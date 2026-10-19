@@ -1,0 +1,390 @@
+(module tests.bootstrap-compiler
+  (import "bun:test" expect test)
+  (import "node:fs/promises" mkdtemp rm writeFile mkdir symlink readFile)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "node:module" createRequire)
+  (import "../bootstrap/host/bun.mjs" compileFile loadCompiler parseArguments)
+  (import "../tools/backends/build.mjs" root)
+
+  (defconst project-directory root)
+  (defconst build-path (resolve project-directory "bin/eliscript-bootstrap"))
+  (defconst public-cli (resolve project-directory "bin/eliscript"))
+  (defconst seed-cli (resolve project-directory "bin/eliscript-seed"))
+  (defconst portable-cli (resolve project-directory "bin/eliscript-portable"))
+  (defconst emacs (if (undefined? (get (get globalThis.process :env) :EMACS)) "emacs"
+    (get (get globalThis.process :env) :EMACS)))
+  (defconst module-names (js-array "symbol" "syntax" "reader" "formatter" "expander"
+    "transient-analysis" "analyzer" "ir" "lower" "source-map" "emitter" "project" "compiler"))
+  (defun env (extra) (Object/assign (js-object) (get globalThis.process :env) extra))
+  (defasync run (command &rest supplied)
+    (let* ((options (if (undefined? (aref supplied 0)) (js-object) (aref supplied 0)))
+           (child (Bun/spawn command (Object/assign
+             (js-object :cwd project-directory :stdout "pipe" :stderr "pipe") options)))
+           (values (await (Promise/all (js-array (get child :exited)
+             (js-call (new globalThis.Response (get child :stdout)) :text)
+             (js-call (new globalThis.Response (get child :stderr)) :text))))))
+      (js-object :exitCode (aref values 0) :stdout (aref values 1) :stderr (aref values 2))))
+  (defun successful (result command)
+    (unless (= (get result :exitCode) 0)
+      (throw (new globalThis.Error (or (js-call (get result :stderr) :trim)
+        (js-call (get result :stdout) :trim) (+ (aref command 0) " exited with " (get result :exitCode))))))
+    (get result :stdout))
+  (defasync run-successful (command &rest supplied)
+    (successful (await (run command (aref supplied 0))) command))
+  (defasync build-portable (compiler-directory output-directory)
+    (let ((compiler (await (loadCompiler compiler-directory))) (index 0))
+      (while (< index (js-length module-names))
+        (let ((name (aref module-names index)))
+          (await (compileFile (js-object :compiler compiler
+            :input (resolve project-directory (+ "bootstrap/compiler/" name ".eli"))
+            :output (resolve output-directory (+ name ".mjs")) :sourceMap t))))
+        (setq index (1+ index)))))
+  (defasync equal-artifacts (left right)
+    (let ((index 0))
+      (while (< index (js-length module-names))
+        (let ((suffixes (js-array ".mjs" ".mjs.map")) (suffix-index 0))
+          (while (< suffix-index (js-length suffixes))
+            (let ((filename (+ (aref module-names index) (aref suffixes suffix-index))))
+              (js-call (expect (await (readFile (resolve right filename) "utf8"))) :toBe
+                (await (readFile (resolve left filename) "utf8"))))
+            (setq suffix-index (1+ suffix-index))))
+        (setq index (1+ index)))))
+  (defasync load-generated (directory name javascript)
+    ;; Real file ESM retains package resolution; emitted bytes stay untouched.
+    (let ((path (resolve directory name)))
+      (await (writeFile path javascript))
+      (funcall (createRequire (get (pathToFileURL path) :href)) path)))
+
+  (test "portable compiler driver reaches a reproducible fixed point"
+    (async ()
+      (js-call (expect (parseArguments (js-array "--" "-o" "out.mjs" "input.eli"))) :toEqual
+        (js-object :input "input.eli" :output "out.mjs" :sourceMap false :portableEntries (js-array) :diagnosticFormat "human"))
+      (js-call (expect (parseArguments (js-array "--portable" "work" "--portable" "index" "input.eli"))) :toEqual
+        (js-object :input "input.eli" :output undefined :sourceMap false :portableEntries (js-array "work" "index") :diagnosticFormat "human"))
+      (js-call (expect (parseArguments (js-array "--diagnostic-format" "json" "input.eli"))) :toEqual
+        (js-object :input "input.eli" :output undefined :sourceMap false :portableEntries (js-array) :diagnosticFormat "json"))
+      (js-call (expect (parseArguments (js-array "--help"))) :toEqual (js-object :help t))
+      (js-call (expect (lambda () (parseArguments (js-array "--source-map" "input.eli")))) :toThrow "--source-map requires --output")
+      (js-call (expect (lambda () (parseArguments (js-array "one.eli" "two.eli")))) :toThrow "multiple input files are not supported yet")
+      (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-compiler-")))) (automatic-run undefined))
+        (try
+          (let* ((one (resolve directory "generation-one")) (two (resolve directory "generation-two"))
+                 (three (resolve directory "generation-three"))
+                 (core-source (resolve project-directory "tests/fixtures/core.eli"))
+                 (automatic-compiler (resolve directory "automatic-compiler")))
+            (await (mkdir (resolve directory "node_modules") (js-object :recursive t)))
+            (await (symlink project-directory (resolve directory "node_modules/eliscript") "dir"))
+            (await (run-successful (js-array build-path)
+              (js-object :env (env (js-object :EMACS emacs :ELISCRIPT_BOOTSTRAP_OUT_DIR one)))))
+            (setq automatic-run (run (js-array public-cli core-source)
+              (js-object :env (env (js-object :EMACS emacs :ELISCRIPT_BOOTSTRAP_MODULE_DIR automatic-compiler :ELISCRIPT_JS_RUNTIME "node")))))
+            (await (build-portable one two)) (await (build-portable two three))
+            (await (equal-artifacts one two)) (await (equal-artifacts two three))
+            (let ((filename "虚拟😀/frontend-lifecycle.eli")
+                  (source "(defmacro identity-code (x) x)\n(defun work (x)\n  (let ((result (identity-code (+ x 2))))\n    (if (> result 0) result -0.0)))\n(export work)")
+                  (lifecycle-ir undefined) (lifecycle-js undefined) (lifecycle-origins undefined)
+                  (generations (js-array one two)) (index 0))
+              (while (< index (js-length generations))
+                (let* ((compiler (await (loadCompiler (aref generations index))))
+                       (ordinary (js-call compiler :compile_ir_string source filename))
+                       (traced (js-call compiler :compile_ir_string_with_origins source filename))
+                       (canonical (js-call compiler :serialize_ir_program ordinary))
+                       (javascript (js-call compiler :emit_ir_string ordinary)))
+                  (js-call (expect (js-call compiler :serialize_ir_program (get traced :program))) :toBe canonical)
+                  (js-call (expect (js-call compiler :emit_ir_string (get traced :program))) :toBe javascript)
+                  (js-call (expect (js-length (get traced :macroOrigins))) :toBe 1)
+                  (let ((origin (aref (get traced :macroOrigins) 0)))
+                    (js-call (expect (get origin :macroName)) :toBe "identity-code")
+                    (js-call (expect (get origin :status)) :toBe "expanded")
+                    (js-call (expect (get (get origin :callSpan) :filename)) :toBe filename))
+                  (unless (undefined? lifecycle-ir)
+                    (js-call (expect canonical) :toBe lifecycle-ir)
+                    (js-call (expect javascript) :toBe lifecycle-js)
+                    (js-call (expect (get traced :macroOrigins)) :toEqual lifecycle-origins))
+                  (setq lifecycle-ir canonical lifecycle-js javascript lifecycle-origins (get traced :macroOrigins))
+                  (let ((module (await (load-generated directory (+ "lifecycle-" index ".mjs") javascript))))
+                    (js-call (expect (js-call module :work 3)) :toBe 5)
+                    (js-call (expect (Object/is (js-call module :work -3) -0.0)) :toBeTrue))
+                  (let ((cases (js-array (js-array "(defun broken (" "reader")
+                      (js-array "(defmacro identity-code (x) x) (identity-code)" "expansion")
+                      (js-array "(defun broken () missing)" "analysis"))) (error-index 0))
+                    (while (< error-index (js-length cases))
+                      (let* ((row (aref cases error-index)) (failures (js-array))
+                             (compilers (js-array (get compiler :compile_ir_string) (get compiler :compile_ir_string_with_origins))) (method-index 0))
+                        (while (< method-index (js-length compilers))
+                          (try (funcall (aref compilers method-index) (aref row 0) filename)
+                            (catch error (js-call failures :push error)))
+                          (setq method-index (1+ method-index)))
+                        (js-call (expect (js-length failures)) :toBe 2)
+                        (js-call (expect (get (aref failures 1) :message)) :toBe (get (aref failures 0) :message))
+                        (js-call (expect (get (aref failures 1) :eliscriptDiagnostic)) :toEqual (get (aref failures 0) :eliscriptDiagnostic))
+                        (js-call (expect (get (get (aref failures 0) :eliscriptDiagnostic) :phase)) :toBe (aref row 1)))
+                      (setq error-index (1+ error-index)))))
+                (setq index (1+ index))))
+            (let* ((seed-output (await (run-successful (js-array seed-cli core-source) (js-object :env (env (js-object :EMACS emacs))))))
+                   (portable-output (await (run-successful (js-array portable-cli core-source) (js-object :env (env (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR two))))))
+                   (bun-output (await (run-successful (js-array public-cli core-source) (js-object :env (env (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR two))))))
+                   (node-output (await (run-successful (js-array public-cli core-source) (js-object :env (env (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR two :ELISCRIPT_JS_RUNTIME "node")))))))
+              (js-call (expect portable-output) :toBe seed-output)
+              (js-call (expect bun-output) :toBe seed-output)
+              (js-call (expect node-output) :toBe seed-output)
+              (js-call (expect (successful (await automatic-run) (js-array public-cli))) :toBe seed-output)
+              (js-call (expect (await (js-call (Bun/file (resolve automatic-compiler "compiler.mjs")) :exists))) :toBeTrue))
+            (let* ((path (resolve directory "diagnostic.eli")))
+              (await (writeFile path "(defun broken ()\n  missing)\n"))
+              (let ((failure (await (run (js-array portable-cli "--diagnostic-format" "json" path)
+                      (js-object :env (env (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR two))))))
+                    (node-failure (await (run (js-array public-cli "--diagnostic-format" "json" path)
+                      (js-object :env (env (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR two :ELISCRIPT_JS_RUNTIME "node")))))))
+                (js-call (expect (get failure :exitCode)) :toBe 1)
+                (js-call (expect (get failure :stdout)) :toBe "")
+                (js-call (expect (JSON/parse (get failure :stderr))) :toEqual
+                  (js-object :format "eliscript-diagnostic" :version 1 :code "ELI-A0001" :severity "error"
+                    :phase "analysis" :message "unbound symbol: missing"
+                    :location (js-object :file path :start (js-object :offset 19 :line 2 :column 3)
+                      :end (js-object :offset 26 :line 2 :column 10))))
+                (js-call (expect (get node-failure :exitCode)) :toBe 1)
+                (js-call (expect (get node-failure :stdout)) :toBe "")
+                (js-call (expect (JSON/parse (get node-failure :stderr))) :toEqual (JSON/parse (get failure :stderr)))))
+            (await (check-libraries two))
+            (await (check-portable directory two core-source)))
+          (finally
+            (when automatic-run (await automatic-run))
+            (await (rm directory (js-object :recursive t :force t))))))) 30000)
+
+  ;; Exact original declaration/string inventory; these are output assertions.
+  (defconst library-cases (js-array (js-array "stdlib/sequence.eli"
+      (js-array "function map(function$, values)"
+      "function range_by(start, end, step)"))
+      (js-array "stdlib/text.eli"
+      (js-array "function slice(start, end, text)"
+      "function trim(text)"))
+      (js-array "stdlib/object.eli"
+      (js-array "function assoc(object, key, value)"
+      "function omit(object, omitted_keys)"))
+      (js-array "stdlib/data.eli"
+      (js-array "import {assoc} from \"./object.eli\";"
+      "import {has_QMARK_} from \"./object.eli\";"
+      "function group_by(key_function, values)"))
+      (js-array "stdlib/function.eli"
+      (js-array "import {empty_persistent_vector, persistent_vector_conj} from \"./persistent-vector.eli\";"
+      "function identity(value)"
+      "function comp(...functions)"
+      "function partial(function$, ...bound_arguments)"
+      "function juxt(...functions)"
+      "function fnil(function$, ...defaults)"
+      "function every_pred(...predicates)"
+      "function some_fn(...predicates)"
+      "function trampoline(function$, ...arguments$)"))
+      (js-array "stdlib/deferred.eli"
+      (js-array "function delay(producer)"
+      "function delay_QMARK_(value)"
+      "function force(value)"
+      "function memoize(function$)"
+      "function realized_QMARK_(value)"))
+      (js-array "stdlib/core/protocol.eli"
+      (js-array "function define_protocol(name, operations)"
+      "function extend_protocol_type(protocol, constructor, implementations)"))
+      (js-array "stdlib/core/identifier.eli"
+      (js-array "function keyword(...arguments$)"
+      "function symbol(...arguments$)"
+      "function qualified_name(value)"))
+      (js-array "stdlib/core/data-text.eli"
+      (js-array "function print_value(value, options = null)"
+      "function read_value(source, options = null)"
+      "function read_values(source, options = null)"))
+      (js-array "stdlib/core/metadata.eli"
+      (js-array "function meta(value)"
+      "function with_meta(value, metadata)"
+      "function vary_meta(value, transform, ...arguments$)"))
+      (js-array "stdlib/core/collection.eli"
+      (js-array "function assoc(collection, key, value, ...key_values)"
+      "function associative_QMARK_(collection)"
+      "function collection_count(collection)"
+      "function bounded_count(limit, collection)"
+      "function collection_QMARK_(value)"
+      "function counted_QMARK_(collection)"
+      "function distinct_QMARK_(...values)"
+      "function disj(collection, ...values)"
+      "function dissoc(collection, ...keys)"
+      "function empty_QMARK_(collection)"
+      "function indexed_QMARK_(collection)"
+      "function list_QMARK_(value)"
+      "function map_QMARK_(value)"
+      "function not_empty(collection)"
+      "function peek(collection)"
+      "function pop(collection)"
+      "function queue_QMARK_(value)"
+      "function reducible_QMARK_(collection)"
+      "function rseq(collection)"
+      "function reversible_QMARK_(collection)"
+      "function sequence_QMARK_(value)"
+      "function sequential_QMARK_(value)"
+      "function seqable_QMARK_(collection)"
+      "function set_QMARK_(value)"
+      "function subvec(vector, start, end = null)"
+      "function reduce(collection, reducer, ...initial)"
+      "function reduce_kv(collection, reducer, initial)"
+      "function reduction_view(reduce_function)"
+      "function reduction_view_QMARK_(value)"
+      "function unbounded_sequence_view(factory)"
+      "function vector_QMARK_(value)"))
+      (js-array "stdlib/core/transient.eli"
+      (js-array "function assoc_BANG_(collection, key, value, ...key_values)"
+      "function persistent_BANG_(collection)"))
+      (js-array "stdlib/core/transducer.eli"
+      (js-array "function catting()"
+      "function compose_transducers(...transducers)"
+      "function deduping()"
+      "function distincting()"
+      "function eduction(...arguments$)"
+      "function interposing(separator)"
+      "function keeping_indexed(transform)"
+      "function mapping_indexed(transform)"
+      "function mapcatting(transform)"
+      "function partitioning_all(size)"
+      "function partitioning_by(classifier)"
+      "function run_BANG_(procedure, collection)"
+      "function taking_nth(interval)"
+      "function taking_while(predicate)"
+      "function transduce(transducer, reducer, initial, collection)"))
+      (js-array "stdlib/core/seq.eli"
+      (js-array "function range(...bounds)"
+      "function repeat(...arguments$)"
+      "function repeatedly(...arguments$)"
+      "function iterate(transform, seed)"
+      "function cycle(collection)"
+      "function generate(limit, producer)"
+      "function first(collection, not_found_value = null)"
+      "function nth_rest(limit, collection)"
+      "function nth_next(limit, collection)"
+      "function rest(collection)"
+      "function next(collection)"
+      "function prepend(value, collection)"
+      "function second(collection, not_found_value = null)"
+      "function ffirst(collection)"
+      "function nfirst(collection)"
+      "function fnext(collection)"
+      "function nnext(collection)"
+      "function sequence_nth(index, collection, not_found_value = null)"
+      "function last(collection, not_found_value = null)"
+      "function take_last(limit, collection)"
+      "function drop_last(limit, collection)"
+      "function butlast(collection)"
+      "function split_at(limit, collection)"
+      "function split_with(predicate, collection)"
+      "function reverse(collection)"
+      "implementsProtocolOperation(IReversible, \"rseq\", collection)"
+      "function map(transform, collection)"
+      "function map_indexed(transform, collection)"
+      "function distinct(collection)"
+      "function mapcat(transform, collection)"
+      "function partition(size, ...arguments$)"
+      "function partition_all(size, ...arguments$)"
+      "function interleave(...collections)"
+      "function interleave_all(...collections)"
+      "function not_any_QMARK_(predicate, collection)"
+      "function not_every_QMARK_(predicate, collection)"
+      "function reductions(step, initial, collection)"
+      "function tree_seq(branch_predicate, children_function, root)"
+      "function flatten(root)"
+      "function concat(...collections)"))
+      (js-array "stdlib/core/data.eli"
+      (js-array "function collect_buckets(key_function, collection, create_bucket, update_bucket)"
+      "function index_by(key_function, collection)"
+      "function get_in(collection, path, not_found = null)"
+      "function assoc_in(collection, path, value)"
+      "function update(collection, key, transform, ...arguments$)"
+      "function update_in(collection, path, transform, ...arguments$)"
+      "function select_keys(collection, keys)"
+      "function merge(...collections)"
+      "function merge_with(combine, ...collections)"
+      "function zipmap(keys, values)"))
+      (js-array "stdlib/core/set.eli"
+      (js-array "function set(...arguments$)"
+      "function union(...collections)"
+      "function intersection(...collections)"
+      "function difference(...collections)"
+      "function subset_QMARK_(...arguments$)"
+      "function superset_QMARK_(...arguments$)"
+      "function disjoint_QMARK_(...arguments$)"
+      "function select(...arguments$)"
+      "function project(...arguments$)"
+      "function rename_keys(...arguments$)"
+      "function rename(...arguments$)"
+      "function index(...arguments$)"
+      "function map_invert(...arguments$)"
+      "function join(...arguments$)"))
+      (js-array "stdlib/core/order.eli"
+      (js-array "function compare_values(left, right)"
+      "function comparator(comparison)"
+      "function reverse_comparator(...arguments$)"
+      "function sort(...arguments$)"
+      "function sort_by(key_function, ...arguments$)"
+      "function min_key(key_function, ...values)"
+      "function max_key(key_function, ...values)"))
+      (js-array "examples/emacs-index/index.eli"
+      (js-array "import {count_by} from \"../../stdlib/data.eli\";"
+      "function score_document(id, terms, query_terms)"))))
+  (defasync check-library (row generation)
+    (let* ((source (resolve project-directory (aref row 0)))
+           (seed (await (run-successful (js-array seed-cli source) (js-object :env (env (js-object :EMACS emacs))))))
+           (self (await (run-successful (js-array portable-cli source)
+             (js-object :env (env (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR generation)))))))
+      (js-call (expect self) :toBe seed)
+      (js-call (aref row 1) :forEach (lambda (declaration) (js-call (expect seed) :toContain declaration)))))
+  (defasync check-libraries (generation)
+    (let ((index 0))
+      (while (< index (js-length library-cases))
+        ;; Preserve the original bound of two independent public CLI processes.
+        (await (Promise/all (js-call (js-call library-cases :slice index (+ index 2)) :map
+          (async (row) (await (check-library row generation))))))
+        (setq index (+ index 2)))))
+  (defasync check-portable (directory generation core-source)
+    (let* ((source (resolve directory "portable.eli"))
+           (options (js-object :env (env (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR generation))))
+           (seed-options (js-object :env (env (js-object :EMACS emacs)))))
+      (await (writeFile source "(defconst step 2)\n(defportable helper (value) (* value step))\n(defportable work (value) (helper value))\n(defportable unused () 99)\n(defun ordinary () 1)\n"))
+      (let ((seed (await (run-successful (js-array seed-cli "--portable" "work" source) seed-options)))
+            (self (await (run-successful (js-array portable-cli "--portable" "work" source) options))))
+        (js-call (expect self) :toBe seed)
+        (js-call (expect seed) :toContain "function helper(value)")
+        (js-call (expect seed) :toContain "function work(value)")
+        (js-call (get (expect seed) :not) :toContain "function unused")
+        (js-call (get (expect seed) :not) :toContain "function ordinary"))
+      (let ((imported (resolve directory "portable-import.eli")))
+        (await (writeFile imported "(import-portable \"./helper.eli\" helper)\n(defportable imported-work (value) (helper value))\n"))
+        (let ((seed (await (run (js-array seed-cli "--portable" "imported-work" imported) seed-options)))
+              (self (await (run (js-array portable-cli "--portable" "imported-work" imported) options))))
+          (js-call (expect (get seed :exitCode)) :toBe 1)
+          (js-call (expect (get self :exitCode)) :toBe 1)
+          (js-call (expect (get seed :stderr)) :toContain "portable import helper requires a project build")
+          (js-call (expect (get self :stderr)) :toContain "portable import helper requires a project build")))
+      (let* ((seed (resolve directory "seed-cli/portable.mjs")) (self (resolve directory "portable-cli/portable.mjs")))
+        (await (run-successful (js-array seed-cli "--source-map" "--portable" "work" "--output" seed source) seed-options))
+        (await (run-successful (js-array portable-cli "--source-map" "--portable" "work" "--output" self source) options))
+        (js-call (expect (await (readFile self "utf8"))) :toBe (await (readFile seed "utf8")))
+        (js-call (expect (await (readFile (+ self ".map") "utf8"))) :toBe (await (readFile (+ seed ".map") "utf8"))))
+      (let* ((seed (resolve directory "seed-cli/core.mjs")) (self (resolve directory "portable-cli/core.mjs"))
+             (node (resolve directory "public-node/core.mjs")))
+        (await (run-successful (js-array seed-cli "--source-map" "--output" seed core-source) seed-options))
+        (await (run-successful (js-array portable-cli "--source-map" "--output" self core-source) options))
+        (await (run-successful (js-array public-cli "--source-map" "--output" node core-source)
+          (js-object :env (env (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR generation :ELISCRIPT_JS_RUNTIME "node")))))
+        (js-call (expect (await (readFile self "utf8"))) :toBe (await (readFile seed "utf8")))
+        (js-call (expect (await (readFile (+ self ".map") "utf8"))) :toBe (await (readFile (+ seed ".map") "utf8")))
+        (js-call (expect (await (readFile node "utf8"))) :toBe (await (readFile seed "utf8")))
+        (js-call (expect (await (readFile (+ node ".map") "utf8"))) :toBe (await (readFile (+ seed ".map") "utf8"))))
+      (let ((broken (resolve directory "broken.eli")))
+        (await (writeFile broken "(defun broken () missing)\n"))
+        (let ((seed (await (run (js-array seed-cli broken) seed-options)))
+              (self (await (run (js-array portable-cli broken) options)))
+              (message (+ broken ":1:18: unbound symbol: missing")))
+          (js-call (expect (get seed :exitCode)) :toBe 1)
+          (js-call (expect (get self :exitCode)) :toBe 1)
+          (js-call (expect (get self :stdout)) :toBe (get seed :stdout))
+          (js-call (expect (get seed :stderr)) :toContain message)
+          (js-call (expect (get self :stderr)) :toContain message)))))
+)

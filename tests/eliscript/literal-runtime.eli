@@ -1,0 +1,535 @@
+(module tests.literal-runtime
+  (import "bun:test" expect)
+  (import "node:fs/promises" mkdir mkdtemp readFile rm writeFile symlink)
+  (import "node:path" resolve dirname)
+  (import "node:module" createRequire)
+  (import "../runtime/core/identifier.mjs" keyword)
+  (import "../runtime/core/list.mjs" isPersistentList)
+  (import "../runtime/core/map.mjs" isPersistentHashMap)
+  (import "../runtime/core/set.mjs" isPersistentHashSet)
+  (import "../runtime/core/value.mjs" equalValues)
+  (import "../runtime/core/vector.mjs" isPersistentVector persistentVector)
+  (import "../runtime/worker-value-codec.mjs" decodeWorkerValue encodeWorkerValue)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "./helpers/managed-literal-nth-node-selfhosted.mjs" nth-entry-source nth-runtime-budget loadNthReference exerciseNth finishNth)
+
+  (defconst environment (get globalThis.process :env))
+  (defconst reference-root (get environment :ELISCRIPT_ORIGINAL_REFERENCE_PRODUCT_ROOT))
+  (defconst ROOT (if (get environment :ELISCRIPT_ORIGINAL_SOURCE_ROOT)
+    (get environment :ELISCRIPT_ORIGINAL_SOURCE_ROOT)
+    (resolve (dirname (aref (get globalThis.process :argv) 1)) "..")))
+  (defconst SOURCE (resolve ROOT "tests/fixtures/literal-runtime.eli"))
+  (defconst HOST (resolve ROOT "tests/fixtures/literal-runtime-host.mjs"))
+  (defconst SEED (resolve ROOT "bin/eliscript"))
+  (defconst BUILD_BOOTSTRAP (resolve ROOT "bin/eliscript-bootstrap"))
+  (defconst SELF_HOSTED (resolve ROOT "bin/eliscript-portable"))
+  (defconst BUN (get globalThis.process :execPath))
+  (defconst NODE (if (nullish? (get environment :NODE_BINARY)) "node" (get environment :NODE_BINARY)))
+  (defconst require-module (createRequire (resolve ROOT "tests/literal-runtime.test.mjs")))
+  (defconst selected (if reference-root
+    (resolve (aref (get globalThis.process :argv) 2) "bootstrap/compiler") undefined))
+  (defconst reference (if reference-root (resolve reference-root "bootstrap/compiler") undefined))
+  (defconst modules (js-array "symbol" "syntax" "reader" "formatter" "expander"
+    "transient-analysis" "analyzer" "ir" "lower" "source-map" "emitter" "project" "compiler"))
+  (defconst cases (js-array))
+
+  (defun test (name body &optional timeout)
+    (let ((limit (if (nullish? timeout) 5000 timeout)))
+      (unless (and (= (value-type name) "string") (= (value-type body) "function")
+                   (Number/isSafeInteger limit) (> limit 0))
+        (throw (new globalThis.TypeError "original literal runtime case registration changed")))
+      (js-call cases :push (js-object :name name :body body :timeout limit))))
+
+  (defasync install-selected (directory)
+    (unless (and (= (value-type directory) "string") (> (js-length directory) 0))
+      (throw (new globalThis.TypeError "original literal bootstrap output directory changed")))
+    (await (mkdir directory (js-object :recursive t)))
+    (let ((index 0))
+      (while (< index (js-length modules))
+        (let* ((name (aref modules index)) (actual (resolve selected (+ name ".mjs"))))
+          ;; Verify the selected map before publishing either transport link.
+          ;; Symlinks load the actual emitted module, never a forwarding body.
+          (await (readFile (+ actual ".map")))
+          (await (symlink actual (resolve directory (+ name ".mjs")) "file"))
+          (await (symlink (+ actual ".map") (resolve directory (+ name ".mjs.map")) "file")))
+        (setq index (1+ index)))))
+
+  (defasync run (command &optional supplied-environment allow-failure)
+    (let ((extra (or supplied-environment (js-object))))
+      (if (and reference-root (= (aref command 0) BUILD_BOOTSTRAP))
+        (progn
+          (unless (= (js-length command) 1)
+            (throw (new globalThis.TypeError "original literal bootstrap command changed")))
+          (await (install-selected (get extra :ELISCRIPT_BOOTSTRAP_OUT_DIR)))
+          (js-object :exitCode 0 :stdout "" :stderr ""))
+        (progn
+          (when reference-root
+            (cond
+              ((= (aref command 0) SEED)
+               (setq extra (Object/assign (js-object) extra
+                 (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR reference))))
+              ((= (aref command 0) SELF_HOSTED)
+               (setq extra (Object/assign (js-object) extra
+                 (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR
+                   (if (nullish? (get extra :ELISCRIPT_BOOTSTRAP_MODULE_DIR)) selected
+                     (get extra :ELISCRIPT_BOOTSTRAP_MODULE_DIR))))))))
+          (let* ((child (js-call globalThis.Bun :spawn command
+                   (js-object :cwd ROOT :env (Object/assign (js-object) environment
+                     (js-object :BUN BUN :EMACS (if (nullish? (get environment :EMACS)) "emacs" (get environment :EMACS))) extra)
+                     :stdout "pipe" :stderr "pipe")))
+                 (results (await (Promise/all (js-array (get child :exited)
+                   (js-call (new globalThis.Response (get child :stdout)) :text)
+                   (js-call (new globalThis.Response (get child :stderr)) :text)))))
+                 (exit-code (aref results 0)) (stdout (aref results 1)) (stderr (aref results 2)))
+            (when (and (/= exit-code 0) (not allow-failure))
+              (throw (new globalThis.Error (or (js-call stderr :trim) (js-call stdout :trim)
+                (+ (aref command 0) " exited with " exit-code)))))
+            (js-object :exitCode exit-code :stdout stdout :stderr stderr))))))
+
+  (defasync compile (compiler output &optional extra-environment source extra-arguments)
+    (await (mkdir (resolve output "..") (js-object :recursive t)))
+    (await (run (js-call (js-array compiler "--source-map" "--output" output) :concat
+                   (or extra-arguments (js-array)) (js-array (or source SOURCE))) extra-environment)))
+
+  (defasync execute (host module-path)
+    (let ((result (await (run (js-array host HOST module-path)))))
+      (JSON/parse (get result :stdout))))
+
+  (test "persistent literals and quoted data preserve language value categories" (async ()
+    (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-literals-"))))
+           (bootstrap (resolve directory "bootstrap"))
+           (seed-output (resolve directory "seed/module.mjs"))
+           (self-output (resolve directory "self/module.mjs")))
+      (try
+        (progn
+          (await (run (js-array BUILD_BOOTSTRAP) (js-object :ELISCRIPT_BOOTSTRAP_OUT_DIR bootstrap)))
+          (await (compile SEED seed-output))
+          (await (compile SELF_HOSTED self-output (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR bootstrap)))
+          (js-call (expect (await (readFile self-output "utf8"))) :toBe (await (readFile seed-output "utf8")))
+          (js-call (expect (await (readFile (+ self-output ".map") "utf8"))) :toBe
+            (await (readFile (+ seed-output ".map") "utf8")))
+          (let ((javascript (await (readFile seed-output "utf8"))))
+            (js-call (expect (js-call javascript :match (new globalThis.RegExp "eliscript/runtime/literals" "g"))) :toHaveLength 1)
+            (js-call (expect (js-call javascript :match (new globalThis.RegExp "runtime/core/collection\\.mjs" "g"))) :toHaveLength 1)
+            (js-call (js-array "__eliscript_vector(" "__eliscript_hash_map(" "__eliscript_hash_set("
+                       "__eliscript_queue(" "__eliscript_keyword(" "__eliscript_list(" "__eliscript_symbol(") :forEach
+              (lambda (needle) (js-call (expect javascript) :toContain needle)))
+            (js-call (get (expect javascript) :not) :toContain "vite")
+            (js-call (get (expect javascript) :not) :toContain "react"))
+          (let ((bun-report (await (execute BUN seed-output)))
+                (node-report (await (execute NODE self-output))))
+            (js-call (expect node-report) :toEqual bun-report)
+            (js-call (expect bun-report) :toEqual
+              (js-object
+                :vector (js-object :persistent t :count 3 :languageCount 3 :first 1
+                  :values (js-array 1 2 (js-object)) :nestedPersistent t)
+                :map (js-object :persistent t :count 2 :name "Eliscript" :valueKey (js-array 5 6))
+                :mapLiteral (js-object :persistent t :count 4 :name "source" :valueKey (js-array 7 8)
+                  :nestedPersistent t :nestedReady t :duplicate 2)
+                :set (js-object :explicitPersistent t :explicitCount 2 :explicitValueKey t
+                  :literalPersistent t :literalCount 3 :duplicate t :valueKey t :nestedMap t :nestedReady t
+                  :evaluationOrder "12" :macroPersistent t :macroKeyword t :macroValue t)
+                :queue (js-object :explicitPersistent t :explicitValues (js-array "explicit" (js-array 5 6))
+                  :literalPersistent t :literalValues (js-array "source" (js-array 7 8) (js-object :ready t))
+                  :evaluationOrder "12" :text "#queue [\"source\" [7 8] {:ready true}]")
+                :keyword (js-object :value t :interned t :qualifiedName "article/title" :printed ":article/title"
+                  :mapPersistent t :mapCount 2 :mapQualified "qualified" :mapReady t :stringKeyMiss nil
+                  :macroValue t :macroQualifiedName "macro/value"
+                  :quotedSyntax (js-object :value t :qualifiedName "quoted/value"))
+                :quoted (js-object :persistentList t :count 5 :symbol t :symbolName "alpha" :keyword t
+                  :vector t :vectorValues (js-array 1 nil) :emptyList t :falseSymbol t
+                  :text "(alpha :beta [1 undefined] () #eliscript/symbol [nil \"false\"])"
+                  :mapSyntax "(hash-map :ready true)" :setSyntax "(hash-set :ready [1 undefined])"
+                  :queueSyntax "(queue 1 :ready)")
+                :list (js-object :persistent t :values (js-array 1 2 3) :first 1 :restPersistent t
+                  :restValues (js-array 2 3) :consPersistent t :consValues (js-array 0 1 2 3) :emptyRest t)
+                :host (js-object :array t :prependedArray (js-array 0 1 2 3) :languageCount 3 :second 2
+                  :object t :objectValue (js-object :name "host" :count 2))))))
+        (finally (await (rm directory (js-object :recursive t :force t))))))) 60000)
+
+  (test "hash-map rejects incomplete pairs in both compilers" (async ()
+    (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-literals-bad-"))))
+           (bootstrap (resolve directory "bootstrap")) (source (resolve directory "invalid.eli")))
+      (await (js-call globalThis.Bun :write source "(hash-map \"key\")\n"))
+      (try
+        (progn
+          (await (run (js-array BUILD_BOOTSTRAP) (js-object :ELISCRIPT_BOOTSTRAP_OUT_DIR bootstrap)))
+          (let ((seed (await (run (js-array SEED source) (js-object) t)))
+                (self-hosted (await (run (js-array SELF_HOSTED source)
+                  (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR bootstrap) t))))
+            (js-call (get (expect (get seed :exitCode)) :not) :toBe 0)
+            (js-call (get (expect (get self-hosted :exitCode)) :not) :toBe 0)
+            (js-call (expect (get seed :stderr)) :toContain "hash-map expects complete key/value pairs")
+            (js-call (expect (get self-hosted :stderr)) :toContain "hash-map expects complete key/value pairs")))
+        (finally (await (rm directory (js-object :recursive t :force t))))))) 60000)
+
+  (test "explicit host-only modules do not link the persistent runtime" (async ()
+    (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-host-values-"))))
+           (bootstrap (resolve directory "bootstrap")) (source (resolve directory "host-only.eli"))
+           (seed-output (resolve directory "seed/module.mjs")) (self-output (resolve directory "self/module.mjs")))
+      (await (js-call globalThis.Bun :write source
+        (+ "(defconst values (js-array 1 2))\n" "(defconst first (js-nth 0 values))\n"
+          "(defconst count (js-length values))\n" "(defconst options (js-object :ready t))\n"
+          "(defconst ready (get options :ready))\n" "(defconst present (object-has? options :ready))\n"
+          "(defconst copied (object-assoc options :count 3))\n"
+          "(export values first count options ready present copied)\n")))
+      (try
+        (progn
+          (await (run (js-array BUILD_BOOTSTRAP) (js-object :ELISCRIPT_BOOTSTRAP_OUT_DIR bootstrap)))
+          (await (compile SEED seed-output (js-object) source))
+          (await (compile SELF_HOSTED self-output (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR bootstrap) source))
+          (let ((seed (await (readFile seed-output "utf8"))))
+            (js-call (expect (await (readFile self-output "utf8"))) :toBe seed)
+            (js-call (expect (await (readFile (+ self-output ".map") "utf8"))) :toBe
+              (await (readFile (+ seed-output ".map") "utf8")))
+            (js-call (js-array "eliscript/runtime/literals" "runtime/core/collection.mjs"
+                       "__eliscript_keyword" "__eliscript_list" "__eliscript_symbol") :forEach
+              (lambda (needle) (js-call (get (expect seed) :not) :toContain needle)))
+            (js-call (expect seed) :toContain "const values = [1, 2]")
+            (js-call (expect seed) :toContain
+              (+ "const first = ((((" "(__eliscript_tdz_read_0())" ") ?? [])[0]) ?? null)"))
+            (js-call (expect seed) :toContain
+              (+ "const count = ((" "(__eliscript_tdz_read_0())" ") ?? []).length"))
+            (js-call (expect seed) :toContain "const options = ({\"ready\": true})")
+            (js-call (expect seed) :toContain (+ "const ready = (" "(__eliscript_tdz_read_3())" ")[\"ready\"]"))
+            (js-call (expect seed) :toContain
+              (+ "Object.prototype.hasOwnProperty.call((" "(__eliscript_tdz_read_3())" ") ?? {}, \"ready\")"))
+            (js-call (expect seed) :toContain "[\"count\"]: 3"))
+          ;; Both compiler outputs are real executed modules, in addition to
+          ;; the complete source/map byte checks and exact TDZ read snippets.
+          (js-call (js-array seed-output self-output) :forEach (lambda (path)
+            (let ((module (funcall require-module path)))
+              (js-call (expect (get module :values)) :toEqual (js-array 1 2))
+              (js-call (expect (get module :first)) :toBe 1)
+              (js-call (expect (get module :count)) :toBe 2)
+              (js-call (expect (get module :options)) :toEqual (js-object :ready t))
+              (js-call (expect (get module :ready)) :toBe t)
+              (js-call (expect (get module :present)) :toBe t)
+              (js-call (expect (get module :copied)) :toEqual (js-object :ready t :count 3))))))
+        (finally (await (rm directory (js-object :recursive t :force t))))))) 60000)
+
+  (defun literal-audit-symbol (node)
+    (if (and node (= (get node :kind) "symbol")) (get node :name) undefined))
+
+  (defun literal-audit-items (items start quoted calls)
+    (let ((index start))
+      (while (< index (js-length items))
+        (literal-audit-expression (aref items index) quoted calls)
+        (setq index (1+ index)))))
+
+  (defun literal-audit-bindings (node function-bindings calls)
+    (when (and node (= (get node :kind) "list"))
+      (let ((bindings (get node :items)) (index 0))
+        (while (< index (js-length bindings))
+          (let ((binding (aref bindings index)))
+            (when (= (get binding :kind) "list")
+              ;; Binding names/destructuring patterns and function parameters
+              ;; are declarations. Only their initializer/body is executable.
+              (literal-audit-items (get binding :items) (if function-bindings 2 1) 0 calls)))
+          (setq index (1+ index))))))
+
+  (defun literal-audit-function (items start calls)
+    (let ((parameters (aref items start)))
+      (if (and parameters (= (get parameters :kind) "list")
+               (> (js-length (get parameters :items)) 0)
+               (not (= (get (aref (get parameters :items) 0) :kind) "symbol")))
+        ;; Multi-arity clauses each begin with their own parameter list.
+        (let ((index start))
+          (while (< index (js-length items))
+            (let ((clause (aref items index)))
+              (when (= (get clause :kind) "list")
+                (literal-audit-items (get clause :items) 1 0 calls)))
+            (setq index (1+ index))))
+        (literal-audit-items items (1+ start) 0 calls))))
+
+  (defun literal-audit-expression (node quoted calls)
+    (when node
+      (cond
+        ((= (get node :kind) "vector")
+         (literal-audit-items (get node :items) 0 quoted calls))
+        ((= (get node :kind) "list")
+         (let* ((items (get node :items)) (operator (literal-audit-symbol (aref items 0))))
+           (cond
+             ((> quoted 0)
+              (literal-audit-items items
+                (if (or (= operator "quasiquote") (= operator "unquote") (= operator "unquote-splicing")) 1 0)
+                (cond ((= operator "quasiquote") (1+ quoted))
+                      ((or (= operator "unquote") (= operator "unquote-splicing")) (1- quoted))
+                      (t quoted)) calls))
+             ((= operator "quote") nil)
+             ((= operator "quasiquote") (literal-audit-items items 1 1 calls))
+             ((or (= operator "array") (= operator "object"))
+              (js-call calls :push (get (get node :span) :start))
+              (literal-audit-items items 1 0 calls))
+             ((or (= operator "defun") (= operator "defn") (= operator "defportable")
+                  (= operator "defasync") (= operator "defcomponent") (= operator "defmacro"))
+              (literal-audit-function items 2 calls))
+             ((or (= operator "lambda") (= operator "fn") (= operator "async"))
+              (literal-audit-function items 1 calls))
+             ((or (= operator "let") (= operator "let*") (= operator "loop") (= operator "letfn"))
+              (literal-audit-bindings (aref items 1) (= operator "letfn") calls)
+              (literal-audit-items items 2 0 calls))
+             ((= operator "module") (literal-audit-items items 2 0 calls))
+             ((or (= operator "import") (= operator "import-portable") (= operator "export")) nil)
+             ((or (= operator "defvar") (= operator "defconst") (= operator "catch"))
+              (literal-audit-items items 2 0 calls))
+             (t (literal-audit-items items 0 0 calls))))))))
+
+  (defun literal-retired-constructor-offsets (source filename)
+    ;; Use the existing generated Reader, rather than treating every parenthesis
+    ;; in source text as an expression. This audit remains a source-only gate.
+    (let* ((reader (funcall require-module
+                    (resolve (if reference-root reference (resolve ROOT "dist/bootstrap")) "reader.mjs")))
+           (forms (js-call reader :read_string source filename)) (calls (js-array))
+           (result (js-array)) (index 0) (unit 0) (point 0))
+      (literal-audit-items forms 0 0 calls)
+      (js-call calls :sort (lambda (left right) (- left right)))
+      (while (< index (js-length calls))
+        (let ((offset (aref calls index)))
+          ;; Reader positions count Unicode scalars; preserve the original
+          ;; audit's UTF-16 string offsets without a whole-source character map.
+          (while (< point offset)
+            (let ((first (js-call source :charCodeAt unit)))
+              (if (and (>= first 55296) (<= first 56319) (< (1+ unit) (js-length source))
+                       (>= (js-call source :charCodeAt (1+ unit)) 56320)
+                       (<= (js-call source :charCodeAt (1+ unit)) 57343))
+                (setq unit (+ unit 2)) (setq unit (1+ unit))))
+            (setq point (1+ point)))
+          (js-call result :push unit))
+        (setq index (1+ index))) result))
+
+  (defasync literal-runtime-source-audit ()
+    (let ((roots (js-array "bootstrap" "stdlib" "examples" "tests/fixtures"))
+          (intentional-negative-fixtures (new globalThis.Set (js-array "compatibility/native-containers-v1.eli")))
+          (retired (new globalThis.RegExp "\\((?:array|object)(?=[\\s)])" "g"))
+          (violations (js-array)) (root-index 0))
+      (js-call (expect (literal-retired-constructor-offsets
+        "(module audit (defun f (object array) (let ((array (js-array)) (object (js-object))) (get object :array))))"
+        "audit-bindings.eli")) :toEqual (js-array))
+      (js-call (expect (literal-retired-constructor-offsets
+        "(defconst data '(array (object)))\n(defconst text \"(object 1)\")\n; (array 1)\n"
+        "audit-data.eli")) :toEqual (js-array))
+      (let* ((source "(defconst emoji \"😀\")\n(let ((array (array 1)) (object (object :ready t))) (js-array array object))")
+             (expected (js-array (js-call source :indexOf "(array 1)") (js-call source :indexOf "(object :ready t)"))))
+        (js-call (expect (literal-retired-constructor-offsets source "audit-calls.eli")) :toEqual expected))
+      (while (< root-index (js-length roots))
+        (let* ((source-root (aref roots root-index)) (glob (new globalThis.Bun.Glob "**/*.eli"))
+               (scan (js-call glob :scan (js-object :cwd (resolve ROOT source-root) :onlyFiles t)))
+               (iterator (js-call scan globalThis.Symbol.asyncIterator)) (step (await (js-call iterator :next))))
+          (while (not (get step :done))
+            (let ((relative (get step :value)))
+              (unless (and (= source-root "tests/fixtures") (js-call intentional-negative-fixtures :has relative))
+                (let* ((file (resolve ROOT source-root relative))
+                       (source (await (js-call (js-call globalThis.Bun :file file) :text)))
+                       (potential (js-call source :match retired)))
+                  (when potential
+                    (let ((offsets (literal-retired-constructor-offsets source file)) (index 0))
+                      (while (< index (js-length offsets))
+                        (js-call violations :push (+ source-root "/" relative ":" (aref offsets index)))
+                        (setq index (1+ index))))))))
+            (setq step (await (js-call iterator :next)))))
+        (setq root-index (1+ root-index)))
+      (js-call (expect violations) :toEqual (js-array))))
+
+  (test "maintained Eliscript sources use explicit host constructors" literal-runtime-source-audit 5000)
+
+  (test "portable closures produce persistent values for the versioned worker codec" (async ()
+    (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-portable-values-"))))
+           (bootstrap (resolve directory "bootstrap")) (source (resolve directory "portable.eli"))
+           (invalid (resolve directory "invalid.eli"))
+           (seed-output (resolve directory "seed/module.mjs")) (self-output (resolve directory "self/module.mjs")))
+      (try
+        (progn
+          (await (run (js-array BUILD_BOOTSTRAP) (js-object :ELISCRIPT_BOOTSTRAP_OUT_DIR bootstrap)))
+          (await (js-call globalThis.Bun :write source
+            (+ "(defportable build (argument)\n" "  {:argument argument\n" "   :keyword :ready\n"
+              "   :vector [1 undefined]\n" "   :map {:nested [2]}\n" "   :set #{argument [4]}\n"
+              "   :quote '(alpha :beta [3] nil)})\n" "(export build)\n")))
+          (await (compile SEED seed-output (js-object) source (js-array "--portable" "build")))
+          (await (compile SELF_HOSTED self-output (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR bootstrap)
+            source (js-array "--portable" "build")))
+          (js-call (expect (await (readFile self-output "utf8"))) :toBe (await (readFile seed-output "utf8")))
+          (js-call (expect (await (readFile (+ self-output ".map") "utf8"))) :toBe
+            (await (readFile (+ seed-output ".map") "utf8")))
+          (js-call (expect (await (readFile seed-output "utf8"))) :toContain "eliscript/runtime/literals")
+          (let* ((seed-module (funcall require-module seed-output))
+                 (self-module (funcall require-module self-output)) (argument (persistentVector 8 9))
+                 (seed-value (js-call seed-module :build argument)) (self-value (js-call self-module :build argument))
+                 (transported (decodeWorkerValue (encodeWorkerValue seed-value))))
+            (js-call (expect (isPersistentHashMap seed-value)) :toBe t)
+            (js-call (expect (equalValues seed-value self-value)) :toBe t)
+            (js-call (expect (equalValues seed-value transported)) :toBe t)
+            (js-call (expect (equalValues (js-call seed-value :get (keyword "argument")) argument)) :toBe t)
+            (js-call (expect (js-call seed-value :get (keyword "keyword"))) :toBe (keyword "ready"))
+            (js-call (expect (isPersistentVector (js-call seed-value :get (keyword "vector")))) :toBe t)
+            (js-call (expect (isPersistentHashMap (js-call seed-value :get (keyword "map")))) :toBe t)
+            (js-call (expect (isPersistentHashSet (js-call seed-value :get (keyword "set")))) :toBe t)
+            (js-call (expect (isPersistentList (js-call seed-value :get (keyword "quote")))) :toBe t))
+          (await (js-call globalThis.Bun :write invalid "(defportable build () [missing])\n(export build)\n"))
+          (let ((invalid-seed (await (run (js-array SEED "--portable" "build" invalid) (js-object) t)))
+                (invalid-self (await (run (js-array SELF_HOSTED "--portable" "build" invalid)
+                  (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR bootstrap) t))))
+            (js-call (js-array invalid-seed invalid-self) :forEach (lambda (result)
+              (js-call (get (expect (get result :exitCode)) :not) :toBe 0)
+              (js-call (expect (get result :stderr)) :toContain "unbound")
+              (js-call (expect (get result :stderr)) :toContain "missing")))))
+        (finally (await (rm directory (js-object :recursive t :force t))))))) 60000)
+
+  (test "language nth preserves index-first syntax null fallback and imported collection lookup semantics in real backends"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-literal-nth-"))))
+             (compiler-directory (if reference-root selected (resolve ROOT "dist/bootstrap")))
+             (compiler (funcall require-module (resolve compiler-directory "compiler.mjs")))
+             (backend (await (buildBackends (js-object :outputRoot (resolve directory "backend") :frontend compiler))))
+             (libraries (await (js-call backend :loadLiteralModules)))
+             (source (await (readFile SOURCE "utf8")))
+             (program (js-call compiler :compile_ir_string source "tests/fixtures/literal-runtime.eli"))
+             (entry-program (js-call compiler :compile_ir_string nth-entry-source "literal-nth-entry.eli"))
+             (input (js-array (js-object :id "literal-runtime.mjs" :program program)
+                              (js-object :id "nth-entry.mjs" :program entry-program)))
+             (saved (JSON/stringify input))
+             (runtime-ir (js-call compiler :compile_ir_string
+               (await (readFile (resolve ROOT "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
+             (memory (js-object :initialPages 128 :maximumPages 4096))
+             (budget (Object/assign (js-object) nth-runtime-budget))
+             (node-completion undefined)
+             (diagnostic (= (get environment :ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC) "1"))
+             (failed false)
+             (native-target (when (= (get globalThis.process :arch) "arm64")
+               (cond ((= (get globalThis.process :platform) "darwin") "arm64-macos")
+                     ((= (get globalThis.process :platform) "linux") "arm64-linux")))))
+        (try
+          (progn
+            (js-call (expect (js-length (get libraries :literalModules))) :toBe 53)
+            (let ((records (get libraries :literalSources)) (index 0))
+              (while (< index (js-length records))
+                (let ((record (aref records index)))
+                  (js-call (expect (get record :source)) :toBe
+                    (await (readFile (resolve ROOT (get record :filename)) "utf8"))))
+                (setq index (1+ index))))
+            (let* ((lowered (js-call (get backend :managed) :lower_managed_project input "nth-entry.mjs" runtime-ir
+                             (js-object :literalModules (get libraries :literalModules) :phased t :foreignEntry t)))
+                   (bytes (globalThis.Uint8Array.from
+                     (js-call (get backend :wasm) :append_metadata_section
+                       (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) memory)
+                       "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))))
+                   (wasm-path (resolve directory "nth.wasm"))
+                   (descriptor-path (resolve directory "nth-descriptor.json"))
+                   (reference-directory (resolve directory "reference"))
+                   (reference-path (resolve reference-directory "nth-entry.mjs"))
+                   (entry-source-path (resolve directory "nth-entry.eli")))
+              (js-call (expect (JSON/stringify input)) :toBe saved)
+              ;; This additional case actually accepts a host array through
+              ;; fromHostValue. Declare that boundary explicitly; the original
+              ;; five literal cases and raw owned-handle ABI remain unchanged.
+              (js-call (expect (get (get lowered :descriptor) :hostCapabilities)) :toEqual
+                (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2 :abi "managed-host-call-v1")))
+              (let ((imports (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes))))
+                (js-call (expect (js-call imports :map (lambda (item)
+                  (js-object :module (get item :module) :name (get item :name) :kind (get item :kind))))) :toEqual
+                  (js-array (js-object :module "eliscript.host" :name "source-operation" :kind "function")))
+                (js-call imports :forEach (lambda (item)
+                  (when (Object/hasOwn item "type")
+                    (js-call (expect (get item :type)) :toEqual
+                      (js-object :parameters (js-array "i32" "i32") :results (js-array "i32")))))))
+              (await (writeFile wasm-path bytes))
+              (await (writeFile descriptor-path (JSON/stringify (get lowered :descriptor))))
+              ;; Independent Seed output executes the exact same fixture and
+              ;; forwarding entry; the original case still compares full
+              ;; Seed/self-host JavaScript and source-map bytes for the fixture.
+              (await (writeFile entry-source-path nth-entry-source))
+              (await (compile SEED (resolve reference-directory "literal-runtime.mjs")))
+              (await (compile SEED reference-path (js-object) entry-source-path))
+              ;; The independent Node instance consumes the same immutable
+              ;; files as before. Start it before the two local instances;
+              ;; none of their heaps or module evaluations are shared.
+              ;; Install both handlers immediately so an early child failure
+              ;; remains observed while a synchronous backend is executing.
+              (when diagnostic
+                (try (console/error "[literal-nth-stage] node-start") (catch ignored nil)))
+              (setq node-completion
+                (js-call (run (js-array NODE
+                  (resolve ROOT "tests/helpers/managed-literal-nth-node-selfhosted.mjs") wasm-path reference-path descriptor-path))
+                  :then
+                  (lambda (result)
+                    (when diagnostic
+                      (try
+                        (console/error "[literal-nth-stage] node-complete")
+                        (js-call (get globalThis.process :stderr) :write (get result :stderr))
+                        (catch ignored nil)))
+                    (js-object :failed false :result result))
+                  (lambda (error)
+                    (when diagnostic
+                      (try (console/error "[literal-nth-stage] node-failed") (catch ignored nil)))
+                    (js-object :failed t :error error))))
+              (let* ((reference-module (await (loadNthReference reference-path)))
+                     (runtime (instantiateManagedRuntime bytes budget)) (runtime-failed false))
+                (try (exerciseNth runtime reference-module (get lowered :descriptor))
+                  (catch error (setq runtime-failed t) (throw error))
+                  (finally (finishNth runtime runtime-failed)))
+                (when native-target
+                  (let ((native-path (resolve directory (if (= native-target "arm64-macos") "nth.dylib" "nth.so"))))
+                    (await (writeFile native-path (globalThis.Uint8Array.from
+                      (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target))))
+                    (let* ((old-module (get globalThis.WebAssembly :Module))
+                           (old-instance (get globalThis.WebAssembly :Instance))
+                           (reject (lambda (&rest arguments) (throw (new globalThis.Error "native nth must not execute WASM"))))
+                           (native undefined) (native-failed false))
+                      (try
+                        (put globalThis.WebAssembly :Module (new globalThis.Proxy old-module (js-object :construct reject :apply reject)))
+                        (put globalThis.WebAssembly :Instance (new globalThis.Proxy old-instance (js-object :construct reject :apply reject)))
+                        (setq native (await (instantiateNativeManagedRuntime native-path lowered budget)))
+                        (exerciseNth native reference-module (get lowered :descriptor))
+                        (catch error (setq native-failed t) (throw error))
+                        (finally
+                          (try
+                            (when native (finishNth native native-failed))
+                            (finally
+                              (put globalThis.WebAssembly :Module old-module)
+                              (put globalThis.WebAssembly :Instance old-instance))))))))
+              (let ((outcome (await node-completion)))
+                (when (get outcome :failed) (throw (get outcome :error)))
+                (js-call (expect (get (get outcome :result) :exitCode)) :toBe 0)))))
+          (catch error (setq failed t) (throw error))
+          (finally
+            ;; Await the actual process exit and both output streams even if
+            ;; a local backend threw false or undefined. Its first error owns
+            ;; the result; child/cleanup errors may not replace that value.
+            (try
+              (when node-completion
+                (let ((outcome (await node-completion)))
+                  (unless failed
+                    (when (get outcome :failed) (throw (get outcome :error)))
+                    (js-call (expect (get (get outcome :result) :exitCode)) :toBe 0))))
+              (catch error (setq failed t) (throw error))
+              (finally
+                (try (await (rm directory (js-object :recursive t :force t)))
+                  (catch error (unless failed (throw error)))))))))) 60000)
+
+  (defasync runLiteralRuntimeCases ()
+    (if reference-root
+      (let ((index 0))
+        (while (< index (js-length cases))
+          (let* ((record (aref cases index)) (timer undefined))
+            (try
+              (await (Promise/race (js-array
+                (js-call (Promise/resolve) :then (get record :body))
+                (new globalThis.Promise (lambda (resolve-promise reject)
+                  (setq timer (funcall globalThis.setTimeout
+                    (lambda () (funcall reject (new globalThis.Error
+                      (+ (get record :name) " exceeded its original " (get record :timeout) " ms timeout"))))
+                    (get record :timeout))))))))
+              (finally (funcall globalThis.clearTimeout timer))))
+          (setq index (1+ index))))
+      (let ((bun-test (funcall require-module "bun:test")))
+        (js-call cases :forEach (lambda (record)
+          (js-call bun-test :test (get record :name) (get record :body) (get record :timeout)))))))
+
+  (export runLiteralRuntimeCases)
+  (js-call (runLiteralRuntimeCases) :catch (lambda (error)
+    (js-call (get globalThis.process :stderr) :write
+      (+ (or (get error :stack) (funcall globalThis.String error)) "\n"))
+    (put globalThis.process :exitCode 1)))
+)

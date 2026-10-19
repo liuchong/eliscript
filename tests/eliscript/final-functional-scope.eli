@@ -1,0 +1,158 @@
+(module tests.final-functional-scope
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile mkdtemp writeFile rm)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "node:crypto" createHash)
+  (import "node:stream" PassThrough)
+  (import "../dist/bootstrap/compiler.mjs" :as compiler)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/testing/final-functional-scope.mjs" cancelledCompilerHostCases
+    functionalScopePattern runFinalFunctionalScope runFunctionalChild)
+
+  (defconst package-file "tests/compiler-package-session.test.mjs")
+  (defconst tools-file "tests/compiler-session-tools.test.mjs")
+  (defconst sequence-file "tests/wasm-managed-sequence-data.test.mjs")
+  (defun sha (source) (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
+  (defasync cases (file) (cancelledCompilerHostCases file (await (readFile (resolve root file) "utf8"))))
+
+  (test "final functional scope cancels exactly the authenticated binary compiler cases and retains all small user runtimes"
+    (async ()
+      (let* ((package-source (await (readFile (resolve root package-file) "utf8")))
+             (cancelled (cancelledCompilerHostCases package-file package-source))
+             (tools (await (cases tools-file)))
+             (pattern (new globalThis.RegExp (functionalScopePattern cancelled))))
+        (js-call assert :strictEqual (js-length cancelled) 27)
+        (js-call assert :strictEqual (js-length tools) 1)
+        (js-call assert :strictEqual (get (aref tools 0) :title)
+          "a complete real managed compiler driver transports AggregateError graphs with shared errors and cause identity")
+        (js-call assert :strictEqual (js-length (js-call cancelled :filter (lambda (item) (= (get item :host) "wasm")))) 16)
+        (js-call assert :strictEqual (js-length (js-call cancelled :filter (lambda (item) (= (get item :host) "native")))) 11)
+        (js-call cancelled :forEach (lambda (item)
+          (js-call assert :strictEqual (get item :sourceSha256) (sha package-source))
+          (js-call assert :strictEqual (get item :status) "cancelled")
+          (js-call assert :strictEqual (Object/hasOwn item "passed") false)
+          (js-call assert :strictEqual (js-call pattern :test (get item :title)) false)
+          (js-call assert :strictEqual (js-call pattern :test (+ (get item :title) " unrelated")) t)))
+        (js-call (js-array
+          "small actual WASM source streams preserve identity-before-decode UTF8-before-JSON and invalid-encoding precedence without refetching decoded failures"
+          "small source downloads retry original read failures share concurrent readers support legacy fallback and reject use after close"
+          "small actual WASM HTTP package streams source chunks once per URL with strict UTF16 dual decoding and reader cleanup"
+          "small real package loaders retain decoded sources and executable state without retaining their consumed whole-byte buffers in a bounded Node process"
+          "complete javascript compiler JSON-UTF16 sources survive original and relocated package sessions in Node and Bun"
+          "the public node CLI consumes original and relocated javascript compilers with exact input bytes and default assets"
+          "Given the original and relocated javascript compiler When bun CLI request submits emit-memory-ir Then real products sidecars and recovery preserve their ABI")
+          :forEach (lambda (title) (js-call assert :strictEqual (js-call pattern :test title) t)))
+        (js-call assert :deepStrictEqual (cancelledCompilerHostCases "tests/unrelated-package.test.mjs" package-source) (js-array)))))
+
+  (test "scope bindings reject a forged or modified same-name suite before dispatch without evaluating any test source"
+    (async ()
+      (let ((source (await (readFile (resolve root package-file) "utf8"))))
+        (js-call assert :throws (lambda () (cancelledCompilerHostCases package-file (+ source "\n")))
+          (new globalThis.RegExp "source identity changed"))
+        (js-call assert :throws (lambda () (cancelledCompilerHostCases package-file
+          (js-call source :replace "small actual WASM source streams" "forged actual WASM source streams")))
+          (new globalThis.RegExp "source identity changed"))
+        (js-call assert :strictEqual (functionalScopePattern (js-array)) undefined))))
+
+  (test "scope dispatch preserves file sharding original monitor and environment and records cancellation separately from actual failures"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-functional-scope-"))))
+             (inventory (js-array "./tests/plain-one.test.mjs" (+ "./" package-file)
+                         (+ "./" sequence-file) "./tests/plain-two.test.mjs" (+ "./" tools-file)))
+             (calls (js-array))
+             (environment (Object/assign (js-object) (get globalThis.process :env)
+               (js-object :ELISCRIPT_TEST_COMPILER_PACKAGE_DIRECTORY (resolve directory "stage3-package")
+                 :ELISCRIPT_TEST_COMPILER_PACKAGE_SOURCE_ARTIFACT (resolve directory "stage3" "compiler-artifact.json"))))
+             (executors (js-object
+               :ordinary (async (files)
+                 (js-call calls :push (js-array "ordinary" files))
+                 (js-object :results (js-call files :map (lambda (file) (js-object :file file :exitCode 0))) :exitCode 0))
+               :mixed (async (plan env)
+                 (js-call calls :push (js-array "mixed" (get plan :file) (get plan :pattern) env))
+                 (js-object :file (get plan :file) :exitCode 1))
+               :sequence (async (plan env)
+                 (js-call calls :push (js-array "sequence" (get plan :file) env))
+                 (js-object :file (get plan :file) :exitCode 0)))))
+        (try
+          (let* ((options (js-object :sourceRoot root :outputDirectory directory :environment environment :executors executors))
+                 (result (await (runFinalFunctionalScope inventory options)))
+                 (saved (JSON/parse (await (readFile (get result :archive) "utf8")))))
+            (js-call assert :strictEqual (get result :exitCode) 1)
+            (js-call assert :strictEqual (js-length (get result :results)) 5)
+            (js-call assert :strictEqual (js-length (get result :cancelled)) 28)
+            (js-call assert :deepStrictEqual (get saved :cancelled) (get result :cancelled))
+            (js-call assert :deepStrictEqual (get saved :unstarted) (js-array))
+            (js-call assert :deepStrictEqual (js-call calls :map (lambda (item) (aref item 0)))
+              (js-array "ordinary" "mixed" "sequence" "ordinary" "mixed"))
+            (js-call assert :strictEqual (aref (aref calls 1) 3) environment)
+            (js-call assert :strictEqual (aref (aref calls 2) 2) environment)
+            (setq calls (js-array))
+            (let ((shard (await (runFinalFunctionalScope
+                    (js-call inventory :concat (js-array "--shard-index" "2" "--shard-count" "2")) options))))
+              (js-call assert :deepStrictEqual (get shard :inventory)
+                (js-array (+ "./" package-file) "./tests/plain-two.test.mjs"))
+              (js-call assert :strictEqual (js-length (get shard :cancelled)) 27)
+              (js-call assert :strictEqual (js-call calls :some (lambda (item) (= (aref item 0) "sequence"))) false)))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "cancellation while a mixed supervisor starts closes its own guard without starting the suite and retains the original signal code"
+    (async ()
+      (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-functional-cancel-")))) (index 0))
+        (try
+          (while (< index 2)
+            (let* ((code (if (= index 0) 130 143)) (cancellation (js-object :code 0))
+                   (mark-ready undefined) (release undefined)
+                   (ready (new globalThis.Promise (lambda (complete) (setq mark-ready complete))))
+                   (waiting (new globalThis.Promise (lambda (complete) (setq release complete))))
+                   (runs 0) (closes 0)
+                   (supervisor (js-object
+                     :run (async (request) (setq runs (1+ runs)) (throw (new globalThis.Error "cancelled suite must not start")))
+                     :close (async () (setq closes (1+ closes)))
+                     :cancel (lambda (signal) (throw (new globalThis.Error "no workload exists before readiness")))))
+                   (executors (js-object :startSupervisor (async () (funcall mark-ready) (await waiting))))
+                   (pending (runFinalFunctionalScope (js-array (+ "./" tools-file))
+                     (js-object :sourceRoot root :outputDirectory directory :executors executors :cancellation cancellation))))
+              (await ready)
+              (put cancellation :code code)
+              (funcall release supervisor)
+              (let* ((result (await pending)) (saved (JSON/parse (await (readFile (get result :archive) "utf8")))))
+                (js-call assert :strictEqual runs 0)
+                (js-call assert :strictEqual closes 1)
+                (js-call assert :strictEqual (get result :exitCode) code)
+                (js-call assert :strictEqual (get (aref (get result :results) 0) :exitCode) code)
+                (js-call assert :strictEqual (get (aref (get result :results) 0) :started) false)
+                (js-call assert :deepStrictEqual (get result :unstarted) (js-array (+ "./" tools-file)))
+                (js-call assert :strictEqual (get saved :exitCode) code)
+                (js-call assert :strictEqual (get (aref (get saved :cancelled) 0) :status) "cancelled")))
+            (setq index (1+ index)))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "argument rejection and a real child preserve original stdout stderr and exit status without a synthetic pass"
+    (async ()
+      (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-functional-child-")))))
+        (try
+          (await (js-call assert :rejects (runFinalFunctionalScope (js-array "--unknown")) globalThis.TypeError))
+          (let ((index 0))
+            (while (< index 2)
+              (let* ((file (resolve directory (+ "original-" index ".test.mjs")))
+                     (source (str "(import \"bun:test\" test)\n"
+                       "(test \"original child case\" (lambda () "
+                       "(js-call globalThis.console :log \"original-output\") "
+                       "(js-call globalThis.console :error \"original-error-output\") "
+                       (if (= index 0) "nil" "(throw (new globalThis.Error \"original child failure\"))") "))"))
+                     (stdout (new PassThrough)) (stderr (new PassThrough))
+                     (out "") (err ""))
+                (js-call stdout :on "data" (lambda (chunk) (setq out (+ out (js-call chunk :toString)))))
+                (js-call stderr :on "data" (lambda (chunk) (setq err (+ err (js-call chunk :toString)))))
+                (await (writeFile file (js-call compiler :compile_string source "functional-child.eli")))
+                (let ((result (await (runFunctionalChild file (js-array "--smol" "test" file)
+                                (js-object :stdout stdout :stderr stderr)))))
+                  (js-call assert :strictEqual (get result :exitCode) index)
+                  (js-call assert :ok (js-call out :includes "original-output"))
+                  (js-call assert :ok (js-call err :includes "original-error-output"))
+                  (when (= index 1) (js-call assert :ok (js-call err :includes "original child failure")))))
+              (setq index (1+ index))))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
+)

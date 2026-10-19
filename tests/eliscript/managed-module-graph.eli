@@ -1,0 +1,286 @@
+(module tests.managed-module-graph
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp mkdir writeFile rm)
+  (import "node:path" resolve dirname)
+  (import "node:url" pathToFileURL fileURLToPath)
+  (import "node:os" tmpdir)
+  (import "node:module" createRequire)
+  (import "../dist/bootstrap/compiler.mjs" compile-string)
+  (import "../tools/backends/managed-module-graph.mjs" createManagedModuleGraph
+    createManagedProjectFacades loadManagedProjectGraph)
+
+  (defun graph-descriptor ()
+    (js-object :project (js-object :prepare "prepare" :entry "main.mjs"
+      :modules (js-array (js-object :id "main.mjs" :dependencies
+        (js-array (js-object :kind "host" :id "provider")) :steps (js-array) :exports (js-array))))
+      :hostModules (js-array (js-object :id "provider" :specifier "./provider.mjs"
+        :referrer "main.mjs" :allowedExports (js-array "default" "value") :namespace t))))
+
+  (defun graph-runtime ()
+    (js-object :project (js-object :prepare (lambda () undefined) :run (lambda () undefined)
+      :get (lambda () undefined) :bindHoisted (lambda (kind index value) value)
+      :invoke (lambda () undefined))))
+
+  (test "actual cyclic ESM namespaces validate export names before values initialize"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-namespace-"))))
+             (graph (createManagedModuleGraph (graph-descriptor)))
+             (state (js-object :graph graph)) (key "__eliscript_namespace_regression__"))
+        (try
+          (progn
+            (put globalThis.globalThis key state)
+            (js-call graph :attachRuntime (graph-runtime)) (js-call graph :prepare)
+            (let ((registration
+              "(import \"./provider.mjs\" :as Provider)\n(defconst state (get globalThis.globalThis \"__eliscript_namespace_regression__\"))\n(js-call (get state :graph) :namespace \"provider\" (lambda () Provider))\n(put state :namespace (js-call (get (get state :graph) :hostModules) :get \"provider\"))\n(try (get Provider \"default\") (catch error (put state :readError error)))\n")
+                  (provider
+              "(import \"./registration.mjs\")\n(import \"./provider.mjs\" :as Self)\n(defvar value 22)\n(defun change (next) (setq value next))\n(export value change)\n(export-default 11)\n(put (get globalThis.globalThis \"__eliscript_namespace_regression__\") :provider Self)\n"))
+              (await (writeFile (resolve directory "registration.mjs") (compile-string registration "registration.eli")))
+              (await (writeFile (resolve directory "provider.mjs") (compile-string provider "provider.eli"))))
+            (let* ((path (resolve directory "provider.mjs"))
+                   (namespace (progn (funcall (createRequire path) path) (get state :provider))))
+              (js-call assert :strictEqual (get (get state :readError) :name) "ReferenceError")
+              (js-call assert :strictEqual (get state :namespace) namespace)
+              (js-call assert :strictEqual (js-call (get graph :hostModules) :get "provider") namespace)
+              (js-call assert :strictEqual (get namespace "default") 11)
+              (js-call assert :strictEqual (get namespace :value) 22)
+              (js-call namespace :change 31)
+              (js-call assert :strictEqual (get (js-call (get graph :hostModules) :get "provider") :value) 31)))
+          (finally
+            (js-call graph :close) (Reflect/deleteProperty globalThis.globalThis key)
+            (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "graph options preserve omitted undefined explicit null and close callback semantics"
+    (lambda ()
+      (let ((omitted (createManagedModuleGraph (graph-descriptor)))
+            (explicit (createManagedModuleGraph (graph-descriptor) undefined))
+            (null-options (createManagedModuleGraph (graph-descriptor) nil))
+            (closed 0))
+        (js-call omitted :close) (js-call explicit :close)
+        (js-call assert :strictEqual (get omitted :closed) t)
+        (js-call assert :strictEqual (get explicit :closed) t)
+        ;; Explicit null keeps the original host error; omission is undefined.
+        (js-call assert :throws (lambda () (js-call null-options :close)) globalThis.TypeError)
+        (js-call assert :strictEqual (get null-options :closed) t)
+        (let ((callback (createManagedModuleGraph (graph-descriptor)
+                          (js-object :onClose (lambda () (setq closed (1+ closed)))))))
+          (js-call callback :close) (js-call callback :close)
+          (js-call assert :strictEqual closed 1)))))
+
+  (test "namespace checks preserve graph lifecycle, missing exports and ESM identity rejection"
+    (lambda ()
+      (let* ((graph (createManagedModuleGraph (graph-descriptor)))
+             (namespace (js-object :default 11 :value 22)))
+        (js-call assert :ok (Object/isFrozen graph))
+        (js-call assert :throws (lambda () (js-call graph :namespace "provider" (lambda () namespace))))
+        (js-call assert :strictEqual (js-call graph :attachRuntime (graph-runtime)) graph)
+        (js-call assert :throws (lambda () (js-call graph :namespace "provider" (lambda () namespace))) globalThis.ReferenceError)
+        (js-call assert :strictEqual (js-call graph :prepare) graph)
+        (js-call assert :throws (lambda () (js-call graph :namespace "unknown" (lambda () namespace))) globalThis.TypeError)
+        (js-call graph :namespace "provider" (lambda () namespace))
+        (js-call graph :namespace "provider" (lambda () namespace))
+        (js-call assert :strictEqual (js-call (get graph :hostModules) :get "provider") namespace)
+        (js-call assert :throws (lambda () (js-call graph :namespace "provider"
+          (lambda () (js-object :default 11 :value 22)))) globalThis.TypeError)
+        (js-call graph :close)
+        (js-call assert :strictEqual (get graph :closed) t)
+        (js-call assert :throws (lambda () (js-call graph :namespace "provider" (lambda () namespace))))
+        (let ((missing (createManagedModuleGraph (graph-descriptor))))
+          (try
+            (progn
+              (js-call missing :attachRuntime (graph-runtime)) (js-call missing :prepare)
+              (js-call missing :namespace "provider" (lambda () (js-object :value 22)))
+              (js-call assert :throws (lambda () (js-call (get missing :hostModules) :get "provider")) globalThis.SyntaxError))
+            (finally (js-call missing :close)))))))
+  (defun prepared-descriptor ()
+    (js-object :module (js-object :bindingCount 2)
+      :project (js-object :entry "main.mjs" :prepare "prepare"
+        :preparedBindings (js-array (js-object :name "private-value" :kind 0 :index 0 :mutable false))
+        :modules (js-array
+          (js-object :id "dep.mjs" :dependencies (js-array)
+            :steps (js-array (js-object :run "initialize-count" :initializes
+              (js-array (js-object :kind 0 :index 1 :mutable t))))
+            :exports (js-array (js-object :name "value" :kind 0 :index 0 :mutable false)
+              (js-object :name "count" :kind 0 :index 1 :mutable t)))
+          (js-object :id "main.mjs" :dependencies (js-array (js-object :kind "managed" :id "dep.mjs"))
+            :steps (js-array)
+            :exports (js-array (js-object :name "alias" :kind 0 :index 0 :mutable false)
+              (js-object :name "value" :kind 0 :index 0 :mutable false)
+              (js-object :name "count" :kind 0 :index 1 :mutable t)
+              (js-object :name "read" :kind 1 :index 0 :mutable false
+                :functionName "read" :functionLength 0 :functionConstructible t :functionAsync false)))))))
+
+  (test "prepared canonical exports preserve actual ESM aliases watches ordinary phases and hoisted function metadata"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-prepared-exports-"))))
+             (descriptor (prepared-descriptor)) (saved (JSON/stringify descriptor))
+             (facades (createManagedProjectFacades descriptor (js-object :entry "main.mjs")))
+             (graph (createManagedModuleGraph descriptor))
+             (shared (js-object :marker "prepared")) (prepared false) (count undefined) (runs 0)
+             (runtime (js-object :project (js-object
+               :prepare (lambda ()
+                 ;; These notifications are real prepare-owned global writes;
+                 ;; ESM watches are installed only after prepare returns.
+                 (js-call graph :bindingChanged 0 0 shared)
+                 (js-call graph :bindingChanged 0 0 shared)
+                 (js-call assert :throws (lambda () (js-call graph :read 0 0)) globalThis.ReferenceError)
+                 (setq prepared t))
+               :run (lambda (name) (js-call assert :strictEqual name "initialize-count")
+                 (setq runs (1+ runs) count 3))
+               :get (lambda (kind index)
+                 (js-call assert :strictEqual kind 0)
+                 (unless prepared (throw (new globalThis.ReferenceError "not prepared")))
+                 (if (= index 0) shared count))
+               :bindHoisted (lambda (kind index fn) fn)
+               :invoke (lambda (kind index receiver arguments new-target) count)))))
+        (try
+          (progn
+            (js-call assert :strictEqual (JSON/stringify descriptor) saved)
+            (let ((files (get facades :files)) (index 0))
+              (while (< index (js-length files))
+                (let* ((file (aref files index)) (path (resolve directory (get file :id))))
+                  (await (mkdir (dirname path) (js-object :recursive t)))
+                  (await (writeFile path (get file :source))))
+                (setq index (1+ index))))
+            (let* ((options (js-object :moduleGraph graph :projectModuleBaseURL
+                               (get (pathToFileURL (str directory "/")) :href)
+                               :importProjectModule (lambda (url)
+                                 (let ((path (fileURLToPath url))) (funcall (createRequire path) path)))))
+                   (loaded (await (loadManagedProjectGraph runtime descriptor options)))
+                   (namespace (get loaded :namespace)))
+              (js-call assert :strictEqual prepared t)
+              (js-call assert :strictEqual runs 1)
+              (js-call assert :strictEqual (get namespace :value) shared)
+              (js-call assert :strictEqual (get namespace :alias) shared)
+              (let ((replacement (js-object :marker "prepared replacement")))
+                (js-call graph :bindingChanged 0 0 replacement)
+                (js-call assert :strictEqual (get namespace :value) replacement)
+                (js-call assert :strictEqual (get namespace :alias) replacement))
+              (js-call assert :strictEqual (get namespace :count) 3)
+              (js-call assert :strictEqual (get (get namespace :read) :name) "read")
+              (js-call assert :strictEqual (get (get namespace :read) :length) 0)
+              (js-call assert :strictEqual (js-call namespace :read) 3)
+              (setq count 9) (js-call graph :bindingChanged 0 1 9)
+              (js-call assert :strictEqual (get namespace :count) 9)
+              (js-call assert :strictEqual (js-call namespace :read) 9)
+              (js-call assert :deepStrictEqual (get (get loaded :facades) :files) (get facades :files))
+              (js-call assert :strictEqual (await (loadManagedProjectGraph runtime descriptor options)) loaded)
+              (js-call assert :strictEqual (JSON/stringify descriptor) saved)))
+          (finally (js-call graph :close) (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "prepare notifications preserve ready boundaries later listener order and a single successful initialization"
+    (lambda ()
+      (let* ((descriptor (prepared-descriptor)) (saved (JSON/stringify descriptor))
+             (graph (createManagedModuleGraph descriptor)) (runtime (graph-runtime))
+             (trace (js-array)) (value (js-object :prepared t)) (runs 0)
+             (first (lambda (next) (js-call trace :push (js-array "first" next))))
+             (second (lambda (next) (js-call trace :push (js-array "second" next)))))
+        (put (get runtime :project) :prepare (lambda ()
+          (setq runs (1+ runs))
+          (js-call graph :bindingChanged 0 0 value)
+          (js-call graph :bindingChanged 0 0 -0)
+          (js-call assert :throws (lambda () (js-call graph :bindingChanged 2 0 value))
+            (lambda (error) (and (js-call globalThis.TypeError globalThis.Symbol.hasInstance error)
+                                (= (get error :message) "invalid managed project cell"))))
+          (js-call assert :throws (lambda () (js-call graph :read 0 0)) globalThis.ReferenceError)
+          (js-call assert :throws (lambda () (js-call graph :watch 0 0 first)) globalThis.ReferenceError)))
+        (put (get runtime :project) :get (lambda (kind index) value))
+        (try
+          (progn
+            (js-call assert :throws (lambda () (js-call graph :bindingChanged 0 0 value)))
+            (js-call graph :attachRuntime runtime)
+            (js-call assert :throws (lambda () (js-call graph :bindingChanged 0 0 value)) globalThis.ReferenceError)
+            (js-call assert :strictEqual (js-call graph :prepare) graph)
+            (js-call assert :strictEqual (js-call graph :prepare) graph)
+            (js-call assert :strictEqual runs 1)
+            (js-call assert :strictEqual (js-call graph :read 0 0) value)
+            (js-call assert :deepStrictEqual trace (js-array))
+            (let ((stop-first (js-call graph :watch 0 0 first)) (stop-second (js-call graph :watch 0 0 second)))
+              (js-call graph :bindingChanged 0 0 -0)
+              (js-call assert :deepStrictEqual trace (js-array (js-array "first" -0) (js-array "second" -0)))
+              (funcall stop-first)
+              (js-call graph :bindingChanged 0 0 value)
+              (js-call assert :deepStrictEqual (aref trace 2) (js-array "second" value))
+              (funcall stop-second))
+            (js-call assert :strictEqual (JSON/stringify descriptor) saved))
+          (finally (js-call graph :close))))))
+
+  (test "failed prepare discards pending notifications and preserves falsy first failures without becoming ready"
+    (lambda ()
+      (js-call (js-array false undefined (js-object :prepareFailure t)) :forEach (lambda (failure)
+        (let* ((graph (createManagedModuleGraph (prepared-descriptor))) (runtime (graph-runtime)) (runs 0))
+          (put (get runtime :project) :prepare (lambda ()
+            (setq runs (1+ runs))
+            (js-call graph :bindingChanged 0 0 (js-object :unpublished t))
+            (throw failure)))
+          (js-call graph :attachRuntime runtime)
+          (try
+            (progn
+              (js-call (js-array 0 1) :forEach (lambda (unused)
+                (let ((caught false) (actual undefined))
+                  (try (js-call graph :prepare) (catch error (setq caught t actual error)))
+                  (js-call assert :strictEqual caught t)
+                  (js-call assert :strictEqual actual failure))))
+              (js-call assert :strictEqual runs 1)
+              (js-call assert :throws (lambda () (js-call graph :read 0 0)) globalThis.ReferenceError)
+              (js-call assert :throws (lambda () (js-call graph :watch 0 0 (lambda (value) nil))) globalThis.ReferenceError)
+              (js-call assert :throws (lambda () (js-call graph :bindingChanged 0 0 undefined)) globalThis.ReferenceError))
+            (finally (js-call graph :close))))))))
+
+  (test "prepared exports reject absent forged duplicate conflicting and ordinary-owned prepare declarations"
+    (lambda ()
+      (let ((missing (prepared-descriptor)))
+        (Reflect/deleteProperty (get missing :project) "preparedBindings")
+        (js-call assert :throws (lambda () (createManagedProjectFacades missing (js-object :entry "main.mjs")))
+          (new globalThis.RegExp "no lexical initialization phase")))
+      (let ((mutations (js-array
+        (lambda (descriptor) (put (get descriptor :project) :preparedBindings (js-object)))
+        (lambda (descriptor) (put (aref (get (get descriptor :project) :preparedBindings) 0) :kind 1))
+        (lambda (descriptor) (put (aref (get (get descriptor :project) :preparedBindings) 0) :index 2))
+        (lambda (descriptor) (js-call (get (get descriptor :project) :preparedBindings) :push
+          (funcall globalThis.structuredClone (aref (get (get descriptor :project) :preparedBindings) 0))))
+        (lambda (descriptor) (put (aref (get (get descriptor :project) :preparedBindings) 0) :mutable t))
+        (lambda (descriptor) (put (aref (get (get descriptor :project) :preparedBindings) 0) :index 1)))))
+        (js-call mutations :forEach (lambda (mutate)
+          (let ((descriptor (prepared-descriptor)))
+            (funcall mutate descriptor)
+            (js-call assert :throws (lambda () (createManagedProjectFacades descriptor (js-object :entry "main.mjs")))
+              globalThis.TypeError)))))))
+
+  (test "prepared export rendering does not replace the original prepare failure or manufacture ready cells"
+    (async ()
+      (let* ((descriptor (prepared-descriptor)) (graph (createManagedModuleGraph descriptor))
+             (failure (js-object :marker "prepare failure")) (closed 0)
+             (runtime (graph-runtime)))
+        (put (get runtime :project) :prepare (lambda () (throw failure)))
+        (put runtime :closeModule (lambda () (setq closed (1+ closed))))
+        (await (js-call assert :rejects
+          (lambda () (loadManagedProjectGraph runtime descriptor (js-object :moduleGraph graph
+            :projectModuleBaseURL "file:///unused/" :importProjectModule
+            (lambda (url) (throw (new globalThis.Error "module IO must follow prepare"))))))
+          (lambda (error) (Object/is error failure))))
+        (js-call assert :strictEqual closed 1)
+        (js-call assert :strictEqual (get graph :closed) t))
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-prepared-tdz-"))))
+             (descriptor (prepared-descriptor)) (graph (createManagedModuleGraph descriptor))
+             (facades (createManagedProjectFacades descriptor (js-object :entry "main.mjs")))
+             (runtime (graph-runtime)) (failure (new globalThis.ReferenceError "real cell is uninitialized")))
+        (put (get runtime :project) :get (lambda (kind index) (if (= index 0) (throw failure) 3)))
+        (try
+          (progn
+            (let ((files (get facades :files)) (index 0))
+              (while (< index (js-length files))
+                (let* ((file (aref files index)) (path (resolve directory (get file :id))))
+                  (await (mkdir (dirname path) (js-object :recursive t)))
+                  (await (writeFile path (get file :source))))
+                (setq index (1+ index))))
+            (await (js-call assert :rejects
+              (lambda () (loadManagedProjectGraph runtime descriptor
+                (js-object :moduleGraph graph :projectModuleBaseURL
+                  (get (pathToFileURL (str directory "/")) :href)
+                  :importProjectModule (lambda (url)
+                    (let ((path (fileURLToPath url))) (funcall (createRequire path) path))))))
+              (lambda (error) (Object/is error failure))))
+            (js-call assert :strictEqual (get graph :closed) t))
+          (finally (js-call graph :close) (await (rm directory (js-object :recursive t :force t))))))))
+)

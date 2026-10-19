@@ -1,0 +1,196 @@
+(module tests.emitter-tdz-seed-parity
+  (import "node:test" test before after)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp writeFile rm)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "node:module" createRequire)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" root)
+  (import "../dist/bootstrap/compiler.mjs"
+    compile-string compile-string-with-source-map compile-ir-string
+    emit-ir-string emit-ir-string-with-source-map serialize-ir-program)
+
+  ;; These source programs exercise the established emitted binding namespace.
+  ;; Seed and selfhost must agree on the whole output, including all map fields;
+  ;; executing both products also prevents identical missing guards from passing.
+  (defconst cases (js-array
+    (js-object :name "module-bindings"
+      :source "(defvar 你好 -0.0)\n(defconst base-12l4 4)\n(defconst arguments 6)\n(defun read-values () (js-array 你好 base-12l4 arguments))\n(defun replace-value (value) (setq 你好 value))\n(export read-values replace-value)\n")
+    (js-object :name "scalar-shadow"
+      :source "(defun before-init () (let ((你好 2)) 你好))\n(defconst first (before-init))\n(defvar 你好 91)\n(defun parameter (你好) 你好)\n(defun sequential () (let* ((你好 3) (reserved-words 你好)) reserved-words))\n(defun read-values () (js-array first (parameter 7) (sequential) 你好))\n(export read-values)\n")
+    (js-object :name "pattern-shadow"
+      :source "(defun before-init ([你好 reserved-words]) (let (([base-12l4] (js-array reserved-words))) (js-array 你好 base-12l4)))\n(defconst first (before-init (js-array 2 3)))\n(defvar 你好 90)\n(defvar reserved-words 91)\n(defvar base-12l4 92)\n(defun read-values () (js-array first 你好 reserved-words base-12l4))\n(export read-values)\n")
+    (js-object :name "function-import-names"
+      :source "(import \"./dependency.mjs\" 外部-值)\n(import \"./dependency.mjs\" :as 名字-空间)\n(defvar reserved-words 8)\n(defun 你好-函数 () (+ (外部-值) (名字-空间.外部-值)))\n(defun read-values () (js-array (你好-函数) reserved-words))\n(export read-values)\n")
+    (js-object :name "early-unicode-read" :early "_U4F60__U597D_"
+      :source "(defun read-early () 你好)\n(defconst first (read-early))\n(defvar 你好 42)\n(export first)\n")
+    (js-object :name "early-hyphen-read" :early "base_12l4"
+      :source "(defun read-early () base-12l4)\n(defconst first (read-early))\n(defconst base-12l4 42)\n(export first)\n")
+    (js-object :name "early-reserved-read" :early "arguments$"
+      :source "(defun read-early () arguments)\n(defconst first (read-early))\n(defvar arguments 42)\n(export first)\n")
+    ;; Source analysis correctly rejects writes to defconst. This additional IR
+    ;; fixture exercises the existing immutable writer, without accepting a new
+    ;; source assignment or modifying either emitter's input during emission.
+    (js-object :name "immutable-ir-writer" :readonly t
+      :source "(defvar reserved-words -0.0)\n(defun read-value () reserved-words)\n(defun write-value (value) (setq reserved-words value))\n(export read-value write-value)\n")))
+  (defvar directory undefined)
+  (defvar results undefined)
+  (defvar seed-immutable-message undefined)
+  (defvar seed-immutable-diagnostic undefined)
+
+  ;; This is Emacs Lisp invoking the maintained Seed APIs, not generated JS or a
+  ;; substitute oracle. The same fixture bytes feed both compiler implementations.
+  (defconst seed-script (js-call (js-array
+    "(progn"
+    " (require 'json) (require 'eliscript)"
+    " (set-language-environment \"UTF-8\")"
+    " (defun tdz-parity-js (text) (decode-coding-string (substring-no-properties text) 'utf-8-unix))"
+    " (defun tdz-parity-emission (value)"
+    "   `((javascript . ,(tdz-parity-js (eliscript-emission-javascript value)))"
+    "     (sourceMap . ,(json-parse-string (eliscript-emission-source-map value) :object-type 'alist :array-type 'array :null-object nil :false-object :false))))"
+    " (let* ((fixture (with-temp-buffer (insert-file-contents (getenv \"ELISCRIPT_TDZ_FIXTURE\")) (json-parse-buffer :object-type 'alist :array-type 'list :null-object nil :false-object :false)))"
+    "        (results (mapcar (lambda (item)"
+    "          (let* ((name (alist-get 'name item)) (source (alist-get 'source item))"
+    "                 (filename (concat \"tdz-\" name \".eli\"))"
+    "                 (program (eliscript-compile-ir-string source filename))"
+    "                 (string-js (tdz-parity-js (eliscript-compile-string source filename)))"
+    "                 (string-map (tdz-parity-emission (eliscript-compile-string-with-source-map source filename \"fixture.mjs\" filename))))"
+    "            (when (eq (alist-get 'readonly item) t)"
+    "              (let ((declaration (car (eliscript-ir-program-body program))))"
+    "                (unless (eq (eliscript-ir-node-kind declaration) 'variable-declaration) (error \"missing real declaration\"))"
+    "                (setf (eliscript-ir-node-properties declaration) (plist-put (eliscript-ir-node-properties declaration) :mutable nil))))"
+    "            (let* ((before (prin1-to-string program))"
+    "                   (ir-js (tdz-parity-js (eliscript-emit-ir-module program)))"
+    "                   (ir-map (tdz-parity-emission (eliscript-emit-ir-module-with-source-map program source \"fixture.mjs\" filename))))"
+    "              (unless (equal before (prin1-to-string program)) (error \"Seed emitter mutated input IR\"))"
+    "              `((name . ,name) (stringJavascript . ,string-js) (stringEmission . ,string-map)"
+    "                (irJavascript . ,ir-js) (irEmission . ,ir-map) (irUnchanged . t))))) fixture)))"
+    "   (let ((failure (condition-case error-data"
+    "                     (progn (eliscript-compile-ir-string \"(defconst reserved-words 1) (setq reserved-words 2)\" \"constant-write.eli\") (error \"immutable source was accepted\"))"
+    "                   (eliscript-analyze-error"
+    "                    `((message . ,(cadr error-data))"
+    "                      (diagnostic . ,(eliscript-diagnostic-to-alist (eliscript-diagnostic-from-condition error-data))))))))"
+    "     (princ (decode-coding-string (json-serialize `((cases . ,(vconcat results)) (immutableMessage . ,(alist-get 'message failure)) (immutableDiagnostic . ,(alist-get 'diagnostic failure))) :null-object nil :false-object :false) 'utf-8-unix)))))") :join "\n"))
+
+  (before (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-tdz-parity-"))))
+    (let* ((fixture (resolve directory "cases.json"))
+           (env (Object/assign (js-object) (get globalThis.process :env)
+                  (js-object :ELISCRIPT_TDZ_FIXTURE fixture))))
+      (await (writeFile fixture (JSON/stringify cases)))
+      (let ((child (spawnSync (get env :EMACS "emacs")
+                     (js-array "--batch" "-Q" "-L" "compiler" "--eval" seed-script)
+                     (js-object :cwd root :env env :encoding "utf8" :maxBuffer 4194304))))
+        (js-call assert :strictEqual (get child :error) undefined)
+        (js-call assert :strictEqual (get child :signal) nil)
+        (js-call assert :strictEqual (get child :status) 0 (get child :stderr))
+        (let ((output (JSON/parse (get child :stdout))))
+          (setq results (get output :cases))
+          (setq seed-immutable-message (get output :immutableMessage))
+          (setq seed-immutable-diagnostic (get output :immutableDiagnostic)))
+        (js-call assert :strictEqual (js-length results) (js-length cases))))))
+  (after (async () (when directory (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun assert-emission (actual expected source filename)
+    (js-call assert :strictEqual (get actual :javascript) (get expected :javascript))
+    (let ((map (JSON/parse (get actual :sourceMap))))
+      (js-call assert :deepStrictEqual map (get expected :sourceMap))
+      (js-call assert :strictEqual (get map :version) 3)
+      (js-call assert :strictEqual (get map :file) "fixture.mjs")
+      (js-call assert :deepStrictEqual (get map :sources) (js-array filename))
+      (js-call assert :deepStrictEqual (get map :sourcesContent) (js-array source))))
+
+  (defasync load-product (name role javascript)
+    (let* ((path (resolve directory (+ name "-" role ".mjs")))
+           (dependency (resolve directory "dependency.mjs")))
+      (await (writeFile dependency (compile-string "(defun 外部-值 () 5) (export 外部-值)" "dependency.eli")))
+      (await (writeFile path javascript))
+      (funcall (createRequire path) path)))
+
+  (defun verify-values (name namespace)
+    (cond
+      ((= name "module-bindings")
+       (let ((values (js-call namespace :read_values)))
+         (js-call assert :strictEqual (Object/is (aref values 0) -0) t)
+         (js-call assert :deepStrictEqual (js-call values :slice 1) (js-array 4 6)))
+       (js-call assert :strictEqual (js-call namespace :replace_value 17) 17)
+       (js-call assert :deepStrictEqual (js-call namespace :read_values) (js-array 17 4 6)))
+      ((= name "scalar-shadow")
+       (js-call assert :deepStrictEqual (js-call namespace :read_values) (js-array 2 7 3 91)))
+      ((= name "pattern-shadow")
+       (js-call assert :deepStrictEqual (js-call namespace :read_values) (js-array (js-array 2 3) 90 91 92)))
+      ((= name "function-import-names")
+       (js-call assert :deepStrictEqual (js-call namespace :read_values) (js-array 10 8)))
+      ((= name "immutable-ir-writer")
+       (js-call assert :strictEqual (Object/is (js-call namespace :read_value) -0) t)
+       (js-call assert :throws (lambda () (js-call namespace :write_value 17))
+         (lambda (error)
+           (and (js-call globalThis.TypeError globalThis.Symbol.hasInstance error)
+                (= (get error :name) "TypeError")
+                (= (get error :message) "Assignment to constant variable."))))
+       (js-call assert :strictEqual (Object/is (js-call namespace :read_value) -0) t))
+      (t (throw (new globalThis.Error (+ "missing TDZ runtime assertion: " name))))))
+
+  (defasync check-case (item index)
+    (let* ((name (get item :name)) (source (get item :source))
+           (filename (+ "tdz-" name ".eli")) (seed (aref results index))
+           (program (compile-ir-string source filename))
+           (string-js (compile-string source filename))
+           (string-map (compile-string-with-source-map source filename "fixture.mjs" filename)))
+      (js-call assert :strictEqual (get seed :name) name)
+      (js-call assert :strictEqual string-js (get seed :stringJavascript))
+      (assert-emission string-map (get seed :stringEmission) source filename)
+      (when (get item :readonly)
+        (let ((declaration (aref (get program :body) 0)))
+          (js-call assert :strictEqual (get declaration :kind) "variable-declaration")
+          (put (get declaration :properties) :mutable false)))
+      (let* ((snapshot (funcall globalThis.structuredClone program))
+             (before (serialize-ir-program program))
+             (javascript (emit-ir-string program))
+             (emission (emit-ir-string-with-source-map program source "fixture.mjs" filename)))
+        (js-call assert :strictEqual javascript (get seed :irJavascript))
+        (assert-emission emission (get seed :irEmission) source filename)
+        (js-call assert :strictEqual (emit-ir-string program) javascript)
+        (js-call assert :deepStrictEqual program snapshot)
+        (js-call assert :strictEqual (serialize-ir-program program) before)
+        (js-call assert :strictEqual (get seed :irUnchanged) t)
+        (unless (get item :readonly) (js-call assert :strictEqual javascript string-js))
+        (let ((roles (js-array "seed" "selfhost")) (at 0))
+          (while (< at (js-length roles))
+            (let* ((role (aref roles at)) (text (if (= role "seed") (get seed :irJavascript) javascript)))
+              (if (get item :early)
+                (await (js-call assert :rejects (load-product name role text)
+                  (lambda (error)
+                    (and (js-call globalThis.ReferenceError globalThis.Symbol.hasInstance error)
+                         (= (get error :name) "ReferenceError")
+                         (= (get error :message) (+ "Cannot access '" (get item :early) "' before initialization"))))))
+                (verify-values name (await (load-product name role text)))))
+            (setq at (1+ at)))))))
+
+  (let ((index 0))
+    (while (< index (js-length cases))
+      (let ((item (aref cases index)) (position index))
+        (test (+ "Seed and selfhost TDZ binding namespace parity: " (get item :name))
+          (async () (await (check-case item position)))))
+      (setq index (1+ index))))
+
+  (test "TDZ parity keeps immutable source assignment rejected before either emission path"
+    (lambda ()
+      (let* ((source "(defconst reserved-words 1) (setq reserved-words 2)")
+             (message "cannot assign to immutable binding: reserved-words")
+             (rendered (+ "constant-write.eli:1:35: " message))
+             (diagnostic (js-object :format "eliscript-diagnostic" :version 1
+               :code "ELI-A0001" :severity "error" :phase "analysis" :message message
+               :location (js-object :file "constant-write.eli"
+                 :start (js-object :offset 34 :line 1 :column 35)
+                 :end (js-object :offset 48 :line 1 :column 49)))))
+        (js-call assert :strictEqual seed-immutable-message rendered)
+        (js-call assert :deepStrictEqual seed-immutable-diagnostic diagnostic)
+        (js-call assert :throws (lambda () (compile-ir-string source "constant-write.eli"))
+          (lambda (error)
+            (js-call assert :strictEqual (get error :name) "Error")
+            (js-call assert :strictEqual (get error :message) rendered)
+            (js-call assert :deepStrictEqual (get error :eliscriptDiagnostic) diagnostic)
+            t)))))
+)

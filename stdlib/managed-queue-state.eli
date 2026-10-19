@@ -1,0 +1,65 @@
+(module eliscript.managed-queue-state
+  (import-portable "./persistent-list.eli"
+    empty-persistent-list persistent-list-empty? persistent-list-cons
+    persistent-list-first persistent-list-rest persistent-list-reverse persistent-list-to-array)
+
+  ;; Private FIFO storage. Public frozen values and their protocols belong to
+  ;; the literal adapter; these ordinary records never cross that boundary.
+  (defportable managed-queue-state-make (front rear count metadata)
+    (js-object :front front :rear rear :count count :metadata metadata))
+
+  (defportable managed-queue-state-empty ()
+    (managed-queue-state-make (empty-persistent-list) (empty-persistent-list) 0 nil))
+
+  (defportable managed-queue-state-count (queue) (get queue :count))
+  (defportable managed-queue-state-empty? (queue) (= (get queue :count) 0))
+  (defportable managed-queue-state-meta (queue) (get queue :metadata))
+
+  (defportable managed-queue-state-with-meta (queue metadata)
+    (if (eq metadata (get queue :metadata)) queue
+      (managed-queue-state-make (get queue :front) (get queue :rear) (get queue :count) metadata)))
+
+  (defportable managed-queue-state-conj (queue value)
+    (let ((count (get queue :count)))
+      (if (>= count 2147483647) nil
+        (if (= count 0)
+          (managed-queue-state-make
+            (persistent-list-cons (get queue :front) value) (get queue :rear) 1 (get queue :metadata))
+          (managed-queue-state-make
+            (get queue :front) (persistent-list-cons (get queue :rear) value)
+            (1+ count) (get queue :metadata))))))
+
+  (defportable managed-queue-state-peek (queue not-found)
+    (if (= (get queue :count) 0) not-found
+      (persistent-list-first (get queue :front) not-found)))
+
+  (defportable managed-queue-state-pop (queue)
+    (let ((count (get queue :count)))
+      (if (= count 0) nil
+        (let ((front (persistent-list-rest (get queue :front) nil))
+              (rear (get queue :rear)))
+          (when (persistent-list-empty? front)
+            (setq front (persistent-list-reverse rear) rear (empty-persistent-list)))
+          (managed-queue-state-make front rear (1- count) (get queue :metadata))))))
+
+  (defportable managed-queue-state-to-array (queue)
+    (let ((result (empty-persistent-list)) (front (get queue :front))
+          (rear (persistent-list-reverse (get queue :rear))))
+      (while (not (persistent-list-empty? front))
+        (setq result (persistent-list-cons result (persistent-list-first front nil))
+              front (persistent-list-rest front nil)))
+      (while (not (persistent-list-empty? rear))
+        (setq result (persistent-list-cons result (persistent-list-first rear nil))
+              rear (persistent-list-rest rear nil)))
+      (persistent-list-to-array (persistent-list-reverse result))))
+
+  (defportable managed-queue-state-from-array (values)
+    (let ((queue (managed-queue-state-empty)) (index 0))
+      (while (< index (js-length values))
+        (setq queue (managed-queue-state-conj queue (get values index)) index (1+ index)))
+      queue))
+
+  (export managed-queue-state-empty managed-queue-state-count managed-queue-state-empty?
+    managed-queue-state-meta managed-queue-state-with-meta managed-queue-state-conj
+    managed-queue-state-peek managed-queue-state-pop managed-queue-state-to-array
+    managed-queue-state-from-array))

@@ -1,0 +1,100 @@
+(module eliscript.runtime.unicode-case
+  (import "./unicode-case-data.mjs" :as data)
+
+  ;; Ordinary Eliscript JavaScript uses the same Unicode 17 default as the
+  ;; owned runtime. Explicit profile selection remains available below.
+  ;; Tables are derived from the one maintained Unicode-3.0 region in memory.eli.
+  (defconst installed (new globalThis.WeakMap))
+  (defconst intrinsic-string globalThis.String)
+  (defconst intrinsic-code-point (get (get intrinsic-string :prototype) :codePointAt))
+  (defconst intrinsic-from-code-point (get intrinsic-string :fromCodePoint))
+
+  (defun point (text index)
+    (Reflect/apply intrinsic-code-point text (js-array index)))
+  (defun characters (code)
+    (Reflect/apply intrinsic-from-code-point intrinsic-string (js-array code)))
+  (defun tables (version)
+    (let ((suffix (cond ((= version 15.1) "151") ((= version 16) "160") ((= version 17) "17")
+                        (t (throw (new globalThis.TypeError "Unicode case profile must be 15.1, 16, or 17"))))))
+      (js-object :upper (js-array (get data (+ "unicode_case_data_upper_0_" suffix))
+          (get data (+ "unicode_case_data_upper_1_" suffix)) (get data (+ "unicode_case_data_upper_2_" suffix)))
+        :lower (js-array (get data (+ "unicode_case_data_lower_0_" suffix))
+          (get data (+ "unicode_case_data_lower_1_" suffix)) (get data (+ "unicode_case_data_lower_2_" suffix)))
+        :cased (get data (+ "unicode_case_data_cased_" suffix))
+        :ignorable (get data (+ "unicode_case_data_case_ignorable_" suffix)))))
+
+  (defun final-sigma (text index before rules)
+    (let ((result before) (done false))
+      (while (and (= before 1) (not done) (< index (js-length text)))
+        (let ((code (point text index)))
+          (when (= (funcall (get rules :ignorable) code) 0)
+            (setq done t)
+            (when (= (funcall (get rules :cased) code) 1) (setq result 0)))
+          (setq index (+ index (if (> code 65535) 2 1))))) result))
+
+  (defun convert (text upper rules)
+    (let* ((mapping (get rules (if upper "upper" "lower")))
+           (first-map (aref mapping 0)) (second-map (aref mapping 1)) (third-map (aref mapping 2))
+           (pieces (js-array)) (chunk "") (index 0) (before 0))
+      (while (< index (js-length text))
+        (let* ((code (point text index)) (step (if (> code 65535) 2 1))
+               (first (funcall first-map code)) (second (funcall second-map code)) (third (funcall third-map code)))
+          (when (and (not upper) (= code 931) (= (final-sigma text (+ index step) before rules) 1))
+            (setq first 962))
+          (setq chunk (+ chunk (characters first)))
+          (when (/= second 0) (setq chunk (+ chunk (characters second))))
+          (when (/= third 0) (setq chunk (+ chunk (characters third))))
+          (when (>= (js-length chunk) 4096) (js-call pieces :push chunk) (setq chunk ""))
+          (when (and (not upper) (= (funcall (get rules :ignorable) code) 0))
+            (setq before (funcall (get rules :cased) code)))
+          (setq index (+ index step))))
+      (when (> (js-length chunk) 0) (js-call pieces :push chunk))
+      (js-call pieces :join "")))
+
+  (defun profile-method (name upper rules string-constructor function-prototype type-error)
+    ;; An arrow target is intrinsically nonconstructible. Proxy [[Call]] gives
+    ;; Eli the actual method receiver without embedded foreign-language code.
+    (let ((target (lambda () undefined)))
+      (Object/setPrototypeOf target function-prototype)
+      (Object/defineProperty target "name" (js-object :value name :configurable t))
+      (Object/defineProperty target "length" (js-object :value 0 :configurable t))
+      (new globalThis.Proxy target (js-object :apply (lambda (ignored receiver arguments)
+        (when (nullish? receiver)
+          (throw (new type-error (+ "String.prototype." name " called on null or undefined"))))
+        ;; String(Symbol) has a special exception to abstract ToString; the
+        ;; String prototype algorithms do not have that exception.
+        (when (= (value-type receiver) "symbol")
+          (throw (new type-error "Cannot convert a Symbol value to a string")))
+        (let ((text (Reflect/apply string-constructor undefined (js-array receiver))))
+          (convert text upper rules)))))))
+
+  (defun installUnicodeCaseProfile (version &rest arguments)
+    (let* ((rules (tables version))
+           (requested-realm (if (= (js-length arguments) 0) undefined (aref arguments 0)))
+           (realm (if (undefined? requested-realm) globalThis.globalThis requested-realm)))
+      (unless (and realm (= (value-type (get realm :String)) "function")
+                   (= (value-type (get realm :Function)) "function")
+                   (= (value-type (get realm :TypeError)) "function"))
+        (throw (new globalThis.TypeError "Unicode case profile requires a real String realm")))
+      (let* ((string-constructor (get realm :String)) (prototype (get string-constructor :prototype))
+             (function-prototype (get (get realm :Function) :prototype)) (type-error (get realm :TypeError))
+             (previous (js-call installed :get prototype)))
+        (if (and previous (= (get previous :version) version)) previous
+          (let ((names (js-array "toUpperCase" "toLowerCase")) (index 0))
+            ;; Check both ordinary intrinsic properties before publishing any
+            ;; method, including the deleted-property/nonextensible boundary.
+            (while (< index 2)
+              (let ((descriptor (Object/getOwnPropertyDescriptor prototype (aref names index))))
+                (when (if descriptor (not (get descriptor :configurable)) (not (Object/isExtensible prototype)))
+                  (throw (new type-error "Unicode case profile cannot replace a fixed String method"))))
+              (setq index (1+ index)))
+            (let* ((upper (profile-method "toUpperCase" t rules string-constructor function-prototype type-error))
+                   (lower (profile-method "toLowerCase" false rules string-constructor function-prototype type-error))
+                   (state (Object/freeze (js-object :version version :upper upper :lower lower))))
+              (Object/defineProperty prototype "toUpperCase" (js-object :value upper :writable t :enumerable false :configurable t))
+              (Object/defineProperty prototype "toLowerCase" (js-object :value lower :writable t :enumerable false :configurable t))
+              (js-call installed :set prototype state) state))))))
+  ;; ESM evaluation installs once, before the importing user module executes.
+  ;; A later import is cached, so user getters, replacements and deletion remain.
+  (installUnicodeCaseProfile 17)
+  (export installUnicodeCaseProfile))

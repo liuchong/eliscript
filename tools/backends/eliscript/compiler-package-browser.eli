@@ -1,0 +1,24 @@
+(module tools.backends.compiler-package-browser
+  (import "./compiler-browser.mjs" :as original)
+
+  (defun browser-options (input fields)
+    ;; Mirror the original API's destructuring order and Get count. Unknown
+    ;; caller properties are neither enumerated nor evaluated by this adapter.
+    (let ((options (if (undefined? input) (js-object) input)) (result (js-object)))
+      (js-call fields :forEach (lambda (key) (put result key (get options key))))
+      (when (and (undefined? (get result :manifestURL))
+                 (not (get result :workerClient)))
+        (put result :manifestURL (get (new globalThis.URL "./compiler-artifact.json" (js* "import.meta.url")) :href)))
+      result))
+
+  (defasync createBrowserCompiler (&rest arguments)
+    (await (js-call original :createBrowserCompiler
+      (browser-options (if (> (js-length arguments) 0) (aref arguments 0) undefined)
+        (js-array "host" "manifestURL" "workerClient" "ownsWorkerClient" "worker" "signal"
+          "options" "runtimeURL" "runtimeSource")))))
+
+  (defasync installBrowserCompilerWorker (scope options)
+    (await (js-call original :installBrowserCompilerWorker scope
+      (browser-options options (js-array "host" "manifestURL" "options" "signal")))))
+
+  (export createBrowserCompiler installBrowserCompilerWorker))

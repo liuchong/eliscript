@@ -1,0 +1,336 @@
+(module tools.backends.managed-module-graph
+  (import "./managed-module-graph-legacy.mjs" :as legacy)
+  (import "./managed-source-view.mjs"
+    bindManagedSourceBoundary withManagedSourceBoundary withManagedSourceBindingPoll withManagedSourceDecode
+    registerManagedSourceDecodeRuntime)
+  (import "../../dist/bootstrap/compiler.mjs" compile-string)
+
+  ;; Keep the unchanged ESM emission/loading implementation. Namespace name
+  ;; validation belongs here: a real module namespace's property descriptor
+  ;; reads its binding, which can still be in the temporal dead zone.
+  (defconst managedHostModuleEdges (get legacy :managedHostModuleEdges))
+  (defconst project-boundaries (new globalThis.WeakMap))
+  (defconst prepared-load-results (new globalThis.WeakMap))
+
+  ;; Prepared globals are initialized by the real prepare export, not by a
+  ;; fabricated lexical step. Keep the ordinary emitter and loader unchanged;
+  ;; only the newly declared prepared cells need forwarding bindings.
+  (defun prepared-project-plan (descriptor)
+    (let* ((project (get descriptor :project)) (bindings (get project :preparedBindings))
+           (cells (new globalThis.Map)) (exports (new globalThis.Map)) (modules (js-array)))
+      (if (undefined? bindings) nil
+        (progn
+          (unless (Array/isArray bindings)
+            (throw (new globalThis.TypeError "prepared project bindings must be an array")))
+          (js-call bindings :forEach (lambda (binding)
+            (unless (and binding (= (get binding :kind) 0)
+                         (= (value-type (get binding :name)) "string")
+                         (= (value-type (get binding :mutable)) "boolean")
+                         (Number/isSafeInteger (get binding :index)) (>= (get binding :index) 0)
+                         (Number/isSafeInteger (get (get descriptor :module) :bindingCount))
+                         (< (get binding :index) (get (get descriptor :module) :bindingCount))
+                         (not (js-call cells :has (get binding :index))))
+              (throw (new globalThis.TypeError "invalid canonical prepared project binding")))
+            (js-call cells :set (get binding :index) binding)))
+          (js-call (get project :modules) :forEach (lambda (module)
+            (let ((remaining (js-array)) (forwarded (js-array)) (names (new globalThis.Set)))
+              (js-call (get module :steps) :forEach (lambda (step)
+                (js-call (get step :initializes) :forEach (lambda (binding)
+                  (when (and (= (get binding :kind) 0) (js-call cells :has (get binding :index)))
+                    (throw (new globalThis.TypeError "prepared project cell also has a lexical initialization phase")))))))
+              (js-call (get module :exports) :forEach (lambda (binding)
+                (let ((prepared (and (= (get binding :kind) 0)
+                                    (js-call cells :get (get binding :index)))))
+                  (unless (and (= (value-type (get binding :name)) "string")
+                               (not (js-call names :has (get binding :name))))
+                    (throw (new globalThis.TypeError "invalid managed project export")))
+                  (js-call names :add (get binding :name))
+                  (if prepared
+                    (progn
+                      (unless (eq (get binding :mutable) (get prepared :mutable))
+                        (throw (new globalThis.TypeError "conflicting canonical prepared project binding")))
+                      (js-call forwarded :push binding))
+                    (js-call remaining :push binding)))))
+              (when (> (js-length forwarded) 0) (js-call exports :set (get module :id) forwarded))
+              (js-call modules :push (Object/assign (js-object) module (js-object :exports remaining))))))
+          (if (= (get exports :size) 0) nil
+            (js-object :descriptor (Object/assign (js-object) descriptor
+              (js-object :project (Object/assign (js-object) project (js-object :modules modules))))
+              :exports exports))))))
+
+  (defun prepared-relative (from to)
+    (let ((left (js-call from :split "/")) (right (js-call to :split "/")) (parts (js-array)))
+      (js-call left :pop)
+      (while (and (> (js-length left) 0) (> (js-length right) 0)
+                  (= (aref left 0) (aref right 0)))
+        (js-call left :shift) (js-call right :shift))
+      (js-call left :forEach (lambda (part) (js-call parts :push "..")))
+      (js-call right :forEach (lambda (part) (js-call parts :push part)))
+      (let ((path (js-call parts :join "/")))
+        (if (js-call path :startsWith ".") path (+ "./" path)))))
+
+  (defun prepared-binding-source (file registry bindings)
+    (let ((names (new globalThis.Set)) (alias "__prepared_registry") (forms (js-array))
+          (index 0))
+      (js-call bindings :forEach (lambda (binding) (js-call names :add (get binding :name))))
+      (while (js-call names :has alias) (setq alias (+ alias "_")))
+      (js-call forms :push (str "(import " (JSON/stringify (prepared-relative file registry)) " :as " alias ")"))
+      (js-call bindings :forEach (lambda (binding)
+        (let* ((name (get binding :name)) (default (= name "default"))
+               (local (if default (str alias "_default_" index) name))
+               (next (str alias "_next_" index)))
+          ;; Public names come from the actual linked descriptor. The compiler
+          ;; checks their binding syntax; nothing is interpolated as JavaScript.
+          (js-call forms :push (str "(defvar " local " (js-call (" alias "/graph) :read 0 " (get binding :index) "))"))
+          (js-call forms :push (str "(js-call (" alias "/graph) :watch 0 " (get binding :index)
+            " (lambda (" next ") (setq " local " " next ")))"))
+          (js-call forms :push (if default (str "(export-default " local ")") (str "(export " local ")")))
+          (setq index (1+ index)))))
+      (compile-string (js-call forms :join "\n") (+ file ".prepared.eli"))))
+
+  (defun prepared-project-facades (plan options)
+    (let* ((base (js-call legacy :createManagedProjectFacades (get plan :descriptor) options))
+           (files (js-call (get base :files) :map (lambda (file)
+             (let ((bindings (js-call (get plan :exports) :get (get file :id))))
+               (if (not bindings) file
+                 (Object/freeze (js-object :id (get file :id)
+                   :source (str (get file :source) "\n"
+                     (prepared-binding-source (get file :id) (get base :registry) bindings))))))))))
+      (Object/freeze (Object/assign (js-object) base (js-object :files (Object/freeze files))))))
+
+  (defun createManagedProjectFacades (descriptor &rest arguments)
+    (let* ((options (if (> (js-length arguments) 0) (aref arguments 0) undefined))
+           (plan (prepared-project-plan descriptor)))
+      (if plan (prepared-project-facades plan options)
+        (js-call legacy :createManagedProjectFacades descriptor options))))
+
+  (defasync loadManagedProjectGraph (runtime descriptor &rest arguments)
+    (let* ((options (if (> (js-length arguments) 0) (aref arguments 0) undefined))
+           (plan (prepared-project-plan descriptor)))
+      (if (not plan) (await (js-call legacy :loadManagedProjectGraph runtime descriptor options))
+        (let* ((configuration (if (undefined? options) (js-object) options))
+               (facades (prepared-project-facades plan (js-object
+                 :entry (if (nullish? (get configuration :projectEntry))
+                          (get (get descriptor :project) :entry) (get configuration :projectEntry))
+                 :privateDirectory (get configuration :projectPrivateDirectory))))
+               (loaded (await (js-call legacy :loadManagedProjectGraph runtime
+                         (get plan :descriptor) options))))
+          (let ((previous (js-call prepared-load-results :get loaded)))
+            (if previous previous
+              (let ((result (Object/freeze (Object/assign (js-object) loaded (js-object :facades facades)))))
+                (js-call prepared-load-results :set loaded result) result)))))))
+
+  (defun pure-project-description (descriptor)
+    ;; These fields are ordinary metadata data properties in actual products.
+    ;; An opaque/accessor descriptor stays on the original notification path;
+    ;; selecting a private optimization must not execute a new caller getter.
+    (let ((fields (js-array "hostCapabilities" "hostModules")) (index 0) (pure t))
+      (while (and pure (< index (js-length fields)))
+        (let ((field (Object/getOwnPropertyDescriptor descriptor (aref fields index))))
+          (when field
+            (unless (and (Object/hasOwn field "value")
+              (or (undefined? (get field :value))
+                (and (Array/isArray (get field :value)) (= (js-length (get field :value)) 0))))
+              (setq pure false))))
+        (setq index (1+ index))) pure))
+
+  (defun graph-method (descriptors name method)
+    (let* ((entry (get descriptors name)) (previous (get entry :value)))
+      (Object/defineProperties method (js-object
+        :name (js-object :value (get previous :name)) :length (js-object :value (get previous :length))))
+      (put entry :value method)))
+
+  (defun observed-project-method (method receiver name state)
+    (lambda (&rest arguments)
+      (if (or (= name "close") (= name "closeModule"))
+        (try (Reflect/apply method receiver arguments)
+          (finally (put state :stopped t)))
+        (withManagedSourceBoundary (get state :observer)
+          (lambda () (Reflect/apply method receiver arguments))))))
+
+  (defun observeManagedProjectExports (exports graph)
+    (let* ((state (when graph (js-call project-boundaries :get graph)))
+           (entry (when state (Object/getOwnPropertyDescriptor exports "value-async-drain"))))
+      (if (not (and entry (= (value-type (get entry :value)) "function"))) exports
+        (let* ((descriptors (Object/getOwnPropertyDescriptors exports))
+               (facade (Object/create (Object/getPrototypeOf exports)))
+               (drain (get entry :value)))
+          (graph-method descriptors "value-async-drain" (lambda (&rest arguments)
+            (try (Reflect/apply drain exports arguments)
+              (finally
+                ;; The private pump calls this before decoding its result and
+                ;; resolving/rejecting its original Promise. Queue only: the
+                ;; legacy call boundary must inspect last-error and clean up
+                ;; before polling can begin another managed operation.
+                (unless (get state :queued)
+                  (put state :queued t)
+                  (globalThis.queueMicrotask (lambda ()
+                    (put state :queued false)
+                    ;; This is post-call cleanup, never a replacement rejection
+                    ;; or a second unhandled error for the pump's first throw.
+                    (try (withManagedSourceBoundary (get state :observer) (lambda () undefined))
+                      (catch ignored nil)))))))))
+          (Object/defineProperties facade descriptors)
+          (Object/freeze facade)))))
+
+  (defun observeManagedProjectRuntime (runtime graph)
+    ;; Called only by the existing Eli factories, before publishing their API.
+    ;; Do not insert hooks in raw exports: they still own last-error cleanup.
+    (let ((state (when graph (js-call project-boundaries :get graph))))
+      (if (not state) runtime
+        (let* ((descriptors (Object/getOwnPropertyDescriptors runtime))
+               (facade (Object/create (Object/getPrototypeOf runtime))))
+          (js-call (Reflect/ownKeys descriptors) :forEach (lambda (name)
+            (let* ((entry (get descriptors name)) (value (get entry :value)))
+              (cond
+                ((and (= name "project") value)
+                  (let* ((project-descriptors (Object/getOwnPropertyDescriptors value))
+                         (project (Object/create (Object/getPrototypeOf value))))
+                    (js-call (Reflect/ownKeys project-descriptors) :forEach (lambda (key)
+                      (let* ((property (get project-descriptors key)) (method (get property :value)))
+                        (when (= (value-type method) "function")
+                          (graph-method project-descriptors key
+                            (observed-project-method method value key state))))))
+                    (Object/defineProperties project project-descriptors)
+                    (put entry :value (Object/freeze project))))
+                ((= (value-type value) "function")
+                  (graph-method descriptors name
+                    (observed-project-method value runtime name state)))))))
+          (Object/defineProperties facade descriptors)
+          (registerManagedSourceDecodeRuntime facade runtime)
+          (Object/freeze facade)))))
+
+  (defun createManagedModuleGraph (descriptor &rest arguments)
+    ;; The host API defaults only omitted/undefined options. Eliscript's
+    ;; optional parameter would turn omission into an explicit null.
+    (let* ((options (if (> (js-length arguments) 0) (aref arguments 0) undefined))
+           (base (js-call legacy :createManagedModuleGraph descriptor options))
+           (descriptors (Object/getOwnPropertyDescriptors base))
+           (facade (Object/create (Object/getPrototypeOf base)))
+           (prepared false) (preparing false) (prepare-notifications (js-array))
+           (declarations (new globalThis.Map))
+           (pure (pure-project-description descriptor))
+           (known (new globalThis.Set)) (watched (new globalThis.Map))
+           (state (js-object :stopped false :syncing false)) (observer undefined))
+      (when pure
+        (setq observer (lambda ()
+          (when (and prepared (not (get base :closed)) (not (get state :stopped)) (not (get state :syncing)))
+            (put state :syncing t)
+            (try
+              ;; Only cells already read successfully and watched by an ESM
+              ;; facade participate. No poll can force an uninitialized cell.
+              ;; A listener can re-enter a source function and change an earlier
+              ;; cell. Continue until values are stable, without re-entering the
+              ;; same flush from the source Proxy or transport wrappers.
+              (let ((changed t))
+                (while (and changed (not (get base :closed)) (not (get state :stopped)))
+                  (setq changed false)
+                  (js-call watched :forEach (lambda (entry key)
+                    (let ((value (bindManagedSourceBoundary
+                                   (withManagedSourceBindingPoll observer (lambda ()
+                                     (js-call base :read (get entry :kind) (get entry :index)))) observer)))
+                      (unless (Object/is value (get entry :value))
+                        (put entry :value value) (setq changed t)
+                        (js-call base :bindingChanged (get entry :kind) (get entry :index) value)))))))
+              (finally (put state :syncing false))))))
+        (put state :observer observer)
+        (js-call project-boundaries :set facade state))
+      (js-call (if (nullish? (get descriptor :hostModules)) (js-array) (get descriptor :hostModules)) :forEach
+        (lambda (declaration) (js-call declarations :set (get declaration :id) declaration)))
+      (put (get descriptors :attachRuntime) :value
+        (lambda (runtime)
+          (js-call base :attachRuntime runtime)
+          (registerManagedSourceDecodeRuntime facade runtime) facade))
+      (put (get descriptors :prepare) :value
+        (lambda ()
+          ;; Actual prepare-owned declarations can notify before the legacy
+          ;; prepare call publishes ready. Do not publish a readable graph or
+          ;; install listeners early; deliver these events only after success.
+          (setq preparing t)
+          (try
+            (progn
+              (js-call base :prepare)
+              (setq prepared t preparing false)
+              (let ((pending prepare-notifications))
+                (setq prepare-notifications (js-array))
+                (js-call pending :forEach (lambda (entry)
+                  (js-call base :bindingChanged (aref entry 0) (aref entry 1) (aref entry 2)))))
+              facade)
+            ;; In particular a false/undefined prepare failure must stay the
+            ;; original failure. Never retain its unpublished values or replay
+            ;; them on a subsequent call to the legacy cached failure.
+            (finally (setq preparing false prepare-notifications (js-array))))))
+      (graph-method descriptors "bindingChanged" (lambda (kind index value)
+        (if (not preparing) (js-call base :bindingChanged kind index value)
+          (progn
+            ;; Same reference validation as the original notification method.
+            ;; Outside the prepare dynamic extent, its original ready check
+            ;; and error priority remain untouched.
+            (unless (and (or (= kind 0) (= kind 1)) (Number/isSafeInteger index) (>= index 0))
+              (throw (new globalThis.TypeError "invalid managed project cell")))
+            (js-call prepare-notifications :push (js-array kind index value)) undefined))))
+      (when pure
+        (graph-method descriptors "read" (lambda (kind index)
+          (withManagedSourceBoundary observer (lambda ()
+            (let ((value (js-call base :read kind index)))
+              (js-call known :add (str kind ":" index)) value)))))
+        (graph-method descriptors "bindHoisted" (lambda (kind index fn)
+          (withManagedSourceBoundary observer (lambda () (js-call base :bindHoisted kind index fn)))))
+        (graph-method descriptors "invoke" (lambda (kind index receiver arguments newTarget)
+          (withManagedSourceBoundary observer
+            (lambda () (js-call base :invoke kind index receiver arguments newTarget)))))
+        (graph-method descriptors "step" (lambda (name)
+          (withManagedSourceBoundary observer (lambda () (js-call base :step name)))))
+        (graph-method descriptors "watch" (lambda (kind index listener)
+          (let* ((stop (js-call base :watch kind index listener)) (key (str kind ":" index))
+                 (entry (js-call watched :get key)))
+            (when (and (not entry) (js-call known :has key))
+              (try
+                (setq entry (js-object :kind kind :index index :listeners (new globalThis.Set)
+                  :value (withManagedSourceBoundary observer (lambda () (js-call base :read kind index)))))
+                (catch error (funcall stop) (throw error)))
+              (js-call watched :set key entry))
+            (when entry (js-call (get entry :listeners) :add listener))
+            (lambda ()
+              (funcall stop)
+              (when entry
+                (js-call (get entry :listeners) :delete listener)
+                (when (= (get (get entry :listeners) :size) 0) (js-call watched :delete key)))))))
+        (graph-method descriptors "close" (lambda ()
+          (try (js-call base :close)
+            (finally (put state :stopped t) (js-call watched :clear) (js-call known :clear))))))
+      (put (get descriptors :namespace) :value
+        (lambda (id resolver)
+          (when (get base :closed) (throw (new globalThis.Error "managed module graph is closed")))
+          (unless (get base :attached)
+            (throw (new globalThis.Error "managed module graph transport is not attached")))
+          (unless prepared (throw (new globalThis.ReferenceError "managed project has not been prepared")))
+          (let ((declaration (js-call declarations :get id)))
+            (unless declaration (throw (new globalThis.TypeError "undeclared mixed host module")))
+            (js-call (get base :hostModules) :declare id
+              (lambda ()
+                (let ((namespace (funcall resolver)))
+                  (unless (and (not (eq namespace nil)) (= (value-type namespace) "object"))
+                    (throw (new globalThis.TypeError "expected an actual ESM module namespace")))
+                  ;; [[OwnPropertyKeys]] checks names without [[GetOwnProperty]],
+                  ;; preserving both uninitialized binding errors and identity.
+                  (let ((names (Reflect/ownKeys namespace)))
+                    (js-call (get declaration :allowedExports) :forEach
+                      (lambda (name)
+                        (unless (js-call names :includes name)
+                          (throw (new globalThis.SyntaxError
+                            (+ "host module does not provide export " (JSON/stringify name))))))))
+                  namespace))))))
+      ;; The graph calls the real attached transport unchanged. Establish the
+      ;; private codec context around calls rather than wrapping runtime.project
+      ;; or copying that transport after native/WASM attachment.
+      (js-call (js-array "prepare" "step" "read" "bindHoisted" "invoke") :forEach (lambda (name)
+        (let* ((entry (get descriptors name)) (method (get entry :value)))
+          (when (= (value-type method) "function")
+            (graph-method descriptors name (lambda (&rest arguments)
+              (withManagedSourceDecode (lambda () (Reflect/apply method facade arguments)) facade)))))))
+      (Object/defineProperties facade descriptors)
+      (Object/freeze facade)))
+
+  (export managedHostModuleEdges createManagedProjectFacades loadManagedProjectGraph createManagedModuleGraph
+    observeManagedProjectRuntime observeManagedProjectExports))

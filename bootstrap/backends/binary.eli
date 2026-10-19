@@ -1,0 +1,173 @@
+(module eliscript.backend.binary
+  (import "./numeric.mjs" backend-fail)
+
+  ;; Packed output owns bounded word batches and exact UTF16 strings. Each
+  ;; code unit stores two little-endian bytes, including unpaired surrogates.
+  ;; The ordinary byte-array API keeps its original representation.
+  (defun binary-output (&optional options)
+    (let ((configuration (or options (js-object))))
+      (if (not (Object/hasOwn configuration "binaryEncoding")) (js-array)
+        (if (= (get configuration :binaryEncoding) "u16le-chunks")
+            (js-object :length 0 :chunks (js-array) :pending (js-array) :low -1)
+          (backend-fail nil "unsupported binary output encoding")))))
+
+  (defun binary-flush (output)
+    (let ((pending (get output :pending)))
+      (when (> (js-length pending) 0)
+        (js-call (get output :chunks) :push
+          (Reflect/apply (js* "String.fromCharCode") nil pending))
+        (put output :pending (js-array)))))
+
+  (defun binary-unit (output value)
+    (js-call (get output :pending) :push value)
+    (when (= (js-length (get output :pending)) 2048) (binary-flush output)))
+
+  (defun binary-byte (output value)
+    (if (Array/isArray output) (js-call output :push (bit-and value 255))
+      (progn
+        (if (< (get output :low) 0) (put output :low (bit-and value 255))
+          (progn
+            (binary-unit output (+ (get output :low) (* (bit-and value 255) 256)))
+            (put output :low -1)))
+        (put output :length (1+ (get output :length)))))
+    output)
+
+  (defun binary-u32 (output value)
+    (if (and (not (Array/isArray output)) (< (get output :low) 0))
+        (progn
+          (binary-unit output (bit-and value 65535))
+          (binary-unit output (unsigned-bit-shift-right value 16))
+          (put output :length (+ (get output :length) 4)))
+      (let ((i 0))
+        (while (< i 4)
+          (binary-byte output (bit-and value 255))
+          (setq value (unsigned-bit-shift-right value 8)) (setq i (1+ i)))))
+    output)
+
+  (defun binary-push (output &rest values)
+    (let ((index 0))
+      (while (< index (js-length values))
+        (binary-byte output (js-nth index values)) (setq index (1+ index))))
+    (get output :length))
+
+  (defun binary-child (output)
+    (binary-output (if (Array/isArray output) (js-object)
+      (js-object :binaryEncoding "u16le-chunks"))))
+
+  (defun binary-length (input)
+    (if (Array/isArray input) (js-length input)
+      (if (= (get input :encoding nil) "u16le-chunks") (get input :byteLength) (get input :length))))
+
+  (defun binary-byte-at (input index)
+    (if (Array/isArray input) (js-nth index input)
+      (let* ((unit (js-call globalThis.Math :floor (/ index 2)))
+             (chunk (js-call globalThis.Math :floor (/ unit 2048))) (offset (% unit 2048))
+             (chunks (get input :chunks))
+             (value (if (< chunk (js-length chunks))
+                        (string-code-unit-at (js-nth chunk chunks) offset)
+                      (if (< offset (js-length (get input :pending)))
+                          (js-nth offset (get input :pending)) (get input :low)))))
+        (bit-and (if (= (% index 2) 0) value (unsigned-bit-shift-right value 8)) 255))))
+
+  ;; Reopening a finished public envelope retains its immutable chunk strings.
+  ;; Only the final partial block is unpacked, never the complete byte stream.
+  (defun binary-resume (input)
+    (if (/= (get input :encoding nil) "u16le-chunks") input
+      (let* ((output (binary-output (js-object :binaryEncoding "u16le-chunks")))
+             (length (get input :byteLength)) (chunks (js-call (get input :chunks) :slice))
+             (tail (% length 4096)))
+        (put output :length length) (put output :chunks chunks)
+        (when (> tail 0)
+          (let ((last (js-call chunks :pop)) (index 0) (count (js-call globalThis.Math :floor (/ tail 2))))
+            (while (< index count)
+              (js-call (get output :pending) :push (string-code-unit-at last index))
+              (setq index (1+ index)))
+            (when (= (% tail 2) 1) (put output :low (bit-and (string-code-unit-at last count) 255)))))
+        output)))
+
+  (defun binary-append (output input)
+    (let ((i 0))
+      (while (< i (binary-length input)) (binary-byte output (binary-byte-at input i)) (setq i (1+ i))))
+    output)
+
+  (defun binary-append-owned-even (output input length)
+    (let ((units (js-call globalThis.Math :floor (/ length 2))))
+      (when (> units 0)
+        (let* ((chunks (get input :chunks)) (chunk-index 0) (position 0)
+               (pending (get output :pending))
+               (carry (if (> (js-length pending) 0)
+                 (Reflect/apply (js* "String.fromCharCode") nil pending) "")))
+          (put output :pending (js-array))
+          (while (< position units)
+            (let ((chunk (if (< chunk-index (js-length chunks)) (js-nth chunk-index chunks)
+                           (Reflect/apply (js* "String.fromCharCode") nil (get input :pending)))))
+              ;; A finished odd source may include one padded high byte in
+              ;; its last unit. Never transfer that unit as a complete pair.
+              (when (> (js-length chunk) (- units position))
+                (setq chunk (js-call chunk :slice 0 (- units position))))
+              (setq position (+ position (js-length chunk)))
+              (setq chunk-index (1+ chunk-index))
+              (if (and (= (js-length carry) 0) (= (js-length chunk) 2048))
+                (js-call (get output :chunks) :push chunk)
+                (progn
+                  ;; carry has <2048 units and chunk has <=2048: this
+                  ;; temporary has at most 4095, regardless of stream size.
+                  (setq carry (str carry chunk))
+                  (when (>= (js-length carry) 2048)
+                    (js-call (get output :chunks) :push (js-call carry :slice 0 2048))
+                    (setq carry (js-call carry :slice 2048)))))))
+          ;; Only the final tail is unpacked into the normal pending batch.
+          ;; Intermediate carries stay strings rather than numeric arrays.
+          (let ((index 0))
+            (while (< index (js-length carry))
+              (js-call (get output :pending) :push (string-code-unit-at carry index))
+              (setq index (1+ index))))
+          (put output :length (+ (get output :length) (* units 2)))))
+      (when (= (% length 2) 1) (binary-byte output (binary-byte-at input (1- length)))))
+    output)
+
+  ;; Internal transfer for the WASM emitter's freshly allocated packed body
+  ;; writers only. Public append and finished envelopes remain repeatable and
+  ;; non-consuming. No caller option can select this path for typed input.
+  (defun binary-append-owned (output input)
+    (when (Object/is output input) (backend-fail nil "cannot consume a binary writer into itself"))
+    (if (or (Array/isArray output) (Array/isArray input)
+            (= (get input :encoding nil) "u16le-chunks"))
+      (binary-append output input)
+      (progn
+        (unless (and (not (nil? output)) (not (nil? input))
+                     (Array/isArray (get output :chunks nil)) (Array/isArray (get output :pending nil))
+                     (Array/isArray (get input :chunks nil)) (Array/isArray (get input :pending nil))
+                     (not (Object/hasOwn output "encoding")) (not (Object/hasOwn input "encoding")))
+          (backend-fail nil "owned binary append requires fresh packed writers"))
+        (let ((length (get input :length)) (index 0))
+          (if (< (get output :low) 0) (binary-append-owned-even output input length)
+            ;; An odd destination needs cross-unit byte pairing. Preserve the
+            ;; original path, including the source's exact odd final byte.
+            (while (< index length)
+              (binary-byte output (binary-byte-at input index)) (setq index (1+ index)))))
+        ;; Replace storage, rather than clearing shared arrays in place: a
+        ;; previously finished snapshot may still own the old chunk list.
+        ;; Preserve emitter debug/span/scratch properties on both writers.
+        (put input :length 0) (put input :chunks (js-array))
+        (put input :pending (js-array)) (put input :low -1)
+        output)))
+
+  (defun binary-slice (output start end)
+    (if (Array/isArray output) (js-call output :slice start end)
+      (let ((result (js-array)) (limit (binary-length output)))
+        (when (> end limit) (setq end limit))
+        (while (< start end)
+          (js-call result :push (binary-byte-at output start))
+          (setq start (1+ start))) result)))
+
+  (defun binary-finish (output)
+    (if (Array/isArray output) output
+      (progn
+        (when (>= (get output :low) 0)
+          (binary-unit output (get output :low)) (put output :low -1))
+        (binary-flush output)
+        (js-object :encoding "u16le-chunks" :byteLength (get output :length) :chunks (get output :chunks)))))
+
+  (export binary-output binary-byte binary-u32 binary-push binary-child binary-length binary-resume
+    binary-append binary-append-owned binary-slice binary-finish))

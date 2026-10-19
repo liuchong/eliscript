@@ -119,6 +119,38 @@ baseline in
 
 ## Development
 
+Build the JavaScript stage0 → stage1 → stage2 → stage3 chain, then independently
+verify its fixed point:
+
+```sh
+make bootstrap-release
+make verify-bootstrap
+```
+
+The second command only reads the existing artifacts. It rechecks the complete
+declared products, source and IR identities, maps and other assets, compares every
+stage2/stage3 product byte, and authenticates the stored comparison receipt. It
+does not compile, rebuild, prepare a package, or update that receipt. Success is
+exit code 0 and one JSON report with `scope: "stage2-stage3-complete-products"`,
+`verification: "identical"`, the actual `fileCount`, matching stage2/stage3 product
+SHA-256 summaries, and the source identity summary. The count follows the complete
+product inventory rather than a fixed expected number.
+
+Use the same output directory for both commands when choosing another layout:
+
+```sh
+make bootstrap-release BOOTSTRAP_RELEASE_OUT=dist/bootstrap-local
+make verify-bootstrap BOOTSTRAP_RELEASE_OUT=dist/bootstrap-local
+```
+
+For a manifest elsewhere, run
+`node tools/backends/dist/release-cli.mjs verify-bootstrap --bootstrap-manifest PATH/bootstrap.json`.
+A missing file, a one-byte change, an extra product file, or a changed receipt
+must produce a nonzero exit. Product control metadata can legitimately contain
+different producer names and paths, so `diff -r` over entire stage directories is
+not the comparison rule. This fixed-point check does not substitute for the final
+stage3 JavaScript/WASM/native program acceptance.
+
 ```sh
 make byte-compile       # Emacs Lisp with warnings as errors
 make test-core          # contracts and the framework-neutral suite

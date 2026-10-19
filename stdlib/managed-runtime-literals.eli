@@ -1,0 +1,23 @@
+(module eliscript.managed-runtime-literals
+  (import "./core/list.eli" persistentList)
+  (import "./core/map.eli" persistentHashMap)
+  (import "./core/vector.eli" persistentVector)
+  (import "./core/set.eli" persistentHashSet)
+  (import "./core/queue.eli" persistentQueue)
+  (import "./core/identifier.eli" keyword eliscriptSymbol)
+
+  (defconst symbol eliscriptSymbol)
+  (defun list (&rest values) (apply persistentList values))
+  (defun vector (&rest values) (apply persistentVector values))
+  (defun hashMap (&rest keyValues)
+    (when (/= (mod (js-length keyValues) 2) 0)
+      (throw (new globalThis/TypeError "hash-map expects complete key/value pairs")))
+    (let ((entries (js-array)) (index 0))
+      (while (< index (js-length keyValues))
+        (js-call entries :push (js-array (get keyValues index) (get keyValues (1+ index))))
+        (setq index (+ index 2)))
+      (apply persistentHashMap entries)))
+  (defun hashSet (&rest values) (apply persistentHashSet values))
+  (defun queue (&rest values) (apply persistentQueue values))
+
+  (export list vector hashMap hashSet queue keyword symbol))

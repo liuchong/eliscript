@@ -1,0 +1,6 @@
+(module eliscript.managed-testing-value
+  (import "../core/value-internals.eli" clearValueCaches readValueMetrics resetValueMetrics)
+  (defun resetValueHashMetrics () (resetValueMetrics))
+  (defun clearValueHashCaches () (clearValueCaches))
+  (defun valueHashMetrics () (readValueMetrics))
+  (export resetValueHashMetrics clearValueHashCaches valueHashMetrics))

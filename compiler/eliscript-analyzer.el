@@ -528,8 +528,376 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
        (eliscript-analyzer--analyze-non-tail operator-form scope)
        (eliscript-analyzer--analyze-non-tail-sequence arguments scope)))))
 
+(defvar eliscript-analyzer--expression-tasks nil)
+(defvar eliscript-analyzer--pending-tasks nil)
+(defvar eliscript-analyzer--task-active nil)
+
+(defun eliscript-analyzer--enqueue (action)
+  "Enqueue ACTION after earlier siblings with its exact analysis context."
+  (let ((span eliscript-analyzer--current-span)
+        (tail eliscript-analyzer--tail-position)
+        (targets eliscript-analyzer--recur-targets)
+        (barrier eliscript-analyzer--recur-barrier))
+    (push (lambda ()
+            (let ((eliscript-analyzer--current-span span)
+                  (eliscript-analyzer--tail-position tail)
+                  (eliscript-analyzer--recur-targets targets)
+                  (eliscript-analyzer--recur-barrier barrier))
+              (funcall action)))
+          eliscript-analyzer--pending-tasks)))
+
+(defun eliscript-analyzer--enqueue-expression (form scope tail)
+  "Enqueue FORM in SCOPE with explicit TAIL status."
+  (let ((eliscript-analyzer--tail-position tail))
+    (eliscript-analyzer--enqueue
+     (lambda () (eliscript-analyzer--analyze-expression-step form scope)))))
+
+(defun eliscript-analyzer--enqueue-sequence (forms scope tail)
+  "Enqueue FORMS in original order, assigning TAIL only to the last form."
+  (while forms
+    (eliscript-analyzer--enqueue-expression
+     (car forms) scope (and tail (null (cdr forms))))
+    (setq forms (cdr forms))))
+
+(defun eliscript-analyzer--enqueue-defaults (pattern scope)
+  "Enqueue pattern-default validation followed by its expressions in SCOPE."
+  (eliscript-analyzer--enqueue
+   (lambda ()
+     (let ((defaults
+            (eliscript-binding-defaults
+             pattern
+             (lambda (form message)
+               (let ((eliscript-analyzer--current-span
+                      (or (eliscript-form-span form)
+                          eliscript-analyzer--current-span)))
+                 (eliscript-analyzer--fail "%s" message))))))
+       (eliscript-analyzer--enqueue-sequence defaults scope nil)))))
+
+(defun eliscript-analyzer--enqueue-let (arguments scope sequential)
+  "Schedule let ARGUMENTS with the original SEQUENTIAL binding visibility."
+  (unless arguments
+    (eliscript-analyzer--fail "%s requires a binding list"
+                              (if sequential "let*" "let")))
+  (let* ((bindings-form (car arguments))
+         (bindings (eliscript-form-value bindings-form))
+         (child (eliscript-analyzer--make-scope scope))
+         (tail eliscript-analyzer--tail-position))
+    (unless (proper-list-p bindings)
+      (let ((eliscript-analyzer--current-span
+             (or (eliscript-form-span bindings-form)
+                 eliscript-analyzer--current-span)))
+        (eliscript-analyzer--fail "let bindings must be a list")))
+    (if sequential
+        (dolist (binding bindings)
+          ;; Parse each sequential binding only after the preceding initializer,
+          ;; defaults and declaration, preserving both visibility and first error.
+          (let ((binding binding))
+            (eliscript-analyzer--enqueue
+             (lambda ()
+               (pcase-let ((`(,name ,value)
+                            (eliscript-analyzer--binding-pair binding)))
+                 (eliscript-analyzer--enqueue-expression value child nil)
+                 (eliscript-analyzer--enqueue-defaults name child)
+                 (eliscript-analyzer--enqueue
+                  (lambda ()
+                    (eliscript-analyzer--declare-pattern
+                     child name 'local t))))))))
+      ;; Parallel let validates every binding shape before any initializer, then
+      ;; evaluates all initializers/defaults in the parent scope before declaring.
+      (let ((parsed (mapcar #'eliscript-analyzer--binding-pair bindings)))
+        (dolist (binding parsed)
+          (eliscript-analyzer--enqueue-expression (cadr binding) scope nil)
+          (eliscript-analyzer--enqueue-defaults (car binding) scope))
+        (eliscript-analyzer--enqueue
+         (lambda ()
+           (dolist (binding parsed)
+             (eliscript-analyzer--declare-pattern
+              child (car binding) 'local t))))))
+    (eliscript-analyzer--enqueue-sequence (cdr arguments) child tail)))
+
+(defun eliscript-analyzer--enqueue-function
+    (parameters body scope asynchronous)
+  "Schedule PARAMETERS and BODY in a new ASYNCHRONOUS function context."
+  (let ((parsed
+         (eliscript-parameters-parse
+          parameters
+          (lambda (form message)
+            (let ((eliscript-analyzer--current-span
+                   (or (eliscript-form-span form)
+                       eliscript-analyzer--current-span)))
+              (eliscript-analyzer--fail "%s" message))))))
+    (dolist (parameter parsed)
+      (eliscript-analyzer--enqueue-defaults
+       (eliscript-parameter-form parameter) scope))
+    (eliscript-analyzer--enqueue
+     (lambda ()
+       (let ((child (eliscript-analyzer--make-scope
+                     scope (if asynchronous 'async 'sync)))
+             (target (eliscript-analyzer--recur-target-create
+                      :kind 'function :arity (length parsed))))
+         (dolist (parameter parsed)
+           (eliscript-analyzer--declare-pattern
+            child (eliscript-parameter-form parameter) 'parameter t))
+         (let ((eliscript-analyzer--recur-targets (list target))
+               (eliscript-analyzer--recur-barrier nil))
+           (eliscript-analyzer--enqueue-sequence body child t)))))))
+
+(defun eliscript-analyzer--enqueue-loop (arguments scope)
+  "Schedule LOOP ARGUMENTS without capturing the parent's recur target."
+  (unless arguments (eliscript-analyzer--fail "loop requires a binding list"))
+  (let* ((bindings-form (car arguments))
+         (bindings (eliscript-form-value bindings-form))
+         (child (eliscript-analyzer--make-scope scope)))
+    (unless (proper-list-p bindings)
+      (let ((eliscript-analyzer--current-span
+             (or (eliscript-form-span bindings-form)
+                 eliscript-analyzer--current-span)))
+        (eliscript-analyzer--fail "loop bindings must be a list")))
+    (let ((parsed
+           (mapcar
+            (lambda (binding)
+              (let ((value (eliscript-form-value binding)))
+                (unless (and (proper-list-p value) (= (length value) 2))
+                  (let ((eliscript-analyzer--current-span
+                         (or (eliscript-form-span binding)
+                             eliscript-analyzer--current-span)))
+                    (eliscript-analyzer--fail
+                     "loop bindings require exactly one initializer: %S"
+                     (eliscript-form-strip binding))))
+                (eliscript-analyzer--binding-pair binding))) bindings)))
+      (dolist (binding parsed)
+        (eliscript-analyzer--enqueue-expression (cadr binding) scope nil)
+        (eliscript-analyzer--enqueue-defaults (car binding) scope))
+      (eliscript-analyzer--enqueue
+       (lambda ()
+         (dolist (binding parsed)
+           (eliscript-analyzer--declare-pattern child (car binding) 'loop t))
+         (let ((eliscript-analyzer--recur-targets
+                (cons (eliscript-analyzer--recur-target-create
+                       :kind 'loop :arity (length parsed))
+                      eliscript-analyzer--recur-targets))
+               (eliscript-analyzer--recur-barrier nil))
+           (eliscript-analyzer--enqueue-sequence (cdr arguments) child t)))))))
+
+(defun eliscript-analyzer--enqueue-assignment (arguments scope form-name)
+  "Schedule assignment checks and values in the original pair order."
+  (when (or (null arguments) (= (% (length arguments) 2) 1))
+    (eliscript-analyzer--fail "%s expects one or more name/value pairs" form-name))
+  (while arguments
+    (let ((name (pop arguments)) (value (pop arguments)))
+      (eliscript-analyzer--enqueue
+       (lambda ()
+         (let* ((name-value (eliscript-form-value name))
+                (binding (and (symbolp name-value)
+                              (eliscript-analyzer--require-binding
+                               scope name-value))))
+           (unless binding
+             (eliscript-analyzer--fail "assignment target must be a symbol: %S"
+                                       (eliscript-form-strip name)))
+           (unless (eliscript-analyzer--binding-mutable binding)
+             (let ((eliscript-analyzer--current-span
+                    (or (eliscript-form-span name)
+                        eliscript-analyzer--current-span)))
+               (eliscript-analyzer--fail
+                "cannot assign to immutable binding: %s" name-value)))
+           (eliscript-analyzer--enqueue-expression value scope nil)))))))
+
+(defun eliscript-analyzer--enqueue-cond (clauses scope)
+  "Schedule COND CLAUSES with original interleaved validation order."
+  (dolist (clause clauses)
+    (let ((clause clause))
+      (eliscript-analyzer--enqueue
+     (lambda ()
+       (let ((value (eliscript-form-value clause)))
+         (unless (and (proper-list-p value) value)
+           (let ((eliscript-analyzer--current-span
+                  (or (eliscript-form-span clause)
+                      eliscript-analyzer--current-span)))
+             (eliscript-analyzer--fail
+              "invalid cond clause: %S" (eliscript-form-strip clause))))
+         (eliscript-analyzer--enqueue-expression (car value) scope nil)
+         (eliscript-analyzer--enqueue-sequence
+          (cdr value) scope eliscript-analyzer--tail-position)))))))
+
+(defun eliscript-analyzer--enqueue-try (arguments scope)
+  "Schedule TRY ARGUMENTS, retaining clause order and the recur barrier."
+  (let ((eliscript-analyzer--recur-barrier t)
+        (state (vector nil nil nil)))
+    (dolist (argument arguments)
+      (let ((argument argument))
+        (eliscript-analyzer--enqueue
+       (lambda ()
+         (let ((operator (eliscript-analyzer--clause-operator argument)))
+           (cond
+            ((eq operator 'catch)
+             (when (aref state 1)
+               (eliscript-analyzer--fail "try accepts at most one catch clause"))
+             (when (aref state 2)
+               (eliscript-analyzer--fail "catch must precede finally"))
+             (aset state 0 t) (aset state 1 t)
+             (let* ((clause (eliscript-form-value argument))
+                    (binding (cadr clause)))
+               (unless (and binding (eliscript-binding-pattern-p binding))
+                 (let ((eliscript-analyzer--current-span
+                        (or (eliscript-form-span argument)
+                            eliscript-analyzer--current-span)))
+                   (eliscript-analyzer--fail
+                    "catch requires a binding symbol, vector, or map")))
+               (eliscript-analyzer--enqueue-defaults binding scope)
+               (eliscript-analyzer--enqueue
+                (lambda ()
+                  (let ((child (eliscript-analyzer--make-scope scope)))
+                    (eliscript-analyzer--declare-pattern child binding 'catch t)
+                    (eliscript-analyzer--enqueue-sequence
+                     (cddr clause) child eliscript-analyzer--tail-position))))))
+            ((eq operator 'finally)
+             (when (aref state 2)
+               (eliscript-analyzer--fail
+                "try accepts at most one finally clause"))
+             (aset state 0 t) (aset state 2 t)
+             (eliscript-analyzer--enqueue-sequence
+              (cdr (eliscript-form-value argument))
+              scope eliscript-analyzer--tail-position))
+            ((aref state 0)
+             (let ((eliscript-analyzer--current-span
+                    (or (eliscript-form-span argument)
+                        eliscript-analyzer--current-span)))
+               (eliscript-analyzer--fail
+                "try body forms must precede catch and finally clauses")))
+            (t (eliscript-analyzer--enqueue-expression
+                argument scope eliscript-analyzer--tail-position))))))))
+    (eliscript-analyzer--enqueue
+     (lambda ()
+       (unless (or (aref state 1) (aref state 2))
+         (eliscript-analyzer--fail "try requires a catch or finally clause"))))))
+
+(defun eliscript-analyzer--analyze-call-tasks (form scope)
+  "Validate call FORM and schedule its descendants using explicit tasks."
+  (let* ((items (eliscript-form-value form))
+         (operator-form (car items))
+         (operator (eliscript-form-value operator-form))
+         (arguments (cdr items))
+         (tail eliscript-analyzer--tail-position))
+    (pcase operator
+      ((or 'lambda 'fn 'async)
+       (unless arguments
+         (eliscript-analyzer--fail "%s requires an argument list" operator))
+       (eliscript-analyzer--enqueue-function
+        (car arguments) (cdr arguments) scope (eq operator 'async)))
+      ('await
+       (unless (= (length arguments) 1)
+         (eliscript-analyzer--fail "await expects 1 argument"))
+       (unless (eliscript-analyzer--async-function-p scope)
+         (eliscript-analyzer--fail "await is only valid inside an async function"))
+       (eliscript-analyzer--enqueue-expression (car arguments) scope nil))
+      ('throw
+       (unless (= (length arguments) 1)
+         (eliscript-analyzer--fail "throw expects 1 argument"))
+       (eliscript-analyzer--enqueue-expression (car arguments) scope nil))
+      ('try (eliscript-analyzer--enqueue-try arguments scope))
+      ((or 'catch 'finally)
+       (eliscript-analyzer--fail "%s is only valid as a try clause" operator))
+      ((or 'let 'let*)
+       (eliscript-analyzer--enqueue-let arguments scope (eq operator 'let*)))
+      ('loop (eliscript-analyzer--enqueue-loop arguments scope))
+      ('recur
+       (let ((target (car eliscript-analyzer--recur-targets)))
+         (unless target
+           (eliscript-analyzer--fail "recur is only valid inside a function or loop"))
+         (when eliscript-analyzer--recur-barrier
+           (eliscript-analyzer--fail "recur cannot cross a try boundary"))
+         (unless tail
+           (eliscript-analyzer--fail "recur is only valid in tail position"))
+         (unless (= (length arguments) (eliscript-analyzer--recur-target-arity target))
+           (eliscript-analyzer--fail
+            "recur expects %d arguments for the current %s, got %d"
+            (eliscript-analyzer--recur-target-arity target)
+            (eliscript-analyzer--recur-target-kind target) (length arguments)))
+         (eliscript-analyzer--enqueue-sequence arguments scope nil)))
+      ('setq (eliscript-analyzer--enqueue-assignment arguments scope "setq"))
+      ('set!
+       (unless (= (length arguments) 2)
+         (eliscript-analyzer--fail "set! expects 2 arguments"))
+       (eliscript-analyzer--enqueue-assignment arguments scope "set!"))
+      ('cond (eliscript-analyzer--enqueue-cond arguments scope))
+      ('if
+       (unless (<= 2 (length arguments) 3)
+         (eliscript-analyzer--fail "if expects 2..3 arguments"))
+       (eliscript-analyzer--enqueue-expression (car arguments) scope nil)
+       (dolist (branch (cdr arguments))
+         (eliscript-analyzer--enqueue-expression branch scope tail)))
+      ((or 'when 'unless)
+       (unless arguments
+         (eliscript-analyzer--fail "%s expects 1+ arguments" operator))
+       (eliscript-analyzer--enqueue-expression (car arguments) scope nil)
+       (eliscript-analyzer--enqueue-sequence (cdr arguments) scope tail))
+      ((or 'progn 'do 'and 'or)
+       (eliscript-analyzer--enqueue-sequence arguments scope tail))
+      ('while
+       (unless arguments
+         (eliscript-analyzer--fail "while expects 1+ arguments"))
+       (eliscript-analyzer--enqueue-sequence arguments scope nil))
+      ('quote nil)
+      ('js-object
+       (when (= (% (length arguments) 2) 1)
+         (eliscript-analyzer--fail "js-object expects key/value pairs"))
+       (while arguments
+         (let ((key (pop arguments)) (value (pop arguments)))
+           (unless (let ((key-value (eliscript-form-value key)))
+                     (or (keywordp key-value) (stringp key-value)
+                         (symbolp key-value)))
+             (eliscript-analyzer--enqueue-expression key scope nil))
+           (eliscript-analyzer--enqueue-expression value scope nil))))
+      ('hash-map
+       (when (= (% (length arguments) 2) 1)
+         (eliscript-analyzer--fail "hash-map expects complete key/value pairs"))
+       (eliscript-analyzer--enqueue-sequence arguments scope nil))
+      ((or 'get 'put 'js-call)
+       (pcase operator
+         ('get (unless (<= 2 (length arguments) 3)
+                 (eliscript-analyzer--fail "get expects 2..3 arguments")))
+         ('put (unless (= (length arguments) 3)
+                 (eliscript-analyzer--fail "put expects 3 arguments")))
+         ('js-call (when (< (length arguments) 2)
+                     (eliscript-analyzer--fail "js-call expects 2+ arguments"))))
+       (eliscript-analyzer--enqueue-expression (car arguments) scope nil)
+       (let ((key (cadr arguments)))
+         (unless (let ((value (eliscript-form-value key)))
+                   (or (keywordp value) (stringp value)))
+           (eliscript-analyzer--enqueue-expression key scope nil)))
+       (eliscript-analyzer--enqueue-sequence (nthcdr 2 arguments) scope nil))
+      ('js* nil)
+      ((pred (lambda (name) (memq name eliscript-analyzer--builtin-operators)))
+       (eliscript-analyzer--enqueue-sequence arguments scope nil))
+      ((or 'defun 'defn 'defportable 'defasync 'defvar 'defconst
+           'export 'export-default 'import 'module)
+       (eliscript-analyzer--fail "%s is only valid at module top level" operator))
+      (_
+       (eliscript-analyzer--enqueue-expression operator-form scope nil)
+       (eliscript-analyzer--enqueue-sequence arguments scope nil)))))
+
 (defun eliscript-analyzer--analyze-expression (form scope)
-  "Analyze expression FORM in lexical SCOPE."
+  "Analyze FORM in SCOPE without consuming stack depth for descendants."
+  (if eliscript-analyzer--task-active
+      (eliscript-analyzer--enqueue-expression
+       form scope eliscript-analyzer--tail-position)
+    (let ((eliscript-analyzer--task-active t)
+          (eliscript-analyzer--expression-tasks nil)
+          (eliscript-analyzer--pending-tasks nil))
+      (eliscript-analyzer--enqueue-expression
+       form scope eliscript-analyzer--tail-position)
+      (setq eliscript-analyzer--expression-tasks
+            (nreverse eliscript-analyzer--pending-tasks))
+      (while eliscript-analyzer--expression-tasks
+        (let ((action (pop eliscript-analyzer--expression-tasks))
+              (eliscript-analyzer--pending-tasks nil))
+          (funcall action)
+          (setq eliscript-analyzer--expression-tasks
+                (nconc (nreverse eliscript-analyzer--pending-tasks)
+                       eliscript-analyzer--expression-tasks)))))))
+
+(defun eliscript-analyzer--analyze-expression-step (form scope)
+  "Analyze one expression FORM in SCOPE and enqueue its descendants."
   (let* ((eliscript-analyzer--current-span
           (or (eliscript-form-span form) eliscript-analyzer--current-span))
          (value (eliscript-form-value form)))
@@ -545,14 +913,13 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
               "%s" (eliscript-diagnostic-condition-message error-data))))
         (eliscript-analyzer--require-binding scope value)))
      ((vectorp value)
-      (eliscript-analyzer--analyze-non-tail-sequence
-       (append value nil) scope))
+      (eliscript-analyzer--enqueue-sequence (append value nil) scope nil))
      ((consp value)
       (unless (proper-list-p value)
         (eliscript-analyzer--fail
          "dotted call forms are not supported: %S"
          (eliscript-form-strip form)))
-      (eliscript-analyzer--analyze-call form scope))
+      (eliscript-analyzer--analyze-call-tasks form scope))
      (t (eliscript-analyzer--fail
          "unsupported form: %S" (eliscript-form-strip form))))))
 

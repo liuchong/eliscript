@@ -1,0 +1,182 @@
+(module tests.managed-source-view-decode
+  (import "node:test" before after test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile writeFile mkdtemp rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "../tools/backends/managed-source-view.mjs" createManagedSourceView withManagedSourceDecode)
+  (import "../tools/backends/build.mjs" buildBackends root)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntimeWithHostModules)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "../tools/backends/managed-module-graph.mjs" createManagedModuleGraph)
+
+  (defun deferred-chain (count)
+    (let ((views (new globalThis.Map)) (reads (js-array)) (lookup undefined))
+      (setq lookup (lambda (index)
+        (let ((view (js-call views :get index)))
+          (unless view
+            (let* ((target (js-object))
+                   (next (lambda () (if (< (1+ index) count) (funcall lookup (1+ index)) nil)))
+                   (operations (js-object
+                     :keys (lambda () (js-call reads :push (str "keys:" index)) (js-array "next"))
+                     :descriptor (lambda (key)
+                       (js-call reads :push (str "descriptor:" index ":" key))
+                       (when (= key "next") (js-object :value (funcall next) :writable t :enumerable t :configurable t)))
+                     :get (lambda (key receiver) (if (= key "next") (funcall next) undefined))
+                     :set (lambda (&rest ignored) false) :has (lambda (key) (= key "next"))
+                     :define (lambda (&rest ignored) false) :delete (lambda (&rest ignored) false)
+                     :prototype (lambda () (get globalThis.Object :prototype))
+                     :setPrototype (lambda (&rest ignored) false)
+                     :extensible (lambda () t) :preventExtensions (lambda () false))))
+              (setq view (withManagedSourceDecode (lambda ()
+                (createManagedSourceView (js-object :target target :operations operations)))))
+              (js-call views :set index view)))
+          ;; This is the same private call made by the actual host decoder.
+          (js-call view :refresh)
+          (get view :value))))
+      (js-object :lookup lookup :views views :reads reads)))
+
+  (test "private decoder publication does not visit an unobserved child graph and public reflection still reads the actual source"
+    (lambda ()
+      (let* ((state (deferred-chain 20000)) (first (funcall (get state :lookup) 0)))
+        (js-call assert :strictEqual (get (get state :views) :size) 1)
+        (js-call assert :deepStrictEqual (get state :reads) (js-array))
+        (let ((next (get first :next)))
+          (js-call assert :strictEqual next (funcall (get state :lookup) 1))
+          (js-call assert :strictEqual (get (get state :views) :size) 2)
+          (js-call assert :deepStrictEqual (Object/keys first) (js-array "next"))
+          (let ((descriptor (Object/getOwnPropertyDescriptor first "next")))
+            (js-call assert :strictEqual (get descriptor :value) next)
+            (js-call assert :strictEqual (get descriptor :writable) t)
+            (js-call assert :strictEqual (get descriptor :enumerable) t)
+            (js-call assert :strictEqual (get descriptor :configurable) t))
+          (js-call assert :strictEqual (get (get state :views) :size) 2)))))
+
+  (test "private decode context restores on false and undefined throws without weakening the original public full refresh contract"
+    (lambda ()
+      (let ((failures (js-array false undefined)) (index 0))
+        (while (< index (js-length failures))
+          (let ((failure (aref failures index)) (caught false) (actual nil) (reads 0))
+            (try (withManagedSourceDecode (lambda () (throw failure)))
+              (catch error (setq caught t actual error)))
+            (js-call assert :strictEqual caught t) (js-call assert :strictEqual actual failure)
+            (let* ((value (js-object))
+                   (view (createManagedSourceView (js-object :target value :operations (js-object
+                     :keys (lambda () (setq reads (1+ reads)) (js-array))
+                     :extensible (lambda () t))))))
+              (js-call view :refresh)
+              (js-call assert :strictEqual reads 1)))
+          (setq index (1+ index))))))
+
+  (defconst source (js-call (js-array
+    "(defvar shared (js-object :deep (js-object :value 1)))"
+    "(defun node (previous) (js-object :shared shared :previous previous))"
+    "(defun mutate (value) (put (get shared :deep) :value value) shared)"
+    "(defun freezeChild () (Object/freeze (get shared :deep)))"
+    "(defun sealChild () (Object/seal (get shared :deep)))"
+    "(defun bad (value) (Object/defineProperty shared \"bad\""
+    "  (js-object :configurable t :get (lambda () (throw value)))) shared)"
+    "(defun recover () (Reflect/deleteProperty shared \"bad\") shared)"
+    "(export shared node mutate freezeChild sealChild bad recover)") :join "\n"))
+  (defvar directory undefined) (defvar bytes undefined) (defvar lowered undefined)
+  (defvar library undefined)
+  (defconst native-target (when (= (get globalThis.process :arch) "arm64")
+    (cond ((= (get globalThis.process :platform) "darwin") "arm64-macos")
+          ((= (get globalThis.process :platform) "linux") "arm64-linux"))))
+  (before (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-lazy-source-decoder-"))))
+    (let* ((backend (await (buildBackends (js-object :outputRoot directory))))
+           (compiler (get backend :compiler))
+           (program (js-call compiler :compile_ir_string source "decoder-project.eli"))
+           (runtime (js-call compiler :compile_ir_string
+             (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli")))
+      (setq lowered (js-call (get backend :managed) :lower_managed_project
+        (js-array (js-object :id "entry.mjs" :program program)) "entry.mjs" runtime (js-object :phased t)))
+      (setq bytes (globalThis.Uint8Array.from (js-call (get backend :wasm) :append_metadata_section
+        (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed))
+        "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))))
+      (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      (when native-target
+        (setq library (resolve directory (if (= native-target "arm64-macos") "decode.dylib" "decode.so")))
+        (await (writeFile library (globalThis.Uint8Array.from
+          (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target)))))))
+    (js-object :timeout 120000))
+  (after (async () (when directory (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun exercise (runtime graph)
+    (let ((project (get runtime :project)) (roots (js-array)) (failed false))
+      (try
+        (progn
+          (js-call runtime :auto 65536)
+          (js-call graph :prepare)
+          (js-call (get (get (get lowered :descriptor) :project) :modules) :forEach (lambda (module)
+            (js-call (get module :steps) :forEach (lambda (step) (js-call graph :step (get step :run))))))
+          (js-call assert :strictEqual (get runtime :project) project)
+          (let* ((first (js-call runtime :invoke "node" (js-array nil)))
+                 (_first (js-call roots :push first))
+                 (host (js-call runtime :toHostValue first))
+                 (shared (get host :shared)) (deep (get shared :deep))
+                 (value (js-call runtime :number -0.0)))
+            (js-call roots :push value)
+            (let ((changed (js-call runtime :invoke "mutate" (js-array value))))
+              (try (js-call assert :strictEqual (js-call runtime :toHostValue changed) shared)
+                (finally (js-call runtime :release changed))))
+            (js-call runtime :collect)
+            (js-call assert :strictEqual (get host :shared) shared)
+            (js-call assert :strictEqual (get shared :deep) deep)
+            (js-call assert :ok (Object/is (get deep :value) -0.0))
+            (let ((descriptor (Object/getOwnPropertyDescriptor deep "value")))
+              (js-call assert :ok (Object/is (get descriptor :value) -0.0))
+              (js-call assert :strictEqual (get descriptor :writable) t))
+            (let ((second (js-call runtime :invoke "node" (js-array first))))
+              (try
+                (let ((next (js-call runtime :toHostValue second)))
+                  (js-call assert :strictEqual (get next :previous) host)
+                  (js-call assert :strictEqual (get next :shared) shared))
+                (finally (js-call runtime :release second))))
+            (js-call (js-array false undefined) :forEach (lambda (failure)
+              (let ((result (js-call runtime :invoke "bad" (js-array failure))) (caught false) (actual nil))
+                (try
+                  (js-call assert :strictEqual (js-call runtime :toHostValue result) shared)
+                  (try (get shared :bad) (catch error (setq caught t actual error)))
+                  (js-call assert :strictEqual caught t) (js-call assert :strictEqual actual failure)
+                  (finally (js-call runtime :release result))))
+              (let ((result (js-call runtime :invoke "recover" (js-array))))
+                (try (js-call assert :strictEqual (js-call runtime :toHostValue result) shared)
+                  (finally (js-call runtime :release result))))))
+            (let ((sealed (js-call runtime :invoke "sealChild" (js-array))))
+              (try (js-call assert :strictEqual (js-call runtime :toHostValue sealed) deep)
+                (finally (js-call runtime :release sealed))))
+            (js-call assert :strictEqual (Object/isSealed deep) t)
+            (let ((frozen (js-call runtime :invoke "freezeChild" (js-array))))
+              (try (js-call assert :strictEqual (js-call runtime :toHostValue frozen) deep)
+                (finally (js-call runtime :release frozen))))
+            (js-call assert :strictEqual (Object/isFrozen deep) t)
+            (js-call assert :strictEqual (get (Object/getOwnPropertyDescriptor deep "value") :writable) false)
+            (js-call assert :ok (Object/is (get deep :value) -0.0))
+            (js-call runtime :collect)
+            (js-call assert :strictEqual (get host :shared) shared)))
+        (catch error (setq failed t) (throw error))
+        (finally
+          (try
+            (js-call roots :forEach (lambda (value) (js-call runtime :release value)))
+            (js-call runtime :closeModule) (js-call runtime :collect)
+            (js-call assert :strictEqual (js-call runtime :live) 0)
+            (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)
+            (when (get runtime :close) (js-call runtime :close))
+            (catch cleanup (unless failed (throw cleanup))))))))
+  (test "actual WASM factory preserves private lazy shared views nested mutation reflection errors and original project transport identity"
+    (async ()
+      (let* ((graph (createManagedModuleGraph (get lowered :descriptor)))
+             (runtime (await (instantiateManagedRuntimeWithHostModules bytes
+               (js-object :moduleGraph graph :initializeModule false
+                 :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216)))))
+        (exercise runtime graph))))
+  (test "actual native factory preserves the same live nested view identities reflection and GC roots without replacing its attached project"
+    (js-object :skip (not native-target))
+    (async ()
+      (let* ((graph (createManagedModuleGraph (get lowered :descriptor)))
+             (runtime (await (instantiateNativeManagedRuntime library lowered
+               (js-object :moduleGraph graph :initializeModule false :nativeTarget native-target
+                 :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216)))))
+        (exercise runtime graph)))))

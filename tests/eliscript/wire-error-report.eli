@@ -1,0 +1,67 @@
+(module tests.wire-error-report
+  (import "node:test" test before after)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile writeFile rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:module" createRequire)
+  (import "node:url" pathToFileURL)
+  (import "../tools/backends/build.mjs" root)
+  (import "../dist/bootstrap/compiler.mjs" compile-string)
+  (import "../runtime/wire/markdown.mjs" MarkdownError)
+
+  (defvar directory undefined)
+  (defvar report undefined)
+  (before (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-wire-error-report-"))))
+    (let* ((source (await (readFile (resolve root "tests/fixtures/wasm-managed-wire.eli") "utf8")))
+           (start (js-call source :indexOf "  (defun error-report (error)"))
+           (end (js-call source :indexOf "  (defun parse-report (source options)" start))
+           (path (resolve directory "wire-report.mjs")))
+      (js-call assert :ok (and (>= start 0) (> end start)))
+      ;; Compile the exact maintained helper body. The only surrounding source
+      ;; supplies its real MarkdownError constructor and a test-only export.
+      (await (writeFile path
+        (compile-string
+          (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "runtime/wire/markdown.mjs")) :href))
+            " MarkdownError)\n" (js-call source :slice start end) "\n(export error-report)\n")
+          "wire-error-report.eli")))
+      (let ((namespace (funcall (createRequire path) path)))
+        (js-call assert :strictEqual (get namespace globalThis.Symbol.toStringTag) "Module")
+        (setq report (get namespace :error_report))))))
+  (after (async ()
+    (when directory (await (rm directory (js-object :recursive t :force t))))))
+
+  (test "wire reports keep document locations owned by actual Markdown errors"
+    (lambda ()
+      (let* ((error (new MarkdownError "MDP-E006" 91 "Orphan table"))
+             (before (Object/getOwnPropertyDescriptors error))
+             (actual (funcall report error)))
+        (js-call assert :deepStrictEqual (JSON/parse (JSON/stringify actual))
+          (js-object :name "MarkdownError" :message "MDP-E006 at line 91: Orphan table"
+            :code "MDP-E006" :line 91))
+        (js-call assert :deepStrictEqual (Object/getOwnPropertyDescriptors error) before)
+        (js-call assert :strictEqual (Object/getPrototypeOf error) (get MarkdownError :prototype)))))
+
+  (test "wire reports preserve native failures without confusing engine stack locations with document lines"
+    (lambda ()
+      (let ((kinds (js-array globalThis.RangeError globalThis.TypeError globalThis.Error)) (index 0))
+        (while (< index (js-length kinds))
+          (let* ((kind (aref kinds index)) (error (new kind "Markdown length limit")))
+            ;; Exercise the host extension explicitly on every engine. This
+            ;; does not claim that an injected field is an engine measurement.
+            (Object/defineProperty error "line" (js-object :value 91 :configurable t))
+            (let ((before (Object/getOwnPropertyDescriptors error)) (actual (funcall report error)))
+              (js-call assert :deepStrictEqual (JSON/parse (JSON/stringify actual))
+                (js-object :name (get error :name) :message "Markdown length limit"))
+              (js-call assert :strictEqual (get actual :line) undefined)
+              (js-call assert :strictEqual (get error :line) 91)
+              (js-call assert :deepStrictEqual (Object/getOwnPropertyDescriptors error) before)))
+          (setq index (1+ index))))))
+
+  (test "wire reports retain primitive thrown values and never manufacture document locations"
+    (lambda ()
+      (js-call assert :deepStrictEqual (JSON/parse (JSON/stringify (funcall report "wire marker")))
+        (js-object :raw "wire marker"))
+      (js-call assert :deepStrictEqual (JSON/parse (JSON/stringify (funcall report false)))
+        (js-object :raw false)))))

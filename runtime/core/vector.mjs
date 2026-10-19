@@ -949,3 +949,9 @@ export function subvec(vector, start, end = undefined) {
 export function isPersistentVector(value) {
   return value instanceof PersistentVector;
 }
+
+// Bulk transports preserve a view's original base and bounds. Only the
+// constructor-owned WeakMap establishes this brand; user properties do not.
+export function readPersistentVectorView(value) {
+  return SUBVECTOR_STATE.get(value);
+}

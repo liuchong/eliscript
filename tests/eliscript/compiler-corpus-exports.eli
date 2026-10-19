@@ -1,0 +1,555 @@
+(module tests.compiler-corpus-exports
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile writeFile rm mkdir readdir lstat)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:child_process" spawnSync)
+  (import "node:crypto" createHash)
+  (import "node:timers/promises" setImmediate)
+  (import "../tools/backends/build.mjs" buildBackends root)
+  (import "../tools/backends/compiler-build.mjs" independentCompilerResources)
+  (import "../tools/backends/compiler-corpus-execution.mjs" executeCompilerCorpusRecord)
+  (import "../tools/backends/compiler-matrix.mjs" archiveProduct)
+
+  (defvar directory undefined)
+  (defvar backend undefined)
+  (defvar runtime undefined)
+  (defvar reference undefined)
+  (defvar symbols-source undefined)
+  (defvar symbol-calls undefined)
+  (defconst native-target (when (= (get globalThis.process :arch) "arm64")
+    (cond ((= (get globalThis.process :platform) "darwin") "arm64-macos")
+          ((= (get globalThis.process :platform) "linux") "arm64-linux"))))
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-corpus-exports-"))))
+    (setq backend (await (buildBackends (js-object :outputRoot directory))))
+    (setq runtime (js-call (get backend :compiler) :compile_ir_string
+      (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
+    (setq symbols-source (await (readFile (resolve root "bootstrap/compiler/symbol.eli") "utf8")))
+    (let* ((fixtures (JSON/parse (await (readFile (resolve root "tests/fixtures/bootstrap-symbols.json") "utf8"))))
+           (names (js-object :segment (js-array "munge-segment" "munge_segment")
+             :binding (js-array "binding-name" "binding_name") :reference (js-array "reference-name" "reference_name")))
+           (groups (Object/entries fixtures)) (index 0))
+      (setq symbol-calls (js-array))
+      (while (< index (js-length groups))
+        (let* ((group (aref groups index)) (pair (get names (aref group 0))) (cases (aref group 1)) (position 0))
+          (while (< position (js-length cases))
+            (let* ((item (aref cases position)) (call (js-object :name (aref pair 0) :javascriptName (aref pair 1) :args (js-array (get item :input)))))
+              (if (Object/hasOwn item "error") (put call :error (get item :error)) (put call :expected (get item :output)))
+              (js-call symbol-calls :push call))
+            (setq position (1+ position))))
+        (setq index (1+ index))))
+    ;; The unchanged fixture declares segment=12, binding=13, reference=10.
+    (js-call assert :strictEqual (js-length symbol-calls) 35)
+    ;; Same source and all original vectors, executed by independent Node.
+    (await (writeFile (resolve directory "symbol-reference.mjs")
+      (js-call (get backend :compiler) :compile_string symbols-source "bootstrap/compiler/symbol.eli")))
+    (let* ((oracle (js-call (js-array
+             "(module oracle (import \"node:assert/strict\" :default assert)"
+             " (import \"./symbol-reference.mjs\" :as symbols)"
+             (str " (defconst calls (JSON/parse " (JSON/stringify (JSON/stringify symbol-calls)) "))")
+             " (defconst output (js-array)) (defvar index 0)"
+             " (while (< index (js-length calls))"
+             "  (let* ((call (aref calls index)) (failed false) (error undefined) (value undefined))"
+             "   (try (setq value (funcall (get symbols (get call :javascriptName)) (aref (get call :args) 0)))"
+             "    (catch caught (setq failed t error caught)))"
+             "   (if (Object/hasOwn call \"error\")"
+             "    (progn (js-call assert :strictEqual failed t)"
+             "     (js-call assert :strictEqual (get error :message) (get call :error))"
+             "     (js-call output :push (js-object :name (get call :name) :error (get call :error))))"
+             "    (progn (when failed (throw error))"
+             "     (js-call assert :deepStrictEqual value (get call :expected))"
+             "     (js-call output :push (js-object :name (get call :name) :value value)))))"
+             "  (setq index (1+ index)))"
+             " (js-call (get globalThis.process :stdout) :write (JSON/stringify output)))") :join "\n"))
+           (path (resolve directory "symbol-oracle.mjs")))
+      (await (writeFile path (js-call (get backend :compiler) :compile_string oracle "symbol-oracle.eli")))
+      (let ((child (spawnSync "node" (js-array path) (js-object :encoding "utf8" :timeout 10000 :maxBuffer 1048576))))
+        (js-call assert :strictEqual (get child :error) undefined)
+        (js-call assert :strictEqual (get child :status) 0 (get child :stderr))
+        (setq reference (JSON/parse (get child :stdout)))))) 120000)
+  (afterAll (async ()
+    (setq backend undefined runtime undefined reference undefined symbols-source undefined symbol-calls undefined)
+    (when directory (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun record (source calls)
+    (let ((request (js-object :operation "project" :entry "module.mjs" :sourceMap t
+                    :modules (js-array (js-object :id "module.mjs" :filename "module.eli" :source source)))))
+      (js-object :id "actual-export-sequence" :kind "sequence" :steps (js-array
+        (js-object :id "first" :request request :artifact (js-object :kind "exports" :auto 1 :calls calls))
+        (js-object :id "repeat" :request (globalThis.structuredClone request)
+          :artifact (js-object :kind "exports" :auto 1 :calls (globalThis.structuredClone calls)) :sameProductAs "first")))))
+  (defun production-context (item target requests)
+    (let ((products (new globalThis.Map)) (counter 0))
+      (js-object :record item :target target :sourceRoot root :directory directory
+        :options (js-object :profile "small")
+        :session (js-object :request (async (request options)
+          (js-call requests :push (globalThis.structuredClone request))
+          (let* ((source (get (aref (get request :modules) 0) :source))
+                 (program (js-call (get backend :compiler) :compile_ir_string source "module.eli"))
+                 (lowered (js-call (get backend :managed) :lower_managed_program program runtime t))
+                 (key (JSON/stringify (js-array source target (get request :memory)))))
+            (unless (js-call products :has key)
+              (let* ((path (resolve directory (str "product-" counter (if (= target "wasm") ".wasm" (if (= native-target "arm64-macos") ".dylib" ".so")))))
+                     (bytes (if (= target "wasm")
+                       (js-call (get backend :wasm) :append_metadata_section
+                         (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) (get request :memory))
+                         "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))
+                       (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target))))
+                (setq counter (1+ counter))
+                (await (writeFile path (js-call globalThis.Uint8Array :from bytes)))
+                (js-call products :set key (js-object :target target :path path :entry "module.mjs"
+                  :typed (get lowered :typed) :descriptor (get lowered :descriptor) :identitySha256 key :nativeTarget native-target))))
+            (js-call products :get key))))
+        :archiveProduct (async (product name actual-target)
+          (js-call assert :strictEqual actual-target target) product))))
+
+  (defun bounded-observation (value depth)
+    ;; Assertion evidence only: never retain/serialize a product, source or IR.
+    (cond ((= (value-type value) "string") (js-call value :slice 0 2048))
+      ((or (nullish? value) (= (value-type value) "number") (= (value-type value) "boolean")) value)
+      ((<= depth 0) "<depth-limit>")
+      ((Array/isArray value) (js-call (js-call value :slice 0 64) :map
+        (lambda (item) (bounded-observation item (1- depth)))))
+      ((and (not (eq value nil)) (= (value-type value) "object"))
+        (Object/fromEntries (js-call (js-call (Object/keys value) :slice 0 16) :map
+          (lambda (key) (js-array key (bounded-observation (get value key) (1- depth)))))))
+      (t value)))
+  (defun sequence-evidence (actual item target)
+    (JSON/stringify (js-object :target target :identity (bounded-observation (get actual :identity) 5)
+      :steps (js-call (js-call (get item :steps) :slice 0 8) :map (lambda (step)
+        (js-object :id (get step :id) :operation (get (get step :request) :operation)
+          :expected (bounded-observation (get step :expected) 3)
+          :calls (js-call (js-call (get (get step :artifact) :calls) :slice 0 64) :map (lambda (call)
+            (bounded-observation (js-object :name (get call :name) :javascriptName (get call :javascriptName)
+              :expected (get call :expected) :error (get call :error)) 3)))))))))
+
+  (test "binary export sequences retain all original 35 symbol calls and strict Node errors with actual descriptor names"
+    (async ()
+      (let ((targets (if native-target (js-array "wasm" "native") (js-array "wasm"))) (index 0))
+        (while (< index (js-length targets))
+          (let* ((requests (js-array)) (item (record symbols-source symbol-calls)) (before (JSON/stringify item))
+                 (actual (await (executeCompilerCorpusRecord (production-context item (aref targets index) requests)))))
+            (js-call assert :strictEqual (get actual :expectedSatisfied) t
+              (sequence-evidence actual item (aref targets index)))
+            (js-call assert :strictEqual (js-length (get actual :identity)) 2)
+            (let ((position 0))
+              (while (< position 2)
+                (js-call assert :deepStrictEqual (get (aref (get actual :identity) position) :result) reference)
+                (setq position (1+ position))))
+            (js-call assert :strictEqual (JSON/stringify item) before)
+            (js-call assert :deepStrictEqual (get (aref requests 0) :memory)
+              (get (independentCompilerResources (js-object :profile "small")) :memory))
+            (js-call assert :deepStrictEqual (get (aref requests 1) :memory) (get (aref requests 0) :memory)))
+          (setq index (1+ index))))) 120000)
+
+  (test "actual binary exports prefer the original public name retain signed zero and clean up a failed alias before recovery"
+    (async ()
+      (let* ((source "(defun direct (value) value) (defun fallback (value) (+ value 1)) (export direct fallback)")
+             (calls (js-array (js-object :name "direct" :javascriptName "fallback" :args (js-array -0) :expected -0)))
+             (item (record source calls)) (requests (js-array))
+             (actual (await (executeCompilerCorpusRecord (production-context item "wasm" requests)))))
+        (js-call assert :strictEqual (get actual :expectedSatisfied) t)
+        (js-call assert :deepStrictEqual (get (aref (get (aref (get actual :identity) 0) :result) 0) :value)
+          (js-object :$eliscriptObservation "-0")))
+      (let* ((item (record "(defun direct (value) value) (export direct)"
+                     (js-array (js-object :name "missing" :javascriptName "not_exported" :args (js-array "protected operand") :expected "unused"))))
+             (step (aref (get item :steps) 1)))
+        (put (get step :artifact) :calls (js-array (js-object :name "direct" :args (js-array 42) :expected 42)))
+        (let ((actual (await (executeCompilerCorpusRecord (production-context item "wasm" (js-array))))))
+          (js-call assert :strictEqual (get actual :expectedSatisfied) false)
+          (js-call assert :strictEqual (get (aref (get actual :identity) 0) :status) "failed")
+          (js-call assert :strictEqual (get (get (get (aref (get actual :identity) 0) :error) :diagnostic) :code) "ELI-RT0003")
+          (js-call assert :deepStrictEqual (get (get (aref (get actual :identity) 0) :error) :execution)
+            (js-object :stage "invoke" :callIndex 0 :callName "<unexported>" :completedCalls 0))
+          (js-call assert :deepStrictEqual (get (aref (get actual :identity) 1) :result) (js-array (js-object :name "direct" :value 42)))))) 30000)
+
+  (test "binary export error contracts decode owned source Error messages release thrown handles and preserve primitive first errors"
+    (async ()
+      (let* ((source "(defun failed (message) (throw (new globalThis.Error message))) (defun direct (value) value) (export failed direct)")
+             (calls (js-array
+               (js-object :name "failed" :args (js-array "first exact message") :error "first exact message")
+               (js-object :name "failed" :args (js-array "second exact message") :error "second exact message")
+               (js-object :name "missing" :args (js-array) :error "managed argument or bounds error")
+               (js-object :name "direct" :args (js-array -0) :expected -0)))
+             (expected (js-array (js-object :name "failed" :error "first exact message")
+                         (js-object :name "failed" :error "second exact message")
+                         (js-object :name "missing" :error "managed argument or bounds error")
+                         (js-object :name "direct" :value (js-object :$eliscriptObservation "-0"))))
+             (targets (if native-target (js-array "wasm" "native") (js-array "wasm"))) (index 0))
+        (while (< index (js-length targets))
+          (let* ((item (record source calls))
+                 (actual (await (executeCompilerCorpusRecord
+                          (production-context item (aref targets index) (js-array))))))
+            (js-call assert :strictEqual (get actual :expectedSatisfied) t
+              (sequence-evidence actual item (aref targets index)))
+            (js-call (get actual :identity) :forEach (lambda (step)
+              (js-call assert :deepStrictEqual (get step :result) expected))))
+          (setq index (1+ index))))
+      (let ((values (js-array "false" "undefined")) (index 0))
+        (while (< index (js-length values))
+          (let* ((word (aref values index))
+                 (source (str "(defun failed () (throw " word ")) (defun direct (value) value) (export failed direct)"))
+                 (item (record source (js-array (js-object :name "failed" :args (js-array)))))
+                 (repeat (aref (get item :steps) 1)))
+            (put (get repeat :artifact) :calls (js-array (js-object :name "direct" :args (js-array 42) :expected 42)))
+            (let ((actual (await (executeCompilerCorpusRecord (production-context item "wasm" (js-array))))))
+              (js-call assert :strictEqual (get actual :expectedSatisfied) false)
+              (js-call assert :strictEqual (get (get (aref (get actual :identity) 0) :error) :message) word)
+              (js-call assert :deepStrictEqual (get (get (aref (get actual :identity) 0) :error) :execution)
+                (js-object :stage "invoke" :callIndex 0 :callName "failed" :completedCalls 0))
+              (js-call assert :deepStrictEqual (get (aref (get actual :identity) 1) :result)
+                (js-array (js-object :name "direct" :value 42)))))
+          (setq index (1+ index))))
+      (let* ((source (str "(defun failed () (let ((error (js-object))) "
+                       "(Object/defineProperty error \"message\" (js-object :get (lambda () (throw false)))) (throw error))) "
+                       "(defun direct (value) value) (export failed direct)"))
+             (item (record source (js-array (js-object :name "failed" :args (js-array) :error "unreachable"))))
+             (repeat (aref (get item :steps) 1)))
+        (put (get repeat :artifact) :calls (js-array (js-object :name "direct" :args (js-array 42) :expected 42)))
+        (let ((actual (await (executeCompilerCorpusRecord (production-context item "wasm" (js-array))))))
+          (js-call assert :strictEqual (get actual :expectedSatisfied) false)
+          (js-call assert :strictEqual (get (get (aref (get actual :identity) 0) :error) :message) "false")
+          (js-call assert :deepStrictEqual (get (get (aref (get actual :identity) 0) :error) :execution)
+            (js-object :stage "error-message" :callIndex 0 :callName "failed" :completedCalls 0))
+          (js-call assert :deepStrictEqual (get (aref (get actual :identity) 1) :result)
+            (js-array (js-object :name "direct" :value 42)))))
+      ;; Message observation must not enumerate a native Error or invoke an
+      ;; unrelated getter. The actual accessor receiver/captured return value
+      ;; and primitive undefined must retain source semantics without coercion.
+      (let* ((source (str "(defvar reads 0) (defun failed (value) (let ((error (new globalThis.Error \"original\"))) "
+                       "(Object/defineProperty error \"message\" (js-object :configurable t :get (lambda () (setq reads (+ reads 1)) value))) "
+                       "(Object/defineProperty error \"unrelated\" (js-object :get (lambda () (throw false)))) (throw error))) "
+                       "(defun seen () reads) (defun direct (value) value) (export failed seen direct)"))
+             (item (record source (js-array
+               (js-object :name "failed" :args (js-array false) :error false)
+               (js-object :name "seen" :args (js-array) :expected 1))))
+             (actual (await (executeCompilerCorpusRecord (production-context item "wasm" (js-array))))))
+        (js-call assert :strictEqual (get actual :expectedSatisfied) t (sequence-evidence actual item "wasm"))
+        (js-call (get actual :identity) :forEach (lambda (step)
+          (js-call assert :deepStrictEqual (get step :result)
+            (js-array (js-object :name "failed" :error false) (js-object :name "seen" :value 1)))))
+        (let* ((item (record source (js-array (js-object :name "failed" :args (js-array undefined) :error "sentinel"))))
+               (repeat (aref (get item :steps) 1)))
+          (put (get repeat :artifact) :calls (js-array (js-object :name "direct" :args (js-array 42) :expected 42)))
+          (let* ((actual (await (executeCompilerCorpusRecord (production-context item "wasm" (js-array)))))
+                 (failure (get (aref (get actual :identity) 0) :error)))
+            (js-call assert :strictEqual (get actual :expectedSatisfied) false)
+            (js-call assert :strictEqual (get failure :name) "AssertionError")
+            (js-call assert :ok (js-call (get failure :message) :includes "undefined"))
+            (js-call assert :deepStrictEqual (get failure :execution)
+              (js-object :stage "error-assertion" :callIndex 0 :callName "failed" :completedCalls 0))
+            (js-call assert :deepStrictEqual (get (aref (get actual :identity) 1) :result)
+              (js-array (js-object :name "direct" :value 42))))))) 120000)
+
+  (test "export failure evidence is private bounded stage data and does not alter original primitive or artifact errors"
+    (async ()
+      (let* ((item (record "unused source" (js-array)))
+             (missing (resolve directory "never-produced.wasm"))
+             (actual (await (executeCompilerCorpusRecord (js-object :record item :target "wasm"
+               :options (js-object :profile "small")
+               :session (js-object :request (async (request options)
+                 (js-object :target "wasm" :path missing :identitySha256 "missing-export-artifact")))
+               :archiveProduct (async (product name target) product))))))
+        (js-call assert :strictEqual (get actual :expectedSatisfied) false)
+        (js-call (get actual :identity) :forEach (lambda (step)
+          (js-call assert :strictEqual (get step :status) "failed")
+          (js-call assert :ok (js-call (get (get step :error) :message) :includes "ENOENT"))
+          (js-call assert :deepStrictEqual (get (get step :error) :execution)
+            (js-object :stage "artifact-read" :callIndex -1 :completedCalls 0)))))
+      (let* ((item (record "unused source" (js-array)))
+             (actual (await (executeCompilerCorpusRecord (js-object :record item :target "wasm"
+               :options (js-object :profile "small")
+               :session (js-object :request (async (request options) (throw undefined))))))))
+        (js-call assert :strictEqual (get actual :expectedSatisfied) false)
+        (js-call (get actual :identity) :forEach (lambda (step)
+          (js-call assert :strictEqual (get (get step :error) :message) "undefined")
+          (js-call assert :strictEqual (Object/hasOwn (get step :error) "execution") false))))))
+
+  (test "export sequence requests preserve explicit memory and profile overrides while cancellation retains its original reason"
+    (async ()
+      (let* ((item (record "(defun direct (value) value) (export direct)" (js-array)))
+             (before (JSON/stringify item)) (seen (js-array))
+             (actual (await (executeCompilerCorpusRecord
+               (js-object :record item :target "wasm" :options (js-object :profile "full-compiler")
+                 :session (js-object :request (async (request options) (js-call seen :push request) (throw false))))))))
+        (js-call assert :strictEqual (get actual :expectedSatisfied) false)
+        (js-call assert :strictEqual (js-length seen) 2)
+        (js-call assert :deepStrictEqual (get (aref seen 0) :memory)
+          (get (independentCompilerResources (js-object :profile "full-compiler")) :memory))
+        (js-call assert :deepStrictEqual (get (aref seen 1) :memory) (get (aref seen 0) :memory))
+        (js-call assert :strictEqual (JSON/stringify item) before))
+      (let ((item (record "(defun direct (value) value) (export direct)" (js-array)))
+            (seen (js-array)) (reason (js-object :reason "request stopped")))
+        (put (aref (get item :steps) 0) :request (Object/assign (js-object) (get (aref (get item :steps) 0) :request)
+          (js-object :memory (js-object :initialPages 2 :maximumPages 256))))
+        (put item :memory (js-object :initialPages 3 :maximumPages 512))
+        (let* ((options (js-object :profile "full-compiler" :memory (js-object :initialPages 4 :maximumPages 1024)))
+               (signal (js-object :aborted t :reason reason))
+               (context (js-object :record item :target "wasm" :options options :signal signal
+                 :session (js-object :request (async (request options)
+                   (js-call seen :push request) (throw reason))))))
+          (await (js-call assert :rejects (executeCompilerCorpusRecord context) (lambda (error) (eq error reason))))
+          (js-call assert :deepStrictEqual (get (aref seen 0) :memory) (js-object :initialPages 2 :maximumPages 256))))))
+  (defasync runtime-assets (directory prefix)
+    (let ((entries (await (readdir directory (js-object :withFileTypes t)))) (result (js-array)) (index 0))
+      (while (< index (js-length entries))
+        (let* ((entry (aref entries index)) (name (get entry :name)) (id (+ prefix "/" name)) (path (resolve directory name)))
+          (cond ((js-call entry :isDirectory)
+            (setq result (js-call result :concat (await (runtime-assets path id)))))
+            ((and (js-call entry :isFile) (js-call name :endsWith ".mjs"))
+              (js-call result :push (js-object :id id :filename id :source (await (readFile path "utf8")))))))
+        (setq index (1+ index))) result))
+  (defasync queue-context (declare-runtime)
+    (let* ((product (await (mkdtemp (resolve directory "queue-product-"))))
+           (source "(module queue.fixture (defconst value #queue [1 2]) (export value))")
+           (host (js-call (js-array
+             "(module queue.host (import \"node:assert/strict\" :default assert)"
+             " (import \"node:module\" createRequire) (import \"node:path\" resolve)"
+             " (import \"../module.mjs\" :as selected)"
+             " (import \"../runtime/core/queue.mjs\" PersistentQueue)"
+             " (import \"../runtime/core/data-text.mjs\" printValue)"
+             " (import \"eliscript/runtime/literals\" :as short)"
+             " (import \"eliscript/runtime/literals.mjs\" :as full)"
+             " (js-call assert :strictEqual (get short :queue) (get full :queue))"
+             " (js-call assert :strictEqual (Object/getPrototypeOf (get selected :value)) (get PersistentQueue :prototype))"
+             " (js-call assert :strictEqual (Object/getPrototypeOf (js-call short :queue 1 2)) (Object/getPrototypeOf (get selected :value)))"
+             " (defconst reference-root (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_REFERENCE_PRODUCT_ROOT))"
+             " (when reference-root (let* ((require-module (createRequire (aref (get globalThis.process :argv) 1)))"
+             "   (reference (funcall require-module (resolve reference-root \"module.mjs\"))))"
+             "  (js-call assert :strictEqual (Object/getPrototypeOf (get reference :value)) (get PersistentQueue :prototype))"
+             "  (js-call assert :strictEqual (printValue (get reference :value)) \"#queue [1 2]\")))"
+             " (js-call (get globalThis.process :stdout) :write (printValue (get selected :value))))") :join "\n"))
+           (sources (if declare-runtime (await (runtime-assets (resolve root "runtime") "runtime")) (js-array)))
+           (entry (resolve product "module.mjs")))
+      (await (writeFile entry (js-call (get backend :compiler) :compile_string source "queue-fixture.eli")))
+      (js-object :record (js-object :kind "project" :entry "module.mjs"
+          :modules (js-array (js-object :id "module.mjs" :filename "queue-fixture.eli" :source source))
+          :request (js-object :hostSources sources)
+          :execution (js-object :kind "original-program" :host "tests/queue-host.mjs"
+            :hostSource (js-call (get backend :compiler) :compile_string host "queue-host.eli") :hostRuntime "node" :timeoutMs 10000))
+        :artifact (js-object :target "javascript" :directory product :path entry :entry "module.mjs"
+          :modules (js-array (js-object :id "module.mjs" :exports (js-array (js-object :name "value")))))
+        :target "javascript" :sourceRoot root :directory product :options (js-object))))
+  (test "original JS programs use the declared local runtime for queue literals package aliases and host protocols idempotently"
+    (async ()
+      (let* ((context (await (queue-context t))) (path (resolve (get context :directory) "package.json"))
+             (first (await (executeCompilerCorpusRecord context))) (bytes (await (readFile path "utf8")))
+             (second (await (executeCompilerCorpusRecord context))))
+        (js-call assert :deepStrictEqual first (js-object :kind "original-program" :stdout "#queue [1 2]"))
+        (js-call assert :deepStrictEqual second first)
+        (js-call assert :strictEqual (await (readFile path "utf8")) bytes)
+        (let ((package (JSON/parse bytes)))
+          (js-call assert :strictEqual (get package :name) "eliscript")
+          (js-call assert :strictEqual (get (get package :exports) "./runtime/literals") "./runtime/literals.mjs")))))
+  (test "original JS programs without a declared local runtime retain the existing package and runtime route"
+    (async ()
+      (let* ((context (await (queue-context false))) (path (resolve (get context :directory) "package.json")))
+        (js-call assert :deepStrictEqual (await (executeCompilerCorpusRecord context))
+          (js-object :kind "original-program" :stdout "#queue [1 2]"))
+        (await (js-call assert :rejects (lstat path) (lambda (error) (= (get error :code) "ENOENT")))))))
+  (test "declared local runtime package conflicts are rejected without changing caller data"
+    (async ()
+      (let* ((context (await (queue-context t))) (path (resolve (get context :directory) "package.json")))
+        (await (writeFile path "{\"name\":\"other-runtime\",\"type\":\"module\"}\n"))
+        (let ((before (await (readFile path "utf8"))))
+          (await (js-call assert :rejects (executeCompilerCorpusRecord context)
+            (lambda (error) (and (= (get error :name) "Error") (= (get error :message) "original local runtime package conflicts with emitted source")))))
+          (js-call assert :strictEqual (await (readFile path "utf8")) before)))))
+  (test "independent Seed source and selected JS share only the declared runtime graph for exact protocol identity"
+    (async ()
+      (let ((context (await (queue-context t))))
+        (put (get (get context :record) :execution) :referenceArtifact t)
+        (let ((result (await (executeCompilerCorpusRecord context))))
+          (js-call assert :strictEqual (get result :stdout) "#queue [1 2]")
+          (js-call assert :strictEqual (js-length (get result :supportingProducts)) 1)
+          (js-call assert :strictEqual (get (aref (get result :supportingProducts) 0) :producer) "emacs-seed")
+          (js-call assert :notStrictEqual (get (aref (get result :supportingProducts) 0) :directory)
+            (get (get context :artifact) :directory))))))
+  (test "original host token replay uses byte identical selected files for real Node and Bun instance isolation"
+    (async ()
+      (let* ((source (await (readFile (resolve root "tests/fixtures/wasm-managed-host-identity.eli") "utf8")))
+             (host (await (readFile (resolve root "tools/backends/compiler-corpus-identity-host.mjs") "utf8")))
+             (hosts (js-array "node" "bun")) (index 0))
+        (while (< index (js-length hosts))
+          (let* ((product (await (mkdtemp (resolve directory "identity-product-")))) (entry "main.mjs")
+                 (javascript (js-call (get backend :compiler) :compile_string source "host-identity.eli"))
+                 (legacy-host (js-call (get backend :compiler) :compile_string
+                   "(throw (new globalThis.Error \"binary host must not replace the explicit selected JS host\"))" "binary-host.eli"))
+                 (modules (js-array (js-object :id entry :filename "host-identity.eli" :source source)))
+                 (record (js-object :kind "project" :entry entry :modules modules :request (js-object)
+                   :execution (js-object :kind "original-program" :host "tests/identity-host.mjs"
+                     :hostSource legacy-host :javascriptHostSource host :hostRuntime (aref hosts index)
+                     :referenceArtifact t :arguments (js-array (js-object :directory t) (js-object :literal entry))
+                     :timeoutMs 30000)))
+                 (before (JSON/stringify record)))
+            (await (writeFile (resolve product entry) javascript))
+            (let* ((result (await (executeCompilerCorpusRecord (js-object :record record :target "javascript"
+                      :sourceRoot root :directory product :options (js-object)
+                      :artifact (js-object :target "javascript" :directory product :path (resolve product entry) :entry entry
+                        :modules (js-array (js-object :id entry :exports (js-array))))))))
+                   (receipt (JSON/parse (await (readFile (resolve product "original-identity-isolation.json") "utf8")))))
+              (js-call assert :deepStrictEqual (JSON/parse (get result :stdout))
+                (js-object :tokens (js-array 1 1 1 2) :effects (js-array t (js-array 1 2))
+                  :abrupt (js-array t (js-array 1)) :conversion (js-array)
+                  :symbols (js-array t t) :functions (js-array t t)))
+              (js-call assert :strictEqual (get receipt :sourceSha256)
+                (js-call (js-call (createHash "sha256") :update javascript) :digest "hex"))
+              (js-call assert :strictEqual (js-length (get receipt :copies)) 2)
+              (let ((copies (get receipt :copies)) (position 0))
+                (js-call assert :notStrictEqual (aref copies 0) (aref copies 1))
+                (while (< position (js-length copies))
+                  (js-call assert :strictEqual (await (readFile (resolve product (aref copies position)) "utf8")) javascript)
+                  (setq position (1+ position))))
+              (js-call assert :strictEqual (JSON/stringify record) before)))
+          (setq index (1+ index))))))
+  (test "binary pure product repeats release unreferenced complete responses while retaining strict product identities"
+    (async ()
+      (let* ((weak undefined) (weak-typed undefined) (count 0)
+             (record (js-object :kind "sequence" :steps (js-array
+               (js-object :id "first" :request (js-object :operation "project"))
+               (js-object :id "repeat" :request (js-object :operation "project") :sameProductAs "first"))))
+             (context (js-object :record record :target "native" :options (js-object)
+               :session (js-object :request (async (request options)
+                 (when (= count 1)
+                   (await (setImmediate)) (js-call globalThis.Bun :gc t)
+                   (js-call assert :strictEqual (js-call weak :deref) undefined)
+                   (js-call assert :strictEqual (js-call weak-typed :deref) undefined))
+                 (setq count (1+ count))
+                 (let ((response (js-object :target "native" :typed (js-object :body (js-array 1 2 3))
+                                   :descriptor (js-object :exports (js-array "whole")) :debug (js-object :functions (js-array "all")))))
+                   (setq weak (new globalThis.WeakRef response)
+                     weak-typed (new globalThis.WeakRef (get response :typed))) response)))
+               :archiveProduct (async (product name target)
+                 (js-call assert :deepStrictEqual (get product :typed) (js-object :body (js-array 1 2 3)))
+                 (js-call assert :deepStrictEqual (get product :descriptor) (js-object :exports (js-array "whole")))
+                 (js-call assert :deepStrictEqual (get product :debug) (js-object :functions (js-array "all")))
+                 (Object/assign (js-object) product (js-object :identitySha256 "complete-product")))))
+             (result (await (executeCompilerCorpusRecord context))))
+        (js-call assert :strictEqual (get result :expectedSatisfied) t)
+        (js-call assert :strictEqual count 2)
+        (js-call assert :deepStrictEqual (get result :identity) (js-array
+          (js-object :id "first" :result (js-object :productIdentitySha256 "complete-product"))
+          (js-object :id "repeat" :result (js-object :productIdentitySha256 "complete-product")))))))
+  (test "binary product sequences preserve referenced response snapshots until their last recipe consumer"
+    (async ()
+      (let* ((weak undefined) (count 0) (trace (js-array))
+             (record (js-object :kind "sequence" :steps (js-array
+               (js-object :id "first" :request (js-object :operation "project"))
+               (js-object :id "referenced" :request (js-object :operation "project-ir"
+                 :typed (js-object :$compilerCorpusRef "first.typed")) :sameProductAs "first"
+                 :sameFieldsAs (js-object :step "first" :fields (js-array "descriptor")))
+               (js-object :id "final" :request (js-object :operation "project") :sameProductAs "first"))))
+             (result (await (executeCompilerCorpusRecord (js-object :record record :target "wasm" :options (js-object)
+               :session (js-object :request (async (request options)
+                 (when (= count 1)
+                   (js-call assert :ok (js-call weak :deref))
+                   (js-call assert :deepStrictEqual (get request :typed) (js-object :body (js-array "all-nodes")))
+                   (js-call assert :notStrictEqual (get request :typed) (get (js-call weak :deref) :typed)))
+                 (when (= count 2)
+                   (await (setImmediate)) (js-call globalThis.Bun :gc t)
+                   (js-call assert :strictEqual (js-call weak :deref) undefined))
+                 (setq count (1+ count))
+                 (js-call trace :push count)
+                 (let ((response (js-object :target "wasm" :typed (js-object :body (js-array "all-nodes"))
+                                   :descriptor (js-object :complete t))))
+                   (when (= count 1) (setq weak (new globalThis.WeakRef response))) response)))
+               :archiveProduct (async (response name target)
+                 (Object/assign (js-object) response (js-object :identitySha256 "same-complete-product"))))))))
+        (js-call assert :strictEqual (get result :expectedSatisfied) t)
+        (js-call assert :deepStrictEqual trace (js-array 1 2 3)))))
+  (test "binary product sequence failure recovery and future accessor order retain their original first errors"
+    (async ()
+      (let* ((trace (js-array)) (later (js-object)) (count 0)
+             (record (js-object :kind "sequence" :steps (js-array
+               (js-object :id "failed" :request (js-object :operation "project"))
+               (js-object :id "recovered" :request later)))))
+        (Object/defineProperty later "operation" (js-object :enumerable t :get (lambda ()
+          (js-call trace :push "operation") "project")))
+        (let ((result (await (executeCompilerCorpusRecord (js-object :record record :target "native" :options (js-object)
+          :session (js-object :request (async (request options)
+            (setq count (1+ count)) (js-call trace :push count)
+            (if (= count 1) (throw false) (js-object :target "native" :typed (js-object :complete t)))))
+          :archiveProduct (async (response name target) (js-object :identitySha256 "recovered")))))))
+          (js-call assert :strictEqual (get result :expectedSatisfied) false)
+          (js-call assert :strictEqual (get (get (aref (get result :identity) 0) :error) :message) "false")
+          (js-call assert :deepStrictEqual (get (aref (get result :identity) 1) :result)
+            (js-object :productIdentitySha256 "recovered"))
+          (js-call assert :deepStrictEqual trace (js-array 1 "operation" 2))))))
+  (test "isolated binary export recipes keep provider effects out of the parent and independent across products while preserving false and undefined first errors"
+    (async ()
+      (let* ((compiler (get backend :compiler))
+             (counter-key "__eliscript_import_effects")
+             (previous (Object/getOwnPropertyDescriptor globalThis.globalThis counter-key))
+             (source (str "(import \"./provider.mjs\")\n"
+               "(import \"./provider.mjs\" :default default-value effect-count named-value)\n"
+               "(import \"./provider.mjs\" :default namespace-default :as Provider)\n"
+               "(defun report () (js-array default-value named-value namespace-default (get Provider \"namespace_value\") (effect-count)))\n"
+               "(defun throw_false () (throw false)) (defun throw_undefined () (throw undefined))\n"
+               "(export report throw_false throw_undefined)"))
+             (provider-source (str "(put globalThis.globalThis :__eliscript_import_effects (+ (get globalThis.globalThis :__eliscript_import_effects 0) 1))\n"
+               "(defconst named-value 22) (defconst namespace-value 33)\n"
+               "(defun effect-count () (get globalThis.globalThis :__eliscript_import_effects))\n"
+               "(export-default 11) (export named-value namespace-value effect-count)"))
+             (provider (js-call compiler :compile_string provider-source "provider.eli"))
+             (host-modules (js-array (js-object :id "provider.mjs" :specifier "./provider.mjs" :referrer "main.mjs"
+               :allowedExports (js-array "default" "effect_count" "named_value") :namespace t)))
+             (request (js-object :operation "project" :resolveImports false :entry "main.mjs" :sourceMap t
+               :modules (js-array (js-object :id "main.mjs" :filename "main.eli" :source source))
+               :hostModules host-modules :hostSources (js-array (js-object :id "provider.mjs" :filename "provider.mjs" :source provider))))
+             (targets (if native-target (js-array "wasm" "native") (js-array "wasm"))))
+        (Object/defineProperty globalThis.globalThis counter-key (js-object :value 37 :writable t :configurable t))
+        (try
+          (await (js-call targets :reduce
+            (async (previous target)
+              (await previous)
+              (let* ((root-directory (resolve directory (+ "isolated-" target)))
+                     (steps (js-call (js-array "first" "second" "false" "undefined") :map
+                       (lambda (id)
+                         (js-object :id id :request (globalThis.structuredClone request)
+                           :sidecars (js-array (js-object :file "provider.mjs" :source provider))
+                           :artifact (js-object :kind "exports" :isolated t :calls (js-array
+                             (if (or (= id "first") (= id "second"))
+                               (js-object :name "report" :args (js-array) :expected (js-array 11 22 11 33 1))
+                               (js-object :name (if (= id "false") "throw_false" "throw_undefined") :args (js-array)))))))))
+                     (item (js-object :id "isolated-original-provider" :kind "sequence" :steps steps))
+                     (saved (JSON/stringify item))
+                     (transport (js-object))
+                     (context (js-object :record item :target target :sourceRoot root :directory root-directory
+                       :transportEvidence transport :options (js-object :profile "small")
+                       :session (js-object :request (async (input options)
+                         (let* ((modules (js-call (get input :modules) :map (lambda (module)
+                                  (js-object :id (get module :id) :program
+                                    (js-call compiler :compile_ir_string (get module :source) (get module :filename))))))
+                                (lowered (js-call (get backend :managed) :lower_managed_project modules "main.mjs" runtime
+                                  (js-object :phased t :hostModules (get input :hostModules))))
+                                (bytes (if (= target "wasm")
+                                  (js-call (get backend :wasm) :append_metadata_section
+                                    (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) (get input :memory))
+                                    "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))
+                                  (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target))))
+                           (js-object :target target :entry "main.mjs" :bytes bytes :typed (get lowered :typed)
+                             :descriptor (get lowered :descriptor) :nativeTarget native-target :nativeFormat "library"))))
+                       :archiveProduct (async (product name actual-target)
+                         (await (archiveProduct product actual-target (resolve root-directory name))))))
+                     (actual (await (executeCompilerCorpusRecord context)))
+                     (identity (get actual :identity)))
+                (js-call assert :strictEqual (get actual :expectedSatisfied) false)
+                (js-call assert :strictEqual (js-length identity) 4)
+                (js-call (js-array 0 1) :forEach (lambda (index)
+                  (js-call assert :deepStrictEqual (get (aref identity index) :result)
+                    (js-array (js-object :name "report" :value (js-array 11 22 11 33 1))))))
+                (js-call assert :strictEqual (get (get (aref identity 2) :error) :message) "false")
+                (js-call assert :strictEqual (get (get (aref identity 3) :error) :message) "undefined")
+                (js-call assert :strictEqual (get globalThis.globalThis counter-key) 37)
+                (js-call assert :strictEqual (JSON/stringify item) saved)
+                (js-call assert :strictEqual (js-length (get transport :isolatedExports)) 4)
+                (js-call (get transport :isolatedExports) :forEach (lambda (evidence)
+                  (js-call assert :match (get evidence :sha256) (new globalThis.RegExp "^[a-f0-9]{64}$"))
+                  (js-call assert :match (get evidence :sourceSha256) (new globalThis.RegExp "^[a-f0-9]{64}$"))))))
+            (globalThis.Promise.resolve)))
+          (finally
+            (if previous (Object/defineProperty globalThis.globalThis counter-key previous)
+              (Reflect/deleteProperty globalThis.globalThis counter-key)))))) 120000)
+)

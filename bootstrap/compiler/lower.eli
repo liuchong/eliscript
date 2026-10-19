@@ -659,4 +659,30 @@
         (lambda (form) (js-call body :push (lower-top-level form))))
       (make-program filename body)))
 
-  (export lower-expression lower-top-level lower-module))
+  (defun lower-owned-top-level (form)
+    (let* ((items (when (= (node-kind form) "list") (node-items form)))
+           (operator (when items (js-nth 0 items))))
+      (if (and (symbol-node-p operator) (= (node-name operator) "module"))
+          (let ((children (js-array)) (index 2))
+            ;; No slice of the entire module body may retain members after
+            ;; their completed IR has taken ownership of the needed data.
+            (while (< index (get items :length))
+              (js-call children :push (lower-owned-top-level (js-nth index items)))
+              (put items index nil)
+              (setq index (1+ index)))
+            (make-node "module-declaration" (node-span form)
+              (node-name (js-nth 1 items)) children nil))
+        (lower-top-level form))))
+
+  (defun lower-owned-module (forms filename)
+    ;; Used only after complete analysis of newly read/expanded private forms.
+    ;; The public lowering functions above never consume their caller's tree.
+    (let ((body (js-array)) (index 0))
+      (setq recur-targets (js-array))
+      (while (< index (get forms :length))
+        (js-call body :push (lower-owned-top-level (js-nth index forms)))
+        (put forms index nil)
+        (setq index (1+ index)))
+      (make-program filename body)))
+
+  (export lower-expression lower-top-level lower-module lower-owned-module))

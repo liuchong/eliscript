@@ -1,0 +1,806 @@
+(module tools.backends.record-grid
+  (import "node:fs/promises" mkdir mkdtemp lstat realpath)
+  (import "node:path" resolve dirname basename relative isAbsolute sep)
+  (import "../build.mjs" root)
+  (import "../compiler-build.mjs" loadCompilerSources compilerMetadataDigest buildIndependentCompiler)
+  (import "../compiler-metadata.mjs" readCompilerMetadata)
+  (import "../compiler-bootstrap.mjs"
+    compilerHosts normalizeCompilerHost compilerSourceIdentity assertCompilerArtifactSources
+    archiveCompilerSources archiveCompilerArtifact openCompilerArtifact saveCompilerMetadata compilerFailure
+    bootstrapCompilerChain)
+  (import "../compiler-matrix.mjs" buildCompilerMatrix runCompilerMatrixCell)
+
+  (defun grid-error (message) (throw (new globalThis.Error message)))
+  (defun grid-required-string (value message)
+    (unless (and (= (value-type value) "string") (> (js-length value) 0))
+      (throw (new globalThis.TypeError message)))
+    value)
+
+  (defun grid-source-sha (record)
+    (get (get record :sourceIdentity) :sha256))
+
+  (defun grid-capture-plan (options)
+    ;; Capture declarations before asynchronous IO. Only primitive paths and
+    ;; host names become the private plan; no caller artifact is trusted.
+    (unless (and options (= (value-type options) "object") (not (Array/isArray options)))
+      (throw (new globalThis.TypeError "recorded compiler grid options are required")))
+    (let* ((output (grid-required-string (get options :outputRoot) "compiler grid outputRoot is required"))
+           (producers (get options :producers)) (cells (get options :cells))
+           (generations (get options :generations))
+           (generation-directory (grid-required-string
+             (if (nullish? generations) undefined (get generations :directory))
+             "recorded compiler grid requires existing self-host generation evidence"))
+           (producer-records (js-array)) (cell-records (js-array))
+           (hosts (new globalThis.Set)) (pairs (new globalThis.Set)) (index 0))
+      (unless (and (Array/isArray producers) (= (js-length producers) 3))
+        (throw (new globalThis.TypeError "recorded compiler grid requires three producer artifacts")))
+      (unless (and (Array/isArray cells) (= (js-length cells) 9))
+        (throw (new globalThis.TypeError "recorded compiler grid requires nine existing cells")))
+      (while (< index (js-length producers))
+        (let* ((record (aref producers index))
+               (host (normalizeCompilerHost (get record :host)))
+               (path (grid-required-string (get record :metadataPath) "producer metadataPath is required")))
+          (when (js-call hosts :has host) (grid-error "compiler grid repeats a producer host"))
+          (js-call hosts :add host)
+          (js-call producer-records :push (js-object :host host :metadataPath (resolve path))))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (js-length cells))
+        (let* ((record (aref cells index)) (host (normalizeCompilerHost (get record :host)))
+               (target (normalizeCompilerHost (get record :target)))
+               (pair (+ host "-to-" target))
+               (path (grid-required-string (get record :metadataPath) "cell metadataPath is required")))
+          (when (js-call pairs :has pair) (grid-error "compiler grid repeats a producer/target cell"))
+          (js-call pairs :add pair)
+          (js-call cell-records :push (js-object :host host :target target :metadataPath (resolve path))))
+        (setq index (1+ index)))
+      (js-object :outputRoot (resolve output) :producers producer-records :cells cell-records
+        :generations (js-object :directory (resolve generation-directory))
+        :sourceRoot (if (nullish? (get options :sourceRoot)) root (resolve (get options :sourceRoot)))
+        :sessionOptions (get options :sessionOptions))))
+
+  (defun grid-assert-provenance (artifact sources producer-host)
+    (assertCompilerArtifactSources artifact sources)
+    (let* ((provenance (get artifact :provenance))
+           (mode (if (nullish? provenance) undefined (get provenance :mode)))
+           (wanted (js-call (js-call (get sources :modules) :map (lambda (record) (get record :id))) :sort))
+           (received (if (nullish? provenance) undefined (get provenance :compiledModuleIds))))
+      (unless (and (or (= mode "seed") (= mode "session")) (= (get provenance :runtimeCompiled) t))
+        (grid-error "compiler build did not record a complete runtime compilation"))
+      (unless (and (Array/isArray received)
+                   (= (JSON/stringify (js-call (Array/from received) :sort)) (JSON/stringify wanted)))
+        (grid-error "compiler build did not compile every original module"))
+      (unless (undefined? producer-host)
+        (unless (and (= mode "session")
+                     (= (normalizeCompilerHost (get provenance :producerHost)) producer-host))
+          (grid-error "compiler build producer differs from the recorded independent host")))))
+
+  (defasync grid-read-artifact (path host sources producer-host)
+    (let ((artifact (await (readCompilerMetadata path))))
+      (unless (= (normalizeCompilerHost (get artifact :host)) host)
+        (grid-error "recorded compiler artifact has a different host"))
+      (grid-assert-provenance artifact sources producer-host)
+      ;; Build manifests store portable paths. Hydrate only this private
+      ;; decoded envelope; complete debug/IR declarations remain unchanged.
+      (put artifact :directory (dirname path))
+      (put artifact :metadataPath path)
+      (put artifact :path (resolve (dirname path)
+        (grid-required-string (get artifact :path) "compiler artifact path is required")))
+      artifact))
+
+  (defasync grid-initialize-artifact (artifact directory options owner)
+    (let ((session nil) (failed false))
+      (try
+        (progn
+          (setq session (await (openCompilerArtifact artifact options)))
+          (unless (= (normalizeCompilerHost (get session :host)) (normalizeCompilerHost (get artifact :host)))
+            (grid-error "compiler session changed its recorded host"))
+          (let ((capabilities (await (js-call session :request (js-object :operation "capabilities")))))
+            (unless (and (= (get capabilities :format) "eliscript-compiler-capabilities")
+                         (= (get capabilities :version) 1) (Array/isArray (get capabilities :targets))
+                         (js-call compilerHosts :every
+                           (lambda (host) (js-call (get capabilities :targets) :includes host))))
+              (grid-error "initialized compiler does not expose the three product targets"))
+            (await (saveCompilerMetadata (resolve directory "capabilities.json") capabilities))
+            capabilities))
+        (catch error (setq failed t) (throw error))
+        (finally
+          (when session
+            (try (await (js-call session :close))
+              (catch error
+                (put owner :cleanupFailure (compilerFailure error))
+                (unless failed (throw error)))))))))
+
+  (defasync grid-existing-generations (directory source-identity)
+    (let* ((metadata (await (readCompilerMetadata (resolve directory "bootstrap.json"))))
+           (chains (get metadata :chains)) (hosts (new globalThis.Set)) (index 0))
+      (unless (and (= (get metadata :format) "eliscript-independent-compiler-bootstrap")
+                   (= (get metadata :version) 1) (= (grid-source-sha metadata) (get source-identity :sha256))
+                   (= (get metadata :status) "constructed") (= (get (get metadata :fixedPoint) :status) "identical")
+                   (Array/isArray chains) (= (js-length chains) 3))
+        (grid-error "compiler grid requires three complete fixed-point self-host chains"))
+      (while (< index (js-length chains))
+        (let* ((chain (aref chains index)) (sequence (get chain :hosts))
+               (host (if (and (Array/isArray sequence) (> (js-length sequence) 0))
+                       (normalizeCompilerHost (aref sequence 0)) undefined))
+               (chain-directory (grid-required-string (get chain :directory) "compiler generation directory is required")))
+          (unless (and host (not (js-call hosts :has host)) (>= (js-length sequence) 3)
+                       (= (get chain :status) "constructed")
+                       (js-call sequence :every (lambda (item) (= (normalizeCompilerHost item) host))))
+            (grid-error "compiler grid generations do not cover three independent same-host chains"))
+          (js-call hosts :add host)
+          (let* ((original (await (readCompilerMetadata (resolve chain-directory "bootstrap.json"))))
+                 (records (get original :generations)) (fixed-point (get original :fixedPoint)))
+            (unless (and (= (get original :format) "eliscript-compiler-bootstrap") (= (get original :version) 1)
+                         (= (grid-source-sha original) (get source-identity :sha256))
+                         (= (get original :status) "constructed") (not (get original :cleanupFailure))
+                         (Array/isArray records) (= (js-length records) (js-length sequence))
+                         (js-call records :every
+                           (lambda (record position)
+                             (and (= (get record :generation) (1+ position)) (= (get record :target) host)
+                                  (= (get record :status) "instantiated")
+                                  (= (get record :sourceSha256) (get source-identity :sha256))
+                                  (or (= position 0) (= (get record :producerHost) host)))))
+                         (= (get fixed-point :status) "identical")
+                         (Array/isArray (get fixed-point :comparisons))
+                         (= (js-length (get fixed-point :comparisons)) (1- (js-length records)))
+                         (js-call (get fixed-point :comparisons) :every (lambda (item) (= (get item :status) "identical"))))
+              (grid-error "compiler generation records do not satisfy the retained matrix gate"))))
+        (setq index (1+ index)))
+      (js-object :directory directory :status (get metadata :status) :sourceIdentity (get metadata :sourceIdentity)
+        :chains chains :fixedPoint (get metadata :fixedPoint))))
+
+  (defasync record-grid-artifacts (options retain-artifacts)
+    (let* ((plan (grid-capture-plan options))
+           (sources (await (loadCompilerSources (js-object :sourceRoot (get plan :sourceRoot)))))
+           (source-identity (compilerSourceIdentity sources))
+           (generations (await (grid-existing-generations (get (get plan :generations) :directory) source-identity))))
+      (await (mkdir (get plan :outputRoot) (js-object :recursive t)))
+      (let* ((directory (await (mkdtemp (resolve (get plan :outputRoot) "compiler-grid-"))))
+             (metadata (js-object :format "eliscript-independent-compiler-grid" :version 1
+               :status "building" :verification "unverified"
+               :sourceIdentity (await (archiveCompilerSources sources (resolve directory "sources")))
+               :cells (js-array) :comparisons (js-array) :generations generations :producers (js-array)))
+             (manifest (resolve directory "grid.json")) (artifacts (js-array))
+             (canonical-artifacts (js-array)) (artifact-paths (js-array))
+             (canonical-paths (js-array)) (producers (new globalThis.Map)) (index 0))
+        (await (saveCompilerMetadata manifest metadata))
+        (try
+          (progn
+            (while (< index (js-length (get plan :producers)))
+              (let* ((record (aref (get plan :producers) index)) (host (get record :host))
+                     (artifact (await (grid-read-artifact (get record :metadataPath) host sources undefined)))
+                     (producer-directory (resolve directory (+ "producer-" host)))
+                     (archived (await (archiveCompilerArtifact artifact (resolve producer-directory "metadata"))))
+                     (producer-record (js-object :host host :artifact archived :execution "unverified")))
+                (js-call (get metadata :producers) :push producer-record)
+                (await (grid-initialize-artifact artifact producer-directory (get plan :sessionOptions) producer-record))
+                (js-call producers :set host (get artifact :productIdentity))
+                (put producer-record :execution "initialized"))
+              (setq index (1+ index)))
+            ;; Preserve the original producer-major cell order, independent of
+            ;; input declaration order, so comparison identity arrays match.
+            (let ((host-index 0))
+              (while (< host-index (js-length compilerHosts))
+                (let ((host (aref compilerHosts host-index)) (target-index 0))
+                  (while (< target-index (js-length compilerHosts))
+                    (let* ((target (aref compilerHosts target-index))
+                           (record (js-call (get plan :cells) :find
+                             (lambda (item) (and (= (get item :host) host) (= (get item :target) target)))))
+                           (cell (js-object :host host :target target :status "building" :execution "unverified"))
+                           (cell-directory (resolve directory (+ host "-to-" target))))
+                      (js-call (get metadata :cells) :push cell)
+                      (await (mkdir cell-directory (js-object :recursive t)))
+                      (await (saveCompilerMetadata manifest metadata))
+                      (try
+                        (let ((artifact (await (grid-read-artifact (get record :metadataPath) target sources host))))
+                          (put cell :producerIdentity (js-call producers :get host))
+                          (put cell :artifact (await (archiveCompilerArtifact artifact (resolve cell-directory "metadata"))))
+                          (put cell :status "built")
+                          (await (saveCompilerMetadata manifest metadata))
+                          (await (grid-initialize-artifact artifact cell-directory (get plan :sessionOptions) cell))
+                          (put cell :execution "initialized") (put cell :status "constructed")
+                          (when retain-artifacts (js-call artifacts :push artifact))
+                          (js-call artifact-paths :push (js-object :host target
+                            :metadataPath (get record :metadataPath) :productIdentity (get artifact :productIdentity)))
+                          (await (saveCompilerMetadata manifest metadata)))
+                        (catch error
+                          (put cell :status "failed") (put cell :failure (compilerFailure error))
+                          (throw error))))
+                    (setq target-index (1+ target-index))))
+                (setq host-index (1+ host-index))))
+            (setq index 0)
+            (while (< index (js-length compilerHosts))
+              (let* ((target (aref compilerHosts index))
+                     (cells (js-call (get metadata :cells) :filter (lambda (cell) (= (get cell :target) target))))
+                     (identities (js-call cells :map (lambda (cell) (get (get (get cell :artifact) :productIdentity) :sha256)))))
+                (unless (and (= (js-length cells) 3)
+                             (js-call identities :every (lambda (value) (and (= (value-type value) "string") (> (js-length value) 0)))))
+                  (grid-error "compiler grid target has incomplete product identities"))
+                (let ((identical (= (get (new globalThis.Set identities) :size) 1)))
+                  (js-call (get metadata :comparisons) :push
+                    (js-object :target target :status (if identical "identical" "different") :identities identities))
+                  (unless identical (grid-error "compiler grid target products differ")))
+                (when retain-artifacts
+                  (js-call canonical-artifacts :push
+                    (js-call artifacts :find (lambda (artifact) (= (get artifact :host) target)))))
+                (js-call canonical-paths :push
+                  (js-call artifact-paths :find (lambda (artifact) (= (get artifact :host) target)))))
+              (setq index (1+ index)))
+            (put metadata :identityVerification "identical") (put metadata :status "constructed")
+            ;; Byte/fixed-point identities do not certify the original program
+            ;; corpus, its gates, performance, or language semantics.
+            (await (saveCompilerMetadata manifest metadata))
+            (if retain-artifacts
+              (js-object :directory directory :artifacts artifacts :canonicalArtifacts canonical-artifacts :metadata metadata)
+              (js-object :directory directory :artifacts artifacts :canonicalArtifacts canonical-artifacts
+                :artifactPaths artifact-paths :canonicalArtifactPaths canonical-paths :metadata metadata)))
+          (catch error
+            (put metadata :status "failed") (put metadata :identityVerification "unverified")
+            (put metadata :failure (compilerFailure error))
+            (await (saveCompilerMetadata manifest metadata))
+            (throw error))))))
+
+  (defasync recordCompilerGrid (options)
+    ;; Preserve the original public result. The execute entry below needs
+    ;; paths only, after every real artifact has been checked and initialized.
+    (await (record-grid-artifacts options t)))
+
+  (defun grid-execution-plan (options)
+    (unless (and options (= (value-type options) "object") (not (Array/isArray options)))
+      (throw (new globalThis.TypeError "compiler matrix execution options are required")))
+    (let* ((output (grid-required-string (get options :outputRoot) "compiler grid outputRoot is required"))
+           (producers (get options :producers))
+           (count (if (undefined? (get options :generations)) 3 (get options :generations)))
+           (records (js-array)) (hosts (new globalThis.Set)) (index 0))
+      (unless (and (Number/isSafeInteger count) (>= count 3))
+        (throw (new globalThis.TypeError "compiler matrix execution requires at least three generations per host")))
+      (unless (and (Array/isArray producers) (= (js-length producers) 3))
+        (throw (new globalThis.TypeError "recorded compiler grid requires three producer artifacts")))
+      (while (< index (js-length producers))
+        (let* ((record (aref producers index)) (host (normalizeCompilerHost (get record :host)))
+               (path (grid-required-string (get record :metadataPath) "producer metadataPath is required")))
+          (when (js-call hosts :has host) (grid-error "compiler grid repeats a producer host"))
+          (js-call hosts :add host)
+          (js-call records :push (js-object :host host :metadataPath (resolve path))))
+        (setq index (1+ index)))
+      (js-object :outputRoot (resolve output) :producers records :generations count
+        :sourceRoot (if (nullish? (get options :sourceRoot)) root (resolve (get options :sourceRoot)))
+        :profile (if (undefined? (get options :profile)) "small" (get options :profile))
+        :nativeTarget (get options :nativeTarget) :sessionOptions (get options :sessionOptions)
+        :signal (get options :signal) :onStage (get options :onStage))))
+
+  (defun grid-chain-shape (metadata host count source-identity)
+    (let ((sequence (get metadata :hosts)) (records (get metadata :generations))
+          (fixed (get metadata :fixedPoint)))
+      (unless (and (= (get metadata :format) "eliscript-compiler-bootstrap") (= (get metadata :version) 1)
+                   (= (grid-source-sha metadata) (get source-identity :sha256))
+                   (= (get metadata :status) "constructed") (not (get metadata :cleanupFailure))
+                   (Array/isArray sequence) (>= (js-length sequence) count)
+                   (js-call sequence :every (lambda (item) (= (normalizeCompilerHost item) host)))
+                   (Array/isArray records) (= (js-length records) (js-length sequence))
+                   (js-call records :every (lambda (record position)
+                     (and (= (get record :generation) (1+ position)) (= (get record :target) host)
+                          (= (get record :producerHost) host) (= (get record :status) "instantiated")
+                          (= (get record :sourceSha256) (get source-identity :sha256)))))
+                   (= (get fixed :status) "identical") (Array/isArray (get fixed :comparisons))
+                   (= (js-length (get fixed :comparisons)) (1- (js-length records)))
+                   (js-call (get fixed :comparisons) :every (lambda (item position)
+                     (and (= (get item :target) host) (= (get item :from) (1+ position))
+                          (= (get item :to) (+ position 2)) (= (get item :status) "identical")
+                          (Array/isArray (get item :identities)) (= (js-length (get item :identities)) 2)
+                          (= (aref (get item :identities) 0)
+                             (get (get (get (aref records position) :artifact) :productIdentity) :sha256))
+                          (= (aref (get item :identities) 1)
+                             (get (get (get (aref records (1+ position)) :artifact) :productIdentity) :sha256))))))
+        (grid-error "retained compiler chain does not satisfy the requested complete same-host fixed point"))
+      metadata))
+
+  (defasync grid-verify-chain (metadata host plan sources source-identity initial)
+    (grid-chain-shape metadata host (get plan :generations) source-identity)
+    (let* ((root-directory (await (realpath (resolve (get plan :outputRoot) "generations" (+ "chain-" host)))))
+           (directory (await (realpath (grid-required-string (get metadata :directory) "compiler generation directory is required"))))
+           (part (relative root-directory directory)))
+      (unless (and (> (js-length part) 0) (not (isAbsolute part)) (/= part "..")
+                   (not (js-call part :startsWith (+ ".." sep))))
+        (grid-error "retained compiler chain directory is outside its host construction root"))
+      (let ((original (await (readCompilerMetadata (resolve directory "bootstrap.json")))))
+        (unless (= (compilerMetadataDigest metadata) (compilerMetadataDigest original))
+          (grid-error "retained compiler chain differs from its original bootstrap manifest")))
+      (let ((seed (get metadata :seed)))
+        (unless (and seed (= (get seed :host) host)
+                     (= (get (get seed :productIdentity) :sha256) (get (get initial :productIdentity) :sha256)))
+          (grid-error "retained compiler chain has a different initial producer"))
+        ;; Reuse the original archive verifier: all declared file bytes and
+        ;; hashes are checked again, not merely the executable or a cache flag.
+        (let ((actual (await (archiveCompilerArtifact initial (resolve directory "seed-metadata")))))
+          (unless (= (compilerMetadataDigest actual) (compilerMetadataDigest seed))
+            (grid-error "retained compiler chain seed evidence differs from its actual artifact"))))
+      (let ((records (get metadata :generations)) (index 0) (last undefined))
+        (while (< index (js-length records))
+          (let* ((record (aref records index)) (evidence (get record :artifact))
+                 (artifact-directory (grid-required-string (get evidence :directory) "compiler generation artifact directory is required"))
+                 (artifact (await (grid-read-artifact (resolve artifact-directory "compiler-artifact.json") host sources host))))
+            (unless (and (= (get artifact :profile) (get plan :profile))
+                         (or (/= host "native") (undefined? (get plan :nativeTarget))
+                             (= (get artifact :nativeTarget) (get plan :nativeTarget)))
+                         (Array/isArray (get artifact :frontendIR))
+                         (= (js-length (get artifact :frontendIR)) (1+ (js-length (get sources :modules))))
+                         (Array/isArray (get artifact :literalIR))
+                         (= (js-length (get artifact :literalIR)) (js-length (get sources :literalSources)))
+                         (if (= host "javascript")
+                           (js-call (get artifact :modules) :every (lambda (item) (= (value-type (get item :sourceMapPath)) "string")))
+                           (= (value-type (get artifact :debugPath)) "string"))
+                         (= (get (get artifact :productIdentity) :sha256) (get (get evidence :productIdentity) :sha256)))
+              (grid-error "retained compiler generation omits its complete IR debug or product identity"))
+            (let ((actual (await (archiveCompilerArtifact artifact
+                            (resolve directory (+ "generation-" (1+ index) "-metadata"))))))
+              (unless (= (compilerMetadataDigest actual) (compilerMetadataDigest evidence))
+                (grid-error "retained compiler generation differs from its authenticated artifact")))
+            ;; Do not retain a preceding generation's full native typed graph
+            ;; while decoding the next generation's authenticated manifest.
+            (when (= index (1- (js-length records))) (setq last artifact)))
+          (setq index (1+ index)))
+        (js-object :directory directory :metadata metadata :artifact last))))
+
+  (defasync grid-ensure-chain (plan sources source-identity initial host)
+    (let* ((directory (resolve (get plan :outputRoot) "generations" (+ "chain-" host)))
+           (path (resolve directory "bootstrap.json")) (exists t))
+      (try
+        (let ((info (await (lstat path))))
+          (unless (and (js-call info :isFile) (not (js-call info :isSymbolicLink)))
+            (grid-error "retained compiler chain manifest must be a regular file")))
+        (catch error (if (= (get error :code) "ENOENT") (setq exists false) (throw error))))
+      (if exists
+        (await (grid-verify-chain (await (readCompilerMetadata path)) host plan sources source-identity initial))
+        (let* ((sequence (js-array)) (position 0))
+          (while (< position (get plan :generations))
+            (js-call sequence :push host) (setq position (1+ position)))
+          (let ((chain (await (bootstrapCompilerChain (js-object :outputRoot directory :hosts sequence
+                          :sources sources :sourceRoot (get plan :sourceRoot) :seedArtifact initial
+                          :profile (get plan :profile) :nativeTarget (get plan :nativeTarget)
+                          :retainIR t :debug t :sessionOptions (get plan :sessionOptions)
+                          :signal (get plan :signal) :onStage (get plan :onStage))))))
+            (grid-chain-shape (get chain :metadata) host (get plan :generations) source-identity)
+            ;; The stable host file has the original bootstrap schema. Publish
+            ;; it only after the complete chain and its real cleanup succeeded.
+            (await (saveCompilerMetadata path (get chain :metadata)))
+            ;; The actual builder just authenticated every emitted generation.
+            ;; Re-reading its final typed manifest here would duplicate the
+            ;; fresh product still held by chain.artifact in this same VM.
+            chain)))))
+
+  (defasync runCompilerMatrixChain (options host)
+    (let* ((plan (grid-execution-plan options)) (target (normalizeCompilerHost host))
+           (sources (await (loadCompilerSources (js-object :sourceRoot (get plan :sourceRoot)))))
+           (source-identity (compilerSourceIdentity sources))
+           ;; Capture and validate all three declarations above, but do not
+           ;; decode another host's large typed manifest in this host's VM.
+           (record (js-call (get plan :producers) :find (lambda (item) (= (get item :host) target))))
+           (initial (await (grid-read-artifact (get record :metadataPath) target sources undefined))))
+      (await (grid-ensure-chain plan sources source-identity initial target))))
+
+  (defasync grid-chain-path (plan sources source-identity host)
+    ;; This scope owns only one seed and one chain's final artifact. Its
+    ;; caller retains primitive paths and authenticated small identities.
+    (let* ((record (js-call (get plan :producers) :find (lambda (item) (= (get item :host) host))))
+           (initial (await (grid-read-artifact (get record :metadataPath) host sources undefined)))
+           (chain (await (grid-ensure-chain plan sources source-identity initial host)))
+           (metadata (get chain :metadata)) (artifact (get chain :artifact)))
+      (unless (and (= (get metadata :status) "constructed")
+                   (= (get (get metadata :fixedPoint) :status) "identical")
+                   (not (get metadata :cleanupFailure)))
+        (grid-error "compiler matrix self-host chain has not established a complete fixed point"))
+      (js-object :host host :metadataPath (get artifact :metadataPath)
+        :productIdentity (get artifact :productIdentity)
+        :chain (js-object :hosts (get metadata :hosts) :directory (get chain :directory)
+          :status (get metadata :status) :verification "unverified"
+          :sourceIdentity (get metadata :sourceIdentity) :fixedPoint (get metadata :fixedPoint)))))
+
+  (defun grid-abort (plan)
+    (let ((signal (get plan :signal)))
+      (when (and signal (get signal :aborted))
+        (throw (if (undefined? (get signal :reason))
+                 (new globalThis.Error "compiler matrix aborted") (get signal :reason))))))
+
+  (defasync grid-open-build-producer (plan sources record &optional initial owner)
+    ;; The real loader snapshots execution ABI/source declarations itself.
+    ;; Do not keep this independently decoded manifest in the three-target
+    ;; row's scope after initialization. No artifact field is removed.
+    (let* ((host (get record :host))
+           (artifact (await (grid-read-artifact (get record :metadataPath) host sources
+                              (if initial undefined host)))))
+      (when owner (put owner :producerIdentity (get artifact :productIdentity)))
+      (await (openCompilerArtifact artifact (get plan :sessionOptions)))))
+
+  (defasync grid-build-host (plan sources directory metadata manifest record)
+    (let* ((host (get record :host))
+           (producer nil) (failed false) (paths (js-array)))
+      (try
+        (progn
+          (grid-abort plan)
+          (setq producer (await (grid-open-build-producer plan sources record)))
+          (let ((index 0))
+            (while (< index (js-length compilerHosts))
+              (grid-abort plan)
+              (let* ((target (aref compilerHosts index))
+                     (cell (js-object :host host :target target :status "building" :execution "unverified"))
+                     (cell-directory (resolve directory (+ host "-to-" target))))
+                (js-call (get metadata :cells) :push cell)
+                (await (mkdir cell-directory (js-object :recursive t)))
+                (await (saveCompilerMetadata manifest metadata))
+                (try
+                  (let ((stage (get plan :onStage)))
+                    (when stage (await (funcall stage
+                      (js-object :directory directory :host host :target target :phase "compiler-build"))))
+                    (let ((emitted (await (buildIndependentCompiler
+                            (js-object :host target :outputRoot (resolve cell-directory "artifact") :session producer
+                              :sources sources :sourceRoot (get plan :sourceRoot) :profile (get plan :profile)
+                              :nativeTarget (get plan :nativeTarget) :signal (get plan :signal) :retainIR t :debug t)))))
+                      (unless (= (normalizeCompilerHost (get emitted :host)) target)
+                        (grid-error "compiler grid emitted a different host"))
+                      (grid-assert-provenance emitted sources host)
+                      (put cell :artifact (await (archiveCompilerArtifact emitted (resolve cell-directory "metadata"))))
+                      (put cell :status "built")
+                      (await (saveCompilerMetadata manifest metadata))
+                      (when stage (await (funcall stage
+                        (js-object :directory directory :host host :target target :phase "compiler-initialize"))))
+                      (await (grid-initialize-artifact emitted cell-directory (get plan :sessionOptions) cell))
+                      (put cell :execution "initialized") (put cell :status "constructed")
+                      (js-call paths :push (js-object :host host :target target :metadataPath (get emitted :metadataPath)))))
+                  (catch error
+                    (put cell :status "failed") (put cell :failure (compilerFailure error)) (throw error))
+                  (finally (await (saveCompilerMetadata manifest metadata)))))
+              (setq index (1+ index))))
+          paths)
+        (catch error (setq failed t) (throw error))
+        (finally
+          (when producer
+            (try (await (js-call producer :close))
+              (catch error
+                (unless (get metadata :cleanupFailures) (put metadata :cleanupFailures (js-array)))
+                (js-call (get metadata :cleanupFailures) :push
+                  (js-object :host host :failure (compilerFailure error)))
+                (await (saveCompilerMetadata manifest metadata))
+                (unless failed (throw error)))))))))
+
+  (defasync grid-build-paths (plan sources producers output)
+    ;; The original bootstrap grid retains all nine typed results. Here each
+    ;; completed cell is archived and initialized before its scope exits.
+    (await (mkdir output (js-object :recursive t)))
+    (let* ((directory (await (mkdtemp (resolve output "compiler-grid-"))))
+           (metadata (js-object :format "eliscript-independent-compiler-grid" :version 1
+             :status "building" :verification "unverified"
+             :sourceIdentity (await (archiveCompilerSources sources (resolve directory "sources")))
+             :cells (js-array) :comparisons (js-array)))
+           (manifest (resolve directory "grid.json")) (paths (js-array)) (index 0))
+      (await (saveCompilerMetadata manifest metadata))
+      (try
+        (progn
+          (while (< index (js-length compilerHosts))
+            (let* ((host (aref compilerHosts index))
+                   (record (js-call producers :find (lambda (item) (= (get item :host) host))))
+                   (row (await (grid-build-host plan sources directory metadata manifest record)))
+                   (position 0))
+              (while (< position (js-length row))
+                (js-call paths :push (aref row position)) (setq position (1+ position))))
+            (setq index (1+ index)))
+          (setq index 0)
+          (while (< index (js-length compilerHosts))
+            (let* ((target (aref compilerHosts index))
+                   (cells (js-call (get metadata :cells) :filter (lambda (cell) (= (get cell :target) target))))
+                   (identities (js-call cells :map (lambda (cell) (get (get (get cell :artifact) :productIdentity) :sha256)))))
+              (unless (and (= (js-length cells) 3)
+                           (js-call cells :every (lambda (cell)
+                             (and (= (get cell :status) "constructed") (= (get cell :execution) "initialized"))))
+                           (js-call identities :every (lambda (id) (and (= (value-type id) "string") (> (js-length id) 0)))))
+                (grid-error "complete compiler grid has not established all same-target identities"))
+              (let ((identical (= (get (new globalThis.Set identities) :size) 1)))
+                (js-call (get metadata :comparisons) :push
+                  (js-object :target target :status (if identical "identical" "different") :identities identities))
+                (unless identical (grid-error "complete compiler grid has not established all same-target identities"))))
+            (setq index (1+ index)))
+          (when (get metadata :cleanupFailures) (grid-error "compiler grid producer cleanup failed"))
+          (put metadata :status "constructed") (put metadata :identityVerification "identical")
+          (await (saveCompilerMetadata manifest metadata))
+          (js-object :directory directory :metadata metadata :cells paths))
+        (catch error
+          (put metadata :status "failed") (put metadata :failure (compilerFailure error))
+          (await (saveCompilerMetadata manifest metadata)) (throw error)))))
+
+  (defasync grid-build-selected-cell (plan sources record target directory metadata manifest)
+    ;; This scope releases the selected producer and the fresh target graph
+    ;; before the original corpus opens its own real producer session.
+    (let* ((host (get record :host)) (build (get metadata :build))
+           (producer nil) (failed false) (stage (get plan :onStage)))
+      (try
+        (progn
+          (grid-abort plan)
+          (setq producer (await (grid-open-build-producer plan sources record t build)))
+          (when stage (await (funcall stage
+            (js-object :phase "compiler-build" :host host :target target))))
+          (let ((artifact (await (buildIndependentCompiler
+                  (js-object :host target :outputRoot (resolve directory "artifact")
+                    :session producer :sources sources :sourceRoot (get plan :sourceRoot)
+                    :profile "full-compiler" :nativeTarget (get plan :nativeTarget)
+                    :signal (get plan :signal) :retainIR t :debug t)))))
+            (unless (= (normalizeCompilerHost (get artifact :host)) target)
+              (grid-error "compiler grid emitted a different host"))
+            (grid-assert-provenance artifact sources host)
+            (put build :metadataPath (get artifact :metadataPath))
+            (put build :artifact (await (archiveCompilerArtifact artifact (resolve directory "metadata"))))
+            (put build :status "built")
+            (await (saveCompilerMetadata manifest metadata))
+            (when stage (await (funcall stage
+              (js-object :phase "compiler-initialize" :host host :target target))))
+            (await (grid-initialize-artifact artifact directory (get plan :sessionOptions) build))
+            (put build :execution "initialized") (put build :status "constructed")))
+        (catch error
+          (setq failed t) (put build :status "failed")
+          (put build :failure (compilerFailure error)) (throw error))
+        (finally
+          (when producer
+            (try (await (js-call producer :close))
+              (catch error
+                (put build :cleanupFailure (compilerFailure error))
+                (unless failed (throw error)))))
+          (await (saveCompilerMetadata manifest metadata))))))
+
+  (defun grid-assert-complete-cell-artifact (artifact sources)
+    (let* ((front (get artifact :frontendIR)) (literal (get artifact :literalIR))
+           (wanted (js-call (js-call (get sources :modules) :map (lambda (item) (get item :id))) :concat (js-array "runtime")))
+           (files (new globalThis.Set (js-call (get (get artifact :artifactIdentity) :files) :map (lambda (item) (get item :path)))))
+           (declared (lambda (path)
+             (and (= (value-type path) "string")
+                  (js-call files :has (js-call (js-call (relative (get artifact :directory)
+                    (resolve (get artifact :directory) path)) :split sep) :join "/"))))))
+      ;; Resolve path spellings exactly as the existing artifact resource
+      ;; verifier does. IR and debug references must be declared deliverables.
+      (unless (and (= (get artifact :profile) "full-compiler") (= (get artifact :debugEnabled) t)
+                   (Array/isArray front) (Array/isArray literal)
+                   (= (JSON/stringify (js-call (js-call front :map (lambda (item) (get item :id))) :sort))
+                      (JSON/stringify (js-call wanted :sort)))
+                   (= (JSON/stringify (js-call (js-call literal :map (lambda (item) (get item :id))) :sort))
+                      (JSON/stringify (js-call (js-call (get sources :literalSources) :map (lambda (item) (get item :id))) :sort)))
+                   (js-call (js-call front :concat literal) :every (lambda (item)
+                     (and (funcall declared (get item :path)) (funcall declared (get item :canonicalPath)))))
+                   (if (= (get artifact :host) "javascript")
+                     (js-call (get artifact :modules) :every (lambda (item) (funcall declared (get item :sourceMapPath))))
+                     (funcall declared (get artifact :debugPath))))
+        (grid-error "existing cell build omits its complete IR debug or product declarations"))))
+
+  (defasync grid-reuse-producer-identity (plan sources record directory owner)
+    (let ((artifact (await (grid-read-artifact (get record :metadataPath) (get record :host) sources undefined))))
+      (await (mkdir directory (js-object :recursive t)))
+      (await (grid-initialize-artifact artifact directory (get plan :sessionOptions) owner))
+      (get artifact :productIdentity)))
+
+  (defasync grid-reuse-selected-cell (plan sources record target directory metadata manifest path)
+    (let* ((host (get record :host)) (build (get metadata :build)) (stage (get plan :onStage))
+           (receipt-path (resolve (dirname path) ".." "execution.json")))
+      (grid-abort plan)
+      (when stage (await (funcall stage (js-object :phase "compiler-reuse" :host host :target target))))
+      (let* ((receipt (await (readCompilerMetadata receipt-path))) (old (get receipt :build)))
+        (unless (and (= (get receipt :format) "eliscript-compiler-matrix-cell-execution") (= (get receipt :version) 1)
+                     (= (get receipt :host) host) (= (get receipt :target) target)
+                     (= (grid-source-sha receipt) (get (compilerSourceIdentity sources) :sha256))
+                     old (= (get old :host) host) (= (get old :target) target)
+                     (= (get old :status) "constructed") (= (get old :execution) "initialized")
+                     (not (get old :cleanupFailure))
+                     (= (await (realpath (get old :metadataPath))) (await (realpath path))))
+          (grid-error "existing cell build lacks its complete original construction evidence"))
+        (unless (= (await (realpath (get receipt :producerMetadataPath))) (await (realpath (get record :metadataPath))))
+          (grid-error "existing cell build has a different original producer"))
+        (let ((producer-identity (await (grid-reuse-producer-identity plan sources record
+                                       (resolve directory "producer-verification") build))))
+          (unless (= (get producer-identity :sha256) (get (get old :producerIdentity) :sha256))
+            (grid-error "existing cell build has a different original producer"))
+          (put build :producerIdentity producer-identity))
+        (let* ((artifact (await (grid-read-artifact path target sources host)))
+               (archived nil))
+          (grid-assert-complete-cell-artifact artifact sources)
+          (setq archived (await (archiveCompilerArtifact artifact (resolve directory "metadata"))))
+          (unless (= (compilerMetadataDigest archived) (compilerMetadataDigest (get old :artifact)))
+            (grid-error "existing cell build differs from its original archived product"))
+          (put build :metadataPath path) (put build :artifact archived)
+          (put build :reusedFrom receipt-path) (put build :status "built")
+          (await (saveCompilerMetadata manifest metadata))
+          (when stage (await (funcall stage (js-object :phase "compiler-initialize" :host host :target target))))
+          (await (grid-initialize-artifact artifact directory (get plan :sessionOptions) build))
+          (put build :execution "initialized") (put build :status "constructed")
+          (await (saveCompilerMetadata manifest metadata))))))
+
+  (defasync grid-execute-cell (options host target existing-path)
+    ;; Independent cell execution does not authenticate generations or other
+    ;; cells. Those remain the original matrix's separate, unchanged gates.
+    (let* ((selected-host (normalizeCompilerHost host))
+           (selected-target (normalizeCompilerHost target))
+           (plan (grid-execution-plan options))
+           (corpus-records-path (get options :corpusRecordsPath))
+           (sources (await (loadCompilerSources (js-object :sourceRoot (get plan :sourceRoot)))))
+           (record (js-call (get plan :producers) :find
+                     (lambda (item) (= (get item :host) selected-host)))))
+      (await (mkdir (get plan :outputRoot) (js-object :recursive t)))
+      (let* ((directory (await (mkdtemp (resolve (get plan :outputRoot)
+                         (+ "compiler-matrix-cell-" selected-host "-to-" selected-target "-")))))
+             (manifest (resolve directory "execution.json"))
+             (metadata (js-object :format "eliscript-compiler-matrix-cell-execution" :version 1
+               :host selected-host :target selected-target :profile "full-compiler"
+               :status "building" :verification "unverified"
+               :finalGridVerification "unverified" :crossCellVerification "unverified"
+               :generationsVerification "unverified"
+               :sourceIdentity (await (archiveCompilerSources sources (resolve directory "sources")))
+               :producerMetadataPath (get record :metadataPath)
+               :build (js-object :host selected-host :target selected-target
+                        :status "building" :execution "unverified"))))
+        (await (saveCompilerMetadata manifest metadata))
+        (try
+          (progn
+            (if (undefined? existing-path)
+              (await (grid-build-selected-cell plan sources record selected-target directory metadata manifest))
+              (await (grid-reuse-selected-cell plan sources record selected-target directory metadata manifest existing-path)))
+            (put metadata :status "corpus-running")
+            (await (saveCompilerMetadata manifest metadata))
+            (let ((corpus (await (runCompilerMatrixCell
+                    (js-object :host selected-host :target selected-target
+                      :metadataPath (get record :metadataPath)
+                      :outputRoot (resolve directory "original-corpus")
+                      :sourceRoot (get plan :sourceRoot) :profile "full-compiler"
+                      :corpusRecordsPath corpus-records-path :nativeTarget (get plan :nativeTarget)
+                      :sessionOptions (get plan :sessionOptions)
+                      :signal (get plan :signal) :onStage (get plan :onStage))))))
+              (put metadata :corpus (js-object :directory (get corpus :directory)
+                :status (get (get corpus :metadata) :status)
+                :verification (get (get corpus :metadata) :verification)))
+              (unless (= (get (get corpus :metadata) :verification) "equivalent")
+                (grid-error "original compiler corpus cell has not passed"))
+              (put metadata :status "constructed") (put metadata :verification "equivalent")
+              (await (saveCompilerMetadata manifest metadata))
+              (js-object :directory directory :metadata metadata :corpus corpus)))
+          (catch error
+            (put metadata :status "failed") (put metadata :verification "unverified")
+            (put metadata :failure (compilerFailure error))
+            (await (saveCompilerMetadata manifest metadata)) (throw error))))))
+
+  (defasync executeCompilerMatrixCellFromArtifacts (options host target)
+    (await (grid-execute-cell options host target undefined)))
+
+  (defasync executeCompilerMatrixCellFromArtifact (options host target metadata-path)
+    (normalizeCompilerHost host) (normalizeCompilerHost target)
+    (grid-required-string metadata-path "existing cell build metadataPath is required")
+    (await (grid-execute-cell options host target (resolve metadata-path))))
+
+  (defasync executeCompilerMatrixFromArtifacts (options)
+    ;; Existing artifacts are only initial producers. They never stand in for
+    ;; a self-host generation, a newly compiled cell, or an original gate.
+    (let* ((plan (grid-execution-plan options))
+           (sources (await (loadCompilerSources (js-object :sourceRoot (get plan :sourceRoot)))))
+           (source-identity (compilerSourceIdentity sources)) (index 0))
+      (await (mkdir (get plan :outputRoot) (js-object :recursive t)))
+      (let* ((directory (await (mkdtemp (resolve (get plan :outputRoot) "compiler-matrix-execution-"))))
+             (generation-directory (resolve (get plan :outputRoot) "generations"))
+             (generation-path (resolve generation-directory "bootstrap.json"))
+             (manifest (resolve directory "execution.json"))
+             (generations (js-object :format "eliscript-independent-compiler-bootstrap" :version 1
+               :status "building" :verification "unverified" :sourceIdentity source-identity :chains (js-array)))
+             (metadata (js-object :format "eliscript-compiler-matrix-execution" :version 1
+               :status "building" :verification "unverified" :sourceIdentity source-identity
+               :generationsDirectory generation-directory))
+             (producers (js-array)))
+        (await (mkdir generation-directory (js-object :recursive t)))
+        (await (saveCompilerMetadata generation-path generations))
+        (await (saveCompilerMetadata manifest metadata))
+        (try
+          (progn
+            (setq index 0)
+            (while (< index (js-length compilerHosts))
+              (let* ((host (aref compilerHosts index))
+                     (record (await (grid-chain-path plan sources source-identity host))))
+                  (js-call (get generations :chains) :push (get record :chain))
+                  (js-call producers :push (js-object :host host :metadataPath (get record :metadataPath)
+                    :productIdentity (get record :productIdentity)))
+                  (await (saveCompilerMetadata generation-path generations)))
+              (setq index (1+ index)))
+            (put generations :status "constructed")
+            (put generations :fixedPoint (js-object :status "identical"))
+            (await (saveCompilerMetadata generation-path generations))
+            ;; The same retained validator used by record-only mode checks the
+            ;; original per-generation files, not just this aggregate record.
+            (await (grid-existing-generations generation-directory source-identity))
+            (let* ((built (await (grid-build-paths plan sources producers (resolve directory "cell-builds"))))
+                   (grid (await (record-grid-artifacts (js-object :outputRoot (resolve directory "recorded-grid")
+                           :sourceRoot (get plan :sourceRoot) :producers producers :cells (get built :cells)
+                           :generations (js-object :directory generation-directory)
+                           :sessionOptions (get plan :sessionOptions)) false))))
+              (put metadata :gridDirectory (get grid :directory))
+              (await (saveCompilerMetadata manifest metadata))
+              (let ((matrix (await (buildCompilerMatrix (js-object :outputRoot (resolve directory "original-corpus")
+                              :sourceRoot (get plan :sourceRoot) :compilerGrid grid
+                              :compilerArtifactRecords (get grid :canonicalArtifactPaths)
+                              :readCompilerArtifact (async (host)
+                                (let ((record (js-call (get grid :canonicalArtifactPaths) :find
+                                                (lambda (item) (= (get item :host) host)))))
+                                  (await (grid-read-artifact (get record :metadataPath) host sources "javascript"))))
+                              :profile (get plan :profile)
+                              :nativeTarget (get plan :nativeTarget) :sessionOptions (get plan :sessionOptions)
+                              :signal (get plan :signal) :onStage (get plan :onStage))))))
+                (put metadata :matrixDirectory (get matrix :directory))
+                (put metadata :status (get (get matrix :metadata) :status))
+                (put metadata :verification (get (get matrix :metadata) :verification))
+                (await (saveCompilerMetadata manifest metadata))
+                (unless (= (get metadata :verification) "equivalent")
+                  (grid-error "complete original compiler corpus matrix has not passed"))
+                (js-object :directory directory :metadata metadata :grid grid :matrix matrix))))
+          (catch error
+            (put metadata :status "failed") (put metadata :verification "unverified")
+            (put metadata :failure (compilerFailure error))
+            (when (= (get generations :status) "building")
+              (put generations :status "failed")
+              (await (saveCompilerMetadata generation-path generations)))
+            (await (saveCompilerMetadata manifest metadata)) (throw error))))))
+
+  (defasync run-record-grid (arguments)
+    (let ((execute (and (= (js-length arguments) 2) (= (aref arguments 0) "--execute")))
+          (chain (and (= (js-length arguments) 3) (= (aref arguments 0) "--chain")))
+          (reuse (and (= (js-length arguments) 5) (= (aref arguments 0) "--cell-from-artifact")))
+          (cell (or (and (= (js-length arguments) 4) (= (aref arguments 0) "--cell"))
+                    (and (= (js-length arguments) 5) (= (aref arguments 0) "--cell-from-artifact")))))
+      (unless (or execute chain cell (= (js-length arguments) 1))
+        (throw (new globalThis.Error "Usage: record-grid GRID_INPUT_JSON | --execute INPUT_JSON | --chain INPUT_JSON HOST | --cell INPUT_JSON HOST TARGET | --cell-from-artifact INPUT_JSON HOST TARGET BUILD_METADATA")))
+    (let* ((path (resolve (aref arguments (if (or execute chain cell) 1 0)))) (base (dirname path))
+           (options (await (readCompilerMetadata path))))
+      (put options :outputRoot (resolve base (grid-required-string (get options :outputRoot) "compiler grid outputRoot is required")))
+      (when (get options :sourceRoot) (put options :sourceRoot (resolve base (get options :sourceRoot))))
+      (unless (or execute chain cell)
+        (let ((generations (get options :generations)))
+          (when generations (put generations :directory (resolve base (get generations :directory))))))
+      (js-call (js-array (get options :producers) (get options :cells)) :forEach
+        (lambda (records)
+          (when (Array/isArray records)
+            (js-call records :forEach
+              (lambda (record) (put record :metadataPath (resolve base (get record :metadataPath))))))))
+      (when (or execute chain cell)
+        (let ((count 0))
+          ;; The CLI has no callable JSON option. Observe the existing stage
+          ;; hook without retaining an event or allowing diagnostic IO to
+          ;; replace the compiler's first failure. Library callbacks are not
+          ;; wrapped or changed.
+          (put options :onStage (lambda (event)
+            (when (or cell (< count 64))
+              (setq count (1+ count))
+              (try
+                (let ((record (js-object))
+                      (fields (js-array "phase" "host" "producerHost" "target" "generation" "filename"
+                                "recipe" "case" "record" "id" "operation" "index" "count" "completed" "total"))
+                      (index 0))
+                  (while (< index (js-length fields))
+                    (let* ((field (aref fields index)) (value (get event field)))
+                      (cond ((= (value-type value) "string")
+                             (put record field (js-call value :slice 0 256)))
+                            ((and (= (value-type value) "number") (Number/isFinite value)) (put record field value))))
+                    (setq index (1+ index)))
+                  (js-call (get globalThis.process :stderr) :write (+ "record-grid stage " (JSON/stringify record) "\n")))
+                (catch ignored nil)))))
+          (js-call options :onStage (js-object :phase (cond (chain "chain-start") (cell "cell-start") (t "execute-start"))
+            :host (if (or chain cell) (aref arguments 2) undefined)
+            :target (if cell (aref arguments 3) undefined)))))
+      (let ((grid (await (cond (execute (executeCompilerMatrixFromArtifacts options))
+                              (chain (runCompilerMatrixChain options (aref arguments 2)))
+                              (cell (if reuse
+                                      (executeCompilerMatrixCellFromArtifact options (aref arguments 2) (aref arguments 3)
+                                        (resolve (aref arguments 4)))
+                                      (executeCompilerMatrixCellFromArtifacts options (aref arguments 2) (aref arguments 3))))
+                              (t (recordCompilerGrid options))))))
+        (js-call (get globalThis.process :stdout) :write
+          (+ (resolve (get grid :directory) (cond ((or execute cell) "execution.json") (chain "bootstrap.json") (t "grid.json"))) "\n"))
+        grid))))
+
+  (export recordCompilerGrid executeCompilerMatrixFromArtifacts runCompilerMatrixChain
+    executeCompilerMatrixCellFromArtifacts executeCompilerMatrixCellFromArtifact)
+
+  (when (and (> (js-length (get globalThis.process :argv)) 1)
+             (= (basename (aref (get globalThis.process :argv) 1)) "record-grid.mjs"))
+    (js-call (run-record-grid (js-call (get globalThis.process :argv) :slice 2)) :catch
+      (lambda (error)
+        (js-call (get globalThis.process :stderr) :write (+ (JSON/stringify (compilerFailure error)) "\n"))
+        (put globalThis.process :exitCode 1)))))

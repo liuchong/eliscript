@@ -63,16 +63,14 @@
 
 (defun eliscript-portable--flatten (forms)
   "Return top-level FORMS with module wrappers removed."
-  (apply
-   #'append
-   (mapcar
-    (lambda (form)
-      (let ((value (eliscript-portable--value form)))
+  (let ((pending (copy-sequence forms)) output)
+    (while pending
+      (let* ((form (pop pending)) (value (eliscript-portable--value form)))
         (if (and (consp value)
                  (eq (eliscript-portable--value (car value)) 'module))
-            (eliscript-portable--flatten (cddr value))
-          (list form))))
-    forms)))
+            (setq pending (append (cddr value) pending))
+          (push form output))))
+    (nreverse output)))
 
 (defun eliscript-portable--declarations (forms)
   "Collect portable-relevant declarations from FORMS."
@@ -207,7 +205,7 @@
               "portable function %s depends on non-portable %s: %s"
               eliscript-portable--entry kind name))))))))
 
-(defun eliscript-portable--expression
+(defun eliscript-portable--expression-recursive
     (form scope declarations dependencies)
   "Validate portable expression FORM in lexical SCOPE."
   (when form
@@ -225,6 +223,139 @@
          (append value nil) scope declarations dependencies))
        ((consp value)
         (eliscript-portable--call form scope declarations dependencies))))))
+
+(defun eliscript-portable--expression-jobs (forms scope span)
+  "Describe ordered FORMS to validate in SCOPE inheriting SPAN."
+  (mapcar (lambda (form) (vector 'expression form scope span)) forms))
+
+(defun eliscript-portable--expression
+    (form scope declarations dependencies)
+  "Validate portable FORM with explicit depth-first lexical tasks.
+Binding initialization, defaults and publication remain separate ordered jobs;
+no later binding becomes visible while an earlier initializer is checked."
+  (let ((pending (list (vector 'expression form scope
+                              eliscript-portable--current-span))))
+    (while pending
+      (let* ((job (pop pending)) (kind (aref job 0))
+             (source (aref job 1)) (local (aref job 2))
+             (eliscript-portable--current-span (aref job 3)))
+        (pcase kind
+          ('binding-initializer
+           (push (vector 'expression (eliscript-portable--binding-value source)
+                         local eliscript-portable--current-span) pending))
+          ('binding-default
+           (push (vector 'defaults (eliscript-portable--binding-name source)
+                         local eliscript-portable--current-span) pending))
+          ('binding-add
+           (eliscript-portable--add-pattern
+            (eliscript-portable--binding-name source) local))
+          ('defaults
+           (setq pending
+                 (append
+                  (eliscript-portable--expression-jobs
+                   (eliscript-binding-defaults
+                    source (lambda (_form message)
+                             (eliscript-portable--fail "%s" message)))
+                   local eliscript-portable--current-span)
+                  pending)))
+          ('assignment
+           (when source
+             (let* ((name-form (car source))
+                    (name (eliscript-portable--value name-form)))
+               (unless (gethash name local)
+                 (let ((eliscript-portable--current-span
+                        (or (eliscript-form-span name-form)
+                            eliscript-portable--current-span)))
+                   (eliscript-portable--fail
+                    "portable function %s may only assign local bindings: %s"
+                    eliscript-portable--entry name)))
+               (push (vector 'assignment (cddr source) local
+                             eliscript-portable--current-span) pending)
+               (push (vector 'expression (cadr source) local
+                             eliscript-portable--current-span) pending))))
+          ('object
+           (when source
+             (let* ((key (car source)) (key-value (eliscript-portable--value key)))
+               (push (vector 'object (cddr source) local
+                             eliscript-portable--current-span) pending)
+               (push (vector 'expression (cadr source) local
+                             eliscript-portable--current-span) pending)
+               (unless (or (keywordp key-value) (stringp key-value) (symbolp key-value))
+                 (push (vector 'expression key local
+                               eliscript-portable--current-span) pending)))))
+          ('expression
+           (when source
+             (let* ((eliscript-portable--current-span
+                     (or (eliscript-form-span source) eliscript-portable--current-span))
+                    (value (eliscript-portable--value source)))
+               (cond
+                ((or (null value) (eq value t) (numberp value) (stringp value)
+                     (memq value '(false undefined)) (keywordp value)) nil)
+                ((symbolp value)
+                 (eliscript-portable--reference source local declarations dependencies))
+                ((vectorp value)
+                 (setq pending
+                       (append (eliscript-portable--expression-jobs
+                                (append value nil) local eliscript-portable--current-span)
+                               pending)))
+                ((consp value)
+                 (let* ((operator-form (car value))
+                        (operator (eliscript-portable--value operator-form))
+                        (arguments (cdr value))
+                        (span eliscript-portable--current-span)
+                        (forbidden (and (symbolp operator)
+                                        (assq operator eliscript-portable--forbidden-operators)))
+                        jobs)
+                   (when forbidden
+                     (eliscript-portable--fail
+                      "portable function %s cannot use %s (%s)"
+                      eliscript-portable--entry operator (cdr forbidden)))
+                   (pcase operator
+                     ('quote nil)
+                     ((or 'lambda 'fn)
+                      (let* ((parameters (eliscript-portable--parameter-forms (car arguments)))
+                             (child (eliscript-portable--copy-scope local)))
+                        (dolist (parameter parameters)
+                          (puthash (eliscript-portable--value parameter) t child))
+                        (setq jobs
+                              (append
+                               (mapcar
+                                (lambda (parameter)
+                                  (vector 'defaults (eliscript-parameter-form parameter) local span))
+                                (eliscript-parameters-parse
+                                 (car arguments)
+                                 (lambda (_form message)
+                                   (eliscript-portable--fail "%s" message))))
+                               (eliscript-portable--expression-jobs (cdr arguments) child span)))))
+                     ((or 'let 'let*)
+                      (let* ((bindings (eliscript-portable--value (car arguments)))
+                             (child (eliscript-portable--copy-scope local)))
+                        (setq jobs
+                              (append
+                               (if (eq operator 'let*)
+                                   (cl-mapcan
+                                    (lambda (binding)
+                                      (list (vector 'binding-initializer binding child span)
+                                            (vector 'binding-default binding child span)
+                                            (vector 'binding-add binding child span))) bindings)
+                                 (append
+                                  (mapcar (lambda (binding) (vector 'binding-initializer binding local span)) bindings)
+                                  (mapcar (lambda (binding) (vector 'binding-default binding local span)) bindings)
+                                  (mapcar (lambda (binding) (vector 'binding-add binding child span)) bindings)))
+                               (eliscript-portable--expression-jobs (cdr arguments) child span)))))
+                     ((or 'setq 'set!) (setq jobs (list (vector 'assignment arguments local span))))
+                     ('js-object (setq jobs (list (vector 'object arguments local span))))
+                     ((or 'get 'aref 'object-has? 'object-assoc)
+                      (let ((index 0))
+                        (dolist (argument arguments)
+                          (unless (and (= index 1) (keywordp (eliscript-portable--value argument)))
+                            (push (vector 'expression argument local span) jobs))
+                          (setq index (1+ index)))
+                        (setq jobs (nreverse jobs))))
+                     ((pred (lambda (name) (memq name eliscript-portable--operators)))
+                      (setq jobs (eliscript-portable--expression-jobs arguments local span)))
+                     (_ (setq jobs (eliscript-portable--expression-jobs value local span))))
+                   (setq pending (append jobs pending)))))))))))))
 
 (defun eliscript-portable--sequence
     (forms scope declarations dependencies)
@@ -395,47 +526,39 @@ ALLOW-PORTABLE-IMPORTS defers cross-module proof to the project builder."
          (declarations (eliscript-portable--declarations forms))
          (visited (make-hash-table :test #'eq))
          closure)
-    (cl-labels
-        ((visit
-          (name root)
-          (unless (gethash name visited)
-            (puthash name t visited)
-            (let ((declaration (gethash name declarations)))
-              (unless declaration
-                (setq eliscript-portable--entry root)
-                (eliscript-portable--fail
-                 "unknown portable entry: %s" name))
-              (unless (memq (eliscript-portable--declaration-kind declaration)
-                            '(portable constant portable-import))
-                (setq eliscript-portable--entry root
-                      eliscript-portable--current-span
-                      (eliscript-form-span
-                       (eliscript-portable--declaration-form declaration)))
-                (eliscript-portable--fail
-                 "portable entry %s is not declared with defportable" name))
-              (when (and (eq (eliscript-portable--declaration-kind declaration)
-                             'portable-import)
-                         (not allow-portable-imports))
-                (setq eliscript-portable--entry root
-                      eliscript-portable--current-span
-                      (eliscript-form-span
-                       (eliscript-portable--declaration-form declaration)))
-                (eliscript-portable--fail
-                 "portable import %s requires a project build" name))
-              (push name closure)
-              (dolist (dependency
-                       (eliscript-portable--dependencies
-                        declaration declarations))
-                (visit dependency root))))))
-      (dolist (entry entries)
-        (let ((declaration (gethash entry declarations)))
-          (unless (and declaration
-                       (eq (eliscript-portable--declaration-kind declaration)
-                           'portable))
-            (setq eliscript-portable--entry entry)
-            (eliscript-portable--fail
-             "portable entry %s is not declared with defportable" entry)))
-        (visit entry entry)))
+    (dolist (entry entries)
+      (let ((declaration (gethash entry declarations)))
+        (unless (and declaration
+                     (eq (eliscript-portable--declaration-kind declaration) 'portable))
+          (setq eliscript-portable--entry entry)
+          (eliscript-portable--fail
+           "portable entry %s is not declared with defportable" entry)))
+      (let ((pending (list entry)))
+        (while pending
+          (let ((name (pop pending)))
+            (unless (gethash name visited)
+              (puthash name t visited)
+              (let ((declaration (gethash name declarations)))
+                (unless declaration
+                  (setq eliscript-portable--entry entry)
+                  (eliscript-portable--fail "unknown portable entry: %s" name))
+                (unless (memq (eliscript-portable--declaration-kind declaration)
+                              '(portable constant portable-import))
+                  (setq eliscript-portable--entry entry
+                        eliscript-portable--current-span
+                        (eliscript-form-span (eliscript-portable--declaration-form declaration)))
+                  (eliscript-portable--fail
+                   "portable entry %s is not declared with defportable" name))
+                (when (and (eq (eliscript-portable--declaration-kind declaration) 'portable-import)
+                           (not allow-portable-imports))
+                  (setq eliscript-portable--entry entry
+                        eliscript-portable--current-span
+                        (eliscript-form-span (eliscript-portable--declaration-form declaration)))
+                  (eliscript-portable--fail "portable import %s requires a project build" name))
+                (push name closure)
+                (setq pending
+                      (append (eliscript-portable--dependencies declaration declarations)
+                              pending))))))))
     (nreverse closure)))
 
 (defun eliscript-portable-validate-module (forms &optional filename)
@@ -446,7 +569,10 @@ ALLOW-PORTABLE-IMPORTS defers cross-module proof to the project builder."
         (when (and (consp value)
                    (eq (eliscript-portable--value (car value)) 'defportable))
           (push (eliscript-portable--value (cadr value)) entries))))
-    (eliscript-portable--closure forms (nreverse entries) filename t)
+    ;; With no portable root the old closure visited no initializer or body.
+    ;; Avoid building its unused declaration table for ordinary modules.
+    (when entries
+      (eliscript-portable--closure forms (nreverse entries) filename t))
     forms))
 
 (defun eliscript-portable-select-module

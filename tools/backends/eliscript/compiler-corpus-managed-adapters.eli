@@ -1,0 +1,198 @@
+(module tools.backends.compiler-corpus-managed-adapters
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "node:path" posix)
+  (import "../../dist/bootstrap/reader.mjs" read-string)
+  (import "../../dist/bootstrap/compiler.mjs" compile-string)
+  (import "./build.mjs" loadLiteralSources)
+  (import "./compiler-corpus-managed-adapters-legacy.mjs" :as legacy)
+  (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
+
+  (defconst suite "tests/wasm-managed-sequence-data.test.mjs")
+  (defconst retained "tests/wasm-managed-sequence-data-test-legacy.mjs")
+  (defconst maintained "tests/eliscript/wasm-managed-sequence-data.eli")
+  (defconst fixture "tests/fixtures/wasm-managed-sequence-data.eli")
+  (defconst identity-host "tools/backends/eliscript/compiler-corpus-project-entry-host.eli")
+  (defconst transient-fixture "tests/fixtures/wasm-managed-transient-state.eli")
+  (defconst transient-transports (js-array "tools/backends/eliscript/compiler-corpus-host-context.eli"
+    "tools/backends/compiler-corpus-host-context.mjs" "tools/backends/compiler-corpus-host-context-legacy.mjs"
+    "tools/backends/original-program-bun-launcher.el"))
+  (defun hash (source) (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
+  (defun fail (message) (throw (new globalThis.TypeError message)))
+  (defun transient-transport-record (record assets)
+    (if (not (and (= (get (get record :original) :fixture) transient-fixture)
+      (js-call (new globalThis.RegExp "^original-managed:transient-state:(?:node|bun):auto-(?:65536|1)$") :test (get record :id)))) record
+      (let* ((original (get record :original))
+             (combined (js-call (get original :sourceAssets (js-array)) :slice)))
+        (js-call assets :forEach (lambda (asset)
+          (let ((previous (js-call combined :find (lambda (item) (= (get item :file) (get asset :file))))))
+            (when (and previous (/= (get previous :sourceSha256) (get asset :sourceSha256)))
+              (fail "original transient host transport source identity conflicts"))
+            (unless previous (js-call combined :push asset)))))
+        (Object/assign (js-object) record (js-object :original
+          (Object/assign (js-object) original (js-object :sourceAssets combined)))))))
+  (defasync transient-transport-options (options)
+    (if (or (nullish? options) (/= (value-type (get options :add)) "function")
+            (/= (value-type (get options :text)) "function")
+            (/= (value-type (get options :file)) "function") (nullish? (get options :stableFiles))
+            (not (js-call (get options :stableFiles) :has transient-fixture))) options
+      (let ((assets (js-array)) (index 0) (add (get options :add)))
+        (while (< index (js-length transient-transports))
+          (let* ((filename (aref transient-transports index)) (identity (await (js-call options :file filename))))
+            (js-call assets :push (js-object :file filename :sourceSha256 (get identity :sha256))))
+          (setq index (1+ index)))
+        (Object/assign (js-object) options (js-object :add
+          (lambda (record) (funcall add (transient-transport-record record assets))))))))
+  (defun required-imports ()
+    (js-call (js-array "source-operation" "console-log-capture" "console-log") :map
+      (lambda (name) (js-object :name name :module "eliscript.host" :arity 2 :abi "managed-host-call-v1"))))
+  (defun linker-refusal-record (record)
+    (if (/= (get record :id) "original-managed:core-modules:missing-private-graph") record
+      (Object/assign (js-object) record (js-object :steps
+        (js-call (get record :steps) :map (lambda (step)
+          ;; The authentic assertion calls the lowerer directly. Resolving
+          ;; missing source files first would replace its managed-link refusal
+          ;; with an unrelated host-loader failure.
+          (if (/= (get step :id) "unrelated-path-refusal") step
+            (Object/assign (js-object) step (js-object :request
+              (Object/assign (js-object) (get step :request)
+                (js-object :resolveImports false)))))))))))
+  (defun linker-refusal-options (options)
+    (let ((forwarded (Object/create options)) (add (get options :add)))
+      (Object/defineProperty forwarded "add" (js-object :value
+        (lambda (record) (funcall add (linker-refusal-record record)))
+        :enumerable t :writable t :configurable t))
+      forwarded))
+  (defun assertion-case (item cases)
+    (let* ((parameters (JSON/stringify (get item :parameters)))
+           (found (js-call cases :filter (lambda (candidate)
+             (let ((actual (get candidate :originalCase)))
+               (and (= (get actual :title) (get item :title))
+                    (= (JSON/stringify (get actual :parameters)) parameters)))))))
+      (unless (= (js-length found) 1)
+        (fail "original sequence assertion no longer identifies one authentic retained case"))
+      ;; IDs belong to the original coverage inventory. Every source coordinate
+      ;; and case hash below belongs to the explicitly named retained bytes.
+      (Object/assign (js-object) item (get (aref found 0) :originalCase)
+        (js-object :id (get item :id) :sourceFile retained))))
+  (defun sequence-module-id (path)
+    (let ((normalized (js-call posix :normalize path)))
+      (if (js-call normalized :endsWith ".eli")
+        (+ (js-call normalized :slice 0 -4) ".mjs") normalized)))
+  (defun sequence-relative-imports (module)
+    ;; Read actual import forms. Strings, comments, quoted data and function
+    ;; bodies are not dependency declarations and must not manufacture inputs.
+    (let ((pending (read-string (get module :source) (get module :filename))) (imports (js-array)))
+      (while (> (js-length pending) 0)
+        (let* ((node (js-call pending :shift)) (items (get node :items))
+               (head (and items (> (js-length items) 0) (get (aref items 0) :name))))
+          (cond
+            ((= head "module") (Reflect/apply (get pending :push) pending (js-call items :slice 2)))
+            ((or (= head "import") (= head "import-portable"))
+             (let ((specifier (get (aref items 1) :value)))
+               (when (and (= (value-type specifier) "string") (js-call specifier :startsWith "."))
+                 (js-call imports :push (sequence-module-id
+                   (js-call posix :join (js-call posix :dirname (get module :id)) specifier)))))))))
+      imports))
+  (defun sequence-project-modules (original libraries)
+    (let ((modules (js-array)) (ids (new globalThis.Set))
+          (canonical (new globalThis.Map)) (index 0))
+      (js-call libraries :forEach (lambda (library)
+        (js-call canonical :set (get library :id) library)))
+      (js-call original :forEach (lambda (module)
+        (js-call ids :add (get module :id))
+        ;; The test's virtual output IDs determine relative import resolution.
+        ;; Physical source paths and hashes remain in original.sourceAssets.
+        ;; No source text, declaration, import specifier or span is rewritten.
+        (js-call modules :push (Object/assign (js-object) module
+          (js-object :filename (+ (js-call (get module :id) :slice 0 -4) ".eli"))))))
+      (while (< index (js-length modules))
+        (js-call (sequence-relative-imports (aref modules index)) :forEach (lambda (target)
+          (unless (js-call ids :has target)
+            (let ((library (js-call canonical :get target)))
+              ;; Only real declared source can close a missing edge. Unknown
+              ;; providers stay absent so the selected compiler still refuses
+              ;; the original import rather than receiving a fabricated module.
+              (when library
+                (js-call ids :add target)
+                (js-call modules :push (js-object :id target
+                  :filename (+ (js-call target :slice 0 -4) ".eli")
+                  :source (get library :source))))))))
+        (setq index (1+ index)))
+      modules))
+  (defun sequence-record (record cases proof assets libraries)
+    (if (/= (get (get record :original) :suite) suite) record
+      (let* ((original (get record :original))
+             (bound (js-call (get original :cases) :map (lambda (item) (assertion-case item cases))))
+             (existing (get original :sourceAssets))
+             (source-assets (js-call (if (nullish? existing) (js-array) existing) :slice)))
+        (js-call assets :forEach (lambda (asset)
+          (let ((previous (js-call source-assets :find (lambda (item) (= (get item :file) (get asset :file))))))
+            (if previous
+              (unless (= (get previous :sourceSha256) (get asset :sourceSha256))
+                (fail "original sequence assertion source asset identity conflicts"))
+              (js-call source-assets :push asset)))))
+        (Object/assign (js-object) record
+          (js-object :modules (sequence-project-modules (get record :modules) libraries)
+            :execution (Object/assign (js-object) (get record :execution)
+                       (js-object :zeroImports false :requiredManagedImports (required-imports)))
+            :original (Object/assign (js-object) original
+              (js-object :cases bound :assertionSource proof :sourceAssets source-assets)))))))
+  (defun sequence-host-record (record javascript)
+    (if (and (= (get (get record :original) :suite) suite)
+             (js-call (new globalThis.RegExp
+               "^original-managed:sequence-data-standard-identities:(node|bun):auto-65536$") :test (get record :id)))
+      (Object/assign (js-object) record (js-object :execution
+        (Object/assign (js-object) (get record :execution) (js-object :hostSource javascript)))) record))
+  (defasync addOriginalManagedLibraryAdapters (options)
+    ;; Invalid services and every unrelated capability keep their original
+    ;; diagnostics and evaluation order. Only the migrated suite reads differ.
+    (setq options (await (transient-transport-options options)))
+    (if (or (nullish? options) (/= (value-type (get options :text)) "function")
+            (/= (value-type (get options :file)) "function")
+            (/= (value-type (get options :add)) "function")
+            (nullish? (get options :stableFiles)))
+      (await (js-call legacy :addOriginalManagedLibraryAdapters options))
+      (if (not (js-call (get options :stableFiles) :has fixture))
+        (await (js-call legacy :addOriginalManagedLibraryAdapters (linker-refusal-options options)))
+      (let* ((text (get options :text)) (file (get options :file)) (add (get options :add))
+             (source (await (funcall text retained)))
+             (identity (await (funcall file retained)))
+             (cases (originalSourceCaseLocators suite source))
+             (proof (js-object :file retained :sourceSha256 (get identity :sha256) :bytes (get identity :bytes)))
+             (assets (js-array)) (files (js-array suite retained maintained identity-host
+               "tools/backends/eliscript/managed-host.eli"
+               "tools/backends/managed-host.mjs" "tools/backends/managed-host-legacy.mjs"
+               "tools/backends/eliscript/managed-host-lifecycle.eli" "tools/backends/managed-host-lifecycle.mjs"
+               "tools/backends/eliscript/managed-host-object-provider.eli" "tools/backends/managed-host-object-provider.mjs"
+               "tools/backends/eliscript/managed-host-object-realm.eli" "tools/backends/managed-host-object-realm.mjs")) (index 0))
+        (unless (and (= (value-type source) "string") (= (hash source) (get identity :sha256))
+                     (= (js-call Buffer :byteLength source) (get identity :bytes)))
+          (fail "original sequence assertion text differs from its source asset"))
+        (while (< index (js-length files))
+          (let* ((filename (aref files index)) (asset (await (funcall file filename))))
+            (js-call assets :push (js-object :file filename :sourceSha256 (get asset :sha256))))
+          (setq index (1+ index)))
+        (let* ((libraries (await (loadLiteralSources (js-object :sourceRoot (get options :sourceRoot)))))
+               (host-source (await (funcall text identity-host)))
+               (host-identity (await (funcall file identity-host)))
+               (javascript (compile-string host-source identity-host))
+               (forwarded (Object/assign (js-object) options)))
+          (unless (and (= (hash host-source) (get host-identity :sha256))
+                       (= (js-call Buffer :byteLength host-source) (get host-identity :bytes)))
+            (fail "original sequence identity host text differs from its source asset"))
+          (setq index 0)
+          (while (< index (js-length libraries))
+            (let* ((library (aref libraries index)) (filename (get library :filename))
+                   (identity (await (funcall file filename))))
+              (unless (= (hash (get library :source)) (get identity :sha256))
+                (fail "original sequence canonical source differs from its source asset"))
+              (js-call assets :push (js-object :file filename :sourceSha256 (get identity :sha256))))
+            (setq index (1+ index)))
+          (put forwarded :text (async (filename)
+            (if (= filename suite) source (await (funcall text filename)))))
+          (put forwarded :add (lambda (record)
+            (funcall add (linker-refusal-record (sequence-host-record
+              (sequence-record record cases proof assets libraries) javascript)))))
+          (await (js-call legacy :addOriginalManagedLibraryAdapters forwarded)))))))
+  (export addOriginalManagedLibraryAdapters))

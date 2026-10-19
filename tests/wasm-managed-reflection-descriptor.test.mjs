@@ -58,8 +58,13 @@ test('true thirteen-slot OOM preserves original signed data and the caller frame
  const{r,h,object,n,args,frame}=raw(13);assert.equal(r.value_object_reflection(h,args,2,2),0);assert.equal(r.last_error(),2);assert.equal(r.frame_depth(h),1);assert.equal(r.value_kind(h,object),13);assert(Object.is(new DataView(r.memory.buffer).getFloat64(r.value_data(h,n,4),true),-0));r.frame_pop(h,frame);r.heap_collect(h);assert.equal(r.heap_live(h),0);
 });
 test('a real label-construction trap keeps evaluation effects and caller roots while an earlier nullish failure wins',async()=>{
- const original=await readFile('bootstrap/runtime/memory.eli','utf8'),signature='(defun heap-reflection-label (heap label)';assert(original.includes(signature));
- const injected=b.compiler.compile_ir_string(original.replace(signature,signature+' (when (= label 2) (load-u32 4294967295))'),'descriptor-trap.eli'),{bytes}=await compiled(injected),a=instantiateManagedRuntime(bytes);a.auto(1);
+ const original=await readFile('bootstrap/runtime/memory.eli','utf8'),signature='(defun heap-reflection-descriptor (heap value key)',start=original.indexOf(signature),end=original.indexOf('  (defun value-object-reflection ',start);assert(start>=0&&end>start);
+ const body=original.slice(start,end),label='(let ((name (heap-reflection-label heap index))';assert(body.includes(label));assert.equal(body.indexOf(label),body.lastIndexOf(label));
+ // Fault only the requested ordinary result descriptor. The callee's earlier
+ // own-property lookup also constructs metadata descriptors and must retain
+ // its actual evaluation order before argument and null-target processing.
+ const faulty=original.slice(0,start)+body.replace(label,'(let ((name (progn (when (and (= index 2) (= (heap-key-is heap key 1 120 0 0 0 0 0 0 0 0 0) 1)) (load-u32 4294967295)) (heap-reflection-label heap index)))')+original.slice(end);
+ const injected=b.compiler.compile_ir_string(faulty,'descriptor-trap.eli'),{bytes}=await compiled(injected),a=instantiateManagedRuntime(bytes);a.auto(1);
  const value=a.number(-0),target=a.sourceObject({x:value}),trace=a.sourceArray([]),key=a.invoke('key',[trace]),held=a.number(-0),frame=a.frame(1);a.frameSet(frame,0,held);
  assert.throws(()=>a.invoke('ordered',[undefined,key,trace]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.deepEqual(read(a,trace),['extra']);assert.equal(a.stats().frameDepth,1);a.resize(trace,0);
  assert.throws(()=>a.invoke('ordered',[target,key,trace]),WebAssembly.RuntimeError);assert.deepEqual(read(a,trace),['extra','key']);assert.equal(a.stats().frameDepth,1);assert(Object.is(a.readNumber(held),-0));assert(Object.is(a.readNumber(value),-0));a.leaveFrame(frame);finish(a,[value,target,trace,key,held]);

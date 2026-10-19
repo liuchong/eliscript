@@ -1,0 +1,129 @@
+(module tests.compiler-corpus-host-completion
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp mkdir writeFile rm)
+  (import "node:path" resolve dirname)
+  (import "node:os" tmpdir)
+  (import "node:url" pathToFileURL)
+  (import "../dist/bootstrap/compiler.mjs" compile-string)
+  (import "../tools/backends/compiler-corpus-runtime-adapters.mjs" originalRuntimeHostCompletionSource)
+  (import "../tools/backends/managed-module-graph.mjs"
+    createManagedModuleGraph createManagedProjectFacades loadManagedProjectGraph)
+
+  (defconst state-key "__eliscript_original_host_completion_regression__")
+  (defun description ()
+    (js-object :project (js-object :entry "main.mjs" :prepare "prepare"
+      :modules (js-array (js-object :id "main.mjs" :dependencies (js-array)
+        :steps (js-array) :exports (js-array))))))
+  (defun importer-runtime (counts)
+    (js-object :project (js-object
+      :prepare (lambda () (put counts :prepare (1+ (get counts :prepare))))
+      :run (lambda () (put counts :run (1+ (get counts :run))))
+      :get (lambda () undefined)
+      :bindHoisted (lambda (kind index value) value)
+      :invoke (lambda () undefined))
+      :closeModule (lambda () (put counts :closeModule (1+ (get counts :closeModule))))
+      :close (lambda () (put counts :close (1+ (get counts :close))))))
+  (defun capture (promise state)
+    (js-call promise :then
+      (lambda (value) (put state :settled t) (js-object :fulfilled t :value value))
+      (lambda (error) (put state :settled t) (js-object :fulfilled false :value error))))
+
+  (defasync check-completion (reject-body failure)
+    (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-host-completion-"))))
+           (previous-state (Object/getOwnPropertyDescriptor globalThis.globalThis state-key))
+           (stderr (get globalThis.process :stderr))
+           (previous-write (Object/getOwnPropertyDescriptor stderr "write"))
+           (exit-code (get globalThis.process :exitCode))
+           (writes (js-array)) (graphs (js-array))
+           (state (js-object :starts 0 :completed 0 :settled false :rejectBody reject-body :failure failure))
+           (started (new globalThis.Promise (lambda (accept reject) (put state :started accept))))
+           (gate (new globalThis.Promise (lambda (accept reject) (put state :release accept))))
+           (descriptor (description))
+           (facades (createManagedProjectFacades descriptor
+             (js-object :entry (get (get descriptor :project) :entry))))
+           (registry (resolve directory (get facades :registry)))
+           (source (str "(module original.host.completion\n"
+             "(defconst completion-state (get globalThis.globalThis " (JSON/stringify state-key) "))\n"
+             "(defasync run-original-literal-host ()\n"
+             " (put completion-state :starts (1+ (get completion-state :starts)))\n"
+             " (funcall (get completion-state :started))\n"
+             " (await (get completion-state :gate))\n"
+             " (put completion-state :completed (1+ (get completion-state :completed)))\n"
+             " (when (get completion-state :rejectBody) (throw (get completion-state :failure)))\n"
+             " undefined)\n" originalRuntimeHostCompletionSource "\n)\n")))
+      (try
+        (progn
+          (put state :gate gate)
+          (Object/defineProperty globalThis.globalThis state-key
+            (js-object :value state :writable t :enumerable false :configurable t))
+          (Object/defineProperty stderr "write"
+            (js-object :value (lambda (text) (js-call writes :push text) t)
+              :writable t :enumerable false :configurable t))
+          (await (mkdir (dirname registry) (js-object :recursive t)))
+          ;; The exact production suffix is compiled by the actual compiler.
+          ;; The default graph loader performs native dynamic import of this
+          ;; registry URL; no injected importer or pre-resolved Promise is used.
+          (await (writeFile registry (compile-string source "original-host-completion.eli")))
+          (let* ((counts (js-object :prepare 0 :run 0 :closeModule 0 :close 0))
+                 (runtime (importer-runtime counts)) (graph (createManagedModuleGraph descriptor))
+                 (options (js-object :moduleGraph graph
+                   :projectModuleBaseURL (get (pathToFileURL (str directory "/")) :href)))
+                 (pending (capture (loadManagedProjectGraph runtime descriptor options) state)))
+            (js-call graphs :push graph)
+            (await started)
+            (await (Promise/resolve undefined))
+            (js-call assert :strictEqual (get state :starts) 1)
+            (js-call assert :strictEqual (get state :completed) 0)
+            (js-call assert :strictEqual (get state :settled) false)
+            (js-call assert :strictEqual (get counts :prepare) 1)
+            (js-call assert :strictEqual (get counts :run) 0)
+            (js-call assert :strictEqual (get counts :closeModule) 0)
+            (funcall (get state :release) undefined)
+            (let ((outcome (await pending)))
+              (js-call assert :strictEqual (get outcome :fulfilled) false)
+              (if reject-body
+                (js-call assert :strictEqual (get outcome :value) failure)
+                (progn
+                  (js-call assert :ok (js-call globalThis.TypeError globalThis.Symbol.hasInstance (get outcome :value)))
+                  (js-call assert :strictEqual (get (get outcome :value) :message) "managed facade registry is missing"))))
+            (js-call assert :strictEqual (get state :completed) 1)
+            (js-call assert :strictEqual (get counts :closeModule) 1)
+            (js-call assert :strictEqual (get counts :close) 1)
+            (js-call assert :strictEqual (get graph :closed) t))
+          ;; A new graph reimports exactly the same native ESM URL. Its then
+          ;; export runs again, but the original body/completion is cached.
+          (let* ((counts (js-object :prepare 0 :run 0 :closeModule 0 :close 0))
+                 (runtime (importer-runtime counts)) (graph (createManagedModuleGraph descriptor))
+                 (outcome (progn
+                   (js-call graphs :push graph)
+                   (await (capture (loadManagedProjectGraph runtime descriptor
+                     (js-object :moduleGraph graph
+                       :projectModuleBaseURL (get (pathToFileURL (str directory "/")) :href))) state)))))
+            (js-call assert :strictEqual (get outcome :fulfilled) false)
+            (if reject-body
+              (js-call assert :strictEqual (get outcome :value) failure)
+              (js-call assert :strictEqual (get (get outcome :value) :message) "managed facade registry is missing"))
+            (js-call assert :strictEqual (get state :starts) 1)
+            (js-call assert :strictEqual (get state :completed) 1)
+            (js-call assert :strictEqual (get counts :closeModule) 1)
+            (js-call assert :strictEqual (get counts :close) 1)
+            (js-call assert :strictEqual (get graph :closed) t))
+          (js-call assert :deepStrictEqual writes
+            (if reject-body (js-array (str (funcall globalThis.String failure) "\n")) (js-array)))
+          (js-call assert :strictEqual (get globalThis.process :exitCode) (if reject-body 1 exit-code)))
+        (finally
+          (js-call graphs :forEach (lambda (graph) (unless (get graph :closed) (js-call graph :close))))
+          (if previous-state (Object/defineProperty globalThis.globalThis state-key previous-state)
+            (Reflect/deleteProperty globalThis.globalThis state-key))
+          (if previous-write (Object/defineProperty stderr "write" previous-write)
+            (Reflect/deleteProperty stderr "write"))
+          (put globalThis.process :exitCode exit-code)
+          (await (rm directory (js-object :recursive t :force t)))))))
+
+  (test "original host completion makes native await import wait for the entire successful body"
+    (async () (await (check-completion false undefined))))
+  (test "original host completion preserves a false rejection through native await import and cleanup"
+    (async () (await (check-completion t false))))
+  (test "original host completion preserves the exact object rejection and executes the imported body only once"
+    (async () (await (check-completion t (js-object :originalFailure t))))))

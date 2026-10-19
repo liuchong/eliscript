@@ -1,0 +1,60 @@
+(module eliscript.managed-runtime-collection-internals
+  (import "../../stdlib/managed-literal-protocols.eli"
+    I_COUNTED I_EMPTYABLE I_CONJ I_LOOKUP I_ASSOCIATIVE I_INDEXED I_SEQABLE I_REDUCE I_KV_REDUCE I_MAP I_SET I_STACK I_REVERSIBLE
+    COLLECTION_COUNT COLLECTION_EMPTY COLLECTION_CONJ COLLECTION_GET COLLECTION_ASSOC COLLECTION_CONTAINS COLLECTION_NTH
+    COLLECTION_SEQ COLLECTION_REDUCE COLLECTION_REDUCE_KV COLLECTION_DISSOC COLLECTION_DISJ COLLECTION_PEEK COLLECTION_POP COLLECTION_RSEQ
+    managed-literal-is-reduced managed-literal-reduced managed-literal-unreduced managed-literal-reduce-iterable
+    managed-literal-checked-count)
+  (import "./protocol.eli" protocolMethod)
+  (import "./collection.eli" SequenceView MemoizedSequenceView ReductionView
+    sequenceView unboundedSequenceView memoizedSequenceView memoizedSequenceStatus sliceSequenceView prependSequenceView reductionView)
+
+  (defconst dispatchCollectionCount (protocolMethod I_COUNTED "count"))
+  (defconst dispatchCollectionEmpty (protocolMethod I_EMPTYABLE "empty"))
+  (defconst dispatchCollectionConj (protocolMethod I_CONJ "conj"))
+  (defconst dispatchCollectionGet (protocolMethod I_LOOKUP "get"))
+  (defconst dispatchCollectionAssoc (protocolMethod I_ASSOCIATIVE "assoc"))
+  (defconst dispatchCollectionContains (protocolMethod I_ASSOCIATIVE "contains"))
+  (defconst dispatchCollectionNth (protocolMethod I_INDEXED "nth"))
+  (defconst dispatchCollectionSeq (protocolMethod I_SEQABLE "seq"))
+  (defconst dispatchCollectionReduce (protocolMethod I_REDUCE "reduce"))
+  (defconst dispatchCollectionReduceKV (protocolMethod I_KV_REDUCE "reduceKV"))
+  (defconst dispatchCollectionDissoc (protocolMethod I_MAP "dissoc"))
+  (defconst dispatchCollectionDisj (protocolMethod I_SET "disj"))
+  (defconst dispatchCollectionPeek (protocolMethod I_STACK "peek"))
+  (defconst dispatchCollectionPop (protocolMethod I_STACK "pop"))
+  (defconst dispatchCollectionRseq (protocolMethod I_REVERSIBLE "rseq"))
+  (defun callable? (value) (= (js* "typeof value") "function"))
+  (defun readCollectionEntry (entry)
+    (unless (and (not (nullish? entry)) (callable? (aref entry (aref globalThis/Symbol "iterator"))))
+      (throw (new globalThis/TypeError "persistent hash map entries must be iterable key/value pairs")))
+    (let ((iterator (js-call (aref entry (aref globalThis/Symbol "iterator")) :call entry)) (complete false))
+      (unless (and (not (nil? iterator)) (= (js* "typeof iterator") "object")
+                   (callable? (aref iterator "next")))
+        (throw (new globalThis/TypeError "sequence view factory must return an iterator")))
+      (try
+        (let ((first (js-call iterator :next)))
+          (when (funcall globalThis/Boolean (aref first "done"))
+            (throw (new globalThis/TypeError "persistent hash map entries must contain exactly two values")))
+          (let ((second (js-call iterator :next)))
+            (when (funcall globalThis/Boolean (aref second "done"))
+              (throw (new globalThis/TypeError "persistent hash map entries must contain exactly two values")))
+            (let ((third (js-call iterator :next)))
+              (unless (funcall globalThis/Boolean (aref third "done"))
+                (throw (new globalThis/TypeError "persistent hash map entries must contain exactly two values"))))
+            (setq complete t) (js-array (aref first "value") (aref second "value"))))
+        (finally
+          (when (and (not complete) (callable? (aref iterator "return"))) (js-call iterator :return))))))
+  (defun reducedValue (value) (managed-literal-reduced value))
+  (defun isReducedValue (value) (managed-literal-is-reduced value))
+  (defun unreducedValue (value) (managed-literal-unreduced value))
+  (defun reduceIterable (iterable reducer &rest initial) (managed-literal-reduce-iterable iterable reducer initial))
+  (defun validateCollectionCount (value) (managed-literal-checked-count value))
+  (export I_COUNTED I_EMPTYABLE I_CONJ I_LOOKUP I_ASSOCIATIVE I_INDEXED I_SEQABLE I_REDUCE I_KV_REDUCE I_MAP I_SET I_STACK I_REVERSIBLE
+    COLLECTION_COUNT COLLECTION_EMPTY COLLECTION_CONJ COLLECTION_GET COLLECTION_ASSOC COLLECTION_CONTAINS COLLECTION_NTH
+    COLLECTION_SEQ COLLECTION_REDUCE COLLECTION_REDUCE_KV COLLECTION_DISSOC COLLECTION_DISJ COLLECTION_PEEK COLLECTION_POP COLLECTION_RSEQ
+    dispatchCollectionCount dispatchCollectionEmpty dispatchCollectionConj dispatchCollectionGet dispatchCollectionAssoc
+    dispatchCollectionContains dispatchCollectionNth dispatchCollectionSeq dispatchCollectionReduce dispatchCollectionReduceKV
+    dispatchCollectionDissoc dispatchCollectionDisj dispatchCollectionPeek dispatchCollectionPop dispatchCollectionRseq
+    readCollectionEntry SequenceView MemoizedSequenceView ReductionView sequenceView unboundedSequenceView memoizedSequenceView
+    memoizedSequenceStatus sliceSequenceView prependSequenceView reductionView reducedValue isReducedValue unreducedValue reduceIterable validateCollectionCount))

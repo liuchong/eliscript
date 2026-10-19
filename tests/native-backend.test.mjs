@@ -516,6 +516,44 @@ test("explicit native CLI emits objects, libraries and executable IEEE results",
   }
 },120_000);
 
+test("explicit Linux ARM64 CLI emits the actual ELF object and library and keeps executable refusal precise", async () => {
+  const source = '(defun entry () -0.0) (defun identity (x) x) (export entry identity)';
+  const input = resolve(directory, 'cli-linux.eli');
+  await writeFile(input, source);
+  const program = backend.compiler.compile_ir_string(source, input);
+  for (const format of ['object', 'library']) {
+    const output = resolve(directory, 'cli-linux-' + format);
+    const built = spawnSync(process.execPath, [resolve('tools/backends/compile.mjs'), '--abi', 'numeric-f64',
+      '--target', 'native', '--platform', 'arm64-linux', '--native-format', format, '-o', output, input],
+      {encoding: 'utf8', timeout: 60000});
+    assert.equal(built.status, 0, built.stderr);
+    const bytes = await readFile(output), view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    assert.deepEqual([...bytes.subarray(0, 7)], [127, 69, 76, 70, 2, 1, 1]);
+    assert.equal(view.getUint16(16, true), format === 'object' ? 1 : 3);
+    assert.equal(view.getUint16(18, true), 183);
+    const expected = format === 'object' ? backend.native.emit_native_numeric_object(program, 'arm64-linux')
+      : backend.native.emit_native_numeric_library(program, 'arm64-linux');
+    assert.deepEqual(Uint8Array.from(bytes), Uint8Array.from(expected));
+    if (format === 'library' && process.platform === 'linux' && process.arch === 'arm64') {
+      const {dlopen} = await import('bun:ffi');
+      const library = dlopen(output, {entry: {args: [], returns: 'f64'}, identity: {args: ['f64'], returns: 'f64'}});
+      try {
+        assert(Object.is(library.symbols.entry(), -0));
+        for (const value of [-0, 0, NaN, Infinity, -Infinity, Number.MIN_VALUE, Number.MAX_VALUE]) {
+          assert(Object.is(library.symbols.identity(value), value));
+        }
+      } finally {library.close();}
+    }
+  }
+  const rejectedOutput = resolve(directory, 'cli-linux-unsupported-executable');
+  const rejected = spawnSync(process.execPath, [resolve('tools/backends/compile.mjs'), '--abi', 'numeric-f64',
+    '--target', 'native', '--platform', 'arm64-linux', '--native-format', 'executable', '--entry', 'entry',
+    '-o', rejectedOutput, input], {encoding: 'utf8', timeout: 60000});
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /native executable requires --platform arm64-macos/);
+  await assert.rejects(readFile(rejectedOutput), error => error.code === 'ENOENT');
+}, 120_000);
+
 test("native retained performance evidence rejects altered budgets, samples, identities and promotion", async () => {
   const {validateNativeReport}=await import("../tools/backends/native-benchmark.mjs");
   for(const name of ["native-baseline-macos-arm64.json","native-macos-arm64.json"]) {

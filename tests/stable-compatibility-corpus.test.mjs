@@ -36,10 +36,10 @@ test("stable compatibility corpus covers every frozen core behavior", async () =
     provisionalFeatures: 1,
     excludedApplicationFeatures: 2,
     migrations: 3,
-    fixtures: 138,
+    fixtures: 154,
     evidenceLocators: 679,
     evidenceFiles: 134,
-    sourceFiles: 447,
+    sourceFiles: 463,
     readyForAc02: false,
     identity: expect.stringMatching(/^[0-9a-f]{64}$/u),
   });
@@ -74,6 +74,15 @@ test("stable compatibility corpus covers every frozen core behavior", async () =
   expect((await contract()).fixtureFiles).toContain("tests/fixtures/wasm-managed-number-conversion.eli");
   expect((await contract()).fixtureFiles).toContain("tests/fixtures/wasm-managed-primitive-operators.eli");
   expect((await contract()).fixtureFiles).toContain("tests/fixtures/wasm-managed-source-collections.eli");
+  expect((await contract()).fixtureFiles).toContain("tests/fixtures/regexp-property-original-trie.eli");
+  expect((await contract()).fixtureFiles).toContain("tests/fixtures/wasm-managed-json-callbacks.eli");
+  expect((await contract()).fixtureFiles).toContain("tests/fixtures/wasm-managed-math-transcendental.eli");
+  expect((await contract()).fixtureFiles).toContain("tests/fixtures/wasm-managed-regexp-indices.eli");
+  expect((await contract()).fixtureFiles).toContain("tests/fixtures/wasm-managed-regexp-property-data.eli");
+  expect((await contract()).fixtureFiles).toContain("tests/fixtures/wasm-managed-regexp-unicode-sets.eli");
+  for (const fixture of ["core-modules", "sequence-data", "sorted", "transient-state", "wire"]) {
+    expect((await contract()).fixtureFiles).toContain(`tests/fixtures/wasm-managed-${fixture}.eli`);
+  }
 });
 
 test("stable compatibility corpus rejects omitted behavior and migrations", async () => {

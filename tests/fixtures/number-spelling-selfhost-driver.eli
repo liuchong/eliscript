@@ -1,0 +1,16 @@
+(module tests.number-spelling-selfhost-driver
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:module" createRequire)
+
+  (let* ((path (aref (get globalThis.process :argv) 2))
+         (compiler (funcall (createRequire path) path))
+         (records (JSON/parse (readFileSync 0 "utf8")))
+         (index 0))
+    (while (< index (js-length records))
+      (let ((record (aref records index)))
+        (js-call assert :equal
+          (js-call compiler :compile_string (aref record 0) "number-spelling.eli")
+          (aref record 1)))
+      (setq index (1+ index)))
+    (js-call (get globalThis.process :stdout) :write "selfhost-number-spelling-verified")))

@@ -1,0 +1,47 @@
+(module tests.compiler-session-protocol
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp rm)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "../tools/backends/compiler-build.mjs" buildIndependentCompiler)
+  (import "../tools/backends/compiler-bootstrap.mjs" openCompilerArtifact)
+  (import "../dist/bootstrap/compiler.mjs" serialize-ir-program)
+  (import "../dist/bootstrap/ir.mjs" make-program)
+
+  (test "canonical IR protocol preserves schema diagnostics for nonstring inputs and recovers in the same actual compiler"
+    (async ()
+      (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-ir-protocol-"))))
+            (session nil))
+        (try
+          (let* ((artifact (await (buildIndependentCompiler
+                    (js-object :host "javascript" :profile "full-compiler"
+                      :outputRoot directory :retainIR false :debug false))))
+                 (invalid (js-array undefined nil false 42 (js-array) (js-object)))
+                 (canonical (serialize-ir-program (make-program "protocol.eli" (js-array))))
+                 (index 0))
+            (setq session (await (openCompilerArtifact artifact (js-object :debug false))))
+            (while (< index (js-length invalid))
+              (await (js-call assert :rejects
+                (async ()
+                  (await (js-call session :request
+                    (js-object :operation "protocol" :name "deserialize-ir"
+                      :input (js-object :text (aref invalid index))))))
+                (lambda (error)
+                  (let ((diagnostic (get error :eliscriptDiagnostic nil)))
+                    (and diagnostic
+                         (= (get diagnostic :code) "ELI-I0001")
+                         (= (get diagnostic :phase) "ir-schema")
+                         (= (get diagnostic :message) "canonical IR source must be a string")
+                         (= (get error :message) "canonical IR source must be a string"))))))
+              (let* ((response (await (js-call session :request
+                      (js-object :operation "protocol" :name "deserialize-ir"
+                        :input (js-object :text canonical)))))
+                     (program (JSON/parse (get response :ir))))
+                (js-call assert :strictEqual (get program :filename) "protocol.eli")
+                (js-call assert :deepStrictEqual (get program :body) (js-array))
+                (js-call assert :strictEqual (serialize-ir-program program) canonical))
+              (setq index (1+ index))))
+          (finally
+            (try (when session (await (js-call session :close)))
+              (finally (await (rm directory (js-object :recursive t :force t)))))))))))

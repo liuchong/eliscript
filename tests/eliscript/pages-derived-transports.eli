@@ -1,0 +1,112 @@
+(module tests.pages-derived-transports
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile writeFile rm)
+  (import "node:path" resolve sep extname)
+  (import "node:os" tmpdir)
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "node:http" createServer)
+  (import "playwright-core" chromium)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/pages/assemble.mjs" assemblePages PUBLISHED_FILES)
+  (import "../dist/bootstrap/compiler.mjs" compile-string)
+  (import "./helpers/pages-build.mjs" buildPagesInputs)
+  (defvar directory undefined)
+  (defvar artifact undefined)
+  (defvar manifest undefined)
+  (defun digest (bytes)
+    (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+  (defasync close-http-server (server)
+    (when server
+      (await (new globalThis.Promise (lambda (accept reject)
+        (js-call server :close (lambda (error)
+          (if error (funcall reject error) (funcall accept)))))))))
+  (beforeAll (async ()
+    (await (buildPagesInputs))
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-pages-derived-"))))
+    (setq artifact (resolve directory "pages"))
+    (await (assemblePages (js-object :root root :outDir artifact)))
+    (setq manifest (JSON/parse (await (readFile (resolve artifact "tools/backends/browser/transport.json") "utf8"))))))
+  (afterAll (async () (when directory (await (rm directory (js-object :recursive t :force t))))))
+  (test "Pages keeps every published source byte and binds separate browser representations to their real files"
+    (async ()
+      (let ((position 0))
+        (while (< position (js-length PUBLISHED_FILES))
+          (let* ((path (aref PUBLISHED_FILES position))
+                 (bytes (await (readFile (resolve artifact path))))
+                 (identity (js-call (get manifest :publishedSourceFiles) :find
+                   (lambda (item) (= (get item :path) path)))))
+            (js-call assert :deepStrictEqual bytes (await (readFile (resolve root path))))
+            (js-call assert :strictEqual (get identity :bytes) (js-length bytes))
+            (js-call assert :strictEqual (get identity :sha256) (digest bytes)))
+          (setq position (1+ position))))
+      (js-call assert :strictEqual (get manifest :format) "eliscript-pages-browser-transports")
+      (js-call assert :strictEqual (get manifest :representation) "derived-browser-bundle")
+      (js-call assert :strictEqual (get manifest :compilerFixedPointEvidence) false)
+      (js-call assert :deepStrictEqual
+        (js-call (get manifest :transports) :map (lambda (item) (get (get item :bundle) :path)))
+        (js-array "tools/backends/browser/compiler-browser.mjs" "tools/backends/browser/compiler-worker.mjs"))
+      (let ((position 0))
+        (while (< position (js-length (get manifest :transports)))
+          (let ((item (aref (get manifest :transports) position)) (part 0)
+                (fields (js-array "source" "bundle" "sourceMap")))
+            (while (< part (js-length fields))
+              (let* ((name (aref fields part)) (identity (get item name))
+                     (bytes (await (readFile (resolve (if (= name "source") root artifact) (get identity :path))))))
+                (js-call assert :strictEqual (get identity :bytes) (js-length bytes))
+                (js-call assert :strictEqual (get identity :sha256) (digest bytes)))
+              (setq part (1+ part))))
+          (setq position (1+ position))))
+      (js-call assert :ok (js-call
+        (await (readFile (resolve artifact "dist/browser-playground/playground.mjs") "utf8"))
+        :includes "tools/backends/browser/compiler-browser.mjs"))))
+  (test "the actual Pages worker bundle loads without an import map and preserves the original UTF16 request identity"
+    (async ()
+      (let* ((request (js-object :operation "analyze" :filename "😀.eli"
+                        :source (str "; 😀" (String/fromCharCode 55296) "\n(defun run () 42) (export run)")))
+             (identity (digest (js-call Buffer :from (JSON/stringify request) "utf16le")))
+             (server undefined) (browser undefined) (errors (js-array)))
+        (try
+          (progn
+            (await (writeFile (resolve artifact "tools/backends/browser/test-worker.mjs")
+              (compile-string (str "(import \"./compiler-worker.mjs\" compilerRequestIdentity)\n"
+                "(defasync run () (js-call globalThis.self :postMessage (await (compilerRequestIdentity "
+                "(js-object :operation \"analyze\" :filename " (JSON/stringify (get request :filename))
+                " :source " (JSON/stringify (get request :source)) ")))))\n"
+                "(js-call (run) :catch (lambda (error) (js-call globalThis.self :postMessage (js-object :error (get error :message)))))\n")
+                "pages-worker-probe.eli")))
+            (await (writeFile (resolve artifact "probe.mjs")
+              (compile-string (str
+                "(defconst worker (new globalThis.Worker (new globalThis.URL \"./tools/backends/browser/test-worker.mjs\" (get globalThis.location :href)) (js-object :type \"module\")))\n"
+                "(js-call worker :addEventListener \"message\" (lambda (event)\n"
+                " (js-call (get globalThis.document :documentElement) :setAttribute \"data-status\"\n"
+                "  (if (= (get event :data) " (JSON/stringify identity) ") \"complete\" \"wrong-identity\")) (js-call worker :terminate)))\n"
+                "(js-call worker :addEventListener \"error\" (lambda (event)\n"
+                " (js-call (get globalThis.document :documentElement) :setAttribute \"data-status\" (get event :message)) (js-call worker :terminate)))\n")
+                "pages-worker-page.eli")))
+            (await (writeFile (resolve artifact "probe.html")
+              "<!doctype html><html><head><title>Pages Worker</title></head><body><script type=\"module\" src=\"./probe.mjs\"></script></body></html>"))
+            (setq server (createServer (lambda (request response)
+              (js-call (funcall (async ()
+                (let* ((url (new globalThis.URL (get request :url) "http://127.0.0.1"))
+                       (path (resolve artifact (str "." (get url :pathname)))))
+                  (unless (js-call path :startsWith (str artifact sep))
+                    (throw (new globalThis.Error "Pages probe path escapes artifact")))
+                  (js-call response :setHeader "content-type"
+                    (if (= (extname path) ".mjs") "text/javascript" "text/html"))
+                  (js-call response :end (await (readFile path)))))) :catch
+                (lambda (error) (put response :statusCode 404) (js-call response :end (funcall globalThis.String error)))))))
+            (await (new globalThis.Promise (lambda (accept reject)
+              (js-call server :once "error" reject) (js-call server :listen 0 "127.0.0.1" accept))))
+            (setq browser (await (js-call chromium :launch (js-object :headless t))))
+            (let ((page (await (js-call browser :newPage))))
+              (js-call page :on "pageerror" (lambda (error) (js-call errors :push (get error :message))))
+              (await (js-call page :goto (str "http://127.0.0.1:" (get (js-call server :address) :port) "/probe.html")))
+              (await (js-call (js-call page :locator "html[data-status]") :waitFor))
+              (js-call assert :strictEqual (await (js-call (js-call page :locator "html") :getAttribute "data-status")) "complete")
+              (js-call assert :deepStrictEqual errors (js-array))))
+          (finally
+            (when browser (await (js-call browser :close)))
+            (await (close-http-server server)))))))
+)

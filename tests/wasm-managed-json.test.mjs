@@ -7,13 +7,65 @@ import {pathToFileURL} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {buildBackends} from '../tools/backends/build.mjs';
 import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';
-let b, rt, p, js, javascript, directory;
+let b, rt, p, js, javascript, directory, namespaceBytes, namespaceJavascript;
+const namespaceMethods = ['parse', 'stringify', 'rawJSON', 'isRawJSON'];
+const receiverMethod = '(fn, name) => { if (typeof name !== "string") throw new TypeError("method name must be a string"); return ({ [name](...args) { return Reflect.apply(fn, undefined, [this, ...args]); } })[name]; }';
+const namespaceSource = `
+${namespaceMethods.map(name => `(defconst saved-${name} JSON/${name})`).join('\n')}
+(defun namespace-cold-identities () (and ${namespaceMethods.map(name => `(eq saved-${name} JSON/${name})`).join(' ')}))
+(defun namespace-escaped-identities ()
+ (let ((owner (js* "JSON")))
+  (and ${namespaceMethods.map(name => `(eq saved-${name} (get owner "${name}")) (eq saved-${name} (js* "globalThis.JSON.${name}"))`).join(' ')})))
+(defun namespace-read (key)
+ (cond ${namespaceMethods.map(name => `((= key "${name}") JSON/${name})`).join(' ')}))
+(defun namespace-descriptor (key) (Object/getOwnPropertyDescriptor (js* "JSON") key))
+(defun namespace-metadata-valid (key descriptor)
+ (let ((callable (get descriptor :value)))
+  (and (= (get callable :name) key)
+   (= (get callable :length) (cond ((= key "parse") 2) ((= key "stringify") 3) (t 1)))
+   (get descriptor :writable) (not (get descriptor :enumerable)) (get descriptor :configurable))))
+(defun namespace-restore (key descriptor) (Object/defineProperty (js* "JSON") key descriptor) nil)
+(defun namespace-delete (key) (Reflect/deleteProperty (js* "JSON") key))
+(defun namespace-own (key) (object-has? (js* "JSON") key))
+(defun namespace-note (trace mark) (put trace :order (+ (get trace :order "") mark)))
+(defun namespace-argument (key trace value)
+ (namespace-note trace "a")
+ (when (get trace :mutate false)
+  (Object/defineProperty (js* "JSON") key
+   (js-object :value nil :writable t :enumerable false :configurable t)))
+ value)
+(defun namespace-extra (trace) (namespace-note trace "e") 37)
+(defun namespace-install (key trace callable)
+ (Object/defineProperty (js* "JSON") key
+  (js-object :configurable t :enumerable false :get
+   (funcall (js* ${JSON.stringify(receiverMethod)}) (lambda (receiver)
+   (namespace-note trace "g")
+   (put trace :reads (+ (get trace :reads 0) 1))
+   (put trace :getterThis (eq receiver (js* "JSON")))
+   (if callable
+    (funcall (js* ${JSON.stringify(receiverMethod)}) (lambda (receiver value extra)
+     (namespace-note trace "c")
+     (put trace :calls (+ (get trace :calls 0) 1))
+     (put trace :callThis (eq receiver (js* "JSON")))
+     (put trace :extra extra)
+     value) key)
+    nil))
+   (+ "get " key)))) nil)
+(defun namespace-call (key trace value)
+ (cond ${namespaceMethods.map(name => `((= key "${name}") (JSON/${name} (namespace-argument key trace value) (namespace-extra trace)))`).join(' ')}))
+(export namespace-cold-identities namespace-escaped-identities namespace-read namespace-descriptor namespace-metadata-valid
+ namespace-restore namespace-delete namespace-own namespace-install namespace-call)
+`;
 beforeAll(async () => {
   directory = await mkdtemp(resolve(tmpdir(), 'eliscript-managed-json-'));
   b = await buildBackends({outputRoot: directory});
   rt = b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli', 'utf8'), 'runtime.eli');
   p = b.compiler.compile_ir_string(await readFile('tests/fixtures/wasm-managed-json.eli', 'utf8'), 'json.eli');
   javascript = b.compiler.emit_ir_string(p); js = await import('data:text/javascript;base64,' + Buffer.from(javascript).toString('base64'));
+  const namespaceIR = b.compiler.compile_ir_string(namespaceSource, 'json-namespace.eli');
+  namespaceJavascript = b.compiler.emit_ir_string(namespaceIR);
+  namespaceBytes = Uint8Array.from(b.managed.emit_managed_wasm(namespaceIR, rt));
+  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(namespaceBytes)), []);
 }, 120000);
 afterAll(async () => {if (directory) await rm(directory, {recursive: true, force: true});});
 function instance(options) {
@@ -105,13 +157,15 @@ test('cyclic values are rejected while repeated shared children stringify indepe
   finish(a, [key, cycle, held, child, shared, out]);
 });
 
-test('callback JSON transformations stay explicitly unsupported instead of being silently skipped', async () => {
+test('the original callback JSON inputs execute their reviver replacer and toJSON transformations exactly', async () => {
   const source = '(defconst input "1") (defun f () (js-call (js* "JSON") :parse input (lambda (key value) value))) (defun g () (JSON/stringify 1 (lambda (key value) value))) (defun factory () (lambda (key) 7)) (defun h (x) (JSON/stringify x)) (export f g factory h)';
   const ir = b.compiler.compile_ir_string(source, 'json-callbacks.eli'), ref = await import('data:text/javascript;base64,' + Buffer.from(b.compiler.emit_ir_string(ir)).toString('base64'));
   assert.equal(ref.f(), 1); assert.equal(ref.g(), '1'); assert.equal(ref.h({toJSON: ref.factory()}), '7');
   const a = instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(ir, rt))); a.auto(1);
-  for (const name of ['f', 'g']) assert.throws(() => a.invoke(name), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');
-  const f = a.invoke('factory'), object = a.sourceObject({toJSON: f}); assert.throws(() => a.invoke('h', [object]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003'); finish(a, [f, object]);
+  const parsed = a.invoke('f'), stringified = a.invoke('g');
+  assert.equal(a.readNumber(parsed), ref.f());assert.equal(a.readString(stringified), ref.g());
+  const f = a.invoke('factory'), object = a.sourceObject({toJSON: f}), output = a.invoke('h', [object]);
+  assert.equal(a.readString(output), ref.h({toJSON: ref.factory()}));finish(a, [parsed, stringified, f, object, output]);
 });
 
 test('parsed objects retain ordinary prototype assignment while parsed __proto__ stays an own data property', () => {
@@ -140,7 +194,15 @@ test('actual parser and writer WASM traps release private frames and preserve ea
     const a = instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(p, injected))); a.auto(1);
     const x = a.string(input), held = a.number(-0), frame = a.frame(1); a.frameSet(frame, 0, held);
     assert.throws(() => a.invoke(entry, [x]), WebAssembly.RuntimeError); assert.equal(a.stats().frameDepth, 1); assert.equal(a.readString(x), input); assert(Object.is(a.readNumber(held), -0));
-    if (entry === 'parse-value') {const bad = a.sourceObject({}); assert.throws(() => a.invoke(entry, [bad]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003'); assert.equal(a.stats().frameDepth, 1); a.release(bad);}
+    if (entry === 'parse-value') {
+      // An empty ordinary object converts to "[object Object]" and therefore
+      // reaches the injected parser. Both noncallable conversion methods make
+      // the original earlier-conversion-error assertion meaningful instead.
+      assert.throws(() => JSON.parse({toString: false, valueOf: false}), TypeError);
+      const bad = a.sourceObject({toString: false, valueOf: false});
+      assert.throws(() => a.invoke(entry, [bad]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');
+      assert.equal(a.stats().frameDepth, 1); a.release(bad);
+    }
     a.leaveFrame(frame); finish(a, [x, held]);
   }
 });
@@ -168,10 +230,97 @@ test('Node executes the identical zero-import JSON WASM against its own JSON gra
   `, pathToFileURL(resolve('tools/backends/managed-runtime.mjs')).href, wasm, cases], {encoding: 'utf8', timeout: 30000}); assert.equal(child.status, 0, child.stderr);
 });
 
-test('unsupported RegExp property reflection is refused rather than silently omitted from a JSON property list', async () => {
+test('the original RegExp property list input preserves its implemented lastIndex reflection', async () => {
   const source = '(defconst pattern (js* "/a/")) (defun f () (JSON/stringify pattern (js-array "lastIndex"))) (defun g () (JSON/stringify pattern)) (export f g)';
   const ir = b.compiler.compile_ir_string(source, 'json-regexp.eli'), ref = await import('data:text/javascript;base64,' + Buffer.from(b.compiler.emit_ir_string(ir)).toString('base64'));
   assert.equal(ref.f(), '{"lastIndex":0}'); assert.equal(ref.g(), '{}');
   const a = instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(ir, rt))); a.auto(1); const out = a.invoke('g'); assert.equal(a.readString(out), '{}');
-  assert.throws(() => a.invoke('f'), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003'); finish(a, [out]);
+  const selected = a.invoke('f');assert.equal(a.readString(selected), ref.f());finish(a, [out, selected]);
 });
+
+function checkNamespaceReference(module) {
+  assert.equal(module.namespace_cold_identities(), true);
+  assert.equal(module.namespace_escaped_identities(), true);
+  const records = [];
+  const observe = trace => ({order: trace.order, reads: trace.reads ?? 0, calls: trace.calls ?? 0,
+    getterThis: trace.getterThis ?? false, callThis: trace.callThis ?? false, extra: trace.extra ?? null});
+  for (const key of ['parse', 'stringify', 'rawJSON', 'isRawJSON']) {
+    const descriptor = module.namespace_descriptor(key);
+    assert.equal(module.namespace_metadata_valid(key, descriptor), true);
+    assert.equal(descriptor.value.name, key); assert.equal(descriptor.value.length, key === 'parse' ? 2 : key === 'stringify' ? 3 : 1);
+    assert.deepEqual([descriptor.writable, descriptor.enumerable, descriptor.configurable], [true, false, true]);
+    try {
+      const captured = {mutate: true}; module.namespace_install(key, captured, true);
+      assert.equal(module.namespace_call(key, captured, 'payload'), 'payload');
+      assert.equal(module.namespace_read(key), null);
+      assert.deepEqual(observe(captured), {order: 'gaec', reads: 1, calls: 1, getterThis: true, callThis: true, extra: 37});
+      module.namespace_restore(key, descriptor); assert.equal(module.namespace_escaped_identities(), true);
+      const noncallable = {}; module.namespace_install(key, noncallable, false);
+      assert.throws(() => module.namespace_call(key, noncallable, 'payload'), TypeError);
+      assert.deepEqual(observe(noncallable), {order: 'gae', reads: 1, calls: 0, getterThis: true, callThis: false, extra: null});
+      module.namespace_restore(key, descriptor);
+      assert.equal(module.namespace_delete(key), true); assert.equal(module.namespace_own(key), false);
+      assert.equal(module.namespace_read(key), undefined);
+      const deleted = {}; assert.throws(() => module.namespace_call(key, deleted, 'payload'), TypeError);
+      assert.equal(module.namespace_own(key), false); assert.equal(module.namespace_read(key), undefined);
+      assert.deepEqual(observe(deleted), {order: 'ae', reads: 0, calls: 0, getterThis: false, callThis: false, extra: null});
+      records.push({key, captured: observe(captured), noncallable: observe(noncallable), deleted: observe(deleted)});
+    } finally { module.namespace_restore(key, descriptor); }
+    assert.equal(module.namespace_escaped_identities(), true);
+  }
+  return records;
+}
+
+test('Given cold JSON methods When the namespace escapes and its four methods change Then identity getters receivers deletion and callee capture match independent Node', async () => {
+  const file = resolve(directory, 'json-namespace-reference.mjs'); await writeFile(file, namespaceJavascript);
+  const child = spawnSync('node', ['--input-type=module', '-e', `import assert from 'node:assert/strict';
+    const module = await import(process.argv[1]);
+    const records = (${checkNamespaceReference.toString()})(module);
+    console.log(JSON.stringify(records));`, pathToFileURL(file).href], {encoding: 'utf8', timeout: 30000});
+  assert.equal(child.status, 0, child.stderr);
+  const expected = JSON.parse(child.stdout), a = instantiateManagedRuntime(namespaceBytes); a.auto(1);
+  const held = a.number(-0), frame = a.frame(1); a.frameSet(frame, 0, held);
+  function observe(trace) {
+    const values = {};
+    for (const [name, type, fallback] of [['order', 'string', undefined], ['reads', 'number', 0], ['calls', 'number', 0],
+      ['getterThis', 'boolean', false], ['callThis', 'boolean', false], ['extra', 'number', null]]) {
+      const key = a.string(name); let value;
+      try {
+        value = a.objectGet(trace, key);
+        values[name] = value === undefined ? fallback : type === 'string' ? a.readString(value) : type === 'number' ? a.readNumber(value) : value;
+      } finally { a.release(key); if (value !== undefined && type !== 'boolean') a.release(value); }
+    }
+    return values;
+  }
+  try {
+    assert.equal(a.invoke('namespace-cold-identities'), true);
+    assert.equal(a.invoke('namespace-escaped-identities'), true);
+    for (const record of expected) {
+      const key = a.string(record.key), descriptor = a.invoke('namespace-descriptor', [key]), input = a.string('payload');
+      const captured = a.sourceObject({mutate: true}), noncallable = a.sourceObject({}), deleted = a.sourceObject({});
+      let result;
+      try {
+        assert.equal(a.invoke('namespace-metadata-valid', [key, descriptor]), true);
+        a.invoke('namespace-install', [key, captured, true]);
+        result = a.invoke('namespace-call', [key, captured, input]); assert.equal(a.readString(result), 'payload'); a.release(result); result = undefined;
+        assert.equal(a.invoke('namespace-read', [key]), null);
+        assert.deepEqual(observe(captured), record.captured, record.key + ': callee and both receivers precede argument replacement');
+        a.invoke('namespace-restore', [key, descriptor]); assert.equal(a.invoke('namespace-escaped-identities'), true);
+        a.invoke('namespace-install', [key, noncallable, false]);
+        assert.throws(() => a.invoke('namespace-call', [key, noncallable, input]), error => error instanceof TypeError && error.eliscriptDiagnostic?.code === 'ELI-RT0003');
+        assert.deepEqual(observe(noncallable), record.noncallable, record.key + ': both arguments precede noncallable refusal');
+        a.invoke('namespace-restore', [key, descriptor]);
+        assert.equal(a.invoke('namespace-delete', [key]), true); assert.equal(a.invoke('namespace-own', [key]), false);
+        assert.equal(a.invoke('namespace-read', [key]), undefined);
+        assert.throws(() => a.invoke('namespace-call', [key, deleted, input]), error => error instanceof TypeError && error.eliscriptDiagnostic?.code === 'ELI-RT0003');
+        assert.equal(a.invoke('namespace-own', [key]), false); assert.equal(a.invoke('namespace-read', [key]), undefined);
+        assert.deepEqual(observe(deleted), record.deleted, record.key + ': deleted methods stay absent');
+      } finally {
+        try { a.invoke('namespace-restore', [key, descriptor]); }
+        finally { for (const value of [result, key, descriptor, input, captured, noncallable, deleted]) if (value !== undefined) a.release(value); }
+      }
+      assert.equal(a.invoke('namespace-escaped-identities'), true);
+      a.collect(); assert.equal(a.stats().frameDepth, 1); assert(Object.is(a.readNumber(held), -0));
+    }
+  } finally { a.leaveFrame(frame); finish(a, [held]); }
+}, 30000);

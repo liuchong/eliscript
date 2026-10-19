@@ -1,0 +1,161 @@
+(module tools.testing.file-workers
+  (import "node:path" basename resolve)
+  (import "node:fs/promises" mkdir writeFile)
+  (import "./resource-supervisor.mjs" startResourceSupervisor)
+
+  ;; Each original file still runs in a fresh process under the same real RSS
+  ;; supervisor. Only two confirmed Bun loader failures opt out of smol mode.
+  (defconst FILE_WORKERS 2)
+  (defconst exclusive-files (new globalThis.Set (js-array
+    "wasm-compiler-ir-lower.test.mjs" "wasm-managed-array-sort.test.mjs"
+    "native-compiler-modules.test.mjs" "bootstrap-compiler.test.mjs"
+    "wasm-compiler-analyzer.test.mjs" "wasm-compiler-emitter.test.mjs"
+    "independent-compiler-producers.test.mjs" "compiler-producer-stages.test.mjs"
+    "wasm-managed-str.test.mjs" "native-backend.test.mjs"
+    "native-memory-long-branches.test.mjs" "regexp-property-outlining.test.mjs")))
+  (defconst standard-bun-files (new globalThis.Set (js-array
+    "compiler-seed-runtime-identity.test.mjs" "compiler-corpus-matchers-selfhosted.test.mjs")))
+  (defconst exclusive-pattern (new globalThis.RegExp "(?:compiler.*session|session.*compiler|browser|package|matrix)"))
+  (defconst prefix-pattern (new globalThis.RegExp "^(?:wasm|native|compiler|independent|bootstrap|seed|direct-wasm|managed-stdlib)-"))
+  (defconst shard-pattern (new globalThis.RegExp "^[1-9][0-9]*$"))
+  (defun worker-truth (value) (funcall globalThis.Boolean value))
+  (defun worker-optional (value key) (if (nullish? value) undefined (get value key)))
+
+  (defun isExclusiveTestFile (file)
+    (let ((name (basename file)))
+      (or (js-call exclusive-files :has name) (js-call exclusive-pattern :test name)
+          (js-call prefix-pattern :test name))))
+  (defun worker-test-arguments (file)
+    (if (js-call standard-bun-files :has (basename file)) (js-array "test" file)
+      (js-array "--smol" "test" file)))
+  (defun validate-files (files)
+    (unless (and (Array/isArray files) (> (js-length files) 0)
+                 (not (js-call files :some (lambda (file)
+                   (or (/= (value-type file) "string") (not (js-call file :endsWith ".test.mjs"))))))
+                 (= (get (new globalThis.Set files) :size) (js-length files)))
+      (throw (new globalThis.TypeError "expected unique test files"))))
+
+  (defun partitionTestFiles (files index count)
+    (validate-files files)
+    (unless (and (Number/isSafeInteger index) (Number/isSafeInteger count)
+                 (>= index 1) (>= count 1) (<= index count))
+      (throw (new globalThis.TypeError "invalid test-file shard index/count")))
+    (js-call files :filter (lambda (file position) (= (% position count) (1- index)))))
+
+  (defun parseTestFileArgs (arguments)
+    (unless (Array/isArray arguments) (throw (new globalThis.TypeError "invalid test-file arguments")))
+    (let ((files (js-array)) (options (new globalThis.Map)) (index 0))
+      (while (< index (js-length arguments))
+        (let ((argument (aref arguments index)))
+          (if (or (= argument "--shard-index") (= argument "--shard-count"))
+            (progn
+              (setq index (1+ index))
+              (let ((value (aref arguments index)))
+                (when (or (js-call options :has argument) (/= (value-type value) "string")
+                          (not (js-call shard-pattern :test value))
+                          (not (Number/isSafeInteger (funcall globalThis.Number value))))
+                  (throw (new globalThis.TypeError "invalid test-file arguments: shard options require unique positive integers")))
+                (js-call options :set argument (funcall globalThis.Number value))))
+            (if (or (/= (value-type argument) "string") (js-call argument :startsWith "-"))
+              (throw (new globalThis.TypeError "invalid test-file arguments: unknown option"))
+              (js-call files :push argument))))
+        (setq index (1+ index)))
+      (validate-files files)
+      (if (= (get options :size) 0) (js-object :files files :shard nil)
+        (progn
+          (when (or (/= (get options :size) 2)
+                    (> (js-call options :get "--shard-index") (js-call options :get "--shard-count")))
+            (throw (new globalThis.TypeError "invalid test-file arguments: both shard index/count are required, with index <= count")))
+          (js-object :files files :shard (js-object
+            :index (js-call options :get "--shard-index") :count (js-call options :get "--shard-count")))))))
+
+  (defasync scheduleTestFiles (files supervisor)
+    (validate-files files)
+    (let* ((results (js-array)) (cursor 0) (signal-code 0)
+           (cancel (lambda (code)
+             (setq signal-code code) (js-call supervisor :cancel (if (= code 130) "SIGINT" "SIGTERM"))))
+           (interrupt (lambda () (funcall cancel 130)))
+           (terminate (lambda () (funcall cancel 143))))
+      (js-call globalThis.process :on "SIGINT" interrupt)
+      (js-call globalThis.process :on "SIGTERM" terminate)
+      (try
+        (let ((run-file (async (index)
+          (let ((file (aref files index)))
+            (try
+              (let* ((result (await (js-call supervisor :run (js-object
+                        :id (funcall globalThis.String index) :file file :command (get globalThis.process :execPath)
+                        :args (worker-test-arguments file) :cwd (js-call globalThis.process :cwd)
+                        :env (get globalThis.process :env)))))
+                     (row (js-object :file file :exitCode (get result :exitCode))))
+                (when (and (worker-truth (get result :failure)) (/= (get result :failure) "cancelled"))
+                  (put row :failure (get result :failure)))
+                (when (worker-truth (get result :resource)) (put row :resource (get result :resource)))
+                (when (worker-truth (get result :message)) (put row :message (get result :message)))
+                (put results index row))
+              (catch error
+                (console/error error) (put results index (js-object :file file :exitCode 1))))))))
+          (while (and (= signal-code 0) (not (worker-truth (get supervisor :failure))) (< cursor (js-length files)))
+            (if (isExclusiveTestFile (aref files cursor))
+              (let ((index cursor)) (setq cursor (1+ cursor)) (await (funcall run-file index)))
+              (let ((end cursor))
+                (while (and (< end (js-length files)) (not (isExclusiveTestFile (aref files end))))
+                  (setq end (1+ end)))
+                (await (Promise/all (globalThis.Array.from
+                  (js-object :length (if (< (- end cursor) FILE_WORKERS) (- end cursor) FILE_WORKERS))
+                  (async ()
+                    (while (and (= signal-code 0) (not (worker-truth (get supervisor :failure))) (< cursor end))
+                      (let ((index cursor)) (setq cursor (1+ cursor)) (await (funcall run-file index))))))))))))
+        (finally
+          (js-call globalThis.process :off "SIGINT" interrupt)
+          (js-call globalThis.process :off "SIGTERM" terminate)))
+      (js-object :results (js-call results :filter globalThis.Boolean)
+        :exitCode (if (/= signal-code 0) signal-code
+          (if (or (worker-truth (get supervisor :failure))
+                  (js-call results :some (lambda (row) (/= (get row :exitCode) 0)))) 1 0)))))
+
+  (defasync runTestFiles (files)
+    (validate-files files)
+    (let ((archive (resolve ".eliscript-cache" "test-results"
+                    (str "file-workers-" (Date/now) "-" (get globalThis.process :pid) ".json")))
+          (supervisor undefined) (result undefined))
+      (try
+        (setq supervisor (await (startResourceSupervisor)))
+        (setq result (await (scheduleTestFiles files supervisor)))
+        (catch error (setq result (js-object :results (js-array) :exitCode 1
+          :failure "resource-supervisor-unavailable" :message (get error :message))))
+        (finally (when (worker-truth supervisor) (await (js-call supervisor :close)))))
+      (when (nullish? (get result :failure))
+        (put result :failure (worker-optional (worker-optional supervisor "failure") "failure")))
+      ;; Genuine unstarted files stay explicitly unstarted, never passed/skipped.
+      (let ((record (Object/assign (js-object) result (js-object
+        :inventory files :unstarted (js-call files :slice (js-length (get result :results)))
+        :resourceFailure (let ((failure (worker-optional supervisor "failure")))
+                          (if (nullish? failure) nil failure))))))
+        (try
+          (await (mkdir (resolve ".eliscript-cache" "test-results") (js-object :recursive t)))
+          (await (writeFile archive (+ (JSON/stringify record nil 2) "\n")))
+          (catch error
+            (console/error (+ "Cannot archive test outcomes: " (get error :message)))
+            (put result :exitCode 1))))
+      (when (worker-truth (get result :failure))
+        (console/error (str "[" (get result :failure) "] testing stopped; details: " archive))) result))
+
+  (defasync main ()
+    (try
+      (let* ((parsed (parseTestFileArgs (js-call (get globalThis.process :argv) :slice 2)))
+             (inventory (get parsed :files)) (shard (get parsed :shard))
+             (files (if shard (partitionTestFiles inventory (get shard :index) (get shard :count)) inventory)))
+        (when shard (console/log (str "Test file shard " (get shard :index) "/" (get shard :count)
+          ": " (js-length files) "/" (js-length inventory) " selected")))
+        (let ((result (if (> (js-length files) 0) (await (runTestFiles files)) (js-object :results (js-array) :exitCode 0))))
+          (console/log (str "Test files: " (js-length (get result :results)) "/" (js-length files) " completed; "
+            (js-length (js-call (get result :results) :filter (lambda (row) (/= (get row :exitCode) 0)))) " failed"))
+          (put globalThis.process :exitCode (get result :exitCode))))
+      (catch error
+        (console/error (+ "Invalid test-file arguments: " (get error :message)))
+        (put globalThis.process :exitCode 1))))
+
+  (when (and (> (js-length (get globalThis.process :argv)) 1)
+             (= (basename (aref (get globalThis.process :argv) 1)) "file-workers.mjs"))
+    (main))
+  (export FILE_WORKERS isExclusiveTestFile partitionTestFiles parseTestFileArgs scheduleTestFiles runTestFiles))

@@ -85,6 +85,46 @@ test('whole analyzer preserves deterministic random lexical trees Unicode bindin
  for(let index=0;index<32;index++){const name=['值','ä','é','𐀀','alpha'][next()%5],source=`(defun f (value) (let* ((${name} value) (result (+ ${name} ${next()%100}))) (if (> result 0) result value))) (export f)`;for(const input of[source,source+' missing'+index]){const expected=expectedAnalysis(input,'random😀.eli');assert.deepEqual(analyzeObserved(a,input,'random😀.eli'),expected);a.collect();assert.equal(a.stats().frameDepth,0);}}finish(a);
 });
 
+test('complete analyzer keeps cached names lexical shadowing tail state and nearest async context isolated under forced GC',()=>{
+ const cases=[
+  [true,'(defconst shared 7) (defun f (value) (let ((local value)) (let ((nested local)) (+ shared shared local nested))))'],
+  [true,'(defconst shared 7) (defun f () (let* ((before shared) (shared 1) (after shared)) (setq shared (+ shared 1)) [before shared after]))'],
+  [true,'(defun f (value) (let ((x-y value)) (let ((x_y x-y)) (+ x-y x_y))))'],
+  [true,'(defasync f (promise) (let ((value (await promise))) (let ((next value)) (await next))))'],
+  [true,'(defasync f (promise) (let ((value promise)) (async () (let ((next value)) (await next)))))'],
+  [true,'(defun f (value) (let* ((a (+ value value)) (b (+ a a))) (if value (recur b) value)))'],
+  [true,'(defun f (value) (let ((a value) (b value)) (lambda () (+ a b value))))'],
+  [true,'(defun f () [console/log console/log globalThis/Math globalThis/Math])'],
+  [true,'(defun f (value) (loop ((step value)) (if step (recur false) step)))'],
+  [false,'(defconst shared 7) (defun f () (let ((local shared)) shared shared (setq shared local)))'],
+  [false,'(defun f (x-y x_y) [x-y x_y])'],
+  [false,'(defasync f (promise) (lambda () (let ((next promise)) (await next))))'],
+  [false,'(defun f (value) (+ (recur value) value))'],
+  [false,'(defun f (value) (try (recur value) (finally nil)))'],
+  [false,'(defun f () (let ((first missing) (second 1 2)) first))'],
+  [false,'(defun f () [console/log console/log __eliscript_private/value])'],
+  [false,'(defun f () (let ((value 1)) value missing missing))'],
+  [true,'(defun f () (let () (lambda () (let* () 1))))'],
+  [true,"(defconst data '(defportable fake () missing)) (defun f () data)"],
+  [true,'(module outer (defconst base 2) (module inner (defportable f (value) (+ value base))))'],
+  [true,'(defun helper (value) value) (defun f (value) (helper (helper value)))'],
+  [false,'(defun f () (let () missing))'],
+  [false,'(defun f () (defun nested () 1))'],
+  [false,'(module outer (defportable f (value) (print value)))'],
+  [false,'(defun helper (value) value) (defportable f (value) (helper value))'],
+ ];
+ const a=instantiateManagedRuntime(artifact(),{maxSlots:16384,initialBytes:1048576});a.auto(1);
+ const held=a.number(-0),frame=a.frame(1);a.frameSet(frame,0,held);
+ try{
+  for(let iteration=0;iteration<2;iteration++)for(let index=0;index<cases.length;index++){
+   const[valid,source]=cases[index],filename=`environment😀-${iteration}-${index}.eli`,expected=expectedAnalysis(source,filename);
+   assert.equal(expected.status,valid?'ok':'error',filename);
+   assert.deepEqual(analyzeObserved(a,source,filename),expected,filename);
+   a.collect();assert.equal(a.stats().frameDepth,1,filename);assert(Object.is(a.readNumber(held),-0),filename);
+  }
+ }finally{a.leaveFrame(frame);a.release(held);finish(a);}
+},30000);
+
 test('independent Node executes the same complete Analyzer WASM bytes with its native JS analysis oracle',async()=>{
  const file=resolve(directory,'complete-analyzer.wasm');await writeFile(file,artifact());
  const script=["import assert from 'node:assert/strict';import{readFileSync}from'node:fs';",'const {instantiateManagedRuntime}=await import(process.argv[1]),reference=await import(process.argv[2]),reader=await import(process.argv[3]);',decode.toString(),property.toString(),analyzeObserved.toString(),expectedAnalysis.toString(),'const bytes=readFileSync(process.argv[4]);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);const a=instantiateManagedRuntime(bytes,{maxSlots:16384,initialBytes:1048576});a.auto(1);','for(const source of '+JSON.stringify([...valid,'missing','(defun f (x x) x)','(defportable f (x) (print x))'])+'){assert.deepEqual(analyzeObserved(a,source,"node😀.eli"),expectedAnalysis(source,"node😀.eli"),source);a.collect();assert.equal(a.stats().frameDepth,0);}','a.closeModule();a.collect();assert.equal(a.live(),0);'].join('\n');

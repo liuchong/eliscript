@@ -4,10 +4,8 @@
 ;; Eliscript program, compiled ahead of time by the maintained compiler, and it
 ;; drives the browser compile host at run time.
 ;;
-;; Compilation happens in a module worker, so a large edit never blocks the
-;; editor, and the worker rewrites the runtime specifiers of the output to
-;; served URLs. That is why compiled code needs no import map: only this page's
-;; own module graph uses one.
+;; Compilation happens in a module worker. An explicit compiler artifact
+;; configuration can select the JavaScript or WASM compiler host.
 
 (module example.browser-playground
   (import "eliscript/runtime/core/collection.mjs" :as Collection)
@@ -27,11 +25,20 @@
   ;; which is the base the runtime is served from.
   (defconst package-base (js* "new URL('../../', import.meta.url).href"))
   (defconst worker-url (js* "new URL('../../browser/worker.mjs', import.meta.url).href"))
+  (defconst compiler-browser-url
+    (get (new globalThis.URL "../../tools/backends/browser/compiler-browser.mjs" (js* "import.meta.url")) :href))
+  (defconst compiler-configuration
+    (js* "() => { const configured = globalThis.eliscriptCompiler ?? {}; if (configured === null || typeof configured !== 'object' || Array.isArray(configured)) throw new TypeError('eliscriptCompiler must be a compiler configuration object'); const parameters = new URLSearchParams(location.search); const host = parameters.get('compilerHost') ?? configured.host ?? 'javascript'; const manifest = parameters.get('compilerManifest') ?? configured.manifestURL; if (host !== 'javascript' && host !== 'wasm') throw new TypeError('playground compiler host must be javascript or wasm'); if (host === 'wasm' && !manifest && !configured.workerClient) throw new TypeError('WASM playground compiler requires compilerManifest'); return { ...configured, host, manifestURL: manifest ? new URL(manifest, document.baseURI).href : undefined }; }"))
+  (defconst load-configured-compiler
+    (js* "async (url, configuration) => { const { createBrowserCompiler } = await import(url); return await createBrowserCompiler(configuration); }"))
+  (defconst dispose-compilers
+    (js* "(worker, pending) => { worker?.terminate(); if (pending) Promise.resolve(pending).then((compiler) => compiler.dispose()).catch((error) => console.error(error)); }"))
   (defconst start-worker (js* "(url) => new Worker(url, { type: 'module' })"))
   (defconst compile-once
     (js* "(worker, message) => new Promise((resolve, reject) => { const onMessage = (event) => { const data = event.data; if (!data || data.id !== message.id) return; worker.removeEventListener('message', onMessage); if (data.ok) { resolve(data); return; } const error = new Error(data.message); error.diagnostics = data.diagnostics ?? []; reject(error); }; worker.addEventListener('message', onMessage); worker.postMessage(message); })"))
 
   (defvar compile-worker nil)
+  (defvar configured-compiler-promise nil)
   (defvar compile-sequence 0)
 
   (defconst capabilities
@@ -96,15 +103,38 @@
       (setq compile-worker (funcall start-worker worker-url)))
     compile-worker)
 
+  (defasync configured-compiler (configuration)
+    (when (nil? configured-compiler-promise)
+      (setq configured-compiler-promise
+            (funcall load-configured-compiler compiler-browser-url configuration)))
+    (await configured-compiler-promise))
+
+  (defun close-compilers ()
+    (let ((worker compile-worker)
+          (pending configured-compiler-promise))
+      (setq compile-worker nil)
+      (setq configured-compiler-promise nil)
+      (funcall dispose-compilers worker pending)))
+
   (defasync compile-in-worker (source)
-    (setq compile-sequence (1+ compile-sequence))
-    (await (funcall compile-once
-                    (worker-for-compile)
-                    (js-object :id (str "compile-" compile-sequence)
-                               :request (js-object :mode "single"
-                                                   :source source
-                                                   :filename "playground.eli"
-                                                   :runtimeBase package-base)))))
+    (let ((configuration (funcall compiler-configuration)))
+      (if (and (= (get configuration "host") "javascript")
+               (undefined? (get configuration "manifestURL"))
+               (undefined? (get configuration "workerClient")))
+          (progn
+            (setq compile-sequence (1+ compile-sequence))
+            (await (funcall compile-once
+                            (worker-for-compile)
+                            (js-object :id (str "compile-" compile-sequence)
+                                       :request (js-object :mode "single"
+                                                           :source source
+                                                           :filename "playground.eli"
+                                                           :runtimeBase package-base)))))
+        (let* ((compiler (await (configured-compiler configuration)))
+               (javascript (await (js-call compiler :compile_string source "playground.eli")))
+               (modules (js-object)))
+          (put modules "playground.mjs" (js-object :javascript javascript))
+          (js-object :modules modules)))))
 
   (defasync evaluate ()
     (install-console-capture "stdout" printValue)
@@ -135,6 +165,7 @@
                                  (display-text "diagnostics" (error-text error)))))
 
   (defun wire ()
+    (js-call (js* "globalThis") :addEventListener "pagehide" (lambda (event) (close-compilers)))
     (js-call (node "run") :addEventListener "click" (lambda (event) (start)))
     (js-call (node "source") :addEventListener "input" (lambda (event) (paint-source)))
     (js-call (node "source") :addEventListener "scroll" (lambda (event) (sync-editor-scroll)))

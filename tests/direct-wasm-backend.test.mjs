@@ -1,4 +1,5 @@
 import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
+import {inputs as stdlibJsonInputs,parseCases as stdlibParseCases,encodeInputs as stdlibEncodeInputs} from "./helpers/managed-stdlib-corpus.mjs";
 import { afterAll, beforeAll, describe, test } from "bun:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -6,7 +7,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile, mkdir } from "node:fs/promis
 import { execFile, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
-import { resolve, relative } from "node:path";
+import { resolve, relative, posix } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium, firefox, webkit } from "playwright-core";
 import { backendModules, buildBackends, root } from "../tools/backends/build.mjs";
@@ -171,6 +172,8 @@ beforeAll(async () => {
   const projectEntrySource = await readFile(projectEntryInput, "utf8");
   // Keep the public seed CLI and its per-child deadline. Avoid launching
   // multiple Emacs instances at once while another test file is also running.
+  const functionPropertiesInput = resolve(root, "tests/fixtures/wasm-managed-function-properties.eli");
+  const functionPropertiesSource = await readFile(functionPropertiesInput, "utf8");
   const consInput = resolve(root, "tests/fixtures/wasm-managed-js-cons.eli");
   const vectorInput = resolve(root, "stdlib/persistent-vector.eli");
   const vectorEntryInput = resolve(root, "tests/fixtures/wasm-managed-persistent-vector.eli");
@@ -193,10 +196,12 @@ beforeAll(async () => {
     [consInput, "cons-seed.mjs"],
     [vectorInput, "vector-seed.mjs"],
     [vectorEntryInput, "vector-entry-seed.mjs"],
+    [functionPropertiesInput, "function-properties-seed.mjs"],
   ]) seedOutputs.push(await seedJavascript(input, resolve(directory, output)));
-  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed, projectStateSeed, projectEntrySeed, stringsSeed, regexpSeed, builtinsSeed, jsonSeed, consSeed, vectorSeed, vectorEntrySeed] = seedOutputs;
+  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed, projectStateSeed, projectEntrySeed, stringsSeed, regexpSeed, builtinsSeed, jsonSeed, consSeed, vectorSeed, vectorEntrySeed, functionPropertiesSeed] = seedOutputs;
   runtimeSeeds = {
     memory: { source, javascript: memorySeed },
+    functionProperties: { source: functionPropertiesSource, javascript: functionPropertiesSeed, filename: "function-builtin.eli" },
     cons: { source: consSource, javascript: consSeed, filename: consInput },
     vector: { entry: "entry.mjs", modules: [
       {id:"persistent-vector.mjs",source:vectorSource,javascript:vectorSeed,filename:"persistent-vector.eli"},
@@ -216,8 +221,45 @@ beforeAll(async () => {
       {id:"wasm-managed-project-entry.mjs", source:projectEntrySource, javascript:projectEntrySeed, filename:projectEntryInput},
     ]},
   };
+  const identityPath=resolve(root,'tests/fixtures/wasm-managed-host-identity.eli');
+  const projects=JSON.parse(await readFile(resolve(root,'tests/fixtures/managed-host-identity-projects.json'),'utf8'));
+  const identityGraphs=[{key:'single',entry:'main.mjs',sources:{'main.mjs':await readFile(identityPath,'utf8')}}];
+  for(const[key,sources]of Object.entries(projects))identityGraphs.push({key,entry:'main.mjs',sources});
+  for(const graph of identityGraphs){
+    graph.modules=[];
+    for(const[id,source]of Object.entries(graph.sources)){
+      const input=graph.key==='single'?identityPath:resolve(directory,`identity-${graph.key}-${id}.eli`);
+      if(graph.key!=='single')await writeFile(input,source);
+      graph.modules.push({id,filename:id.replace(/\.mjs$/,'.eli'),source,javascript:await seedJavascript(input,resolve(directory,`identity-${graph.key}-${id}`))});
+    }
+    prepareBrowserProjectOracle(graph,`eliscript-identity/${graph.key}/`);
+  }
+  runtimeSeeds.identityGraphs=identityGraphs;
+  const stdlib={key:'stdlib',entry:'entry.mjs',modules:[]},loaded=new Set();
+  async function loadStdlib(id,input){
+    if(loaded.has(id))return;loaded.add(id);
+    const source=await readFile(input,'utf8'),program=generations[2].compiler.compile_ir_string(source,id);
+    stdlib.modules.push({id,filename:id,source,javascript:await seedJavascript(input,resolve(directory,`stdlib-${id.replaceAll('/','-')}.mjs`))});
+    async function imports(nodes){for(const node of nodes){if(node.kind==='import-declaration'){const target=posix.normalize(posix.join(posix.dirname(id),node.value));assert(target.startsWith('stdlib/'));await loadStdlib(target,resolve(root,target));}await imports(node.children??[]);}}
+    await imports(program.body);
+  }
+  await loadStdlib('entry.mjs',resolve(root,'tests/fixtures/managed-stdlib-value-json.eli'));
+  prepareBrowserProjectOracle(stdlib,'eliscript-stdlib/');runtimeSeeds.stdlib=stdlib;
 }, 120_000);
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
+
+function prepareBrowserProjectOracle(fixture,prefix){
+  fixture.prefix=prefix;
+  const ids=new Set(fixture.modules.map(m=>m.id));
+  for(const m of fixture.modules){
+    const program=generations[2].compiler.compile_ir_string(m.source,m.filename);
+    assert.equal(generations[2].compiler.emit_ir_string(program),m.javascript,'public Seed '+m.id);
+    function rewrite(nodes){for(const node of nodes){if(node.kind==='import-declaration'){
+      const target=posix.normalize(posix.join(posix.dirname(m.id),node.value));assert(ids.has(target),target);node.value=prefix+target;
+    }rewrite(node.children??[]);}}
+    rewrite(program.body);m.oracleJavascript=generations[2].compiler.emit_ir_string(program);
+  }
+}
 
 function compile(source, name = "direct-test.eli", generation = generations[2]) {
   const program = generation.compiler.compile_ir_string(source, name);
@@ -1919,6 +1961,103 @@ describe("browser compiler backends", () => {
     },{source,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-source-collections.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
   });
+  test("browser host identity preserves module ownership, aliases, collection and cyclic operand errors",async()=>{
+    const fixtures=runtimeSeeds.identityGraphs,runtime=runtimeSeeds.memory.source;
+    for(const g of generations)for(const f of fixtures)for(const m of f.modules)assert.equal(g.compiler.compile_string(m.source,m.filename),m.javascript);
+    const result=await evaluateBrowser(async({bundle,fixtures,runtime})=>{
+      const urls=[],imports={},url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));urls.push(url);
+      for(const f of fixtures)for(const m of f.modules){const u=URL.createObjectURL(new Blob([m.oracleJavascript],{type:'text/javascript'}));urls.push(u);imports[f.prefix+m.id]=u;}
+      const map=document.createElement('script');map.type='importmap';map.textContent=JSON.stringify({imports});document.head.appendChild(map);
+      try{
+        const c=await import(url),rt=c.compile_ir_string(runtime,'runtime.eli'),outputs=[],check=(v,label)=>{if(!v)throw Error(label);};
+        const read=(a,v)=>{if(v?.kind===4)return a.readNumber(v);if(v?.kind===5)return a.readString(v);if(v?.kind===14){const out=[];for(let i=0;i<a.length(v);i++){const x=a.get(v,i);try{out.push(read(a,x));}finally{a.release(x);}}return out;}return v;};
+        const value=(a,name,args=[])=>{const out=a.invoke(name,args);try{return read(a,out);}finally{a.release(out);}};
+        const same=(x,y,label)=>check(JSON.stringify(x)===JSON.stringify(y),label),finish=a=>{a.closeModule();a.collect();check(a.live()===0&&a.stats().frameDepth===0,'root cleanup');};
+        for(const f of fixtures){
+          const modules=f.modules.map(m=>({id:m.id,program:c.compile_ir_string(m.source,m.filename)})),frozen=JSON.stringify(modules);
+          for(let i=0;i<modules.length;i++)check(c.emit_ir_string(modules[i].program)===f.modules[i].javascript,'Seed JS parity');
+          const bytes=Uint8Array.from(c.emit_managed_project_wasm(modules,f.entry,rt));check(JSON.stringify(modules)===frozen,'immutable source IR');check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'zero imports');
+          const js=await import(f.prefix+f.entry),a=c.instantiateManagedRuntime(bytes,{maxSlots:2048,initialBytes:65536,maxBytes:16777216});a.auto(1);
+          if(f.key==='single'){
+            const x=a.sourceObject({}),y=a.sourceObject({}),rx={},ry={};
+            for(const[name,object,reference]of[['token',x,rx],['alias',x,rx],['nested',x,rx],['token',y,ry]])same(value(a,name,[object]),js[name](reference),name);
+            for(let i=0;i<8;i++){a.collect();same(value(a,'token',[x]),js.token(rx),'stable collected identity');}
+            for(const name of['effects','abrupt','no-conversion','symbol-case','function-case']){const exported=name.replaceAll('-','_');same(value(a,exported),js[exported](),name);}
+            for(const input of[null,undefined,false,true,-0,NaN,'中😀\ud800']){const v=typeof input==='number'?a.number(input):typeof input==='string'?a.string(input):input;same(value(a,'safe',[v]),js.safe(input),'scalar TypeError');a.release(v);}
+            const second=c.instantiateManagedRuntime(bytes,{maxSlots:2048,initialBytes:65536,maxBytes:16777216}),other=second.sourceObject({});second.auto(1);same(value(second,'token',[other]),1,'fresh heap counter');let refused=false;try{a.invoke('token',[other]);}catch(e){refused=e.eliscriptDiagnostic?.code==='ELI-RT0001';}check(refused,'foreign identity');second.release(other);finish(second);a.release(x);a.release(y);
+          }else if(f.key==='project'){
+            const x=a.sourceObject({}),y=a.sourceObject({}),left=a.getExport('left'),copy=a.getExport('left_copy');
+            check(a.keyEqual(left,copy)===(js.left===js.left_copy),'function alias identity');same(value(a,'encounters',[x,y]),js.encounters({},{}),'opposite module encounters');for(const v of[x,y,left,copy])a.release(v);
+          }else{const early=a.getExport('early');try{same(read(a,early),js.early,'cyclic error precedes operand effects');}finally{a.release(early);}}
+          finish(a);outputs.push([...bytes]);
+        }
+        return outputs;
+      }finally{for(const u of urls)URL.revokeObjectURL(u);}
+    },{fixtures,runtime});
+    for(let i=0;i<fixtures.length;i++){const f=fixtures[i];assert.deepEqual(result[i],generations[2].managed.emit_managed_project_wasm(f.modules.map(m=>({id:m.id,program:generations[2].compiler.compile_ir_string(m.source,m.filename)})),f.entry,generations[2].compiler.compile_ir_string(runtime,'runtime.eli')));}
+  },120000);
+
+  test("browser function properties preserve ordinary absence builtin refusal identities and calls",async()=>{
+    const fixture=runtimeSeeds.functionProperties,runtime=runtimeSeeds.memory.source;
+    for(const g of generations)assert.equal(g.compiler.compile_string(fixture.source,fixture.filename),fixture.javascript);
+    const result=await evaluateBrowser(async({bundle,fixture,runtime})=>{
+      const urls=[],url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));urls.push(url);
+      try{
+        const c=await import(url),program=c.compile_ir_string(fixture.source,fixture.filename),rt=c.compile_ir_string(runtime,'runtime.eli');
+        const check=(v,label)=>{if(!v)throw Error(label);};check(c.emit_ir_string(program)===fixture.javascript,'Seed JS parity');
+        const jsUrl=URL.createObjectURL(new Blob([fixture.javascript],{type:'text/javascript'}));urls.push(jsUrl);const js=await import(jsUrl);
+        const frozen=JSON.stringify(program),bytes=Uint8Array.from(c.emit_managed_wasm(program,rt));check(JSON.stringify(program)===frozen,'immutable IR');check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'zero imports');
+        const a=c.instantiateManagedRuntime(bytes);a.auto(1);
+        const read=v=>{if(v?.kind===4)return a.readNumber(v);if(v?.kind===5)return a.readString(v);if(v?.kind===14){const out=[];for(let i=0;i<a.length(v);i++){const x=a.get(v,i);try{out.push(read(x));}finally{a.release(x);}}return out;}return v;};
+        const call=(name,args=[])=>{const out=a.invoke(name,args);try{return read(out);}finally{a.release(out);}};
+        const same=(actual,expected,label)=>{if(Array.isArray(expected)){check(Array.isArray(actual)&&actual.length===expected.length,label+' length');for(let i=0;i<expected.length;i++)same(actual[i],expected[i],label+' '+i);}else check(Object.is(actual,expected),label);};
+        const refused=(name,args)=>{let failed=false;try{const out=a.invoke(name,args);a.release(out);}catch(e){failed=e.eliscriptDiagnostic?.code==='ELI-RT0003';}check(failed,'explicit builtin refusal '+name);check(a.stats().frameDepth===0,'refusal frame cleanup');};
+        try{
+          for(let mode=0;mode<5;mode++){const n=a.number(mode);try{
+            for(const name of['isFinite','missing','name','length','prototype']){const key=a.string(name);try{for(const op of['read','has','descriptor'])refused(op,[n,key]);}finally{a.release(key);}}
+            for(const op of['keys','names','symbols','prototype'])refused(op,[n]);
+          }finally{a.release(n);}a.collect();}
+          const mode=a.number(5);try{for(const name of['kind','isFinite']){const key=a.string(name);try{same(call('read',[mode,key]),js.read(5,name),'ordinary missing read');same(call('has',[mode,key]),js.has(5,name),'ordinary missing own');same(call('descriptor',[mode,key]),js.descriptor(5,name),'ordinary missing descriptor');}finally{a.release(key);}}}finally{a.release(mode);}
+          const text=a.string('12'),number=a.number(2),builtin=a.number(0),key=a.string('isFinite');try{for(let i=0;i<4;i++){
+            refused('has',[builtin,key]);same(call('cached'),js.cached(),'cached identity');same(call('call-number',[text]),js.call_number('12'),'Number call');same(call('call-string',[number]),js.call_string(2),'String call');same(call('call-finite',[number]),js.call_finite(2),'first-class finite');same(call('static-finite',[number]),js.static_finite(2),'static finite');same(call('call-symbol'),js.call_symbol(),'Symbol call');same(call('call-error'),js.call_error(),'Error call');same(call('effects'),js.effects(),'argument effects');a.collect();
+          }}finally{for(const v of[text,number,builtin,key])a.release(v);}
+        }finally{a.closeModule();a.collect();check(a.live()===0&&a.stats().frameDepth===0,'root cleanup');}
+        return [...bytes];
+      }finally{for(const u of urls)URL.revokeObjectURL(u);}
+    },{fixture,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(fixture.source,fixture.filename),generations[2].compiler.compile_ir_string(runtime,'runtime.eli')));
+  },120000);
+
+  test("browser complete Value and JSON graph executes original persistent and JSON semantics",async()=>{
+    const fixture=runtimeSeeds.stdlib,runtime=runtimeSeeds.memory.source;
+    for(const g of generations)for(const m of fixture.modules)assert.equal(g.compiler.compile_string(m.source,m.filename),m.javascript);
+    const result=await evaluateBrowser(async({bundle,fixture,runtime,inputs,parseCases,encodeInputs})=>{
+      const urls=[],imports={},url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));urls.push(url);
+      for(const m of fixture.modules){const u=URL.createObjectURL(new Blob([m.oracleJavascript],{type:'text/javascript'}));urls.push(u);imports[fixture.prefix+m.id]=u;}
+      const map=document.createElement('script');map.type='importmap';map.textContent=JSON.stringify({imports});document.head.appendChild(map);
+      try{
+        const c=await import(url),js=await import(fixture.prefix+fixture.entry),rt=c.compile_ir_string(runtime,'runtime.eli'),modules=fixture.modules.map(m=>({id:m.id,program:c.compile_ir_string(m.source,m.filename)}));
+        const check=(v,label)=>{if(!v)throw Error(label);};for(let i=0;i<modules.length;i++)check(c.emit_ir_string(modules[i].program)===fixture.modules[i].javascript,'Seed JS parity');
+        const frozen=JSON.stringify(modules),bytes=Uint8Array.from(c.emit_managed_project_wasm(modules,fixture.entry,rt,{initialPages:4,maximumPages:1024}));check(JSON.stringify(modules)===frozen,'immutable IR');check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'zero imports');
+        check(Object.is(encodeInputs[4],-0)&&Number.isNaN(encodeInputs[5]),'lossless scalar test transport');
+        const read=(a,v)=>{if(v?.kind===4)return a.readNumber(v);if(v?.kind===5)return a.readString(v);if(v?.kind===14){const out=[];for(let i=0;i<a.length(v);i++){const x=a.get(v,i);try{out.push(read(a,x));}finally{a.release(x);}}return out;}return v;};
+        for(const threshold of[65536,1]){
+          const a=c.instantiateManagedRuntime(bytes,{maxSlots:8192,initialBytes:262144,maxBytes:16777216});a.auto(threshold);
+          const call=(name,args=[])=>{const out=a.invoke(name,args);try{return read(a,out);}finally{a.release(out);}},same=(x,y,label)=>check(JSON.stringify(x)===JSON.stringify(y),label);
+          same(call('values'),js.values(),'persistent equality and hashes');same(call('identities'),js.identities(),'opaque object keys');
+          same(call('json_boundaries'),js.json_boundaries(),'Unicode signed zero shared and cyclic values');same(call('order_and_identity'),js.order_and_identity(),'unordered maps fixed collisions functions and Symbols');
+          for(const text of inputs){const input=a.string(text);try{same(call('json_case',[input]),js.json_case(text),'JSON '+text);}finally{a.release(input);}}
+          const box=x=>{if(typeof x==='string')return a.string(x);if(typeof x==='number')return a.number(x);if(x&&typeof x==='object'){if(Array.isArray(x))return a.sourceArray([]);const entries=Object.fromEntries(Object.entries(x).map(([key,v])=>[key,box(v)]));try{return a.sourceObject(entries);}finally{Object.values(entries).forEach(v=>a.release(v));}}return x;};
+          for(const pair of parseCases){const args=pair.map(box);try{same(call('parse_report',args),js.parse_report(...pair),'precise JSON error and options');}finally{args.forEach(v=>a.release(v));}}
+          for(const x of encodeInputs){const input=box(x);try{same(call('encode_report',[input]),js.encode_report(x),'JSON encoder boundaries');}finally{a.release(input);}}
+          a.closeModule();a.collect();check(a.live()===0&&a.stats().frameDepth===0,'root cleanup');
+        }
+        return [...bytes];
+      }finally{for(const u of urls)URL.revokeObjectURL(u);}
+    },{fixture,runtime,inputs:stdlibJsonInputs,parseCases:stdlibParseCases,encodeInputs:stdlibEncodeInputs});
+    assert.deepEqual(result,generations[2].managed.emit_managed_project_wasm(fixture.modules.map(m=>({id:m.id,program:generations[2].compiler.compile_ir_string(m.source,m.filename)})),fixture.entry,generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{initialPages:4,maximumPages:1024}));
+  },120000);
+
   test("browser js-cons preserves nullish normalization, argument order and iterable protocols",async()=>{
     const fixture=runtimeSeeds.cons,runtime=runtimeSeeds.memory.source;
     for(const g of generations){const p=g.compiler.compile_ir_string(fixture.source,fixture.filename);assert.equal(g.compiler.emit_ir_string(p),fixture.javascript);}

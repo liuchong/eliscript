@@ -1,0 +1,170 @@
+(module tests.managed-apply-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:module" createRequire)
+  (import "node:path" basename)
+  (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  ;; The five real public wrapper nodes are appended by the suite. These
+  ;; explicitly named recording callees observe forwarding, not collection
+  ;; implementation semantics; the full transient graph has its own gate.
+  (defconst fixture-source (js-call (js-array
+    "(defun managed-literal-conj-bang (collection &rest values) (JSON/stringify (js-array collection values)))"
+    "(defun managed-literal-dissoc-bang (collection &rest keys) (JSON/stringify (js-array collection keys)))"
+    "(defconst Data (js-object :update (lambda (&rest values) (JSON/stringify values)) :update_in (lambda (&rest values) (JSON/stringify values)) :merge_with (lambda (&rest values) (JSON/stringify values))))"
+    "(defun pack (&rest values) (JSON/stringify values))"
+    "(defun apply-input (values) (apply pack values))"
+    "(defun composed (collection values) (apply pack (js-call (js-array collection) :concat values)))"
+    "(defun rest-forward (collection &rest values) (apply pack (js-call (js-array collection) :concat values)))"
+    "(defun closed (values) (let ((offset 10)) (apply (lambda (a b) (+ offset a b)) values)))"
+    "(defun alias (value values) (apply (lambda (first &rest tail) first) (js-call (js-array value) :concat values)))"
+    "(defun member-receiver () (let ((items (js-array 1))) (let ((count (apply (get items :push) (js-array 2 3)))) (JSON/stringify (js-array count items)))))"
+    "(defun property-reference (mode) (let* ((trace \"\") (items (js-array 1)) (method (get items :push)))"
+    " (Object/defineProperty items \"method\" (js-object :get (lambda () (setq trace (str trace \"g\")) (when (= mode 1) (throw false)) (if (= mode 3) undefined method))))"
+    " (try (let ((out (if (>= mode 2)"
+    "   (apply (get (progn (setq trace (str trace \"r\")) items) (progn (setq trace (str trace \"k\")) \"method\") (progn (setq trace (str trace \"d\")) method)) (progn (setq trace (str trace \"a\")) (js-array 2 3)))"
+    "   (apply (get (progn (setq trace (str trace \"r\")) items) (progn (setq trace (str trace \"k\")) \"method\")) (progn (setq trace (str trace \"a\")) (js-array 2 3))))))"
+    "   (JSON/stringify (js-array trace out items))) (catch error (JSON/stringify (js-array trace (if (= error false) false (get error :name)) items))))))"
+    "(defun call-order () (let ((trace \"\") (f (lambda (&rest xs) (str \"old:\" (JSON/stringify xs)))))"
+    " (let ((out (apply (progn (setq trace (str trace \"c\")) f) (progn (setq trace (str trace \"v\")) (setq f (lambda (&rest xs) \"new\")) (js-array 7 8))))) (JSON/stringify (js-array trace out)))))"
+    "(defun bad-input (value) (try (apply pack value) (catch error (get error :name))))"
+    "(defun operand-throw () (apply pack (throw false)))"
+    "(defun iterable-report (mode) (let ((trace \"\") (index 0) (input (js-object)))"
+    " (Object/defineProperty input \"length\" (js-object :get (lambda () (throw \"length-read\"))))"
+    " (Object/defineProperty input \"slice\" (js-object :get (lambda () (throw \"slice-read\"))))"
+    " (Object/defineProperty input \"constructor\" (js-object :get (lambda () (throw \"species-read\"))))"
+    " (Object/defineProperty input globalThis.Symbol.iterator (js-object :get (lambda () (setq trace (str trace \"g\")) (when (= mode 1) (throw false))"
+    "  (lambda () (setq trace (str trace \"i\")) (js-object :next (lambda () (setq trace (str trace \"n\"))"
+    "   (when (and (= mode 2) (= index 1)) (throw false))"
+    "   (let ((position index)) (setq index (1+ index)) (js-object :done (>= position 2) :value position))))))))"
+    " (try (let ((out (apply (progn (setq trace (str trace \"c\")) pack) (progn (setq trace (str trace \"v\")) input))))"
+    "        (JSON/stringify (js-array trace out))) (catch error (JSON/stringify (js-array trace error))))))"
+    "(export apply-input composed rest-forward closed alias member-receiver property-reference call-order bad-input operand-throw iterable-report)") :join "\n"))
+
+  (defun declarations (nodes output)
+    (js-call nodes :forEach (lambda (node)
+      (if (= (get node :kind) "module-declaration") (declarations (get node :children) output)
+        (js-call output :push node)))) output)
+  (defun wrapper-program (compiler source data-source)
+    (let* ((actual (js-call compiler :compile_ir_string source "stdlib/managed-runtime-transient.eli"))
+           (data (js-call compiler :compile_ir_string data-source "stdlib/managed-runtime-data.eli"))
+           (saved (JSON/stringify actual)) (data-saved (JSON/stringify data))
+           (selected (js-array)) (selected-exports (js-array))
+           (fixture (js-call compiler :compile_ir_string fixture-source "managed-apply.eli")))
+      (js-call (js-array (js-array actual (js-array "conjBang" "dissocBang"))
+                        (js-array data (js-array "update" "updateIn" "mergeWith"))) :forEach (lambda (entry)
+        (js-call (declarations (get (aref entry 0) :body) (js-array)) :forEach (lambda (node)
+          (when (and (= (get node :kind) "function-declaration")
+                     (js-call (aref entry 1) :includes (get node :value)))
+            (js-call selected :push node))
+          (when (= (get node :kind) "export-declaration")
+            (js-call (get node :children) :forEach (lambda (reference)
+              (when (js-call (aref entry 1) :includes (get reference :value))
+                (js-call selected-exports :push reference)))))))))
+      (js-call assert :deepStrictEqual (js-call selected :map (lambda (node) (get node :value)))
+        (js-array "conjBang" "dissocBang" "update" "updateIn" "mergeWith"))
+      (js-call assert :deepStrictEqual (js-call selected-exports :map (lambda (node) (get node :value)))
+        (js-array "conjBang" "dissocBang" "update" "updateIn" "mergeWith"))
+      ;; Only the fresh fixture export declaration is extended. The five
+      ;; original export references retain their source spans and identity.
+      (let ((exports (js-call (get fixture :body) :filter
+                        (lambda (node) (= (get node :kind) "export-declaration")))))
+        (js-call assert :strictEqual (js-length exports) 1)
+        (put (aref exports 0) :children
+          (js-call (get (aref exports 0) :children) :concat selected-exports)))
+      (js-call assert :strictEqual (JSON/stringify actual) saved)
+      (js-call assert :strictEqual (JSON/stringify data) data-saved)
+      (put fixture :body (js-call selected :concat (get fixture :body)))
+      (js-object :program fixture :original actual :originalText saved :dataOriginal data :dataText data-saved
+        :wrappers selected :wrapperExports selected-exports)))
+  (defun box (runtime value)
+    (cond ((= (value-type value) "number") (js-call runtime :number value))
+          ((= (value-type value) "string") (js-call runtime :string value))
+          ((Array/isArray value)
+            (let ((items (js-call value :map (lambda (item) (box runtime item)))))
+              (try (js-call runtime :sourceArray items)
+                (finally (js-call items :forEach (lambda (item) (js-call runtime :release item)))))))
+          (t value)))
+  (defun read (runtime value)
+    (if (and value (= (value-type value) "object"))
+      (if (= (get value :kind) 4) (js-call runtime :readNumber value) (js-call runtime :readString value)) value))
+  (defun compare (runtime reference name input)
+    (let* ((expected (Reflect/apply (get reference (js-call name :replaceAll "-" "_")) undefined input))
+           (arguments (js-call input :map (lambda (value) (box runtime value)))) (result undefined))
+      (try
+        (setq result (js-call runtime :invoke name arguments))
+        (assert (Object/is (read runtime result) expected) name)
+        (finally
+          (js-call runtime :release result)
+          (js-call arguments :forEach (lambda (value) (js-call runtime :release value)))))))
+  (defun exercise-wrappers (runtime reference)
+    (js-call runtime :auto 1)
+    (js-call (js-array (js-array) (js-array 7) (js-array -0 nil false t undefined "中\ud800" "😀")) :forEach (lambda (values)
+      (compare runtime reference "apply-input" (js-array values))
+      (compare runtime reference "composed" (js-array "collection" values))
+      (compare runtime reference "conjBang" (js-call (js-array "collection") :concat values))
+      (compare runtime reference "dissocBang" (js-call (js-array "collection") :concat values))
+      (compare runtime reference "update" (js-call (js-array "collection" "key" "transform") :concat values))
+      (compare runtime reference "updateIn" (js-call (js-array "collection" "path" "transform") :concat values))
+      (compare runtime reference "mergeWith" (js-call (js-array "combine") :concat values))
+      (compare runtime reference "rest-forward" (js-call (js-array "collection") :concat values))))
+    (compare runtime reference "closed" (js-array (js-array 1 2)))
+    (let* ((value (js-call runtime :number -0)) (tail (js-call runtime :sourceArray))
+           (out (js-call runtime :invoke "alias" (js-array value tail))))
+      (try (assert (js-call runtime :keyEqual value out)) (assert (Object/is (js-call runtime :readNumber out) -0))
+        (finally (js-call runtime :release out) (js-call runtime :release value) (js-call runtime :release tail))))
+    (js-call runtime :collect)
+    (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
+  (defun exercise-receivers (runtime reference)
+    (js-call runtime :auto 1)
+    (js-call assert :strictEqual (js-call reference :member_receiver) "[3,[1,2,3]]")
+    (compare runtime reference "member-receiver" (js-array))
+    (js-call (js-array
+      (js-array 0 "[\"rkga\",3,[1,2,3]]")
+      (js-array 1 "[\"rkg\",false,[1]]")
+      (js-array 2 "[\"rkga\",\"TypeError\",[1]]")
+      (js-array 3 "[\"rkgda\",\"TypeError\",[1]]")) :forEach (lambda (entry)
+        (js-call assert :strictEqual (js-call reference :property_reference (aref entry 0)) (aref entry 1))
+        (compare runtime reference "property-reference" (js-array (aref entry 0)))))
+    (js-call runtime :collect)
+    (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
+  (defun exercise-order (runtime reference)
+    (js-call runtime :auto 1)
+    (js-call assert :strictEqual (js-call reference :call_order) "[\"cv\",\"old:[7,8]\"]")
+    (compare runtime reference "call-order" (js-array))
+    (js-call runtime :collect)
+    (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
+  (defun exercise-iterators (runtime reference)
+    (js-call runtime :auto 1)
+    (js-call assert :strictEqual (js-call reference :iterable_report 0) "[\"cvginnn\",\"[0,1]\"]")
+    (js-call (js-array 0 1 2) :forEach (lambda (mode) (compare runtime reference "iterable-report" (js-array mode))))
+    (js-call runtime :collect)
+    (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
+  (defun exercise-throws (runtime reference)
+    (js-call runtime :auto 1)
+    (js-call (js-array nil undefined 7 false) :forEach (lambda (value)
+      (compare runtime reference "bad-input" (js-array value))))
+    (let ((thrown false) (failure undefined))
+      (try (js-call reference :operand_throw) (catch error (setq thrown t failure error)))
+      (js-call assert :strictEqual thrown t) (js-call assert :strictEqual failure false)
+      (setq thrown false failure undefined)
+      (try (js-call runtime :invoke "operand-throw") (catch error (setq thrown t failure error)))
+      (js-call assert :strictEqual thrown t) (js-call assert :strictEqual failure false))
+    (js-call runtime :collect)
+    (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
+  (defun exercise (runtime reference)
+    (exercise-wrappers runtime reference)
+    (exercise-receivers runtime reference)
+    (exercise-order runtime reference)
+    (exercise-iterators runtime reference)
+    (exercise-throws runtime reference))
+  (defasync main ()
+    (let* ((arguments (get globalThis.process :argv))
+           (runtime (instantiateManagedRuntime (readFileSync (aref arguments 2))))
+           (reference (funcall (createRequire (aref arguments 3)) (aref arguments 3))))
+      (try (exercise runtime reference)
+        (finally (js-call runtime :closeModule) (js-call runtime :collect)
+          (js-call assert :strictEqual (js-call runtime :live) 0)))))
+  (when (= (basename (or (aref (get globalThis.process :argv) 1) "")) "managed-apply-node-selfhosted.mjs") (main))
+  (export fixture-source wrapper-program exercise exercise-wrappers exercise-receivers
+    exercise-order exercise-iterators exercise-throws box read compare))

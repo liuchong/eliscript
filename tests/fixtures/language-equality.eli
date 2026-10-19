@@ -19,9 +19,9 @@
         :nativeSame
         (equal native-left native-left)
         :nan
-        (equal (js* "NaN") (js* "NaN"))
+        (equal globalThis.NaN globalThis.NaN)
         :signedZero
-        (equal (js* "-0") 0)
+        (equal -0.0 0)
         :mapOrder
         (equal {:a 1 :b 2} {:b 2 :a 1})
         :setOrder

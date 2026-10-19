@@ -24,6 +24,18 @@
        "method-call" "constructor-call" "raw-javascript" "print"
        "string-concat" "invoke" "apply-call" "call")))
 
+  (defconst ir-filename-key "filename")
+  (defconst ir-body-key "body")
+  (defconst ir-kind-key "kind")
+  (defconst ir-span-key "span")
+  (defconst ir-value-key "value")
+  (defconst ir-children-key "children")
+  (defconst ir-properties-key "properties")
+  (defconst canonical-node-kinds
+    (let ((kinds (new globalThis.Map)))
+      (js-call node-kinds :forEach (lambda (kind) (js-call kinds :set kind kind)))
+      kinds))
+
   (defconst fail
     (lambda (message)
       (throw (new (js* "Error") message))))
@@ -108,65 +120,97 @@
             (schema-fail (str label " has unknown or missing fields")))))
       keys))
 
-  (defun canonical-json-array (value path active depth)
+  ;; These private arrays contain only complete string tokens. Invoke the
+  ;; captured native join directly instead of the language's general array
+  ;; text-conversion path, which also handles arbitrary and cyclic values.
+  (defconst canonical-json-array-join (get (js* "Array.prototype") :join))
+
+  (defun make-canonical-json-sink ()
+    (js-object :chunks (js-array) :parts (js-array) :length 0))
+
+  (defun canonical-json-flush (sink)
+    (when (> (js-length (get sink :parts)) 0)
+      (js-call (get sink :chunks) :push
+        (Reflect/apply canonical-json-array-join (get sink :parts) (js-array "")))
+      (put sink :parts (js-array)) (put sink :length 0)))
+
+  (defun canonical-json-token (sink token)
+    ;; Bound pending small tokens rather than retaining a string for every
+    ;; completed subtree. JSON.stringify must still produce each primitive
+    ;; string token atomically; keep an oversized token as its own chunk.
+    (let ((length (js-length token)))
+      (when (> (+ (get sink :length) length) 65536) (canonical-json-flush sink))
+      (if (>= length 65536)
+        (js-call (get sink :chunks) :push token)
+        (progn
+          (js-call (get sink :parts) :push token)
+          (put sink :length (+ (get sink :length) length))))))
+
+  (defun canonical-json-finish (sink)
+    (canonical-json-flush sink)
+    (Reflect/apply canonical-json-array-join (get sink :chunks) (js-array "")))
+
+  (defun canonical-json-array (value path active depth &optional collect-output sink)
     (unless (funcall dense-json-array-p value)
       (schema-fail (str path " must be a dense plain array")))
     (when (js-call active :has value)
       (schema-fail (str path " contains a cyclic JSON value")))
     (js-call active :add value)
-    (let ((parts (js-array))
+    (let ((collect (not (eq collect-output false)))
           (index 0))
+      (when collect (canonical-json-token sink "["))
       (while (< index (get value :length))
-        (js-call parts :push
-          (canonical-json-value
-            (js-nth index value)
-            (str path "[" index "]")
-            active
-            (1+ depth)))
+        (when (and collect (> index 0)) (canonical-json-token sink ","))
+        (canonical-json-value
+          (js-nth index value)
+          (str path "[" index "]")
+          active
+          (1+ depth) collect sink)
         (setq index (1+ index)))
       (js-call active :delete value)
-      (str "[" (js-call parts :join ",") "]")))
+      (when collect (canonical-json-token sink "]"))))
 
-  (defun canonical-json-record (value path active depth)
+  (defun canonical-json-record (value path active depth &optional collect-output sink)
     (let ((keys (funcall plain-record-keys value)))
       (when (nil? keys)
         (schema-fail (str path " must be a plain data object")))
       (when (js-call active :has value)
         (schema-fail (str path " contains a cyclic JSON value")))
       (js-call active :add value)
-      (let ((parts (js-array)))
+      (let ((collect (not (eq collect-output false))) (index 0))
+        (when collect (canonical-json-token sink "{"))
         (js-call keys :forEach
           (lambda (key)
-            (js-call parts :push
-              (str
-                (JSON/stringify key)
-                ":"
-                (canonical-json-value
-                  (get value key)
-                  (str path "." key)
-                  active
-                  (1+ depth))))))
+            (when collect
+              (when (> index 0) (canonical-json-token sink ","))
+              (canonical-json-token sink (JSON/stringify key))
+              (canonical-json-token sink ":"))
+            (canonical-json-value (get value key) (str path "." key)
+              active (1+ depth) collect sink)
+            (setq index (1+ index))))
         (js-call active :delete value)
-        (str "{" (js-call parts :join ",") "}"))))
+        (when collect (canonical-json-token sink "}")))))
 
-  (defun canonical-json-value (value path active depth)
+  (defun canonical-json-value (value path active depth &optional collect-output sink)
     (when (> depth ir-max-depth)
       (schema-fail (str path " exceeds IR nesting depth " ir-max-depth)))
-    (let ((type (js* "typeof value")))
+    (let* ((type (js* "typeof value")) (collect (not (eq collect-output false)))
+           (output (when collect (or sink (make-canonical-json-sink)))))
       (cond
-       ((nil? value) "null")
-       ((= type "boolean") (if value "true" "false"))
+       ((nil? value) (when collect (canonical-json-token output "null")))
+       ((= type "boolean") (when collect (canonical-json-token output (if value "true" "false"))))
        ((= type "number")
         (unless (funcall finite-number-p value)
           (schema-fail (str path " must contain only finite numbers")))
-        (if (Object/is value (- 0)) "-0" (JSON/stringify value)))
-       ((= type "string") (JSON/stringify value))
+        (when collect (canonical-json-token output (if (Object/is value (- 0)) "-0" (JSON/stringify value)))))
+       ((= type "string") (when collect (canonical-json-token output (JSON/stringify value))))
        ((funcall array-p value)
-        (canonical-json-array value path active depth))
+        (canonical-json-array value path active depth collect output))
        ((= type "object")
-        (canonical-json-record value path active depth))
+        (canonical-json-record value path active depth collect output))
        (t
-        (schema-fail (str path " contains unsupported JSON type " type))))))
+        (schema-fail (str path " contains unsupported JSON type " type))))
+      (when (and collect (not sink)) (canonical-json-finish output))))
 
   (defun canonical-json (value)
     (canonical-json-value value "$" (new globalThis.Set) 0))
@@ -249,6 +293,15 @@
       (validate-document document)
       (canonical-json document)))
 
+  (defun validate-serializable-program (program)
+    ;; Schema validation alone does not inspect arbitrary value/properties
+    ;; payloads. Retain both original passes and the document wrapper's JSON
+    ;; paths/depth, while avoiding an unused full canonical output string.
+    (let ((document (js-object :format ir-format :version ir-version :program program)))
+      (validate-document document)
+      (canonical-json-value document "$" (new globalThis.Set) 0 false)
+      program))
+
   (defun deserialize-program (source)
     (unless (= (js* "typeof source") "string")
       (schema-fail "canonical IR source must be a string"))
@@ -270,7 +323,7 @@
       (fail "IR program body must be an array"))
     (unless (js-call body :every node-p)
       (fail "IR program body must contain only IR nodes"))
-    (js-object :filename filename :body body))
+    (js-object (progn ir-filename-key) filename (progn ir-body-key) body))
 
   (defun node-p (value)
     (and value
@@ -291,12 +344,12 @@
       (fail "IR node children must all be IR nodes"))
     (let ((node
            (js-object
-             :kind kind
-             :span span
-             :value value
-             :children children)))
+             (progn ir-kind-key) (js-call canonical-node-kinds :get kind)
+             (progn ir-span-key) span
+             (progn ir-value-key) value
+             (progn ir-children-key) children)))
       (when properties
-        (put node :properties properties))
+        (put node ir-properties-key properties))
       node))
 
   (defun program-filename (program)
@@ -342,5 +395,6 @@
     ir-children
     ir-properties
     ir-property
+    validate-serializable-program
     serialize-program
     deserialize-program))

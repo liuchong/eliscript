@@ -33,7 +33,18 @@
           (eq code 34) (eq code 39) (eq code 44) (eq code 59) (eq code 96))))
   (defun make-state
     (source filename)
-    (js-object :source source :filename filename :index 0 :offset 0 :line 1 :column 1))
+    (js-object :source source :filename filename :index 0 :offset 0 :line 1 :column 1
+      :atomNames (new globalThis.Map)))
+
+  (defun reader-atom-name (state name)
+    ;; This table belongs only to the private read-string state. Syntax nodes
+    ;; keep immutable names directly, never the state or the table itself.
+    (let ((names (get state :atomNames nil)))
+      (if (nil? names) name
+        (let ((existing (js-call names :get name)))
+          (if (undefined? existing)
+              (progn (js-call names :set name name) name)
+            existing)))))
   (defun mark
     (state)
     (js-object
@@ -255,27 +266,43 @@
                 start
                 (str "invalid keyword literal: " token)
                 (- (get state :offset) (get start :offset))))
-            (keyword-node name span)))
+            (keyword-node (reader-atom-name state name) span)))
         ((number-token-p token) (literal-node (funcall (js* "Number") token) span))
-        (t (symbol-node token span)))))
+        (t (symbol-node (reader-atom-name state token) span)))))
   (defun read-string-literal
     (state start)
-    (advance state)
-    (let ((done false))
+    (let* ((source (get state :source))
+           (index (get state :index))
+           (offset (get state :offset))
+           (line (get state :line))
+           (column (get state :column))
+           (opening t)
+           (escaped false)
+           (done false)
+           (ended false))
       (while (not done)
-        (let ((code (peek-code state)))
-          (cond ((eq code undefined) (fail-at state start "unexpected end of input"))
-            ((= code 92)
-              (advance state)
-              (when (eq (peek-code state) undefined)
-                (fail-at state start "unexpected end of input"))
-              (advance state))
-            ((= code 34) (advance state) (setq done t))
-            (t (advance state)))))
+        (let ((code (js-call source :codePointAt index)))
+          (if (eq code undefined)
+            (progn (setq ended t) (setq done t))
+            (progn
+              (setq index (+ index (if (> code 65535) 2 1)))
+              (setq offset (1+ offset))
+              (if (= code 10)
+                (progn (setq line (1+ line)) (setq column 1))
+                (setq column (1+ column)))
+              (cond (opening (setq opening false))
+                (escaped (setq escaped false))
+                ((= code 92) (setq escaped t))
+                ((= code 34) (setq done t)))))))
+      (put state :index index)
+      (put state :offset offset)
+      (put state :line line)
+      (put state :column column)
+      (when ended (fail-at state start "unexpected end of input"))
       (let*
         (
           (raw
-            (js-call (get state :source) :slice (get start :index) (get state :index)))
+            (js-call source :slice (get start :index) index))
           (value (js-call (js* "JSON") :parse raw)))
         (literal-node value (span-from state start)))))
   (defun read-prefix
@@ -289,7 +316,7 @@
       (let ((child (read-node state)))
         (collection-node
           "list"
-          (js-array (symbol-node name prefix-span) child)
+          (js-array (symbol-node (reader-atom-name state name) prefix-span) child)
           (span-from state start)))))
   (defun read-collection
     (state start closing kind &optional tagged-opening-span)
@@ -311,18 +338,18 @@
                 start
                 "map literal must contain an even number of forms"
                 (- (get state :offset) (get start :offset))))
-            (let ((form-items (js-array (symbol-node "hash-map" opening-span))))
+            (let ((form-items (js-array (symbol-node (reader-atom-name state "hash-map") opening-span))))
               (js-call items :forEach (lambda (item) (js-call form-items :push item)))
               (collection-node "list" form-items span)))
           ((= kind "set")
-            (let ((form-items (js-array (symbol-node "hash-set" opening-span))))
+            (let ((form-items (js-array (symbol-node (reader-atom-name state "hash-set") opening-span))))
               (js-call items :forEach (lambda (item) (js-call form-items :push item)))
               (collection-node "list" form-items span)))
           ((= kind "queue")
             (let
               (
                 (form-items
-                  (js-array (symbol-node "queue" (or tagged-opening-span opening-span)))))
+                  (js-array (symbol-node (reader-atom-name state "queue") (or tagged-opening-span opening-span)))))
               (js-call items :forEach (lambda (item) (js-call form-items :push item)))
               (collection-node "list" form-items span)))
           ((and (= kind "list") (= (get items :length) 0)) (literal-node nil span))

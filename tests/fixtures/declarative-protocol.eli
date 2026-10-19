@@ -3,8 +3,10 @@
           define-protocol extend-protocol-category extend-protocol-default
           extend-protocol-type protocol-method)
 
-  (defconst Box
-    (js* "class Box { constructor(value) { this.value = value; } }"))
+  (defun Box (value)
+    (Object/create (get Box :prototype)
+      (js-object :value (js-object :value value :writable t :enumerable t :configurable t))))
+  (Object/defineProperty Box "prototype" (js-object :writable false))
 
   (defprotocol IDescribe describe measure)
 

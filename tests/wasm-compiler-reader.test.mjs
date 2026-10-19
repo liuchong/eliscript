@@ -8,7 +8,25 @@ import { spawnSync } from 'node:child_process';
 import { buildBackends } from '../tools/backends/build.mjs';
 import { instantiateManagedRuntime } from '../tools/backends/managed-runtime.mjs';
 
-let directory, backend, modules, runtime, reference, bytes, diagnosticFailure;
+let directory, backend, modules, runtime, reference, bytes, diagnosticFailure, originalStringReader, localStringReader;
+const originalStringLiteral=`  (defun read-string-literal
+    (state start)
+    (advance state)
+    (let ((done false))
+      (while (not done)
+        (let ((code (peek-code state)))
+          (cond ((eq code undefined) (fail-at state start "unexpected end of input"))
+            ((= code 92)
+              (advance state)
+              (when (eq (peek-code state) undefined)
+                (fail-at state start "unexpected end of input"))
+              (advance state))
+            ((= code 34) (advance state) (setq done t))
+            (t (advance state)))))
+      (let* ((raw (js-call (get state :source) :slice (get start :index) (get state :index)))
+             (value (js-call (js* "JSON") :parse raw)))
+        (literal-node value (span-from state start)))))
+`;
 const readerExports = ['read-string', 'read-token', 'reference-read-token', 'skip-space-and-comments',
   'reference-skip-space-and-comments', 'whitespace-code-p', 'reference-whitespace-code-p',
   'delimiter-code-p', 'reference-delimiter-code-p'];
@@ -28,13 +46,30 @@ beforeAll(async () => {
   })));
   runtime = backend.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli', 'utf8'), 'runtime.eli');
   reference = await import(pathToFileURL(resolve(directory, 'bootstrap/reader.mjs')).href);
+  const readerText=await readFile('bootstrap/compiler/reader.eli','utf8');
+  const literalStart=readerText.indexOf('  (defun read-string-literal\n'),literalEnd=readerText.indexOf('  (defun read-prefix\n',literalStart);
+  assert(literalStart>=0&&literalEnd>literalStart);
+  const originalText=readerText.slice(0,literalStart)+originalStringLiteral+readerText.slice(literalEnd);
+  for(const [name,text]of [['reader-original-string',originalText],['reader-local-string',readerText]]){
+    const exposed=text.replace(/\)\s*$/,'\n  (export read-string-literal))\n');
+    const output=resolve(directory,'bootstrap',name+'.mjs');
+    await writeFile(output,backend.compiler.compile_string(exposed,'reader.eli'));
+    const module=await import(pathToFileURL(output).href);
+    if(name==='reader-original-string')originalStringReader=module;else localStringReader=module;
+  }
+  const reader = modules.find(module => module.id === 'reader.mjs').program;
+  const literalExport=flatten(backend.compiler.compile_ir_string('(defun read-string-literal (state start) nil) (export read-string-literal)','literal-export.eli').body)
+    .filter(node=>node.kind==='export-declaration');
+  reader.body.push(...literalExport);
   modules.push({ id: 'entry.mjs', program: backend.compiler.compile_ir_string(`
-    (import "./reader.mjs" ${readerExports.join(' ')})
+    (import "./reader.mjs" ${readerExports.join(' ')} read-string-literal)
     (defun read-observed (source filename)
       (try (js-array t (read-string source filename))
         (catch error (js-array false error))))
-    (export ${readerExports.join(' ')} read-observed)`, 'reader-entry.eli') });
-  const reader = modules.find(module => module.id === 'reader.mjs').program;
+    (defun read-string-literal-observed (state start)
+      (try (js-array t (read-string-literal state start))
+        (catch error (js-array false error))))
+    (export ${readerExports.join(' ')} read-observed read-string-literal-observed)`, 'reader-entry.eli') });
   const fail = flatten(reader.body).find(node => node.kind === 'variable-declaration' && node.value === 'fail');
   assert(fail);
   const exported = flatten(backend.compiler.compile_ir_string('(defconst fail nil) (export fail)', 'diagnostic-export.eli').body).filter(node => node.kind === 'export-declaration');
@@ -228,6 +263,52 @@ function state(a, source, fields = {}) {
     typeof value === 'string' ? a.string(value) : a.number(value)]));
   try { return a.sourceObject(boxed); } finally { Object.values(boxed).forEach(value => a.release(value)); }
 }
+
+test('local string scanning preserves the independent original Reader AST cursor and errors for long Unicode escaped and incomplete literals',()=>{
+  const a=instantiateManagedRuntime(artifact(),{maxSlots:8192,initialBytes:1048576});a.auto(1);
+  const prefix='😀\n  ',start={index:prefix.length,offset:Array.from(prefix).length,line:2,column:3},filename='literal😀.eli';
+  const literals=[JSON.stringify('中😀"\\\n'.repeat(4096)),'"quote\\\" slash\\\\ end"','"😀𝄞\ud800x\udc00"',
+    '"\\uD83D\\uDE00\\uD800\\uDC00"','"\udc00"','"a\n😀b"','"a\r😀b"','"a\\\n😀b"',
+    '"\\😀"','"\\\ud800"','"unfinished😀','"unfinished😀\\','"'];
+  function original(module,source){
+    const cursor={source,filename,...start};
+    try{return {ok:true,value:module.read_string_literal(cursor,{...start}),cursor};}
+    catch(error){return {ok:false,name:error.name,message:error.message,diagnostic:error.eliscriptDiagnostic,cursor};}
+  }
+  try{
+    for(const [index,literal]of literals.entries()){
+      const source=prefix+literal,expected=original(originalStringReader,source);
+      assert.deepEqual(original(localStringReader,source),expected,'original JavaScript scanner case '+index);
+      const cursor=state(a,source,{filename,...start}),fields=Object.fromEntries(Object.entries(start).map(([key,value])=>[key,a.number(value)]));
+      let mark,observed,value;
+      try{
+        mark=a.sourceObject(fields);observed=a.invoke('read_string_literal_observed',[cursor,mark]);
+        assert.equal(a.get(observed,0),expected.ok,'managed scanner case '+index);
+        value=a.get(observed,1);
+        assert.deepEqual(decode(a,cursor),expected.cursor,'cursor must be committed before parsing or EOF case '+index);
+        if(expected.ok){
+          assert.deepEqual(decode(a,value),expected.value,'unchanged literal AST and scalar span case '+index);
+          assert.deepEqual(reference.read_string(source,filename),originalStringReader.read_string(source,filename));
+        }else{
+          const name=property(a,value,'name'),message=property(a,value,'message'),diagnostic=property(a,value,'eliscriptDiagnostic');
+          try{
+            assert.equal(a.readString(name),expected.name);
+            if(expected.diagnostic){
+              assert.equal(a.readString(message),expected.message);assert.deepEqual(decode(a,diagnostic),expected.diagnostic);
+              assert.equal(expected.diagnostic.code,'ELI-R0001');
+              assert.deepEqual(expected.diagnostic.location.start,{offset:start.offset,line:start.line,column:start.column});
+            }else{
+              assert.equal(expected.name,'SyntaxError');assert(a.readString(message).length>0);
+              assert.equal(decode(a,diagnostic).code,'ELI-RT0003');
+            }
+          }finally{a.release(name);a.release(message);a.release(diagnostic);}
+        }
+      }finally{for(const root of [value,observed,mark,cursor,...Object.values(fields)])a.release(root);}
+      a.collect();assert.equal(a.stats().frameDepth,0);
+    }
+  }finally{finish(a);}
+});
+
 test('all nine original reader exports execute unchanged through the complete linked modules', () => {
   const a = instantiateManagedRuntime(artifact()); a.auto(1);
   for (const name of readerExports.filter(name => name.endsWith('-code-p'))) {

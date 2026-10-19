@@ -23,6 +23,41 @@
   children
   kind)
 
+(defvar eliscript-reader--line-starts nil
+  "Line-start buffer positions for the current located reader invocation.
+The dynamically bound vector belongs only to that invocation's source buffer.")
+
+(defun eliscript-reader--index-lines ()
+  "Index every line start in the current source buffer in one forward scan."
+  (save-excursion
+    (goto-char (point-min))
+    (let ((starts (list (point))))
+      (while (search-forward "\n" nil t)
+        (push (point) starts))
+      (vconcat (nreverse starts)))))
+
+(defun eliscript-reader--position (position)
+  "Return the one-based line and character column at buffer POSITION."
+  (if eliscript-reader--line-starts
+      (let ((low 0)
+            (high (length eliscript-reader--line-starts)))
+        ;; Find the first line beginning strictly after POSITION. Positions at
+        ;; a newline belong to the preceding line; the following position is
+        ;; the next line's first column, including the empty final line.
+        (while (< low high)
+          (let ((middle (/ (+ low high) 2)))
+            (if (<= (aref eliscript-reader--line-starts middle) position)
+                (setq low (1+ middle))
+              (setq high middle))))
+        (cons low
+              (1+ (- position
+                     (aref eliscript-reader--line-starts (1- low))))))
+    ;; Retain the internal helper's behavior outside a located reader call.
+    (save-excursion
+      (goto-char position)
+      (cons (line-number-at-pos)
+            (1+ (- position (line-beginning-position)))))))
+
 (defun eliscript-reader--queue-opening-index (source index)
   "Return the opening bracket index for a Queue tag at INDEX in SOURCE."
   (let ((tag-end (+ index 6)))
@@ -80,61 +115,71 @@ Map braces outside strings and comments become parentheses.  Set literals
 become a same-length parenthesized form with the dispatch brace replaced by
 whitespace.  Eliscript owns both persistent value semantics after the host
 reader has produced a list."
-  (let ((result (copy-sequence source))
-        (index 0)
-        (in-string nil)
-        (escaped nil)
-        (in-comment nil))
-    (while (< index (length result))
-      (let ((character (aref result index)))
+  (save-match-data
+    (let ((result (copy-sequence source))
+          (limit (length source))
+          (index 0)
+          in-string escaped in-comment)
+      (while (< index limit)
         (cond
          (in-comment
-          (when (= character ?\n)
-            (setq in-comment nil)))
+          ;; Only a newline can leave this state. Quoted text, delimiters and
+          ;; Queue-looking bytes inside a comment have no reader meaning.
+          (setq index (or (string-match "\n" result index) limit))
+          (when (< index limit)
+            (setq in-comment nil index (1+ index))))
          (in-string
-          (cond
-           (escaped (setq escaped nil))
-           ((= character ?\\) (setq escaped t))
-           ((= character ?\") (setq in-string nil))))
-         ((= character ?\;) (setq in-comment t))
-         ((= character ?\") (setq in-string t))
-         ((let ((opening
-                 (eliscript-reader--queue-opening-index source index)))
-            (when opening
-              (aset result index ?\()
-              (aset result opening ?\s)
-              (let ((closing
-                     (eliscript-reader--queue-closing-index source opening)))
-                (when closing (aset result closing ?\))))
-              t)))
-         ((and (= character ?#)
-               (< (1+ index) (length result))
-               (= (aref result (1+ index)) ?\{))
-          (aset result index ?\()
-          (aset result (1+ index) ?\s))
-         ((= character ?\{) (aset result index ?\())
-         ((= character ?\}) (aset result index ?\)))))
-      (setq index (1+ index)))
-    result))
+          (if escaped
+              ;; An escape consumes exactly one character, including an
+              ;; astral scalar or newline, rather than one encoded byte.
+              (setq escaped nil index (1+ index))
+            (setq index (or (string-match "[\"\\\\]" result index) limit))
+            (when (< index limit)
+              (if (= (aref result index) ?\\)
+                  (setq escaped t)
+                (setq in-string nil))
+              (setq index (1+ index)))))
+         (t
+          ;; Skip ordinary source runs in the host regexp engine rather than
+          ;; allocating a Queue tag substring at every source character.
+          (setq index (or (string-match "[\";#{}]" result index) limit))
+          (when (< index limit)
+            (let ((character (aref result index)))
+              (cond
+               ((= character ?\;) (setq in-comment t))
+               ((= character ?\") (setq in-string t))
+               ((and (= character ?#)
+                     (let ((opening
+                            (eliscript-reader--queue-opening-index source index)))
+                       (when opening
+                         (aset result index ?\()
+                         (aset result opening ?\s)
+                         (let ((closing
+                                (eliscript-reader--queue-closing-index source opening)))
+                           (when closing (aset result closing ?\))))
+                         t))))
+               ((and (= character ?#)
+                     (< (1+ index) limit)
+                     (= (aref result (1+ index)) ?\{))
+                (aset result index ?\()
+                (aset result (1+ index) ?\s))
+               ((= character ?\{) (aset result index ?\())
+               ((= character ?\}) (aset result index ?\)))))
+            (setq index (1+ index))))))
+      result)))
 
 (defun eliscript-reader--span (start end filename)
   "Return a source span from buffer positions START to END in FILENAME."
-  (let (line column end-line end-column)
-    (save-excursion
-      (goto-char start)
-      (setq line (line-number-at-pos)
-            column (1+ (- start (line-beginning-position))))
-      (goto-char end)
-      (setq end-line (line-number-at-pos)
-            end-column (1+ (- end (line-beginning-position)))))
+  (let ((beginning (eliscript-reader--position start))
+        (ending (eliscript-reader--position end)))
     (eliscript-source-span-create
      :filename filename
      :start (1- start)
      :end (1- end)
-     :line line
-     :column column
-     :end-line end-line
-     :end-column end-column)))
+     :line (car beginning)
+     :column (cdr beginning)
+     :end-line (car ending)
+     :end-column (cdr ending))))
 
 (defun eliscript-reader--prefix-length ()
   "Return the reader-prefix length at point, or nil when none is present."
@@ -375,7 +420,8 @@ two-character dispatch prefix.  Eliscript owns that diagnostic contract."
     (modify-syntax-entry ?\{ "(}" (syntax-table))
     (modify-syntax-entry ?\} "){" (syntax-table))
     (goto-char (point-min))
-    (let ((emacs-source (eliscript-reader--emacs-source source))
+    (let ((eliscript-reader--line-starts (eliscript-reader--index-lines))
+          (emacs-source (eliscript-reader--emacs-source source))
           forms done)
       (while (not done)
         (forward-comment (point-max))

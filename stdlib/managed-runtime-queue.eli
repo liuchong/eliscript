@@ -1,0 +1,9 @@
+(module eliscript.managed-runtime-queue
+  (import "../../stdlib/managed-literals.eli"
+    PersistentQueue literal-queue literal-instance?)
+
+  (defconst EMPTY_QUEUE (literal-queue))
+  (defun persistentQueue (&rest values) (js-call PersistentQueue :from values))
+  (defun isPersistentQueue (value) (literal-instance? value PersistentQueue))
+
+  (export PersistentQueue EMPTY_QUEUE persistentQueue isPersistentQueue))

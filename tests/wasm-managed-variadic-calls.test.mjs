@@ -106,13 +106,23 @@ test('argument-list descriptors validate parameter modes and the actual exported
  const lowered=backends.managed.lower_managed_program(program,runtime),raw=backends.wasm.emit_typed_memory_wasm(lowered.typed),saved=[...raw];
  const positive=Uint8Array.from(backends.wasm.append_metadata_section([...raw],'eliscript-managed-control',JSON.stringify(lowered.descriptor)));assert.equal(WebAssembly.Module.customSections(new WebAssembly.Module(positive),'eliscript-managed-control').length,1);finish(instantiateManagedRuntime(positive));
  const mixed=lowered.descriptor.functions.find(f=>f.name==='mixed');assert.deepEqual(mixed,{name:'mixed',arity:null,callingConvention:'argument-list',parameterKinds:['required','optional','rest']});
- for(const mutate of [d=>{delete d.functions.find(f=>f.name==='mixed').parameterKinds;},d=>{d.functions.find(f=>f.name==='mixed').arity++;},d=>{d.functions.find(f=>f.name==='mixed').callingConvention='other';},d=>{delete d.functions.find(f=>f.name==='mixed').callingConvention;},d=>{d.functions.find(f=>f.name==='mixed').parameterKinds=['required','rest','optional'];},d=>{d.functions.find(f=>f.name==='mixed').parameterKinds=['required','optional','unknown'];},d=>{d.functions.find(f=>f.name==='mixed').parameterKinds=['required','required','required'];},d=>{d.functions.find(f=>f.name==='call-none').arity=3;}]){
+ for(const mutate of [d=>{delete d.functions.find(f=>f.name==='mixed').parameterKinds;},d=>{d.functions.find(f=>f.name==='mixed').arity++;},d=>{d.functions.find(f=>f.name==='mixed').callingConvention='other';},d=>{delete d.functions.find(f=>f.name==='mixed').callingConvention;},d=>{d.functions.find(f=>f.name==='mixed').parameterKinds=['required','rest','optional'];},d=>{d.functions.find(f=>f.name==='mixed').parameterKinds=['required','optional','unknown'];},d=>{d.functions.find(f=>f.name==='mixed').parameterKinds=[];},d=>{d.functions.find(f=>f.name==='call-none').arity=3;}]){
   const d=structuredClone(lowered.descriptor);mutate(d);const invalid=Uint8Array.from(backends.wasm.append_metadata_section([...raw],'eliscript-managed-control',JSON.stringify(d)));
   assert.equal(WebAssembly.Module.customSections(new WebAssembly.Module(invalid),'eliscript-managed-control').length,1,'each argument-list mutant needs its own metadata section');
   assert.throws(()=>instantiateManagedRuntime(invalid),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');
  }
  assert.deepEqual(raw,saved);
  const a=instance();assert.throws(()=>a.invoke('call-none'),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');finish(a);
+});
+test('required parameter patterns declare and execute the real argument-list ABI without optional or rest parameters',()=>{
+ const ir=backends.compiler.compile_ir_string('(defun required-pattern ([value]) value) (export required-pattern)','required-pattern.eli');
+ const lowered=backends.managed.lower_managed_program(ir,runtime);
+ assert.deepEqual(lowered.descriptor.functions,[{name:'required-pattern',arity:null,callingConvention:'argument-list',parameterKinds:['required']}]);
+ const raw=backends.wasm.emit_typed_memory_wasm(lowered.typed);
+ const artifact=Uint8Array.from(backends.wasm.append_metadata_section([...raw],'eliscript-managed-control',JSON.stringify(lowered.descriptor)));
+ const a=instantiateManagedRuntime(artifact);a.auto(1);const zero=a.number(-0),input=a.sourceArray([zero]);
+ try{const output=a.invoke('required-pattern',[input]);try{assert(Object.is(a.readNumber(output),-0));}finally{a.release(output);}}
+ finally{a.release(input);a.release(zero);a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 });
 
 function rawHeap(){

@@ -1,0 +1,11 @@
+(module managed.regexp-property-data
+  (defun make (source flags) (new globalThis/RegExp source flags))
+  (defun test-value (pattern text) (js-call pattern :test text))
+  (defun literal-ascii () (js* "/^\\p{ASCII}$/u"))
+  (defun literal-greek () (js* "/^\\p{Script=Greek}$/u"))
+  (defun literal-negative () (js* "/^\\P{Lowercase_Letter}$/iu"))
+  (defun literal-negative-v () (js* "/^\\P{Lowercase_Letter}$/iv"))
+  (defun throwing (pattern)
+    (js-call pattern :test (js-object :toString (lambda () (throw false)))))
+  (defun recover () (js-call (js* "/^\\p{ASCII}$/u") :test "A"))
+  (export make test-value literal-ascii literal-greek literal-negative literal-negative-v throwing recover))

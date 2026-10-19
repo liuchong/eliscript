@@ -1,0 +1,385 @@
+(module tests.managed-project-initializers
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile writeFile rm realpath)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:module" createRequire)
+  (import "../tools/backends/build.mjs" buildBackends root)
+  (import "../tools/backends/managed-module-graph.mjs" createManagedModuleGraph)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntimeWithHostModules readManagedAllocatorSnapshot)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (defvar directory undefined)
+  (defvar backend undefined)
+  (defvar runtime undefined)
+  (defvar namespace-fixture undefined)
+  (defconst allocator-diagnostic (= (get (get globalThis.process :env) "ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC") "1"))
+  (defun namespace-allocation-phase (adapter phase)
+    (when allocator-diagnostic
+      (try
+        (let ((snapshot undefined))
+          (try (setq snapshot (readManagedAllocatorSnapshot adapter)) (catch ignored nil))
+          (console/error "[project-allocator]" (JSON/stringify
+            (js-object :suite "namespace" :phase phase :allocator snapshot :stats (js-call adapter :stats)))))
+        (catch ignored nil))))
+  (defconst native-target (when (= (get globalThis.process :arch) "arm64")
+    (cond ((= (get globalThis.process :platform) "darwin") "arm64-macos")
+          ((= (get globalThis.process :platform) "linux") "arm64-linux"))))
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-project-initializers-"))))
+    (setq backend (await (buildBackends (js-object :outputRoot directory))))
+    (setq runtime (js-call (get backend :compiler) :compile_ir_string
+      (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
+    (setq namespace-fixture (await (namespace-artifact)))) 120000)
+  (afterAll (async ()
+    (setq backend undefined runtime undefined)
+    (when directory (await (rm directory (js-object :recursive t :force t))))))
+  (defun project ()
+    (let* ((compiler (get backend :compiler))
+           (modules (js-array
+             (js-object :id "dep.mjs" :program (js-call compiler :compile_ir_string
+               "(defvar count 1) (setq count (+ count 2)) (export count)" "dep.eli"))
+             (js-object :id "main.mjs" :program (js-call compiler :compile_ir_string
+               ;; Direct IR lowering uses registered output IDs. Keep the
+               ;; original .eli filenames solely as diagnostic provenance.
+               "(import \"./dep.mjs\" count) (defvar total 10) (setq total (+ total count)) (defun result () total) (export result total)" "main.eli"))))
+           (before (js-call modules :map (lambda (item) (js-call compiler :serialize_ir_program (get item :program)))))
+           (lowered (js-call (get backend :managed) :lower_managed_project modules "main.mjs" runtime (js-object :phased t))))
+      (js-call assert :deepStrictEqual (js-call modules :map (lambda (item)
+        (js-call compiler :serialize_ir_program (get item :program)))) before)
+      lowered))
+  (test "phased expressions retain their original module and ordered independent initialization steps"
+    (lambda ()
+      (let* ((lowered (project)) (description (get (get lowered :descriptor) :project))
+             (modules (get description :modules))
+             (steps (js-call modules :flatMap (lambda (item) (get item :steps)))))
+        ;; Two declarations and two source expression statements all survive.
+        (js-call assert :deepStrictEqual (get description :preparedBindings) (js-array))
+        (js-call assert :strictEqual (js-length steps) 4)
+        (js-call assert :deepStrictEqual (js-call modules :map (lambda (item)
+          (js-array (get item :id) (js-length (get item :steps)))))
+          (js-array (js-array "dep.mjs" 2) (js-array "main.mjs" 2)))
+        (js-call assert :deepStrictEqual (js-call (get (aref modules 0) :steps) :map
+          (lambda (item) (js-length (get item :initializes)))) (js-array 1 0))
+        (js-call assert :deepStrictEqual (js-call (get (aref modules 1) :steps) :map
+          (lambda (item) (js-length (get item :initializes)))) (js-array 1 0)))))
+  (test "prepared binding metadata comes only from real canonical prepare declarations and never duplicates namespace aliases"
+    (lambda ()
+      (let* ((compiler (get backend :compiler)) (managed (get backend :managed))
+             (sources (js-array
+               (js-object :id "dep.mjs" :source "(defvar value 7) (export value)")
+               (js-object :id "other.mjs" :source "(import \"./dep.mjs\" :as Alias) (export Alias)")
+               (js-object :id "main.mjs" :source
+                 "(import \"./dep.mjs\" :as Shared) (import \"./other.mjs\" Alias) (defvar ordinary (get Shared :value)) (export Shared Alias ordinary)")))
+             (modules (js-call sources :map (lambda (item)
+               (js-object :id (get item :id) :program (js-call compiler :compile_ir_string
+                 (get item :source) (get item :id))))))
+             (before (JSON/stringify modules))
+             (linked (js-call managed :link_managed_project modules "main.mjs" (js-object :phased t)))
+             (provenance (js-call (get (get linked :program) :body) :filter (lambda (node)
+               (and (= (get node :kind) "variable-declaration") (get node :projectPrepare false)))))
+             (lowered (js-call managed :lower_managed_project modules "main.mjs" runtime (js-object :phased t)))
+             (descriptor (get lowered :descriptor)) (project (get descriptor :project))
+             (prepared (get project :preparedBindings))
+             (main (js-call (get project :modules) :find (lambda (item) (= (get item :id) "main.mjs"))))
+             (exports (get main :exports))
+             (shared (js-call exports :find (lambda (item) (= (get item :name) "Shared"))))
+             (alias (js-call exports :find (lambda (item) (= (get item :name) "Alias"))))
+             (ordinary (js-call exports :find (lambda (item) (= (get item :name) "ordinary")))))
+        (js-call assert :strictEqual (JSON/stringify modules) before)
+        (js-call assert :strictEqual (js-length provenance) 1)
+        (js-call assert :strictEqual (get shared :index) (get alias :index))
+        (js-call assert :strictEqual (get shared :kind) 0)
+        (js-call assert :deepStrictEqual prepared (js-array
+          (js-object :name (get (aref provenance 0) :value) :kind 0
+            :index (get shared :index) :mutable false)))
+        (js-call assert :notStrictEqual (get (aref prepared 0) :name) "Shared")
+        (js-call assert :strictEqual (get (new globalThis.Set
+          (js-call prepared :map (lambda (item) (get item :index)))) :size) (js-length prepared))
+        (js-call assert :strictEqual (get ordinary :kind) 0)
+        (js-call assert :notStrictEqual (get ordinary :index) (get shared :index))
+        (let ((initializes (js-call (get project :modules) :flatMap (lambda (module)
+                (js-call (get module :steps) :flatMap (lambda (step) (get step :initializes)))))))
+          (js-call assert :strictEqual (js-length initializes) 2)
+          (js-call assert :ok (js-call initializes :some (lambda (item)
+            (= (get item :index) (get ordinary :index)))))
+          (js-call prepared :forEach (lambda (item)
+            (js-call assert :strictEqual (js-call initializes :some (lambda (step)
+              (= (get item :index) (get step :index)))) false)))))))
+  (test "unknown statement module identity is still refused without changing the caller child provenance"
+    (lambda ()
+      (let* ((program (js-call (get backend :compiler) :compile_ir_string
+                       "(defvar value 1) (setq value 2) (export value)" "provenance.eli"))
+             (body (get program :body)) (statement (aref body 1)) (child (aref (get statement :children) 0))
+             (modules (js-array (js-object :id "main.mjs" :dependencies (js-array)
+               :exports (js-array (js-object :name "value" :canonical "value")) :portable (js-array)))))
+        (put program :projectEntry "main.mjs")
+        (put (aref body 0) :projectModule "main.mjs")
+        (put statement :projectModule "missing.mjs")
+        (js-call assert :throws
+          (lambda () (js-call (get backend :managed) :lower_managed_program program runtime t nil nil nil nil modules t))
+          (lambda (error) (= (get error :message) "project initializer lacks its original module identity")))
+        (js-call assert :strictEqual (Object/hasOwn child "projectModule") false)
+        (js-call assert :strictEqual (Object/hasOwn child "projectPrepare") false))))
+  (test "real WASM and native phased projects execute expression initializers once and preserve exported results"
+    (async ()
+      (let* ((lowered (project)) (descriptor (get lowered :descriptor))
+             (targets (if native-target (js-array "wasm" "native") (js-array "wasm"))) (index 0))
+        (while (< index (js-length targets))
+          (let* ((target (aref targets index)) (graph (createManagedModuleGraph descriptor))
+                 (options (js-object :initializeModule false :moduleGraph graph :maxSlots 4096
+                   :initialBytes 1048576 :maxBytes 16777216 :auto 4096
+                   :initialPages 1 :maximumPages 256 :nativeTarget native-target))
+                 (adapter undefined))
+            (try
+              (progn
+                (if (= target "wasm")
+                  (setq adapter (await (instantiateManagedRuntimeWithHostModules
+                    (js-call globalThis.Uint8Array :from (js-call (get backend :wasm) :append_metadata_section
+                      (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed)
+                        (js-object :initialPages 1 :maximumPages 256))
+                      "eliscript-managed-control" (JSON/stringify descriptor))) options)))
+                  (let ((path (resolve directory (if (= native-target "arm64-macos") "project.dylib" "project.so"))))
+                    (await (writeFile path (js-call globalThis.Uint8Array :from
+                      (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target))))
+                    (setq adapter (await (instantiateNativeManagedRuntime path lowered options)))))
+                (js-call graph :prepare)
+                (js-call (get (get descriptor :project) :modules) :forEach (lambda (module)
+                  (js-call (get module :steps) :forEach (lambda (step)
+                    (js-call graph :step (get step :run)) (js-call graph :step (get step :run))))))
+                (let ((value (js-call adapter :invoke "result" (js-array))))
+                  (try (js-call assert :strictEqual (js-call adapter :readNumber value) 13)
+                    (finally (js-call adapter :release value)))))
+              (finally
+                (when adapter
+                  (js-call adapter :closeModule) (js-call adapter :collect)
+                  (js-call assert :strictEqual (js-call adapter :live) 0)
+                  (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0)
+                  (when (get adapter :close) (js-call adapter :close)))
+                (js-call graph :close))))
+          (setq index (1+ index))))) 120000)
+
+  (defasync namespace-artifact ()
+    (let ((names (js-array)) (declarations (js-array "(defvar live 7)")) (index 0))
+      ;; Three real namespaces expose the same canonical functions. The old
+      ;; eager key + function + kind20-cell representation cannot fit 1024
+      ;; slots here; no runtime budget or original four cases is enlarged.
+      (while (< index 128)
+        (let ((name (+ "f" index)))
+          (js-call names :push name)
+          (js-call declarations :push (+ "(defun " name " () " (if (= index 0) "-0.0" (funcall globalThis.String index)) ")")))
+        (setq index (1+ index)))
+      (js-call names :push "live")
+      (let* ((exports (js-call names :join " "))
+             (sources (js-array
+               (js-object :id "dep.mjs" :source (+ (js-call declarations :join "\n") "\n(export " exports ")"))
+               (js-object :id "forward.mjs" :source (+ "(import \"./dep.mjs\" " exports ") (export " exports ")"))
+               (js-object :id "forward-again.mjs" :source (+ "(import \"./forward.mjs\" " exports ") (export " exports ")"))
+               (js-object :id "empty.mjs" :source "(module fixture.empty)")
+               (js-object :id "main.mjs" :source (js-call (js-array
+                 "(import \"./dep.mjs\" f0)"
+                 "(import \"./dep.mjs\" :as Direct)"
+                 "(import \"./forward.mjs\" :as Alias)"
+                 "(import \"./forward-again.mjs\" :as Third)"
+                 "(import \"./empty.mjs\" :as Empty)"
+                 "(defun keysOnly () (js-array (Object/keys Direct) (Object/keys Alias) (Object/keys Third)))"
+                 "(defun ownNames (namespace) (js-call (Reflect/ownKeys namespace) :map (lambda (key) (if (= (value-type key) \"symbol\") \"@@toStringTag\" key))))"
+                 "(defun namesOnly () (js-array (ownNames Direct) (ownNames Alias) (ownNames Third)))"
+                 "(defun tdzSummary () (try (get Direct :live) (catch error (get error :name))))"
+                 "(defun sameAliases () (js-array (Object/is (get Direct :f0) f0) (Object/is (get Direct :f0) (get Alias :f0)) (Object/is (get Alias :f0) (get Third :f0)) (Object/is Direct Alias) (Object/is Alias Third)))"
+                 "(defun reflectionSummary () (let ((d (Object/getOwnPropertyDescriptor Direct \"f0\")) (keys (Reflect/ownKeys Direct))) (js-array (Object/is (get d :value) f0) (get d :writable) (get d :enumerable) (get d :configurable) (js-call keys :map (lambda (key) (if (= (value-type key) \"symbol\") \"@@toStringTag\" key))) (Object/isExtensible Direct))))"
+                 "(defun copySummary () (let ((a (Object/assign (js-object) Direct)) (b (object-assoc Alias \"extra\" 9))) (js-array (Object/is (get a :f0) f0) (Object/is (get b :f0) f0) (Object/keys a) (get a :live) (get b :extra) (Object/hasOwn Alias \"extra\"))))"
+                 "(defun denyGrowth () (let ((before (Object/keys Direct)) (failed t) (i 0)) (while (< i 32) (setq failed (and failed (not (Reflect/defineProperty Direct (str \"new\" i) (js-object :value i :enumerable t :configurable t :writable t))))) (setq i (1+ i))) (js-array failed (Reflect/deleteProperty Direct \"f0\") (Object/keys Direct) before)))"
+                 "(defun takeFunction () (get Third :f0))"
+                 "(defun takeNamespace () Third)"
+                 "(defun takeArrayPrototype () Array.prototype)"
+                 "(defun takeArray () (js-array -0 undefined))"
+                 "(defun tagSummary () (let ((a (Object/getOwnPropertyDescriptor Direct Symbol.toStringTag)) (b (Object/getOwnPropertyDescriptor Empty Symbol.toStringTag))) (js-array (get Direct Symbol.toStringTag) (get Empty Symbol.toStringTag) (get a :value) (get a :writable) (get a :enumerable) (get a :configurable) (get b :value) (get b :writable) (get b :enumerable) (get b :configurable) (js-call (get Object.prototype :toString) :call Direct) (js-call (get Object.prototype :toString) :call Empty) (ownNames Empty) (Object/keys Empty) (Object/keys (Object/assign (js-object) Empty)) (Object/isFrozen Empty) (Object/isFrozen (Object/freeze Empty)))))"
+                 "(defun callHeld (function) (funcall function))"
+                 "(export keysOnly namesOnly tdzSummary sameAliases reflectionSummary copySummary denyGrowth takeFunction takeNamespace takeArrayPrototype takeArray tagSummary callHeld)") :join "\n"))))
+             (compiler (get backend :compiler))
+             (modules (js-call sources :map (lambda (item)
+               (js-object :id (get item :id) :program (js-call compiler :compile_ir_string
+                 (get item :source) (get item :id))))))
+             (saved (funcall globalThis.structuredClone modules))
+             (lowered (js-call (get backend :managed) :lower_managed_project modules "main.mjs" runtime (js-object :phased t)))
+             (bytes (js-call globalThis.Uint8Array :from (js-call (get backend :wasm) :append_metadata_section
+               (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed)
+                 (js-object :initialPages 1 :maximumPages 256))
+               "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))))
+             (native-path (resolve directory (if (= native-target "arm64-macos") "namespace.dylib" "namespace.so"))))
+        (js-call assert :deepStrictEqual modules saved)
+        (setq index 0)
+        (while (< index (js-length modules))
+          (await (writeFile (resolve directory (get (aref modules index) :id))
+            (js-call compiler :emit_ir_string (get (aref modules index) :program))))
+          (setq index (1+ index)))
+        (when native-target
+          (await (writeFile native-path (js-call globalThis.Uint8Array :from
+            (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target)))))
+        (let* ((path (await (realpath (resolve directory "main.mjs"))))
+               (oracle (funcall (createRequire path) path)))
+          (js-object :lowered lowered :bytes bytes :nativePath native-path :oracle oracle)))))
+
+  (defasync with-namespace-runtime (target run)
+    (let* ((lowered (get namespace-fixture :lowered)) (descriptor (get lowered :descriptor))
+           (graph (createManagedModuleGraph descriptor)) (adapter undefined)
+           (options (js-object :initializeModule false :moduleGraph graph :maxSlots 1024
+             :initialBytes 65536 :maxBytes 16777216 :auto 1 :initialPages 1 :maximumPages 256 :nativeTarget native-target)))
+      (try
+        (if (= target "wasm")
+          (setq adapter (await (instantiateManagedRuntimeWithHostModules (get namespace-fixture :bytes) options)))
+          (setq adapter (await (instantiateNativeManagedRuntime (get namespace-fixture :nativePath) lowered options))))
+        (js-call adapter :auto (get options :auto))
+        (namespace-allocation-phase adapter "instance-ready")
+        (await (funcall run adapter graph descriptor))
+        (catch error
+          (when adapter
+            (namespace-allocation-phase adapter "failure-before-collect")
+            (when allocator-diagnostic
+              (try (js-call adapter :collect) (catch ignored nil))
+              (namespace-allocation-phase adapter "failure-after-collect")))
+          (throw error))
+        (finally
+          (when adapter
+            (js-call adapter :closeModule) (js-call adapter :collect)
+            (js-call assert :strictEqual (js-call adapter :live) 0)
+            (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0)
+            (when (get adapter :close) (js-call adapter :close)))
+          (js-call graph :close)))))
+  (defun namespace-observation (adapter value)
+    ;; Read observation arrays through the raw ABI. The public decoder returns
+    ;; live source objects with their own realm's prototypes, not host arrays.
+    (if (and value (= (get value :kind) 14))
+      (let* ((length (js-call adapter :length value)) (result (new globalThis.Array length)) (index 0))
+        (while (< index length)
+          (let ((key (js-call adapter :string (funcall globalThis.String index))))
+            (try
+              (when (js-call adapter :objectHas value key)
+                (let ((child (js-call adapter :get value index)))
+                  (try (put result index (namespace-observation adapter child))
+                    (finally (js-call adapter :release child)))))
+              (finally (js-call adapter :release key))))
+          (setq index (1+ index)))
+        result)
+      (js-call adapter :toHostValue value)))
+  (defun namespace-value (adapter name)
+    (let ((value undefined))
+      (namespace-allocation-phase adapter (str "before-invoke:" name))
+      (try
+        (setq value (js-call adapter :invoke name (js-array)))
+        (namespace-allocation-phase adapter (str "after-invoke:" name))
+        (namespace-observation adapter value)
+        (finally (js-call adapter :release value)))))
+  (defun initialize-namespace-graph (graph descriptor)
+    (js-call (get (get descriptor :project) :modules) :forEach (lambda (module)
+      (js-call (get module :steps) :forEach (lambda (step)
+        (js-call graph :step (get step :run)) (js-call graph :step (get step :run)))))))
+  (defasync check-namespace-preparation (target)
+    (await
+      (with-namespace-runtime target
+        (async (adapter graph descriptor)
+              (js-call graph :prepare)
+              (js-call assert :strictEqual (namespace-value adapter "tdzSummary") "ReferenceError")
+              ;; OwnPropertyKeys itself does not read the uninitialized live
+              ;; binding; Object.keys also obtains descriptors, so it belongs
+              ;; after the original initialization steps below.
+              (js-call assert :deepStrictEqual (namespace-value adapter "namesOnly")
+                (js-call (get namespace-fixture :oracle) :namesOnly))
+              (js-call adapter :collect)
+              (initialize-namespace-graph graph descriptor)
+              (js-call assert :strictEqual (namespace-value adapter "tdzSummary") 7)
+              (js-call assert :deepStrictEqual (namespace-value adapter "keysOnly")
+                (js-call (get namespace-fixture :oracle) :keysOnly))
+          (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0)))))
+  (defasync check-namespace-reflection (target)
+    (await
+      (with-namespace-runtime target
+        (async (adapter graph descriptor)
+              (js-call graph :prepare) (initialize-namespace-graph graph descriptor)
+              (let ((array (js-call adapter :invoke "takeArray" (js-array)))
+                    (prototype (js-call adapter :invoke "takeArrayPrototype" (js-array))))
+                (try
+                  (let ((source (js-call adapter :toHostValue array))
+                        (source-prototype (js-call adapter :toHostValue prototype)))
+                    (js-call assert :strictEqual (Object/getPrototypeOf source) source-prototype)
+                    (js-call assert :notStrictEqual source-prototype globalThis.Array.prototype)
+                    (js-call assert :deepStrictEqual (namespace-observation adapter array) (js-array -0 undefined)))
+                  (finally (js-call adapter :release prototype) (js-call adapter :release array))))
+              (let ((names (js-array "sameAliases" "reflectionSummary" "copySummary" "denyGrowth" "tagSummary")) (position 0))
+                (while (< position (js-length names))
+                  (let* ((name (aref names position))
+                         (expected (Reflect/apply (get (get namespace-fixture :oracle) name) undefined (js-array))))
+                    (js-call assert :deepStrictEqual (namespace-value adapter name) expected name)
+                    (js-call adapter :collect)
+                    (js-call assert :deepStrictEqual (namespace-value adapter name) expected (+ name " after GC")))
+              (setq position (1+ position))))))))
+  (defasync check-namespace-escape (target)
+    (await
+      (with-namespace-runtime target
+        (async (adapter graph descriptor)
+              (js-call graph :prepare) (initialize-namespace-graph graph descriptor)
+              (let ((held (js-call adapter :invoke "takeFunction" (js-array))) (fillers (js-array))
+                    (failed false) (failure undefined) (result undefined))
+                (try
+                  (js-call adapter :collect)
+                  (try (while (< (js-length fillers) 2048)
+                         (js-call fillers :push (js-call adapter :number (js-length fillers))))
+                    (catch error (setq failed t failure error)))
+                  (js-call assert :strictEqual failed t "the unchanged slot limit must still reject exhaustion")
+                  (js-call assert :strictEqual (get (get failure :eliscriptDiagnostic) :code) "ELI-RT0002")
+                  (js-call fillers :forEach (lambda (value) (js-call adapter :release value)))
+                  (setq fillers (js-array)) (js-call adapter :collect)
+                  (setq result (js-call adapter :invoke "callHeld" (js-array held)))
+                  (js-call assert :strictEqual (Object/is (js-call adapter :readNumber result) -0) t)
+                  (js-call adapter :release result) (setq result undefined)
+                  (js-call assert :deepStrictEqual (namespace-value adapter "sameAliases") (js-array t t t false false))
+                  (finally
+                    (js-call fillers :forEach (lambda (value) (js-call adapter :release value)))
+                (js-call adapter :release result)
+                (js-call adapter :release held)))))))
+    (await (check-namespace-closed-environment target t))
+    (await (check-namespace-closed-environment target false)))
+  (defasync check-namespace-closed-environment (target initialized)
+    (await
+      (with-namespace-runtime target
+        (async (adapter graph descriptor)
+          (js-call graph :prepare)
+          (when initialized (initialize-namespace-graph graph descriptor))
+          (let ((namespace (js-call adapter :invoke "takeNamespace" (js-array)))
+                (key (js-call adapter :string "live")) (value undefined))
+            (try
+              ;; The only remaining owner of this environment is the actual
+              ;; escaped namespace; module close clears the current globals.
+              (js-call adapter :closeModule)
+              (js-call adapter :collect)
+              (if initialized
+                (progn
+                  (setq value (js-call adapter :objectGet namespace key))
+                  (js-call assert :strictEqual (js-call adapter :readNumber value)
+                    (js-call (get namespace-fixture :oracle) :tdzSummary))
+                  (js-call adapter :release value) (setq value undefined)
+                  (js-call adapter :collect)
+                  (setq value (js-call adapter :objectGet namespace key))
+                  (js-call assert :strictEqual (js-call adapter :readNumber value) 7))
+                (js-call assert :throws
+                  (lambda () (js-call adapter :objectGet namespace key))
+                  (lambda (error)
+                    (and (js-call (get globalThis.ReferenceError :prototype) :isPrototypeOf error)
+                      (= (get error :name) "ReferenceError")
+                      (= (get (get error :eliscriptDiagnostic) :code) "ELI-RT0008")))))
+              (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0)
+              (finally
+                (js-call adapter :release value)
+                (js-call adapter :release key)
+                (js-call adapter :release namespace))))))))
+  (let ((targets (if native-target (js-array "wasm" "native") (js-array "wasm"))) (index 0))
+    (while (< index (js-length targets))
+      (let ((target (aref targets index)))
+        (test (+ target " namespace preparation and keys keep 384 function aliases within the original 1024 slots and preserve TDZ")
+          (async () (await (check-namespace-preparation target))) 120000)
+        (test (+ target " namespace canonical function aliases descriptors own keys copies and failed growth survive real GC")
+          (async () (await (check-namespace-reflection target))) 120000)
+        (test (+ target " an escaped namespace function retains identity and exact minus zero after slot exhaustion and recovery")
+          (async () (await (check-namespace-escape target))) 120000))
+      (setq index (1+ index)))))

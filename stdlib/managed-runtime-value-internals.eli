@@ -1,0 +1,13 @@
+(module eliscript.managed-runtime-value-internals
+  (import "../../stdlib/core/protocol.eli" protocol-method)
+  (import "../../stdlib/managed-literal-protocols.eli" I_EQUIV I_HASH VALUE_EQUAL VALUE_HASH)
+  (import "../../stdlib/managed-value-state.eli"
+    avalancheHash mixHash finishHash hashString hashNumber hashBigInt hashBoolean hashNull hashUndefined hashGlobalSymbol
+    orderedCollectionHash unorderedCollectionHash cachedProtocolHash recordHashValueCall hostIdentityHash
+    resetValueMetrics clearValueCaches readValueMetrics)
+  (defconst dispatchValueEqual (protocol-method I_EQUIV "equal"))
+  (defconst dispatchValueHash (protocol-method I_HASH "hash"))
+  (export I_EQUIV I_HASH VALUE_EQUAL VALUE_HASH dispatchValueEqual dispatchValueHash
+    avalancheHash mixHash finishHash hashString hashNumber hashBigInt hashBoolean hashNull hashUndefined hashGlobalSymbol
+    orderedCollectionHash unorderedCollectionHash cachedProtocolHash recordHashValueCall hostIdentityHash
+    resetValueMetrics clearValueCaches readValueMetrics))

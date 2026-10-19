@@ -3,6 +3,7 @@ const MAX_PROTOCOLS = 1024;
 const TYPE_CONSTRUCTOR_TOKEN = Symbol("eliscript.type.constructor-token");
 const TYPE_VALUE_STATE = new WeakMap();
 const typeStates = new WeakMap();
+const reifiedStates = new WeakMap();
 
 function fail(message) {
   throw new TypeError(message);
@@ -167,6 +168,28 @@ function installProtocolMethods(target, plans) {
   return target;
 }
 
+function protocolPlanSnapshot(plans) {
+  const snapshot = [];
+  for (let index = 0; index < plans.length; index += 1) {
+    const plan = plans[index];
+    const implementations = Object.create(null);
+    for (let methodIndex = 0; methodIndex < plan.methods.length; methodIndex += 1) {
+      const method = plan.methods[methodIndex];
+      Object.defineProperty(implementations, method.operation, {
+        value: method.implementation,
+        enumerable: true,
+      });
+    }
+    Object.defineProperty(snapshot, String(index), {
+      value: Object.freeze([plan.protocol, Object.freeze(implementations)]),
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
+  }
+  return Object.freeze(snapshot);
+}
+
 function defineFieldAccessors(TypeValue, fieldNames) {
   for (let index = 0; index < fieldNames.length; index += 1) {
     const fieldName = fieldNames[index];
@@ -184,8 +207,23 @@ function defineFieldAccessors(TypeValue, fieldNames) {
 }
 
 export function defineType(name, fields, protocolPlans = []) {
+  return makeTypeDefinition(name, fields, protocolPlans, false);
+}
+
+// Used only by the trusted bulk boundary after transporting the declaration.
+// Keep that frozen array so an independently transported typeFields reference
+// remains the very same object; public defineType still makes its usual copy.
+export function materializeTypeDefinition(name, fields, protocolPlans = []) {
+  return makeTypeDefinition(name, fields, protocolPlans, true);
+}
+
+function makeTypeDefinition(name, fields, protocolPlans, retainFields) {
   const typeName = normalizeTypeName(name);
-  const fieldNames = normalizeFieldNames(fields);
+  const normalized = normalizeFieldNames(fields);
+  if (retainFields && !Object.isFrozen(fields)) {
+    fail("transported type fields must be frozen");
+  }
+  const fieldNames = retainFields ? fields : normalized;
   const plans = normalizeProtocolPlans(protocolPlans, true);
 
   class TypeValue {
@@ -227,13 +265,47 @@ export function defineType(name, fields, protocolPlans = []) {
   installProtocolMethods(TypeValue.prototype, plans);
   Object.freeze(TypeValue.prototype);
   Object.freeze(TypeValue);
-  typeStates.set(TypeValue, Object.freeze({ name: typeName, fields: fieldNames }));
+  typeStates.set(TypeValue, Object.freeze({
+    name: typeName,
+    fields: fieldNames,
+    protocolPlans: protocolPlanSnapshot(plans),
+  }));
   return TypeValue;
 }
 
 export function reifyProtocols(protocolPlans) {
   const plans = normalizeProtocolPlans(protocolPlans, false);
-  return Object.freeze(installProtocolMethods(Object.create(null), plans));
+  const value = Object.freeze(installProtocolMethods(Object.create(null), plans));
+  reifiedStates.set(value, Object.freeze({ protocolPlans: protocolPlanSnapshot(plans) }));
+  return value;
+}
+
+// Read only the states owned by these constructors. The transport preserves
+// actual protocol and function references instead of inferring a type from its
+// printable name, field names, or Symbol descriptions.
+export function readTypeState(type) {
+  return typeof type === "function" ? typeStates.get(type) : undefined;
+}
+
+export function readTypeValueState(value) {
+  return value !== null && typeof value === "object"
+    ? TYPE_VALUE_STATE.get(value) : undefined;
+}
+
+export function materializeTypeValue(type, values) {
+  const state = readTypeState(type);
+  if (state === undefined) fail("expected an Eliscript type");
+  denseArray(values, "type values", MAX_FIELDS);
+  if (values.length !== state.fields.length) {
+    fail(`->${state.name} expects ${state.fields.length} values, received ${values.length}`);
+  }
+  if (!Object.isFrozen(values)) fail("transported type values must be frozen");
+  return new type(TYPE_CONSTRUCTOR_TOKEN, values);
+}
+
+export function readReifiedState(value) {
+  return value !== null && typeof value === "object"
+    ? reifiedStates.get(value) : undefined;
 }
 
 export function isType(value) {

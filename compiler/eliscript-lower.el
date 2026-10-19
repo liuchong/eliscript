@@ -224,7 +224,7 @@
      'try-expression form nil (append body clauses)
      (list :body-count (length body)))))
 
-(defun eliscript-lower-expression (form)
+(defun eliscript-lower--expression-recursive (form)
   "Lower analyzed expression FORM to an IR node."
   (let ((value (eliscript-form-value form)))
     (cond
@@ -367,6 +367,132 @@
             (mapcar #'eliscript-lower-expression value))))))
      (t (error "Cannot lower unsupported Eliscript form: %S"
                (eliscript-form-strip form))))))
+
+(defun eliscript-lower--expression-jobs (forms)
+  "Describe expression FORMS in their original lowering order."
+  (mapcar (lambda (form) (cons 'expression form)) forms))
+
+(defun eliscript-lower--ordinary-plan (form)
+  "Return the nonrecursive node recipe for ordinary expression FORM.
+Recipes retain the original source form, value, flags and ordered child jobs.
+Special forms that establish another recur context keep their existing path."
+  (let ((value (eliscript-form-value form)))
+    (cond
+     ((or (null value) (eq value t) (numberp value) (stringp value)
+          (keywordp value) (eq value 'false) (eq value 'undefined))
+      (list 'literal form value nil nil))
+     ((symbolp value) (list 'reference form value nil nil))
+     ((vectorp value)
+      (list 'persistent-vector-literal form nil nil
+            (eliscript-lower--expression-jobs (append value nil))))
+     ((consp value)
+      (let* ((operator (eliscript-form-value (car value)))
+             (arguments (cdr value))
+             (kind
+              (pcase operator
+                ('if 'conditional)
+                ((or 'when 'unless) 'conditional-sugar)
+                ((or 'progn 'do) 'sequence)
+                ('while 'loop)
+                ((or 'and 'or) 'short-circuit)
+                ('vector 'persistent-vector-literal)
+                ('hash-map 'persistent-map-literal)
+                ('hash-set 'persistent-set-literal)
+                ('queue 'persistent-queue-literal)
+                ('list 'persistent-list-literal)
+                ('js-array 'array-literal)
+                ('get 'property-read) ('put 'property-write)
+                ('js-call 'method-call) ('new 'constructor-call)
+                ('js* 'raw-javascript) ('print 'print)
+                ('str 'string-concat) ('funcall 'invoke)
+                ('apply 'apply-call)
+                ((pred (lambda (name)
+                         (memq name eliscript-lower--intrinsics)))
+                 'intrinsic))))
+        (cond
+         ((memq operator '(let let*))
+          (let ((bindings (eliscript-form-value (car arguments))))
+            (list 'lexical-bindings form nil
+                  (list :sequential (eq operator 'let*)
+                        :binding-count (length bindings))
+                  (append
+                   (mapcar (lambda (binding) (cons 'binding binding)) bindings)
+                   (eliscript-lower--expression-jobs (cdr arguments))))))
+         ((memq operator '(await throw))
+          (list (if (eq operator 'await) 'await-expression 'throw-expression)
+                form nil nil
+                (list (cons 'expression (car arguments)))))
+         (kind
+          (list kind form
+                (unless (memq kind '(persistent-vector-literal
+                                     persistent-map-literal
+                                     persistent-set-literal
+                                     persistent-queue-literal
+                                     persistent-list-literal array-literal))
+                  operator)
+                nil (eliscript-lower--expression-jobs arguments)))
+         ((not (memq operator '(quote lambda fn async try cond loop recur
+                                     setq set! js-object)))
+          (list 'call form nil nil
+                (eliscript-lower--expression-jobs value)))))))))
+
+(defun eliscript-lower--binding-plan (binding)
+  "Describe BINDING without recursively lowering its initializer."
+  (let ((value (eliscript-form-value binding)))
+    (cond
+     ((symbolp value)
+      (list 'lexical-binding binding value (list :style 'symbol) nil))
+     ((eliscript-binding-pattern-p binding)
+      (list 'lexical-binding binding nil (list :style 'symbol :pattern t)
+            (list (cons 'pattern binding))))
+     (t
+      (let* ((target (car value))
+             (pattern (or (vectorp (eliscript-form-value target))
+                          (eliscript-binding-map-pattern-p target))))
+        (list 'lexical-binding binding
+              (unless pattern (eliscript-form-value target))
+              (if pattern (list :style 'list :pattern t) (list :style 'list))
+              (append (and pattern (list (cons 'pattern target)))
+                      (and (cdr value)
+                           (list (cons 'expression (cadr value)))))))))))
+
+(defun eliscript-lower-expression (form)
+  "Lower analyzed FORM without using the host stack for ordinary depth.
+Only one child is scheduled at a time, preserving initializer, callee and
+operand order as well as the first original lowering error."
+  ;; Frames contain job kind, source, recipe, remaining jobs and reverse output.
+  (let ((pending (list (vector 'expression form nil nil nil))) result)
+    (while pending
+      (let* ((frame (car pending))
+             (recipe (aref frame 2)))
+        (cond
+         ((null recipe)
+          (setq recipe
+                (pcase (aref frame 0)
+                  ('expression (eliscript-lower--ordinary-plan (aref frame 1)))
+                  ('binding (eliscript-lower--binding-plan (aref frame 1)))))
+          (if recipe
+              (progn (aset frame 2 recipe) (aset frame 3 (nth 4 recipe)))
+            (setq result
+                  (if (eq (aref frame 0) 'pattern)
+                      (eliscript-lower--binding-target (aref frame 1))
+                    (eliscript-lower--expression-recursive (aref frame 1))))
+            (pop pending)
+            (when pending
+              (aset (car pending) 4 (cons result (aref (car pending) 4))))))
+         ((aref frame 3)
+          (let ((job (car (aref frame 3))))
+            (aset frame 3 (cdr (aref frame 3)))
+            (push (vector (car job) (cdr job) nil nil nil) pending)))
+         (t
+          (setq result
+                (eliscript-lower--node
+                 (nth 0 recipe) (nth 1 recipe) (nth 2 recipe)
+                 (nreverse (aref frame 4)) (nth 3 recipe)))
+          (pop pending)
+          (when pending
+            (aset (car pending) 4 (cons result (aref (car pending) 4))))))))
+    result))
 
 (defun eliscript-lower--import (form arguments &optional portable)
   "Lower import ARGUMENTS from top-level FORM.

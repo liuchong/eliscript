@@ -10,5 +10,9 @@ export {
   protocol_definition as protocolDefinition,
   protocol_host_category as protocolHostCategory,
   protocol_method as protocolMethod,
+  protocol_QMARK_ as isProtocol,
+  materialize_protocol_from_definition as materializeProtocolFromDefinition,
+  read_protocol_operations_owner as readProtocolOperationsOwner,
+  read_protocol_method_owner as readProtocolMethodOwner,
   protocol_slot as protocolSlot,
 } from "./protocol-impl.mjs";

@@ -1,0 +1,137 @@
+(module tools.backends.compiler-corpus-project-adapters
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "./compiler-corpus-project-adapters-legacy.mjs" :as legacy)
+
+  (defconst literal-suite "tests/literal-runtime.test.mjs")
+  (defconst literal-source "tests/eliscript/literal-runtime.eli")
+  (defconst literal-titles (js-array
+    "persistent literals and quoted data preserve language value categories"
+    "hash-map rejects incomplete pairs in both compilers"
+    "explicit host-only modules do not link the persistent runtime"
+    "maintained Eliscript sources use explicit host constructors"
+    "portable closures produce persistent values for the versioned worker codec"))
+  (defconst literal-timeouts (js-array 60000 60000 60000 5000 60000))
+  (defconst literal-host-tool-files (js-array
+    "tools/backends/build.mjs" "tools/backends/managed-runtime.mjs"
+    "tools/backends/native-managed-runtime.mjs" "tests/helpers/managed-literal-nth-node-selfhosted.mjs"))
+  (defun literal-hash (value)
+    (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
+
+  ;; Only this migrated suite replaces the legacy setup transport. Its emitted
+  ;; file is the complete executable harness, not an edited JavaScript template.
+  (defasync literal-record (options locators)
+    (let* ((text (get options :text)) (file (get options :file))
+           (bootstrap-sources (get options :bootstrapSources))
+           (stable-files (if (undefined? (get options :stableFiles))
+                            (new globalThis.Set) (get options :stableFiles)))
+           (seen (new globalThis.Set)) (modules (js-array)) (index 0))
+      (unless (and (= (value-type (get options :add)) "function")
+                   (= (value-type text) "function") (= (value-type file) "function")
+                   (Array/isArray bootstrap-sources) (= (value-type (get options :sourceRoot)) "string"))
+        (throw (new globalThis.TypeError "original project adapter requires its complete source manifest and services")))
+      (while (< index (js-length bootstrap-sources))
+        (let ((filename (aref bootstrap-sources index)))
+          (unless (and (= (value-type filename) "string")
+                       (js-call (new globalThis.RegExp "^bootstrap/compiler/[a-z][a-z0-9-]*\\.eli$") :test filename)
+                       (not (js-call seen :has filename)))
+            (throw (new globalThis.TypeError "original compiler source manifest has an invalid or repeated module")))
+          (js-call seen :add filename)
+          (js-call modules :push (js-object :id (+ (js-call filename :slice 0 -4) ".mjs")
+            :filename filename :source (await (funcall text filename)))))
+        (setq index (1+ index)))
+      (unless (and (= (js-length modules) 13) (js-call seen :has "bootstrap/compiler/compiler.eli"))
+        (throw (new globalThis.TypeError "original project programs require the complete thirteen-module compiler")))
+      (let* ((source (await (funcall text literal-suite)))
+             (identity (await (funcall file literal-suite)))
+             (source-assets (js-array)) (tool-projections (js-array))
+             (coverage (js-array)) (claims (new globalThis.Set))
+             (entries (js-call modules :map (lambda (item) (get item :id))))
+             (changes (js-array))
+             (assets (js-array literal-suite literal-source
+               "tests/fixtures/literal-runtime.eli" "tests/fixtures/literal-runtime-host.mjs"
+               "bin/eliscript" "bin/eliscript-portable" "bin/eliscript-bootstrap" "bootstrap/host/bun.mjs"
+               "runtime/core/identifier.mjs" "runtime/core/list.mjs" "runtime/core/map.mjs"
+               "runtime/core/set.mjs" "runtime/core/value.mjs" "runtime/core/vector.mjs"
+               "runtime/worker-value-codec.mjs")))
+        (setq index 0)
+        (while (< index (js-length literal-titles))
+          (unless (js-call source :includes (aref literal-titles index))
+            (throw (new globalThis.TypeError (+ "original literal runtime assertion boundary changed: " (aref literal-titles index)))))
+          (setq index (1+ index)))
+        (setq index 0)
+        (while (< index (js-length locators))
+          (let ((locator (aref locators index)))
+            (unless (and (= (value-type (get locator :contains)) "string")
+                         (js-call source :includes (get locator :contains)))
+              (throw (new globalThis.TypeError "original literal runtime locator is absent from its complete suite")))
+            (unless (= (get locator :contains) (aref literal-titles 3))
+              (unless (js-call claims :has (get locator :id))
+                (js-call claims :add (get locator :id))
+                (js-call coverage :push (get locator :id)))))
+          (setq index (1+ index)))
+        (setq index 0)
+        (while (< index (js-length assets))
+          (let* ((filename (aref assets index)) (evidence (await (funcall file filename)))
+                 (id (+ "stable-compatibility:" filename)))
+            (js-call source-assets :push (js-object :file filename :sourceSha256 (get evidence :sha256)))
+            (when (and (js-call stable-files :has filename) (not (js-call claims :has id)))
+              (js-call claims :add id) (js-call coverage :push id)))
+          (setq index (1+ index)))
+        ;; These are the complete suite's actual host infrastructure imports.
+        ;; Bind their source bytes without claiming new language coverage or
+        ;; rewriting the original host. Their real paths keep build.root and
+        ;; the selected-frontend injection in the original nth case intact.
+        (let ((tools (js-call literal-host-tool-files :concat
+                       (js-array "tests/eliscript/managed-literal-nth-node.eli"))) (position 0))
+          (while (< position (js-length tools))
+            (let* ((filename (aref tools position)) (evidence (await (funcall file filename))))
+              (js-call source-assets :push (js-object :file filename :sourceSha256 (get evidence :sha256)))
+              (when (< position (js-length literal-host-tool-files))
+                (js-call tool-projections :push (js-object :id filename :sourceFile filename
+                  :sourceSha256 (get evidence :sha256)))))
+            (setq position (1+ position))))
+        (js-object :id "original-program:compiler-literal-runtime-complete" :kind "project" :coverage coverage
+          :modules modules :entry "bootstrap/compiler/compiler.mjs"
+          :request (js-object :operation "project" :resolveImports t :phased t :sourceMap t :entries entries)
+          :execution (js-object :kind "original-program" :host "tests/__eliscript_original_literal_runtime_complete.mjs"
+            :hostSource source :arguments (js-array (js-object :directory t)) :aliases t :requiresBun t :hostRuntime "bun"
+            :referenceArtifact t :childProcesses "inherit-selected-artifact" :runtimeLaunchers t
+            :compilerSourceMaps t :runtimeProfile "compiler" :timeoutMs 245000
+            :hostToolProjection (js-object :kind "literal-runtime-host-tools" :files tool-projections)
+            :setupReplacement (js-object :kind "selected-and-independent-reference-compiler-directories"
+              :algorithms "selected-target-only" :sourceSha256 (get identity :sha256) :modules entries
+              :changes changes :originalCaseTimeouts literal-timeouts :originalHost "tests/fixtures/literal-runtime-host.mjs"))
+          :expected (js-object :kind "seed-program" :oracleRequired t :stdout "")
+          :original (js-object :manifest "stable-compatibility" :suite literal-suite
+            :fixture "tests/fixtures/literal-runtime.eli" :host "tests/fixtures/literal-runtime-host.mjs"
+            :sourceSha256 (get identity :sha256) :originalAssertions literal-titles :sourceAssets source-assets
+            :regions (js-array (js-object :start 0 :end (js-length source) :byteStart 0
+              :byteEnd (js-call Buffer :byteLength source) :sha256 (literal-hash source)))
+            :setupReplacement (js-object :kind "selected-and-independent-reference-compiler-directories" :changes changes))))))
+
+  (defasync addOriginalProjectPrograms (options)
+    (let ((locators (get options :locators)))
+      (if (not (Array/isArray locators))
+          (await (js-call legacy :addOriginalProjectPrograms options))
+        (let ((selected (js-call locators :filter (lambda (item) (= (get item :file) literal-suite)))))
+          (if (= (js-length selected) 0)
+              (await (js-call legacy :addOriginalProjectPrograms options))
+            (let* ((record (await (literal-record options selected)))
+                   (add (get options :add)) (published false)
+                   (after (js-array "original-program:compiler-interop-package-complete"
+                                    "original-program:compiler-loop-recur-complete"
+                                    "original-program:compiler-stdlib-bit-complete"))
+                   (delegated (Object/assign (js-object) options (js-object
+                     :locators (js-call locators :filter (lambda (item) (/= (get item :file) literal-suite)))
+                     :add (lambda (item)
+                       (when (and (not published) (js-call after :includes (get item :id)))
+                         (funcall add record) (setq published t))
+                       (funcall add item)))))
+                   (mapped (await (js-call legacy :addOriginalProjectPrograms delegated)))
+                   (position (js-call mapped :findIndex (lambda (suite)
+                     (js-call (js-array "tests/interop-package.test.mjs" "tests/loop-recur.test.mjs" "tests/stdlib-bit.test.mjs") :includes suite)))))
+              (unless published (funcall add record))
+              (js-call mapped :splice (if (< position 0) (js-length mapped) position) 0 literal-suite)
+              mapped))))))
+  (export addOriginalProjectPrograms))

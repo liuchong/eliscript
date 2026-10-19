@@ -1,0 +1,298 @@
+(module tests.run-artifact
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile writeFile rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "../tools/backends/build.mjs" buildBackends root)
+  (import "../tools/backends/compiler-build.mjs" buildIndependentCompiler)
+  (import "../tools/backends/compiler-metadata.mjs" readCompilerMetadata)
+  (import "../tools/backends/dist/run-artifact.mjs"
+    finalize-runtime-diagnostic run-artifact-mode runtime-diagnostic-options configure-runtime-diagnostic run-artifact)
+
+  (test "ordinary artifact sequences snapshot the existing runtime options and retain debug false and unchanged defaults"
+    (async ()
+      (let ((diagnosed 0) (reads 0) (options (js-object :maxSlots 2048 :initialBytes 65536
+                            :maxBytes 4194304 :extendedHeap false :debug t)))
+        (Object/defineProperty options "auto" (js-object :enumerable t :configurable t
+          :get (lambda () (setq reads (1+ reads)) 134217728)))
+        (let ((captured (await (run-artifact-mode (js-object :runtimeOptions options)
+                         (async () (setq diagnosed (1+ diagnosed)))
+                         (async (configuration)
+                           (Object/defineProperty options "auto" (js-object :value 0))
+                           (put options :maxSlots 1)
+                           configuration)))))
+          (js-call assert :deepStrictEqual captured (js-object :maxSlots 2048 :initialBytes 65536
+            :maxBytes 4194304 :extendedHeap false :debug false :auto 134217728))
+          (js-call assert :strictEqual (Object/isFrozen captured) t))
+        (js-call assert :strictEqual reads 1)
+        (js-call assert :strictEqual diagnosed 0)
+        (js-call assert :deepStrictEqual (await (run-artifact-mode (js-object)
+          (async () (throw (new globalThis.Error "unexpected diagnostic")))
+          (async (configuration) configuration))) (js-object :debug false))
+        (let ((marker (js-object :original "loader")) (failed false) (failure undefined))
+          (try (await (run-artifact-mode (js-object :runtimeOptions (js-object :auto 0))
+                 (async () nil) (async (configuration) (throw marker))))
+            (catch error (setq failed t failure error)))
+          (js-call assert :strictEqual failed t)
+          (js-call assert :strictEqual failure marker)))))
+
+  (defun capture-stderr (run)
+    (let* ((stream (get globalThis.process :stderr)) (original (get stream :write)) (lines (js-array)))
+      (try
+        (progn
+          (put stream :write (lambda (text) (js-call lines :push (JSON/parse text)) t))
+          (funcall run lines))
+        (finally (put stream :write original)))))
+
+  (test "runtime diagnostic captures raw allocator before stats and after collect before reading the exact checkpoint"
+    (lambda ()
+      (capture-stderr (lambda (lines)
+        (let* ((trace (js-array)) (collections 0) (last-error 2)
+               (checkpoint (js-object :phase "literal-read" :filename "源😀\ud800.eli" :index 17))
+               (runtime (js-object
+                 :stats (lambda () (js-call trace :push "stats") (setq last-error 0)
+                   (js-object :used 1768 :capacity 16384 :live 5 :frames 1 :collections collections))
+                 :collect (lambda () (js-call trace :push "collect") (setq collections (1+ collections)))
+                 :objectGet (lambda (state key)
+                   (js-call assert :strictEqual state "state") (js-call assert :strictEqual key "lastPhase")
+                   (js-call trace :push "objectGet") "phase-handle")
+                 :toHostValue (lambda (value)
+                   (js-call assert :strictEqual value "phase-handle") (js-call trace :push "toHostValue") checkpoint)
+                 :release (lambda (value) (js-call trace :push (+ "release:" value)))
+                 :closeModule (lambda () (js-call trace :push "closeModule"))
+                 :close (lambda () (js-call trace :push "close"))))
+               (snapshot (lambda (actual)
+                 (js-call assert :strictEqual actual runtime)
+                 (js-call trace :push "snapshot")
+                 (Object/freeze (js-object :format "eliscript-managed-allocator-snapshot" :version 1
+                   :maxSlots 4194303 :highWater 100 :liveValues 5 :freeReusableSlots 90 :retiredSlots 5
+                   :neverAllocatedSlots 4194203 :slotBits 22 :slotMask 4194303 :generationMax 1023
+                   :usedBytes 1768 :capacityBytes 16384 :maxBytes 1073741824
+                   :freeBytes 256 :largestFreeBlock 128 :freeBlockCount 2 :tailCapacityBytes 14360
+                   :byteHeadroomBytes 1073740056 :slotTableBytes 64 :freeSlotsHead 1 :freeSlotsTail 9
+                   :freeTreeRoot 0 :lastError last-error)))))
+          (finalize-runtime-diagnostic runtime "state" "lastPhase"
+            (js-array "output" "input" "state" "lastPhase") snapshot)
+          (js-call assert :deepStrictEqual trace
+            (js-array "snapshot" "stats" "collect" "snapshot" "stats" "objectGet" "toHostValue"
+              "release:phase-handle" "release:output" "release:input" "release:state" "release:lastPhase"
+              "closeModule" "collect" "close"))
+          (js-call assert :strictEqual (js-length lines) 2)
+          (js-call assert :strictEqual (get (aref lines 0) :phase) "runtime-heap")
+          (js-call assert :strictEqual (get (get (aref lines 0) :allocator) :lastError) 2)
+          (js-call assert :strictEqual (get (get (aref lines 0) :stats) :collections) 0)
+          (js-call assert :strictEqual (get (aref lines 1) :phase) "runtime-checkpoint")
+          (js-call assert :strictEqual (get (get (aref lines 1) :allocator) :lastError) 0)
+          (js-call assert :strictEqual (get (get (aref lines 1) :stats) :collections) 1)
+          (js-call assert :deepStrictEqual (get (aref lines 1) :checkpoint) checkpoint)
+          (let ((keys (Object/keys (get (aref lines 0) :allocator))) (index 0))
+            (while (< index (js-length keys))
+              (let ((value (get (get (aref lines 0) :allocator) (aref keys index))))
+                (js-call assert :ok (or (= (value-type value) "string") (= (value-type value) "number"))))
+              (setq index (1+ index)))))))))
+
+  (test "diagnostic snapshot stats checkpoint and cleanup failures cannot replace false undefined or object source throws"
+    (lambda ()
+      (let ((primaries (js-array false undefined (new globalThis.Error "original-source-failure"))) (index 0))
+        (while (< index (js-length primaries))
+          (capture-stderr (lambda (lines)
+            (let* ((primary (aref primaries index)) (trace (js-array)) (caught false) (failure undefined)
+                   (broken (lambda (name) (js-call trace :push name) (throw (js-object :diagnosticFailure name))))
+                   (runtime (js-object
+                     :stats (lambda () (funcall broken "stats"))
+                     :collect (lambda () (funcall broken "collect"))
+                     :objectGet (lambda (state key) (funcall broken "objectGet"))
+                     :release (lambda (value) (funcall broken (+ "release:" value)))
+                     :closeModule (lambda () (funcall broken "closeModule"))
+                     :close (lambda () (funcall broken "close")))))
+              (try
+                (try (throw primary)
+                  (finally (finalize-runtime-diagnostic runtime "state" "lastPhase"
+                    (js-array undefined "input" "state" "lastPhase")
+                    (lambda (actual) (js-call assert :strictEqual actual runtime) (funcall broken "snapshot")))))
+                (catch error (setq caught t failure error)))
+              (js-call assert :strictEqual caught t)
+              (js-call assert :strictEqual (Object/is failure primary) t)
+              (js-call assert :deepStrictEqual trace
+                (js-array "snapshot" "stats" "collect" "snapshot" "stats" "objectGet"
+                  "release:input" "release:state" "release:lastPhase" "closeModule" "collect" "close"))
+              (js-call assert :strictEqual (js-length lines) 2)
+              (js-call lines :forEach (lambda (line)
+                (js-call assert :strictEqual (get line :allocatorUnavailable) t)
+                (js-call assert :strictEqual (get line :statsUnavailable) t)))
+              (js-call assert :strictEqual (get (aref lines 1) :checkpointUnavailable) t))))
+          (setq index (1+ index))))))
+
+  (test "a diagnostic success ends its branch and diagnostics never fall through to an uninitialized normal session"
+    (async ()
+      (let ((diagnosed 0) (normal 0))
+        (let ((result (await (run-artifact-mode (js-object :runtimeDiagnostic t)
+                  (async () (setq diagnosed (1+ diagnosed)) -0)
+                  (async () (setq normal (1+ normal)) (throw (new globalThis.Error "must not execute")))))))
+          (js-call assert :strictEqual (Object/is result -0) t))
+        (js-call assert :strictEqual diagnosed 1)
+        (js-call assert :strictEqual normal 0)
+        (let ((caught false) (failure undefined))
+          (try (await (run-artifact-mode (js-object :runtimeDiagnostic t)
+                        (async () (throw false)) (async () (setq normal (1+ normal)))))
+            (catch error (setq caught t failure error)))
+          (js-call assert :strictEqual caught t) (js-call assert :strictEqual failure false))
+        (js-call assert :strictEqual normal 0)
+        (js-call assert :strictEqual (await (run-artifact-mode (js-object)
+          (async () (throw (new globalThis.Error "must not diagnose")))
+          (async () (setq normal (1+ normal)) 42))) 42)
+        (js-call assert :strictEqual normal 1))))
+
+  (test "runtime diagnostic auto uses the unchanged artifact default or an explicit snapshotted u32 including zero"
+    (async ()
+      (let* ((metadata (js-object :auto 16777216 :sourceIdentity (js-object :sha256 "unchanged")))
+             (before (funcall globalThis.structuredClone metadata)) (seen (js-array))
+             (runtime (js-object :auto (lambda (value) (js-call seen :push value))))
+             (cases (js-array
+               (js-array (js-object :runtimeDiagnostic t) 16777216)
+               (js-array (js-object :runtimeDiagnostic t :runtimeOptions (js-object)) 16777216)
+               (js-array (js-object :runtimeDiagnostic t :runtimeOptions (js-object :auto 134217728)) 134217728)
+               (js-array (js-object :runtimeDiagnostic t :runtimeOptions (js-object :auto 0)) 0)
+               (js-array (js-object :runtimeDiagnostic t :runtimeOptions (js-object :auto 4294967295)) 4294967295)))
+             (index 0))
+        (while (< index (js-length cases))
+          (let* ((entry (aref cases index)) (step (aref entry 0)) (expected (aref entry 1))
+                 (result (await (run-artifact-mode step
+                   (async (configuration)
+                     (js-call assert :strictEqual (Object/isFrozen configuration) t)
+                     (configure-runtime-diagnostic runtime metadata configuration) 42)
+                   (async () (throw (new globalThis.Error "normal branch must not execute")))))))
+            (js-call assert :strictEqual result 42)
+            (js-call assert :strictEqual (aref seen index) expected))
+          (setq index (1+ index)))
+        (let ((reads 0) (options (js-object)))
+          (Object/defineProperty options "auto" (js-object :enumerable t :configurable t
+            :get (lambda () (setq reads (1+ reads)) 134217728)))
+          (let ((configuration (runtime-diagnostic-options
+                    (js-object :runtimeDiagnostic t :runtimeOptions options))))
+            (Object/defineProperty options "auto" (js-object :value 0))
+            (configure-runtime-diagnostic runtime metadata configuration)
+            (js-call assert :strictEqual reads 1)
+            (js-call assert :strictEqual (aref seen 5) 134217728)))
+        (js-call assert :deepStrictEqual metadata before)
+        (let ((caught false) (failure undefined))
+          (try (configure-runtime-diagnostic
+                 (js-object :auto (lambda (value) (throw false))) metadata (js-object :auto 0))
+            (catch error (setq caught t failure error)))
+          (js-call assert :strictEqual caught t)
+          (js-call assert :strictEqual failure false)))))
+
+  (test "invalid diagnostic auto fails with the runtime word contract before artifact IO or managed calls"
+    (async ()
+      (let ((values (js-array -0 -1 0.5 4294967296 globalThis.NaN globalThis.Infinity
+                     (- globalThis.Infinity) "134217728" false nil undefined
+                     (new globalThis.Number 1) (funcall globalThis.BigInt 1)
+                     (funcall globalThis.Symbol "auto")))
+            (diagnosed 0) (normal 0) (index 0))
+        (while (< index (js-length values))
+          (await (js-call assert :rejects
+            (run-artifact-mode
+              (js-object :runtimeDiagnostic t :runtimeOptions (js-object :auto (aref values index)))
+              (async (configuration) (setq diagnosed (1+ diagnosed)))
+              (async () (setq normal (1+ normal))))
+            (lambda (error)
+              (and (= (get error :message) "managed argument or bounds error")
+                   (= (get (get error :eliscriptDiagnostic) :code) "ELI-RT0003")))))
+          (await (js-call assert :rejects
+            (run-artifact-mode (js-object :runtimeOptions (js-object :auto (aref values index)))
+              (async () (setq diagnosed (1+ diagnosed))) (async () (setq normal (1+ normal))))
+            (lambda (error) (= (get (get error :eliscriptDiagnostic) :code) "ELI-RT0003"))))
+          (setq index (1+ index)))
+        (let ((containers (js-array nil false 1 "auto" (js-array))) (position 0))
+          (while (< position (js-length containers))
+            (await (js-call assert :rejects
+              (run-artifact-mode (js-object :runtimeDiagnostic t :runtimeOptions (aref containers position))
+                (async (configuration) (setq diagnosed (1+ diagnosed)))
+                (async () (setq normal (1+ normal))))
+              (lambda (error) (= (get (get error :eliscriptDiagnostic) :code) "ELI-RT0003"))))
+            (await (js-call assert :rejects
+              (run-artifact-mode (js-object :runtimeOptions (aref containers position))
+                (async () (setq diagnosed (1+ diagnosed))) (async () (setq normal (1+ normal))))
+              (lambda (error) (js-call globalThis.TypeError.prototype :isPrototypeOf error))))
+            (setq position (1+ position))))
+        (js-call assert :strictEqual diagnosed 0)
+        (js-call assert :strictEqual normal 0)
+        (let ((options (js-object)) (reads 0) (caught false) (failure undefined))
+          (Object/defineProperty options "auto" (js-object :get
+            (lambda () (setq reads (1+ reads)) (throw false))))
+          (try (await (run-artifact-mode (js-object :runtimeDiagnostic t :runtimeOptions options)
+                        (async (configuration) (setq diagnosed (1+ diagnosed)))
+                        (async () (setq normal (1+ normal)))))
+            (catch error (setq caught t failure error)))
+          (js-call assert :strictEqual caught t)
+          (js-call assert :strictEqual failure false)
+          (js-call assert :strictEqual reads 1)
+          (js-call assert :strictEqual diagnosed 0))
+        ;; The same word contract now applies to the ordinary session loader.
+        (await (js-call assert :rejects (run-artifact-mode
+          (js-object :runtimeOptions (js-object :auto -0))
+          (async (configuration) (setq diagnosed (1+ diagnosed)))
+          (async () (setq normal (1+ normal)) 42))
+          (lambda (error) (= (get (get error :eliscriptDiagnostic) :code) "ELI-RT0003"))))
+        (js-call assert :strictEqual diagnosed 0)
+        (js-call assert :strictEqual normal 0))))
+
+  (test "the existing CLI executes an authenticated small WASM session and persists its complete project source-map and debug response"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-cli-wasm-project-"))))
+             (stream (get globalThis.process :stdout)) (write (get stream :write)) (lines (js-array)))
+        (try
+          (progn
+            ;; This protocol fixture proves real WASM execution and CLI IO.
+            ;; It does not compile the supplied input or claim self-hosting.
+            (let* ((backend (await (buildBackends (js-object :outputRoot (resolve directory "backend")))))
+                   (compiler (get backend :compiler)) (managed (get backend :managed))
+                   (input-source "(defconst text \"中😀\") (export text)")
+                   (emission (js-call compiler :emit_ir_string_with_source_map
+                     (js-call compiler :compile_ir_string input-source "input.eli") input-source "entry.mjs" "input.eli"))
+                   (expected (js-object :target "javascript" :entry "entry.mjs" :revision 1 :modules
+                     (js-array (js-object :id "entry.mjs" :filename "input.eli"
+                       :javascript (get emission :javascript) :sourceMap (get emission :sourceMap)
+                       :macroOrigins (js-array (js-object :source "中😀" :index 0))))))
+                   (source (js-call (js-array "(module fixture.cli-project"
+                     (+ " (defconst result " (JSON/stringify (JSON/stringify expected)) ")")
+                     " (defun compiler_session_new () (js-object))"
+                     " (defun compiler_session_close (state) t)"
+                     " (defun compiler_session_request (state text)"
+                     "  (let ((request (JSON/parse text)))"
+                     "   (unless (and (= (get request :operation) \"project\") (= (get request :target) \"javascript\")"
+                     "                (= (get request :sourceMap) t) (= (get request :debug) t)"
+                     "                (= (get (aref (get request :modules) 0) :filename) \"input.eli\")) (throw false)) result))"
+                     " (export compiler_session_new compiler_session_request compiler_session_close))") :join "\n"))
+                   (runtime-source (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")))
+                   (runtime (js-call compiler :compile_ir_string runtime-source "runtime.eli"))
+                   (program (js-call compiler :compile_ir_string source "cli-project.eli"))
+                   (lowered (js-call managed :lower_managed_program program runtime t))
+                   (bytes (globalThis.Uint8Array.from (js-call (get backend :wasm) :append_metadata_section
+                     (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed)
+                       (js-object :initialPages 1 :maximumPages 128))
+                     "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))))
+                   (producer (js-object :host "javascript" :request (lambda (request)
+                     (if (= (get request :operation) "runtime") (js-object :revision 1)
+                       (if (= (get request :operation) "capabilities") (js-object)
+                         (js-object :target "wasm" :bytes bytes :descriptor (get lowered :descriptor)))))))
+                   (artifact (await (buildIndependentCompiler (js-object :host "wasm" :session producer
+                     :sources (js-object :entry "driver.mjs" :modules (js-array (js-object :id "driver.mjs" :filename "cli-project.eli" :source source))
+                       :runtime (js-object :filename "runtime.eli" :source runtime-source))
+                     :outputRoot (resolve directory "artifact") :budget (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 4194304)
+                     :memory (js-object :initialPages 1 :maximumPages 128) :auto 65536))))
+                   (steps-path (resolve directory "steps.json")) (input (resolve directory "input.eli")))
+              (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+              (await (writeFile input input-source))
+              (await (writeFile steps-path (JSON/stringify (js-array (js-object
+                :runtimeOptions (js-object :auto 134217728)
+                :request (js-object :operation "project" :target "javascript" :entry "entry.mjs" :sourceMap t :debug t)
+                :moduleSources (js-array (js-object :id "entry.mjs" :filename "input.eli" :sourcePath "input.eli"))
+                :output "project.json")))))
+              (put stream :write (lambda (line) (js-call lines :push (JSON/parse line)) t))
+              (await (run-artifact (js-array (get artifact :metadataPath) steps-path)))
+              (js-call assert :deepStrictEqual (await (readCompilerMetadata (resolve directory "project.json"))) expected)
+              (js-call assert :deepStrictEqual (js-call lines :map (lambda (line) (get line :phase)))
+                (js-array "request-start" "request-complete"))))
+          (finally (put stream :write write) (await (rm directory (js-object :recursive t :force t)))))))))

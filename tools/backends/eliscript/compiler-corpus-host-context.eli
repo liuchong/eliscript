@@ -1,0 +1,217 @@
+(module tools.backends.compiler-corpus-host-context
+  (import "node:fs/promises" readFile writeFile copyFile chmod)
+  (import "node:fs" constants)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL fileURLToPath)
+  (import "node:module" createRequire)
+  (import "./compiler-metadata.mjs" readCompilerMetadata)
+  (import "./managed-runtime.mjs" createManagedModuleGraph createManagedProjectFacades instantiateManagedRuntimeWithHostModules)
+  (import "./native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "./compiler-corpus-literal-provider.mjs" resolveOriginalLiteralHostProvider)
+
+  (defconst own-url (js* "import.meta.url"))
+  (defconst environment-key "ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT")
+  (defconst program-contexts (new globalThis.Map))
+  (defconst contexts (new globalThis.WeakMap))
+  (defun closeOriginalProgramResources (runtime graph)
+    (let ((failed false) (failure undefined))
+      (js-call (js-array
+        (lambda () (when runtime (js-call runtime :closeModule)))
+        (lambda () (when runtime (js-call runtime :collect)))
+        (lambda () (when (and runtime (/= (js-call runtime :live) 0))
+          (throw (new globalThis.Error "original program retained managed values after module close"))))
+        (lambda () (when (and runtime (/= (get (js-call runtime :stats) :frameDepth) 0))
+          (throw (new globalThis.Error "original program retained managed frames after module close"))))
+        (lambda () (when (and runtime (get runtime :close)) (js-call runtime :close)))
+        (lambda () (js-call graph :close)))
+        :forEach (lambda (action)
+          (try (funcall action) (catch error (unless failed (setq failed t failure error))))))
+      (when failed (throw failure))))
+  (defun installOriginalProgramExitCleanup (close &rest processes)
+    (let ((process (if (or (= (js-length processes) 0) (undefined? (aref processes 0)))
+                     globalThis.process (aref processes 0))))
+      (let ((handler (lambda (ignored)
+        (try (funcall close)
+          (catch error
+            (try
+              (js-call (get process :stderr) :write
+                (str (if (and (not (nullish? error)) (get error :stack))
+                       (get error :stack) (funcall globalThis.String error)) "\n"))
+              (catch ignored nil))
+            (unless (funcall globalThis.Boolean (get process :exitCode)) (put process :exitCode 1)))))))
+        (js-call process :once "exit" handler)
+        handler)))
+
+  (defun inheritOriginalProgramContext (options)
+    (let ((configuration (get options :configuration)) (source-root (get options :sourceRoot)))
+      (unless (and (= (value-type configuration) "string") (= (value-type source-root) "string"))
+        (throw (new globalThis.TypeError "original child context requires its actual configuration and source root")))
+      (let* ((environment (get globalThis.process :env)) (option (str "--import=" own-url))
+             (previous (if (nullish? (get environment :NODE_OPTIONS)) "" (get environment :NODE_OPTIONS))))
+        (unless (js-call (js-call previous :split (new globalThis.RegExp "\\s+")) :includes option)
+          (put environment :NODE_OPTIONS (str (if (= previous "") "" (str previous " ")) option)))
+        (put environment environment-key (resolve configuration))
+        (put environment :ELISCRIPT_ORIGINAL_SOURCE_ROOT (resolve source-root)))))
+  (defun createOriginalProgramDriverClose (input close-now)
+    (let* ((options (get input :runtimeOptions))
+           (lifetime (if (nullish? options) undefined (get options :originalHostLifetime))))
+      (if (undefined? lifetime) close-now
+        (progn
+          (unless (and (= lifetime "process")
+                       (js-call (js-array "wasm" "native") :includes (get input :target))
+                       (= (value-type (get input :host)) "string")
+                       (js-call (new globalThis.RegExp
+                         "(?:^|/)tests/__eliscript_original_generated_names_node\\.mjs$")
+                         :test (get input :host)))
+            (throw (new globalThis.TypeError "process lifetime requires the exact original macro Node host")))
+          ;; This original Node host starts import(...).then(...) without TLA.
+          ;; Its module completion precedes its original assertions. Only the
+          ;; already installed real exit hook owns this close-now operation.
+          (lambda () undefined)))))
+  (defasync originalProgramBunLauncher (options)
+    (let ((directory (get options :directory)) (bun (get options :bun))
+          (configuration (get options :configuration)) (source-root (get options :sourceRoot)))
+      (unless (js-call (js-array directory bun configuration source-root) :every
+        (lambda (value) (and (= (value-type value) "string") (> (js-length value) 0))))
+        (throw (new globalThis.TypeError "original Bun launcher requires its selected artifact and executable")))
+      (let* ((environment (get globalThis.process :env))
+             (option (str "--import=" own-url))
+             (node-options (js-call (js-call (js-call
+               (if (nullish? (get environment :NODE_OPTIONS)) "" (get environment :NODE_OPTIONS))
+               :split (new globalThis.RegExp "\\s+")) :filter
+                 (lambda (value) (and (/= value "") (/= value option)))) :join " "))
+             (path (resolve directory "__eliscript_original_bun"))
+             (source (fileURLToPath (new globalThis.URL "./original-program-bun-launcher.el" own-url))))
+        (await (writeFile (str path ".json") (JSON/stringify
+          (js-object :bun bun :preload (fileURLToPath own-url)
+            :configuration (resolve configuration) :sourceRoot (resolve source-root) :nodeOptions node-options))
+          (js-object :flag "wx" :mode 384)))
+        (await (copyFile source path (get constants :COPYFILE_EXCL)))
+        (await (chmod path 448)) path)))
+  (defun transient-context-p (input)
+    (and input (js-call (js-array "wasm" "native") :includes (get input :target))
+      (= (value-type (get input :host)) "string")
+      (js-call (new globalThis.RegExp
+        "(?:^|/)tests/__eliscript_managed_transient-state_(?:node|bun)_(?:65536|1)\\.mjs$")
+        :test (js-call (get input :host) :replaceAll "\\" "/"))))
+
+  ;; This is a private original-test adapter. A phased project uses JavaScript
+  ;; export names; the retained direct-lowerer test invokes source names. Never
+  ;; rename the actual descriptor, raw exports or public runtime API.
+  (defun bindOriginalManagedProgramContext (input context)
+    (if (not (transient-context-p input)) context
+      (or (js-call contexts :get context)
+        (let* ((runtime (get context :runtime)) (functions (get (get input :descriptor) :functions))
+               (canonical (new globalThis.Set)) (aliases (new globalThis.Map)))
+          (unless (Array/isArray functions)
+            (throw (new globalThis.TypeError "original transient context requires its actual function descriptor")))
+          (js-call functions :forEach (lambda (item)
+            (let ((name (get item :name)))
+              (unless (and (= (value-type name) "string") (not (js-call canonical :has name)))
+                (throw (new globalThis.TypeError "original transient context has ambiguous function names")))
+              (js-call canonical :add name))))
+          (js-call functions :forEach (lambda (item)
+            (let* ((name (get item :name)) (alias (js-call name :replaceAll "_" "-")))
+              (unless (= alias name)
+                (when (or (js-call canonical :has alias) (js-call aliases :has alias))
+                  (throw (new globalThis.TypeError "original transient context has ambiguous source aliases")))
+                (js-call aliases :set alias name)))))
+          (let* ((descriptors (Object/getOwnPropertyDescriptors runtime))
+                 (entry (get descriptors :invoke)) (invoke (get entry :value))
+                 (facade (Object/create (Object/getPrototypeOf runtime)))
+                 (call (lambda (name &rest arguments)
+                   (Reflect/apply invoke runtime (js-call
+                     (js-array (if (js-call aliases :has name) (js-call aliases :get name) name))
+                     :concat arguments))))
+                 (context-descriptors (Object/getOwnPropertyDescriptors context))
+                 (result (Object/create (Object/getPrototypeOf context))))
+            (Object/defineProperties call (js-object
+              :name (js-object :value (get invoke :name)) :length (js-object :value (get invoke :length))))
+            (put entry :value call)
+            (Object/defineProperties facade descriptors)
+            (put (get context-descriptors :runtime) :value (Object/freeze facade))
+            (Object/defineProperties result context-descriptors)
+            (Object/freeze result)
+            (js-call contexts :set context result)
+            result)))))
+
+  (defasync prepare-original-context (input key)
+    (unless (and input (js-call (js-array "wasm" "native") :includes (get input :target))
+                 (= (value-type (get input :path)) "string") (= (value-type (get input :base)) "string")
+                 (= (value-type (get input :entry)) "string")
+                 (get input :descriptor) (get (get input :descriptor) :project))
+      (throw (new globalThis.TypeError "original program context requires the selected phased binary artifact")))
+    (let* ((graph (createManagedModuleGraph (get input :descriptor)))
+           (facades (createManagedProjectFacades (get input :descriptor) (js-object :entry (get input :entry))))
+           (runtime undefined) (closed false) (exit-handler undefined)
+           (close-now (lambda ()
+             (unless closed
+               (setq closed t)
+               (try (closeOriginalProgramResources runtime graph)
+                 (finally
+                   (when exit-handler (js-call globalThis.process :removeListener "exit" exit-handler))
+                   (unless (undefined? key) (js-call program-contexts :delete key)))))))
+           (driver-close (createOriginalProgramDriverClose input close-now))
+           (close (async () (funcall driver-close))))
+      (try
+        (let ((options (Object/assign (js-object) (get input :memory) (get input :runtimeOptions)
+                (js-object :moduleGraph graph :initializeModule false :projectEntry (get input :entry)
+                  :projectModuleBaseURL (get input :base) :moduleBaseURL (get (pathToFileURL (get input :path)) :href)
+                  :nativeTarget (get input :nativeTarget)))))
+          (if (= (get input :target) "wasm")
+            (setq runtime (await (instantiateManagedRuntimeWithHostModules
+              (new globalThis.Uint8Array (await (readFile (get input :path)))) options)))
+            (setq runtime (await (instantiateNativeManagedRuntime (get input :path)
+              (js-object :typed (get input :typed) :descriptor (get input :descriptor)) options))))
+          (when (and (get input :runtimeOptions) (not (undefined? (get (get input :runtimeOptions) :auto))))
+            (js-call runtime :auto (get (get input :runtimeOptions) :auto)))
+          (js-call (js-call graph :attachRuntime runtime) :prepare)
+          (let* ((registry-path (fileURLToPath (new globalThis.URL (get facades :registry) (get input :base))))
+                 (registry (funcall (createRequire registry-path) registry-path)))
+            (js-call registry :install graph))
+          (let ((context (Object/freeze (js-object :graph graph :runtime runtime :facades facades :close close))))
+            ;; Exit is final and synchronous. beforeExit is deliberately not
+            ;; used: Node may emit it before a dynamic import's IO resumes.
+            (setq exit-handler (installOriginalProgramExitCleanup close-now))
+            context))
+        (catch error
+          (try (funcall close-now) (catch ignored nil))
+          (throw error)))))
+  (defasync openOriginalProgramContext (input &rest tail)
+    (let* ((resolved-input (await (resolveOriginalLiteralHostProvider input)))
+           (options (if (or (= (js-length tail) 0) (undefined? (aref tail 0))) (js-object) (aref tail 0)))
+           (identity (get options :identity))
+           (key (if (undefined? identity) undefined (resolve identity)))
+           (pending (unless (undefined? key) (js-call program-contexts :get key))))
+      (unless pending
+        (setq pending (prepare-original-context resolved-input key))
+        (unless (undefined? key) (js-call program-contexts :set key pending)))
+      (try (bindOriginalManagedProgramContext input (await pending))
+        (catch error
+          (when (and (not (undefined? key)) (eq (js-call program-contexts :get key) pending))
+            (js-call program-contexts :delete key))
+          (throw error)))))
+  (defasync inherited-context ()
+    (let* ((environment (get globalThis.process :env)) (configuration (get environment environment-key)))
+      (when configuration
+        (let ((input (await (readCompilerMetadata (resolve configuration)))))
+          (await (openOriginalProgramContext input (js-object :identity configuration)))
+          (put environment :ELISCRIPT_ORIGINAL_TARGET (get input :target))
+          (when (get input :sourceRoot) (put environment :ELISCRIPT_ORIGINAL_SOURCE_ROOT (get input :sourceRoot)))))))
+  (defconst inherited-completion (inherited-context))
+  (js-call inherited-completion :catch (lambda (ignored) undefined))
+  ;; The existing import-completion seam also supplies the real API object to
+  ;; original child loaders. It has no then property, avoiding assimilation
+  ;; recursion while preserving each exported function's exact identity.
+  (defun then (fulfill reject)
+    (js-call inherited-completion :then (lambda (ignored)
+      (funcall fulfill (Object/freeze (js-object
+        :openOriginalProgramContext openOriginalProgramContext
+        :inheritOriginalProgramContext inheritOriginalProgramContext
+        :originalProgramBunLauncher originalProgramBunLauncher
+        :bindOriginalManagedProgramContext bindOriginalManagedProgramContext
+        :closeOriginalProgramResources closeOriginalProgramResources
+        :installOriginalProgramExitCleanup installOriginalProgramExitCleanup
+        :createOriginalProgramDriverClose createOriginalProgramDriverClose)))) reject))
+  (export openOriginalProgramContext inheritOriginalProgramContext originalProgramBunLauncher
+    bindOriginalManagedProgramContext closeOriginalProgramResources installOriginalProgramExitCleanup createOriginalProgramDriverClose then))

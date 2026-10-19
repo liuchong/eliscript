@@ -1,0 +1,43 @@
+(module tools.backends.compiler-corpus-project-transport
+  (import "node:crypto" createHash)
+  (import "node:fs" readdirSync readFileSync)
+  (import "node:path" resolve)
+  (import "../../bootstrap/host/project.mjs" :as project)
+
+  (defun selected-directory-digest (directory)
+    (unless (= (value-type directory) "string")
+      (throw (new globalThis.TypeError "original core project requires its actual selected compiler module directory")))
+    ;; Identical framing and file selection to compilerDirectoryDigest in the
+    ;; real project host. Hash emitted selected files and maps, never workspace
+    ;; .eli sources or a constant masquerading as the compiler's identity.
+    (let* ((files (js-call (readdirSync (resolve directory) (js-object :withFileTypes t)) :filter
+                    (lambda (entry) (and (js-call entry :isFile)
+                      (or (js-call (get entry :name) :endsWith ".mjs")
+                          (js-call (get entry :name) :endsWith ".mjs.map"))))))
+           (names (js-call files :map (lambda (entry) (get entry :name))))
+           (digest (createHash "sha256")) (index 0))
+      (js-call names :sort)
+      (unless (js-call names :includes "compiler.mjs")
+        (throw (new globalThis.TypeError "original core project selected compiler directory is incomplete")))
+      (while (< index (js-length names))
+        (let ((name (aref names index)))
+          (js-call digest :update name) (js-call digest :update "\u0000")
+          (js-call digest :update (readFileSync (resolve directory name)))
+          (js-call digest :update "\u0000"))
+        (setq index (1+ index)))
+      (js-call digest :digest "hex")))
+
+  (defasync buildProject (options)
+    (if (nullish? options) (await (js-call project :buildProject options))
+      (let ((forwarded (Object/create (Object/getPrototypeOf options)
+                         (Object/getOwnPropertyDescriptors options))))
+        ;; The original host reads compilerDigest after its request/source/
+        ;; output validation. Keep that order, including an explicit invalid
+        ;; digest or throwing getter, and leave the caller's options untouched.
+        (Object/defineProperty forwarded "compilerDigest" (js-object :enumerable t :configurable t
+          :get (lambda ()
+            (let ((supplied (get options :compilerDigest)))
+              (if (undefined? supplied)
+                (selected-directory-digest (get options :moduleDirectory)) supplied)))))
+        (await (js-call project :buildProject forwarded)))))
+  (export buildProject))

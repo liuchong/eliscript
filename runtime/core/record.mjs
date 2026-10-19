@@ -124,9 +124,13 @@ function normalizeSourceMap(typeState, source) {
   return map;
 }
 
-export function defineRecordType(name, fields) {
+function makeRecordType(name, fields, reuseFields) {
   const typeName = normalizeTypeName(name);
-  const fieldNames = normalizeFieldNames(fields);
+  const normalizedFields = normalizeFieldNames(fields);
+  if (reuseFields && !Object.isFrozen(fields)) {
+    fail("materialized record fields must be a frozen array");
+  }
+  const fieldNames = reuseFields ? fields : normalizedFields;
   const fieldKeys = Object.freeze(fieldNames.map((field) => keyword(field)));
   const fieldIndexes = new Map(
     fieldNames.map((field, index) => [field, index]),
@@ -321,6 +325,14 @@ export function defineRecordType(name, fields) {
   return RecordValue;
 }
 
+export function defineRecordType(name, fields) {
+  return makeRecordType(name, fields, false);
+}
+
+export function materializeRecordType(name, fields) {
+  return makeRecordType(name, fields, true);
+}
+
 export function isRecordType(value) {
   return typeof value === "function" && recordTypes.has(value);
 }
@@ -343,4 +355,13 @@ export function recordTypeName(value) {
 export function recordFieldNames(value) {
   const type = isRecordType(value) ? value : recordType(value);
   return type.recordFields;
+}
+
+// The bulk transport reads the constructor's actual immutable payload without
+// guessing a private Symbol from its description or invoking a state getter.
+export function readRecordState(value) {
+  if (value === null || typeof value !== "object") return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(value, RECORD_STATE);
+  return descriptor !== undefined && "value" in descriptor
+    ? descriptor.value : undefined;
 }

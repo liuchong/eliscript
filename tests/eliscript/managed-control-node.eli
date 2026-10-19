@@ -1,0 +1,12 @@
+(module tests.managed-control-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (let* ((runtime (instantiateManagedRuntime (readFileSync (aref (get globalThis.process :argv) 2))))
+         (_auto (js-call runtime :auto 1))
+         (input (js-call runtime :string "中😀\ud800"))
+         (value (js-call runtime :invoke "call-choose" (js-array input input))))
+    (js-call assert :strictEqual (js-call runtime :readString value) "中😀\ud800")
+    (js-call runtime :release value) (js-call runtime :release input) (js-call runtime :collect)
+    (js-call assert :strictEqual (js-call runtime :live) 0)
+    (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)))

@@ -1,0 +1,273 @@
+(module tools.backends.compiler-package
+  (import "node:fs/promises" copyFile open mkdir readFile writeFile)
+  (import "node:path" resolve basename dirname)
+  (import "node:crypto" createHash)
+  (import "node:util" parseArgs)
+  (import "node:child_process" spawn)
+  (import "./build.mjs" root)
+  (import "./compiler-build.mjs" writeCompilerMetadata)
+  (import "./compiler-package-legacy.mjs" :as legacy)
+
+  ;; The legacy assembler retains the existing loader template and all artifact
+  ;; validation. Complete its transport before publishing the returned package.
+  (defconst retained-transports (js-array
+    (js-array "tools/backends/managed-host-object-realm.mjs" "transport/backends/managed-host-object-realm.mjs"
+      "transport/backends/managed-host.mjs")
+    (js-array "tools/backends/managed-host-object-provider.mjs" "transport/backends/managed-host-object-provider.mjs"
+      "transport/backends/managed-host-object-realm.mjs")
+    (js-array "tools/backends/managed-host-proxy.mjs" "transport/backends/managed-host-proxy.mjs"
+      "transport/backends/managed-source-view.mjs")
+    (js-array "tools/backends/managed-foreign-binding.mjs" "transport/backends/managed-foreign-binding.mjs"
+      "transport/backends/managed-host.mjs")
+    (js-array "tools/backends/managed-host-lifecycle.mjs" "transport/backends/managed-host-lifecycle.mjs"
+      "transport/backends/managed-host.mjs")
+    (js-array "tools/backends/managed-host-legacy.mjs" "transport/backends/managed-host-legacy.mjs"
+      "transport/backends/managed-host.mjs")
+    (js-array "tools/backends/managed-runtime-host-legacy.mjs" "transport/backends/managed-runtime-host-legacy.mjs"
+      "transport/backends/managed-runtime.mjs")
+    (js-array "tools/backends/managed-module-graph-legacy.mjs" "transport/backends/managed-module-graph-legacy.mjs"
+      "transport/backends/managed-module-graph.mjs")
+    (js-array "tools/backends/managed-source-view-legacy.mjs" "transport/backends/managed-source-view-legacy.mjs"
+      "transport/backends/managed-source-view.mjs")))
+  (defun package-default (value fallback) (if (undefined? value) fallback value))
+  (defconst frontend-support (js-call (js-array "analyzer" "compiler" "emitter" "expander" "formatter"
+    "ir" "lower" "project" "reader" "source-map" "symbol" "syntax" "transient-analysis")
+    :flatMap (lambda (name) (js-array (str "dist/bootstrap/" name ".mjs")
+      (str "dist/bootstrap/" name ".mjs.map")))))
+
+  (defasync record-support (result path)
+    (let* ((files (get (get result :manifest) :files))
+           (record (await (transport-identity (resolve (get result :directory) path) path)))
+           (index (js-call files :findIndex (lambda (item) (= (get item :path) path)))))
+      (if (< index 0) (js-call files :push record) (put files index record))))
+
+  (defasync copy-support (result source path)
+    (let ((destination (resolve (get result :directory) path)))
+      (await (mkdir (dirname destination) (js-object :recursive t)))
+      (await (copyFile source destination))
+      (await (record-support result path))))
+
+  (defasync publish-runtime-scope (result path exports)
+    (let* ((destination (resolve (get result :directory) path))
+           (files (get (get result :manifest) :files))
+           (existing (js-call files :find (lambda (item) (= (get item :path) path))))
+           (certified (when (js-call path :startsWith "artifact/")
+             (js-call (get (get (get result :manifest) :artifactIdentity) :files) :find
+               (lambda (item) (= (get item :path) (js-call path :slice (js-length "artifact/")))))))
+           (scope (js-object :name "eliscript" :type "module" :private t :exports exports))
+           (text (str (JSON/stringify scope nil 2) "\n")))
+      (if existing
+        (let* ((bytes (await (readFile destination)))
+               (actual (await (transport-identity destination path)))
+               (declared (JSON/parse (js-call bytes :toString "utf8"))))
+          ;; A certified artifact scope may contain additional public exports.
+          ;; Preserve its exact bytes; require the actual routing we depend on
+          ;; and refuse a conflict instead of overwriting or reblessing it.
+          (unless (and (= (get existing :bytes) (get actual :bytes))
+                       (= (get existing :sha256) (get actual :sha256))
+                       (= (get declared :name) "eliscript") (= (get declared :type) "module")
+                       (get declared :exports)
+                       (js-call (Object/keys exports) :every (lambda (name)
+                         (= (get (get declared :exports) name) (get exports name)))))
+            (throw (new globalThis.Error "compiler package runtime scope conflicts with its certified artifact"))))
+        (progn
+          (when certified
+            (unless (and (= (get certified :bytes) (globalThis.Buffer.byteLength text "utf8"))
+                         (= (get certified :sha256)
+                           (js-call (js-call (createHash "sha256") :update text "utf8") :digest "hex")))
+              (throw (new globalThis.Error "compiler package runtime scope conflicts with its certified artifact"))))
+          (try (await (writeFile destination text (js-object :flag "wx")))
+            (catch error
+              (unless (and (= (get error :code) "EEXIST") (= (await (readFile destination "utf8")) text))
+                (throw error))))
+          (await (record-support result path))))))
+
+  (defasync complete-frontend-support (result source-root)
+    (let ((index 0))
+      (while (< index (js-length frontend-support))
+        (let ((path (aref frontend-support index)))
+          (await (copy-support result (resolve source-root path) path)))
+        (setq index (1+ index))))
+    ;; The transport's formal frontend and the compiler artifact retain their
+    ;; emitted imports and bytes. Private package scopes resolve their genuine
+    ;; Math/Unicode support without changing the caller's outer package name.
+    (let ((prefixes (js-array "dist/" "" "artifact/" "transport/")) (index 0)
+          (files (get (get result :manifest) :files)))
+      (while (< index (js-length prefixes))
+        (let ((capsules (js-array "math" "unicode-case" "unicode-case-data")) (offset 0))
+          (while (< offset (js-length capsules))
+            (let* ((suffix (str "runtime/" (aref capsules offset) ".mjs"))
+                   (path (str (aref prefixes index) suffix)) (map-path (str path ".map"))
+                   (existing (js-call files :find (lambda (item) (= (get item :path) path))))
+                   (existing-map (js-call files :find (lambda (item) (= (get item :path) map-path)))))
+              ;; Code and map form one real producer pair. A certified input
+              ;; may deliberately have no map; another generator's coordinate
+              ;; space must never be attached to that existing module.
+              (unless existing
+                (when existing-map
+                  (throw (new globalThis.Error "compiler package runtime map has no matching certified module")))
+                (await (copy-support result (resolve source-root suffix) path))
+                (await (copy-support result (resolve source-root (str suffix ".map")) map-path))))
+            (setq offset (1+ offset))))
+        (setq index (1+ index))))
+    (let ((scopes (js-array "dist/package.json" "artifact/package.json" "transport/package.json" "runtime/package.json")) (index 0))
+      (while (< index (js-length scopes))
+        (let ((path (aref scopes index)))
+          (await (publish-runtime-scope result path
+            (if (= path "runtime/package.json")
+              (js-object "./runtime/math.mjs" "./math.mjs"
+                "./runtime/unicode-case.mjs" "./unicode-case.mjs"
+                "./runtime/unicode-case-data.mjs" "./unicode-case-data.mjs")
+              (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+                "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
+                "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs")))))
+        (setq index (1+ index))))
+    (let* ((path (resolve (get result :directory) "package.json"))
+           (package (JSON/parse (await (readFile path "utf8")))))
+      (unless (js-call (get package :files) :includes "dist")
+        (js-call (get package :files) :push "dist"))
+      (await (writeFile path (str (JSON/stringify package nil 2) "\n")))
+      (await (record-support result "package.json"))))
+
+  (defasync bundleCompilerBrowserTransport (entry output source-root)
+    ;; Use the existing production browser bundler. The output is a separate
+    ;; representation; no certified compiler module or map is rewritten.
+    (await (mkdir (dirname output) (js-object :recursive t)))
+    (await (new globalThis.Promise (lambda (accept reject)
+      (let* ((command (package-default (get (get globalThis.process :env) :BUN) "bun"))
+             (child (spawn command (js-array "build" entry "--target=browser" "--format=esm"
+                      "--sourcemap=external" "--outdir" (dirname output)
+                      "--entry-naming" (basename output))
+               (js-object :cwd source-root :stdio (js-array "ignore" "ignore" "inherit")))))
+        (js-call child :once "error" reject)
+        (js-call child :once "close" (lambda (code signal)
+          (if (and (= code 0) (nil? signal)) (funcall accept)
+            (funcall reject (new globalThis.Error
+              (str "compiler browser bundle failed: " code " " signal)))))))))))
+
+  (defasync complete-browser-support (result source-root)
+    (let* ((base (get result :directory)) (manifest (get result :manifest)))
+      (when (= (get manifest :host) "javascript")
+        (let* ((original (JSON/parse (await (readFile (resolve base "artifact/compiler-artifact.json") "utf8"))))
+               (browser-root (resolve base "browser"))
+               (assets (js-array)) (seen (new globalThis.Set))
+               (copy-asset (async (path)
+                 (unless (js-call seen :has path)
+                   (js-call seen :add path)
+                   (await (copy-support result (resolve base "artifact" path) (str "browser/" path)))
+                   (js-call assets :push (await (transport-identity (resolve browser-root path) path)))))))
+          (await (bundleCompilerBrowserTransport
+            (resolve source-root "tools/backends/compiler-package-browser.mjs")
+            (resolve browser-root "compiler-browser.mjs") source-root))
+          (await (bundleCompilerBrowserTransport
+            (resolve source-root "tools/backends/compiler-worker.mjs")
+            (resolve browser-root "compiler-worker.mjs") source-root))
+          (await (bundleCompilerBrowserTransport (resolve base "artifact" (get original :path))
+            (resolve browser-root "compiler.mjs") source-root))
+          (let ((bundles (js-array "compiler-browser.mjs" "compiler-worker.mjs" "compiler.mjs")) (index 0))
+            (while (< index (js-length bundles))
+              (let ((path (aref bundles index)))
+                (await (record-support result (str "browser/" path)))
+                (await (record-support result (str "browser/" path ".map")))
+                (when (= path "compiler.mjs")
+                  (js-call assets :push (await (transport-identity (resolve browser-root path) path)))
+                  (js-call assets :push (await (transport-identity (resolve browser-root (str path ".map")) (str path ".map"))))))
+              (setq index (1+ index))))
+          (await (funcall copy-asset (get original :runtimePath)))
+          (let ((literals (get original :literalSources)) (index 0))
+            (unless (undefined? literals)
+              (while (< index (js-length literals))
+                (await (funcall copy-asset (get (aref literals index) :path)))
+                (setq index (1+ index)))))
+          (unless (nullish? (get original :debugPath))
+            (await (funcall copy-asset (get original :debugPath))))
+          (let* ((provenance (js-object :kind "eliscript-browser-bundle"
+                     :originalArtifact "artifact/compiler-artifact.json"
+                     :originalArtifactIdentity (get original :artifactIdentity)
+                     :originalProvenance (get original :provenance)))
+                 (derived (js-object :host "javascript" :target "javascript"
+                   :entry "compiler.mjs" :path "compiler.mjs"
+                   :modules (js-array (js-object :id "compiler.mjs" :path "compiler.mjs" :sourceMapPath "compiler.mjs.map"))
+                   :sourceIdentity (get original :sourceIdentity) :provenance provenance
+                   :runtimePath (get original :runtimePath)
+                   :artifactIdentity (js-object :algorithm "sha256" :files assets))))
+            (when (Object/hasOwn original "productIdentity")
+              (put provenance :originalProductIdentity (get original :productIdentity)))
+            (js-call (js-array "runtimeEncoding" "literalSources" "memory" "budget" "auto" "debugPath" "capabilities") :forEach
+              (lambda (field) (when (Object/hasOwn original field) (put derived field (get original field)))))
+            (await (writeCompilerMetadata (resolve browser-root "compiler-artifact.json") derived))
+            (await (record-support result "browser/compiler-artifact.json")))
+          (put manifest :browserArtifact "browser/compiler-artifact.json")
+          (put manifest :browser "browser/compiler-browser.mjs")
+          (put manifest :worker "browser/compiler-worker.mjs")
+          (let* ((path (resolve base "package.json")) (package (JSON/parse (await (readFile path "utf8")))))
+            (put (get package :exports) "./browser" "./browser/compiler-browser.mjs")
+            (put (get package :exports) "./worker" "./browser/compiler-worker.mjs")
+            (unless (js-call (get package :files) :includes "browser") (js-call (get package :files) :push "browser"))
+            (await (writeFile path (str (JSON/stringify package nil 2) "\n")))
+            (await (record-support result "package.json")))))))
+
+  (defasync transport-identity (path relative-path)
+    (let ((file (await (open path "r"))) (hash (createHash "sha256"))
+          (buffer (new globalThis.Uint8Array 65536)) (bytes 0) (failed false))
+      (try
+        (progn
+          (let ((reading t))
+            (while reading
+              (let ((count (get (await (js-call file :read buffer 0 (js-length buffer) nil)) :bytesRead)))
+                (if (= count 0) (setq reading false)
+                  (progn
+                    (js-call hash :update (js-call buffer :subarray 0 count))
+                    (setq bytes (+ bytes count)))))))
+          (js-object :path relative-path :bytes bytes :sha256 (js-call hash :digest "hex")))
+        (catch error (setq failed t) (throw error))
+        (finally
+          (try (await (js-call file :close))
+            (catch error (unless failed (throw error))))))))
+
+  (defasync packageIndependentCompiler (&rest arguments)
+    ;; Capture exactly the original destructuring fields, in its original order,
+    ;; before IO. Explicit null remains an error; undefined alone defaults.
+    (let* ((options (package-default (if (> (js-length arguments) 0) (aref arguments 0) undefined) (js-object)))
+           (artifact (get options :artifact)) (output-root (get options :outputRoot))
+           (source-root (package-default (get options :sourceRoot) root))
+           (name (package-default (get options :name) "eliscript-independent-compiler"))
+           (result (await (js-call legacy :packageIndependentCompiler
+             (js-object :artifact artifact :outputRoot output-root :sourceRoot source-root :name name))))
+           (files (get (get result :manifest) :files)) (index 0))
+      ;; Preserve the assembler's phase order: every retained dependency
+      ;; follows its actual importing loader. Record its complete real bytes.
+      (while (< index (js-length retained-transports))
+        (let* ((item (aref retained-transports index)) (path (aref item 1))
+               (target (resolve (get result :directory) path))
+               (position (js-call files :findIndex (lambda (record) (= (get record :path) (aref item 2))))))
+          (when (< position 0) (throw (new globalThis.Error "compiler package transport importer is missing")))
+          (await (copyFile (resolve source-root (aref item 0)) target))
+          (js-call files :splice (1+ position) 0 (await (transport-identity target path))))
+        (setq index (1+ index)))
+      (await (complete-frontend-support result source-root))
+      (await (complete-browser-support result source-root))
+      (await (writeCompilerMetadata (get result :manifestPath) (get result :manifest)))
+      result))
+
+  (defasync main (&rest arguments)
+    (let* ((args (package-default (if (> (js-length arguments) 0) (aref arguments 0) undefined)
+                                (js-call (get globalThis.process :argv) :slice 2)))
+           (parsed (parseArgs (js-object :args args :strict t
+             :options (js-object :artifact (js-object :type "string")
+               :output (js-object :type "string" :short "o") :name (js-object :type "string")
+               :help (js-object :type "boolean" :short "h")))))
+           (values (get parsed :values)))
+      (if (get values :help)
+        (js-call (get globalThis.process :stdout) :write "Usage: compiler-package.mjs --artifact compiler-artifact.json --output DIRECTORY [--name PACKAGE]\n")
+        (let ((result (await (packageIndependentCompiler (js-object :artifact (get values :artifact)
+                            :outputRoot (get values :output) :name (get values :name))))))
+          (js-call (get globalThis.process :stdout) :write (+ (get result :manifestPath) "\n"))))))
+
+  (when (and (> (js-length (get globalThis.process :argv)) 1)
+             (= (basename (aref (get globalThis.process :argv) 1)) "compiler-package.mjs"))
+    (js-call (main) :catch (lambda (error)
+      (js-call (get globalThis.process :stderr) :write
+        (+ (if (nullish? (get error :stack)) (funcall globalThis.String error) (get error :stack)) "\n"))
+      (put globalThis.process :exitCode 1))))
+  (export packageIndependentCompiler main bundleCompilerBrowserTransport))

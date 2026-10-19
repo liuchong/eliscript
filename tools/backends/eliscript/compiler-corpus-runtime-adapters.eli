@@ -1,0 +1,417 @@
+(module tools.backends.compiler-corpus-runtime-adapters
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "node:util" isDeepStrictEqual)
+  (import "../../dist/bootstrap/reader.mjs" read-string)
+  (import "../../dist/bootstrap/compiler.mjs" compile-ir-string emit-ir-string)
+  (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
+  (import "./compiler-corpus-runtime-adapters-legacy.mjs" :as legacy)
+
+  (defconst originalRuntimeSourceSuites (get legacy :originalRuntimeSourceSuites))
+  (defconst isOriginalRuntimeHostOnly (get legacy :isOriginalRuntimeHostOnly))
+  (defconst originalRuntimeOnlyCase (get legacy :originalRuntimeOnlyCase))
+  (defconst suite "tests/literal-runtime.test.mjs")
+  (defconst eli-source "tests/eliscript/literal-runtime.eli")
+  (defconst titles (js-array
+    "persistent literals and quoted data preserve language value categories"
+    "hash-map rejects incomplete pairs in both compilers"
+    "explicit host-only modules do not link the persistent runtime"
+    "maintained Eliscript sources use explicit host constructors"
+    "portable closures produce persistent values for the versioned worker codec"))
+  (defconst plans (js-array
+    (js-object :id "host-only-shape" :title (aref titles 2) :record "original-program:literal-runtime-host-only")
+    (js-object :id "portable-codec" :title (aref titles 4) :record "original-program:literal-runtime-portable-codec")
+    (js-object :id "incomplete-map-input" :title (aref titles 1) :record "original-sequence:literal-runtime-invalid-inputs")
+    (js-object :id "unbound-portable-input" :title (aref titles 4) :record "original-sequence:literal-runtime-invalid-inputs")))
+  (defun hash (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
+  ;; Private executable-test transport, not an emitted user module API. The
+  ;; existing driver awaits import(host) and does not consume its namespace.
+  ;; Promise assimilation therefore waits for the original asynchronous body
+  ;; and resolves undefined, never recursively assimilating that namespace.
+  (defconst originalRuntimeHostCompletionSource (str
+    "(defconst original-completion (run-original-literal-host))\n"
+    "(js-call original-completion :catch (lambda (error)\n"
+    " (try (js-call (get globalThis.process :stderr) :write (+ (funcall globalThis.String error) \"\\n\"))\n"
+    "      (catch ignored nil))\n"
+    " (try (put globalThis.process :exitCode 1) (catch ignored nil))))\n"
+    "(defun then (resolve reject)\n"
+    " (js-call original-completion :then (lambda (ignored) (funcall resolve undefined)) reject))\n"
+    "(export then)\n"))
+  (defun copy (value) (funcall globalThis.structuredClone value))
+  (defun head-p (node name)
+    (and node (= (get node :kind) "list") (Array/isArray (get node :items))
+      (> (js-length (get node :items)) 0)
+      (= (get (aref (get node :items) 0) :kind) "symbol")
+      (= (get (aref (get node :items) 0) :name) name)))
+  (defun symbol-p (node name)
+    (and node (= (get node :kind) "symbol") (= (get node :name) name)))
+  (defun unit-offset (source point)
+    (let ((unit 0) (offset 0))
+      (while (< offset point)
+        (when (>= unit (js-length source))
+          (throw (new globalThis.TypeError "original literal AST span exceeds its actual source")))
+        (setq unit (+ unit (if (> (js-call source :codePointAt unit) 65535) 2 1)))
+        (setq offset (1+ offset)))
+      unit))
+  (defun source-region (source node)
+    (let* ((span (get node :span)) (start (unit-offset source (get span :start)))
+           (end (unit-offset source (get span :end))) (text (js-call source :slice start end)))
+      (js-object :text text :start start :end end
+        :byteStart (js-call Buffer :byteLength (js-call source :slice 0 start))
+        :byteEnd (js-call Buffer :byteLength (js-call source :slice 0 end)) :sha256 (hash text))))
+  (defun walk (node predicate)
+    (let ((result (js-array)) (pending (js-array node)))
+      (while (> (js-length pending) 0)
+        (let ((current (js-call pending :pop)))
+          (when (funcall predicate current) (js-call result :push current))
+          (when (and current (Array/isArray (get current :items)))
+            (let* ((items (get current :items)) (index (1- (js-length items))))
+              (while (>= index 0) (js-call pending :push (aref items index)) (setq index (1- index)))))))
+      result))
+  (defun one (items label)
+    (unless (= (js-length items) 1)
+      (throw (new globalThis.TypeError (+ "original literal " label " requires one authentic AST boundary"))))
+    (aref items 0))
+  (defun binding-p (node name)
+    (and (or (head-p node "let") (head-p node "let*"))
+      (let ((bindings (get (aref (get node :items) 1) :items)))
+        (and (Array/isArray bindings) (> (js-length bindings) 0)
+             (symbol-p (aref (get (aref bindings 0) :items) 0) name)))))
+  (defun string-data (node)
+    (cond
+      ((and (= (get node :kind) "literal") (= (value-type (get node :value)) "string")) (get node :value))
+      ((head-p node "+")
+        (let ((items (get node :items)) (index 1) (value ""))
+          (while (< index (js-length items))
+            (setq value (+ value (string-data (aref items index)))) (setq index (1+ index))) value))
+      (t (throw (new globalThis.TypeError "original literal source write must remain static string data")))))
+  (defun written-source (case variable)
+    (let* ((writes (walk case (lambda (node)
+              (and (head-p node "js-call") (= (js-length (get node :items)) 5)
+                   (symbol-p (aref (get node :items) 1) "globalThis.Bun")
+                   (= (get (aref (get node :items) 2) :kind) "keyword")
+                   (= (get (aref (get node :items) 2) :name) "write")
+                   (symbol-p (aref (get node :items) 3) variable)))))
+           (write (one writes (+ variable " source write"))))
+      (js-object :source (string-data (aref (get write :items) 4)) :node write)))
+
+  (defun originalRuntimeCaseLocators (file source)
+    (if (/= file suite) (js-call legacy :originalRuntimeCaseLocators file source)
+      (let ((cases (originalSourceCaseLocators file source)) (result (js-array)) (index 0))
+        (while (< index (js-length plans))
+          (let* ((plan (aref plans index))
+                 (matches (js-call cases :filter (lambda (item) (= (get (get item :originalCase) :title) (get plan :title))))))
+            (unless (= (js-length matches) 1)
+              (throw (new globalThis.TypeError (+ "original runtime region lost its source case: " (get plan :id)))))
+            (let* ((bound (get (aref matches 0) :originalCase)) (span (get bound :span))
+                   (start (get span :start)) (end (get span :end))
+                   (contains (js-call source :slice start end)))
+              (js-call result :push (js-object
+                :id (+ "stable-compatibility:source-region:" file ":" (get plan :id) ":0")
+                :file file :kind "test" :contains contains :originalCase (copy bound)
+                :originalExecution (js-object :record (get plan :record) :span (js-object :start start :end end)
+                  :byteStart (js-call Buffer :byteLength (js-call source :slice 0 start))
+                  :byteEnd (js-call Buffer :byteLength (js-call source :slice 0 end)) :sha256 (hash contains))))))
+          (setq index (1+ index)))
+        result)))
+
+  ;; Read only the maintained language source. Captured subforms below remain
+  ;; exact source text; the real compiler emits their host implementation.
+  (defun literal-forms (source)
+    (let* ((forms (read-string source eli-source))
+           (module (one (js-call forms :filter (lambda (node) (head-p node "module"))) "module"))
+           (members (get module :items)) (cases (js-array)) (index 0))
+      (while (< index (js-length titles))
+        (let* ((title (aref titles index))
+               (matching (js-call members :filter (lambda (node)
+                 (and (head-p node "test")
+                   (= (get (aref (get node :items) 1) :kind) "literal")
+                   (= (get (aref (get node :items) 1) :value) title))))))
+          (js-call cases :push (one matching title)))
+        (setq index (1+ index)))
+      (js-object :members members :cases cases)))
+  (defun form-text (source node) (get (source-region source node) :text))
+  (defun find-binding (source case name)
+    (form-text source (one (walk case (lambda (node) (binding-p node name))) (+ name " binding"))))
+
+  (defun host-header (members source)
+    (let ((imports (js-array
+        "(import \"bun:test\" expect)" "(import \"node:fs/promises\" readFile writeFile mkdir)"
+        "(import \"node:path\" resolve relative dirname basename)" "(import \"node:module\" createRequire)")) (index 0))
+      (while (< index (js-length members))
+        (let ((form (aref members index)))
+          (when (and (head-p form "import")
+                (js-call (get (aref (get form :items) 1) :value) :startsWith "../runtime/"))
+            (js-call imports :push (form-text source form))))
+        (setq index (1+ index)))
+      (js-call imports :join "\n")))
+
+  (defun host-source (source forms kind entry fixture)
+    (let* ((members (get forms :members)) (cases (get forms :cases))
+           (prelude (+ "(module original.literal-runtime-host\n" (host-header members source) "\n"
+             "(defconst environment (get globalThis.process :env))\n"
+             "(defconst ROOT (get environment :ELISCRIPT_ORIGINAL_SOURCE_ROOT))\n"
+             "(defconst product (aref (get globalThis.process :argv) 2))\n"
+             "(defconst reference-root (get environment :ELISCRIPT_ORIGINAL_REFERENCE_PRODUCT_ROOT))\n"
+             "(defconst javascript-root (get environment :ELISCRIPT_ORIGINAL_JAVASCRIPT_PRODUCT_ROOT))\n"
+             "(unless (and ROOT product reference-root javascript-root) (throw (new globalThis.Error \"original literal host requires selected/reference/javascript products\")))\n"
+             "(defconst seed-output (resolve reference-root " (JSON/stringify entry) "))\n"
+             "(defconst self-output (resolve product " (JSON/stringify entry) "))\n"
+             "(defconst require-module (createRequire (aref (get globalThis.process :argv) 1)))\n"))
+           (body ""))
+      (cond
+        ((= kind "complete")
+          (let ((javascript (find-binding source (aref cases 0) "javascript"))
+                (report (find-binding source (aref cases 0) "bun-report")))
+            ;; The original source assertion reads the separately emitted JS
+            ;; companion. Both executable observations use the selected target.
+            (setq body (+
+              "(defconst BUN (get globalThis.process :execPath))\n"
+              "(defconst NODE (if (nullish? (get environment :NODE_BINARY)) \"node\" (get environment :NODE_BINARY)))\n"
+              "(defconst HOST (resolve product " (JSON/stringify fixture) "))\n"
+              "(defconst children (new globalThis.Set))\n"
+              "(js-call (js-array \"SIGINT\" \"SIGTERM\") :forEach (lambda (signal)\n"
+              " (js-call globalThis.process :once signal (lambda ()\n"
+              "  (js-call children :forEach (lambda (child) (js-call child :kill signal)))\n"
+              "  (put globalThis.process :exitCode (if (= signal \"SIGINT\") 130 143))))))\n"
+              "(defasync execute (host ignored)\n"
+              " (let* ((bun (= host BUN)) (command (js-array host)))\n"
+              "  (if bun (js-call command :push \"--preload\" (resolve ROOT \"tests/fixtures/compiled-eli-bun-preload.mjs\"))\n"
+              "   (js-call command :push \"--experimental-loader\" (resolve ROOT \"tests/fixtures/compiled-eli-node-loader.mjs\")))\n"
+              "  (when (and bun (get environment :ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT)) (js-call command :push \"--preload\" (resolve ROOT \"tools/backends/compiler-corpus-host-context.mjs\")))\n"
+              "  (js-call command :push HOST self-output)\n"
+              "  (let ((child (js-call globalThis.Bun :spawn command (js-object :cwd ROOT :env environment :stdout \"pipe\" :stderr \"pipe\"))))\n"
+              "   (js-call children :add child)\n"
+              "   (try (let ((result (await (Promise/all (js-array (get child :exited) (js-call (new globalThis.Response (get child :stdout)) :text) (js-call (new globalThis.Response (get child :stderr)) :text))))))\n"
+              "     (unless (= (aref result 0) 0) (throw (new globalThis.Error (aref result 2))))\n"
+              "     (JSON/parse (aref result 1)))\n"
+              "    (finally (js-call children :delete child))))))\n"
+              "(defasync run-original-literal-host ()\n"
+              "(let ((seed-output (resolve javascript-root " (JSON/stringify entry) ")))\n" javascript ")\n"
+              report ")\n"))))
+        ((= kind "host-only")
+          (setq body (+
+            ;; Project maps have project-relative names; the original case is
+            ;; a CLI byte comparison. Relocate only the map's path metadata
+            ;; using that CLI's real sources/seed-output layout, retaining the
+            ;; selected emitter's mappings, names and embedded source bytes.
+            "(defasync original-cli-output ()\n"
+            " (let* ((id " (JSON/stringify entry) ") (filename " (JSON/stringify "host-only.eli") ")\n"
+            "   (input (resolve javascript-root id)) (output (resolve product \"original-cli-view\" id))\n"
+            "   (javascript (await (readFile input \"utf8\"))) (map (JSON/parse (await (readFile (+ input \".map\") \"utf8\")))))\n"
+            "  (unless (and (= (js-length (get map :sources)) 1) (= (js-length (get map :sourcesContent)) 1))\n"
+            "   (throw (new globalThis.Error \"original host-only CLI map lost its single source\")))\n"
+            "  (put map :file (basename id))\n"
+            "  (put map :sources (js-array (relative (dirname (resolve \"/seed-output\" id)) (resolve \"/sources\" filename))))\n"
+            "  (await (mkdir (dirname output) (js-object :recursive t)))\n"
+            "  (let ((comment (+ \"//# sourceMappingURL=\" (basename (+ id \".map\")) \"\\n\")))\n"
+            "   (await (writeFile output (if (js-call javascript :endsWith comment) javascript (+ javascript comment)))))\n"
+            "  (await (writeFile (+ output \".map\") (+ (JSON/stringify map) \"\\n\"))) output))\n"
+            "(defasync run-original-literal-host ()\n"
+            "(let ((seed-output (resolve reference-root " (JSON/stringify entry) "))\n"
+            "      (self-output (await (original-cli-output))))\n"
+            (find-binding source (aref cases 2) "seed") ")\n"
+            (form-text source (one (walk (aref cases 2) (lambda (node)
+              (and (head-p node "js-call")
+                (head-p (aref (get node :items) 1) "js-array")
+                (symbol-p (aref (get (aref (get node :items) 1) :items) 1) "seed-output")
+                (= (get (aref (get node :items) 2) :name) "forEach")))) "host module checks")) ")\n")))
+        ((= kind "portable")
+          (setq body (+
+            "(defasync run-original-literal-host ()\n"
+            "(js-call (expect (await (readFile (resolve javascript-root " (JSON/stringify entry) ") \"utf8\"))) :toContain \"eliscript/runtime/literals\")\n"
+            (find-binding source (aref cases 4) "seed-module") ")\n")))
+        (t (throw (new globalThis.TypeError "unknown original literal host capability"))))
+      (emit-ir-string (compile-ir-string (+ prelude body originalRuntimeHostCompletionSource "\n)\n")
+        "original-literal-runtime-host.eli"))))
+
+  (defun bound-regions (source locators title record)
+    (let* ((titles (if (Array/isArray title) title (js-array title)))
+           (cases (originalSourceCaseLocators suite source))
+           (selected (js-call locators :filter (lambda (item)
+            (and (= (get item :file) suite)
+              (if (get item :originalExecution)
+                (= (get (get item :originalExecution) :record) record)
+                (js-call titles :includes (get item :contains))))))))
+      (js-call selected :map (lambda (item)
+        (let* ((bound (get item :originalCase))
+               (case-title (if (nullish? bound) (get item :contains) (get bound :title)))
+               (actual (get (one (js-call cases :filter (lambda (candidate)
+                         (= (get (get candidate :originalCase) :title) case-title)))
+                         "registered literal case") :originalCase))
+               (span (get actual :span)) (start (get span :start)) (end (get span :end))
+               (region (js-object :start start :end end
+                 :byteStart (js-call Buffer :byteLength (js-call source :slice 0 start))
+                 :byteEnd (js-call Buffer :byteLength (js-call source :slice 0 end))
+                 :sha256 (hash (js-call source :slice start end)))))
+          ;; Feature-evidence title locators deliberately have neither field.
+          ;; Resolve them from the actual generated registration, while refusing
+          ;; stale or partial explicit provenance rather than replacing it.
+          (when (and (Object/hasOwn item "originalCase") (not (isDeepStrictEqual bound actual)))
+            (throw (new globalThis.TypeError "original literal case provenance differs from its actual registration")))
+          (when (Object/hasOwn item "originalExecution")
+            (unless (and (not (nullish? bound))
+                         (isDeepStrictEqual (get item :originalExecution)
+                           (js-object :record record :span (get actual :span)
+                             :byteStart (get region :byteStart) :byteEnd (get region :byteEnd)
+                             :sha256 (get region :sha256))))
+              (throw (new globalThis.TypeError "original literal execution provenance differs from its actual registration"))))
+          region)))))
+
+  (defasync add-literal-records (options)
+    (let* ((records (get options :records)) (locators (get options :locators))
+           (text (get options :text)) (file (get options :file)) (add (get options :add))
+           (source (await (funcall text eli-source))) (forms (literal-forms source))
+           (original (await (funcall text suite))) (identity (await (funcall file suite)))
+           (eli-identity (await (funcall file eli-source)))
+           (transport-file "tools/backends/eliscript/compiler-corpus-runtime-adapters.eli")
+           (transport-identity (await (funcall file transport-file)))
+           (base (js-call records :find (lambda (record) (= (get record :id) "stable-compatibility:program:tests/fixtures/literal-runtime.eli"))))
+           (case-list (get forms :cases)))
+      (unless base (throw (new globalThis.Error "original literal runtime graph is unavailable")))
+      (let ((index 0) (variants (js-array
+          (js-object :kind "complete" :id "original-program:literal-runtime-complete-hosts" :title (aref titles 0)
+            :entry (get base :entry) :filename "tests/fixtures/literal-runtime.eli" :modules (get base :modules))
+          (js-object :kind "host-only" :id "original-program:literal-runtime-host-only" :title (aref titles 2)
+            :entry "tests/fixtures/host-only.mjs" :filename "host-only.eli"
+            :source (get (written-source (aref case-list 2) "source") :source))
+          (js-object :kind "portable" :id "original-program:literal-runtime-portable-codec" :title (aref titles 4)
+            :entry "tests/fixtures/portable.mjs" :filename "portable.eli"
+            :source (get (written-source (aref case-list 4) "source") :source)))))
+        (while (< index (js-length variants))
+          (let* ((variant (aref variants index)) (id (get variant :id)) (entry (get variant :entry))
+                 (kind (get variant :kind)) (coverage (js-call (js-call locators :filter (lambda (locator)
+                   (and (= (get locator :file) suite)
+                     (if (get locator :originalExecution) (= (get (get locator :originalExecution) :record) id)
+                       (= (get locator :contains) (get variant :title)))))) :map (lambda (item) (get item :id))))
+                 (request (Object/assign (js-object) (copy (get base :request))
+                   (js-object :entries (js-array entry) :phased t)))
+                 (modules (if (= kind "complete") (copy (get base :modules))
+                   (js-array (js-object :id entry :filename (get variant :filename) :source (get variant :source))))))
+            (when (= kind "portable") (put request :portableEntries (js-array "build")))
+            (when (= kind "complete")
+              (put request :hostSources (js-call (if (get request :hostSources) (get request :hostSources) (js-array))
+                :concat (js-array (js-object :id (get (get base :execution) :host)
+                  :filename (get (get base :execution) :host) :source (get (get base :execution) :hostSource))))))
+            (when (= (js-length coverage) 0)
+              (throw (new globalThis.TypeError (+ "original literal host lost source coverage: " id))))
+            (funcall add (js-object :id id :kind "project" :coverage coverage :modules modules :entry entry :request request
+              :execution (js-object :kind "original-program" :host (+ "tests/__eliscript_original_literal_" kind ".mjs")
+                :hostSource (host-source source forms kind entry (get (get base :execution) :host))
+                :arguments (js-array (js-object :directory t)) :aliases t :requiresBun t :hostRuntime "bun"
+                :referenceArtifact t :compilerSourceMaps t :childProcesses "inherit-selected-artifact" :timeoutMs 60000)
+              :expected (js-object :kind "seed-program" :oracleRequired t)
+              :original (js-object :manifest "stable-compatibility" :suite suite
+                :fixture (get variant :filename) :host suite :sourceSha256 (get identity :sha256)
+                :originalAssertion (get variant :title) :regions (bound-regions original locators (get variant :title) id)
+                :sourceAssets (js-array (js-object :file eli-source :sourceSha256 (get eli-identity :sha256))
+                  (js-object :file transport-file :sourceSha256 (get transport-identity :sha256)))
+                :setupAssertions "original compiler and portable CLI byte/map equality remain required by the original gate"))))
+          (setq index (1+ index))))
+      (let* ((id "original-sequence:literal-runtime-invalid-inputs")
+             (coverage (js-call (js-call locators :filter (lambda (locator)
+               (and (= (get locator :file) suite)
+                    (or (= (get locator :contains) (aref titles 1))
+                      (= (get locator :contains) (aref titles 4))
+                      (and (get locator :originalExecution) (= (get (get locator :originalExecution) :record) id))))))
+                        :map (lambda (item) (get item :id)))))
+        (funcall add (js-object :id id :kind "sequence" :coverage coverage
+          :original (js-object :manifest "stable-compatibility" :suite suite :sourceSha256 (get identity :sha256)
+            :regions (bound-regions original locators (js-array (aref titles 1) (aref titles 4)) id)
+            :sourceAssets (js-array (js-object :file eli-source :sourceSha256 (get eli-identity :sha256))))
+          :steps (js-array
+            (js-object :id "incomplete-map" :request (js-object :operation "compile"
+              :source (get (written-source (aref case-list 1) "source") :source) :filename "invalid.eli")
+              :error (js-object :contains "hash-map expects complete key/value pairs"))
+            (js-object :id "unbound-portable" :request (js-object :operation "compile"
+              :source (get (written-source (aref case-list 4) "invalid") :source) :filename "invalid.eli" :portableEntries (js-array "build"))
+              :error (js-object :contains "unbound" :expectFields
+                (js-array (js-object :path (js-array "message") :value "unbound symbol: missing"))))) :expected (js-object :kind "sequence"))))
+      suite))
+
+  (defconst core-project-records (js-array "original-program:core-project-core"
+    "original-program:core-project-utility" "original-program:core-project-persistent-values"
+    "original-program:core-project-value-text" "original-program:core-project-public"))
+  (defun core-project-transport-record (record assets)
+    (if (not (js-call core-project-records :includes (get record :id))) record
+      (let* ((execution (get record :execution)) (source (get execution :hostSource))
+             (before "\"bootstrap/host/project.mjs\"")
+             (after "\"tools/backends/compiler-corpus-project-transport.mjs\"")
+             (start (js-call source :indexOf before)) (original (get record :original)))
+        (unless (and (>= start 0) (= (js-call source :indexOf before (1+ start)) -1))
+          (throw (new globalThis.TypeError "original core project host import boundary changed")))
+        (let ((changed-execution (Object/assign (js-object) execution))
+              (changed-original (Object/assign (js-object) original))
+              (setup (Object/assign (js-object) (get original :setupReplacement))))
+          (put changed-execution :hostSource (js-call source :replace before after))
+          (put changed-original :sourceAssets
+            (js-call (if (nullish? (get original :sourceAssets)) (js-array)
+                         (get original :sourceAssets)) :concat assets))
+          (put setup :compilerDigest "actual-selected-module-and-source-map-bytes")
+          (put setup :changes (js-array (js-object :role "selected-compiler-digest-transport"
+            :beforeSha256 (hash before) :afterSha256 (hash after))))
+          (put changed-original :setupReplacement setup)
+          (Object/assign (js-object) record
+            (js-object :execution changed-execution :original changed-original))))))
+
+  (defasync core-project-options (options)
+    (if (not (js-call (get options :locators) :some
+               (lambda (locator) (= (get locator :file) "tests/core-stdlib.test.mjs")))) options
+      (let ((assets (js-array)) (files (js-array
+                "tools/backends/eliscript/compiler-corpus-project-transport.eli"
+                "tools/backends/compiler-corpus-project-transport.mjs"))
+            (file (get options :file)) (publish (get options :add)) (index 0))
+        (while (< index (js-length files))
+          (let* ((name (aref files index)) (identity (await (funcall file name))))
+            (js-call assets :push (js-object :file name :sourceSha256 (get identity :sha256))))
+          (setq index (1+ index)))
+        (Object/assign (js-object) options (js-object
+          :add (lambda (record) (funcall publish (core-project-transport-record record assets))))))))
+
+  (defasync addOriginalStdlibRuntimeAdapters (options)
+    (let* ((options (await (core-project-options options)))
+           (locators (get options :locators))
+           (selected (js-call locators :filter (lambda (locator) (= (get locator :file) suite)))))
+      (if (= (js-length selected) 0) (await (js-call legacy :addOriginalStdlibRuntimeAdapters options))
+        (let ((literal-records (js-array)) (publish (get options :add))
+              (published-host false) (published-extra false))
+          (await (add-literal-records (Object/assign (js-object) options
+            (js-object :add (lambda (record) (js-call literal-records :push record))))))
+          (let* ((emit-host (lambda ()
+                   (unless published-host
+                     (funcall publish (aref literal-records 0)) (setq published-host t))))
+                 (emit-extra (lambda ()
+                   (unless published-extra
+                     (funcall emit-host)
+                     (let ((index 1))
+                       (while (< index (js-length literal-records))
+                         (funcall publish (aref literal-records index)) (setq index (1+ index))))
+                     (setq published-extra t))))
+                 (mapped (await (js-call legacy :addOriginalStdlibRuntimeAdapters
+                   (Object/assign (js-object) options (js-object
+                     :locators (js-call locators :filter (lambda (locator) (/= (get locator :file) suite)))
+                     :add (lambda (record)
+                       (when (js-call (js-array "original-program:atom-complete-hosts"
+                           "original-program:eliscript-protocol-complete-hosts"
+                           "original-program:persistent-core-exit-complete-hosts-vector"
+                           "original-program:persistent-core-exit-complete-hosts-map"
+                           "original-program:persistent-core-exit-complete-hosts-set"
+                           "original-program:language-equality-complete-hosts"
+                           "original-program:persistent-zipper-indexed-ascent") :includes (get record :id))
+                         (funcall emit-host))
+                       (when (js-call (js-array "original-program:language-equality-identity-only"
+                           "original-program:core-set-source-map" "original-program:core-stdlib-complete-protocols"
+                           "original-program:core-project-core" "original-program:core-project-utility"
+                           "original-program:core-project-persistent-values" "original-program:core-project-value-text"
+                           "original-program:core-project-public") :includes (get record :id))
+                         (funcall emit-extra))
+                       (funcall publish record))))))))
+          (funcall emit-extra)
+          (let ((position (js-call mapped :findIndex (lambda (name)
+                  (js-call (js-array "tests/atom.test.mjs" "tests/eliscript-protocol.test.mjs"
+                    "tests/persistent-core-exit.test.mjs" "tests/language-equality.test.mjs") :includes name)))))
+            (js-call mapped :splice (if (< position 0) (js-length mapped) position) 0 suite))
+          mapped)))))
+
+  (export originalRuntimeSourceSuites originalRuntimeCaseLocators isOriginalRuntimeHostOnly originalRuntimeHostCompletionSource
+    originalRuntimeOnlyCase addOriginalStdlibRuntimeAdapters))

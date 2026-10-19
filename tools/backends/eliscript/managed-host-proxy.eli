@@ -1,0 +1,36 @@
+(module tools.backends.managed-host-proxy
+  ;; Engine-owned Proxy recognition observes no properties or prototype on the
+  ;; input. Do not replace it with a visible brand or arbitrary reflection.
+  (defvar proxy-predicate undefined)
+  (defvar pending undefined)
+  (defun read-host-proxy-predicate (namespace)
+    (let ((predicate (when namespace (get namespace :isProxy))))
+      (when (= (value-type predicate) "function") (setq proxy-predicate predicate))))
+  (defun prepareManagedHostProxyClassifierSync ()
+    (unless proxy-predicate
+      (let* ((process (get globalThis.globalThis "process"))
+             (builtin (when process (get process :getBuiltinModule))))
+        (when (= (value-type builtin) "function")
+          (try (read-host-proxy-predicate
+            (Reflect/apply builtin process (js-array "node:util/types")))
+            (catch ignored nil)))))
+    (not (undefined? proxy-predicate)))
+  (defasync prepareManagedHostProxyClassifier (load)
+    (unless (prepareManagedHostProxyClassifierSync)
+      (when (get globalThis.globalThis "process")
+        (unless pending
+          (setq pending (funcall (async ()
+            (try
+              (let ((modules (await (funcall load
+                (js-object :hostModules (js-array
+                  (js-object :id "managed-host-proxy" :specifier "node:util/types"
+                    :referrer "managed-host-proxy.mjs" :allowedExports (js-array "isProxy") :namespace t)))))))
+                (read-host-proxy-predicate (js-call modules :get "managed-host-proxy")))
+              ;; Optional host recognition must not replace a real provider's
+              ;; original loading error. Browsers keep their existing path.
+              (catch ignored nil))))))
+        (await pending)))
+    (not (undefined? proxy-predicate)))
+  (defun isManagedHostProxy (value)
+    (and (prepareManagedHostProxyClassifierSync) (funcall proxy-predicate value)))
+  (export prepareManagedHostProxyClassifier isManagedHostProxy))

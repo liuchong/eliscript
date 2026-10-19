@@ -1,0 +1,116 @@
+(module tools.pages.assemble
+  (import "node:fs/promises" mkdir copyFile writeFile readFile)
+  (import "node:crypto" createHash)
+  (import "node:path" resolve dirname)
+  (import "node:url" fileURLToPath)
+  (import "./assemble-legacy.mjs" :as legacy)
+  (import "../backends/compiler-package.mjs" bundleCompilerBrowserTransport)
+
+  (defconst SITE_SOURCE (get legacy :SITE_SOURCE))
+  (defconst PUBLISHED_TREES (get legacy :PUBLISHED_TREES))
+  (defconst ROOT_REFERENCES (get legacy :ROOT_REFERENCES))
+  (defconst SITE_SCRIPT (get legacy :SITE_SCRIPT))
+  (defconst PREVIOUS_PREFIX (get legacy :PREVIOUS_PREFIX))
+  (defconst rebasePage (get legacy :rebasePage))
+  (defconst assetVersions (get legacy :assetVersions))
+  (defconst redirectDocument (get legacy :redirectDocument))
+  (defconst runtime-transports (Object/freeze (js-call (js-array
+    "tools/backends/managed-host-object-provider.mjs"
+    "tools/backends/managed-host-object-realm.mjs"
+    "tools/backends/managed-host-legacy.mjs"
+    "tools/backends/managed-host-lifecycle.mjs"
+    "tools/backends/managed-foreign-binding.mjs"
+    "tools/backends/managed-host-proxy.mjs"
+    "tools/backends/managed-runtime-host-legacy.mjs"
+    "tools/backends/managed-source-view-legacy.mjs"
+    "tools/backends/managed-module-graph-legacy.mjs"
+    "tools/runtime/unicode-case-profiles.mjs") :concat
+      ;; The prepared-binding adapter imports the real formal frontend. Ship
+      ;; its complete graph and maps from the prepared stage3 view.
+      (js-call (js-array "analyzer" "compiler" "emitter" "expander" "formatter"
+        "ir" "lower" "project" "reader" "source-map" "symbol" "syntax" "transient-analysis")
+        :flatMap (lambda (name) (js-array (str "dist/bootstrap/" name ".mjs")
+          (str "dist/bootstrap/" name ".mjs.map"))))
+      (js-array "dist/runtime/math.mjs" "dist/runtime/math.mjs.map"
+        "dist/runtime/unicode-case.mjs" "dist/runtime/unicode-case.mjs.map"
+        "dist/runtime/unicode-case-data.mjs" "dist/runtime/unicode-case-data.mjs.map"))))
+  (defconst PUBLISHED_FILES (Object/freeze
+    (js-call (get legacy :PUBLISHED_FILES) :concat runtime-transports (js-array "package.json"))))
+
+  (defasync pages-file-identity (directory path)
+    (let ((bytes (await (readFile (resolve directory path)))))
+      (js-object :path path :bytes (js-length bytes)
+        :sha256 (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))))
+
+  (defasync assemblePages (options)
+    ;; Preserve the existing source-tree guard, compiler packages, pages and
+    ;; asset stamps. Complete the real imports of the generated Eli adapters.
+    (let* ((result (await (js-call legacy :assemblePages options)))
+           (source (resolve (get options :root))) (target (resolve (get options :outDir)))
+           (index 0))
+      (while (< index (js-length runtime-transports))
+        (let* ((file (aref runtime-transports index)) (output (resolve target file)))
+          (await (mkdir (dirname output) (js-object :recursive t)))
+          (await (copyFile (resolve source file) output))
+          (unless (js-call (get result :files) :includes file)
+            (js-call (get result :files) :push file)))
+        (setq index (1+ index)))
+      ;; Node/Bun use the same root-relative runtime graph as the browser's
+      ;; existing import map when the published Worker is loaded in isolation.
+      (await (copyFile (resolve source "package.json") (resolve target "package.json")))
+      (unless (js-call (get result :files) :includes "package.json")
+        (js-call (get result :files) :push "package.json"))
+      ;; The exact published source files above remain byte-identical. Workers
+      ;; consume separate browser representations and their own identity file;
+      ;; these bundles are never certified compiler fixed-point products.
+      (let ((entries (js-array
+               (js-array "tools/backends/compiler-browser.mjs" "tools/backends/browser/compiler-browser.mjs")
+               (js-array "tools/backends/compiler-worker.mjs" "tools/backends/browser/compiler-worker.mjs")))
+            (transports (js-array)) (published-sources (js-array)) (index 0))
+        (while (< index (js-length entries))
+          (let* ((entry (aref entries index)) (input (aref entry 0)) (output (aref entry 1)))
+            (await (bundleCompilerBrowserTransport (resolve source input) (resolve target output) source))
+            (js-call transports :push (js-object
+              :source (await (pages-file-identity source input))
+              :bundle (await (pages-file-identity target output))
+              :sourceMap (await (pages-file-identity target (str output ".map")))))
+            (js-call (get result :files) :push output (str output ".map")))
+          (setq index (1+ index)))
+        (setq index 0)
+        (while (< index (js-length PUBLISHED_FILES))
+          (js-call published-sources :push (await (pages-file-identity target (aref PUBLISHED_FILES index))))
+          (setq index (1+ index)))
+        (let ((manifest "tools/backends/browser/transport.json"))
+          (await (writeFile (resolve target manifest)
+            (str (JSON/stringify (js-object :format "eliscript-pages-browser-transports" :version 1
+              :representation "derived-browser-bundle" :compilerFixedPointEvidence false
+              :publishedSourceFiles published-sources :transports transports) nil 2) "\n")))
+          (js-call (get result :files) :push manifest))) result))
+
+  (defasync main (arguments)
+    (let ((options (js-object :root "." :outDir "dist/pages" :compilerArtifacts (js-array))) (index 0))
+      (while (< index (js-length arguments))
+        (let ((flag (aref arguments index)))
+          (unless (js-call (js-array "--root" "--out" "--compiler-artifact") :includes flag)
+            (throw (new globalThis.TypeError (+ "unknown argument " flag))))
+          (setq index (1+ index))
+          (when (>= index (js-length arguments))
+            (throw (new globalThis.TypeError (+ flag " requires a path"))))
+          (let ((value (aref arguments index)))
+            (cond ((= flag "--compiler-artifact") (js-call (get options :compilerArtifacts) :push value))
+              ((= flag "--root") (put options :root value))
+              (t (put options :outDir value)))))
+        (setq index (1+ index)))
+      (let ((result (await (assemblePages options))))
+        (js-call (get globalThis.process :stdout) :write
+          (+ "Pages artifact: " (js-length (get result :trees)) " trees, "
+            (js-length (get result :files)) " files into " (resolve (get options :outDir)) "\n")) result)))
+
+  (when (and (aref (get globalThis.process :argv) 1)
+             (= (resolve (aref (get globalThis.process :argv) 1)) (fileURLToPath (js* "import.meta.url"))))
+    (js-call (main (js-call (get globalThis.process :argv) :slice 2)) :catch
+      (lambda (error)
+        (js-call (get globalThis.process :stderr) :write (+ "assemble: " (get error :message) "\n"))
+        (put globalThis.process :exitCode 1))))
+  (export SITE_SOURCE PUBLISHED_TREES ROOT_REFERENCES SITE_SCRIPT PREVIOUS_PREFIX
+    PUBLISHED_FILES rebasePage assetVersions redirectDocument assemblePages main))

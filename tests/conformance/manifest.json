@@ -1177,8 +1177,8 @@
       "spec": "0096",
       "contracts": ["Discovers all conditional runtime links in one production IR traversal", "Retains the five independent recursive predicates as a readable semantic reference", "Requires exact optimized/reference agreement over every maintained self-hosted compiler module and explicit boundary cases", "Records a source-bound reviewed speedup report without making wall-clock timing a default test gate", "Keeps application frameworks, UI libraries, Vite, bundlers, site generators, and publishing outside core implementation and evidence"],
       "evidence": [
-        { "kind": "bun-test", "file": "tests/compiler-runtime-scan.test.mjs", "contains": "optimized compiler runtime scan matches its readable reference" },
-        { "kind": "bun-test", "file": "tests/compiler-runtime-scan.test.mjs", "contains": "committed compiler runtime scan report matches measured sources" },
+        { "kind": "bun-test", "file": "tests/compiler-runtime-scan-selfhosted.test.mjs", "contains": "optimized compiler runtime scan matches its readable reference" },
+        { "kind": "bun-test", "file": "tests/compiler-runtime-scan-selfhosted.test.mjs", "contains": "committed compiler runtime scan report matches measured sources" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
     },
@@ -2205,27 +2205,27 @@
       "evidence": [
         {
           "kind": "bun-test",
-          "file": "tests/repository-integrity.test.mjs",
+          "file": "tests/repository-integrity-test-legacy.mjs",
           "contains": "repository dependencies and generated artifacts satisfy declared boundaries"
         },
         {
           "kind": "bun-test",
-          "file": "tests/repository-integrity.test.mjs",
+          "file": "tests/repository-integrity-test-legacy.mjs",
           "contains": "repository integrity rejects undeclared and boundary-crossing imports"
         },
         {
           "kind": "bun-test",
-          "file": "tests/repository-integrity.test.mjs",
+          "file": "tests/repository-integrity-test-legacy.mjs",
           "contains": "repository integrity isolates declared dependencies at the nearest package boundary"
         },
         {
           "kind": "bun-test",
-          "file": "tests/repository-integrity.test.mjs",
+          "file": "tests/repository-integrity-test-legacy.mjs",
           "contains": "repository integrity rejects stale benchmark source evidence"
         },
         {
           "kind": "bun-test",
-          "file": "tests/repository-integrity.test.mjs",
+          "file": "tests/repository-integrity-test-legacy.mjs",
           "contains": "repository integrity rejects incomplete artifact registries"
         }
       ]
@@ -2661,7 +2661,7 @@
         },
         {
           "kind": "bun-test",
-          "file": "tests/compiler-runtime-scan.test.mjs",
+          "file": "tests/compiler-runtime-scan-selfhosted.test.mjs",
           "contains": "optimized compiler runtime scan matches its readable reference"
         }
       ]

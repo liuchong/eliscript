@@ -60,17 +60,21 @@ export async function validateRefreshedTransientBuilder(root,filename,currentByt
  }
  require(accepted.sourceDigest?.algorithm==='sha256'&&current.sourceDigest?.algorithm==='sha256','source digest algorithm changed');
  require(await sourceDigest(root,accepted.sourceDigest.files,revision)===accepted.sourceDigest.value,'accepted source aggregate differs from its Git snapshot');
- if(options.deferPerformanceAcceptance===true){
+ const validateFreshSources=async()=>{
+  const core=(await readdir(path.join(root,'runtime/core'))).filter(name=>name.endsWith('.mjs')).sort().map(name=>`runtime/core/${name}`);
+  const inventory=[...core,'runtime/testing/map.mjs','runtime/testing/set.mjs','runtime/testing/vector.mjs','tools/collections/transient-builder-benchmark.mjs'];
+  require(same(current.sourceDigest.files,inventory),'fresh source inventory is incomplete');
+  require(await sourceDigest(root,inventory)===current.sourceDigest.value,'fresh source aggregate is stale');
+ };
+ if(options.deferPerformanceAcceptance!==true){await validateFreshSources();return true;}
+ let currentFailure;
+ try{await validateFreshSources();return true;}catch(error){currentFailure=error;}
+ try{
   const measured=retainedPerformanceSnapshot(root,filename,currentBytes);
   const core=new TextDecoder().decode(git(root,['ls-tree','--name-only',`${measured.commit}:runtime/core`])).trim().split('\n').filter(file=>file.endsWith('.mjs')).sort().map(file=>`runtime/core/${file}`);
   const inventory=[...core,'runtime/testing/map.mjs','runtime/testing/set.mjs','runtime/testing/vector.mjs','tools/collections/transient-builder-benchmark.mjs'];
   require(same(current.sourceDigest.files,inventory),'measured source inventory is incomplete');
   require(await sourceDigest(root,inventory,measured.commit)===current.sourceDigest.value,'measured source aggregate differs from its Git snapshot');
-  return deferredPerformanceAcceptance(filename,measured);
- }
- const core=(await readdir(path.join(root,'runtime/core'))).filter(name=>name.endsWith('.mjs')).sort().map(name=>`runtime/core/${name}`);
- const inventory=[...core,'runtime/testing/map.mjs','runtime/testing/set.mjs','runtime/testing/vector.mjs','tools/collections/transient-builder-benchmark.mjs'];
- require(same(current.sourceDigest.files,inventory),'fresh source inventory is incomplete');
- require(await sourceDigest(root,inventory)===current.sourceDigest.value,'fresh source aggregate is stale');
- return true;
+  return {...deferredPerformanceAcceptance(filename,measured),currentSourceFailure:{name:currentFailure.name,message:currentFailure.message}};
+ }catch(error){error.cause=currentFailure;throw error;}
 }

@@ -87,9 +87,191 @@ test('uncaught primitives cross the adapter exactly and failed module evaluation
  for(const value of['nil','undefined','false','(new (js* "TypeError") "init")']){const p=b.compiler.compile_ir_string('(defconst fail (throw '+value+')) (export fail)','module-throw.eli'),artifact=Uint8Array.from(b.managed.emit_managed_wasm(p,runtime)),a=instantiateManagedRuntime(artifact,{initializeModule:false});a.auto(1);const seen=[];for(let i=0;i<2;i++){try{a.initializeModule();assert.fail('initializer must throw');}catch(error){seen.push(error);}a.collect();assert.equal(a.stats().frameDepth,0);}if(value.startsWith('(new')){assert(a.keyEqual(seen[0],seen[1]));const key=a.string('message'),text=a.objectGet(seen[0],key);assert.equal(a.readString(text),'init');a.release(key);a.release(text);}else assert.deepEqual(seen,[value==='nil'?null:value==='undefined'?undefined:false,value==='nil'?null:value==='undefined'?undefined:false]);finish(a,seen);}
 });
 
-test('unrepresented Error stack reflection fails explicitly while normal object stack fields remain ordinary data',()=>{
- const source='(defconst marker 1) (defun read-stack (error) (aref error "stack")) (defun has-stack (error) (Object/hasOwn error "stack")) (defun set-stack (error) (put error "stack" 9)) (defun make () (new (js* "Error") "x")) (export read-stack has-stack set-stack make)',p=b.compiler.compile_ir_string(source,'error-stack-boundary.eli'),a=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(p,runtime)));a.auto(1);const error=a.invoke('make');for(const name of['read-stack','has-stack','set-stack'])assert.throws(()=>a.invoke(name,[error]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');const object=a.sourceObject({stack:true});assert.equal(a.invoke('read-stack',[object]),true);assert.equal(a.invoke('has-stack',[object]),true);const out=a.invoke('set-stack',[object]);assert.equal(a.readNumber(out),9);finish(a,[error,object,out]);
+test('unrepresented generated Error stacks remain unsupported while explicit stack data preserves JavaScript descriptors and write restrictions',async()=>{
+ const source=`(defconst marker 1)
+  (defun read-stack (error) (aref error "stack"))
+  (defun has-stack (error) (Object/hasOwn error "stack"))
+  (defun describe-stack (error) (Object/getOwnPropertyDescriptor error "stack"))
+  (defun define-default-stack (error) (Object/defineProperty error "stack" (js-object :value 9)))
+  (defun set-stack (error) (put error "stack" 9))
+  (defun make () (new (js* "Error") "x"))
+  (defun custom-stack (value mode)
+   (let ((error (new globalThis/TypeError "explicit stack")) (outcome "unchanged"))
+    (put error :stack value)
+    (cond ((= mode 1) (Object/defineProperty error "stack" (js-object :writable false)))
+          ((= mode 2) (Object/freeze error)))
+    (unless (= mode 0)
+     (setq outcome (try (put error :stack "replacement") "written" (catch failure (get failure :name)))))
+    (let ((descriptor (Object/getOwnPropertyDescriptor error "stack")))
+     (JSON/stringify (js-array (Object/is (aref error "stack") value) (Object/hasOwn error "stack")
+      (Object/is (get descriptor :value) value) (get descriptor :writable)
+      (get descriptor :enumerable) (get descriptor :configurable) outcome)))))
+  (defun receiver-stack-setter (written)
+   (let ((receiver (js* "this")))
+    (put receiver :calls (1+ (get receiver :calls))) (put receiver :seen written)))
+  (defun receiver-stack (mode value)
+   (let* ((error (new globalThis/TypeError "receiver stack"))
+          (receiver (js-object :seen "before" :calls 0)) (prototype (js-object)))
+    (put error :stack "target")
+    (cond
+     ((= mode 1)
+      (Reflect/deleteProperty error "stack")
+      (Object/defineProperty prototype "stack" (js-object
+       :set receiver-stack-setter :configurable t))
+      (Object/setPrototypeOf error prototype))
+     ((= mode 2)
+      (Reflect/deleteProperty error "stack")
+      (Object/defineProperty prototype "stack" (js-object :value "locked" :writable false :configurable t))
+      (Object/setPrototypeOf error prototype))
+     ((= mode 3) (Object/freeze receiver)))
+    (let* ((outcome (Reflect/set error "stack" value receiver))
+           (descriptor (Object/getOwnPropertyDescriptor receiver "stack")))
+     (JSON/stringify (js-array outcome (get receiver :calls)
+      (Object/hasOwn error "stack") (Object/hasOwn receiver "stack")
+      (Object/is (get error :stack) "target") (Object/is (get error :stack) "locked")
+      (Object/is (get receiver :seen) value) (Object/is (get receiver :stack) value)
+      (if descriptor (js-array (get descriptor :writable) (get descriptor :enumerable) (get descriptor :configurable)) nil))))))
+  (export read-stack has-stack describe-stack define-default-stack set-stack make custom-stack receiver-stack)`;
+ const p=b.compiler.compile_ir_string(source,'error-stack-boundary.eli');
+ const js=await import('data:text/javascript;base64,'+Buffer.from(b.compiler.emit_ir_string(p)).toString('base64'));
+ const artifact=Uint8Array.from(b.managed.emit_managed_wasm(p,runtime));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(artifact)),[]);
+ const a=instantiateManagedRuntime(artifact);a.auto(1);const error=a.invoke('make'),object=a.sourceObject({stack:true});
+ try{
+  // A fresh managed Error has no represented engine-generated stack. These
+  // negative profile checks do not claim equivalence with the host's stack.
+  for(const name of['read-stack','has-stack','describe-stack','define-default-stack'])assert.throws(()=>a.invoke(name,[error]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');
+  for(const target of[error,object]){
+   if(target===object){assert.equal(a.invoke('read-stack',[target]),true);assert.equal(a.invoke('has-stack',[target]),true);}
+   const written=a.invoke('set-stack',[target]);try{assert.equal(a.readNumber(written),9);}finally{a.release(written);}
+   const actual=a.invoke('read-stack',[target]);try{assert.equal(a.readNumber(actual),9);}finally{a.release(actual);}
+   assert.equal(a.invoke('has-stack',[target]),true);
+  }
+  for(const value of['TypeError: supplied\n    at original.eli:3:7',-0,undefined,false])for(const mode of[0,1,2]){
+   const input=box(a,value),option=a.number(mode);let out;
+   try{
+    const expected=JSON.parse(js.custom_stack(value,mode));
+    assert.deepEqual(expected,[true,true,true,mode===0,false,mode!==2,mode===0?'unchanged':'TypeError']);
+    out=a.invoke('custom-stack',[input,option]);assert.deepEqual(JSON.parse(a.readString(out)),expected);
+   }finally{a.release(out);a.release(option);a.release(input);}
+   a.collect();assert.equal(a.stats().frameDepth,0);
+  }
+  const receiverExpected=[
+   [true,0,true,true,true,false,false,true,[true,true,true]],
+   [true,1,false,false,false,false,true,false,null],
+   [false,0,false,false,false,true,false,false,null],
+   [false,0,true,false,true,false,false,false,null],
+  ];
+  for(const value of['explicit receiver stack',-0])for(let mode=0;mode<receiverExpected.length;mode++){
+   const input=box(a,value),option=a.number(mode);let out;
+   try{
+    const expected=JSON.parse(js.receiver_stack(mode,value));assert.deepEqual(expected,receiverExpected[mode]);
+    out=a.invoke('receiver-stack',[option,input]);assert.deepEqual(JSON.parse(a.readString(out)),expected);
+   }finally{a.release(out);a.release(option);a.release(input);}
+   a.collect();assert.equal(a.stats().frameDepth,0);
+  }
+ }finally{finish(a,[error,object]);}
 });
+
+test('cold Error realm dynamic lookups calls overrides and explicit prototypes match JavaScript reflection and recover after GC',async()=>{
+ const source=`(defconst marker 1)
+  (defun property (object key) (get object key))
+  (defun invoke-method (object key arguments)
+   (let ((method (property object key))) (js-call method :apply object arguments)))
+  (defun own-render (&rest ignored) "own")
+  (defun prototype-render (&rest ignored) "prototype")
+  (defun cold-lookup ()
+   (let* ((error (new (js* "Error") "message"))
+          (constructor (property error "constructor"))
+          (to-string (property error "toString"))
+          (own (property error "hasOwnProperty"))
+          (enumerable (property error "propertyIsEnumerable"))
+          (prototype (Object/getPrototypeOf error))
+          (called (js-call constructor :call nil "called"))
+          (applied (js-call constructor :apply nil (js-array "applied")))
+          (bound (js-call constructor :bind nil "bound")) (bound-error (funcall bound)))
+    (JSON/stringify (js-array
+     (Object/is constructor (js* "Error")) (Object/is prototype (get constructor :prototype))
+     (Object/is (property prototype "constructor") constructor)
+     (Object/is to-string (property prototype "toString"))
+     (Object/is own (get globalThis.Object.prototype :hasOwnProperty))
+     (Object/is enumerable (get globalThis.Object.prototype :propertyIsEnumerable))
+     (invoke-method error "toString" (js-array))
+     (js-call own :call error "message") (js-call enumerable :call error "message")
+     (get called :message) (get applied :message) (get bound-error :message)
+     (Object/is constructor (property error "constructor"))))))
+  (defun overwrite ()
+   (let* ((error (new (js* "Error") "message")) (prototype (Object/getPrototypeOf error))
+          (original-method (property prototype "toString"))
+          (original-constructor (property prototype "constructor")))
+    (try
+     (put prototype :toString prototype-render)
+     (let ((inherited (invoke-method error "toString" (js-array))))
+      (put error :toString own-render)
+      (let ((own (invoke-method error "toString" (js-array))))
+       (Reflect/deleteProperty error "toString") (put prototype :constructor false)
+       (JSON/stringify (js-array inherited own
+        (invoke-method error "toString" (js-array)) (property error "constructor")
+        (Object/hasOwn error "toString")))))
+     (finally (put prototype :toString original-method) (put prototype :constructor original-constructor)))))
+  (defun getter-order ()
+   (let ((error (new (js* "Error") "message")) (trace (js-array)))
+    (Object/defineProperty error "toString" (js-object :configurable t
+     :get (lambda () (js-call trace :push "getter") own-render)))
+    (let* ((method (property error "toString"))
+           (result (js-call method :call error (progn (js-call trace :push "argument") 7))))
+     (JSON/stringify (js-array result trace)))))
+  (defun explicit-prototypes ()
+   (let ((error (new (js* "Error") "message")) (custom (js-object :constructor false :toString own-render)))
+    (Object/setPrototypeOf error nil)
+    (let ((empty (js-array (Object/is (Object/getPrototypeOf error) nil)
+                  (Object/is (property error "constructor") undefined)
+                  (Object/is (property error "toString") undefined))))
+     (Object/setPrototypeOf error custom)
+     (JSON/stringify (js-array empty (Object/is (Object/getPrototypeOf error) custom)
+      (property error "constructor") (invoke-method error "toString" (js-array))
+      (Object/is (Object/getPrototypeOf error) custom))))))
+  (defun reflection ()
+   (let* ((error (new (js* "Error") "message"))
+          (constructor (property error "constructor")) (prototype (Object/getPrototypeOf error))
+          (descriptor (Object/getOwnPropertyDescriptor prototype "toString"))
+          (reflected (Reflect/getOwnPropertyDescriptor prototype "toString")))
+    (JSON/stringify (js-array
+     (Object/is (Reflect/getPrototypeOf error) prototype)
+     (Object/is (Reflect/get error "constructor") constructor)
+     (Reflect/has error "toString") (Object/hasOwn error "constructor")
+     (invoke-method error "hasOwnProperty" (js-array "message"))
+     (invoke-method error "propertyIsEnumerable" (js-array "message"))
+     (Object/is (get descriptor :value) (property error "toString"))
+     (Object/is (get reflected :value) (get descriptor :value))
+     (get descriptor :writable) (get descriptor :enumerable) (get descriptor :configurable)
+     (get reflected :writable) (get reflected :enumerable) (get reflected :configurable)))))
+  (defun recover (value) (+ value marker))
+  (export cold-lookup overwrite getter-order explicit-prototypes reflection recover)`;
+ const p=b.compiler.compile_ir_string(source,'cold-error-realm.eli');
+ const js=await import('data:text/javascript;base64,'+Buffer.from(b.compiler.emit_ir_string(p)).toString('base64'));
+ const artifact=Uint8Array.from(b.managed.emit_managed_wasm(p,runtime));
+ assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(artifact)),[]);
+ const observations=[
+  ['cold-lookup',[true,true,true,true,true,true,'Error: message',true,false,'called','applied','bound',true]],
+  ['overwrite',['prototype','own','prototype',false,false]],
+  ['getter-order',['own',['getter','argument']]],
+  ['explicit-prototypes',[[true,true,true],true,false,'own',true]],
+  ['reflection',[true,true,true,false,true,false,true,true,true,false,true,true,false,true]],
+ ];
+ for(const [name,expected]of observations){
+  const a=instantiateManagedRuntime(artifact);a.auto(1);const keep=a.number(-0),caller=a.frame(1);a.frameSet(caller,0,keep);
+  try{
+   for(let index=0;index<2;index++){
+    const oracle=JSON.parse(js[name.replaceAll('-','_')]());assert.deepEqual(oracle,expected);
+    const out=a.invoke(name);try{assert.deepEqual(JSON.parse(a.readString(out)),oracle);}finally{a.release(out);}
+    a.collect();assert.equal(a.stats().frameDepth,1);
+    const held=a.frameGet(caller,0);try{assert(Object.is(a.readNumber(held),-0));}finally{a.release(held);}
+    const input=a.number(7),recovered=a.invoke('recover',[input]);
+    try{assert.equal(a.readNumber(recovered),js.recover(7));}finally{a.release(recovered);a.release(input);}
+   }
+  }finally{a.leaveFrame(caller);finish(a,[keep]);}
+ }
+},30000);
 
 let generationEvidence;
 function generations(){return generationEvidence??=buildGenerations();}

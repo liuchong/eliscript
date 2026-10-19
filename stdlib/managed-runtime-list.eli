@@ -1,0 +1,19 @@
+(module eliscript.managed-runtime-list
+  (import "../../stdlib/managed-literals.eli"
+    PersistentList literal-list literal-instance?)
+
+  (defconst EMPTY_LIST (literal-list))
+  (defun persistentList (&rest values) (js-call PersistentList :from values))
+  (defun isPersistentList (value) (literal-instance? value PersistentList))
+  (defun require-list (value operation)
+    (unless (isPersistentList value)
+      (throw (new globalThis/TypeError (str operation " expects a persistent List or nil"))))
+    value)
+  (defun first (value &optional notFound)
+    (if (nullish? value) notFound (js-call (require-list value "first") :first notFound)))
+  (defun rest (value)
+    (if (nullish? value) EMPTY_LIST (js-call (require-list value "rest") :rest)))
+  (defun cons (value list)
+    (js-call (if (nullish? list) EMPTY_LIST (require-list list "cons")) :cons value))
+
+  (export PersistentList EMPTY_LIST persistentList isPersistentList first rest cons))

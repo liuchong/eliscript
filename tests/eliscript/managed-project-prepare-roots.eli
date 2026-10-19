@@ -1,0 +1,309 @@
+(module tests.managed-project-prepare-roots
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile writeFile rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:url" pathToFileURL)
+  (import "node:module" createRequire)
+  (import "../tools/backends/build.mjs" buildBackends root)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntimeWithHostModules loadManagedHostModules readManagedAllocatorSnapshot)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "../tools/backends/managed-module-graph.mjs" createManagedModuleGraph)
+
+  (defvar directory undefined)
+  (defvar backend undefined)
+  (defvar runtime-ir undefined)
+  (defvar observer undefined)
+  (defvar successful undefined)
+  (defvar abrupt undefined)
+  (defconst allocator-diagnostic (= (get (get globalThis.process :env) "ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC") "1"))
+  (defun prepare-allocation-phase (runtime phase)
+    (when allocator-diagnostic
+      (try
+        (let ((snapshot undefined))
+          (try (setq snapshot (readManagedAllocatorSnapshot runtime)) (catch ignored nil))
+          (console/error "[project-allocator]" (JSON/stringify
+            (js-object :suite "prepare" :phase phase :allocator snapshot :stats (js-call runtime :stats)))))
+        (catch ignored nil))))
+  (defun observed-prepare (runtime graph)
+    (prepare-allocation-phase runtime "before-prepare")
+    (try
+      (let ((result (js-call graph :prepare)))
+        (prepare-allocation-phase runtime "after-prepare") result)
+      (catch error
+        (prepare-allocation-phase runtime "failure-before-collect")
+        (when allocator-diagnostic
+          (try (js-call runtime :collect) (catch ignored nil))
+          (prepare-allocation-phase runtime "failure-after-collect"))
+        (throw error))))
+  (defconst width 24)
+  (defconst discarded-per-initializer 48)
+  (defconst native-target (when (= (get globalThis.process :arch) "arm64")
+    (cond ((= (get globalThis.process :platform) "darwin") "arm64-macos")
+          ((= (get globalThis.process :platform) "linux") "arm64-linux"))))
+
+  ;; These are small source modules exercising the existing literalModules
+  ;; registration contract. The real linker alone assigns projectPrepare;
+  ;; no test inserts private IR nodes, provenance flags, cells or phases.
+  (defun library-source (fail)
+    (let ((forms (js-array "(defconst shared (js-object :tag \"shared\"))"
+                          "(defvar trace (js-array))"))
+          (names (js-array "shared" "trace")) (index 0))
+      (while (< index width)
+        (let ((parts (js-array (str "(defconst value" index " (progn"
+                                    " (print \"init-" index "\") (js-call trace :push " index ")")))
+              (discarded 0))
+          (while (< discarded discarded-per-initializer)
+            (js-call parts :push (str "(js-array " discarded ")"))
+            (setq discarded (1+ discarded)))
+          (when (and fail (= index 8)) (js-call parts :push "(throw false)"))
+          (js-call parts :push (str "(js-array shared " index " -0)))"))
+          (js-call forms :push (js-call parts :join " "))
+          (js-call names :push (str "value" index)))
+        (setq index (1+ index)))
+      (let ((values (js-call (js-call names :slice 2) :join " ")))
+        (js-call forms :push (str "(defun report () (js-array trace (js-array " values ") shared))")))
+      (js-call forms :push (str "(export " (js-call names :join " ") " report)"))
+      (js-call forms :join "\n")))
+
+  (defun source-modules (fail)
+    (let ((compiler (get backend :compiler)))
+      (js-object :modules (js-array (js-object :id "main.mjs" :program
+        (js-call compiler :compile_ir_string
+          (str "(import \"eliscript/runtime/core/value.mjs\" :as First)\n"
+               "(import \"eliscript/runtime/core/value.mjs\" :as Second)\n"
+               "(defun report () (First/report))\n"
+               "(import \"eliscript/runtime/core/value-alias.mjs\" :as Third)\n"
+               "(defun aliases () (and (eq First Second) (eq First.shared Third.shared) (eq First.report Third.report)))\n"
+               "(defun namespace-keys () (js-array (Reflect/ownKeys First) (Reflect/ownKeys Third)))\n"
+               "(defun array-prototype () Array.prototype)\n"
+               "(export report aliases namespace-keys array-prototype)") "prepare-main.eli")))
+        :literals (js-array
+          (js-object :id "stdlib/managed-literals.mjs" :program
+            (js-call compiler :compile_ir_string
+              ;; This fixture exports ordinary objects, not persistent values.
+              ;; The literal transport's unbranded sentinel is nil (raw zero).
+              (str "(defun literal-kind (value) nil)\n"
+                   "(defun literal-export-value (value) value)\n"
+                   "(defun literal-import-value (value) value)\n"
+                   "(export literal-kind literal-export-value literal-import-value)") "prepare-adapter.eli"))
+          (js-object :id "runtime/core/value.mjs" :program
+            (js-call compiler :compile_ir_string (library-source fail) "prepare-values.eli"))
+          (js-object :id "runtime/core/value-alias.mjs" :program
+            (let* ((names (js-array "shared" "trace" "report")) (index 0))
+              (while (< index width)
+                (js-call names :push (str "value" index)) (setq index (1+ index)))
+              (js-call compiler :compile_ir_string
+                (str "(import \"eliscript/runtime/core/value.mjs\" " (js-call names :join " ") ")\n"
+                  "(export " (js-call names :join " ") ")") "prepare-value-alias.eli")))))))
+
+  (defasync product (name fail)
+    (let* ((sources (source-modules fail)) (saved (JSON/stringify sources))
+           (configuration (js-object :literalModules (get sources :literals) :phased t))
+           (linked (js-call (get backend :managed) :link_managed_project (get sources :modules) "main.mjs" configuration))
+           (provenance (js-call (get (get linked :program) :body) :filter (lambda (node)
+             (and (= (get node :kind) "variable-declaration") (get node :projectPrepare false)))))
+           (lowered (js-call observer :lower_managed_project (get sources :modules) "main.mjs" runtime-ir configuration))
+           (project (js-call observer :take_project)) (descriptor (get lowered :descriptor))
+           (bytes (globalThis.Uint8Array.from
+             (js-call (get backend :wasm) :append_metadata_section
+               (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed)
+                 (js-object :initialPages 1 :maximumPages 256))
+               "eliscript-managed-control" (JSON/stringify descriptor))))
+           (path undefined))
+      (js-call assert :strictEqual (JSON/stringify sources) saved)
+      (when native-target
+        (setq path (resolve directory (str name (if (= native-target "arm64-macos") ".dylib" ".so"))))
+        (await (writeFile path (globalThis.Uint8Array.from
+          (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target)))))
+      (js-object :sources sources :saved saved :provenance provenance :lowered lowered
+        :project project :descriptor descriptor :bytes bytes :nativePath path)))
+
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-project-prepare-roots-"))))
+    (setq backend (await (buildBackends (js-object :outputRoot directory))))
+    (setq runtime-ir (js-call (get backend :compiler) :compile_ir_string
+      (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "prepare-runtime.eli"))
+    ;; Observe the exact production stage result without changing its inputs,
+    ;; algorithms or emitted body. All original relative imports remain real.
+    (let* ((source (await (readFile (resolve root "bootstrap/backends/managed.eli") "utf8")))
+           (signature "(defun managed-project-stage-functions (initializers globals functions runtime modules entry)")
+           (replacement "(defun observed-stage-functions (initializers globals functions runtime modules entry)")
+           (renamed (js-call source :replace signature replacement))
+           (observed-source (str (js-call renamed :slice 0 (js-call renamed :lastIndexOf ")"))
+             "\n(defvar observed-project nil)\n"
+             "(defun managed-project-stage-functions (initializers globals functions runtime modules entry)\n"
+             " (setq observed-project (observed-stage-functions initializers globals functions runtime modules entry)))\n"
+             "(defun take-project () (let ((value observed-project)) (setq observed-project nil) value))\n"
+             "(export take-project))\n"))
+           (path (resolve (get backend :directory) "managed-prepare-observer.mjs")))
+      (js-call assert :strictEqual (js-length (js-call source :split signature)) 2)
+      (await (writeFile path (js-call (get backend :compiler) :compile_string observed-source "managed-prepare-observer.eli")))
+      ;; This generated observer and its backend dependencies have no top-level
+      ;; await. Load the actual file namespace, then supply that namespace via
+      ;; the loader's explicit second argument instead of its wrapper import.
+      (let* ((namespace (funcall (createRequire path) path))
+             (_namespace (js-call assert :strictEqual (get namespace globalThis.Symbol.toStringTag) "Module"))
+             (modules (await (loadManagedHostModules (js-object :hostModules
+               (js-array (js-object :id "observer" :specifier (get (pathToFileURL path) :href)
+                 :referrer "prepare-roots.mjs" :allowedExports (js-array "lower_managed_project" "take_project") :namespace t)))
+               (js-object :hostModules (new globalThis.Map (js-array (js-array "observer" namespace))))))))
+        (js-call assert :strictEqual (js-call modules :get "observer") namespace)
+        (setq observer (js-call modules :get "observer"))))
+    (setq successful (await (product "successful" false)))
+    (setq abrupt (await (product "abrupt" t)))) 120000)
+
+  (afterAll (async ()
+    (setq backend undefined observer undefined runtime-ir undefined successful undefined abrupt undefined)
+    (when directory (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun cleanup (primary-failed actions)
+    (let ((failure undefined) (failed false) (index 0))
+      (while (< index (js-length actions))
+        (try (funcall (aref actions index))
+          (catch error (unless failed (setq failed t failure error))))
+        (setq index (1+ index)))
+      (when (and failed (not primary-failed)) (throw failure))))
+
+  (defasync instantiate (target artifact events)
+    (let* ((graph (createManagedModuleGraph (get artifact :descriptor)))
+           (options (js-object :initializeModule false :moduleGraph graph :maxSlots 1024
+             :initialBytes 65536 :maxBytes 16777216 :auto 65536 :nativeTarget native-target
+             :console (js-object :log (lambda (value) (js-call events :push value)))))
+           (runtime (if (= target "wasm")
+             (await (instantiateManagedRuntimeWithHostModules (get artifact :bytes) options))
+             (await (instantiateNativeManagedRuntime (get artifact :nativePath) (get artifact :lowered) options)))))
+      (js-call runtime :auto (get options :auto))
+      (js-object :runtime runtime :graph graph)))
+
+  (defun finish (instance failed)
+    (let ((runtime (get instance :runtime)) (graph (get instance :graph)))
+      (cleanup failed (js-array
+        (lambda () (js-call runtime :closeModule)) (lambda () (js-call runtime :collect))
+        (lambda () (js-call assert :strictEqual (js-call runtime :live) 0))
+        (lambda () (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
+        (lambda () (when (= (value-type (get runtime :close)) "function") (js-call runtime :close)))
+        (lambda () (js-call graph :close))))))
+
+  (test "real linker prepare provenance uses independent initializer parts without retaining a duplicate monolithic body"
+    (lambda ()
+      (js-call (js-array successful abrupt) :forEach (lambda (artifact)
+        (let* ((project (get artifact :project)) (body (get project :prepareBody))
+               (parts (get body :initializerParts)) (seen (new globalThis.Set)))
+          (js-call assert :ok (Array/isArray parts))
+          (js-call assert :strictEqual (js-length parts) (1+ (js-length (get artifact :provenance))))
+          (js-call assert :strictEqual (js-length (get (get body :source) :children)) 0)
+          (js-call parts :forEach (lambda (part)
+            (let ((children (get (get part :source) :children)))
+              (js-call assert :strictEqual (js-length children) 1)
+              (js-call assert :strictEqual (js-call seen :has (aref children 0)) false)
+              (js-call seen :add (aref children 0))
+              (js-call assert :notStrictEqual part body)
+              (js-call assert :ok (get part :body)))))
+          (js-call assert :ok (>= (js-length (get (get (get artifact :descriptor) :project) :preparedBindings)) width))
+          (js-call assert :strictEqual (JSON/stringify (get artifact :sources)) (get artifact :saved)))))))
+
+  (defun prepare-observation (runtime value)
+    ;; Source arrays keep the managed realm's prototype when decoded. Compare
+    ;; their actual raw elements, retaining ordinary object identity and holes.
+    (if (and value (= (get value :kind) 14))
+      (let* ((length (js-call runtime :length value)) (result (new globalThis.Array length)) (index 0))
+        (while (< index length)
+          (let ((key (js-call runtime :string (funcall globalThis.String index))))
+            (try
+              (when (js-call runtime :objectHas value key)
+                (let ((child (js-call runtime :get value index)))
+                  (try (put result index (prepare-observation runtime child))
+                    (finally (js-call runtime :release child)))))
+              (finally (js-call runtime :release key))))
+          (setq index (1+ index))) result)
+      (js-call runtime :toHostValue value)))
+
+  (defun exercise-success (instance events)
+    (let ((runtime (get instance :runtime)) (graph (get instance :graph)))
+      (observed-prepare runtime graph) (observed-prepare runtime graph)
+      (js-call assert :deepStrictEqual events (Array/from (js-object :length width)
+        (lambda (unused index) (str "init-" index))))
+      (js-call (get (get (get successful :descriptor) :project) :modules) :forEach (lambda (module)
+        (js-call (get module :steps) :forEach (lambda (step) (js-call graph :step (get step :run))))))
+      (js-call runtime :collect)
+      (let ((result (js-call runtime :invoke "report" (js-array))))
+        (try
+          (let ((prototype (js-call runtime :invoke "array_prototype" (js-array))))
+            (try
+              (let ((source (js-call runtime :toHostValue result))
+                    (array-prototype (js-call runtime :toHostValue prototype)))
+                (js-call assert :strictEqual (Object/getPrototypeOf source) array-prototype)
+                (js-call assert :strictEqual (Object/getPrototypeOf (aref source 0)) array-prototype)
+                (js-call assert :strictEqual (Object/getPrototypeOf (aref source 1)) array-prototype)
+                (js-call assert :notStrictEqual array-prototype globalThis.Array.prototype))
+              (finally (js-call runtime :release prototype))))
+          (let* ((report (prepare-observation runtime result)) (trace (aref report 0))
+                 (values (aref report 1)) (shared (aref report 2)) (index 0))
+            (js-call assert :deepStrictEqual trace (Array/from (js-object :length width) (lambda (unused index) index)))
+            (js-call assert :strictEqual (js-length values) width)
+            (while (< index width)
+              (let ((value (aref values index)))
+                (js-call assert :strictEqual (aref value 0) shared)
+                (js-call assert :strictEqual (aref value 1) index)
+                (js-call assert :ok (Object/is (aref value 2) -0)))
+              (setq index (1+ index)))
+            (js-call assert :strictEqual (get shared :tag) "shared"))
+          (finally (js-call runtime :release result))))
+      (let ((aliases (js-call runtime :invoke "aliases" (js-array))))
+        (try (js-call assert :strictEqual aliases t)
+          (finally (js-call runtime :release aliases))))
+      (let ((keys (js-call runtime :invoke "namespace_keys" (js-array))))
+        (try
+          (let* ((value (prepare-observation runtime keys))
+                 (expected (js-array "shared" "trace" "report")) (index 0))
+            (while (< index width)
+              (js-call expected :push (str "value" index)) (setq index (1+ index)))
+            (js-call expected :sort)
+            (js-call expected :push globalThis.Symbol.toStringTag)
+            (js-call assert :deepStrictEqual value (js-array expected expected)))
+          (finally (js-call runtime :release keys))))
+      (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)))
+
+  (test "WASM and native prepare at 1024 slots release completed initializer temporaries while published globals remain live"
+    (async ()
+      (let ((targets (if native-target (js-array "wasm" "native") (js-array "wasm"))) (index 0))
+        (while (< index (js-length targets))
+          (let* ((events (js-array)) (instance (await (instantiate (aref targets index) successful events))) (failed false))
+            (try (exercise-success instance events)
+              (catch error (setq failed t) (throw error))
+              (finally (finish instance failed))))
+          (setq index (1+ index))))) 120000)
+
+  (test "prepare preserves the first source throw skips later initializers restores caller roots and permits a fresh successful retry"
+    (async ()
+      (let ((targets (if native-target (js-array "wasm" "native") (js-array "wasm"))) (index 0))
+        (while (< index (js-length targets))
+          (let* ((target (aref targets index)) (events (js-array))
+                 (instance (await (instantiate target abrupt events))) (runtime (get instance :runtime))
+                 (graph (get instance :graph)) (number (js-call runtime :number -0))
+                 (text (js-call runtime :string "caller")) (frame (js-call runtime :frame 2)) (failed false))
+            (js-call runtime :frameSet frame 0 number) (js-call runtime :frameSet frame 1 text)
+            (try
+              (progn
+                (js-call assert :throws (lambda () (observed-prepare runtime graph)) (lambda (error) (Object/is error false)))
+                (js-call assert :deepStrictEqual events (Array/from (js-object :length 9)
+                  (lambda (unused index) (str "init-" index))))
+                (js-call assert :throws (lambda () (observed-prepare runtime graph)) (lambda (error) (Object/is error false)))
+                (js-call assert :strictEqual (js-length events) 9)
+                (js-call runtime :collect)
+                (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 1)
+                (js-call assert :ok (Object/is (js-call runtime :readNumber number) -0))
+                (js-call assert :strictEqual (js-call runtime :readString text) "caller"))
+              (catch error (setq failed t) (throw error))
+              (finally (cleanup failed (js-array
+                (lambda () (js-call runtime :leaveFrame frame))
+                (lambda () (js-call runtime :release number))
+                (lambda () (js-call runtime :release text))
+                (lambda () (finish instance failed)))))))
+          (let* ((events (js-array)) (instance (await (instantiate (aref targets index) successful events))) (failed false))
+            (try (exercise-success instance events)
+              (catch error (setq failed t) (throw error))
+              (finally (finish instance failed))))
+          (setq index (1+ index))))) 120000))

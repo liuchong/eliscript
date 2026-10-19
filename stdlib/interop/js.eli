@@ -25,32 +25,73 @@
 
   (defconst interop-array-predicate (js* "Array.isArray"))
   (defconst interop-map-predicate
-    (js* "(() => { const sentinel = Object.freeze({}); return (value) => { try { Map.prototype.has.call(value, sentinel); return true; } catch { return false; } }; })()"))
+    (let ((sentinel (js-call globalThis/Object :freeze (js-object))))
+      (lambda (value)
+        (try
+          (progn
+            (js-call (get (get globalThis/Map :prototype) :has) :call value sentinel)
+            t)
+          (catch error false)))))
   (defconst interop-set-predicate
-    (js* "(() => { const sentinel = Object.freeze({}); return (value) => { try { Set.prototype.has.call(value, sentinel); return true; } catch { return false; } }; })()"))
+    (let ((sentinel (js-call globalThis/Object :freeze (js-object))))
+      (lambda (value)
+        (try
+          (progn
+            (js-call (get (get globalThis/Set :prototype) :has) :call value sentinel)
+            t)
+          (catch error false)))))
   (defconst interop-object-predicate
-    (js* "(value) => { if (value === null || typeof value !== \"object\") return false; try { const prototype = Object.getPrototypeOf(value); return prototype === null || Object.getPrototypeOf(prototype) === null; } catch { return false; } }"))
+    (lambda (value)
+      (if (or (nil? value) (/= (js* "typeof value") "object"))
+          false
+        (try
+          (let ((prototype (js-call globalThis/Object :getPrototypeOf value)))
+            (or (nil? prototype)
+                (nil? (js-call globalThis/Object :getPrototypeOf prototype))))
+          (catch error false)))))
   (defconst interop-safe-integer-predicate (js* "Number.isSafeInteger"))
-  (defconst interop-map-factory (js* "() => new Map()"))
-  (defconst interop-set-factory (js* "() => new Set()"))
-  (defconst interop-object-factory (js* "() => ({})"))
-  (defconst interop-weak-map-factory (js* "() => new WeakMap()"))
+  (defconst interop-map-factory (lambda () (new globalThis/Map)))
+  (defconst interop-set-factory (lambda () (new globalThis/Set)))
+  (defconst interop-object-factory (lambda () (js-object)))
+  (defconst interop-weak-map-factory (lambda () (new globalThis/WeakMap)))
   (defconst interop-map-entries
-    (js* "(value) => Array.from(Map.prototype.entries.call(value))"))
+    (lambda (value)
+      (js-call globalThis/Array :from
+        (js-call (get (get globalThis/Map :prototype) :entries) :call value))))
   (defconst interop-set-values
-    (js* "(value) => Array.from(Set.prototype.values.call(value))"))
-  (defconst interop-iterable-values (js* "(value) => Array.from(value)"))
+    (lambda (value)
+      (js-call globalThis/Array :from
+        (js-call (get (get globalThis/Set :prototype) :values) :call value))))
+  (defconst interop-iterable-values
+    (lambda (value) (js-call globalThis/Array :from value)))
   (defconst interop-json-string (js* "JSON.stringify"))
   (defconst interop-enumerable-own-keys
-    (js* "(value) => Reflect.ownKeys(value).filter((key) => Object.prototype.propertyIsEnumerable.call(value, key))"))
+    (lambda (value)
+      (js-call (js-call globalThis/Reflect :ownKeys value) :filter
+        (lambda (key)
+          (js-call (get (get globalThis/Object :prototype) :propertyIsEnumerable)
+                   :call value key)))))
   (defconst interop-own-data-property
-    (js* "(value, key) => { const descriptor = Object.getOwnPropertyDescriptor(value, key); return descriptor !== undefined && Object.prototype.hasOwnProperty.call(descriptor, \"value\") ? { ok: true, value: descriptor.value } : { ok: false, value: undefined }; }"))
+    (lambda (value key)
+      (let ((descriptor (js-call globalThis/Object :getOwnPropertyDescriptor value key)))
+        (if (and (not (undefined? descriptor))
+                 (js-call (get (get globalThis/Object :prototype) :hasOwnProperty)
+                          :call descriptor "value"))
+            (js-object :ok t :value (get descriptor :value))
+          (js-object :ok false :value undefined)))))
   (defconst interop-define-property
-    (js* "(target, key, value) => { Object.defineProperty(target, key, { value, enumerable: true, configurable: true, writable: true }); return target; }"))
+    (lambda (target key value)
+      (js-call globalThis/Object :defineProperty target key
+        (js-object :value value :enumerable t :configurable t :writable t))
+      target))
   (defconst interop-map-set
-    (js* "(target, key, value) => { Map.prototype.set.call(target, key, value); return target; }"))
+    (lambda (target key value)
+      (js-call (get (get globalThis/Map :prototype) :set) :call target key value)
+      target))
   (defconst interop-set-add
-    (js* "(target, value) => { Set.prototype.add.call(target, value); return target; }"))
+    (lambda (target value)
+      (js-call (get (get globalThis/Set :prototype) :add) :call target value)
+      target))
 
   (defun interop-fail (code message path &optional origin)
     (throw

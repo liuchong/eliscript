@@ -91,6 +91,7 @@ export function validateCompatibilityMatrix(matrix) {
     : [];
   if (systems.length === 0) errors.push("operatingSystems must not be empty");
   const systemIds = [];
+  const machineSystems = new Set();
   for (const [index, system] of systems.entries()) {
     const label = `operating system ${index}`;
     if (!isPlainObject(system)) {
@@ -107,6 +108,20 @@ export function validateCompatibilityMatrix(matrix) {
     if (!new Set(["x64", "arm64"]).has(system.architecture)) {
       errors.push(`${label} must declare x64 or arm64 architecture`);
     }
+    const operatingSystem = system.operatingSystem ?? system.id;
+    if ((system.operatingSystem !== undefined &&
+        !["linux", "macos"].includes(system.operatingSystem)) ||
+        !["linux", "macos"].includes(operatingSystem)) {
+      errors.push(`${label} operatingSystem must identify linux or macos`);
+    }
+    if (["linux", "macos"].includes(system.id) && operatingSystem !== system.id) {
+      errors.push(`${label} operatingSystem must match its canonical system id`);
+    }
+    const machine = `${operatingSystem}/${system.architecture}`;
+    if (machineSystems.has(machine)) {
+      errors.push(`${label} duplicates an actual operatingSystem and architecture`);
+    }
+    machineSystems.add(machine);
   }
   sortedUnique(systemIds, "operating system ids", errors);
   if (!systemIds.includes("linux") || !systemIds.includes("macos")) {
@@ -257,6 +272,8 @@ export function renderToolchainSteps(matrix) {
 `          emacs --version\n` +
 `          bun --version\n` +
 `          node --version\n` +
+`          test "$(bun -p 'process.arch')" = "\${{ matrix.architecture }}"\n` +
+`          test "$(node -p 'process.arch')" = "\${{ matrix.architecture }}"\n` +
 `          test "$(node --version)" = "v${validated.localEvidence.nodeHost.version}"\n`;
 }
 
@@ -327,8 +344,8 @@ export async function checkCompatibilityWorkflow(options = {}) {
   }
   return {
     schemaVersion: 1,
-    systems: validated.systems.map(({ id, architecture, runner }) => ({
-      id, architecture, runner,
+    systems: validated.systems.map(({ id, architecture, runner, operatingSystem }) => ({
+      id, architecture, runner, operatingSystem: operatingSystem ?? id,
     })),
     acceptanceSystems: validated.acceptanceSystems.map(
       ({ id, architecture, runner }) => ({ id, architecture, runner }),

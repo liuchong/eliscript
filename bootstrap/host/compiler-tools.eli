@@ -1,0 +1,513 @@
+(module bootstrap.host.compiler-tools
+  (import "../bootstrap/reader.mjs" read-string)
+  (import "../bootstrap/expander.mjs" expand-module-with-origins)
+  (import "../bootstrap/analyzer.mjs" analyze-module)
+  (import "../bootstrap/lower.mjs" lower-module)
+  (import "../backends/sha256.mjs" sha256-string-utf16le)
+
+  (defun tools-fail (message filename &optional code)
+    (let ((error (new (js* "Error") message)))
+      (put error :eliscriptDiagnostic
+        (js-object :format "eliscript-diagnostic" :version 1 :code (or code "ELI-T0001")
+          :severity "error" :phase "compiler-tools" :message message
+          :location (js-object :file filename)))
+      (throw error)))
+
+  (defun tools-span-key (span)
+    (when span (str (get span :start) ":" (get span :end))))
+
+  (defun tools-syntax-index (node context)
+    (let ((span (get node :span nil)) (kind (get node :kind nil)))
+      (when span
+        (js-call (get context :syntax) :set (tools-span-key span) node))
+      (when (or (= kind "list") (= kind "vector"))
+        (js-call (get node :items) :forEach
+          (lambda (child) (tools-syntax-index child context))))))
+
+  (defun tools-symbol-span (node name context)
+    (let* ((span (get node :span nil))
+           (original (and span (js-call (get context :syntax) :get (tools-span-key span))))
+           (kind (get node :kind nil)))
+      (when original
+        (cond
+          ((and (= (get original :kind) "symbol") (= (get original :name) name))
+           (get original :span))
+          ((and (= kind "binding-name") (= (get original :kind) "symbol"))
+           ;; Qualified map shortcuts bind only their final local name. The
+           ;; reader span is the whole qualified symbol; retain its actual
+           ;; suffix rather than labelling this source binding as generated.
+           (let* ((qualified (get original :name)) (slash (js-call qualified :lastIndexOf "/")))
+             (when (and (>= slash 0) (= (js-call qualified :slice (1+ slash)) name))
+               (let* ((prefix (tools-scalar-length (js-call qualified :slice 0 (1+ slash))))
+                      (original-span (get original :span)))
+                 (js-call globalThis.Object :assign (js-object) original-span
+                   (js-object :start (+ (get original-span :start) prefix)
+                     :column (+ (get original-span :column) prefix)))))))
+          ((= (get original :kind) "list")
+           (let* ((items (get original :items))
+                  (head (js-nth 0 items))
+                  (operator (and head (get head :name nil)))
+                  (declaration (or
+                    (and (= kind "function-declaration")
+                      (js-call (js-array "defun" "defn" "defportable" "defasync") :includes operator))
+                    (and (= kind "variable-declaration")
+                      (or (= operator "defconst") (= operator "defvar")))))
+                  (candidate (if declaration (js-nth 1 items)
+                    (if (= kind "lexical-binding") head nil))))
+             (when (and candidate (= (get candidate :kind) "symbol")
+                        (= (get candidate :name) name))
+               (get candidate :span))))))))
+
+  (defun tools-origin (span context)
+    (let ((result nil))
+      (when span
+        (js-call (get context :macroOrigins) :forEach
+          (lambda (origin)
+            (when (= (tools-span-key span) (tools-span-key (get origin :span)))
+              (setq result origin)))))
+      (let ((trace (js-array)))
+        (when span
+          (js-call (get context :macroExpansions) :forEach
+            (lambda (event)
+              (when (= (tools-span-key span) (tools-span-key (get event :callSpan)))
+                (js-call trace :push event)))))
+        (when (> (js-length trace) 0)
+          (let ((event (js-nth (1- (js-length trace)) trace)))
+            (setq result (js-call globalThis.Object :assign (js-object)
+              (or result (js-object))
+              (js-object :macroName (get event :macroName) :span (get event :callSpan)
+                :definitionSpan (get event :definitionSpan) :trace trace)))))
+        result)))
+
+  (defun tools-scope (parent)
+    (js-object :parent parent :names (new globalThis.Map)))
+
+  (defun tools-find (scope name)
+    (let ((current scope) (binding nil))
+      (while (and current (nullish? binding))
+        (setq binding (js-call (get current :names) :get name))
+        (setq current (get current :parent))) binding))
+
+  (defun tools-declare (node scope kind context)
+    (let* ((name (get node :value))
+           (span (tools-symbol-span node name context))
+           (definition (js-object
+             :id (str "binding-" (js-length (get context :definitions)))
+             :name name :kind kind :span span :expandedSpan (get node :span nil)
+             :generated (nil? span) :macroOrigin (tools-origin (get node :span nil) context))))
+      (js-call (get scope :names) :set name definition)
+      (js-call (get context :definitions) :push definition)
+      definition))
+
+  (defun tools-reference (node scope role context)
+    (let* ((name (get node :value))
+           (binding (tools-find scope name))
+           (span (tools-symbol-span node name context)))
+      (js-call (get context :references) :push
+        (js-object :name name :role role :span span :expandedSpan (get node :span nil)
+          :generated (nil? span) :bindingId (if binding (get binding :id) nil)
+          :definitionSpan (if binding (get binding :span) nil)
+          :macroOrigin (tools-origin (get node :span nil) context)))))
+
+  (defun tools-pattern-defaults (node scope context)
+    (let ((kind (get node :kind)) (children (get node :children)))
+      (cond
+        ((= kind "map-binding-entry")
+         (when (> (js-length children) 2) (tools-walk (js-nth 2 children) scope context))
+         (tools-pattern-defaults (js-nth 0 children) scope context))
+        ((or (= kind "array-binding-pattern") (= kind "map-binding-pattern"))
+         (js-call children :forEach (lambda (child) (tools-pattern-defaults child scope context)))))))
+
+  (defun tools-pattern-declare (node scope kind context)
+    (let ((tag (get node :kind)) (children (get node :children)))
+      (cond
+        ((= tag "binding-name") (tools-declare node scope kind context))
+        ((= tag "map-binding-entry") (tools-pattern-declare (js-nth 0 children) scope kind context))
+        ((or (= tag "array-binding-pattern") (= tag "map-binding-pattern"))
+         (js-call children :forEach (lambda (child) (tools-pattern-declare child scope kind context)))))))
+
+  (defun tools-binding-defaults (node scope context)
+    ;; A parameter's expression children belong to the enclosing scope, just
+    ;; like defaults inside its binding pattern. Do not walk those children as
+    ;; function-body expressions after parameter names have been declared.
+    (when (= (get node :kind) "parameter-binding")
+      (tools-binding-initializer node scope context))
+    (when (get (get node :properties nil) :pattern false)
+      (tools-pattern-defaults (js-nth 0 (get node :children)) scope context)))
+
+  (defun tools-binding-declare (node scope kind context)
+    (if (get (get node :properties nil) :pattern false)
+      (tools-pattern-declare (js-nth 0 (get node :children)) scope kind context)
+      (tools-declare node scope kind context)))
+
+  (defun tools-binding-initializer (node scope context)
+    (let ((children (get node :children))
+          (start (if (get (get node :properties nil) :pattern false) 1 0)))
+      (while (< start (js-length children))
+        (tools-walk (js-nth start children) scope context)
+        (setq start (1+ start)))))
+
+  (defun tools-predeclare (nodes scope context)
+    (js-call nodes :forEach
+      (lambda (node)
+        (let ((kind (get node :kind)))
+          (cond
+            ((= kind "module-declaration") (tools-predeclare (get node :children) scope context))
+            ((= kind "function-declaration") (tools-declare node scope "function" context))
+            ((= kind "variable-declaration") (tools-declare node scope "variable" context))
+            ((= kind "import-declaration")
+             (js-call (get node :children) :forEach
+               (lambda (child) (tools-declare child scope "import" context)))))))))
+
+  (defun tools-function (node scope context)
+    (let* ((children (get node :children))
+           (count (get (get node :properties) :parameterCount))
+           (child (tools-scope scope)) (index 0))
+      ;; Analyzer defaults see the enclosing scope, before any parameter binds.
+      (while (< index count)
+        (tools-binding-defaults (js-nth index children) scope context)
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index count)
+        (tools-binding-declare (js-nth index children) child "parameter" context)
+        (setq index (1+ index)))
+      (while (< index (js-length children))
+        (tools-walk (js-nth index children) child context)
+        (setq index (1+ index)))))
+
+  (defun tools-let (node scope context)
+    (let* ((children (get node :children)) (properties (get node :properties))
+           (count (get properties :bindingCount))
+           (sequential (get properties :sequential false))
+           (child (tools-scope scope)) (index 0))
+      (while (< index count)
+        (let* ((binding (js-nth index children)) (initializer-scope (if sequential child scope)))
+          (tools-binding-initializer binding initializer-scope context)
+          (tools-binding-defaults binding initializer-scope context)
+          (when sequential (tools-binding-declare binding child "local" context)))
+        (setq index (1+ index)))
+      (unless sequential
+        (setq index 0)
+        (while (< index count)
+          (tools-binding-declare (js-nth index children) child
+            (if (= (get node :kind) "binding-loop") "loop" "local") context)
+          (setq index (1+ index))))
+      (while (< index (js-length children))
+        (tools-walk (js-nth index children) child context)
+        (setq index (1+ index)))))
+
+  (defun tools-walk (node scope context)
+    (let ((kind (get node :kind)) (children (get node :children)))
+      (cond
+        ((= kind "reference") (tools-reference node scope "read" context))
+        ((= kind "assignment-pair")
+         (tools-reference node scope "write" context)
+         (js-call children :forEach (lambda (child) (tools-walk child scope context))))
+        ((or (= kind "function-declaration") (= kind "function-expression"))
+         (tools-function node scope context))
+        ((or (= kind "lexical-bindings") (= kind "binding-loop")) (tools-let node scope context))
+        ((= kind "catch-clause")
+         (let ((child (tools-scope scope)) (binding (js-nth 0 children)) (index 1))
+           (tools-binding-defaults binding scope context)
+           (tools-binding-declare binding child "catch" context)
+           (while (< index (js-length children))
+             (tools-walk (js-nth index children) child context)
+             (setq index (1+ index)))))
+        ;; Literal/raw contents and property names are data, never guessed refs.
+        ((or (= kind "quoted-literal") (= kind "raw-javascript")
+             (= kind "import-declaration")) nil)
+        (t (js-call children :forEach (lambda (child) (tools-walk child scope context)))))))
+
+  (defun tools-source-sequence (nodes context)
+    (js-call nodes :forEach (lambda (node) (tools-source-expression node context))))
+
+  (defun tools-source-binding-defaults (node context)
+    (let ((kind (get node :kind)))
+      (cond
+        ((= kind "vector")
+         (js-call (get node :items) :forEach
+           (lambda (item) (tools-source-binding-defaults item context))))
+        ((= kind "list")
+         (let* ((items (get node :items)) (head (js-nth 0 items)))
+           (when (and head (= (get head :kind) "symbol") (= (get head :name) "hash-map"))
+             (let ((index 1))
+               (while (< index (js-length items))
+                 (let* ((target (js-nth index items)) (value (js-nth (1+ index) items))
+                        (directive (if (= (get target :kind) "keyword") (get target :name) nil)))
+                   (cond
+                     ((= directive "or")
+                      (let ((defaults (get value :items)) (position 2))
+                        (while (< position (js-length defaults))
+                          (tools-source-expression (js-nth position defaults) context)
+                          (setq position (+ position 2)))))
+                     ;; Shortcut keys and :as values only introduce names.
+                     ((not (= (get target :kind) "keyword"))
+                      (tools-source-binding-defaults target context))))
+                 (setq index (+ index 2))))))))))
+
+  (defun tools-source-parameter-defaults (parameters context)
+    (js-call (get parameters :items (js-array)) :forEach
+      (lambda (parameter) (tools-source-binding-defaults parameter context))))
+
+  (defun tools-source-expression (node context)
+    (let ((kind (get node :kind)))
+      (cond
+        ((= kind "vector") (tools-source-sequence (get node :items) context))
+        ((= kind "list")
+         (let* ((items (get node :items)) (head (js-nth 0 items))
+                (operator (and head (= (get head :kind) "symbol") (get head :name)))
+                (macro (and operator (js-call (get context :macros) :get operator))))
+           (cond
+             (macro
+              ;; locate-generated preserves this source invocation span, not a
+              ;; complete nested expansion trace. Do not fabricate that trace.
+              (let ((origin (js-object :name operator :span (get node :span)
+                       :definitionId (get macro :id) :definitionSpan (get macro :span)
+                       :precision "source-invocation")))
+                (js-call (get context :macroOrigins) :push origin)
+                (js-call (get context :references) :push
+                  (js-object :name operator :role "macro-expansion" :span (get head :span)
+                    :expandedSpan (get node :span) :generated false
+                    :bindingId (get macro :id) :definitionSpan (get macro :span) :macroOrigin origin))))
+             ((or (= operator "quote") (= operator "js*")) nil)
+             ((or (= operator "lambda") (= operator "fn") (= operator "async"))
+              (tools-source-parameter-defaults (js-nth 1 items) context)
+              (tools-source-sequence (js-call items :slice 2) context))
+             ((or (= operator "let") (= operator "let*") (= operator "loop"))
+              (let ((bindings (get (js-nth 1 items) :items (js-array))))
+                (js-call bindings :forEach
+                  (lambda (binding)
+                    (when (= (get binding :kind) "list")
+                      (tools-source-sequence (js-call (get binding :items) :slice 1) context)))))
+              (tools-source-sequence (js-call items :slice 2) context))
+             ((= operator "cond")
+              (js-call (js-call items :slice 1) :forEach
+                (lambda (clause) (tools-source-sequence (get clause :items) context))))
+             ((= operator "try")
+              (js-call (js-call items :slice 1) :forEach
+                (lambda (clause)
+                  (let* ((parts (get clause :items (js-array)))
+                         (tag (and (> (js-length parts) 0) (get (js-nth 0 parts) :name nil))))
+                    (cond
+                      ((= tag "catch") (tools-source-sequence (js-call parts :slice 2) context))
+                      ((= tag "finally") (tools-source-sequence (js-call parts :slice 1) context))
+                      (t (tools-source-expression clause context)))))))
+             ((= operator "js-object")
+              (let ((index 1))
+                (while (< index (js-length items))
+                  (let ((key (js-nth index items)))
+                    (when (or (= (get key :kind) "list") (= (get key :kind) "vector"))
+                      (tools-source-expression key context)))
+                  (tools-source-expression (js-nth (1+ index) items) context)
+                  (setq index (+ index 2)))))
+             (t
+              (unless (and head (= (get head :kind) "symbol"))
+                (when head (tools-source-expression head context)))
+              (tools-source-sequence (js-call items :slice 1) context))))))))
+
+  (defun tools-source-top (forms context)
+    (js-call forms :forEach
+      (lambda (node)
+        (let* ((items (get node :items (js-array)))
+               (head (js-nth 0 items))
+               (operator (and head (get head :name nil))))
+          (cond
+            ((= operator "module") (tools-source-top (js-call items :slice 2) context))
+            ((= operator "defmacro")
+             (let* ((name-node (js-nth 1 items)) (name (get name-node :name))
+                    (definition (js-object :id (str "binding-" (js-length (get context :definitions)))
+                      :name name :kind "macro" :span (get name-node :span)
+                      :expandedSpan (get node :span) :generated false :macroOrigin nil)))
+               (js-call (get context :definitions) :push definition)
+               (js-call (get context :macros) :set name definition)))
+            ((or (= operator "import") (= operator "import-portable") (= operator "export")) nil)
+            ((or (= operator "defun") (= operator "defn")
+                 (= operator "defportable") (= operator "defasync"))
+             (tools-source-parameter-defaults (js-nth 2 items) context)
+             (tools-source-sequence (js-call items :slice 3) context))
+            ((or (= operator "defvar") (= operator "defconst"))
+             (tools-source-sequence (js-call items :slice 2) context))
+            (t (tools-source-expression node context)))))))
+
+  (defun tools-scalar-length (source)
+    (let ((index 0) (count 0) (length (js-length source)))
+      (while (< index length)
+        (let ((first (string-code-unit-at source index)))
+          (when (and (>= first 55296) (<= first 56319) (< (1+ index) length))
+            (let ((second (string-code-unit-at source (1+ index))))
+              (when (and (>= second 56320) (<= second 57343)) (setq index (1+ index))))))
+        (setq index (1+ index)) (setq count (1+ count))) count))
+
+  (defun tools-contains (span offset)
+    (and span (<= (get span :start) offset) (< offset (get span :end))))
+
+  (defun tools-at (context offset)
+    (let ((selected nil) (width nil) (ambiguous false))
+      (js-call (get context :definitions) :forEach
+        (lambda (definition)
+          (let ((span (get definition :span)))
+            (when (tools-contains span offset)
+              (let ((size (- (get span :end) (get span :start))))
+                (cond
+                  ((or (nil? width) (< size width))
+                   (setq selected (js-object :kind "definition" :value definition
+                     :bindingId (get definition :id)))
+                   (setq width size) (setq ambiguous false))
+                  ((= size width) (setq ambiguous t))))))))
+      (js-call (get context :references) :forEach
+        (lambda (reference)
+          (let ((span (get reference :span)))
+            (when (tools-contains span offset)
+              (let ((size (- (get span :end) (get span :start))))
+                (cond
+                  ((or (nil? width) (< size width))
+                   (setq selected (js-object :kind "reference" :value reference
+                     :bindingId (get reference :bindingId)))
+                   (setq width size) (setq ambiguous false))
+                  ((= size width) (setq ambiguous t))))))))
+      (if ambiguous nil selected)))
+
+  (defun tools-query (context request source filename)
+    (let ((offset (get request :offset nil))
+          (unit (get request :offsetUnit nil))
+          (query (get request :query "symbol")))
+      (unless (= unit "unicode-scalar")
+        (tools-fail "query offsetUnit must be unicode-scalar" filename))
+      (unless (and (Number/isSafeInteger offset) (>= offset 0)
+                   (<= offset (tools-scalar-length source)))
+        (tools-fail "query offset is outside the source Unicode scalar range" filename))
+      (unless (js-call (js-array "symbol" "definition" "references") :includes query)
+        (tools-fail "unsupported compiler query" filename))
+      (let* ((selected (tools-at context offset))
+             (binding-id (and selected (get selected :bindingId)))
+             (definition nil) (references (js-array)))
+        (unless (nil? binding-id)
+          (js-call (get context :definitions) :forEach
+            (lambda (item) (when (= (get item :id) binding-id) (setq definition item))))
+          (js-call (get context :references) :forEach
+            (lambda (item)
+              (when (= (get item :bindingId) binding-id) (js-call references :push item)))))
+        (js-object :query query :offset offset :offsetUnit unit :symbol selected
+          :definition definition :references references
+          :result (cond ((= query "definition") definition)
+                        ((= query "references") references)
+                        (t selected))))))
+
+  (defun tools-source-identity (source filename)
+    (let ((bytes (sha256-string-utf16le source)) (hex "")
+          (digits "0123456789abcdef") (index 0))
+      (while (< index (js-length bytes))
+        (let ((byte (js-nth index bytes)))
+          (setq hex (str hex (js-call digits :charAt (unsigned-bit-shift-right byte 4))
+                            (js-call digits :charAt (bit-and byte 15)))))
+        (setq index (1+ index)))
+      (js-object :format "eliscript-source-identity" :version 1
+        :encoding "utf16le" :filename filename :units (js-length source) :sha256 hex)))
+
+  (defun tools-check-source-identity (request identity filename required)
+    (let ((expected (get request :expectedSourceIdentity)))
+      (when (and required (undefined? expected))
+        (tools-fail "edit-preview requires expectedSourceIdentity" filename))
+      (unless (undefined? expected)
+        (unless (and (not (nil? expected)) (= (value-type expected) "object")
+                     (not (Array/isArray expected))
+                     (= (get expected :format nil) "eliscript-source-identity")
+                     (= (get expected :version nil) 1)
+                     (= (get expected :encoding nil) "utf16le")
+                     (= (get expected :filename nil) (get identity :filename))
+                     (= (get expected :units nil) (get identity :units))
+                     (= (get expected :sha256 nil) (get identity :sha256)))
+          (tools-fail "request belongs to a different source snapshot" filename "ELI-T0002")))))
+
+  (defun tools-next-scalar (source index)
+    (let ((first (string-code-unit-at source index)) (next (1+ index)))
+      (when (and (>= first 55296) (<= first 56319) (< next (js-length source)))
+        (let ((second (string-code-unit-at source next)))
+          (when (and (>= second 56320) (<= second 57343)) (setq next (1+ next)))))
+      next))
+
+  (defun tools-edit-preview (request source filename identity)
+    (let ((edits (get request :edits undefined)) (length (tools-scalar-length source))
+          (previous-start -1) (previous-end 0))
+      (unless (= (get request :offsetUnit nil) "unicode-scalar")
+        (tools-fail "edit offsetUnit must be unicode-scalar" filename))
+      (unless (Array/isArray edits) (tools-fail "edits must be an array" filename))
+      ;; Validate the complete original-coordinate batch before constructing a
+      ;; preview. Equal starts, even two insertions, are deliberately ambiguous.
+      (js-call edits :forEach
+        (lambda (edit)
+          (unless (and (not (nil? edit)) (= (value-type edit) "object")
+                       (not (Array/isArray edit)))
+            (tools-fail "each edit must be an object" filename))
+          (let ((start (get edit :start nil)) (end (get edit :end nil))
+                (text (get edit :text undefined)))
+            (unless (and (Number/isSafeInteger start) (Number/isSafeInteger end)
+                         (>= start 0) (>= end start) (<= end length)
+                         (= (value-type text) "string"))
+              (tools-fail "edit requires a valid scalar range and replacement string" filename))
+            (unless (and (> start previous-start) (>= start previous-end))
+              (tools-fail "edits must have distinct starts in nonoverlapping source order" filename))
+            (setq previous-start start) (setq previous-end end))))
+      (let ((parts (js-array)) (unit 0) (scalar 0) (copied 0))
+        ;; Walk the original once. Preserve unmatched UTF-16 units and never
+        ;; allocate a whole-source scalar array just to address edit offsets.
+        (js-call edits :forEach
+          (lambda (edit)
+            (while (< scalar (get edit :start))
+              (setq unit (tools-next-scalar source unit)) (setq scalar (1+ scalar)))
+            (js-call parts :push (js-call source :slice copied unit) (get edit :text))
+            (while (< scalar (get edit :end))
+              (setq unit (tools-next-scalar source unit)) (setq scalar (1+ scalar)))
+            (setq copied unit)))
+        (js-call parts :push (js-call source :slice copied))
+        (let ((updated (js-call parts :join "")))
+          (js-object :ok t :operation "edit-preview" :filename filename
+            :offsetUnit "unicode-scalar" :readOnly t :diagnostics (js-array)
+            :previousSourceIdentity identity :sourceIdentity (tools-source-identity updated filename)
+            :source updated)))))
+
+  (defun tools-request (request)
+    (let ((filename (get request :filename "<input>")) (identity nil))
+      (unless (= (value-type filename) "string") (tools-fail "filename must be a string" "<input>"))
+      (try
+        (let ((source (get request :source undefined))
+              (operation (get request :operation nil)))
+          (unless (= (value-type source) "string") (tools-fail "source must be a string" filename))
+          (unless (or (= operation "analyze") (= operation "query") (= operation "edit-preview"))
+            (tools-fail "unsupported compiler tools operation" filename))
+          (progn
+            (setq identity (tools-source-identity source filename))
+            (tools-check-source-identity request identity filename (= operation "edit-preview"))
+            (if (= operation "edit-preview") (tools-edit-preview request source filename identity)
+          (let* ((forms (read-string source filename))
+                 (expansion (expand-module-with-origins forms filename (get request :macroContext nil)))
+                 (expanded (get expansion :forms))
+                 (context (js-object :syntax (new globalThis.Map) :macros (new globalThis.Map)
+                   :definitions (js-array) :references (js-array) :macroOrigins (js-array)
+                   :macroExpansions (get expansion :macroOrigins)))
+                 (scope (tools-scope nil)))
+            (analyze-module expanded filename)
+            (let ((program (lower-module expanded filename)))
+              (js-call forms :forEach (lambda (node) (tools-syntax-index node context)))
+              (tools-source-top forms context)
+              (tools-predeclare (get program :body) scope context)
+              (js-call (get program :body) :forEach (lambda (node) (tools-walk node scope context)))
+              (let ((result (js-object :ok t :operation operation :filename filename
+                       :offsetUnit "unicode-scalar" :sourceIdentity identity :readOnly t :diagnostics (js-array)
+                       :definitions (get context :definitions) :references (get context :references)
+                       :macroOrigins (get context :macroOrigins)
+                       :macroExpansions (get context :macroExpansions) :macroExpansionTraceAvailable t)))
+                (when (= operation "query")
+                  (put result :query (tools-query context request source filename)))
+                result))))))
+        (catch error
+          (let ((diagnostic (get error :eliscriptDiagnostic nil)))
+            (if diagnostic
+              (js-object :ok false :operation (get request :operation nil) :filename filename
+                :offsetUnit "unicode-scalar" :sourceIdentity identity :readOnly t :diagnostics (js-array diagnostic)
+                :definitions (js-array) :references (js-array) :macroOrigins (js-array)
+                :macroExpansions (get error :macroOrigins (js-array))
+                :macroExpansionTraceAvailable t :query nil)
+              (throw error)))))))
+
+  (export tools-request))

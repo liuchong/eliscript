@@ -20,6 +20,14 @@ cd "$ROOT"
   tools/org/*.el \
   tools/worker/*.el \
   tests/eliscript-tests.el \
+  tests/eliscript-analyzer-depth-tests.el \
+  tests/eliscript-lower-depth-tests.el \
+  tests/eliscript-emitter-depth-tests.el \
+  tests/eliscript-ir-await-cache-tests.el \
+  tests/eliscript-reader-preprocess-tests.el \
+  tests/eliscript-number-spelling-tests.el \
+  tests/eliscript-transient-depth-tests.el \
+  tests/eliscript-portable-depth-tests.el \
   tests/eliscript-project-tests.el \
   tests/eliscript-mode-tests.el \
   tests/eliscript-org-tests.el \

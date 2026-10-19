@@ -1,29 +1,64 @@
 (module bootstrap.compiler.syntax
+  ;; Computed object keys reuse immutable primitive handles. The objects and
+  ;; their data-property descriptors are still newly constructed on every call.
+  (defconst syntax-filename-key "filename")
+  (defconst syntax-start-key "start")
+  (defconst syntax-end-key "end")
+  (defconst syntax-line-key "line")
+  (defconst syntax-column-key "column")
+  (defconst syntax-end-line-key "endLine")
+  (defconst syntax-end-column-key "endColumn")
+  (defconst syntax-kind-key "kind")
+  (defconst syntax-value-key "value")
+  (defconst syntax-span-key "span")
+  (defconst syntax-name-key "name")
+  (defconst syntax-items-key "items")
+  (defconst syntax-literal-kind "literal")
+  (defconst syntax-undefined-kind "undefined")
+  (defconst syntax-symbol-kind "symbol")
+  (defconst syntax-keyword-kind "keyword")
+  (defconst syntax-list-kind "list")
+  (defconst syntax-vector-kind "vector")
+  ;; Positions are primitive values. A bounded pool reuses common line and
+  ;; column numbers without retaining source objects or growing across edits.
+  (defconst syntax-small-positions (new globalThis.Map))
+  (defun syntax-position (value)
+    (if (and (Number/isSafeInteger value) (>= value 0) (<= value 1024)
+             (not (Object/is value -0)))
+        (if (js-call syntax-small-positions :has value)
+            (js-call syntax-small-positions :get value)
+          (progn (js-call syntax-small-positions :set value value) value))
+      value))
+
   (defun make-span
       (filename start end line column end-line end-column)
     (js-object
-      :filename filename
-      :start start
-      :end end
-      :line line
-      :column column
-      :endLine end-line
-      :endColumn end-column))
+      (progn syntax-filename-key) filename
+      (progn syntax-start-key) (syntax-position start)
+      (progn syntax-end-key) (syntax-position end)
+      (progn syntax-line-key) (syntax-position line)
+      (progn syntax-column-key) (syntax-position column)
+      (progn syntax-end-line-key) (syntax-position end-line)
+      (progn syntax-end-column-key) (syntax-position end-column)))
 
   (defun literal-node (value span)
-    (js-object :kind "literal" :value value :span span))
+    (js-object (progn syntax-kind-key) syntax-literal-kind (progn syntax-value-key) value (progn syntax-span-key) span))
 
   (defun undefined-node (span)
-    (js-object :kind "undefined" :span span))
+    (js-object (progn syntax-kind-key) syntax-undefined-kind (progn syntax-span-key) span))
 
   (defun symbol-node (name span)
-    (js-object :kind "symbol" :name name :span span))
+    (js-object (progn syntax-kind-key) syntax-symbol-kind (progn syntax-name-key) name (progn syntax-span-key) span))
 
   (defun keyword-node (name span)
-    (js-object :kind "keyword" :name name :span span))
+    (js-object (progn syntax-kind-key) syntax-keyword-kind (progn syntax-name-key) name (progn syntax-span-key) span))
 
   (defun collection-node (kind items span)
-    (js-object :kind kind :items items :span span))
+    (js-object (progn syntax-kind-key)
+      (cond ((= kind syntax-list-kind) syntax-list-kind)
+            ((= kind syntax-vector-kind) syntax-vector-kind)
+            (t kind))
+      (progn syntax-items-key) items (progn syntax-span-key) span))
 
   (defun node-kind (node)
     (get node :kind))

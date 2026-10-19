@@ -1,0 +1,162 @@
+(module tests.compiler-corpus-host-tool-projection
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile writeFile mkdtemp mkdir rm realpath lstat)
+  (import "node:path" resolve dirname join)
+  (import "node:os" tmpdir)
+  (import "node:crypto" createHash)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/backends/compiler-corpus.mjs" createOriginalCorpusSourceReader)
+  (import "../tools/backends/compiler-corpus-project-adapters.mjs" addOriginalProjectPrograms)
+  (import "../tools/backends/compiler-corpus-execution.mjs" executeCompilerCorpusRecord)
+  (import "../tools/backends/compiler-matrix.mjs" archiveProduct)
+  (import "../dist/bootstrap/compiler.mjs" compile-string)
+
+  (defconst suite "tests/literal-runtime.test.mjs")
+  (defconst maintained "tests/eliscript/managed-literal-nth-node.eli")
+  (defconst files (js-array "tools/backends/build.mjs" "tools/backends/managed-runtime.mjs"
+    "tools/backends/native-managed-runtime.mjs" "tests/helpers/managed-literal-nth-node-selfhosted.mjs"))
+  (defun hash (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+  (defasync declarations ()
+    (let ((result (js-array)) (index 0))
+      (while (< index (js-length files))
+        (let ((file (aref files index)))
+          (js-call result :push (js-object :id file :sourceFile file
+            :sourceSha256 (hash (await (readFile (resolve root file)))))))
+        (setq index (1+ index))) result))
+  (defasync workspace (operation)
+    (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-host-tool-projection-")))))
+      (try (await (funcall operation directory))
+        (finally (await (rm directory (js-object :recursive t :force t)))))))
+
+  (test "the complete original literal adapter retains its exact host bytes and binds all four actual tool files and the maintained helper source"
+    (async ()
+      (let* ((reader (createOriginalCorpusSourceReader (js-object :sourceRoot root)))
+             (records (js-array))
+             (parity (JSON/parse (await (readFile (resolve root "contracts/compiler-parity-corpus.json") "utf8"))))
+             (stable (JSON/parse (await (readFile (resolve root "contracts/stable-compatibility-corpus.json") "utf8"))))
+             (titles (js-array "persistent literals and quoted data preserve language value categories"
+               "hash-map rejects incomplete pairs in both compilers"
+               "explicit host-only modules do not link the persistent runtime"
+               "maintained Eliscript sources use explicit host constructors"
+               "portable closures produce persistent values for the versioned worker codec"))
+             (locators (js-call titles :map (lambda (title index)
+               (js-object :file suite :id (+ "literal-projection:" index) :contains title)))))
+        (await (addOriginalProjectPrograms (js-object :sourceRoot root :bootstrapSources (get parity :bootstrapSources)
+          :stableFiles (new globalThis.Set (get stable :fixtureFiles)) :locators locators
+          :text (get reader :text) :file (get reader :file)
+          :add (lambda (record) (js-call records :push record)))))
+        (let* ((record (js-call records :find (lambda (item)
+                         (= (get item :id) "original-program:compiler-literal-runtime-complete"))))
+               (execution (get record :execution)) (original (get record :original))
+               (expected (await (declarations)))
+               (source (await (readFile (resolve root suite) "utf8"))))
+          (js-call assert :strictEqual (get execution :hostSource) source)
+          (js-call assert :strictEqual (get original :sourceSha256) (hash source))
+          (js-call assert :deepStrictEqual (get (get execution :setupReplacement) :changes) (js-array))
+          (js-call assert :strictEqual (js-length (get record :modules)) 13)
+          (js-call assert :strictEqual (get execution :referenceArtifact) t)
+          (js-call assert :deepStrictEqual (get execution :hostToolProjection)
+            (js-object :kind "literal-runtime-host-tools" :files expected))
+          (let ((required (js-call files :concat (js-array maintained))) (index 0))
+            (while (< index (js-length required))
+              (let* ((filename (aref required index))
+                     (asset (js-call (get original :sourceAssets) :find
+                              (lambda (item) (= (get item :file) filename)))))
+                (js-call assert :ok asset filename)
+                (js-call assert :strictEqual (get asset :sourceSha256)
+                  (hash (await (readFile (resolve root filename))))))
+              (setq index (1+ index))))))))
+
+  (defasync context-for (directory)
+    (let* ((declared (await (declarations)))
+           (host-source (compile-string (js-call (js-array
+             "(module tests.actual-host-tool-projection"
+             " (import \"node:assert/strict\" :default assert)"
+             " (import \"../tools/backends/build.mjs\" root)"
+             " (import \"../tools/backends/managed-runtime.mjs\" instantiateManagedRuntime)"
+             " (import \"../tools/backends/native-managed-runtime.mjs\" instantiateNativeManagedRuntime)"
+             " (import \"./helpers/managed-literal-nth-node-selfhosted.mjs\" nth-entry-source loadNthReference)"
+             " (js-call assert :strictEqual root (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_SOURCE_ROOT))"
+             " (js-call assert :strictEqual (value-type instantiateManagedRuntime) \"function\")"
+             " (js-call assert :strictEqual (value-type instantiateNativeManagedRuntime) \"function\")"
+             " (js-call assert :strictEqual (value-type nth-entry-source) \"string\")"
+             " (js-call assert :strictEqual (value-type loadNthReference) \"function\")"
+             " (js-call globalThis.console :log \"actual host tools loaded\"))") :join "\n") "projection-host.eli"))
+           (entry-source (compile-string "(module selected.projection (defun value () 42) (export value))" "selected.eli"))
+           (artifact (await (archiveProduct (js-object :target "javascript" :entry "entry.mjs"
+                       :modules (js-array (js-object :id "entry.mjs" :javascript entry-source)))
+                       "javascript" (resolve directory "product"))))
+           (source-assets (js-call declared :map (lambda (item)
+                            (js-object :file (get item :sourceFile) :sourceSha256 (get item :sourceSha256))))))
+      (js-call source-assets :push (js-object :file maintained
+        :sourceSha256 (hash (await (readFile (resolve root maintained))))))
+      (js-object :target "javascript" :sourceRoot root :directory directory :artifact artifact :options (js-object)
+        :record (js-object :id "host-tool-projection-fixture" :kind "project" :request (js-object)
+          :execution (js-object :kind "original-program" :host "tests/host-tools.mjs" :hostSource host-source
+            :hostRuntime "node" :arguments (js-array) :timeoutMs 30000
+            :hostToolProjection (js-object :kind "literal-runtime-host-tools" :files declared))
+          :original (js-object :sourceAssets source-assets)))))
+
+  (test "declared host tools load real compiled Eli hosts without relocation rewrites and repeat with identical canonical file identities"
+    (async ()
+      (await (workspace (async (directory)
+        (let* ((context (await (context-for directory))) (record (get context :record))
+               (before (JSON/stringify record)) (artifact (get context :artifact))
+               (binary-before (await (readFile (get artifact :path)))) (round 0))
+          (while (< round 2)
+            (let ((actual (await (executeCompilerCorpusRecord context))))
+              (js-call assert :strictEqual (get actual :kind) "original-program")
+              (js-call assert :strictEqual (get actual :stdout) "actual host tools loaded\n"))
+            (js-call assert :strictEqual (JSON/stringify record) before)
+            (js-call assert :deepStrictEqual (await (readFile (get artifact :path))) binary-before)
+            (let ((index 0))
+              (while (< index (js-length files))
+                (let* ((file (aref files index)) (projected (resolve (get artifact :directory) file))
+                       (source (resolve root file)))
+                  (js-call assert :strictEqual (js-call (await (lstat projected)) :isSymbolicLink) t)
+                  (js-call assert :strictEqual (await (realpath projected)) (await (realpath source)))
+                  (js-call assert :strictEqual (hash (await (readFile projected))) (hash (await (readFile source)))))
+                (setq index (1+ index))))
+            (setq round (1+ round)))))))))
+
+  (test "projection refuses existing conflicts missing files tampered source identities and noncanonical declarations without replacing selected bytes"
+    (async ()
+      (await (workspace (async (directory)
+        (let* ((conflict (await (context-for (join directory "conflict"))))
+               (path (resolve (get (get conflict :artifact) :directory) (aref files 0)))
+               (bytes (globalThis.Uint8Array.of 17 29 41)))
+          (await (mkdir (dirname path) (js-object :recursive t))) (await (writeFile path bytes))
+          (await (js-call assert :rejects (lambda () (executeCompilerCorpusRecord conflict))))
+          (js-call assert :deepStrictEqual (Array/from (await (readFile path))) (Array/from bytes)))
+        (let ((missing (await (context-for (join directory "missing")))))
+          (put missing :sourceRoot (join directory "absent-source-root"))
+          (await (js-call assert :rejects (lambda () (executeCompilerCorpusRecord missing)))))
+        (let* ((tampered (await (context-for (join directory "tampered"))))
+               (source-root (join directory "copied-source")) (index 0))
+          (while (< index (js-length files))
+            (let* ((file (aref files index)) (path (resolve source-root file))
+                   (bytes (await (readFile (resolve root file)))))
+              (await (mkdir (dirname path) (js-object :recursive t)))
+              (when (= index 0) (put bytes 0 (% (1+ (aref bytes 0)) 256)))
+              (await (writeFile path bytes)))
+            (setq index (1+ index)))
+          (put tampered :sourceRoot source-root)
+          (await (js-call assert :rejects (lambda () (executeCompilerCorpusRecord tampered)))))
+        (let ((variants (js-array
+                 (lambda (projection) (put projection :kind "unknown-host-tools"))
+                 (lambda (projection) (js-call (get projection :files) :pop))
+                 (lambda (projection) (js-call (get projection :files) :push
+                   (globalThis.structuredClone (aref (get projection :files) 0))))
+                 (lambda (projection) (put (aref (get projection :files) 0) :id "../escape.mjs"))
+                 (lambda (projection) (put (aref (get projection :files) 0) :sourceFile "package.json"))
+                 (lambda (projection) (put (aref (get projection :files) 0) :sourceSha256 (js-call "0" :repeat 64)))))
+              (index 0))
+          (while (< index (js-length variants))
+            (let* ((context (await (context-for (join directory (+ "invalid-" index)))))
+                   (artifact (get context :artifact)) (before (await (readFile (get artifact :path)))))
+              (funcall (aref variants index) (get (get (get context :record) :execution) :hostToolProjection))
+              (await (js-call assert :rejects (lambda () (executeCompilerCorpusRecord context))))
+              (js-call assert :deepStrictEqual (await (readFile (get artifact :path))) before))
+            (setq index (1+ index)))))))))
+  )

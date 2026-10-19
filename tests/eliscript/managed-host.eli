@@ -1,0 +1,778 @@
+(module tests.managed-host
+  (import "node:test" before after test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile writeFile mkdtemp rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" buildBackends root)
+  (import "../tools/backends/managed-host.mjs" :as host)
+  (import "../tools/backends/managed-host-legacy.mjs" :as legacy)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime instantiateManagedRuntimeWithHostModules)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "../tools/runtime/unicode-case-profiles.mjs" hostUnicodeCaseVersion)
+  (import "./helpers/managed-numeric-selfhosted.mjs" loadReference)
+
+  (defconst source (str
+    "(module fixture.function-slot\n"
+    " (defconst slot (funcall globalThis.Symbol \"actual function slot\"))\n"
+    " (defun dispatch (value) value)\n"
+    " (Object/defineProperty dispatch \"slot\" (js-object :value slot))\n"
+    " (defun make-function-slot () dispatch)\n"
+    " (defun read-through-source () (get dispatch :slot))\n"
+    " (defun make-object-slot () (js-object :slot slot))\n"
+    " (defun make-bad-getter () (let ((method (lambda () 7)))\n"
+    "   (Object/defineProperty method \"slot\" (js-object :get (lambda () (throw false)))) method))\n"
+    " (defun make-source-error () (lambda () (throw (new globalThis.Error \"source throw must release its original root\"))))\n"
+    " (export slot dispatch make-function-slot read-through-source make-object-slot make-bad-getter make-source-error))\n"))
+  (defvar directory undefined)
+  (defvar bytes undefined)
+  (defvar lowered undefined)
+  (defvar reference undefined)
+  (defvar library undefined)
+  (defvar shared-backend undefined)
+  (defvar shared-runtime undefined)
+  (defconst native-target (when (= (get globalThis.process :arch) "arm64")
+    (cond ((= (get globalThis.process :platform) "darwin") "arm64-macos")
+          ((= (get globalThis.process :platform) "linux") "arm64-linux"))))
+  (defun options () (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 1048576))
+
+  (test "only actual automatic literal probes suppress same-owner reentry and always restore their scope"
+    (lambda ()
+      (let* ((status 0) (calls (js-array)) (mode "nested") (actual undefined)
+             (callee (lambda (heap slot) (+ (* heap 100) slot)))
+             (descriptor (js-object :module (js-object :get "fixture-get" :functionCount 4)
+               :literalRuntime (js-object :bindings (js-object
+                 :literal-kind (js-object :kind 1 :index 1)
+                 :literal-protocol-for-role (js-object :kind 1 :index 2))
+                 :brandProbe (js-object :version 1) :roleProbe (js-object :version 1))))
+             (exports (js-object
+               :fixture-get (lambda (heap kind slot) (setq status 0) (funcall callee heap slot))
+               :last-error (lambda () status)
+               :value-error-restore (lambda (code) (setq status code) 0)
+               :value-kind (lambda (heap value) (setq status 0) (if (= value 7) 7 0))
+               :value-length (lambda (heap value) (setq status 0) 1)
+               :value-source-invoke-with-this (lambda (heap function receiver arguments count)
+                 (setq status 0)
+                 (js-call calls :push (js-array heap function receiver arguments count))
+                 (cond
+                   ((= mode "false") (throw false))
+                   ((= mode "undefined") (throw undefined))
+                   ((= mode "error") (setq status 8) 0)
+                   ((/= count 1) (setq status 3) 0)
+                   ((= function (funcall callee heap 3)) 77)
+                   ((and (= mode "nested") (= heap 10))
+                    (let* ((kind (js-call actual :fixture-get heap 1 1))
+                           (role (js-call actual :fixture-get heap 1 2))
+                           (original (js-call actual :fixture-get heap 1 3))
+                           (other (js-call actual :fixture-get 20 1 1)))
+                      (js-call assert :strictEqual (js-call actual :value-source-invoke-with-this heap kind 3 7 1) 0)
+                      (js-call assert :strictEqual (js-call actual :value-source-invoke-with-this heap role 3 7 1) 3)
+                      (js-call assert :strictEqual status 0)
+                      (js-call assert :strictEqual (js-call actual :value-source-invoke-with-this heap kind 3 7 0) 0)
+                      (js-call assert :strictEqual status 3)
+                      (js-call assert :strictEqual (js-call actual :value-source-invoke-with-this heap original 3 7 1) 77)
+                      (js-call assert :strictEqual (js-call actual :value-source-invoke-with-this 20 other 3 7 1) 42)
+                      42))
+                   (t 42)))))
+             (original (Object/getOwnPropertyDescriptors exports)))
+        (setq actual (js-call host :managedHostLiteralProbeExports exports descriptor))
+        (let ((kind (js-call actual :fixture-get 10 1 1)) (role (js-call actual :fixture-get 10 1 2)))
+          (js-call assert :strictEqual (js-call actual :value-source-invoke-with-this 10 kind 3 7 1) 42)
+          (js-call assert :strictEqual (js-length calls) 4)
+          ;; Both directions share one dynamic scope, rather than letting
+          ;; kind -> role -> kind recurse through two independent guards.
+          (js-call assert :strictEqual (js-call actual :value-source-invoke-with-this 10 role 3 7 1) 42)
+          (js-call assert :strictEqual (js-length calls) 8)
+          (js-call (js-array "false" "undefined") :forEach (lambda (failure)
+            (setq mode failure)
+            (let ((threw false) (caught nil))
+              (try (js-call actual :value-source-invoke-with-this 10 kind 3 7 1)
+                (catch error (setq threw t caught error)))
+              (js-call assert :strictEqual threw t)
+              (js-call assert :strictEqual caught (if (= failure "false") false undefined)))
+            (setq mode "normal")
+            (js-call assert :strictEqual (js-call actual :value-source-invoke-with-this 10 kind 3 7 1) 42)))
+          (setq mode "error")
+          (js-call assert :strictEqual (js-call actual :value-source-invoke-with-this 10 role 3 7 1) 0)
+          (js-call assert :strictEqual status 8)
+          (setq mode "normal")
+          (js-call assert :strictEqual (js-call actual :value-source-invoke-with-this 10 role 3 7 1) 42)
+          (js-call assert :strictEqual status 0))
+        (js-call assert :deepStrictEqual (Object/getOwnPropertyDescriptors exports) original)
+        (js-call assert :strictEqual (js-call host :managedHostLiteralProbeExports exports (js-object)) exports))))
+
+  (defun unicode-argument-error-p (error)
+    ;; The stable wire code belongs to the complete diagnostic record; the
+    ;; Error message remains the original human-readable runtime message.
+    (js-call assert :strictEqual (Object/getPrototypeOf error) (get globalThis.Error :prototype))
+    (js-call assert :strictEqual (get error :name) "Error")
+    (js-call assert :strictEqual (get error :message) "managed argument or bounds error")
+    (js-call assert :deepStrictEqual (get error :eliscriptDiagnostic)
+      (js-object :format "eliscript-diagnostic" :version 1 :code "ELI-RT0003"
+        :severity "error" :phase "runtime" :message "managed argument or bounds error"))
+    t)
+
+  (defasync check-default-unicode (target)
+    (let ((variants (js-array "omitted" undefined 15.1 16 17 "host")) (index 0))
+      (while (< index (js-length variants))
+        (let* ((version (aref variants index)) (configuration (options))
+               (_version (unless (= version "omitted") (put configuration :unicodeVersion version)))
+               (_native (when (= target "native") (put configuration :nativeTarget native-target)))
+               (before (Object/getOwnPropertyDescriptors configuration))
+               (runtime (if (= target "wasm") (instantiateManagedRuntime bytes configuration)
+                          (await (instantiateNativeManagedRuntime library lowered configuration))))
+               (expected (if (or (= version "omitted") (undefined? version)) 17
+                           (if (= version "host") (/ (hostUnicodeCaseVersion) 10) version)))
+               (primary false))
+          (try
+            (progn
+              (js-call assert :strictEqual (get runtime :unicodeVersion) expected)
+              (js-call assert :deepStrictEqual (Object/getOwnPropertyDescriptors configuration) before)
+              (let ((value (js-call runtime :invoke "make-function-slot")))
+                (try (js-call assert :strictEqual (get value :kind) 18)
+                  (finally (js-call runtime :release value)))))
+            (catch error (setq primary t) (throw error))
+            (finally
+              (let ((failed false) (failure undefined))
+                (js-call (js-array
+                  (lambda () (js-call runtime :closeModule))
+                  (lambda () (js-call runtime :collect))
+                  (lambda () (js-call assert :strictEqual (js-call runtime :live) 0))
+                  (lambda () (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
+                  (lambda () (when (get runtime :close) (js-call runtime :close))))
+                  :forEach (lambda (action) (try (funcall action)
+                    (catch error (unless failed (setq failed t failure error))))))
+                (when (and failed (not primary)) (throw failure))))))
+        (setq index (1+ index))))
+    (let ((invalid (js-array nil false 0 "17" globalThis.NaN)) (index 0))
+      (while (< index (js-length invalid))
+        (let ((configuration (Object/assign (options) (js-object :unicodeVersion (aref invalid index)))))
+          (if (= target "wasm")
+            (js-call assert :throws (lambda () (instantiateManagedRuntime bytes configuration))
+              unicode-argument-error-p)
+            (await (js-call assert :rejects (instantiateNativeManagedRuntime library lowered
+              (Object/assign configuration (js-object :nativeTarget native-target)))
+              unicode-argument-error-p))))
+        (setq index (1+ index)))))
+
+  (test "WASM default Unicode is 17 while explicit profiles and caller options retain their contract"
+    (async () (await (check-default-unicode "wasm"))))
+  (test "native default Unicode is 17 while explicit profiles and caller options retain their contract"
+    (js-object :skip (not native-target) :timeout 120000)
+    (async () (await (check-default-unicode "native"))))
+
+  (test "Unicode defaults defer option Get preserve frozen undefined and never evaluate unrelated getters"
+    (lambda ()
+      (let* ((configuration (js-object)) (trace (js-array))
+             (names (js-array "maxSlots" "initialBytes" "maxBytes" "initializeModule" "randomSeed"))
+             (values (js-array 1024 65536 1048576 t undefined))
+             (status 0) (versions (js-array))
+             ;; A real raw call reads last-error after invoking its selector.
+             ;; Deliberately fail that first raw operation, before heap-new;
+             ;; this tests defaults and Get order without an incomplete ABI
+             ;; manufacturing a host TypeError in place of the runtime error.
+             (exports (js-object
+               "runtime-case-version" (lambda (version) (js-call versions :push version) (setq status 3) 0)
+               "last-error" (lambda () status)))
+             (index 0))
+        (while (< index (js-length names))
+          (let ((name (aref names index)) (value (aref values index)))
+            (Object/defineProperty configuration name
+              (js-object :enumerable t :get (lambda () (js-call trace :push name) value))))
+          (setq index (1+ index)))
+        (Object/defineProperty configuration "unicodeVersion"
+          (js-object :value undefined :enumerable false :writable false :configurable false))
+        (Object/defineProperty configuration "unrelated"
+          (js-object :enumerable t :get (lambda () (throw false))))
+        (let ((before (Object/getOwnPropertyDescriptors configuration)))
+          (js-call assert :throws
+            (lambda () (js-call host :createManagedHostRuntime exports nil nil configuration))
+            unicode-argument-error-p)
+          (js-call assert :deepStrictEqual versions (js-array 170))
+          (js-call assert :strictEqual status 3)
+          (js-call assert :deepStrictEqual trace names)
+          (js-call assert :deepStrictEqual (Object/getOwnPropertyDescriptors configuration) before)))))
+
+  (test "private invoke diagnostics retain raw first errors results roots and unchanged default exports"
+    (lambda ()
+      (let* ((environment (get globalThis.process :env)) (key "ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC")
+             (present (Object/hasOwn environment key)) (previous (get environment key))
+             (console-error (get globalThis.console :error)) (records (js-array))
+             (status 0) (source-class 0) (reads 0) (throws false) (throw-value undefined)
+             (exports (js-object
+               "value-source-invoke-with-this" (lambda (heap function receiver arguments count)
+                 (setq status 3 source-class 2)
+                 (if throws (throw throw-value) 0))
+               "last-error" (lambda () status)
+               "value-exception-class" (lambda (heap) source-class)
+               "value-exception-class-set" (lambda (heap value) (setq source-class value) 1)
+               "value-error-restore" (lambda (value) (setq status value) 0)
+               "value-kind" (lambda (heap value) (setq reads (1+ reads) status 0) (if (= value 10) 18 7))
+               "value-length" (lambda (heap value) (setq reads (1+ reads) status 0) (if (= value 10) 2 3))
+               "value-function-code" (lambda (heap value) (setq reads (1+ reads) status 0) 527))))
+        (try
+          (Reflect/deleteProperty environment key)
+          (js-call assert :strictEqual (js-call host :managedHostInvokeDiagnosticExports exports) exports)
+          (js-call assert :strictEqual reads 0)
+          (put environment key "1")
+          (put globalThis.console :error (lambda (tag text) (js-call records :push (JSON/parse text))))
+          (let ((actual (js-call host :managedHostInvokeDiagnosticExports exports)))
+            (js-call assert :strictEqual (js-call actual "value-source-invoke-with-this" 1 10 3 11 3) 0)
+            (js-call assert :strictEqual status 3)
+            (js-call assert :strictEqual source-class 2)
+            (js-call assert :deepStrictEqual (aref records 0)
+              (js-object :phase "value-source-invoke-with-this" :callee 10 :calleeKind 18 :calleeCount 2
+                :calleeCode 527 :arguments 11 :argumentKind 7 :argumentLength 3 :count 3
+                :lastError 3 :sourceClass 2 :threw false))
+            (js-call (js-array false undefined) :forEach (lambda (first)
+              (setq throws t throw-value first)
+              (let ((failed false) (failure nil))
+                (try (js-call actual "value-source-invoke-with-this" 1 10 3 11 3)
+                  (catch error (setq failed t failure error)))
+                (js-call assert :strictEqual failed t)
+                (js-call assert :strictEqual failure first)
+                (js-call assert :strictEqual status 3)
+                (js-call assert :strictEqual source-class 2))))
+            ;; A secondary observation/output failure never replaces the raw
+            ;; operation's error, even when that original throw is undefined.
+            (put globalThis.console :error (lambda (&rest ignored) (throw "diagnostic")))
+            (let ((failed false) (failure nil))
+              (try (js-call actual "value-source-invoke-with-this" 1 10 3 11 3)
+                (catch error (setq failed t failure error)))
+              (js-call assert :strictEqual failed t)
+              (js-call assert :strictEqual failure undefined)
+              (js-call assert :strictEqual status 3)
+              (js-call assert :strictEqual source-class 2)))
+          (finally
+            (put globalThis.console :error console-error)
+            (if present (put environment key previous) (Reflect/deleteProperty environment key)))))))
+
+  (test "real invoke diagnostics do not require the private unexported function-code helper"
+    (lambda ()
+      (let* ((environment (get globalThis.process :env)) (key "ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC")
+             (present (Object/hasOwn environment key)) (previous (get environment key))
+             (console-error (get globalThis.console :error)) (records (js-array))
+             (status 0) (source-class 0) (observed-code false)
+             (exports (js-object
+               "value-source-invoke-with-this" (lambda (heap function receiver arguments count)
+                 (setq status 3 source-class 0) 0)
+               "last-error" (lambda () status)
+               "value-exception-class" (lambda (heap) source-class)
+               "value-exception-class-set" (lambda (heap value) (setq source-class value) 1)
+               "value-error-restore" (lambda (value) (setq status value) 0)
+               "value-kind" (lambda (heap value) (setq status 0) (if (= value 10) 18 7))
+               "value-length" (lambda (heap value) (setq status 0) (if (= value 10) 0 3)))))
+        (try
+          (put environment key "1")
+          (put globalThis.console :error (lambda (tag text)
+            (js-call assert :strictEqual tag "[managed-invoke]")
+            (js-call records :push (JSON/parse text))))
+          (let ((actual (js-call host :managedHostInvokeDiagnosticExports exports)))
+            (js-call assert :notStrictEqual actual exports)
+            (js-call assert :strictEqual (js-call actual "value-source-invoke-with-this" 1 10 3 11 3) 0)
+            (js-call assert :strictEqual status 3)
+            (js-call assert :strictEqual source-class 0)
+            (js-call assert :deepStrictEqual (aref records 0)
+              (js-object :phase "value-source-invoke-with-this" :callee 10 :calleeKind 18 :calleeCount 0
+                :calleeCode nil
+                :arguments 11 :argumentKind 7 :argumentLength 3 :count 3 :lastError 3 :sourceClass 0 :threw false)))
+          ;; An optional accessor is not a callable ABI export and must not
+          ;; execute merely because diagnostics were explicitly enabled.
+          (Object/defineProperty exports "value-function-code" (js-object
+            :get (lambda () (setq observed-code t) (throw "optional export getter")) :configurable t))
+          (let ((actual (js-call host :managedHostInvokeDiagnosticExports exports)))
+            (js-call assert :notStrictEqual actual exports)
+            (js-call assert :strictEqual (js-call actual "value-source-invoke-with-this" 1 10 3 11 3) 0)
+            (js-call assert :strictEqual observed-code false)
+            (js-call assert :strictEqual (js-length records) 2)
+            (js-call assert :strictEqual status 3)
+            (js-call assert :strictEqual source-class 0))
+          (finally
+            (put globalThis.console :error console-error)
+            (if present (put environment key previous) (Reflect/deleteProperty environment key)))))))
+
+  (test "invoke diagnostics read the validated owned function code from its actual raw memory without allocating roots"
+    (lambda ()
+      (let* ((environment (get globalThis.process :env)) (key "ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC")
+             (present (Object/hasOwn environment key)) (previous (get environment key))
+             (console-error (get globalThis.console :error)) (records (js-array))
+             (buffer (new globalThis.ArrayBuffer 96)) (view (new globalThis.DataView buffer))
+             (status 0) (source-class 0) (bad-memory false) (reads 0)
+             (exports (js-object
+               "value-source-invoke-with-this" (lambda (heap function receiver arguments count)
+                 (setq status 3 source-class 0) 0)
+               "last-error" (lambda () status)
+               "value-exception-class" (lambda (heap) source-class)
+               "value-exception-class-set" (lambda (heap value) (setq source-class value) 1)
+               "value-error-restore" (lambda (value) (setq status value) 0)
+               "value-kind" (lambda (heap value) (setq status 0) (if (= value 10) 18 7))
+               "value-length" (lambda (heap value) (setq status 0) (if (= value 10) 0 1))
+               "value-data" (lambda (heap value kind)
+                 (js-call assert :strictEqual heap 1)
+                 (js-call assert :strictEqual value 10)
+                 (js-call assert :strictEqual kind 18)
+                 (setq status 0) 64)))
+             (memory (js-object :view (lambda ()
+               (setq reads (1+ reads))
+               (if bad-memory (throw "secondary memory observation") view)))))
+        ;; The public value-data ABI returns the payload at block+32. Named
+        ;; functions retain their real code at block+12, even with 0 captures.
+        (js-call view :setUint32 44 528 t)
+        (try
+          (put environment key "1")
+          (put globalThis.console :error (lambda (tag text) (js-call records :push (JSON/parse text))))
+          (let ((actual (js-call host :managedHostInvokeDiagnosticExports exports memory)))
+            (js-call assert :strictEqual (js-call actual "value-source-invoke-with-this" 1 10 3 11 1) 0)
+            (js-call assert :strictEqual (get (aref records 0) :calleeCode) 528)
+            (js-call assert :strictEqual (get (aref records 0) :calleeCount) 0)
+            (js-call assert :strictEqual (get (aref records 0) :argumentLength) 1)
+            (js-call assert :strictEqual reads 1)
+            (js-call assert :strictEqual status 3)
+            (js-call assert :strictEqual source-class 0)
+            (setq bad-memory t)
+            (js-call assert :strictEqual (js-call actual "value-source-invoke-with-this" 1 10 3 11 1) 0)
+            (js-call assert :strictEqual (js-length records) 2)
+            (js-call assert :strictEqual (get (aref records 1) :calleeCode) nil)
+            (js-call assert :strictEqual status 3)
+            (js-call assert :strictEqual source-class 0))
+          (finally
+            (put globalThis.console :error console-error)
+            (if present (put environment key previous) (Reflect/deleteProperty environment key)))))))
+
+  (before (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-host-function-slot-"))))
+    (let* ((backend (await (buildBackends (js-object :outputRoot directory))))
+           (compiler (get backend :compiler))
+           (program (js-call compiler :compile_ir_string source "function-slot.eli"))
+           (runtime (js-call compiler :compile_ir_string
+             (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli")))
+      (setq shared-backend backend shared-runtime runtime)
+      (setq lowered (js-call (get backend :managed) :lower_managed_program program runtime t))
+      (setq bytes (globalThis.Uint8Array.from (js-call (get backend :wasm) :append_metadata_section
+        (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed)
+          (js-object :initialPages 2 :maximumPages 256))
+        "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))))
+      (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      (let ((exports (globalThis.WebAssembly.Module.exports (new globalThis.WebAssembly.Module bytes))))
+        (js-call (js-array "value-source-invoke-with-this" "last-error" "value-error-restore"
+          "value-exception-class" "value-exception-class-set" "value-kind" "value-length") :forEach
+          (lambda (name)
+            (js-call assert :ok (js-call exports :some (lambda (entry)
+              (and (= (get entry :name) name) (= (get entry :kind) "function"))))))))
+      (setq reference (await (loadReference (resolve directory "reference.mjs") (js-call compiler :emit_ir_string program))))
+      (when native-target
+        (setq library (resolve directory (if (= native-target "arm64-macos") "function-slot.dylib" "function-slot.so")))
+        (await (writeFile library (globalThis.Uint8Array.from
+          (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target)))))))
+    (js-object :timeout 120000))
+  (after (async () (when directory (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun exercise (runtime)
+    ;; Keep the actual independent generated JS oracle and its Symbol identity.
+    (let ((actual (js-call reference :make_function_slot)))
+      (js-call assert :strictEqual (get actual :slot) (js-call reference :read_through_source))
+      (js-call assert :strictEqual (value-type (get actual :slot)) "symbol"))
+    (let ((roots (js-array)) (frame undefined) (primary false))
+      (try
+        (progn
+          (js-call runtime :auto 1)
+          ;; This is the same source Proxy apply/throw transport used by an
+          ;; imported original-program ESM facade. Keep the observed Error
+          ;; reachable through module close; its decoder-owned source root
+          ;; must be disposed, and its original throw root must already have
+          ;; been returned when sourceThrown delivered that Proxy.
+          (let* ((function (js-call runtime :invoke "make-source-error"))
+                 (callable undefined)
+                 (caught false) (failure undefined) (expected undefined))
+            (try
+              (setq callable (js-call runtime :toHostValue function))
+              (try (Reflect/apply (js-call reference :make_source_error) undefined (js-array))
+                (catch error (setq expected error)))
+              (try (Reflect/apply callable undefined (js-array))
+                (catch error (setq caught t failure error)))
+              (js-call assert :strictEqual caught t)
+              (js-call assert :strictEqual (get failure :name) (get expected :name))
+              (js-call assert :strictEqual (get failure :message) (get expected :message))
+              (js-call runtime :collect)
+              (js-call assert :strictEqual (get failure :message) "source throw must release its original root")
+              (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)
+              (finally (js-call runtime :release function))))
+          (let* ((function (js-call runtime :invoke "make-function-slot"))
+                 (key (js-call runtime :string "slot")))
+            (js-call roots :push function key)
+            (setq frame (js-call runtime :frame 1)) (js-call runtime :frameSet frame 0 function)
+            (let* ((first (js-call runtime :objectGet function key))
+                   (expected (js-call runtime :invoke "read-through-source")))
+              (js-call roots :push first expected)
+              (js-call assert :strictEqual (get function :kind) 18)
+              (js-call assert :strictEqual (get first :kind) 22)
+              (js-call assert :strictEqual (js-call runtime :keyEqual first expected) t)
+              (let ((symbol (js-call runtime :toHostValue first)) (index 0))
+                (js-call assert :strictEqual (value-type symbol) "symbol")
+                (while (< index 4)
+                  (js-call runtime :collect)
+                  (let ((again (js-call runtime :objectGet function key)))
+                    (try
+                      (js-call assert :strictEqual (js-call runtime :keyEqual first again) t)
+                      (js-call assert :strictEqual (js-call runtime :toHostValue again) symbol)
+                      (finally (js-call runtime :release again))))
+                  (setq index (1+ index)))))
+            (let* ((object (js-call runtime :invoke "make-object-slot"))
+                   (ordinary (js-call runtime :objectGet object key)))
+              (js-call roots :push object ordinary)
+              (js-call assert :strictEqual (js-call runtime :keyEqual ordinary (aref roots 2)) t))
+            (let ((bad (js-call runtime :invoke "make-bad-getter")) (thrown false) (failure undefined))
+              (js-call roots :push bad)
+              (try (js-call runtime :objectGet bad key) (catch error (setq thrown t failure error)))
+              (js-call assert :strictEqual thrown t)
+              (js-call assert :strictEqual failure false)
+              (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 1)
+              (let ((recovered (js-call runtime :objectGet function key)))
+                (try (js-call assert :strictEqual (js-call runtime :keyEqual recovered (aref roots 2)) t)
+                  (finally (js-call runtime :release recovered)))))))
+        (catch error (setq primary t) (throw error))
+        (finally
+          (let ((failure undefined) (failed false))
+            (js-call (js-array
+              (lambda () (unless (undefined? frame) (js-call runtime :leaveFrame frame)))
+              (lambda () (js-call roots :forEach (lambda (value) (js-call runtime :release value))))
+              (lambda () (js-call runtime :closeModule)) (lambda () (js-call runtime :collect))
+              (lambda () (js-call assert :strictEqual (js-call runtime :live) 0))
+              (lambda () (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
+              (lambda () (when (get runtime :close) (js-call runtime :close))))
+              :forEach (lambda (action) (try (funcall action)
+                (catch error (unless failed (setq failed t failure error))))))
+            (when (and failed (not primary)) (throw failure)))))))
+
+  (test "host bridge preserves unchanged export identities and omitted versus explicit default arguments"
+    (lambda ()
+      (js-call (js-array "failManagedRuntime" "validateManagedRuntimeOptions" "createManagedHostCapabilityBridge")
+        :forEach (lambda (name) (js-call assert :strictEqual (get host name) (get legacy name))))
+      (js-call assert :strictEqual (get (get host :createManagedHostRuntime) :length) 3)
+      (let ((tails (js-array (js-array) (js-array undefined) (js-array nil))) (index 0))
+        (while (< index (js-length tails))
+          (let ((failures (js-array)) (arguments (js-call (js-array (Object/create nil) nil nil) :concat (aref tails index))))
+            (js-call (js-array (get host :createManagedHostRuntime) (get legacy :createManagedHostRuntime))
+              :forEach (lambda (factory)
+                (let ((failed false) (failure undefined))
+                  (try (Reflect/apply factory undefined arguments) (catch error (setq failed t failure error)))
+                  (js-call assert :strictEqual failed t)
+                  (js-call failures :push (js-array (get failure :name) (get failure :message))))))
+            (js-call assert :deepStrictEqual (aref failures 0) (aref failures 1)))
+          (setq index (1+ index))))))
+  (test "WASM host reads actual function Symbol slots across GC and preserves accessor throws and caller roots"
+    (lambda () (exercise (instantiateManagedRuntime bytes (options)))))
+  (test "native host uses the same function property bridge without executing WASM"
+    (js-object :skip (not native-target) :timeout 120000)
+    (async ()
+      (let ((old-module (get globalThis.WebAssembly :Module)) (old-instance (get globalThis.WebAssembly :Instance))
+            (reject (lambda (&rest arguments) (throw (new globalThis.Error "native function slot must not execute WASM")))))
+        (try
+          (put globalThis.WebAssembly :Module (new globalThis.Proxy old-module (js-object :construct reject :apply reject)))
+          (put globalThis.WebAssembly :Instance (new globalThis.Proxy old-instance (js-object :construct reject :apply reject)))
+          (exercise (await (instantiateNativeManagedRuntime library lowered
+            (Object/assign (options) (js-object :nativeTarget native-target)))))
+          (finally (put globalThis.WebAssembly :Module old-module) (put globalThis.WebAssembly :Instance old-instance))))))
+  (test "raw value-object-get still rejects a real function while generic property Get returns its actual slot"
+    (lambda ()
+      (let* ((exports (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
+             (descriptor (get lowered :descriptor)) (module (get descriptor :module))
+             (original (get exports "value-object-get"))
+             (heap (js-call exports "heap-new" 1024 65536 1048576))
+             (entry (js-call (get module :exports) :find (lambda (item) (= (get item :name) "dispatch"))))
+             (function 0) (key 0))
+        (try
+          (js-call exports (get module :initialize) heap)
+          (setq function (js-call exports (get module :get) heap (get entry :kind) (get entry :index)))
+          (js-call exports "heap-pin" heap function)
+          (setq key (js-call exports "value-string" heap 4))
+          (let ((index 0))
+            (while (< index 4)
+              (js-call exports "value-unit-set" heap key index (js-call "slot" :charCodeAt index))
+              (setq index (1+ index))))
+          (js-call exports "value-seal" heap key)
+          (js-call exports "heap-pin" heap key)
+          (js-call assert :strictEqual (js-call exports "value-object-get" heap function key) 0)
+          (js-call assert :strictEqual (js-call exports "last-error") 1)
+          (let ((value (js-call exports "value-property-get" heap function key 0)))
+            (js-call assert :strictEqual (js-call exports "last-error") 0)
+            (js-call assert :strictEqual (js-call exports "value-kind" heap value) 22))
+          (js-call assert :strictEqual (get exports "value-object-get") original)
+          (finally
+            (js-call exports "heap-release" heap function) (js-call exports "heap-release" heap key)
+            (js-call exports (get module :close) heap) (js-call exports "heap-collect" heap)
+            (js-call assert :strictEqual (js-call exports "heap-live" heap) 0)
+            (js-call assert :strictEqual (js-call exports "frame-depth" heap) 0))))))
+
+  (defconst canonical-source (js-call (js-array
+    "(module fixture.canonical-object"
+    " (defconst initializedRoot globalThis/Object.prototype)"
+    " (defconst initializedConstructor globalThis/Object)"
+    " (defun initializedIdentities () (and (eq initializedRoot globalThis/Object.prototype) (eq initializedConstructor globalThis/Object)))"
+    " (defun objectRoot () globalThis/Object.prototype)"
+    " (defun objectConstructor () globalThis/Object)"
+    " (defun ordinary () (js-object :owned 7))"
+    " (defun arrayValue () (js-array 1 2))"
+    " (defun readValue (value key) (get value key))"
+    " (defun writeValue (value key child) (Reflect/set value key child))"
+    " (defun hasValue (value key) (Reflect/has value key))"
+    " (defun descriptorValue (value key) (Object/getOwnPropertyDescriptor value key))"
+    " (defun keysValue (value) (Reflect/ownKeys value))"
+    " (defun defineValue (value key descriptor) (Reflect/defineProperty value key descriptor))"
+    " (defun deleteValue (value key) (Reflect/deleteProperty value key))"
+    " (defun prototypeOf (value) (Object/getPrototypeOf value))"
+    " (defun readRoot (key) (get globalThis/Object.prototype key))"
+    " (defun writeRoot (key value) (Reflect/set globalThis/Object.prototype key value))"
+    " (defun descriptorRoot (key) (Object/getOwnPropertyDescriptor globalThis/Object.prototype key))"
+    " (defun keysRoot () (Reflect/ownKeys globalThis/Object.prototype))"
+    " (defun defineRoot (key descriptor) (Reflect/defineProperty globalThis/Object.prototype key descriptor))"
+    " (defun deleteRoot (key) (Reflect/deleteProperty globalThis/Object.prototype key))"
+    " (defun parentRoot () (Object/getPrototypeOf globalThis/Object.prototype))"
+    " (defun setParentRoot (prototype) (Reflect/setPrototypeOf globalThis/Object.prototype prototype))"
+    " (defun extensibleRoot () (Reflect/isExtensible globalThis/Object.prototype))"
+    " (defun preventRoot () (Reflect/preventExtensions globalThis/Object.prototype))"
+    " (defun freezeRoot () (Object/freeze globalThis/Object.prototype))"
+    " (defun frozenRoot () (Object/isFrozen globalThis/Object.prototype))"
+    " (defun preventConstructor () (Reflect/preventExtensions globalThis/Object))"
+    " (defun freezeConstructor () (Object/freeze globalThis/Object))"
+    " (defun frozenConstructor () (Object/isFrozen globalThis/Object))"
+    " (export initializedIdentities objectRoot objectConstructor ordinary arrayValue readValue writeValue hasValue descriptorValue keysValue defineValue deleteValue prototypeOf readRoot writeRoot descriptorRoot keysRoot"
+    "  defineRoot deleteRoot parentRoot setParentRoot extensibleRoot preventRoot freezeRoot frozenRoot preventConstructor freezeConstructor frozenConstructor))") :join "\n"))
+  (defasync canonical-fixture ()
+    (let* ((compiler (get shared-backend :compiler))
+           (program (js-call compiler :compile_ir_string canonical-source "canonical-object.eli"))
+           (before (globalThis.structuredClone program))
+           (pure (js-call (get shared-backend :managed) :lower_managed_program program shared-runtime t))
+           (actual (js-call (get shared-backend :managed) :lower_managed_program program shared-runtime t nil nil nil nil nil nil nil t))
+           (emit (lambda (lowered) (globalThis.Uint8Array.from
+             (js-call (get shared-backend :wasm) :append_metadata_section
+               (js-call (get shared-backend :wasm) :emit_typed_memory_wasm (get lowered :typed)
+                 (js-object :initialPages 16 :maximumPages 1024))
+               "eliscript-managed-control" (JSON/stringify (get lowered :descriptor))))))
+           (pure-bytes (funcall emit pure)) (actual-bytes (funcall emit actual)))
+      (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module pure-bytes)) (js-array))
+      (js-call assert :deepStrictEqual
+        (js-call (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module actual-bytes)) :map
+          (lambda (item) (js-array (get item :module) (get item :name) (get item :kind))))
+        (js-array (js-array "eliscript.host" "source-operation" "function")))
+      (js-call assert :deepStrictEqual program before)
+      (js-object :pure pure :pureBytes pure-bytes :actual actual :bytes actual-bytes
+        :reference (await (loadReference (resolve directory "canonical-reference.mjs") (js-call compiler :emit_ir_string program))))))
+  (defun canonical-api (runtime roots)
+    (let ((api (js-object)))
+      (js-call (js-array "initializedIdentities" "objectRoot" "objectConstructor" "ordinary" "arrayValue" "readValue" "writeValue" "hasValue" "descriptorValue" "keysValue" "defineValue" "deleteValue" "prototypeOf" "readRoot" "writeRoot"
+        "descriptorRoot" "keysRoot" "defineRoot" "deleteRoot" "parentRoot" "setParentRoot" "extensibleRoot"
+        "preventRoot" "freezeRoot" "frozenRoot" "preventConstructor" "freezeConstructor" "frozenConstructor") :forEach (lambda (name)
+          (let ((value (js-call runtime :getExport name)))
+            (js-call roots :push value) (put api name (js-call runtime :toHostValue value))))) api))
+  (defun canonical-close (runtime roots)
+    (js-call roots :forEach (lambda (value) (js-call runtime :release value)))
+    (js-call runtime :closeModule) (js-call runtime :collect)
+    (js-call assert :strictEqual (js-call runtime :live) 0)
+    (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)
+    (when (get runtime :close) (js-call runtime :close)))
+  (defun exercise-canonical (api)
+    (let* ((prototype (get globalThis.Object :prototype))
+           (key (funcall globalThis.Symbol "canonical object mutation"))
+           (first (js-object :first t)) (reads 0))
+      (js-call assert :strictEqual (js-call api :objectRoot) prototype)
+      (js-call assert :strictEqual (js-call api :initializedIdentities) t)
+      (js-call assert :strictEqual (js-call api :objectConstructor) globalThis.Object)
+      (js-call assert :strictEqual (get (js-call api :objectRoot) :constructor) globalThis.Object)
+      (js-call assert :strictEqual (js-call api :prototypeOf (js-call api :ordinary)) prototype)
+      (js-call assert :strictEqual (js-call api :parentRoot) nil)
+      (js-call assert :strictEqual (js-call api :setParentRoot nil) t)
+      (js-call assert :strictEqual (js-call api :setParentRoot (js-object)) false)
+      (let ((custom (Object/create nil)))
+        (js-call assert :strictEqual (js-call api :prototypeOf (Object/create custom)) custom))
+      (let ((constructor (js-call api :objectConstructor))
+            (symbol (funcall globalThis.Symbol "canonical constructor mutation")))
+        (try
+          (Object/defineProperty globalThis.Object symbol
+            (js-object :value first :writable t :configurable t :enumerable false))
+          (js-call assert :strictEqual (js-call api :readValue constructor symbol) first)
+          (js-call assert :deepStrictEqual (js-call api :descriptorValue constructor symbol)
+            (Object/getOwnPropertyDescriptor globalThis.Object symbol))
+          (js-call assert :strictEqual (js-call api :writeValue constructor symbol -0.0) t)
+          (js-call assert :strictEqual (Object/is (get globalThis.Object symbol) -0.0) t)
+          (js-call assert :strictEqual (js-call api :defineValue constructor symbol
+            (js-object :value first :writable false :configurable t :enumerable t)) t)
+          (js-call assert :strictEqual (get globalThis.Object symbol) first)
+          (js-call assert :ok (js-call (js-call api :keysValue constructor) :includes symbol))
+          (js-call assert :strictEqual (js-call api :deleteValue constructor symbol) t)
+          (js-call assert :strictEqual (Object/hasOwn globalThis.Object symbol) false)
+          (finally (Reflect/deleteProperty globalThis.Object symbol))))
+      (try
+        (Object/defineProperty prototype key (js-object :value first :enumerable t :configurable t :writable t))
+        (js-call assert :strictEqual (js-call api :readRoot key) first)
+        (let ((owned (js-call api :ordinary)))
+          (js-call assert :strictEqual (js-call api :readValue owned key) first)
+          (js-call assert :strictEqual (js-call api :hasValue owned key) t)
+          (js-call assert :strictEqual (js-call api :writeValue owned key -0.0) t)
+          (js-call assert :strictEqual (Object/is (get owned key) -0.0) t)
+          (js-call assert :strictEqual (get prototype key) first)
+          (js-call assert :strictEqual (Object/hasOwn owned key) t))
+        (js-call assert :deepStrictEqual (js-call api :descriptorRoot key) (Object/getOwnPropertyDescriptor prototype key))
+        (js-call assert :ok (js-call (js-call api :keysRoot) :includes key))
+        (js-call assert :strictEqual (js-call api :writeRoot key -0.0) t)
+        (js-call assert :strictEqual (Object/is (get prototype key) -0.0) t)
+        (js-call assert :strictEqual (js-call api :defineRoot key
+          (js-object :get (lambda () (setq reads (1+ reads)) first) :enumerable false :configurable t)) t)
+        (js-call assert :strictEqual (js-call api :readRoot key) first)
+        (js-call assert :strictEqual reads 1)
+        (js-call (js-array false undefined first) :forEach (lambda (failure)
+          (Object/defineProperty prototype key (js-object :configurable t :get (lambda () (throw failure))))
+          (let ((failed false) (actual nil))
+            (try (js-call api :readRoot key) (catch error (setq failed t actual error)))
+            (js-call assert :strictEqual failed t)
+            (js-call assert :strictEqual actual failure))))
+        (js-call assert :strictEqual (js-call api :deleteRoot key) t)
+        (js-call assert :strictEqual (Object/hasOwn prototype key) false)
+        (let ((actual (js-call api :keysRoot)) (expected (Reflect/ownKeys prototype)) (index 0))
+          (js-call assert :strictEqual (get actual :length) (get expected :length))
+          (while (< index (get expected :length))
+            (js-call assert :strictEqual (aref actual index) (aref expected index))
+            (setq index (1+ index))))
+        (finally (Reflect/deleteProperty prototype key)))))
+
+  (test "source-operation uses actual canonical Object identities with complete mutations while the same pure program retains its own zero-import realm"
+    (js-object :timeout 120000)
+    (async ()
+      (let* ((fixture (await (canonical-fixture))) (roots (js-array))
+             (pure (instantiateManagedRuntime (get fixture :pureBytes) (options))))
+        (exercise-canonical (get fixture :reference))
+        (try
+          (let* ((root-token (js-call pure :invoke "objectRoot"))
+                 (object-token (js-call pure :invoke "ordinary")))
+            (js-call roots :push root-token object-token)
+            (let ((root (js-call pure :toHostValue root-token)) (value (js-call pure :toHostValue object-token)))
+              (js-call assert :notStrictEqual root (get globalThis.Object :prototype))
+              (js-call assert :strictEqual (Reflect/getPrototypeOf value) root)))
+          (finally (canonical-close pure roots)))
+        (let ((targets (if native-target (js-array "wasm" "native") (js-array "wasm"))) (position 0))
+          (while (< position (js-length targets))
+            (let* ((target (aref targets position)) (runtime undefined) (roots (js-array))
+                   (configuration (Object/assign (options) (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216
+                     :nativeTarget native-target))) (failed false))
+              (try
+                (progn
+                  (if (= target "wasm") (setq runtime (await (instantiateManagedRuntimeWithHostModules (get fixture :bytes) configuration)))
+                    (let ((path (resolve directory (if (= native-target "arm64-macos") "canonical-object.dylib" "canonical-object.so"))))
+                      (await (writeFile path (globalThis.Uint8Array.from (js-call (get shared-backend :native)
+                        :emit_typed_native_memory_library (get (get fixture :actual) :typed) native-target))))
+                      (setq runtime (await (instantiateNativeManagedRuntime path (get fixture :actual) configuration)))))
+                  (js-call runtime :auto 1)
+                  (let ((api (canonical-api runtime roots)))
+                    (exercise-canonical api) (js-call runtime :collect) (exercise-canonical api)
+                    (let ((token (js-call runtime :fromHostValue (get globalThis.Object :prototype)))
+                          (raw-root (js-call runtime :invoke "objectRoot"))
+                          (key (js-call runtime :string "constructor")))
+                      (try
+                        (js-call assert :strictEqual (js-call runtime :keyEqual token raw-root) t)
+                        (js-call assert :strictEqual (js-call runtime :toHostValue token) (js-call api :objectRoot))
+                        ;; The separate raw Object ABI remains object-only.
+                        (js-call assert :throws (lambda () (js-call runtime :objectGet token key))
+                          (lambda (error) (= (get (get error :eliscriptDiagnostic) :code) "ELI-RT0001")))
+                        (js-call runtime :collect)
+                        (js-call assert :strictEqual (js-call runtime :toHostValue token) (get globalThis.Object :prototype))
+                        (finally (js-call runtime :release token) (js-call runtime :release raw-root)
+                          (js-call runtime :release key))))
+                    (let ((object (js-call runtime :invoke "ordinary"))
+                          (key (js-call runtime :string "rawOwnedMutation"))
+                          (child (js-call runtime :number -0.0)))
+                      (try
+                        (js-call assert :strictEqual (js-call runtime :objectSet object key child) object)
+                        (let ((value (js-call runtime :objectGet object key)))
+                          (try
+                            (js-call assert :strictEqual (Object/is (js-call runtime :readNumber value) -0.0) t)
+                            (finally (js-call runtime :release value))))
+                        (js-call assert :strictEqual (Object/hasOwn (get globalThis.Object :prototype) "rawOwnedMutation") false)
+                        (finally (js-call runtime :release object) (js-call runtime :release key)
+                          (js-call runtime :release child))))))
+                (catch error (setq failed t) (throw error))
+                (finally (when runtime (try (canonical-close runtime roots) (catch cleanup (unless failed (throw cleanup))))))))
+            (setq position (1+ position)))))))
+
+  (test "canonical host Object identities remain shared across owners and survive closing one owner without opening closed source views"
+    (js-object :timeout 120000)
+    (async ()
+      (let* ((fixture (await (canonical-fixture)))
+             (a (await (instantiateManagedRuntimeWithHostModules (get fixture :bytes) (options))))
+             (b undefined) (a-roots (js-array)) (b-roots (js-array)) (closed false))
+        (try
+          (setq b (await (instantiateManagedRuntimeWithHostModules (get fixture :bytes) (options))))
+          (let* ((left (canonical-api a a-roots)) (right (canonical-api b b-roots))
+                 (value (js-call left :ordinary)))
+            (js-call assert :strictEqual (js-call left :objectRoot) (js-call right :objectRoot))
+            (js-call assert :strictEqual (js-call right :prototypeOf value) (get globalThis.Object :prototype))
+            (canonical-close a a-roots) (setq closed t)
+            (js-call assert :strictEqual (js-call right :objectRoot) (get globalThis.Object :prototype))
+            (js-call assert :strictEqual (get (get globalThis.Object :prototype) :constructor) globalThis.Object)
+            (js-call assert :throws (lambda () (Reflect/get value "owned"))
+              (lambda (error) (= (get error :message) "managed host value is closed"))))
+          (finally
+            (unless closed (canonical-close a a-roots))
+            (when b (canonical-close b b-roots)))))))
+
+  (test "canonical host identity is available during the original initializer and explicit deferred initialization stays deferred"
+    (js-object :timeout 120000)
+    (async ()
+      (let* ((fixture (await (canonical-fixture)))
+             (runtime (await (instantiateManagedRuntimeWithHostModules (get fixture :bytes)
+               (Object/assign (options) (js-object :initializeModule false)))))
+             (roots (js-array)))
+        (try
+          (js-call assert :throws (lambda () (js-call runtime :invoke "initializedIdentities"))
+            (lambda (error) (= (get (get error :eliscriptDiagnostic) :code) "ELI-RT0008")))
+          (js-call assert :strictEqual (js-call runtime :initializeModule) t)
+          (let ((api (canonical-api runtime roots)))
+            (js-call assert :strictEqual (js-call api :initializedIdentities) t)
+            (js-call assert :strictEqual (js-call api :objectRoot) (get globalThis.Object :prototype)))
+          (finally (canonical-close runtime roots))))))
+
+  (defconst integrity-title "canonical host Object integrity mutations use the actual isolated host intrinsic")
+  (test integrity-title
+    (js-object :skip (/= (get (get globalThis.process :env) "ELISCRIPT_HOST_OBJECT_INTEGRITY_CHILD") "1") :timeout 120000)
+    (async ()
+      (let* ((fixture (await (canonical-fixture)))
+             (native (= (get (get globalThis.process :env) "ELISCRIPT_HOST_OBJECT_INTEGRITY_TARGET") "native"))
+             (runtime undefined)
+             (configuration (Object/assign (options) (js-object :nativeTarget native-target)))
+             (library (resolve directory (if (= native-target "arm64-macos") "integrity.dylib" "integrity.so"))))
+        (if native
+          (progn
+            (js-call assert :ok native-target)
+            (await (writeFile library (globalThis.Uint8Array.from (js-call (get shared-backend :native)
+              :emit_typed_native_memory_library (get (get fixture :actual) :typed) native-target))))
+            (setq runtime (await (instantiateNativeManagedRuntime library (get fixture :actual) configuration))))
+          (setq runtime (await (instantiateManagedRuntimeWithHostModules (get fixture :bytes) configuration))))
+      (let* (
+             (roots (js-array)) (api (canonical-api runtime roots)))
+        (try
+          (js-call assert :strictEqual (js-call api :extensibleRoot) (Reflect/isExtensible (get globalThis.Object :prototype)))
+          (js-call assert :strictEqual (js-call api :preventRoot) t)
+          (js-call assert :strictEqual (Reflect/isExtensible (get globalThis.Object :prototype)) false)
+          (js-call assert :strictEqual (js-call api :freezeRoot) (get globalThis.Object :prototype))
+          (js-call assert :strictEqual (Object/isFrozen (get globalThis.Object :prototype)) t)
+          (js-call assert :strictEqual (js-call api :frozenRoot) t)
+          (js-call assert :strictEqual (js-call api :preventConstructor) t)
+          (js-call assert :strictEqual (Reflect/isExtensible globalThis.Object) false)
+          (js-call assert :strictEqual (js-call api :freezeConstructor) globalThis.Object)
+          (js-call assert :strictEqual (Object/isFrozen globalThis.Object) t)
+          (js-call assert :strictEqual (js-call api :frozenConstructor) t)
+          (finally (canonical-close runtime roots)))))))
+  (test "irreversible canonical host integrity is verified in an isolated real Node process without mutating the parent intrinsic"
+    (lambda ()
+      (let ((before (Reflect/isExtensible (get globalThis.Object :prototype))))
+        (js-call (if native-target (js-array "wasm" "native") (js-array "wasm")) :forEach (lambda (target)
+          (let ((result (spawnSync (get globalThis.process :execPath)
+            (js-array "--test" "--test-name-pattern" (str "^" integrity-title "$")
+              (resolve root "tests/managed-host-selfhosted.test.mjs"))
+            (js-object :encoding "utf8" :env (Object/assign (js-object) (get globalThis.process :env)
+              (js-object :ELISCRIPT_HOST_OBJECT_INTEGRITY_CHILD "1"
+                :ELISCRIPT_HOST_OBJECT_INTEGRITY_TARGET target))))))
+            (js-call assert :strictEqual (get result :error) undefined)
+            (js-call assert :strictEqual (get result :status) 0 (str (get result :stdout) (get result :stderr)))
+            (js-call assert :strictEqual (Reflect/isExtensible (get globalThis.Object :prototype)) before)))))))
+)

@@ -7,6 +7,7 @@ import {pathToFileURL} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {buildBackends} from '../tools/backends/build.mjs';
 import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';
+import {invokeWithHeapDiagnostic} from './helpers/managed-heap-diagnostic.mjs';
 const methods=['push','pop','slice','map','filter','forEach','some','every','find','findIndex','findLast','findLastIndex','reduce','reduceRight','sort','toSorted','join','toString','concat','includes','indexOf','lastIndexOf','keys','values','entries'];
 let directory,backend,runtime,program,bytes,reference,source;
 beforeAll(async()=>{
@@ -58,7 +59,7 @@ test('override dispatch capacity failure preserves caller frames and recovers wi
  const a=instantiateManagedRuntime(bytes,{maxSlots:256,initialBytes:32768,maxBytes:131072});a.auto(1);const mode=a.number(6),caller=a.frame(1);a.frameSet(caller,0,mode);const padding=[];let exhausted=false;
  try{for(let i=0;i<512;i++)padding.push(a.number(i));}catch(error){assert.equal(error.eliscriptDiagnostic?.code,'ELI-RT0002');exhausted=true;}assert(exhausted);
  assert.throws(()=>a.invoke('test-push',[mode]),error=>error.eliscriptDiagnostic?.code==='ELI-RT0002');assert.equal(a.stats().frameDepth,1);
- for(const value of padding)a.release(value);a.collect();const out=a.invoke('test-push',[mode]);assert.equal(a.readString(out),withPrototypes(()=>reference.test_push(6)));assert.equal(a.stats().frameDepth,1);a.leaveFrame(caller);finish(a,[mode,out]);
+ for(const value of padding)a.release(value);a.collect();const out=invokeWithHeapDiagnostic(a,'test-push',[mode]);assert.equal(a.readString(out),withPrototypes(()=>reference.test_push(6)));assert.equal(a.stats().frameDepth,1);a.leaveFrame(caller);finish(a,[mode,out]);
 });
 test('captured prototype callee Get traps unwind private frames while a later independent source call recovers',async()=>{
  const source=await readFile('bootstrap/runtime/memory.eli','utf8'),first=source.indexOf('  (defun value-array-callback-get '),last=source.indexOf('  ;; The supported source objects',first);assert(first>=0&&last>first);
@@ -66,6 +67,6 @@ test('captured prototype callee Get traps unwind private frames while a later in
  const artifact=Uint8Array.from(backend.managed.emit_managed_wasm(program,injected));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(artifact)),[]);
  for(const name of ['push','includes','keys']){const a=instantiateManagedRuntime(artifact);a.auto(1);const mode=a.number(0),caller=a.frame(1);a.frameSet(caller,0,mode);assert.throws(()=>a.invoke('test-'+name,[mode]),WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);const out=a.invoke('recover');assert.equal(a.readNumber(out),3);assert.equal(a.stats().frameDepth,1);a.leaveFrame(caller);finish(a,[mode,out]);}
 });
-test('unrepresented default Array native callable reflection remains an explicit refusal',()=>{
- const a=instantiateManagedRuntime(bytes);a.auto(1);assert.throws(()=>a.invoke('native'),error=>error.eliscriptDiagnostic?.code==='ELI-RT0003');finish(a);
+test('default Array native method lookup returns a real managed callable',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);const method=a.invoke('native');assert.equal(method.kind,18);finish(a,[method]);
 });

@@ -1,0 +1,1549 @@
+(module bootstrap.host.compiler-session
+  (import "../bootstrap/compiler.mjs"
+    compile-ir-string compile-project-portable-ir-string emit-ir-string emit-ir-string-with-source-map
+    serialize-ir-program deserialize-ir-program format-source project-plan portable-project-plan
+    project-request project-configuration build-operation-request check-operation-request
+    project-build-report project-check-report project-cache-lookup project-cache-decision
+    evaluation-operation-request evaluation-input-description
+    evaluation-form-description evaluation-module-description)
+  (import "../backends/managed.mjs" lower-managed-program lower-managed-project)
+  (import "../backends/memory.mjs" lower-memory-program)
+  (import "../backends/wasm.mjs"
+    emit-typed-memory-wasm emit-typed-memory-wasm-artifact append-metadata-section
+    emit-managed-ir-wasm-product emit-managed-project-wasm-product)
+  (import "../backends/native.mjs"
+    emit-typed-native-memory-library emit-typed-native-memory-object
+    emit-typed-native-memory-artifact
+    emit-fresh-observed-typed-native-memory-object emit-fresh-observed-typed-native-memory-library emit-fresh-observed-typed-native-memory-artifact)
+  (import "./compiler-tools.mjs" tools-request)
+  (import "../bootstrap/reader.mjs" read-string)
+  (import "../bootstrap/expander.mjs" expand-module expand-module-with-origins
+    expand-owned-module expand-owned-module-with-origins)
+  (import "../bootstrap/analyzer.mjs" analyze-module select-portable-module)
+  (import "../bootstrap/lower.mjs" lower-module lower-owned-module)
+  (import "../bootstrap/symbol.mjs" binding-name)
+
+  ;; Private JSON buffers contain only already encoded string tokens. Invoke
+  ;; the primitive join directly rather than source-array text conversion,
+  ;; which must also implement the language's cyclic-array contract.
+  (defconst session-json-parts-join (get (js* "Array.prototype") :join))
+
+  (defun session-fail (message &optional filename)
+    (let* ((error (new (js* "Error") message))
+           (diagnostic (js-object :format "eliscript-diagnostic" :version 1
+             :code "ELI-H0001" :severity "error" :phase "compiler-session" :message message)))
+      (when filename (put diagnostic :location (js-object :file filename)))
+      (put error :eliscriptDiagnostic diagnostic)
+      (throw error)))
+
+  (defun session-object-p (value)
+    (and (not (nil? value)) (= (value-type value) "object") (not (Array/isArray value))))
+
+  (defun session-string (record key fallback)
+    (let ((value (get record key fallback)))
+      (unless (= (value-type value) "string")
+        (session-fail (+ "compiler request requires string " key)))
+      value))
+
+  (defun session-live (state)
+    (unless (and (session-object-p state)
+                 (= (get state :format nil) "eliscript-compiler-session")
+                 (= (get state :version nil) 1)
+                 (= (get state :closed nil) false))
+      (session-fail "compiler session is closed or invalid"))
+    state)
+
+  (defun session-phase (state phase count)
+    ;; Only a local JS driver wrapper may install this private observer. It is
+    ;; never read from request JSON or included in a response/product. Managed
+    ;; hosts leave it nil and need no additional host capability or import.
+    (try
+      (let ((observer (get state :phaseObserver nil)))
+        (when (= (value-type observer) "function")
+          (funcall observer phase (js-object :count count))))
+      (catch ignored nil)))
+
+  (defun compiler-session-new ()
+    (js-object :format "eliscript-compiler-session" :version 1 :closed false
+      :runtime nil :runtimeSource nil :runtimeFilename nil :revision 0
+      :literalSources nil :literalModules nil :literalKey nil :literalRevision 0 :literalCache (new globalThis.Map)
+      :projectKey nil :projectModules nil :projectPortablePlan nil
+      :projectRevision 0 :moduleCache (new globalThis.Map)
+      :responseCursor nil :responseToken 0 :phaseObserver nil :lastPhase nil))
+
+  (defun compiler-session-close (state)
+    (session-live state)
+    (session-response-clear state)
+    (put state :runtime nil)
+    (put state :runtimeSource nil)
+    (put state :runtimeFilename nil)
+    (put state :literalSources nil) (put state :literalModules nil)
+    (put state :literalKey nil) (put state :literalCache nil)
+    (put state :projectKey nil)
+    (put state :projectModules nil)
+    (put state :projectPortablePlan nil)
+    (put state :moduleCache nil)
+    (put state :phaseObserver nil)
+    (put state :lastPhase nil)
+    (put state :closed t)
+    nil)
+
+  (defun session-macro-context (input)
+    (when (not (nil? input))
+      (unless (session-object-p input) (session-fail "macroContext must be an object"))
+      (let ((capabilities (get input :capabilities (js-array)))
+            (files (get input :files (js-array)))
+            (allowed (new globalThis.Set)) (contents (new globalThis.Map)) (index 0))
+        (unless (and (Array/isArray capabilities) (Array/isArray files))
+          (session-fail "macroContext requires capability and file arrays"))
+        (while (< index (js-length capabilities))
+          (let ((name (js-nth index capabilities)))
+            (unless (= name "read-file") (session-fail "unsupported macro capability"))
+            (js-call allowed :add name))
+          (setq index (1+ index)))
+        (setq index 0)
+        (while (< index (js-length files))
+          (let ((item (js-nth index files)))
+            (unless (session-object-p item) (session-fail "macro file must be an object"))
+            (let ((specifier (session-string item "specifier" undefined))
+                  (content (session-string item "content" undefined)))
+              (when (js-call contents :has specifier) (session-fail "duplicate macro file"))
+              (js-call contents :set specifier content)))
+          (setq index (1+ index)))
+        (js-object :capabilities allowed :files contents))))
+
+  (defun session-runtime-ir (state source filename prefix index)
+    ;; The same owned frontend stages as compile-ir-string, with only a scalar
+    ;; checkpoint between them. No source tree is retained in session progress.
+    (put state :lastPhase (js-object :phase (+ prefix "-read") :filename filename :index index))
+    (let ((forms (read-string source filename)))
+      (put (get state :lastPhase) :phase (+ prefix "-expand"))
+      (let ((expanded (expand-owned-module forms filename)))
+        (setq forms nil)
+        (put (get state :lastPhase) :phase (+ prefix "-analyze"))
+        (analyze-module expanded filename)
+        (put (get state :lastPhase) :phase (+ prefix "-lower"))
+        (lower-owned-module expanded filename))))
+
+  (defun session-packed-literal-ir (state source filename index)
+    ;; Return only the wire snapshot: the completed frontend frame and its
+    ;; program roots end here, before the next literal or the runtime Reader.
+    (let ((program (session-runtime-ir state source filename "literal" index)))
+      (put (get state :lastPhase) :phase "literal-snapshot")
+      (serialize-ir-program program)))
+
+  (defun session-shared-ir-primitive (value pool)
+    (if (js-call pool :has value) (js-call pool :get value)
+      (progn (js-call pool :set value value) value)))
+
+  (defun session-restore-ir-value (value strings numbers)
+    ;; Only a freshly deserialized private JSON tree enters this traversal.
+    ;; Consume its parent edges, and retain primitive constants rather than
+    ;; one managed string/number for every occurrence in the restored graph.
+    (let ((kind (value-type value)))
+      (cond
+        ((= kind "string") (session-shared-ir-primitive value strings))
+        ((= kind "number")
+          (if (Object/is value -0) value (session-shared-ir-primitive value numbers)))
+        ((or (nil? value) (not (= kind "object"))) value)
+        ((Array/isArray value)
+          (let ((result (js-array)) (index 0) (count (js-length value)))
+            (while (< index count)
+              (let ((child (session-restore-ir-value (js-nth index value) strings numbers)))
+                (put value index nil)
+                (js-call result :push child))
+              (setq index (1+ index))) result))
+        (t
+          (let ((result (js-object)) (keys (Object/keys value)) (index 0))
+            (while (< index (js-length keys))
+              (let* ((original-key (js-nth index keys))
+                     (key (session-shared-ir-primitive original-key strings))
+                     (child (session-restore-ir-value (get value original-key) strings numbers)))
+                (Reflect/deleteProperty value original-key)
+                (put keys index nil)
+                (Object/defineProperty result key
+                  (js-object :value child :writable t :enumerable t :configurable t)))
+              (setq index (1+ index))) result)))))
+
+  (defun session-restore-literals (state literals)
+    (let ((strings (new globalThis.Map)) (numbers (new globalThis.Map))
+          (modules (get literals :modules)) (sources (get literals :sources))
+          (cache (get literals :cache)) (index 0))
+      (while (< index (js-length modules))
+        (let* ((module (js-nth index modules)) (source (js-nth index sources))
+               (cached (js-call cache :get (get module :id))))
+          (when (Object/hasOwn module "packedIR")
+            (put state :lastPhase (js-object :phase "literal-restore"
+              :filename (get source :filename) :index index))
+            (let ((program (session-restore-ir-value
+                    (deserialize-ir-program (get module :packedIR)) strings numbers)))
+              (put module :program program)
+              (put cached :program program)
+              (Reflect/deleteProperty module "packedIR")
+              (Reflect/deleteProperty cached "packedIR"))))
+        (setq index (1+ index)))
+      ;; Neither pool is part of the published session cache.
+      (js-call strings :clear) (js-call numbers :clear)
+      literals))
+
+  (defun session-literal-modules (state request &optional pack)
+    (let* ((inputs (get request :literalSources (or (get state :literalSources) (js-array))))
+           (key (JSON/stringify inputs))
+           (previous (or (get state :literalCache) (new globalThis.Map))))
+      (unless (Array/isArray inputs) (session-fail "literalSources must be an array"))
+      (if (and (= key (get state :literalKey)) (get state :literalModules))
+        (js-object :key key :sources inputs :modules (get state :literalModules) :cache previous)
+        ;; A complete cache hit needs none of the replacement transaction's
+        ;; containers.  On a miss keep that transaction private until all
+        ;; literals and the runtime have successfully compiled.
+        (let ((modules (js-array)) (sources (js-array))
+              (next (new globalThis.Map)) (ids (new globalThis.Set)) (index 0))
+          (while (< index (js-length inputs))
+           (let ((input (js-nth index inputs)))
+            (unless (session-object-p input) (session-fail "literal source must be an object"))
+            (let* ((id (session-string input "id" undefined))
+                   (source (session-string input "source" undefined))
+                   (filename (session-string input "filename" id))
+                   (cached (js-call previous :get id)))
+              (when (or (= (js-length id) 0) (js-call ids :has id))
+                (session-fail "literal source ids must be non-empty and unique" filename))
+              (js-call ids :add id)
+              ;; Both fields are already primitive strings. Keep their original
+              ;; values rather than retaining a second escaped copy of every
+              ;; library's complete source beside the whole-graph key.
+              (let* ((reusable (and cached (= (get cached :source) source)
+                                    (= (get cached :filename) filename)))
+                     (program (if reusable (get cached :program)
+                               (if pack (session-packed-literal-ir state source filename index)
+                                 (session-runtime-ir state source filename "literal" index)))))
+                (unless reusable (put (get state :lastPhase) :phase "literal-complete"))
+                (js-call modules :push (if (and pack (not reusable))
+                  (js-object :id id :packedIR program) (js-object :id id :program program)))
+                (js-call sources :push (js-object :id id :filename filename :source source))
+                (js-call next :set id (if reusable cached
+                  (if pack (js-object :source source :filename filename :packedIR program)
+                    (js-object :source source :filename filename :program program)))))))
+           (setq index (1+ index)))
+          (js-object :key key :sources sources :modules modules :cache next)))))
+  (defun session-publish-literals (state literals)
+    (unless (= (get state :literalKey) (get literals :key))
+      (put state :literalRevision (1+ (get state :literalRevision))))
+    (put state :literalSources (get literals :sources))
+    (put state :literalModules (get literals :modules))
+    (put state :literalKey (get literals :key))
+    (put state :literalCache (get literals :cache)))
+  (defun session-runtime (state request)
+    (session-phase state "runtime-literals-start" 0)
+    (let* ((source (session-string request "source" undefined))
+           (filename (session-string request "filename" "bootstrap/runtime/memory.eli"))
+           (cold (and (nil? (get state :runtime)) (= (get (get state :literalCache) :size) 0)))
+           (literals (session-literal-modules state request cold)))
+      (session-phase state "runtime-literals-complete" (js-length (get literals :modules)))
+      ;; Compile before publishing any state. A failed replacement preserves the
+      ;; previous runtime, and subsequent target emissions reuse the same IR.
+      (unless (and (= source (get state :runtimeSource))
+                   (= filename (get state :runtimeFilename))
+                   (= (get literals :key) (get state :literalKey))
+                   (not (nil? (get state :runtime))))
+        (session-phase state "runtime-program-start" 0)
+        (let ((program (if (and (= source (get state :runtimeSource))
+                               (= filename (get state :runtimeFilename)) (get state :runtime))
+                          (get state :runtime)
+                          (session-runtime-ir state source filename "runtime-program" -1))))
+          (session-phase state "runtime-program-complete" 0)
+          ;; Restore only after every literal and the runtime succeeded. A
+          ;; failed restore still leaves the previous session unpublished.
+          (when cold (session-restore-literals state literals))
+          (put state :runtime program)
+          (put state :runtimeSource source)
+          (put state :runtimeFilename filename)
+          (session-publish-literals state literals)
+          (put state :revision (1+ (get state :revision)))))
+      (put state :lastPhase (js-object :phase "runtime-ready" :filename filename :index -1))
+      (let ((result (js-object :ready t :filename filename :revision (get state :revision))))
+        (when (> (js-length (get state :literalModules (js-array))) 0)
+          (put result :literalRevision (get state :literalRevision))) result)))
+
+  (defun session-ir-wire-flush (sink)
+    (let ((pending (get sink :pending)))
+      (when (> (js-length pending) 0)
+        (js-call (get sink :complete) :push (Reflect/apply session-json-parts-join pending (js-array "")))
+        (put sink :pending (js-array))
+        (put sink :units 0))))
+
+  (defun session-ir-wire-push (sink text)
+    ;; Release completed token batches during the traversal, rather than
+    ;; retaining one array entry per byte/field until the entire reply exists.
+    (let ((pending (get sink :pending)))
+      (js-call pending :push text)
+      (put sink :units (+ (get sink :units) (js-length text)))
+      (when (or (>= (js-length pending) 2048) (>= (get sink :units) 32768))
+        (session-ir-wire-flush sink))))
+
+  (defun session-ir-wire-append (value ancestors frames chunks array-element)
+    (let ((kind (value-type value)))
+      (cond
+        ((nil? value) (session-ir-wire-push chunks "null") t)
+        ((= kind "bigint")
+          (throw (new globalThis/TypeError "compiler IR cannot contain BigInt values")))
+        ((= kind "number")
+          (session-ir-wire-push chunks
+            (if (and (= value 0) (< (/ 1 value) 0)) "-0" (JSON/stringify value))) t)
+        ((or (= kind "string") (= kind "boolean"))
+          (session-ir-wire-push chunks (JSON/stringify value)) t)
+        ((not (= kind "object"))
+          (when array-element (session-ir-wire-push chunks "null")) false)
+        (t
+          (when (js-call ancestors :has value)
+            (throw (new globalThis/TypeError "compiler IR cannot contain cycles")))
+          (let ((frame (js-object :value value :array (Array/isArray value)
+                         :keys nil :index 0 :first t :active false)))
+            ;; Publish the cleanup record before adding this path element.
+            ;; Object.keys or the opening chunk may fail after the add.
+            (js-call frames :push frame)
+            (js-call ancestors :add value)
+            (put frame :active t)
+            (if (get frame :array)
+                (session-ir-wire-push chunks "[")
+              (progn
+                (session-ir-wire-push chunks "{")
+                (put frame :keys (Object/keys value)))))
+          t))))
+
+  (defun session-ir-wire (value ancestors)
+    ;; The traversal owns only its active path entries. Completed shared
+    ;; subtrees may be emitted again without recursion or intermediate joins.
+    (let ((frames (js-array))
+          (chunks (js-object :pending (js-array) :units 0 :complete (js-array))))
+      (try
+        (progn
+          (unless (session-ir-wire-append value ancestors frames chunks false)
+            (throw (new globalThis/TypeError "compiler IR must be JSON data")))
+          (while (> (js-length frames) 0)
+            (let* ((frame (js-nth (1- (js-length frames)) frames))
+                   (container (get frame :value))
+                   (index (get frame :index)) (advance false))
+              (if (get frame :array)
+                  (when (< index (js-length container))
+                    (put frame :index (1+ index))
+                    (when (> index 0) (session-ir-wire-push chunks ","))
+                    (session-ir-wire-append (js-nth index container) ancestors frames chunks t)
+                    (setq advance t))
+                (let ((keys (get frame :keys)))
+                  (when (< index (js-length keys))
+                    (put frame :index (1+ index))
+                    (let* ((key (js-nth index keys)) (item (get container key))
+                           (kind (value-type item)))
+                      (unless (or (undefined? item) (= kind "function") (= kind "symbol"))
+                        (unless (get frame :first) (session-ir-wire-push chunks ","))
+                        (put frame :first false)
+                        (session-ir-wire-push chunks (JSON/stringify key))
+                        (session-ir-wire-push chunks ":")
+                        (session-ir-wire-append item ancestors frames chunks false)))
+                    (setq advance t))))
+              (unless advance
+                (session-ir-wire-push chunks (if (get frame :array) "]" "}"))
+                (js-call ancestors :delete container)
+                (put frame :active false)
+                (js-call frames :pop))))
+          (progn
+            (session-ir-wire-flush chunks)
+            (Reflect/apply session-json-parts-join (get chunks :complete) (js-array ""))))
+        (finally
+          (while (> (js-length frames) 0)
+            (let ((frame (js-call frames :pop)))
+              (when (get frame :active)
+                (js-call ancestors :delete (get frame :value)))))))))
+
+  (defun session-response-clear (state)
+    (let ((cursor (get state :responseCursor nil)))
+      (put state :responseCursor nil)
+      (when cursor
+        ;; Existing fields are cleared without allocating cleanup containers.
+        ;; Nothing outside this private cursor owns its active ancestor set.
+        (put cursor :root nil) (put cursor :frames nil)
+        (put cursor :ancestors nil) (put cursor :pendingEvent nil)
+        (when (get cursor :identities nil)
+          (put (get cursor :identities) :segments nil))
+        (put cursor :identities nil) (put cursor :nextIdentity 0))))
+
+  ;; Keep each host hash-table rehash bounded independently of the full graph.
+  ;; IDs remain global across segments; no response field or edge is omitted.
+  (defconst session-response-identity-segment-size 1048576)
+
+  (defun session-response-identities (segment-size)
+    ;; The private size argument permits small boundary fixtures. Production
+    ;; always uses the fixed ceiling, below a single host Map's entry limit.
+    (let ((limit segment-size))
+      (unless (and (Number/isSafeInteger limit) (> limit 0)
+                   (<= limit session-response-identity-segment-size))
+        (session-fail "invalid compiler response identity segment size"))
+      (js-object :limit limit :segments (js-array (new globalThis.Map)))))
+
+  (defun session-response-find-identity (identities value)
+    (let ((segments (get identities :segments)) (index 0) (id nil))
+      (while (and (nil? id) (< index (js-length segments)))
+        (let ((segment (js-nth index segments)))
+          (when (js-call segment :has value) (setq id (js-call segment :get value))))
+        (setq index (1+ index)))
+      id))
+
+  (defun session-response-add-identity (identities value id)
+    (let* ((segments (get identities :segments))
+           (segment (js-nth (1- (js-length segments)) segments)))
+      (when (>= (get segment :size) (get identities :limit))
+        (setq segment (new globalThis.Map))
+        (js-call segments :push segment))
+      (js-call segment :set value id)))
+
+  (defun session-response-value-event (cursor value array-element)
+    (let ((kind (value-type value)))
+      (cond
+        ((undefined? value)
+          (if array-element (js-array "value" nil)
+            (throw (new globalThis/TypeError "compiler IR must be JSON data"))))
+        ((nil? value) (js-array "value" nil))
+        ((= kind "bigint")
+          (throw (new globalThis/TypeError "compiler IR cannot contain BigInt values")))
+        ((= kind "number") (js-array "value" (if (Number/isFinite value) value nil)))
+        ((= kind "string")
+          (if (and (get cursor :stringChunks false) (> (js-length value) 8192))
+              (progn
+                (js-call (get cursor :frames) :push
+                  (js-object :string t :value value :index 0))
+                (js-array "string" (js-length value)))
+            (js-array "value" value)))
+        ((= kind "boolean") (js-array "value" value))
+        ((not (= kind "object"))
+          (if array-element (js-array "value" nil)
+            (throw (new globalThis/TypeError "compiler IR must be JSON data"))))
+        (t
+          (let ((ancestors (get cursor :ancestors)) (frames (get cursor :frames))
+                (identities (get cursor :identities nil)))
+            (when (js-call ancestors :has value)
+              (throw (new globalThis/TypeError "compiler IR cannot contain cycles")))
+            ;; Only the explicit graph protocol reuses completed identities.
+            ;; Active ancestors are rejected first, including previously named
+            ;; objects, so references cannot introduce cycles.
+            (let ((existing (when identities (session-response-find-identity identities value))))
+            (if existing
+                (js-array "reference" existing)
+              (let ((frame (js-object :value value :array (Array/isArray value) :keys nil
+                             :index 0 :pendingValue false :item nil)) (id nil))
+                (when identities
+                  (setq id (get cursor :nextIdentity))
+                  (unless (and (Number/isSafeInteger id) (> id 0))
+                    (session-fail "compiler response identity space is exhausted"))
+                  (session-response-add-identity identities value id)
+                  (put cursor :nextIdentity (1+ id)))
+                (js-call frames :push frame) (js-call ancestors :add value)
+                (let ((kind (if (get frame :array) "array" "object")))
+                  (unless (get frame :array) (put frame :keys (Object/keys value)))
+                  (if identities (js-array kind id) (js-array kind)))))))))))
+
+  (defun session-response-array-event (cursor frame)
+    (let ((container (get frame :value)) (values (js-array)) (event nil) (stop false))
+      (while (and (not stop) (< (js-length values) 256)
+                  (< (get frame :index) (js-length container)))
+        (let ((index (get frame :index)))
+          (put frame :index (1+ index))
+          ;; Each element is observed once, in traversal order. A lookahead
+          ;; which ends a run belongs to this frame until its next event.
+          (let ((item (js-nth index container)))
+            (if (= (value-type item) "number")
+                (js-call values :push (if (Number/isFinite item) item nil))
+              (progn
+                (setq stop t)
+                (if (> (js-length values) 0)
+                    (progn (put frame :item item) (put frame :pendingValue t))
+                  (setq event (session-response-value-event cursor item t))))))))
+      (if (> (js-length values) 0) (js-array "array-values" values) event)))
+
+  (defun session-response-string-event (cursor frame)
+    (let ((text (get frame :value)) (index (get frame :index)))
+      (if (< index (js-length text))
+          (let ((end (+ index 8192)))
+            (when (> end (js-length text)) (setq end (js-length text)))
+            (put frame :index end)
+            (js-array "string-chunk" (js-call text :slice index end)))
+        (progn
+          ;; Drop this frame's text reference before observing the next field.
+          ;; Pending envelope slices remain bounded by the batch unit budget.
+          (put frame :value nil)
+          (js-call (get cursor :frames) :pop)
+          (js-array "end")))))
+
+  (defun session-response-event (cursor)
+    (if (not (get cursor :started))
+        (progn
+          (put cursor :started t)
+          (session-response-value-event cursor (get cursor :root) false))
+      (let ((event nil) (frames (get cursor :frames)))
+        (while (and (nil? event) (> (js-length frames) 0))
+          (let* ((frame (js-nth (1- (js-length frames)) frames))
+                 (container (get frame :value)) (index (get frame :index)) (advance false))
+            (if (get frame :string false)
+                (progn (setq event (session-response-string-event cursor frame)) (setq advance t))
+            (if (get frame :pendingValue)
+                (let ((item (get frame :item)))
+                  (put frame :pendingValue false) (put frame :item nil)
+                  (setq event (session-response-value-event cursor item (get frame :array)))
+                  (setq advance t))
+              (if (get frame :array)
+                  (when (< index (js-length container))
+                    (setq event (session-response-array-event cursor frame))
+                    (setq advance t))
+                (let ((keys (get frame :keys)))
+                  (when (< index (js-length keys))
+                    (put frame :index (1+ index))
+                    ;; Match the ordinary serializer: capture a property once,
+                    ;; before emitting its key, and never repeat its getter.
+                    (let* ((key (js-nth index keys)) (item (get container key)) (kind (value-type item)))
+                      (unless (or (undefined? item) (= kind "function") (= kind "symbol"))
+                        (put frame :item item) (put frame :pendingValue t)
+                        (setq event (js-array "key" key))))
+                    (setq advance t))))))
+            (unless advance
+              (js-call (get cursor :ancestors) :delete container)
+              (js-call frames :pop)
+              (setq event (js-array "end")))))
+        event)))
+
+  (defun session-response-event-units (event)
+    (if (and (= (js-length event) 2) (= (value-type (js-nth 1 event)) "string"))
+        (js-length (js-nth 1 event)) 0))
+
+  (defun session-response-batch (state cursor)
+    (let ((events (js-array)) (units 0) (stop false))
+      (while (and (not stop) (< (js-length events) 256) (< units 32768))
+        (let ((event (get cursor :pendingEvent nil)))
+          (put cursor :pendingEvent nil)
+          (when (nil? event) (setq event (session-response-event cursor)))
+          (if (nil? event) (setq stop t)
+            (let ((next-units (session-response-event-units event)))
+              (if (and (> (js-length events) 0) (> (+ units next-units) 32768))
+                  (progn (put cursor :pendingEvent event) (setq stop t))
+                (progn (js-call events :push event) (setq units (+ units next-units))))))))
+      (let* ((done (and (get cursor :started) (= (js-length (get cursor :frames)) 0)
+                       (nil? (get cursor :pendingEvent nil))))
+             (result (js-object :format "eliscript-compiler-response-events" :version (get cursor :version)
+                       :token (get cursor :token) :events events :done done)))
+        (when done
+          (session-phase state "response-events-complete" 0)
+          (session-response-clear state))
+        result)))
+
+  (defun session-response-start (state value &optional mode identity-size string-chunks)
+    (let ((token (1+ (get state :responseToken 0))) (graph (= mode "graph-events-v1")))
+      (unless (and (Number/isSafeInteger token) (> token 0))
+        (session-fail "compiler response token space is exhausted"))
+      (let ((cursor (js-object :token token :root value :frames (js-array)
+                      :ancestors (new globalThis.Set) :started false :pendingEvent nil
+                      :stringChunks (= string-chunks t)
+                      :version (if graph 2 1) :identities (if graph
+                        (session-response-identities
+                          (if (nil? identity-size) session-response-identity-segment-size identity-size)) nil)
+                      :nextIdentity 1)))
+        (put state :responseToken token) (put state :responseCursor cursor)
+        (session-phase state "response-events-start" 0)
+        (session-response-batch state cursor))))
+
+  (defun session-response-control (state request operation)
+    (let ((cursor (get state :responseCursor nil)) (token (get request :token undefined)))
+      (unless (and cursor (Number/isSafeInteger token) (> token 0) (= token (get cursor :token)))
+        (session-fail "compiler response token is absent, stale or invalid"))
+      (if (= operation "response-next") (session-response-batch state cursor)
+        (let ((result (js-object :format "eliscript-compiler-response-events" :version (get cursor :version)
+                        :token token :events (js-array) :done t)))
+          (session-response-clear state) result))))
+
+  (defun session-compile-program (request source filename)
+    (let ((entries (get request :portableEntries nil))
+          (context (session-macro-context (get request :macroContext nil))))
+      (if (nil? entries) (compile-ir-string source filename context)
+        (progn
+          (unless (and (Array/isArray entries) (> (js-length entries) 0))
+            (session-fail "portableEntries requires non-empty entry names" filename))
+          (let ((forms (expand-owned-module (read-string source filename) filename context)))
+            (analyze-module forms filename)
+            (let ((selected (select-portable-module forms entries filename
+                              (get request :allowProjectImports false))))
+              (setq forms nil)
+              (lower-owned-module selected filename)))))))
+
+  (defun session-compile (request ir-only)
+    (let* ((source (session-string request "source" undefined))
+           (filename (session-string request "filename" "<input>"))
+           (program (session-compile-program request source filename)))
+      (if ir-only
+        (let ((result (js-object :ir (session-ir-wire program (new globalThis.Set)) :filename filename)))
+          (when (= (get request :canonicalIR false) t)
+            (put result :canonicalIR (serialize-ir-program program)))
+          result)
+        (let ((mapping (get request :sourceMap nil)))
+          (if (nil? mapping)
+            (js-object :javascript (emit-ir-string program) :filename filename)
+            (progn
+              (unless (session-object-p mapping) (session-fail "sourceMap must be an object" filename))
+              (let ((artifact (emit-ir-string-with-source-map program source
+                      (session-string mapping "generatedFile" "output.mjs")
+                      (session-string mapping "sourceName" filename))))
+                (put artifact :filename filename)
+                artifact)))))))
+
+  (defun session-stage (request)
+    (let* ((stage (session-string request "stage" undefined))
+           (source (session-string request "source" undefined))
+           (filename (session-string request "filename" "<input>"))
+           (forms (read-string source filename)) (result nil))
+      (unless (or (= stage "reader") (= stage "expander") (= stage "analyzer")
+                  (= stage "portable") (= stage "ir") (= stage "emitter"))
+        (session-fail "unknown compiler stage" filename))
+      (when (and (not (= stage "reader")) (not (= (get request :expand t) false)))
+        (setq forms (expand-module forms filename
+          (session-macro-context (get request :macroContext nil)))))
+      (cond
+        ((or (= stage "reader") (= stage "expander")) (setq result forms))
+        (t
+          (analyze-module forms filename)
+          (setq result
+            (cond
+              ((= stage "analyzer") forms)
+              ((= stage "portable")
+                (let ((entries (get request :entries nil)))
+                  (unless (Array/isArray entries) (session-fail "portable stage requires entry names" filename))
+                  (select-portable-module forms entries filename (get request :allowProjectImports false))))
+              ((= stage "ir") (lower-module forms filename))
+              (t
+                (let ((program (lower-module forms filename)) (mapping (get request :sourceMap nil)))
+                  (if (nil? mapping) (emit-ir-string program)
+                    (progn
+                      (unless (session-object-p mapping) (session-fail "sourceMap must be an object" filename))
+                      (let ((emission (emit-ir-string-with-source-map program source
+                              (session-string mapping "generatedFile" "fixture.mjs")
+                              (session-string mapping "sourceName" filename))))
+                        (js-object :javascript (get emission :javascript)
+                          :sourceMap (JSON/parse (get emission :sourceMap))))))))))))
+      (js-object :stage stage :filename filename
+        :data (session-ir-wire result (new globalThis.Set)))))
+
+  (defun session-protocol (request)
+    (let ((name (session-string request "name" undefined))
+          (input (get request :input undefined)))
+      (cond
+        ((= name "project-plan")
+          (project-plan (get input :entries undefined)
+            (lambda (id)
+              (let ((dependencies (get input :dependencies (js-object))))
+                (if (js-call globalThis.Object :hasOwn dependencies id) (get dependencies id) (js-array))))))
+        ((= name "portable-project-plan")
+          (let* ((calls (js-array)) (resolutions (get input :resolutions (js-array)))
+                 (plan (portable-project-plan (get input :entries undefined)
+                   (lambda (id entries)
+                     (js-call calls :push (js-object :id id :entries (Array/from entries)))
+                     (let ((index 0) (selected nil) (found false))
+                       (while (and (< index (js-length resolutions)) (not found))
+                         (let ((item (js-nth index resolutions)))
+                           (when (and (= (get item :id) id)
+                                      (or (nil? (get item :includes nil))
+                                          (js-call entries :includes (get item :includes))))
+                             (setq selected (get item :dependencies undefined) found t)))
+                         (setq index (1+ index)))
+                       (if found selected (js-array)))))))
+            (js-object :plan plan :calls calls)))
+        ((= name "project-request") (project-request input))
+        ((= name "project-configuration")
+          (project-configuration input (session-string request "filename" "eliscript.json")))
+        ((= name "build-operation-request") (build-operation-request input))
+        ((= name "check-operation-request") (check-operation-request input))
+        ((= name "project-build-report") (project-build-report input))
+        ((= name "project-check-report") (project-check-report input))
+        ((= name "project-cache-lookup") (project-cache-lookup input))
+        ((= name "project-cache-decision") (project-cache-decision input))
+        ((= name "evaluation-operation-request") (evaluation-operation-request input))
+        ((= name "deserialize-ir")
+          (js-object :ir (session-ir-wire
+            (deserialize-ir-program (get input :text undefined)) (new globalThis.Set))))
+        ((= name "serialize-ir")
+          (js-object :canonicalIR (serialize-ir-program (get input :program undefined))))
+        ((= name "evaluation-input-description")
+          (evaluation-input-description (session-string request "source" undefined)
+            (session-string request "filename" "<input>")))
+        ((= name "evaluation-form-description")
+          (evaluation-form-description (session-string request "source" undefined)
+            (session-string request "filename" "<input>")))
+        ((= name "evaluation-module-description")
+          (evaluation-module-description (session-string request "source" undefined)
+            (session-string request "filename" "<input>")))
+        (t (session-fail (+ "unknown compiler protocol: " name))))))
+
+  (defun session-ir-operation (state request operation)
+    (if (= operation "deserialize-ir")
+      (let* ((canonical (session-string request "canonicalIR" undefined))
+             (program (deserialize-ir-program canonical)))
+        (js-object :ir (session-ir-wire program (new globalThis.Set)) :canonicalIR canonical))
+      (let* ((program (JSON/parse (session-string request "ir" undefined)))
+             (canonical (serialize-ir-program program)))
+        (if (= operation "serialize-ir") (js-object :canonicalIR canonical)
+          (if (not (= (get request :target "javascript") "javascript"))
+            (session-binary-ir state request program)
+          (let ((mapping (get request :sourceMap nil)))
+            (if (nil? mapping) (js-object :javascript (emit-ir-string program))
+              (progn
+                (unless (session-object-p mapping) (session-fail "sourceMap must be an object"))
+                (emit-ir-string-with-source-map program (session-string request "source" undefined)
+                  (session-string mapping "generatedFile" "output.mjs")
+                  (session-string mapping "sourceName" (get program :filename)))))))))))
+
+  (defun session-backend-emission (filename action)
+    ;; A source-rendering prepass may reject an intrinsic before typed lowering.
+    ;; Preserve its actual Error, message and precise emitter-owned node span;
+    ;; unrelated exceptions and existing structured diagnostics remain untouched.
+    (try (funcall action)
+      (catch error
+        (when (and (session-object-p error)
+                   (nil? (get error :eliscriptDiagnostic nil))
+                   (js-call globalThis.Object :hasOwn error "eliscriptIRSpan"))
+          (let* ((span (get error :eliscriptIRSpan nil))
+                 (location (js-object :file (if (session-object-p span)
+                   (get span :filename filename) filename)))
+                 (message (get error :message "backend emission failed")))
+            (when (session-object-p span)
+              (put location :start (js-object :offset (get span :start)
+                :line (get span :line) :column (get span :column)))
+              (put location :end (js-object :offset (get span :end)
+                :line (get span :endLine) :column (get span :endColumn))))
+            (put error :eliscriptDiagnostic (js-object
+              :format "eliscript-diagnostic" :version 1 :code "ELI-B0001"
+              :severity "error" :phase "managed-backend" :message message :location location))))
+        (throw error))))
+
+  ;; IR input uses the same structural validator and lowerers as source input.
+  ;; It does not regenerate source text or bypass intrinsic/ABI diagnostics.
+  (defun session-binary-ir (state request program)
+    (session-project-transaction state (lambda ()
+      (let ((target (session-string request "target" undefined))
+            (runtime (get state :runtime)))
+        (unless (or (= target "wasm") (= target "native"))
+          (session-fail "IR target must be javascript, wasm or native"))
+        (when (nil? runtime) (session-fail "binary emission requires an initialized runtime"))
+        (when (js-call globalThis.Object :hasOwn request "literalSources")
+          (session-publish-literals state (session-literal-modules state request)))
+        (let* ((lowered (session-backend-emission (get program :filename) (lambda ()
+                         (if (= target "wasm")
+                           (emit-managed-ir-wasm-product program runtime
+                             (js-object :literalModules (get state :literalModules nil))
+                             (lambda () (session-wasm-configuration request)))
+                           (lower-managed-program program runtime nil nil nil nil nil nil nil
+                             (get state :literalModules nil))))))
+               (modules (js-array (js-object :id "__eliscript_input__.mjs"
+                 :filename (get program :filename) :program program :source (get request :source "")))))
+          ;; Native emission only consumes these two fields. Release the
+          ;; private linker's module envelopes before allocating its image;
+          ;; the typed source nodes and public cached IR keep their own roots.
+          (when (= target "native")
+            (setq lowered (js-object :typed (get lowered :typed) :descriptor (get lowered :descriptor))))
+          (session-lowered-output state modules request target lowered))))))
+
+  (defun session-project-ir (state request)
+    (session-project-transaction state (lambda ()
+      (let ((inputs (get request :modules undefined)) (modules (js-array))
+            (ids (new globalThis.Set))
+            (target (session-string request "target" undefined))
+            (entry (session-string request "entry" undefined)))
+        (unless (or (= target "javascript") (= target "wasm") (= target "native"))
+          (session-fail "target must be javascript, wasm or native"))
+        (unless (and (Array/isArray inputs) (> (js-length inputs) 0))
+          (session-fail "project IR requires a non-empty modules array"))
+        (js-call inputs :forEach (lambda (input)
+          (unless (session-object-p input) (session-fail "project IR module must be an object"))
+          (let* ((id (session-string input "id" undefined))
+                 (program (JSON/parse (session-string input "ir" undefined)))
+                 (_canonical (serialize-ir-program program))
+                 (filename (session-string input "filename" (get program :filename)))
+                 (source (session-string input "source" "")))
+            (when (or (= (js-length id) 0) (js-call ids :has id))
+              (session-fail "project IR module ids must be non-empty and unique" filename))
+            (unless (= filename (get program :filename))
+              (session-fail "project IR filename must match its original IR filename" filename))
+            (unless (Array/isArray (get input :macroOrigins (js-array)))
+              (session-fail "project IR macroOrigins must be an array" filename))
+            (when (and (= target "javascript") (get request :sourceMap false)
+                       (not (js-call globalThis.Object :hasOwn input "source")))
+              (session-fail "IR Source Maps require the original module source" filename))
+            (js-call ids :add id)
+            (js-call modules :push (js-object :id id :filename filename :program program
+              :source source :macroOrigins (get input :macroOrigins (js-array)))))))
+        (unless (js-call ids :has entry) (session-fail "project entry is absent from modules" entry))
+        (when (= (get request :resolveImports false) t)
+          (let ((aliases (new globalThis.Map)))
+            (js-call modules :forEach (lambda (item)
+              (js-call (js-array (get item :id) (get item :filename)) :forEach (lambda (path)
+                (let* ((key (session-normalize-path path)) (previous (js-call aliases :get key)))
+                  (when (and previous (not (= previous (get item :id))))
+                    (session-fail "ambiguous project source identity" path))
+                  (js-call aliases :set key (get item :id)))))))
+            (js-call (get request :hostSources (js-array)) :forEach (lambda (input)
+              (let ((id (session-normalize-path (session-string input "id" undefined))))
+                (when (js-call aliases :has id) (session-fail "host source collides with a compiled module" id))
+                (js-call aliases :set id id)
+                (js-call aliases :set (session-normalize-path (session-string input "filename" id)) id))))
+            (setq modules (js-call modules :map (lambda (item)
+              (js-call globalThis.Object :assign (js-object) item
+                (js-object :program (js-call globalThis.Object :assign (js-object) (get item :program)
+                  (js-object :body (session-rewrite-imports (get (get item :program) :body) item aliases
+                    (get request :hostModules (js-array))))))))))))
+        (when (js-call globalThis.Object :hasOwn request "literalSources")
+          (session-publish-literals state (session-literal-modules state request)))
+        (let ((result (if (= target "javascript") (session-javascript-project modules request)
+                        (session-binary-project state modules request target))))
+          (put result :revision (get state :projectRevision))
+          (when (> (js-length (get state :literalModules (js-array))) 0)
+            (put result :literalRevision (get state :literalRevision)))
+          result)))))
+
+  ;; The raw memory ABI is separate from ordinary managed-language output.
+  ;; Its input already contains the real runtime; no JS runtime is substituted.
+  (defun session-binary-options (request kind)
+    (let ((options (js-object :format kind)))
+      (when (Object/hasOwn request "binaryEncoding")
+        (put options :binaryEncoding (get request :binaryEncoding))) options))
+
+  (defun session-native-observer (state)
+    ;; Unknown request fields cannot supply or replace this private callback.
+    (try
+      (let ((observer (get state :phaseObserver nil)))
+        (when (= (value-type observer) "function") observer))
+      (catch ignored nil)))
+
+  (defun session-memory-ir (request operation)
+    (let* ((input (JSON/parse (session-string request "ir" undefined)))
+           (target (session-string request "target" undefined))
+           (typed (if (= operation "emit-memory-ir")
+                    (progn (serialize-ir-program input) (lower-memory-program input)) input))
+           ;; Emitters allocate target-specific scratch locals on their owned
+           ;; lowering. Keep the public typed payload independent of those
+           ;; mutations, with exact f64 values preserved across the copy.
+           (emission (JSON/parse (session-ir-wire typed (new globalThis.Set))))
+           (memory (get request :memory (js-object)))
+           (debug (= (get request :debug false) t)))
+      (unless (or (= target "wasm") (= target "native"))
+        (session-fail "raw memory IR targets must be wasm or native"))
+      (unless (session-object-p memory) (session-fail "memory must be an object"))
+      (if (= target "wasm")
+        (let* ((configuration (session-wasm-configuration request))
+               (memory (get configuration :memory))
+               (artifact (when debug (emit-typed-memory-wasm-artifact emission memory))))
+          (js-object :target target :abi "memory-u32" :typed typed
+            :bytes (if artifact (get artifact :bytes) (emit-typed-memory-wasm emission memory))
+            :debug (when artifact (get artifact :debug))))
+        (let ((platform (session-string request "nativeTarget" undefined))
+              (kind (session-string request "nativeFormat" "library")))
+          (unless (or (= kind "library") (= kind "object"))
+            (session-fail "nativeFormat must be library or object"))
+          (let ((artifact (when debug
+                  (emit-typed-native-memory-artifact emission platform (session-binary-options request kind)))))
+            (js-object :target target :abi "memory-u32" :typed typed
+              :nativeTarget platform :nativeFormat kind
+              :bytes (if artifact (get artifact :bytes)
+                (if (= kind "object") (emit-typed-native-memory-object emission platform (session-binary-options request kind))
+                  (emit-typed-native-memory-library emission platform (session-binary-options request kind))))
+              :debug (when artifact (get artifact :debug))))))))
+
+  (defun session-input-index (inputs)
+    (let ((records (new globalThis.Map)) (aliases (new globalThis.Map)))
+      (js-call inputs :forEach
+        (lambda (input)
+          (unless (session-object-p input) (session-fail "project module must be an object"))
+          (let* ((id (session-string input "id" undefined))
+                 (filename (session-string input "filename" id)))
+            (when (or (= (js-length id) 0) (js-call records :has id))
+              (session-fail "project module ids must be non-empty and unique" filename))
+            (js-call records :set id input)
+            (js-call (js-array id filename) :forEach
+              (lambda (path)
+                (let* ((key (session-normalize-path path)) (existing (js-call aliases :get key)))
+                  (when (and existing (not (= existing id)))
+                    (session-fail "ambiguous project source identity" path))
+                  (js-call aliases :set key id)))))))
+      (js-object :records records :aliases aliases)))
+
+  (defun session-enqueue-dependencies (nodes item graph queued pending)
+    (js-call nodes :forEach
+      (lambda (node)
+        (cond
+          ((= (get node :kind) "module-declaration")
+            (session-enqueue-dependencies (get node :children) item graph queued pending))
+          ((= (get node :kind) "import-declaration")
+            (let ((specifier (get node :value)) (target nil))
+              (if (js-call specifier :startsWith ".")
+                (let ((parts (js-call (get item :filename) :split "/")))
+                  (js-call parts :pop)
+                  (setq target (js-call (get graph :aliases) :get
+                    (session-normalize-path (+
+                      (if (> (js-length parts) 0) (+ (js-call parts :join "/") "/") "") specifier))))
+                  (unless (or target
+                    (js-call (get graph :hostAliases) :has (session-normalize-path (+
+                      (if (> (js-length parts) 0) (+ (js-call parts :join "/") "/") "") specifier)))
+                    (js-call (get graph :hostModules) :some (lambda (declaration)
+                      (and (= (get declaration :referrer) (get item :id)) (= (get declaration :specifier) specifier)))))
+                    (session-fail (+ "missing project source: " specifier) (get item :filename))))
+                (setq target (js-call (get graph :aliases) :get specifier)))
+              (when (and target (not (js-call queued :has target)))
+                (js-call queued :add target)
+                (js-call pending :push (js-call (get graph :records) :get target)))))))))
+
+  (defun session-source-record (id source filename macro-input trace &optional entries)
+    (let ((context (session-macro-context macro-input)))
+      (if (not trace)
+        (js-object :id id :source source :filename filename
+          :portableEntries (or entries (js-array))
+          :program (if entries (compile-project-portable-ir-string source entries filename context)
+                     (compile-ir-string source filename context)))
+        (let* ((expansion (expand-owned-module-with-origins (read-string source filename) filename context))
+               (forms (get expansion :forms)))
+          (analyze-module forms filename)
+          (let ((selected (if entries (select-portable-module forms entries filename t) forms))
+                (origins (get expansion :macroOrigins)))
+            (put expansion :forms nil)
+            (setq expansion nil) (setq forms nil)
+            (js-object :id id :source source :filename filename
+              :portableEntries (or entries (js-array))
+              :program (lower-owned-module selected filename) :macroOrigins origins))))))
+
+  (defun session-portable-requests (request)
+    (let ((initial (js-array)) (entries (get request :portableEntries (js-array)))
+          (inputs (get request :modules nil)))
+      (unless (Array/isArray entries) (session-fail "portableEntries must be an array"))
+      (when (> (js-length entries) 0)
+        (js-call initial :push (js-object :id (session-string request "entry" undefined) :entries entries)))
+      (when (Array/isArray inputs)
+        (js-call inputs :forEach
+          (lambda (input)
+            (when (session-object-p input)
+              (let ((selected (get input :portableEntries (js-array))))
+                (unless (Array/isArray selected) (session-fail "module portableEntries must be an array"))
+                (when (> (js-length selected) 0)
+                  (js-call initial :push (js-object :id (session-string input "id" undefined) :entries selected))))))))
+      initial))
+
+  (defun session-portable-import-fail (message filename)
+    (let ((error (new (js* "Error") message)))
+      (put error :eliscriptDiagnostic (js-object :format "eliscript-diagnostic" :version 1
+        :code "ELI-B0001" :severity "error" :phase "project-build" :message message
+        :location (js-object :file filename)))
+      (throw error)))
+
+  (defun session-portable-dependencies (nodes item graph)
+    (let ((dependencies (js-array)))
+      (js-call nodes :forEach
+        (lambda (node)
+          (cond
+            ((= (get node :kind) "module-declaration")
+              (js-call (session-portable-dependencies (get node :children) item graph) :forEach
+                (lambda (dependency) (js-call dependencies :push dependency))))
+            ((= (get node :kind) "import-declaration")
+              (unless (= (get (get node :properties (js-object)) :portable false) t)
+                (session-portable-import-fail "portable project contains a non-portable import" (get item :filename)))
+              (let ((specifier (get node :value)))
+                (unless (and (js-call specifier :startsWith ".") (js-call specifier :endsWith ".eli"))
+                  (session-portable-import-fail (+ "portable import must be a relative .eli module: " specifier)
+                    (get item :filename)))
+                (let ((parts (js-call (get item :filename) :split "/")))
+                  (js-call parts :pop)
+                  (let* ((path (session-normalize-path (+
+                           (if (> (js-length parts) 0) (+ (js-call parts :join "/") "/") "") specifier)))
+                         (target (js-call (get graph :aliases) :get path)))
+                    (unless target (session-fail (+ "missing project source: " specifier) (get item :filename)))
+                    (js-call dependencies :push (js-object :id target
+                      :entries (js-call (js-call (get node :children) :filter
+                        (lambda (binding) (= (get binding :kind) "import-named"))) :map
+                        (lambda (binding) (get binding :value))))))))))))
+      dependencies))
+
+  (defun session-compile-portable-modules (state request initial)
+    (let* ((inputs (get request :modules nil))
+           (graph (session-input-index inputs))
+           (previous (if (= (get request :cache t) false) (new globalThis.Map) (get state :moduleCache)))
+           (next (new globalThis.Map)) (modules (js-array))
+           (plan (portable-project-plan initial
+             (lambda (id entries)
+               (let ((input (js-call (get graph :records) :get id)))
+                 (unless input (session-fail "project entry is absent from modules" id))
+                 (let* ((source (session-string input "source" undefined))
+                        (filename (session-string input "filename" id))
+                        (macro-input (get input :macroContext (get request :macroContext nil)))
+                        (trace (= (get request :debug false) t))
+                        (key (JSON/stringify (js-array source filename macro-input trace entries)))
+                        (cached (or (js-call next :get id) (js-call previous :get id)))
+                        (item (if (and cached (= (get cached :key) key)) (get cached :module)
+                                (session-source-record id source filename macro-input trace entries))))
+                   (js-call next :set id (js-object :key key :module item))
+                   (session-portable-dependencies (get (get item :program) :body) item graph)))))))
+      (js-call (get plan :modules) :forEach
+        (lambda (record) (js-call modules :push (get (js-call next :get (get record :id)) :module))))
+      (js-object :modules modules :cache next :portablePlan plan)))
+
+  (defun session-compile-standard-modules (state request)
+    (let ((inputs (get request :modules nil)) (modules (js-array))
+          (ids (new globalThis.Set)) (index 0)
+          (previous (if (= (get request :cache t) false)
+                      (new globalThis.Map) (get state :moduleCache)))
+          (next (new globalThis.Map)) (graph nil) (queued (new globalThis.Set)))
+      (unless (and (Array/isArray inputs) (> (js-length inputs) 0))
+        (session-fail "project requires a non-empty modules array"))
+      (when (= (get request :resolveImports false) t)
+        (setq graph (session-input-index inputs))
+        (let ((hosts (new globalThis.Map)))
+          (js-call (get request :hostSources (js-array)) :forEach
+            (lambda (item)
+              (let ((id (session-string item "id" undefined)))
+                (js-call hosts :set (session-normalize-path id) id)
+                (js-call hosts :set (session-normalize-path (session-string item "filename" id)) id))))
+          (put graph :hostAliases hosts) (put graph :hostModules (get request :hostModules (js-array))))
+        (let ((entries (get request :entries (js-array (get request :entry)))))
+          (unless (and (Array/isArray entries) (> (js-length entries) 0))
+            (session-fail "project requires entry identities"))
+          ;; An unchanged host module may import any managed source in the
+          ;; authorized project. Keep their real declarations available to ESM;
+          ;; phased evaluation still executes only the imported module bodies.
+          (when (> (js-length (get request :hostSources (js-array))) 0)
+            (setq entries (Array/from (js-call (get graph :records) :keys))))
+          (setq inputs (js-array))
+          (js-call entries :forEach
+            (lambda (entry)
+              (unless (js-call (get graph :records) :has entry)
+                (session-fail "project entry is absent from modules" entry))
+              (unless (js-call queued :has entry)
+                (js-call queued :add entry)
+                (js-call inputs :push (js-call (get graph :records) :get entry)))))))
+      (while (< index (js-length inputs))
+        (let ((input (js-nth index inputs)))
+          (unless (session-object-p input) (session-fail "project module must be an object"))
+          (let* ((id (session-string input "id" undefined))
+                 (source (session-string input "source" undefined))
+                 (filename (session-string input "filename" id))
+                 (macro-input (get input :macroContext (get request :macroContext nil)))
+                 (trace (= (get request :debug false) t))
+                 (key (JSON/stringify (js-array source filename macro-input trace)))
+                 (cached (js-call previous :get id)))
+            (when (or (= (js-length id) 0) (js-call ids :has id))
+              (session-fail "project module ids must be non-empty and unique" filename))
+            (js-call ids :add id)
+            (let ((item (if (and cached (= (get cached :key) key))
+                          (get cached :module)
+                          (session-source-record id source filename macro-input trace))))
+              (js-call modules :push item)
+              (js-call next :set id (js-object :key key :module item))
+              (when graph
+                (session-enqueue-dependencies (get (get item :program) :body) item graph queued inputs)))))
+        (setq index (1+ index)))
+      ;; Only the current graph remains rooted. Failed edits do not publish a
+      ;; partial cache, and removed modules lose their last session-owned root.
+      (js-object :modules modules :cache next :portablePlan nil)))
+
+  (defun session-compile-modules (state request)
+    (let ((inputs (get request :modules nil)) (initial (session-portable-requests request)))
+      (unless (and (Array/isArray inputs) (> (js-length inputs) 0))
+        (session-fail "project requires a non-empty modules array"))
+      (if (> (js-length initial) 0) (session-compile-portable-modules state request initial)
+        (session-compile-standard-modules state request))))
+
+  (defun session-modules (state request)
+    ;; A session retains only the latest source graph. Different output targets
+    ;; share its real IR, while source, filename and macro file changes replace
+    ;; it atomically. No parsed graph is reconstructed by the host transport.
+    (session-phase state "modules-start" 0)
+    (let ((key (JSON/stringify
+            (js-array (get request :modules nil) (get request :macroContext nil)
+              (get request :resolveImports false) (get request :entry nil) (get request :entries nil)
+              (get request :portableEntries nil)
+              (get request :debug false) (get request :hostSources nil) (get request :hostModules nil)
+              ;; The revision changes exactly when the full literal key does,
+              ;; and rolls back with the same project transaction. Do not
+              ;; escape and retain that complete source graph again here.
+              (get state :literalRevision 0)))))
+      (if (and (not (= (get request :cache t) false))
+               (= key (get state :projectKey)) (not (nil? (get state :projectModules))))
+        (progn
+          (session-phase state "modules-cached" (js-length (get state :projectModules)))
+          (get state :projectModules))
+        (let* ((compiled (session-compile-modules state request)) (modules (get compiled :modules)))
+          (put state :moduleCache (get compiled :cache))
+          (put state :projectPortablePlan (get compiled :portablePlan))
+          (put state :projectKey key)
+          (put state :projectModules modules)
+          (put state :projectRevision (1+ (get state :projectRevision)))
+          (session-phase state "modules-complete" (js-length modules))
+          modules))))
+
+  (defun session-cached-ir (state request)
+    (let ((kind (session-string request "kind" "module")) (program nil)
+          (filename nil) (id nil) (revision (get request :revision undefined)))
+      (unless (and (Number/isSafeInteger revision) (>= revision 0))
+        (session-fail "cached IR requires an exact source revision"))
+      (cond
+        ((= kind "runtime")
+          (unless (= revision (get state :revision)) (session-fail "runtime IR belongs to a different revision"))
+          (setq program (get state :runtime) filename (get state :runtimeFilename) id "runtime"))
+        ((= kind "literal")
+          (unless (= revision (get state :literalRevision)) (session-fail "literal IR belongs to a different revision"))
+          (setq id (session-string request "id" undefined))
+          (let ((cached (js-call (get state :literalCache) :get id)))
+            (when cached
+              (setq program (get cached :program) filename (get cached :filename)))))
+        ((= kind "module")
+          (unless (= revision (get state :projectRevision)) (session-fail "project IR belongs to a different revision"))
+          (setq id (session-string request "id" undefined))
+          (let ((modules (get state :projectModules nil)))
+            (when modules
+              (js-call modules :forEach
+                (lambda (item)
+                  (when (= id (get item :id))
+                    (setq program (get item :program) filename (get item :filename))))))))
+        (t (session-fail "cached IR kind must be module, runtime or literal")))
+      (when (nil? program) (session-fail "cached IR is unavailable" filename))
+      (let ((result (js-object :id id :filename filename :revision revision :stage "frontend")))
+        (if (= (get request :responseStringChunks false) t)
+            (progn
+              ;; These private getters are observed once by the cursor, in
+              ;; field order. They retain the selected program, not the whole
+              ;; session, and do not keep an already transmitted text alive.
+              (Object/defineProperty result "ir"
+                (js-object :enumerable t :configurable t
+                  :get (lambda () (session-ir-wire program (new globalThis.Set)))))
+              (Object/defineProperty result "canonicalIR"
+                (js-object :enumerable t :configurable t
+                  :get (lambda () (serialize-ir-program program)))))
+          (progn
+            (put result :ir (session-ir-wire program (new globalThis.Set)))
+            (put result :canonicalIR (serialize-ir-program program))))
+        result)))
+
+  (defun session-normalize-path (path)
+    (when (or (js-call path :startsWith "/") (js-call path :includes "\\"))
+      (session-fail "project paths must be relative virtual paths" path))
+    (let ((parts (js-call path :split "/")) (result (js-array)) (index 0))
+      (while (< index (js-length parts))
+        (let ((part (js-nth index parts)))
+          (cond
+            ((or (= part "") (= part ".")) nil)
+            ((= part "..")
+              (when (= (js-length result) 0) (session-fail "project path escapes its virtual root" path))
+              (js-call result :pop))
+            (t (js-call result :push part))))
+        (setq index (1+ index)))
+      (js-call result :join "/")))
+
+  (defun session-relative-import (importer target)
+    (let ((from (js-call importer :split "/")) (to (js-call target :split "/"))
+          (index 0) (parts (js-array)))
+      (js-call from :pop)
+      (while (and (< index (js-length from)) (< index (js-length to))
+                  (= (js-nth index from) (js-nth index to)))
+        (setq index (1+ index)))
+      (let ((remaining index))
+        (while (< remaining (js-length from))
+          (js-call parts :push "..") (setq remaining (1+ remaining))))
+      (while (< index (js-length to))
+        (js-call parts :push (js-nth index to)) (setq index (1+ index)))
+      (let ((path (js-call parts :join "/")))
+        (if (js-call path :startsWith ".") path (+ "./" path)))))
+
+  (defun session-rewrite-imports (nodes item aliases host-modules)
+    (js-call nodes :map
+      (lambda (node)
+        (let ((kind (get node :kind)))
+          (cond
+            ((= kind "module-declaration")
+              (js-call globalThis.Object :assign (js-object) node
+                (js-object :children (session-rewrite-imports (get node :children) item aliases host-modules))))
+            ((= kind "import-declaration")
+              (let* ((specifier (get node :value)) (id (get item :id))
+                     (filename (get item :filename)) (target nil))
+                (if (js-call specifier :startsWith ".")
+                  (let* ((parts (js-call filename :split "/"))
+                         (_directory (js-call parts :pop))
+                         (resolved (session-normalize-path
+                           (+ (if (> (js-length parts) 0) (+ (js-call parts :join "/") "/") "") specifier))))
+                    (setq target (js-call aliases :get resolved))
+                    (unless (or target (js-call host-modules :some
+                              (lambda (declaration) (and (= (get declaration :referrer) id)
+                                (= (get declaration :specifier) specifier)))))
+                      (session-fail (+ "missing project source: " specifier) filename)))
+                  (setq target (js-call aliases :get specifier)))
+                (if target
+                  (js-call globalThis.Object :assign (js-object) node
+                    (js-object :value (session-relative-import id target)))
+                  node)))
+            (t node))))))
+
+  (defun session-project-modules (state request)
+    (let ((modules (session-modules state request)))
+      (if (and (not (= (get request :resolveImports false) t)) (nil? (get state :projectPortablePlan))) modules
+        (let ((aliases (new globalThis.Map)))
+          (js-call modules :forEach
+            (lambda (item)
+              (js-call (js-array (get item :id) (get item :filename)) :forEach
+                (lambda (path)
+                  (let* ((key (session-normalize-path path)) (existing (js-call aliases :get key)))
+                    (when (and existing (not (= existing (get item :id))))
+                      (session-fail "ambiguous project source identity" path))
+                    (js-call aliases :set key (get item :id)))))))
+          (let ((providers (get request :hostSources (js-array))))
+            (unless (Array/isArray providers) (session-fail "hostSources must be an array"))
+            (js-call providers :forEach
+              (lambda (item)
+                (let* ((id (session-normalize-path (session-string item "id" undefined)))
+                       (filename (session-normalize-path (session-string item "filename" id))))
+                  (when (js-call aliases :has id) (session-fail "host source collides with a compiled module" id))
+                  (js-call aliases :set id id) (js-call aliases :set filename id)))))
+          (js-call modules :map
+            (lambda (item)
+              (js-call globalThis.Object :assign (js-object) item
+                (js-object :program
+                  (js-call globalThis.Object :assign (js-object) (get item :program)
+                    (js-object :body (session-rewrite-imports (get (get item :program) :body) item aliases
+                      (get request :hostModules (js-array)))))))))))))
+
+  (defun session-project-host-modules (modules request)
+    (let ((declarations (js-call (get request :hostModules (js-array)) :slice))
+          (providers (new globalThis.Map)))
+      (js-call (get request :hostSources (js-array)) :forEach
+        (lambda (item) (js-call providers :set (session-normalize-path (get item :id)) item)))
+      (js-call modules :forEach
+        (lambda (item)
+          (let ((pending (js-call (get (get item :program) :body) :slice)))
+            (while (> (js-length pending) 0)
+              (let* ((node (js-call pending :shift)) (kind (get node :kind)))
+                (cond
+                  ((= kind "module-declaration") (js-call (get node :children) :forEach
+                    (lambda (child) (js-call pending :push child))))
+                  ((= kind "import-declaration")
+                    (let* ((specifier (get node :value)) (parts (js-call (get item :id) :split "/"))
+                           (_directory (js-call parts :pop))
+                           (path (when (js-call specifier :startsWith ".")
+                             (session-normalize-path (+ (if (> (js-length parts) 0) (+ (js-call parts :join "/") "/") "") specifier)))))
+                      (when (and path (js-call providers :has path))
+                        (let ((existing (js-call declarations :find (lambda (value)
+                                  (and (= (get value :referrer) (get item :id)) (= (get value :specifier) specifier))))))
+                          (unless existing
+                            (setq existing (js-object :id path :specifier specifier :referrer (get item :id)
+                              :allowedExports (js-array) :namespace false))
+                            (js-call declarations :push existing))
+                          (js-call (get node :children) :forEach
+                            (lambda (binding)
+                              (let ((mode (get binding :kind)))
+                                (if (= mode "import-namespace") (put existing :namespace t)
+                                  (let ((name (if (= mode "import-default") "default" (binding-name (get binding :value)))))
+                                    (unless (js-call (get existing :allowedExports) :includes name)
+                                      (js-call (get existing :allowedExports) :push name)))))))))))))))))
+      declarations))
+
+  (defun session-ordered-modules (modules)
+    ;; Transport order and entry-discovery order are not emission identities.
+    ;; Both source and supplied IR graphs use the same UTF-16 id ordering after
+    ;; original input validation, without mutating cached or caller-owned arrays.
+    (js-call (js-call modules :slice) :sort
+      (lambda (left right)
+        (let ((a (get left :id)) (b (get right :id)))
+          (cond ((< a b) -1) ((> a b) 1) (t 0))))))
+
+  (defun session-javascript-project (modules request)
+    (let ((modules (session-ordered-modules modules)) (outputs (js-array)) (index 0) (mapping (get request :sourceMap false)))
+      (while (< index (js-length modules))
+        (let* ((item (js-nth index modules)) (id (get item :id))
+               (filename (get item :filename))
+               (artifact (if mapping
+                 (emit-ir-string-with-source-map (get item :program) (get item :source) id filename)
+                 (js-object :javascript (emit-ir-string (get item :program))))))
+          (put artifact :id id)
+          (put artifact :filename filename)
+          (when (> (js-length (get item :portableEntries (js-array))) 0)
+            (put artifact :portableEntries (js-call (get item :portableEntries) :slice)))
+          (when (= (get request :debug false) t)
+            (put artifact :macroOrigins (get item :macroOrigins (js-array))))
+          (js-call outputs :push artifact))
+        (setq index (1+ index)))
+      (js-object :target "javascript" :entry (get request :entry) :modules outputs)))
+
+  (defun session-resolve-import (importer specifier ids)
+    (if (js-call ids :has specifier) specifier
+      (when (js-call specifier :startsWith ".")
+        (let* ((parts (js-call importer :split "/"))
+               (pending (js-call specifier :split "/")) (index 0))
+          (js-call parts :pop)
+          (while (< index (js-length pending))
+            (let ((part (js-nth index pending)))
+              (cond
+                ((or (= part "") (= part ".")) nil)
+                ((= part "..")
+                  (when (= (js-length parts) 0)
+                    (session-fail "relative project import escapes its virtual root" importer))
+                  (js-call parts :pop))
+                (t (js-call parts :push part))))
+            (setq index (1+ index)))
+          (let ((resolved (js-call parts :join "/")))
+            (unless (js-call ids :has resolved)
+              (session-fail (+ "missing virtual project module: " resolved) importer))
+            resolved)))))
+
+  (defun session-module-imports (nodes importer ids dependencies external)
+    (let ((index 0))
+      (while (< index (js-length nodes))
+        (let* ((node (js-nth index nodes)) (kind (get node :kind)))
+          (cond
+            ((= kind "import-declaration")
+              (let* ((specifier (get node :value))
+                     (resolved (session-resolve-import importer specifier ids)))
+                (if (nil? resolved)
+                  (js-call external :add specifier)
+                  (js-call dependencies :add resolved))))
+            ((= kind "module-declaration")
+              (session-module-imports (get node :children) importer ids dependencies external))))
+        (setq index (1+ index)))))
+
+  (defun session-project-transaction (state operation)
+    (let ((key (get state :projectKey)) (modules (get state :projectModules))
+          (portable (get state :projectPortablePlan)) (revision (get state :projectRevision))
+          (cache (get state :moduleCache))
+          (literal-sources (get state :literalSources)) (literal-modules (get state :literalModules))
+          (literal-key (get state :literalKey)) (literal-cache (get state :literalCache))
+          (literal-revision (get state :literalRevision)))
+      (try (funcall operation)
+        (catch error
+          (put state :projectKey key) (put state :projectModules modules)
+          (put state :projectPortablePlan portable) (put state :projectRevision revision)
+          (put state :moduleCache cache)
+          (put state :literalSources literal-sources) (put state :literalModules literal-modules)
+          (put state :literalKey literal-key) (put state :literalCache literal-cache)
+          (put state :literalRevision literal-revision)
+          (throw error)))))
+
+  (defun session-project-plan (state request)
+    (session-project-transaction state (lambda () (session-project-plan-body state request))))
+
+  (defun session-project-plan-body (state request)
+    (let ((modules (session-project-modules state request)) (ids (new globalThis.Map))
+          (external (new globalThis.Set)))
+      (js-call modules :forEach (lambda (item) (js-call ids :set (get item :id) item)))
+      (let* ((entries (get request :entries (js-array (get request :entry))))
+             (plan (or (get state :projectPortablePlan)
+               (project-plan entries
+               (lambda (id)
+                 (unless (js-call ids :has id) (session-fail "project entry is absent from modules" id))
+                 (let ((dependencies (new globalThis.Set)))
+                   (session-module-imports (get (get (js-call ids :get id) :program) :body)
+                     id ids dependencies external)
+                   (js-call (Array/from dependencies) :sort))))))
+             (result (js-call globalThis.Object :assign (js-object) plan)))
+        (put result :external (js-call (Array/from external) :sort))
+        result)))
+
+  (defun session-debug-sources (state modules)
+    (let ((sources (js-call modules :map
+            (lambda (item)
+              (js-object :id (get item :id) :filename (get item :filename)
+                :macroOrigins (get item :macroOrigins (js-array)))))))
+      (js-call sources :push (js-object :id "runtime" :filename (get state :runtimeFilename) :macroOrigins (js-array)))
+      sources))
+
+  (defun session-binary-project (state modules request target)
+    (let ((runtime (get state :runtime)) (modules (session-ordered-modules modules)))
+      (when (nil? runtime) (session-fail "binary emission requires an initialized runtime"))
+      (let* ((entry (session-string request "entry" undefined))
+             (records (js-call modules :map
+               (lambda (item) (js-object :id (get item :id) :program (get item :program)))))
+             (_observed (session-phase state "managed-lower-start" (js-length records)))
+             (lowered (session-backend-emission entry (lambda ()
+               (let ((options (js-object :hostModules (session-project-host-modules modules request)
+                                :literalModules (get state :literalModules nil)
+                                :phased (= (get request :phased false) t))))
+                 ;; Host providers require retaining the complete source graph
+                 ;; for ESM transport. They do not make every retained source
+                 ;; an evaluation root of the managed project.
+                 (when (Object/hasOwn request "entries")
+                   (put options :entries (get request :entries)))
+                 (when (Object/hasOwn request "foreignEntry")
+                   (let ((foreign-entry (get request :foreignEntry)))
+                     (unless (= (value-type foreign-entry) "boolean")
+                       (session-fail "foreignEntry must be a boolean"))
+                     (put options :foreignEntry foreign-entry)))
+                 (if (= target "wasm")
+                   (emit-managed-project-wasm-product records entry runtime options
+                     (lambda ()
+                       (session-phase state "managed-lower-complete" (js-length records))
+                       (session-phase state "wasm-emit-start" 0)
+                       (session-wasm-configuration request)))
+                   (lower-managed-project records entry runtime options)))))))
+        (session-phase state (if (= target "wasm") "wasm-emit-complete" "managed-lower-complete") 0)
+        ;; The complete linked source graph is not an emission input once
+        ;; lowering has returned. Do not retain its private module envelopes
+        ;; beside the native word buffers or mutate the lowering result.
+        (when (= target "native")
+          (setq lowered (js-object :typed (get lowered :typed) :descriptor (get lowered :descriptor))))
+        (session-lowered-output state modules request target lowered))))
+
+  (defun session-wasm-configuration (request)
+    ;; The backend invokes this only after managed lowering. Keep session
+    ;; option failures behind source/lowering failures and ahead of emission.
+    (let ((memory (get request :memory nil)))
+      (unless (or (nil? memory) (session-object-p memory))
+        (session-fail "memory must be an object"))
+      (setq memory (or memory (js-object)))
+      (when (js-call globalThis.Object :hasOwn request "binaryEncoding")
+        (setq memory (js-call globalThis.Object :assign (js-object) memory))
+        (put memory :binaryEncoding (get request :binaryEncoding)))
+      (js-object :memory memory :debug (= (get request :debug false) t))))
+
+  (defun session-lowered-output (state modules request target lowered)
+    (let ((entry (get request :entry undefined))
+          (typed (get lowered :typed)) (descriptor (get lowered :descriptor)))
+        (if (= target "wasm")
+          (let* ((bytes (get lowered :bytes)) (mapping (get lowered :debug nil))
+                 (debug (when mapping
+                     (js-call globalThis.Object :assign (js-object) mapping
+                       (js-object :moduleByteLength (if (Array/isArray bytes) (js-length bytes) (get bytes :byteLength))
+                         :sources (session-debug-sources state modules))))))
+              (js-object :target target :entry entry :descriptor descriptor :bytes bytes :debug debug))
+          (let* ((platform (session-string request "nativeTarget" undefined))
+                 (kind (session-string request "nativeFormat" "library")))
+            (unless (or (= kind "library") (= kind "object"))
+              (session-fail "managed nativeFormat must be library or object"))
+            (let* ((observer (session-native-observer state))
+                   (artifact (when (= (get request :debug false) t)
+                    (emit-fresh-observed-typed-native-memory-artifact typed platform (session-binary-options request kind) observer))))
+              (js-object :target target :nativeTarget platform :nativeFormat kind
+                :entry entry :descriptor descriptor :typed typed
+                :debug (if artifact
+                  (js-call globalThis.Object :assign (js-object) (get artifact :debug)
+                    (js-object :sources (session-debug-sources state modules))) nil)
+                :bytes (if artifact (get artifact :bytes)
+                  (if (= kind "object")
+                    (emit-fresh-observed-typed-native-memory-object typed platform (session-binary-options request kind) observer)
+                    (emit-fresh-observed-typed-native-memory-library typed platform (session-binary-options request kind) observer)))))))))
+
+  (defun session-project (state request)
+    (session-project-transaction state (lambda () (session-project-body state request))))
+
+  (defun session-project-body (state request)
+    (let ((target (session-string request "target" undefined))
+          (entry (session-string request "entry" undefined)))
+      (unless (or (= target "javascript") (= target "wasm") (= target "native"))
+        (session-fail "target must be javascript, wasm or native"))
+      (when (js-call globalThis.Object :hasOwn request "literalSources")
+        (session-publish-literals state (session-literal-modules state request)))
+      (let ((modules (session-project-modules state request)) (found false))
+        (js-call modules :forEach (lambda (item) (when (= (get item :id) entry) (setq found t))))
+        (unless found (session-fail "project entry is absent from modules" entry))
+        (let ((result (if (= target "javascript")
+                       (session-javascript-project modules request)
+                       (session-binary-project state modules request target))))
+          (put result :revision (get state :projectRevision))
+          (when (> (js-length (get state :literalModules (js-array))) 0)
+            (put result :literalRevision (get state :literalRevision)))
+          (when (get state :projectPortablePlan)
+            (put result :plan (get state :projectPortablePlan)))
+          result))))
+
+  (defun session-request-result (state request operation)
+    (cond
+                 ((= operation "runtime") (session-runtime state request))
+                 ((= operation "compile") (session-compile request false))
+                 ((= operation "compile-ir") (session-compile request t))
+                 ((= operation "stage") (session-stage request))
+                 ((= operation "cached-ir") (session-cached-ir state request))
+                 ((or (= operation "emit-ir") (= operation "serialize-ir") (= operation "deserialize-ir"))
+                  (session-ir-operation state request operation))
+                 ((= operation "protocol") (session-protocol request))
+                 ((= operation "project") (session-project state request))
+                 ((= operation "project-ir") (session-project-ir state request))
+                 ((or (= operation "emit-memory-ir") (= operation "emit-typed-memory"))
+                  (session-memory-ir request operation))
+                 ((= operation "project-plan") (session-project-plan state request))
+                 ((or (= operation "analyze") (= operation "query") (= operation "edit-preview"))
+                  (tools-request (js-call globalThis.Object :assign (js-object) request
+                    (js-object :macroContext (session-macro-context (get request :macroContext nil))))))
+                 ((= operation "format")
+                  (js-object :source (format-source (session-string request "source" undefined)
+                    (session-string request "filename" "<input>") (get request :options nil))))
+                 ((= operation "capabilities")
+                  (js-object :format "eliscript-compiler-capabilities" :version 1
+                    :operations (js-array "runtime" "compile" "compile-ir" "stage" "cached-ir" "emit-ir" "serialize-ir" "deserialize-ir"
+                      "protocol" "project" "project-ir" "emit-memory-ir" "emit-typed-memory" "project-plan" "format" "analyze" "query" "edit-preview"
+                      "response-next" "response-close")
+                    :responseModes (js-array "events-v1" "graph-events-v1")
+                    :responseStringChunks t
+                    :targets (js-array "javascript" "wasm" "native")
+                    :nativeTargets (js-array "arm64-macos" "arm64-linux")
+                    :memoryIRTargets (js-array "wasm" "native")))
+                 (t (session-fail (+ "unknown compiler operation: " operation)))))
+
+  (defun compiler-session-request (state request-json)
+    (session-live state)
+    (try
+      (progn
+        (unless (= (value-type request-json) "string")
+          (session-fail "compiler request must be a JSON string"))
+        (let ((request (JSON/parse request-json)))
+          (unless (session-object-p request) (session-fail "compiler request must be an object"))
+          (let* ((operation (session-string request "operation" undefined))
+                 (control (or (= operation "response-next") (= operation "response-close")))
+                 (result
+                   (if control (session-response-control state request operation)
+                     (progn
+                       (when (get state :responseCursor nil)
+                         (session-fail "compiler response is pending; use response-next or response-close"))
+                       (let ((mode (get request :responseMode)))
+                         (unless (or (undefined? mode) (= mode "events-v1") (= mode "graph-events-v1"))
+                           (session-fail "unsupported compiler responseMode"))
+                         (let ((chunks (get request :responseStringChunks)))
+                           (unless (or (undefined? chunks) (= chunks t) (= chunks false))
+                             (session-fail "responseStringChunks must be a boolean"))
+                           (when (and (= chunks t) (undefined? mode))
+                             (session-fail "responseStringChunks requires an event responseMode")))
+                         (let ((value (session-request-result state request operation)))
+                           (if (or (= mode "events-v1") (= mode "graph-events-v1"))
+                               (session-response-start state value mode undefined
+                                 (get request :responseStringChunks false)) value)))))))
+            ;; This remains a small JSON envelope in events mode. Its scalar
+            ;; strings are already owned by the result; no whole reply joins.
+            (unless control (session-phase state "response-serialize-start" 0))
+            (let ((text (session-ir-wire result (new globalThis.Set))))
+              (unless control (session-phase state "response-serialize-complete" (js-length text)))
+              text))))
+      (catch error
+        ;; Cleanup is secondary: malformed input, getters and compilation keep
+        ;; their first original thrown value even if cleanup itself fails.
+        (try (session-response-clear state) (catch cleanup nil))
+        (throw error))))
+
+  (defun compiler-session-project-owned (wire-request state request-json)
+    ;; An in-process build may consume its fresh binary product without keeping
+    ;; a second complete typed/debug graph beside it. The public wire API retains
+    ;; its JSON snapshot contract. Wrapping the wire function opts out before
+    ;; touching state, so observers and custom transports remain authoritative.
+    (if (not (eq wire-request compiler-session-request)) nil
+      (progn
+        (session-live state)
+        (try
+          (progn
+            (unless (= (value-type request-json) "string")
+              (session-fail "compiler request must be a JSON string"))
+            (let ((request (JSON/parse request-json)))
+              (unless (session-object-p request) (session-fail "compiler request must be an object"))
+              (let ((operation (session-string request "operation" undefined)))
+                (if (and (= operation "project")
+                         (or (= (get request :target) "wasm") (= (get request :target) "native"))
+                         (not (Object/hasOwn request "responseMode")))
+                    (progn
+                      (when (get state :responseCursor nil)
+                        (session-fail "compiler response is pending; use response-next or response-close"))
+                      (js-object :format "eliscript-compiler-owned-project" :version 1
+                        :value (session-project state request)))
+                  nil))))
+          (catch error
+            (try (session-response-clear state) (catch cleanup nil))
+            (throw error))))))
+
+  (export compiler-session-new compiler-session-request compiler-session-close compiler-session-project-owned))

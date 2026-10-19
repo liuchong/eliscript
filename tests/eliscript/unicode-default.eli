@@ -1,0 +1,121 @@
+(module tests.unicode-default
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp mkdir readFile writeFile symlink realpath rm)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "node:module" createRequire)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" root)
+  (import "../dist/bootstrap/compiler.mjs" compile-ir-string emit-ir-string)
+
+  (defconst import-text "import \"eliscript/runtime/unicode-case.mjs\";")
+  (defconst program-source
+    "(module unicode.default-user (defun upper (value) (js-call value :toUpperCase)) (defun lower (value) (js-call value :toLowerCase)) (defun dynamic (value key) (js-call value key)) (defun reflect (value key) (Reflect/apply (get globalThis.String.prototype key) value (js-array))) (defun captured (value argument) (js-call value :toUpperCase (funcall argument))) (export upper lower dynamic reflect captured))")
+  (defasync load-module (path)
+    (let* ((canonical (await (realpath path))) (require-module (createRequire canonical)))
+      (funcall require-module canonical)))
+
+  (defasync check-default ()
+    (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-unicode-default-"))))
+           (prototype (get globalThis.String :prototype))
+           (upper-descriptor (Object/getOwnPropertyDescriptor prototype "toUpperCase"))
+           (lower-descriptor (Object/getOwnPropertyDescriptor prototype "toLowerCase"))
+           (javascript (emit-ir-string (compile-ir-string program-source "unicode-default-user.eli"))))
+      (try
+        (progn
+          (js-call assert :ok (js-call javascript :includes import-text))
+          (await (mkdir (resolve directory "node_modules")))
+          (await (symlink root (resolve directory "node_modules/eliscript") "dir"))
+          (await (writeFile (resolve directory "first.mjs") javascript))
+          (await (writeFile (resolve directory "second.mjs") javascript))
+          (let* ((selected (await (load-module (resolve directory "first.mjs"))))
+                 (profile (js-call (get (JSON/parse (await (readFile
+                   (resolve root "tests/fixtures/unicode-case-profiles.json") "utf8"))) :versions)
+                   :find (lambda (entry) (= (get entry :version) 17)))))
+            ;; These are the independent original version-17 contextual cases,
+            ;; executed by an ordinary product without a profile installer.
+            (js-call (get profile :sigma) :forEach (lambda (pair)
+              (js-call assert :strictEqual (js-call selected :lower (aref pair 0)) (aref pair 1))
+              (js-call assert :strictEqual (js-call selected :dynamic (aref pair 0) "toLowerCase") (aref pair 1))
+              (js-call assert :strictEqual (js-call selected :reflect (aref pair 0) "toLowerCase") (aref pair 1))))
+            (js-call assert :strictEqual (js-call selected :upper "ßﬃ\ud800\udc00\ud800") "SSFFI\ud800\udc00\ud800")
+            (js-call assert :strictEqual (js-call selected :lower "İAΣ\udc00") "i̇aς\udc00")
+            (let ((trace (js-array)) (value (js-object)))
+              (Object/defineProperty value (get globalThis.Symbol :toPrimitive)
+                (js-object :value (lambda (hint) (js-call trace :push hint) "AΣ")))
+              ;; Method Call must Get the receiver's actual method. This
+              ;; ordinary object has none; generic String casing is the
+              ;; separately exported real Reflect.apply path, not coercion
+              ;; inserted ahead of that observable Get.
+              (js-call assert :throws (lambda () (js-call selected :lower value)) globalThis.TypeError)
+              (js-call assert :deepStrictEqual trace (js-array))
+              (js-call assert :strictEqual (js-call selected :reflect value "toLowerCase") "aς")
+              (js-call assert :deepStrictEqual trace (js-array "string")))
+            (js-call (js-array false undefined) :forEach (lambda (marker)
+              (let ((value (js-object :toString (lambda () (throw marker)))))
+                (js-call assert :throws (lambda () (js-call selected :lower value)) globalThis.TypeError)
+                (js-call assert :throws (lambda () (js-call selected :reflect value "toLowerCase"))
+                  (lambda (error) (Object/is error marker))))))
+            (js-call (js-array nil undefined (funcall globalThis.Symbol "primitive")) :forEach
+              (lambda (value) (js-call assert :throws (lambda () (js-call selected :reflect value "toLowerCase")) globalThis.TypeError)))
+            ;; First module initialization installs once. Subsequent ordinary
+            ;; programs must preserve dynamic Get, capture and user deletion.
+            (let ((trace (js-array)) (method (lambda () "user")))
+              (Object/defineProperty prototype "toUpperCase"
+                (js-object :configurable t :enumerable false :get
+                  (lambda () (js-call trace :push "get") method)))
+              (js-call assert :strictEqual (js-call selected :upper
+                (progn (js-call trace :push "argument") "x")) "user")
+              (js-call assert :deepStrictEqual trace (js-array "argument" "get"))
+              (put trace :length 0)
+              (js-call assert :strictEqual (js-call selected :captured "x"
+                (lambda () (js-call trace :push "argument") 1)) "user")
+              (js-call assert :deepStrictEqual trace (js-array "get" "argument"))
+              (Reflect/deleteProperty prototype "toLowerCase")
+              (let ((later (await (load-module (resolve directory "second.mjs")))))
+                (js-call assert :strictEqual (get prototype :toUpperCase) method)
+                (js-call assert :strictEqual (Object/hasOwn prototype "toLowerCase") false)
+                (js-call assert :throws (lambda () (js-call later :lower "A")) globalThis.TypeError)))))
+        (finally
+          (Object/defineProperty prototype "toUpperCase" upper-descriptor)
+          (Object/defineProperty prototype "toLowerCase" lower-descriptor)
+          (await (rm directory (js-object :recursive t :force t)))))))
+
+  (defasync check-capsules ()
+    (let ((entries (js-array
+      (js-array "runtime/unicode-case.eli" "eliscript.runtime.unicode-case")
+      (js-array "runtime/unicode-case-data.eli" "eliscript.runtime.unicode-case-data"))) (index 0))
+      (while (< index (js-length entries))
+        (let* ((entry (aref entries index)) (filename (aref entry 0))
+               (source (await (readFile (resolve root filename) "utf8"))))
+          (js-call assert :strictEqual (js-call (emit-ir-string (compile-ir-string source filename)) :includes import-text) false)
+          (js-call assert :strictEqual (js-call (emit-ir-string (compile-ir-string source (resolve root filename))) :includes import-text) false)
+          (js-call assert :strictEqual (js-call (emit-ir-string (compile-ir-string source "unicode-case.eli")) :includes import-text) t)
+          (js-call assert :strictEqual (js-call (emit-ir-string (compile-ir-string
+            "(module ordinary.program (defun run () 1) (export run))" filename)) :includes import-text) t))
+        (setq index (1+ index))))
+    (js-call (js-array "(defun run (value key) (js-call value key)) (export run)"
+               "(defun run (object key) (get object key)) (export run)"
+               "(defun run (function value) (funcall function value)) (export run)"
+               "(defun run () 1) (export run)") :forEach
+      (lambda (source) (js-call assert :strictEqual
+        (js-call (emit-ir-string (compile-ir-string source "ordinary.eli")) :includes import-text) t))))
+
+  (if (= (get (get globalThis.process :env) :ELISCRIPT_UNICODE_DEFAULT_CHILD) "1")
+    (js-call (check-default) :then
+      (lambda () (js-call (get globalThis.process :stdout) :write "unicode-default-complete\n"))
+      (lambda (error) (js-call globalThis.console :error error) (put globalThis.process :exitCode 1)))
+    (progn
+      (test "ordinary emitted JavaScript defaults to Unicode 17 with dynamic interop and persistent user edits" check-default)
+      (test "only exact maintained module and source identities omit the Unicode bootstrap dependency" check-capsules)
+      (test "independent Bun executes the same ordinary Unicode default program without an explicit profile"
+        (lambda ()
+          (let* ((environment (Object/assign (js-object) (get globalThis.process :env)
+                    (js-object :ELISCRIPT_UNICODE_DEFAULT_CHILD "1")))
+                 (child (spawnSync "bun" (js-array (resolve root "tests/unicode-default-selfhosted.test.mjs"))
+                   (js-object :cwd root :env environment :stdio (js-array "ignore" "pipe" "pipe") :encoding "utf8"))))
+            (js-call assert :strictEqual (get child :error) undefined)
+            (js-call assert :strictEqual (get child :signal) nil)
+            (js-call assert :strictEqual (get child :status) 0 (get child :stderr))
+            (js-call assert :strictEqual (get child :stdout) "unicode-default-complete\n")))))))

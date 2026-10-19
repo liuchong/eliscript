@@ -1,5 +1,38 @@
 # Eliscript Agent Rules
 
+## Working Directory
+
+- Perform normal development in the primary project checkout.
+- Create parallel Git worktrees only below `_worktree/` in that checkout,
+  using task and scope subdirectories as needed. Keep `_worktree/` ignored.
+- Do not start new development in temporary directories or separate source
+  copies. Run builds and acceptance from the checkout that owns the changes.
+- Never store persistent source, uncommitted changes, plans, recovery data,
+  long-lived logs or acceptance evidence in system temporary directories.
+  Temporary locations are only for disposable, reproducible intermediates.
+  Store retained evidence under the project's durable ignored directories.
+- Preserve unrelated changes. Commit with a verified signature and deliver
+  completed work to the primary branch using fast-forward merges and pushes.
+
+## Current Delivery Target
+
+- The active delivery plan is `docs/bootstrap-0.0.2-plan.md`.
+- The maintained Emacs Lisp compiler emits JavaScript stage0. The same frozen
+  Eliscript compiler sources then produce JavaScript stage1, stage2 and stage3.
+  Require exact stage2/stage3 compiler-product equality.
+- Only final stage3 must pass the shared-source JavaScript, WASM and native
+  output acceptance. Do not add binary-output acceptance for stage1 or stage2.
+- WASM/native compiler hosts and the previous 3-by-3 bootstrap goal are
+  cancelled for this delivery. Preserve their historical evidence; do not
+  restart that work or require it for 0.0.2. The WASM/native output backends
+  and actual generated-program execution remain required.
+- `docs/native-wasm-feasibility.md` is historical context, not the active
+  construction checklist. The new plan controls scope and acceptance.
+- For this delivery, finish all design, then write all required tests without
+  running them, then finish all implementation, and only then perform unified
+  integration and acceptance. This order supersedes focused-test iteration
+  and vertical-slice guidance below. Preserve existing useful work.
+
 This file defines project-specific rules for Eliscript. These rules take
 precedence over parent rules when they address the same decision.
 
@@ -54,6 +87,21 @@ precedence over parent rules when they address the same decision.
   dependencies, and exit-gate status.
 
 ## Eliscript Core Boundary
+
+- **SEMANTICS-01** - Eliscript semantics are authoritative across JavaScript,
+  WASM and native outputs and supported hosts. Missing host methods, incorrect
+  native implementations and differing Unicode versions must be handled by
+  Eliscript compiler/runtime compatibility implementations, rather than by
+  weakening expected results or accepting host-dependent Eliscript behavior.
+- **SEMANTICS-02** - Preserve intentional user overrides and observable
+  evaluation, conversion, exception and identity behavior while adapting host
+  operations. Keep the same source and independent expected results across
+  targets; a compatibility helper alone is not proof of generated-program
+  correctness.
+- **SEMANTICS-03** - Access to host-specific JavaScript behavior belongs in
+  explicitly named/documented JavaScript interoperation APIs, separate from
+  portable Eliscript semantics. Add such APIs when required; they are not a
+  prerequisite for this release and must not expand the current mainline.
 
 - **CORE-01** - Core progress includes the language, self-hosted compiler,
   runtime, persistent data structures, standard library, host-neutral tooling,

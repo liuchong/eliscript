@@ -1,0 +1,109 @@
+(module tools.backends.compiler-corpus-cli-adapters
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "node:util" isDeepStrictEqual)
+  (import "./compiler-corpus-cli-adapters-legacy.mjs" :as legacy)
+  (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
+
+  (defconst addOriginalWorkerProgram (get legacy :addOriginalWorkerProgram))
+  (defconst generation-suite "tests/bootstrap-compiler.test.mjs")
+  (defconst generation-archive "tests/bootstrap-compiler-test-legacy.mjs")
+  (defconst generation-maintained "tests/eliscript/bootstrap-compiler.eli")
+  (defun hash (source) (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
+  (defun generation-fail (message) (throw (new globalThis.TypeError message)))
+  (defasync generation-sources (options)
+    (let ((files (js-array generation-archive generation-maintained generation-suite))
+          (assets (js-array)) (sources (js-array)) (identities (js-array)) (index 0))
+      (while (< index (js-length files))
+        (let* ((filename (aref files index)) (source (await (js-call options :text filename)))
+               (identity (await (js-call options :file filename))))
+          (unless (and (= (value-type source) "string") (= (get identity :file) filename)
+            (= (hash source) (get identity :sha256)) (= (js-call Buffer :byteLength source) (get identity :bytes)))
+            (generation-fail "original CLI generation source asset identity differs"))
+          (js-call sources :push source) (js-call identities :push identity)
+          (js-call assets :push (js-object :file filename :sourceSha256 (get identity :sha256))))
+        (setq index (1+ index)))
+      (let* ((source (aref sources 0)) (cases (originalSourceCaseLocators generation-suite source)))
+        (unless (and (= (js-length cases) 1)
+          (= (get (get (aref cases 0) :originalCase) :title) "portable compiler driver reaches a reproducible fixed point")
+          (= (get (get (aref cases 0) :originalCase) :timeoutMs) 30000))
+          (generation-fail "original CLI generation assertion registration changed"))
+        (js-object :source source :identity (aref identities 0) :assets assets
+          :maintainedSource (aref sources 1) :generatedSource (aref sources 2)
+          :case (get (aref cases 0) :originalCase)))))
+  (defun generation-record (record binding)
+    (if (/= (get record :id) "original-program:compiler-cli-bootstrap-generations") record
+      (let* ((original (get record :original)) (execution (get record :execution))
+             (source (get binding :source)) (sha (get (get binding :identity) :sha256))
+             (region (js-object :start 0 :end (js-length source) :byteStart 0
+               :byteEnd (js-call Buffer :byteLength source) :sha256 sha)))
+        (unless (and (= (get original :suite) generation-suite)
+          (= (get original :fixture) generation-suite) (= (get original :host) generation-suite)
+          (= (get original :sourceSha256) sha)
+          (= (get (get original :setupReplacement) :sourceSha256) sha)
+          (= (get (get execution :setupReplacement) :sourceSha256) sha)
+          (isDeepStrictEqual (get original :regions) (js-array region)))
+          (generation-fail "original CLI generation assertion archive binding changed"))
+        ;; Logical gate names remain canonical for final-gate classification.
+        ;; Every actual byte coordinate explicitly names the retained archive;
+        ;; the new canonical suite and its maintained Eli are separate assets.
+        (Object/assign (js-object) record (js-object :original
+          (Object/assign (js-object) original (js-object
+            :regions (js-array (Object/assign (js-object) region (js-object :sourceFile generation-archive)))
+            :assertionSource (js-object :file generation-archive :sourceSha256 sha
+              :bytes (js-call Buffer :byteLength source) :regions (js-array region))
+            :cases (js-call (get record :coverage) :map (lambda (id)
+              (Object/assign (js-object) (get binding :case) (js-object :id id :sourceFile generation-archive))))
+            :sourceAssets (get binding :assets)
+            :maintainedGate (js-object :kind "maintained-eli-original-js-bootstrap-gate"
+              :logicalSuite generation-suite :sourceFile generation-maintained
+              :sourceSha256 (hash (get binding :maintainedSource)) :generatedFile generation-suite
+              :generatedSha256 (hash (get binding :generatedSource)) :finalGate "make test" :originalTimeoutMs 30000))))))))
+  (defun original-shell-stdout (source)
+    ;; Bind both success messages to the actual unchanged shell. The second
+    ;; message follows the public Seed RAM, byte/map, and diagnostic assertions;
+    ;; it must remain part of the frozen stdout rather than being discarded.
+    (let* ((first "printf 'CLI and Bun execution test passed\\n'")
+           (second "console.log(\"Public Seed RAM bytecode and unchanged small-input path passed\");")
+           (start (js-call source :indexOf first)) (end (js-call source :indexOf second)))
+      (unless (and (>= start 0) (> end start)
+                   (= (js-call source :indexOf first (1+ start)) -1)
+                   (= (js-call source :indexOf second (1+ end)) -1))
+        (throw (new globalThis.TypeError "original shell CLI success statement boundary changed")))
+      "CLI and Bun execution test passed\nPublic Seed RAM bytecode and unchanged small-input path passed\n"))
+
+  (defun shell-record (record source)
+    (if (/= (get record :id) "original-program:compiler-cli-shell") record
+      (let ((stdout (original-shell-stdout source)))
+        (unless (= (get (get record :original) :sourceSha256) (hash source))
+          (throw (new globalThis.TypeError "original shell CLI source identity changed")))
+        (Object/assign (js-object) record (js-object :expected
+          (Object/assign (js-object) (get record :expected) (js-object :stdout stdout)))))))
+
+  (defasync addOriginalCLIPrograms (options)
+    ;; Historical construction stays byte-identical. Its retired generation
+    ;; replay is provenance only in the stage3 scope; the canonical maintained
+    ;; suite executes the complete JS gate once in make test.
+    (if (nullish? options) (await (js-call legacy :addOriginalCLIPrograms options))
+      (let ((source undefined) (add (get options :add)) (text (get options :text)))
+        (if (or (/= (value-type add) "function") (/= (value-type text) "function"))
+          (await (js-call legacy :addOriginalCLIPrograms options))
+          (let* ((forwarded (Object/assign (js-object) options))
+                 (locators (get options :locators))
+                 (selected (and (Array/isArray locators) (js-call locators :some
+                   (lambda (locator) (= (get locator :file) generation-suite)))))
+                 (binding undefined)
+                 (file (get options :file))
+                 (ensure-binding (async ()
+                   (when (undefined? binding) (setq binding (await (generation-sources options)))) binding)))
+            (put forwarded :text (async (filename)
+              (if (and selected (= filename generation-suite)) (get (await (funcall ensure-binding)) :source)
+                (let ((value (await (funcall text filename))))
+                  (when (= filename "tests/cli-test.sh") (setq source value)) value))))
+            (when selected
+              (put forwarded :file (async (filename)
+                (if (= filename generation-suite) (get (await (funcall ensure-binding)) :identity) (await (funcall file filename))))))
+            (put forwarded :add (lambda (record)
+              (funcall add (generation-record (shell-record record source) binding))))
+            (await (js-call legacy :addOriginalCLIPrograms forwarded)))))))
+  (export addOriginalCLIPrograms addOriginalWorkerProgram))

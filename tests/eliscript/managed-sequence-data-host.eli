@@ -1,0 +1,401 @@
+(module tests.managed-sequence-data-host
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile)
+  (import "node:buffer" Buffer)
+  (import "node:module" createRequire)
+  (import "node:path" basename)
+  (import "node:util" types)
+  (import "node:url" pathToFileURL)
+  (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime loadManagedHostModules readManagedAllocatorSnapshot readManagedAllocatorValueCounts)
+  (import "../../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "../../tools/backends/managed-module-graph.mjs" createManagedModuleGraph loadManagedProjectGraph)
+  (import "../../tools/backends/managed-source-view.mjs" isManagedSourceView)
+  (import "../../runtime/core/data-text.mjs" IPrint printValue)
+  (import "../../runtime/core/order.mjs" IComparable compareValues)
+  (import "../../runtime/core/protocol.mjs" protocolSlot protocolMethod isProtocol)
+  (defconst allocator-diagnostic (= (get (get globalThis.process :env) "ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC") "1"))
+  (defconst sequence-source-failures (new globalThis.WeakMap))
+  (defvar sequence-phase-count 0)
+  (defun readSequenceSourceFailureReport (error)
+    (js-call sequence-source-failures :get error))
+  (defun sequence-object-p (value)
+    ;; Object(value) preserves an object's identity without consulting traps.
+    (eq (funcall globalThis.Object value) value))
+  (defun sequence-release-secondary (runtime primary secondary)
+    (when (and (not (eq primary secondary)) (not (eq secondary nil))
+               (sequence-object-p secondary))
+      (let ((owned false))
+        (try (js-call runtime :pin secondary) (setq owned t) (catch ignored nil))
+        (when owned
+          (let ((index 0))
+            (while (< index 2)
+              (try (js-call runtime :release secondary) (catch ignored nil))
+              (setq index (1+ index))))))))
+  (defun capture-sequence-source-failure (runtime error)
+    (let ((previous (readSequenceSourceFailureReport error)))
+      (if previous previous
+        (when (and runtime (not (eq error nil))
+                   (sequence-object-p error))
+          (let ((owned false) (report undefined))
+            (try
+              (progn
+                ;; The actual owner/generation WeakMap is the authority. Do
+                ;; not inspect a host Error or accept a forged kind property.
+                (js-call runtime :pin error) (setq owned t)
+                (setq report (js-object :kind (get error :kind)))
+                (js-call sequence-source-failures :set error report)
+                (when (= (get report :kind) 13)
+                  (try
+                    (js-call (js-array "name" "message") :forEach (lambda (field)
+                      (let ((key undefined) (child undefined))
+                        (try
+                          (progn
+                            (setq key (js-call runtime :string field))
+                            ;; This is the existing source Get, not full Error
+                            ;; reflection. A custom source getter can throw;
+                            ;; diagnostics never replace the first exception.
+                            (setq child (js-call runtime :objectGet error key))
+                            (when (and child (= (get child :kind) 5))
+                              (let* ((text (js-call runtime :readString child))
+                                     (limit (if (= field "name") 128 2048)))
+                                (put report field (js-call text :slice 0 limit))
+                                (put report (+ field "Length") (js-length text)))))
+                          (finally
+                            (js-call (js-array child key) :forEach (lambda (value)
+                              (try (js-call runtime :release value)
+                                (catch ignored (put report :fieldReleaseFailed t))))))))))
+                    (catch secondary
+                      (put report :fieldReadFailed t)
+                      (sequence-release-secondary runtime error secondary)))))
+              (catch ignored nil)
+              (finally
+                (when owned
+                  ;; One borrowed pin plus the thrown value's original root.
+                  ;; This helper is the terminal CLI observer of that throw.
+                  (let ((index 0))
+                    (while (< index 2)
+                      (try (js-call runtime :release error)
+                        (catch ignored (when report (put report :rootReleaseFailed t))))
+                      (setq index (1+ index)))))))
+            (when (and (not owned)
+                       (or (isManagedSourceView error) (js-call types :isNativeError error)))
+              (setq report (js-object :source (if (isManagedSourceView error) "source-view" "native-error")))
+              (js-call sequence-source-failures :set error report)
+              (try
+                (js-call (js-array "name" "message" "reason") :forEach (lambda (field)
+                  (let ((text (get error field)) (limit (if (= field "message") 2048 128)))
+                    (when (and (not (sequence-object-p text)) (= (value-type text) "string"))
+                      (put report field (js-call text :slice 0 limit))
+                      (put report (+ field "Length") (js-length text))))))
+                (catch secondary
+                  (put report :fieldReadFailed t)
+                  (sequence-release-secondary runtime error secondary))))
+            report)))))
+  (defun withSequenceSourceFailure (runtime action)
+    (try (funcall action)
+      (catch error
+        (capture-sequence-source-failure runtime error)
+        (throw error))))
+  (defun sequence-call-phase (method phase arguments)
+    (when (and allocator-diagnostic (< sequence-phase-count 128))
+      (try
+        (progn
+          (setq sequence-phase-count (1+ sequence-phase-count))
+          (let ((record (js-object :method method :phase phase)))
+            (when (> (js-length arguments) 0)
+              (let ((name (aref arguments 0)))
+                (when (or (= (value-type name) "string") (= (value-type name) "number"))
+                  (put record :export (if (= (value-type name) "string") (js-call name :slice 0 128) name)))))
+            (console/error "[sequence-phase]" (JSON/stringify record))))
+        (catch ignored nil))))
+  (defun sequence-allocation-phase (runtime phase)
+    (when allocator-diagnostic
+      (try
+        (let ((snapshot undefined) (counts undefined))
+          (try (setq snapshot (readManagedAllocatorSnapshot runtime)) (catch ignored nil))
+          (try (setq counts (readManagedAllocatorValueCounts runtime)) (catch ignored nil))
+          (console/error "[project-allocator]" (JSON/stringify
+            (js-object :suite "sequence" :phase phase :allocator snapshot :values counts :stats (js-call runtime :stats)))))
+        (catch ignored nil))))
+  (defun createSequenceDiagnosticGraph (runtime graph)
+    ;; Native construction already attaches runtime.project to this graph.
+    ;; Observe its loader methods without replacing that frozen transport.
+    (let* ((descriptors (Object/getOwnPropertyDescriptors graph))
+           (observed (Object/create (Object/getPrototypeOf graph))))
+      (js-call (js-array "prepare" "invoke") :forEach (lambda (name)
+        (let* ((description (get descriptors name))
+               (method (get description :value))
+               (wrapped (lambda (&rest arguments)
+                 (sequence-call-phase name "start" arguments)
+                 (when (= name "prepare") (sequence-allocation-phase runtime "before-prepare"))
+                 (try
+                   (let ((result (if (= name "prepare")
+                                   (withSequenceSourceFailure runtime
+                                     (lambda () (Reflect/apply method graph arguments)))
+                                   (Reflect/apply method graph arguments))))
+                     (sequence-call-phase name "complete" arguments)
+                     (when (= name "prepare") (sequence-allocation-phase runtime "after-prepare"))
+                     result)
+                   (catch error
+                     (sequence-call-phase name "failed" arguments)
+                     (when (= name "prepare")
+                       (sequence-allocation-phase runtime "prepare-failed-before-loader-cleanup"))
+                     (throw error))))))
+          (Object/defineProperties wrapped (js-object
+            :name (js-object :value (get method :name)) :length (js-object :value (get method :length))))
+          (put description :value wrapped))))
+      (Object/defineProperties observed descriptors)
+      (Object/freeze observed)))
+  (defasync load-module (path)
+    (let* ((namespace (funcall (createRequire path) path))
+           (_namespace (js-call assert :strictEqual (get namespace globalThis.Symbol.toStringTag) "Module"))
+           (modules (await (loadManagedHostModules
+             (js-object :hostModules
+               (js-array (js-object :id "body" :specifier (get (pathToFileURL path) :href)
+                 :referrer "sequence-data-host.mjs" :allowedExports (js-array) :namespace t)))
+             (js-object :hostModules (new globalThis.Map (js-array (js-array "body" namespace))))))))
+      (js-call assert :strictEqual (js-call modules :get "body") namespace)
+      namespace))
+  (defasync load-body (path)
+    ;; The parent has already relocated the original static import specifiers.
+    ;; Transport its complete bytes without rewriting its code, including TLA.
+    (let* ((bytes (await (readFile path)))
+           (encoded (js-call bytes :toString "base64"))
+           (_bytes (js-call assert :ok (js-call (js-call Buffer :from encoded "base64") :equals bytes)))
+           (url (+ "data:text/javascript;base64," encoded))
+           (modules (await (loadManagedHostModules
+             (js-object :hostModules
+               (js-array (js-object :id "body" :specifier url :referrer "sequence-data-host.mjs"
+                 :allowedExports (js-array) :namespace t)))))))
+      (let ((namespace (js-call modules :get "body")))
+        (js-call assert :strictEqual (get namespace globalThis.Symbol.toStringTag) "Module")
+        namespace)))
+  (defun observation-json (value)
+    (JSON/stringify value (lambda (key item)
+      (cond ((undefined? item) (js-object :$number "undefined"))
+            ((= (value-type item) "bigint") (js-object :$bigint (funcall globalThis.String item)))
+            ((/= (value-type item) "number") item)
+            ((Object/is item -0) (js-object :$number "-0"))
+            ((Number/isNaN item) (js-object :$number "NaN"))
+            ((= item globalThis.Infinity) (js-object :$number "+Infinity"))
+            ((= item (- globalThis.Infinity)) (js-object :$number "-Infinity")) (t item)))))
+  (defun ordered (value) (js-call (Array/from value) :sort (lambda (left right) (- left right))))
+  (defun rows (value)
+    (js-call (js-call (Array/from value) :map (lambda (row) (Object/fromEntries row))) :sort
+      (lambda (left right)
+        (if (and (not (undefined? (get left :id))) (not (undefined? (get right :id))))
+          (- (get left :id) (get right :id))
+          (js-call (JSON/stringify left) :localeCompare (JSON/stringify right))))))
+  (defun entries (value)
+    (js-call (js-call (Array/from value) :map (lambda (entry) (Array/from entry))) :sort
+      (lambda (left right) (js-call (funcall globalThis.String (aref left 0)) :localeCompare
+                            (funcall globalThis.String (aref right 0))))))
+  (defun set-report (usage)
+    ;; The original core-set runUsageHost observation, expressed in Eli.
+    (js-object :converted (ordered (get usage :converted)) :united (ordered (get usage :united))
+      :intersected (ordered (get usage :intersected)) :subtracted (ordered (get usage :subtracted))
+      :subset (get usage :subset_result) :superset (get usage :superset_result) :disjoint (get usage :disjoint_result)
+      :selected (rows (get usage :selected)) :projected (rows (get usage :projected)) :renamed (rows (get usage :renamed))
+      :renamedKeys (Object/fromEntries (get usage :renamed_keys))
+      :indexSizes (js-call (js-call (Array/from (get usage :indexed)) :map (lambda (entry) (get (aref entry 1) :count))) :sort)
+      :inverted (entries (get usage :inverted)) :joined (rows (get usage :joined)) :mappedJoined (rows (get usage :mapped_joined))))
+  (defun standard-identities (module)
+    (let ((input (js-object)))
+      (Object/defineProperty input (protocolSlot IPrint "print")
+        (js-object :value (lambda () "host-print") :enumerable t :configurable t :writable t))
+      (Object/defineProperty input (protocolSlot IComparable "compare")
+        (js-object :value (lambda () 0) :enumerable t :configurable t :writable t))
+      (js-call assert :deepStrictEqual (Array/from (js-call module :read_standard_input input)) (js-array "host-print" 0)))
+    (let ((values (js-call module :standard_protocol_identities)))
+      (js-call assert :strictEqual (aref values 0) (protocolSlot IPrint "print"))
+      (js-call assert :strictEqual (aref values 1) (protocolMethod IPrint "print"))
+      (js-call assert :strictEqual (aref values 2) (get IPrint :operations))
+      (js-call assert :strictEqual (aref values 3) IPrint)
+      (js-call assert :strictEqual (aref values 4) (protocolSlot IComparable "compare"))
+      (js-call assert :strictEqual (aref values 5) IComparable)
+      (js-call assert :strictEqual (printValue (aref values 6)) "target-print")
+      (js-call assert :strictEqual (compareValues (aref values 6) (aref values 6)) 0)
+      (js-call assert :strictEqual (isProtocol (aref values 7)) t)
+      (js-call assert :notStrictEqual (aref values 7) IPrint)
+      (js-call assert :notStrictEqual (protocolSlot (aref values 7) "print") (protocolSlot IPrint "print")))
+    (console/log "standard identities preserved"))
+  (defun sequence-protocol-error-field (runtime error field)
+    (let ((key undefined) (child undefined))
+      (try
+        (progn
+          (setq key (js-call runtime :string field))
+          (setq child (js-call runtime :objectGet error key))
+          (js-call runtime :readString child))
+        (finally (js-call runtime :release child) (js-call runtime :release key)))))
+  (defun assertSequenceProtocolRejection (runtime action reason)
+    (let ((failed false) (failure undefined))
+      (try (funcall action) (catch error (setq failed t failure error)))
+      (js-call assert :strictEqual failed t)
+      (let ((owned false))
+        (when runtime
+          (try (js-call runtime :pin failure) (setq owned t) (catch ignored nil)))
+        (try
+          (if owned
+            (progn
+              (js-call assert :strictEqual (sequence-protocol-error-field runtime failure "name") "ProtocolDispatchError")
+              (js-call assert :strictEqual (sequence-protocol-error-field runtime failure "reason") reason))
+            (progn
+              (js-call assert :ok (or (isManagedSourceView failure) (js-call types :isNativeError failure)))
+              (js-call assert :strictEqual (get failure :name) "ProtocolDispatchError")
+              (js-call assert :strictEqual (get failure :reason) reason)))
+          (finally
+            (when owned (js-call runtime :release failure) (js-call runtime :release failure)))))))
+  (defun sequence-protocol-exact (module runtime)
+    (let* ((values (js-array 1 2 3)) (object (js-object :a 1))
+           (sum (lambda (left right) (+ left right)))
+           (reduce-slot (protocolSlot (get module :IReduce) "reduce"))
+           (assoc-slot (protocolSlot (get module :IAssociative) "assoc"))
+           (result (js-call module :assoc object "b" 2)))
+      (js-call assert :strictEqual (js-call module :reduce values sum 0) 6)
+      (js-call assert :strictEqual (get result :a) 1)
+      (js-call assert :strictEqual (get result :b) 2)
+      (js-call assert :strictEqual (Object/getPrototypeOf result) globalThis.Object.prototype)
+      (let ((safe (js-call module :assoc object "__proto__" 7)))
+        (js-call assert :strictEqual (Object/getPrototypeOf safe) globalThis.Object.prototype)
+        (js-call assert :strictEqual (Object/hasOwn safe "__proto__") t)
+        (js-call assert :strictEqual (get safe "__proto__") 7))
+      (js-call assert :strictEqual (Object/hasOwn object "b") false)
+      (js-call assert :strictEqual (Object/getPrototypeOf values) globalThis.Array.prototype)
+      (js-call assert :strictEqual (Object/getPrototypeOf object) globalThis.Object.prototype)
+      (js-call (js-array
+        (js-object :target values :slot reduce-slot :call (lambda () (js-call module :reduce values sum 0)))
+        (js-object :target object :slot assoc-slot :call (lambda () (js-call module :assoc object "b" 2))))
+        :forEach (lambda (operation)
+          (let ((target (get operation :target)) (slot (get operation :slot)) (action (get operation :call))
+                (reads 0) (calls 0))
+            (Object/defineProperty target slot (js-object :configurable t
+              :value (lambda (&rest arguments) (setq calls (1+ calls)) 19)))
+            (js-call assert :strictEqual (funcall action) 19)
+            (js-call assert :strictEqual calls 1)
+            (js-call (js-array undefined nil false) :forEach (lambda (value)
+              (Object/defineProperty target slot (js-object :configurable t :value value))
+              (assertSequenceProtocolRejection runtime action "invalid-direct-slot")))
+            (Object/defineProperty target slot (js-object :configurable t
+              :get (lambda () (setq reads (1+ reads)) (lambda (&rest arguments) 23))))
+            (js-call assert :strictEqual (funcall action) 23)
+            (js-call assert :strictEqual reads 1)
+            (js-call (js-array false undefined) :forEach (lambda (first)
+              (setq reads 0)
+              (Object/defineProperty target slot (js-object :configurable t
+                :get (lambda () (setq reads (1+ reads)) (throw first))))
+              (let ((failed false) (failure nil))
+                (try (funcall action) (catch error (setq failed t failure error)))
+                (js-call assert :strictEqual failed t)
+                (js-call assert :strictEqual failure first)
+                (js-call assert :strictEqual reads 1))))
+            (js-call assert :strictEqual (Reflect/deleteProperty target slot) t))))
+      (js-call assert :strictEqual (js-call module :reduce values sum 0) 6)
+      (js-call assert :strictEqual (get (js-call module :assoc object "b" 2) :b) 2)
+      (js-call (js-array (Object/create (js-object :custom t)) (Object/create nil)) :forEach
+        (lambda (target)
+          (assertSequenceProtocolRejection runtime (lambda () (js-call module :assoc target "b" 2)) "missing")))
+      (js-call assert :strictEqual (Object/getPrototypeOf values) globalThis.Array.prototype)
+      (js-call assert :strictEqual (Object/getPrototypeOf object) globalThis.Object.prototype))
+    (console/log "exact host protocol dispatch preserved"))
+  (defasync perform (configuration runtime)
+    (let ((mode (get configuration :mode)) (module undefined))
+      (if (= mode "body") (await (load-body (get configuration :body)))
+        (progn
+          (setq module (await (load-module (get configuration :module))))
+          (cond
+            ((= mode "usage") nil)
+            ((= mode "set") (console/log (JSON/stringify (set-report module))))
+            ((= mode "protocols") (standard-identities module))
+            ((= mode "protocol-exact") (sequence-protocol-exact module runtime))
+            ((= mode "indexed-sequence")
+             ;; Call the actual compiled public module. These are observations
+             ;; of its results, not replacement implementations of sequences.
+             (let* ((values (js-array 0 1 2 3 4))
+                    (left (js-array 1 2)) (right (js-array 10 20 30))
+                    (tree (js-array 1 (js-array 2 3) 4)))
+               (console/log (observation-json (js-object
+                 :partitionAll (js-call (Array/from (js-call module :partitionAll 3 2 values))
+                                   :map (lambda (window) (Array/from window)))
+                 :interleave (Array/from (js-call module :interleave left right))
+                 :interleaveAll (Array/from (js-call module :interleaveAll left right))
+                 :treeSeq (Array/from (js-call module :treeSeq
+                                       (lambda (value) (Array/isArray value)) (lambda (value) value) tree))
+                 :flatten (Array/from (js-call module :flatten
+                                       (js-array -0 (js-array 2 (js-array 3)) false (js-array) "中"))))))))
+            ((= mode "observations")
+             (let ((out (js-object)))
+               (js-call (get configuration :observations) :forEach (lambda (name)
+                 (put out name (Reflect/apply (get module name) undefined (js-array)))))
+               (console/log (observation-json out))))
+            (t (throw (new globalThis.TypeError "unknown sequence-data host mode"))))))))
+  (defasync run ()
+    (let* ((argv (get globalThis.process :argv))
+           (configuration (JSON/parse (await (readFile (aref argv 2) "utf8"))))
+           (host (get configuration :host))
+           (old-module (get globalThis.WebAssembly :Module))
+           (old-instance (get globalThis.WebAssembly :Instance))
+           (runtime undefined) (graph undefined) (failed false) (load-failed false))
+      (try
+        (progn
+          (unless (= host "reference")
+            (let* ((lowered (JSON/parse (await (readFile (get configuration :lowered) "utf8"))))
+                   (descriptor (get lowered :descriptor)))
+              (setq graph (createManagedModuleGraph descriptor))
+              (when (= host "native")
+                (let ((reject (lambda (&rest arguments)
+                                (throw (new globalThis.Error "native sequence/data must not execute WASM")))))
+                  (put globalThis.WebAssembly :Module (new globalThis.Proxy old-module
+                    (js-object :apply reject :construct reject)))
+                  (put globalThis.WebAssembly :Instance (new globalThis.Proxy old-instance
+                    (js-object :apply reject :construct reject)))))
+              (let ((options (Object/assign (js-object) (get configuration :memory) (get configuration :budget)
+                              (js-object :initializeModule false :nativeTarget (get configuration :nativeTarget) :moduleGraph graph))))
+                (setq runtime (if (= host "wasm")
+                  (instantiateManagedRuntime (new globalThis.Uint8Array (await (readFile (get configuration :wasmPath)))) options)
+                  (await (instantiateNativeManagedRuntime (get configuration :nativePath) lowered options))))
+                (js-call runtime :auto 65536)
+                (try
+                  (await (loadManagedProjectGraph runtime descriptor (js-object :moduleGraph
+                    (if allocator-diagnostic (createSequenceDiagnosticGraph runtime graph) graph)
+                    :projectEntry (get configuration :entry) :projectModuleBaseURL
+                    (get (pathToFileURL (+ (get configuration :deployment) "/")) :href))))
+                  (catch error
+                    ;; The real loader closes its runtime and graph before
+                    ;; rejecting. A second closeModule on the native wrapper
+                    ;; would replace this preparation failure with "closed".
+                    (setq load-failed t)
+                    (throw error))))))
+          (Reflect/apply (get argv :splice) argv
+            (js-call (js-array 2 (- (js-length argv) 2)) :concat (get configuration :arguments (js-array))))
+          (await (perform configuration runtime))
+          (when runtime (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)))
+        (catch error
+          (setq failed t)
+          (when allocator-diagnostic (capture-sequence-source-failure runtime error))
+          (throw error))
+        (finally
+          (put globalThis.WebAssembly :Module old-module) (put globalThis.WebAssembly :Instance old-instance)
+          (try
+            (if runtime
+              (try
+                (if load-failed
+                  (js-call assert :strictEqual (get graph :closed) t
+                    "the loader owns failed preparation cleanup")
+                  (progn
+                    (js-call runtime :closeModule) (js-call runtime :collect)
+                    (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)
+                    (js-call assert :strictEqual (js-call runtime :live) 0)
+                    (js-call runtime :closeModule) (js-call runtime :collect)
+                    (js-call assert :strictEqual (js-call runtime :live) 0)))
+                (finally (when (get runtime :close) (js-call runtime :close))))
+              (when graph (js-call graph :close)))
+            (catch cleanup-error
+              ;; Successful cases still enforce every cleanup assertion;
+              ;; failing cases must report the original prepare/body error.
+              (unless failed (throw cleanup-error))))))))
+  (export withSequenceSourceFailure readSequenceSourceFailureReport createSequenceDiagnosticGraph assertSequenceProtocolRejection)
+  (when (= (basename (get (get globalThis.process :argv) 1 "")) "managed-sequence-data-host-selfhosted.mjs")
+    (js-call (run) :catch (lambda (error)
+      (let ((report (when allocator-diagnostic (readSequenceSourceFailureReport error))))
+        (if report (console/error "[sequence-source-throw]" (JSON/stringify report)) (console/error error)))
+      (put globalThis.process :exitCode 1)))))

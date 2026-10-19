@@ -1,0 +1,260 @@
+(module tools.backends.run-artifact
+  (import "node:fs/promises" readFile writeFile mkdir)
+  (import "node:path" resolve dirname basename)
+  (import "node:module" createRequire)
+  (import "../compiler-metadata.mjs" readCompilerMetadata)
+  (import "../compiler-bootstrap.mjs" openCompilerArtifact compilerFailure assertCompilerArtifactSources)
+  (import "../compiler-build.mjs" writeCompilerMetadata buildIndependentCompiler loadCompilerSources)
+  (import "../compiler-session.mjs" createCompilerSession)
+  (import "../managed-runtime.mjs" instantiateManagedRuntime readManagedAllocatorSnapshot)
+  (import "../managed-host.mjs" failManagedRuntime)
+
+  (defun runtime-diagnostic-options (first-step)
+    (let ((options (get first-step :runtimeOptions)) (configuration (js-object)))
+      (unless (undefined? options)
+        (unless (and (not (nullish? options)) (= (value-type options) "object")
+                     (not (Array/isArray options)))
+          (failManagedRuntime 3))
+        (when (Object/hasOwn options "auto")
+          (let ((auto (get options :auto)))
+            ;; Match runtime.auto's word validation without touching a heap.
+            ;; In particular, zero disables automatic GC and is no default.
+            (unless (and (= (value-type auto) "number") (Number/isInteger auto)
+                         (>= auto 0) (<= auto 4294967295) (not (Object/is auto -0)))
+              (failManagedRuntime 3))
+            (put configuration :auto auto))))
+      (Object/freeze configuration)))
+
+  (defun configure-runtime-diagnostic (runtime metadata configuration)
+    (js-call runtime :auto (if (Object/hasOwn configuration "auto")
+      (get configuration :auto) (get metadata :auto))))
+
+  (defun runtime-session-options (first-step)
+    (let ((options (get first-step :runtimeOptions)) (configuration (js-object :debug false)))
+      (unless (undefined? options)
+        (unless (and (not (nullish? options)) (= (value-type options) "object")
+                     (not (Array/isArray options)))
+          (throw (new globalThis.TypeError "runtimeOptions must be an object")))
+        ;; Snapshot spread semantics once, including an own __proto__ field,
+        ;; without invoking inherited setters. The ordinary loader retains
+        ;; responsibility for its existing resource-option validation.
+        (let ((keys (Reflect/ownKeys options)) (index 0))
+          (while (< index (js-length keys))
+            (let* ((key (aref keys index)) (descriptor (Object/getOwnPropertyDescriptor options key)))
+              (when (and descriptor (get descriptor :enumerable))
+                (Object/defineProperty configuration key (js-object :value (get options key)
+                  :enumerable t :writable t :configurable t))))
+            (setq index (1+ index))))
+        (runtime-diagnostic-options (js-object :runtimeOptions configuration)))
+      ;; Source-frame loading remains disabled for functional compiler calls;
+      ;; request.debug still reaches project emission independently.
+      (put configuration :debug false)
+      (Object/freeze configuration)))
+
+  (defun capture-runtime-diagnostic (runtime snapshot-reader phase)
+    (let ((record (js-object :phase phase)))
+      ;; Read raw allocator state first: stats may clear lastError while
+      ;; calling the runtime. Neither reader can hide the other's evidence.
+      (try (put record :allocator (funcall snapshot-reader runtime))
+        (catch ignored (put record :allocatorUnavailable t)))
+      (try (put record :stats (js-call runtime :stats))
+        (catch ignored (put record :statsUnavailable t)))
+      record))
+
+  (defun write-runtime-diagnostic (record)
+    (try (js-call (get globalThis.process :stderr) :write (+ (JSON/stringify record) "\n"))
+      (catch ignored nil)))
+
+  (defun finalize-runtime-diagnostic (runtime state phase-key values snapshot-reader)
+    ;; This is a diagnostic/cleanup boundary, never a replacement source error.
+    ;; The caller's handles remain rooted across both snapshots and collection.
+    (write-runtime-diagnostic (capture-runtime-diagnostic runtime snapshot-reader "runtime-heap"))
+    (try (js-call runtime :collect) (catch ignored nil))
+    ;; Snapshot the post-collection allocator before any checkpoint conversion
+    ;; can touch lastError or create an unrelated managed temporary.
+    (let ((record (capture-runtime-diagnostic runtime snapshot-reader "runtime-checkpoint")))
+      (if (and (not (undefined? state)) (not (undefined? phase-key)))
+        (try
+          (let ((phase (js-call runtime :objectGet state phase-key)))
+            (try (put record :checkpoint (js-call runtime :toHostValue phase))
+              (finally (try (js-call runtime :release phase) (catch ignored nil)))))
+          (catch ignored (put record :checkpointUnavailable t)))
+        (put record :checkpointUnavailable t))
+      (write-runtime-diagnostic record))
+    (let ((index 0))
+      (while (< index (js-length values))
+        (unless (undefined? (aref values index))
+          (try (js-call runtime :release (aref values index)) (catch ignored nil)))
+        (setq index (1+ index))))
+    (try (js-call runtime :closeModule) (catch ignored nil))
+    (try (js-call runtime :collect) (catch ignored nil))
+    (try (js-call runtime :close) (catch ignored nil)))
+
+  ;; Preserve the full request and its first failure while exposing only scalar
+  ;; counters. This mode diagnoses a real capacity failure; it is no grid cell.
+  (defasync runtime-diagnostic (metadata metadata-path configuration)
+    (unless (= (get metadata :host) "wasm")
+      (throw (new globalThis.Error "runtime diagnostic requires a WASM compiler")))
+    (let* ((verified (await (openCompilerArtifact metadata (js-object :debug false))))
+           (runtime undefined) (state undefined) (input undefined) (output undefined)
+           (phase-key undefined))
+      (await (js-call verified :close))
+      (try
+        (setq runtime (instantiateManagedRuntime
+          (await (readFile (resolve (dirname metadata-path) (get metadata :path))))
+          (Object/assign (js-object) (get metadata :budget)
+            (js-object :initializeModule false))))
+        (configure-runtime-diagnostic runtime metadata configuration)
+        (js-call runtime :initializeModule)
+        (setq state (js-call runtime :invoke "compiler_session_new"))
+        (setq phase-key (js-call runtime :string "lastPhase"))
+        (let* ((graph (await (loadCompilerSources)))
+               (request (js-object :operation "runtime"
+                 :source (get (get graph :runtime) :source)
+                 :filename (get (get graph :runtime) :filename)
+                 :literalSources (get graph :literalSources))))
+          (assertCompilerArtifactSources metadata graph)
+          (setq input (js-call runtime :string (JSON/stringify request)))
+          (setq output (js-call runtime :invoke "compiler_session_request" (js-array state input)))
+          (js-call (get globalThis.process :stdout) :write
+            (+ (js-call runtime :readString output) "\n")))
+        (catch error (throw error))
+        (finally
+          (when runtime
+            (finalize-runtime-diagnostic runtime state phase-key (js-array output input state phase-key)
+              readManagedAllocatorSnapshot))))))
+
+  ;; Keep an actual emitted compiler alive across a complete request sequence.
+  ;; Existing host loaders provide file and machine-library access only; every
+  ;; compilation request executes the selected compiler's own implementation.
+  (defun report (phase index request)
+    (js-call (get globalThis.process :stdout) :write
+      (+ (JSON/stringify
+           (js-object :phase phase :index index
+             :operation (get request :operation)
+             :target (get request :target))) "\n")))
+
+  (defasync run-artifact-mode (first-step diagnostic sequence)
+    (if (get first-step :runtimeDiagnostic)
+      ;; Validate and snapshot before the branch may perform artifact IO,
+      ;; initialize a compiler, or call any managed operation.
+      (let ((configuration (runtime-diagnostic-options first-step)))
+        (await (funcall diagnostic configuration)))
+      (await (funcall sequence (runtime-session-options first-step)))))
+
+  (defasync run-artifact (arguments)
+    (unless (= (js-length arguments) 2)
+      (throw (new globalThis.Error
+        "Usage: run-artifact ARTIFACT_METADATA REQUEST_SEQUENCE_JSON")))
+    (let* ((metadata-path (resolve (aref arguments 0)))
+           (sequence-path (resolve (aref arguments 1)))
+           (base (dirname sequence-path))
+           (metadata undefined)
+           (steps (JSON/parse (await (readFile sequence-path "utf8"))))
+           (session nil) (failed false) (index 0))
+      (unless (and (Array/isArray steps) (> (js-length steps) 0))
+        (throw (new globalThis.Error "request sequence must be a nonempty array")))
+      ;; Binary debug data remains an authenticated build deliverable. Loading
+      ;; it is unnecessary when exercising the compiler's functional requests.
+      (await (run-artifact-mode (aref steps 0)
+        (async (configuration)
+          (setq metadata (await (readCompilerMetadata metadata-path)))
+          (put metadata :metadataPath metadata-path)
+          (await (runtime-diagnostic metadata metadata-path configuration)))
+        (async (configuration)
+      (setq metadata (await (readCompilerMetadata metadata-path)))
+      (put metadata :metadataPath metadata-path)
+      (setq session (await (openCompilerArtifact metadata configuration)))
+      (try
+        ;; The wire transport consumes a fresh decoded graph in bounded events.
+        ;; Authenticate the emitted compiler through the normal loader first;
+        ;; changing transport never substitutes a compiler implementation.
+        (when (get (aref steps 0) :wireTransport)
+          (unless (= (get metadata :host) "javascript")
+            (throw (new globalThis.Error "wire transport requires a JavaScript compiler artifact")))
+          (await (js-call session :close))
+          (let* ((require-module (createRequire metadata-path))
+                 (compiler (funcall require-module
+                   (resolve (dirname metadata-path) (get metadata :path))))
+                 (descriptors (Object/getOwnPropertyDescriptors compiler))
+                 (create-descriptor (get descriptors "compiler_session_new"))
+                 (create (get create-descriptor :value))
+                 (observed (Object/create (Object/getPrototypeOf compiler))))
+            ;; Preserve the authenticated module's other exports and every
+            ;; property descriptor. Only the local state constructor installs
+            ;; the existing private observer; it never enters request data.
+            (put create-descriptor :value
+              (lambda (&rest arguments)
+                (let ((state (Reflect/apply create compiler arguments)))
+                  (put state :phaseObserver
+                    (lambda (phase counts)
+                      (let* ((step (aref steps index))
+                             (request (or (get step :request)
+                               (js-object :operation "build" :target (get (get step :build) :host)))))
+                        (report phase index request))))
+                  state)))
+            (Object/defineProperties observed descriptors)
+            (setq session (await (createCompilerSession
+              (js-object :host "javascript" :compiler observed))))))
+        (while (< index (js-length steps))
+          (let* ((step (aref steps index)) (request (get step :request))
+                 (output (get step :output)) (source-path (get step :sourcePath))
+                 (module-sources (get step :moduleSources)) (build (get step :build)))
+            (unless (and (or request build) (= (value-type output) "string"))
+              (throw (new globalThis.Error "each request requires an output path")))
+            (if build
+              (let* ((host (get build :host))
+                     (artifact (await (buildIndependentCompiler
+                       (js-object :host host :outputRoot (resolve base output)
+                         :profile (get build :profile "full-runtime")
+                         :nativeTarget (get build :nativeTarget "arm64-macos")
+                         :retainIR false :debug t :session session
+                         :onPhase (lambda (phase counts)
+                           (report phase index (js-object :operation "build" :target host))))))))
+                (report "build-complete" index (js-object :operation "build" :target host))
+                (js-call (get globalThis.process :stdout) :write
+                  (+ (get artifact :metadataPath) "\n")))
+              (progn
+            (when source-path
+              (put request :source (await (readFile (resolve base source-path) "utf8")))
+              (unless (get request :filename) (put request :filename source-path)))
+            (when module-sources
+              (unless (Array/isArray module-sources)
+                (throw (new globalThis.Error "moduleSources must be an array")))
+              (let ((modules (js-array)) (position 0))
+                (while (< position (js-length module-sources))
+                  (let* ((item (aref module-sources position))
+                         (filename (get item :filename))
+                         (source (await (readFile
+                           (resolve base (get item :sourcePath)) "utf8"))))
+                    (js-call modules :push
+                      (js-object :id (get item :id) :filename filename :source source)))
+                  (setq position (1+ position)))
+                (put request :modules modules)))
+            (report "request-start" index request)
+            (let* ((result (await (js-call session :request request)))
+                   (javascript (get result :javascript))
+                   (expected-path (get step :expectedJavascriptPath))
+                   (path (resolve base output)))
+              (when expected-path
+                (unless (= javascript (await (readFile (resolve base expected-path) "utf8")))
+                  (throw (new globalThis.Error "compiler JavaScript output differs from the bound reference"))))
+              (await (mkdir (dirname path) (js-object :recursive t)))
+              (if (= (value-type javascript) "string")
+                (await (writeFile path javascript))
+                (await (writeCompilerMetadata path result)))
+              (report "request-complete" index request)))))
+          (setq index (1+ index)))
+        (catch error (setq failed t) (throw error))
+        (finally
+          (try (await (js-call session :close))
+            (catch close-error (unless failed (throw close-error)))))))))))
+
+  (export finalize-runtime-diagnostic run-artifact-mode runtime-diagnostic-options configure-runtime-diagnostic run-artifact)
+  (when (and (> (js-length (get globalThis.process :argv)) 1)
+             (= (basename (aref (get globalThis.process :argv) 1)) "run-artifact.mjs"))
+    (js-call (run-artifact (js-call (get globalThis.process :argv) :slice 2)) :catch
+      (lambda (error)
+        (js-call (get globalThis.process :stderr) :write
+          (+ (JSON/stringify (compilerFailure error)) "\n"))
+        (put globalThis.process :exitCode 1)))))

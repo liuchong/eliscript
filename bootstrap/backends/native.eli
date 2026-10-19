@@ -1,33 +1,129 @@
 (module eliscript.backend.native
   (import "./optimize.mjs" optimize-program)
   (import "./numeric.mjs" lower-numeric-program optimize-numeric-program numeric-pure backend-fail find-function)
-  (import "./sha256.mjs" sha256-bytes)
+  (import "./sha256.mjs" sha256-bytes sha256-words-le)
   (import "./memory.mjs" lower-memory-program)
+  (import "./elf.mjs" emit-elf-object emit-elf-library)
+  (import "./capabilities.mjs" prepare-host-capabilities prepare-fresh-host-capabilities host-capability-index)
+  (import "./binary.mjs" binary-output binary-byte binary-u32 binary-append binary-append-owned binary-slice binary-finish)
 
   ;; ARM64 numeric-f64 instruction and Mach-O image emission. Selection,
   ;; encoding, linking metadata and ad-hoc page signatures are independent.
+  ;; A memory image owns immutable 1024-word UTF16 blocks and one mutable
+  ;; block. Relocations may revisit any block, but never unpack the image.
+  ;; Numeric assembly helpers keep their existing ordinary-array contract.
+  (defun native-word-buffer ()
+    (js-object :length 0 :chunks (js-array) :cache (js-array) :units (js-array) :cacheIndex -1 :dirty false))
+
+  (defun native-word-flush (words)
+    (when (get words :dirty)
+      (let ((cache (get words :cache)) (units (get words :units nil)) (index 0))
+        (unless units (setq units (js-array)) (put words :units units))
+        (put units :length 0)
+        (while (< index (js-length cache))
+          (unless (Object/hasOwn cache index) (backend-fail nil "native word buffer contains an unwritten word"))
+          (let ((value (js-nth index cache)))
+            (js-call units :push (bit-and value 65535) (unsigned-bit-shift-right value 16)))
+          (setq index (1+ index)))
+        (put (get words :chunks) (get words :cacheIndex)
+          (Reflect/apply (js* "String.fromCharCode") nil units))
+        (put words :dirty false))) words)
+
+  (defun native-word-cache (words block)
+    (unless (= block (get words :cacheIndex))
+      (native-word-flush words)
+      (let ((text (js-nth block (get words :chunks))) (cache (get words :cache)) (index 0))
+        ;; The preceding flush published an immutable string. Both numeric
+        ;; scratch arrays are private to this buffer and bounded by one block.
+        (put cache :length 0)
+        (when (= (value-type text) "string")
+          (while (< index (js-length text))
+            (js-call cache :push (+ (string-code-unit-at text index)
+              (* (string-code-unit-at text (1+ index)) 65536)))
+            (setq index (+ index 2))))
+        (put words :cacheIndex block)))
+    (get words :cache))
+
+  (defun native-word-at (words index)
+    (if (Array/isArray words) (js-nth index words)
+      (progn
+        (unless (and (Number/isSafeInteger index) (>= index 0) (< index (js-length words)))
+          (backend-fail nil "native word buffer index is out of range"))
+        (let ((block (js-call globalThis.Math :floor (/ index 1024))) (offset (% index 1024)))
+          (if (= block (get words :cacheIndex))
+            (let ((cache (get words :cache)))
+              (unless (Object/hasOwn cache offset) (backend-fail nil "native word buffer contains an unwritten word"))
+              (js-nth offset cache))
+            (let ((text (js-nth block (get words :chunks))))
+              (unless (and (= (value-type text) "string") (< (1+ (* offset 2)) (js-length text)))
+                (backend-fail nil "native word buffer contains an unwritten word"))
+              (+ (string-code-unit-at text (* offset 2))
+                (* (string-code-unit-at text (1+ (* offset 2))) 65536))))))))
+
+  (defun native-word-set (words index value)
+    (if (Array/isArray words) (put words index value)
+      (progn
+        (unless (and (Number/isSafeInteger index) (>= index 0) (< index (js-length words)))
+          (backend-fail nil "native word buffer index is out of range"))
+        (put (native-word-cache words (js-call globalThis.Math :floor (/ index 1024))) (% index 1024) (uint32 value))
+        (put words :dirty t))) value)
+
+  (defun native-word-resize (words length)
+    (if (Array/isArray words) (put words :length length)
+      (progn
+        (unless (and (Number/isSafeInteger length) (>= length 0))
+          (backend-fail nil "native word buffer length is invalid"))
+        (when (< length (js-length words))
+          (let ((block (js-call globalThis.Math :floor (/ length 1024))) (tail (% length 1024))
+                (cached (get words :cacheIndex)) (chunks (get words :chunks)))
+            (when (< (* cached 1024) length)
+              (when (= cached block)
+                (let ((cache (get words :cache)))
+                  (when (> (js-length cache) tail) (put cache :length tail))))
+              (native-word-flush words))
+            (put (get words :cache) :length 0) (put words :cacheIndex -1) (put words :dirty false)
+            (put chunks :length (+ block (if (> tail 0) 1 0)))
+            (when (and (> tail 0) (= (value-type (js-nth block chunks)) "string"))
+              (put chunks block (js-call (js-nth block chunks) :slice 0 (* tail 2))))))
+        (put words :length length))) length)
+
+  (defun native-word-push (words value)
+    (if (Array/isArray words) (js-call words :push (uint32 value))
+      (let ((index (js-length words)))
+        (native-word-resize words (1+ index)) (native-word-set words index value) (js-length words))))
+
   (defun word (state value)
-    (js-call (get state :words) :push (uint32 value)))
+    (native-word-push (get state :words) value))
+
+  (defun native-append-words (output words)
+    (if (or (Array/isArray output) (Array/isArray words))
+      (let ((index 0))
+        (while (< index (js-length words))
+          (binary-u32 output (native-word-at words index)) (setq index (1+ index))))
+      (progn
+        ;; Both are emitter-owned writers. Publish the final mutable word block
+        ;; before sharing its immutable UTF16 strings. The temporary byte view
+        ;; owns only its fields: consuming it never clears words.chunks/cache.
+        ;; Aligned Mach-O text transfers whole strings; the object prefix uses
+        ;; binary's bounded carry without constructing a complete byte copy.
+        (native-word-flush words)
+        (binary-append-owned output (js-object :length (* (js-length words) 4)
+          :chunks (get words :chunks) :pending (js-array) :low -1)))) output)
 
   (defun u32 (bytes value)
-    (let ((i 0))
-      (while (< i 4)
-        (js-call bytes :push (bit-and value 255))
-        (setq value (unsigned-bit-shift-right value 8))
-        (setq i (1+ i))))
-    bytes)
+    (binary-u32 bytes value))
 
   (defun u64 (bytes value)
     (u32 bytes (uint32 value))
     (u32 bytes (uint32 (/ value 4294967296))))
 
   (defun zeros (bytes count)
-    (let ((i 0)) (while (< i count) (js-call bytes :push 0) (setq i (1+ i)))))
+    (let ((i 0)) (while (< i count) (binary-byte bytes 0) (setq i (1+ i)))))
 
   (defun ascii-field (bytes name width)
     (let ((i 0))
       (while (< i width)
-        (js-call bytes :push (if (< i (js-length name)) (string-code-unit-at name i) 0))
+        (binary-byte bytes (if (< i (js-length name)) (string-code-unit-at name i) 0))
         (setq i (1+ i)))))
 
   (defun string-bytes (bytes name)
@@ -67,6 +163,17 @@
       (word state (+ 4072669184 (* (bit-and high 65535) 32) register)))
     (when (or (not (get state :compact nil)) (/= (unsigned-bit-shift-right high 16) 0))
       (word state (+ 4074766336 (* (unsigned-bit-shift-right high 16) 32) register))))
+
+  (defun memory-integer-register (state register value)
+    ;; Word values need only W-register writes, which also zero the upper half.
+    ;; Keep integer-register's fixed-width sequences for relocatable placeholders.
+    (let ((low (bit-and value 65535)) (high (unsigned-bit-shift-right value 16)))
+      (if (and (= low 0) (/= high 0))
+          (word state (+ 1386217472 (* high 32) register)) ;; movz Wd,#high,lsl #16
+        (progn
+          (word state (+ 1384120320 (* low 32) register)) ;; movz Wd,#low
+          (when (/= high 0)
+            (word state (+ 1923088384 (* high 32) register))))))) ;; movk Wd,#high,lsl #16
 
   (defun float-literal (state value)
     (let* ((bits (number-float64-words value)) (low (js-nth 0 bits)) (high (js-nth 1 bits)))
@@ -149,7 +256,7 @@
             (let* ((at (js-nth j uses)) (distance (- target at)))
               (unless (and (>= distance -262144) (< distance 262144))
                 (backend-fail nil "native literal exceeds ARM64 displacement range"))
-              (js-call words :splice at 1 (bit-or (+ 1543503872 (bit-and (js-nth at words) 31))
+              (native-word-set words at (bit-or (+ 1543503872 (bit-and (native-word-at words at) 31))
                 (* (bit-and distance 524287) 32))))
             (setq j (1+ j)))
           (word state (get entry :low)) (word state (get entry :high)))
@@ -187,11 +294,20 @@
           (word state (if (= type "f64")
             (+ 509624320 (if store register (* register 32)))
             (if store (+ 505872384 register) (+ 505806848 (* register 32)))))
-        (progn
-          (integer-register state 9 (* (1+ index) 8) 0)
-          (word state 3406365609) ;; sub x9, x29, x9
-          (word state (if (= type "f64") (if store 4244635936 4248830240)
-                        (if store 3103785248 3107979552))))))))
+        (let ((offset (* (1+ index) 8)))
+          (if (and (get state :memory nil) (<= offset 256))
+              ;; LDUR/STUR use a signed nine-bit byte offset from FP (x29).
+              (word state (+ (if (= type "f64") (if store 4227858432 4232052736)
+                                (if store 3087007744 3091202048))
+                             (* (bit-and (- offset) 511) 4096) 928))
+            (progn
+              (if (and (get state :memory nil) (<= offset 4095))
+                  (word state (+ 3506439081 (* offset 1024))) ;; sub x9,x29,#offset
+                (progn
+                  (integer-register state 9 offset 0)
+                  (word state 3406365609))) ;; sub x9,x29,x9
+              (word state (if (= type "f64") (if store 4244635936 4248830240)
+                            (if store 3103785248 3107979552))))))))))
 
   (defun register-weights (node counts)
     (let ((kind (get node :kind)) (children (get node :children)) (i 0) (call (= (get node :kind) "call")))
@@ -375,7 +491,7 @@
 
   (defun retarget-last (state register)
     (let* ((words (get state :words)) (at (1- (js-length words))))
-      (js-call words :splice at 1 (bit-or (bit-and (js-nth at words) 4294967264) register))))
+      (native-word-set words at (bit-or (bit-and (native-word-at words at) 4294967264) register))))
 
   (defun writes-physical (state node register)
     (let ((kind (get node :kind)) (children (get node :children)) (i 0) (found nil))
@@ -414,7 +530,7 @@
              (let* ((rhs (js-nth 0 children)) (r (pure-value state rhs))
                     (target (js-nth value (get state :registers))))
                (if (and (>= target 0) (= r register) (= (bit-and
-                         (js-nth (1- (js-length (get state :words))) (get state :words)) 31) r)
+                         (native-word-at (get state :words) (1- (js-length (get state :words)))) 31) r)
                         (or (= (get rhs :kind) "arithmetic") (= (get rhs :kind) "literal")))
                    (progn (retarget-last state target) (setq register target))
                  (setq register (store-float-value state value r)))))
@@ -451,6 +567,18 @@
           (put state :depth (1+ depth))
           register))))
 
+  (defun discarded-pure (node)
+    ;; Discarded numeric branches include a sequence ending in an i32 zero.
+    ;; That wrapper is effect-free when all its children are effect-free;
+    ;; numeric-pure deliberately excludes sequences for its other callers.
+    (if (or (= (get node :kind) "sequence") (= (get node :kind) "if"))
+        (let ((children (get node :children)) (i 0) (pure t))
+          (while (and pure (< i (js-length children)))
+            (setq pure (discarded-pure (js-nth i children)))
+            (setq i (1+ i)))
+          pure)
+      (numeric-pure node)))
+
   (defun discarded (state node)
     (let ((kind (get node :kind)) (children (get node :children)) (i 0))
       (cond
@@ -463,7 +591,7 @@
              (= kind "int-and") (= kind "int-compare"))
          (while (< i (js-length children)) (discarded state (js-nth i children)) (setq i (1+ i))))
         ((= kind "if")
-         (if (and (numeric-pure (js-nth 1 children)) (numeric-pure (js-nth 2 children)))
+         (if (and (discarded-pure (js-nth 1 children)) (discarded-pure (js-nth 2 children)))
              (discarded state (js-nth 0 children))
            (let ((otherwise (condition-jumps state (js-nth 0 children) nil)))
              (discarded state (js-nth 1 children))
@@ -486,7 +614,7 @@
                 (r (pure-value state rhs)) (registers (get state :registers))
                 (target (js-nth (get node :value) registers)))
            (if (and (>= target 0) (= r (+ 16 depth))
-                    (= (bit-and (js-nth (1- (js-length (get state :words))) (get state :words)) 31) r)
+                    (= (bit-and (native-word-at (get state :words) (1- (js-length (get state :words)))) 31) r)
                     (or (= (get rhs :kind) "arithmetic") (= (get rhs :kind) "literal")))
                (retarget-last state target)
              (store-float-value state (get node :value) r))
@@ -529,15 +657,45 @@
         (bit-or (bit-and opcode (if (= kind 3) 4294443039 4278190111))
           (* (bit-and distance (if (= kind 3) 16383 524287)) 32)))))
 
-  (defun patch-jump (state at target)
-    (let* ((words (get state :words)) (opcode (js-nth at words))
+  (defun patch-jump-record (state at target record descriptor)
+    (let* ((words (get state :words)) (opcode (native-word-at words at))
            (branches (or (get state :branches nil)
              (let ((created (js-array))) (put state :branches created) created)))
            (kind (branch-kind opcode)) (distance (- target at)))
       ;; Keep source positions stable until every local label and call is known.
-      (js-call branches :push (js-object :at at :target target :opcode opcode :kind kind :size 1))
+      ;; A direct call's private pending record becomes its final relocation.
+      ;; Do not retain a second object for the same instruction until linking.
+      (let ((entry (or record (js-object :at at :target target :opcode opcode :kind kind :size 1))))
+        (when record
+          (put entry :at at) (put entry :target target)
+          ;; The pending shape stays two fields during code generation. Define
+          ;; the remaining own data fields only now, without inherited setters.
+          ;; One null-prototype descriptor is reused for this whole transfer.
+          (put descriptor :value opcode) (Object/defineProperty entry "opcode" descriptor)
+          (put descriptor :value kind) (Object/defineProperty entry "kind" descriptor)
+          (put descriptor :value 1) (Object/defineProperty entry "size" descriptor))
+        (js-call branches :push entry))
       (when (branch-fits distance (branch-limit kind))
-        (put words at (branch-word opcode distance)))))
+        (native-word-set words at (branch-word opcode distance)))))
+
+  (defun patch-jump (state at target)
+    (patch-jump-record state at target nil nil))
+
+  (defun finish-calls (state offsets)
+    (let* ((calls (get state :calls)) (count (js-length calls)) (index 0)
+           (descriptor (Object/create nil)))
+      (put descriptor :value 0) (put descriptor :writable t)
+      (put descriptor :enumerable t) (put descriptor :configurable t)
+      (while (< index count)
+        (let* ((call (js-nth index calls)) (at (get call :at))
+               (target (/ (js-nth (get call :target) offsets) 4)))
+          ;; Pending :target is the function index; after validation it becomes
+          ;; the word offset on this same emitter-owned record. Clear only a
+          ;; successfully transferred slot, preserving the first patch error.
+          (patch-jump-record state at target call descriptor)
+          (put calls index nil))
+        (setq index (1+ index)))
+      (put calls :length 0) count))
 
   (defun branch-position (branches position)
     (let ((low 0) (high (js-length branches)))
@@ -556,6 +714,18 @@
       (uint32 (js-call globalThis.Math :floor (/ (* distance 4) 4294967296))))
     (word state 2333147664) ;; add x16,x16,x17
     (word state (if link 3594453504 3592356352))) ;; blr / br x16
+
+  (defun relaxed-branch (state entry at target)
+    (let ((opcode (get entry :opcode)) (kind (get entry :kind)) (size (get entry :size)))
+      (if (branch-fits (- target at) (branch-limit kind))
+          (word state (branch-word opcode (- target at)))
+        (if (or (= kind 0) (and (= kind 1) (>= (bit-and opcode 15) 14)))
+            (if (= size 1) (word state (branch-word 335544320 (- target at)))
+              (long-jump state (- target at) (/= (bit-and opcode 2147483648) 0)))
+          (progn
+            (word state (branch-word (bit-xor opcode (if (= kind 1) 1 16777216)) size))
+            (if (= size 2) (word state (branch-word 335544320 (- target at 1)))
+              (long-jump state (- target at 1) nil)))))))
 
   (defun finish-branches (state offsets)
     (let ((branches (get state :branches (js-array))) (changed t))
@@ -577,25 +747,39 @@
                      (if (branch-fits (- target at) 33554432) 1 7)
                      (if (branch-fits (- target at 1) 33554432) 2 8)))))
             (when (> size (get entry :size)) (put entry :size size) (setq changed t))))))
-      (let* ((old (get state :words)) (output (js-array))
-             (out (js-object :words output :compact nil)) (index 0) (next 0))
-        (while (< index (js-length old))
-          (let ((entry (if (< next (js-length branches)) (js-nth next branches) nil)))
+      (let* ((words (get state :words)) (original-size (js-length words))
+             (count (js-length branches))
+             (last (if (> count 0) (js-nth (1- count) branches) nil))
+             (final-size (+ original-size (if last (+ (get last :before) (1- (get last :size))) 0)))
+             (scratch (js-array)) (out (js-object :words scratch :compact nil))
+             (index (1- original-size)) (next (1- count)) (write (1- final-size)))
+        ;; Sizes have converged and only grow. Every destination is at or above
+        ;; its old position, so reverse traversal preserves the unread prefix.
+        ;; Reuse at most eight words for one relaxed branch, never a code copy.
+        (native-word-resize words final-size)
+        (while (>= index 0)
+          (let ((entry (if (>= next 0) (js-nth next branches) nil)))
             (if (and entry (= (get entry :at) index))
-              (let* ((at (js-length output)) (target (branch-position branches (get entry :target)))
-                     (opcode (get entry :opcode)) (kind (get entry :kind)) (size (get entry :size)))
-                (if (branch-fits (- target at) (branch-limit kind))
-                  (word out (branch-word opcode (- target at)))
-                  (if (or (= kind 0) (and (= kind 1) (>= (bit-and opcode 15) 14)))
-                    (if (= size 1) (word out (branch-word 335544320 (- target at)))
-                      (long-jump out (- target at) (/= (bit-and opcode 2147483648) 0)))
-                    (progn
-                      (word out (branch-word (bit-xor opcode (if (= kind 1) 1 16777216)) size))
-                      (if (= size 2) (word out (branch-word 335544320 (- target at 1)))
-                        (long-jump out (- target at 1) nil)))))
-                (setq next (1+ next)))
-              (word out (js-nth index old))))
-          (setq index (1+ index)))
+              (let ((at (- write (1- (get entry :size))))
+                    (target (branch-position branches (get entry :target))) (j 0))
+                (put scratch :length 0)
+                (relaxed-branch out entry at target)
+                (setq j (1- (js-length scratch)))
+                (while (>= j 0)
+                  (let ((value (js-nth j scratch)))
+                    ;; patch-jump already wrote every fitting branch. When no
+                    ;; earlier relaxation moved it, do not repack that same
+                    ;; immutable word block merely to write the same opcode.
+                    (unless (and (= write index) (= (native-word-at words index) value))
+                      (native-word-set words write value)))
+                  (setq write (1- write)) (setq j (1- j)))
+                (setq next (1- next)))
+              (let ((value (native-word-at words index)))
+                ;; Still read every source word in the original reverse order,
+                ;; including hole validation. Only moved words need a write.
+                (unless (= write index) (native-word-set words write value))
+                (setq write (1- write)))))
+          (setq index (1- index)))
         (setq index 0)
         (while (< index (js-length offsets))
           (put offsets index (* (branch-position branches (/ (js-nth index offsets) 4)) 4))
@@ -605,12 +789,19 @@
             (while (< i (js-length uses)) (put uses i (branch-position branches (js-nth i uses))) (setq i (1+ i))))))
         (let ((uses (get state :tableUses (js-array))) (i 0))
           (while (< i (js-length uses)) (put uses i (branch-position branches (js-nth i uses))) (setq i (1+ i))))
-        (put state :words output)
+        (let ((ranges (get state :debugRanges nil)) (i 0))
+          (when ranges
+            (while (< i (js-length ranges))
+              (let ((range (js-nth i ranges)))
+                (put range :start (* (branch-position branches (/ (get range :start) 4)) 4))
+                (put range :end (* (branch-position branches (/ (get range :end) 4)) 4)))
+              (setq i (1+ i)))))
         (put state :branches (js-array)))))
 
   (defun condition (state node)
     (expression state node)
-    (when (or (= (get node :type) "f64") (= (get node :type) "u32")) (integer-register state 0 1 0)))
+    (when (or (= (get node :type) "f64") (= (get node :type) "u32"))
+      (if (get state :memory nil) (memory-integer-register state 0 1) (integer-register state 0 1 0))))
 
   (defun comparison-code (operator integer)
     ;; Ordered f64 '<' uses MI: signed LT would accept unordered NaN.
@@ -632,8 +823,13 @@
                (every (if (= kind "and") (not when-true) when-true)))
            (while (< i (js-length children))
              (let ((last (= i (1- (js-length children)))))
-               (append (if (or every last) jumps skip)
-                 (condition-jumps state (js-nth i children) (if (or every last) when-true (not when-true)))))
+               (let ((output (if (or every last) jumps skip))
+                     (positions (condition-jumps state (js-nth i children)
+                       (if (or every last) when-true (not when-true)))) (j 0))
+                 ;; These are full word positions, not container bytes.
+                 (while (< j (js-length positions))
+                   (js-call output :push (js-nth j positions))
+                   (setq j (1+ j)))))
              (setq i (1+ i)))
            (when (= (js-length children) 0)
              (when (= when-true (= kind "and")) (js-call jumps :push (jump state "jump"))))
@@ -702,7 +898,7 @@
         (setq i (1+ i)))
       (let ((at (js-length (get state :words))))
         (word state 2483027968)
-        (js-call (get state :calls) :push (js-object :at at :function (get node :value))))
+        (js-call (get state :calls) :push (js-object :at at :target (get node :value))))
       (stack-adjust state extra nil)
       (setq i (1- (js-length saved)))
       (while (>= i 0)
@@ -723,10 +919,13 @@
       (let ((start (js-length (get state :words))))
         (condition state (js-nth 0 children))
         (let ((end (jump state "zero")))
-          (expression state (js-nth 1 children))
+          (if (get state :memory nil) (memory-discarded state (js-nth 1 children))
+            (expression state (js-nth 1 children)))
           (let ((back (jump state "jump"))) (patch-jump state back start))
           (patch-jump state end (js-length (get state :words)))
-          (integer-register state 0 0 0)))))
+          (if (get state :memory nil)
+              (when used (memory-integer-register state 0 0))
+            (integer-register state 0 0 0))))))
 
   (defun integer-immediate (node)
     (if (and (or (= (get node :kind) "int-literal")
@@ -758,26 +957,84 @@
             ((= kind "int-and") 167772192) (t 1795162175)) registers)
           (unless (or (= kind "int-compare") (= destination 0)) (retarget-last state destination))))))
 
-  (defun expression (state node)
+  (defun expression (state node &optional unused)
+    (let ((ranges (get state :debugRanges nil)))
+      (if ranges
+          (let* ((depth (get state :debugDepth 0))
+                 (range (js-object :kind (get node :kind) :function (get state :debugFunction)
+                          :functionIndex (get state :debugFunctionIndex) :depth depth
+                          :start (* 4 (js-length (get state :words))) :end 0
+                          :span (get node :span nil))))
+            (js-call ranges :push range)
+            (put state :debugDepth (1+ depth))
+            (let ((result (if (and unused (get state :memory nil))
+                              (memory-discarded-body state node) (expression-body state node))))
+              (put state :debugDepth depth)
+              (put range :end (* 4 (js-length (get state :words)))) result))
+        (if (and unused (get state :memory nil))
+            (memory-discarded-body state node) (expression-body state node)))))
+
+  (defun memory-discarded (state node)
+    ;; Reuse expression's debug ranges even when a pure result emits no words.
+    (expression state node t))
+
+  (defun memory-discarded-body (state node)
+    (let ((kind (get node :kind)) (children (get node :children)) (i 0))
+      (cond
+        ((or (= kind "literal") (= kind "int-literal") (= kind "local")) nil)
+        ((or (= kind "sequence")
+             (and (= kind "word-compare") (= (js-length children) 2))
+             (and (= kind "word-arithmetic") (<= (js-length children) 2)
+                  (js-call (js-array "+" "-" "*" "1+" "1-") :includes (get node :value))))
+         ;; Pure word arithmetic cannot trap. Retain every evaluated operand's
+         ;; writes, calls and checked memory access in its original order.
+         (while (< i (js-length children))
+           (memory-discarded state (js-nth i children)) (setq i (1+ i))))
+        ((= kind "if")
+         (condition state (js-nth 0 children))
+         (let ((otherwise (jump state "zero")))
+           (memory-discarded state (js-nth 1 children))
+           (let ((end (jump state "jump")))
+             (patch-jump state otherwise (js-length (get state :words)))
+             (memory-discarded state (js-nth 2 children))
+             (patch-jump state end (js-length (get state :words))))))
+        ((or (= kind "while") (= kind "remainder-while") (= kind "guarded-while"))
+         (emit-loop state children nil))
+        ;; In particular memory-op (including loads/division), calls, stores,
+        ;; and short-circuit nodes keep their complete existing emission path.
+        (t (expression-body state node)))))
+
+  (defun expression-body (state node)
     (let ((kind (get node :kind)) (value (get node :value)) (children (get node :children)))
       (cond
         ((and (get state :memory nil) (= kind "memory-op")) (memory-operation state node))
+        ((and (get state :memory nil) (= kind "memory-data-copy")) (memory-data-copy state node))
         ((and (get state :memory nil) (or (= kind "call") (= kind "call-indirect"))) (memory-call state node))
+        ((and (get state :memory nil) (= kind "host-call")) (memory-host-call state node))
         ((or (= kind "word-arithmetic") (= kind "word-compare")) (memory-word state node))
         ((= kind "literal")
          (if (= (get node :type) "f64")
              (float-literal state value)
+           (if (and (get state :memory nil) (memory-word-type (get node :type)))
+               (memory-integer-register state 0 value)
+             (integer-register state 0 value 0))))
+        ((= kind "int-literal")
+         (if (and (get state :memory nil) (memory-word-type (get node :type)))
+             (memory-integer-register state 0 value)
            (integer-register state 0 value 0)))
-        ((= kind "int-literal") (integer-register state 0 value 0))
         ((= kind "local") (local-access state value (get node :type) nil))
         ((or (= kind "set") (= kind "initialize"))
          (expression state (js-nth 0 children))
          (local-access state value (get node :type) t))
         ((= kind "sequence")
-         (if (= (js-length children) 0) (integer-register state 0 0 0)
+         (if (= (js-length children) 0)
+             (if (get state :memory nil) (memory-integer-register state 0 0) (integer-register state 0 0 0))
            (let ((i 0)) (while (< i (js-length children))
-             (if (and (get state :compact nil) (< i (1- (js-length children))))
-                 (discarded state (js-nth i children)) (expression state (js-nth i children)))
+             (if (< i (1- (js-length children)))
+                 (if (get state :memory nil) (memory-discarded state (js-nth i children))
+                   (if (get state :compact nil) (discarded state (js-nth i children))
+                     (expression state (js-nth i children))))
+               (expression state (js-nth i children)))
              (setq i (1+ i))))))
         ((= kind "int-number") (expression state (js-nth 0 children)) (word state 509739008))
         ((= kind "ceil-int") (expression state (js-nth 0 children)) (word state 509919232) (word state 511180800))
@@ -886,21 +1143,16 @@
           (when compact (preserve-registers state (js-length locals) t))
           (word state 2432697279) (word state 2831252477) (word state 3596551104)))
         (setq i (1+ i)))
-      (setq i 0)
-      (while (< i (js-length (get state :calls)))
-        (let* ((call (js-nth i (get state :calls)))
-               (target (/ (js-nth (get call :function) offsets) 4)))
-          (patch-jump state (get call :at) target))
-        (setq i (1+ i)))
+      (finish-calls state offsets)
       (finish-branches state offsets)
       (finish-literals state)
       (js-object :words (get state :words) :offsets offsets)))
 
-  (defun macho-object (program code)
+  (defun macho-object (program code &optional options)
     (let* ((words (get code :words)) (offsets (get code :offsets))
            (functions (get program :functions)) (size (* (js-length words) 4))
            (symbol-offset (* (js-call globalThis.Math :ceil (/ (+ 208 size) 8)) 8))
-           (strings (js-array 0)) (names (js-array)) (output (js-array)) (i 0))
+           (strings (js-array 0)) (names (js-array)) (output (binary-output options)) (i 0))
       (while (< i (js-length functions))
         (js-call names :push (js-length strings))
         (string-bytes strings (str "_" (get (js-nth i functions) :name)))
@@ -917,33 +1169,36 @@
       (u32 output 2) (u32 output 24) (u32 output symbol-offset)
       (u32 output (js-length functions)) (u32 output (+ symbol-offset (* (js-length functions) 16)))
       (u32 output (js-length strings))
-      (setq i 0)
-      (while (< i (js-length words)) (u32 output (js-nth i words)) (setq i (1+ i)))
+      (native-append-words output words)
       (zeros output (- symbol-offset (js-length output)))
       (setq i 0)
       (while (< i (js-length functions))
         (u32 output (js-nth i names))
-        (js-call output :push
-          (if (js-call (get program :exports) :includes (get (js-nth i functions) :name)) 15 14) 1 0 0)
+        (binary-byte output (if (js-call (get program :exports) :includes (get (js-nth i functions) :name)) 15 14))
+        (binary-byte output 1) (binary-byte output 0) (binary-byte output 0)
         (u64 output (js-nth i offsets))
         (setq i (1+ i)))
       (setq i 0)
-      (while (< i (js-length strings)) (js-call output :push (js-nth i strings)) (setq i (1+ i)))
-      output))
+      (while (< i (js-length strings)) (binary-byte output (js-nth i strings)) (setq i (1+ i)))
+      (put code :section (js-object :name "__text" :fileOffset 208 :virtualAddress 0 :size size))
+      (binary-finish output)))
 
   (defun emit-native-numeric-object (program target &optional options)
-    (unless (= target "arm64-macos") (backend-fail program "native target must be explicit arm64-macos"))
+    (unless (or (= target "arm64-macos") (= target "arm64-linux"))
+      (backend-fail program "native object target must be explicit arm64-macos or arm64-linux"))
     (lower-numeric-program program)
     (let ((typed-program (optimize-numeric-program (lower-numeric-program (optimize-program program))
                          (js-object :unswitch (get (or options (js-object)) :registerAllocation t)
                                     :constantFlow (get (or options (js-object)) :registerAllocation t)
                                     :parallelSingle (get (or options (js-object)) :registerAllocation t)
                                     :cyclicMultiple (get (or options (js-object)) :registerAllocation t)))))
-      (macho-object typed-program (typed-code typed-program options))))
+      (if (= target "arm64-linux")
+          (emit-elf-object typed-program (typed-code typed-program options) options)
+        (macho-object typed-program (typed-code typed-program options) options))))
 
 
   (defun append (output bytes)
-    (let ((i 0)) (while (< i (js-length bytes)) (js-call output :push (js-nth i bytes)) (setq i (1+ i)))))
+    (binary-append output bytes))
 
   (defun leb (output value)
     (while (>= value 128)
@@ -1040,20 +1295,20 @@
         (append directory identifier)
         (let ((i 0))
           (while (< i pages)
-            (append directory (sha256-bytes (js-call image :slice (* i 4096) (* (1+ i) 4096))))
+            (append directory (sha256-bytes (binary-slice image (* i 4096) (* (1+ i) 4096))))
             (setq i (1+ i))))
         (be32 output 4208856256) (be32 output (+ 20 (js-length directory)))
         (be32 output 1) (be32 output 0) (be32 output 20)
         (append output directory)
         output)))
 
-  (defun macho-library (program code &optional entry)
+  (defun macho-library (program code &optional entry options)
     (let* ((functions (get program :functions)) (offsets (get code :offsets))
            (words (get code :words)) (size (* 4 (js-length words)))
            (text-size (align-size (+ 4096 size) 16384))
            (trie (export-trie program offsets))
            (symbols (js-array)) (strings (js-array 0)) (local-count 0)
-           (commands (js-array)) (image (js-array)) (i 0))
+           (commands (js-array)) (image (binary-output options)) (i 0))
       ;; Local symbols precede external definitions; public surface is exact.
       (let ((pass 0))
         (while (< pass 2)
@@ -1098,9 +1353,7 @@
           (dylib-command commands 13 "@rpath/eliscript-native.dylib"))
         (dylib-command commands 12 "/usr/lib/libSystem.B.dylib")
         (u32 commands 27) (u32 commands 24)
-        (let ((text (js-array)) (j 0))
-          (while (< j (js-length words)) (u32 text (js-nth j words)) (setq j (1+ j)))
-          (append commands (js-call (sha256-bytes text) :slice 0 16)))
+        (append commands (js-call (sha256-words-le words (if (Array/isArray words) nil native-word-at)) :slice 0 16))
         (u32 commands 50) (u32 commands 24) (u32 commands 1)
         (u32 commands 983040) (u32 commands 983040) (u32 commands 0)
         (u32 commands 2) (u32 commands 24) (u32 commands text-size)
@@ -1118,8 +1371,7 @@
         (append image commands)
         (when (> (js-length image) 4096) (backend-fail program "native load commands exceed text prefix"))
         (zeros image (- 4096 (js-length image)))
-        (setq i 0)
-        (while (< i (js-length words)) (u32 image (js-nth i words)) (setq i (1+ i)))
+        (native-append-words image words)
         (zeros image (- text-size (js-length image)))
         (append image symbols) (append image strings)
         (zeros image (- trie-offset (js-length image))) (append image trie)
@@ -1127,17 +1379,22 @@
         (let ((signature (page-signature image text-size entry)))
           (unless (= (js-length signature) signature-size) (backend-fail program "native signature layout mismatch"))
           (append image signature))
-        image)))
+        (put code :section (js-object :name "__text" :fileOffset 4096
+          :virtualAddress (+ (if entry 4294967296 0) 4096) :size size))
+        (binary-finish image))))
 
   (defun emit-native-numeric-library (program target &optional options)
-    (unless (= target "arm64-macos") (backend-fail program "native target must be explicit arm64-macos"))
+    (unless (or (= target "arm64-macos") (= target "arm64-linux"))
+      (backend-fail program "native library target must be explicit arm64-macos or arm64-linux"))
     (lower-numeric-program program)
     (let ((typed-program (optimize-numeric-program (lower-numeric-program (optimize-program program))
                          (js-object :unswitch (get (or options (js-object)) :registerAllocation t)
                                     :constantFlow (get (or options (js-object)) :registerAllocation t)
                                     :parallelSingle (get (or options (js-object)) :registerAllocation t)
                                     :cyclicMultiple (get (or options (js-object)) :registerAllocation t)))))
-      (macho-library typed-program (typed-code typed-program options))))
+      (if (= target "arm64-linux")
+          (emit-elf-library typed-program (typed-code typed-program options) options)
+        (macho-library typed-program (typed-code typed-program options) nil options))))
 
   (defun emit-native-numeric-executable (program target entry &optional options)
     (unless (= target "arm64-macos") (backend-fail program "native target must be explicit arm64-macos"))
@@ -1171,17 +1428,30 @@
           (word state 3556773889))
         (finish-branches state (js-array))
         (put code :words (get state :words))
-        (macho-library typed-program code start))))
+        (macho-library typed-program code start options))))
 
 
-  ;; memory-u32 native ABI: x0 is a caller-owned, nonmoving 32-byte context:
+  ;; memory-u32 native ABI: x0 is a caller-owned, nonmoving context:
   ;; [0] byte pointer, [8] current byte length, [16] capacity, [24] error u32.
-  ;; Explicit u32 arguments use w1..w7, then packed 4-byte Darwin stack slots.
-  ;; Every nested call receives the same context. Generated images have no
-  ;; imports; growth uses the reserved mapping and zeroes every exposed byte.
+  ;; Explicit u32 arguments use w1..w7, then Darwin's packed 4-byte slots or
+  ;; AAPCS64's 8-byte stack slots selected explicitly by the Linux target.
+  ;; Programs with explicit host capabilities additionally read callback@32.
+  ;; Debug artifacts use the reserved padding word@28 for trap site ID + 1.
+  ;; A zero padding word means that no precise native site was recorded.
+  ;; Pure programs retain the original 32-byte context and no host dependency.
+  ;; Every nested call receives the same context; growth zeroes exposed bytes.
   (defun memory-error (state code)
-    (integer-register state 9 code 0)
+    (memory-integer-register state 9 code)
     (word state 3103791721) ;; str w9, [x19, #24]
+    (let ((sites (get state :trapSites nil)))
+      (when sites
+        (memory-integer-register state 9 (1+ (js-length sites)))
+        (let ((range (js-object :kind "trap-site" :function (get state :debugFunction)
+                       :functionIndex (get state :debugFunctionIndex) :depth (get state :debugDepth 0)
+                       :start (* 4 (js-length (get state :words))) :end (+ 4 (* 4 (js-length (get state :words))))
+                       :span nil :code code :site (1+ (js-length sites)))))
+          (js-call sites :push range) (js-call (get state :debugRanges) :push range))
+        (word state 3103792745))) ;; str w9, [x19, #28]
     (js-call (get state :memoryErrors) :push (jump state "jump")))
 
   (defun memory-conditional-error (state opcode code)
@@ -1196,14 +1466,76 @@
       ((or (= name "load-u32") (= name "store-u32")) 4)
       ((or (= name "load-f64") (= name "store-f64")) 8) (t 0)))
 
+  (defun memory-data-copy (state node)
+    (let* ((text (get node :value)) (length (js-length text)) (index 0))
+      ;; The destination may call, trap or grow memory. Evaluate it once before
+      ;; loading the current base/length, and check the complete byte range in
+      ;; x registers before the first store. Even an empty copy checks its end.
+      (expression state (js-nth 0 (get node :children)))
+      (memory-integer-register state 10 (* length 2))
+      (word state 2332688394) ;; add x10,x0,x10; no u32 end-address wrap
+      (word state 4181722731) ;; ldr x11,[x19,#8]
+      (word state 3943367007) ;; cmp x10,x11
+      (memory-conditional-error state 1409286153 1) ;; b.ls
+      (when (> length 0)
+        (word state 4181721705) ;; ldr x9,[x19]
+        (word state 2332033321) ;; add x9,x9,x0
+        (while (< index length)
+          (let* ((count (js-call globalThis.Math :min 16384 (- length index)))
+                 (end (+ index count)) (cursor index) (skip nil)
+                 (data-start 0))
+            ;; Each immutable UTF16LE block is at most 32 KiB. Its adjacent ADR
+            ;; and unconditional branch stay short regardless of total source
+            ;; size or relaxation elsewhere. No pointer relocation or writable
+            ;; linear-memory constant pool can corrupt the next invocation.
+            (word state 268435530) ;; adr x10,.+8
+            (setq skip (jump state "jump"))
+            (setq data-start (* 4 (js-length (get state :words))))
+            (while (< cursor end)
+              (word state (bit-or (string-code-unit-at text cursor)
+                (if (< (1+ cursor) end) (* (string-code-unit-at text (1+ cursor)) 65536) 0)))
+              (setq cursor (+ cursor 2)))
+            (when (get state :debugRanges nil)
+              (js-call (get state :debugRanges) :push
+                (js-object :kind "static-data" :dataKind "utf16le"
+                  :function (get state :debugFunction) :functionIndex (get state :debugFunctionIndex)
+                  :depth (get state :debugDepth 0) :start data-start
+                  :end (* 4 (js-length (get state :words))) :span nil)))
+            (patch-jump state skip (js-length (get state :words)))
+            (memory-integer-register state 11 count)
+            (let ((loop (js-length (get state :words))) (again nil))
+              ;; Unaligned halfword accesses have the same normal-memory
+              ;; contract as load/store-u16, including lone surrogate units.
+              (word state 2034237772) ;; ldrh w12,[x10]
+              (word state 2030043436) ;; strh w12,[x9]
+              (word state 2432698698) ;; add x10,x10,#2
+              (word state 2432698665) ;; add x9,x9,#2
+              (word state 4043310443) ;; subs x11,x11,#1
+              (setq again (js-length (get state :words)))
+              (word state 1409286145) ;; b.ne loop
+              (patch-jump state again loop))
+            (setq index end))))
+      (memory-integer-register state 0 0)))
+
   (defun memory-word (state node)
     (let* ((children (get node :children)) (count (js-length children)) (name (get node :value)))
-      (if (= count 0) (integer-register state 0 (if (= name "*") 1 0) 0)
+      (if (= count 0)
+          (if (get state :memory nil) (memory-integer-register state 0 (if (= name "*") 1 0))
+            (integer-register state 0 (if (= name "*") 1 0) 0))
         (progn
           (expression state (js-nth 0 children))
           (cond
             ((= count 2)
-             (push-value state "u32") (expression state (js-nth 1 children)) (pop-value state "u32")
+             (let ((right (js-nth 1 children)))
+               (if (and (get state :memory nil) (not (get state :compact nil))
+                        (not (get state :leaf nil)) (= (js-length (get state :registers)) 0)
+                        (memory-word-type (get right :type))
+                        (or (= (get right :kind) "literal") (= (get right :kind) "local")))
+                   ;; These RHS forms touch only x0/x9 in the memory backend.
+                   ;; Capture the evaluated LHS without changing evaluation order.
+                   (progn (word state 704644065) (expression state right)) ;; mov w1,w0
+                 (progn
+                   (push-value state "u32") (expression state right) (pop-value state "u32"))))
              (if (= (get node :kind) "word-compare")
                  (let ((code (cond ((= name "=") 0) ((= name "/=") 1) ((= name "<") 3)
                              ((= name "<=") 9) ((= name ">") 8) (t 2))))
@@ -1237,13 +1569,37 @@
       (word state 4177528426) ;; str x10, [x19, #8]
       (let ((end (jump state "jump")))
         (patch-jump state failed (js-length (get state :words)))
-        (integer-register state 0 4294967295 0)
+        (memory-integer-register state 0 4294967295)
         (patch-jump state end (js-length (get state :words))))))
+
+  (defun memory-f64-unary-instruction (name)
+    ;; Arm A64 scalar FP one-source encoding, ftype=01, Rn=Rd=0.
+    (cond ((= name "f64-abs") 509657088) ;; fabs d0,d0
+      ((= name "f64-neg") 509689856) ;; fneg d0,d0
+      ((= name "f64-ceil") 509919232) ;; frintp d0,d0
+      ((= name "f64-floor") 509952000) ;; frintm d0,d0
+      ((= name "f64-trunc") 509984768) ;; frintz d0,d0
+      ((= name "f64-nearest") 509886464) ;; frintn d0,d0: ties to even
+      ((= name "f64-sqrt") 509722624) ;; fsqrt d0,d0
+      (t nil)))
+
+  (defun memory-f64-unary (state node)
+    (expression state (js-nth 0 (get node :children)))
+    ;; The child completes before this instruction-local environment begins.
+    ;; x9 is the existing scratch register; no calls, loads or branches can
+    ;; leave this window without restoring the caller's exact FPCR. Zero
+    ;; selects nearest-even sqrt, gradual underflow, ordinary NaN propagation
+    ;; and disabled FP exception traps, independently of the embedding host.
+    (word state 3577431049) ;; mrs x9,FPCR (0xd53b4409)
+    (word state 3575333919) ;; msr FPCR,xzr (0xd51b441f)
+    (word state (memory-f64-unary-instruction (get node :value)))
+    (word state 3575333897)) ;; msr FPCR,x9 (0xd51b4409)
 
   (defun memory-operation (state node)
     (let* ((name (get node :value)) (children (get node :children)) (width (memory-width name))
            (store (= (js-length children) 2)))
       (cond
+        ((memory-f64-unary-instruction name) (memory-f64-unary state node))
         ((> width 0)
          (expression state (js-nth 0 children))
          (when store
@@ -1263,7 +1619,7 @@
            ((= name "load-u32") 3107979552) ((= name "load-f64") 4248830240)
            ((= name "store-u8") 956301602) ((= name "store-u16") 2030043426)
            ((= name "store-u32") 3103785250) (t 4244635938)))
-         (when store (integer-register state 0 0 0)))
+         (when store (memory-integer-register state 0 0)))
         ((= name "memory-size") (word state 4181722720) (word state 3545299968))
         ((= name "memory-grow") (memory-grow state node))
         (t
@@ -1278,7 +1634,8 @@
   (defun memory-call (state node)
     (let* ((args (get node :children)) (indirect (= (get node :kind) "call-indirect"))
            (count (- (js-length args) (if indirect 1 0))) (i 0)
-           (extra (* (js-call globalThis.Math :ceil (/ (if (> count 7) (* (- count 7) 4) 0) 16)) 16)))
+           (slot-size (if (get state :linux nil) 8 4))
+           (extra (* (js-call globalThis.Math :ceil (/ (if (> count 7) (* (- count 7) slot-size) 0) 16)) 16)))
       (while (< i (js-length args)) (expression state (js-nth i args)) (push-value state "u32") (setq i (1+ i)))
       (when indirect (pop-value state "u32") (memory-indirect-target state node))
       (stack-adjust state extra t)
@@ -1292,7 +1649,7 @@
         (word state (+ 3107979552 (if (< i 7) (1+ i) 10)))
         (when (>= i 7)
           (word state 2432697321)
-          (let ((offset (* (- i 7) 4)))
+          (let ((offset (* (- i 7) slot-size)))
             (while (> offset 0)
               (let ((part (if (< offset 4095) offset 4095)))
                 (word state (+ 2432696617 (* part 1024))) (setq offset (- offset part)))))
@@ -1301,71 +1658,137 @@
       (word state 2853372896) ;; mov x0, x19
       (if indirect (word state 3594453504) ;; blr x16
         (let ((at (js-length (get state :words))))
-          (word state 2483027968) (js-call (get state :calls) :push (js-object :at at :function (get node :value)))))
+          (word state 2483027968) (js-call (get state :calls) :push (js-object :at at :target (get node :value)))))
       (stack-adjust state (+ extra (* count 16)) nil)
       (put state :depth (- (get state :depth) count))
       (word state 3107986025)
       (let ((at (js-length (get state :words))))
         (word state 889192457) (js-call (get state :memoryErrors) :push at))))
 
-  (defun memory-code (program)
-    (let* ((state (js-object :words (js-array) :calls (js-array) :constants (js-array)
-                    :compact nil :leaf nil :memory t :registers (js-array)
+  (defun memory-host-call (state node)
+    (let ((children (get node :children))
+          (index (host-capability-index (get state :hostCapabilities) node)))
+      (expression state (js-nth 0 children)) (push-value state "u32")
+      (expression state (js-nth 1 children))
+      (word state 704644067) ;; mov w3,w0: complete rooted argument list
+      (pop-value state "u32")
+      (word state 704709602) ;; mov w2,w1: heap
+      (memory-integer-register state 1 index)
+      (word state 2853372896) ;; mov x0,x19: native context
+      (word state 4181725808) ;; ldr x16,[x19,#32]
+      (memory-conditional-error state 3036676112 6) ;; cbnz x16, ready
+      (word state 3594453504) ;; blr x16
+      ;; FFI callbacks return normally; the loader retains the original thrown
+      ;; host value and sets the trap latch before this epilogue boundary.
+      (word state 3107986025)
+      (let ((at (js-length (get state :words))))
+        (word state 889192457) (js-call (get state :memoryErrors) :push at))))
+
+  (defun native-phase (observer phase count words branches calls)
+    (when (= (value-type observer) "function")
+      (try
+        (funcall observer phase (js-object :count count :words words :branches branches :calls calls))
+        (catch ignored nil))) nil)
+
+  (defun native-memory-prepare (program observer &optional fresh)
+    (native-phase observer "native-prepare-start" 0 0 0 0)
+    (let ((prepared (if fresh (memory-prepare-fresh-program program) (memory-prepare-program program))))
+      (native-phase observer "native-prepare-complete" (js-length (get prepared :functions)) 0 0 0)
+      prepared))
+
+  (defun native-memory-container (program code target format options observer)
+    (let ((word-count (js-length (get code :words))))
+      (native-phase observer "native-container-start" (js-length (get program :functions)) word-count 0 0)
+      (let ((bytes (if (= target "arm64-linux")
+                   (if (= format "object") (emit-elf-object program code options) (emit-elf-library program code options))
+                 (if (= format "object") (macho-object program code options) (macho-library program code nil options)))))
+        (native-phase observer "native-container-complete" (js-length (get program :functions)) word-count 0 0)
+        ;; All consumers of this private code image have finished. Public typed
+        ;; input, completed bytes and exact source-map ranges retain their own
+        ;; data; building the final debug document no longer needs this root.
+        (put code :words nil) bytes)))
+
+  (defun memory-code (program &optional target options observer)
+    (let* ((linux (= target "arm64-linux")) (slot-size (if linux 8 4))
+           (debug (get (or options (js-object)) :debug nil))
+           (state (js-object :words (if (get (or options (js-object)) :packedWords nil) (native-word-buffer) (js-array)) :calls (js-array) :constants (js-array)
+                    :compact nil :leaf nil :memory t :linux linux :registers (js-array)
+                    :debugRanges (if debug (js-array) nil)
+                    :trapSites (if debug (js-array) nil)
+                    :hostCapabilities (get program :hostCapabilities (js-array))
                     :table (get program :table nil) :tableUses (js-array)))
            (functions (get program :functions)) (offsets (js-array)) (i 0))
+      (native-phase observer "native-code-start" 0 0 0 0)
       (while (< i (js-length functions))
         (let* ((function (js-nth i functions)) (locals (get function :locals)) (arity (get function :arity))
                (frame (* (js-call globalThis.Math :ceil (/ (1+ (js-length locals)) 2)) 16)) (j 0))
           (js-call offsets :push (* (js-length (get state :words)) 4))
           (put state :depth 0) (put state :memoryErrors (js-array))
+          (when debug
+            (put state :debugFunction (get function :name)) (put state :debugFunctionIndex i)
+            (put state :debugDepth 0)
+            (let* ((source (get function :source nil))
+                   (range (js-object :kind "function" :function (get function :name) :functionIndex i :depth -1
+                            :start (* 4 (js-length (get state :words))) :end 0
+                            :span (get function :span (if source (get source :span nil) nil)))))
+              (put state :debugFunctionRange range) (js-call (get state :debugRanges) :push range)))
           (word state 2847898621) (word state 2432697341)
           (stack-adjust state frame t) (word state 4177527795) ;; save caller x19
           (word state 2852127731) ;; mov x19,x0
           (while (< j arity)
             (if (< j 7) (word state (+ 704644064 (* (1+ j) 65536)))
-              (progn (integer-register state 9 (+ 16 (* (- j 7) 4)) 0)
+              (progn (integer-register state 9 (+ 16 (* (- j 7) slot-size)) 0)
                 (word state 2332623785) (word state 3107979552)))
             (local-access state j "u32" t) (setq j (1+ j)))
           ;; Typed memory IR follows WASM's zero-initialized local contract.
           ;; Managed error/frame slots can be read before any explicit store.
           (while (< j (js-length locals))
             (let ((type (get (js-nth j locals) :type)))
-              (if (= type "f64") (float-literal state 0) (integer-register state 0 0 0))
+              (if (= type "f64") (word state 2657551328) ;; fmov d0,xzr: positive zero
+                (memory-integer-register state 0 0))
               (local-access state j type t)) (setq j (1+ j)))
           (expression state (get function :body))
           (let ((normal (jump state "jump")))
             (patch-conditions state (get state :memoryErrors) (js-length (get state :words)))
-            (integer-register state 0 0 0)
+            (memory-integer-register state 0 0)
             (patch-jump state normal (js-length (get state :words))))
           (integer-register state 9 frame 0) (word state 3406365609) ;; sub x9,fp,x9
           (word state 4181721395) ;; restore x19 independently of temporary stack depth
-          (word state 2432697279) (word state 2831252477) (word state 3596551104))
-        (setq i (1+ i)))
-      (setq i 0)
-      (while (< i (js-length (get state :calls)))
-        (let ((call (js-nth i (get state :calls))))
-          (patch-jump state (get call :at) (/ (js-nth (get call :function) offsets) 4)))
-        (setq i (1+ i)))
-      (finish-branches state offsets)
-      (memory-finish-table state program offsets)
-      (js-object :words (get state :words) :offsets offsets)))
+          (word state 2432697279) (word state 2831252477) (word state 3596551104)
+          (when debug
+            (put (get state :debugFunctionRange) :end (* 4 (js-length (get state :words))))))
+        (setq i (1+ i))
+        (when (and (= (value-type observer) "function") (= (% i 128) 0))
+          (native-phase observer "native-code-progress" i (js-length (get state :words))
+            (js-length (get state :branches (js-array))) (js-length (get state :calls)))))
+      (let ((call-count (finish-calls state offsets)))
+        (finish-branches state offsets)
+        (memory-finish-table state program offsets)
+        (native-phase observer "native-code-complete" (js-length functions) (js-length (get state :words))
+          (js-length (get state :branches (js-array))) call-count)
+        (let ((code (js-object :words (get state :words) :offsets offsets :debugRanges (get state :debugRanges nil)
+                      :trapSites (get state :trapSites nil))))
+          (unless (Array/isArray (get code :words)) (put code :wordReader native-word-at)) code))))
 
-  (defun emit-native-memory-object (program target)
-    (unless (= target "arm64-macos") (backend-fail program "native target must be explicit arm64-macos"))
+  (defun emit-native-memory-object (program target &optional options)
+    (unless (or (= target "arm64-macos") (= target "arm64-linux"))
+      (backend-fail program "native memory target must be explicit arm64-macos or arm64-linux"))
     (let ((typed-program (lower-memory-program program)))
-      (emit-typed-native-memory-object typed-program target)))
+      (emit-typed-native-memory-object typed-program target options)))
 
-  (defun emit-native-memory-library (program target)
-    (unless (= target "arm64-macos") (backend-fail program "native target must be explicit arm64-macos"))
+  (defun emit-native-memory-library (program target &optional options)
+    (unless (or (= target "arm64-macos") (= target "arm64-linux"))
+      (backend-fail program "native memory target must be explicit arm64-macos or arm64-linux"))
     (let ((typed-program (lower-memory-program program)))
-      (emit-typed-native-memory-library typed-program target)))
+      (emit-typed-native-memory-library typed-program target options)))
 
 
   (defun memory-word-type (type) (or (= type "u32") (= type "i32")))
   (defun memory-valid-index (value limit)
     (and (= (value-type value) "number") (= value (uint32 value)) (< value limit)))
 
-  (defun memory-validate-node (node function program arities)
+  (defun memory-validate-node (node function program arities capabilities &optional completed)
+    (unless (and completed (js-call completed :has node))
     (let ((kind (get node :kind)) (children (get node :children)) (value (get node :value)) (i 0))
       (unless (Array/isArray children) (backend-fail node "native typed node requires children"))
       (when (or (= kind "local") (= kind "set") (= kind "initialize"))
@@ -1381,15 +1804,34 @@
                      (= (js-length children) (1+ value)) (js-call arities :includes value)
                      (memory-word-type (get node :type)))
           (backend-fail node "indirect calls require a memory-u32 table and an exact signature")))
+      (when (= kind "host-call")
+        (host-capability-index capabilities node))
+      (when (and (= kind "memory-op") (memory-f64-unary-instruction value))
+        (unless (and (= (get node :type) "f64") (= (js-length children) 1)
+                     (not (nil? (js-nth 0 children)))
+                     (= (value-type (js-nth 0 children)) "object")
+                     (not (Array/isArray (js-nth 0 children)))
+                     (Array/isArray (get (js-nth 0 children) :children))
+                     (= (get (js-nth 0 children) :type) "f64"))
+          (backend-fail node "f64 unary memory opcode requires one f64 operand and result")))
+      (when (= kind "memory-data-copy")
+        (unless (and (= (get node :type) "u32") (= (value-type value) "string")
+                     (<= (js-length value) 2147483647) (= (js-length children) 1)
+                     (= (get (js-nth 0 children) :type) "u32"))
+          (backend-fail node "static UTF16 copy requires memory-u32, one word address and string data")))
       (while (< i (js-length children))
-        (when (and (or (= kind "call") (= kind "call-indirect"))
+        (when (and (or (= kind "call") (= kind "call-indirect") (= kind "host-call"))
                    (not (memory-word-type (get (js-nth i children) :type))))
           (backend-fail node "native memory calls require word arguments"))
-        (memory-validate-node (js-nth i children) function program arities) (setq i (1+ i)))))
+        (memory-validate-node (js-nth i children) function program arities capabilities completed) (setq i (1+ i))))
+      ;; Each memo belongs to one function and one preparation only. Do not
+      ;; remember a node until every check and every descendant has succeeded.
+      (when completed (js-call completed :set node t))))
 
-  (defun memory-prepare-program (program)
+  (defun memory-prepare-program-core (program fresh)
     (unless (= (get program :abi) "memory-u32") (backend-fail program "native memory emitter requires memory-u32 typed input"))
     (let* ((functions (get program :functions)) (exports (get program :exports))
+           (capabilities (if fresh (prepare-fresh-host-capabilities program) (prepare-host-capabilities program)))
            (table (get program :table nil)) (declared (get program :indirectArities (js-array)))
            (arities (js-array)) (i 0))
       (unless (and (Array/isArray functions) (Array/isArray exports) (Array/isArray declared)
@@ -1420,7 +1862,9 @@
             (backend-fail program "native table entry is not a declared function index")) (setq i (1+ i))))
       (setq i 0)
       (while (< i (js-length functions))
-        (let ((function (js-nth i functions))) (memory-validate-node (get function :body) function program arities)) (setq i (1+ i)))
+        (let ((function (js-nth i functions)))
+          (memory-validate-node (get function :body) function program arities capabilities
+            (when fresh (new globalThis.WeakMap)))) (setq i (1+ i)))
       ;; Existing managed aliases become direct word wrappers; source and table
       ;; indices remain unchanged, and no public canonical/typed IR is mutated.
       (let ((combined (js-call functions :slice)) (public (js-call exports :slice))
@@ -1448,11 +1892,18 @@
                   (js-call combined :push (js-object :name name :index (js-length combined) :arity (get target :arity) :locals locals
                     :body (js-object :kind "call" :type "u32" :value (get target :index) :children arguments)))))))
           (setq i (1+ i)))
-        (js-object :abi "memory-u32" :filename (get program :filename) :functions combined :exports public :table table))))
+        (let ((prepared (js-object :abi "memory-u32" :filename (get program :filename) :functions combined :exports public :table table)))
+          (when (> (js-length capabilities) 0) (put prepared :hostCapabilities capabilities))
+          prepared))))
+
+  (defun memory-prepare-program (program)
+    (memory-prepare-program-core program nil))
+  (defun memory-prepare-fresh-program (program)
+    (memory-prepare-program-core program t))
 
   (defun memory-indirect-target (state node)
     (word state 704709612) ;; mov w12,w1: evaluated table slot
-    (integer-register state 0 (js-length (get state :table)) 0)
+    (memory-integer-register state 0 (js-length (get state :table)))
     (word state 1795162527) ;; cmp w12,w0
     (memory-conditional-error state 1409286147 3) ;; b.lo
     (let ((at (js-length (get state :words))))
@@ -1462,7 +1913,7 @@
     (word state 2332688681)
     (word state 2332822825) ;; add x9,x9,x12,lsl #3
     (word state 3107980586) ;; table entry arity
-    (integer-register state 11 (get node :value) 0)
+    (memory-integer-register state 11 (get node :value))
     (word state 1795883359)
     (memory-conditional-error state 1409286144 4) ;; b.eq
     (word state 3112173866) ;; ldrsw x10,[x9]: signed target relative to entry
@@ -1483,17 +1934,67 @@
           (while (< i (js-length uses))
             (let* ((at (js-nth i uses)) (distance (* (- start at) 4)))
               (unless (memory-valid-index distance 4294967296) (backend-fail program "native table exceeds relative range"))
-              (js-call (get state :words) :splice (1+ at) 2
-                (+ 3531603978 (* (bit-and distance 65535) 32))
-                (+ 4070572042 (* (unsigned-bit-shift-right distance 16) 32))))
+              (native-word-set (get state :words) (1+ at) (+ 3531603978 (* (bit-and distance 65535) 32)))
+              (native-word-set (get state :words) (+ at 2) (+ 4070572042 (* (unsigned-bit-shift-right distance 16) 32))))
             (setq i (1+ i)))))))
 
-  (defun emit-typed-native-memory-object (program target)
-    (unless (= target "arm64-macos") (backend-fail program "native target must be explicit arm64-macos"))
-    (let ((prepared (memory-prepare-program program))) (macho-object prepared (memory-code prepared))))
+  (defun emit-observed-typed-native-memory-object (program target options observer &optional fresh)
+    (unless (or (= target "arm64-macos") (= target "arm64-linux"))
+      (backend-fail program "native memory target must be explicit arm64-macos or arm64-linux"))
+    (let* ((prepared (native-memory-prepare program observer fresh))
+           (code (memory-code prepared target (js-object :packedWords t) observer)))
+      (native-memory-container prepared code target "object" options observer)))
 
-  (defun emit-typed-native-memory-library (program target)
-    (unless (= target "arm64-macos") (backend-fail program "native target must be explicit arm64-macos"))
-    (let ((prepared (memory-prepare-program program))) (macho-library prepared (memory-code prepared))))
+  (defun emit-observed-typed-native-memory-library (program target options observer &optional fresh)
+    (unless (or (= target "arm64-macos") (= target "arm64-linux"))
+      (backend-fail program "native memory target must be explicit arm64-macos or arm64-linux"))
+    (let* ((prepared (native-memory-prepare program observer fresh))
+           (code (memory-code prepared target (js-object :packedWords t) observer)))
+      (native-memory-container prepared code target "library" options observer)))
 
-  (export emit-typed-native-memory-object emit-typed-native-memory-library emit-native-memory-object emit-native-memory-library emit-native-numeric-object emit-native-numeric-library emit-native-numeric-executable))
+  (defun emit-observed-typed-native-memory-artifact (program target options observer &optional fresh)
+    (unless (or (= target "arm64-macos") (= target "arm64-linux"))
+      (backend-fail program "native memory target must be explicit arm64-macos or arm64-linux"))
+    (let* ((format (get (or options (js-object)) :format "library"))
+           (prepared (native-memory-prepare program observer fresh))
+           (code (memory-code prepared target (js-object :debug t :packedWords t) observer))
+           (bytes nil) (functions (js-array)) (ranges (get code :debugRanges)) (i 0))
+      (unless (or (= format "object") (= format "library"))
+        (backend-fail program "native memory artifact format must be object or library"))
+      (setq bytes (native-memory-container prepared code target format options observer))
+      (while (< i (js-length ranges))
+        (let ((range (js-nth i ranges)))
+          (when (= (get range :kind) "function")
+            (js-call functions :push (js-object :name (get range :function) :index (get range :functionIndex)
+              :start (get range :start) :end (get range :end) :span (get range :span)))))
+        (setq i (1+ i)))
+      (js-object :bytes bytes
+        :debug (js-object :format "eliscript-native-source-map" :version 1 :target target :abi "memory-u32"
+          :imageFormat (if (= target "arm64-linux") "elf64" "mach-o64") :artifactFormat format
+          :offsetUnit "byte" :offsetBase "code-section" :relocatable t
+          :trapSites (js-call (get code :trapSites (js-array)) :map (lambda (site)
+            (js-object :site (get site :site) :address (get site :start) :offsetBase "code-section"
+              :functionIndex (get site :functionIndex) :returnAddress false :code (get site :code))))
+          :codeSection (get code :section) :functions functions :ranges ranges))))
+
+  ;; Preserve the existing public argument list and options observations. Only
+  ;; the in-process session imports the explicit-observer variants above.
+  (defun emit-typed-native-memory-object (program target &optional options)
+    (emit-observed-typed-native-memory-object program target options nil))
+  (defun emit-typed-native-memory-library (program target &optional options)
+    (emit-observed-typed-native-memory-library program target options nil))
+  (defun emit-typed-native-memory-artifact (program target &optional options)
+    (emit-observed-typed-native-memory-artifact program target options nil))
+
+  ;; These entries are the session's already lowered, privately created data
+  ;; handoff. No program marker or public options property enables its memos.
+  (defun emit-fresh-observed-typed-native-memory-object (program target options observer)
+    (emit-observed-typed-native-memory-object program target options observer t))
+  (defun emit-fresh-observed-typed-native-memory-library (program target options observer)
+    (emit-observed-typed-native-memory-library program target options observer t))
+  (defun emit-fresh-observed-typed-native-memory-artifact (program target options observer)
+    (emit-observed-typed-native-memory-artifact program target options observer t))
+
+  (export emit-typed-native-memory-artifact emit-typed-native-memory-object emit-typed-native-memory-library emit-native-memory-object emit-native-memory-library emit-native-numeric-object emit-native-numeric-library emit-native-numeric-executable
+    emit-observed-typed-native-memory-object emit-observed-typed-native-memory-library emit-observed-typed-native-memory-artifact
+    emit-fresh-observed-typed-native-memory-object emit-fresh-observed-typed-native-memory-library emit-fresh-observed-typed-native-memory-artifact))

@@ -683,23 +683,366 @@ When PREDECLARED is non-nil, reuse an already attached top-level resource."
          (dolist (argument arguments)
            (eliscript-transient--analyze-expression argument scope t)))))))
 
-(defun eliscript-transient--analyze-expression (form scope value-context)
-  "Analyze expression FORM in SCOPE under VALUE-CONTEXT."
-  (when form
-    (let* ((eliscript-transient--current-span
-            (or (eliscript-form-span form)
-                eliscript-transient--current-span))
-           (value (eliscript-form-value form)))
-      (eliscript-transient--record-try-prefix)
+(defvar eliscript-transient--task-active nil)
+(defvar eliscript-transient--task-context nil)
+(defvar eliscript-transient--pending-tasks nil)
+
+;; Context slots are state, function id, next function id, repeated-loop
+;; protection, and an optional shared cell of exceptional try-prefix states.
+;; A branch owns its state slot; only an explicit continuation merges it.
+(defun eliscript-transient--enqueue (action &optional context)
+  "Schedule ACTION in CONTEXT with its original diagnostic span."
+  (push (vector action (or context eliscript-transient--task-context)
+                eliscript-transient--current-span)
+        eliscript-transient--pending-tasks))
+
+(defun eliscript-transient--branch-context (state)
+  "Copy the current control context with a private copy of STATE."
+  (let ((context (copy-sequence eliscript-transient--task-context)))
+    (aset context 0 (copy-hash-table state))
+    context))
+
+(defun eliscript-transient--enqueue-expression
+    (form scope value-context &optional context)
+  "Schedule FORM in SCOPE with VALUE-CONTEXT and optional control CONTEXT."
+  (eliscript-transient--enqueue
+   (lambda ()
+     (when form
+       (let* ((eliscript-transient--current-span
+               (or (eliscript-form-span form) eliscript-transient--current-span))
+              (value (eliscript-form-value form)))
+         (eliscript-transient--record-try-prefix)
+         (cond
+          ((symbolp value) (eliscript-transient--analyze-reference form scope))
+          ((vectorp value)
+           (dolist (item (append value nil))
+             (eliscript-transient--enqueue-expression item scope t)))
+          ((consp value)
+           (eliscript-transient--analyze-call-tasks form scope value-context)))
+         ;; Recording after descendants is an explicit continuation: recording
+         ;; here immediately would miss completion in a nested expression.
+         (eliscript-transient--enqueue #'eliscript-transient--record-try-prefix))))
+   context))
+
+(defun eliscript-transient--enqueue-sequence (forms scope value-context &optional context)
+  "Schedule FORMS in order with VALUE-CONTEXT only on the last form."
+  (while forms
+    (eliscript-transient--enqueue-expression
+     (car forms) scope (and value-context (null (cdr forms))) context)
+    (setq forms (cdr forms))))
+
+(defun eliscript-transient--enqueue-initializer (initializer scope bindings)
+  "Schedule INITIALIZER, attaching its fresh resource only after its argument."
+  (eliscript-transient--enqueue
+   (lambda ()
+     (if (and initializer
+              (eliscript-transient--constructor-call-p initializer scope))
+         (let* ((value (eliscript-form-value initializer)) (arguments (cdr value)))
+           (unless (and (= (length bindings) 1)
+                        (symbolp (eliscript-transient--binding-name (car bindings))))
+             (let ((eliscript-transient--current-span
+                    (or (eliscript-form-span initializer)
+                        eliscript-transient--current-span)))
+               (eliscript-transient--fail
+                "transient result must be bound directly to one symbol")))
+           (unless (= (length arguments) 1)
+             (let ((eliscript-transient--current-span
+                    (or (eliscript-form-span initializer)
+                        eliscript-transient--current-span)))
+               (eliscript-transient--fail "transient expects 1 argument")))
+           (eliscript-transient--enqueue-expression (car arguments) scope t)
+           (eliscript-transient--enqueue
+            (lambda ()
+              (eliscript-transient--new-resource
+               (car bindings) (eliscript-form-span initializer)))))
+       (when initializer
+         (eliscript-transient--enqueue-expression initializer scope t))))))
+
+(defun eliscript-transient--enqueue-let (arguments scope sequential value-context)
+  "Schedule lexical binding ARGUMENTS and restore visible state on exit."
+  (let* ((baseline (eliscript-transient--copy-state))
+         (bindings (eliscript-form-value (car arguments)))
+         (child (eliscript-transient--make-scope scope)))
+    (if sequential
+        (dolist (entry bindings)
+          (let ((entry entry))
+            (eliscript-transient--enqueue
+             (lambda ()
+               (pcase-let* ((`(,target ,initializer)
+                            (eliscript-transient--binding-pair entry))
+                           (declared (eliscript-transient--make-pattern-bindings target)))
+                 (eliscript-transient--enqueue-initializer initializer child declared)
+                 (eliscript-transient--enqueue
+                  (lambda () (eliscript-transient--install-bindings child declared))))))))
+      (let ((parsed (mapcar #'eliscript-transient--binding-pair bindings)) declared)
+        (dolist (entry parsed)
+          (push (eliscript-transient--make-pattern-bindings (car entry)) declared))
+        (setq declared (nreverse declared))
+        (cl-mapc (lambda (entry targets)
+                   (eliscript-transient--enqueue-initializer (cadr entry) scope targets))
+                 parsed declared)
+        (eliscript-transient--enqueue
+         (lambda ()
+           (dolist (targets declared)
+             (eliscript-transient--install-bindings child targets))))))
+    (eliscript-transient--enqueue-sequence (cdr arguments) child value-context)
+    (eliscript-transient--enqueue
+     (lambda () (eliscript-transient--retain-state-keys baseline)))))
+
+(defun eliscript-transient--enqueue-function (parameters body scope)
+  "Schedule an independently owned function with PARAMETERS and BODY."
+  (let* ((context (eliscript-transient--branch-context eliscript-transient--state))
+         (id (1+ eliscript-transient--next-function-id))
+         (child (eliscript-transient--make-scope scope)))
+    (aset context 1 id) (aset context 2 id) (aset context 3 nil)
+    (dolist (parameter (eliscript-parameters-parse
+                        parameters (lambda (_form message) (error "%s" message))))
+      (eliscript-transient--declare-pattern child (eliscript-parameter-form parameter)))
+    (eliscript-transient--enqueue-sequence body child t context)))
+
+(defun eliscript-transient--enqueue-if (arguments scope value-context)
+  "Schedule the test, isolated branches and original ownership merge."
+  (eliscript-transient--enqueue-expression (car arguments) scope t)
+  (eliscript-transient--enqueue
+   (lambda ()
+     (let* ((baseline (eliscript-transient--copy-state))
+            (then-context (eliscript-transient--branch-context baseline))
+            (else-context (eliscript-transient--branch-context baseline)))
+       (eliscript-transient--enqueue-expression
+        (cadr arguments) scope value-context then-context)
+       (when (cddr arguments)
+         (eliscript-transient--enqueue-expression
+          (caddr arguments) scope value-context else-context))
+       (eliscript-transient--enqueue
+        (lambda ()
+          (setq eliscript-transient--state
+                (eliscript-transient--merge-state
+                 baseline (list (aref then-context 0) (aref else-context 0))))))))))
+
+(defun eliscript-transient--enqueue-when (arguments scope value-context)
+  "Schedule a conditional body and its implicit unchanged branch."
+  (eliscript-transient--enqueue-expression (car arguments) scope t)
+  (eliscript-transient--enqueue
+   (lambda ()
+     (let* ((baseline (eliscript-transient--copy-state))
+            (body-context (eliscript-transient--branch-context baseline)))
+       (eliscript-transient--enqueue-sequence
+        (cdr arguments) scope value-context body-context)
+       (eliscript-transient--enqueue
+        (lambda ()
+          (setq eliscript-transient--state
+                (eliscript-transient--merge-state
+                 baseline (list baseline (aref body-context 0))))))))))
+
+(defun eliscript-transient--enqueue-short-circuit (arguments scope value-context)
+  "Schedule each short-circuit operand and retain every possible exit."
+  (let ((exits (list nil)))
+    (dolist (argument arguments)
+      (eliscript-transient--enqueue-expression argument scope value-context)
+      (eliscript-transient--enqueue
+       (lambda () (push (eliscript-transient--copy-state) (car exits)))))
+    (eliscript-transient--enqueue
+     (lambda ()
+       (when (car exits)
+         (setq eliscript-transient--state
+               (eliscript-transient--merge-state
+                (car (last (car exits))) (car exits))))))))
+
+(defun eliscript-transient--enqueue-cond-step
+    (clauses scope value-context baseline exits)
+  "Schedule the next COND clause and the continuation over remaining CLAUSES."
+  (if (null clauses)
+      (progn
+        (push (eliscript-transient--copy-state) (car exits))
+        (setq eliscript-transient--state
+              (eliscript-transient--merge-state baseline (car exits))))
+    (let* ((items (eliscript-form-value (car clauses))) (test (car items)))
+      (eliscript-transient--enqueue-expression test scope t)
+      (eliscript-transient--enqueue
+       (lambda ()
+         (let ((body-context (eliscript-transient--branch-context
+                              (eliscript-transient--copy-state))))
+           (eliscript-transient--enqueue-sequence
+            (cdr items) scope value-context body-context)
+           (eliscript-transient--enqueue
+            (lambda ()
+              (push (aref body-context 0) (car exits))
+              (if (eq (eliscript-form-value test) t)
+                  (setq eliscript-transient--state
+                        (eliscript-transient--merge-state baseline (car exits)))
+                (eliscript-transient--enqueue-cond-step
+                 (cdr clauses) scope value-context baseline exits))))))))))
+
+(defun eliscript-transient--enqueue-try (arguments scope value-context)
+  "Schedule TRY normal, exceptional, catch and finally states without recursion."
+  (let ((baseline (eliscript-transient--copy-state)) body catch-clause finally-clause)
+    (dolist (argument arguments)
       (cond
-       ((symbolp value)
-        (eliscript-transient--analyze-reference form scope))
-       ((vectorp value)
-        (dolist (item (append value nil))
-          (eliscript-transient--analyze-expression item scope t)))
-       ((consp value)
-        (eliscript-transient--analyze-call form scope value-context)))
-      (eliscript-transient--record-try-prefix))))
+       ((eliscript-transient--try-clause-p argument 'catch) (setq catch-clause argument))
+       ((eliscript-transient--try-clause-p argument 'finally) (setq finally-clause argument))
+       (t (push argument body))))
+    (let* ((prefixes (list (list (copy-hash-table baseline))))
+           (normal-context (eliscript-transient--branch-context baseline)))
+      (aset normal-context 4 prefixes)
+      (eliscript-transient--enqueue-sequence
+       (nreverse body) scope value-context normal-context)
+      (eliscript-transient--enqueue
+       (lambda ()
+         (let* ((exception-state (eliscript-transient--merge-state baseline (car prefixes)))
+                (catch-context (eliscript-transient--branch-context exception-state)))
+           (aset catch-context 4 prefixes)
+           (when catch-clause
+             (let* ((items (eliscript-form-value catch-clause))
+                    (child (eliscript-transient--make-scope scope)))
+               (eliscript-transient--declare-pattern child (cadr items))
+               (eliscript-transient--enqueue-sequence
+                (cddr items) child value-context catch-context)))
+           (eliscript-transient--enqueue
+            (lambda ()
+              (setq eliscript-transient--state
+                    (eliscript-transient--merge-state
+                     baseline (list (aref normal-context 0) (aref catch-context 0))))
+              (when finally-clause
+                (eliscript-transient--enqueue-sequence
+                 (cdr (eliscript-form-value finally-clause)) scope nil))))))))))
+
+(defun eliscript-transient--enqueue-loop (arguments scope value-context)
+  "Schedule loop initialization, protected body and visible-resource cleanup."
+  (let* ((baseline (eliscript-transient--copy-state))
+         (child (eliscript-transient--make-scope scope)))
+    (dolist (entry (eliscript-form-value (car arguments)))
+      (let ((entry entry))
+        (eliscript-transient--enqueue
+         (lambda ()
+           (pcase-let* ((`(,target ,initializer)
+                        (eliscript-transient--binding-pair entry))
+                       (declared (eliscript-transient--declare-pattern child target)))
+             (eliscript-transient--enqueue-initializer initializer scope declared))))))
+    (eliscript-transient--enqueue
+     (lambda ()
+       (let ((body-context (copy-sequence eliscript-transient--task-context)))
+         (aset body-context 0 eliscript-transient--state)
+         (aset body-context 3 (append (eliscript-transient--visible-active-resources)
+                                     eliscript-transient--loop-protected))
+         (eliscript-transient--enqueue-sequence
+          (cdr arguments) child value-context body-context)
+         (eliscript-transient--enqueue
+          (lambda ()
+            (setq eliscript-transient--state (aref body-context 0))
+            (eliscript-transient--retain-state-keys baseline))))))))
+
+(defun eliscript-transient--enqueue-while (arguments scope)
+  "Schedule WHILE condition and conservatively merge repeated-body effects."
+  (eliscript-transient--enqueue-expression (car arguments) scope t)
+  (eliscript-transient--enqueue
+   (lambda ()
+     (let* ((baseline (eliscript-transient--copy-state))
+            (body-context (eliscript-transient--branch-context baseline)))
+       (aset body-context 3 (append (eliscript-transient--visible-active-resources)
+                                   eliscript-transient--loop-protected))
+       (eliscript-transient--enqueue-sequence (cdr arguments) scope nil body-context)
+       (eliscript-transient--enqueue
+        (lambda ()
+          (setq eliscript-transient--state
+                (eliscript-transient--merge-state
+                 baseline (list baseline (aref body-context 0))))))))))
+
+(defun eliscript-transient--enqueue-assignment (arguments scope)
+  "Schedule each reassignment check before its corresponding value."
+  (while arguments
+    (let ((name (pop arguments)) (value (pop arguments)))
+      (eliscript-transient--enqueue
+       (lambda ()
+         (let ((binding (eliscript-transient--lookup scope (eliscript-form-value name))))
+           (when (and binding (eliscript-transient--binding-resource binding))
+             (let ((eliscript-transient--current-span
+                    (or (eliscript-form-span name) eliscript-transient--current-span)))
+               (eliscript-transient--fail "transient binding %s cannot be reassigned"
+                                          (eliscript-form-value name))))
+           (eliscript-transient--enqueue-expression value scope t)))))))
+
+(defun eliscript-transient--analyze-call-tasks (form scope value-context)
+  "Analyze one call FORM and schedule descendants in SCOPE."
+  (let* ((items (eliscript-form-value form)) (operator-form (car items))
+         (operator (eliscript-form-value operator-form)) (arguments (cdr items))
+         (operation-binding (eliscript-transient--operator-binding operator-form scope)))
+    (if operation-binding
+        (eliscript-transient--analyze-operation
+         (eliscript-transient--binding-operation operation-binding)
+         form arguments scope value-context)
+      (pcase operator
+        ((or 'lambda 'fn 'async)
+         (eliscript-transient--enqueue-function (car arguments) (cdr arguments) scope))
+        ('await
+         (eliscript-transient--enqueue-expression (car arguments) scope t)
+         (eliscript-transient--enqueue
+          (lambda ()
+            (let ((active (eliscript-transient--visible-active-resources)))
+              (when active
+                (eliscript-transient--fail
+                 "transient binding %s cannot remain active across await"
+                 (eliscript-transient--resource-name (car active))))))))
+        ((or 'quote 'js*) nil)
+        ('let (eliscript-transient--enqueue-let arguments scope nil value-context))
+        ('let* (eliscript-transient--enqueue-let arguments scope t value-context))
+        ('loop (eliscript-transient--enqueue-loop arguments scope value-context))
+        ('while (eliscript-transient--enqueue-while arguments scope))
+        ((or 'setq 'set!) (eliscript-transient--enqueue-assignment arguments scope))
+        ('if (eliscript-transient--enqueue-if arguments scope value-context))
+        ((or 'when 'unless)
+         (eliscript-transient--enqueue-when arguments scope value-context))
+        ((or 'and 'or)
+         (eliscript-transient--enqueue-short-circuit arguments scope value-context))
+        ('cond
+         (eliscript-transient--enqueue-cond-step
+          arguments scope value-context (eliscript-transient--copy-state) (list nil)))
+        ('try (eliscript-transient--enqueue-try arguments scope value-context))
+        ((or 'progn 'do)
+         (eliscript-transient--enqueue-sequence arguments scope value-context))
+        (_
+         (let ((binding (and (symbolp operator)
+                             (eliscript-transient--lookup scope operator))))
+           (when (and binding
+                      (or (eliscript-transient--binding-operation binding)
+                          (eliscript-transient--binding-resource binding)))
+             (eliscript-transient--analyze-reference operator-form scope)))
+         ;; Ordinary call arguments are all value positions, not a body sequence.
+         (dolist (argument arguments)
+           (eliscript-transient--enqueue-expression argument scope t)))))))
+
+(defun eliscript-transient--analyze-expression (form scope value-context)
+  "Analyze FORM in SCOPE using explicit control and ownership state frames."
+  (if eliscript-transient--task-active
+      (eliscript-transient--enqueue-expression form scope value-context)
+    (let* ((eliscript-transient--task-active t)
+           (eliscript-transient--pending-tasks nil)
+           (root (vector eliscript-transient--state eliscript-transient--function-id
+                         eliscript-transient--next-function-id
+                         eliscript-transient--loop-protected
+                         (and eliscript-transient--try-prefix-states
+                              (list eliscript-transient--try-prefix-states))))
+           (eliscript-transient--task-context root)
+           tasks)
+      (eliscript-transient--enqueue-expression form scope value-context)
+      (setq tasks (nreverse eliscript-transient--pending-tasks))
+      (while tasks
+        (let* ((task (pop tasks)) (context (aref task 1))
+               (eliscript-transient--task-context context)
+               (eliscript-transient--pending-tasks nil)
+               (eliscript-transient--current-span (aref task 2))
+               (eliscript-transient--state (aref context 0))
+               (eliscript-transient--function-id (aref context 1))
+               (eliscript-transient--next-function-id (aref context 2))
+               (eliscript-transient--loop-protected (aref context 3))
+               (prefixes (aref context 4))
+               (eliscript-transient--try-prefix-states (and prefixes (car prefixes))))
+          (funcall (aref task 0))
+          (aset context 0 eliscript-transient--state)
+          (when prefixes (setcar prefixes eliscript-transient--try-prefix-states))
+          (setq tasks (nconc (nreverse eliscript-transient--pending-tasks) tasks))))
+      (setq eliscript-transient--state (aref root 0))
+      (when (aref root 4)
+        (setq eliscript-transient--try-prefix-states (car (aref root 4)))))))
 
 (defun eliscript-transient--import-declarations (arguments scope)
   "Declare import ARGUMENTS in SCOPE with canonical transient provenance."
@@ -799,6 +1142,20 @@ When PREDECLARED is non-nil, reuse an already attached top-level resource."
          (eliscript-transient--analyze-expression argument scope t)))
       (_ (eliscript-transient--analyze-expression form scope nil)))))
 
+(defun eliscript-transient--scope-has-provenance-p (scope)
+  "Return non-nil when SCOPE exposes any canonical transient operation.
+
+Only imported operation bindings and namespace families create provenance.
+Without either, no resource can be created and no ownership rule can fire.
+The ordinary analyzer still validates every expression and binding."
+  (let (found)
+    (maphash (lambda (_name binding)
+               (when (or (eliscript-transient--binding-operation binding)
+                         (eliscript-transient--binding-namespace binding))
+                 (setq found t)))
+             (eliscript-transient--scope-names scope))
+    found))
+
 (defun eliscript-transient--analyze-module (forms &optional filename)
   "Validate transient ownership and escape rules in expanded FORMS."
   (if (eliscript-transient--trusted-core-source-p filename)
@@ -813,8 +1170,9 @@ When PREDECLARED is non-nil, reuse an already attached top-level resource."
          (flattened (eliscript-transient--flatten-modules forms))
          (scope (eliscript-transient--make-scope)))
     (eliscript-transient--predeclare-top-level flattened scope)
-    (dolist (form flattened)
-      (eliscript-transient--analyze-top-level form scope))
+    (when (eliscript-transient--scope-has-provenance-p scope)
+      (dolist (form flattened)
+        (eliscript-transient--analyze-top-level form scope)))
       forms)))
 
 (provide 'eliscript-transient-analysis)

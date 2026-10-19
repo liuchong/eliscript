@@ -1,0 +1,154 @@
+(module tests.compiler-corpus-tools-cli
+  (import "node:test" before after test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile writeFile mkdir rm)
+  (import "node:path" resolve dirname)
+  (import "node:os" tmpdir)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/backends/stage3-targets.mjs" authenticateStage3Targets)
+  (import "../tools/backends/compiler-bootstrap.mjs" openCompilerArtifact)
+  (import "../tools/backends/compiler-build.mjs" loadCompilerSources buildIndependentCompiler)
+  (import "../tools/backends/compiler-corpus-tools-cli.mjs"
+    authenticateOriginalToolsCLI projectOriginalToolsCLIArguments)
+  (import "../tools/backends/compiler-corpus-execution.mjs" prepareOriginalToolsCLIContext)
+  (defvar directory undefined)
+  (defvar selected undefined)
+  (defvar authentication undefined)
+  (defvar configuration undefined)
+  (defvar projection undefined)
+  (before (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-original-tools-cli-"))))
+    (let* ((manifest (get (get globalThis.process :env) :ELISCRIPT_BOOTSTRAP_MANIFEST
+                       (resolve root "dist/bootstrap-release/bootstrap.json")))
+           (verified (await (authenticateStage3Targets (js-object :bootstrapManifestPath manifest))))
+           (artifact (JSON/parse (await (readFile (get verified :stage3MetadataPath) "utf8")))))
+      (setq authentication verified)
+      (put artifact :metadataPath (get verified :stage3MetadataPath))
+      (let ((producer (await (openCompilerArtifact artifact))))
+        (try
+          (setq selected (await (buildIndependentCompiler (js-object :host "javascript" :session producer
+            :sourceRoot root :sources (await (loadCompilerSources (js-object :sourceRoot root)))
+            :profile "small" :outputRoot (resolve directory "original-tool-products/standard-selected")))))
+          (finally (await (js-call producer :close)))))
+      (setq configuration (resolve directory "product/__eliscript_original_compiler_session.json"))
+      (await (mkdir (dirname configuration) (js-object :recursive t)))
+      (await (writeFile configuration (JSON/stringify (js-object :target "javascript" :sourceRoot root
+        :path (resolve (dirname (get verified :stage3MetadataPath)) (get artifact :path))
+        :supportingDirectory (resolve directory "original-tool-products")))))
+      (setq projection (js-object :kind "original-tools-final-cli" :version 1
+        :recordId "original-tools-artifact:compiler-session-tools:node"
+        :sourceRoot root :configurationPath configuration
+        :producerPath (resolve (dirname (get verified :stage3MetadataPath)) (get artifact :path))
+        :supportingDirectory (resolve directory "original-tool-products")
+        :bootstrapManifestPath (get verified :bootstrapManifestPath)))
+      (await (writeFile (resolve (dirname configuration) "__eliscript_tools_cli_projection.json")
+        (JSON/stringify projection))))))
+  (after (async () (when directory (await (rm directory (js-object :recursive t :force t))))))
+  (defun selected-path () (resolve (get selected :directory) "compiler-artifact.json"))
+  (defasync proof ()
+    (await (authenticateOriginalToolsCLI (js-object :configurationPath configuration :selectedMetadataPath (selected-path)))))
+
+  (test "real session-built standard compiler files are authenticated as a distinct projection of the designated stage3"
+    (async ()
+      (let* ((actual (await (proof))) (input (resolve directory "source.eli"))
+             (arguments (js-array "compile" "--compiler-artifact" (selected-path) "--input" input
+                         "--target" "javascript" "--json-errors"))
+             (before (js-call arguments :slice))
+             (forwarded (projectOriginalToolsCLIArguments arguments actual)))
+        (js-call assert :notStrictEqual (get actual :selectedMetadataPath) (get actual :stage3MetadataPath))
+        (js-call assert :strictEqual (get actual :bootstrapManifestPath) (get authentication :bootstrapManifestPath))
+        (js-call assert :deepStrictEqual (get actual :selectedProductIdentity) (get selected :productIdentity))
+        (js-call assert :ok (> (js-length (get actual :files)) 0))
+        (js-call assert :deepStrictEqual arguments before)
+        (js-call assert :deepStrictEqual forwarded (js-array "compile" "--compiler-artifact"
+          (get authentication :stage3MetadataPath) "--input" input "--target" "javascript" "--json-errors"
+          "--bootstrap-manifest" (get authentication :bootstrapManifestPath)))
+        (let* ((metadata (selected-path)) (original (await (readFile metadata "utf8")))
+               (mutations (js-array
+                 (lambda (value) (put (get value :provenance) :mode "seed"))
+                 (lambda (value) (put (get value :provenance) :producerHost "native"))
+                 (lambda (value) (put (get value :provenance) :runtimeCompiled false))
+                 (lambda (value) (js-call (get (get value :provenance) :compiledModuleIds) :pop))
+                 (lambda (value) (js-call (get value :modules) :pop))
+                 (lambda (value) (put (get value :sourceIdentity) :runtime (js-object)))
+                 (lambda (value) (js-call (get (get value :artifactIdentity) :files) :pop))
+                 (lambda (value) (put (aref (get (get value :artifactIdentity) :files) 0) :path "../escape.mjs"))
+                 (lambda (value) (put (aref (get value :modules) 0) :sourceMapPath "missing.mjs.map"))))
+               (index 0))
+          (try
+            (while (< index (js-length mutations))
+              (let ((changed (JSON/parse original)))
+                (funcall (aref mutations index) changed)
+                (await (writeFile metadata (JSON/stringify changed)))
+                (await (js-call assert :rejects (lambda () (proof)))))
+              (setq index (1+ index)))
+            (finally (await (writeFile metadata original)))))
+        (let* ((file (resolve (get selected :directory) (get (aref (get selected :modules) 0) :path)))
+               (original (await (readFile file))))
+          (try
+            (await (writeFile file (globalThis.Buffer.concat (js-array original (globalThis.Buffer.from "\n")))))
+            (await (js-call assert :rejects (lambda () (proof))))
+            (finally (await (writeFile file original))))))))
+
+  (test "original CLI argv and structured failures survive the authenticated private transport and successful recovery"
+    (async ()
+      (let* ((path (resolve root "tools/backends/compiler-corpus-tools-cli.mjs"))
+             (input (resolve directory "original-source.eli"))
+             (env (Object/assign (js-object) (get globalThis.process :env)
+               (js-object :ELISCRIPT_ORIGINAL_COMPILER_SESSION configuration)))
+             (artifact (JSON/parse (await (readFile (get authentication :stage3MetadataPath) "utf8")))))
+        (put artifact :metadataPath (get authentication :stage3MetadataPath))
+        (let ((session (await (openCompilerArtifact artifact))))
+          (try
+            (let ((sources (js-array "; 😀\n(defun broken (" "(defun recovered (x) (+ x 1)) (export recovered)")) (index 0))
+              (while (< index (js-length sources))
+                (let* ((source (aref sources index)) (failed false) (original undefined))
+                  (await (writeFile input source))
+                  (try (setq original (await (js-call session :request
+                    (js-object :operation "compile" :source source :filename input))))
+                    (catch error (setq failed t original error)))
+                  (let ((child (spawnSync (get globalThis.process :execPath)
+                          (js-array path "compile" "--compiler-artifact" (selected-path) "--input" input
+                            "--target" "javascript" "--json-errors")
+                          (js-object :env env :encoding "utf8" :stdio (js-array "ignore" "pipe" "pipe")))))
+                    (js-call assert :strictEqual (get child :error) undefined)
+                    (js-call assert :strictEqual (get child :signal) nil)
+                    (js-call assert :strictEqual (get child :status) (if failed 1 0) (get child :stderr))
+                    (if failed
+                      (let ((result (JSON/parse (get child :stderr))))
+                        (js-call assert :strictEqual (get child :stdout) "")
+                        (js-call assert :strictEqual (get result :format) "eliscript-compiler-cli-error")
+                        (js-call assert :strictEqual (get result :version) 1)
+                        (js-call assert :strictEqual (get (get result :error) :message) (get original :message))
+                        (js-call assert :deepStrictEqual (get (get result :error) :eliscriptDiagnostic) (get original :eliscriptDiagnostic)))
+                      (progn
+                        (js-call assert :strictEqual (get child :stderr) "")
+                        (js-call assert :strictEqual (get child :stdout) (get original :javascript))))))
+                (setq index (1+ index))))
+            (finally (await (js-call session :close))))))))
+
+  (test "private tools CLI rejects another metadata path or caller manifest instead of relaxing public final-stage authentication"
+    (async ()
+      (await (js-call assert :rejects (authenticateStage3Targets (js-object
+        :bootstrapManifestPath (get authentication :bootstrapManifestPath) :stage3MetadataPath (selected-path)))))
+      (await (js-call assert :rejects (authenticateOriginalToolsCLI
+        (js-object :configurationPath configuration :selectedMetadataPath (get authentication :stage3MetadataPath)))))
+      (let* ((actual (await (proof))) (args (js-array "compile" "--compiler-artifact" (selected-path)
+                           "--bootstrap-manifest" "wrong-bootstrap.json")))
+        (js-call assert :throws (lambda () (projectOriginalToolsCLIArguments args actual)) globalThis.TypeError))
+      (let* ((path (resolve (dirname configuration) "__eliscript_tools_cli_projection.json"))
+             (original (await (readFile path "utf8"))))
+        (try
+          (await (writeFile path (JSON/stringify (Object/assign (js-object) projection
+            (js-object :recordId "original-tools-artifact:unrelated:node")))))
+          (await (js-call assert :rejects (lambda () (proof))))
+          (finally (await (writeFile path original)))))
+      (let ((context (js-object :target "javascript" :record (js-object :id "original-tools-artifact:unrelated:node"))))
+        (Object/defineProperty context "artifact" (js-object :get (lambda () (throw false))))
+        (js-call assert :strictEqual (await (prepareOriginalToolsCLIContext context)) context))
+      (let ((context (js-object :target "javascript" :failure undefined :record
+                       (js-object :id "original-tools-artifact:compiler-session-tools:node"))))
+        (Object/defineProperty context "artifact" (js-object :get (lambda () (throw false))))
+        (js-call assert :strictEqual (await (prepareOriginalToolsCLIContext context)) context))))
+)

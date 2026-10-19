@@ -1,0 +1,15 @@
+(module tools.backends.compiler-corpus-isolated-exports
+  (import "node:fs/promises" readFile)
+  (import "./compiler-bootstrap.mjs" saveCompilerMetadata)
+  (import "./compiler-corpus-execution.mjs" executeIsolatedCompilerCorpusExports)
+
+  ;; Only this original recipe capability runs in this child. The provider is
+  ;; loaded by the unchanged real project graph; its source and URL are not
+  ;; rewritten and its global effects are never reset by the parent process.
+  (defasync main ()
+    (let* ((argv (get globalThis.process :argv))
+           (input (JSON/parse (await (readFile (aref argv 2) "utf8"))))
+           (result (await (executeIsolatedCompilerCorpusExports input))))
+      (await (saveCompilerMetadata (aref argv 3) result))))
+  (js-call (main) :catch (lambda (error)
+    (console/error error) (put globalThis.process :exitCode 1))))

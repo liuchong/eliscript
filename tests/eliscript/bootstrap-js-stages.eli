@@ -1,0 +1,407 @@
+(module tests.bootstrap-js-stages
+  (import "node:test" test before after)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp mkdir readFile writeFile readdir rm cp symlink)
+  (import "node:path" resolve dirname relative isAbsolute)
+  (import "node:os" tmpdir)
+  (import "node:child_process" spawnSync)
+  (import "node:module" createRequire)
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/backends/compiler-build.mjs" loadCompilerSources writeCompilerMetadata)
+  (import "../tools/backends/compiler-metadata.mjs" readCompilerMetadata)
+  (import "../tools/backends/compiler-bootstrap.mjs"
+    compilerSourceIdentity assertCompilerArtifactSources openCompilerArtifact)
+  (import "../tools/backends/dist/bootstrap-js-stages.mjs"
+    bootstrapJsStages compareJsFixedPoint)
+
+  ;; This suite shares one complete, authentic Emacs -> JS0 -> JS1 -> JS2 ->
+  ;; JS3 execution. Fault cases use the same maintained formal source graph,
+  ;; compiled by Emacs, rather than injectable producer functions or old seeds.
+  (defvar directory undefined)
+  (defvar source-root undefined)
+  (defvar sources undefined)
+  (defvar stage0-path undefined)
+  (defvar chain-promise undefined)
+
+  (defun sha (bytes)
+    (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+
+  (defasync write-source (base filename source)
+    (let ((path (resolve base filename)))
+      (await (mkdir (dirname path) (js-object :recursive t)))
+      (await (writeFile path source))))
+
+  (defasync source-only-checkout (destination)
+    (await (mkdir destination (js-object :recursive t)))
+    (let ((names (await (readdir (resolve root "compiler")))) (index 0))
+      (while (< index (js-length names))
+        (let ((name (aref names index)))
+          (when (js-call name :endsWith ".el")
+            (await (write-source destination (+ "compiler/" name)
+              (await (readFile (resolve root "compiler" name)))))))
+        (setq index (1+ index))))
+    (await (write-source destination "tools/backends/bootstrap.el"
+      (await (readFile (resolve root "tools/backends/bootstrap.el")))))
+    (await (write-source destination "tools/runtime/unicode-case-runtime.el"
+      (await (readFile (resolve root "tools/runtime/unicode-case-runtime.el")))))
+    (let ((support (js-array "tools/project/project.eli" "bootstrap/host/project-legacy.mjs"
+                    "bootstrap/host/bun.mjs" "bootstrap/host/build.mjs"
+                    "tools/bootstrap-seed.el" "tools/bootstrap-runtime.el")) (index 0))
+      (while (< index (js-length support))
+        (let ((name (aref support index)))
+          (await (write-source destination name (await (readFile (resolve root name))))))
+        (setq index (1+ index))))
+    (let ((records (js-call (get sources :modules) :concat
+                    (get sources :literalSources) (js-array (get sources :runtime)))) (index 0))
+      (while (< index (js-length records))
+        (let ((record (aref records index)))
+          (await (write-source destination (get record :filename) (get record :source))))
+        (setq index (1+ index))))
+    ;; The host's declared runtime package is an actual source dependency, not
+    ;; a compiler artifact. No dist/bootstrap or compiled backend is copied.
+    (await (mkdir (resolve destination "node_modules") (js-object :recursive t)))
+    (await (symlink root (resolve destination "node_modules/eliscript") "dir"))
+    destination)
+
+  (defun emacs-stage0 (checkout output)
+    (let* ((env (Object/assign (js-object) (get globalThis.process :env)))
+           (emacs (get env :EMACS "emacs")))
+      (Reflect/deleteProperty env "ELISCRIPT_BOOTSTRAP_MODULE_DIR")
+      (let ((child (spawnSync emacs
+                    (js-array "--batch" "-Q" "--script" (resolve checkout "tools/backends/bootstrap.el")
+                      "--stage0" "--output" output)
+                    (js-object :cwd checkout :env env :encoding "utf8" :maxBuffer 8388608))))
+        (js-call assert :strictEqual (get child :error) undefined)
+        (js-call assert :strictEqual (get child :signal) nil (get child :stderr))
+        (js-call assert :strictEqual (get child :status) 0 (get child :stderr)))
+      (resolve output "stage0.json")))
+
+  (defasync chain ()
+    (unless chain-promise
+      (setq chain-promise (bootstrapJsStages (js-object :stage0ManifestPath stage0-path
+        :sourceRoot source-root :outputRoot (resolve directory "chain")))))
+    (await chain-promise))
+
+  (defasync manifest ()
+    (await (readCompilerMetadata (get (await (chain)) :manifestPath))))
+
+  (defasync read-artifact (path)
+    (let ((value (await (readCompilerMetadata path))))
+      (put value :directory (dirname path)) (put value :metadataPath path) value))
+
+  (defun stage-path (result record)
+    (resolve (dirname (get result :manifestPath)) (get record :metadataPath)))
+
+  (defasync caught (action)
+    (let ((failed false) (value undefined))
+      (try (await (funcall action)) (catch error (setq failed t value error)))
+      (js-call assert :strictEqual failed t "operation must actually reject")
+      value))
+
+  (before (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-js-stages-"))))
+    (setq sources (await (loadCompilerSources)))
+    (setq source-root (await (source-only-checkout (resolve directory "source"))))
+    (setq stage0-path (emacs-stage0 source-root (resolve directory "stage0")))))
+  (after (async ()
+    (setq chain-promise undefined sources undefined)
+    (when directory (await (rm directory (js-object :recursive t :force t))))))
+
+  (test "T01 Emacs prepares the project facade before a generated JavaScript build host can load"
+    (async ()
+      (let* ((entry (resolve source-root "bootstrap/host/project.mjs"))
+             (require-module (createRequire entry))
+             (facade (funcall require-module entry))
+             (legacy (funcall require-module (resolve source-root "bootstrap/host/project-legacy.mjs")))
+             (map (JSON/parse (await (readFile (+ entry ".map") "utf8")))))
+        (js-call assert :strictEqual (get facade :checkProject) (get legacy :checkProject))
+        (js-call assert :strictEqual (value-type (get facade :buildProject)) "function")
+        (js-call assert :deepStrictEqual (get map :sourcesContent)
+          (js-array (await (readFile (resolve source-root "tools/project/project.eli") "utf8")))))))
+
+  (test "T01 public seed from a clean source tree also prepares the real build host dependency"
+    (async ()
+      (let* ((checkout (await (source-only-checkout (resolve directory "public-source"))))
+             (output (resolve checkout "dist/bootstrap"))
+             (child (spawnSync (get (get globalThis.process :env) :EMACS "emacs")
+               (js-array "--batch" "-Q" "--script" (resolve checkout "tools/bootstrap-seed.el")
+                 "--" checkout output "symbol" "syntax" "reader" "formatter" "expander"
+                 "transient-analysis" "analyzer" "ir" "lower" "source-map" "emitter" "project" "compiler")
+               (js-object :cwd checkout :encoding "utf8" :maxBuffer 8388608))))
+        (js-call assert :strictEqual (get child :error) undefined)
+        (js-call assert :strictEqual (get child :signal) nil (get child :stderr))
+        (js-call assert :strictEqual (get child :status) 0 (get child :stderr))
+        (let* ((entry (resolve checkout "bootstrap/host/build.mjs"))
+               (host (funcall (createRequire entry) entry))
+               (input (resolve checkout "program.eli")) (product (resolve checkout "program.mjs")))
+          (await (writeFile input "(print 43)\n"))
+          (await (js-call host :executeBuild (js-object :mode "single" :input input :output product
+            :moduleDirectory output)))
+          (let ((run (spawnSync (get globalThis.process :execPath) (js-array product)
+                       (js-object :cwd checkout :encoding "utf8"))))
+            (js-call assert :strictEqual (get run :status) 0 (get run :stderr))
+            (js-call assert :strictEqual (js-call (get run :stdout) :trim) "43"))))))
+
+  (test "T01 Emacs alone builds the complete formal stage0 from a checkout containing no compiler artifacts"
+    (async ()
+      (let* ((receipt (await (readCompilerMetadata stage0-path)))
+             (path (resolve (dirname stage0-path) (get receipt :metadataPath)))
+             (artifact (await (read-artifact path)))
+             (expected (compilerSourceIdentity sources)) (session nil))
+        (js-call assert :strictEqual (get receipt :format) "eliscript-js-stage0")
+        (js-call assert :strictEqual (get receipt :version) 1)
+        (js-call assert :strictEqual (get receipt :status) "built")
+        (js-call assert :strictEqual (get receipt :producer) "emacs-lisp")
+        (js-call assert :strictEqual (get receipt :host) "javascript")
+        (js-call assert :strictEqual (get receipt :target) "javascript")
+        (js-call assert :strictEqual (isAbsolute (get receipt :metadataPath)) false)
+        (js-call assert :deepStrictEqual (get receipt :formalSourceIdentity) expected)
+        (js-call assert :ok (> (js-length (get receipt :seedSourceIdentity)) 0))
+        (js-call assert :deepStrictEqual (js-call (get receipt :seedSourceIdentity) :map (lambda (item) (get item :path)))
+          (js-call (js-array "tools/backends/bootstrap.el" "tools/runtime/unicode-case-runtime.el") :concat
+            (js-call (js-call (js-call (await (readdir (resolve source-root "compiler"))) :filter
+              (lambda (name) (js-call name :endsWith ".el"))) :sort) :map (lambda (name) (+ "compiler/" name)))))
+        (js-call (get receipt :seedSourceIdentity) :forEach (lambda (item)
+          (js-call assert :ok (or (= (get item :path) "tools/backends/bootstrap.el")
+            (= (get item :path) "tools/runtime/unicode-case-runtime.el")
+            (and (js-call (get item :path) :startsWith "compiler/") (js-call (get item :path) :endsWith ".el"))))))
+        (js-call assert :deepStrictEqual (js-call (get artifact :modules) :map (lambda (item) (get item :id)))
+          (js-call (get sources :modules) :map (lambda (item) (get item :id))))
+        (assertCompilerArtifactSources artifact sources)
+        (try
+          (setq session (await (openCompilerArtifact artifact)))
+          (js-call assert :strictEqual (get session :host) "javascript")
+          (js-call assert :strictEqual
+            (get (await (js-call session :request (js-object :operation "capabilities"))) :format)
+            "eliscript-compiler-capabilities")
+          (finally (when session (await (js-call session :close)))))
+        (await (js-call assert :rejects (readFile (resolve source-root "dist/bootstrap/compiler.mjs"))
+          (lambda (error) (= (get error :code) "ENOENT")))))))
+
+  (test "T02 three actual JavaScript producers consume one complete input and only stage2 versus stage3 establishes the fixed point"
+    (async ()
+      (let* ((result (await (chain))) (record (await (manifest))) (stages (get record :stages))
+             (identity (compilerSourceIdentity sources)) (index 0))
+        (js-call assert :strictEqual (get record :format) "eliscript-js-bootstrap")
+        (js-call assert :strictEqual (get record :version) 1)
+        (js-call assert :strictEqual (get record :status) "accepted")
+        (js-call assert :deepStrictEqual (get record :formalSourceIdentity) identity)
+        (js-call assert :strictEqual (js-length stages) 4)
+        (while (< index 4)
+          (let* ((stage (aref stages index)) (path (stage-path result stage))
+                 (artifact (await (readCompilerMetadata path))))
+            (js-call assert :strictEqual (get stage :stage) index)
+            (js-call assert :strictEqual (get stage :producer)
+              (if (= index 0) "emacs-lisp" (+ "stage" (1- index))))
+            (js-call assert :strictEqual (get stage :status) "built")
+            (js-call assert :strictEqual (get stage :host) "javascript")
+            (js-call assert :strictEqual (get stage :target) "javascript")
+            (js-call assert :strictEqual (isAbsolute (get stage :metadataPath)) false)
+            (js-call assert :deepStrictEqual (get stage :inputIdentity) identity)
+            (js-call assert :deepStrictEqual (get stage :productIdentity) (get artifact :productIdentity))
+            (assertCompilerArtifactSources artifact sources)
+            (when (> index 0)
+              (js-call assert :strictEqual (get (get artifact :provenance) :mode) "session")
+              (js-call assert :strictEqual (get (get artifact :provenance) :producerHost) "javascript")
+              (js-call assert :deepStrictEqual (get (get artifact :provenance) :compiledModuleIds)
+                (js-call (get sources :modules) :map (lambda (item) (get item :id))))
+              (js-call assert :strictEqual (js-length (get artifact :frontendIR)) (1+ (js-length (get sources :modules))))
+              (js-call assert :strictEqual (get (aref (get artifact :frontendIR) (js-length (get sources :modules))) :id) "runtime")
+              (js-call assert :strictEqual (js-length (get artifact :literalIR)) (js-length (get sources :literalSources)))))
+          (setq index (1+ index)))
+        (js-call assert :strictEqual (get result :stage3MetadataPath) (stage-path result (aref stages 3)))
+        (js-call assert :strictEqual (get (get record :fixedPoint) :from) 2)
+        (js-call assert :strictEqual (get (get record :fixedPoint) :to) 3)
+        (js-call assert :strictEqual (get (get record :fixedPoint) :status) "identical")
+        (js-call assert :strictEqual (get (get record :finalAcceptance) :status) "pending")
+        (js-call assert :deepStrictEqual (get (get record :finalAcceptance) :targets) (js-array "javascript" "wasm" "native")))))
+
+  (test "T03 fixed point authenticates every original module map macro IR and data byte without rewriting logical filenames"
+    (async ()
+      (let* ((result (await (chain))) (record (await (manifest))) (stages (get record :stages))
+             (second (stage-path result (aref stages 2))) (third (stage-path result (aref stages 3)))
+             (identity (get record :formalSourceIdentity))
+             (comparison (await (compareJsFixedPoint (js-object :stage2 second :stage3 third :sourceIdentity identity))))
+             (saved (await (readCompilerMetadata
+               (resolve (dirname (get result :manifestPath)) (get (get record :fixedPoint) :comparisonPath)))))
+             (artifact (await (read-artifact third)))
+             (files (get (get artifact :artifactIdentity) :files)) (index 0))
+        (js-call assert :deepStrictEqual saved comparison)
+        (js-call assert :strictEqual (get comparison :format) "eliscript-js-fixed-point")
+        (js-call assert :strictEqual (get comparison :status) "identical")
+        (js-call assert :deepStrictEqual (get comparison :sourceIdentity) identity)
+        (js-call assert :deepStrictEqual (get comparison :files)
+          (js-call (Array/from files) :sort (lambda (left right)
+            (cond ((< (get left :path) (get right :path)) -1)
+                  ((> (get left :path) (get right :path)) 1) (t 0)))))
+        (while (< index (js-length (get artifact :modules)))
+          (let* ((module (aref (get artifact :modules) index))
+                 (map-path (resolve (get artifact :directory) (get module :sourceMapPath)))
+                 (map (JSON/parse (js-call (await (readFile map-path)) :toString "utf8")))
+                 (source (js-call (get sources :modules) :find (lambda (item) (= (get item :id) (get module :id))))))
+            (js-call assert :strictEqual (get map :file) (get module :id))
+            (js-call assert :deepStrictEqual (get map :sources) (js-array (get source :filename)))
+            (js-call assert :deepStrictEqual (get map :sourcesContent) (js-array (get source :source)))
+            (js-call assert :strictEqual (js-call (JSON/stringify map) :includes (get artifact :directory)) false))
+          (setq index (1+ index)))
+        ;; Missing or altered bytes are rejected separately from metadata. No
+        ;; text decoding, number normalization or surrogate replacement occurs.
+        (let ((candidates (js-array (get (aref (get artifact :modules) 0) :path)
+                             (get (aref (get artifact :modules) 0) :sourceMapPath)
+                             (get (aref (get artifact :modules) 0) :macroOriginsPath)
+                             (get (aref (get artifact :frontendIR) 0) :canonicalPath)
+                             (get (aref (get artifact :literalIR) 0) :canonicalPath))) (position 0))
+          (while (< position (js-length candidates))
+            (let* ((path (resolve (get artifact :directory) (aref candidates position)))
+                   (original (await (readFile path))))
+              (try
+                (await (writeFile path (js-call Buffer :concat (js-array original (js-call Buffer :from "-0\u0000\ud800\udfff你好" "utf16le")))))
+                (await (js-call assert :rejects (compareJsFixedPoint (js-object :stage2 second :stage3 third :sourceIdentity identity))))
+                (await (rm path))
+                (await (js-call assert :rejects (compareJsFixedPoint (js-object :stage2 second :stage3 third :sourceIdentity identity))))
+                (finally (await (writeFile path original)))))
+            (setq position (1+ position))))
+        (let ((extra (resolve (get artifact :directory) "unexpected-product.mjs")))
+          (try (await (writeFile extra "unexpected product bytes"))
+            (await (js-call assert :rejects (compareJsFixedPoint (js-object :stage2 second :stage3 third :sourceIdentity identity))))
+            (finally (await (rm extra (js-object :force t))))))
+        (let ((changed (funcall globalThis.structuredClone identity)))
+          (put changed :sha256 (js-call "0" :repeat 64))
+          (await (js-call assert :rejects (compareJsFixedPoint (js-object :stage2 second :stage3 third :sourceIdentity changed)))))
+        (js-call assert :deepStrictEqual
+          (await (compareJsFixedPoint (js-object :stage2 second :stage3 third :sourceIdentity identity))) comparison))))
+
+  (test "T01 T04 untrusted stage0 source product seed and module declarations fail without manufacturing a completed successor"
+    (async ()
+      (let* ((receipt (await (readCompilerMetadata stage0-path)))
+             (metadata-path (resolve (dirname stage0-path) (get receipt :metadataPath)))
+             (metadata (await (readCompilerMetadata metadata-path)))
+             (mutations (js-array
+               (lambda (value) (put value :host "wasm"))
+               (lambda (value) (put value :producer "stage2"))
+               (lambda (value) (put value :status "failed"))
+               (lambda (value) (put (get value :formalSourceIdentity) :sha256 (js-call "0" :repeat 64)))
+               (lambda (value) (put (aref (get value :seedSourceIdentity) 0) :sha256 (js-call "0" :repeat 64)))
+               (lambda (value) (put (js-call (get value :seedSourceIdentity) :find
+                 (lambda (record) (= (get record :path) "tools/runtime/unicode-case-runtime.el")))
+                   :sha256 (js-call "0" :repeat 64)))
+               (lambda (value) (put value :seedSourceIdentity
+                 (js-call (get value :seedSourceIdentity) :filter
+                   (lambda (record) (/= (get record :path) "tools/runtime/unicode-case-runtime.el")))))))
+             (index 0))
+        (try
+          (while (< index (js-length mutations))
+            (let ((changed (funcall globalThis.structuredClone receipt)))
+              (funcall (aref mutations index) changed)
+              (await (writeCompilerMetadata stage0-path changed))
+              (await (js-call assert :rejects (bootstrapJsStages (js-object :stage0ManifestPath stage0-path
+                :sourceRoot source-root :outputRoot (resolve directory (+ "invalid-stage0-" index)))))))
+            (setq index (1+ index)))
+          (finally (await (writeCompilerMetadata stage0-path receipt))))
+        (let ((changed (funcall globalThis.structuredClone metadata)))
+          (js-call (get changed :modules) :pop)
+          (try
+            (await (writeCompilerMetadata metadata-path changed))
+            (await (js-call assert :rejects (bootstrapJsStages (js-object :stage0ManifestPath stage0-path
+              :sourceRoot source-root :outputRoot (resolve directory "missing-module")))))
+            (finally (await (writeCompilerMetadata metadata-path metadata)))))
+        (let* ((file (resolve source-root "compiler/eliscript.el")) (original (await (readFile file))))
+          (try
+            (await (writeFile file (js-call Buffer :concat (js-array original (js-call Buffer :from "\n;; changed seed\n")))))
+            (await (js-call assert :rejects (bootstrapJsStages (js-object :stage0ManifestPath stage0-path
+              :sourceRoot source-root :outputRoot (resolve directory "changed-seed")))))
+            (finally (await (writeFile file original))))))))
+
+  (defasync failure-stage0 (name expression)
+    (let* ((checkout (resolve directory (+ "fault-source-" name)))
+           (output (resolve directory (+ "fault-stage0-" name))))
+      (await (cp source-root checkout (js-object :recursive t :verbatimSymlinks t)))
+      (let* ((path (resolve checkout "bootstrap/host/compiler-session.eli"))
+             (original (js-call (await (readFile path)) :toString "utf8"))
+             (request-head "(defun compiler-session-request (state request-json)")
+             (close-head "(defun compiler-session-close (state)")
+             (export-head "(export compiler-session-new")
+             (changed (js-call original :replace request-head
+               (+ request-head "\n    (when (= (get (JSON/parse request-json) :operation) \"runtime\") (throw " expression "))"))))
+        (js-call assert :notStrictEqual changed original)
+        (setq changed (js-call changed :replace close-head
+          (+ close-head "\n    (setq bootstrap-test-close-count (1+ bootstrap-test-close-count))\n    (throw bootstrap-test-secondary)")))
+        (setq changed (js-call changed :replace export-head
+          (+ "(defconst bootstrap-test-primary (js-object :marker \"primary\"))\n"
+             "  (defconst bootstrap-test-secondary (js-object :marker \"close\"))\n"
+             "  (defvar bootstrap-test-close-count 0)\n"
+             "  (export bootstrap-test-primary bootstrap-test-secondary bootstrap-test-close-count compiler-session-new")))
+        (await (writeFile path changed)))
+      (let* ((receipt-path (emacs-stage0 checkout output))
+             (receipt (await (readCompilerMetadata receipt-path)))
+             (artifact (await (read-artifact (resolve output (get receipt :metadataPath)))))
+             (namespace (funcall (createRequire (resolve output "require-anchor.mjs")) (resolve output (get artifact :path)))))
+        (js-object :sourceRoot checkout :stage0ManifestPath receipt-path :namespace namespace))))
+
+  (test "T04 real stage0 exceptions retain object false and undefined while secondary close failures cannot replace the primary"
+    (async ()
+      (let ((cases (js-array (js-array "object" "bootstrap-test-primary")
+                             (js-array "false" "false") (js-array "undefined" "undefined"))) (index 0))
+        (while (< index (js-length cases))
+          (let* ((item (aref cases index)) (name (aref item 0))
+                 (fixture (await (failure-stage0 name (aref item 1))))
+                 (namespace (get fixture :namespace))
+                 (output (resolve directory (+ "failed-chain-" name)))
+                 (actual (await (caught (lambda () (bootstrapJsStages
+                   (js-object :stage0ManifestPath (get fixture :stage0ManifestPath)
+                     :sourceRoot (get fixture :sourceRoot) :outputRoot output))))))
+                 (expected (cond ((= name "object") (get namespace :bootstrap_test_primary))
+                                 ((= name "false") false) (t undefined)))
+                 (record (await (readCompilerMetadata (resolve output "bootstrap.json")))))
+            (js-call assert :strictEqual actual expected)
+            (js-call assert :strictEqual (get namespace :bootstrap_test_close_count) 1)
+            (js-call assert :strictEqual (get record :status) "failed")
+            (js-call assert :strictEqual (get (aref (get record :stages) 0) :status) "built")
+            (js-call assert :strictEqual (get (aref (get record :stages) 1) :status) "failed")
+            (js-call assert :strictEqual (get (get record :fixedPoint) :status) "pending")
+            (js-call assert :strictEqual (get (get record :finalAcceptance) :status) "pending")
+            (js-call assert :strictEqual (js-call (get record :stages) :some
+              (lambda (stage) (and (> (get stage :stage) 1) (= (get stage :status) "built")))) false))
+          (setq index (1+ index))))))
+
+  (test "T04 cancellation malformed manifests and write failures preserve original failures without a successor or a false fixed point"
+    (async ()
+      (let* ((controller (new globalThis.AbortController)) (reason (js-object :marker "cancelled")))
+        (js-call controller :abort reason)
+        (js-call assert :strictEqual (await (caught (lambda () (bootstrapJsStages
+          (js-object :stage0ManifestPath stage0-path :sourceRoot source-root
+            :outputRoot (resolve directory "cancelled") :signal (get controller :signal)))))) reason))
+      (let ((bad (resolve directory "invalid-stage0.json")))
+        (await (writeFile bad "{invalid manifest"))
+        (await (js-call assert :rejects (bootstrapJsStages (js-object :stage0ManifestPath bad
+          :sourceRoot source-root :outputRoot (resolve directory "invalid-json")))
+          (lambda (error) (= (get error :name) "SyntaxError")))))
+      (let ((blocked (resolve directory "output-is-a-file")))
+        (await (writeFile blocked "keep original bytes"))
+        (await (js-call assert :rejects (bootstrapJsStages (js-object :stage0ManifestPath stage0-path
+          :sourceRoot source-root :outputRoot blocked))
+          (lambda (error) (js-call (js-array "EEXIST" "ENOTDIR") :includes (get error :code)))))
+        (js-call assert :strictEqual (js-call (await (readFile blocked)) :toString "utf8") "keep original bytes"))))
+
+  (test "T09 the release candidate is exactly authenticated stage3 and compiler control receipts never substitute for product identity"
+    (async ()
+      (let* ((result (await (chain))) (record (await (manifest)))
+             (stage3 (aref (get record :stages) 3))
+             (artifact (await (readCompilerMetadata (get result :stage3MetadataPath))))
+             (receipt (await (readCompilerMetadata
+               (resolve (dirname (get result :manifestPath)) (get (get record :fixedPoint) :comparisonPath))))))
+        (js-call assert :strictEqual (get stage3 :producer) "stage2")
+        (js-call assert :strictEqual (get stage3 :host) "javascript")
+        (js-call assert :deepStrictEqual (get stage3 :productIdentity) (get artifact :productIdentity))
+        (js-call assert :deepStrictEqual (get receipt :stage3ProductIdentity) (get artifact :productIdentity))
+        (js-call assert :deepStrictEqual (get receipt :sourceIdentity) (compilerSourceIdentity sources))
+        (js-call assert :ok (> (js-length (get receipt :files)) (js-length (get sources :modules))))
+        (js-call (get receipt :files) :forEach (lambda (item)
+          (js-call assert :strictEqual (isAbsolute (get item :path)) false)
+          (js-call assert :strictEqual (js-call (js-array "bootstrap.json" "stage0.json") :includes (get item :path)) false)))
+        ;; Fixed point acceptance is not package/three-output acceptance. The
+        ;; separate release suite must authenticate and execute this stage3.
+        (js-call assert :strictEqual (get (get record :finalAcceptance) :status) "pending"))))
+)

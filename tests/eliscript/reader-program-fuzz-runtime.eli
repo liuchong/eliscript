@@ -1,0 +1,33 @@
+(module tests.reader-program-fuzz-runtime
+  (import "bun:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "../tools/fuzz/reader-program-fuzz.mjs" runReaderProgramFuzz parseArguments fuzzCases)
+  (import "../tools/fuzz/reader-program-fuzz-legacy.mjs" :as legacy)
+
+  (test "fuzz dependency transport keeps original deterministic generators and argument parsing"
+    (lambda ()
+      (js-call assert :strictEqual parseArguments (get legacy :parseArguments))
+      (js-call assert :strictEqual fuzzCases (get legacy :fuzzCases))
+      (js-call assert :deepStrictEqual (Array/from (fuzzCases 20 1162627377))
+        (Array/from (js-call legacy :fuzzCases 20 1162627377)))))
+  (test "default fuzz bootstrap loads its actual compiler Math dependency and executes every original invariant"
+    (async ()
+      ;; The original acceptance still executes all 100000 inputs. This small
+      ;; dependency regression runs the same untouched generator and verifier.
+      (let ((report (await (runReaderProgramFuzz (js-object :cases 12 :seed 1162627377)))))
+        (js-call assert :strictEqual (get report :verified) t)
+        (js-call assert :strictEqual (get report :inputs) 12)
+        (js-call assert :strictEqual (get report :readerInputs) 6)
+        (js-call assert :strictEqual (get report :programInputs) 6)
+        (js-call assert :strictEqual (get report :corpusReplayed) t)
+        (js-call assert :strictEqual (get (get report :reader) :seedAgreements) 12))) 0)
+  (test "fuzz dependency preparation preserves original invalid option diagnostics before bootstrap"
+    (async ()
+      (let ((cases (js-array (js-object :cases 0) (js-object :seed -1) (js-object :compilerDirectory ""))) (index 0))
+        (while (< index (js-length cases))
+          (let ((first undefined) (second undefined))
+            (try (await (runReaderProgramFuzz (aref cases index))) (catch error (setq first error)))
+            (try (await (js-call legacy :runReaderProgramFuzz (aref cases index))) (catch error (setq second error)))
+            (js-call assert :strictEqual (get first :message) (get second :message))
+            (js-call assert :strictEqual (get first :eliscriptFuzzInvariant) t))
+          (setq index (1+ index)))))))

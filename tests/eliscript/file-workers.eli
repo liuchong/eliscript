@@ -1,0 +1,140 @@
+(module tests.file-workers
+  (import "bun:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:path" resolve)
+  (import "../tools/testing/file-workers.mjs"
+    FILE_WORKERS isExclusiveTestFile parseTestFileArgs partitionTestFiles scheduleTestFiles)
+
+  (defasync tick ()
+    (await (new globalThis.Promise (lambda (resolve reject) (funcall globalThis.setImmediate resolve)))))
+
+  (test "only the two confirmed exact Bun files use standard mode and every original input is dispatched"
+    (async ()
+      (let* ((files (js-array
+                "tests/compiler-seed-runtime-identity.test.mjs"
+                (resolve "independent" "compiler-corpus-matchers-selfhosted.test.mjs")
+                "compiler-seed-runtime-identity-copy.test.mjs"
+                "compiler-corpus-matchers-selfhosted-copy.test.mjs"
+                "Compiler-seed-runtime-identity.test.mjs"
+                "synthetic-ci.test.mjs"))
+             (requests (js-array))
+             (supervisor (js-object :failure nil
+               :run (async (request) (js-call requests :push request) (js-object :exitCode 0))
+               :cancel (lambda (signal) (js-call assert :fail "unexpected cancellation"))))
+             (result (await (scheduleTestFiles files supervisor))))
+        (js-call assert :strictEqual FILE_WORKERS 2)
+        (js-call assert :strictEqual (get result :exitCode) 0)
+        (js-call assert :deepStrictEqual (js-call requests :map (lambda (request) (get request :file))) files)
+        (js-call assert :deepStrictEqual (js-call (get result :results) :map (lambda (row) (get row :file))) files)
+        (js-call requests :forEach (lambda (request index)
+          (js-call assert :deepStrictEqual (get request :args)
+            (if (< index 2) (js-array "test" (aref files index))
+              (js-array "--smol" "test" (aref files index))))
+          (js-call assert :strictEqual (get request :command) (get globalThis.process :execPath))
+          (js-call assert :strictEqual (get request :env) (get globalThis.process :env))
+          (js-call assert :strictEqual (get request :cwd) (js-call globalThis.process :cwd))
+          (js-call assert :strictEqual (get request :id) (funcall globalThis.String index)))))))
+
+  (test "two ordinary workers settle before exact standard-mode files and later results retain original order"
+    (async ()
+      (let* ((files (js-array "a.test.mjs" "b.test.mjs"
+                 "tests/compiler-seed-runtime-identity.test.mjs"
+                 "tests/compiler-corpus-matchers-selfhosted.test.mjs" "c.test.mjs" "d.test.mjs"))
+             (active (new globalThis.Map)) (started (js-array))
+             (complete (lambda (file code)
+               (let ((resolve (js-call active :get file)))
+                 (js-call assert :strictEqual (value-type resolve) "function")
+                 (js-call active :delete file) (funcall resolve (js-object :exitCode code)))))
+             (supervisor (js-object :failure nil
+               :run (lambda (request)
+                 (js-call started :push (get request :file))
+                 (new globalThis.Promise (lambda (resolve reject)
+                   (js-call active :set (get request :file) resolve))))
+               :cancel (lambda (signal)
+                 (js-call (Array/from (js-call active :keys)) :forEach (lambda (file)
+                   (funcall complete file (if (= signal "SIGINT") 130 143)))))))
+             (running (scheduleTestFiles files supervisor)))
+        (try
+          (progn
+            (js-call assert :deepStrictEqual (Array/from (js-call active :keys)) (js-call files :slice 0 2))
+            (funcall complete (aref files 1) 9) (await (tick))
+            (js-call assert :deepStrictEqual (Array/from (js-call active :keys)) (js-array (aref files 0)))
+            (funcall complete (aref files 0) 0) (await (tick))
+            (js-call assert :deepStrictEqual (Array/from (js-call active :keys)) (js-array (aref files 2)))
+            (funcall complete (aref files 2) 0) (await (tick))
+            (js-call assert :deepStrictEqual (Array/from (js-call active :keys)) (js-array (aref files 3)))
+            (funcall complete (aref files 3) 0) (await (tick))
+            (js-call assert :deepStrictEqual (Array/from (js-call active :keys)) (js-call files :slice 4))
+            (funcall complete (aref files 5) 0) (funcall complete (aref files 4) 0)
+            (let ((result (await running)))
+              (js-call assert :strictEqual (get result :exitCode) 1)
+              (js-call assert :deepStrictEqual started files)
+              (js-call assert :deepStrictEqual (get result :results)
+                (js-call files :map (lambda (file index) (js-object :file file :exitCode (if (= index 1) 9 0)))))))
+          (finally (js-call globalThis.process :emit "SIGTERM") (await running))))))
+
+  (test "cancellation keeps its original code stops queued work and restores both signal listeners"
+    (async ()
+      (let ((rows (js-array (js-array "SIGINT" 130) (js-array "SIGTERM" 143))) (index 0))
+        (while (< index (js-length rows))
+          (let* ((row (aref rows index)) (pending (js-array)) (started (js-array))
+                 (before (js-array (js-call globalThis.process :listenerCount "SIGINT")
+                                  (js-call globalThis.process :listenerCount "SIGTERM")))
+                 (files (js-array "tests/compiler-corpus-matchers-selfhosted.test.mjs" "never.test.mjs"))
+                 (supervisor (js-object :failure nil
+                   :run (lambda (request)
+                     (js-call started :push (get request :file))
+                     (new globalThis.Promise (lambda (resolve reject) (js-call pending :push resolve))))
+                   :cancel (lambda (signal)
+                     (js-call assert :strictEqual signal (aref row 0))
+                     (js-call pending :forEach (lambda (resolve)
+                       (funcall resolve (js-object :exitCode (aref row 1))))))))
+                 (running (scheduleTestFiles files supervisor)))
+            (js-call assert :deepStrictEqual started (js-array (aref files 0)))
+            (js-call globalThis.process :emit (aref row 0))
+            (let ((result (await running)))
+              (js-call assert :strictEqual (get result :exitCode) (aref row 1))
+              (js-call assert :deepStrictEqual (get result :results)
+                (js-array (js-object :file (aref files 0) :exitCode (aref row 1)))))
+            (js-call assert :deepStrictEqual
+              (js-array (js-call globalThis.process :listenerCount "SIGINT")
+                        (js-call globalThis.process :listenerCount "SIGTERM")) before))
+          (setq index (1+ index))))))
+
+  (test "primitive run rejections and real resource metadata remain failures without filtering later files"
+    (async ()
+      (let* ((files (js-array "a.test.mjs" "b.test.mjs" "c.test.mjs" "d.test.mjs"))
+             (calls (js-array)) (resource (js-object :peak 23))
+             (result (await (scheduleTestFiles files (js-object :failure nil
+               :cancel (lambda (signal) nil)
+               :run (async (request)
+                 (let ((file (get request :file)))
+                   (js-call calls :push file)
+                   (cond ((= file "a.test.mjs") (throw false))
+                         ((= file "b.test.mjs") (throw undefined))
+                         ((= file "c.test.mjs") (js-object :exitCode 1 :failure "guard" :resource resource :message "original"))
+                         (t (js-object :exitCode 0 :failure "cancelled"))))))))))
+        (js-call assert :strictEqual (get result :exitCode) 1)
+        (js-call assert :deepStrictEqual calls files)
+        (js-call assert :deepStrictEqual (get result :results) (js-array
+          (js-object :file "a.test.mjs" :exitCode 1)
+          (js-object :file "b.test.mjs" :exitCode 1)
+          (js-object :file "c.test.mjs" :exitCode 1 :failure "guard" :resource resource :message "original")
+          (js-object :file "d.test.mjs" :exitCode 0))))))
+
+  (test "all original shard and validation contracts remain strict and importing the runner starts no CLI"
+    (async ()
+      (let ((files (js-array "a.test.mjs" "b.test.mjs" "c.test.mjs")))
+        (js-call assert :deepStrictEqual (parseTestFileArgs files) (js-object :files files :shard nil))
+        (js-call assert :deepStrictEqual
+          (parseTestFileArgs (js-call (js-array "--shard-index" "2" "--shard-count" "2") :concat files))
+          (js-object :files files :shard (js-object :index 2 :count 2)))
+        (js-call assert :deepStrictEqual (partitionTestFiles files 2 2) (js-array "b.test.mjs"))
+        (js-call assert :strictEqual (isExclusiveTestFile "tests/compiler-corpus-matchers-selfhosted.test.mjs") t)
+        (js-call assert :strictEqual (isExclusiveTestFile "ordinary.test.mjs") false)
+        (js-call (js-array nil (js-array) (js-array "a.mjs") (js-array "a.test.mjs" "a.test.mjs")) :forEach
+          (lambda (bad) (js-call assert :throws (lambda () (parseTestFileArgs bad)))))
+        (js-call assert :throws (lambda () (partitionTestFiles files 0 2)))
+        (js-call assert :throws (lambda () (parseTestFileArgs
+          (js-array "--shard-index" "1" "a.test.mjs")))))))
+)

@@ -1,0 +1,220 @@
+(module tests.release-package-install
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile writeFile mkdir mkdtemp realpath open)
+  (import "node:path" resolve dirname relative isAbsolute sep)
+  (import "node:child_process" spawnSync)
+  (import "node:crypto" createHash)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/backends/compiler-build.mjs" loadCompilerSources writeCompilerMetadata)
+  (import "../tools/backends/compiler-bootstrap.mjs" compilerSourceIdentity compilerDigest compilerFailure)
+  (import "../tools/backends/compiler-metadata.mjs" readCompilerMetadata)
+  (import "../tools/backends/stage3-targets.mjs" authenticateStage3Targets)
+
+  (defconst source (js-call (js-array
+    "(module installed.user-program"
+    " (defvar counter 0)"
+    " (defun observation ()"
+    "  (setq counter (+ counter 1))"
+    "  (js-array -0.0 (/ 0 0) (/ 1 0) 5e-324 \"中😀\\ud800\" undefined false counter (Math/f16round 1.00048828125) (Math/sumPrecise (js-array 1e20 1 -1e20))))"
+    " (defun fail () (throw false))"
+    " (export observation fail))") :join "\n"))
+  ;; The host is also maintained Eli. Its JavaScript is produced by the actual
+  ;; installed CLI; no checkout runtime or foreign-language helper is emitted.
+  (defconst runner-source (js-call (js-array
+    "(module installed.program-host"
+    " (import \"node:assert/strict\" :default assert)"
+    " (import \"node:fs/promises\" readFile)"
+    " (import \"./program.mjs\" observation fail)"
+    " (import \"eliscript/tools/backends/managed-runtime.mjs\" instantiateManagedRuntime)"
+    " (import \"eliscript/tools/backends/native-managed-runtime.mjs\" instantiateNativeManagedRuntime)"
+    " (import \"eliscript/tools/backends/compiler-metadata.mjs\" readCompilerMetadata)"
+    " (import \"eliscript/tools/backends/stage3-targets.mjs\" authenticateStage3Targets)"
+    " (defconst results (js-array))"
+    " (defvar certificate undefined)"
+    " (defun read-value (runtime value)"
+    "  (cond ((or (nullish? value) (= (value-type value) \"boolean\")) value)"
+    "   ((= (get value :kind) 4) (js-call runtime :readNumber value))"
+    "   ((= (get value :kind) 5) (js-call runtime :readString value))"
+    "   ((= (get value :kind) 14)"
+    "    (let ((out (js-array)) (index 0))"
+    "     (while (< index (js-call runtime :length value))"
+    "      (let ((child (js-call runtime :get value index)))"
+    "       (try (js-call out :push (read-value runtime child)) (finally (js-call runtime :release child))))"
+    "      (setq index (1+ index))) out))"
+    "   (t (js-call assert :fail \"unexpected installed program value\"))))"
+    " (defun read-call (runtime)"
+    "  (let ((value (js-call runtime :invoke \"observation\")))"
+    "   (try (read-value runtime value) (finally (js-call runtime :release value)))))"
+    " (defun expect-false (action)"
+    "  (let ((thrown false)) (try (funcall action) (catch error (setq thrown t) (js-call assert :strictEqual error false)))"
+    "   (js-call assert :strictEqual thrown t)))"
+    " (defun check (target call throw-call)"
+    "  (js-call assert :deepStrictEqual (funcall call) (js-array -0 globalThis.NaN globalThis.Infinity 5e-324 \"中😀\\ud800\" undefined false 1 1 1))"
+    "  (expect-false throw-call)"
+    "  (js-call assert :deepStrictEqual (funcall call) (js-array -0 globalThis.NaN globalThis.Infinity 5e-324 \"中😀\\ud800\" undefined false 2 1 1))"
+    "  (js-call results :push target))"
+    " (defasync main ()"
+    "  (setq certificate (await (authenticateStage3Targets (js-object :bootstrapManifestPath (aref (get globalThis.process :argv) 4)))))"
+    "  (check \"javascript\" observation fail)"
+    "  (let ((index 0) (targets (js-array \"wasm\" \"native\")))"
+    "   (while (< index 2)"
+    "    (let* ((target (aref targets index)) (path (aref (get globalThis.process :argv) (+ index 2)))"
+    "           (metadata (await (readCompilerMetadata (str path \".json\"))))"
+    "           (runtime (if (= target \"wasm\") (instantiateManagedRuntime (new globalThis.Uint8Array (await (readFile path))))"
+    "            (await (instantiateNativeManagedRuntime path metadata (js-object :nativeTarget (get metadata :nativeTarget)))))))"
+    "     (try (js-call runtime :auto 1)"
+    "      (check target (lambda () (read-call runtime)) (lambda () (js-call runtime :invoke \"fail\")))"
+    "      (finally (js-call runtime :closeModule) (js-call runtime :collect)"
+    "       (js-call assert :strictEqual (js-call runtime :live) 0)"
+    "       (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)"
+    "       (when (get runtime :close) (js-call runtime :close)))))"
+    "    (setq index (1+ index))))"
+    "  (js-call (get globalThis.process :stdout) :write (str (JSON/stringify (js-object :targets results :rootsReleased t :node (get globalThis.process :version) :sourceIdentity (get certificate :sourceIdentity) :producerIdentity (get certificate :productIdentity))) \"\\n\")))"
+    " (await (main)))") :join "\n"))
+
+  (defun clean-environment ()
+    (let ((env (Object/assign (js-object) (get globalThis.process :env))))
+      (js-call (Object/keys env) :forEach (lambda (key)
+        (when (or (js-call key :startsWith "ELISCRIPT_") (= key "NODE_OPTIONS") (= key "NODE_PATH"))
+          (Reflect/deleteProperty env key))))
+      (put env :PATH (str (dirname (get globalThis.process :execPath)) ":" (get env :PATH ""))) env))
+
+  (defun child (name executable arguments directory env receipt)
+    (let* ((actual (spawnSync executable arguments (js-object :cwd directory :env env :encoding "utf8" :maxBuffer 8388608)))
+           (record (js-object :phase name :executable executable :status (get actual :status)
+                     :signal (get actual :signal) :stdout (get actual :stdout) :stderr (get actual :stderr))))
+      (js-call (get receipt :commands) :push record)
+      (js-call assert :strictEqual (get actual :error) undefined name)
+      (js-call assert :strictEqual (get actual :signal) nil name)
+      (js-call assert :strictEqual (get actual :status) 0 (str name "\n" (get actual :stderr)))
+      actual))
+
+  (defun declared-package-path (files path)
+    (js-call files :some (lambda (file)
+      (let ((prefix (js-call file :replace (new globalThis.RegExp "/+$") "")))
+        (or (= prefix path) (js-call path :startsWith (str prefix "/")))))))
+
+  (defasync file-sha (path)
+    (let ((file (await (open path "r"))) (buffer (new globalThis.Uint8Array 65536))
+          (hash (createHash "sha256")) (failed false) (reading t))
+      (try
+        (progn
+          (while reading
+            (let ((count (get (await (js-call file :read buffer 0 (js-length buffer) nil)) :bytesRead)))
+              (if (= count 0) (setq reading false)
+                (js-call hash :update (js-call buffer :subarray 0 count)))))
+          (js-call hash :digest "hex"))
+        (catch error (setq failed t) (throw error))
+        (finally (try (await (js-call file :close)) (catch error (unless failed (throw error))))))))
+
+  (defasync prepared-input ()
+    (let* ((environment (get globalThis.process :env))
+           (manifest-path (resolve (get environment :ELISCRIPT_RELEASE_PACKAGE_BOOTSTRAP_MANIFEST
+                                  (resolve root "dist/bootstrap-release/bootstrap.json"))))
+           (manifest-relative (relative root manifest-path))
+           (manifest (JSON/parse (await (readFile (resolve root "package.json") "utf8")))))
+      (if (or (isAbsolute manifest-relative) (= manifest-relative "..")
+              (js-call manifest-relative :startsWith (str ".." sep))
+              (not (declared-package-path (get manifest :files) manifest-relative)))
+        (js-object :pending "selected bootstrap has not been prepared in the published package layout")
+        (try
+          (let* ((certified (await (authenticateStage3Targets (js-object :bootstrapManifestPath manifest-path))))
+                 (metadata (await (readCompilerMetadata (get certified :stage3MetadataPath))))
+                 (current (compilerSourceIdentity (await (loadCompilerSources)))))
+            (js-call assert :deepStrictEqual (get certified :sourceIdentity) current "package must use the current formal source graph")
+            (let ((index 0) (modules (get metadata :modules)))
+              (while (< index (js-length modules))
+                (let* ((record (aref modules index))
+                       (source-path (resolve (dirname (get certified :stage3MetadataPath)) (get record :path)))
+                       (actual (await (readFile source-path)))
+                       (prepared (await (readFile (resolve root "dist" (get record :id))))))
+                  (js-call assert :deepStrictEqual prepared actual
+                    (str "prepared public compiler module " (get record :id)))
+                  (when (= (get record :id) "runtime/math.mjs")
+                    (js-call assert :deepStrictEqual
+                      (await (readFile (resolve root "runtime/math.mjs"))) actual
+                      "prepared runtime must be the actual final stage3 product")))
+                (setq index (1+ index))))
+            (js-object :certified certified :manifest manifest :manifestRelative manifest-relative))
+          (catch error
+            (if (and error (= (get error :code) "ENOENT"))
+              (js-object :pending "current authenticated stage3 package assets are not prepared" :failure (compilerFailure error))
+              (throw error)))))))
+
+  (test "T07 T09 clean installation uses the packaged final stage3 CLI and installed runtimes for one shared three-output program"
+    (async (context)
+      (let* ((base (resolve root "dist/release-package-install"))
+             (_directory (await (mkdir base (js-object :recursive t))))
+             (directory (await (mkdtemp (resolve base "attempt-"))))
+             (receipt-path (resolve directory "receipt.json"))
+             (receipt (js-object :format "eliscript-release-package-install" :version 1 :status "pending"
+               :node (get globalThis.process :version) :nodeExecutable (get globalThis.process :execPath)
+               :sourceSha256 (compilerDigest source) :commands (js-array))))
+        (try
+          (let ((prepared (await (prepared-input))))
+            (if (get prepared :pending)
+              (progn
+                (put receipt :reason (get prepared :pending))
+                (await (writeCompilerMetadata receipt-path receipt))
+                (js-call context :diagnostic (str "pending package install receipt: " receipt-path))
+                (js-call context :skip (get prepared :pending)))
+              (let* ((native-target (cond ((and (= (get globalThis.process :arch) "arm64") (= (get globalThis.process :platform) "darwin")) "arm64-macos")
+                                          ((and (= (get globalThis.process :arch) "arm64") (= (get globalThis.process :platform) "linux")) "arm64-linux")))
+                     (env (clean-environment)) (consumer (resolve directory "consumer"))
+                     (node (get globalThis.process :execPath)))
+                (unless native-target (throw (new globalThis.Error "actual package native acceptance requires a declared ARM64 platform")))
+                (put receipt :status "running")
+                (put receipt :packageVersion (get (get prepared :manifest) :version))
+                (put receipt :sourceIdentity (get (get prepared :certified) :sourceIdentity))
+                (put receipt :producerIdentity (get (get prepared :certified) :productIdentity))
+                (await (mkdir consumer (js-object :recursive t)))
+                (await (writeFile (resolve consumer "package.json")
+                  (JSON/stringify (js-object :private t :type "module"))))
+                (let* ((packed (child "pack" "npm" (js-array "pack" "--ignore-scripts" "--json" "--pack-destination" directory) root env receipt))
+                       (pack-result (aref (JSON/parse (get packed :stdout)) 0))
+                       (tarball (resolve directory (get pack-result :filename))))
+                  (put receipt :tarball (get pack-result :filename))
+                  (put receipt :npmIntegrity (get pack-result :integrity))
+                  (put receipt :tarballSha256 (await (file-sha tarball)))
+                  (child "install" "npm" (js-array "install" "--ignore-scripts" "--no-audit" "--no-fund" "--package-lock=false" tarball) consumer env receipt))
+                (let* ((installed (resolve consumer "node_modules/eliscript"))
+                       (installed-manifest (resolve installed (get prepared :manifestRelative)))
+                       (identity (await (authenticateStage3Targets (js-object :bootstrapManifestPath installed-manifest))))
+                       (cli (resolve consumer "node_modules/.bin/eliscript-compiler"))
+                       (input (resolve consumer "program.eli")) (runner (resolve consumer "runner.eli"))
+                       (javascript (resolve consumer "program.mjs")) (wasm (resolve consumer "program.wasm"))
+                       (native (resolve consumer (if (= native-target "arm64-macos") "program.dylib" "program.so"))))
+                  (js-call assert :deepStrictEqual (get identity :sourceIdentity) (get receipt :sourceIdentity))
+                  (js-call assert :deepStrictEqual (get identity :productIdentity) (get receipt :producerIdentity))
+                  (js-call assert :ok (js-call (await (realpath (get identity :stage3MetadataPath))) :startsWith (str (await (realpath installed)) sep)))
+                  (js-call assert :strictEqual (get (JSON/parse (await (readFile (resolve installed "package.json") "utf8"))) :version) (get receipt :packageVersion))
+                  (await (writeFile input source)) (await (writeFile runner runner-source))
+                  ;; The installed CLI's default layout must resolve stage3 by
+                  ;; itself. It receives no checkout compiler-artifact override.
+                  (let ((outputs (js-array javascript wasm native)) (targets (js-array "javascript" "wasm" "native")) (index 0))
+                    (while (< index 3)
+                      (let ((args (js-array cli "compile" "--input" input "--target" (aref targets index)
+                                    "--source-map" "--debug" "--output" (aref outputs index))))
+                        (when (= index 2) (js-call args :push "--native-target" native-target "--native-format" "library"))
+                        (child (str "compile-" (aref targets index)) node args consumer env receipt))
+                      (setq index (1+ index))))
+                  (child "compile-eli-host" node (js-array cli "compile" "--input" runner "--target" "javascript"
+                    "--source-map" "--output" (resolve consumer "runner.mjs")) consumer env receipt)
+                  (let ((mapping (JSON/parse (await (readFile (str javascript ".map") "utf8")))))
+                    (js-call assert :strictEqual (get mapping :version) 3)
+                    (js-call assert :ok (js-call (get mapping :sourcesContent) :includes source)))
+                  (let ((execution (child "execute-installed-three-targets" node
+                    (js-array (resolve consumer "runner.mjs") wasm native installed-manifest) consumer env receipt)))
+                    (put receipt :observation (JSON/parse (js-call (get execution :stdout) :trim)))
+                    (js-call assert :deepStrictEqual (get (get receipt :observation) :targets) (js-array "javascript" "wasm" "native"))
+                    (js-call assert :strictEqual (get (get receipt :observation) :rootsReleased) t)
+                    (js-call assert :deepStrictEqual (get (get receipt :observation) :sourceIdentity) (get receipt :sourceIdentity))
+                    (js-call assert :deepStrictEqual (get (get receipt :observation) :producerIdentity) (get receipt :producerIdentity)))
+                  (put receipt :status "passed")
+                  (await (writeCompilerMetadata receipt-path receipt))
+                  (js-call context :diagnostic (str "actual package install receipt: " receipt-path))))))
+          (catch error
+            (put receipt :status "failed") (put receipt :failure (compilerFailure error))
+            (await (writeCompilerMetadata receipt-path receipt)) (throw error))))))
+)

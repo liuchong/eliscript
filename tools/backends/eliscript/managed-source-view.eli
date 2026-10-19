@@ -1,0 +1,338 @@
+(module tools.backends.managed-source-view
+  (import "./managed-source-view-legacy.mjs" :as legacy)
+  (import "./managed-host-proxy.mjs" isManagedHostProxy)
+  ;; The literal materializer and Proxy implementation remain the original
+  ;; bytes. Only completed source-operation boundaries gain a private hook.
+  (defun createManagedLiteralHostProvider (&rest arguments)
+    (let* ((provider (Reflect/apply (get legacy :createManagedLiteralHostProvider) undefined arguments))
+           (direct (when (> (js-length arguments) 0) (aref arguments 0))))
+      ;; A supplied complete custom provider keeps its exact original contract.
+      ;; Only the standard boundary materializer gains native Proxy exclusion.
+      (if (eq provider direct) provider
+        (let* ((descriptors (Object/getOwnPropertyDescriptors provider))
+               (entry (get descriptors :kind)) (original (get entry :value))
+               (kind (lambda (value)
+                 (if (and (isManagedHostProxy value) (not (isManagedSourceView value))) nil
+                   (Reflect/apply original provider (js-array value))))))
+          ;; Unknown host Proxies remain foreign capabilities. They are not
+          ;; canonical persistent instances; instanceof classification would
+          ;; itself invoke their source-visible [[GetPrototypeOf]] traps.
+          (Object/defineProperties kind (js-object
+            :name (Object/getOwnPropertyDescriptor original "name")
+            :length (Object/getOwnPropertyDescriptor original "length")))
+          (put entry :value kind)
+          (Object/freeze (Object/create (Object/getPrototypeOf provider) descriptors))))))
+  (defconst source-boundaries (new globalThis.WeakMap))
+  (defconst decode-realms (new globalThis.WeakMap))
+  (defvar current-boundary undefined)
+  (defvar current-binding-poll undefined)
+  (defvar current-refresh undefined)
+  (defvar current-source-decode false)
+  (defvar current-source-realm undefined)
+
+  ;; Authentication uses the actual source-view registry, never a visible
+  ;; property, brand probe, or a trap on an unrelated host value.
+  (defun isManagedSourceView (value) (js-call source-boundaries :has value))
+
+  ;; Only factory-created opaque owners and their original runtime/facade
+  ;; aliases enter this registry. No property on an input view is inspected.
+  (defun registerManagedSourceDecodeRuntime (runtime owner &rest classifiers)
+    (let ((realm (if (> (js-length classifiers) 0)
+                   (js-object :classify (aref classifiers 0))
+                   (js-call decode-realms :get owner))))
+      (unless (undefined? realm) (js-call decode-realms :set runtime realm))) runtime)
+
+  (defun isManagedSourceViewForRuntime (value runtime)
+    (let ((record (js-call source-boundaries :get value)) (realm (js-call decode-realms :get runtime)))
+      (and (not (undefined? record)) (not (undefined? realm)) (eq (get record :realm) realm))))
+
+  (defun snapshot-source-state (state)
+    (let ((base (get state :base))) (if (undefined? base) state base)))
+
+  (defun snapshot-source-intern (state value)
+    (let ((record (js-call source-boundaries :get value)))
+      (if (undefined? record) value
+        (let* ((target (get record :target))
+               (array (Array/isArray target))
+               (prototype (unless array (Reflect/getPrototypeOf target))))
+          ;; Callable, boxed and other exotic source views retain their actual
+          ;; identity. Only the ordinary record/array representation required
+          ;; by the external matcher is materialized.
+          (if (not (or array (eq prototype nil) (eq prototype (get globalThis.Object :prototype)))) value
+            (let* ((base (snapshot-source-state state))
+                   (overrides (get state :prototypeOverrides))
+                   (local (if (undefined? overrides) undefined (js-call overrides :get value)))
+                   (known (if (undefined? local) (js-call (get base :copies) :get value) local)))
+              (if (not (undefined? known)) known
+                (let* ((length-entry (when array (Reflect/getOwnPropertyDescriptor value "length")))
+                       (source-prototype (Reflect/getPrototypeOf value))
+                       (copy (if array (js-array) (Object/create nil))))
+                  (js-call (get base :copies) :set value copy)
+                  (js-call (get base :pending) :push
+                    (js-object :source value :copy copy :array array :length length-entry
+                      :prototype source-prototype))
+                  copy))))))))
+
+  (defun snapshot-source-descriptor (state source key descriptor)
+    (let ((copy (Object/assign (js-object) descriptor)))
+      (if (Object/hasOwn descriptor "value")
+        (put copy :value (snapshot-source-intern state (get descriptor :value)))
+        (progn
+          ;; Reflection itself must not execute an accessor. If the matcher
+          ;; subsequently reads it, preserve the source receiver and first
+          ;; thrown value; materialize only the actual returned source view.
+          (unless (undefined? (get descriptor :get))
+            (put copy :get (lambda ()
+              (let ((result (snapshot-source-intern state (Reflect/get source key source))))
+                (snapshot-source-drain state) result))))
+          (unless (undefined? (get descriptor :set))
+            (put copy :set (lambda (value)
+              (Reflect/apply (get descriptor :set) source (js-array value))))))) copy))
+
+  (defun snapshot-source-publish-prototypes (state)
+    (let ((queue (get state :prototypeQueue)) (edges (get state :prototypeEdges))
+          (published (get state :publishedPrototypes)) (index 0))
+      (while (< index (js-length queue))
+        (let ((current (aref queue index)) (path (js-array)) (seen (new globalThis.WeakSet)))
+          ;; Every recorded edge belongs to an authenticated copy. A foreign
+          ;; prototype has no edge here; never inspect its own prototype.
+          (while (and (not (undefined? current)) (not (js-call published :has current)))
+            (let ((edge (js-call edges :get current)))
+              (if (undefined? edge) (setq current undefined)
+                (progn
+                  (when (js-call seen :has current)
+                    (throw (new globalThis.TypeError "cyclic managed source snapshot prototype")))
+                  (js-call seen :add current) (js-call path :push current)
+                  (setq current (get edge :prototype))))))
+          ;; Parents are complete before a child's real prototype is exposed.
+          ;; All indexed storage and own descriptors were defined while the
+          ;; fresh array still had its ordinary construction prototype.
+          (while (> (js-length path) 0)
+            (let* ((copy (js-call path :pop)) (edge (js-call edges :get copy)))
+              (Object/setPrototypeOf copy (get edge :prototype))
+              (js-call published :add copy))))
+        (put queue index undefined) (setq index (1+ index)))
+      (put queue :length 0)))
+
+  (defun snapshot-source-drain (state)
+    (setq state (snapshot-source-state state))
+    (let ((pending (get state :pending)))
+      (while (< (get state :position) (js-length pending))
+        (let* ((index (get state :position)) (entry (aref pending index))
+               (source (get entry :source)) (copy (get entry :copy))
+               (keys (Reflect/ownKeys source)) (key-index 0))
+          (put state :position (1+ index))
+          ;; Discover the exact prototype graph now, but publish it only after
+          ;; every queued copy has its complete own indexed storage. Installing
+          ;; a custom prototype before filling the holes unnecessarily changes
+          ;; the engine's indexed-property construction path.
+          (js-call (get state :prototypeEdges) :set copy
+            (js-object :prototype
+              (if (and (get state :matcher) (get entry :array))
+                (snapshot-source-matcher-prototype state (get entry :source) (get entry :prototype))
+                (snapshot-source-intern state (get entry :prototype)))))
+          (js-call (get state :prototypeQueue) :push copy)
+          (while (< key-index (js-length keys))
+            (let ((key (aref keys key-index)))
+              (unless (and (get entry :array) (= key "length"))
+                (let ((descriptor (Reflect/getOwnPropertyDescriptor source key)))
+                  (unless (undefined? descriptor)
+                    (Object/defineProperty copy key (snapshot-source-descriptor state source key descriptor))))))
+            (setq key-index (1+ key-index)))
+          ;; Install a non-writable length only after all actual indexed
+          ;; properties. Holes remain absent; no iterable protocol is called.
+          (when (get entry :array) (Object/defineProperty copy "length" (get entry :length)))
+          (put pending index undefined)))
+      ;; The operation may be retained by a lazy accessor, but completed work
+      ;; must not hold the source graph through this temporary queue.
+      (put pending :length 0) (put state :position 0)
+      (snapshot-source-publish-prototypes state)))
+
+  (defun snapshotManagedSourceView (value)
+    (let* ((state (js-object :copies (new globalThis.WeakMap) :pending (js-array) :position 0
+                    :prototypeEdges (new globalThis.WeakMap) :prototypeQueue (js-array)
+                    :publishedPrototypes (new globalThis.WeakSet)))
+           (result (snapshot-source-intern state value)))
+      (snapshot-source-drain state) result))
+
+  (defun snapshot-host-array-anchor-safe-p ()
+    (let ((array-prototype (get globalThis.Array :prototype))
+          (object-prototype (get globalThis.Object :prototype)))
+      (and (eq (Reflect/getPrototypeOf array-prototype) object-prototype)
+           (eq (Reflect/getPrototypeOf object-prototype) nil)
+           (js-call (js-array array-prototype object-prototype) :every (lambda (prototype)
+             (js-call (Reflect/ownKeys prototype) :every (lambda (key)
+               (not (get (Reflect/getOwnPropertyDescriptor prototype key) :enumerable)))))))))
+
+  (defun snapshot-source-classify (realm value)
+    (let ((record (js-call source-boundaries :get value)))
+      ;; A foreign/other-owner view is rejected before entering the classifier,
+      ;; which otherwise could encode it as a new foreign managed value.
+      (if (or (undefined? record) (undefined? realm) (not (eq (get record :realm) realm))) -1
+        (funcall (get realm :classify) value))))
+
+  (defun snapshot-source-matcher-prototype (state source prototype)
+    (let* ((record (js-call source-boundaries :get source))
+           (realm (when record (get record :realm)))
+           (ordinary (lambda () (snapshot-source-intern state prototype))))
+      (if (or (undefined? realm) (not (snapshot-host-array-anchor-safe-p))
+              (/= (snapshot-source-classify realm prototype) 1)) (funcall ordinary)
+        (let ((parent (Reflect/getPrototypeOf prototype)))
+          (if (or (/= (snapshot-source-classify realm parent) 0)
+                  (not (eq (Reflect/getPrototypeOf parent) nil))) (funcall ordinary)
+            (let ((known (js-call (get state :arrayBranches) :get prototype)))
+              (if (not (undefined? known)) known
+                (let* ((array-copy (js-array)) (object-copy (Object/create nil))
+                       (overrides (new globalThis.WeakMap))
+                       (branch (js-object :base state :prototypeOverrides overrides)))
+                  ;; The Array-only branch is independent of the ordinary
+                  ;; record's Object.prototype copy. Explicit data aliases
+                  ;; outside these two prototype nodes still use base.copies.
+                  (js-call overrides :set prototype array-copy)
+                  (js-call overrides :set parent object-copy)
+                  (js-call (get state :arrayBranches) :set prototype array-copy)
+                  (js-call (js-array (js-array parent object-copy) (js-array prototype array-copy)) :forEach
+                    (lambda (pair)
+                      (let ((owner (aref pair 0)) (copy (aref pair 1)))
+                        (js-call (Reflect/ownKeys owner) :forEach (lambda (key)
+                          (unless (and (eq owner prototype) (= key "length"))
+                            (let ((descriptor (Reflect/getOwnPropertyDescriptor owner key)))
+                              (unless (undefined? descriptor)
+                                (Object/defineProperty copy key
+                                  (snapshot-source-descriptor branch owner key descriptor))))))))))
+                  (Object/defineProperty array-copy "length" (Reflect/getOwnPropertyDescriptor prototype "length"))
+                  (Object/setPrototypeOf object-copy (get globalThis.Array :prototype))
+                  (Object/setPrototypeOf array-copy object-copy)
+                  array-copy))))))))
+
+  (defun projectManagedSourceViewForMatcher (value)
+    (let* ((state (js-object :copies (new globalThis.WeakMap) :pending (js-array) :position 0
+                    :prototypeEdges (new globalThis.WeakMap) :prototypeQueue (js-array)
+                    :publishedPrototypes (new globalThis.WeakSet)
+                    :matcher t :arrayBranches (new globalThis.WeakMap)))
+           (result (snapshot-source-intern state value)))
+      (snapshot-source-drain state) result))
+
+  ;; A private synchronous host-codec boundary. It does not escape through a
+  ;; Promise, retain a managed value, or classify a source object as immutable.
+  (defun source-decode-with-realm (operation realm)
+    (let ((previous current-source-decode) (previous-realm current-source-realm))
+      (setq current-source-decode t)
+      (setq current-source-realm realm)
+      (try (funcall operation)
+        (finally (setq current-source-decode previous current-source-realm previous-realm)))))
+
+  (defun withManagedSourceDecode (operation &rest runtimes)
+    (source-decode-with-realm operation
+      (if (> (js-length runtimes) 0) (js-call decode-realms :get (aref runtimes 0)) current-source-realm)))
+
+  (defun drain-source-refresh (refresh value)
+    ;; Decoder callbacks can discover another source view while mirroring a
+    ;; descriptor. Queue that mirror instead of growing the host stack. Every
+    ;; discovered view is fully mirrored before the outer refresh returns.
+    (if current-refresh
+      (progn
+        (unless (js-call (get current-refresh :seen) :has refresh)
+          (js-call (get current-refresh :seen) :add refresh)
+          (js-call (get current-refresh :queue) :push refresh))
+        value)
+      (let ((state (js-object :seen (new globalThis.Set) :queue (js-array refresh)))
+            (index 0))
+        (js-call (get state :seen) :add refresh)
+        (setq current-refresh state)
+        (try
+          (progn
+            (while (< index (js-length (get state :queue)))
+              (funcall (aref (get state :queue) index))
+              (setq index (1+ index)))
+            value)
+          (finally (setq current-refresh undefined))))))
+
+  (defun withManagedSourceBindingPoll (observer operation)
+    ;; Private graph polling only. This context ends before listener delivery;
+    ;; it cannot suppress public reads or a different heap's refresh.
+    (let ((previous current-binding-poll))
+      (setq current-binding-poll observer)
+      (try (withManagedSourceDecode operation)
+        (finally (setq current-binding-poll previous)))))
+
+  (defun bindManagedSourceBoundary (value observer)
+    ;; WeakMap.get accepts primitive keys and never invokes Proxy traps.
+    ;; value-type is a language brand query: on a source Proxy it would request
+    ;; real descriptors, recursively decoding values merely to find their owner.
+    (let ((record (js-call source-boundaries :get value)))
+      ;; A source Proxy belongs to its original heap. Passing it through a
+      ;; second runtime must not replace that owner's synchronization hook.
+      (when (and record (undefined? (get record :observer)))
+        (put record :observer observer))) value)
+
+  (defun withManagedSourceBoundary (observer operation)
+    (if (or (not (= (value-type observer) "function")) (eq current-boundary observer))
+      (funcall operation)
+      (let ((previous current-boundary) (completed false))
+        (setq current-boundary observer)
+        (try
+          (let ((result (bindManagedSourceBoundary (funcall operation) observer)))
+            (setq completed t) result)
+          (finally
+            ;; Raw exports have already checked last-error and restored their
+            ;; frames here. A synchronization failure cannot replace a source
+            ;; throw, including false/undefined. Keep the context during polling
+            ;; so polling itself cannot recursively flush the same graph.
+            (try
+              (if completed (funcall observer)
+                (try (funcall observer) (catch ignored nil)))
+              (finally (setq current-boundary previous))))))))
+
+  (defun createManagedSourceView (configuration)
+    (let* ((target (get configuration :target)) (operations (get configuration :operations))
+           (deferred current-source-decode) (realm current-source-realm)
+           (decode-call (lambda (operation)
+             (if deferred (source-decode-with-realm operation realm) (funcall operation))))
+           (record (js-object :observer current-boundary :target target :realm realm)) (observed (js-object)))
+      ;; Resolve methods at the same time and with the same receiver as the
+      ;; original Proxy. In particular, do not eagerly read caller getters.
+      (js-call (js-array "descriptor" "keys" "get" "set" "has" "define" "delete"
+                        "prototype" "setPrototype" "extensible" "preventExtensions" "apply")
+        :forEach (lambda (name)
+          (Object/defineProperty observed name (js-object :value
+            (lambda (&rest arguments)
+              (withManagedSourceBoundary (get record :observer)
+                (lambda () (funcall decode-call
+                  (lambda () (Reflect/apply (get operations name) operations arguments))))))))))
+      (Object/defineProperty observed "construct" (js-object :get
+        (lambda ()
+          (let ((method (get operations :construct)))
+            (if method
+              (lambda (&rest arguments)
+                (withManagedSourceBoundary (get record :observer)
+                  (lambda () (funcall decode-call
+                    (lambda () (Reflect/apply method operations arguments)))))) method)))))
+      (let* ((view (js-call legacy :createManagedSourceView (js-object :target target :operations observed)))
+             (proxy (get view :value)) (refreshed false)
+             (perform-refresh (lambda ()
+               (setq refreshed false)
+               (js-call view :refresh)
+               (setq refreshed t)))
+             (refresh (lambda ()
+               (if (or deferred
+                       (and refreshed (not (undefined? current-binding-poll))
+                        (eq current-binding-poll (get record :observer)))) proxy
+                 (progn
+                   ;; A failed public refresh must be retried, including when
+                   ;; the next decode happens inside a private binding poll.
+                   (drain-source-refresh perform-refresh proxy))))))
+        (js-call source-boundaries :set (get view :value) record)
+        ;; Only decoder-created views omit the redundant eager all:true walk.
+        ;; Their Proxy traps still perform the original live Get/descriptor/
+        ;; ownKeys/integrity synchronization. A public view's explicit refresh
+        ;; retains the original complete-mirror contract, including retries.
+        (Object/defineProperties refresh (js-object
+          :name (js-object :value (get (get view :refresh) :name))
+          :length (js-object :value (get (get view :refresh) :length))))
+        (Object/freeze (js-object :value proxy :refresh refresh)))))
+
+  (export createManagedLiteralHostProvider createManagedSourceView
+    bindManagedSourceBoundary withManagedSourceBoundary withManagedSourceBindingPoll withManagedSourceDecode
+    registerManagedSourceDecodeRuntime isManagedSourceViewForRuntime
+    isManagedSourceView snapshotManagedSourceView projectManagedSourceViewForMatcher))

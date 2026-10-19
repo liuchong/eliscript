@@ -6,7 +6,12 @@ import {validateFinalAcceptanceContract} from '../tools/acceptance/finalize.mjs'
 import {validateRefreshedTransientBuilder} from '../tools/acceptance/retained-transient.mjs';
 const root=resolve(import.meta.dir,'..');
 const read=async file=>JSON.parse(await readFile(resolve(root,file),'utf8'));
-test('a remeasured transient benchmark preserves the original accepted run and final manifest',async()=>{
+// Only the canonical projection depends on the source-run being generated.
+// Threshold, freshness, forgery and historical-source checks remain ordinary
+// tests, including when the official source probe sets this existing flag.
+const officialSourceProbe=process.env.ELISCRIPT_SKIP_RETAINED_ACCEPTANCE==='1';
+const canonicalFinalTest=officialSourceProbe?test.skip:test;
+canonicalFinalTest('a remeasured transient benchmark preserves the original accepted run and final manifest',async()=>{
  const run=await read('acceptance/runs/m13-01.json'),before=JSON.stringify(run);
  await validateFinalAcceptanceContract(await read('contracts/final-acceptance.json'),run,{root,deferPerformanceAcceptance:process.env.ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE==='1'});
  assert.equal(JSON.stringify(run),before);
@@ -30,4 +35,19 @@ test('transient refresh refuses substituted accepted commits, trees, artifact ha
   const copy=structuredClone(run);mutate(copy);await assert.rejects(validateRefreshedTransientBuilder(root,file,bytes,copy));
  }
  await assert.rejects(validateRefreshedTransientBuilder(root,'benchmarks/core-performance-macos-arm64.json',bytes,run));
+});
+
+test('fresh strict transient acceptance remains accepted when deferral is explicitly enabled',async()=>{
+ const run=await read('acceptance/runs/m13-01.json'),file='benchmarks/transient-builder-macos-arm64.json',bytes=await readFile(resolve(root,file));
+ assert.equal(await validateRefreshedTransientBuilder(root,file,bytes,run),true);
+ assert.equal(await validateRefreshedTransientBuilder(root,file,bytes,run,{deferPerformanceAcceptance:true}),true);
+});
+test('failed fresh transient measurements cannot be accepted through deferral without historical proof',async()=>{
+ const run=await read('acceptance/runs/m13-01.json'),file='benchmarks/transient-builder-macos-arm64.json',report=await read(file);
+ const timing=report.results.vector.timing;
+ timing.transientSamplesMs=timing.persistentSamplesMs.map(value=>value*2);
+ timing.transientMedianMs=timing.persistentMedianMs*2;timing.speedup=.5;report.decision.passed=false;
+ const bytes=Buffer.from(JSON.stringify(report));
+ await assert.rejects(validateRefreshedTransientBuilder(root,file,bytes,run));
+ await assert.rejects(validateRefreshedTransientBuilder(root,file,bytes,run,{deferPerformanceAcceptance:true}));
 });

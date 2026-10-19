@@ -1,0 +1,39 @@
+(module tools.backends.compiler-corpus-matchers
+  (import "bun:test" :as original)
+  (import "./managed-source-view.mjs" isManagedSourceView projectManagedSourceViewForMatcher)
+
+  ;; Re-export the actual registration function: original assertion bodies
+  ;; retain their imports and execute the same tests, never a substitute runner.
+  (defconst test (get original :test))
+  (defconst original-expect (get original :expect))
+
+  (defun branch-matcher (arguments branches)
+    (let* ((input (js-call arguments :slice))
+           (_snapshot (put input 0 (projectManagedSourceViewForMatcher (aref arguments 0))))
+           (matcher (Reflect/apply original-expect undefined input)) (index 0))
+      (while (< index (js-length branches))
+        (setq matcher (Reflect/get matcher (aref branches index) matcher))
+        (setq index (1+ index))) matcher))
+
+  (defun wrap-matcher (matcher arguments branches)
+    (new globalThis.Proxy matcher (js-object :get (lambda (target key receiver)
+      (let ((method (Reflect/get target key target)))
+        (cond
+          ((= key "not") (wrap-matcher method arguments (js-call branches :concat (js-array key))))
+          ((= key "toMatchObject")
+           (lambda (&rest operands)
+             (let ((adapted (branch-matcher arguments branches)))
+               (Reflect/apply (Reflect/get adapted key adapted) adapted operands))))
+          ((= (value-type method) "function")
+           (lambda (&rest operands) (Reflect/apply method target operands)))
+          (t method)))))))
+
+  ;; Proxy only the invocation; properties/statics/name/length of Bun expect
+  ;; remain the actual ones. Unknown and foreign values return the original
+  ;; matcher unchanged. No managed runtime result is mutated or replaced.
+  (defconst expect (new globalThis.Proxy original-expect
+    (js-object :apply (lambda (target receiver arguments)
+      (let ((matcher (Reflect/apply target receiver arguments)))
+        (if (and (> (js-length arguments) 0) (isManagedSourceView (aref arguments 0)))
+          (wrap-matcher matcher arguments (js-array)) matcher))))))
+  (export expect test))

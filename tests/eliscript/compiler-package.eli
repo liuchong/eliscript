@@ -1,0 +1,481 @@
+(module tests.compiler-package
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp mkdir writeFile readFile rm cp symlink realpath)
+  (import "node:path" resolve dirname sep extname)
+  (import "node:http" createServer)
+  (import "playwright-core" chromium)
+  (import "node:os" tmpdir)
+  (import "node:module" createRequire)
+  (import "node:crypto" createHash)
+  (import "node:child_process" spawnSync)
+  (import "../dist/bootstrap/compiler.mjs" compile-ir-string emit-ir-string)
+  (import "../tools/backends/compiler-package.mjs" packageIndependentCompiler)
+  (import "../tools/backends/compiler-package-legacy.mjs" :as legacy)
+  (import "../tools/backends/compiler-build.mjs" writeCompilerMetadata)
+  (import "../tools/backends/compiler-metadata.mjs" readCompilerMetadata)
+  (import "../tools/backends/compiler-bootstrap.mjs" compilerSourceIdentity)
+  (import "../tools/backends/build.mjs" root)
+
+  (defconst dependency "transport/backends/managed-runtime-host-legacy.mjs")
+  (defconst retained-dependencies (js-array dependency
+    "transport/backends/managed-host-legacy.mjs"
+    "transport/backends/managed-module-graph-legacy.mjs"
+    "transport/backends/managed-source-view-legacy.mjs"))
+  (defconst helper-support (js-array "transport/backends/managed-host-object-realm.mjs"
+    "transport/backends/managed-host-object-provider.mjs"
+    "transport/backends/managed-host-lifecycle.mjs"
+    "transport/backends/managed-foreign-binding.mjs" "transport/backends/managed-host-proxy.mjs"))
+  (defconst frontend-support (js-call (js-array "analyzer" "compiler" "emitter" "expander" "formatter"
+    "ir" "lower" "project" "reader" "source-map" "symbol" "syntax" "transient-analysis")
+    :flatMap (lambda (name) (js-array (str "dist/bootstrap/" name ".mjs")
+      (str "dist/bootstrap/" name ".mjs.map")))))
+  (defconst added-support (js-call frontend-support :concat helper-support
+    (js-array "dist/runtime/math.mjs" "dist/runtime/math.mjs.map" "dist/package.json"
+      "runtime/math.mjs" "runtime/math.mjs.map" "runtime/package.json" "artifact/runtime/math.mjs"
+      "artifact/runtime/math.mjs.map" "artifact/package.json"
+      "transport/runtime/math.mjs" "transport/runtime/math.mjs.map" "transport/package.json")
+    (js-call (js-array "dist/" "" "artifact/" "transport/") :flatMap
+      (lambda (prefix) (js-call (js-array "unicode-case" "unicode-case-data") :flatMap
+        (lambda (name) (js-array (str prefix "runtime/" name ".mjs") (str prefix "runtime/" name ".mjs.map"))))))))
+  (defun digest (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+  (defconst runtime-capsules (js-array "math" "unicode-case" "unicode-case-data"))
+  (defconst runtime-prefixes (js-array "dist/" "" "artifact/" "transport/"))
+  ;; Node 24 and Bun load these synchronous ESM entry points through the same
+  ;; createRequire boundary already used by the compiler build fixtures.
+  (defasync load-module (path)
+    (let ((canonical (await (realpath path)))) (funcall (createRequire canonical) canonical)))
+  (defasync workspace (run)
+    (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-package-transport-")))))
+      (try (await (funcall run directory))
+        (finally (await (rm directory (js-object :recursive t :force t)))))))
+
+  (defasync close-browser-server (server)
+    (when server
+      (await (new globalThis.Promise (lambda (accept reject)
+        (js-call server :close (lambda (error)
+          (if error (funcall reject error) (funcall accept)))))))))
+
+  (defasync protocol-artifact (directory &optional certified-runtime)
+    ;; A real compiled protocol fixture checks packaging/imports only. It does
+    ;; not claim to be the independent compiler or replace its full acceptance.
+    (let* ((source (str "(module fixture.package-transport\n"
+                    " (defun compiler_session_new () (js-object))\n"
+                    " (defun compiler_session_request (state text)\n"
+                    "  (let ((request (JSON/parse text)))\n"
+                    "   (JSON/stringify (if (= (get request :operation) \"capabilities\")\n"
+                    "    (js-object :host \"javascript\" :independentCompiler false)\n"
+                    "    (js-object :operation (get request :operation) :value 42)))))\n"
+                    " (defun compiler_session_close (state) nil)\n"
+                    " (export compiler_session_new compiler_session_request compiler_session_close))"))
+           (javascript (emit-ir-string (compile-ir-string source "package-transport.eli")))
+           (runtime "(module fixture.runtime)")
+           (entry "driver.mjs") (runtime-path "runtime.eli") (files (js-array))
+           (modules (js-array (js-object :id entry :path entry)))
+           (source-modules (js-array (js-object :id entry :filename "package-transport.eli" :source source))))
+      (await (mkdir directory (js-object :recursive t)))
+      ;; The ordinary emitted fixture retains its real default runtime import.
+      ;; Give this pre-package input the same genuine package base as the
+      ;; other compiler fixtures. The assembler independently copies/authenticates
+      ;; its runtime closure; no source, output byte or identity is rewritten.
+      (await (mkdir (resolve directory "node_modules")))
+      (await (symlink root (resolve directory "node_modules/eliscript") "dir"))
+      (js-call assert :strictEqual (await (realpath (resolve directory "node_modules/eliscript")))
+        (await (realpath root)))
+      (js-call assert :ok (js-call javascript :includes "import \"eliscript/runtime/unicode-case.mjs\";"))
+      (let ((items (js-array (js-array entry javascript) (js-array runtime-path runtime))) (index 0))
+        (while (< index (js-length items))
+          (let* ((item (aref items index)) (path (aref item 0)) (text (aref item 1)))
+            (await (writeFile (resolve directory path) text))
+            (let ((bytes (await (readFile (resolve directory path)))))
+              (js-call files :push (js-object :path path :bytes (js-length bytes) :sha256 (digest bytes)))))
+          (setq index (1+ index))))
+      (when certified-runtime
+        ;; These are actual independent seed products, whose map coordinates
+        ;; differ from the canonical root runtime generator's support maps.
+        ;; Copy both bytes, declare both identities, and bind their maintained
+        ;; Eli sources. No map fields or compiler output text are rewritten.
+        (await (mkdir (resolve directory "runtime")))
+        (let ((index 0))
+          (while (< index (js-length runtime-capsules))
+            (let* ((name (aref runtime-capsules index)) (id (str "runtime/" name ".mjs"))
+                   (source-path (str "runtime/" name ".eli"))
+                   (source-bytes (await (readFile (resolve root "dist" id))))
+                   (map-bytes (await (readFile (resolve root "dist" (str id ".map"))))))
+              (await (writeFile (resolve directory id) source-bytes))
+              (await (writeFile (resolve directory (str id ".map")) map-bytes))
+              (js-call files :push (js-object :path id :bytes (js-length source-bytes) :sha256 (digest source-bytes))
+                (js-object :path (str id ".map") :bytes (js-length map-bytes) :sha256 (digest map-bytes)))
+              (js-call modules :push (js-object :id id :path id :sourceMapPath (str id ".map")))
+              (js-call source-modules :push (js-object :id id :filename source-path
+                :source (await (readFile (resolve root source-path) "utf8")))))
+            (setq index (1+ index))))
+        (let ((scope (str (JSON/stringify (js-object :name "eliscript" :type "module" :private t
+                :exports (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+                  "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
+                  "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs")) nil 2) "\n")))
+          (await (writeFile (resolve directory "package.json") scope))
+          (let ((bytes (await (readFile (resolve directory "package.json")))))
+            (js-call files :push (js-object :path "package.json" :bytes (js-length bytes) :sha256 (digest bytes))))))
+      (let* ((driver (await (load-module (resolve directory entry))))
+             (names (js-array "compiler_session_new" "compiler_session_request" "compiler_session_close"))
+             (index 0))
+        (while (< index (js-length names))
+          (js-call assert :strictEqual (value-type (get driver (aref names index))) "function")
+          (setq index (1+ index)))
+        (let ((state (js-call driver :compiler_session_new)))
+          (try
+            (js-call assert :deepStrictEqual
+              (JSON/parse (js-call driver :compiler_session_request state
+                (JSON/stringify (js-object :operation "capabilities"))))
+              (js-object :host "javascript" :independentCompiler false))
+            (js-call assert :deepStrictEqual
+              (JSON/parse (js-call driver :compiler_session_request state
+                (JSON/stringify (js-object :operation "fixture"))))
+              (js-object :operation "fixture" :value 42))
+            (finally (js-call driver :compiler_session_close state)))))
+      (js-object :directory directory :host "javascript" :target "javascript" :entry entry :path entry
+        :runtimePath runtime-path :modules modules
+        :provenance (js-object :kind "compiled-eliscript-protocol-fixture"
+          :independentCompiler false :sourceFilename "package-transport.eli")
+        :sourceIdentity (compilerSourceIdentity
+          (js-object :entry entry :runtime (js-object :filename "runtime.eli" :source runtime)
+            :modules source-modules))
+        :artifactIdentity (js-object :algorithm "sha256" :files files))))
+
+  (defasync assert-runtime-pairs (artifact packaged certified-runtime)
+    ;; Expected provenance is selected from fixture construction, never the
+    ;; output's own metadata: certified artifact pairs came from dist/runtime;
+    ;; every support pair came from the actual root runtime generator inputs.
+    (let ((prefix-index 0) (files (get (get packaged :manifest) :files)))
+      (while (< prefix-index (js-length runtime-prefixes))
+        (let ((prefix (aref runtime-prefixes prefix-index)) (capsule-index 0))
+          (while (< capsule-index (js-length runtime-capsules))
+            (let ((id (str "runtime/" (aref runtime-capsules capsule-index) ".mjs"))
+                  (suffixes (js-array "" ".map")) (suffix-index 0))
+              (while (< suffix-index (js-length suffixes))
+                (let* ((suffix (aref suffixes suffix-index)) (relative (str id suffix))
+                       (path (str prefix relative))
+                       (expected-path (if (and certified-runtime (= prefix "artifact/"))
+                         (resolve root "dist" relative) (resolve root relative)))
+                       (expected (await (readFile expected-path)))
+                       (actual (await (readFile (resolve (get packaged :directory) path)))))
+                  (js-call assert :deepStrictEqual actual expected path)
+                  (js-call assert :deepStrictEqual
+                    (js-call files :filter (lambda (record) (= (get record :path) path)))
+                    (js-array (js-object :path path :bytes (js-length expected) :sha256 (digest expected))))
+                  (when (and certified-runtime (= prefix "artifact/"))
+                    (js-call assert :deepStrictEqual (await (readFile (resolve (get artifact :directory) relative))) expected)
+                    (js-call assert :deepStrictEqual
+                      (js-call (get (get artifact :artifactIdentity) :files) :filter
+                        (lambda (record) (= (get record :path) relative)))
+                      (js-array (js-object :path relative :bytes (js-length expected) :sha256 (digest expected))))))
+                (setq suffix-index (1+ suffix-index))))
+            (setq capsule-index (1+ capsule-index))))
+        (setq prefix-index (1+ prefix-index)))))
+
+  (defasync assert-rejected-capsule-maps (directory)
+    (let ((index 0))
+      (while (< index (js-length runtime-capsules))
+        (let* ((name (aref runtime-capsules index))
+               (certified (await (protocol-artifact (resolve directory (str "changed-map-input-" name)) t)))
+               (relative (str "runtime/" name ".mjs.map"))
+               (map-path (resolve (get certified :directory) relative))
+               (map-bytes (await (readFile map-path)))
+               (before (globalThis.structuredClone (get certified :artifactIdentity))))
+          (put map-bytes 0 (% (1+ (aref map-bytes 0)) 256))
+          (await (writeFile map-path map-bytes))
+          (await (js-call assert :rejects (packageIndependentCompiler
+            (js-object :artifact certified :outputRoot (resolve directory (str "changed-map-output-" name))))
+            (lambda (error) (= (get error :message) (str "compiler artifact changed after emission: " relative)))))
+          (js-call assert :deepStrictEqual (get certified :artifactIdentity) before))
+        (setq index (1+ index)))))
+
+  (test "packaged loader worker and browser carry the exact preserved runtime dependency and original identities"
+    (async ()
+      (await (workspace (async (directory)
+        (let* ((artifact (await (protocol-artifact (resolve directory "input"))))
+               (original (await (js-call legacy :packageIndependentCompiler
+                 (js-object :artifact artifact :outputRoot (resolve directory "legacy")))))
+               (packaged (await (packageIndependentCompiler
+                 (js-object :artifact artifact :outputRoot (resolve directory "current")))))
+               (manifest (get packaged :manifest)) (files (get manifest :files))
+               (record (js-call files :find (lambda (item) (= (get item :path) dependency))))
+               (actual (await (readFile (resolve (get packaged :directory) dependency))))
+               (source (await (readFile (resolve root "tools/backends/managed-runtime-host-legacy.mjs")))))
+          (js-call assert :deepStrictEqual actual source)
+          (js-call assert :deepStrictEqual record
+            (js-object :path dependency :bytes (js-length actual) :sha256 (digest actual)))
+          (let ((position (js-call files :findIndex (lambda (item) (= (get item :path) dependency)))))
+            (js-call assert :strictEqual (get (aref files (1- position)) :path) "transport/backends/managed-runtime.mjs")
+            (js-call assert :strictEqual (get (aref files (1+ position)) :path) "transport/backends/managed-host.mjs"))
+          (js-call retained-dependencies :forEach (lambda (path)
+            (let ((records (js-call files :filter (lambda (item) (= (get item :path) path)))))
+              (js-call assert :strictEqual (js-length records) 1))))
+          (let ((index 0))
+            (while (< index (js-length helper-support))
+              (let* ((path (aref helper-support index))
+                     (local (str "tools/" (js-call path :slice (js-length "transport/"))))
+                     (bytes (await (readFile (resolve (get packaged :directory) path))))
+                     (source (await (readFile (resolve root local)))))
+                (js-call assert :deepStrictEqual bytes source)
+                (js-call assert :deepStrictEqual
+                  (js-call files :filter (lambda (item) (= (get item :path) path)))
+                  (js-array (js-object :path path :bytes (js-length bytes) :sha256 (digest bytes)))))
+              (setq index (1+ index))))
+          (let ((index 1))
+            (while (< index (js-length retained-dependencies))
+              (let* ((path (aref retained-dependencies index))
+                     (local (+ "tools/" (js-call path :slice (js-length "transport/"))))
+                     (bytes (await (readFile (resolve (get packaged :directory) path))))
+                     (source (await (readFile (resolve root local))))
+                     (record (js-call files :find (lambda (item) (= (get item :path) path))))
+                     (position (js-call files :findIndex (lambda (item) (= (get item :path) path))))
+                     (importer (js-call path :replace "-legacy.mjs" ".mjs")))
+                (js-call assert :deepStrictEqual bytes source)
+                (js-call assert :deepStrictEqual record (js-object :path path :bytes (js-length bytes) :sha256 (digest bytes)))
+                (js-call assert :strictEqual (get (aref files (1- position)) :path) importer))
+              (setq index (1+ index))))
+          (js-call assert :deepStrictEqual
+            (js-call files :filter (lambda (item)
+              (and (not (js-call retained-dependencies :includes (get item :path)))
+                   (not (js-call added-support :includes (get item :path)))
+                   (not (js-call (get item :path) :startsWith "browser/"))
+                   (/= (get item :path) "package.json"))))
+            (js-call (get (get original :manifest) :files) :filter
+              (lambda (item) (/= (get item :path) "package.json"))))
+          (let ((paths frontend-support)
+                (index 0))
+            (while (< index (js-length paths))
+              (let* ((path (aref paths index))
+                     (bytes (await (readFile (resolve (get packaged :directory) path))))
+                     (current (await (readFile (resolve root path))))
+                     (entries (js-call files :filter (lambda (item) (= (get item :path) path)))))
+                (js-call assert :deepStrictEqual bytes current)
+                (js-call assert :deepStrictEqual entries
+                  (js-array (js-object :path path :bytes (js-length bytes) :sha256 (digest bytes)))))
+              (setq index (1+ index))))
+          (await (assert-runtime-pairs artifact packaged false))
+          (let ((package (JSON/parse (await (readFile (resolve (get packaged :directory) "package.json") "utf8"))))
+                (before (JSON/parse (await (readFile (resolve (get original :directory) "package.json") "utf8")))))
+            (js-call assert :strictEqual (get (get package :exports) "./browser") "./browser/compiler-browser.mjs")
+            (js-call assert :strictEqual (get (get package :exports) "./worker") "./browser/compiler-worker.mjs")
+            (js-call assert :deepStrictEqual (Object/assign (js-object) package (js-object
+              :files (get before :files) :exports (Object/assign (js-object) (get package :exports)
+                (js-object "./browser" (get (get before :exports) "./browser")
+                  "./worker" (get (get before :exports) "./worker"))))) before)
+            (js-call assert :deepStrictEqual (get package :files) (js-call (get before :files) :concat (js-array "dist" "browser"))))
+          (let ((scopes (js-array "dist/package.json" "artifact/package.json" "transport/package.json" "runtime/package.json")) (index 0))
+            (while (< index (js-length scopes))
+              (let* ((path (aref scopes index)) (bytes (await (readFile (resolve (get packaged :directory) path)))))
+                (js-call assert :deepStrictEqual (JSON/parse (js-call bytes :toString "utf8"))
+                  (js-object :name "eliscript" :type "module" :private t
+                    :exports (if (= path "runtime/package.json")
+                      (js-object "./runtime/math.mjs" "./math.mjs"
+                        "./runtime/unicode-case.mjs" "./unicode-case.mjs"
+                        "./runtime/unicode-case-data.mjs" "./unicode-case-data.mjs")
+                      (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+                        "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
+                        "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs"))))
+                (js-call assert :deepStrictEqual (js-call files :find (lambda (item) (= (get item :path) path)))
+                  (js-object :path path :bytes (js-length bytes) :sha256 (digest bytes))))
+              (setq index (1+ index))))
+          (js-call assert :deepStrictEqual (get manifest :sourceIdentity) (get artifact :sourceIdentity))
+          (js-call assert :deepStrictEqual (get manifest :artifactIdentity) (get artifact :artifactIdentity))
+          (let ((original-bytes (await (readFile (resolve (get artifact :directory) (get artifact :entry)))))
+                (copied-bytes (await (readFile (resolve (get packaged :directory) "artifact" (get artifact :entry))))))
+            (js-call assert :deepStrictEqual copied-bytes original-bytes)
+            (let ((record (js-call files :find (lambda (item)
+                    (= (get item :path) (str "artifact/" (get artifact :entry)))))))
+              (js-call assert :deepStrictEqual record
+                (js-object :path (str "artifact/" (get artifact :entry))
+                  :bytes (js-length original-bytes) :sha256 (digest original-bytes)))))
+          (let* ((certified (await (protocol-artifact (resolve directory "certified-input") t)))
+                 (identity (globalThis.structuredClone (get certified :artifactIdentity)))
+                 (source-identity (globalThis.structuredClone (get certified :sourceIdentity)))
+                 (certified-package (await (packageIndependentCompiler
+                   (js-object :artifact certified :outputRoot (resolve directory "certified-current"))))))
+            (await (assert-runtime-pairs certified certified-package t))
+            (js-call assert :deepStrictEqual (get certified :artifactIdentity) identity)
+            (js-call assert :deepStrictEqual (get certified :sourceIdentity) source-identity)
+            (js-call assert :deepStrictEqual (get (get certified-package :manifest) :artifactIdentity) identity)
+            (js-call assert :deepStrictEqual
+              (await (readFile (resolve (get certified-package :directory) "artifact/package.json")))
+              (await (readFile (resolve (get certified :directory) "package.json")))))
+          (js-call assert :strictEqual (get manifest :browserArtifact) "browser/compiler-artifact.json")
+          (js-call assert :strictEqual (get manifest :browser) "browser/compiler-browser.mjs")
+          (js-call assert :strictEqual (get manifest :worker) "browser/compiler-worker.mjs")
+          (let* ((derived (await (readCompilerMetadata (resolve (get packaged :directory) (get manifest :browserArtifact)))))
+                 (provenance (get derived :provenance)))
+            (js-call assert :strictEqual (get provenance :kind) "eliscript-browser-bundle")
+            (js-call assert :deepStrictEqual (get provenance :originalArtifactIdentity) (get artifact :artifactIdentity))
+            (js-call assert :deepStrictEqual (get derived :sourceIdentity) (get artifact :sourceIdentity))
+            (let ((index 0) (records (get (get derived :artifactIdentity) :files)))
+              (while (< index (js-length records))
+                (let* ((entry (aref records index))
+                       (bytes (await (readFile (resolve (get packaged :directory) "browser" (get entry :path))))))
+                  (js-call assert :strictEqual (get entry :bytes) (js-length bytes))
+                  (js-call assert :strictEqual (get entry :sha256) (digest bytes)))
+                (setq index (1+ index)))))
+          (js-call assert :deepStrictEqual (await (readCompilerMetadata (get packaged :manifestPath))) manifest)
+          (let* ((loader (await (load-module (resolve (get packaged :directory) "compiler-loader.mjs"))))
+                 (session (await (js-call loader :openCompilerPackage))))
+            (try
+              (js-call assert :deepStrictEqual (await (js-call session :request (js-object :operation "fixture")))
+                (js-object :operation "fixture" :value 42))
+              (js-call assert :strictEqual (get (get session :integrity) :javascriptImports) "native-esm-loader-not-intercepted")
+              (finally (await (js-call session :close)))))
+          (let ((worker (await (load-module (resolve (get packaged :directory) (get manifest :worker)))))
+                (browser (await (load-module (resolve (get packaged :directory) (get manifest :browser))))))
+            (js-call assert :strictEqual (value-type (get worker :installCompilerWorker)) "function")
+            (js-call assert :strictEqual (value-type (get browser :createBrowserCompiler)) "function")
+            (js-call assert :strictEqual (value-type (get browser :installBrowserCompilerWorker)) "function"))))))))
+
+  (test "a missing packaged runtime dependency rejects real static imports and changed bytes fail its recorded identity"
+    (async ()
+      (await (workspace (async (directory)
+        (let* ((artifact (await (protocol-artifact (resolve directory "input"))))
+               (packaged (await (packageIndependentCompiler
+                 (js-object :artifact artifact :outputRoot (resolve directory "current")))))
+               (record (js-call (get (get packaged :manifest) :files) :find
+                         (lambda (item) (= (get item :path) dependency))))
+               (missing (resolve directory "missing")) (path (resolve (get packaged :directory) dependency))
+               (bytes (await (readFile path))))
+          (await (cp (get packaged :directory) missing (js-object :recursive t)))
+          (await (rm (resolve missing dependency)))
+          (await (js-call assert :rejects
+            (load-module (resolve missing "compiler-loader.mjs"))
+            (lambda (error) (and (js-call (get error :message) :includes "managed-runtime-host-legacy.mjs")
+                                (js-call (get error :message) :includes "Cannot find")))))
+          ;; The public loader honestly delegates static ESM reads to the host.
+          ;; Its recorded identity still detects a same-length changed file;
+          ;; this assertion does not pretend those imports are intercepted.
+          (put bytes 0 (% (1+ (aref bytes 0)) 256))
+          (await (writeFile path bytes))
+          (let ((changed (await (readFile path))))
+            (js-call assert :strictEqual (js-length changed) (get record :bytes))
+            (js-call assert :notStrictEqual (digest changed) (get record :sha256)))
+          (await (assert-rejected-capsule-maps directory))))))))
+
+  (test "a custom-named package runs its derived compiler in a real module Worker without an import map"
+    (async ()
+      (await (workspace (async (directory)
+        (let* ((artifact (await (protocol-artifact (resolve directory "input"))))
+               (packaged (await (packageIndependentCompiler
+                 (js-object :artifact artifact :name "a-real-custom-compiler" :outputRoot (resolve directory "package")))))
+               (base (get packaged :directory)) (requests (js-array))
+               (server undefined) (browser undefined))
+          (try
+            (progn
+              (setq server (createServer (lambda (request response)
+                (js-call (funcall (async ()
+                  (let* ((url (new globalThis.URL (get request :url) "http://127.0.0.1"))
+                         (path (resolve base (str "." (get url :pathname)))))
+                    (unless (js-call path :startsWith (str base sep))
+                      (throw (new globalThis.Error "HTTP path escapes test package")))
+                    (js-call requests :push (get url :pathname))
+                    (js-call response :setHeader "cache-control" "no-store")
+                    (js-call response :setHeader "content-type"
+                      (cond ((= (extname path) ".mjs") "text/javascript")
+                            ((= (extname path) ".json") "application/json") (t "text/html")))
+                    (js-call response :end (await (readFile path)))))) :catch
+                  (lambda (error) (put response :statusCode 404) (js-call response :end (funcall globalThis.String error)))))))
+              (await (new globalThis.Promise (lambda (accept reject)
+                (js-call server :once "error" reject) (js-call server :listen 0 "127.0.0.1" accept))))
+              ;; The page and Worker run actual Eli-emitted source. No JS
+              ;; template/evaluate callback stands in for a module importer.
+              (let ((browser-url (str "http://127.0.0.1:" (get (js-call server :address) :port)
+                      "/browser/compiler-browser.mjs")))
+              (await (writeFile (resolve base "probe-source.mjs") (emit-ir-string (compile-ir-string
+                (str "(import " (JSON/stringify browser-url) " createBrowserCompiler)\n"
+                  "(defasync run () (let ((compiler (await (createBrowserCompiler))))\n"
+                  " (try (let ((result (await (js-call compiler :request (js-object :operation \"fixture\")))))\n"
+                  "  (unless (= (get result :value) 42) (throw (new globalThis.Error \"wrong real Worker result\")))\n"
+                  "  (let ((control (new globalThis.AbortController)) (caught false))\n"
+                  "   (js-call control :abort false)\n"
+                  "   (try (await (js-call compiler :request (js-object :operation \"fixture\") (js-object :signal (get control :signal))))\n"
+                  "    (catch error (setq caught (Object/is error false))))\n"
+                  "   (unless caught (throw (new globalThis.Error \"cancel value changed\"))))\n"
+                  "  (let ((missing false))\n"
+                  "   (try (await (createBrowserCompiler (js-object :worker false :manifestURL \"./missing-explicit-artifact.json\")))\n"
+                  "    (catch error (setq missing (js-call (funcall globalThis.String error) :includes \"404\"))))\n"
+                  "   (unless missing (throw (new globalThis.Error \"explicit manifest silently replaced\"))))\n"
+                  "  (js-call (get globalThis.document :documentElement) :setAttribute \"data-status\" \"complete\"))\n"
+                  "  (finally (await (js-call compiler :dispose))))))\n"
+                  "(js-call (run) :catch (lambda (error)\n"
+                  " (js-call (get globalThis.document :documentElement) :setAttribute \"data-error\" (funcall globalThis.String error))\n"
+                  " (js-call (get globalThis.document :documentElement) :setAttribute \"data-status\" \"failed\")))")
+                "package-worker-probe.eli"))))
+              ;; Compile this same real Eli probe's runtime closure for HTTP.
+              ;; Keep the already deployed compiler facade as an external ESM
+              ;; boundary, preserving its import.meta URLs and real requests.
+              ;; This uses the production bundler, never an import map, edited
+              ;; JavaScript string or inlined replacement Worker implementation.
+              (await (mkdir (resolve base "node_modules")))
+              (await (symlink (resolve base "artifact") (resolve base "node_modules/eliscript") "dir"))
+              (js-call assert :strictEqual (await (realpath (resolve base "node_modules/eliscript")))
+                (await (realpath (resolve base "artifact"))))
+              (let* ((command (get (get globalThis.process :env) :BUN "bun"))
+                     (bundle (spawnSync command
+                       (js-array "build" (resolve base "probe-source.mjs") "--target=browser" "--format=esm"
+                         (str "--external=" browser-url) "--outfile" (resolve base "probe.mjs"))
+                       (js-object :cwd root :encoding "utf8" :stdio (js-array "ignore" "pipe" "pipe")))))
+                (js-call assert :strictEqual (get bundle :error) undefined)
+                (js-call assert :strictEqual (get bundle :signal) nil)
+                (js-call assert :strictEqual (get bundle :status) 0 (get bundle :stderr))))
+              (await (writeFile (resolve base "index.html")
+                "<!doctype html><html><head><title>Actual package Worker</title></head><body><script type=\"module\" src=\"./probe.mjs\"></script></body></html>"))
+              (setq browser (await (js-call chromium :launch)))
+              (let ((page (await (js-call browser :newPage))) (errors (js-array)))
+                (js-call page :on "pageerror" (lambda (error) (js-call errors :push (funcall globalThis.String error))))
+                (await (js-call page :goto (str "http://127.0.0.1:" (get (js-call server :address) :port) "/index.html")))
+                (await (js-call page :waitForSelector "html[data-status]"))
+                (js-call assert :strictEqual
+                  (await (js-call (js-call page :locator "html") :getAttribute "data-status")) "complete"
+                  (await (js-call (js-call page :locator "html") :getAttribute "data-error")))
+                (js-call assert :deepStrictEqual errors (js-array))
+                (js-call assert :ok (>= (js-length (js-call requests :filter
+                  (lambda (path) (= path "/browser/compiler-browser.mjs")))) 2))
+                (js-call assert :ok (js-call requests :includes "/browser/compiler-artifact.json"))
+                (js-call assert :ok (js-call requests :includes "/browser/compiler.mjs"))))
+            (finally
+              (when browser (await (js-call browser :close)))
+              (await (close-browser-server server))))))))))
+
+  (test "the package facade preserves omitted undefined null and original option getter failure order"
+    (async ()
+      (await (js-call assert :rejects (packageIndependentCompiler)
+        (lambda (error) (= (get error :message) "compiler packaging requires artifact and outputRoot"))))
+      (await (js-call assert :rejects (packageIndependentCompiler undefined)
+        (lambda (error) (= (get error :message) "compiler packaging requires artifact and outputRoot"))))
+      (await (js-call assert :rejects (packageIndependentCompiler nil)
+        (lambda (error) (= (get error :name) "TypeError"))))
+      (let ((options (js-object)) (trace (js-array)) (marker (js-object :value -0)))
+        (Object/defineProperty options "artifact" (js-object :get (lambda () (js-call trace :push "artifact") undefined)))
+        (Object/defineProperty options "outputRoot" (js-object :get (lambda () (js-call trace :push "outputRoot") undefined)))
+        (Object/defineProperty options "sourceRoot" (js-object :get (lambda () (js-call trace :push "sourceRoot") (throw marker))))
+        (Object/defineProperty options "name" (js-object :get (lambda () (js-call trace :push "name") "unused")))
+        (await (js-call assert :rejects (packageIndependentCompiler options) (lambda (error) (Object/is error marker))))
+        (js-call assert :deepStrictEqual trace (js-array "artifact" "outputRoot" "sourceRoot")))))
+
+  (test "the original package CLI publishes the completed Eli transport manifest"
+    (async ()
+      (await (workspace (async (directory)
+        (let* ((artifact (await (protocol-artifact (resolve directory "input"))))
+               (input (resolve directory "input/compiler-artifact.json"))
+               (output (resolve directory "cli"))
+               (arguments (if (get (get globalThis.process :versions) :bun) (js-array "--smol") (js-array))))
+          (await (writeCompilerMetadata input artifact))
+          (js-call arguments :push (resolve root "tools/backends/compiler-package.mjs") "--artifact" input "--output" output)
+          (let ((child (spawnSync (get globalThis.process :execPath) arguments
+                         (js-object :encoding "utf8" :timeout 5000 :maxBuffer 1048576))))
+            (js-call assert :strictEqual (get child :error) undefined)
+            (js-call assert :strictEqual (get child :signal) nil)
+            (js-call assert :strictEqual (get child :status) 0 (get child :stderr))
+            (js-call assert :strictEqual (get child :stdout) (+ (resolve output "compiler-package.json") "\n")))
+          (let* ((manifest (await (readCompilerMetadata (resolve output "compiler-package.json"))))
+                 (record (js-call (get manifest :files) :find (lambda (item) (= (get item :path) dependency))))
+                 (bytes (await (readFile (resolve output dependency)))))
+            (js-call assert :deepStrictEqual record
+              (js-object :path dependency :bytes (js-length bytes) :sha256 (digest bytes))))))))))
+)

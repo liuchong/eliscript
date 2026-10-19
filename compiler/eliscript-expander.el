@@ -1318,7 +1318,139 @@
          (nth 2 arguments))
         (nthcdr 3 arguments)))))))
 
+(defun eliscript-expander--ordinary-expression-p (value environment)
+  "Whether VALUE can use ordinary explicit-stack child expansion."
+  (and (consp value) (proper-list-p value)
+       (let ((operator (eliscript-form-value (car value))))
+         (and
+          (not (memq operator
+                     '(quote defmacro defportable defasync defmulti defmethod
+                       deftype defrecord defprotocol extend-type extend-category
+                       extend-default -> ->> as-> cond-> cond->> some-> some->>
+                       if-let when-let if-some when-some case condp reify letfn)))
+          (not (and (symbolp operator) (gethash operator environment)))
+          (not (and (memq operator '(lambda fn async)) (cdr value)
+                    (eliscript-expander--multi-arity-clause-p (cadr value))))))))
+
+(defun eliscript-expander--ordinary-expression-plan (form value)
+  "Return a fresh FORM value and its expression child slots in source order.
+Only the shallow syntax owned by this node is copied. Binding names, literal
+keys and parameters retain the same exclusion rules as the special handlers."
+  (let* ((copy (copy-sequence value))
+         (operator (eliscript-form-value (car copy)))
+         (arguments (cdr copy))
+         slots)
+    (pcase operator
+      ((or 'lambda 'fn 'async 'set!)
+       (let ((remaining (cdr arguments)))
+         (while remaining
+           (push remaining slots) (setq remaining (cdr remaining)))))
+      ((or 'let 'let*)
+       (when arguments
+         (let* ((bindings-form (car arguments))
+                (bindings (eliscript-form-value bindings-form)))
+           (when (proper-list-p bindings)
+             (let ((binding-copy (copy-sequence bindings)))
+               (setcar arguments (eliscript-form-inherit binding-copy bindings-form))
+               (let ((remaining binding-copy))
+                 (while remaining
+                   (let* ((binding (car remaining))
+                          (items (eliscript-form-value binding)))
+                     (when (and (consp items) (proper-list-p items))
+                       (let* ((items-copy (copy-sequence items))
+                              (initializers (cdr items-copy)))
+                         (setcar remaining (eliscript-form-inherit items-copy binding))
+                         (while initializers
+                           (push initializers slots)
+                           (setq initializers (cdr initializers))))))
+                   (setq remaining (cdr remaining))))))
+           ;; The old handler also inherits the binding-list span when it is
+           ;; malformed; its contents are left for the analyzer to reject.
+           (unless (proper-list-p bindings)
+             (setcar arguments (eliscript-form-inherit bindings bindings-form))))
+         (let ((remaining (cdr arguments)))
+           (while remaining
+             (push remaining slots) (setq remaining (cdr remaining))))))
+      ('cond
+       (let ((remaining arguments))
+         (while remaining
+           (let* ((clause (car remaining)) (items (eliscript-form-value clause)))
+             (when (proper-list-p items)
+               (let ((items-copy (copy-sequence items)))
+                 (setcar remaining (eliscript-form-inherit items-copy clause))
+                 (while items-copy
+                   (push items-copy slots) (setq items-copy (cdr items-copy))))))
+           (setq remaining (cdr remaining)))))
+      ('try
+       (let ((remaining arguments))
+         (while remaining
+           (let* ((clause (car remaining)) (items (eliscript-form-value clause))
+                  (head (and (proper-list-p items) items
+                             (eliscript-form-value (car items)))))
+             (cond
+              ((and (eq head 'catch) (cdr items))
+               (let* ((items-copy (copy-sequence items)) (body (cddr items-copy)))
+                 (setcar remaining (eliscript-form-inherit items-copy clause))
+                 (while body (push body slots) (setq body (cdr body)))))
+              ((eq head 'catch) nil)
+              ((eq head 'finally)
+               (let* ((items-copy (copy-sequence items)) (body (cdr items-copy)))
+                 (setcar remaining (eliscript-form-inherit items-copy clause))
+                 (while body (push body slots) (setq body (cdr body)))))
+              (t (push remaining slots))))
+           (setq remaining (cdr remaining)))))
+      ((or 'setq 'js-object 'get 'put 'js-call)
+       (let ((remaining arguments) (index 0))
+         (while remaining
+           (let ((item (eliscript-form-value (car remaining))))
+             (unless
+                 (pcase operator
+                   ('setq (cl-evenp index))
+                   ('js-object (and (cl-evenp index)
+                                    (or (keywordp item) (stringp item) (symbolp item))))
+                   (_ (and (= index 1) (or (keywordp item) (stringp item)))))
+               (push remaining slots)))
+           (setq remaining (cdr remaining) index (1+ index)))))
+      (_
+       (unless (symbolp operator) (push copy slots))
+       (let ((remaining arguments))
+         (while remaining
+           (push remaining slots) (setq remaining (cdr remaining))))))
+    (cons (eliscript-form-inherit copy form) (nreverse slots))))
+
 (defun eliscript-expander--expand-expression (form environment depth)
+  "Expand FORM with an explicit stack for ordinary expression trees.
+Macro invocation and desugaring retain their existing handlers and depth
+counter. Ordinary AST nesting never adds host frames to that macro depth."
+  (let* ((result (list nil))
+         (pending (list (list form (cons result nil) eliscript-expander--current-span))))
+    (while pending
+      (let* ((job (pop pending)) (source (nth 0 job)) (target (nth 1 job))
+             (eliscript-expander--current-span
+              (or (eliscript-form-span source) (nth 2 job)))
+             (value (eliscript-form-value source))
+             expanded)
+        (cond
+         ((vectorp value)
+          (let ((copy (copy-sequence value)) (index (1- (length value))))
+            (setq expanded (eliscript-form-inherit copy source))
+            (while (>= index 0)
+              (push (list (aref value index) (cons copy index)
+                          eliscript-expander--current-span) pending)
+              (setq index (1- index)))))
+         ((not (consp value)) (setq expanded source))
+         ((eliscript-expander--ordinary-expression-p value environment)
+          (let ((plan (eliscript-expander--ordinary-expression-plan source value)))
+            (setq expanded (car plan))
+            (dolist (slot (reverse (cdr plan)))
+              (push (list (car slot) (cons slot nil) eliscript-expander--current-span) pending))))
+         (t (setq expanded (eliscript-expander--expand-special-expression source environment depth))))
+        (if (cdr target)
+            (aset (car target) (cdr target) expanded)
+          (setcar (car target) expanded))))
+    (car result)))
+
+(defun eliscript-expander--expand-special-expression (form environment depth)
   "Expand expression FORM in macro ENVIRONMENT at DEPTH."
   (let* ((value (eliscript-form-value form))
          (eliscript-expander--current-span

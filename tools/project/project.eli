@@ -1,0 +1,110 @@
+(module tools.project.project
+  (import "node:crypto" createHash)
+  (import "node:fs" lstatSync mkdirSync readFileSync realpathSync writeFileSync)
+  (import "node:path" basename dirname resolve)
+  (import "node:url" fileURLToPath)
+  (import "node:buffer" Buffer)
+  (import "./project-legacy.mjs" :as legacy)
+
+  (defconst checkProject (get legacy :checkProject))
+  (defconst source-root (resolve (dirname (fileURLToPath (js* "import.meta.url"))) "../.."))
+  (defconst capsules (js-array "math" "unicode-case" "unicode-case-data"))
+  (defun digest (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+  (defun project-error (message filename)
+    (let ((error (new globalThis.Error message)))
+      (put error :eliscriptDiagnostic (js-object :format "eliscript-diagnostic" :version 1
+        :code "ELI-B0001" :severity "error" :phase "project-build" :message message
+        :location (js-object :file filename)))
+      (throw error)))
+  (defun attributes (path)
+    (try (lstatSync path)
+      (catch error (if (= (get error :code) "ENOENT") undefined (throw error)))))
+  (defun plain-directory (out-dir relative-path)
+    (let* ((path (resolve out-dir relative-path)) (value (attributes path)))
+      (when value
+        (when (js-call value :isSymbolicLink)
+          (project-error (str "project runtime support contains a symlink: " relative-path) path))
+        (unless (js-call value :isDirectory)
+          (project-error (str "project runtime support is not a directory: " relative-path) path)))))
+  (defun check-target (base record)
+    (let* ((relative-path (get record :path)) (path (resolve base relative-path))
+           (value (attributes path)))
+      (when value
+        (when (js-call value :isSymbolicLink)
+          (project-error (str "project runtime support contains a symlink: " relative-path) path))
+        (unless (and (js-call value :isFile) (js-call (readFileSync path) :equals (get record :content)))
+          (project-error (str "project runtime support conflicts with existing output: " relative-path) path)))
+      (not (undefined? value))))
+  (defun reject-source-alias (base record inputs)
+    (let* ((path (resolve base (get record :path))) (value (attributes path)))
+      (when value
+        (js-call inputs :forEach (lambda (input)
+          (when (and (= (get value :dev) (get input :dev))
+                     (= (get value :ino) (get input :ino)))
+            (project-error (str "project runtime output aliases a source: " (get record :path)) path)))))))
+  (defun asset (path content)
+    (js-object :path path :bytes (js-length content) :sha256 (digest content)))
+  (defun runtime-inputs ()
+    (let ((files (js-array)) (identities (js-array)) (inputs (js-array)))
+      (js-call capsules :forEach (lambda (name)
+        (let* ((source-path (str "runtime/" name ".eli"))
+               (module-path (str "runtime/" name ".mjs")) (map-path (str module-path ".map"))
+               (source (readFileSync (resolve source-root source-path)))
+               (module (readFileSync (resolve source-root module-path)))
+               (mapping (readFileSync (resolve source-root map-path)))
+               (map (JSON/parse (js-call mapping :toString "utf8"))))
+          (js-call (js-array source-path module-path map-path) :forEach (lambda (path)
+            (js-call inputs :push (lstatSync (realpathSync (resolve source-root path))))))
+          ;; The source module and its map are one real generator pair. Keep
+          ;; every original map coordinate and byte; dist/runtime is another
+          ;; producer and is never a fallback for either half of this pair.
+          (unless (and (= (get map :version) 3) (= (value-type (get map :file)) "string")
+                       (= (basename (get map :file)) (str name ".mjs"))
+                       (Array/isArray (get map :sourcesContent)) (= (js-length (get map :sourcesContent)) 1)
+                       (= (aref (get map :sourcesContent) 0) (js-call source :toString "utf8")))
+            (project-error (str "project runtime source and map identity differ: " module-path)
+              (resolve source-root map-path)))
+          (js-call files :push (js-object :path module-path :content module)
+            (js-object :path map-path :content mapping))
+          (js-call identities :push (js-object :source (asset source-path source)
+            :module (asset module-path module) :sourceMap (asset map-path mapping))))))
+      (let ((exports (js-object)))
+        (js-call capsules :forEach (lambda (name)
+          (put exports (str "./runtime/" name ".mjs") (str "./runtime/" name ".mjs"))))
+        (js-call files :push (js-object :path "package.json" :content
+          (js-call Buffer :from (str (JSON/stringify (js-object :name "eliscript" :type "module"
+            :private t :exports exports)) "\n") "utf8"))))
+      (js-call files :push (js-object :path "eliscript-runtime.json" :content
+        (js-call Buffer :from (str (JSON/stringify (js-object :format "eliscript-project-runtime"
+          :version 1 :capsules identities)) "\n") "utf8")))
+      (js-object :files files :inputs inputs)))
+  (defun complete-runtime (result)
+    (let* ((out-dir (get result :outDir)) (base (resolve out-dir "node_modules/eliscript"))
+           (runtime (runtime-inputs)) (files (get runtime :files))
+           (directories (js-array "node_modules" "node_modules/eliscript" "node_modules/eliscript/runtime")))
+      ;; All source authentication and all user-output conflicts precede the
+      ;; first support write. The original project manifest/result stay exact.
+      (js-call directories :forEach (lambda (path) (plain-directory out-dir path)))
+      (js-call files :forEach (lambda (record)
+        (check-target base record)
+        (reject-source-alias base record (get runtime :inputs))))
+      (js-call directories :forEach (lambda (path)
+        (plain-directory out-dir path)
+        (try (mkdirSync (resolve out-dir path))
+          (catch error (unless (= (get error :code) "EEXIST") (throw error))))
+        (plain-directory out-dir path)))
+      (js-call files :forEach (lambda (record)
+        (js-call directories :forEach (lambda (path) (plain-directory out-dir path)))
+        (reject-source-alias base record (get runtime :inputs))
+        (unless (check-target base record)
+          (try (writeFileSync (resolve base (get record :path)) (get record :content) (js-object :flag "wx"))
+            (catch error
+              (if (= (get error :code) "EEXIST") (check-target base record) (throw error)))))))
+      result))
+
+  (defasync buildProject (options)
+    ;; Preserve legacy option reads, validation, root isolation, cache, reports,
+    ;; errors and its frozen return identity. Deployment is only post-success.
+    (complete-runtime (await (js-call legacy :buildProject options))))
+
+  (export checkProject buildProject))

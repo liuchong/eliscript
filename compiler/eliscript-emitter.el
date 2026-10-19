@@ -13,10 +13,16 @@
 (require 'subr-x)
 (require 'eliscript-diagnostic)
 (require 'eliscript-parameters)
+(require 'eliscript-ir)
 
-;; Identical capsules share cycle guards without global mutation.
+(declare-function eliscript-ir-emitter--binding-initializer "eliscript-ir-emitter" (node))
+(declare-function eliscript-ir-emitter--children "eliscript-ir-emitter" (node))
+(declare-function eliscript-ir-emitter--split-counted-children "eliscript-ir-emitter" (node property))
+
+;; Identical capsules share cycle guards and deterministic Number method
+;; formatting without replacing global prototypes or native function values.
 (defconst eliscript-emitter--array-text-import
-  "import { c as __eliscript_at, d as __eliscript_at_direct } from \"data:text/javascript;base64,dmFyIGU9UmVmbGVjdC5hcHBseSxpPUFycmF5LmlzQXJyYXksbD1BcnJheS5wcm90b3R5cGUuam9pbixhPUFycmF5LnByb3RvdHlwZS50b1N0cmluZyxrPU9iamVjdC5wcm90b3R5cGUudG9TdHJpbmcsdT1TdHJpbmcseT1UeXBlRXJyb3IseD1TeW1ib2wudG9QcmltaXRpdmUsQT1XZWFrU2V0LnByb3RvdHlwZS5oYXMsVD1XZWFrU2V0LnByb3RvdHlwZS5hZGQsQz1XZWFrU2V0LnByb3RvdHlwZS5kZWxldGUsbT1uZXcgV2Vha1NldCxmPW51bGwsZz0odCk9PnQhPT1udWxsJiYodHlwZW9mIHQ9PT0ib2JqZWN0Inx8dHlwZW9mIHQ9PT0iZnVuY3Rpb24ifHx0eXBlb2YgdD4idSImJnQhPT12b2lkIDApLGo9KHQpPT50eXBlb2YgdD09PSJmdW5jdGlvbiJ8fHR5cGVvZiB0PiJ1IiYmdCE9PXZvaWQgMDtmdW5jdGlvbiBXKCl7bGV0IG49bmV3IHkoImN5Y2xpYyBhcnJheSB0ZXh0IGNvbnZlcnNpb24iKTt0aHJvdyBuLmVsaXNjcmlwdERpYWdub3N0aWM9e2Zvcm1hdDoiZWxpc2NyaXB0LWRpYWdub3N0aWMiLHZlcnNpb246MSxjb2RlOiJFTEktUlQwMDA5IixzZXZlcml0eToiZXJyb3IiLHBoYXNlOiJydW50aW1lIixtZXNzYWdlOiJjeWNsaWMgYXJyYXkgdGV4dCBjb252ZXJzaW9uIn0sbn1mdW5jdGlvbiBFKHQpe2lmKCFnKHQpKXJldHVybiB0O2xldCBuPXRbeF07aWYobiE9PXZvaWQgMCYmbiE9PW51bGwpe2xldCBvPWUobix0LFsic3RyaW5nIl0pO2lmKCFnKG8pKXJldHVybiBvO3Rocm93IG5ldyB5KCJDYW5ub3QgY29udmVydCBvYmplY3QgdG8gcHJpbWl0aXZlIHZhbHVlIil9Zm9yKGxldCBvPTA7bzwyO28rKyl7bGV0IHI9dFtvPT09MD8idG9TdHJpbmciOiJ2YWx1ZU9mIl07aWYoaihyKSl7bGV0IGM9cj09PWEmJmkodCk/Uyh0KTplKHIsdCxbXSk7aWYoIWcoYykpcmV0dXJuIGN9fXRocm93IG5ldyB5KCJDYW5ub3QgY29udmVydCBvYmplY3QgdG8gcHJpbWl0aXZlIHZhbHVlIil9ZnVuY3Rpb24gYih0KXtsZXQgbj1FKHQpO2lmKHR5cGVvZiBuPT09InN5bWJvbCIpdGhyb3cgbmV3IHkoIkNhbm5vdCBjb252ZXJ0IGEgU3ltYm9sIHZhbHVlIHRvIGEgc3RyaW5nIik7cmV0dXJuIHUobil9ZnVuY3Rpb24gaCh0LG4pe2xldCBvPSt0Lmxlbmd0aCxyPW8hPT1vfHxvPD0wPzA6bz49OTAwNzE5OTI1NDc0MDk5MT85MDA3MTk5MjU0NzQwOTkxOm8tbyUxLGM9bj09PXZvaWQgMD8iLCI6YihuKSx3PWY9PT1udWxsO2lmKHcpZj10O2Vsc2V7aWYodD09PWZ8fGUoQSxtLFt0XSkpVygpO2UoVCxtLFt0XSl9dHJ5e2xldCBwPSIiO2ZvcihsZXQgcz0wO3M8cjtzKyspe2lmKHMpcCs9YztsZXQgZD10W3NdO2lmKGQhPT1udWxsJiZkIT09dm9pZCAwKXArPWIoZCl9cmV0dXJuIHB9ZmluYWxseXtpZih3KWY9bnVsbDtlbHNlIGUoQyxtLFt0XSl9fWZ1bmN0aW9uIFModCl7bGV0IG49dC5qb2luO3JldHVybiBqKG4pP249PT1sP2godCx2b2lkIDApOmUobix0LFtdKTplKGssdCxbXSl9ZnVuY3Rpb24gUih0LG4pe2xldCBvPXRbbl07cmV0dXJuKC4uLnIpPT57aWYobz09PWwmJmkodCkpcmV0dXJuIGgodCxyWzBdKTtpZihvPT09YSYmaSh0KSlyZXR1cm4gUyh0KTtyZXR1cm4gZShvLHQscil9fWZ1bmN0aW9uIEQodCxuLC4uLm8pe2xldCByPXRbbl07aWYocj09PWwmJmkodCkpcmV0dXJuIGgodCxvWzBdKTtpZihyPT09YSYmaSh0KSlyZXR1cm4gUyh0KTtyZXR1cm4gZShyLHQsbyl9ZXhwb3J0e1IgYXMgYyxEIGFzIGR9Ow==\";\n")
+  "import { c as __eliscript_at, d as __eliscript_at_direct } from \"data:text/javascript;base64,dmFyIG09UmVmbGVjdC5hcHBseSx0dD1OdW1iZXIucHJvdG90eXBlLnZhbHVlT2Ysaj1OdW1iZXIucHJvdG90eXBlLnRvU3RyaW5nLFU9TnVtYmVyLG50PU9iamVjdC5jcmVhdGUsaD1CaWdJbnQsZXQ9RGF0YVZpZXcsb3Q9QXJyYXlCdWZmZXIsaXQ9RGF0YVZpZXcucHJvdG90eXBlLnNldEZsb2F0NjQsSj1EYXRhVmlldy5wcm90b3R5cGUuZ2V0VWludDMyLHJ0PVJhbmdlRXJyb3I7ZnVuY3Rpb24gY3QodCxuKXtsZXQgZT1oKG4pLG89aCh0KSxpPSIiO2lmKG88MG4pbz0tbztkb3tsZXQgZj1vJWU7aT0iMDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6IltVKGYpXStpLG8vPWV9d2hpbGUobyE9PTBuKTtyZXR1cm4gdDwwPyItIitpOml9ZnVuY3Rpb24gc3QodCxuKXtsZXQgZT1uZXcgZXQobmV3IG90KDgpKTttKGl0LGUsWzAsdCwhMV0pO2xldCBvPW0oSixlLFswLCExXSksaT1tKEosZSxbNCwhMV0pLGY9bz4+PjIwJjIwNDcsYj1vJjEwNDg1NzUscD1vPj4+MzEscj1oKGIpPDwzMm58aChpKTtpZihmIT09MClyKz0xbjw8NTJuO3I8PD0ybjtsZXQgbD00bix1PWY+MSYmYj09PTAmJmk9PT0wPzFuOjJuLGs9Mm47aWYoZj49MTA3NSl7bGV0IGM9aChmLTEwNzUpO3I8PD1jLHU8PD1jLGs8PD1jfWVsc2UgbDw8PWgoZj09PTA/MTA3NDoxMDc1LWYpO2xldCBkPWgobiksZz1udChudWxsKSxhPTAsUz0wLEQ9MDtpZihyPGwpd2hpbGUocjxsKXtpZihyKjJuPmwmJnIraz5sKWJyZWFrO3IqPWQsdSo9ZCxrKj1kLFMtLX1lbHNlIHdoaWxlKHI+PWwqZClsKj1kLFMrKztmb3IoOzspe2xldCBjPVUoci9sKTtyJT1sO2xldCBJPXI8dSx4PXIraz5sO2dbYSsrXT1jLEQ9RCoobiYxKStjJjE7bGV0IHE9cioybixQPXE+bHx8cT09PWwmJkQ9PT0xO2lmKFAmJnh8fCFQJiZJKXtpZihQKXtsZXQgUj1hLEI9ITA7d2hpbGUoUj4wJiZCKXtSLS07bGV0IEg9Z1tSXSsxO2lmKEg9PT1uKWdbUl09MDtlbHNlIGdbUl09SCxCPSExfWlmKEIpZ1swXT0xLFMrK31icmVha31pZihhPj02NCl0aHJvdyBuZXcgcnQoIm51bWJlciByYWRpeCBmb3JtYXR0aW5nIGRpZCBub3QgY29udmVyZ2UiKTtyKj1kLHUqPWQsayo9ZH13aGlsZShhPjEmJmdbYS0xXT09PTApYS0tO2xldCB3PSIiO2lmKFM8MCl7dz0iMC4iO2ZvcihsZXQgYz0wO2M8LTEtUztjKyspdys9IjAiO2ZvcihsZXQgYz0wO2M8YTtjKyspdys9IjAxMjM0NTY3ODlhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5eiJbZ1tjXV19ZWxzZXtsZXQgYz1TKzEsST1jPmE/YzphO2ZvcihsZXQgeD0wO3g8STt4Kyspe2lmKHg9PT1jJiZjPGEpdys9Ii4iO3crPXg8YT8iMDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6IltnW3hdXToiMCJ9fXJldHVybiBwPyItIit3Ond9ZnVuY3Rpb24gRyh0LG4pe2xldCBlO3RyeXtlPW0odHQsdCxbXSl9Y2F0Y2h7cmV0dXJuIG0oaix0LFtuXSl9bGV0IG89MTA7aWYobiE9PXZvaWQgMCl7bGV0IGk9K247aWYobz1pIT09aT8wOmktaSUxLG88Mnx8bz4zNnx8byE9PW8pcmV0dXJuIG0oaixlLFtvXSl9aWYobz09PTEwfHxlPT09MHx8ZSE9PWV8fGU9PT0xLzB8fGU9PT0tMS8wKXJldHVybiBtKGosZSxbMTBdKTtyZXR1cm4gZSUxPT09MD9jdChlLG8pOnN0KGUsbyl9dmFyIHM9UmVmbGVjdC5hcHBseSxNPUZ1bmN0aW9uLnByb3RvdHlwZS5jYWxsLE49RnVuY3Rpb24ucHJvdG90eXBlLmFwcGx5LEU9RnVuY3Rpb24ucHJvdG90eXBlLmJpbmQsVD1PYmplY3QuZGVmaW5lUHJvcGVydHksbHQ9T2JqZWN0LmdldE93blByb3BlcnR5RGVzY3JpcHRvcixmdD1PYmplY3QuZ2V0UHJvdG90eXBlT2YsdXQ9T2JqZWN0LnNldFByb3RvdHlwZU9mLGF0PVJlZmxlY3Qub3duS2V5cyxwdD1TeW1ib2wuaGFzSW5zdGFuY2UsVj1BcnJheS5pc0FycmF5LEs9QXJyYXkucHJvdG90eXBlLmpvaW4sej1BcnJheS5wcm90b3R5cGUudG9TdHJpbmcseXQ9T2JqZWN0LnByb3RvdHlwZS50b1N0cmluZyxidD1TdHJpbmcsQz1UeXBlRXJyb3IsZHQ9U3ltYm9sLnRvUHJpbWl0aXZlLGd0PVdlYWtTZXQucHJvdG90eXBlLmhhcyx3dD1XZWFrU2V0LnByb3RvdHlwZS5hZGQseHQ9V2Vha1NldC5wcm90b3R5cGUuZGVsZXRlLEY9bmV3IFdlYWtTZXQsTz1udWxsLFc9KHQpPT50IT09bnVsbCYmKHR5cGVvZiB0PT09Im9iamVjdCJ8fHR5cGVvZiB0PT09ImZ1bmN0aW9uInx8dHlwZW9mIHQ+InUiJiZ0IT09dm9pZCAwKSxBPSh0KT0+dHlwZW9mIHQ9PT0iZnVuY3Rpb24ifHx0eXBlb2YgdD4idSImJnQhPT12b2lkIDA7ZnVuY3Rpb24gaHQoKXtsZXQgbj1uZXcgQygiY3ljbGljIGFycmF5IHRleHQgY29udmVyc2lvbiIpO3Rocm93IG4uZWxpc2NyaXB0RGlhZ25vc3RpYz17Zm9ybWF0OiJlbGlzY3JpcHQtZGlhZ25vc3RpYyIsdmVyc2lvbjoxLGNvZGU6IkVMSS1SVDAwMDkiLHNldmVyaXR5OiJlcnJvciIscGhhc2U6InJ1bnRpbWUiLG1lc3NhZ2U6ImN5Y2xpYyBhcnJheSB0ZXh0IGNvbnZlcnNpb24ifSxufWZ1bmN0aW9uIG10KHQpe2lmKCFXKHQpKXJldHVybiB0O2xldCBuPXRbZHRdO2lmKG4hPT12b2lkIDAmJm4hPT1udWxsKXtsZXQgZT1zKG4sdCxbInN0cmluZyJdKTtpZighVyhlKSlyZXR1cm4gZTt0aHJvdyBuZXcgQygiQ2Fubm90IGNvbnZlcnQgb2JqZWN0IHRvIHByaW1pdGl2ZSB2YWx1ZSIpfWZvcihsZXQgZT0wO2U8MjtlKyspe2xldCBvPXRbZT09PTA/InRvU3RyaW5nIjoidmFsdWVPZiJdO2lmKEEobykpe2xldCBpPW89PT16JiZWKHQpP3YodCk6cyhvLHQsW10pO2lmKCFXKGkpKXJldHVybiBpfX10aHJvdyBuZXcgQygiQ2Fubm90IGNvbnZlcnQgb2JqZWN0IHRvIHByaW1pdGl2ZSB2YWx1ZSIpfWZ1bmN0aW9uIFEodCl7bGV0IG49bXQodCk7aWYodHlwZW9mIG49PT0ic3ltYm9sIil0aHJvdyBuZXcgQygiQ2Fubm90IGNvbnZlcnQgYSBTeW1ib2wgdmFsdWUgdG8gYSBzdHJpbmciKTtyZXR1cm4gYnQobil9ZnVuY3Rpb24gXyh0LG4pe2xldCBlPSt0Lmxlbmd0aCxvPWUhPT1lfHxlPD0wPzA6ZT49OTAwNzE5OTI1NDc0MDk5MT85MDA3MTk5MjU0NzQwOTkxOmUtZSUxLGk9bj09PXZvaWQgMD8iLCI6UShuKSxmPU89PT1udWxsO2lmKGYpTz10O2Vsc2V7aWYodD09PU98fHMoZ3QsRixbdF0pKWh0KCk7cyh3dCxGLFt0XSl9dHJ5e2xldCBiPSIiO2ZvcihsZXQgcD0wO3A8bztwKyspe2lmKHApYis9aTtsZXQgcj10W3BdO2lmKHIhPT1udWxsJiZyIT09dm9pZCAwKWIrPVEocil9cmV0dXJuIGJ9ZmluYWxseXtpZihmKU89bnVsbDtlbHNlIHMoeHQsRixbdF0pfX1mdW5jdGlvbiB2KHQpe2xldCBuPXQuam9pbjtyZXR1cm4gQShuKT9uPT09Sz9fKHQsdm9pZCAwKTpzKG4sdCxbXSk6cyh5dCx0LFtdKX1mdW5jdGlvbiB5KHQsbil7cmV0dXJuIG48dC5sZW5ndGg/dFtuXTp2b2lkIDB9ZnVuY3Rpb24gWCh0LG4pe2xldCBlPVtdO2ZvcihsZXQgbz1uO288dC5sZW5ndGg7bysrKVQoZSxlLmxlbmd0aCx7dmFsdWU6dFtvXSx3cml0YWJsZTohMCxlbnVtZXJhYmxlOiEwLGNvbmZpZ3VyYWJsZTohMH0pO3JldHVybiBlfWZ1bmN0aW9uIFN0KHQsbil7bGV0IGU9W107Zm9yKGxldCBvPTA7bzx0Lmxlbmd0aCtuLmxlbmd0aDtvKyspVChlLG8se3ZhbHVlOm88dC5sZW5ndGg/dFtvXTpuW28tdC5sZW5ndGhdLHdyaXRhYmxlOiEwLGVudW1lcmFibGU6ITAsY29uZmlndXJhYmxlOiEwfSk7cmV0dXJuIGV9ZnVuY3Rpb24gWSguLi50KXtyZXR1cm4gdH1mdW5jdGlvbiBaKHQsbil7cmV0dXJuIG4/cyhOLFksW3ZvaWQgMCx0XSk6cyhZLHZvaWQgMCx0KX1mdW5jdGlvbiBMKHQsbixlKXtmb3IoOzspe2lmKHQ9PT1qKXJldHVybiBHKG4seShlLDApKTtpZih0PT09SyYmVihuKSlyZXR1cm4gXyhuLHkoZSwwKSk7aWYodD09PXomJlYobikpcmV0dXJuIHYobik7aWYodD09PU0pe2lmKCFBKG4pKXJldHVybiBzKHQsbixlKTtsZXQgbz1uLGk9eShlLDApO2U9WChlLDEpLHQ9byxuPWk7Y29udGludWV9aWYodD09PU4pe2lmKCFBKG4pKXJldHVybiBzKHQsbixlKTtsZXQgbz1uLGk9eShlLDApO2U9Wih5KGUsMSksITApLHQ9byxuPWk7Y29udGludWV9aWYodD09PXMpe2xldCBvPXkoZSwwKSxpPXkoZSwxKTtpZighQShvKSlyZXR1cm4gcyh0LG4sZSk7ZT1aKHkoZSwyKSwhMSksdD1vLG49aTtjb250aW51ZX1pZih0PT09RSl7bGV0IG89cyh0LG4sZSk7aWYobiE9PWomJm4hPT1LJiZuIT09eiYmbiE9PU0mJm4hPT1OJiZuIT09cyYmbiE9PUUpcmV0dXJuIG87bGV0IGk9bixmPXkoZSwwKSxiPVgoZSwxKSxwPSguLi51KT0+TChpLGYsU3QoYix1KSk7VChwLHB0LHt2YWx1ZToodSk9PnUgaW5zdGFuY2VvZiBpLGNvbmZpZ3VyYWJsZTohMH0pO2xldCByPXMoRSxwLFt2b2lkIDBdKTt1dChyLGZ0KG8pKTtsZXQgbD1hdChvKTtmb3IobGV0IHU9MDt1PGwubGVuZ3RoO3UrKylUKHIsbFt1XSxsdChvLGxbdV0pKTtyZXR1cm4gcn1yZXR1cm4gcyh0LG4sZSl9fWZ1bmN0aW9uIFJ0KHQsbil7bGV0IGU9dFtuXTtyZXR1cm4oLi4ubyk9PkwoZSx0LG8pfWZ1bmN0aW9uIEF0KHQsbiwuLi5lKXtsZXQgbz10W25dO3JldHVybiBMKG8sdCxlKX1leHBvcnR7UnQgYXMgYyxBdCBhcyBkfTs=\";\n")
 
 (defconst eliscript-emitter--number-conversion-intrinsics
     "const __eliscript_number_intrinsic = globalThis.Number;\nconst __eliscript_bigint_intrinsic = globalThis.BigInt;\nconst __eliscript_numeric_apply = globalThis.Reflect.apply;\nconst __eliscript_numeric_symbol = globalThis.Symbol.toPrimitive;\nconst __eliscript_numeric_error = globalThis.TypeError;\nconst __eliscript_numeric_trim = globalThis.String.prototype.trim;\nconst __eliscript_numeric_slice = globalThis.String.prototype.slice;\nconst __eliscript_numeric_exec = globalThis.RegExp.prototype.exec;\n")
@@ -61,6 +67,224 @@
   #'eliscript-symbol-reference-name)
 
 (defvar eliscript-emitter--temporary-counter 0)
+(defconst eliscript-emitter--tdz-import "import { tdz as __eliscript_tdz_error, immutable as __eliscript_const_error } from \"data:text/javascript;base64,Y29uc3QgRSA9IFJlZmVyZW5jZUVycm9yOyBjb25zdCBUID0gVHlwZUVycm9yOyBleHBvcnQgZnVuY3Rpb24gdGR6KG5hbWUpIHsgdGhyb3cgbmV3IEUoIkNhbm5vdCBhY2Nlc3MgJyIgKyBuYW1lICsgIicgYmVmb3JlIGluaXRpYWxpemF0aW9uIik7IH0gZXhwb3J0IGZ1bmN0aW9uIGltbXV0YWJsZSgpIHsgdGhyb3cgbmV3IFQoIkFzc2lnbm1lbnQgdG8gY29uc3RhbnQgdmFyaWFibGUuIik7IH0K\";\n")
+;; Private module initialization state is separate from public ESM bindings.
+(defvar eliscript-emitter--tdz-state nil)
+(defconst eliscript-emitter--tdz-read-tag (make-symbol "eliscript-tdz-read"))
+(defconst eliscript-emitter--tdz-write-tag (make-symbol "eliscript-tdz-write"))
+(defconst eliscript-emitter--tdz-assignment-tag (make-symbol "eliscript-tdz-assignment"))
+(defun eliscript-emitter--tdz-ready-name (record)
+  (format "__eliscript_tdz_ready_%d" (plist-get record :index)))
+(defun eliscript-emitter--tdz-reader-name (record)
+  (format "__eliscript_tdz_read_%d" (plist-get record :index)))
+(defun eliscript-emitter--tdz-writer-name (record)
+  (format "__eliscript_tdz_write_%d" (plist-get record :index)))
+(defun eliscript-emitter--tdz-root (name)
+  ;; Resolve the established emitted binding namespace, just like the
+  ;; self-hosted emitter. Distinct source spellings can share a JS binding.
+  ;; Reference mapping also accepts literal symbols, which are never bindings.
+  (eliscript-emitter--reference-name
+   (intern (car (split-string (symbol-name name) "[./]")))))
+(defun eliscript-emitter--tdz-read-text (record reference)
+  (if (null record) (eliscript-emitter--reference-name reference)
+    (let* ((name (eliscript-emitter--binding-name (plist-get record :name)))
+           (text (eliscript-emitter--reference-name reference)))
+      (concat "(" (eliscript-emitter--tdz-reader-name record) "())" (substring text (length name))))))
+(defun eliscript-emitter--tdz-write-text (record name value)
+  (if record (concat (eliscript-emitter--tdz-writer-name record) "(" value ")")
+    (format "(%s = %s)" (eliscript-emitter--binding-name name) value)))
+(defun eliscript-emitter--tdz-prologue (state)
+  (when (plist-get state :variables)
+    (concat eliscript-emitter--tdz-import
+      (mapconcat
+        (lambda (record)
+          (let* ((ready (eliscript-emitter--tdz-ready-name record))
+                 (name (eliscript-emitter--binding-name (plist-get record :name)))
+                 (argument (format "__eliscript_tdz_value_%d" (plist-get record :index)))
+                 (quoted (eliscript-emitter--json-string name)))
+            (concat "var " ready ";\n"
+              "function " (eliscript-emitter--tdz-reader-name record) "() { if (" ready
+              " !== true) __eliscript_tdz_error(" quoted "); return " name "; }\n"
+              "function " (eliscript-emitter--tdz-writer-name record) "(" argument ") { if (" ready
+              " !== true) __eliscript_tdz_error(" quoted "); "
+              (if (plist-get record :mutable) (concat "return (" name " = " argument ");") "return __eliscript_const_error();") " }\n")))
+        (plist-get state :variables) ""))))
+
+
+
+(defun eliscript-emitter--tdz-legacy-shadow (pattern scope)
+  (let ((pending (list pattern)))
+    (while pending
+      (let ((item (pop pending)))
+        (cond ((and item (symbolp item) (not (keywordp item))
+                    (not (string-prefix-p "&" (symbol-name item))))
+               (puthash (eliscript-emitter--binding-name item) nil scope))
+              ((vectorp item)
+               (let ((index (1- (length item))))
+                 (while (>= index 0) (push (aref item index) pending) (setq index (1- index))))))))))
+
+(defun eliscript-emitter--tdz-legacy-parameters (parameters scope)
+  (dolist (parameter parameters) (eliscript-emitter--tdz-legacy-shadow parameter scope)))
+(defun eliscript-emitter--tdz-legacy-predeclare (forms scope state)
+  (dolist (form forms)
+    (when (consp form)
+      (pcase (car form)
+        ('module (eliscript-emitter--tdz-legacy-predeclare (cddr form) scope state))
+        ((or 'defvar 'defconst)
+         (let ((record (list :index (length (plist-get state :variables)) :name (cadr form) :mutable (eq (car form) 'defvar))))
+           (setf (plist-get state :variables) (append (plist-get state :variables) (list record)))
+           (puthash form record (plist-get state :declarations))
+           (puthash (eliscript-emitter--binding-name (cadr form)) record scope)))
+        ((or 'defun 'defn 'defasync) (puthash (eliscript-emitter--binding-name (cadr form)) nil scope))
+        ((or 'import 'import-portable)
+         (dolist (name (cddr form))
+           (when (and name (symbolp name) (not (keywordp name)))
+             (puthash (eliscript-emitter--binding-name name) nil scope))))))))
+(defun eliscript-emitter--tdz-legacy-sequence (forms scope)
+  (mapcar (lambda (form) (eliscript-emitter--tdz-legacy-expression form scope)) forms))
+(defun eliscript-emitter--tdz-legacy-expression (form scope)
+  "Rewrite ordinary TDZ expression trees using explicit continuations."
+  (eliscript-emitter--run-depth-plan #'eliscript-emitter--tdz-depth-plan :expression form scope))
+
+(defun eliscript-emitter--tdz-depth-plan (mode value scope)
+  (pcase mode
+    (:sequence
+     (list :children (mapcar (lambda (form) (list :expression form scope)) value)
+           (lambda (results) (list :value results))))
+    (:bindings
+     (let ((remaining (nth 0 value)) (original (nth 1 value)) (reversed (nth 2 value))
+           (operator (nth 3 value)) (body (nth 4 value)) (child (nth 5 value)) (sequential (nth 6 value)))
+       (if remaining
+           (let* ((binding (car remaining)) (parsed (eliscript-emitter--parse-binding binding)) (target (car parsed)))
+             (list :children (list (list :expression (cadr parsed) (if sequential child scope)))
+                   (lambda (results)
+                     (when sequential (eliscript-emitter--tdz-legacy-shadow target child))
+                     (list :children
+                           (list (list :bindings
+                                       (list (cdr remaining) original
+                                             (cons (if (or (symbolp binding) (vectorp binding)) binding (list target (car results))) reversed)
+                                             operator body child sequential) scope))
+                           (lambda (tail) (list :value (car tail)))))))
+         (unless sequential
+           (dolist (binding original)
+             (eliscript-emitter--tdz-legacy-shadow (car (eliscript-emitter--parse-binding binding)) child)))
+         (list :children (list (list :sequence body child))
+               (lambda (results) (list :value (cons operator (cons (nreverse reversed) (car results)))))))))
+    (:expression
+     (cond
+      ((vectorp value)
+       (list :children (list (list :sequence (append value nil) scope))
+             (lambda (results) (list :value (vconcat (car results))))))
+      ((and (consp value) (memq (car value) '(let let* loop)))
+       (list :children (list (list :bindings (list (cadr value) (cadr value) nil (car value) (cddr value)
+                                                  (copy-hash-table scope) (eq (car value) 'let*)) scope))
+             (lambda (results) (list :value (car results)))))
+      ((and (consp value) (memq (car value) '(lambda fn async)))
+       (let ((child (copy-hash-table scope)))
+         (eliscript-emitter--tdz-legacy-parameters (cadr value) child)
+         (list :children (list (list :sequence (cddr value) child))
+               (lambda (results) (list :value (cons (car value) (cons (cadr value) (car results))))))))
+      ((and (consp value) (not (memq (car value) '(quote js* setq set! try cond js-object))))
+       (let* ((operator (car value))
+              (fixed (memq operator '(if when unless progn do while recur and or not
+                + * - / % mod = /= not= < <= > >= 1+ 1- eq equal null nil? undefined? nullish?
+                int32 uint32 imul32 bit-and bit-or bit-xor bit-not bit-shift-left bit-shift-right unsigned-bit-shift-right
+                value-type host-identity-token string-code-unit-at string-from-code-unit string-to-number string-to-bigint number-float64-words
+                list vector hash-map hash-set queue js-array car cdr cons js-cons nth js-nth aref length js-length
+                new print str object-keys object-has? object-assoc __eliscript_arity_error funcall apply get put js-call await throw))))
+         (list :children
+               (append (unless fixed (list (list :expression operator scope)))
+                       (mapcar (lambda (form) (list :expression form scope)) (cdr value)))
+               (lambda (results) (list :value (if fixed (cons operator results) results))))))
+      (t (list :value (eliscript-emitter--tdz-legacy-expression-recursive value scope)))))
+    (_ (error "unknown TDZ continuation mode: %S" mode))))
+
+(defun eliscript-emitter--tdz-legacy-expression-recursive (form scope)
+  (cond
+   ((and form (symbolp form) (not (keywordp form)))
+    (let ((record (gethash (eliscript-emitter--tdz-root form) scope)))
+      (if record (list eliscript-emitter--tdz-read-tag record form) form)))
+   ((vectorp form) (vconcat (eliscript-emitter--tdz-legacy-sequence (append form nil) scope)))
+   ((consp form)
+    (let ((operator (car form)) (arguments (cdr form)))
+      (pcase operator
+        ((or 'quote 'js*) form)
+        ((or 'lambda 'fn 'async)
+         (let ((child (copy-hash-table scope)))
+           (eliscript-emitter--tdz-legacy-parameters (car arguments) child)
+           (cons operator (cons (car arguments) (eliscript-emitter--tdz-legacy-sequence (cdr arguments) child)))))
+        ((or 'let 'let* 'loop)
+         (let ((child (copy-hash-table scope)) (sequential (eq operator 'let*)) bindings)
+           (dolist (binding (car arguments))
+             (let* ((parsed (eliscript-emitter--parse-binding binding))
+                    (target (car parsed))
+                    (value (eliscript-emitter--tdz-legacy-expression (cadr parsed) (if sequential child scope))))
+               (push (if (or (symbolp binding) (vectorp binding)) binding (list target value)) bindings)
+               (when sequential (eliscript-emitter--tdz-legacy-shadow target child))))
+           (unless sequential
+             (dolist (binding (car arguments))
+               (eliscript-emitter--tdz-legacy-shadow (car (eliscript-emitter--parse-binding binding)) child)))
+           (cons operator (cons (nreverse bindings) (eliscript-emitter--tdz-legacy-sequence (cdr arguments) child)))))
+        ((or 'setq 'set!)
+         (if (eq operator 'set!) (eliscript-emitter--require-arity "set!" arguments 2 2)
+           (when (or (null arguments) (= (% (length arguments) 2) 1))
+             (eliscript-emitter--fail "setq expects one or more name/value pairs")))
+         (let ((pending arguments) pairs original-pairs guarded)
+           (while pending
+             (let* ((name (pop pending)) (value (pop pending))
+                    (record (and (symbolp name) (gethash (eliscript-emitter--tdz-root name) scope)))
+                    (rewritten (eliscript-emitter--tdz-legacy-expression value scope)))
+               (when record (setq guarded t))
+               (push (list name rewritten) original-pairs)
+               (push (list eliscript-emitter--tdz-write-tag record name rewritten) pairs)))
+           (if guarded
+               (list eliscript-emitter--tdz-assignment-tag operator (nreverse pairs))
+             (cons operator (apply #'append (nreverse original-pairs))))))
+        ('try
+         (cons operator
+           (mapcar (lambda (clause)
+             (cond
+              ((and (consp clause) (eq (car clause) 'catch))
+               (let ((child (copy-hash-table scope)))
+                 (eliscript-emitter--tdz-legacy-shadow (cadr clause) child)
+                 (cons 'catch (cons (cadr clause) (eliscript-emitter--tdz-legacy-sequence (cddr clause) child)))))
+              ((and (consp clause) (eq (car clause) 'finally))
+               (cons 'finally (eliscript-emitter--tdz-legacy-sequence (cdr clause) scope)))
+              (t (eliscript-emitter--tdz-legacy-expression clause scope)))) arguments)))
+        ('cond
+         (cons operator (mapcar (lambda (clause) (eliscript-emitter--tdz-legacy-sequence clause scope)) arguments)))
+        ('js-object
+         (let ((pending arguments) fields)
+           (while pending
+             (let ((key (pop pending)) (value (pop pending)))
+               (push (if (or (symbolp key) (stringp key)) key (eliscript-emitter--tdz-legacy-expression key scope)) fields)
+               (push (eliscript-emitter--tdz-legacy-expression value scope) fields)))
+           (cons operator (nreverse fields))))
+        (_
+         (cons
+          (if (memq operator '(if when unless progn do while recur and or not
+                + * - / % mod = /= not= < <= > >= 1+ 1- eq equal null nil? undefined? nullish?
+                int32 uint32 imul32 bit-and bit-or bit-xor bit-not bit-shift-left bit-shift-right unsigned-bit-shift-right
+                value-type host-identity-token string-code-unit-at string-from-code-unit string-to-number string-to-bigint number-float64-words
+                list vector hash-map hash-set queue js-array car cdr cons js-cons nth js-nth aref length js-length
+                new print str object-keys object-has? object-assoc __eliscript_arity_error funcall apply get put js-call await throw))
+              operator (eliscript-emitter--tdz-legacy-expression operator scope))
+          (eliscript-emitter--tdz-legacy-sequence arguments scope))))))
+   (t form)))
+(defun eliscript-emitter--tdz-legacy-top (form scope state)
+  (if (not (consp form)) (eliscript-emitter--tdz-legacy-expression form scope)
+    (pcase (car form)
+      ('module (cons 'module (cons (cadr form) (mapcar (lambda (child) (eliscript-emitter--tdz-legacy-top child scope state)) (cddr form)))))
+      ((or 'import 'import-portable 'export) form)
+      ((or 'defvar 'defconst)
+       (let ((copy (cons (car form) (cons (cadr form) (eliscript-emitter--tdz-legacy-sequence (cddr form) scope)))))
+         (puthash copy (gethash form (plist-get state :declarations)) (plist-get state :declarations)) copy))
+      ((or 'defun 'defn 'defasync)
+       (let ((child (copy-hash-table scope)))
+         (eliscript-emitter--tdz-legacy-parameters (nth 2 form) child)
+         (append (list (car form) (cadr form) (nth 2 form)) (eliscript-emitter--tdz-legacy-sequence (nthcdr 3 form) child))))
+      ('export-default (cons 'export-default (eliscript-emitter--tdz-legacy-sequence (cdr form) scope)))
+      (_ (eliscript-emitter--tdz-legacy-expression form scope)))))
 
 (defun eliscript-emitter--fail (format-string &rest arguments)
   "Signal a compiler error using FORMAT-STRING and ARGUMENTS."
@@ -70,13 +294,62 @@
 
 (defun eliscript-emitter--json-string (value)
   "Encode string VALUE as an ECMAScript string literal."
-  (let ((encoded (json-serialize value)))
-    ;; Emacs 30 returns UTF-8 JSON strings as unibyte data.  Decode before
-    ;; composing them with multibyte emitter fragments so non-ASCII values do
-    ;; not turn into one replacement character per encoded byte.
-    (if (multibyte-string-p encoded)
-        encoded
-      (decode-coding-string encoded 'utf-8-unix))))
+  (cl-labels
+      ((encode (text)
+         (let* ((encoded (json-serialize text))
+                (decoded
+           ;; Emacs 30 returns UTF-8 JSON strings as unibyte data. Decode
+           ;; before composing them with multibyte emitter fragments.
+                 (if (multibyte-string-p encoded) encoded
+                   (decode-coding-string encoded 'utf-8-unix)))
+                (index 0))
+           ;; Jansson uses uppercase escape digits; JSON.stringify uses
+           ;; lowercase. Skip escaped backslashes so literal text such as
+           ;; "\\u00AB" retains its exact original spelling.
+           (while (< index (length decoded))
+             (if (= (aref decoded index) ?\\)
+                 (if (= (aref decoded (1+ index)) ?u)
+                     (progn
+                       (dotimes (digit 4)
+                         (let* ((at (+ index 2 digit)) (unit (aref decoded at)))
+                           (when (<= ?A unit ?F) (aset decoded at (+ unit 32)))))
+                       (setq index (+ index 6)))
+                   (setq index (+ index 2)))
+               (setq index (1+ index))))
+           decoded)))
+    (if (or (not (stringp value))
+            (not (cl-find-if (lambda (unit) (<= #xd800 unit #xdfff)) value)))
+        (encode value)
+      ;; Emacs can represent raw UTF16 surrogate code units in a string, but
+      ;; json-serialize accepts Unicode scalar values only. JSON.stringify
+      ;; emits isolated halves as lowercase escapes and paired halves as one
+      ;; scalar. Preserve the serializer's rejection of non-Unicode Emacs
+      ;; characters rather than treating them as additional UTF16 code units.
+      (when (cl-find-if (lambda (unit) (> unit #x10ffff)) value)
+        (encode value))
+      (with-temp-buffer
+        (insert "\"")
+        (let ((start 0) (index 0) (size (length value)))
+          (while (< index size)
+            (let ((unit (aref value index)))
+              (if (<= #xd800 unit #xdfff)
+                  (progn
+                    (when (< start index)
+                      (insert (substring (encode (substring value start index)) 1 -1)))
+                    (if (and (<= unit #xdbff) (< (1+ index) size)
+                             (<= #xdc00 (aref value (1+ index)) #xdfff))
+                        (let ((point (+ #x10000 (ash (- unit #xd800) 10)
+                                        (- (aref value (1+ index)) #xdc00))))
+                          (insert (substring (encode (char-to-string point)) 1 -1))
+                          (setq index (+ index 2)))
+                      (insert (format "\\u%04x" unit))
+                      (setq index (1+ index)))
+                    (setq start index))
+                (setq index (1+ index)))))
+          (when (< start size)
+            (insert (substring (encode (substring value start size)) 1 -1))))
+        (insert "\"")
+        (buffer-string)))))
 
 (defun eliscript-emitter--fresh-name ()
   "Return a fresh internal ECMAScript identifier."
@@ -111,10 +384,27 @@
   "Emit comma-separated ARGUMENTS."
   (mapconcat #'eliscript-emitter-emit-expression arguments ", "))
 
+(defun eliscript-emitter--qualified-apply-callee-p (form)
+  "Whether FORM reads a qualified apply property in call position.
+Keep references themselves unchanged: custom namespace objects and aliases
+must retain their ordinary property identity and receiver."
+  (let ((reference (if (and (consp form)
+                            (eq (car form) eliscript-emitter--tdz-read-tag))
+                       (nth 2 form) form)))
+    (and (symbolp reference)
+         (string-match-p "[./]apply[./]*\\'" (symbol-name reference)))))
+
 (defun eliscript-emitter--emit-callee (form)
   "Emit FORM in a position where ECMAScript expects a callable value."
   (let ((output (eliscript-emitter-emit-expression form)))
-    (if (symbolp form) output (format "(%s)" output))))
+    (cond
+     ((eliscript-emitter--qualified-apply-callee-p form)
+      ;; The already emitted reference retains its lexical/TDZ root lookup.
+      ;; Capture the actual property before arguments, then let the shared
+      ;; dispatcher recognize intrinsic Reflect.apply by identity only.
+      (format "__eliscript_at(%s, \"apply\")" (substring output 0 -6)))
+     ((symbolp form) output)
+     (t (format "(%s)" output)))))
 
 (defun eliscript-emitter--binding-pattern-p (form)
   "Return non-nil when FORM is a vector binding pattern."
@@ -302,21 +592,146 @@ Keep initializer and binding scopes separate, including sequential shadowing."
 
 (defun eliscript-emitter--emit-context-cond (clauses returning)
   "Emit CLAUSES as statements or RETURNING values."
-  (if (null clauses) (if returning "return null;" "")
-    (let* ((clause (car clauses)) (test (car clause)) (body (cdr clause)))
-      (if (eq test t)
-          (if returning (eliscript-emitter--emit-returning-body body)
-            (eliscript-emitter--emit-statement-body body))
-        (concat "if (" (eliscript-emitter--emit-test test) ") {\n"
-                (eliscript-emitter--indent
-                 (if returning (eliscript-emitter--emit-returning-body body)
-                   (eliscript-emitter--emit-statement-body body)))
-                "\n} else {\n"
-                (eliscript-emitter--indent
-                 (eliscript-emitter--emit-context-cond (cdr clauses) returning))
-                "\n}")))))
+  (let ((result (if returning "return null;" "")) frames)
+    (while clauses
+      (let* ((clause (pop clauses)) (test (car clause)) (body (cdr clause)))
+        (if (eq test t)
+            (setq result (if returning (eliscript-emitter--emit-returning-body body)
+                           (eliscript-emitter--emit-statement-body body))
+                  clauses nil)
+          (let ((condition (eliscript-emitter--emit-test test))
+                (consequent (if returning (eliscript-emitter--emit-returning-body body)
+                              (eliscript-emitter--emit-statement-body body))))
+            (push (list condition consequent) frames)))))
+    (dolist (frame frames)
+      (setq result (concat "if (" (car frame) ") {\n"
+                           (eliscript-emitter--indent (cadr frame))
+                           "\n} else {\n" (eliscript-emitter--indent result) "\n}")))
+    result))
+
+(defun eliscript-emitter--run-depth-plan (adapter mode value options)
+  "Run ADAPTER's emission continuations without nesting host Lisp calls.
+Children finish in source order; a continuation may schedule another stage
+when temporary allocation or binding setup must occur between child groups."
+  (let* ((result (list nil))
+         (pending (list (list :visit mode value options result))))
+    (while pending
+      (let ((job (pop pending)))
+        (pcase (car job)
+          (:visit
+           (push (list :plan (funcall adapter (nth 1 job) (nth 2 job) (nth 3 job))
+                       (nth 4 job)) pending))
+          (:plan
+           (let ((plan (nth 1 job)) (output (nth 2 job)))
+             (if (eq (car plan) :value)
+                 (setcar output (nth 1 plan))
+               (let* ((specs (nth 1 plan))
+                      (cells (mapcar (lambda (_spec) (list nil)) specs)))
+                 (push (list :combine (nth 2 plan) cells output) pending)
+                 (let ((pairs (cl-mapcar #'cons specs cells)))
+                   (dolist (pair (nreverse pairs))
+                     (let ((spec (car pair)))
+                       (push (list :visit (nth 0 spec) (nth 1 spec) (nth 2 spec) (cdr pair))
+                             pending))))))))
+          (:combine
+           (push (list :plan (funcall (nth 1 job) (mapcar #'car (nth 2 job)))
+                       (nth 3 job)) pending)))))
+    (car result)))
 
 (defun eliscript-emitter--emit-context (form returning)
+  "Emit FORM using explicit continuations for ordinary conditional trees."
+  (if (and (consp form) (memq (car form) '(if let let* progn do))
+           (not (eliscript-emitter--contains-await-p form)))
+      (eliscript-emitter--run-depth-plan #'eliscript-emitter--depth-plan :context form returning)
+    (eliscript-emitter--emit-context-recursive form returning)))
+
+(defun eliscript-emitter--depth-plan (mode value options)
+  "Describe an ordinary form emission step without recursing into its tree."
+  (pcase mode
+    (:value (list :value value))
+    (:expression
+     (if (and (consp value) (eq (car value) 'if))
+         (let ((arguments (cdr value)))
+           (eliscript-emitter--require-arity "if" arguments 2 3)
+           (list :children (mapcar (lambda (form) (list :expression form nil))
+                                   (list (nth 0 arguments) (nth 1 arguments) (nth 2 arguments)))
+                 (lambda (results)
+                   (list :value (format "(%s ? %s : %s)"
+                                         (if (eliscript-emitter--boolean-p (car arguments)) (nth 0 results)
+                                           (format "__eliscript_truthy(%s)" (nth 0 results)))
+                                         (nth 1 results) (nth 2 results))))))
+       (list :value (eliscript-emitter--emit-expression-recursive value))))
+    (:body
+     (if (null value) (list :value (if options "return null;" ""))
+       (let ((remaining value) specs)
+         (while remaining
+           (push (list :context (car remaining) (and options (null (cdr remaining)))) specs)
+           (setq remaining (cdr remaining)))
+         (list :children (nreverse specs)
+               (lambda (results) (list :value (string-join results "\n")))))))
+    (:declaration
+     (let ((name (eliscript-emitter--emit-binding-target (car value))))
+       (list :children (list (list :expression (cadr value) nil))
+             (lambda (results) (list :value (concat "let " name " = " (car results) ";"))))))
+    (:context-let
+     (let ((bindings (nth 0 value)) (body (nth 1 value)) (sequential (nth 2 value)))
+       (cond
+        ((null bindings) (list :children (list (list :body body options))
+                               (lambda (results) (list :value (car results)))))
+        ((and sequential (eliscript-emitter--context-sequential-safe-p bindings))
+         (list :children (append (mapcar (lambda (binding) (list :declaration binding nil)) bindings)
+                                 (list (list :body body options)))
+               (lambda (results)
+                 (list :value (concat "{\n" (eliscript-emitter--indent (string-join results "\n")) "\n}")))))
+        (t
+         (let* ((group (if sequential (list (car bindings)) bindings))
+                (temporaries (mapcar (lambda (_binding) (eliscript-emitter--fresh-name)) group)))
+           (list :children (mapcar (lambda (binding) (list :expression (cadr binding) nil)) group)
+                 (lambda (results)
+                   (let ((initializers (cl-mapcar (lambda (temporary text) (format "const %s = %s;" temporary text)) temporaries results))
+                         (declarations (cl-mapcar (lambda (binding temporary)
+                                                  (format "let %s = %s;" (eliscript-emitter--emit-binding-target (car binding)) temporary)) group temporaries)))
+                     (list :children (list (list :context-let (list (and sequential (cdr bindings)) body sequential) options))
+                           (lambda (tail)
+                             (list :value
+                                   (concat "{\n" (eliscript-emitter--indent
+                                                   (string-join
+                                                    (append initializers
+                                                            (list (concat "{\n" (eliscript-emitter--indent
+                                                                                 (string-join (append declarations tail) "\n")) "\n}"))) "\n")) "\n}"))))))))))))
+    (:context
+     (let ((operator (and (consp value) (car value))) (arguments (and (consp value) (cdr value))))
+       (cond
+        ((eliscript-emitter--contains-await-p value)
+         (list :value (eliscript-emitter--emit-context-recursive value options)))
+        ((memq operator '(progn do))
+         (list :children (list (list :body arguments options))
+               (lambda (results) (list :value (car results)))))
+        ((eq operator 'if)
+         (list :children
+               (list (list :expression (nth 0 arguments) nil)
+                     (list :context (nth 1 arguments) options)
+                     (if (nthcdr 2 arguments) (list :context (nth 2 arguments) options)
+                       (list :value (if options "return null;" "") nil)))
+               (lambda (results)
+                 (list :value
+                       (concat "if (" (if (eliscript-emitter--boolean-p (car arguments)) (nth 0 results)
+                                          (format "__eliscript_truthy(%s)" (nth 0 results))) ") {\n"
+                               (eliscript-emitter--indent (nth 1 results)) "\n}"
+                               (if (or options (nthcdr 2 arguments))
+                                   (concat " else {\n" (eliscript-emitter--indent (nth 2 results)) "\n}") ""))))))
+        ((and (memq operator '(let let*))
+              (let ((parsed (mapcar #'eliscript-emitter--parse-binding (car arguments))))
+                (cl-every (lambda (binding) (symbolp (car binding))) parsed)))
+         (list :children
+               (list (list :context-let
+                           (list (mapcar #'eliscript-emitter--parse-binding (car arguments))
+                                 (cdr arguments) (eq operator 'let*)) options))
+               (lambda (results) (list :value (car results)))))
+        (t (list :value (eliscript-emitter--emit-context-recursive value options))))))
+    (_ (error "unknown form emission continuation mode: %S" mode))))
+
+(defun eliscript-emitter--emit-context-recursive (form returning)
   "Emit FORM as a statement or a RETURNING body value."
   (let ((operator (and (consp form) (car form)))
         (arguments (and (consp form) (cdr form))))
@@ -375,18 +790,28 @@ Keep initializer and binding scopes separate, including sequential shadowing."
   "Emit FORMS as statements whose values are discarded."
   (mapconcat (lambda (form) (eliscript-emitter--emit-context form nil)) forms "\n"))
 
+(defun eliscript-emitter--some-form (forms predicate &optional excluded)
+  "Find PREDICATE in source preorder without recursive host calls.
+EXCLUDED operators prune their complete forms after the node predicate."
+  (let ((pending (list (cons :sequence forms))) found)
+    (while (and pending (not found))
+      (let* ((job (pop pending)) (value (cdr job)))
+        (if (eq (car job) :sequence)
+            (when value
+              (unless (consp value) (signal 'wrong-type-argument (list 'listp value)))
+              (push (cons :sequence (cdr value)) pending)
+              (push (cons :node (car value)) pending))
+          (setq found (funcall predicate value))
+          (unless found
+            (cond ((vectorp value) (push (cons :sequence (append value nil)) pending))
+                  ((and (consp value) (not (memq (car value) excluded)))
+                   (push (cons :sequence value) pending)))))))
+    found))
+
 (defun eliscript-emitter--contains-await-p (form)
-  "Return non-nil when FORM contains `await' in the current function."
-  (cond
-   ((vectorp form)
-    (cl-some #'eliscript-emitter--contains-await-p (append form nil)))
-   ((consp form)
-    (let ((operator (car form)))
-      (cond
-       ((eq operator 'await) t)
-       ((memq operator '(lambda fn async)) nil)
-       (t (cl-some #'eliscript-emitter--contains-await-p form)))))
-   (t nil)))
+  "Return non-nil when FORM contains await outside nested functions."
+  (eliscript-emitter--some-form (list form)
+    (lambda (node) (and (consp node) (eq (car node) 'await))) '(lambda fn async)))
 
 (defun eliscript-emitter--emit-iife
     (parameters body arguments asynchronous)
@@ -466,19 +891,9 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
              (eliscript-emitter--emit-function-body parameters body)))))
 
 (defun eliscript-emitter--contains-function-recur-p (form)
-  "Return non-nil when FORM recurs to its current function."
-  (cond
-   ((vectorp form)
-    (cl-some #'eliscript-emitter--contains-function-recur-p
-             (append form nil)))
-   ((consp form)
-    (let ((operator (car form)))
-      (cond
-       ((eq operator 'recur) t)
-       ((memq operator '(lambda fn async loop)) nil)
-       (t
-        (cl-some #'eliscript-emitter--contains-function-recur-p form)))))
-   (t nil)))
+  "Return non-nil when FORM recurs outside nested functions or loops."
+  (eliscript-emitter--some-form (list form)
+    (lambda (node) (and (consp node) (eq (car node) 'recur))) '(lambda fn async loop)))
 
 (defun eliscript-emitter--emit-rebinding-target (binding temporary)
   "Assign TEMPORARY to mutable BINDING, including a vector pattern."
@@ -528,22 +943,23 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
 
 (defun eliscript-emitter--emit-tail-cond (clauses target)
   "Emit conditional CLAUSES in recur-aware tail position for TARGET."
-  (if (null clauses)
-      "return null;"
-    (let ((clause (car clauses)))
+  (let ((result "return null;") frames)
+    (while clauses
+      (let ((clause (pop clauses)))
       (unless (and (listp clause) clause)
         (eliscript-emitter--fail "cond clause must be a non-empty list"))
       (let ((test (car clause))
             (body (cdr clause)))
         (if (eq test t)
-            (eliscript-emitter--emit-tail-body body target)
-          (format "if (__eliscript_truthy(%s)) {\n%s\n} else {\n%s\n}"
-                  (eliscript-emitter-emit-expression test)
-                  (eliscript-emitter--indent
-                   (eliscript-emitter--emit-tail-body body target))
-                  (eliscript-emitter--indent
-                   (eliscript-emitter--emit-tail-cond
-                    (cdr clauses) target))))))))
+            (setq result (eliscript-emitter--emit-tail-body body target) clauses nil)
+          (let ((condition (eliscript-emitter-emit-expression test))
+                (consequent (eliscript-emitter--emit-tail-body body target)))
+            (push (list condition consequent) frames))))))
+    (dolist (frame frames)
+      (setq result (format "if (__eliscript_truthy(%s)) {\n%s\n} else {\n%s\n}"
+                           (car frame) (eliscript-emitter--indent (cadr frame))
+                           (eliscript-emitter--indent result))))
+    result))
 
 (defun eliscript-emitter--emit-tail-let (arguments sequential target)
   "Emit lexical ARGUMENTS in tail position for TARGET."
@@ -595,30 +1011,44 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
               (eliscript-emitter--indent
                (string-join (nreverse parts) "\n"))))))
 
+(defun eliscript-emitter--assemble-tail-short-circuit (frames kind result)
+  "Assemble emitted FRAMES and final RESULT of tail short-circuit KIND.
+FRAMES are in reverse evaluation order.  Indent each fragment at its final
+depth once, rather than copying and reindenting the growing nested suffix."
+  (if (null frames) result
+    (with-temp-buffer
+      (let ((depth 0))
+        (cl-labels ((line (level text)
+                     (unless (= (point) (point-min)) (insert "\n"))
+                     (insert (if (= level 0) text
+                               (eliscript-emitter--indent text level)))))
+          (dolist (frame (reverse frames))
+            (let ((temporary (car frame)))
+              (line depth (format "const %s = %s;" temporary (cadr frame)))
+              (line depth (format "if (__eliscript_truthy(%s)) {" temporary))
+              (when (eq kind 'or)
+                (line (1+ depth) (format "return %s;" temporary))
+                (line depth "} else {"))
+              (setq depth (1+ depth))))
+          (line depth result)
+          (dolist (frame frames)
+            (setq depth (1- depth))
+            (when (eq kind 'and)
+              (line depth "} else {")
+              (line (1+ depth) (format "return %s;" (car frame))))
+            (line depth "}"))))
+      (buffer-string))))
+
 (defun eliscript-emitter--emit-tail-short-circuit (arguments kind target)
   "Emit recur-aware short-circuit ARGUMENTS of KIND for TARGET."
-  (cond
-   ((null arguments)
-    (format "return %s;" (if (eq kind 'and) "true" "null")))
-   ((null (cdr arguments))
-    (eliscript-emitter--emit-tail-form (car arguments) target))
-   (t
-    (let ((temporary (eliscript-emitter--fresh-name)))
-      (format
-       "const %s = %s;\nif (__eliscript_truthy(%s)) {\n%s\n} else {\n%s\n}"
-       temporary
-       (eliscript-emitter-emit-expression (car arguments))
-       temporary
-       (eliscript-emitter--indent
-        (if (eq kind 'and)
-            (eliscript-emitter--emit-tail-short-circuit
-             (cdr arguments) kind target)
-          (format "return %s;" temporary)))
-       (eliscript-emitter--indent
-        (if (eq kind 'and)
-            (format "return %s;" temporary)
-          (eliscript-emitter--emit-tail-short-circuit
-           (cdr arguments) kind target))))))))
+  (let (frames result)
+    (while (cdr arguments)
+      (let ((temporary (eliscript-emitter--fresh-name))
+            (first (eliscript-emitter-emit-expression (pop arguments))))
+        (push (list temporary first) frames)))
+    (setq result (if arguments (eliscript-emitter--emit-tail-form (car arguments) target)
+                   (format "return %s;" (if (eq kind 'and) "true" "null"))))
+    (eliscript-emitter--assemble-tail-short-circuit frames kind result)))
 
 (defun eliscript-emitter--emit-tail-form (form target)
   "Emit FORM in a tail position controlled by TARGET."
@@ -662,44 +1092,103 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
 
 (defvar eliscript-emitter--numeric-profile nil)
 
+(defun eliscript-emitter--scalar-proof-plan (model mode value context)
+  "Prove scalar operations with explicit scope and short-circuit actions."
+  (let ((scope (car context)) (state (cadr context)))
+    (pcase mode
+      (:value (list :value value))
+      (:every
+       (if (null value) (list :value t)
+         (list :children (list (list :node (car value) context))
+               (lambda (results)
+                 (if (car results)
+                     (list :children (list (list :every (cdr value) context))
+                           (lambda (tail) (list :value (car tail))))
+                   (list :value nil))))))
+      (:bindings
+       (let ((remaining (nth 0 value)) (inner (nth 1 value)) (forms (nth 2 value))
+             (sequential (nth 3 value)) (valid (nth 4 value)))
+         (if (null remaining)
+             (if valid (list :children (list (list :every forms (list inner state)))
+                             (lambda (results) (list :value (car results)))) (list :value nil))
+           (let* ((binding (car remaining))
+                  (target (if (eq model 'ir) (eliscript-ir-node-value binding)
+                            (if (consp binding) (car binding) binding)))
+                  (initializer (if (eq model 'ir) (eliscript-ir-emitter--binding-initializer binding)
+                                 (and (consp binding) (cadr binding))))
+                  (shape (if (eq model 'ir)
+                             (and (eq (eliscript-ir-node-kind binding) 'lexical-binding)
+                                  (not (eliscript-ir-property binding :pattern)))
+                           (and (symbolp target) (or (symbolp binding)
+                                (and (proper-list-p binding) (<= 1 (length binding) 2)))))))
+             (list :children (list (if shape (list :node initializer (list (if sequential inner scope) state))
+                                    (list :value nil context)))
+                   (lambda (results)
+                     (list :children (list (list :bindings
+                              (list (cdr remaining) (cons target inner) forms sequential (and valid (car results))) context))
+                           (lambda (tail) (list :value (car tail))))))))))
+      (:pairs
+       (if (null value) (list :value t)
+         (let* ((ir (eq model 'ir)) (pair (if ir (car value) value))
+                (target (if ir (eliscript-ir-node-value pair) (car pair)))
+                (shape (and (or (not ir) (eq (eliscript-ir-node-kind pair) 'assignment-pair)) (memq target scope)))
+                (operand (if ir (car (eliscript-ir-node-children pair)) (cadr pair))))
+           (list :children (list (if shape (list :node operand context) (list :value nil context)))
+                 (lambda (results)
+                   (if (and ir (not (car results))) (list :value nil)
+                     (list :children (list (list :pairs (if ir (cdr value) (cddr value)) context))
+                           (lambda (tail) (list :value (and (car results) (car tail)))))))))))
+      (:node
+       (if (eq model 'ir)
+           (if (null value) (list :value t)
+             (let ((kind (eliscript-ir-node-kind value)) (datum (eliscript-ir-node-value value))
+                   (children (eliscript-ir-emitter--children value)))
+               (pcase kind
+                 ('literal (list :value (or (numberp datum) (memq datum '(nil t false undefined)))))
+                 ('reference (list :value (memq datum scope)))
+                 ('lexical-bindings
+                  (let ((split (eliscript-ir-emitter--split-counted-children value :binding-count)))
+                    (list :children (list (list :bindings (list (car split) scope (cadr split)
+                                        (eliscript-ir-property value :sequential) t) context))
+                          (lambda (results) (list :value (car results))))))
+                 ('assignment (list :children (list (list :pairs children context))
+                                    (lambda (results) (list :value (car results)))))
+                 ((or 'intrinsic 'conditional 'conditional-sugar 'short-circuit 'sequence 'loop)
+                  (when (eq kind 'loop) (setcar state t))
+                  (if (and (or (not (eq kind 'intrinsic))
+                               (memq datum '(+ - * / % mod 1+ 1- = eq < <= > >= /= not= not)))
+                           (or (not (and (eq kind 'intrinsic) (memq datum '(< <= > >=)))) (= (length children) 2)))
+                      (list :children (list (list :every children context)) (lambda (results) (list :value (car results))))
+                    (list :value nil)))
+                 (_ (list :value nil)))))
+         (cond
+          ((or (numberp value) (memq value '(nil t false undefined))) (list :value t))
+          ((symbolp value) (list :value (memq value scope)))
+          ((consp value)
+           (let ((operator (car value)) (arguments (cdr value)))
+             (cond
+              ((memq operator '(let let*))
+               (list :children (list (list :bindings (list (car arguments) scope (cdr arguments) (eq operator 'let*) t) context))
+                     (lambda (results) (list :value (car results)))))
+              ((memq operator '(setq set!)) (list :children (list (list :pairs arguments context))
+                                                (lambda (results) (list :value (car results)))))
+              ((memq operator '(+ - * / % mod 1+ 1- = eq < <= > >= /= not= not and or if when unless progn do while))
+               (when (eq operator 'while) (setcar state t))
+               (if (or (not (memq operator '(< <= > >=))) (= (length arguments) 2))
+                   (list :children (list (list :every arguments context)) (lambda (results) (list :value (car results))))
+                 (list :value nil)))
+              (t (list :value nil)))))
+          (t (list :value nil)))))
+      (_ (error "unknown scalar proof continuation: %S" mode)))))
+
 (defun eliscript-emitter--closed-scalar-loop-p (names body)
-  "Prove BODY only reads/writes scalar locals under Number parameter NAMES.
-No calls, host access, strings, free bindings or destructuring enter this proof."
-  (let (loop-found)
-    (cl-labels
-        ((walk (form scope)
-           (cond
-            ((or (numberp form) (memq form '(nil t false undefined))) t)
-            ((symbolp form) (memq form scope))
-            ((consp form)
-             (let ((op (car form)) (args (cdr form)))
-               (cond
-                ((memq op '(let let*))
-                 (let ((inner scope) (valid t))
-                   (dolist (binding (car args))
-                     (let ((target (if (consp binding) (car binding) binding))
-                           (initializer (and (consp binding) (cadr binding))))
-                       (unless (and (symbolp target)
-                                    (or (symbolp binding)
-                                        (and (proper-list-p binding) (<= 1 (length binding) 2)))
-                                    (walk initializer (if (eq op 'let*) inner scope)))
-                         (setq valid nil))
-                       (push target inner)))
-                   (and valid (cl-every (lambda (x) (walk x inner)) (cdr args)))))
-                ((memq op '(setq set!))
-                 (let ((valid t))
-                   (while args
-                     (unless (and (memq (car args) scope) (walk (cadr args) scope))
-                       (setq valid nil))
-                     (setq args (cddr args))) valid))
-                ((memq op '(+ - * / % mod 1+ 1- = eq < <= > >= /= not= not
-                              and or if when unless progn do while))
-                 (when (eq op 'while) (setq loop-found t))
-                 (and (or (not (memq op '(< <= > >=))) (= (length args) 2))
-                      (cl-every (lambda (x) (walk x scope)) args)))
-                (t nil))))
-            (t nil))))
-      (and names (cl-every (lambda (x) (walk x names)) body) loop-found))))
+  "Prove the original scalar subset without recursive expression scans."
+  (when names
+    (let* ((state (list nil))
+           (valid (eliscript-emitter--run-depth-plan
+                   (lambda (mode value context) (eliscript-emitter--scalar-proof-plan 'form mode value context))
+                   :every body (list names state))))
+      (and valid (car state)))))
 
 (defun eliscript-emitter--emit-function-body (parameters body)
   "Version closed scalar loops behind one Number guard per parameter."
@@ -780,19 +1269,21 @@ No calls, host access, strings, free bindings or destructuring enter this proof.
 
 (defun eliscript-emitter--emit-cond (clauses)
   "Emit nested conditional expressions for CLAUSES."
-  (if (null clauses)
-      "null"
-    (let ((clause (car clauses)))
+  (let ((result "null") frames)
+    (while clauses
+      (let ((clause (pop clauses)))
       (unless (and (listp clause) clause)
         (eliscript-emitter--fail "invalid cond clause: %S" clause))
       (let ((test (car clause))
             (body (cdr clause)))
         (if (eq test t)
-            (eliscript-emitter--emit-do body)
-          (format "(%s ? %s : %s)"
-                  (eliscript-emitter--emit-test test)
-                  (eliscript-emitter--emit-do body)
-                  (eliscript-emitter--emit-cond (cdr clauses))))))))
+            (setq result (eliscript-emitter--emit-do body) clauses nil)
+          (let ((condition (eliscript-emitter--emit-test test))
+                (consequent (eliscript-emitter--emit-do body)))
+            (push (list condition consequent) frames))))))
+    (dolist (frame frames)
+      (setq result (format "(%s ? %s : %s)" (car frame) (cadr frame) result)))
+    result))
 
 (defun eliscript-emitter--try-clause-operator (form)
   "Return FORM's try clause operator, or nil."
@@ -904,31 +1395,33 @@ No calls, host access, strings, free bindings or destructuring enter this proof.
 
 (defun eliscript-emitter--emit-short-circuit (arguments kind)
   "Emit Lisp-style short-circuit ARGUMENTS for KIND, either and or or."
-  (cond
-   ((null arguments) (if (eq kind 'and) "true" "null"))
-   ((null (cdr arguments))
-    (eliscript-emitter-emit-expression (car arguments)))
-   ((and (cl-every #'eliscript-emitter--boolean-p arguments)
-         (not (eliscript-emitter--contains-await-p arguments)))
-    (format "(%s)"
-            (mapconcat #'eliscript-emitter-emit-expression arguments
-                       (if (eq kind 'and) " && " " || "))))
-   (t
-    (let ((temporary (eliscript-emitter--fresh-name))
-          (first (eliscript-emitter-emit-expression (car arguments)))
-          (rest (eliscript-emitter--emit-short-circuit (cdr arguments) kind)))
-      (if (eliscript-emitter--contains-await-p (cdr arguments))
-          (format
-           "(await (async (%s) => (__eliscript_truthy(%s) ? %s : %s))(%s))"
-           temporary temporary
-           (if (eq kind 'and) rest temporary)
-           (if (eq kind 'and) temporary rest)
-           first)
-        (format "((%s) => (__eliscript_truthy(%s) ? %s : %s))(%s)"
-                temporary temporary
-                (if (eq kind 'and) rest temporary)
-                (if (eq kind 'and) temporary rest)
-                first))))))
+  (let (frames result done)
+    (while (not done)
+      (cond
+       ((null arguments) (setq result (if (eq kind 'and) "true" "null") done t))
+       ((null (cdr arguments))
+        (setq result (eliscript-emitter-emit-expression (car arguments)) done t))
+       ((and (cl-every #'eliscript-emitter--boolean-p arguments)
+             (not (eliscript-emitter--contains-await-p arguments)))
+        (setq result (format "(%s)" (mapconcat #'eliscript-emitter-emit-expression arguments
+                                               (if (eq kind 'and) " && " " || ")))
+              done t))
+       (t
+        (let ((temporary (eliscript-emitter--fresh-name))
+              (first (eliscript-emitter-emit-expression (car arguments))))
+          (setq arguments (cdr arguments))
+          (push (list temporary first arguments) frames)))))
+    (dolist (frame frames)
+      (let ((temporary (car frame)))
+        (setq result
+              (format (if (eliscript-emitter--contains-await-p (nth 2 frame))
+                          "(await (async (%s) => (__eliscript_truthy(%s) ? %s : %s))(%s))"
+                        "((%s) => (__eliscript_truthy(%s) ? %s : %s))(%s)")
+                      temporary temporary
+                      (if (eq kind 'and) result temporary)
+                      (if (eq kind 'and) temporary result)
+                      (cadr frame)))))
+    result))
 
 (defun eliscript-emitter--numeric-tag (operator)
   "Return the primitive helper tag for OPERATOR."
@@ -1058,10 +1551,10 @@ No calls, host access, strings, free bindings or destructuring enter this proof.
       access)))
 
 (defun eliscript-emitter--array-text-key-p (key)
-  "Return non-nil for array text keys and computed KEY expressions."
+  "Return non-nil for text and borrowed-call methods or computed KEY."
   (if (or (keywordp key) (stringp key) (numberp key) (memq key '(nil t false undefined)))
       (member (if (keywordp key) (substring (symbol-name key) 1) key)
-              '("join" "toString"))
+              '("join" "toString" "call" "apply" "bind"))
     t))
 
 (defun eliscript-emitter--primitive-literal-p (form)
@@ -1081,13 +1574,53 @@ No calls, host access, strings, free bindings or destructuring enter this proof.
           (eliscript-emitter--emit-property-key (nth 1 arguments))
           (eliscript-emitter--emit-arguments (nthcdr 2 arguments))))
 
+(defun eliscript-emitter--number-text (value)
+  "Spell numeric VALUE as the same binary64 literal as the JavaScript emitter.
+
+Use Emacs's shortest round-tripping digits, then change only decimal-point
+placement and exponent spelling. No rounded decimal arithmetic is involved."
+  (let* ((float-output-format nil)
+         ;; Eliscript Numbers have the same binary64 conversion as Number in
+         ;; the self-hosted reader, including Emacs integers beyond 2^53.
+         (text (number-to-string (float value))))
+    (when (string-match-p "INF\\|NaN" text)
+      (eliscript-emitter--fail "non-finite numbers are not supported: %S" value))
+    (if (zerop value)
+        (if (string-prefix-p "-" text) "-0.0" "0")
+      (let* ((negative (string-prefix-p "-" text))
+             (unsigned (if negative (substring text 1) text))
+             (exponent-at (string-match "[eE]" unsigned))
+             (mantissa (if exponent-at (substring unsigned 0 exponent-at) unsigned))
+             (exponent (if exponent-at (string-to-number (substring unsigned (1+ exponent-at))) 0))
+             (point (or (string-match "\\." mantissa) (length mantissa)))
+             (digits (replace-regexp-in-string "\\." "" mantissa t t))
+             (position (+ point exponent)))
+        (while (and (> (length digits) 1) (= (aref digits 0) ?0))
+          (setq digits (substring digits 1) position (1- position)))
+        (while (and (> (length digits) 1) (= (aref digits (1- (length digits))) ?0))
+          (setq digits (substring digits 0 -1)))
+        (concat
+         (if negative "-" "")
+         (cond
+          ((and (> position 0) (<= position 21))
+           (if (>= position (length digits))
+               (concat digits (make-string (- position (length digits)) ?0))
+             (concat (substring digits 0 position) "." (substring digits position))))
+          ((and (> position -6) (<= position 0))
+           (concat "0." (make-string (- position) ?0) digits))
+          (t
+           (concat (substring digits 0 1)
+                   (if (> (length digits) 1) (concat "." (substring digits 1)) "")
+                   "e" (if (> position 0) "+" "")
+                   (number-to-string (1- position))))))))))
+
 (defun eliscript-emitter--emit-quoted (value)
   "Emit quoted Eliscript VALUE as canonical persistent data."
   (cond
    ((null value) "__eliscript_list()")
    ((eq value t) "true")
    ((eq value 'undefined) "undefined")
-   ((numberp value) (number-to-string value))
+   ((numberp value) (eliscript-emitter--number-text value))
    ((stringp value) (eliscript-emitter--json-string value))
    ((keywordp value)
     (format "__eliscript_keyword(%s)"
@@ -1425,15 +1958,26 @@ No calls, host access, strings, free bindings or destructuring enter this proof.
                (eliscript-emitter--emit-arguments arguments))))))
 
 (defun eliscript-emitter-emit-expression (form)
+  "Emit FORM with explicit continuations for ordinary if expression trees."
+  (if (and (consp form) (eq (car form) 'if))
+      (eliscript-emitter--run-depth-plan #'eliscript-emitter--depth-plan :expression form nil)
+    (eliscript-emitter--emit-expression-recursive form)))
+
+(defun eliscript-emitter--emit-expression-recursive (form)
   "Emit Eliscript FORM as an ECMAScript expression."
   (cond
+   ((and (consp form) (eq (car form) eliscript-emitter--tdz-assignment-tag))
+    (let ((outputs (mapcar #'eliscript-emitter-emit-expression (nth 2 form))))
+      (if (eq (nth 1 form) 'set!) (car outputs)
+        (format "(%s)" (string-join outputs ", ")))))
+   ((and (consp form) (eq (car form) eliscript-emitter--tdz-read-tag))
+    (eliscript-emitter--tdz-read-text (nth 1 form) (nth 2 form)))
+   ((and (consp form) (eq (car form) eliscript-emitter--tdz-write-tag))
+    (eliscript-emitter--tdz-write-text (nth 1 form) (nth 2 form)
+      (eliscript-emitter-emit-expression (nth 3 form))))
    ((null form) "null")
    ((eq form t) "true")
-   ((numberp form)
-    (let ((text (number-to-string form)))
-      (when (string-match-p "INF\\|NaN" text)
-        (eliscript-emitter--fail "non-finite numbers are not supported: %S" form))
-      text))
+   ((numberp form) (eliscript-emitter--number-text form))
    ((stringp form) (eliscript-emitter--json-string form))
    ((keywordp form)
     (format "__eliscript_keyword(%s)"
@@ -1510,10 +2054,14 @@ No calls, host access, strings, free bindings or destructuring enter this proof.
          (eliscript-emitter--emit-import arguments))
         ((or 'defvar 'defconst)
          (eliscript-emitter--require-arity (symbol-name operator) arguments 1 2)
-         (format "%s %s = %s;"
-                 (if (eq operator 'defconst) "const" "let")
-                 (eliscript-emitter--binding-name (car arguments))
-                 (eliscript-emitter-emit-expression (cadr arguments))))
+         (concat
+          (format "%s %s = %s;"
+                  (if (eq operator 'defconst) "const" "let")
+                  (eliscript-emitter--binding-name (car arguments))
+                  (eliscript-emitter-emit-expression (cadr arguments)))
+          (let ((record (and eliscript-emitter--tdz-state
+                         (gethash form (plist-get eliscript-emitter--tdz-state :declarations)))))
+            (when record (concat "\n" (eliscript-emitter--tdz-ready-name record) " = true;")))))
         ((or 'defun 'defn 'defasync)
          (eliscript-emitter--require-arity (symbol-name operator) arguments 2)
          (let ((name (nth 0 arguments))
@@ -1545,140 +2093,73 @@ No calls, host access, strings, free bindings or destructuring enter this proof.
         (_ (concat (eliscript-emitter-emit-expression form) ";"))))))
 
 (defun eliscript-emitter--uses-number-conversion-p (forms)
-  "Return non-nil when FORMS contain a Number conversion call."
-  (cl-labels
-      ((walk
-        (form)
-        (cond
-         ((vectorp form) (cl-some #'walk (append form nil)))
-         ((consp form)
-          (and (not (eq (car form) 'quote))
-               (or (eq (car form) 'string-to-number) (cl-some #'walk form))))
-         (t nil))))
-    (cl-some #'walk forms)))
+  "Find the corresponding unquoted runtime operation without host recursion."
+  (eliscript-emitter--some-form forms
+    (lambda (node) (and (consp node) (memq (car node) '(string-to-number)) t)) '(quote)))
 
 (defun eliscript-emitter--uses-numeric-coercion-p (forms)
-  "Return non-nil when FORMS need dynamic numeric helpers."
-  (cl-labels ((walk (form)
-              (cond ((vectorp form) (cl-some #'walk (append form nil)))
-                    ((consp form)
-                     (and (not (eq (car form) 'quote))
-                          (or (and (eliscript-emitter--numeric-coercion-p (car form))
-                                   (or (not (eq (car form) '*)) (> (length (cdr form)) 1)))
-                              (cl-some #'walk form)))) (t nil))))
-    (cl-some #'walk forms)))
+  "Find unquoted dynamic numeric operations without host recursion."
+  (eliscript-emitter--some-form forms
+    (lambda (node) (and (consp node)
+                       (eliscript-emitter--numeric-coercion-p (car node))
+                       (or (not (eq (car node) '*)) (> (length (cdr node)) 1)))) '(quote)))
 
 (defun eliscript-emitter--uses-host-identity-token-p (forms)
-  "Return non-nil when FORMS contain a host identity token call."
-  (cl-labels
-      ((walk
-        (form)
-        (cond
-         ((vectorp form) (cl-some #'walk (append form nil)))
-         ((consp form)
-          (or (eq (car form) 'host-identity-token)
-              (cl-some #'walk form)))
-         (t nil))))
-    (cl-some #'walk forms)))
+  "Retain the original host-token scan, including its quoted-form traversal."
+  (eliscript-emitter--some-form forms
+    (lambda (node) (and (consp node) (eq (car node) 'host-identity-token)))))
 
 (defun eliscript-emitter--uses-literal-runtime-p (forms)
-  "Return non-nil when FORMS construct canonical language literal values."
-  (cl-labels
-      ((walk-object
-        (arguments)
-        (let (found)
-          (while arguments
-            (let ((key (pop arguments))
-                  (value (pop arguments)))
-              (when (or (and (not (or (keywordp key)
-                                      (stringp key)
-                                      (symbolp key)))
-                             (walk key))
-                        (walk value))
-                (setq found t))))
-          found))
-       (walk-static-key-call
-        (arguments key-index)
-        (cl-loop
-         for argument in arguments
-         for index from 0
-         thereis
-         (and (not (and (= index key-index) (keywordp argument)))
-              (walk argument))))
-       (walk
-        (form)
+  "Find canonical literal construction without recursive ordinary-tree walks."
+  (cl-some #'eliscript-emitter--form-uses-literal-runtime-p forms))
+
+(defun eliscript-emitter--form-uses-literal-runtime-p (form)
+  (let ((pending (list form)) found)
+    (while (and pending (not found))
+      (let ((item (pop pending)))
         (cond
-         ((keywordp form) t)
-         ((vectorp form) t)
-         ((consp form)
-          (let ((operator (car form))
-                (arguments (cdr form)))
+         ((keywordp item) (setq found t))
+         ((vectorp item) (setq found t))
+         ((consp item)
+          (let ((operator (car item)) (arguments (cdr item)))
             (cond
-             ((eq operator 'quote)
-              (eliscript-emitter--quoted-uses-literal-runtime-p
-               (car arguments)))
+             ((eq operator 'quote) (setq found (eliscript-emitter--quoted-uses-literal-runtime-p (car arguments))))
              ((memq operator '(import import-portable)) nil)
-             ((memq operator '(list vector hash-map hash-set queue)) t)
-             ((eq operator 'js-object) (walk-object arguments))
-             ((memq operator '(get put js-call aref object-has? object-assoc))
-              (walk-static-key-call arguments 1))
-             (t (cl-some #'walk form)))))
-         (t nil))))
-    (cl-some #'walk forms)))
+             ((memq operator '(list vector hash-map hash-set queue)) (setq found t))
+             ((eq operator 'js-object)
+              ;; Retain the original complete pair traversal of object fields.
+              (while arguments
+                (let ((key (pop arguments)) (value (pop arguments)))
+                  (when (or (and (not (or (keywordp key) (stringp key) (symbolp key)))
+                                 (eliscript-emitter--form-uses-literal-runtime-p key))
+                            (eliscript-emitter--form-uses-literal-runtime-p value)) (setq found t)))))
+             (t
+              (let ((index 0) selected)
+                (dolist (child (if (memq operator '(get put js-call aref object-has? object-assoc)) arguments item))
+                  (unless (and (memq operator '(get put js-call aref object-has? object-assoc)) (= index 1) (keywordp child))
+                    (push child selected))
+                  (setq index (1+ index)))
+                (dolist (child selected) (push child pending))))))))))
+    found))
 
 (defun eliscript-emitter--uses-collection-runtime-p (forms)
-  "Return non-nil when FORMS use protocol-driven collection operations."
-  (cl-labels
-      ((walk
-        (form)
-        (cond
-         ((vectorp form) (cl-some #'walk (append form nil)))
-         ((consp form)
-          (cond
-           ((eq (car form) 'quote) nil)
-           ((memq (car form) '(nth length)) t)
-           (t (cl-some #'walk form))))
-         (t nil))))
-    (cl-some #'walk forms)))
+  "Find the corresponding unquoted runtime operation without host recursion."
+  (eliscript-emitter--some-form forms
+    (lambda (node) (and (consp node) (memq (car node) '(nth length)) t)) '(quote)))
 
 (defun eliscript-emitter--uses-list-runtime-p (forms)
-  "Return non-nil when FORMS use canonical persistent List operations."
-  (cl-labels
-      ((walk
-        (form)
-        (cond
-         ((vectorp form) (cl-some #'walk (append form nil)))
-         ((consp form)
-          (cond
-           ((eq (car form) 'quote) nil)
-           ((memq (car form) '(car cdr cons)) t)
-           (t (cl-some #'walk form))))
-         (t nil))))
-    (cl-some #'walk forms)))
+  "Find the corresponding unquoted runtime operation without host recursion."
+  (eliscript-emitter--some-form forms
+    (lambda (node) (and (consp node) (memq (car node) '(car cdr cons)) t)) '(quote)))
 
 (defun eliscript-emitter--uses-value-runtime-p (forms)
-  "Return non-nil when FORMS use canonical language value equality."
-  (cl-labels
-      ((walk
-        (form)
-        (cond
-         ((vectorp form) (cl-some #'walk (append form nil)))
-         ((consp form)
-          (cond
-           ((eq (car form) 'quote) nil)
-           ((eq (car form) 'equal) t)
-           (t (cl-some #'walk form))))
-         (t nil))))
-    (cl-some #'walk forms)))
+  "Find the corresponding unquoted runtime operation without host recursion."
+  (eliscript-emitter--some-form forms
+    (lambda (node) (and (consp node) (memq (car node) '(equal)) t)) '(quote)))
 
 (defun eliscript-emitter--forms-name-global-root-p (forms)
-  "Return non-nil when unquoted FORMS name the global root binding."
-  (cl-labels ((walk (form)
-               (cond ((eq form 'globalThis) t)
-                     ((vectorp form) (cl-some #'walk (append form nil)))
-                     ((consp form) (unless (eq (car form) 'quote)
-                                     (cl-some #'walk form))))))
-    (cl-some #'walk forms)))
+  "Find the unquoted global root binding without host recursion."
+  (eliscript-emitter--some-form forms (lambda (node) (eq node 'globalThis)) '(quote)))
 
 (defun eliscript-emitter--number-conversion-prologue (shadowed)
   "Capture intrinsics independently of a SHADOWED global root binding."
@@ -1688,59 +2169,110 @@ No calls, host access, strings, free bindings or destructuring enter this proof.
     eliscript-emitter--number-conversion-helper))
 
 (defun eliscript-emitter--uses-imul-p (forms)
-  "Return non-nil when unquoted FORMS require imul32."
-  (cl-labels ((walk (form)
-               (cond ((vectorp form) (cl-some #'walk (append form nil)))
-                     ((consp form) (and (not (eq (car form) 'quote))
-                                        (or (eq (car form) 'imul32) (cl-some #'walk form)))))))
-    (cl-some #'walk forms)))
+  "Find the corresponding unquoted runtime operation without host recursion."
+  (eliscript-emitter--some-form forms
+    (lambda (node) (and (consp node) (memq (car node) '(imul32)) t)) '(quote)))
 
 (defun eliscript-emitter--imul-prologue (shadowed)
   "Capture Math.imul only when required, outside SHADOWED global bindings."
   (concat (if shadowed eliscript-emitter--imul-capsule eliscript-emitter--imul-intrinsic)
           eliscript-emitter--imul-operator-helper))
 
-(defun eliscript-emitter--uses-array-text-p (forms)
-  "Return non-nil when unquoted FORMS contain guarded method calls."
-  (cl-labels ((walk (form)
-               (cond ((vectorp form) (cl-some #'walk (append form nil)))
-                     ((consp form)
-                      (and (not (eq (car form) 'quote))
-                           (or (and (eq (car form) 'js-call)
-                                    (eliscript-emitter--array-text-key-p (nth 2 form)))
-                               (cl-some #'walk form)))))))
-    (cl-some #'walk forms)))
+(defconst eliscript-emitter--unicode-runtime-import
+  "import \"eliscript/runtime/unicode-case.mjs\";\n")
 
-(defun eliscript-emit-module (forms)
+(defun eliscript-emitter--unicode-capsule-p (filename module-name)
+  "Recognize bootstrap capsules by full source and module identity."
+  (let ((name (if (symbolp module-name) (symbol-name module-name) module-name)))
+    (and (stringp filename)
+         (cl-some
+          (lambda (entry)
+            (and (equal name (cdr entry))
+                 (or (equal filename (car entry))
+                     (and (file-name-absolute-p filename)
+                          (string-suffix-p (concat "/" (car entry)) filename)))))
+          '(("runtime/unicode-case.eli" . "eliscript.runtime.unicode-case")
+            ("runtime/unicode-case-data.eli" . "eliscript.runtime.unicode-case-data"))))))
+
+(defun eliscript-emitter--forms-unicode-capsule-p (forms filename)
+  "Require a single exact module as well as its compilation source context."
+  (and (= (length forms) 1) (consp (car forms))
+       (eq (caar forms) 'module)
+       (eliscript-emitter--unicode-capsule-p filename (cadar forms))))
+
+(defconst eliscript-emitter--math-runtime-import
+  "import \"eliscript/runtime/math.mjs\";\n")
+
+(defun eliscript-emitter--math-reference-p (value)
+  "Recognize explicit references to the real Math namespace."
+  (let ((name (if (symbolp value) (symbol-name value) value)))
+    (and (stringp name)
+         (or (member name '("Math" "globalThis/Math" "globalThis.Math"))
+             (cl-some (lambda (prefix) (string-prefix-p prefix name))
+                      '("Math/" "Math." "globalThis/Math/" "globalThis/Math."
+                        "globalThis.Math/" "globalThis.Math."))))))
+
+(defun eliscript-emitter--uses-math-runtime-p (forms)
+  "Find unquoted Math references, including the existing raw namespace form."
+  (eliscript-emitter--some-form forms
+    (lambda (node)
+      (or (and (symbolp node) (eliscript-emitter--math-reference-p node))
+          (and (consp node) (eq (car node) 'js*)
+               (member (cadr node) '("Math" "globalThis.Math"))))) '(quote)))
+
+(defun eliscript-emitter--uses-array-text-p (forms)
+  "Find unquoted guarded method calls without host recursion."
+  (eliscript-emitter--some-form forms
+    (lambda (node)
+      (and (consp node)
+           (or (and (eq (car node) 'js-call)
+                    (eliscript-emitter--array-text-key-p (nth 2 node)))
+               (eliscript-emitter--qualified-apply-callee-p (car node))
+               (and (memq (car node) '(funcall apply))
+                    (eliscript-emitter--qualified-apply-callee-p (nth 1 node)))))) '(quote)))
+
+(defun eliscript-emit-module (forms &optional filename)
   "Emit FORMS as one ECMAScript module."
-  (let ((eliscript-emitter--temporary-counter 0))
+  (let* ((eliscript-emitter--tdz-state (list :variables nil :declarations (make-hash-table :test #'eq)))
+         (scope (make-hash-table :test #'equal)))
+    (eliscript-emitter--tdz-legacy-predeclare forms scope eliscript-emitter--tdz-state)
+    (eliscript-emitter--emit-module-ready
+      (mapcar (lambda (form) (eliscript-emitter--tdz-legacy-top form scope eliscript-emitter--tdz-state)) forms) forms filename)))
+
+(defun eliscript-emitter--emit-module-ready (forms &optional source-forms filename)
+  (let ((eliscript-emitter--temporary-counter 0)
+        (prologue-forms (or source-forms forms)))
     (concat
      "// Generated by Eliscript. Do not edit.\n"
-     (if (eliscript-emitter--uses-array-text-p forms) eliscript-emitter--array-text-import "")
-     (if (eliscript-emitter--uses-literal-runtime-p forms)
+     (eliscript-emitter--tdz-prologue eliscript-emitter--tdz-state)
+     (if (eliscript-emitter--forms-unicode-capsule-p prologue-forms filename)
+         "" eliscript-emitter--unicode-runtime-import)
+     (if (eliscript-emitter--uses-math-runtime-p prologue-forms) eliscript-emitter--math-runtime-import "")
+     (if (eliscript-emitter--uses-array-text-p prologue-forms) eliscript-emitter--array-text-import "")
+     (if (eliscript-emitter--uses-literal-runtime-p prologue-forms)
          eliscript-emitter--literal-runtime-import
        "")
-     (if (eliscript-emitter--uses-collection-runtime-p forms)
+     (if (eliscript-emitter--uses-collection-runtime-p prologue-forms)
          eliscript-emitter--collection-runtime-import
        "")
-     (if (eliscript-emitter--uses-list-runtime-p forms)
+     (if (eliscript-emitter--uses-list-runtime-p prologue-forms)
          eliscript-emitter--list-runtime-import
        "")
-     (if (eliscript-emitter--uses-value-runtime-p forms)
+     (if (eliscript-emitter--uses-value-runtime-p prologue-forms)
          eliscript-emitter--value-runtime-import
        "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
-     (if (or (eliscript-emitter--uses-number-conversion-p forms)
-             (eliscript-emitter--uses-numeric-coercion-p forms))
+     (if (or (eliscript-emitter--uses-number-conversion-p prologue-forms)
+             (eliscript-emitter--uses-numeric-coercion-p prologue-forms))
          (eliscript-emitter--number-conversion-prologue
-          (eliscript-emitter--forms-name-global-root-p forms))
+          (eliscript-emitter--forms-name-global-root-p prologue-forms))
        "")
-     (if (eliscript-emitter--uses-numeric-coercion-p forms)
+     (if (eliscript-emitter--uses-numeric-coercion-p prologue-forms)
          eliscript-emitter--numeric-operator-helper "")
-     (if (eliscript-emitter--uses-imul-p forms)
+     (if (eliscript-emitter--uses-imul-p prologue-forms)
          (eliscript-emitter--imul-prologue
-          (eliscript-emitter--forms-name-global-root-p forms)) "")
-     (if (eliscript-emitter--uses-host-identity-token-p forms)
+          (eliscript-emitter--forms-name-global-root-p prologue-forms)) "")
+     (if (eliscript-emitter--uses-host-identity-token-p prologue-forms)
          eliscript-emitter--host-identity-token-helper
        "")
      "\n"

@@ -1,0 +1,283 @@
+(module tools.backends.managed-host-object-realm
+  (import "./managed-host-object-provider.mjs" readHostObjectConstructor readHostObjectPrototype readHostObjectIntrinsics
+    hostObjectDescriptorPrototypeClear)
+  (import "./managed-host-legacy.mjs" failManagedRuntime)
+
+  (defun data-function (descriptors name)
+    (let ((entry (get descriptors name)))
+      (when (and entry (Object/hasOwn entry "value") (= (value-type (get entry :value)) "function"))
+        (get entry :value))))
+  (defun function-shape (target source)
+    (Object/defineProperties target (js-object
+      :name (Object/getOwnPropertyDescriptor source "name")
+      :length (Object/getOwnPropertyDescriptor source "length"))) target)
+
+  (defun ordinary-native-object-p (context heap value kind)
+    (and (or (= kind 13) (= kind 14))
+      ;; Namespace own descriptors can read a live binding/TDZ. Keep their
+      ;; public host trap route; only ordinary records and arrays qualify.
+      (or (= kind 14)
+        (/= (js-call (js-call (get context :memory) :view) :getUint32
+          (- (funcall (get context :checked) "value-data" heap value 13) 12) t) 1))))
+
+  (defun native-data-definition-p (context heap target key definition)
+    (let* ((checked (get context :checked))
+           (parent (js-call (js-call (get context :memory) :view) :getUint32
+             (+ (funcall checked "value-data" heap definition 13) 4) t))
+           (canonical (funcall checked "value-standard-prototype-existing" heap 0)))
+      (when (and (or (= parent 0) (= parent 3) (and (> canonical 3) (= parent canonical)))
+                 (or (= parent 0) (hostObjectDescriptorPrototypeClear))
+                 (= (funcall checked "value-source-extensible" heap target) 2)
+                 (= (funcall checked "value-source-own-descriptor" heap target key) 3))
+        (let ((frame (funcall checked "frame-new" heap 3)) (valid t))
+          (try
+            (let ((value-name (funcall checked "value-string" heap 5)) (index 0))
+              (funcall checked "frame-set" heap frame 0 value-name)
+              (while (< index 5)
+                (funcall checked "value-unit-set" heap value-name index (js-call "value" :charCodeAt index))
+                (setq index (1+ index)))
+              (funcall checked "value-seal" heap value-name)
+              (js-call (js-array "enumerable" "configurable" "value" "writable" "get" "set") :forEach
+                (lambda (field)
+                  (when valid
+                    (let ((name (funcall checked "value-string" heap (js-length field))) (index 0))
+                      (funcall checked "frame-set" heap frame 1 name)
+                      (while (< index (js-length field))
+                        (funcall checked "value-unit-set" heap name index (js-call field :charCodeAt index))
+                        (setq index (1+ index)))
+                      (funcall checked "value-seal" heap name)
+                      (let ((own (funcall checked "value-source-own-descriptor" heap definition name)))
+                        (funcall checked "frame-set" heap frame 2 own)
+                        (unless (or (= own 3)
+                          (and (/= field "get") (/= field "set")
+                            (= (funcall checked "value-object-has" heap own value-name) 1)))
+                          (setq valid false))))))) valid)
+            (finally (funcall checked "frame-pop" heap frame)))))))
+
+  (defun native-object-operation (context heap arguments count)
+    ;; Return a routing decision, not an ABI result (nil/false/zero are valid
+    ;; results). Reading these raw tuples does not decode or publish a view.
+    (let* ((checked (get context :checked)) (tokens (get context :nativeTokens))
+           (target (if (>= count 3) (funcall checked "value-get" heap arguments 1) 0)))
+      (when (and tokens (> target 3) (= (funcall checked "value-kind" heap target) 35))
+        (let ((method (js-call tokens :get (funcall checked "value-foreign-token" heap target))))
+          (when method
+            (let* ((name (get method :name)) (arity (if (= name "freeze") 1 (if (= name "hasOwn") 2 3)))
+                   (value (if (= count (+ arity 3)) (funcall checked "value-get" heap arguments 3) 0))
+                   (kind (if (> value 3) (funcall checked "value-kind" heap value) 0)))
+              ;; Foreign targets include actual host Proxies. They and every
+              ;; unsupported shape retain the unchanged host implementation.
+              (when (and (= count (+ arity 3)) (ordinary-native-object-p context heap value kind))
+                (let* ((key (if (> arity 1) (funcall checked "value-get" heap arguments 4) 3))
+                       (key-kind (if (> key 3) (funcall checked "value-kind" heap key) 0))
+                       (definition (if (= arity 3) (funcall checked "value-get" heap arguments 5) 3)))
+                  ;; Object-valued keys may invoke arbitrary host coercion.
+                  ;; Keep their original evaluation/first-error path intact.
+                  (when (and (or (= arity 1) (<= key 3) (= key-kind 4) (= key-kind 5) (= key-kind 22) (= key-kind 34))
+                             (or (/= arity 3) (and (> definition 3)
+                               (= (funcall checked "value-kind" heap definition) 13)
+                               (ordinary-native-object-p context heap definition 13)
+                               (native-data-definition-p context heap value key definition))))
+                    (js-object :name name :arity arity :value value))))))))))
+
+  (defun call-native-object-operation (context heap arguments operation)
+    (let ((raw (get context :raw)) (checked (get context :checked))
+          (arity (get operation :arity)) (frame 0) (result 0)
+          (status 0) (source-class 0))
+      (try
+        (progn
+          (setq frame (funcall checked "frame-new" heap 1))
+          (let ((tuple (funcall checked "value-refs" heap 7 arity)) (index 0))
+            (funcall checked "frame-set" heap frame 0 tuple)
+            (while (< index arity)
+              (funcall checked "value-set" heap tuple index (funcall checked "value-get" heap arguments (+ index 3)))
+              (setq index (1+ index)))
+            ;; These are the same public raw implementations used by an owned
+            ;; zero-import Object builtin. No source value crosses the host
+            ;; codec solely because the real native intrinsic consumed it.
+            (setq result (cond
+              ((= (get operation :name) "freeze")
+                (funcall raw "value-object-integrity" heap (get operation :value) 0))
+              ((= (get operation :name) "hasOwn")
+                (funcall raw "value-object-properties" heap tuple arity 1))
+              (t (funcall raw "value-object-meta-builtin" heap tuple arity 0))))))
+        (finally
+          (setq status (funcall raw "last-error") source-class (funcall raw "value-exception-class" heap))
+          (when (/= frame 0) (funcall raw "frame-pop" heap frame))
+          (funcall raw "value-exception-class-set" heap source-class)
+          (funcall raw "value-error-restore" status))) result))
+
+  (defun register-native-object-operations (context lifecycle)
+    (let ((runtime (get context :runtime)) (checked (get context :checked))
+          (raw (get context :raw)) (owner (get context :owner))
+          (roots (js-array)) (tokens (new globalThis.Map)) (released false))
+      (put context :nativeTokens tokens)
+      ;; These three fixed host-function roots authenticate the actual native
+      ;; targets. They never retain a user receiver, descriptor or key.
+      (let ((dispose (get lifecycle :dispose)))
+        (put lifecycle :dispose (lambda ()
+          (let ((status (funcall raw "last-error")) (source-class (funcall raw "value-exception-class" owner))
+                (failure undefined) (failed false))
+            (unless released
+              (setq released t)
+              (js-call roots :forEach (lambda (root)
+                (try (js-call runtime :release root)
+                  (catch error (unless failed (setq failed t failure error))))))
+              (js-call tokens :clear))
+            (funcall raw "value-exception-class-set" owner source-class)
+            (funcall raw "value-error-restore" status)
+            (Reflect/apply dispose lifecycle (js-array))
+            (when failed (throw failure))))))
+      (try
+        (js-call (readHostObjectIntrinsics) :forEach (lambda (method)
+          (when method
+            (let ((frame (js-call runtime :frame 1)) (token undefined))
+              (try
+                (progn
+                  (setq token (js-call runtime :fromHostValue (get method :method)))
+                  (js-call roots :push token)
+                  (js-call runtime :frameSet frame 0 token)
+                  (let ((function (funcall checked "frame-get" owner (funcall checked "frame-current" owner) 0)))
+                    (unless (= (funcall checked "value-kind" owner function) 35) (failManagedRuntime 3))
+                    (js-call tokens :set (funcall checked "value-foreign-token" owner function) method)))
+                (finally (js-call runtime :leaveFrame frame)))))))
+        (catch error
+          (try (funcall (get lifecycle :dispose)) (catch ignored nil))
+          (throw error)))))
+
+  (defun dispatch-host-object-identity (context handler name heap arguments)
+    (if (not (and (= name "source-operation") (= heap (get context :owner))))
+      (funcall handler name heap arguments)
+      (let ((raw (get context :raw)) (checked (get context :checked)))
+        (if (/= (funcall raw "last-error") 0) 0
+          (let* ((kind (funcall checked "value-kind" heap arguments))
+                 (count (if (= kind 7) (funcall checked "value-length" heap arguments) 0))
+                 (opcode (if (> count 0) (funcall checked "value-get" heap arguments 0) 0))
+                 (operation (if (and (> opcode 3) (= (funcall checked "value-kind" heap opcode) 4))
+                   (js-call (js-call (get context :memory) :view) :getFloat64
+                     (funcall checked "value-data" heap opcode 4) t) -1)))
+            (if (/= operation 35)
+              (let ((native (when (= operation 8) (native-object-operation context heap arguments count))))
+                (if native (call-native-object-operation context heap arguments native)
+                  (funcall handler name heap arguments)))
+              (progn
+                (unless (and (= kind 7) (= count 2)) (failManagedRuntime 3))
+                (let* ((member (funcall checked "value-get" heap arguments 1))
+                       (runtime (get context :runtime))
+                       (frame undefined) (callee undefined) (result 0) (primary false)
+                       (status 0) (source-class 0) (cleanup undefined) (cleanup-failed false))
+                  (unless (and (not (undefined? runtime)) (or (= member 0) (= member 1)))
+                    (failManagedRuntime 3))
+                  (try
+                    (progn
+                      (setq frame (js-call runtime :frame 3))
+                      (let ((frame-id (funcall checked "frame-current" heap)))
+                        (setq callee (js-call runtime :fromHostValue
+                          (if (= member 0) readHostObjectPrototype readHostObjectConstructor)))
+                        (js-call runtime :frameSet frame 0 callee)
+                        (let ((tuple (funcall checked "value-refs" heap 7 3)))
+                          (funcall checked "frame-set" heap frame-id 1 tuple)
+                          (let ((number (js-call runtime :number 8)))
+                            (try
+                              (js-call runtime :frameSet frame 2 number)
+                              (funcall checked "value-set" heap tuple 0 (funcall checked "frame-get" heap frame-id 2))
+                              (finally (js-call runtime :release number))))
+                          (funcall checked "value-set" heap tuple 1 (funcall checked "frame-get" heap frame-id 0))
+                          (funcall checked "value-set" heap tuple 2 3)
+                          ;; The unchanged Call capability encodes the actual
+                          ;; host intrinsic in this owner's foreign registry.
+                          (setq result (funcall handler name heap tuple)))))
+                    (catch error (setq primary t) (throw error))
+                    (finally
+                      (setq status (funcall raw "last-error")
+                        source-class (if (/= status 0) (funcall raw "value-exception-class" heap) 0))
+                      (js-call (js-array
+                        (lambda () (unless (undefined? callee) (js-call runtime :release callee)))
+                        (lambda () (unless (undefined? frame) (js-call runtime :leaveFrame frame))))
+                        :forEach (lambda (action)
+                          (try (funcall action)
+                            (catch error (unless cleanup-failed (setq cleanup-failed t cleanup error))))))
+                      (funcall raw "value-exception-class-set" heap source-class)
+                      (funcall raw "value-error-restore" status)
+                      (when (and cleanup-failed (not primary) (= status 0)) (throw cleanup))))
+                  result))))))))
+
+  (defun createManagedHostObjectRealmRuntime (creator exports descriptor memory tail completions)
+    (let* ((descriptors (Object/getOwnPropertyDescriptors exports))
+           (enabled (data-function descriptors "host-object-identity-enabled"))
+           (required (js-array "heap-new" "last-error" "value-error-restore" "value-exception-class"
+             "value-exception-class-set" "value-kind" "value-get" "value-length" "value-data"
+             "value-refs" "value-set" "frame-current" "frame-get" "frame-set"))
+           (options (if (> (js-length tail) 0) (aref tail 0) undefined))
+           (lifecycle (if (> (js-length tail) 1) (aref tail 1) undefined))
+           (locals (when (and lifecycle (= (value-type lifecycle) "object"))
+             (Object/getOwnPropertyDescriptors lifecycle)))
+           (bridge-entry (when locals (get locals :capabilityBridge)))
+           (bridge (when (and bridge-entry (Object/hasOwn bridge-entry "value")) (get bridge-entry :value)))
+           (bridge-descriptors (when bridge (Object/getOwnPropertyDescriptors bridge)))
+           (attach (when bridge-descriptors (data-function bridge-descriptors "attach"))))
+      (if (not (and enabled (= (funcall enabled) 1) attach (not (eq options nil))
+             descriptor (Array/isArray (get descriptor :hostCapabilities))
+             (js-call (get descriptor :hostCapabilities) :some (lambda (item)
+               (and (= (get item :module) "eliscript.host") (= (get item :name) "source-operation")
+                 (= (get item :arity) 2) (= (get item :abi) "managed-host-call-v1"))))
+             (js-call required :every (lambda (name) (data-function descriptors name)))))
+        (Reflect/apply creator undefined (js-call (js-array exports descriptor memory) :concat tail))
+        (let* ((forwarded (Array/from tail))
+               (original-options (if (undefined? options) (js-object) (funcall globalThis.Object options)))
+               (receiver (if (undefined? options) original-options options))
+               (option-descriptors (Object/getOwnPropertyDescriptors original-options))
+               (initialize t) (runtime undefined)
+               (context (js-object :owner 0 :runtime undefined :memory memory))
+               (raw (lambda (name &rest arguments)
+                 (Reflect/apply (data-function descriptors name) exports arguments)))
+               (checked (lambda (name &rest arguments)
+                 (let* ((value (Reflect/apply raw undefined (js-call (js-array name) :concat arguments)))
+                        (code (funcall raw "last-error")))
+                   (when (/= code 0) (failManagedRuntime code
+                     (funcall raw "value-exception-class" (get context :owner)))) value)))
+               (new-heap (data-function descriptors "heap-new")))
+          (put context :raw raw) (put context :checked checked)
+          ;; Preserve accessor receivers and the original destructuring order.
+          ;; Invalid initialize values pass through to the original validator.
+          (js-call (Reflect/ownKeys option-descriptors) :forEach (lambda (key)
+            (let ((entry (get option-descriptors key)))
+              (unless (Object/hasOwn entry "value")
+                (let ((getter (get entry :get)) (setter (get entry :set)))
+                  (when getter (put entry :get (lambda () (Reflect/apply getter receiver (js-array)))))
+                  (when setter (put entry :set (lambda (value) (Reflect/apply setter receiver (js-array value))))))))))
+          (put option-descriptors :initializeModule (js-object :configurable t :enumerable t
+            :get (lambda ()
+              (let ((value (Reflect/get original-options "initializeModule" receiver)))
+                (setq initialize (if (undefined? value) t value))
+                (if (or (undefined? value) (= (value-type value) "boolean")) false value)))))
+          (put forwarded 0 (Object/create (Object/getPrototypeOf original-options) option-descriptors))
+          (put (get bridge-descriptors :attach) :value (function-shape (lambda (handler)
+            (Reflect/apply attach bridge (js-array (lambda (name heap arguments)
+              (dispatch-host-object-identity context handler name heap arguments))))) attach))
+          (put bridge-entry :value (Object/create (Object/getPrototypeOf bridge) bridge-descriptors))
+          ;; Every nesting layer forwards the final disposer installed by the
+          ;; creator. Neither close ownership nor the actual project is cloned.
+          (put locals :dispose (js-object :configurable t :enumerable t
+            :get (lambda () (get lifecycle :dispose))
+            :set (lambda (value) (put lifecycle :dispose value))))
+          (put forwarded 1 (Object/create (Object/getPrototypeOf lifecycle) locals))
+          (put (get descriptors "heap-new") :value (function-shape (lambda (slots initial maximum)
+            (let ((owner (Reflect/apply new-heap exports (js-array slots initial maximum))))
+              (put context :owner owner) owner)) new-heap))
+          (setq runtime (Reflect/apply creator undefined (js-call (js-array
+            (Object/create (Object/getPrototypeOf exports) descriptors) descriptor memory) :concat forwarded)))
+          (put context :runtime runtime)
+          (when (and (get (get descriptor :literalRuntime (js-object)) :brandProbe nil)
+                     (js-call (js-array "value-foreign-token" "value-object-properties" "value-object-integrity"
+                               "value-object-meta-builtin" "frame-new" "frame-pop" "value-string" "value-unit-set"
+                               "value-seal" "value-object-has" "value-source-own-descriptor"
+                               "value-source-extensible" "value-standard-prototype-existing")
+                       :every (lambda (name) (data-function descriptors name))))
+            (register-native-object-operations context lifecycle))
+          ;; Outer lifecycle/foreign/decode registrations finish first. This
+          ;; runs the same initializer before the public factory returns.
+          (when (and (= (get descriptor :abi) "managed-module-v1") (eq initialize t))
+            (js-call completions :push (lambda () (js-call runtime :initializeModule))))
+          runtime))))
+  (export createManagedHostObjectRealmRuntime))

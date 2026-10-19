@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { posix, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { createHash } from "node:crypto";
 
-import { PUBLISHED_TREES, assemblePages } from "../tools/pages/assemble.mjs";
+import { PUBLISHED_TREES, PUBLISHED_FILES, assemblePages } from "../tools/pages/assemble.mjs";
 
 import { buildPagesInputs } from "./helpers/pages-build.mjs";
 
@@ -60,6 +62,16 @@ test("the published root is the documentation site", async () => {
     expect(source).not.toContain('src="../../');
     expect(source).not.toContain('href="../../');
   }
+});
+
+test("the published compiler Worker loads its exact integrity dependency and preserves UTF16 request identities", async () => {
+  for (const name of PUBLISHED_FILES) {
+    expect(await readFile(resolve(artifact, name))).toEqual(await readFile(resolve(ROOT, name)));
+  }
+  const worker = await import(pathToFileURL(resolve(artifact, "tools/backends/compiler-worker.mjs")).href);
+  const request = {operation: "analyze", filename: "😀.eli", source: "; 😀\ud800\n(defun run () 42) (export run)"};
+  const expected = createHash("sha256").update(Buffer.from(JSON.stringify(request), "utf16le")).digest("hex");
+  expect(await worker.compilerRequestIdentity(request)).toBe(expected);
 });
 
 test("the addresses the site used to have still lead somewhere", async () => {

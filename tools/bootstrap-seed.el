@@ -13,8 +13,10 @@
     (when source
       (add-to-list 'load-path
                    (expand-file-name "../compiler"
-                                     (file-name-directory source))))))
+                                     (file-name-directory source)))
+      (add-to-list 'load-path (file-name-directory source)))))
 (require 'eliscript)
+(require 'eliscript-bootstrap-runtime "bootstrap-runtime")
 
 (defun eliscript-bootstrap-seed-main (arguments)
   "Compile the compiler modules named by ARGUMENTS using the normal seed API."
@@ -24,9 +26,15 @@
         (output (pop arguments)))
     (unless (and root output arguments)
       (error "bootstrap seed requires project, output and module names"))
+    ;; Validate the complete request before publishing runtime files or even
+    ;; creating OUTPUT. A malformed later name cannot leave a partial seed.
     (dolist (name arguments)
       (unless (string-match-p "\\`[a-z][a-z-]*\\'" name)
-        (error "invalid bootstrap module name: %s" name))
+        (error "invalid bootstrap module name: %s" name)))
+    (make-directory output t)
+    (eliscript-bootstrap-prepare-runtime root output)
+    (eliscript-bootstrap-prepare-project-host root)
+    (dolist (name arguments)
       (eliscript-compile-file-with-source-map
        (expand-file-name (concat "bootstrap/compiler/" name ".eli") root)
        (expand-file-name (concat name ".mjs") output)))))

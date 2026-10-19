@@ -1,0 +1,72 @@
+(module tests.managed-foreign-binding
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "../tools/backends/managed-foreign-binding.mjs" readManagedForeignBinding createManagedForeignPlainObject)
+  (import "../runtime/literals.mjs" keyword symbol)
+  (import "../runtime/core/collection.mjs" ILookup)
+  (test "foreign collection clone allocation creates independent ordinary objects without observing its source"
+    (lambda ()
+      (let* ((unexpected (lambda (&rest arguments) (throw "allocation must not observe source")))
+             (source (new globalThis.Proxy (js-object)
+               (js-object :get unexpected :getPrototypeOf unexpected :ownKeys unexpected
+                 :getOwnPropertyDescriptor unexpected)))
+             (left (createManagedForeignPlainObject source))
+             (right (createManagedForeignPlainObject source)))
+        (js-call assert :notStrictEqual left source)
+        (js-call assert :notStrictEqual left right)
+        (js-call assert :strictEqual (Object/getPrototypeOf left) globalThis.Object.prototype)
+        (js-call assert :deepStrictEqual (Reflect/ownKeys left) (js-array))
+        (Object/defineProperty left "__proto__"
+          (js-object :value 7 :writable t :enumerable t :configurable t))
+        (js-call assert :strictEqual (Object/getPrototypeOf left) globalThis.Object.prototype)
+        (js-call assert :strictEqual (Object/hasOwn left "__proto__") t)
+        (js-call assert :strictEqual (get left "__proto__") 7)
+        (js-call assert :deepStrictEqual (Reflect/ownKeys right) (js-array)))))
+  (test "foreign destructuring preserves own missing undefined null signed zero and real getters"
+    (lambda ()
+      (let ((row (js-object)) (trace (js-array)))
+        (Object/defineProperty row "value" (js-object :get (lambda () (js-call trace :push "value") -0.0)))
+        (let ((actual (readManagedForeignBinding row "value" 1)))
+          (js-call assert :ok (Object/is (aref actual 0) -0.0))
+          (js-call assert :strictEqual (aref actual 1) t))
+        (js-call assert :deepStrictEqual trace (js-array "value"))
+        (js-call assert :deepStrictEqual (readManagedForeignBinding row "absent" 0) (js-array nil false))
+        (js-call assert :deepStrictEqual (readManagedForeignBinding (js-object :value undefined) "value" 1) (js-array undefined t))
+        (js-call assert :deepStrictEqual (readManagedForeignBinding (js-object :value nil) "value" 2) (js-array nil t))
+        ;; The original binding helper still delegates a null-prototype value
+        ;; to ILookup. The real registry has no exact null prototype extension.
+        (js-call assert :throws (lambda () (readManagedForeignBinding (Object/create nil) "value" 0))
+          (lambda (error) (and (= (get error :code) "ELI-RUNTIME-PROTOCOL")
+            (= (get error :protocol) "ILookup") (= (get error :operation) "get")
+            (= (get error :observedType) "object:anonymous") (= (get error :reason) "missing"))))
+        (let ((ordinary (js-object)))
+          (Object/defineProperty (Object/getPrototypeOf ordinary) "__eliscript_binding_test_missing__"
+            (js-object :configurable t :get (lambda () (throw "inherited getter must not run"))))
+          (try
+            (js-call assert :deepStrictEqual (readManagedForeignBinding ordinary "__eliscript_binding_test_missing__" 0) (js-array nil false))
+            (finally (Reflect/deleteProperty (Object/getPrototypeOf ordinary) "__eliscript_binding_test_missing__")))))))
+  (test "foreign destructuring uses the real protocol with the original tagged key and source throw"
+    (lambda ()
+      (let* ((slot (get (get (get ILookup :operations) :get) :slot))
+             (prototype (js-object)) (target (Object/create prototype)) (trace (js-array)))
+        (Object/defineProperty target slot (js-object :value
+          (lambda (key missing) (js-call trace :push key) key)))
+        (let ((word (readManagedForeignBinding target "profile/name" 1))
+              (quoted (readManagedForeignBinding target "profile/name" 2)))
+          (js-call assert :strictEqual (aref word 0) (keyword "profile/name"))
+          ;; Symbol values are deliberately not interned. Preserve the actual
+          ;; key received by this protocol call, not a second factory result.
+          (js-call assert :strictEqual (aref quoted 0) (aref trace 1))
+          (js-call assert :notStrictEqual (aref quoted 0) (symbol "profile/name"))
+          (js-call assert :strictEqual (get (aref quoted 0) :qualifiedName) "profile/name")
+          (js-call assert :strictEqual (Object/getPrototypeOf (aref quoted 0))
+            (Object/getPrototypeOf (symbol "profile/name")))
+          (js-call assert :strictEqual (aref word 1) t)
+          (js-call assert :strictEqual (aref quoted 1) t))
+        (js-call assert :strictEqual (js-length trace) 2)
+        (js-call assert :strictEqual (aref trace 0) (keyword "profile/name"))
+        (let ((row (js-object)) (failed false) (actual undefined))
+          (Object/defineProperty row "value" (js-object :get (lambda () (throw false))))
+          (try (readManagedForeignBinding row "value" 1) (catch error (setq failed t actual error)))
+          (js-call assert :strictEqual failed t) (js-call assert :strictEqual actual false))
+        (js-call assert :throws (lambda () (readManagedForeignBinding target "value" 3)) globalThis.TypeError)))))

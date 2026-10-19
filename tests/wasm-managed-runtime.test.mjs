@@ -5,16 +5,55 @@ import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {buildBackends} from '../tools/backends/build.mjs';
 import {hashValue,equalValues} from '../runtime/core/value.mjs';
-let directory,backend,bytes,memoryProgram;
+let directory,backend,bytes,memoryProgram,memorySource;
 beforeAll(async()=>{
  directory=await mkdtemp(resolve(tmpdir(),'eliscript-managed-'));
  backend=await buildBackends({outputRoot:directory});
- const source=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8')+'\n(defun gc-named (heap code) (value-function-named heap code)) (export gc-named)';
+ memorySource=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8');
+ const source=memorySource+'\n(defun gc-named (heap code) (value-function-named heap code))'+
+  '\n(defun gc-unnamed (heap code) (value-function-new heap code 0))'+
+  '\n(defun gc-defragment (heap) (heap-defragment heap)) (export gc-named gc-unnamed gc-defragment)';
  memoryProgram=backend.compiler.compile_ir_string(source,'managed-runtime.eli');
  bytes=Uint8Array.from(backend.wasm.emit_memory_wasm(memoryProgram,{maximumPages:256}));
  assert(WebAssembly.validate(bytes)); assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);
 },120000);
 afterAll(async()=>{if(directory) await rm(directory,{recursive:true,force:true});});
+test('Given the complete runtime module when every helper is compiled then all source helper declarations stay direct module bindings and preserve forward visibility',()=>{
+ const modules=memoryProgram.body.filter(node=>node.kind==='module-declaration');
+ assert.equal(modules.length,1);const module=modules[0];
+ const declarations=module.children.filter(node=>node.kind==='function-declaration');
+ const expected=[...memorySource.matchAll(/^  \(defun ([^()\s]+)/gm)].map(match=>match[1]);
+ assert.deepEqual(declarations.map(node=>node.value),expected);
+ assert.deepEqual(memoryProgram.body.filter(node=>node.kind==='function-declaration').map(node=>node.value),['gc-named','gc-unnamed','gc-defragment']);
+ for(const declaration of declarations){
+  const pending=[...declaration.children];
+  while(pending.length){const node=pending.pop();assert.notEqual(node.kind,'function-declaration','runtime helper nested under '+declaration.value);pending.push(...node.children);}
+ }
+ for(const name of['heap-object-data-flags','heap-error-prototype','value-math-sum-precise','heap-source-wrapper-kind','heap-source-own-bag','value-function-class','value-function-class-invoke'])
+  assert.equal(declarations.filter(node=>node.value===name).length,1,name+' has exactly one module binding');
+});
+test('Given wrapper class and constructor helpers when their frames finish then cleanup is a statement and the lexical result is the numeric return value',()=>{
+ const module=memoryProgram.body.find(node=>node.kind==='module-declaration');
+ for(const name of['value-function-class','value-function-class-invoke','value-function-wrapper','heap-function-invoke-constructor']){
+  const declaration=module.children.find(node=>node.kind==='function-declaration'&&node.value===name);
+  assert(declaration,name+' is a module declaration');const pending=[...declaration.children],frames=[];
+  while(pending.length){const node=pending.pop();
+   if(node.kind==='lexical-bindings'){
+    const bindings=node.children.slice(0,node.properties.bindingCount).map(binding=>binding.value);
+    if(bindings.includes('frame')&&bindings.includes('result'))frames.push(node);
+   }
+   pending.push(...node.children);
+  }
+  assert.equal(frames.length,1,name+' owns one result frame');
+  const frame=frames[0],result=frame.children.at(-1),guard=frame.children.at(-2);
+  assert.equal(result.kind,'reference',name+' returns an actual value after the frame guard');assert.equal(result.value,'result');
+  assert.equal(guard.kind,'conditional-sugar');assert.equal(guard.value,'when');
+  const cleanup=guard.children.at(-1);assert.equal(cleanup.kind,'assignment',name+' always closes the entered frame');
+  assert.equal(cleanup.children.length,1);assert.equal(cleanup.children[0].value,'result');
+  const call=cleanup.children[0].children[0];assert.equal(call.kind,'call');
+  assert.equal(call.children[0].kind,'reference');assert.equal(call.children[0].value,'heap-frame-result');
+ }
+});
 function runtime(slots=64,initial=4096,max=1048576,artifact=bytes) {
  const e=new WebAssembly.Instance(new WebAssembly.Module(artifact)).exports;
  const r=Object.fromEntries(Object.entries(e).map(([k,v])=>[k.replaceAll('-','_'),typeof v==='function'? (...args)=>v(...args)>>>0:v]));
@@ -38,6 +77,190 @@ function managedBytes(r,h,input) {
 function readManagedBytes(r,h,value) {
  const length=r.value_length(h,value),p=r.value_data(h,value,6);assert(p>0);return new Uint8Array(r.memory.buffer,p,length).slice();
 }
+test('raw construction distinguishes valid nonconstructors from invalid handles after validating arguments and preserves caller roots',()=>{
+ const {r,h}=runtime(),owned=[];
+ const own=value=>{assert(value>3);assert.equal(r.heap_pin(h,value),1);owned.push(value);return value;};
+ const held=own(number(r,h,-0)),args=own(r.value_refs(h,7,1));
+ assert.equal(r.value_set(h,args,0,held),1);
+ const text=own(managedString(r,h,'not a constructor')),object=own(r.value_object_new(h,3));
+ const array=own(r.value_array_new(h,0)),name=own(managedString(r,h,'nonconstructor'));
+ const callable=own(r.gc_named(h,77));
+ assert.equal(r.value_function_describe(h,callable,name,0,0,0,78),callable);
+ assert.equal(r.value_function_callable(h,callable),1);
+ assert.equal(r.value_function_constructible(h,callable),0);assert.equal(r.last_error(),0);
+ const frame=r.frame_new(h,1);assert(frame>3);assert.equal(r.frame_set(h,frame,0,held),1);
+ r.heap_auto(h,1);
+ const rejected=(target,argumentsList,count,code,sourceClass)=>{
+  // Match the host adapter's per-error source-class consumption rather than
+  // allowing a previous language failure to classify a later raw ABI error.
+  assert.equal(r.value_exception_class_set(h,0),1);
+  assert.equal(r.value_source_construct(h,target,argumentsList,count),0);
+  assert.equal(r.last_error(),code);
+  assert.equal(r.value_exception_class(h),sourceClass);
+  assert.equal(r.value_exception_class_set(h,0),1);
+  assert.equal(r.frame_depth(h),1);assert.equal(r.frame_get(h,frame,0),held);
+  assert(Object.is(unbox(r,h,held),-0));
+  r.heap_collect(h);
+  assert.equal(r.frame_depth(h),1);assert.equal(r.value_get(h,args,0),held);
+  assert(Object.is(unbox(r,h,held),-0));
+ };
+ try{
+  for(const target of[0,1,2,3,held,text,object,array,callable])rejected(target,args,1,3,2);
+  // Malformed argument carriers/counts win even when the callee is false or
+  // forged; neither case may be rewritten to a nonconstructor TypeError.
+  rejected(1,0,0,1,0);rejected(1,object,0,1,0);
+  rejected(1,args,0,3,0);rejected(0xffffffff,args,0,3,0);
+  const stale=r.value_object_new(h,3);assert(stale>3);
+  r.heap_collect(h);assert.equal(r.value_kind(h,stale),0);assert.equal(r.last_error(),1);
+  rejected(stale,args,1,1,0);rejected(0xffffffff,args,1,1,0);
+  const staleFunction=r.gc_named(h,79);assert(staleFunction>3);
+  r.heap_collect(h);assert.equal(r.value_kind(h,staleFunction),0);assert.equal(r.last_error(),1);
+  rejected(staleFunction,args,1,1,0);
+  // Ordinary allocations and writes still succeed after both error classes.
+  const recovered=own(r.value_object_new(h,3));
+  assert.equal(r.value_kind(h,recovered),13);assert.equal(r.value_set(h,args,0,held),1);
+  rejected(1,args,1,3,2);
+ }finally{
+  assert.equal(r.frame_pop(h,frame),1);assert.equal(r.frame_depth(h),0);
+  for(const value of owned)assert.equal(r.heap_release(h,value),1);
+  r.heap_collect(h);assert.equal(r.heap_live(h),0);assert.equal(r.frame_depth(h),0);
+ }
+});
+function managedPoolLayout(r,h){
+ const view=new DataView(r.memory.buffer),control=view.getUint32(h+16,true),pool=view.getUint32(control+4,true);
+ return {view,control,base:view.getUint32(pool+16,true),maximum:view.getUint32(control+8,true),highwater:view.getUint32(control+12,true)};
+}
+function namedCacheAddress(r,h,code){
+ const {base,maximum,highwater}=managedPoolLayout(r,h);
+ assert(maximum>=512);assert(highwater<maximum-255,'test only accesses an unallocated cache window');
+ return base+(maximum-255+(code&255))*24+16;
+}
+test('weak named cache validates collisions and candidate identity without retaining values through collection or pool movement',()=>{
+ const {r,h}=runtime(512,16384,262144),owned=new Set();
+ const own=value=>{assert(value>3);assert.equal(r.heap_pin(h,value),1);owned.add(value);return value;};
+ const held=own(number(r,h,-0)),first=own(r.gc_named(h,0)),collision=own(r.gc_named(h,256));
+ const frame=r.frame_new(h,1);assert(frame>3);r.frame_set(h,frame,0,held);
+ const cell=()=>namedCacheAddress(r,h,0),cached=()=>new DataView(r.memory.buffer).getUint32(cell(),true);
+ const counts=()=>[r.heap_live(h),r.heap_used(h),r.frame_depth(h)];
+ try{
+  assert.equal(cached(),collision,'colliding code replaces only the weak cache entry');
+  const before=counts();
+  for(let repeat=0;repeat<16;repeat++){
+   assert.equal(r.gc_named(h,0),first);assert.equal(cached(),first);
+   assert.equal(r.gc_named(h,256),collision);assert.equal(cached(),collision);
+  }
+  assert.deepEqual(counts(),before,'cache hits and collision misses do not allocate');
+  // These deliberately invalid *cache hints* are written only into unused
+  // slot-table words. They must not become ABI errors or false identities.
+  for(const candidate of[0xffffffff,held,collision]){
+   new DataView(r.memory.buffer).setUint32(cell(),candidate,true);
+   assert.equal(r.gc_named(h,0),first);assert.equal(r.last_error(),0);assert.equal(cached(),first);
+  }
+  const dead=r.gc_named(h,321);assert(dead>3);
+  assert.equal(new DataView(r.memory.buffer).getUint32(namedCacheAddress(r,h,321),true),dead);
+  assert.equal(r.heap_collect(h),1,'a cached function with no caller roots is collectible');
+  assert.equal(r.value_kind(h,dead),0);assert.equal(r.last_error(),1);
+  const unnamed=own(r.gc_unnamed(h,321));
+  assert.equal(unnamed&1048575,dead&1048575);assert.notEqual(unnamed>>>20,dead>>>20);
+  const replacement=own(r.gc_named(h,321));assert.notEqual(replacement,dead);assert.notEqual(replacement,unnamed);
+  assert.equal(r.value_kind(h,unnamed),18);
+  const sameCodeCounts=counts();
+  new DataView(r.memory.buffer).setUint32(namedCacheAddress(r,h,321),unnamed,true);
+  assert.equal(r.gc_named(h,321),replacement,'an unnamed callable with the same code is not a named identity');
+  assert.deepEqual(counts(),sameCodeCounts);
+  const high=own(r.gc_named(h,0xffffffff));assert.equal(r.gc_named(h,0xffffffff),high);
+  const previousBase=managedPoolLayout(r,h).base;
+  const gap=own(r.value_bytes(h,31)),blob=own(r.value_bytes(h,30000));
+  assert.notEqual(managedPoolLayout(r,h).base,previousBase,'the real pool has moved on growth');
+  assert.equal(r.value_byte_set(h,blob,0,17),1);assert.equal(r.value_byte_set(h,blob,29999,239),1);
+  assert.equal(r.heap_release(h,gap),1);owned.delete(gap);r.heap_collect(h);
+  assert.equal(r.gc_defragment(h),1);
+  for(const [code,value]of[[0,first],[256,collision],[321,replacement],[0xffffffff,high]])assert.equal(r.gc_named(h,code),value);
+  assert.equal(r.value_byte_get(h,blob,0),17);assert.equal(r.value_byte_get(h,blob,29999),239);
+  assert.equal(r.frame_get(h,frame,0),held);assert(Object.is(unbox(r,h,held),-0));assert.equal(r.frame_depth(h),1);
+  assert.equal(r.gc_named(0,0),0);assert.equal(r.last_error(),1);
+  assert.equal(r.gc_named(h,0),first,'invalid heap failure does not change another heap cache');
+ }finally{
+  assert.equal(r.frame_pop(h,frame),1);for(const value of owned)assert.equal(r.heap_release(h,value),1);
+  r.heap_collect(h);assert.equal(r.heap_live(h),0);assert.equal(r.frame_depth(h),0);
+ }
+});
+test('weak named caches are per heap and small heaps keep their original uncached slot-table contract',()=>{
+ const {r,h}=runtime(512,16384,65536),peer=r.heap_new(512,16384,65536);assert(peer>0);
+ const first=r.gc_named(h,73);r.heap_pin(h,first);
+ const prefix=number(r,peer,-0);r.heap_pin(peer,prefix);
+ const second=r.gc_named(peer,73);r.heap_pin(peer,second);
+ try{
+  assert.notEqual(first,second,'different live slots make the two heap identities independently observable');
+  assert.equal(new DataView(r.memory.buffer).getUint32(namedCacheAddress(r,h,73),true),first);
+  assert.equal(new DataView(r.memory.buffer).getUint32(namedCacheAddress(r,peer,73),true),second);
+  r.heap_collect(h);r.heap_collect(peer);
+  assert.equal(r.gc_named(h,73),first);assert.equal(r.gc_named(peer,73),second);assert(Object.is(unbox(r,peer,prefix),-0));
+ }finally{
+  r.heap_release(h,first);r.heap_release(peer,prefix);r.heap_release(peer,second);
+  r.heap_collect(h);r.heap_collect(peer);assert.equal(r.heap_live(h),0);assert.equal(r.heap_live(peer),0);
+ }
+ const small=r.heap_new(511,16384,65536);assert(small>0);
+ const layout=managedPoolLayout(r,small),untouched=layout.base+511*24+16;
+ layout.view.setUint32(untouched,0x76543210,true);
+ const value=r.gc_named(small,255);assert(value>3);r.heap_pin(small,value);
+ assert.equal(r.gc_named(small,255),value);
+ assert.equal(new DataView(r.memory.buffer).getUint32(untouched,true),0x76543210);
+ r.heap_release(small,value);r.heap_collect(small);assert.equal(r.heap_live(small),0);
+ assert.equal(r.retire(),1);assert.equal(r.gc_named(h,73),0);assert.equal(r.last_error(),1);
+ const fresh=r.heap_new(512,16384,65536);assert(fresh>0);assert(r.gc_named(fresh,73)>3);
+ r.heap_collect(fresh);assert.equal(r.heap_live(fresh),0);
+});
+test('allocating the first cache-tail entry disables lookup and writes before all slots remain usable',()=>{
+ const {r,h}=runtime(512,65536,65536),owned=[];
+ const own=value=>{assert(value>3);assert.equal(r.heap_pin(h,value),1);owned.push(value);return value;};
+ const first=own(r.gc_named(h,0)),held=own(number(r,h,-0)),frame=r.frame_new(h,1);
+ assert(frame>3);r.frame_set(h,frame,0,held);
+ try{
+  while(managedPoolLayout(r,h).highwater<256)own(number(r,h,7));
+  const oldCell=namedCacheAddress(r,h,0);assert.equal(new DataView(r.memory.buffer).getUint32(oldCell,true),first);
+  const boundary=r.gc_named(h,256);assert(boundary>3);assert.equal(boundary&1048575,257);
+  assert.equal(new DataView(r.memory.buffer).getUint32(oldCell,true),0,
+   'fresh allocation clears the cache hint and the post-allocation cache write must stay disabled');
+  own(boundary);assert.equal(new DataView(r.memory.buffer).getUint32(oldCell,true),1);
+  assert.equal(r.gc_named(h,0),first);assert.equal(r.gc_named(h,256),boundary);
+  assert.equal(new DataView(r.memory.buffer).getUint32(oldCell,true),1,'fallback does not write into an active root counter');
+  while(r.heap_live(h)<512)own(number(r,h,7));
+  const before=[r.heap_live(h),r.heap_used(h),r.frame_depth(h)];
+  assert.equal(r.gc_named(h,512),0);assert.equal(r.last_error(),2);
+  assert.deepEqual([r.heap_live(h),r.heap_used(h),r.frame_depth(h)],before);
+  assert.equal(new DataView(r.memory.buffer).getUint32(oldCell,true),1);
+  assert.equal(r.gc_named(h,0),first);assert.equal(r.gc_named(h,256),boundary);
+  r.heap_collect(h);assert.equal(r.heap_live(h),512);assert.equal(r.frame_depth(h),1);assert(Object.is(unbox(r,h,held),-0));
+ }finally{
+  r.frame_pop(h,frame);for(const value of owned)r.heap_release(h,value);
+  r.heap_collect(h);assert.equal(r.heap_live(h),0);assert.equal(r.frame_depth(h),0);
+ }
+ const rebuilt=r.gc_named(h,0);assert(rebuilt>3);assert.notEqual(rebuilt,first);
+ assert.equal(r.gc_named(h,0),rebuilt);r.heap_collect(h);assert.equal(r.heap_live(h),0);
+});
+test('a failed cache miss preserves the old hint and caller state and retries after the original byte budget is freed',()=>{
+ const {r,h}=runtime(512,16384,16384),owned=new Set();
+ const own=value=>{assert(value>3);assert.equal(r.heap_pin(h,value),1);owned.add(value);return value;};
+ const first=own(r.gc_named(h,0)),held=own(number(r,h,-0)),frame=r.frame_new(h,1);
+ assert(frame>3);r.frame_set(h,frame,0,held);
+ try{
+  const remaining=r.heap_capacity(h)-r.heap_used(h);assert(remaining>=32);
+  const filler=own(r.value_bytes(h,remaining-32));assert.equal(r.heap_used(h),16384);
+  const address=namedCacheAddress(r,h,0),hint=new DataView(r.memory.buffer).getUint32(address,true);
+  const before=[r.heap_live(h),r.heap_used(h),r.frame_depth(h)];
+  assert.equal(r.gc_named(h,256),0);assert.equal(r.last_error(),2);
+  assert.deepEqual([r.heap_live(h),r.heap_used(h),r.frame_depth(h)],before);
+  assert.equal(new DataView(r.memory.buffer).getUint32(namedCacheAddress(r,h,0),true),hint);
+  assert.equal(r.gc_named(h,0),first);assert(Object.is(unbox(r,h,held),-0));
+  r.heap_release(h,filler);owned.delete(filler);r.heap_collect(h);
+  const recovered=own(r.gc_named(h,256));assert.notEqual(recovered,first);assert.equal(r.last_error(),0);
+  assert.equal(r.gc_named(h,0),first);assert.equal(r.frame_get(h,frame,0),held);assert.equal(r.frame_depth(h),1);
+ }finally{
+  r.frame_pop(h,frame);for(const value of owned)r.heap_release(h,value);
+  r.heap_collect(h);assert.equal(r.heap_live(h),0);assert.equal(r.frame_depth(h),0);
+ }
+});
 test('Number word operations reject invalid arguments and keep original inputs and capacity transactional',()=>{
  const {r,h}=runtime(2,384,384),x=number(r,h,-0),y=number(r,h,3);r.heap_pin(h,x);r.heap_pin(h,y);r.heap_auto(h,1);
  const used=r.heap_used(h);
@@ -782,4 +1005,41 @@ test('Node and Bun execute the same whole key pipeline through repeated WASM all
  const point=e['value-data'](h,value,4)>>>0,view=new DataView(e.memory.buffer);assert.equal(view.getUint32(point,true),999);assert.equal(view.getUint32(point+4,true),2146959360);
  assert.equal(e['frame-depth'](h),0);assert(e['heap-collections'](h)>=2000);e['heap-release'](h,value);e['heap-collect'](h);assert.equal(e['heap-live'](h),0);
  `],{encoding:'utf8',timeout:30000});assert.equal(result.status,0,result.stderr);
+});
+
+test('Given an unfinished owned string when a static literal borrows its full payload then length kind sealing and physical bounds are checked without allocating or changing caller frames',()=>{
+ const{r,h}=runtime(32,2048,65536),held=number(r,h,-0),frame=r.frame_new(h,1);r.frame_set(h,frame,0,held);r.heap_auto(h,1);
+ const string=r.value_string(h,5);assert(string);r.heap_pin(h,string);
+ const beforeLive=r.heap_live(h),beforeUsed=r.heap_used(h),beforeCollections=r.heap_collections(h),expected=r.value_data(h,string,5);
+ const pointer=r.value_string_initial_data(h,string,5);assert.equal(pointer,expected);assert.equal(r.last_error(),0);
+ assert.equal(r.heap_live(h),beforeLive);assert.equal(r.heap_used(h),beforeUsed);assert.equal(r.heap_collections(h),beforeCollections);assert.equal(r.frame_depth(h),1);
+ const units=[0,0xfeff,0xd800,0xdc00,0xdfff],view=new DataView(r.memory.buffer);
+ units.forEach((unit,index)=>view.setUint16(pointer+index*2,unit,true));
+ const snapshot=new Uint8Array(r.memory.buffer,pointer,10).slice();
+ for(const count of[0,4,6,0x80000000,0xffffffff]){
+  assert.equal(r.value_string_initial_data(h,string,count),0);assert.equal(r.last_error(),3);
+  assert.deepEqual(new Uint8Array(r.memory.buffer,pointer,10),snapshot);
+ }
+ // Corrupt only inline length/capacity fields through the existing raw ABI,
+ // proving that a plausible count cannot borrow beyond its actual block.
+ const header=pointer-32,length=view.getUint32(header+4,true),capacity=view.getUint32(header+8,true);
+ try{
+  view.setUint32(header+4,capacity+1,true);assert.equal(r.value_string_initial_data(h,string,capacity+1),0);assert.equal(r.last_error(),3);
+  view.setUint32(header+4,64,true);view.setUint32(header+8,64,true);assert.equal(r.value_string_initial_data(h,string,64),0);assert.equal(r.last_error(),3);
+ }finally{view.setUint32(header+4,length,true);view.setUint32(header+8,capacity,true);}
+ assert.equal(r.value_seal(h,string),string);assert.equal(readManagedString(r,h,string),String.fromCharCode(...units));
+ assert.equal(r.value_string_initial_data(h,string,5),0);assert.equal(r.last_error(),6);
+ const empty=r.value_string(h,0);r.heap_pin(h,empty);assert.equal(r.value_string_initial_data(h,empty,0),r.value_data(h,empty,5));
+ assert.equal(r.value_seal(h,empty),empty);assert.equal(readManagedString(r,h,empty),'');
+ for(const invalid of[0,1,2,3,held,0xffffffff]){assert.equal(r.value_string_initial_data(h,invalid,0),0);assert.equal(r.last_error(),1);}
+ const peer=r.heap_new(32,2048,65536);assert(peer);assert.equal(r.value_string_initial_data(peer,string,5),0);assert.equal(r.last_error(),1);
+ r.heap_release(h,string);r.heap_release(h,empty);r.heap_collect(h);
+ assert.equal(r.value_string_initial_data(h,string,5),0);assert.equal(r.last_error(),1);
+ assert(Object.is(unbox(r,h,held),-0));assert.equal(r.frame_depth(h),1);r.frame_pop(h,frame);r.heap_collect(h);assert.equal(r.heap_live(h),0);
+});
+test('Given exhausted literal allocation when its payload cannot be created then capacity failure retains existing roots and never exposes a writable pointer',()=>{
+ const{r,h}=runtime(4,256,256),held=number(r,h,-0),frame=r.frame_new(h,1);assert(frame);r.frame_set(h,frame,0,held);r.heap_auto(h,1);
+ assert.equal(r.value_string(h,8192),0);assert.equal(r.last_error(),2);assert(Object.is(unbox(r,h,held),-0));assert.equal(r.frame_depth(h),1);
+ assert.equal(r.value_string_initial_data(h,0,8192),0);assert.equal(r.last_error(),1);
+ r.frame_pop(h,frame);r.heap_collect(h);assert.equal(r.heap_live(h),0);
 });

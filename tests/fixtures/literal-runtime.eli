@@ -58,6 +58,34 @@
   (defconst array-second (nth 1 array-value))
   (defconst array-count (length array-value))
 
+  (defun nth-language (index collection) (nth index collection))
+  (defun nth-language-values ()
+    (let* ((shared (js-object :marker "nth"))
+           (vector [undefined -0.0 shared])
+           (array (js-array undefined -0.0 shared)))
+      (js-array
+        (nth 1 [10 20]) (nth 1 (js-array 10 20))
+        (nth 0 "A😀B") (nth 1 "A😀B") (nth 2 "A😀B") (nth 3 "A😀B")
+        (nth 99 vector) (nth 99 array) (nth 99 "A😀B")
+        (nth -1 vector) (nth -1 array) (nth -1 "A😀B")
+        (undefined? (nth 0 vector)) (undefined? (nth 0 array))
+        (Object/is (nth 1 vector) -0.0) (Object/is (nth 1 array) -0.0)
+        (eq (nth 2 vector) shared) (eq (nth 2 array) shared))))
+  (defun nth-language-order (mode)
+    (let ((trace "") (failure (js-object :marker "nth failure")) (collection (js-array 42)))
+      (try
+        (let ((result (nth
+                (progn
+                  (setq trace (str trace "i"))
+                  (when (= mode 1) (throw false))
+                  (when (= mode 3) (setq collection (js-array 99))) 0)
+                (progn
+                  (setq trace (str trace "c"))
+                  (when (= mode 2) (throw failure)) collection))))
+          (js-array trace false result))
+        (catch error
+          (js-array trace t (if (= mode 1) (eq error false) (eq error failure)))))))
+
   (export
     vector-value map-value map-literal set-value set-literal macro-set
     set-evaluation-order queue-value queue-literal queue-evaluation-order
@@ -66,4 +94,5 @@
     quoted-queue
     list-value list-first list-rest list-cons empty-list-rest
     array-value prepended-array object-value
-    vector-first vector-count array-second array-count))
+    vector-first vector-count array-second array-count
+    nth-language nth-language-values nth-language-order))

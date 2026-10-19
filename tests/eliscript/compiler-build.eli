@@ -1,0 +1,1361 @@
+(module tests.compiler-build
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile writeFile stat rm realpath)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "node:crypto" createHash)
+  (import "node:module" createRequire)
+  (import "../tools/backends/compiler-build.mjs"
+    independentCompilerProfiles independentCompilerResources loadCompilerSources
+    decodeCompilerBinary compilerMetadataDigest writeCompilerMetadata
+    buildIndependentCompiler)
+  (import "../tools/backends/compiler-metadata.mjs" readCompilerMetadata)
+  (import "../tools/backends/compiler-session.mjs" encodeCompilerIR)
+  (import "../dist/bootstrap/reader.mjs" read-string read-token reference-read-token)
+  (import "../dist/bootstrap/syntax.mjs"
+    make-span literal-node undefined-node symbol-node keyword-node collection-node)
+  (import "../dist/bootstrap/ir.mjs" make-node make-program)
+  (import "../dist/bootstrap/expander.mjs"
+    expand-module expand-module-with-origins expand-owned-module expand-owned-module-with-origins)
+  (import "../dist/bootstrap/analyzer.mjs" analyze-module)
+  (import "../dist/bootstrap/lower.mjs" lower-module lower-owned-module)
+  (import "../dist/bootstrap/compiler.mjs"
+    compile-ir-string compile-ir-string-with-origins serialize-ir-program emit-ir-string)
+
+  (defun sha256-text (text &optional encoding)
+    (js-call (js-call (createHash "sha256") :update text encoding) :digest "hex"))
+
+  (defun assert-type-error (callback message)
+    (js-call assert :throws callback
+      (lambda (error)
+        (and (= (get error :name) "TypeError") (= (get error :message) message)))))
+
+  (defun compiler-test-failure (callback)
+    (let ((failed false) (failure undefined))
+      (try (funcall callback)
+        (catch error (setq failed t) (setq failure error)))
+      (js-call assert :strictEqual failed t "the original operation must fail")
+      failure))
+
+  (defun checkpoint-ir (id filename source revision)
+    (let ((program (compile-ir-string source filename)))
+      (js-object :id id :filename filename :revision revision :stage "frontend"
+        :ir (encodeCompilerIR program) :canonicalIR (serialize-ir-program program))))
+  (defun observed-checkpoint-ir (record counts kind)
+    (let ((output (Object/assign (js-object) record)))
+      (js-call (js-array "ir" "canonicalIR") :forEach (lambda (key)
+        (Object/defineProperty output key (js-object :enumerable t :get (lambda ()
+          (let ((name (+ kind ":" key)))
+            (put counts name (1+ (get counts name 0))))
+          (get record key))))))
+      output))
+
+  (test "retained runtime and literal IR are source-bound on disk before a project fails and successful builds reuse the same checkpoints"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-runtime-ir-checkpoint-"))))
+             (sources (js-object :entry "entry.mjs"
+               :modules (js-array (js-object :id "entry.mjs" :filename "entry.eli" :source "(defun f () -0.0) (export f)"))
+               :runtime (js-object :filename "runtime.eli" :source "(defun runtime () 1)")
+               :literalSources (js-array (js-object :id "stdlib/value.mjs" :filename "stdlib/value.eli" :source "(defun value () 2)"))))
+             (runtime-ir (checkpoint-ir "runtime" "runtime.eli" (get (get sources :runtime) :source) 7))
+             (literal-ir (checkpoint-ir "stdlib/value.mjs" "stdlib/value.eli" (get (aref (get sources :literalSources) 0) :source) 9))
+             (module-ir (checkpoint-ir "entry.mjs" "entry.eli" (get (aref (get sources :modules) 0) :source) 8))
+             (markers (js-array (js-object :original "project failure") false undefined)) (index 0))
+        (try
+          (progn
+            (while (< index 4)
+              (let* ((success (= index 3)) (marker (aref markers index))
+                     (output (resolve directory (funcall globalThis.String index)))
+                     (calls (js-array)) (stages (js-array)) (seen-checkpoint undefined)
+                     (reads (js-object))
+                     (runtime-value (observed-checkpoint-ir runtime-ir reads "runtime"))
+                     (literal-value (observed-checkpoint-ir literal-ir reads "literal"))
+                     (producer (js-object :host "wasm" :request (async (request options)
+                       (js-call calls :push request)
+                       (cond
+                         ((= (get request :operation) "runtime") (js-object :revision 7 :literalRevision 9 :ready t))
+                         ((= (get request :operation) "cached-ir")
+                          (cond ((= (get request :kind) "runtime") runtime-value)
+                                ((= (get request :kind) "literal") literal-value) (t module-ir)))
+                         ((= (get request :operation) "project")
+                          (setq seen-checkpoint (await (readCompilerMetadata (resolve output "ir/runtime-checkpoint.json"))))
+                          (js-call assert :strictEqual (await (readFile (resolve output "ir/0001.json") "utf8")) (get runtime-ir :ir))
+                          (js-call assert :strictEqual (await (readFile (resolve output "ir/0001.json.canonical") "utf8")) (get runtime-ir :canonicalIR))
+                          (js-call assert :strictEqual (await (readFile (resolve output "ir/literal/0000.json") "utf8")) (get literal-ir :ir))
+                          (js-call assert :strictEqual (await (readFile (resolve output "ir/literal/0000.json.canonical") "utf8")) (get literal-ir :canonicalIR))
+                          (unless success (throw marker))
+                          (js-object :target "javascript" :revision 8 :modules
+                            (js-array (js-object :id "entry.mjs" :javascript
+                              (emit-ir-string (compile-ir-string (get (aref (get sources :modules) 0) :source) "entry.eli"))))))
+                         (t (throw (new globalThis.Error "unexpected checkpoint producer operation"))))))))
+                (if success
+                  (let* ((artifact (await (buildIndependentCompiler (js-object :host "javascript" :sources sources
+                                    :session producer :retainIR t :outputRoot output
+                                    :onPhase (lambda (stage details) (js-call stages :push stage))))))
+                         (metadata (await (readCompilerMetadata (get artifact :metadataPath)))))
+                    (js-call assert :deepStrictEqual (js-call (get artifact :frontendIR) :map (lambda (record) (get record :id)))
+                      (js-array "entry.mjs" "runtime"))
+                    (js-call assert :strictEqual (get (aref (get artifact :frontendIR) 1) :path) (resolve output "ir/0001.json"))
+                    (js-call assert :strictEqual (get (aref (get artifact :literalIR) 0) :path) (resolve output "ir/literal/0000.json"))
+                    (js-call assert :deepStrictEqual (get metadata :frontendIR)
+                      (js-array (js-object :id "entry.mjs" :stage "frontend" :path "ir/0000.json" :canonicalPath "ir/0000.json.canonical")
+                        (js-object :id "runtime" :stage "frontend" :path "ir/0001.json" :canonicalPath "ir/0001.json.canonical")))
+                    (js-call assert :strictEqual (js-call (get (get artifact :artifactIdentity) :files) :some (lambda (record)
+                      (= (get record :path) "ir/runtime-checkpoint.json"))) false))
+                  (let ((failed false) (failure undefined))
+                    (try (await (buildIndependentCompiler (js-object :host "javascript" :sources sources
+                           :session producer :retainIR t :outputRoot output)))
+                      (catch error (setq failed t failure error)))
+                    (js-call assert :strictEqual failed t)
+                    (js-call assert :strictEqual failure marker)))
+                (js-call assert :strictEqual (get seen-checkpoint :format) "eliscript-compiler-runtime-ir-checkpoint")
+                (js-call assert :strictEqual (get seen-checkpoint :producerHost) "wasm")
+                (js-call assert :strictEqual (get seen-checkpoint :revision) 7)
+                (js-call assert :strictEqual (get seen-checkpoint :literalRevision) 9)
+                ;; Exactly one validation read and one persistence read. A
+                ;; second write after project completion would observe these
+                ;; same producer getters again.
+                (js-call assert :deepStrictEqual reads
+                  (js-object "runtime:ir" 2 "runtime:canonicalIR" 2 "literal:ir" 2 "literal:canonicalIR" 2))
+                (js-call assert :deepStrictEqual (get seen-checkpoint :sourceIdentity)
+                  (js-object :algorithm "sha256" :encoding "utf16le"
+                    :runtime (js-object :filename "runtime.eli" :sha256 (sha256-text (get (get sources :runtime) :source) "utf16le"))
+                    :literalSources (js-array (js-object :id "stdlib/value.mjs" :filename "stdlib/value.eli"
+                      :sha256 (sha256-text (get (aref (get sources :literalSources) 0) :source) "utf16le")))))
+                (js-call assert :deepStrictEqual (js-call calls :map (lambda (request)
+                  (js-array (get request :operation) (get request :kind) (get request :revision))))
+                  (js-call (js-array (js-array "runtime" undefined undefined)
+                    (js-array "cached-ir" "runtime" 7) (js-array "cached-ir" "literal" 9)
+                    (js-array "project" undefined undefined)) :concat
+                    (if success (js-array (js-array "cached-ir" "module" 8)) (js-array)))))
+              (setq index (1+ index))))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "retainIR false never requests or writes runtime checkpoints before preserving the exact project refusal"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-no-runtime-checkpoint-"))))
+             (calls (js-array)) (marker (js-object :original "project"))
+             (producer (js-object :request (lambda (request options)
+               (js-call calls :push (get request :operation))
+               (if (= (get request :operation) "runtime") (js-object :revision 7 :literalRevision 9) (throw marker)))))
+             (sources (js-object :entry "entry.mjs" :modules (js-array)
+               :runtime (js-object :filename "runtime.eli" :source "(defun runtime () 1)"))))
+        (try
+          (progn
+            (await (js-call assert :rejects (buildIndependentCompiler (js-object :host "javascript" :sources sources
+              :session producer :retainIR false :outputRoot directory)) (lambda (error) (eq error marker))))
+            (js-call assert :deepStrictEqual calls (js-array "runtime" "project"))
+            (await (js-call assert :rejects (readFile (resolve directory "ir/runtime-checkpoint.json"))
+              (lambda (error) (= (get error :code) "ENOENT")))))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "Reader atom names keep read-local maps and unchanged Unicode and literal semantics"
+    (lambda ()
+      (let* ((source "😀名 😀名 :😀名 :😀名\n'😀名 #'😀名 #{😀名 :😀名} {:😀名 😀名} #queue [😀名] -0 -0.0 \"😀名\" \"quoted-only\" 12.5 '😀名 #'😀名 #{😀名} {:😀名 😀名} #queue [😀名]")
+             (filename "reader-names.eli") (original-map globalThis.Map) (maps (js-array))
+             (forms undefined) (other undefined)
+             (map-constructor (new globalThis.Proxy original-map
+               (js-object :construct
+                 (lambda (target arguments new-target)
+                   (let ((map (Reflect/construct target arguments new-target)))
+                     (js-call maps :push map) map))))))
+        (try
+          (progn
+            (put globalThis.globalThis :Map map-constructor)
+            (setq forms (read-string source filename))
+            (setq other (read-string "另一个 :另一个 \"quoted-second\" -1" "second.eli")))
+          (finally (put globalThis.globalThis :Map original-map)))
+        ;; These are observations of the private per-read dictionaries. String
+        ;; equality below checks source semantics, not managed handle identity.
+        (js-call assert :strictEqual (js-length maps) 2)
+        (js-call assert :notStrictEqual (aref maps 0) (aref maps 1))
+        (js-call assert :deepStrictEqual (Array/from (js-call (aref maps 0) :keys))
+          (js-array "😀名" "quote" "function" "hash-set" "hash-map" "queue"))
+        (js-call assert :deepStrictEqual (Array/from (js-call (aref maps 1) :keys)) (js-array "另一个"))
+        (let ((index 0) (excluded (js-array "-0" "-0.0" "12.5" "quoted-only" "quoted-second")))
+          (while (< index (js-length excluded))
+            (js-call assert :strictEqual (js-call (aref maps 0) :has (aref excluded index)) false)
+            (js-call assert :strictEqual (js-call (aref maps 1) :has (aref excluded index)) false)
+            (setq index (1+ index))))
+        (js-call assert :strictEqual (js-length forms) 19)
+        (js-call assert :deepStrictEqual
+          (js-call (js-call forms :slice 0 4) :map (lambda (node) (js-array (get node :kind) (get node :name))))
+          (js-array (js-array "symbol" "😀名") (js-array "symbol" "😀名")
+            (js-array "keyword" "😀名") (js-array "keyword" "😀名")))
+        (js-call assert :notStrictEqual (aref forms 0) (aref forms 1))
+        (js-call assert :notStrictEqual (get (aref forms 0) :span) (get (aref forms 1) :span))
+        (js-call assert :deepStrictEqual (get (aref forms 0) :span)
+          (js-object :filename filename :start 0 :end 2 :line 1 :column 1 :endLine 1 :endColumn 3))
+        (js-call assert :deepStrictEqual (get (aref forms 3) :span)
+          (js-object :filename filename :start 10 :end 13 :line 1 :column 11 :endLine 1 :endColumn 14))
+        (js-call assert :deepStrictEqual (get (aref forms 4) :span)
+          (js-object :filename filename :start 14 :end 17 :line 2 :column 1 :endLine 2 :endColumn 4))
+        (js-call assert :deepStrictEqual (get (aref (get (aref forms 4) :items) 1) :span)
+          (js-object :filename filename :start 15 :end 17 :line 2 :column 2 :endLine 2 :endColumn 4))
+        (js-call assert :deepStrictEqual
+          (js-call (js-call forms :slice 4 9) :map
+            (lambda (node) (get (aref (get node :items) 0) :name)))
+          (js-array "quote" "function" "hash-set" "hash-map" "queue"))
+        (js-call assert :deepStrictEqual
+          (js-call (js-call forms :slice 14 19) :map
+            (lambda (node) (get (aref (get node :items) 0) :name)))
+          (js-array "quote" "function" "hash-set" "hash-map" "queue"))
+        (js-call assert :strictEqual (get (aref (get (aref forms 6) :items) 2) :kind) "keyword")
+        (js-call assert :strictEqual (get (aref (get (aref forms 7) :items) 1) :name) "😀名")
+        (js-call assert :ok (Object/is (get (aref forms 9) :value) -0))
+        (js-call assert :ok (Object/is (get (aref forms 10) :value) -0))
+        (js-call assert :strictEqual (get (aref forms 11) :kind) "literal")
+        (js-call assert :strictEqual (get (aref forms 11) :value) "😀名")
+        (js-call assert :strictEqual (get (aref forms 12) :value) "quoted-only")
+        (js-call assert :strictEqual (get (aref forms 13) :value) 12.5)
+        (let* ((text (+ "😀/" (String/fromCharCode 55296) "/" (String/fromCharCode 57343)))
+               (literal (aref (read-string (JSON/stringify text) "string-codeunits.eli") 0)))
+          (js-call assert :strictEqual (get literal :value) text))
+        (put (aref forms 0) :name "changed")
+        (js-call assert :strictEqual (get (aref forms 1) :name) "😀名")
+        (js-call assert :strictEqual (get (aref other 0) :name) "另一个")
+        (js-call assert :strictEqual (get (aref other 1) :name) "另一个")
+        (js-call assert :strictEqual (Object/hasOwn (aref forms 0) "atomNames") false)
+        (js-call assert :strictEqual (js-call (aref maps 0) :has "另一个") false))
+      (let* ((state (js-object :source "😀名 boundary" :filename "external.eli" :index 0 :offset 0 :line 1 :column 1))
+             (reference (funcall globalThis.structuredClone state))
+             (start (js-object :index 0 :offset 0 :line 1 :column 1)))
+        (js-call assert :strictEqual (read-token state start) "😀名")
+        (js-call assert :strictEqual (reference-read-token reference start) "😀名")
+        (js-call assert :deepStrictEqual state reference)
+        (js-call assert :strictEqual (get state :index) 3)
+        (js-call assert :strictEqual (get state :offset) 2)
+        (js-call assert :strictEqual (get state :column) 3)
+        (js-call assert :strictEqual (Object/hasOwn state "atomNames") false))
+      (let* ((failure (compiler-test-failure (lambda () (read-string "😀名\n:bad/" "reader-error.eli"))))
+             (diagnostic (get failure :eliscriptDiagnostic)))
+        (js-call assert :strictEqual (get diagnostic :code) "ELI-R0001")
+        (js-call assert :strictEqual (get diagnostic :phase) "reader")
+        (js-call assert :strictEqual (get diagnostic :message) "invalid keyword literal: :bad/")
+        (js-call assert :deepStrictEqual (get diagnostic :location)
+          (js-object :file "reader-error.eli"
+            :start (js-object :offset 3 :line 2 :column 1) :end (js-object :offset 8 :line 2 :column 6))))
+      (let ((cases (js-array (js-array "'" "unexpected end of input")
+                     (js-array "#{name]" "Invalid read syntax: \"]\"")
+                     (js-array "{:x}" "map literal must contain an even number of forms")
+                     (js-array "#queue [name" "unexpected end of input"))) (index 0))
+        (while (< index (js-length cases))
+          (let* ((entry (aref cases index))
+                 (failure (compiler-test-failure (lambda () (read-string (aref entry 0) "reader-error.eli"))))
+                 (diagnostic (get failure :eliscriptDiagnostic)))
+            (js-call assert :strictEqual (get diagnostic :code) "ELI-R0001")
+            (js-call assert :strictEqual (get diagnostic :phase) "reader")
+            (js-call assert :strictEqual (get diagnostic :message) (aref entry 1))
+            (js-call assert :strictEqual (get (get diagnostic :location) :file) "reader-error.eli"))
+          (setq index (1+ index))))))
+
+  (test "Reader complete runtime AST records exact numeric repetition and node span counts"
+    (async ()
+      (let* ((filename "bootstrap/runtime/memory.eli")
+             (source (await (readFile (resolve filename) "utf8")))
+             (forms (read-string source filename)) (pending (Array/from forms))
+             (nodes (new globalThis.Set)) (spans (new globalThis.Set)) (collection-arrays (new globalThis.Set))
+             (numbers (new globalThis.Map)) (large-lines (new globalThis.Set))
+             (kinds (js-object :literal 0 :undefined 0 :symbol 0 :keyword 0 :list 0 :vector 0))
+             (numeric-count 0) (zero-count 0) (negative-zero-count 0) (one-count 0) (negative-one-count 0)
+             (large-line-references 0))
+        ;; This reads the complete, unchanged runtime, not a repeated synthetic
+        ;; sample. Counts describe source AST values; equal JavaScript Numbers
+        ;; do not by themselves prove duplicate managed heap handles.
+        (while (> (js-length pending) 0)
+          (let* ((node (js-call pending :pop)) (kind (get node :kind)) (span (get node :span)))
+            (js-call assert :strictEqual (js-call nodes :has node) false "Reader returns a tree of distinct mutable nodes")
+            (js-call assert :strictEqual (Array/isArray node) false)
+            (js-call assert :strictEqual (Array/isArray span) false)
+            (js-call nodes :add node) (js-call spans :add span)
+            (js-call assert :strictEqual (Object/hasOwn kinds kind) t)
+            (put kinds kind (1+ (aref kinds kind)))
+            (js-call assert :strictEqual (get span :filename) filename)
+            (js-call assert :strictEqual (Object/hasOwn node "atomNames") false)
+            (let ((start-line (get span :line)) (end-line (get span :endLine)))
+              (when (> start-line 1024)
+                (setq large-line-references (1+ large-line-references)) (js-call large-lines :add start-line))
+              (when (> end-line 1024)
+                (setq large-line-references (1+ large-line-references)) (js-call large-lines :add end-line)))
+            (if (or (= kind "list") (= kind "vector"))
+              (let ((items (get node :items)) (index 0))
+                (js-call assert :strictEqual (Array/isArray items) t)
+                (js-call assert :strictEqual (js-call collection-arrays :has items) false
+                  "each mutable collection owns its independent items array")
+                (js-call collection-arrays :add items)
+                (while (< index (js-length items))
+                  (js-call pending :push (aref items index)) (setq index (1+ index))))
+              (when (and (= kind "literal") (= (value-type (get node :value)) "number"))
+                (let* ((value (get node :value))
+                       ;; Map uses SameValueZero. A separate nonnumeric key is
+                       ;; necessary to count -0 and +0 independently.
+                       (key (if (Object/is value -0) "-0" value))
+                       (previous (js-call numbers :get key)))
+                  (setq numeric-count (1+ numeric-count))
+                  (js-call numbers :set key (if (undefined? previous) 1 (1+ previous)))
+                  (cond ((Object/is value -0) (setq negative-zero-count (1+ negative-zero-count)))
+                        ((= value 0) (setq zero-count (1+ zero-count)))
+                        ((= value 1) (setq one-count (1+ one-count)))
+                        ((= value -1) (setq negative-one-count (1+ negative-one-count)))))))))
+        (let* ((entries (Array/from (js-call numbers :entries))) (sum 0) (index 0)
+               (object-lower-bound (+ (get nodes :size) (get spans :size) (get collection-arrays :size)))
+               (legacy-limit (get (get (get independentCompilerProfiles "full-runtime") :budget) :maxSlots))
+               (common (js-call entries :map (lambda (entry)
+                 (js-object :value (if (= (value-type (aref entry 0)) "string") "-0"
+                                      (funcall globalThis.String (aref entry 0)))
+                            :occurrences (aref entry 1))))))
+          (while (< index (js-length entries))
+            (setq sum (+ sum (aref (aref entries index) 1))) (setq index (1+ index)))
+          (js-call common :sort (lambda (left right) (- (get right :occurrences) (get left :occurrences))))
+          (js-call assert :ok (> (get nodes :size) 0))
+          (js-call assert :strictEqual (get spans :size) (get nodes :size) "each mutable AST span remains independent")
+          (js-call nodes :forEach (lambda (node)
+            (js-call assert :strictEqual (js-call spans :has node) false "node and span records are disjoint objects")))
+          ;; This is a conservative necessary-object lower bound, not a
+          ;; measured managed slot count. It excludes the top-level forms
+          ;; array, all property tables, primitive handles and Reader state.
+          (js-call assert :strictEqual legacy-limit 1048575)
+          (js-call assert :ok (> object-lower-bound legacy-limit)
+            "the unchanged complete runtime AST alone exceeds the legacy full-runtime slot limit")
+          (js-call assert :ok (> numeric-count 0))
+          (js-call assert :strictEqual sum numeric-count)
+          (js-call assert :ok (<= (get numbers :size) numeric-count))
+          (js-call globalThis.console :info "reader-complete-runtime-ast"
+            (JSON/stringify (js-object :filename filename :sourceUnits (js-length source)
+              :sourceSha256 (sha256-text source "utf16le") :topLevelForms (js-length forms)
+              :nodeCount (get nodes :size) :spanCount (get spans :size) :kinds kinds
+              :collectionArrayCount (get collection-arrays :size)
+              :necessaryObjectLowerBound object-lower-bound :legacyFullRuntimeSlotLimit legacy-limit
+              :numericLiteralCount numeric-count :distinctNumericValues (get numbers :size)
+              :repeatedNumericOccurrences (- numeric-count (get numbers :size))
+              :positiveZero zero-count :negativeZero negative-zero-count :one one-count :negativeOne negative-one-count
+              :lineReferencesAbove1024 large-line-references :distinctLinesAbove1024 (get large-lines :size)
+              :mostCommonNumericValues (js-call common :slice 0 12))))))))
+
+  (defasync compiler-check-binary-project-entries (driver state)
+    (let* ((request (js-object :operation "project" :target "wasm" :resolveImports t :phased t
+                     :entry "main.mjs" :entries (js-array "main.mjs")
+                     :hostSources (js-array (js-object :id "unused-host.mjs" :filename "unused-host.mjs"
+                       :source (await (readFile (resolve "runtime/math.mjs") "utf8"))))
+                     :modules (js-array
+                       (js-object :id "main.mjs" :filename "main.eli"
+                         :source "(module main (defun answer () 7) (export answer))")
+                       (js-object :id "unused.mjs" :filename "unused.eli"
+                         :source "(module unused (defun bad () (js* \"unreachable-foreign-operation\")) (export bad))"))))
+           (before (JSON/stringify request))
+           (response (JSON/parse (js-call driver :compiler_session_request state (JSON/stringify request)))))
+      (js-call assert :strictEqual (get response :target) "wasm")
+      (js-call assert :deepStrictEqual
+        (js-call (get (get (get response :descriptor) :project) :modules) :map (lambda (item) (get item :id)))
+        (js-array "main.mjs"))
+      (js-call assert :strictEqual (JSON/stringify request) before)
+      (let* ((javascript (Object/assign (js-object) request (js-object :target "javascript")))
+             (product (JSON/parse (js-call driver :compiler_session_request state (JSON/stringify javascript)))))
+        (js-call assert :deepStrictEqual
+          (js-call (get product :modules) :map (lambda (item) (get item :id)))
+          (js-array "main.mjs" "unused.mjs")))
+      ;; The retained source is still validated and cached, but it is not an
+      ;; execution root until explicitly selected. The same session recovers.
+      (put request :entries (js-array "main.mjs" "unused.mjs"))
+      (let ((failure (compiler-test-failure
+              (lambda () (js-call driver :compiler_session_request state (JSON/stringify request))))))
+        (js-call assert :strictEqual (get (get failure :eliscriptDiagnostic) :code) "ELI-B0001")
+        (js-call assert :strictEqual (get (get failure :eliscriptDiagnostic) :message)
+          "raw JavaScript is not supported by managed control"))
+      (put request :entries (js-array "main.mjs"))
+      (js-call assert :strictEqual
+        (get (JSON/parse (js-call driver :compiler_session_request state (JSON/stringify request))) :target) "wasm")))
+
+  (defun compiler-check-foreign-entry (driver state)
+    (let* ((request (js-object :operation "project" :target "wasm" :phased t
+                     :entry "foreign.mjs" :entries (js-array "foreign.mjs")
+                     :modules (js-array (js-object :id "foreign.mjs" :filename "foreign.eli"
+                       :source "(defun read ([value]) value) (export read)"))))
+           (before (JSON/stringify request)))
+      (js-call (js-array undefined false t) :forEach (lambda (flag)
+        (let* ((input (Object/assign (js-object) request))
+               (_flag (unless (undefined? flag) (put input :foreignEntry flag)))
+               (snapshot (JSON/stringify input))
+               (response (JSON/parse (js-call driver :compiler_session_request state (JSON/stringify input)))))
+          (js-call assert :strictEqual (JSON/stringify input) snapshot)
+          (js-call assert :deepStrictEqual
+            (get (get response :descriptor) :hostCapabilities (js-array))
+            (if (eq flag t)
+              (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2 :abi "managed-host-call-v1"))
+              (js-array))))))
+      (js-call (js-array nil 0 1 "true" (js-array) (js-object)) :forEach (lambda (invalid)
+        (let* ((input (Object/assign (js-object) request (js-object :foreignEntry invalid)))
+               (failure (compiler-test-failure (lambda ()
+                 (js-call driver :compiler_session_request state (JSON/stringify input))))))
+          (js-call assert :strictEqual (get (get failure :eliscriptDiagnostic) :code) "ELI-H0001")
+          (js-call assert :strictEqual (get failure :message) "foreignEntry must be a boolean"))))
+      (js-call assert :deepStrictEqual
+        (get (get (JSON/parse (js-call driver :compiler_session_request state (JSON/stringify request)))
+          :descriptor) :hostCapabilities (js-array)) (js-array))
+      (js-call assert :strictEqual (JSON/stringify request) before)))
+
+  (defun compiler-check-runtime-stages (driver)
+    (let* ((source "(module staged (defmacro twice (x) (list '+ x x)) (defun choose (value) (let ((zero -0.0)) (if value (twice value) zero))) (export choose))")
+           (filename "分阶段😀.eli")
+           (literal-source "(module literal (defconst token :重复) (defun token-value () token) (export token token-value))")
+           (literal-filename "literal-stages.eli")
+           (state (js-call driver :compiler_session_new)))
+      (try
+        (let* ((request (js-object :operation "runtime" :source source :filename filename
+                          :literalSources (js-array (js-object :id "stdlib/staged.mjs" :filename literal-filename :source literal-source))))
+               (response (JSON/parse (js-call driver :compiler_session_request state (JSON/stringify request)))))
+          (js-call assert :strictEqual (get response :ready) t)
+          (js-call assert :strictEqual (serialize-ir-program (get state :runtime))
+            (serialize-ir-program (compile-ir-string source filename)))
+          (js-call assert :strictEqual
+            (serialize-ir-program (get (aref (get state :literalModules) 0) :program))
+            (serialize-ir-program (compile-ir-string literal-source literal-filename)))
+          (js-call assert :deepStrictEqual (get state :lastPhase)
+            (js-object :phase "runtime-ready" :filename filename :index -1))
+          (js-call assert :strictEqual (Object/hasOwn response "lastPhase") false))
+        (finally
+          (js-call driver :compiler_session_close state)
+          (js-call assert :strictEqual (get state :lastPhase) nil))))
+    (let ((cases (js-array
+            (js-array "(module broken (defun bad () missing)" "read")
+            (js-array "(module broken (defun bad () missing) (defmacro take (x) x) (take))" "expand")
+            (js-array "(module broken (defun bad () missing) (export bad))" "analyze")))
+          (index 0))
+      (while (< index (js-length cases))
+        (let* ((entry (aref cases index)) (source (aref entry 0))
+               (filename (+ "runtime-stage-" (aref entry 1) ".eli"))
+               (expected (compiler-test-failure (lambda () (compile-ir-string source filename))))
+               (mode 0))
+          (while (< mode 2)
+            (let* ((state (js-call driver :compiler_session_new))
+                   (prefix (if (= mode 0) "runtime-program" "literal"))
+                   (request (if (= mode 0)
+                     (js-object :operation "runtime" :source source :filename filename :literalSources (js-array))
+                     (js-object :operation "runtime" :source "(module valid)" :filename "valid-runtime.eli"
+                       :literalSources (js-array (js-object :id "stdlib/broken.mjs" :filename filename :source source))))))
+              (try
+                (let ((failure (compiler-test-failure
+                        (lambda () (js-call driver :compiler_session_request state (JSON/stringify request))))))
+                  (js-call assert :deepStrictEqual (get failure :eliscriptDiagnostic) (get expected :eliscriptDiagnostic))
+                  (js-call assert :strictEqual (get failure :message) (get expected :message))
+                  (js-call assert :deepStrictEqual (get state :lastPhase)
+                    (js-object :phase (+ prefix "-" (aref entry 1)) :filename filename :index (if (= mode 0) -1 0)))
+                  (js-call assert :strictEqual (get state :runtime) nil)
+                  (js-call assert :strictEqual (get state :literalModules) nil)
+                  (js-call assert :strictEqual (get state :revision) 0)
+                  (js-call assert :strictEqual (get state :literalRevision) 0))
+                (finally
+                  (js-call driver :compiler_session_close state)
+                  (js-call assert :strictEqual (get state :lastPhase) nil))))
+            (setq mode (1+ mode))))
+        (setq index (1+ index)))))
+
+  (defun compiler-check-cold-runtime-transaction (driver)
+    (let* ((state (js-call driver :compiler_session_new))
+           (original-cache (get state :literalCache))
+           (runtime-source "(module runtime (defconst negative -0.0) (defun value () negative) (export value))")
+           (literal-source "(module literal (defconst text \"同名😀\") (defconst zero 0) (defconst negative -0.0) (defun values () (js-array text zero negative)) (export values))")
+           (literal (js-object :id "stdlib/冷😀.mjs" :filename "冷😀.eli" :source literal-source))
+           (request (js-object :operation "runtime" :filename "runtime-cold.eli"
+                      :source runtime-source :literalSources (js-array literal)))
+           (bad-runtime "(module runtime (defun bad () missing-runtime))")
+           (bad-literal "(module literal (defun bad () missing-literal))")
+           (phases (js-array)))
+      (try
+        (progn
+          (put state :phaseObserver (lambda (phase counts) (js-call phases :push phase)))
+          ;; Both sources fail: the original literal diagnostic must still win,
+          ;; with no runtime compilation or transaction publication.
+          (let* ((expected (compiler-test-failure (lambda () (compile-ir-string bad-literal "bad-literal.eli"))))
+                 (bad (object-assoc (object-assoc request :source bad-runtime)
+                        :literalSources (js-array literal
+                          (js-object :id "stdlib/bad.mjs" :filename "bad-literal.eli" :source bad-literal))))
+                 (failure (compiler-test-failure
+                   (lambda () (js-call driver :compiler_session_request state (JSON/stringify bad))))))
+            (js-call assert :deepStrictEqual (get failure :eliscriptDiagnostic) (get expected :eliscriptDiagnostic))
+            (js-call assert :strictEqual (get failure :message) (get expected :message))
+            (js-call assert :deepStrictEqual (get state :lastPhase)
+              (js-object :phase "literal-analyze" :filename "bad-literal.eli" :index 1))
+            (js-call assert :deepStrictEqual phases (js-array "runtime-literals-start")))
+          (js-call assert :strictEqual (get state :literalCache) original-cache)
+          (js-call assert :strictEqual (get original-cache :size) 0)
+          ;; A successfully snapshotted literal must not become a cache entry
+          ;; when the later runtime fails. The runtime error stays exact.
+          (put phases :length 0)
+          (let* ((expected (compiler-test-failure (lambda () (compile-ir-string bad-runtime "runtime-cold.eli"))))
+                 (failure (compiler-test-failure
+                   (lambda () (js-call driver :compiler_session_request state
+                     (JSON/stringify (object-assoc request :source bad-runtime)))))))
+            (js-call assert :deepStrictEqual (get failure :eliscriptDiagnostic) (get expected :eliscriptDiagnostic))
+            (js-call assert :strictEqual (get failure :message) (get expected :message))
+            (js-call assert :deepStrictEqual (get state :lastPhase)
+              (js-object :phase "runtime-program-analyze" :filename "runtime-cold.eli" :index -1))
+            (js-call assert :deepStrictEqual phases
+              (js-array "runtime-literals-start" "runtime-literals-complete" "runtime-program-start")))
+          (js-call assert :strictEqual (get state :runtime) nil)
+          (js-call assert :strictEqual (get state :runtimeSource) nil)
+          (js-call assert :strictEqual (get state :literalSources) nil)
+          (js-call assert :strictEqual (get state :literalModules) nil)
+          (js-call assert :strictEqual (get state :literalKey) nil)
+          (js-call assert :strictEqual (get state :literalCache) original-cache)
+          (js-call assert :strictEqual (get original-cache :size) 0)
+          (js-call assert :strictEqual (get state :revision) 0)
+          (js-call assert :strictEqual (get state :literalRevision) 0)
+          (put phases :length 0)
+          (let* ((ready (JSON/parse (js-call driver :compiler_session_request state (JSON/stringify request))))
+                 (runtime (get state :runtime)) (modules (get state :literalModules))
+                 (cache (get state :literalCache)) (record (js-call cache :get (get literal :id)))
+                 (program (get (aref modules 0) :program)))
+            (js-call assert :deepStrictEqual ready
+              (js-object :ready t :filename "runtime-cold.eli" :revision 1 :literalRevision 1))
+            (js-call assert :deepStrictEqual phases
+              (js-array "runtime-literals-start" "runtime-literals-complete" "runtime-program-start"
+                "runtime-program-complete" "response-serialize-start" "response-serialize-complete"))
+            (js-call assert :strictEqual (serialize-ir-program runtime)
+              (serialize-ir-program (compile-ir-string runtime-source "runtime-cold.eli")))
+            (js-call assert :strictEqual (serialize-ir-program program)
+              (serialize-ir-program (compile-ir-string literal-source "冷😀.eli")))
+            (js-call assert :strictEqual (get record :program) program)
+            (js-call assert :deepStrictEqual (Object/keys (aref modules 0)) (js-array "id" "program"))
+            (js-call assert :deepStrictEqual (Object/keys record) (js-array "source" "filename" "program"))
+            (js-call assert :strictEqual (Object/getPrototypeOf program) globalThis.Object.prototype)
+            (js-call assert :deepStrictEqual (Object/getOwnPropertyDescriptor program "body")
+              (js-object :value (get program :body) :writable t :enumerable t :configurable t))
+            (let ((pending (js-array program)) (positive false) (negative false) (unicode false))
+              (while (> (js-length pending) 0)
+                (let ((value (js-call pending :pop)))
+                  (when (and value (= (value-type value) "object"))
+                    (when (= (get value :kind nil) "literal")
+                      (let ((literal-value (get value :value)))
+                        (when (Object/is literal-value 0) (setq positive t))
+                        (when (Object/is literal-value -0) (setq negative t))
+                        (when (= literal-value "同名😀") (setq unicode t))))
+                    (js-call (Object/values value) :forEach
+                      (lambda (child) (js-call pending :push child))))))
+              (js-call assert :strictEqual positive t)
+              (js-call assert :strictEqual negative t)
+              (js-call assert :strictEqual unicode t))
+            ;; A cache hit retains the exact restored objects and revisions.
+            (put phases :length 0)
+            (js-call assert :deepStrictEqual
+              (JSON/parse (js-call driver :compiler_session_request state (JSON/stringify request))) ready)
+            (js-call assert :strictEqual (get state :runtime) runtime)
+            (js-call assert :strictEqual (get state :literalModules) modules)
+            (js-call assert :strictEqual (get state :literalCache) cache)
+            (js-call assert :strictEqual (js-call cache :get (get literal :id)) record)
+            (js-call assert :deepStrictEqual phases
+              (js-array "runtime-literals-start" "runtime-literals-complete"
+                "response-serialize-start" "response-serialize-complete"))))
+        (finally
+          (js-call driver :compiler_session_close state)
+          (js-call assert :strictEqual (get state :lastPhase) nil)
+          (js-call assert :strictEqual (get state :literalCache) nil)))))
+
+  (defun compiler-response-segment-events (producer state value size)
+    (let ((events (js-array))
+          (batch (js-call producer :session_response_start state value "graph-events-v1" size)))
+      (while batch
+        (js-call (get batch :events) :forEach (lambda (event) (js-call events :push event)))
+        (if (get batch :done) (setq batch nil)
+          (setq batch (js-call producer :session_response_control state
+            (js-object :token (get batch :token)) "response-next"))))
+      (js-call assert :strictEqual (get state :responseCursor) nil)
+      events))
+
+  (defasync compiler-check-response-segments (driver sources directory)
+    ;; Compile the actual private producer functions, not a second protocol
+    ;; implementation. Their existing size argument exercises real boundaries
+    ;; without manufacturing a million-node input in this functional test.
+    (let* ((record (js-call (get sources :modules) :find
+                    (lambda (item) (= (get item :id) "host/compiler-session.mjs"))))
+           (names (js-array "session-fail" "session-phase" "session-response-clear"
+             "session-response-identity-segment-size" "session-response-identities"
+             "session-response-find-identity" "session-response-add-identity"
+             "session-response-value-event" "session-response-array-event"
+             "session-response-string-event" "session-response-event"
+             "session-response-event-units" "session-response-batch"
+             "session-response-start" "session-response-control"))
+           (wanted (new globalThis.Set names)) (definitions (js-array))
+           (text (get record :source)) (points (Array/from text))
+           (forms (read-string text (get record :filename)))
+           (members (get (aref forms 0) :items))
+           (index 2) (state (js-call driver :compiler_session_new)))
+      (while (< index (js-length members))
+        (let* ((member (aref members index)) (items (get member :items (js-array)))
+               (head (when (> (js-length items) 0) (get (aref items 0) :name nil)))
+               (name (when (> (js-length items) 1) (get (aref items 1) :name nil))))
+          (when (and (or (= head "defun") (= head "defconst")) (js-call wanted :has name))
+            (let ((span (get member :span)))
+              (js-call definitions :push
+                (js-call (js-call points :slice (get span :start) (get span :end)) :join "")))))
+        (setq index (1+ index)))
+      (js-call assert :strictEqual (js-length definitions) (js-length names))
+      (try
+        (let* ((source (+ "(module tests.response-segments\n" (js-call definitions :join "\n")
+                        "\n(export session-response-start session-response-control session-response-clear session-response-identities session-response-add-identity session-response-find-identity session-response-identity-segment-size))"))
+               (response (JSON/parse (js-call driver :compiler_session_request state
+                 (JSON/stringify (js-object :operation "compile" :source source :filename "response-segments.eli")))))
+               (path (resolve directory "response-segments.mjs")))
+          (await (writeFile path (get response :javascript)))
+          ;; Load the freshly written synchronous ESM file through its actual
+          ;; canonical location, as the other compiled fixture loaders do.
+          ;; It retains the enclosing complete product's real package scope
+          ;; and Unicode/Math modules; do not turn it into a data URL or edit
+          ;; its generated imports to evade those dependencies.
+          (let* ((canonical (await (realpath path)))
+                 (producer (funcall (createRequire canonical) canonical))
+                 (shared (js-object :label "共享😀" :negative -0))
+                 (graph (js-array)) (position 0)
+                 (session (js-object :responseToken 0 :responseCursor nil :phaseObserver nil)))
+            (js-call assert :strictEqual (await (readFile canonical "utf8")) (get response :javascript))
+            (js-call assert :strictEqual (get producer :session_response_identity_segment_size) 1048576)
+            (while (< position 300)
+              (js-call graph :push (js-object :left shared :right shared))
+              (setq position (1+ position)))
+            (let ((expected (compiler-response-segment-events producer session graph undefined)) (size 1))
+              (while (<= size 3)
+                (js-call assert :deepStrictEqual
+                  (compiler-response-segment-events producer session graph size) expected)
+                (setq size (1+ size))))
+            ;; Global identity numbers survive several physical tables.
+            (let* ((identities (js-call producer :session_response_identities 2))
+                   (values (js-array shared graph (aref graph 0) (aref graph 299) (js-object))) (item 0))
+              (while (< item (js-length values))
+                (js-call producer :session_response_add_identity identities (aref values item) (1+ item))
+                (setq item (1+ item)))
+              (js-call assert :strictEqual (js-length (get identities :segments)) 3)
+              (setq item 0)
+              (while (< item (js-length values))
+                (js-call assert :strictEqual
+                  (js-call producer :session_response_find_identity identities (aref values item)) (1+ item))
+                (setq item (1+ item))))
+            ;; Closing a partial response drops its graph and all map segments.
+            (let* ((batch (js-call producer :session_response_start session graph "graph-events-v1" 2))
+                   (cursor (get session :responseCursor)) (identities (get cursor :identities)))
+              (js-call assert :strictEqual (get batch :done) false)
+              (js-call producer :session_response_control session (js-object :token (get batch :token)) "response-close")
+              (js-call assert :strictEqual (get session :responseCursor) nil)
+              (js-call assert :strictEqual (get cursor :root) nil)
+              (js-call assert :strictEqual (get cursor :frames) nil)
+              (js-call assert :strictEqual (get identities :segments) nil)
+              (js-call assert :throws
+                (lambda () (js-call producer :session_response_control session
+                  (js-object :token (get batch :token)) "response-next"))))
+            ;; The ancestor check still wins over an already registered ID.
+            (let ((cycle (js-object)))
+              (put cycle :self cycle)
+              (js-call assert :throws
+                (lambda () (js-call producer :session_response_start session cycle "graph-events-v1" 1))
+                (lambda (error) (and (= (get error :name) "TypeError")
+                  (= (get error :message) "compiler IR cannot contain cycles"))))
+              (let* ((cursor (get session :responseCursor)) (identities (get cursor :identities)))
+                (js-call producer :session_response_clear session)
+                (js-call assert :strictEqual (get cursor :root) nil)
+                (js-call assert :strictEqual (get identities :segments) nil)))
+            (js-call assert :deepStrictEqual
+              (compiler-response-segment-events producer session graph 1)
+              (compiler-response-segment-events producer session graph undefined))))
+        (finally (js-call driver :compiler_session_close state)))))
+
+  (test "shared compiler schema strings preserve independent nodes and exact own data fields"
+    (lambda ()
+      (let* ((span (make-span "源😀.eli" 0 7 1 1 2 3))
+             (items (js-array (literal-node -0 span)))
+             (properties (js-object :mutable t))
+             (nodes (js-array
+               (literal-node -0 span) (undefined-node span)
+               (symbol-node "名字" span) (keyword-node "键" span)
+               (collection-node "vector" items span)))
+             (expected (js-array
+               (js-object :kind "literal" :value -0 :span span)
+               (js-object :kind "undefined" :span span)
+               (js-object :kind "symbol" :name "名字" :span span)
+               (js-object :kind "keyword" :name "键" :span span)
+               (js-object :kind "vector" :items items :span span)))
+             (ir (make-node "literal" span -0 (js-array) properties))
+             (plain (make-node "literal" span -0 (js-array) nil)))
+        (js-call assert :deepStrictEqual span
+          (js-object :filename "源😀.eli" :start 0 :end 7 :line 1 :column 1 :endLine 2 :endColumn 3))
+        (js-call assert :deepStrictEqual (Object/keys span)
+          (js-array "filename" "start" "end" "line" "column" "endLine" "endColumn"))
+        (let ((special (make-span "positions.eli" -0 1025 globalThis.Infinity globalThis.NaN undefined nil)))
+          (js-call assert :strictEqual (Object/is (get special :start) -0) t)
+          (js-call assert :strictEqual (get special :end) 1025)
+          (js-call assert :strictEqual (get special :line) globalThis.Infinity)
+          (js-call assert :strictEqual (Object/is (get special :column) globalThis.NaN) t)
+          (js-call assert :strictEqual (get special :endLine) undefined)
+          (js-call assert :strictEqual (get special :endColumn) nil))
+        (js-call assert :deepStrictEqual nodes expected)
+        (js-call assert :strictEqual (get (aref nodes 4) :items) items)
+        (let ((index 0))
+          (while (< index (js-length nodes))
+            (let ((node (aref nodes index)))
+              (js-call assert :strictEqual (get node :span) span)
+              (js-call assert :deepStrictEqual (Object/keys node) (Object/keys (aref expected index)))
+              (js-call assert :deepStrictEqual (Object/getOwnPropertyDescriptors node)
+                (Object/getOwnPropertyDescriptors (aref expected index))))
+            (setq index (1+ index))))
+        (js-call assert :deepStrictEqual ir
+          (js-object :kind "literal" :span span :value -0 :children (js-array) :properties properties))
+        (js-call assert :deepStrictEqual (Object/keys ir)
+          (js-array "kind" "span" "value" "children" "properties"))
+        (js-call assert :strictEqual (get ir :properties) properties)
+        (js-call assert :strictEqual (Object/hasOwn plain "properties") false)
+        (put (aref nodes 0) :value 9)
+        (js-call assert :strictEqual (Object/is (get (aref items 0) :value) -0) t)
+        (put ir :value 10)
+        (js-call assert :strictEqual (Object/is (get plain :value) -0) t)
+        (js-call assert :deepStrictEqual (make-program "源😀.eli" (js-array ir))
+          (js-object :filename "源😀.eli" :body (js-array ir)))
+        (let* ((prototype globalThis.Object.prototype)
+               (previous (Object/getOwnPropertyDescriptor prototype "kind")) (calls 0))
+          (try
+            (progn
+              (Object/defineProperty prototype "kind"
+                (js-object :set (lambda (value) (setq calls (1+ calls))) :configurable t))
+              (js-call assert :strictEqual (get (symbol-node "safe" span) :kind) "symbol")
+              (js-call assert :strictEqual (get (make-node "literal" span 1 (js-array) nil) :kind) "literal")
+              (js-call assert :strictEqual calls 0))
+            (finally
+              (if previous (Object/defineProperty prototype "kind" previous)
+                (Reflect/deleteProperty prototype "kind"))))))))
+
+  (test "owned frontend consumes parent slots while preserving shared syntax and exact public IR"
+    (lambda ()
+      (let* ((source "(module plain (defun unchanged (value) (let* ((x value)) (try (if x [x] '(1 2)) (catch error value) (finally value)))) (module nested (defun nested-value () 7)) (export unchanged))")
+             (filename "owned-frontend.eli")
+             (public-input (read-string source filename))
+             (public-snapshot (funcall globalThis.structuredClone public-input))
+             (public-expanded (expand-module public-input filename (js-object :ownedForms t)))
+             (public-expanded-snapshot (funcall globalThis.structuredClone public-expanded))
+             (owned-input (read-string source filename))
+             (reader-module (aref owned-input 0))
+             (reader-items (get reader-module :items))
+             (unchanged (aref reader-items 2))
+             (unchanged-snapshot (funcall globalThis.structuredClone unchanged))
+             (owned-expanded (expand-owned-module owned-input filename))
+             (expanded-module (aref owned-expanded 0))
+             (expanded-items (get expanded-module :items)))
+        (js-call assert :deepStrictEqual public-input public-snapshot)
+        (js-call assert :deepStrictEqual owned-expanded public-expanded)
+        (js-call assert :deepStrictEqual owned-input (js-array nil))
+        (js-call assert :ok (js-call (js-call reader-items :slice 2) :every (lambda (value) (nil? value))))
+        (js-call assert :strictEqual (aref expanded-items 2) unchanged)
+        (js-call assert :deepStrictEqual unchanged unchanged-snapshot)
+        (analyze-module public-expanded filename)
+        (analyze-module owned-expanded filename)
+        (let* ((public-program (lower-module public-expanded filename))
+               (owned-program (lower-owned-module owned-expanded filename))
+               (expected (serialize-ir-program public-program)))
+          (js-call assert :strictEqual (serialize-ir-program owned-program) expected)
+          (js-call assert :strictEqual (serialize-ir-program (compile-ir-string source filename)) expected)
+          (js-call assert :deepStrictEqual public-input public-snapshot)
+          (js-call assert :deepStrictEqual public-expanded public-expanded-snapshot)
+          (js-call assert :deepStrictEqual owned-expanded (js-array nil))
+          (js-call assert :ok (js-call (js-call expanded-items :slice 2) :every (lambda (value) (nil? value))))
+          ;; Only parents are consumed, even when the completed output reused
+          ;; a Reader node. Its own body/items are not a disposal worklist.
+          (js-call assert :deepStrictEqual unchanged unchanged-snapshot)))))
+
+  (test "owned frontend keeps macro bodies alive across members and preserves origins and first diagnostics"
+    (lambda ()
+      (let* ((source "(module macros (defmacro twice (x) (list '+ x x)) (defun early (value) (twice value)) (module nested (defun middle (value) (twice value))) (defun late (value) (twice value)) (export early late))")
+             (filename "owned-macros.eli")
+             (public-input (read-string source filename))
+             (snapshot (funcall globalThis.structuredClone public-input))
+             (public-expansion (expand-module-with-origins public-input filename))
+             (owned-input (read-string source filename))
+             (macro-definition (aref (get (aref owned-input 0) :items) 2))
+             (macro-snapshot (funcall globalThis.structuredClone macro-definition))
+             (owned-expansion (expand-owned-module-with-origins owned-input filename))
+             (public-forms (get public-expansion :forms))
+             (owned-forms (get owned-expansion :forms)))
+        (js-call assert :deepStrictEqual public-input snapshot)
+        (js-call assert :deepStrictEqual owned-expansion public-expansion)
+        (js-call assert :strictEqual (js-length (get owned-expansion :macroOrigins)) 3)
+        (js-call assert :deepStrictEqual macro-definition macro-snapshot)
+        (analyze-module public-forms filename) (analyze-module owned-forms filename)
+        (let* ((expected (serialize-ir-program (lower-module public-forms filename)))
+               (compiled (compile-ir-string-with-origins source filename)))
+          (js-call assert :strictEqual (serialize-ir-program (lower-owned-module owned-forms filename)) expected)
+          (js-call assert :strictEqual (serialize-ir-program (get compiled :program)) expected)
+          (js-call assert :deepStrictEqual (get compiled :macroOrigins) (get public-expansion :macroOrigins))
+          (js-call assert :deepStrictEqual macro-definition macro-snapshot)))
+      (let* ((source "(module broken (defun earlier () missing) (defmacro take-one (x) x) (take-one))")
+             (filename "owned-error.eli") (input (read-string source filename))
+             (snapshot (funcall globalThis.structuredClone input))
+             (public-failure (compiler-test-failure (lambda () (expand-module-with-origins input filename))))
+             (owned-failure (compiler-test-failure
+               (lambda () (expand-owned-module-with-origins (read-string source filename) filename))))
+             (compile-failure (compiler-test-failure (lambda () (compile-ir-string-with-origins source filename)))))
+        (js-call assert :deepStrictEqual input snapshot)
+        (js-call assert :strictEqual (get (get public-failure :eliscriptDiagnostic) :code) "ELI-X0001")
+        (js-call assert :deepStrictEqual (get owned-failure :eliscriptDiagnostic) (get public-failure :eliscriptDiagnostic))
+        (js-call assert :deepStrictEqual (get compile-failure :eliscriptDiagnostic) (get public-failure :eliscriptDiagnostic))
+        (js-call assert :deepStrictEqual (get owned-failure :macroOrigins) (get public-failure :macroOrigins))
+        (js-call assert :deepStrictEqual (get compile-failure :macroOrigins) (get public-failure :macroOrigins)))
+      (let* ((input (js-array (js-object :kind "unsupported" :span nil)))
+             (snapshot (funcall globalThis.structuredClone input)))
+        (compiler-test-failure (lambda () (lower-module input "owned-lower-error.eli")))
+        (js-call assert :deepStrictEqual input snapshot))
+      (let* ((source "(module analysis (defun bad () missing) (export bad))")
+             (filename "owned-analysis-error.eli") (input (expand-module (read-string source filename) filename))
+             (snapshot (funcall globalThis.structuredClone input))
+             (public-failure (compiler-test-failure (lambda () (analyze-module input filename))))
+             (owned-failure (compiler-test-failure (lambda () (compile-ir-string source filename)))))
+        (js-call assert :deepStrictEqual input snapshot)
+        (js-call assert :strictEqual (get (get public-failure :eliscriptDiagnostic) :code) "ELI-A0001")
+        (js-call assert :deepStrictEqual (get owned-failure :eliscriptDiagnostic) (get public-failure :eliscriptDiagnostic)))))
+
+  (test "compiler-build keeps the complete full-runtime resource profile and private overrides"
+    (lambda ()
+      (let* ((expected (js-object
+               :budget (js-object :maxSlots 1048575 :initialBytes 67108864 :maxBytes 268435456)
+               :memory (js-object :initialPages 2048 :maximumPages 16384) :auto 4194304))
+             (profile (get independentCompilerProfiles "full-runtime"))
+             (actual (independentCompilerResources (js-object :profile "full-runtime")))
+             (budget (js-object :initialBytes 8388608)) (memory (js-object :maximumPages 4096))
+             (overridden (independentCompilerResources
+               (js-object :profile "full-runtime" :budget budget :memory memory :auto 0))))
+        (js-call assert :deepStrictEqual profile expected)
+        (js-call assert :deepStrictEqual
+          (independentCompilerResources undefined) (independentCompilerResources))
+        (assert-type-error (lambda () (independentCompilerResources nil))
+          "compiler options must not be null")
+        (js-call assert :deepStrictEqual actual
+          (js-object :profile "full-runtime" :budget (get expected :budget) :memory (get expected :memory) :auto 4194304))
+        (js-call assert :ok (Object/isFrozen independentCompilerProfiles))
+        (js-call assert :ok (Object/isFrozen profile))
+        (js-call assert :ok (Object/isFrozen (get profile :budget)))
+        (js-call assert :ok (Object/isFrozen (get profile :memory)))
+        (js-call assert :notStrictEqual (get actual :budget) (get profile :budget))
+        (js-call assert :notStrictEqual (get actual :memory) (get profile :memory))
+        (js-call assert :deepStrictEqual (get overridden :budget)
+          (js-object :maxSlots 1048575 :initialBytes 8388608 :maxBytes 268435456))
+        (js-call assert :deepStrictEqual (get overridden :memory)
+          (js-object :initialPages 2048 :maximumPages 4096))
+        (js-call assert :strictEqual (get overridden :auto) 0)
+        (put budget :initialBytes 1) (put memory :maximumPages 1)
+        (js-call assert :strictEqual (get (get overridden :budget) :initialBytes) 8388608)
+        (js-call assert :strictEqual (get (get overridden :memory) :maximumPages) 4096)
+        (js-call assert :deepStrictEqual profile expected)
+        (js-call assert :deepStrictEqual (independentCompilerResources)
+          (js-object :profile "small"
+            :budget (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864)
+            :memory (js-object :initialPages 128 :maximumPages 4096) :auto 65536)))))
+
+  (test "compiler-build exposes the explicit full-compiler functional capacity profile without changing legacy profiles"
+    (lambda ()
+      ;; The new profile makes a larger functional construction explicit. It
+      ;; does not turn earlier legacy capacity or performance failures into
+      ;; passing evidence under the old resource configuration.
+      (let* ((expected (js-object
+                :budget (js-object :maxSlots 8388607 :initialBytes 268435456 :maxBytes 1073741824 :extendedHeap t)
+                :memory (js-object :initialPages 4096 :maximumPages 65535) :auto 16777216))
+             (profile (get independentCompilerProfiles "full-compiler"))
+             (actual (independentCompilerResources (js-object :profile "full-compiler")))
+             (budget (js-object :initialBytes 67108864)) (memory (js-object :maximumPages 32768))
+             (overridden (independentCompilerResources
+               (js-object :profile "full-compiler" :budget budget :memory memory :auto 0))))
+        (js-call assert :deepStrictEqual profile expected)
+        (js-call assert :deepStrictEqual actual
+          (js-object :profile "full-compiler" :budget (get expected :budget) :memory (get expected :memory) :auto 16777216))
+        (js-call assert :ok (Object/isFrozen profile))
+        (js-call assert :ok (Object/isFrozen (get profile :budget)))
+        (js-call assert :ok (Object/isFrozen (get profile :memory)))
+        (js-call assert :notStrictEqual (get actual :budget) (get profile :budget))
+        (js-call assert :notStrictEqual (get actual :memory) (get profile :memory))
+        (js-call assert :deepStrictEqual (get overridden :budget)
+          (js-object :maxSlots 8388607 :initialBytes 67108864 :maxBytes 1073741824 :extendedHeap t))
+        (js-call assert :deepStrictEqual (get overridden :memory)
+          (js-object :initialPages 4096 :maximumPages 32768))
+        (js-call assert :strictEqual (get overridden :auto) 0)
+        (put budget :initialBytes 1) (put memory :maximumPages 1)
+        (js-call assert :strictEqual (get (get overridden :budget) :initialBytes) 67108864)
+        (js-call assert :strictEqual (get (get overridden :memory) :maximumPages) 32768)
+        (js-call assert :deepStrictEqual profile expected))))
+
+  (test "full-compiler resources reserve the 23-bit slot table while preserving explicit narrower layouts and byte ceilings"
+    (lambda ()
+      (let* ((resources (independentCompilerResources (js-object :profile "full-compiler")))
+             (budget (get resources :budget))
+             ;; This is the table's necessary storage, not a measurement of
+             ;; live compiler objects or an excuse to change the byte limit.
+             (slot-table-bytes (* (1+ (get budget :maxSlots)) 24))
+             (minimum-initial (+ slot-table-bytes 32)))
+        (js-call assert :strictEqual slot-table-bytes 201326592)
+        (js-call assert :strictEqual minimum-initial 201326624)
+        (js-call assert :ok (>= (get budget :initialBytes) minimum-initial))
+        (js-call assert :strictEqual (get budget :initialBytes) 268435456)
+        (js-call assert :strictEqual (get budget :maxBytes) 1073741824)
+        (js-call assert :strictEqual (get (get resources :memory) :initialPages) 4096)
+        (js-call assert :strictEqual (get (get resources :memory) :maximumPages) 65535)
+        (js-call assert :strictEqual (get resources :auto) 16777216)
+        ;; Resources are declarations. Actual invalid-size rejection stays in
+        ;; the existing runtime constructors, covered by their ABI regressions.
+        (let ((layouts (js-array 1048575 2097151 4194303 8388607)) (index 0))
+          (while (< index (js-length layouts))
+            (let* ((input (js-object :maxSlots (aref layouts index) :initialBytes 268435456
+                           :maxBytes 1073741824 :extendedHeap t))
+                   (snapshot (funcall globalThis.structuredClone input))
+                   (actual (independentCompilerResources (js-object :profile "full-compiler" :budget input))))
+              (js-call assert :deepStrictEqual (get actual :budget) snapshot)
+              (js-call assert :notStrictEqual (get actual :budget) input)
+              (put (get actual :budget) :maxSlots 1)
+              (js-call assert :deepStrictEqual input snapshot)
+              (js-call assert :strictEqual (get (get (get independentCompilerProfiles "full-compiler") :budget) :maxSlots) 8388607))
+            (setq index (1+ index)))))))
+
+  (test "full-compiler declarations reach both binary producer paths and preserve their original first failure"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-extended-build-boundary-"))))
+             (sources (js-object :entry "entry.mjs"
+               :modules (js-array (js-object :id "entry.mjs" :filename "entry.eli" :source "(module entry)"))
+               :runtime (js-object :filename "runtime.eli" :source "(module runtime)")))
+             (hosts (js-array "wasm" "native")) (index 0))
+        (try
+          (while (< index (js-length hosts))
+            ;; This sentinel proves orchestration/option transport only. It
+            ;; emits no substitute binary and never claims runtime acceptance.
+            (let* ((host (aref hosts index)) (marker (js-object :host host)) (calls (js-array))
+                   (producer (js-object :host "javascript" :request (lambda (request options)
+                     (js-call calls :push request)
+                     (cond
+                       ((= (get request :operation) "runtime") (js-object :ready t :revision 1))
+                       ((= (get request :operation) "capabilities") (js-object :responseModes (js-array "events-v1")))
+                       ((= (get request :operation) "project") (throw marker))
+                       (t (throw (new globalThis.Error "unexpected producer operation"))))))))
+              (await (js-call assert :rejects (buildIndependentCompiler
+                (js-object :host host :profile "full-compiler" :sources sources :session producer
+                  :outputRoot (resolve directory host))) (lambda (error) (eq error marker))))
+              (js-call assert :deepStrictEqual (js-call calls :map (lambda (request) (get request :operation)))
+                (js-array "runtime" "capabilities" "project"))
+              (js-call assert :strictEqual (get (aref calls 2) :target) host)
+              (js-call assert :deepStrictEqual (get (aref calls 2) :memory)
+                (js-object :initialPages 4096 :maximumPages 65535))
+              (js-call assert :strictEqual (get (aref calls 2) :binaryEncoding) "u16le-chunks"))
+            (setq index (1+ index)))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "compiler build trace is opt-in scalar request evidence and preserves the exact producer failure"
+    (async ()
+      (let* ((environment (get globalThis.process :env))
+             (had-flag (Object/hasOwn environment "ELISCRIPT_COMPILER_BUILD_TRACE"))
+             (old-flag (get environment "ELISCRIPT_COMPILER_BUILD_TRACE"))
+             (stream (get globalThis.process :stderr)) (write (get stream :write))
+             (lines (js-array))
+             (directory (await (mkdtemp (resolve (tmpdir) "eliscript-build-trace-"))))
+             (sources (js-object :entry "compiler.mjs"
+               :modules (js-array (js-object :id "compiler.mjs" :filename "compiler.eli" :source "(defun f () 1) (export f)"))
+               :runtime (js-object :filename "runtime.eli" :source "(defun runtime () 1)")
+               :literalSources (js-array (js-object :id "stdlib/value.mjs" :filename "stdlib/value.eli" :source "(defun value () 1)")))))
+        (try
+          (progn
+            (put stream :write (lambda (text) (js-call lines :push text) t))
+            (let ((modes (js-array undefined "0" "1")) (index 0))
+              (while (< index (js-length modes))
+                (let* ((mode (aref modes index)) (marker (Object/freeze (new globalThis.Error "original request failure")))
+                       (requests (js-array))
+                       (producer (js-object :host "wasm" :request
+                         (lambda (request options)
+                           (js-call requests :push request)
+                           (cond
+                             ((= (get request :operation) "runtime")
+                              (if (= mode "1") (js-object :ready t :revision 7 :literalRevision 9) (throw marker)))
+                             ((= (get request :operation) "capabilities") (js-object :responseModes (js-array)))
+                             ((= (get request :operation) "project") (js-object :target "wasm" :revision 8))
+                             ((and (= (get request :operation) "cached-ir") (= (get request :kind) "literal")) (throw marker))
+                             ((= (get request :operation) "cached-ir")
+                              (checkpoint-ir "runtime" "runtime.eli" (get (get sources :runtime) :source) 7))
+                             (t (throw (new globalThis.Error "unexpected request"))))))))
+                  (if (undefined? mode) (Reflect/deleteProperty environment "ELISCRIPT_COMPILER_BUILD_TRACE")
+                    (put environment "ELISCRIPT_COMPILER_BUILD_TRACE" mode))
+                  (put lines :length 0)
+                  (await (js-call assert :rejects (buildIndependentCompiler (js-object :host "wasm"
+                    :sources sources :session producer :retainIR t :debug t :outputRoot directory))
+                    (lambda (error) (eq error marker))))
+                  (if (/= mode "1") (js-call assert :strictEqual (js-length lines) 0)
+                    (let* ((records (js-call lines :map (lambda (line)
+                                     (js-call assert :ok (js-call line :startsWith "compiler-build trace "))
+                                     (JSON/parse (js-call line :slice (js-length "compiler-build trace "))))))
+                           (starts (js-call records :filter (lambda (record) (= (get record :phase) "request-start"))))
+                           (failure (aref records (1- (js-length records)))))
+                      (js-call assert :deepStrictEqual (js-call starts :map (lambda (record) (get record :operation)))
+                        (js-array "runtime" "cached-ir" "cached-ir"))
+                      (js-call assert :deepStrictEqual (js-call (js-call starts :slice 1) :map (lambda (record)
+                        (js-array (get record :kind) (get record :id) (get record :revision))))
+                        (js-array (js-array "runtime" undefined 7)
+                                  (js-array "literal" "stdlib/value.mjs" 9)))
+                      (js-call assert :deepStrictEqual failure (js-object :phase "request-failure" :operation "cached-ir"
+                        :kind "literal" :id "stdlib/value.mjs" :revision 9))
+                      (js-call records :forEach (lambda (record)
+                        (js-call (Object/keys record) :forEach (lambda (key)
+                          (js-call assert :ok (js-call (js-array "phase" "operation" "kind" "id" "revision") :includes key)))))))))
+                (setq index (1+ index))))
+            ;; Diagnostic output itself cannot become the primary failure.
+            (put environment "ELISCRIPT_COMPILER_BUILD_TRACE" "1")
+            (put stream :write (lambda (text) (throw "diagnostic output failure")))
+            (let* ((marker (Object/freeze (js-object :source "original")))
+                   (producer (js-object :request (lambda (request options) (throw marker)))))
+              (await (js-call assert :rejects (buildIndependentCompiler (js-object :host "wasm" :sources sources
+                :session producer :outputRoot directory)) (lambda (error) (eq error marker))))))
+          (finally
+            (put stream :write write)
+            (if had-flag (put environment "ELISCRIPT_COMPILER_BUILD_TRACE" old-flag)
+              (Reflect/deleteProperty environment "ELISCRIPT_COMPILER_BUILD_TRACE"))
+            (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "compiler-build rejects invalid options before source IO or producer execution"
+    (async ()
+      (await (js-call assert :rejects (loadCompilerSources nil)
+        (lambda (error) (= (get error :message) "compiler options must not be null"))))
+      (await (js-call assert :rejects (buildIndependentCompiler nil)
+        (lambda (error) (= (get error :message) "compiler options must not be null"))))
+      (assert-type-error
+        (lambda () (independentCompilerResources (js-object :profile "unknown")))
+        "unknown independent compiler profile: unknown")
+      (let ((calls 0)
+            (producer (js-object :request (lambda () (throw "producer must not run")))))
+        (Object/defineProperty producer "request"
+          (js-object :get (lambda () (setq calls (1+ calls)) (throw "producer must not be observed"))))
+        (await (js-call assert :rejects
+          (buildIndependentCompiler (js-object :host "unknown" :session producer :sourceRoot "missing-compiler-source"))
+          (lambda (error) (= (get error :message) "unknown compiler host: unknown"))))
+        (await (js-call assert :rejects
+          (buildIndependentCompiler (js-object :nativeTarget "unsupported" :session producer :sourceRoot "missing-compiler-source"))
+          (lambda (error) (= (get error :message) "unsupported native compiler target"))))
+        (await (js-call assert :rejects
+          (buildIndependentCompiler (js-object :profile "unknown" :session producer :sourceRoot "missing-compiler-source"))
+          (lambda (error) (= (get error :message) "unknown independent compiler profile: unknown"))))
+        (await (js-call assert :rejects
+          (buildIndependentCompiler (js-object :onPhase false :session producer :sourceRoot "missing-compiler-source"))
+          (lambda (error) (= (get error :message) "compiler phase observer must be a function"))))
+        (js-call assert :strictEqual calls 0))))
+
+  (test "compiler binary codec validates all chunks and returns independent exact bytes"
+    (lambda ()
+      (let* ((input (js-call globalThis.Uint8Array :from (js-array 0 1 127 128 255)))
+             (decoded (decodeCompilerBinary input)))
+        (js-call assert :deepStrictEqual decoded input)
+        (js-call assert :notStrictEqual decoded input)
+        (put input 0 42) (js-call assert :strictEqual (aref decoded 0) 0)
+        (js-call assert :deepStrictEqual (decodeCompilerBinary (js-array 0 255 128))
+          (js-call globalThis.Uint8Array :from (js-array 0 255 128))))
+      (js-call assert :deepStrictEqual
+        (decodeCompilerBinary (js-object :encoding "u16le-chunks" :byteLength 0 :chunks (js-array)))
+        (new globalThis.Uint8Array 0))
+      (js-call assert :deepStrictEqual
+        (decodeCompilerBinary (js-object :encoding "u16le-chunks" :byteLength 5
+          :chunks (js-array (String/fromCharCode 513 65535 128))))
+        (js-call globalThis.Uint8Array :from (js-array 1 2 255 255 128)))
+      (let* ((first (js-call (String/fromCharCode 513) :repeat 2048))
+             (bytes (decodeCompilerBinary (js-object :encoding "u16le-chunks" :byteLength 4097
+                      :chunks (js-array first (String/fromCharCode 255)))))
+             (index 0))
+        (js-call assert :strictEqual (js-length bytes) 4097)
+        (while (< index 4096)
+          (js-call assert :strictEqual (aref bytes index) (if (= (% index 2) 0) 1 2))
+          (setq index (1+ index)))
+        (js-call assert :strictEqual (aref bytes 4096) 255))
+      (let ((bad-bytes (js-array -1 256 0.5 globalThis.NaN)) (index 0))
+        (while (< index (js-length bad-bytes))
+          (let ((byte (aref bad-bytes index)))
+            (assert-type-error (lambda () (decodeCompilerBinary (js-array 0 byte)))
+              "compiler binary contains an invalid byte"))
+          (setq index (1+ index))))
+      (assert-type-error (lambda () (decodeCompilerBinary nil)) "compiler binary has an unsupported encoding")
+      (assert-type-error (lambda () (decodeCompilerBinary (js-object :encoding "other")))
+        "compiler binary has an unsupported encoding")
+      (assert-type-error
+        (lambda () (decodeCompilerBinary (js-object :encoding "u16le-chunks" :byteLength 4097 :chunks (js-array ""))))
+        "compiler binary has an invalid chunk layout")
+      (assert-type-error
+        (lambda () (decodeCompilerBinary (js-object :encoding "u16le-chunks" :byteLength 1 :chunks (js-array (String/fromCharCode 256)))))
+        "compiler binary has a noncanonical chunk")
+      (assert-type-error
+        (lambda () (decodeCompilerBinary (js-object :encoding "u16le-chunks" :byteLength 2 :chunks (js-array 1))))
+        "compiler binary has a noncanonical chunk")))
+
+  (test "compiler metadata writes exact negative-zero Unicode snapshots and hashes shared JSON values"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-build-metadata-"))))
+             (path (resolve directory "metadata.json"))
+             (text (+ "中文😀/" (String/fromCharCode 55296) "/" (String/fromCharCode 57343)))
+             (shared (js-object :value -0.0 :text text))
+             (value (js-object :left shared :right shared :positive 0 :absent undefined
+                      :items (js-array undefined -0.0 nil false globalThis.NaN globalThis.Infinity)))
+             (record (+ "{\"value\":-0,\"text\":" (JSON/stringify text) "}"))
+             (expected (+ "{\"left\":" record ",\"right\":" record
+                          ",\"positive\":0,\"items\":[null,-0,null,false,null,null]}")))
+        (try
+          (progn
+            (js-call assert :strictEqual (compilerMetadataDigest value) (sha256-text expected))
+            (let ((pending (writeCompilerMetadata path value)))
+              ;; Public writes capture all reads before yielding to file IO.
+              (put shared :value 99) (put value :positive 12)
+              (await pending))
+            (js-call assert :strictEqual (await (readFile path "utf8")) (+ expected "\n"))
+            (let ((decoded (await (readCompilerMetadata path))))
+              (js-call assert :ok (Object/is (get (get decoded :left) :value) -0.0))
+              (js-call assert :ok (Object/is (get (get decoded :right) :value) -0.0))
+              (js-call assert :ok (Object/is (get decoded :positive) 0))
+              (js-call assert :ok (Object/is (aref (get decoded :items) 1) -0.0))
+              (js-call assert :strictEqual (get (get decoded :left) :text) text)
+              (js-call assert :deepStrictEqual (get decoded :left) (get decoded :right))
+              (js-call assert :notStrictEqual (get decoded :left) (get decoded :right))
+              (js-call assert :strictEqual (Object/hasOwn decoded "absent") false)
+              (js-call assert :strictEqual (compilerMetadataDigest decoded) (sha256-text expected)))
+            (js-call assert :strictEqual (get shared :value) 99)
+            (js-call assert :strictEqual (get value :positive) 12)
+            (let ((exclusive (resolve directory "exclusive.json")))
+              (await (writeCompilerMetadata exclusive (js-object :created t) (js-object :flag "wx" :mode 384)))
+              (js-call assert :strictEqual (bit-and (get (await (stat exclusive)) :mode) 511) 384)
+              (await (js-call assert :rejects
+                (writeCompilerMetadata exclusive (js-object :replacement t) (js-object :flag "wx" :mode 384))
+                (lambda (error) (= (get error :code) "EEXIST"))))
+              (js-call assert :strictEqual (await (readFile exclusive "utf8")) "{\"created\":true}\n")
+              (await (writeCompilerMetadata exclusive (js-object :appended t) (js-object :flag "a")))
+              (js-call assert :strictEqual (await (readFile exclusive "utf8"))
+                "{\"created\":true}\n{\"appended\":true}\n"))
+            (let ((marker (js-object :first "getter")) (reads 0) (input (js-object)))
+              (Object/defineProperty input "value" (js-object :enumerable t
+                :get (lambda () (setq reads (1+ reads)) (throw marker))))
+              ;; A snapshot getter failure precedes opening the existing file.
+              (await (js-call assert :rejects (writeCompilerMetadata path input (js-object :flag "wx"))
+                (lambda (error) (eq error marker))))
+              (js-call assert :strictEqual reads 1)
+              (js-call assert :strictEqual (await (readFile path "utf8")) (+ expected "\n"))))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "compiler build invokes producer request and declared graph or event response modes through real persistence"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-build-response-mode-"))))
+             (sources (js-object :entry "entry.mjs"
+               :modules (js-array (js-object :id "entry.mjs" :filename "entry.eli" :source "(module entry)"))
+               :runtime (js-object :filename "runtime.eli" :source "(module runtime)")))
+             (configurations (js-array
+               (js-object :modes (js-array "events-v1" "graph-events-v1") :debug t :expected "graph-events-v1")
+               (js-object :modes (js-array "events-v1" "graph-events-v1") :debug false :expected "events-v1")
+               (js-object :modes (js-array "events-v1") :debug t :expected "events-v1")))
+             (index 0))
+        (try
+          (while (< index (js-length configurations))
+            ;; This producer supplies a valid empty WASM image solely to
+            ;; exercise the builder's IO/transport contract, not compilation.
+            (let* ((configuration (aref configurations index)) (calls (js-array))
+                   (producer (js-object :host "javascript" :request
+                     (lambda (request options)
+                       (js-call calls :push (js-object :request request :options options))
+                       (cond
+                         ((= (get request :operation) "runtime") (js-object :ready t :revision 1))
+                         ((= (get request :operation) "capabilities")
+                          (js-object :format "eliscript-compiler-capabilities" :version 1 :responseModes (get configuration :modes)))
+                         ((= (get request :operation) "project")
+                          (js-object :target "wasm" :bytes (js-array 0 97 115 109 1 0 0 0)
+                            :descriptor (js-object :format "eliscript-managed-control" :version 1)))
+                         (t (throw (new globalThis.Error "unexpected producer operation")))))))
+                   (artifact (await (buildIndependentCompiler
+                     (js-object :host "wasm" :sources sources :session producer :debug (get configuration :debug)
+                       :outputRoot (resolve directory (funcall globalThis.String index)))))))
+              (js-call assert :deepStrictEqual
+                (js-call calls :map (lambda (call) (get (get call :request) :operation)))
+                (js-array "runtime" "capabilities" "project"))
+              (let ((project (aref calls 2)))
+                (js-call assert :strictEqual (get (get project :options) :responseMode) (get configuration :expected))
+                (js-call assert :strictEqual (get (get project :request) :binaryEncoding) "u16le-chunks")
+                (js-call assert :strictEqual (get (get project :request) :debug) (get configuration :debug)))
+              (js-call assert :deepStrictEqual (get artifact :bytes)
+                (js-call globalThis.Uint8Array :from (js-array 0 97 115 109 1 0 0 0)))
+              (js-call assert :deepStrictEqual
+                (js-call globalThis.Uint8Array :from (await (readFile (get artifact :path)))) (get artifact :bytes))
+              (js-call assert :strictEqual (get (get artifact :provenance) :mode) "session")
+              (js-call assert :deepStrictEqual (get (await (readCompilerMetadata (get artifact :metadataPath))) :sourceIdentity)
+                (get artifact :sourceIdentity)))
+            (setq index (1+ index)))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "complete JavaScript compiler build retains all 30 modules and 53 literals and executes its own IR source"
+    (js-object :timeout 180000)
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-build-complete-"))))
+             (sources (await (loadCompilerSources)))
+             (original (funcall globalThis.structuredClone sources))
+             (scope-observations (js-array))
+             (module-ids (js-array
+               "bootstrap/analyzer.mjs" "bootstrap/compiler.mjs" "bootstrap/emitter.mjs"
+               "bootstrap/expander.mjs" "bootstrap/formatter.mjs" "bootstrap/ir.mjs"
+               "bootstrap/lower.mjs" "bootstrap/project.mjs" "bootstrap/reader.mjs"
+               "bootstrap/source-map.mjs" "bootstrap/symbol.mjs" "bootstrap/syntax.mjs"
+               "bootstrap/transient-analysis.mjs"
+               "backends/async.mjs" "backends/binary.mjs" "backends/capabilities.mjs"
+               "backends/elf.mjs" "backends/managed.mjs" "backends/memory.mjs"
+               "backends/native.mjs" "backends/numeric.mjs" "backends/optimize.mjs"
+               "backends/regexp.mjs" "backends/sha256.mjs" "backends/wasm.mjs"
+               "host/compiler-session.mjs" "host/compiler-tools.mjs" "runtime/math.mjs"
+               "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs"))
+             (sorted-module-ids (js-call (js-call module-ids :slice) :sort)))
+        (try
+          (progn
+            (js-call assert :strictEqual (js-length module-ids) 30)
+            (js-call assert :deepStrictEqual
+              (js-call (js-call (get sources :modules) :map (lambda (record) (get record :id))) :sort) sorted-module-ids)
+            (js-call assert :strictEqual (js-length (get sources :literalSources)) 53)
+            (let* ((artifact (await (buildIndependentCompiler
+                     (js-object :host "javascript" :profile "full-runtime" :sources sources :outputRoot directory
+                       :onPhase (lambda (phase counts)
+                         (when (= phase "seed-backends-start")
+                           ;; Read at the actual first loader boundary, before
+                           ;; the nested seed can cache an absent product scope.
+                           (js-call scope-observations :push
+                             (js-call (Promise/all (js-array
+                               (readFile (resolve directory "package.json") "utf8")
+                               (readFile (resolve directory "seed/package.json") "utf8"))) :then
+                               (lambda (texts)
+                                 (js-object :product (JSON/parse (aref texts 0))
+                                   :seed (JSON/parse (aref texts 1))))
+                               (lambda (error) (js-object :error error))))))))))
+                   (observed-scopes (await (Promise/all scope-observations)))
+                   (driver (await (js-call artifact :load)))
+                   (state (js-call driver :compiler_session_new))
+                   (ir-source (js-call (get sources :modules) :find
+                     (lambda (record) (= (get record :id) "bootstrap/ir.mjs"))))
+                   (metadata (await (readCompilerMetadata (get artifact :metadataPath)))))
+              (try
+                (progn
+                  (js-call assert :deepStrictEqual observed-scopes
+                    (js-array (js-object
+                      :product (js-object :name "eliscript" :type "module" :private t
+                        :exports (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+                          "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
+                          "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs"))
+                      :seed (js-object :type "module" :private t))))
+                  (js-call assert :strictEqual (get state :lastPhase) nil)
+                  (js-call assert :strictEqual (get artifact :host) "javascript")
+                  (js-call assert :strictEqual (get artifact :profile) "full-runtime")
+                  (js-call assert :deepStrictEqual (get artifact :budget) (get (get independentCompilerProfiles "full-runtime") :budget))
+                  (js-call assert :strictEqual (get artifact :auto) 4194304)
+                  (js-call assert :deepStrictEqual
+                    (js-call (js-call (get artifact :modules) :map (lambda (record) (get record :id))) :sort) sorted-module-ids)
+                  (js-call assert :deepStrictEqual
+                    (js-call (js-call (get (get artifact :provenance) :compiledModuleIds) :slice) :sort) sorted-module-ids)
+                  (js-call assert :deepStrictEqual
+                    (js-call (js-call (get metadata :modules) :map (lambda (record) (get record :id))) :sort) sorted-module-ids)
+                  (js-call assert :deepStrictEqual
+                    (js-call (js-call (get (get metadata :provenance) :compiledModuleIds) :slice) :sort) sorted-module-ids)
+                  (let* ((scope-path (resolve directory "package.json"))
+                         (scope-bytes (await (readFile scope-path)))
+                         (scope (JSON/parse (js-call scope-bytes :toString "utf8")))
+                         (identity (js-call (get (get metadata :artifactIdentity) :files) :find
+                           (lambda (item) (= (get item :path) "package.json"))))
+                         (math (js-call (get artifact :modules) :find
+                           (lambda (item) (= (get item :id) "runtime/math.mjs")))))
+                    (js-call assert :deepStrictEqual scope
+                      (js-object :name "eliscript" :type "module" :private t
+                        :exports (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+                          "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
+                          "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs")))
+                    (js-call assert :strictEqual
+                      (resolve directory (get (get scope :exports) "./runtime/math.mjs")) (get math :path))
+                    (js-call assert :ok identity)
+                    (js-call assert :strictEqual (get identity :bytes) (js-length scope-bytes))
+                    (js-call assert :strictEqual (get identity :sha256) (sha256-text scope-bytes)))
+                  (js-call assert :strictEqual (js-length (get artifact :literalSources)) 53)
+                  (js-call assert :deepStrictEqual sources original)
+                  (js-call assert :deepStrictEqual (get metadata :sourceIdentity) (get artifact :sourceIdentity))
+                  (js-call assert :strictEqual (get (get (get artifact :sourceIdentity) :runtime) :sha256)
+                    (sha256-text (get (get sources :runtime) :source) "utf16le"))
+                  (let ((index 0))
+                    (while (< index (js-length (get sources :literalSources)))
+                      (let ((source (aref (get sources :literalSources) index))
+                            (identity (aref (get (get artifact :sourceIdentity) :literalSources) index)))
+                        (js-call assert :strictEqual (get identity :id) (get source :id))
+                        (js-call assert :strictEqual (get identity :sha256) (sha256-text (get source :source) "utf16le")))
+                      (setq index (1+ index))))
+                  (js-call assert :ok ir-source)
+                  (let* ((request (js-object :operation "compile" :source (get ir-source :source) :filename (get ir-source :filename)))
+                         (response (JSON/parse (js-call driver :compiler_session_request state (JSON/stringify request))))
+                         (saved (await (readFile (resolve directory (get ir-source :id)) "utf8"))))
+                    (js-call assert :strictEqual (get response :javascript) saved))
+                  ;; Register the original complete runtime and all 53 literal
+                  ;; modules in the actual generated JS compiler. A failed
+                  ;; replacement must keep the same successfully cached IR.
+                  (let* ((runtime (get sources :runtime))
+                         (request (js-object :operation "runtime" :source (get runtime :source)
+                                    :filename (get runtime :filename) :literalSources (get sources :literalSources)))
+                         (phases (js-array))
+                         (ready (progn
+                           (put state :phaseObserver (lambda (phase counts) (js-call phases :push phase)))
+                           (JSON/parse (js-call driver :compiler_session_request state (JSON/stringify request)))))
+                         (runtime-program (get state :runtime)) (literal-cache (get state :literalCache))
+                         (literal-modules (get state :literalModules)) (revision (get state :revision))
+                         (literal-revision (get state :literalRevision))
+                         (bad-literals (js-call (get sources :literalSources) :map
+                           (lambda (record index)
+                             (js-object :id (get record :id) :filename (get record :filename)
+                               :source (if (= index 52) "(" (get record :source)))))))
+                    (js-call assert :strictEqual (get ready :ready) t)
+                    (js-call assert :strictEqual (js-length literal-modules) 53)
+                    (let ((index 0))
+                      (while (< index 53)
+                        (let* ((record (aref (get sources :literalSources) index))
+                               (module (aref literal-modules index))
+                               (cached (js-call literal-cache :get (get record :id))))
+                          (js-call assert :strictEqual (get module :id) (get record :id))
+                          (js-call assert :strictEqual (get cached :program) (get module :program))
+                          (js-call assert :strictEqual (get cached :source) (get record :source))
+                          (js-call assert :strictEqual (get cached :filename) (get record :filename))
+                          (js-call assert :strictEqual (Object/hasOwn module "packedIR") false)
+                          (js-call assert :strictEqual (Object/hasOwn cached "packedIR") false)
+                          (js-call assert :strictEqual (serialize-ir-program (get module :program))
+                            (serialize-ir-program (compile-ir-string (get record :source) (get record :filename)))))
+                        (setq index (1+ index))))
+                    (js-call assert :deepStrictEqual (get state :lastPhase)
+                      (js-object :phase "runtime-ready" :filename (get runtime :filename) :index -1))
+                    (js-call assert :strictEqual (Object/hasOwn ready "lastPhase") false)
+                    (js-call assert :deepStrictEqual phases (js-array "runtime-literals-start" "runtime-literals-complete"
+                      "runtime-program-start" "runtime-program-complete" "response-serialize-start" "response-serialize-complete"))
+                    (let* ((bad-request (object-assoc request :literalSources bad-literals))
+                           (failure (compiler-test-failure
+                             (lambda () (js-call driver :compiler_session_request state (JSON/stringify bad-request))))))
+                      (js-call assert :strictEqual (get (get failure :eliscriptDiagnostic) :code) "ELI-R0001"))
+                    (js-call assert :deepStrictEqual (get state :lastPhase)
+                      (js-object :phase "literal-read" :filename (get (aref bad-literals 52) :filename) :index 52))
+                    (js-call assert :deepStrictEqual (Object/keys (get state :lastPhase)) (js-array "phase" "filename" "index"))
+                    (js-call assert :ok (js-call (Object/values (get state :lastPhase)) :every
+                      (lambda (value) (or (= (value-type value) "string") (= (value-type value) "number")))))
+                    (js-call assert :strictEqual (get state :runtime) runtime-program)
+                    (js-call assert :strictEqual (get state :literalCache) literal-cache)
+                    (js-call assert :strictEqual (get state :literalModules) literal-modules)
+                    (js-call assert :strictEqual (get state :revision) revision)
+                    (js-call assert :strictEqual (get state :literalRevision) literal-revision)
+                    (js-call assert :deepStrictEqual
+                      (JSON/parse (js-call driver :compiler_session_request state (JSON/stringify request))) ready)
+                    (js-call assert :strictEqual (get state :runtime) runtime-program)
+                    (js-call assert :strictEqual (get state :literalCache) literal-cache)
+                    (js-call assert :deepStrictEqual sources original)
+                    (js-call assert :deepStrictEqual (get state :lastPhase)
+                      (js-object :phase "runtime-ready" :filename (get runtime :filename) :index -1))
+                    (js-call assert :deepStrictEqual phases (js-array "runtime-literals-start" "runtime-literals-complete"
+                      "runtime-program-start" "runtime-program-complete" "response-serialize-start" "response-serialize-complete"
+                      "runtime-literals-start" "runtime-literals-start" "runtime-literals-complete"
+                      "response-serialize-start" "response-serialize-complete")))
+                  (compiler-check-runtime-stages driver)
+                  (compiler-check-cold-runtime-transaction driver)
+                  (await (compiler-check-response-segments driver sources directory))
+                  (await (compiler-check-binary-project-entries driver state))
+                  (compiler-check-foreign-entry driver state)
+                  ;; Execute the emitted IR module itself, rather than only
+                  ;; checking the compiler's reported source or capabilities.
+                  (let* ((require-module (createRequire (get artifact :path)))
+                         (ir (funcall require-module (resolve directory (get ir-source :id))))
+                         (program (js-call ir :make_program "self.eli" (js-array)))
+                         (wire (js-call ir :serialize_program program))
+                         (restored (js-call ir :deserialize_program wire)))
+                    (js-call assert :strictEqual (js-call ir :program_filename restored) "self.eli")
+                    (js-call assert :deepStrictEqual (js-call ir :program_body restored) (js-array))
+                    (js-call assert :strictEqual (js-call ir :serialize_program restored) wire)))
+                (finally
+                  (js-call driver :compiler_session_close state)
+                  (js-call assert :strictEqual (get state :lastPhase) nil)))))
+          (finally (await (rm directory (js-object :recursive t :force t)))))))))

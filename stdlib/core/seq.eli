@@ -43,7 +43,7 @@
     persistentVector)
   (defconst not-found (js-object))
   (defconst sequence-no-partition-pad (js-object))
-  (defconst sequence-ring (js* "() => new Map()"))
+  (defconst sequence-ring (lambda () (new globalThis/Map)))
   (defconst sequence-array? (js* "Array.isArray"))
   (defconst sequence-safe-integer? (js* "Number.isSafeInteger"))
   (defconst sequence-finite? (js* "Number.isFinite"))

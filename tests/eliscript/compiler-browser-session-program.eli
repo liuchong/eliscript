@@ -1,0 +1,9 @@
+(module tests.compiler-browser-session-program
+  (import "./program.mjs" :as program)
+  ;; This module is emitted from Eli and served beside each unmodified compiler
+  ;; output. The actual browser ESM loader, rather than eval, executes it.
+  (let ((request (get globalThis.globalThis :__eliscriptProgramRequest)))
+    (try
+      (let ((result (Reflect/apply (get program (get request :name)) undefined (get request :arguments))))
+        (funcall (get request :resolve) result))
+      (catch error (funcall (get request :reject) error)))))

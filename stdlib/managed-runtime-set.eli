@@ -1,0 +1,9 @@
+(module eliscript.managed-runtime-set
+  (import "../../stdlib/managed-literals.eli"
+    PersistentHashSet literal-set literal-instance?)
+
+  (defconst EMPTY_SET (literal-set))
+  (defun persistentHashSet (&rest values) (js-call PersistentHashSet :from values))
+  (defun isPersistentHashSet (value) (literal-instance? value PersistentHashSet))
+
+  (export PersistentHashSet EMPTY_SET persistentHashSet isPersistentHashSet))

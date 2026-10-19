@@ -47,6 +47,26 @@ jobs:
             architecture: x64
             emacs: "30.2"
             shard: 2
+          - name: linux-arm64-emacs-29.4-shard-1-of-2
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "29.4"
+            shard: 1
+          - name: linux-arm64-emacs-29.4-shard-2-of-2
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "29.4"
+            shard: 2
+          - name: linux-arm64-emacs-30.2-shard-1-of-2
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "30.2"
+            shard: 1
+          - name: linux-arm64-emacs-30.2-shard-2-of-2
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "30.2"
+            shard: 2
           - name: macos-emacs-29.4-shard-1-of-2
             os: macos-15
             architecture: arm64
@@ -106,6 +126,8 @@ jobs:
           emacs --version
           bun --version
           node --version
+          test "$(bun -p 'process.arch')" = "${{ matrix.architecture }}"
+          test "$(node -p 'process.arch')" = "${{ matrix.architecture }}"
           test "$(node --version)" = "v24.20.0"
       - name: Install locked dependencies
         run: bun install --frozen-lockfile

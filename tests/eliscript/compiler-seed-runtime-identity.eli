@@ -1,0 +1,620 @@
+(module tests.compiler-seed-runtime-identity
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile writeFile readdir lstat realpath rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "../dist/bootstrap/compiler.mjs" compile-string)
+  (import "../tools/backends/build.mjs" root loadLiteralSources)
+  (import "../tools/backends/compiler-corpus-execution.mjs" createOriginalSeedOracle)
+  (import "../tools/backends/compiler-corpus-source-archive.mjs"
+    archiveCompilerCorpusSources readArchivedCompilerCorpusSources)
+
+  (defvar directory undefined)
+  (defvar providers undefined)
+  (defvar assets undefined)
+  (defconst maintained-source "tests/eliscript/compiler-seed-runtime-identity.eli")
+  (defconst program-source
+    "(module seed.identity (defconst vector-value [1 2 3]) (defconst queue-value #queue [1 2]) (export vector-value queue-value))")
+  (defconst host-source
+    (js-call (js-array
+      "(module seed.identity.host"
+      " (import \"node:assert/strict\" :default assert)"
+      " (import \"../entry.mjs\" :as emitted)"
+      " (import \"../runtime/core/vector.mjs\" PersistentVector)"
+      " (import \"../runtime/core/queue.mjs\" PersistentQueue)"
+      " (import \"../runtime/core/collection.mjs\" IReduce reduce)"
+      " (import \"../runtime/core/collection-internals.mjs\" COLLECTION_REDUCE)"
+      " (import \"../runtime/core/data-text.mjs\" IPrint printValue)"
+      " (import \"eliscript/runtime/core/vector.mjs\" :as BareVector)"
+      " (import \"eliscript/runtime/core/queue.mjs\" :as BareQueue)"
+      " (import \"eliscript/runtime/core/collection.mjs\" :as BareCollection)"
+      " (import \"eliscript/runtime/core/collection-internals.mjs\" :as BareInternals)"
+      " (import \"eliscript/runtime/core/data-text.mjs\" :as BareText)"
+      " (import \"eliscript/runtime/literals\" :as ShortLiteral)"
+      " (import \"eliscript/runtime/literals.mjs\" :as FullLiteral)"
+      " (js-call assert :strictEqual PersistentVector (get BareVector :PersistentVector))"
+      " (js-call assert :strictEqual PersistentQueue (get BareQueue :PersistentQueue))"
+      " (js-call assert :strictEqual IReduce (get BareCollection :IReduce))"
+      " (js-call assert :strictEqual COLLECTION_REDUCE (get BareInternals :COLLECTION_REDUCE))"
+      " (js-call assert :strictEqual IPrint (get BareText :IPrint))"
+      " (js-call assert :strictEqual (get ShortLiteral :queue) (get FullLiteral :queue))"
+      " (js-call assert :strictEqual (get ShortLiteral :vector) (get FullLiteral :vector))"
+      " (js-call assert :strictEqual (Object/getPrototypeOf (get emitted :vector_value)) (get PersistentVector :prototype))"
+      " (js-call assert :strictEqual (Object/getPrototypeOf (get emitted :queue_value)) (get PersistentQueue :prototype))"
+      " (js-call assert :strictEqual (Reflect/has (get emitted :vector_value) COLLECTION_REDUCE) t)"
+      " (js-call assert :strictEqual (reduce (get emitted :vector_value) (lambda (sum value) (+ sum value)) 0) 6)"
+      " (js-call assert :strictEqual (printValue (get emitted :queue_value)) \"#queue [1 2]\")"
+      " (js-call assert :strictEqual (js-call BareText :printValue (js-call FullLiteral :queue 1 2)) \"#queue [1 2]\")"
+      " (js-call (get globalThis.process :stdout) :write \"runtime identity verified\\n\"))") :join "\n"))
+
+  (defun digest (bytes)
+    (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+  (defasync runtime-assets (path prefix)
+    (let ((entries (await (readdir path (js-object :withFileTypes t)))) (result (js-array)) (index 0))
+      (js-call entries :sort (lambda (left right) (js-call (get left :name) :localeCompare (get right :name))))
+      (while (< index (js-length entries))
+        (let* ((entry (aref entries index)) (name (get entry :name)) (id (str prefix "/" name)))
+          (cond
+            ((js-call entry :isDirectory)
+              (setq result (js-call result :concat (await (runtime-assets (resolve path name) id)))))
+            ((and (js-call entry :isFile) (js-call name :endsWith ".mjs"))
+              (let ((bytes (await (readFile (resolve path name)))))
+                (js-call result :push (js-object :id id :filename id
+                  :source (js-call bytes :toString "utf8") :bytes (js-length bytes) :sha256 (digest bytes)))))))
+        (setq index (1+ index))) result))
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-seed-runtime-identity-"))))
+    (setq providers (await (runtime-assets (resolve root "runtime") "runtime")))
+    (setq assets (js-call providers :map (lambda (item)
+      (js-object :file (get item :filename) :bytes (get item :bytes) :sha256 (get item :sha256)))))
+    (let ((bytes (await (readFile (resolve root maintained-source)))))
+      (js-call assets :push (js-object :file maintained-source :bytes (js-length bytes) :sha256 (digest bytes))))) 30000)
+  (afterAll (async ()
+    (setq providers undefined assets undefined)
+    (when directory (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun recipe (id)
+    (js-object :id id :kind "project" :entry "entry.mjs" :coverage (js-array id)
+      :modules (js-array (js-object :id "entry.mjs" :filename "seed-identity.eli" :source program-source))
+      :request (js-object :operation "project" :hostSources (js-call providers :map (lambda (item)
+        (js-object :id (get item :id) :filename (get item :filename) :source (get item :source)))))
+      :original (js-object :sourceAssets (js-call assets :map (lambda (item) (Object/assign (js-object) item))))
+      :execution (js-object :kind "original-program" :host "tests/seed-identity-host.mjs"
+        :hostSource (compile-string host-source "seed-identity-host.eli") :hostRuntime "node" :timeoutMs 10000
+        :arguments (js-array))
+      :expected (js-object :kind "seed-program" :oracleRequired t :stdout "runtime identity verified\n")))
+
+  (defun oracle (path)
+    (let ((node (get (get globalThis.process :env) :NODE_BINARY)))
+      (createOriginalSeedOracle (js-object :sourceRoot root :directory path
+        :node (if (nullish? node) "node" node) :programHost "node"))))
+
+  (test "independent Seed program literals and relative runtime share exact constructors symbols prototypes and registered protocols"
+    (async ()
+      (let* ((record (recipe "seed-runtime-exact-identities")) (before (JSON/stringify record))
+             (output (resolve directory "complete-oracle")) (run (oracle output))
+             (first (await (funcall run (js-object :record record :target "javascript"))))
+             (second (await (funcall run (js-object :record record :target "javascript")))))
+        (js-call assert :deepStrictEqual first (js-object :kind "original-program" :stdout "runtime identity verified\n"))
+        (js-call assert :strictEqual second first)
+        (js-call assert :strictEqual (JSON/stringify record) before)
+        (let ((sources (get (get record :request) :hostSources)) (bound (get (get record :original) :sourceAssets)))
+          (js-call assert :strictEqual (js-length sources) (js-length providers))
+          (js-call sources :forEach (lambda (source)
+            (let* ((asset (js-call bound :find (lambda (item) (= (get item :file) (get source :filename)))))
+                   (bytes (js-call Buffer :from (get source :source) "utf8")))
+              (js-call assert :ok asset)
+              (js-call assert :strictEqual (get asset :sha256) (digest bytes))
+              (js-call assert :strictEqual (get asset :bytes) (js-length bytes))))))
+        (let* ((path (resolve directory "complete-archive"))
+               (identity (await (archiveCompilerCorpusSources record path)))
+               (restored (await (readArchivedCompilerCorpusSources path (js-object :expectedIdentity (get identity :sha256))))))
+          (js-call assert :deepStrictEqual restored record)))) 60000)
+
+  (test "independent Seed oracle does not invent missing runtime source declarations or mutate the retained recipe"
+    (async ()
+      (let* ((record (recipe "seed-runtime-missing-queue"))
+             (sources (get (get record :request) :hostSources)))
+        (put (get record :request) :hostSources (js-call sources :filter (lambda (item)
+          (not (= (get item :id) "runtime/core/queue.mjs")))))
+        (let* ((before (JSON/stringify record)) (run (oracle (resolve directory "missing-oracle"))))
+          (await (js-call assert :rejects (funcall run (js-object :record record :target "javascript"))))
+          (js-call assert :strictEqual (JSON/stringify record) before)))) 60000)
+
+  (test "independent Seed local runtime refuses an emitted module conflicting with authentic declared runtime bytes"
+    (async ()
+      (let ((record (recipe "seed-runtime-conflicting-vector")))
+        (js-call (get record :modules) :push (js-object :id "runtime/core/vector.mjs"
+          :filename "conflicting-vector.eli" :source "(defconst incompatible 1) (export incompatible)"))
+        (let* ((before (JSON/stringify record)) (run (oracle (resolve directory "conflicting-oracle"))))
+          (await (js-call assert :rejects (funcall run (js-object :record record :target "javascript"))
+            (lambda (error) (= (get error :message) "original local runtime graph conflicts with emitted source"))))
+          (js-call assert :strictEqual (JSON/stringify record) before)))) 60000)
+
+  (test "the complete Seed runtime recipe archive rejects changed hostSource bytes under its original identity"
+    (async ()
+      (let* ((record (recipe "seed-runtime-archive-tamper")) (path (resolve directory "tamper-archive"))
+             (identity (await (archiveCompilerCorpusSources record path)))
+             (stored (resolve path "record.json")) (bytes (await (readFile stored "utf8"))))
+        (js-call assert :ok (js-call bytes :includes "runtime identity verified"))
+        (await (writeFile stored (js-call bytes :replace "runtime identity verified" "runtime identity modified")))
+        (await (js-call assert :rejects
+          (readArchivedCompilerCorpusSources path (js-object :expectedIdentity (get identity :sha256)))
+          (lambda (error) (= (get error :message) "original source case recipe bytes changed")))))))
+
+  (test "the Seed program reference installs all real declared runtime files before preparing its independent reference"
+    (async ()
+      (let* ((record (recipe "seed-runtime-complete-independent-reference"))
+             (output (resolve directory "complete-reference")) (run (oracle output)))
+        (put (get record :execution) :referenceArtifact t)
+        (let* ((before (JSON/stringify record))
+               (actual (await (funcall run (js-object :record record :target "javascript")))))
+          (js-call assert :strictEqual (get actual :stdout) "runtime identity verified\n")
+          (js-call assert :strictEqual (js-length (get actual :supportingProducts)) 1)
+          (js-call assert :strictEqual (get (aref (get actual :supportingProducts) 0) :producer) "emacs-seed")
+          (js-call assert :strictEqual (JSON/stringify record) before)))) 60000)
+
+  (test "Seed source projects resolve actual eli dependency exports for loader-free Node and Bun children"
+    (async ()
+      (let* ((record (recipe "seed-runtime-source-project-imports"))
+             (child (compile-string
+               "(import \"../data.mjs\" value) (import \"node:assert/strict\" :default assert) (js-call assert :strictEqual (value) 42) (console/log \"resolved real exports\")"
+               "source-project-child.eli"))
+             (host (compile-string (js-call (js-array
+               "(import \"node:assert/strict\" :default assert) (import \"node:child_process\" spawnSync)"
+               "(import \"node:path\" resolve dirname)"
+               "(defconst child (resolve (dirname (aref (get globalThis.process :argv) 1)) \"source-project-child.mjs\"))"
+               "(defconst env (get globalThis.process :env))"
+               "(defconst engines (js-array (if (nullish? (get env :NODE_BINARY)) \"node\" (get env :NODE_BINARY)) (if (nullish? (get env :BUN)) \"bun\" (get env :BUN))))"
+               "(js-call engines :forEach (lambda (engine)"
+               " (let ((result (spawnSync engine (js-array child) (js-object :encoding \"utf8\" :timeout 10000))))"
+               "  (js-call assert :strictEqual (get result :error) undefined)"
+               "  (js-call assert :strictEqual (get result :signal) nil (get result :stderr))"
+               "  (js-call assert :strictEqual (get result :status) 0 (get result :stderr))"
+               "  (js-call assert :strictEqual (get result :stdout) \"resolved real exports\\n\"))))") :join "\n") "source-project-host.eli")))
+        (put record :entry "data.mjs")
+        (put record :modules (js-array
+          (js-object :id "object.mjs" :filename "stdlib/object.eli"
+            :source "(defportable assoc (value) (+ value 1)) (export assoc)")
+          (js-object :id "data.mjs" :filename "stdlib/data.eli"
+            :source "(import-portable \"./object.eli\" assoc) (defun value () (assoc 41)) (export value)")))
+        (put (get record :request) :resolveImports t)
+        (js-call (get (get record :request) :hostSources) :push
+          (js-object :id "tests/source-project-child.mjs" :filename "source-project-child.eli" :source child))
+        (put (get record :execution) :hostSource host)
+        (let* ((before (JSON/stringify record)) (run (oracle (resolve directory "source-project-oracle")))
+               (actual (await (funcall run (js-object :record record :target "javascript")))))
+          (js-call assert :strictEqual (get actual :stdout) "")
+          (js-call assert :strictEqual (JSON/stringify record) before)))) 60000)
+
+  (defasync stdlib-inputs (path prefix)
+    (let ((entries (await (readdir path (js-object :withFileTypes t)))) (modules (js-array)) (index 0))
+      (js-call entries :sort (lambda (left right) (js-call (get left :name) :localeCompare (get right :name))))
+      (while (< index (js-length entries))
+        (let* ((entry (aref entries index)) (name (get entry :name))
+               (id (if (= prefix "") name (str prefix "/" name))))
+          (cond ((js-call entry :isDirectory)
+                  (setq modules (js-call modules :concat (await (stdlib-inputs (resolve path name) id)))))
+                ((and (js-call entry :isFile) (js-call name :endsWith ".eli"))
+                  (js-call modules :push (js-object :id (str (js-call id :slice 0 -4) ".mjs")
+                    :filename (str "stdlib/" id) :source (await (readFile (resolve path name) "utf8")))))))
+        (setq index (1+ index))) modules))
+
+  (test "Seed program portable pruning retains the original numeric JSON and result source goldens"
+    (async ()
+      (let ((modules (await (stdlib-inputs (resolve root "stdlib") "")))
+            (cases (js-array
+              (js-array "numeric" "gcd" (js-array "function gcd(" "function rem(" "function safe_integer_QMARK_(") "function lcm(")
+              (js-array "json" "parse-json" (js-array "function parse_json(") "function stringify_json(")
+              (js-array "result" "unwrap-or" (js-array "function unwrap_or(" "function ok_QMARK_(") "function collect_results(")))
+            (index 0))
+        (while (< index (js-length cases))
+          (let* ((item (aref cases index)) (name (aref item 0))
+                 (record (recipe (str "seed-portable-" name)))
+                 (forms (js-array "(import \"node:assert/strict\" :default assert)"
+                                  "(import \"node:fs\" readFileSync)" "(import \"node:path\" resolve)"
+                   (str "(defconst text (readFileSync (resolve (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_JAVASCRIPT_PRODUCT_ROOT) "
+                     (JSON/stringify (str name ".mjs")) ") \"utf8\"))"))))
+            (js-call (aref item 2) :forEach (lambda (text)
+              (js-call forms :push (str "(js-call assert :ok (js-call text :includes " (JSON/stringify text) "))"))))
+            (js-call forms :push (str "(js-call assert :strictEqual (js-call text :includes "
+              (JSON/stringify (aref item 3)) ") false)"))
+            (put record :modules modules) (put record :entry (str name ".mjs"))
+            (put (get record :request) :resolveImports t)
+            (put (get record :request) :portableEntries (js-array (aref item 1)))
+            (put (get record :execution) :hostSource
+              (compile-string (js-call forms :join "\n") (str "portable-" name "-host.eli")))
+            (let* ((before (JSON/stringify record)) (run (oracle (resolve directory (str "portable-oracle-" name))))
+                   (actual (await (funcall run (js-object :record record :target "javascript")))))
+              (js-call assert :strictEqual (get actual :stdout) "")
+              (js-call assert :strictEqual (JSON/stringify record) before)))
+          (setq index (1+ index))))) 120000)
+
+  (test "Seed oracle uses the same maintained physical-file identity host capability as the selected product"
+    (async ()
+      (let* ((record (recipe "seed-physical-identity-host"))
+             (fixture "tests/fixtures/wasm-managed-host-identity.eli")
+             (host-file "tools/backends/compiler-corpus-identity-host.mjs")
+             (host-eli "tools/backends/eliscript/compiler-corpus-identity-host.eli"))
+        (put record :modules (js-array (js-object :id "main.mjs" :filename "host-identity.eli"
+          :source (await (readFile (resolve root fixture) "utf8")))))
+        (put record :entry "main.mjs")
+        (put (get record :execution) :referenceArtifact t)
+        (put (get record :execution) :hostRuntime "bun")
+        (put (get record :execution) :arguments (js-array (js-object :directory t) (js-object :literal "main.mjs")))
+        (put (get record :execution) :hostSource
+          (compile-string "(throw (new globalThis.Error \"legacy host must not replace explicit JavaScript capability\"))" "old-host.eli"))
+        (put (get record :execution) :javascriptHostSource (await (readFile (resolve root host-file) "utf8")))
+        (let ((files (js-array fixture host-file host-eli)) (index 0))
+          (while (< index (js-length files))
+            (let* ((file (aref files index)) (bytes (await (readFile (resolve root file)))))
+              (js-call (get (get record :original) :sourceAssets) :push
+                (js-object :file file :sourceSha256 (digest bytes))))
+            (setq index (1+ index))))
+        (let* ((before (JSON/stringify record)) (run (oracle (resolve directory "physical-identity-oracle")))
+               (actual (await (funcall run (js-object :record record :target "javascript")))))
+          (js-call assert :deepStrictEqual (JSON/parse (get actual :stdout))
+            (js-object :tokens (js-array 1 1 1 2) :effects (js-array t (js-array 1 2))
+              :abrupt (js-array t (js-array 1)) :conversion (js-array) :symbols (js-array t t) :functions (js-array t t)))
+          (js-call assert :strictEqual (JSON/stringify record) before)))) 120000)
+  (defun seed-provider-fixture (id)
+    (let* ((record (recipe id))
+           (replacement (js-object :id "managed-runtime-identifier.mjs"
+             :filename "stdlib/managed-runtime-identifier.eli"
+             :source "(module seed.shadow (defconst shadow-value 17) (export shadow-value))"))
+           (libraries (js-array replacement))
+           (proofs (js-call providers :map (lambda (item)
+             (let ((bytes (js-call Buffer :from (get item :source) "utf8")))
+               (js-object :file (get item :filename) :encoding "base64"
+                 :content (js-call bytes :toString "base64") :bytes (js-length bytes) :sha256 (digest bytes))))))
+           (bytes (js-call Buffer :from (get replacement :source) "utf8")))
+      (js-call proofs :push (js-object :file (get replacement :filename) :encoding "base64"
+        :content (js-call bytes :toString "base64") :bytes (js-length bytes) :sha256 (digest bytes)))
+      (js-call (get record :modules) :push (Object/assign (js-object) replacement))
+      (put (get record :request) :resolveImports t)
+      (js-object :record record :options (js-object :sourceAssets proofs
+        :literalSources (js-array (Object/assign (js-object) replacement (js-object :id "runtime/core/identifier.mjs")))
+        :literalSourceIdentity (js-array (js-object :id "runtime/core/identifier.mjs"
+          :filename (get replacement :filename)
+          :sha256 (js-call (js-call (createHash "sha256") :update (get replacement :source) "utf16le") :digest "hex")))))))
+
+  (defun provider-oracle (fixture path)
+    (let ((node (get (get globalThis.process :env) :NODE_BINARY)))
+      (createOriginalSeedOracle (Object/assign (js-object :sourceRoot root :directory path
+        :node (if (nullish? node) "node" node) :programHost "node") (get fixture :options)))))
+
+  (defasync archived-sequence-seed-fixture (family engine)
+    ;; A small transport regression, not an alternative observation for the
+    ;; retained complete sequence programs. Exercise their actual private
+    ;; archive-provider branch through the real independent Emacs Seed route.
+    (let* ((record (recipe (str "original-managed:sequence-data-" family ":" engine ":auto-65536")))
+           (libraries (await (loadLiteralSources (js-object :sourceRoot root))))
+           (proofs (js-call providers :map (lambda (provider)
+             (let ((bytes (js-call Buffer :from (get provider :source) "utf8")))
+               (js-object :file (get provider :filename) :encoding "base64"
+                 :content (js-call bytes :toString "base64") :bytes (js-length bytes) :sha256 (digest bytes))))))
+           (identities (js-array)))
+      (put (get record :original) :suite "tests/wasm-managed-sequence-data.test.mjs")
+      (put (get record :execution) :hostRuntime engine)
+      (put (get record :request) :resolveImports t)
+      (js-call libraries :forEach (lambda (library)
+        (let ((bytes (js-call Buffer :from (get library :source) "utf8")))
+          (js-call proofs :push (js-object :file (get library :filename) :encoding "base64"
+            :content (js-call bytes :toString "base64") :bytes (js-length bytes) :sha256 (digest bytes)))
+          (js-call (get (get record :original) :sourceAssets) :push
+            (js-object :file (get library :filename) :sourceSha256 (digest bytes)))
+          (js-call identities :push (js-object :id (get library :id) :filename (get library :filename)
+            :sha256 (js-call (js-call (createHash "sha256") :update (get library :source) "utf16le") :digest "hex"))))))
+      ;; Retain the complete original declarations in the source archive too;
+      ;; restore the oracle configuration from these exact archived bytes.
+      (put record :seedSourceAssets proofs)
+      (js-object :record record :options (js-object :sourceAssets proofs
+        :literalSources libraries :literalSourceIdentity identities))))
+
+  (test "independent sequence Seed contexts authenticate the complete restored provider archive for both hosts and families"
+    (async ()
+      (let ((families (js-array "relational-set" "standard-identities"))
+            (engines (js-array "node" "bun")) (family-index 0))
+        (while (< family-index (js-length families))
+          (let ((engine-index 0))
+            (while (< engine-index (js-length engines))
+              (let* ((family (aref families family-index)) (engine (aref engines engine-index))
+                     (fixture (await (archived-sequence-seed-fixture family engine)))
+                     (record (get fixture :record)) (before (JSON/stringify record))
+                     (path (resolve directory (str "sequence-source-archive-" family "-" engine)))
+                     (identity (await (archiveCompilerCorpusSources record path)))
+                     (restored (await (readArchivedCompilerCorpusSources path
+                                 (js-object :expectedIdentity (get identity :sha256)))))
+                     (options (Object/assign (js-object) (get fixture :options)
+                                (js-object :sourceAssets (get restored :seedSourceAssets))))
+                     (run (provider-oracle (js-object :options options)
+                            (resolve directory (str "sequence-seed-" family "-" engine)))))
+                (js-call assert :deepStrictEqual restored record)
+                (js-call assert :strictEqual (js-length (get options :sourceAssets))
+                  (+ (js-length providers) (js-length (get options :literalSources))))
+                (let ((actual (await (funcall run (js-object :record restored :target "javascript")))))
+                  (js-call assert :strictEqual (get actual :kind) "original-program")
+                  (js-call assert :strictEqual (get actual :stdout) "runtime identity verified\n")
+                  (let ((provider-proof (get actual :nativeProviderIdentity)))
+                    (js-call assert :strictEqual (get provider-proof :policy) "canonical-source-runtime")
+                    (js-call assert :strictEqual (get provider-proof :runtimeRoot) (await (realpath (resolve root "runtime"))))
+                    (js-call assert :strictEqual (js-length (get provider-proof :files)) (js-length providers))
+                    (js-call providers :forEach (lambda (provider)
+                      (let ((proof (js-call (get provider-proof :files) :find
+                                     (lambda (item) (= (get item :id) (get provider :id))))))
+                        (js-call assert :ok proof)
+                        (js-call assert :strictEqual (get proof :sha256) (get provider :sha256))
+                        (js-call assert :strictEqual (get proof :bytes) (get provider :bytes)))))))
+                (js-call assert :strictEqual (JSON/stringify record) before)
+                (js-call assert :strictEqual (JSON/stringify restored) before))
+              (setq engine-index (1+ engine-index))))
+          (setq family-index (1+ family-index))))) 60000)
+
+  (test "sequence Seed archive routing never substitutes request host sources for missing changed or duplicate provider proofs"
+    (async ()
+      (let ((modes (js-array "missing" "changed" "duplicate")) (index 0))
+        (while (< index (js-length modes))
+          (let* ((mode (aref modes index)) (fixture (await (archived-sequence-seed-fixture "relational-set" "node")))
+                 (record (get fixture :record))
+                 (path (resolve directory (str "sequence-refusal-archive-" mode)))
+                 (identity (await (archiveCompilerCorpusSources record path)))
+                 (restored (await (readArchivedCompilerCorpusSources path
+                             (js-object :expectedIdentity (get identity :sha256)))))
+                 (proofs (funcall globalThis.structuredClone (get restored :seedSourceAssets)))
+                 (proof (js-call proofs :find (lambda (item) (= (get item :file) "runtime/core/queue.mjs")))))
+            (js-call assert :ok proof)
+            (cond
+              ((= mode "missing")
+                (setq proofs (js-call proofs :filter (lambda (item) (/= (get item :file) (get proof :file))))))
+              ((= mode "changed")
+                (let ((bytes (js-call Buffer :from
+                              (str (js-call (js-call Buffer :from (get proof :content) "base64") :toString "utf8") "\n "))))
+                  (put proof :content (js-call bytes :toString "base64"))
+                  (put proof :bytes (js-length bytes)) (put proof :sha256 (digest bytes))))
+              (t (js-call proofs :push (Object/assign (js-object) proof))))
+            (let* ((before (JSON/stringify restored))
+                   (options (Object/assign (js-object) (get fixture :options) (js-object :sourceAssets proofs)))
+                   (run (provider-oracle (js-object :options options)
+                          (resolve directory (str "sequence-refusal-seed-" mode)))))
+              ;; request.hostSources still contains the authentic provider.
+              ;; It is deliberately insufficient for the archived branch.
+              (js-call assert :strictEqual
+                (js-length (get (get restored :request) :hostSources)) (js-length providers))
+              (await (js-call assert :rejects (funcall run (js-object :record restored :target "javascript"))
+                (lambda (error) (= (get error :message)
+                  "original canonical native provider identity conflicts with the selected product"))))
+              (js-call assert :strictEqual (JSON/stringify restored) before)))
+          (setq index (1+ index))))) 60000)
+
+  (test "authenticated Seed mjs source and host edges use declared providers instead of unrelated managed output aliases"
+    (async ()
+      (let ((engines (js-array "node" "bun")) (index 0))
+        (while (< index (js-length engines))
+          (let* ((engine (aref engines index)) (fixture (seed-provider-fixture (str "seed-provider-precedence-" engine)))
+                 (record (get fixture :record))
+                 (entry (aref (get record :modules) 0)))
+            (put entry :source (str "(import \"./runtime/core/identifier.mjs\" keyword)\n" program-source
+              "\n(defconst keyword-value (keyword \"seed\")) (export keyword-value)"))
+            (put (get record :execution) :hostRuntime engine)
+            (put (get record :execution) :hostSource (compile-string (str host-source
+              "\n(import \"../runtime/core/identifier.mjs\" :as HostIdentifier)"
+              "\n(js-call assert :strictEqual (Object/getPrototypeOf (get emitted :keyword_value)) (get (get HostIdentifier :Keyword) :prototype))")
+              "seed-provider-host.eli"))
+            (let* ((before (JSON/stringify record))
+                   (run (provider-oracle fixture (resolve directory (str "provider-precedence-" engine))))
+                   (actual (await (funcall run (js-object :record record :target "javascript")))))
+              (js-call assert :strictEqual (get actual :stdout) "runtime identity verified\n")
+              (js-call assert :strictEqual (JSON/stringify record) before)))
+          (setq index (1+ index))))) 60000)
+
+  (test "Seed provider precedence does not hide explicit eli imports or explicit project entry conflicts"
+    (async ()
+      (let ((modes (js-array "eli-import" "explicit-entry")) (index 0))
+        (while (< index (js-length modes))
+          (let* ((mode (aref modes index)) (fixture (seed-provider-fixture (str "seed-provider-" mode)))
+                 (record (get fixture :record)))
+            (if (= mode "eli-import")
+              (put (aref (get record :modules) 0) :source (str
+                "(import \"./runtime/core/identifier.eli\" shadow-value)\n" program-source))
+              (put (get record :request) :entries (js-array "entry.mjs" "managed-runtime-identifier.mjs")))
+            (let* ((before (JSON/stringify record))
+                   (run (provider-oracle fixture (resolve directory (str "provider-refusal-" mode)))))
+              (await (js-call assert :rejects (funcall run (js-object :record record :target "javascript"))
+                (lambda (error) (= (get error :message) "original local runtime graph conflicts with emitted source"))))
+              (js-call assert :strictEqual (JSON/stringify record) before)))
+          (setq index (1+ index))))) 60000)
+
+  (test "Seed provider source proof changes are rejected before compiling or installing a local runtime"
+    (async ()
+      (let* ((fixture (seed-provider-fixture "seed-provider-source-proof")) (record (get fixture :record))
+             (proofs (get (get fixture :options) :sourceAssets))
+             (proof (aref proofs (1- (js-length proofs))))
+             (before (JSON/stringify record))
+             (run (provider-oracle fixture (resolve directory "provider-source-proof"))))
+        (put proof :sha256 (js-call "0" :repeat 64))
+        ;; Create the oracle after changing its input proof; it captures its
+        ;; own immutable source declaration snapshot on construction.
+        (setq run (provider-oracle fixture (resolve directory "provider-source-proof-changed")))
+        (await (js-call assert :rejects (funcall run (js-object :record record :target "javascript"))
+          (lambda (error) (= (get error :message)
+            "original recipe source asset identity differs: stdlib/managed-runtime-identifier.eli"))))
+        (js-call assert :strictEqual (JSON/stringify record) before))))
+
+  (test "Seed local package exposes only actually declared platform files through their original explicit aliases"
+    (async ()
+      (let* ((record (recipe "seed-declared-http-provider"))
+             (http (await (readFile (resolve root "platform/http.mjs") "utf8")))
+             (source (str program-source
+               "\n(import \"eliscript/platform/http.mjs\" readHttpGlobal)"
+               "\n(defconst headers-value (readHttpGlobal \"Headers\")) (export headers-value)")))
+        (put (aref (get record :modules) 0) :source source)
+        (js-call (get (get record :request) :hostSources) :push
+          (js-object :id "platform/http.mjs" :filename "platform/http.mjs" :source http))
+        (put (get record :execution) :hostSource (compile-string (str host-source
+          "\n(import \"eliscript/platform/http\" :as ShortHTTP)"
+          "\n(import \"eliscript/platform/http.mjs\" :as FullHTTP)"
+          "\n(js-call assert :strictEqual ShortHTTP FullHTTP)"
+          "\n(js-call assert :strictEqual (get emitted :headers_value) globalThis.Headers)"
+          "\n(js-call assert :strictEqual (js-call FullHTTP :readHttpGlobal \"Headers\") globalThis.Headers)"
+          "\n(js-call assert :throws (lambda () (js-call FullHTTP :readHttpGlobal \"unapproved\")) globalThis.TypeError)")
+          "declared-http-host.eli"))
+        (let* ((before (JSON/stringify record)) (run (oracle (resolve directory "declared-http-oracle")))
+               (actual (await (funcall run (js-object :record record :target "javascript")))))
+          (js-call assert :strictEqual (get actual :stdout) "runtime identity verified\n")
+          (js-call assert :strictEqual (JSON/stringify record) before))
+        (let* ((missing (funcall globalThis.structuredClone record))
+               (run (oracle (resolve directory "undeclared-http-oracle"))))
+          (put (get missing :request) :hostSources (js-call (get (get missing :request) :hostSources) :filter
+            (lambda (item) (/= (get item :id) "platform/http.mjs"))))
+          (await (js-call assert :rejects (funcall run (js-object :record missing :target "javascript"))
+            (lambda (error) (js-call (get error :message) :includes "platform/http")))))
+        (let* ((unrelated (funcall globalThis.structuredClone record))
+               (run (oracle (resolve directory "undeclared-platform-oracle"))))
+          (put (aref (get unrelated :modules) 0) :source (str program-source
+            "\n(import \"eliscript/platform/browser.mjs\" :as Unrelated)"))
+          (await (js-call assert :rejects (funcall run (js-object :record unrelated :target "javascript"))
+            (lambda (error) (js-call (get error :message) :includes "platform/browser"))))))) 60000)
+
+  (test "independent sorted provider originals retain real source runtime constructors comparators metadata and incoming identity"
+    (async ()
+      (let ((engines (js-array "node" "bun")) (index 0))
+        (while (< index (js-length engines))
+          (let* ((engine (aref engines index)) (record (recipe (str "original-managed:sorted-core:" engine ":auto-1")))
+                 (source (str
+                   "(import \"./runtime/core/sorted.mjs\" persistentSortedMap defaultSortedComparator)\n"
+                   "(defun provider-value () (persistentSortedMap 2 \"b\" 1 \"a\"))\n"
+                   "(defun provider-identity (value) value)\n"
+                   "(export provider-value provider-identity)"))
+                 (original-sorted (JSON/stringify (resolve root "runtime/core/sorted.mjs")))
+                 (original-metadata (JSON/stringify (resolve root "runtime/core/metadata.mjs")))
+                 (original-literals (JSON/stringify (resolve root "runtime/literals.mjs"))))
+            (put (aref (get record :modules) 0) :source source)
+            (put (get record :original) :suite "tests/wasm-managed-sorted-core.test.mjs")
+            (put (get record :original) :fixture "tests/fixtures/wasm-managed-sorted.eli")
+            (put (get record :execution) :hostRuntime engine)
+            (put (get record :execution) :referenceArtifact t)
+            (put (get record :execution) :aliases t)
+            (put (get record :execution) :hostSource (compile-string (js-call (js-array
+              "(import \"node:assert/strict\" :default assert)"
+              "(import \"../entry.mjs\" :as emitted)"
+              (str "(import " original-sorted " :as OriginalSorted)")
+              (str "(import " original-metadata " :as OriginalMetadata)")
+              (str "(import " original-literals " :as OriginalLiterals)")
+              "(defconst value (js-call emitted :provider_value))"
+              "(js-call assert :strictEqual (Object/getPrototypeOf value) (get (get OriginalSorted :PersistentSortedMap) :prototype))"
+              "(js-call assert :strictEqual (get value :comparator) (js-call OriginalSorted :defaultSortedComparator))"
+              "(js-call assert :strictEqual (js-call emitted :provider_identity value) value)"
+              "(defconst metadata (js-call OriginalLiterals :hashMap \"provider\" 17))"
+              "(defconst incoming (js-call OriginalMetadata :withMeta (js-call OriginalSorted :persistentSortedMap 1 \"a\") metadata))"
+              "(js-call assert :strictEqual (js-call emitted :provider_identity incoming) incoming)"
+              "(js-call assert :strictEqual (js-call OriginalMetadata :meta incoming) metadata)"
+              "(js-call (get globalThis.process :stdout) :write \"sorted provider identity verified\\n\")") :join "\n")
+              "sorted-provider-host.eli"))
+            (let* ((before (JSON/stringify record)) (run (oracle (resolve directory (str "sorted-provider-" engine))))
+                   (actual (await (funcall run (js-object :record record :target "javascript")))))
+              (js-call assert :strictEqual (get actual :stdout) "sorted provider identity verified\n")
+              (js-call assert :strictEqual (JSON/stringify record) before))
+            (let* ((changed (funcall globalThis.structuredClone record))
+                   (provider (js-call (get (get changed :request) :hostSources) :find
+                     (lambda (item) (= (get item :id) "runtime/core/sorted.mjs"))))
+                   (run (oracle (resolve directory (str "sorted-provider-changed-" engine)))))
+              (put provider :source (str (get provider :source) "\n "))
+              (await (js-call assert :rejects (funcall run (js-object :record changed :target "javascript"))
+                (lambda (error) (= (get error :message)
+                  "original canonical native provider identity conflicts with the selected product")))))
+            (let* ((missing (funcall globalThis.structuredClone record))
+                   (run (oracle (resolve directory (str "sorted-provider-missing-" engine)))))
+              (put (get missing :request) :hostSources (js-call (get (get missing :request) :hostSources) :filter
+                (lambda (item) (/= (get item :id) "runtime/core/sorted.mjs"))))
+              (await (js-call assert :rejects (funcall run (js-object :record missing :target "javascript"))
+                (lambda (error) (= (get error :message)
+                  "original canonical native provider identity conflicts with the selected product"))))))
+          (setq index (1+ index))))) 60000)
+  (defun literal-codec-seed-record ()
+    (let ((record (recipe "original-program:compiler-literal-runtime-complete")))
+      (put (get record :original) :suite "tests/literal-runtime.test.mjs")
+      (put (get record :original) :fixture "tests/fixtures/literal-runtime.eli")
+      (put (get record :execution) :host "tests/__eliscript_original_literal_runtime_complete.mjs")
+      (put (get record :execution) :runtimeProfile "compiler")
+      (put (get record :execution) :referenceArtifact t)
+      (put (get record :execution) :aliases t)
+      (put (get record :execution) :setupReplacement
+        (js-object :kind "selected-and-independent-reference-compiler-directories"))
+      record))
+
+  (test "independent literal Seed replay shares the real runtime URL with genuine portable compiler outputs and the strict worker codec"
+    (async ()
+      (let* ((record (literal-codec-seed-record))
+             (host (js-call (js-array
+               "(import \"node:assert/strict\" :default assert)"
+               "(import \"node:fs\" mkdtempSync mkdirSync readFileSync writeFileSync rmSync)"
+               "(import \"node:path\" resolve)"
+               "(import \"node:child_process\" spawnSync)"
+               "(import \"node:module\" createRequire)"
+               "(import \"../runtime/worker-value-codec.mjs\" encodeWorkerValue decodeWorkerValue)"
+               "(import \"../runtime/core/vector.mjs\" persistentVector isPersistentVector)"
+               "(import \"../runtime/core/map.mjs\" isPersistentHashMap)"
+               "(import \"../runtime/core/set.mjs\" isPersistentHashSet)"
+               "(import \"../runtime/core/list.mjs\" isPersistentList)"
+               "(import \"../runtime/core/identifier.mjs\" keyword)"
+               "(import \"../runtime/core/value.mjs\" equalValues)"
+               "(defconst ROOT (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_SOURCE_ROOT))"
+               "(defconst directory (mkdtempSync (resolve ROOT \".eliscript-seed-codec-\")))"
+               "(try (let* ((source (resolve directory \"portable.eli\"))"
+               " (outputs (js-array (resolve directory \"first/module.mjs\") (resolve directory \"second/module.mjs\"))))"
+               " (writeFileSync source \"(defportable build (argument) {:argument argument :keyword :ready :vector [1 undefined] :map {:nested [2]} :set #{argument [4]} :quote '(alpha :beta [3] nil)}) (export build)\")"
+               " (js-call outputs :forEach (lambda (output)"
+               "  (mkdirSync (resolve output \"..\") (js-object :recursive t))"
+               "  (let ((result (spawnSync (resolve ROOT \"bin/eliscript-seed\") (js-array \"--source-map\" \"--portable\" \"build\" \"--output\" output source) (js-object :cwd ROOT :encoding \"utf8\"))))"
+               "   (js-call assert :strictEqual (get result :error) undefined)"
+               "   (js-call assert :strictEqual (get result :signal) nil (get result :stderr))"
+               "   (js-call assert :strictEqual (get result :status) 0 (get result :stderr)))))"
+               " (js-call assert :strictEqual (readFileSync (aref outputs 0) \"utf8\") (readFileSync (aref outputs 1) \"utf8\"))"
+               " (js-call assert :strictEqual (readFileSync (str (aref outputs 0) \".map\") \"utf8\") (readFileSync (str (aref outputs 1) \".map\") \"utf8\"))"
+               " (let* ((load (createRequire (resolve ROOT \"tests/literal-runtime.test.mjs\")))"
+               " (first (funcall load (aref outputs 0))) (second (funcall load (aref outputs 1)))"
+               " (argument (persistentVector 8 9))"
+               " (left (js-call first :build argument)) (right (js-call second :build argument))"
+               " (transported (decodeWorkerValue (encodeWorkerValue left))))"
+               " (js-call assert :strictEqual (isPersistentHashMap left) t)"
+               " (js-call assert :strictEqual (equalValues left right) t)"
+               " (js-call assert :strictEqual (equalValues left transported) t)"
+               " (js-call assert :strictEqual (js-call left :get (keyword \"argument\")) argument)"
+               " (js-call assert :strictEqual (js-call left :get (keyword \"keyword\")) (keyword \"ready\"))"
+               " (js-call assert :strictEqual (isPersistentVector (js-call left :get (keyword \"vector\"))) t)"
+               " (js-call assert :strictEqual (isPersistentHashMap (js-call left :get (keyword \"map\"))) t)"
+               " (js-call assert :strictEqual (isPersistentHashSet (js-call left :get (keyword \"set\"))) t)"
+               " (js-call assert :strictEqual (isPersistentList (js-call left :get (keyword \"quote\"))) t)"
+               " (js-call (get globalThis.process :stdout) :write \"real Seed codec identity verified\\n\")))"
+               " (finally (rmSync directory (js-object :recursive t :force t))))") :join "\n")))
+        (put (get record :execution) :hostSource (compile-string host "seed-real-portable-codec-host.eli"))
+        (let* ((before (JSON/stringify record)) (run (oracle (resolve directory "real-seed-codec")))
+               (actual (await (funcall run (js-object :record record :target "javascript")))))
+          (js-call assert :strictEqual (get actual :stdout) "real Seed codec identity verified\n")
+          (js-call assert :strictEqual (js-length (get actual :supportingProducts)) 1)
+          (js-call assert :strictEqual (get (aref (get actual :supportingProducts) 0) :producer) "emacs-seed")
+          (js-call assert :strictEqual (get (get actual :nativeProviderIdentity) :runtimeRoot)
+            (await (realpath (resolve root "runtime"))))
+          (js-call assert :strictEqual (JSON/stringify record) before)))) 60000)
+
+  (test "independent literal Seed runtime URL sharing rejects changed source bytes and missing declarations"
+    (async ()
+      (let ((modes (js-array "changed" "missing")) (index 0))
+        (while (< index (js-length modes))
+          (let* ((mode (aref modes index)) (record (literal-codec-seed-record))
+                 (sources (get (get record :request) :hostSources)))
+            (if (= mode "changed")
+              (let ((provider (js-call sources :find (lambda (item) (= (get item :id) "runtime/core/map.mjs")))))
+                (put provider :source (str (get provider :source) "\n ")))
+              (put (get record :request) :hostSources (js-call sources :filter
+                (lambda (item) (/= (get item :id) "runtime/core/map.mjs")))))
+            (let* ((before (JSON/stringify record)) (run (oracle (resolve directory (str "seed-codec-refusal-" mode)))))
+              (await (js-call assert :rejects (funcall run (js-object :record record :target "javascript"))
+                (lambda (error) (= (get error :message)
+                  "original canonical native provider identity conflicts with the selected product"))))
+              (js-call assert :strictEqual (JSON/stringify record) before)))
+          (setq index (1+ index))))) 60000)
+)

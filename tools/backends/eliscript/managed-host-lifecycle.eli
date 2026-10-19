@@ -1,0 +1,133 @@
+(module tools.backends.managed-host-lifecycle
+  ;; This is a private factory bridge. The exported runtime ABI and capability
+  ;; dispatcher keep their original identities. Only prepare-time binding
+  ;; notifications retain raw tuples until the compiled initializer returns.
+  (defun data-function (descriptors key)
+    (let ((entry (get descriptors key)))
+      (when (and entry (Object/hasOwn entry "value")
+                 (= (value-type (get entry :value)) "function"))
+        (get entry :value))))
+
+  (defun retain-function-name (target original)
+    (let ((name (Object/getOwnPropertyDescriptor original "name")))
+      (when (and name (Object/hasOwn name "value"))
+        (Object/defineProperty target "name" name)))
+    target)
+
+  (defun notification-tuple-p (raw view memory heap arguments)
+    (and (= (funcall raw "value-kind" heap arguments) 7)
+         (= (funcall raw "value-length" heap arguments) 4)
+         (let ((operation (funcall raw "value-get" heap arguments 0)))
+           (and (> operation 3) (= (funcall raw "value-kind" heap operation) 4)
+                (let ((offset (funcall raw "value-data" heap operation 4)))
+                  (and (= (funcall raw "last-error") 0)
+                       (= (js-call (Reflect/apply view memory (js-array)) :getFloat64 offset t) 18)))))))
+
+  (defun createManagedHostRuntimeWithLifecycle (creator exports descriptor memory tail)
+    (let* ((invoke (lambda (received forwarded)
+                     (Reflect/apply creator undefined
+                       (js-call (js-array received descriptor memory) :concat forwarded))))
+           (descriptors (Object/getOwnPropertyDescriptors exports))
+           (required (js-array "heap-new" "last-error" "value-error-restore"
+                       "value-kind" "value-length" "value-get" "value-data"
+                       "heap-pin" "heap-release" "value-exception-class" "value-exception-class-set"))
+           (lifecycle (when (and (Array/isArray tail) (> (js-length tail) 1)) (aref tail 1)))
+           (local-descriptors (when (and lifecycle (= (value-type lifecycle) "object"))
+                                (Object/getOwnPropertyDescriptors lifecycle)))
+           (bridge-descriptor (when local-descriptors (get local-descriptors :capabilityBridge)))
+           (bridge (when (and bridge-descriptor (Object/hasOwn bridge-descriptor "value"))
+                     (get bridge-descriptor :value)))
+           (bridge-descriptors (when (and bridge (= (value-type bridge) "object"))
+                                 (Object/getOwnPropertyDescriptors bridge)))
+           (attach (when bridge-descriptors (data-function bridge-descriptors "attach")))
+           (memory-descriptors (when (and memory (= (value-type memory) "object"))
+                                 (Object/getOwnPropertyDescriptors memory)))
+           (view (when memory-descriptors (data-function memory-descriptors "view"))))
+      ;; Fake/older services and non-private lifecycle objects follow the exact
+      ;; original creator path, including omitted, undefined and null defaults.
+      (if (not (and attach view local-descriptors
+                    (= (js-length (Reflect/ownKeys local-descriptors)) 1)
+                    (Object/isExtensible lifecycle)
+                    (js-call required :every (lambda (key) (data-function descriptors key)))))
+        (funcall invoke exports tail)
+        (let* ((raw (lambda (name &rest arguments)
+                      (Reflect/apply (data-function descriptors name) exports arguments)))
+               (owner 0) (active false) (handler undefined) (pending (js-array))
+               (original-new (data-function descriptors "heap-new"))
+               (original-prepare (data-function descriptors "__eliscript_project_prepare"))
+               (snapshot (lambda ()
+                 (let* ((code (funcall raw "last-error"))
+                        (kind (if (/= code 0) (funcall raw "value-exception-class" owner) 0)))
+                   (js-object :code code :kind kind))))
+               (restore (lambda (state)
+                 (funcall raw "value-exception-class-set" owner (get state :kind))
+                 (funcall raw "value-error-restore" (get state :code))))
+               (defer (lambda (name heap arguments)
+                 (if (and active (= name "source-operation") (= heap owner))
+                   (if (/= (funcall raw "last-error") 0) 0
+                     (let ((matches (notification-tuple-p raw view memory heap arguments)))
+                       (if (/= (funcall raw "last-error") 0) 0
+                         (if matches
+                           (progn
+                             (funcall raw "heap-pin" heap arguments)
+                             (if (/= (funcall raw "last-error") 0) 0
+                               (progn (js-call pending :push arguments) 3)))
+                           (funcall handler name heap arguments)))))
+                   (funcall handler name heap arguments))))
+               (new-heap (retain-function-name (lambda (slots initial maximum)
+                           (setq owner (Reflect/apply original-new exports (js-array slots initial maximum)))) original-new))
+               (prepare (when original-prepare (retain-function-name (lambda (heap)
+                 (let ((result undefined) (failed false) (failure undefined)
+                       (cleanup-failed false) (cleanup-error undefined) (status undefined) (index 0))
+                   (setq active t pending (js-array))
+                   (try
+                     (setq result (Reflect/apply original-prepare exports (js-array heap)))
+                     ;; Re-enter only after all original prepare initializers
+                     ;; succeeded. New notifications append to the same FIFO.
+                     (while (and (= (funcall raw "last-error") 0) (< index (js-length pending)))
+                       (funcall handler "source-operation" heap (aref pending index))
+                       (setq index (1+ index)))
+                     (catch error (setq failed t failure error))
+                     (finally
+                       (setq active false status (funcall snapshot))
+                       (setq index 0)
+                       (while (< index (js-length pending))
+                         (try
+                           (funcall raw "heap-release" owner (aref pending index))
+                           (when (= (get status :code) 0)
+                             (let ((released (funcall snapshot)))
+                               (when (/= (get released :code) 0) (setq status released))))
+                           (catch error
+                             (unless cleanup-failed (setq cleanup-failed t cleanup-error error))))
+                         (setq index (1+ index)))
+                       (setq pending (js-array))
+                       ;; Release starts a new raw operation. Restore the first
+                       ;; numeric error/class; the pending throw slot is never
+                       ;; taken or decoded by this bridge.
+                       (funcall restore status)))
+                   (when failed (throw failure))
+                   (when (and cleanup-failed (= (get status :code) 0)) (throw cleanup-error))
+                   result)) original-prepare)))
+               (wrapped-attach (retain-function-name (lambda (callback)
+                 (let ((result (Reflect/apply attach bridge (js-array defer))))
+                   (setq handler callback) result)) attach))
+               (private-bridge undefined) (local undefined)
+               (forwarded (Array/from tail)))
+          (put (get bridge-descriptors "attach") :value wrapped-attach)
+          (setq private-bridge (Object/create (Object/getPrototypeOf bridge) bridge-descriptors))
+          (put bridge-descriptor :value private-bridge)
+          ;; A factory installs its final close hook only after the creator
+          ;; returns. Descriptor-preserving nested views must read that latest
+          ;; hook, and legacy construction must publish its dispose to the
+          ;; original envelope. A one-time data copy loses one of those writes.
+          (put local-descriptors "dispose" (js-object
+            :get (lambda () (get lifecycle :dispose))
+            :set (lambda (value) (put lifecycle :dispose value))
+            :enumerable t :configurable t))
+          (setq local (Object/create (Object/getPrototypeOf lifecycle) local-descriptors))
+          (put forwarded 1 local)
+          (put (get descriptors "heap-new") :value new-heap)
+          (when prepare (put (get descriptors "__eliscript_project_prepare") :value prepare))
+          (funcall invoke (Object/create (Object/getPrototypeOf exports) descriptors) forwarded)))))
+
+  (export createManagedHostRuntimeWithLifecycle))

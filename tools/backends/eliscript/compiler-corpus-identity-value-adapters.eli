@@ -1,0 +1,28 @@
+(module tools.backends.compiler-corpus-identity-value-adapters
+  (import "./compiler-corpus-identity-value-adapters-legacy.mjs" :as legacy)
+  (defconst originalIdentityValueSuites (get legacy :originalIdentityValueSuites))
+  (defconst originalIdentityValueCaseLocators (get legacy :originalIdentityValueCaseLocators))
+  (defasync addOriginalIdentityValueAdapters (options)
+    (let* ((text (get options :text)) (file (get options :file))
+           (source-path "tools/backends/eliscript/compiler-corpus-identity-host.eli")
+           (generated-path "tools/backends/compiler-corpus-identity-host.mjs")
+           (host-source (await (funcall text generated-path)))
+           (source-identity (await (funcall file source-path)))
+           (generated-identity (await (funcall file generated-path)))
+           (publish (get options :add)))
+      (await (js-call legacy :addOriginalIdentityValueAdapters
+        (Object/assign (js-object) options (js-object :add (lambda (record)
+          (if (js-call (get record :id) :startsWith "original-identity-value:host-token-single:")
+            (let* ((original (get record :original)) (modules (get record :modules))
+                   (execution (get record :execution)))
+              (unless (and (= (get original :fixture) "tests/fixtures/wasm-managed-host-identity.eli")
+                           (= (js-length modules) 1) (= (get (aref modules 0) :id) (get record :entry)))
+                (throw (new globalThis.TypeError "original single-module identity replay lost its actual source boundary")))
+              (funcall publish (Object/assign (js-object) record
+                (js-object :execution (Object/assign (js-object) execution (js-object :javascriptHostSource host-source))
+                  :original (Object/assign (js-object) original (js-object :sourceAssets
+                    (js-call (or (get original :sourceAssets) (js-array)) :concat
+                      (js-array (js-object :file source-path :sourceSha256 (get source-identity :sha256))
+                        (js-object :file generated-path :sourceSha256 (get generated-identity :sha256))))))))))
+            (funcall publish record)))))))))
+  (export originalIdentityValueSuites originalIdentityValueCaseLocators addOriginalIdentityValueAdapters))

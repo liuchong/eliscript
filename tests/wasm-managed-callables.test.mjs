@@ -8,13 +8,16 @@ import { pathToFileURL } from "node:url";
 import { buildBackends } from "../tools/backends/build.mjs";
 import { instantiateManagedRuntime } from "../tools/backends/managed-runtime.mjs";
 
-let directory, backends, runtime, program, javascript;
+let directory, backends, runtime, program, javascript, generatedClosureCases;
 beforeAll(async () => {
   directory = await mkdtemp(resolve(tmpdir(), "eliscript-callables-"));
   backends = await buildBackends({ outputRoot: directory });
   runtime = backends.compiler.compile_ir_string(await readFile("bootstrap/runtime/memory.eli", "utf8"), "runtime.eli");
   program = backends.compiler.compile_ir_string(await readFile("tests/fixtures/wasm-managed-callables.eli", "utf8"), "callables.eli");
   javascript = await import("data:text/javascript;base64," + Buffer.from(backends.compiler.emit_ir_string(program)).toString("base64"));
+  const preparedAt = performance.now();
+  generatedClosureCases = prepareGeneratedClosureCases();
+  console.info(`[managed-callables] prepared ${generatedClosureCases.length} full-runtime artifacts in ${(performance.now() - preparedAt).toFixed(2)}ms`);
 }, 120_000);
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
 
@@ -98,9 +101,24 @@ test("dynamic calls capture callees before arguments and evaluate extras before 
   try { assert.equal(heap.readNumber(effect), 9); } finally { heap.release(effect); }
   const missing = heap.invoke("apply-zero", [identity]);
   assert.equal(missing, undefined);
-  assert.throws(() => heap.invoke("invoke-order", [false, marker]), error => error.eliscriptDiagnostic?.code === "ELI-RT0003");
-  const failedEffect = heap.get(marker, 0);
-  try { assert.equal(heap.readNumber(failedEffect), 2); } finally { heap.release(failedEffect); }
+  const rejected = [null, undefined, false, true, -0, 0, NaN, Infinity, "", "中😀", [], {}];
+  for (const value of rejected) {
+    const referenceTrace = [false];
+    assert.throws(() => javascript.invoke_order(value, referenceTrace), TypeError);
+    assert.deepEqual(referenceTrace, [2]);
+    const input = typeof value === "number" ? heap.number(value)
+      : typeof value === "string" ? heap.string(value)
+      : Array.isArray(value) ? heap.sourceArray([])
+      : value !== null && typeof value === "object" ? heap.sourceObject({}) : value;
+    try {
+      assert.throws(() => heap.invoke("invoke-order", [input, marker]),
+        error => error instanceof TypeError && error.eliscriptDiagnostic?.code === "ELI-RT0003");
+      const failedEffect = heap.get(marker, 0);
+      try { assert.equal(heap.readNumber(failedEffect), 2); } finally { heap.release(failedEffect); }
+      heap.collect(); assert.equal(heap.stats().frameDepth, 0);
+      assert.equal(heap.invoke("apply-zero", [identity]), undefined);
+    } finally { heap.release(input); }
+  }
   finish(heap, [identity, marker]);
 });
 
@@ -363,21 +381,133 @@ test("a real trap inside a captured read unwinds dynamic callers and retains pre
   heap.leaveFrame(frame); finish(heap, [four, five, f]);
 });
 
-test("unsupported callable forms are source-bound refusals even in dead code and leave input IR untouched", () => {
+test("unsupported callable forms are source-bound refusals even in dead code and leave input IR untouched", async () => {
   const before = JSON.stringify(program), runtimeBefore = JSON.stringify(runtime);
   const dead = backends.compiler.compile_ir_string("(defun f (x) (if false (lambda () x) x)) (export f)", "dead-supported-lambda.eli");
   const heap = instantiateManagedRuntime(Uint8Array.from(backends.managed.emit_managed_wasm(dead, runtime)));
   const input = heap.number(4), output = heap.invoke("f", [input]); assert.equal(heap.readNumber(output), 4); finish(heap, [input, output]);
   backends.managed.emit_managed_wasm(program, runtime);
   assert.equal(JSON.stringify(program), before); assert.equal(JSON.stringify(runtime), runtimeBefore);
-  for (const source of ["(defun f () (if false (async () 1) 0))", "(defun f () (lambda ([x]) x))", "(defun f () (lambda (&optional [x]) x))",
-    "(defun f (g) (apply g (js* \"[]\")))",
-    "(defun f () (let ((globalThis nil)) (lambda () (new globalThis.Map))))"]) {
+  const supported = backends.compiler.compile_ir_string("(defun f () (if false (async () 1) 0)) (export f)", "supported-async-callable.eli");
+  const supportedBefore = JSON.stringify(supported);
+  const supportedBytes = Uint8Array.from(backends.managed.emit_managed_wasm(supported, runtime));
+  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(supportedBytes)), []);
+  const supportedHeap = instantiateManagedRuntime(supportedBytes); supportedHeap.auto(1);
+  const supportedResult = supportedHeap.invoke("f", []);
+  assert.equal(supportedHeap.readNumber(supportedResult), 0);
+  supportedHeap.release(supportedResult); supportedHeap.collect(); assert.equal(supportedHeap.live(), 0);
+  assert.equal(JSON.stringify(supported), supportedBefore);
+  const shadowedSource = "(defun f () (let ((globalThis nil)) (lambda () (new globalThis.Map)))) (defun call-closure (fn) (funcall fn)) (export f call-closure)";
+  const shadowed = backends.compiler.compile_ir_string(shadowedSource, "shadowed-constructor.eli"), shadowedBefore = JSON.stringify(shadowed);
+  const shadowedReference = backends.compiler.emit_ir_string(shadowed);
+  const shadowedBytes = Uint8Array.from(backends.managed.emit_managed_wasm(shadowed, runtime));
+  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(shadowedBytes)), []);
+  const shadowedHeap = instantiateManagedRuntime(shadowedBytes); shadowedHeap.auto(1);
+  const closure = shadowedHeap.invoke("f", []);
+  assert.throws(() => shadowedHeap.invoke("call-closure", [closure]), error => error instanceof TypeError && error.eliscriptDiagnostic?.code === "ELI-RT0001");
+  shadowedHeap.release(closure); shadowedHeap.collect(); assert.equal(shadowedHeap.live(), 0);
+  assert.equal(JSON.stringify(shadowed), shadowedBefore);
+  const reference = spawnSync("node", ["--input-type=module", "-e", `import assert from 'node:assert/strict';const reference=await import('data:text/javascript;base64,'+${JSON.stringify(Buffer.from(shadowedReference).toString("base64"))});assert.throws(()=>reference.call_closure(reference.f()),TypeError);`], { encoding: "utf8", timeout: 30000 });
+  assert.equal(reference.status, 0, reference.stderr);
+  for (const source of ["(defun f () (lambda ([x]) x))", "(defun f () (lambda (&optional [x]) x))"]) {
+    // These original inputs now belong to the implemented parameter-pattern
+    // profile. Preserve both sources and prove their real callable behavior.
+    const ir = backends.compiler.compile_ir_string(source +
+      " (defun call-pattern (fn value) (funcall fn value)) (export f call-pattern)", "supported-callable-pattern.eli");
+    const saved = JSON.stringify(ir), bytes = Uint8Array.from(backends.managed.emit_managed_wasm(ir, runtime));
+    assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);assert.equal(JSON.stringify(ir), saved);
+    const js = await import("data:text/javascript;base64," + Buffer.from(backends.compiler.emit_ir_string(ir)).toString("base64"));
+    const a = instantiateManagedRuntime(bytes);a.auto(1);const fn = a.invoke("f"), expected = js.f();
+    try {
+      for (const value of [-0, 37, undefined, null, false]) {
+        const element = typeof value === "number" ? a.number(value) : value;
+        const input = a.sourceArray([element]);let result;
+        try {
+          a.collect();result = a.invoke("call-pattern", [fn, input]);
+          const actual = result?.kind === 4 ? a.readNumber(result) : result;
+          assert(Object.is(actual, expected([value])), "the original pattern source retains the exact JS value under GC");
+        } finally {a.release(result);a.release(input);a.release(element);}
+        a.collect();assert.equal(a.stats().frameDepth, 0);
+      }
+    } finally {a.release(fn);a.closeModule();finish(a, []);}
+    assert.equal(JSON.stringify(ir), saved);
+  }
+  for (const source of ["(defun f (g) (apply g (js* \"[]\")))"]) {
     const ir = backends.compiler.compile_ir_string(source + " (export f)", "unsupported-callable.eli"), saved = JSON.stringify(ir);
-    assert.throws(() => backends.managed.emit_managed_wasm(ir, runtime), e => e.eliscriptDiagnostic?.code === "ELI-B0001" && e.eliscriptDiagnostic.location.file === "unsupported-callable.eli");
+    assert.throws(() => backends.managed.emit_managed_wasm(ir, runtime), e => e.eliscriptDiagnostic?.code === "ELI-B0001" && e.eliscriptDiagnostic.location.file === "unsupported-callable.eli", source);
     assert.equal(JSON.stringify(ir), saved);
   }
 });
+
+test("local and captured host constructors preserve real lookup argument order and GC in standalone and linked WASM", async () => {
+  const body = `(new globalThis.Map
+    (progn (put trace 1 (aref trace 0))
+      (Object/defineProperty globalThis "Map" (js-object :value false :configurable t)) undefined)
+    (put trace 2 (1+ (aref trace 2))))`;
+  const source = `(defun makehost (trace)
+    (let ((host (js-object)) (constructor (js* "Map")))
+      (Object/defineProperty host "Map" (js-object :configurable t
+        :get (lambda () (put trace 0 (1+ (aref trace 0))) constructor))) host))
+    (defun throwhost (trace)
+      (Object/defineProperty (js-object) "Map" (js-object :configurable t
+        :get (lambda () (put trace 0 1) (throw false)))))
+    (defun localnew (globalThis trace) ${body})
+    (defun capturenew (globalThis trace) (lambda () ${body}))
+    (defun invokeclosure (closure) (funcall closure))
+    (defun mapsize (map) (get map :size))
+    (export makehost throwhost localnew capturenew invokeclosure mapsize)`;
+  const ir = backends.compiler.compile_ir_string(source, "local-constructors.eli"), saved = JSON.stringify(ir);
+  const reference = await import("data:text/javascript;base64," + Buffer.from(backends.compiler.emit_ir_string(ir)).toString("base64"));
+  for (const linked of [false, true]) {
+    const bytes = Uint8Array.from(linked
+      ? backends.managed.emit_managed_project_wasm([{id: "constructors.mjs", program: ir}], "constructors.mjs", runtime)
+      : backends.managed.emit_managed_wasm(ir, runtime));
+    assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);assert.equal(JSON.stringify(ir), saved);
+    const heap = instantiateManagedRuntime(bytes);heap.auto(1);const held = [];
+    const own = value => {held.push(value);return value;};
+    const makeTrace = () => {
+      const zero = heap.number(0);
+      try {return own(heap.sourceArray([zero, zero, zero]));} finally {heap.release(zero);}
+    };
+    const traceValues = trace => Array.from({length: heap.length(trace)}, (_, index) => {
+      const value = heap.get(trace, index);try {return heap.readNumber(value);} finally {heap.release(value);}
+    });
+    try {
+      for (const captured of [false, true]) {
+        const trace = makeTrace(), host = own(heap.invoke("makehost", [trace]));
+        const expectedTrace = [0, 0, 0], expectedHost = reference.makehost(expectedTrace);
+        const closure = captured ? own(heap.invoke("capturenew", [host, trace])) : undefined;
+        const expectedCall = captured ? reference.capturenew(expectedHost, expectedTrace) : () => reference.localnew(expectedHost, expectedTrace);
+        const call = () => captured ? heap.invoke("invokeclosure", [closure]) : heap.invoke("localnew", [host, trace]);
+        heap.collect();const expected = expectedCall(), map = own(call());
+        assert.equal(number(heap, "mapsize", [map]), expected.size);assert.deepEqual(traceValues(trace), expectedTrace);
+        assert.deepEqual(expectedTrace, [1, 1, 1]);
+        // The callee was captured before the first argument replaced its
+        // property. A later call observes false, after evaluating both args.
+        assert.throws(expectedCall, TypeError);assert.throws(call, TypeError);
+        assert.deepEqual(traceValues(trace), expectedTrace);assert.deepEqual(expectedTrace, [1, 1, 2]);
+        heap.collect();assert.equal(number(heap, "mapsize", [map]), 0);
+        const empty = makeTrace(), expectedEmpty = [0, 0, 0];
+        const missing = captured ? own(heap.invoke("capturenew", [null, empty])) : undefined;
+        heap.collect();assert.throws(() => captured ? heap.invoke("invokeclosure", [missing]) : heap.invoke("localnew", [null, empty]),
+          error => error instanceof TypeError && error.eliscriptDiagnostic?.code === "ELI-RT0001");
+        assert.throws(() => captured ? reference.capturenew(null, expectedEmpty)() : reference.localnew(null, expectedEmpty), TypeError);
+        assert.deepEqual(traceValues(empty), expectedEmpty);assert.deepEqual(expectedEmpty, [0, 0, 0]);
+        const thrownTrace = makeTrace(), throwing = own(heap.invoke("throwhost", [thrownTrace]));
+        const throwingClosure = captured ? own(heap.invoke("capturenew", [throwing, thrownTrace])) : undefined;
+        let threw = false;
+        try {captured ? heap.invoke("invokeclosure", [throwingClosure]) : heap.invoke("localnew", [throwing, thrownTrace]);}
+        catch (error) {threw = true;assert.strictEqual(error, false);}
+        assert(threw);assert.deepEqual(traceValues(thrownTrace), [1, 0, 0]);
+        const jsTrace = [0, 0, 0], jsHost = reference.throwhost(jsTrace);let jsThrew = false;
+        try {captured ? reference.capturenew(jsHost, jsTrace)() : reference.localnew(jsHost, jsTrace);}
+        catch (error) {jsThrew = true;assert.strictEqual(error, false);}
+        assert(jsThrew);assert.deepEqual(traceValues(thrownTrace), jsTrace);
+        heap.collect();assert.equal(heap.stats().frameDepth, 0);
+      }
+    } finally {for (const value of held) heap.release(value);heap.closeModule();finish(heap, []);}
+  }
+}, 30000);
 
 test("parallel and sequential captures preserve shadowing and hygiene of internal ABI names", () => {
   const heap = instance(), four = heap.number(4), five = heap.number(5), f = heap.invoke("parallel-capture", [four]);
@@ -458,13 +588,27 @@ test("funcall shares dynamic callee ordering, omitted arguments and required ABI
 test("malformed callable parameters cannot hide unsupported IR, duplicate bindings or invalid counts", () => {
   const find = nodes => { for (const n of nodes) { if (n.kind === "function-expression") return n; const child = find(n.children ?? []); if (child) return child; } };
   for (const mutate of [n => { n.properties.parameterCount = -1; }, n => { n.properties.parameterCount = "2"; },
-    n => { n.children[0].children = [{ kind: "raw-javascript", value: "js*", children: [] }]; },
+    n => { n.children[0].children = [{ kind: "raw-javascript", value: "js*", children: [], span: {...n.children[0].span} }]; },
     n => { n.children[1].value = n.children[0].value; }, n => { n.children[0].value = ""; }]) {
     const ir = backends.compiler.compile_ir_string("(defun f () (lambda (x y) 7)) (export f)", "malformed-callable.eli");
     mutate(find(ir.body)); const saved = JSON.stringify(ir);
     assert.throws(() => backends.managed.emit_managed_wasm(ir, runtime), e => e.eliscriptDiagnostic?.code === "ELI-B0001" && e.eliscriptDiagnostic.location.file === "malformed-callable.eli");
     assert.equal(JSON.stringify(ir), saved);
   }
+});
+
+test("a callable child without its required source span is rejected by the IR schema before backend lowering", () => {
+  const ir = backends.compiler.compile_ir_string("(defun f () (lambda (x y) 7)) (export f)", "missing-callable-span.eli");
+  const pending = [...ir.body];let callable;
+  while (pending.length) {const node = pending.pop();if (node.kind === "function-expression") {callable = node;break;}pending.push(...node.children);}
+  assert(callable);callable.children[0].children = [{kind: "raw-javascript", value: "js*", children: []}];
+  const saved = JSON.stringify(ir);
+  assert.throws(() => backends.managed.emit_managed_wasm(ir, runtime), error => {
+    assert.equal(error.eliscriptDiagnostic?.code, "ELI-I0001");assert.equal(error.eliscriptDiagnostic?.phase, "ir-schema");
+    assert.equal(error.message, "IR node has unknown or missing fields");
+    assert.equal(error.eliscriptDiagnostic.message, error.message);return true;
+  });
+  assert.equal(JSON.stringify(ir), saved);
 });
 
 test("captured arguments are snapshotted before later writes replace their shared cell", () => {
@@ -475,19 +619,30 @@ test("captured arguments are snapshotted before later writes replace their share
   finish(heap, [four, result, first, second]);
 });
 
-test("generated closure programs match an independent lexical and IEEE model across shadowing and updates", () => {
+function prepareGeneratedClosureCases() {
   const names = ["x", "heap", "frame", "error", "arguments", "function"], operators = ["+", "-", "*", "/"];
   let seed = 0x3fd8a157; const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0);
-  const update = { "+": (a, b) => a + b, "-": (a, b) => a - b, "*": (a, b) => a * b, "/": (a, b) => a / b };
-  let count = 0;
+  const cases = [];
   for (const name of names) for (const sequential of [false, true]) for (const op of operators) {
-    const salt = ((random() % 2001) - 1000) / 16, outer = count % 3 === 0 ? -0 : count % 3 === 1 ? NaN : 7.25;
+    const salt = ((random() % 2001) - 1000) / 16, outer = cases.length % 3 === 0 ? -0 : cases.length % 3 === 1 ? NaN : 7.25;
     const bindings = sequential ? `((${name} ${salt}) (before (lambda () ${name})))` : `((before (lambda () ${name})) (${name} ${salt}))`;
     const source = `(defun make (${name}) (${sequential ? "let*" : "let"} ${bindings}
       (js-array (lambda (delta) (setq ${name} (${op} ${name} delta)) ${name}) (lambda () ${name}) before)))
       (defun update (f delta) (funcall f delta)) (defun read (f) (funcall f)) (export make update read)`;
-    const ir = backends.compiler.compile_ir_string(source, `generated-capture-${count++}.eli`);
-    const heap = instantiateManagedRuntime(Uint8Array.from(backends.managed.emit_managed_wasm(ir, runtime))); heap.auto(1);
+    const ir = backends.compiler.compile_ir_string(source, `generated-capture-${cases.length}.eli`);
+    const before = JSON.stringify(ir), bytes = Uint8Array.from(backends.managed.emit_managed_wasm(ir, runtime));
+    assert.equal(JSON.stringify(ir), before);
+    cases.push({ name, sequential, op, salt, outer, bytes });
+  }
+  assert.equal(cases.length, 48);
+  return cases;
+}
+
+test("generated closure programs match an independent lexical and IEEE model across shadowing and updates", () => {
+  const update = { "+": (a, b) => a + b, "-": (a, b) => a - b, "*": (a, b) => a * b, "/": (a, b) => a / b };
+  let count = 0;
+  for (const { name, sequential, op, salt, outer, bytes } of generatedClosureCases) {
+    const heap = instantiateManagedRuntime(bytes); heap.auto(1);
     const input = heap.number(outer), pair = heap.invoke("make", [input]), writer = heap.get(pair, 0), reader = heap.get(pair, 1), before = heap.get(pair, 2);
     let expected = salt;
     for (const delta of [0.5, -0, 3.25, -2, Infinity, Number.MIN_VALUE, NaN]) {
@@ -497,7 +652,7 @@ test("generated closure programs match an independent lexical and IEEE model acr
         const out = heap.invoke("read", [f]); assert(Object.is(heap.readNumber(out), value), `${name} ${sequential} ${op} read`); heap.release(out);
       }
     }
-    finish(heap, [input, pair, writer, reader, before]);
+    finish(heap, [input, pair, writer, reader, before]); count++;
   }
   assert.equal(count, 48);
 });

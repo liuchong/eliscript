@@ -9,7 +9,7 @@ import { buildBackends } from "./build.mjs";
 // optimization path.
 const args = process.argv.slice(2);
 if (args.includes("--help")) {
-  console.log("Usage: bun tools/backends/compile.mjs --abi numeric-f64 --target js|wasm|native -o OUTPUT INPUT\nManaged control: --abi managed-control-v1|managed-module-v1 --target wasm -o OUTPUT INPUT\nManaged project: --abi managed-module-v1 --target wasm --project -o OUTPUT REQUEST.json\nNative: --platform arm64-macos --native-format object|library|executable [--entry FUNCTION]");
+  console.log("Usage: bun tools/backends/compile.mjs --abi numeric-f64 --target js|wasm|native -o OUTPUT INPUT\nManaged control: --abi managed-control-v1|managed-module-v1 --target wasm -o OUTPUT INPUT\nManaged project: --abi managed-module-v1 --target wasm --project -o OUTPUT REQUEST.json\nNative: --platform arm64-macos|arm64-linux --native-format object|library\nNative executable: --platform arm64-macos --native-format executable --entry FUNCTION");
   process.exit(0);
 }
 let abi, target, output, input, platform, nativeFormat, entry, project = false;
@@ -36,26 +36,29 @@ try {
   if (abi !== "numeric-f64" && target !== "wasm") throw new Error(`${abi} currently requires --target wasm`);
   if (project && (abi !== "managed-module-v1" || target !== "wasm")) throw new Error("managed projects require --abi managed-module-v1 --target wasm");
   if (target === "native") {
-    if (platform !== "arm64-macos" || !["object", "library", "executable"].includes(nativeFormat) ||
+    if (!["arm64-macos", "arm64-linux"].includes(platform) || !["object", "library", "executable"].includes(nativeFormat) ||
         (nativeFormat === "executable" ? !entry : entry !== undefined)) {
-      throw new Error("native requires --platform arm64-macos --native-format object|library|executable; --entry is required only for executable");
+      throw new Error("native requires --platform arm64-macos|arm64-linux --native-format object|library|executable; --entry is required only for executable");
     }
+    if (nativeFormat === 'executable' && platform !== 'arm64-macos') throw new Error('native executable requires --platform arm64-macos');
   } else if (platform !== undefined || nativeFormat !== undefined || entry !== undefined) {
     throw new Error("native options require --target native");
   }
   // Standalone invocations must not race with each other or with packaging
   // over the checkout's bootstrap cache. Only the requested output is shared.
   buildDirectory = await mkdtemp(resolve(tmpdir(), "eliscript-backend-cli-"));
-  const { compiler, numeric, wasm, native, managed } = await buildBackends({outputRoot: buildDirectory});
+  const { compiler, numeric, wasm, native, managed, loadLiteralModules } = await buildBackends({outputRoot: buildDirectory});
   const filename = resolve(input);
-  const source = await readFile(filename, "utf8");
+  const decodeSource = bytes => new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(bytes);
+  const source = decodeSource(await readFile(filename));
   const program = project ? null : compiler.compile_ir_string(source, filename);
   // Validate the same ABI for all three targets, before any optimization removes
   // unreachable code or unsupported constructs.
   let bytes;
   if (abi !== "numeric-f64") {
     const runtimePath=fileURLToPath(new URL("../../bootstrap/runtime/memory.eli",import.meta.url));
-    const runtimeProgram=compiler.compile_ir_string(await readFile(runtimePath,"utf8"),runtimePath);
+    const runtimeProgram=compiler.compile_ir_string(decodeSource(await readFile(runtimePath)),runtimePath);
+    const {literalModules} = await loadLiteralModules();
     if (project) {
       const request = JSON.parse(source);
       if (!request || request.mode !== "project" || typeof request.entry !== "string" ||
@@ -66,8 +69,8 @@ try {
         if (typeof request.files[id] !== "string") throw new Error("managed project sources must be strings");
         return {id, program: compiler.compile_ir_string(request.files[id], id)};
       });
-      bytes=Uint8Array.from(managed.emit_managed_project_wasm(modules,request.entry,runtimeProgram,{abi}));
-    } else bytes=Uint8Array.from(managed.emit_managed_wasm(program,runtimeProgram,{abi}));
+      bytes=Uint8Array.from(managed.emit_managed_project_wasm(modules,request.entry,runtimeProgram,{abi,literalModules}));
+    } else bytes=Uint8Array.from(managed.emit_managed_wasm(program,runtimeProgram,{abi,literalModules}));
   } else {
     numeric.lower_numeric_program(program);
     bytes = target === "wasm"

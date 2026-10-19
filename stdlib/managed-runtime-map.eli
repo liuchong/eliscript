@@ -1,0 +1,9 @@
+(module eliscript.managed-runtime-map
+  (import "../../stdlib/managed-literals.eli"
+    PersistentHashMap literal-map literal-instance?)
+
+  (defconst EMPTY_MAP (literal-map))
+  (defun persistentHashMap (&rest entries) (js-call PersistentHashMap :from entries))
+  (defun isPersistentHashMap (value) (literal-instance? value PersistentHashMap))
+
+  (export PersistentHashMap EMPTY_MAP persistentHashMap isPersistentHashMap))

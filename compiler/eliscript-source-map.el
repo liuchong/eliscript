@@ -11,6 +11,7 @@
 (require 'cl-lib)
 (require 'json)
 (require 'eliscript-form)
+(require 'eliscript-emitter)
 
 (cl-defstruct (eliscript-emission
                (:constructor eliscript-emission-create))
@@ -164,6 +165,20 @@ column convention rather than display columns."
           segments ",")))
      lines ";")))
 
+(defun eliscript-source-map--json-value (value)
+  "Encode one source-map VALUE as UTF-8-writable JSON text.
+Keep the native serializer's ordinary bytes.  Source text and names can also
+contain lone UTF16 code units, which use the emitter's standard JSON escapes."
+  (if (and (stringp value)
+           (cl-find-if (lambda (unit) (<= #xd800 unit #xdfff)) value))
+      (eliscript-emitter--json-string value)
+    (let ((encoded (json-serialize value :null-object nil :false-object :json-false)))
+      ;; Emacs 30 returns UTF8 bytes here. Inserting those bytes directly into
+      ;; the file writer's multibyte buffer creates raw byte characters and an
+      ;; interactive coding-system prompt, even though the JSON is valid UTF8.
+      (if (multibyte-string-p encoded) encoded
+        (decode-coding-string encoded 'utf-8-unix)))))
+
 (defun eliscript-source-map-create (generated source source-name generated-name)
   "Create a Source Map v3 JSON document for GENERATED and SOURCE.
 
@@ -174,18 +189,17 @@ generated module and may be nil."
          (mappings
           (eliscript-source-map--encode-mappings
            (eliscript-source-map--group-marks marks locations))))
-    (concat
-     (json-serialize
-      (append
-       '((version . 3))
-       (and generated-name `((file . ,generated-name)))
-       `((sources . [,source-name])
-         (sourcesContent . [,source])
-         (names . [])
-         (mappings . ,mappings)))
-      :null-object nil
-      :false-object :json-false)
-     "\n")))
+    ;; Keep the same field order and wire representation. Encoding the string
+    ;; fields individually also preserves lone surrogates as JSON \uXXXX,
+    ;; without asking native json-serialize to accept non-scalar characters.
+    (concat "{\"version\":3"
+            (and generated-name
+                 (concat ",\"file\":"
+                         (eliscript-source-map--json-value generated-name)))
+            ",\"sources\":[" (eliscript-source-map--json-value source-name) "]"
+            ",\"sourcesContent\":[" (eliscript-source-map--json-value source) "]"
+            ",\"names\":[],\"mappings\":"
+            (eliscript-source-map--json-value mappings) "}\n")))
 
 (provide 'eliscript-source-map)
 

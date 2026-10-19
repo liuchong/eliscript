@@ -22,6 +22,10 @@
   (defconst portable-forbidden-operators
     (js-array "js*" "print" "put" "js-call" "new" "async" "await" "throw" "try"))
 
+  (defconst top-level-operators
+    (js-array "defun" "defn" "defportable" "defasync" "defvar" "defconst"
+      "export" "export-default" "import" "import-portable" "module"))
+
   (defconst fail
     (lambda (diagnostic)
       (let* ((p (aref (aref diagnostic "location") "start"))
@@ -37,12 +41,6 @@
                  (+ file ":" line ":" column ": " message)))))
         (put error :eliscriptDiagnostic diagnostic)
         (throw error))))
-  (defconst guard
-    (lambda (operation onError)
-      (try (funcall operation)
-        (catch error
-          (funcall onError (get error :message))))))
-
   (defun compiler-fail (context span code phase message)
     (let ((file (or (get context :filename)
                     (and span (get span :filename))
@@ -109,7 +107,7 @@
       (t undefined)))
 
   (defun binding-marker-p (name)
-    (js-call (js-array "&optional" "&rest" "&body") :includes name))
+    (or (= name "&optional") (= name "&rest") (= name "&body")))
 
   (defun split-binding-name (name)
     (let ((slash (js-call name :lastIndexOf "/")))
@@ -123,7 +121,7 @@
     (when (keyword-node-p node)
       (let* ((parts (split-binding-name (node-name node)))
              (kind (get parts :local)))
-        (when (js-call (js-array "keys" "strs" "syms") :includes kind)
+        (when (or (= kind "keys") (= kind "strs") (= kind "syms"))
           (js-object :kind kind :namespace (get parts :namespace))))))
 
   (defun shortcut-entry (shortcut name-node)
@@ -400,29 +398,43 @@
   (defun make-scope (parent &optional function-context)
     (js-object
       :parent parent
-      :names (new (js* "Map"))
-      :outputs (new (js* "Map"))
-      :functionContext function-context))
+      :names nil
+      :outputs nil
+      :bindingEpoch (if parent (get parent :bindingEpoch) (js-object :value 0))
+      :lookupCache undefined
+      :lookupEpoch -1
+      :functionContext (or function-context (and parent (get parent :functionContext)))))
 
   (defun async-function-p (scope)
-    (let ((current scope)
-          (function-context nil))
-      (while (and current (not function-context))
-        (setq function-context (get current :functionContext))
-        (setq current (get current :parent)))
-      (= function-context "async")))
+    (= (get scope :functionContext) "async"))
 
   (defun guarded-binding-name (name context span)
-    (funcall
-      guard
-      (lambda () (binding-name name))
-      (lambda (message) (analyzer-fail context span message))))
+    (let* ((cache (get context :bindingNames))
+           (cached (and cache (js-call cache :get name))))
+      (if cached cached
+        (let ((result (try (binding-name name)
+                        (catch error
+                          (analyzer-fail context span (get error :message))))))
+          (when (= (js* "typeof name") "string")
+            (unless cache
+              (setq cache (new (js* "Map")))
+              (put context :bindingNames cache))
+            (js-call cache :set name result))
+          result))))
 
   (defun guarded-reference-name (name context span)
-    (funcall
-      guard
-      (lambda () (reference-name name))
-      (lambda (message) (analyzer-fail context span message))))
+    (let* ((cache (get context :referenceNames))
+           (cached (and cache (js-call cache :get name))))
+      (if cached cached
+        (let ((result (try (reference-name name)
+                        (catch error
+                          (analyzer-fail context span (get error :message))))))
+          (when (= (js* "typeof name") "string")
+            (unless cache
+              (setq cache (new (js* "Map")))
+              (put context :referenceNames cache))
+            (js-call cache :set name result))
+          result))))
 
   (defun declare-binding (scope name-node kind mutable context)
     (unless (symbol-node-p name-node)
@@ -434,8 +446,8 @@
            (names (get scope :names))
            (outputs (get scope :outputs))
            (output-name (guarded-binding-name name context span))
-           (existing-name (js-call names :get name))
-           (existing-output (js-call outputs :get output-name)))
+           (existing-name (and names (js-call names :get name)))
+           (existing-output (and outputs (js-call outputs :get output-name))))
       (when existing-name
         (analyzer-fail
           context span (str "duplicate " kind " binding: " name)))
@@ -450,22 +462,53 @@
                :outputName output-name
                :kind kind
                :mutable mutable)))
+        (unless names
+          (setq names (new (js* "Map")))
+          (put scope :names names)
+          (setq outputs (new (js* "Map")))
+          (put scope :outputs outputs))
         (js-call names :set name binding)
         (js-call outputs :set output-name binding)
+        ;; A later let* binding may shadow a previously resolved ancestor.
+        ;; One private epoch invalidates inherited resolutions throughout
+        ;; this module without retaining syntax nodes or completed contexts.
+        (let ((epoch (get scope :bindingEpoch)))
+          (put epoch :value (1+ (get epoch :value))))
         binding)))
 
   (defun declare-pattern (scope pattern kind mutable context)
-    (js-call (binding-nodes pattern context) :forEach
-      (lambda (binding)
-        (declare-binding scope binding kind mutable context))))
+    (if (and (symbol-node-p pattern)
+             (not (binding-marker-p (node-name pattern))))
+        (declare-binding scope pattern kind mutable context)
+      (let ((bindings (binding-nodes pattern context))
+            (index 0))
+        (while (< index (get bindings :length))
+          (declare-binding scope (js-nth index bindings) kind mutable context)
+          (setq index (1+ index))))))
 
   (defun lookup-binding (scope name)
-    (let ((current scope)
-          (binding undefined))
-      (while (and current (not binding))
-        (setq binding (js-call (get current :names) :get name))
-        (setq current (get current :parent)))
-      binding))
+    (let* ((names (get scope :names))
+           (binding (and names (js-call names :get name)))
+          (current (get scope :parent)))
+      (if (or binding (not current)) binding
+        (let* ((epoch (get (get scope :bindingEpoch) :value))
+               (cache (get scope :lookupCache)))
+          (when (and cache (not (= epoch (get scope :lookupEpoch))))
+            (js-call cache :clear)
+            (put scope :lookupEpoch epoch))
+          (setq binding (and cache (js-call cache :get name)))
+          (unless binding
+            (while (and current (not binding))
+              (let ((parent-names (get current :names)))
+                (when parent-names (setq binding (js-call parent-names :get name))))
+              (setq current (get current :parent)))
+            (when binding
+              (unless cache
+                (setq cache (new (js* "Map")))
+                (put scope :lookupCache cache)
+                (put scope :lookupEpoch epoch))
+              (js-call cache :set name binding)))
+          binding))))
 
   (defun require-binding (scope node context)
     (let* ((name (node-name node))
@@ -481,18 +524,25 @@
   (defun analyze-sequence (forms scope context)
     (let ((tail-position (get context :tailPosition))
           (index 0))
+      ;; Non-tail sequences dominate ordinary calls.  Their context already
+      ;; has the required value; repeatedly writing it builds needless
+      ;; managed property-update state for every operand.
+      (when (and tail-position (> (get forms :length) 1))
+        (put context :tailPosition false))
       (while (< index (get forms :length))
-        (put context :tailPosition
-          (and tail-position (= index (1- (get forms :length)))))
+        (when (and tail-position (= index (1- (get forms :length))))
+          (put context :tailPosition tail-position))
         (analyze-expression (js-nth index forms) scope context)
-        (setq index (1+ index)))
-      (put context :tailPosition tail-position)))
+        (setq index (1+ index)))))
 
   (defun analyze-non-tail (form scope context)
     (let ((tail-position (get context :tailPosition)))
-      (put context :tailPosition false)
-      (analyze-expression form scope context)
-      (put context :tailPosition tail-position)))
+      (if tail-position
+          (progn
+            (put context :tailPosition false)
+            (analyze-expression form scope context)
+            (put context :tailPosition tail-position))
+        (analyze-expression form scope context))))
 
   (defun analyze-pattern-defaults (pattern scope context)
     (cond
@@ -514,14 +564,17 @@
 
   (defun analyze-non-tail-sequence (forms scope context)
     (let ((tail-position (get context :tailPosition)))
-      (put context :tailPosition false)
-      (analyze-sequence forms scope context)
-      (put context :tailPosition tail-position)))
+      (if tail-position
+          (progn
+            (put context :tailPosition false)
+            (analyze-sequence forms scope context)
+            (put context :tailPosition tail-position))
+        (analyze-sequence forms scope context))))
 
   (defun binding-pair (binding context)
     (cond
       ((binding-pattern-p binding)
-       (binding-nodes binding context)
+       (unless (symbol-node-p binding) (binding-nodes binding context))
        (js-array binding undefined))
       (t
        (let ((items (list-items binding)))
@@ -530,7 +583,8 @@
                   (<= (get items :length) 2)
                   (binding-pattern-p (js-nth 0 items)))
              (progn
-               (binding-nodes (js-nth 0 items) context)
+               (unless (symbol-node-p (js-nth 0 items))
+                 (binding-nodes (js-nth 0 items) context))
                (js-array (js-nth 0 items) (js-nth 1 items)))
            (analyzer-fail
              context (node-span binding)
@@ -544,45 +598,56 @@
     (let* ((bindings-form (js-nth 0 args))
            (bindings (list-items bindings-form))
            (body (js-call args :slice 1))
-           (child (make-scope scope)))
+           (child (make-scope scope))
+           (index 0))
       (when (eq bindings undefined)
         (analyzer-fail
           context (node-span bindings-form) "let bindings must be a list"))
       (if sequential
-          (js-call bindings :forEach
-            (lambda (binding)
-              (let ((pair (binding-pair binding context)))
+          (while (< index (get bindings :length))
+              (let ((pair (binding-pair (js-nth index bindings) context)))
                 (analyze-non-tail (js-nth 1 pair) child context)
                 (analyze-pattern-defaults (js-nth 0 pair) child context)
                 (declare-pattern
-                  child (js-nth 0 pair) "local" t context))))
-        (let ((parsed
-               (js-call bindings :map
-                 (lambda (binding) (binding-pair binding context)))))
-          (js-call parsed :forEach
-            (lambda (pair)
+                  child (js-nth 0 pair) "local" t context))
+              (setq index (1+ index)))
+        (let ((parsed (js-array)))
+          ;; Validate every parallel binding before analyzing any initializer.
+          (while (< index (get bindings :length))
+            (js-call parsed :push (binding-pair (js-nth index bindings) context))
+            (setq index (1+ index)))
+          (setq index 0)
+          (while (< index (get parsed :length))
+            (let ((pair (js-nth index parsed)))
               (analyze-non-tail (js-nth 1 pair) scope context)
-              (analyze-pattern-defaults (js-nth 0 pair) scope context)))
-          (js-call parsed :forEach
-            (lambda (pair)
+              (analyze-pattern-defaults (js-nth 0 pair) scope context))
+            (setq index (1+ index)))
+          (setq index 0)
+          (while (< index (get parsed :length))
+            (let ((pair (js-nth index parsed)))
               (declare-pattern
-                child (js-nth 0 pair) "local" t context)))))
+                child (js-nth 0 pair) "local" t context))
+            (setq index (1+ index)))))
       (analyze-sequence body child context)))
 
   (defun analyze-function
       (parameters body scope context &optional asynchronous)
-    (let ((parameter-items (function-parameters parameters context)))
-      (js-call parameter-items :forEach
-        (lambda (parameter)
-          (analyze-pattern-defaults (get parameter :node) scope context)))
+    (let ((parameter-items (function-parameters parameters context))
+          (index 0))
+      (while (< index (get parameter-items :length))
+        (analyze-pattern-defaults (get (js-nth index parameter-items) :node) scope context)
+        (setq index (1+ index)))
       (let ((child (make-scope
                     scope (if asynchronous "async" "sync"))))
-        (js-call parameter-items :forEach
-          (lambda (parameter)
-            (js-call (get parameter :bindings) :forEach
-              (lambda (binding)
+        (setq index 0)
+        (while (< index (get parameter-items :length))
+          (let ((bindings (get (js-nth index parameter-items) :bindings))
+                (binding-index 0))
+            (while (< binding-index (get bindings :length))
                 (declare-binding
-                  child binding "parameter" t context)))))
+                  child (js-nth binding-index bindings) "parameter" t context)
+                (setq binding-index (1+ binding-index))))
+          (setq index (1+ index)))
         (let ((recur-targets (get context :recurTargets))
               (tail-position (get context :tailPosition))
               (recur-barrier (get context :recurBarrier)))
@@ -846,7 +911,12 @@
                       (<= (get args :length) 3))
            (analyzer-fail context form-span "if expects 2..3 arguments"))
          (analyze-non-tail (js-nth 0 args) scope context)
-         (analyze-sequence (js-call args :slice 1) scope context))
+         ;; These are alternatives, not successive body forms.  Each branch
+         ;; inherits the conditional's tail position, including the first.
+         (let ((index 1))
+           (while (< index (get args :length))
+             (analyze-expression (js-nth index args) scope context)
+             (setq index (1+ index)))))
         ((or (= operator "when") (= operator "unless"))
          (when (= (get args :length) 0)
            (analyzer-fail
@@ -875,11 +945,7 @@
         ((= operator "js*") nil)
         ((js-call builtin-operators :includes operator)
          (analyze-non-tail-sequence args scope context))
-        ((js-call
-          (js-array "defun" "defn" "defportable" "defasync"
-            "defvar" "defconst"
-            "export" "export-default" "import" "import-portable" "module")
-           :includes operator)
+        ((js-call top-level-operators :includes operator)
          (analyzer-fail
            context form-span
            (str operator " is only valid at module top level")))
@@ -1030,7 +1096,9 @@
                    context (node-span form)
                    (str operator " expects 2+ arguments")))
                (declare-binding
-                 scope (js-nth 0 args) "function" false context))))))))
+                 scope (js-nth 0 args) "function" false context)
+               (when (= operator "defportable")
+                 (put context :hasPortable t)))))))))
 
   (defun analyze-top-level (form scope context)
     (if (not (= (node-kind form) "list"))
@@ -1436,7 +1504,11 @@
       (js-call flattened :forEach
         (lambda (form) (analyze-top-level form scope context)))
       (analyze-transients forms filename)
-      (validate-portable-module flattened context)
+      ;; With no portable entry the dependency worklist is empty.  All normal
+      ;; declarations/imports were already checked above; do not construct a
+      ;; second Map and copy every function body just to visit no entry.
+      (when (get context :hasPortable false)
+        (validate-portable-module flattened context))
       forms))
 
   (export analyze-module select-portable-module))

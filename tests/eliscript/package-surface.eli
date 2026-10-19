@@ -1,0 +1,128 @@
+(module tests.package-surface
+  (import "bun:test" beforeAll expect test)
+  (import "node:fs/promises" access readFile stat)
+  (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" root)
+
+  (defvar manifest undefined)
+  (defconst commands
+    (js-array "eliscript" "eliscript-build" "eliscript-check"
+      "eliscript-format" "eliscript-eval" "eliscript-watch" "eliscript-compiler"))
+
+  (defun each (values action) (js-call values :forEach action))
+  (defun does-not (value) (get (expect value) :not))
+  (defun pattern (source flags) (new globalThis.RegExp source flags))
+  (defasync package-command (arguments)
+    (let* ((child (Bun/spawn arguments
+              (js-object :cwd root :stdin (Bun/file "/dev/null") :stdout "pipe" :stderr "pipe")))
+           (results (await (Promise/all
+             (js-array (get child :exited)
+               (js-call (new globalThis.Response (get child :stdout)) :text)
+               (js-call (new globalThis.Response (get child :stderr)) :text))))))
+      (js-object :exitCode (aref results 0) :stdout (aref results 1) :stderr (aref results 2))))
+
+  ;; Match npm packaging on a clean checkout; no earlier browser build is used.
+  ;; Read the manifest before prepack, as the original top-level read did.
+  (beforeAll (async ()
+    (setq manifest (JSON/parse (await (readFile (resolve root "package.json") "utf8"))))
+    (let ((result (await (package-command (js-array "bun" "run" "prepack")))))
+      (unless (= (get result :exitCode) 0)
+        (throw (new globalThis.Error
+          (let ((stderr (js-call (get result :stderr) :trim)))
+            (if (> (js-length stderr) 0) stderr (js-call (get result :stdout) :trim)))))))) 30000)
+
+  (test "the package declares one executable entry for every command" (async ()
+    (js-call (expect (Object/keys (get manifest :bin))) :toEqual commands)
+    (let* ((target (resolve root (get (get manifest :bin) :eliscript)))
+           (source (await (readFile target "utf8"))))
+      (js-call (expect (js-call source :startsWith "#!/usr/bin/env node")) :toBe t)
+      (js-call (expect (bit-and (get (await (stat target)) :mode) 73)) :toBeGreaterThan 0)
+      (each commands (lambda (command)
+        (js-call (expect (get (get manifest :bin) command)) :toBe "bootstrap/host/eliscript-cli.mjs")
+        (js-call (expect source) :toContain (str "\"" command "\":")))))))
+
+  (test "every exported entry resolves inside the package" (async ()
+    (let ((entries (Object/entries (get manifest :exports))) (index 0))
+      (while (< index (js-length entries))
+        (let* ((entry (aref entries index)) (specifier (aref entry 0)) (target (aref entry 1)))
+          (unless (js-call specifier :includes "*")
+            (js-call (expect (js-call target :startsWith "./")) :toBe t)
+            (await (access (resolve root target)))))
+        (setq index (1+ index))))
+    (let ((exports (get manifest :exports)))
+      (js-call (expect (get exports "./compiler")) :toBe "./dist/bootstrap/compiler.mjs")
+      (js-call (expect (get exports "./browser")) :toBe "./browser/host.mjs")
+      (js-call (expect (get exports "./browser/worker.mjs")) :toBe "./browser/worker.mjs")
+      (js-call (expect (get exports "./browser/compiler")) :toBe "./dist/browser/compiler.js")
+      (js-call (expect (get exports "./compiler-session")) :toBe "./tools/backends/compiler-session.mjs")
+      (js-call (expect (get exports "./browser/compiler-session")) :toBe "./tools/backends/compiler-browser.mjs"))))
+
+  (test "the published file list carries the browser host" (async ()
+    (each (js-array "browser/" "dist/browser/") (lambda (entry)
+      (js-call (expect (get manifest :files)) :toContain entry)))
+    (await (access (resolve root "browser/host.mjs")))
+    (await (access (resolve root "browser/worker.mjs")))))
+
+  (test "the browser bundle is one file and needs no Node built-in" (async ()
+    (let ((result (await (package-command
+                    (js-array "bun" "build" "dist/bootstrap/compiler.mjs"
+                      "--target=browser" "--format=esm" "--outfile" "dist/browser/compiler.js")))))
+      (js-call (expect (js-call (get result :exitCode) :toString) (get result :stderr)) :toBe "0")
+      (let ((bundle (await (readFile (resolve root "dist/browser/compiler.js") "utf8"))))
+        ;; Diagnostics can contain node: prose; only actual imports are rejected.
+        (js-call (does-not bundle) :toMatch (pattern "from\\s+\"node:" "u"))
+        (js-call (does-not bundle) :toMatch (pattern "import\\s+\"node:" "u"))
+        (js-call (does-not bundle) :toContain "require(")
+        (each (Array/from (js-call bundle :matchAll (pattern "^\\s*import\\s" "gmu")))
+          (lambda (match) (js-call (expect match) :toBeNull)))
+        (js-call (expect (js-length bundle)) :toBeGreaterThan 100000)))))
+
+  (test "the published file list carries the compiler and the runtime" (async ()
+    (each (js-array "bin/" "bootstrap/" "compiler/" "dist/bootstrap/"
+                   "editor/" "platform/" "runtime/" "stdlib/")
+      (lambda (entry) (js-call (expect (get manifest :files)) :toContain entry)))
+    ;; Published consumers run the compiler without Emacs or Bun.
+    (await (access (resolve root "dist/bootstrap/compiler.mjs")))))
+
+  (test "the published transport includes native Node execution and the complete corpus adapter graph" (async ()
+    (let ((names (js-array "native-node-memory.mjs" "native-node-worker.mjs"
+                   "native-node-runner.mjs" "native-node-watchdog.mjs"
+                   "compiler-corpus-cli-adapters.mjs" "compiler-corpus-evaluation-adapters.mjs"
+                   "compiler-corpus-project-adapters.mjs" "compiler-corpus-runtime-adapters.mjs"
+                   "compiler-corpus-generations.mjs" "compiler-corpus-reference.mjs"
+                   "compiler-corpus-host-context.mjs")) (index 0))
+      (while (< index (js-length names))
+        (let ((entry (str "tools/backends/" (aref names index))))
+          (js-call (expect (get manifest :files)) :toContain entry)
+          (js-call (expect (js-call (await (stat (resolve root entry))) :isFile)) :toBe t))
+        (setq index (1+ index))))))
+
+  (test "the package keeps development trees out of the tarball" (lambda ()
+    (each (js-array "acceptance/" "docs/" "examples/" "node_modules/" "specs/" "tests/" "tools/")
+      (lambda (excluded) (js-call (does-not (get manifest :files)) :toContain excluded)))))
+
+  (test "the released package keeps its metadata and manual publication gates" (async ()
+    (js-call (expect (get manifest :version)) :toBe "0.0.1")
+    (js-call (expect (get manifest :description)) :toBeString)
+    (js-call (expect (get (get manifest :repository) :url)) :toContain "github.com/liuchong/eliscript")
+    (js-call (expect (get manifest :license)) :toBe "GPL-3.0-or-later")
+    (js-call (expect (get (get manifest :engines) :node)) :toBeString)
+    (js-call (expect (get (get manifest :publishConfig) :access)) :toBe "public")
+    ;; Manual dispatch, signed release tags and reviewed tarball bytes retain
+    ;; the publication gate after removal of the old development latch.
+    (js-call (expect (Object/hasOwn manifest "private")) :toBe false)
+    (js-call (expect (get (get manifest :publishConfig) :registry)) :toBe "https://registry.npmjs.org/")
+    (let* ((workflow (await (readFile (resolve root ".github/workflows/release.yml") "utf8")))
+           (triggers (js-call workflow :slice (js-call workflow :indexOf "\non:")
+                       (js-call workflow :indexOf "\npermissions:"))))
+      (js-call (expect triggers) :toContain "workflow_dispatch:")
+      (js-call (does-not triggers) :toMatch (pattern "^  (?:push|pull_request|schedule|workflow_run):" "mu"))
+      (js-call (expect triggers) :toMatch (pattern "publish:[\\s\\S]*default: false" "u"))
+      (js-call (expect workflow) :toContain ".verification.verified")
+      (js-call (expect workflow) :toContain "grep -qx true")
+      (js-call (expect workflow) :toContain "if [ \"$packed\" != \"$VERSION\" ]")
+      (js-call (expect workflow) :toContain "if: ${{ !inputs.publish }}")
+      (js-call (expect workflow) :toContain "npm stage publish \"eliscript-$VERSION.tgz\"")
+      (js-call (expect workflow) :toContain "if: ${{ inputs.publish }}")
+      (js-call (expect workflow) :toContain "npm publish \"eliscript-$VERSION.tgz\""))))
+)

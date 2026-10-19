@@ -5,6 +5,75 @@ The standalone backend CLI supports the experimental `numeric-f64` and
 The implementation and remaining acceptance gates are tracked in
 [the backend plan](../../docs/native-wasm-feasibility.md).
 
+Node's native memory bridge transfers read/write payloads in blocks of at most
+64 KiB. Reads still return one complete independent byte array; writes retain
+one complete snapshot before checking the remote range or dispatching blocks.
+Both paths validate the complete range first, and an empty operation still
+crosses the remote boundary. This bounds temporary base64 data without changing
+the public byte-array contract.
+
+Streaming compiler metadata also quotes long strings in bounded blocks rather
+than building a complete escaped copy first. Blocks preserve surrogate pairs,
+so JSON text, UTF-8 file bytes and product hashes retain their original spelling.
+The discardable quote cache remains bounded across keys and values. These
+changes await the unified gate; they do not establish the full compiler's peak
+memory budget.
+
+Compiler sessions can explicitly request `responseStringChunks: true` with an
+event response mode when the actual driver advertises that capability. Long
+strings then cross the existing event protocol in chunks of at most 8,192
+UTF-16 code units. The caller still receives the complete ordinary strings,
+including lone surrogates; default responses and older drivers keep their
+original contract. Cached IR fields are generated and consumed in order, and
+completion, cancellation and failure release temporary cursor references.
+The complete response protocol file passes 25 regressions. The full source
+archive memory and deadline gate remains open.
+
+The inverse string decoder uses a fixed 8 KiB buffer and decoded pieces,
+without joining a complete escaped token before parsing it. Invalid string
+escapes still fail at the closing quote, and malformed UTF-8 is rejected.
+Direct builds own their fresh seed products and use the existing streaming
+metadata writer; public producer responses retain their snapshot contract.
+Private transport and IR wrapper references are dropped after their original
+persistence points without removing any saved IR, debug data or identity field.
+
+Original-case source archives snapshot and validate the full recipe before
+I/O, then hash and write IR and source assets in bounded blocks. Assets retain
+their ordinal paths, version-1 manifest and exact bytes, including lone UTF16
+surrogates encoded as JSON. Reads use 64 KiB blocks and defer parse/UTF8 errors
+until the original complete asset identity check succeeds. The seven archive
+streaming regressions and 34 metadata regressions pass, including independent
+Node cases with small heaps. Full compiler resource and semantic acceptance
+remains pending; a public producer's retained graph still requires isolation
+before asynchronous persistence.
+
+Package and local-artifact loaders stream runtime and literal source assets in
+64 KiB blocks, caching the required decoded strings rather than an additional
+complete byte image. Multiple declared encodings of one package source share
+one read; complete resource identities still precede decoding errors. The local
+artifact loader verifies JavaScript modules incrementally; both loaders verify
+native images incrementally before the platform loader opens them. WASM instantiation still receives complete verified
+bytes, and the package releases its extra byte reference after instantiation.
+Source archives capture their required input fields synchronously, then write
+and read exact UTF16 data in bounded blocks. Five package source-loading and
+buffer-lifetime regressions pass across real JS, WASM and native transports,
+including an independent Node process. These transport fixtures do not replace
+the complete compiler package or full browser acceptance gates.
+
+Unicode property aliases and all 519 character-range rows now use checked-in
+packed data instead of large generated conditional trees. The offline tools in
+`tools/runtime` retain exact extracted records, original-source hashes and
+Unicode license information. Name lookup retains the original exact/prefix
+terminals; a compact decision table preserves effectful private string readers.
+Runtime range lookup reuses one 7,236-byte buffer across rows and heaps. This
+instance-private constant buffer contains no managed references and survives
+retirement without allocating another copy. Both backends copy literals into
+owned memory and use the same lookup code. All nine offline generation and
+original-data provenance regressions pass. Seed and self-hosted compilation of
+the complete runtime now produce identical JavaScript, including packed lone
+UTF16 surrogate units. Backend execution and complete compiler resource gates
+remain open.
+
 `bootstrap/runtime/memory.eli` emits a module with owned, growable linear memory
 and zero imports. Its managed heap implements Numbers, UTF-16 strings, byte
 arrays, reference arrays, fixed records, mutable Map/Set tables, live iterators,
@@ -58,6 +127,45 @@ handles or kinds, `0002` for capacity exhaustion, `0003` for arguments/bounds,
 string sealing violations. Raw loads/stores perform explicit width checks with
 unsigned 64-bit arithmetic and raise `WebAssembly.RuntimeError` before a host
 memory fault. Store operand effects and memory growth finish before checking.
+
+The internal `memory32` ABI includes `f64-abs`, `f64-neg`, `f64-ceil`,
+`f64-floor`, `f64-trunc`, `f64-nearest` and `f64-sqrt`. Each consumes one f64
+operand and returns f64 without a host import. `f64-nearest` rounds ties to even;
+it differs from source `Math.round`. ARM64 emission locally saves and restores
+the caller's floating-point control while selecting IEEE rounding and gradual
+underflow for these instructions. Managed `Math.sqrt` performs the ordinary
+Number conversion once and uses `f64-sqrt`, retaining signed zero, subnormals,
+NaN and infinities. Its entry uses the same native function identity and method
+dispatch as other Math members. The remaining transcendental family now has
+owned f64 kernels for exp/expm1, log/log1p/log2/log10, pow, cbrt, trigonometric,
+inverse trigonometric, hyperbolic and inverse hyperbolic methods. The kernels
+retain fdlibm/OpenLibm coefficients and compensated reconstruction, with their
+source and license notices in `bootstrap/runtime/memory.eli`. Trigonometric
+range reduction includes the full finite binary64 range. Ordinary calls,
+borrowed methods, bound functions and callbacks enter the same builtin thunks;
+observable argument conversion completes before numerical work begins.
+
+Kernels borrow a fixed 4 KiB workspace, lazily created once per heap. They
+neither allocate nor call source functions, so coercion can reenter Math before
+the workspace is borrowed without corrupting an outer calculation. The buffer
+is traced and its root is cleared on module close. `hypot` retains one packed
+f64 per converted argument, then uses maximum-magnitude scaling and compensated
+summation. It converts every argument in order, including arguments following
+NaN or infinity; an actual conversion throw is preserved, and otherwise
+infinity takes precedence over NaN.
+
+`Math.random` draws from an owned xoshiro128** state per heap. The standard
+loaders obtain 16 entropy bytes once during initialization; draws do not call
+host Math or request additional entropy. `randomSeed: [a, b, c, d]` (also a
+four-element Uint32Array) snapshots an explicit nonzero u32 seed for reproducible
+WASM/native replay. The raw ABI exposes `runtime-random-seed` before `heap-new`;
+reseeding a live raw runtime is rejected. A heap's 16-byte state survives GC and
+is unrooted on module close. Legacy artifacts without that export remain
+loadable with default options and reject an explicit seed.
+
+The complete Math batch and its permanent tests await unified execution.
+Numerical accuracy, cross-target behavior and production budgets remain
+unaccepted until their original gates run.
 
 Eliscript functions using the internal word ABI must root parameters across the
 first frame allocation and keep live locals in frames across allocating calls.
@@ -192,6 +300,15 @@ host interop, parameter destructuring, async functions, custom Symbol iterators
 and exception expressions remain open; this profile does not represent the complete dynamic
 backend.
 
+The managed Symbol constructor represents all fifteen well-known symbols,
+including `Symbol.dispose` and `Symbol.asyncDispose`, with immutable own data
+properties. Their runtime identity numbers preserve the original thirteen
+entries and append the two disposal symbols; constructor property enumeration
+uses its own publication order. Static references, dynamic reads, symbol keys
+and host transfers share these identities across collection. A host that lacks
+a represented well-known symbol rejects its transfer explicitly. Resource
+management declarations and disposable-stack algorithms remain separate work.
+
 Function values execute through an owned WASM table and `call_indirect`, with
 zero JS imports or callbacks. Named references share identity while live;
 evaluating the same lambda creation site again produces a distinct value.
@@ -227,14 +344,18 @@ open. Callback errors, capacity failures and actual traps preserve caller roots
 and earlier observable effects, without host callbacks or imports.
 
 Host `invoke(name, args)` retains the exact descriptor arity for required-only
-entries and accepts a variable argument count for optional/rest entries. Those
+entries with plain parameter names. Optional/rest entries and parameter
+destructuring use an argument list, including patterns whose parameters are all
+required. Those
 entries declare `arity: null`, `callingConvention: "argument-list"` and ordered
 `parameterKinds` in their descriptor; the adapter checks these fields against
 the export signature and transfers one dense owned argument list. The null arity
 causes older fixed-arity readers to refuse the artifact rather than call it with
 the wrong convention. Every operand
 still obeys the existing owned-handle requirements. Getter, capacity and trap
-failures release temporary lists and preserve caller frames.
+failures release temporary lists and preserve caller frames. Every temporary
+root release is attempted even if another cleanup action fails; cleanup cannot
+replace the original thrown value, including primitive values.
 
 ```lisp
 (defun make-counter (n)
@@ -351,6 +472,15 @@ array, including its canonical iterator behavior; other invalid iterables throw
 source TypeError. Result indices are own data slots, even with frozen inherited
 indices. The existing raw spread helper continues to reject nullish tails.
 
+The existing `host-identity-token` intrinsic maintains a private table per
+original module, including across linked projects, imported aliases and nested
+closures. Object and function entries do not keep keys alive; Symbols remain
+strongly held until module close. Tokens are monotonic safe integers, independent
+of reusable heap slots. Cached identities remain readable after exhaustion;
+unsupported scalar inputs throw the original TypeError, and a new identity after
+exhaustion throws RangeError. Cyclic imports retain the helper binding's original
+initialization order and reject early calls before evaluating their arguments.
+
 The complete existing `stdlib/persistent-vector.eli` module can now be linked
 with a managed entry and executed as zero-import WASM or a native library.
 Acceptance covers persistent versions, metadata, append/assoc/pop, reductions,
@@ -460,6 +590,52 @@ they do not establish complete compiler performance or any missing 3×3 host cel
 
 ## Experimental managed projects
 
+The pure compiler session provides `analyze`, `query`, and `edit-preview` on
+the same source request protocol for all three compiler hosts. Semantic reports
+include a text `sourceIdentity` with format `eliscript-source-identity`, version
+1, filename, UTF-16 unit count and SHA-256 of the original UTF-16LE code units.
+This text identity preserves BOMs and unmatched surrogates. Hashing reads the
+source in fixed-size blocks without making a whole-source byte array. Diagnostic
+reports retain the text identity too. It identifies source text, while the
+browser/Worker transport separately binds macro inputs, IR and source revisions.
+Worker request and source digests consume the same canonical UTF-16LE bytes in
+one reusable 64 KiB buffer. They preserve the asynchronous API and cancellation
+boundaries without allocating a second whole-message byte array. The static
+browser distribution carries the same incremental SHA-256 module as packages.
+
+`query` and `analyze` optionally accept `expectedSourceIdentity`.
+`edit-preview` requires it, `offsetUnit: "unicode-scalar"`, and an `edits` array
+of `{start, end, text}` in original-source coordinates. Edits must have distinct
+starts in ascending order with no overlapping ranges; adjacent ranges, deletion,
+insertion and EOF insertion are supported. The whole batch is validated before
+any preview is constructed. The response contains `source`, `sourceIdentity`,
+`previousSourceIdentity`, and `readOnly: true`. No compiler cache or registered
+document is changed. The caller explicitly registers accepted text. Identity
+mismatches return `ELI-T0002` before parsing or expansion; malformed edit batches
+use `ELI-T0001`. Browser inline and Worker sessions also reject unregistered or
+outdated snapshots before preview dispatch, using their existing revision checks.
+
+Artifact metadata retains the original JSON representation, including the full
+native typed IR. File and package loaders decode bounded UTF-8 chunks instead
+of constructing a single JSON string; signed zero, property order and resource
+hash checks are preserved. This transport handling performs no compilation.
+Packaging copies and hashes each resource in bounded buffers and replaces its
+destination only after the copied bytes match the declared identity.
+Package manifests, artifact metadata and default debug documents use a single
+file descriptor or HTTP body reader. Their incremental decoder and SHA-256
+verification consume the same chunks; complete byte counts and hashes precede
+publication or JSON errors. Browser integrity checks use the bundled bounded
+SHA-256 implementation. Failed reads release their resources without replacing
+the original error. Fresh, verified default debug documents avoid a second
+whole-document clone; caller-supplied debug documents retain snapshot isolation.
+For an executing WASM or native compiler, loader option `debug: false` disables only its
+own source-frame lookup. Exact machine trap frames remain available, and each
+compilation request still independently controls its generated output maps.
+
+`buildIndependentCompiler({onPhase})` optionally reports fixed build phases and
+scalar counts. It is silent by default, retains no source or IR in observations,
+and observer failures never replace a compiler result or its original error.
+
 `emit_managed_project_wasm(modules, entry, runtimeProgram, options)` links a bulk
 array of `{id, program}` records. Each program is ordinary canonical compiler IR;
 IDs are canonical relative virtual paths, and imports resolve relative to their
@@ -545,12 +721,24 @@ prevent zero-width repetitions from looping without consuming input.
 
 The current capability includes literal characters, dot, character classes and
 ranges, common character/control/hex/Unicode escapes, numbered captures,
-noncapturing groups, alternatives, anchors and word boundaries, greedy/lazy
-`*`, `+`, `?`, and the `m`, `s`, `u` flags. Exec returns a source array whose
-captures, missing entries, index, input and own undefined groups property match
-the existing JS source. Method values and receivers are captured before arguments;
+noncapturing and named groups, alternatives, anchors and word boundaries,
+greedy/lazy and bounded repetition, lookaround, backreferences, case folding
+and the `d`, `g`, `i`, `m`, `s`, `u`, `v`, `y` flags. Literal and dynamic construction
+use the same owned-memory matching program. Exec returns a source array with
+captures, missing entries, index, input and groups. Method values and receivers are captured before arguments;
 ignored arguments still execute, nullish receivers fail before arguments, and
 noncallable ordinary methods fail after their arguments.
+
+With `d`, `hasIndices` is true and successful exec results additionally own an
+`indices` array of UTF-16 `[start, end]` pairs. An unmatched capture owns an
+`undefined` entry. `indices.groups` has a null prototype for named captures and
+shares the corresponding pair objects; it is otherwise an own `undefined`
+property. Fresh result fields are defined as writable, enumerable and
+configurable data properties, bypassing inherited setters. The no-`d` path has
+no own `indices` property. These rules follow
+[the match-indices algorithm](https://tc39.es/ecma262/multipage/text-processing.html#sec-makematchindicesindexpairarray).
+The new indices paths and original valid-pattern migrations await unified
+execution; implementation does not establish acceptance across the three hosts.
 
 RegExp values own private kind-21 program/source references, traced by the common
 collector. Temporary capture registers and growable backtracking storage belong
@@ -559,12 +747,32 @@ The current parser bounds nesting at 256, instructions at 1,048,576 and capture
 or progress-register counts at 65,535. The existing heap/word ABI imposes its
 normal allocation limits.
 
-Bounded repetitions, backreferences, lookaround, named groups, case folding,
-other flags, dynamic RegExp construction, mutable RegExp properties/prototypes,
-object ToPrimitive conversion, string replacement/search/split integration and
-source exception semantics remain open. Unsupported static forms are rejected
-with ELI-B0001 and the original source identity. This experimental capability
-does not complete RegExp, the standard library or a compiler host.
+The `v` implementation uses nested unions, intersections (`&&`), subtraction
+(`--`), code-point ranges/properties and finite strings (`\q{...|...}`). It
+applies case folding before set operations, including complemented properties;
+`u` and `v` are mutually exclusive. `unicodeSets` reflects `v` while `unicode`
+continues to reflect `u`. Candidate strings match longest first with ordinary
+backtracking, including reverse matching inside lookbehind. The grammar rejects
+reserved unescaped punctuation and complements that may contain strings. These
+rules follow [Unicode-set semantics](https://tc39.es/ecma262/multipage/text-processing.html#sec-static-semantics-maycontainstrings).
+
+The seven Unicode properties of strings use checked-in, packed Unicode 15.1,
+16.0 and 17.0 emoji data. Each heap loads only its selected immutable profile
+on first use (91,000, 91,132 or 97,048 bytes), shares sequence records across
+properties, and searches without constructing temporary strings. Ordinary
+code-point matching allocates no emoji cache. The collector retains a live
+cache, and module close releases its root. Pinned source identities and the
+Unicode license are in `tools/runtime/unicode-emoji-inputs.json`; regenerate
+with `tools/runtime/unicode-emoji-data.mjs --write`. Runtime builds never fetch
+data or expand those tables into per-character instructions. The internal
+`copy-static-u16` memory capability accepts a literal and lowers to the same
+bounded static-data copy used by ordinary managed literals.
+
+The Unicode-set implementation and its permanent tests await unified execution;
+full RegExp compatibility remains open. Unsupported static forms are rejected
+with ELI-B0001 and the original source identity. The complete
+semantic corpus, all compiler hosts and production resource budgets still require
+their original acceptance gates; this experimental capability does not close them.
 
 ## Experimental primitive builtin values
 
@@ -608,18 +816,31 @@ being returned to subsequent source operations.
 Parsing and serialization keep text, intermediate containers, growable UTF-16
 output, ancestor identity and temporary values in the owned heap and root frames.
 Nesting beyond 512 reports the existing capacity error. Invalid JSON, cycles and
-unsupported conversions currently use the experimental ELI-RT0003 bridge;
-source SyntaxError/TypeError identities and full exception behavior remain open.
-Output growth, exact surrogate handling, GC, capacity failures and actual WASM
-traps are tested independently of host JSON execution.
+unsupported conversions retain their structured runtime diagnostics and source
+exception classes. Output growth, exact surrogate handling, GC, capacity failures
+and actual WASM traps retain the original independent tests and budgets.
 
-Callable revivers/replacers and callable `toJSON` transformations are explicitly
-refused, rather than silently ignored. Complete callback context, wrapper-object
-conversions, arbitrary JSON namespace aliases/mutation and builtin-prototype
-reflection remain open. These ordinary data capabilities do not complete JSON,
-the standard library, a compiler host or the full backend matrix.
-RegExp property-list reads require the still-open reflection path and fail
-explicitly; an unavailable property must not be silently replaced by undefined.
+The callback implementation uses source functions for revivers, replacers and
+`toJSON`, including the holder as `this` and original key order. Revivers visit
+children before their parent; returning undefined deletes a property. Their
+third context argument exposes the exact original token as `source` only for an
+unchanged primitive whose parse record still applies. No parse-record graph is
+built when the reviver is not callable. Stringification applies `toJSON` and the
+replacer before unboxing or deciding omission, and snapshots object keys or array
+length at the specified stage. Callback mutations and original throws remain
+observable.
+
+`JSON.rawJSON(text)` validates a primitive JSON document without leading or
+trailing whitespace, using the parser's lexical rules without materializing an
+unused decoded representation. It returns a frozen, null-prototype object with its original
+`rawJSON` text. Its private brand is independent of public fields or property
+copies. `JSON.isRawJSON` does not coerce its argument; stringification emits a
+branded object's text after the ordinary transformation steps. This preserves
+large numeric tokens and their original spelling. These interfaces follow
+[the JSON algorithms](https://tc39.es/ecma262/multipage/structured-data.html#sec-json-object).
+The callback, raw-text and RegExp property-list paths have regression source in
+the complete selected-compiler replay but await unified execution. They do not
+establish JSON compatibility, a compiler host or a full matrix cell.
 
 ## Experimental ordinary string replacement
 
@@ -680,6 +901,20 @@ refreshes the compact literals in both emitters. This maintenance operation uses
 the development bundler; normal compilation by any compiler host emits only the
 fixed literal and never invokes a bundler, optimizer or external service.
 
+The shared JS support also handles real `call`, `apply`, `Reflect.apply` and
+`bind` method identities, including nested borrowing. It consumes the complete
+apply argument list in the original order. User replacements keep ordinary
+method behavior. Supported bindings remain genuine native bound functions with
+the original descriptors and prototype; their private target preserves live
+`instanceof` delegation. Bound calls and callbacks return through the same
+number/array rules. No global or prototype method is replaced.
+
+For Number `toString`, nondecimal JS formatting uses the same exact integer and
+rounding-interval algorithm as managed execution, including boxed Numbers and
+receiver-before-radix validation. Decimal text retains the builtin spelling.
+This handling applies to emitted method calls and their bound functions; it
+does not rewrite foreign JS that directly calls an original unbound intrinsic.
+
 Represented lexical/module `typeof` identifiers and static member paths now
 execute within WASM. They preserve null/undefined, function identity and module
 renaming without invoking object conversion hooks. Existing `nil?`, `undefined?`,
@@ -689,3 +924,60 @@ raw JS expressions and unimplemented primitive prototype values remain explicit
 refusals. Full object conversion, function source reflection, arbitrary prototype
 changes and complete compiler hosts remain open. See the single backend plan
 for remaining acceptance gates.
+
+The compiler's high-level managed WASM product operations lower source IR and
+emit their fresh private typed graph in one operation. They return bytes,
+descriptor and optional debug information; they do not transfer a mutable typed
+graph to callers. Configuration runs after lowering, before emission. The public
+typed emitters still snapshot caller-owned input and preserve its reuse.
+
+`compiler-cli.mjs build --root DIRECTORY` reads the complete compiler, runtime
+and literal source graph from that directory. `--debug` retains each emitted
+JavaScript module's source map and macro origins, including builds produced by
+an independent compiler session. Bootstrap commands use the same selected source
+root. A missing source root reports its original file error.
+
+Compiler artifact metadata uses the existing exact JSON wire, including signed
+zero, shared-subtree visits, BigInt decimal strings and original getter errors.
+`forEachCompilerMetadataChunk` synchronously consumes that wire in bounded token
+batches. Product hashes consume those batches directly, and metadata files write
+the captured chunks with their original trailing newline. All source reads finish
+before file I/O yields, preserving the caller's pre-dispatch snapshot while
+avoiding a single string containing the entire typed graph.
+
+Native and WASM emitters accept `binaryEncoding: "u16le-chunks"` in their options;
+compiler session requests accept the same field. The default remains an array
+of byte values. Packed output contains `encoding`, `byteLength` and `chunks`:
+each string holds up to 2048 UTF16 units, each unit represents two little-endian
+bytes, and an odd final byte has a zero high half. JSON preserves every code
+unit, including unpaired surrogates. Mach-O page signatures and debug offsets
+refer to the original bytes. Independent binary compiler builds use this form
+and `decodeCompilerBinary` validates and decodes it into the actual file bytes.
+
+Sessions advertising `responseModes: ["events-v1"]` also accept the request
+option `responseMode: "events-v1"`. The adapter assembles ordered data events
+from bounded replies, preserving the original returned value without joining
+one enormous JSON document. Tokens isolate the pending cursor; completion,
+cancellation, failures and session close release it. Normal requests keep the
+existing JSON response protocol. Independent binary builds negotiate this mode
+through the producer's actual capabilities.
+`graph-events-v1` is a separately advertised mode with version 2 envelopes.
+Containers receive consecutive IDs on first traversal; references reuse only
+completed containers. This preserves actual object sharing in compiler data
+without removing instructions or source metadata. Active-ancestor references
+remain cycle errors. Each physical object's properties are visited once in
+this explicit mode; ordinary and `events-v1` traversal are unchanged. Binary
+builds with `debug: true` prefer graph responses when advertised, preserving
+shared source spans throughout the debug mapping. Other builds prefer events;
+graph-only producers and legacy JSON producers remain supported. This choice
+does not establish that a complete compiler fits its memory or time budget.
+Each reply contains at most 256 events. An `array-values` event carries at most
+256 consecutive numeric array elements, preserving signed zero and the ordinary
+null representation of nonfinite numbers. Mixed elements resume in their
+original order without reading an array getter twice. The receiving adapter
+validates each bounded run before appending it.
+
+Native runtime loading snapshots the function ABI and complete control
+descriptor before asynchronous imports. Function bodies remain in the complete
+compiler artifact and its identity; the native loader consumes their emitted
+machine code and does not copy those unused bodies into another runtime record.

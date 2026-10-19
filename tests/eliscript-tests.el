@@ -15,7 +15,31 @@
      (eliscript-expand-module
       (eliscript-read-located-string source filename)
       filename)
-     filename))))
+     filename)) filename))
+
+(defun eliscript-tests--guarded-module-read (output binding)
+  "Assert OUTPUT guards the actual module BINDING, returning its read text."
+  (let ((pattern
+         (concat
+          "function \\(__eliscript_tdz_read_[0-9]+\\)() { if ("
+          "\\(__eliscript_tdz_ready_[0-9]+\\) !== true) "
+          (regexp-quote
+           (format "__eliscript_tdz_error(%S); return %s; }" binding binding)))))
+    (should (string-match pattern output))
+    (let* ((reader (match-string 1 output))
+           (ready (match-string 2 output))
+           (declaration
+            (string-match
+             (concat "^\\(?:const\\|let\\) " (regexp-quote binding) " = ")
+             output)))
+      (should (equal (substring reader (length "__eliscript_tdz_read_"))
+                     (substring ready (length "__eliscript_tdz_ready_"))))
+      (should (string-match-p (regexp-quote (concat "var " ready ";")) output))
+      (should declaration)
+      (should (string-match-p
+               (regexp-quote (concat ready " = true;"))
+               (substring output declaration)))
+      (format "(%s())" reader))))
 
 (defun eliscript-tests--decode-vlq-segment (segment)
   "Decode Base64 VLQ values from source-map SEGMENT."
@@ -155,6 +179,79 @@
              (regexp-quote "columns.eli:1:3: Invalid read syntax")
              (error-message-string error-data)))))
 
+(ert-deftest eliscript-reader-line-index-matches-native-buffer-positions ()
+  "Indexed positions retain Emacs character columns at every boundary."
+  (dolist (source '("" "x" "\n" "\n\n" "a\r\nb\r\n" "a\rb"
+                    "\t中😀\r\n\n尾\t😀\n"))
+    (with-temp-buffer
+      (insert source)
+      (let ((eliscript-reader--line-starts (eliscript-reader--index-lines)))
+        (cl-loop for position from (point-min) to (point-max)
+                 do (let ((expected
+                           (save-excursion
+                             (goto-char position)
+                             (cons (line-number-at-pos)
+                                   (1+ (- position (line-beginning-position)))))))
+                      (should (equal (eliscript-reader--position position)
+                                     expected))))))))
+
+(ert-deftest eliscript-reader-line-index-retains-all-nested-source-spans ()
+  "The indexed reader and original buffer position rules locate every node."
+  (let* ((source ";中😀\r\n\t(foo [1 -0.0] {:键 \"😀\"} #{:a})\r\n\r\n'尾\n")
+         (indexed (eliscript-read-located-string source "indexed.eli"))
+         (native
+          (cl-letf (((symbol-function 'eliscript-reader--position)
+                     (lambda (position)
+                       (save-excursion
+                         (goto-char position)
+                         (cons (line-number-at-pos)
+                               (1+ (- position (line-beginning-position))))))))
+            (eliscript-read-located-string source "indexed.eli"))))
+    (should (equal indexed native))))
+
+(ert-deftest eliscript-reader-builds-one-index-without-per-node-line-scans ()
+  "Wide input and error spans use the same single index, with no prefix scans."
+  (let ((indexer (symbol-function 'eliscript-reader--index-lines))
+        (builds 0)
+        (source (concat "(module wide\n"
+                        (mapconcat
+                         (lambda (index) (format "(defun f%d () %d)" index index))
+                         (number-sequence 0 127) "\n")
+                        "\n)")))
+    (cl-letf (((symbol-function 'eliscript-reader--index-lines)
+               (lambda () (setq builds (1+ builds)) (funcall indexer)))
+              ((symbol-function 'line-number-at-pos)
+               (lambda (&rest _arguments)
+                 (ert-fail "located reading must not rescan source prefixes"))))
+      (should (= (length (eliscript-read-located-string source "wide.eli")) 1))
+      (should (= builds 1))
+      (let* ((error-data
+              (should-error (eliscript-read-located-string ";\r\n(foo ]" "bad-index.eli")
+                            :type 'eliscript-read-error))
+             (diagnostic (eliscript-diagnostic-from-condition error-data))
+             (span (eliscript-diagnostic-span diagnostic)))
+        (should (equal (eliscript-diagnostic-code diagnostic) "ELI-R0001"))
+        (should (equal (eliscript-diagnostic-file diagnostic) "bad-index.eli"))
+        (should (= (eliscript-source-span-start span) 3))
+        (should (= (eliscript-source-span-end span) 4))
+        (should (= (eliscript-source-span-line span) 2))
+        (should (= (eliscript-source-span-column span) 1))
+        (should (= (eliscript-source-span-end-line span) 2))
+        (should (= (eliscript-source-span-end-column span) 2)))
+      (should (= builds 2)))))
+
+(ert-deftest eliscript-reader-nested-invocations-restore-the-outer-index ()
+  "A separate source buffer cannot replace the caller's line index."
+  (with-temp-buffer
+    (insert "outer\r\n中😀\nlast")
+    (let* ((eliscript-reader--line-starts (eliscript-reader--index-lines))
+           (outer eliscript-reader--line-starts)
+           (position (point-max))
+           (expected (eliscript-reader--position position)))
+      (eliscript-read-located-string "\n\n(inner 😀)\n" "inner.eli")
+      (should (eq eliscript-reader--line-starts outer))
+      (should (equal (eliscript-reader--position position) expected)))))
+
 (ert-deftest eliscript-emits-literals-and-data ()
   (should (equal (eliscript-emitter-emit-expression nil) "null"))
   (should (equal (eliscript-emitter-emit-expression t) "true"))
@@ -186,7 +283,10 @@
 (defconst host-indexed (aref host :ready))
 (defconst host-has (object-has? host :ready))
 (defconst host-copy (object-assoc host :count 1))")
-         (output (eliscript-compile-string source "keywords.eli")))
+         (output (eliscript-compile-string source "keywords.eli"))
+         (host-read (eliscript-tests--guarded-module-read output "host"))
+         (keyword-read
+          (eliscript-tests--guarded-module-read output "keyword_value")))
     (should (equal output
                    (eliscript-tests--legacy-compile-string
                     source "keywords.eli")))
@@ -199,14 +299,21 @@
               "const keyword_value = __eliscript_keyword(\"article/title\")")
              output))
     (should (string-match-p
-             (regexp-quote "const host_ready = (host)[\"ready\"]")
+             (regexp-quote (format "const host_ready = (%s)[\"ready\"]" host-read))
              output))
     (should (string-match-p
-             (regexp-quote "const host_indexed = (host)[\"ready\"]")
+             (regexp-quote (format "const host_indexed = (%s)[\"ready\"]" host-read))
              output))
     (should (string-match-p
              (regexp-quote
-              "Object.prototype.hasOwnProperty.call((host) ?? {}, \"ready\")")
+              (format "Object.prototype.hasOwnProperty.call((%s) ?? {}, \"ready\")" host-read))
+             output))
+    (should (string-match-p
+             (regexp-quote
+              (format "const data = __eliscript_hash_map(__eliscript_keyword(\"article/title\"), %s);" keyword-read))
+             output))
+    (should (string-match-p
+             (regexp-quote (format "const host_copy = ({...((%s) ?? {})" host-read))
              output))
     (should (string-match-p
              (regexp-quote "[\"count\"]: 1") output))))
@@ -743,6 +850,147 @@
     (should (string-match-p "__eliscript_truthy" or-output))
     (should-not (equal and-output or-output))))
 
+(defun eliscript-tests--wide-short-circuit-tail (width kind)
+  "Build exact tail bytes for WIDTH `value' operands of KIND.
+Each line is written once at its final depth.  Do not repeatedly indent the
+already nested suffix, or use either production emitter to build the oracle."
+  (with-temp-buffer
+    (cl-labels ((line (depth text)
+                 (unless (= (point) (point-min)) (insert "\n"))
+                 (insert (make-string (* 2 depth) ?\s) text)))
+      (cl-loop for index from 1 below width do
+               (let ((temporary (format "__eliscript_value_%d" index))
+                     (depth (1- index)))
+                 (line depth (format "const %s = value;" temporary))
+                 (line depth (format "if (__eliscript_truthy(%s)) {" temporary))
+                 (when (eq kind 'or)
+                   (line index (format "return %s;" temporary))
+                   (line depth "} else {"))))
+      (line (1- width) "return value;")
+      (cl-loop for index downfrom (1- width) to 1 do
+               (when (eq kind 'and)
+                 (line (1- index) "} else {")
+                 (line index (format "return __eliscript_value_%d;" index)))
+               (line (1- index) "}")))
+    (buffer-string)))
+
+(ert-deftest eliscript-wide-short-circuit-preserves-exact-expression-and-tail-bytes ()
+  "512 sibling operands retain their values and temporary allocation order."
+  ;; Hand-written shallow products independently fix both branch directions
+  ;; and the final-depth/newline convention of the wide oracle.
+  (dolist (fixture
+           '((2 and "const __eliscript_value_1 = value;\nif (__eliscript_truthy(__eliscript_value_1)) {\n  return value;\n} else {\n  return __eliscript_value_1;\n}")
+             (3 or "const __eliscript_value_1 = value;\nif (__eliscript_truthy(__eliscript_value_1)) {\n  return __eliscript_value_1;\n} else {\n  const __eliscript_value_2 = value;\n  if (__eliscript_truthy(__eliscript_value_2)) {\n    return __eliscript_value_2;\n  } else {\n    return value;\n  }\n}")))
+    (let* ((width (nth 0 fixture)) (kind (nth 1 fixture)) (expected (nth 2 fixture))
+           (forms (make-list width 'value))
+           (nodes (mapcar (lambda (_form) (eliscript-ir-make-node 'reference nil 'value)) forms)))
+      (should (equal (eliscript-tests--wide-short-circuit-tail width kind) expected))
+      (dolist (emitter (list (lambda () (eliscript-emitter--emit-tail-short-circuit forms kind nil))
+                            (lambda () (eliscript-ir-emitter--emit-tail-short-circuit nodes kind nil))))
+        (let ((eliscript-emitter--temporary-counter 0))
+          (should (equal (funcall emitter) expected))
+          (should (= eliscript-emitter--temporary-counter (1- width)))))))
+  (let* ((width 512)
+         (forms (make-list width 'value))
+         (nodes (mapcar (lambda (_form) (eliscript-ir-make-node 'reference nil 'value)) forms)))
+    (dolist (kind '(and or))
+      (let ((expression "value")
+            (tail (eliscript-tests--wide-short-circuit-tail width kind)))
+        (cl-loop for index downfrom (1- width) to 1 do
+                 (let ((temporary (format "__eliscript_value_%d" index)))
+                   (setq expression
+                         (format "((%s) => (__eliscript_truthy(%s) ? %s : %s))(%s)"
+                                 temporary temporary
+                                 (if (eq kind 'and) expression temporary)
+                                 (if (eq kind 'and) temporary expression) "value"))))
+        (dolist (emitter (list (lambda () (eliscript-emitter--emit-short-circuit forms kind))
+                              (lambda () (eliscript-ir-emitter--emit-short-circuit nodes kind))))
+          (let ((eliscript-emitter--temporary-counter 0))
+            (should (equal (funcall emitter) expression))
+            (should (= eliscript-emitter--temporary-counter (1- width)))))
+        (dolist (emitter (list (lambda () (eliscript-emitter--emit-tail-short-circuit forms kind nil))
+                              (lambda () (eliscript-ir-emitter--emit-tail-short-circuit nodes kind nil))))
+          (let ((eliscript-emitter--temporary-counter 0))
+            (should (equal (funcall emitter) tail))
+            (should (= eliscript-emitter--temporary-counter (1- width)))))))))
+
+(ert-deftest eliscript-short-circuit-retains-boolean-suffix-and-async-boundaries ()
+  "Iteration preserves old suffix specialization and await scheduling bytes."
+  (dolist (kind '(and or))
+    (let* ((temporary "__eliscript_value_1")
+           (suffix (if (eq kind 'and) "(true && false)" "(true || false)"))
+           (expected (format "((%s) => (__eliscript_truthy(%s) ? %s : %s))(value)"
+                             temporary temporary
+                             (if (eq kind 'and) suffix temporary)
+                             (if (eq kind 'and) temporary suffix)))
+           (node (eliscript-lower-expression (car (eliscript-read-located-string
+                                                 (format "(%s value t false)" kind))))))
+      (let ((eliscript-emitter--temporary-counter 0))
+        (should (equal (eliscript-ir-emitter-emit-expression node) expected))
+        (should (= eliscript-emitter--temporary-counter 1)))
+      (let ((eliscript-emitter--temporary-counter 0))
+        (should (equal (eliscript-emitter-emit-expression (list kind 'value t 'false)) expected))
+        (should (= eliscript-emitter--temporary-counter 1)))))
+  (dolist (source '("(defasync f (value) (or value (await value) value))"
+                    "(defasync f (value) (and value (await value) value))"
+                    "(defun f (value) (or (or value value) t false))"
+                    "(defun f (value) (and (and value value) t false))"
+                    "(defun f (value) (loop ((n value)) (or n (recur 1))))"
+                    "(defun f (value) (loop ((n value)) (and n (recur 1))))"))
+    (should (equal (eliscript-compile-string source "short-circuit-order.eli")
+                   (eliscript-tests--legacy-compile-string source "short-circuit-order.eli")))))
+
+(ert-deftest eliscript-wide-cond-retains-all-emission-contexts-and-source-marks ()
+  "512 sibling branches retain exact expression, statement and tail products."
+  (let ((width 512) forms clauses
+        (expression "null") (returning "return null;") (statement ""))
+    (dotimes (index width)
+      (let ((span (eliscript-source-span-create :filename "wide-cond.eli"
+                                               :start index :end (1+ index)
+                                               :line 1 :column (1+ index)
+                                               :end-line 1 :end-column (+ index 2))))
+        (push (list 'condition index) forms)
+        (push (eliscript-ir-make-node
+               'conditional-clause span nil
+               (list (eliscript-ir-make-node 'reference nil 'condition)
+                     (eliscript-ir-make-node 'literal nil index))) clauses)))
+    (setq forms (nreverse forms) clauses (nreverse clauses))
+    (cl-loop for index downfrom (1- width) to 0 do
+             (setq expression (format "(__eliscript_truthy(condition) ? %d : %s)" index expression)
+                   returning (format "if (__eliscript_truthy(condition)) {\n  return %d;\n} else {\n%s\n}"
+                                     index (eliscript-emitter--indent returning))
+                   statement (format "if (__eliscript_truthy(condition)) {\n  %d;\n} else {\n%s\n}"
+                                     index (eliscript-emitter--indent statement))))
+    (should (equal (eliscript-emitter--emit-cond forms) expression))
+    (should (equal (eliscript-ir-emitter--emit-cond clauses) expression))
+    (should (equal (eliscript-emitter--emit-context-cond forms t) returning))
+    (should (equal (eliscript-ir-emitter--emit-context-cond clauses t) returning))
+    (should (equal (eliscript-emitter--emit-context-cond forms nil) statement))
+    (should (equal (eliscript-ir-emitter--emit-context-cond clauses nil) statement))
+    (should (equal (eliscript-emitter--emit-tail-cond forms nil) returning))
+    (should (equal (eliscript-ir-emitter--emit-tail-cond clauses nil) returning))
+    (let ((eliscript-ir-emitter--record-source-spans t)
+          (expected "null"))
+      (dolist (clause (reverse clauses))
+        (setq expected
+              (eliscript-source-map-mark
+               (format "(__eliscript_truthy(condition) ? %d : %s)"
+                       (eliscript-ir-node-value (cadr (eliscript-ir-node-children clause))) expected)
+               (eliscript-ir-node-span clause))))
+      (should (equal-including-properties (eliscript-ir-emitter--emit-cond clauses) expected)))))
+
+(ert-deftest eliscript-cond-stops-emitting-after-default-without-changing-order ()
+  "Unreachable later clauses consume no temporaries or source marks."
+  (dolist (source '("(defun f (x) (cond ((or x x) (or x x)) (t (and x x)) ((or x x) (or x x))))"
+                    "(defun f (x) (progn (cond ((or x x) 1) (t 2)) x))"
+                    "(defun f (x) (js-array (cond ((or x x) 1) (t 2))))"
+                    "(defun f (x) (loop ((n x)) (cond ((or n n) (recur false)) (t n))))"))
+    (let* ((filename "cond-order.eli")
+           (plain (eliscript-compile-string source filename))
+           (mapped (eliscript-compile-string-with-source-map source filename "cond.mjs" filename)))
+      (should (equal plain (eliscript-tests--legacy-compile-string source filename)))
+      (should (equal plain (eliscript-emission-javascript mapped))))))
+
 (ert-deftest eliscript-specializes-binary-comparisons ()
   (dolist (case '((= "===") (< "<") (<= "<=") (> ">") (>= ">=")))
     (let* ((operator (nth 0 case))
@@ -902,7 +1150,11 @@
     (should (= (cl-count 'persistent-list-literal kinds) 1))
     (should (= (cl-count 'array-literal kinds) 1))
     (should (string-match-p "__eliscript_list(1, 2)" output))
-    (should (string-match-p "__eliscript_rest(values)" output))
+    (should (string-match-p
+             (regexp-quote
+              (format "__eliscript_rest(%s)"
+                      (eliscript-tests--guarded-module-read output "values")))
+             output))
     (should
      (string-match-p
       (regexp-quote "[0, ...(([1, 2]) ?? [])]")
@@ -1106,10 +1358,35 @@
   (should-error
    (eliscript-compile-string "(defconst answer 42) (setq answer 43)")
    :type 'eliscript-analyze-error)
-  (should
-   (string-match-p
-    "(answer = 43)"
-    (eliscript-compile-string "(defvar answer 42) (setq answer 43)"))))
+  (let* ((output
+          (eliscript-compile-string "(defvar answer 42) (setq answer 43)"))
+         (reader (eliscript-tests--guarded-module-read output "answer"))
+         (writer (replace-regexp-in-string "_read_" "_write_" (substring reader 1 -3)))
+         (ready (replace-regexp-in-string "_write_" "_ready_" writer))
+         (argument (replace-regexp-in-string "_write_" "_value_" writer)))
+    (should (string-match-p
+             (regexp-quote
+              (format "function %s(%s) { if (%s !== true) __eliscript_tdz_error(\"answer\"); return (answer = %s); }"
+                      writer argument ready argument))
+             output))
+    (should (string-match-p (regexp-quote (format "(%s(43))" writer)) output))))
+
+(ert-deftest eliscript-tdz-writer-does-not-shadow-value-module-binding ()
+  (let ((source "(defvar value -0.0) (defun replace-value (next) (setq value next)) (export value replace-value)"))
+    (dolist (output (list (eliscript-compile-string source "tdz-value.eli")
+                          (eliscript-tests--legacy-compile-string source "tdz-value.eli")))
+      (should (string-match-p
+               (regexp-quote
+                "function __eliscript_tdz_write_0(__eliscript_tdz_value_0) { if (__eliscript_tdz_ready_0 !== true) __eliscript_tdz_error(\"value\"); return (value = __eliscript_tdz_value_0); }")
+               output))
+      (should (string-match-p (regexp-quote "__eliscript_tdz_write_0(next)") output)))))
+
+(ert-deftest eliscript-tdz-writer-argument-retains-reserved-name-protection ()
+  (dolist (name '("__eliscript_tdz_value_0" "__eliscript-tdz-value-0"))
+    (let ((error-data
+           (should-error (eliscript-compile-string (format "(defvar %s 1)" name) "tdz-reserved.eli")
+                         :type 'eliscript-compile-error)))
+      (should (string-match-p "reserved compiler prefix" (error-message-string error-data))))))
 
 (ert-deftest eliscript-analyzer-validates-exports ()
   (should-error (eliscript-compile-string "(export missing)")
@@ -1339,21 +1616,22 @@
     (should (string-match-p "export {answer};" output))))
 
 (ert-deftest eliscript-expander-desugars-multimethod-declarations ()
-  (let ((output
+  (let* ((output
          (eliscript-compile-string
           (concat
            "(import \"./multimethod.eli\" add-method! multi-fn)\n"
            "(defmulti render (lambda (kind value) kind) \"fallback\")\n"
            "(defmethod render \"text\" (kind value) (str value))\n"
            "(export render)")
-          "declarative.eli")))
+          "declarative.eli"))
+         (render-read (eliscript-tests--guarded-module-read output "render")))
     (should (string-match-p
              (regexp-quote
               "const render = multi_fn(\"render\", ((kind, value) =>")
              output))
     (should (string-match-p
              (regexp-quote
-              "add_method_BANG_(render, \"text\", ((kind, value) =>")
+              (format "add_method_BANG_(%s, \"text\", ((kind, value) =>" render-read))
              output))
     (should-not (string-match-p "defmulti\\|defmethod" output))))
 
@@ -1380,7 +1658,7 @@
                (error-message-string error-data))))))
 
 (ert-deftest eliscript-expander-desugars-protocol-declarations ()
-  (let ((output
+  (let* ((output
          (eliscript-compile-string
           (concat
            "(import \"./protocol.eli\" define-protocol protocol-method "
@@ -1393,21 +1671,23 @@
            "(describe (_value) \"default\") "
            "(measure (_value _scale) 0))\n"
            "(export IDescribe describe measure)")
-          "declarative-protocol.eli")))
+          "declarative-protocol.eli"))
+         (protocol-read
+          (eliscript-tests--guarded-module-read output "IDescribe")))
     (should (string-match-p
              (regexp-quote
               "const IDescribe = define_protocol(\"IDescribe\", [\"describe\", \"measure\"]);")
              output))
     (should (string-match-p
              (regexp-quote
-              "const describe = protocol_method(IDescribe, \"describe\");")
+              (format "const describe = protocol_method(%s, \"describe\");" protocol-read))
              output))
     (should (string-match-p
              (regexp-quote
-              "extend_protocol_category(IDescribe, \"number\"")
+              (format "extend_protocol_category(%s, \"number\"" protocol-read))
              output))
     (should (string-match-p
-             (regexp-quote "extend_protocol_default(IDescribe") output))
+             (regexp-quote (format "extend_protocol_default(%s" protocol-read)) output))
     (should-not
      (string-match-p
       "defprotocol\\|extend-category\\|extend-default" output))))
@@ -1441,13 +1721,14 @@
                (error-message-string error-data))))))
 
 (ert-deftest eliscript-expander-desugars-record-declarations ()
-  (let ((output
+  (let* ((output
          (eliscript-compile-string
           (concat
            "(import \"./record.eli\" define-record-type)\n"
            "(defrecord Person [name age])\n"
            "(export Person ->Person map->Person Person?)")
-          "declarative-record.eli")))
+          "declarative-record.eli"))
+         (record-read (eliscript-tests--guarded-module-read output "Person")))
     (should (string-match-p
              (regexp-quote
               "const Person = define_record_type(\"Person\", [\"name\", \"age\"]);")
@@ -1457,13 +1738,15 @@
               "const __GT_Person = ((name, age) =>")
              output))
     (should (string-match-p
-             (regexp-quote "(Person)[\"create\"](name, age)") output))
+             (regexp-quote (format "(%s)[\"create\"](name, age)" record-read)) output))
     (should (string-match-p
              (regexp-quote "const map__GT_Person = ((source) =>") output))
     (should (string-match-p
-             (regexp-quote "(Person)[\"fromMap\"](source)") output))
+             (regexp-quote (format "(%s)[\"fromMap\"](source)" record-read)) output))
     (should (string-match-p
              (regexp-quote "const Person_QMARK_ = ((value) =>") output))
+    (should (string-match-p
+             (regexp-quote (format "(%s)[\"isInstance\"](value)" record-read)) output))
     (should-not (string-match-p "defrecord" output))))
 
 (ert-deftest eliscript-expander-validates-record-declarations ()
@@ -1491,7 +1774,7 @@
                (error-message-string error-data))))))
 
 (ert-deftest eliscript-expander-desugars-type-and-reify-forms ()
-  (let ((output
+  (let* ((output
          (eliscript-compile-string
           (concat
            "(import \"./protocol.eli\" define-protocol protocol-method)\n"
@@ -1501,19 +1784,23 @@
            "(defun captured (prefix) "
            "(reify IRead (read (_self suffix) (str prefix suffix))))\n"
            "(export Box ->Box Box? captured)")
-          "declarative-type.eli")))
+          "declarative-type.eli"))
+         (protocol-read (eliscript-tests--guarded-module-read output "IRead"))
+         (type-read (eliscript-tests--guarded-module-read output "Box")))
     (should (string-match-p
              (regexp-quote
-              "const Box = define_type(\"Box\", [\"value\"], [[IRead")
+              (format "const Box = define_type(\"Box\", [\"value\"], [[%s" protocol-read))
              output))
     (should (string-match-p
              (regexp-quote "const __GT_Box = ((value) =>") output))
     (should (string-match-p
-             (regexp-quote "(Box)[\"create\"](value)") output))
+             (regexp-quote (format "(%s)[\"create\"](value)" type-read)) output))
     (should (string-match-p
              (regexp-quote "const Box_QMARK_ = ((value) =>") output))
     (should (string-match-p
-             (regexp-quote "return reify_protocols([[IRead") output))
+             (regexp-quote (format "(%s)[\"isInstance\"](value)" type-read)) output))
+    (should (string-match-p
+             (regexp-quote (format "return reify_protocols([[%s" protocol-read)) output))
     (should-not (string-match-p "deftype\|reify " output))))
 
 (ert-deftest eliscript-expander-validates-type-and-reify-forms ()
@@ -1751,6 +2038,78 @@
              (regexp-quote "let value$G2 =") first))
     (should-not (string-match-p
                  (regexp-quote "let value$G1 =") first))))
+
+(ert-deftest eliscript-expander-deep-ordinary-trees-use-explicit-frames ()
+  "Ordinary if/let nesting keeps source spans and macro capture avoidance."
+  (let* ((filename "deep-ordinary.eli")
+         (span (eliscript-source-span-create :filename filename :start 0 :end 1
+                                             :line 1 :column 1 :end-line 1 :end-column 2))
+         (definition (car (eliscript-read-located-string
+                           "(defmacro once (form) `(let ((value$ ,form)) value$))" filename)))
+         (leaf (car (eliscript-read-located-string "(once value$G1)" filename)))
+         (condition (car (eliscript-read-located-string "(= unit 0)" filename)))
+         (consequent (car (eliscript-read-located-string "unit" filename)))
+         (bindings (car (eliscript-read-located-string "((unit value$G1))" filename)))
+         (if-name (eliscript-form-wrap 'if span))
+         (let-name (eliscript-form-wrap 'let span))
+         (tree leaf)
+         (width 320))
+    ;; Construct the same ordinary if/let spine bottom-up. The reader is not
+    ;; the component under test; every node already has a real source span.
+    (dotimes (_index width)
+      (setq tree (eliscript-form-wrap
+                  (list if-name condition consequent
+                        (eliscript-form-wrap (list let-name bindings tree) span)) span)))
+    (let ((original tree)
+          (expanded (car (eliscript-expand-module (list definition tree) filename))))
+      (dotimes (_index width)
+        (should (eq (eliscript-form-span expanded) span))
+        (let* ((items (eliscript-form-value expanded))
+               (alternative (eliscript-form-value (nth 3 items))))
+          (should (eq (eliscript-form-value (car items)) 'if))
+          (should (equal (nth 1 items) condition))
+          (should (equal (nth 2 items) consequent))
+          (should (eq (eliscript-form-value (car alternative)) 'let))
+          (should (equal (nth 1 alternative) bindings))
+          (setq expanded (nth 2 alternative)))
+        (setq original (nth 2 (eliscript-form-value
+                              (nth 3 (eliscript-form-value original))))))
+      (should (eq original leaf))
+      (should (equal (eliscript-form-strip expanded)
+                     '(let ((value$G2 value$G1)) value$G2))))))
+
+(ert-deftest eliscript-expander-frames-retain-special-child-exclusions ()
+  "Literal keys, parameters, bindings and catch names are never macro calls."
+  (let* ((source "(defmacro mark () 7)
+ (lambda (mark) (js-array (mark) (quote (mark))))
+ (let (((mark) (mark))) (setq target (mark)) (set! target (mark)))
+ (js-object :key (mark) name (mark))
+ (get object :key (mark))
+ (cond ((mark) (mark)))
+ (try (mark) (catch mark (mark)) (finally (mark)))")
+         (forms (eliscript-read-located-string source "frame-shapes.eli"))
+         (expanded (mapcar #'eliscript-form-strip (eliscript-expand-module forms "frame-shapes.eli"))))
+    (should (equal expanded
+                   '((lambda (mark) (js-array 7 (quote (mark))))
+                     (let (((mark) 7)) (setq target 7) (set! target 7))
+                     (js-object :key 7 name 7)
+                     (get object :key 7)
+                     (cond (7 7))
+                     (try 7 (catch mark 7) (finally 7)))))))
+
+(ert-deftest eliscript-expander-frame-failures-preserve-source-and-input ()
+  "A child macro error retains its own location and leaves original forms intact."
+  (let* ((source "(defmacro denied () (getenv \"HOME\"))\n(if t 1\n (let ((unit 0)) (denied)))")
+         (forms (eliscript-read-located-string source "frame-error.eli"))
+         (original (mapcar #'eliscript-form-strip forms))
+         (error-data (should-error (eliscript-expand-module forms "frame-error.eli")
+                                   :type 'eliscript-expand-error))
+         (diagnostic (eliscript-diagnostic-from-condition error-data)))
+    (should (equal (mapcar #'eliscript-form-strip forms) original))
+    (should (equal (eliscript-diagnostic-file diagnostic) "frame-error.eli"))
+    (should (= (eliscript-source-span-line (eliscript-diagnostic-span diagnostic)) 3))
+    (should (string-match-p "unsupported macro function: getenv"
+                            (eliscript-diagnostic-message diagnostic)))))
 
 (ert-deftest eliscript-expander-rejects-runaway-expansion ()
   (should-error
@@ -2109,10 +2468,141 @@
   (should (equal (eliscript-source-map--encode-vlq 16) "gB"))
   (should (equal (eliscript-source-map--encode-vlq -16) "hB")))
 
+(ert-deftest eliscript-source-map-file-writes-real-wire-unicode-as-utf8 ()
+  ;; This is the original Seed file writer and actual source that previously
+  ;; completed emission, then prompted for a coding system while saving .map.
+  (let* ((compiler-directory (file-name-directory (locate-library "eliscript")))
+         (root (file-name-directory (directory-file-name compiler-directory)))
+         (input (expand-file-name "stdlib/managed-wire-http-rpc.eli" root))
+         (source (with-temp-buffer (insert-file-contents input) (buffer-string)))
+         (directory (make-temp-file "eliscript-unicode-map-" t))
+         (output (expand-file-name "wire-中😀.mjs" directory))
+         (coding-system-for-write 'utf-8-unix))
+    (unwind-protect
+        (let* ((emission (eliscript-compile-file-with-source-map input output))
+               (json (eliscript-emission-source-map emission))
+               (map (json-parse-string json :object-type 'alist :array-type 'list))
+               (map-bytes (with-temp-buffer
+                            (set-buffer-multibyte nil)
+                            (insert-file-contents-literally (concat output ".map"))
+                            (buffer-string)))
+               (javascript-bytes (with-temp-buffer
+                                   (set-buffer-multibyte nil)
+                                   (insert-file-contents-literally output)
+                                   (buffer-string))))
+          (should (multibyte-string-p json))
+          (should (= (alist-get 'version map) 3))
+          (should (equal (alist-get 'file map) "wire-中😀.mjs"))
+          (should (equal (alist-get 'sourcesContent map) (list source)))
+          (should (equal (alist-get 'sources map)
+                         (list (file-relative-name input directory))))
+          (should (equal map-bytes (encode-coding-string json 'utf-8-unix)))
+          (should (equal (decode-coding-string map-bytes 'utf-8-unix) json))
+          (should (equal (decode-coding-string javascript-bytes 'utf-8-unix)
+                         (eliscript-emission-javascript emission)))
+          (should (eliscript-tests--decode-mappings (alist-get 'mappings map))))
+      (delete-directory directory t))))
+
+(ert-deftest eliscript-source-map-preserves-lone-surrogates-and-utf16-locations ()
+  (let* ((source (concat ";; 中😀" (string #xd800) "x" (string #xdc00)
+                         "\n(defun answer () 42)\n(export answer)"))
+         (source-name (concat "source-" (string #xd800) ".eli"))
+         (generated-name (concat "generated-" (string #xdc00) ".mjs"))
+         (emission (eliscript-compile-string-with-source-map
+                    source source-name generated-name source-name))
+         (json (eliscript-emission-source-map emission))
+         (json-object-type 'alist) (json-array-type 'list)
+         ;; The portable JSON reader preserves lone UTF16 code units, whereas
+         ;; native json-parse-string intentionally rejects those JSON values.
+         (map (json-read-from-string json)))
+    (should (multibyte-string-p json))
+    (should (equal (alist-get 'file map) generated-name))
+    (should (equal (alist-get 'sources map) (list source-name)))
+    (should (equal (alist-get 'sourcesContent map) (list source)))
+    (should (string-match-p (regexp-quote "\\ud800") json))
+    (should (string-match-p (regexp-quote "\\udc00") json))
+    (should (string-match-p "中😀" json))
+    (should (equal (decode-coding-string (encode-coding-string json 'utf-8-unix)
+                                       'utf-8-unix) json))
+    (should (cl-find-if (lambda (segment) (= (nth 3 segment) 1))
+                       (eliscript-tests--decode-mappings (alist-get 'mappings map))))))
+
+(ert-deftest eliscript-portable-source-map-file-writes-unicode-without-byte-characters ()
+  (let* ((directory (make-temp-file "eliscript-portable-unicode-map-" t))
+         (input (expand-file-name "source-中.eli" directory))
+         (output (expand-file-name "portable-😀.mjs" directory))
+         (source "(defportable answer () \"中😀\\ud800\\udfff\")\n(export answer)\n")
+         (coding-system-for-write 'utf-8-unix))
+    (unwind-protect
+        (progn
+          (with-temp-file input (insert source))
+          (let* ((emission (eliscript-compile-portable-file-with-source-map
+                            input '(answer) output))
+                 (json (eliscript-emission-source-map emission))
+                 (map (json-parse-string json :object-type 'alist :array-type 'list)))
+            (should (equal (alist-get 'file map) "portable-😀.mjs"))
+            (should (equal (alist-get 'sourcesContent map) (list source)))
+            (should (equal (with-temp-buffer
+                             (insert-file-contents (concat output ".map")) (buffer-string))
+                           json))
+            (should (equal (with-temp-buffer (insert-file-contents output) (buffer-string))
+                           (eliscript-emission-javascript emission)))))
+      (delete-directory directory t))))
+
 (ert-deftest eliscript-emitter-preserves-non-bmp-string-literals ()
   (let ((encoded (eliscript-emitter--json-string "😀")))
     (should (multibyte-string-p encoded))
     (should (equal encoded "\"😀\""))))
+
+(ert-deftest eliscript-emitter-json-string-preserves-utf16-surrogates ()
+  (dolist (case
+           (list
+            (cons (string #xd800) "\"\\ud800\"")
+            (cons (string #xdbff) "\"\\udbff\"")
+            (cons (string #xdc00) "\"\\udc00\"")
+            (cons (string #xdfff) "\"\\udfff\"")
+            (cons (string #xd83d #xde00) "\"😀\"")
+            (cons (string #xd800 #xdc00) (concat "\"" (string #x10000) "\""))
+            (cons (string #xdbff #xdfff) (concat "\"" (string #x10ffff) "\""))
+            (cons (string #xd800 #xd83d #xde00 #xdfff)
+                  "\"\\ud800😀\\udfff\"")
+            (cons "\\u00AB" "\"\\\\u00AB\"")
+            (cons (concat (string #xd800) "\\u00AB")
+                  "\"\\ud800\\\\u00AB\"")
+            (cons (concat "中" (string #xdc00) "\\ud800" (string #xd800) "é😀")
+                  "\"中\\udc00\\\\ud800\\ud800é😀\"")))
+    (let ((encoded (eliscript-emitter--json-string (car case))))
+      (should (multibyte-string-p encoded))
+      (should (equal encoded (cdr case)))
+      ;; A real UTF8 file contains escapes for lone halves, never raw surrogate
+      ;; encodings or replacement characters. Paired halves remain astral.
+      (should (equal (decode-coding-string (encode-coding-string encoded 'utf-8-unix)
+                                           'utf-8-unix)
+                     (cdr case))))))
+
+(ert-deftest eliscript-emitter-json-string-surrogates-retain-json-escaping ()
+  (let* ((ordinary (concat (string 0 1 8 9 10 11 12 13 31) "\"\\/é中"
+                           (string #x2028 #x2029) "😀"))
+         (escaped (concat "\\u0000\\u0001\\b\\t\\n\\u000b\\f\\r\\u001f"
+                          "\\\"\\\\/é中" (string #x2028 #x2029) "😀")))
+    (should (equal (eliscript-emitter--json-string ordinary)
+                   (concat "\"" escaped "\"")))
+    (should (equal (eliscript-emitter--json-string
+                    (concat (string #xd800) ordinary (string #xdfff)))
+                   (concat "\"\\ud800" escaped "\\udfff\"")))))
+
+(ert-deftest eliscript-emitter-json-string-surrogates-retain-invalid-character-rejection ()
+  (dolist (value (list (string #x110000)
+                       (string #xd800 #x110000 #xdfff)))
+    (should-error (eliscript-emitter--json-string value) :type 'wrong-type-argument)))
+
+(ert-deftest eliscript-emitter-compiles-packed-utf16-without-double-escaping ()
+  (let* ((source "(defun packed () \"\\ud800\\ud83d\\ude00\\udfff\\\\ud800\") (export packed)")
+         (expected "return \"\\ud800😀\\udfff\\\\ud800\";")
+         (actual (eliscript-compile-string source "packed-utf16.eli"))
+         (legacy (eliscript-tests--legacy-compile-string source "packed-utf16.eli")))
+    (should (string-match-p (regexp-quote expected) actual))
+    (should (string-match-p (regexp-quote expected) legacy))))
 
 (ert-deftest eliscript-source-map-records-ir-spans-and-utf16-columns ()
   (let* ((source "(defun choose (value)\n\t(if value value nil))\n(print \"😀\" \"after\")")
@@ -2138,7 +2628,7 @@
     (should (string-match-p
              (regexp-quote "console.log(\"😀\", \"after\");")
              (eliscript-emission-javascript emission)))
-    (should (member '(3 0 0 0 0) segments))
+    (should (member '(4 0 0 0 0) segments))
     (should (cl-find-if
              (lambda (segment)
                (and (= (nth 3 segment) 1)
@@ -2320,6 +2810,27 @@
            (ir (eliscript-ir-emitter--context-sequential-safe-p bindings)))
       (should (eq (not (null legacy)) (cadr case)))
       (should (eq (not (null legacy)) (not (null ir)))))))
+
+(ert-deftest eliscript-default-unicode-prelude-is-unconditional ()
+  (dolist (source '("(defun run () 1) (export run)"
+                    "(defun run (value key) (js-call value key)) (export run)"
+                    "(defun run (value key) (get value key)) (export run)"))
+    (dolist (output (list (eliscript-compile-string source "ordinary.eli")
+                          (eliscript-tests--legacy-compile-string source "ordinary.eli")))
+      (should (string-match-p
+               (regexp-quote "import \"eliscript/runtime/unicode-case.mjs\";") output)))))
+
+(ert-deftest eliscript-unicode-capsules-require-exact-module-and-path ()
+  (dolist (entry '(("runtime/unicode-case.eli" . "eliscript.runtime.unicode-case")
+                   ("runtime/unicode-case-data.eli" . "eliscript.runtime.unicode-case-data")))
+    (let ((source (format "(module %s (defun run () 1) (export run))" (cdr entry)))
+          (dependency (regexp-quote "import \"eliscript/runtime/unicode-case.mjs\";")))
+      (should-not (string-match-p dependency (eliscript-compile-string source (car entry))))
+      (should-not (string-match-p dependency (eliscript-tests--legacy-compile-string source (car entry))))
+      (should-not (string-match-p dependency (eliscript-compile-string source (expand-file-name (car entry)))))
+      (should (string-match-p dependency (eliscript-compile-string source "unicode-case.eli")))
+      (should (string-match-p dependency (eliscript-compile-string
+        "(module ordinary.program (defun run () 1) (export run))" (car entry)))))))
 
 (provide 'eliscript-tests)
 

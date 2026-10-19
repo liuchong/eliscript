@@ -6,9 +6,10 @@
     formatter-width
     formatter-indent
     format-source)
-  (import "./expander.mjs" expand-module)
+  (import "./expander.mjs" expand-module expand-module-with-origins
+    expand-owned-module expand-owned-module-with-origins)
   (import "./analyzer.mjs" analyze-module select-portable-module)
-  (import "./lower.mjs" lower-module)
+  (import "./lower.mjs" lower-module lower-owned-module)
   (import "./ir.mjs" ir-format ir-version serialize-program deserialize-program)
   (import "./emitter.mjs" emit-module emit-module-with-source-map)
   (import "./project.mjs"
@@ -75,9 +76,17 @@
     (source filename &optional macro-context)
     (let*
       ((read-forms (read-string source filename))
-        (expanded-forms (expand-module read-forms filename macro-context)))
+        (expanded-forms (expand-owned-module read-forms filename macro-context)))
+      ;; Expansion keeps any shared leaves it needs. Release the separate
+      ;; reader tree before analysis and lowering allocate their output.
+      (setq read-forms nil)
       (analyze-module expanded-forms filename)
-      (lower-module expanded-forms filename)))
+      (lower-owned-module expanded-forms filename)))
+  (defun compile-ir-string-with-origins (source filename &optional macro-context)
+    (let* ((expansion (expand-owned-module-with-origins (read-string source filename) filename macro-context))
+           (forms (get expansion :forms)))
+      (analyze-module forms filename)
+      (js-object :program (lower-owned-module forms filename) :macroOrigins (get expansion :macroOrigins))))
   (defun evaluation-object-field
     (value key fallback)
     (if (js-call globalThis.Object :hasOwn value key) (get value key) fallback))
@@ -390,16 +399,22 @@
     (source entries filename &optional macro-context)
     (let*
       ((read-forms (read-string source filename))
-        (expanded-forms (expand-module read-forms filename macro-context)))
+        (expanded-forms (expand-owned-module read-forms filename macro-context)))
+      (setq read-forms nil)
       (analyze-module expanded-forms filename)
-      (lower-module (select-portable-module expanded-forms entries filename) filename)))
+      (let ((selected (select-portable-module expanded-forms entries filename)))
+        (setq expanded-forms nil)
+        (lower-owned-module selected filename))))
   (defun compile-project-portable-ir-string
     (source entries filename &optional macro-context)
     (let*
       ((read-forms (read-string source filename))
-        (expanded-forms (expand-module read-forms filename macro-context)))
+        (expanded-forms (expand-owned-module read-forms filename macro-context)))
+      (setq read-forms nil)
       (analyze-module expanded-forms filename)
-      (lower-module (select-portable-module expanded-forms entries filename t) filename)))
+      (let ((selected (select-portable-module expanded-forms entries filename t)))
+        (setq expanded-forms nil)
+        (lower-owned-module selected filename))))
   (defun emit-ir-string (program) (emit-module program))
   (defun serialize-ir-program (program) (serialize-program program))
   (defun deserialize-ir-program (source) (deserialize-program source))
@@ -425,6 +440,7 @@
       (or source-name filename "<string>")))
   (export
     compile-ir-string
+    compile-ir-string-with-origins
     compile-project-portable-ir-string
     compile-string
     compile-portable-ir-string

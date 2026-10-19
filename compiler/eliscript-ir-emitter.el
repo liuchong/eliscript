@@ -17,6 +17,123 @@
 
 (defvar eliscript-ir-emitter--record-source-spans nil)
 (defvar eliscript-ir-emitter--binding-temporaries nil)
+(defvar eliscript-ir-emitter--tdz-state nil)
+(defvar eliscript-ir-emitter--await-cache nil
+  "Node-identity await results owned by one module emission, including nil.")
+(defun eliscript-ir-emitter--tdz-scope (parent)
+  (cons (make-hash-table :test #'equal) parent))
+(defun eliscript-ir-emitter--tdz-find (scope name)
+  (let ((missing (make-symbol "missing")) record found)
+    (while (and scope (not found))
+      (setq record (gethash name (car scope) missing))
+      (if (eq record missing) (setq scope (cdr scope)) (setq found t)))
+    (when found record)))
+(defun eliscript-ir-emitter--tdz-pattern (node scope)
+  (let ((pending (list node)))
+    (while pending
+      (let* ((item (pop pending)) (kind (eliscript-ir-node-kind item))
+             (children (eliscript-ir-node-children item)))
+        (pcase kind
+          ('binding-name (puthash (eliscript-emitter--binding-name (eliscript-ir-node-value item)) nil (car scope)))
+          ('map-binding-entry (push (car children) pending))
+          ((or 'array-binding-pattern 'map-binding-pattern)
+           (dolist (child (reverse children)) (push child pending))))))))
+
+(defun eliscript-ir-emitter--tdz-bind (node scope)
+  (if (eliscript-ir-property node :pattern)
+      (eliscript-ir-emitter--tdz-pattern (car (eliscript-ir-node-children node)) scope)
+    (puthash (eliscript-emitter--binding-name (eliscript-ir-node-value node)) nil (car scope))))
+(defun eliscript-ir-emitter--tdz-pattern-defaults (node scope state)
+  (eliscript-ir-emitter--tdz-walk node scope state (list (list :pattern-defaults node scope))))
+
+(defun eliscript-ir-emitter--tdz-defaults (node scope state)
+  (when (eliscript-ir-property node :pattern)
+    (eliscript-ir-emitter--tdz-pattern-defaults (car (eliscript-ir-node-children node)) scope state)))
+(defun eliscript-ir-emitter--tdz-predeclare (nodes scope state)
+  (let ((pending (list nodes)))
+    (while pending
+      (let ((siblings (pop pending)))
+        (when siblings
+          (let ((node (car siblings)))
+            (push (cdr siblings) pending)
+            (pcase (eliscript-ir-node-kind node)
+              ('module-declaration (push (eliscript-ir-node-children node) pending))
+              ('variable-declaration
+               (let ((record (list :index (length (plist-get state :variables)) :name (eliscript-ir-node-value node)
+                                   :mutable (eliscript-ir-property node :mutable))))
+                 (setf (plist-get state :variables) (append (plist-get state :variables) (list record)))
+                 (puthash node record (plist-get state :declarations))
+                 (puthash (eliscript-emitter--binding-name (eliscript-ir-node-value node)) record (car scope))))
+              ('function-declaration (puthash (eliscript-emitter--binding-name (eliscript-ir-node-value node)) nil (car scope)))
+              ('import-declaration
+               (dolist (child (eliscript-ir-node-children node))
+                 (puthash (eliscript-emitter--binding-name (eliscript-ir-node-value child)) nil (car scope)))))))))))
+
+(defun eliscript-ir-emitter--tdz-walk (node scope state &optional jobs)
+  "Resolve TDZ references in source order with explicit scope actions."
+  (let ((pending (or jobs (list (list :walk node scope)))))
+    (while pending
+      (let* ((job (pop pending)) (item (nth 1 job)) (current (nth 2 job))
+             (kind (eliscript-ir-node-kind item)) (children (eliscript-ir-node-children item)) tasks)
+        (pcase (car job)
+          (:bind (eliscript-ir-emitter--tdz-bind item current))
+          (:defaults
+           (when (eliscript-ir-property item :pattern)
+             (push (list :pattern-defaults (car children) current) pending)))
+          (:pattern-defaults
+           (pcase kind
+             ('map-binding-entry
+              (setq tasks (append (and (> (length children) 2) (list (list :walk (nth 2 children) current)))
+                                  (list (list :pattern-defaults (car children) current)))))
+             ((or 'array-binding-pattern 'map-binding-pattern)
+              (setq tasks (mapcar (lambda (child) (list :pattern-defaults child current)) children)))))
+          (:walk
+           (pcase kind
+             ((or 'reference 'assignment-pair)
+              (let ((record (eliscript-ir-emitter--tdz-find current (eliscript-emitter--tdz-root (eliscript-ir-node-value item)))))
+                (when record (puthash item record (plist-get state (if (eq kind 'reference) :reads :writes)))))
+              (setq tasks (mapcar (lambda (child) (list :walk child current)) children)))
+             ((or 'function-declaration 'function-expression)
+              (let* ((count (eliscript-ir-property item :parameter-count)) (parameters (seq-take children count))
+                     (child (eliscript-ir-emitter--tdz-scope current)))
+                (setq tasks (append (mapcar (lambda (parameter) (list :defaults parameter current)) parameters)
+                                    (mapcar (lambda (parameter) (list :bind parameter child)) parameters)
+                                    (mapcar (lambda (body) (list :walk body child)) (nthcdr count children))))))
+             ((or 'lexical-bindings 'binding-loop)
+              (let* ((count (eliscript-ir-property item :binding-count)) (bindings (seq-take children count))
+                     (sequential (eliscript-ir-property item :sequential)) (child (eliscript-ir-emitter--tdz-scope current))
+                     reversed)
+                (dolist (binding bindings)
+                  (let ((outer (if sequential child current))
+                        (values (if (eliscript-ir-property binding :pattern) (cdr (eliscript-ir-node-children binding))
+                                  (eliscript-ir-node-children binding))))
+                    (dolist (value values) (push (list :walk value outer) reversed))
+                    (push (list :defaults binding outer) reversed)
+                    (when sequential (push (list :bind binding child) reversed))))
+                (unless sequential (dolist (binding bindings) (push (list :bind binding child) reversed)))
+                (dolist (body (nthcdr count children)) (push (list :walk body child) reversed))
+                (setq tasks (nreverse reversed))))
+             ('catch-clause
+              (let ((child (eliscript-ir-emitter--tdz-scope current)))
+                (setq tasks (append (list (list :defaults (car children) current) (list :bind (car children) child))
+                                    (mapcar (lambda (body) (list :walk body child)) (cdr children))))))
+             ((or 'quoted-literal 'raw-javascript 'import-declaration) nil)
+             (_ (setq tasks (mapcar (lambda (child) (list :walk child current)) children))))))
+        (dolist (task (reverse tasks)) (push task pending))))))
+
+(defun eliscript-ir-emitter--tdz-prepare (program)
+  (let ((state (list :variables nil :declarations (make-hash-table :test #'eq)
+                     :reads (make-hash-table :test #'eq) :writes (make-hash-table :test #'eq)))
+        (scope (eliscript-ir-emitter--tdz-scope nil)))
+    (eliscript-ir-emitter--tdz-predeclare (eliscript-ir-program-body program) scope state)
+    ;; No lookup can resolve to a tracked module variable in this case. In
+    ;; particular a function-only runtime needs no second walk of every body.
+    (when (plist-get state :variables)
+      (dolist (node (eliscript-ir-program-body program))
+        (eliscript-ir-emitter--tdz-walk node scope state)))
+    state))
+
+
 
 (defconst eliscript-ir-emitter--literal-runtime-import
   "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, queue as __eliscript_queue, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n"
@@ -229,9 +346,12 @@
 (defun eliscript-ir-emitter--emit-callee (node)
   "Emit NODE in a position where ECMAScript expects a callable value."
   (let ((output (eliscript-ir-emitter-emit-expression node)))
-    (if (eq (eliscript-ir-node-kind node) 'reference)
-        output
-      (format "(%s)" output))))
+    (cond
+     ((and (eq (eliscript-ir-node-kind node) 'reference)
+           (eliscript-emitter--qualified-apply-callee-p (eliscript-ir-node-value node)))
+      (format "__eliscript_at(%s, \"apply\")" (substring output 0 -6)))
+     ((eq (eliscript-ir-node-kind node) 'reference) output)
+     (t (format "(%s)" output)))))
 
 (defun eliscript-ir-emitter--boolean-p (node)
   "Whether NODE is proven to produce a JavaScript boolean."
@@ -334,28 +454,137 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
 
 (defun eliscript-ir-emitter--emit-context-cond (clauses returning)
   "Emit conditional CLAUSES with discarded or RETURNING values."
-  (if (null clauses)
-      (if returning "return null;" "")
-    (let* ((clause (car clauses))
-           (nodes (eliscript-ir-emitter--children clause))
-           (test (car nodes))
-           (body (cdr nodes)))
-      (eliscript-ir-emitter--locate
-       clause
-       (if (and (eq (eliscript-ir-node-kind test) 'literal)
-                (eq (eliscript-ir-node-value test) t))
-           (if returning (eliscript-ir-emitter--emit-returning-body body)
-             (eliscript-ir-emitter--emit-statement-body body))
-         (concat "if (" (eliscript-ir-emitter--emit-test test) ") {\n"
-                 (eliscript-emitter--indent
-                  (if returning (eliscript-ir-emitter--emit-returning-body body)
-                    (eliscript-ir-emitter--emit-statement-body body)))
-                 "\n} else {\n"
-                 (eliscript-emitter--indent
-                  (eliscript-ir-emitter--emit-context-cond (cdr clauses) returning))
-                 "\n}"))))))
+  (let ((result (if returning "return null;" "")) frames)
+    ;; Emit tests and bodies in source order, then assemble their already
+    ;; emitted tails without consuming Lisp depth for sibling clauses.
+    (while clauses
+      (let* ((clause (pop clauses))
+             (nodes (eliscript-ir-emitter--children clause))
+             (test (car nodes)) (body (cdr nodes)))
+        (if (and (eq (eliscript-ir-node-kind test) 'literal)
+                 (eq (eliscript-ir-node-value test) t))
+            (setq result (eliscript-ir-emitter--locate
+                          clause
+                          (if returning (eliscript-ir-emitter--emit-returning-body body)
+                            (eliscript-ir-emitter--emit-statement-body body)))
+                  clauses nil)
+          (let ((condition (eliscript-ir-emitter--emit-test test))
+                (consequent (if returning (eliscript-ir-emitter--emit-returning-body body)
+                              (eliscript-ir-emitter--emit-statement-body body))))
+            (push (list clause condition consequent) frames)))))
+    (dolist (frame frames)
+      (setq result
+            (eliscript-ir-emitter--locate
+             (nth 0 frame)
+             (concat "if (" (nth 1 frame) ") {\n"
+                     (eliscript-emitter--indent (nth 2 frame))
+                     "\n} else {\n" (eliscript-emitter--indent result) "\n}"))))
+    result))
 
 (defun eliscript-ir-emitter--emit-context (node returning)
+  "Emit NODE with explicit continuations for ordinary conditional trees."
+  (if (and (memq (eliscript-ir-node-kind node) '(conditional lexical-bindings sequence))
+           (not (eliscript-ir-emitter--contains-await-p node)))
+      (eliscript-emitter--run-depth-plan #'eliscript-ir-emitter--depth-plan :context node returning)
+    (eliscript-ir-emitter--emit-context-recursive node returning)))
+
+(defun eliscript-ir-emitter--depth-plan (mode value options)
+  "Describe the next ordinary IR emission step, preserving all child order."
+  (pcase mode
+    (:value (list :value value))
+    (:expression
+     (if (and (eliscript-ir-node-p value) (eq (eliscript-ir-node-kind value) 'conditional))
+         (let ((children (eliscript-ir-emitter--children value)))
+           (list :children
+                 (list (list :expression (nth 0 children) nil)
+                       (list :expression (nth 1 children) nil)
+                       (if (nth 2 children) (list :expression (nth 2 children) nil)
+                         (list :value "null" nil)))
+                 (lambda (results)
+                   (list :value
+                         (eliscript-ir-emitter--locate
+                          value (format "(%s ? %s : %s)"
+                                        (if (eliscript-ir-emitter--boolean-p (car children)) (nth 0 results)
+                                          (format "__eliscript_truthy(%s)" (nth 0 results)))
+                                        (nth 1 results) (nth 2 results)))))))
+       (list :value (eliscript-ir-emitter--emit-expression-recursive value))))
+    (:body
+     (if (null value) (list :value (if options "return null;" ""))
+       (let ((remaining value) specs)
+         (while remaining
+           (push (list :context (car remaining) (and options (null (cdr remaining)))) specs)
+           (setq remaining (cdr remaining)))
+         (list :children (nreverse specs)
+               (lambda (results) (list :value (string-join results "\n")))))))
+    (:initializer
+     (let ((initializer (eliscript-ir-emitter--binding-initializer value)))
+       (if initializer
+           (list :children (list (list :expression initializer nil))
+                 (lambda (results) (list :value (car results))))
+         (list :value (eliscript-ir-emitter--binding-default-value value)))))
+    (:declaration
+     (let ((name (eliscript-ir-emitter--emit-binding-target value)))
+       (list :children (list (list :initializer value nil))
+             (lambda (results) (list :value (concat "let " name " = " (car results) ";"))))))
+    (:context-let
+     (let ((bindings (nth 0 value)) (body (nth 1 value)) (sequential (nth 2 value)))
+       (cond
+        ((null bindings) (list :children (list (list :body body options))
+                               (lambda (results) (list :value (car results)))))
+        ((and sequential (eliscript-ir-emitter--context-sequential-safe-p bindings))
+         (list :children (append (mapcar (lambda (binding) (list :declaration binding nil)) bindings)
+                                 (list (list :body body options)))
+               (lambda (results)
+                 (list :value (concat "{\n" (eliscript-emitter--indent (string-join results "\n")) "\n}")))))
+        (t
+         (let* ((group (if sequential (list (car bindings)) bindings))
+                (temporaries (mapcar (lambda (_binding) (eliscript-emitter--fresh-name)) group)))
+           (list :children (mapcar (lambda (binding) (list :initializer binding nil)) group)
+                 (lambda (results)
+                   (let ((initializers (cl-mapcar (lambda (temporary text) (format "const %s = %s;" temporary text)) temporaries results))
+                         (declarations (cl-mapcar (lambda (binding temporary)
+                                                  (format "let %s = %s;" (eliscript-ir-emitter--emit-binding-target binding) temporary)) group temporaries)))
+                     (list :children (list (list :context-let (list (and sequential (cdr bindings)) body sequential) options))
+                           (lambda (tail)
+                             (list :value
+                                   (concat "{\n" (eliscript-emitter--indent
+                                                   (string-join
+                                                    (append initializers
+                                                            (list (concat "{\n" (eliscript-emitter--indent
+                                                                                 (string-join (append declarations tail) "\n")) "\n}"))) "\n")) "\n}"))))))))))))
+    (:context
+     (let ((kind (eliscript-ir-node-kind value)) (children (eliscript-ir-emitter--children value)))
+       (cond
+        ((eliscript-ir-emitter--contains-await-p value)
+         (list :value (eliscript-ir-emitter--emit-context-recursive value options)))
+        ((eq kind 'sequence)
+         (list :children (list (list :body children options))
+               (lambda (results) (list :value (eliscript-ir-emitter--locate value (car results))))))
+        ((eq kind 'conditional)
+         (list :children
+               (list (list :expression (nth 0 children) nil)
+                     (list :context (nth 1 children) options)
+                     (if (nth 2 children) (list :context (nth 2 children) options)
+                       (list :value (if options "return null;" "") nil)))
+               (lambda (results)
+                 (list :value
+                       (eliscript-ir-emitter--locate
+                        value
+                        (concat "if (" (if (eliscript-ir-emitter--boolean-p (car children)) (nth 0 results)
+                                          (format "__eliscript_truthy(%s)" (nth 0 results))) ") {\n"
+                                (eliscript-emitter--indent (nth 1 results)) "\n}"
+                                (if (or options (nth 2 children))
+                                    (concat " else {\n" (eliscript-emitter--indent (nth 2 results)) "\n}") "")))))))
+        ((and (eq kind 'lexical-bindings)
+              (cl-every (lambda (binding) (not (eliscript-ir-property binding :pattern)))
+                        (seq-take children (eliscript-ir-property value :binding-count))))
+         (let ((split (eliscript-ir-emitter--split-counted-children value :binding-count)))
+           (list :children (list (list :context-let (list (car split) (cadr split) (eliscript-ir-property value :sequential)) options))
+                 (lambda (results) (list :value (eliscript-ir-emitter--locate value (car results)))))))
+        (t (list :value (eliscript-ir-emitter--emit-context-recursive value options))))))
+    (_ (error "unknown IR emission continuation mode: %S" mode))))
+
+(defun eliscript-ir-emitter--emit-context-recursive (node returning)
   "Emit NODE with its value discarded or RETURNING from the current function."
   (let ((kind (eliscript-ir-node-kind node))
         (nodes (eliscript-ir-emitter--children node)))
@@ -422,19 +651,73 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
   (mapconcat (lambda (node) (eliscript-ir-emitter--emit-context node nil))
              nodes "\n"))
 
+(defun eliscript-ir-emitter--some-node (value predicate excluded)
+  "Search VALUE in preorder, pruning EXCLUDED kinds after the predicate."
+  (let ((pending (list value)) found)
+    (while (and pending (not found))
+      (let ((item (pop pending)))
+        (cond
+         ((eliscript-ir-node-p item)
+          (setq found (funcall predicate item))
+          (unless (or found (memq (eliscript-ir-node-kind item) excluded))
+            (push (eliscript-ir-emitter--children item) pending)))
+         ((consp item)
+          (push (cdr item) pending) (push (car item) pending)))))
+    found))
+
+(defun eliscript-ir-emitter--walk-program (program visitor)
+  "Call VISITOR in the original IR preorder using explicit sibling frames."
+  (unless (eliscript-ir-program-p program) (error "Expected an IR program: %S" program))
+  (let ((pending (list (eliscript-ir-program-body program))))
+    (while pending
+      (let ((siblings (pop pending)))
+        (when siblings
+          (let ((node (car siblings)))
+            (push (cdr siblings) pending)
+            (funcall visitor node)
+            (push (eliscript-ir-node-children node) pending)))))))
+
+(defun eliscript-ir-emitter--cached-await-p (value cache)
+  "Find await in VALUE, remembering completed node results in CACHE.
+
+The explicit continuations retain preorder short circuiting: a later sibling
+is never inspected after an earlier await, and a nested function is pruned.
+Only IR nodes are cached; list tails remain ordinary sibling continuations."
+  (let ((pending (list (cons :visit value)))
+        (missing (make-symbol "uncomputed-await"))
+        results)
+    (while pending
+      (let* ((task (pop pending)) (item (cdr task)))
+        (pcase (car task)
+          (:visit
+           (cond
+            ((eliscript-ir-node-p item)
+             (let ((known (gethash item cache missing)))
+               (if (not (eq known missing))
+                   (push known results)
+                 (pcase (eliscript-ir-node-kind item)
+                   ('await-expression (puthash item t cache) (push t results))
+                   ('function-expression (puthash item nil cache) (push nil results))
+                   (_
+                    (push (cons :cache item) pending)
+                    (push (cons :visit (eliscript-ir-emitter--children item)) pending))))))
+            ((consp item)
+             (push (cons :tail (cdr item)) pending)
+             (push (cons :visit (car item)) pending))
+            (t (push nil results))))
+          (:tail
+           (unless (car results)
+             (pop results)
+             (push (cons :visit item) pending)))
+          (:cache (puthash item (car results) cache)))))
+    (car results)))
+
 (defun eliscript-ir-emitter--contains-await-p (value)
-  "Return non-nil when VALUE contains `await' in the current function."
-  (cond
-   ((eliscript-ir-node-p value)
-    (let ((kind (eliscript-ir-node-kind value)))
-      (cond
-       ((eq kind 'await-expression) t)
-       ((eq kind 'function-expression) nil)
-       (t (cl-some #'eliscript-ir-emitter--contains-await-p
-                   (eliscript-ir-emitter--children value))))))
-   ((consp value)
-    (cl-some #'eliscript-ir-emitter--contains-await-p value))
-   (t nil)))
+  "Find await in the current function without recursive host calls."
+  (if eliscript-ir-emitter--await-cache
+      (eliscript-ir-emitter--cached-await-p value eliscript-ir-emitter--await-cache)
+    (eliscript-ir-emitter--some-node value
+      (lambda (node) (eq (eliscript-ir-node-kind node) 'await-expression)) '(function-expression))))
 
 (defun eliscript-ir-emitter--emit-iife
     (parameters body arguments asynchronous)
@@ -478,25 +761,11 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
              (eliscript-ir-emitter--emit-function-body parameters body)))))
 
 (defun eliscript-ir-emitter--contains-recur-target-p (value target-kind)
-  "Return non-nil when VALUE recurs to TARGET-KIND in this function."
-  (cond
-   ((eliscript-ir-node-p value)
-    (let ((kind (eliscript-ir-node-kind value)))
-      (cond
-       ((eq kind 'recur)
-        (eq (eliscript-ir-property value :target-kind) target-kind))
-       ((eq kind 'function-expression) nil)
-       (t
-        (cl-some
-         (lambda (child)
-           (eliscript-ir-emitter--contains-recur-target-p child target-kind))
-         (eliscript-ir-emitter--children value))))))
-   ((consp value)
-    (cl-some
-     (lambda (child)
-       (eliscript-ir-emitter--contains-recur-target-p child target-kind))
-     value))
-   (t nil)))
+  "Find a current-function recur without entering nested function bodies."
+  (eliscript-ir-emitter--some-node value
+    (lambda (node) (and (eq (eliscript-ir-node-kind node) 'recur)
+                        (eq (eliscript-ir-property node :target-kind) target-kind)))
+    '(recur function-expression)))
 
 (defun eliscript-ir-emitter--emit-rebinding-target (binding temporary)
   "Assign TEMPORARY to mutable BINDING, including a destructuring target."
@@ -551,24 +820,26 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
 
 (defun eliscript-ir-emitter--emit-tail-cond (clauses target)
   "Emit conditional CLAUSES in recur-aware tail position for TARGET."
-  (if (null clauses)
-      "return null;"
-    (let* ((clause (car clauses))
-           (children (eliscript-ir-emitter--children clause))
-           (test (car children))
-           (body (cdr children)))
-      (eliscript-ir-emitter--locate
-       clause
-       (if (and (eq (eliscript-ir-node-kind test) 'literal)
-                (eq (eliscript-ir-node-value test) t))
-           (eliscript-ir-emitter--emit-tail-body body target)
-         (format "if (__eliscript_truthy(%s)) {\n%s\n} else {\n%s\n}"
-                 (eliscript-ir-emitter-emit-expression test)
-                 (eliscript-emitter--indent
-                  (eliscript-ir-emitter--emit-tail-body body target))
-                 (eliscript-emitter--indent
-                  (eliscript-ir-emitter--emit-tail-cond
-                   (cdr clauses) target))))))))
+  (let ((result "return null;") frames)
+    (while clauses
+      (let* ((clause (pop clauses))
+             (children (eliscript-ir-emitter--children clause))
+             (test (car children)) (body (cdr children)))
+        (if (and (eq (eliscript-ir-node-kind test) 'literal)
+                 (eq (eliscript-ir-node-value test) t))
+            (setq result (eliscript-ir-emitter--locate
+                          clause (eliscript-ir-emitter--emit-tail-body body target))
+                  clauses nil)
+          (let ((condition (eliscript-ir-emitter-emit-expression test))
+                (consequent (eliscript-ir-emitter--emit-tail-body body target)))
+            (push (list clause condition consequent) frames)))))
+    (dolist (frame frames)
+      (setq result (eliscript-ir-emitter--locate
+                    (nth 0 frame)
+                    (format "if (__eliscript_truthy(%s)) {\n%s\n} else {\n%s\n}"
+                            (nth 1 frame) (eliscript-emitter--indent (nth 2 frame))
+                            (eliscript-emitter--indent result)))))
+    result))
 
 (defun eliscript-ir-emitter--emit-tail-let (node target)
   "Emit lexical binding NODE in recur-aware tail position for TARGET."
@@ -624,27 +895,14 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
 
 (defun eliscript-ir-emitter--emit-tail-short-circuit (nodes kind target)
   "Emit recur-aware short-circuit NODES of KIND for TARGET."
-  (cond
-   ((null nodes) (format "return %s;" (if (eq kind 'and) "true" "null")))
-   ((null (cdr nodes))
-    (eliscript-ir-emitter--emit-tail-node (car nodes) target))
-   (t
-    (let ((temporary (eliscript-emitter--fresh-name)))
-      (format
-       "const %s = %s;\nif (__eliscript_truthy(%s)) {\n%s\n} else {\n%s\n}"
-       temporary
-       (eliscript-ir-emitter-emit-expression (car nodes))
-       temporary
-       (eliscript-emitter--indent
-        (if (eq kind 'and)
-            (eliscript-ir-emitter--emit-tail-short-circuit
-             (cdr nodes) kind target)
-          (format "return %s;" temporary)))
-       (eliscript-emitter--indent
-        (if (eq kind 'and)
-            (format "return %s;" temporary)
-          (eliscript-ir-emitter--emit-tail-short-circuit
-           (cdr nodes) kind target))))))))
+  (let (frames result)
+    (while (cdr nodes)
+      (let ((temporary (eliscript-emitter--fresh-name))
+            (first (eliscript-ir-emitter-emit-expression (pop nodes))))
+        (push (list temporary first) frames)))
+    (setq result (if nodes (eliscript-ir-emitter--emit-tail-node (car nodes) target)
+                   (format "return %s;" (if (eq kind 'and) "true" "null"))))
+    (eliscript-emitter--assemble-tail-short-circuit frames kind result)))
 
 (defun eliscript-ir-emitter--emit-tail-node (node target)
   "Emit NODE in a tail position controlled by TARGET."
@@ -686,43 +944,13 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
                ";")))))
 
 (defun eliscript-ir-emitter--closed-scalar-loop-p (names body)
-  "Prove a scalar loop directly over IR, without a reader-form bridge."
-  (let (loop-found)
-    (cl-labels
-        ((walk (node scope)
-           (if (null node) t
-             (let ((kind (eliscript-ir-node-kind node))
-                 (value (eliscript-ir-node-value node))
-                 (children (eliscript-ir-emitter--children node)))
-             (pcase kind
-               ('literal (or (numberp value) (memq value '(nil t false undefined))))
-               ('reference (memq value scope))
-               ('lexical-bindings
-                (pcase-let ((`(,bindings ,forms)
-                             (eliscript-ir-emitter--split-counted-children node :binding-count)))
-                  (let ((inner scope) (valid t))
-                    (dolist (binding bindings)
-                      (unless (and (eq (eliscript-ir-node-kind binding) 'lexical-binding)
-                                   (not (eliscript-ir-property binding :pattern))
-                                   (walk (eliscript-ir-emitter--binding-initializer binding)
-                                         (if (eliscript-ir-property node :sequential) inner scope)))
-                        (setq valid nil))
-                      (push (eliscript-ir-node-value binding) inner))
-                    (and valid (cl-every (lambda (child) (walk child inner)) forms)))))
-               ('assignment
-                (cl-every (lambda (pair)
-                            (and (eq (eliscript-ir-node-kind pair) 'assignment-pair)
-                                 (memq (eliscript-ir-node-value pair) scope)
-                                 (walk (car (eliscript-ir-emitter--children pair)) scope))) children))
-               ((or 'intrinsic 'conditional 'conditional-sugar 'short-circuit 'sequence 'loop)
-                (when (eq kind 'loop) (setq loop-found t))
-                (and (or (not (eq kind 'intrinsic))
-                         (memq value '(+ - * / % mod 1+ 1- = eq < <= > >= /= not= not)))
-                     (or (not (and (eq kind 'intrinsic) (memq value '(< <= > >=))))
-                         (= (length children) 2))
-                     (cl-every (lambda (child) (walk child scope)) children)))
-               (_ nil))))))
-      (and names (cl-every (lambda (node) (walk node names)) body) loop-found))))
+  "Prove the original scalar IR subset with explicit scope continuations."
+  (when names
+    (let* ((state (list nil))
+           (valid (eliscript-emitter--run-depth-plan
+                   (lambda (mode value context) (eliscript-emitter--scalar-proof-plan 'ir mode value context))
+                   :every body (list names state))))
+      (and valid (car state)))))
 
 (defun eliscript-ir-emitter--emit-function-body (parameters body)
   "Emit a guarded Number version only for proved closed scalar loops."
@@ -780,21 +1008,23 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
 
 (defun eliscript-ir-emitter--emit-cond (clauses)
   "Emit nested conditional expressions for IR CLAUSES."
-  (if (null clauses)
-      "null"
-    (let* ((clause (car clauses))
-           (children (eliscript-ir-emitter--children clause))
-           (test (car children))
-           (body (cdr children)))
-      (eliscript-ir-emitter--locate
-       clause
-       (if (and (eq (eliscript-ir-node-kind test) 'literal)
-                (eq (eliscript-ir-node-value test) t))
-           (eliscript-ir-emitter--emit-do body)
-         (format "(%s ? %s : %s)"
-                 (eliscript-ir-emitter--emit-test test)
-                 (eliscript-ir-emitter--emit-do body)
-                 (eliscript-ir-emitter--emit-cond (cdr clauses))))))))
+  (let ((result "null") frames)
+    (while clauses
+      (let* ((clause (pop clauses))
+             (children (eliscript-ir-emitter--children clause))
+             (test (car children)) (body (cdr children)))
+        (if (and (eq (eliscript-ir-node-kind test) 'literal)
+                 (eq (eliscript-ir-node-value test) t))
+            (setq result (eliscript-ir-emitter--locate
+                          clause (eliscript-ir-emitter--emit-do body))
+                  clauses nil)
+          (let ((condition (eliscript-ir-emitter--emit-test test))
+                (consequent (eliscript-ir-emitter--emit-do body)))
+            (push (list clause condition consequent) frames)))))
+    (dolist (frame frames)
+      (setq result (eliscript-ir-emitter--locate
+                    (nth 0 frame) (format "(%s ? %s : %s)" (nth 1 frame) (nth 2 frame) result))))
+    result))
 
 (defun eliscript-ir-emitter--emit-throw (node)
   "Emit throw expression NODE."
@@ -933,10 +1163,13 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
            (lambda (pair)
              (eliscript-ir-emitter--locate
               pair
-              (format "(%s = %s)"
-                      (eliscript-ir-emitter--emit-binding-name pair)
-                      (eliscript-ir-emitter-emit-expression
-                       (car (eliscript-ir-emitter--children pair))))))
+              (let ((record (and eliscript-ir-emitter--tdz-state
+                              (gethash pair (plist-get eliscript-ir-emitter--tdz-state :writes))))
+                    (value (eliscript-ir-emitter-emit-expression
+                            (car (eliscript-ir-emitter--children pair)))))
+                (if record
+                    (eliscript-emitter--tdz-write-text record (eliscript-ir-node-value pair) value)
+                  (format "(%s = %s)" (eliscript-ir-emitter--emit-binding-name pair) value)))))
            pairs)))
     (if (eq operator 'set!)
         (car assignments)
@@ -992,31 +1225,33 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
 
 (defun eliscript-ir-emitter--emit-short-circuit (nodes kind)
   "Emit Lisp-style short-circuit NODES for KIND."
-  (cond
-   ((null nodes) (if (eq kind 'and) "true" "null"))
-   ((null (cdr nodes))
-    (eliscript-ir-emitter-emit-expression (car nodes)))
-   ((and (cl-every #'eliscript-ir-emitter--boolean-p nodes)
-         (not (eliscript-ir-emitter--contains-await-p nodes)))
-    (format "(%s)"
-            (mapconcat #'eliscript-ir-emitter-emit-expression nodes
-                       (if (eq kind 'and) " && " " || "))))
-   (t
-    (let ((temporary (eliscript-emitter--fresh-name))
-          (first (eliscript-ir-emitter-emit-expression (car nodes)))
-          (rest (eliscript-ir-emitter--emit-short-circuit (cdr nodes) kind)))
-      (if (eliscript-ir-emitter--contains-await-p (cdr nodes))
-          (format
-           "(await (async (%s) => (__eliscript_truthy(%s) ? %s : %s))(%s))"
-           temporary temporary
-           (if (eq kind 'and) rest temporary)
-           (if (eq kind 'and) temporary rest)
-           first)
-        (format "((%s) => (__eliscript_truthy(%s) ? %s : %s))(%s)"
-                temporary temporary
-                (if (eq kind 'and) rest temporary)
-                (if (eq kind 'and) temporary rest)
-                first))))))
+  (let (frames result done)
+    (while (not done)
+      (cond
+       ((null nodes) (setq result (if (eq kind 'and) "true" "null") done t))
+       ((null (cdr nodes))
+        (setq result (eliscript-ir-emitter-emit-expression (car nodes)) done t))
+       ((and (cl-every #'eliscript-ir-emitter--boolean-p nodes)
+             (not (eliscript-ir-emitter--contains-await-p nodes)))
+        (setq result (format "(%s)" (mapconcat #'eliscript-ir-emitter-emit-expression nodes
+                                               (if (eq kind 'and) " && " " || ")))
+              done t))
+       (t
+        (let ((temporary (eliscript-emitter--fresh-name))
+              (first (eliscript-ir-emitter-emit-expression (car nodes))))
+          (setq nodes (cdr nodes))
+          (push (list temporary first nodes) frames)))))
+    (dolist (frame frames)
+      (let ((temporary (car frame)))
+        (setq result
+              (format (if (eliscript-ir-emitter--contains-await-p (nth 2 frame))
+                          "(await (async (%s) => (__eliscript_truthy(%s) ? %s : %s))(%s))"
+                        "((%s) => (__eliscript_truthy(%s) ? %s : %s))(%s)")
+                      temporary temporary
+                      (if (eq kind 'and) result temporary)
+                      (if (eq kind 'and) temporary result)
+                      (cadr frame)))))
+    result))
 
 (defun eliscript-ir-emitter--emit-infix (name nodes operator &optional minimum)
   "Emit NODES joined by OPERATOR for intrinsic NAME."
@@ -1311,12 +1546,7 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
   (cond
    ((null value) "null")
    ((eq value t) "true")
-   ((numberp value)
-    (let ((text (number-to-string value)))
-      (when (string-match-p "INF\\|NaN" text)
-        (eliscript-emitter--fail
-         "non-finite numbers are not supported: %S" value))
-      text))
+   ((numberp value) (eliscript-emitter--number-text value))
    ((stringp value) (eliscript-emitter--json-string value))
    ((keywordp value)
     (format "__eliscript_keyword(%s)"
@@ -1327,6 +1557,12 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
    (t (eliscript-emitter--fail "unsupported IR literal: %S" value))))
 
 (defun eliscript-ir-emitter-emit-expression (node)
+  "Emit expression NODE with explicit continuations for conditional branches."
+  (if (and (eliscript-ir-node-p node) (eq (eliscript-ir-node-kind node) 'conditional))
+      (eliscript-emitter--run-depth-plan #'eliscript-ir-emitter--depth-plan :expression node nil)
+    (eliscript-ir-emitter--emit-expression-recursive node)))
+
+(defun eliscript-ir-emitter--emit-expression-recursive (node)
   "Emit expression IR NODE as ECMAScript."
   (unless (eliscript-ir-node-p node)
     (eliscript-emitter--fail "expected an IR expression node: %S" node))
@@ -1338,7 +1574,9 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
       ('literal (eliscript-ir-emitter--emit-literal
                  (eliscript-ir-node-value node)))
       ('reference
-       (eliscript-emitter--reference-name (eliscript-ir-node-value node)))
+       (eliscript-emitter--tdz-read-text
+        (and eliscript-ir-emitter--tdz-state (gethash node (plist-get eliscript-ir-emitter--tdz-state :reads)))
+        (eliscript-ir-node-value node)))
       ('array-literal
        (format "[%s]" (eliscript-ir-emitter--emit-arguments children)))
       ('persistent-list-literal
@@ -1487,13 +1725,14 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
        (mapconcat #'eliscript-ir-emitter-emit-top-level children "\n"))
       ('import-declaration (eliscript-ir-emitter--emit-import node))
       ('variable-declaration
-       (format "%s %s = %s;"
-               (if (eliscript-ir-property node :mutable) "let" "const")
-               (eliscript-emitter--binding-name
-                (eliscript-ir-node-value node))
-               (if children
-                   (eliscript-ir-emitter-emit-expression (car children))
-                 "null")))
+       (concat
+        (format "%s %s = %s;"
+                (if (eliscript-ir-property node :mutable) "let" "const")
+                (eliscript-emitter--binding-name (eliscript-ir-node-value node))
+                (if children (eliscript-ir-emitter-emit-expression (car children)) "null"))
+        (let ((record (and eliscript-ir-emitter--tdz-state
+                       (gethash node (plist-get eliscript-ir-emitter--tdz-state :declarations)))))
+          (when record (concat "\n" (eliscript-emitter--tdz-ready-name record) " = true;")))))
       ('function-declaration
        (pcase-let ((`(,parameters ,body)
                     (eliscript-ir-emitter--split-counted-children
@@ -1545,24 +1784,28 @@ JavaScript property or tag string rather than an Eliscript value."
         (eliscript-ir-emitter--node-uses-literal-runtime-p child))))
 
 (defun eliscript-ir-emitter--node-uses-literal-runtime-p (node)
-  "Return non-nil when NODE emits a canonical language literal constructor."
-  (let ((kind (eliscript-ir-node-kind node))
-        (children (eliscript-ir-emitter--children node)))
-    (cond
-     ((memq kind '(persistent-list-literal persistent-vector-literal
-                    persistent-map-literal persistent-set-literal
-                    persistent-queue-literal)) t)
-     ((eq kind 'quoted-literal)
-      (eliscript-emitter--quoted-uses-literal-runtime-p
-       (eliscript-ir-node-value node)))
-     ((eliscript-ir-emitter--keyword-literal-p node) t)
-     ((memq kind '(property-read property-write method-call))
-      (eliscript-ir-emitter--children-use-literal-runtime-p children 1))
-     ((and (eq kind 'intrinsic)
-           (memq (eliscript-ir-node-value node)
-                 '(aref object-has? object-assoc)))
-      (eliscript-ir-emitter--children-use-literal-runtime-p children 1))
-     (t (eliscript-ir-emitter--children-use-literal-runtime-p children)))))
+  "Find actual literal constructors, retaining static-key exclusions."
+  (let ((pending (list node)) found)
+    (while (and pending (not found))
+      (let* ((item (pop pending)) (kind (eliscript-ir-node-kind item))
+             (children (eliscript-ir-emitter--children item)))
+        (cond
+         ((memq kind '(persistent-list-literal persistent-vector-literal persistent-map-literal
+                       persistent-set-literal persistent-queue-literal)) (setq found t))
+         ((eq kind 'quoted-literal)
+          (setq found (eliscript-emitter--quoted-uses-literal-runtime-p (eliscript-ir-node-value item))))
+         ((eliscript-ir-emitter--keyword-literal-p item) (setq found t))
+         (t
+          (let ((static (or (memq kind '(property-read property-write method-call))
+                            (and (eq kind 'intrinsic)
+                                 (memq (eliscript-ir-node-value item) '(aref object-has? object-assoc)))))
+                (index 0) selected)
+            (dolist (child children)
+              (unless (and static (= index 1) (eliscript-ir-emitter--keyword-literal-p child))
+                (push child selected))
+              (setq index (1+ index)))
+            (dolist (child selected) (push child pending)))))))
+    found))
 
 (defun eliscript-ir-emitter--emit-module (program)
   "Emit IR PROGRAM, retaining source marks when recording is active."
@@ -1570,6 +1813,10 @@ JavaScript property or tag string rather than an Eliscript value."
     (eliscript-emitter--fail "expected an IR program: %S" program))
   (let ((eliscript-emitter--temporary-counter 0)
         (eliscript-ir-emitter--binding-temporaries nil)
+        ;; IR is immutable during emission. Rechecking each synchronous if/let
+        ;; subtree otherwise repeats the same negative walk at every ancestor.
+        (eliscript-ir-emitter--await-cache (make-hash-table :test #'eq))
+        (eliscript-ir-emitter--tdz-state (eliscript-ir-emitter--tdz-prepare program))
         uses-literal-runtime
         uses-collection-runtime
         uses-binding-runtime
@@ -1580,12 +1827,16 @@ JavaScript property or tag string rather than an Eliscript value."
         uses-numeric-coercion
         uses-imul
         uses-array-text
+        uses-math-runtime
         names-global-root
         portable-functions
         exported-bindings)
-    (eliscript-ir-walk
+    (eliscript-ir-emitter--walk-program
      program
      (lambda (node)
+       (when (and (memq (eliscript-ir-node-kind node) '(reference raw-javascript))
+                  (eliscript-emitter--math-reference-p (eliscript-ir-node-value node)))
+         (setq uses-math-runtime t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (eq (eliscript-ir-node-value node) 'imul32))
          (setq uses-imul t))
@@ -1595,10 +1846,15 @@ JavaScript property or tag string rather than an Eliscript value."
          (setq names-global-root t))
        (when (eq (eliscript-ir-node-kind node) 'map-binding-pattern)
          (setq uses-binding-runtime t))
-       (when (and (eq (eliscript-ir-node-kind node) 'method-call)
-                  (let ((key (nth 1 (eliscript-ir-node-children node))))
-                    (or (not (eq (eliscript-ir-node-kind key) 'literal))
-                        (eliscript-emitter--array-text-key-p (eliscript-ir-node-value key)))))
+       (when (or (and (eq (eliscript-ir-node-kind node) 'method-call)
+                      (let ((key (nth 1 (eliscript-ir-node-children node))))
+                        (or (not (eq (eliscript-ir-node-kind key) 'literal))
+                            (eliscript-emitter--array-text-key-p (eliscript-ir-node-value key)))))
+                 (and (memq (eliscript-ir-node-kind node) '(call invoke apply-call))
+                      (let ((callee (car (eliscript-ir-node-children node))))
+                        (and (eliscript-ir-node-p callee)
+                             (eq (eliscript-ir-node-kind callee) 'reference)
+                             (eliscript-emitter--qualified-apply-callee-p (eliscript-ir-node-value callee))))))
          (setq uses-array-text t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (memq (eliscript-ir-node-value node) '(nth length)))
@@ -1632,6 +1888,14 @@ JavaScript property or tag string rather than an Eliscript value."
     (setq portable-functions (nreverse portable-functions))
     (concat
      "// Generated by Eliscript. Do not edit.\n"
+     (eliscript-emitter--tdz-prologue eliscript-ir-emitter--tdz-state)
+     (if (let ((body (eliscript-ir-program-body program)))
+           (and (= (length body) 1)
+                (eq (eliscript-ir-node-kind (car body)) 'module-declaration)
+                (eliscript-emitter--unicode-capsule-p
+                 (eliscript-ir-program-filename program) (eliscript-ir-node-value (car body)))))
+         "" eliscript-emitter--unicode-runtime-import)
+     (if uses-math-runtime eliscript-emitter--math-runtime-import "")
      (if uses-array-text eliscript-emitter--array-text-import "")
      (if uses-literal-runtime
          eliscript-ir-emitter--literal-runtime-import

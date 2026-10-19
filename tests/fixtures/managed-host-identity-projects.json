@@ -1,0 +1,16 @@
+{
+  "project": {
+    "a.mjs": "(defun token (value) (host-identity-token value)) (defun make () (lambda (value) (host-identity-token value))) (export token make)",
+    "b.mjs": "(defun token (value) (host-identity-token value)) (export token)",
+    "main.mjs": "(import \"./a.mjs\" :as a) (import \"./b.mjs\" :as b) (defconst left a/token) (defconst left-copy a/token) (defconst right b/token) (defconst closure (a/make)) (defun own (value) (host-identity-token value)) (defun encounters (x y) (js-array (left x) (left y) (right y) (right x) (closure x) (own y) (left-copy y))) (export encounters left left-copy right closure own)"
+  },
+  "cycle": {
+    "main.mjs": "(import \"./early.mjs\" early) (defun token (value) (host-identity-token value)) (export token early)",
+    "early.mjs": "(import \"./main.mjs\" token) (defconst early (try (token (js-object)) (catch error (get error :name)))) (export early)"
+  },
+  "cycleOperands": {
+    "main.mjs": "(import \"./trace.mjs\" trace) (import \"./early.mjs\" early) (defun token () (host-identity-token (progn (js-call trace :push \"arg\") (throw \"operand\")))) (export early token)",
+    "early.mjs": "(import \"./main.mjs\" token) (import \"./trace.mjs\" trace) (defconst early (try (token) (catch error (js-array (get error :name) (= error \"operand\") trace)))) (export early)",
+    "trace.mjs": "(defconst trace (js-array)) (export trace)"
+  }
+}

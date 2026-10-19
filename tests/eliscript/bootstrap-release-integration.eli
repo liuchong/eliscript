@@ -1,0 +1,134 @@
+(module tests.bootstrap-release-integration
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile mkdtemp writeFile rm lstat readlink realpath)
+  (import "node:child_process" spawnSync)
+  (import "node:path" resolve join)
+  (import "node:os" tmpdir)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/backends/dist/release-cli.mjs"
+    runReleaseCLI resolveReleaseCompiler renderReleaseCLIError)
+  (import "../tools/ci/dist/compiler-release.mjs" renderCompilerReleaseWorkflow)
+
+  (defun pattern (text) (new globalThis.RegExp text))
+
+  (test "checkout compiler command is a relative link to the same generated Eli package entry"
+    (async ()
+      (let* ((command (resolve root "bin/eliscript-compiler"))
+             (package (JSON/parse (await (readFile (resolve root "package.json") "utf8")))))
+        (js-call assert :strictEqual (js-call (await (lstat command)) :isSymbolicLink) t)
+        (js-call assert :strictEqual (await (readlink command)) "../bootstrap/host/eliscript-cli.mjs")
+        (js-call assert :strictEqual (await (realpath command))
+          (await (realpath (resolve root (get (get package :bin) :eliscript-compiler)))))
+        (let ((result (spawnSync command (js-array "--help")
+                (js-object :cwd root :encoding "utf8" :env (get globalThis.process :env)))))
+          (js-call assert :strictEqual (get result :error) undefined)
+          (js-call assert :strictEqual (get result :signal) nil)
+          (js-call assert :strictEqual (get result :status) 0 (get result :stderr))
+          (js-call assert :match (get result :stdout) (pattern "stage3"))))))
+
+  (test "release CLI help explains the JS bootstrap and final three outputs without starting a compiler"
+    (async ()
+      (let ((lines (js-array)))
+        (await (runReleaseCLI (js-array "--help")
+          (js-object :write (lambda (text) (js-call lines :push text)))))
+        (let ((text (js-call lines :join "")))
+          (js-call assert :match text (pattern "stage0"))
+          (js-call assert :match text (pattern "stage3"))
+          (js-call assert :match text (pattern "verify-bootstrap"))
+          (js-call assert :match text (pattern "javascript"))
+          (js-call assert :match text (pattern "wasm"))
+          (js-call assert :match text (pattern "native"))))))
+
+  (test "release targets exposes only the explicit small functional profile and refuses invalid values before reading files"
+    (async ()
+      (let ((lines (js-array)))
+        (await (runReleaseCLI (js-array "targets" "--help") (js-object :write (lambda (text) (js-call lines :push text)))))
+        (js-call assert :match (js-call lines :join "") (pattern "functional-runtime-profile small")))
+      (await (js-call assert :rejects (runReleaseCLI
+        (js-array "targets" "--functional-runtime-profile" "unknown" "--bootstrap-manifest" "must-not-read.json"))
+        (lambda (error) (and (js-call globalThis.TypeError.prototype :isPrototypeOf error)
+          (js-call (get error :message) :includes "functionalRuntimeProfile")))))
+      (await (js-call assert :rejects (runReleaseCLI
+        (js-array "compile" "--functional-runtime-profile" "small" "--input" "must-not-read.eli"))
+        (lambda (error) (js-call globalThis.TypeError.prototype :isPrototypeOf error))))))
+
+  (test "bootstrap verification Make target reads existing products without invoking a rebuild or preparation"
+    (async ()
+      (let* ((source (await (readFile (resolve root "Makefile") "utf8")))
+             (lines (js-call source :split "\n"))
+             (index (js-call lines :findIndex (lambda (line) (js-call line :startsWith "verify-bootstrap:"))))
+             (commands (js-array)))
+        (js-call assert :ok (>= index 0))
+        (js-call assert :strictEqual (aref lines index) "verify-bootstrap:")
+        (setq index (1+ index))
+        (while (and (< index (js-length lines)) (js-call (aref lines index) :startsWith "\t"))
+          (js-call commands :push (aref lines index)) (setq index (1+ index)))
+        (js-call assert :strictEqual (js-length commands) 1)
+        (js-call assert :match (aref commands 0) (pattern "release-cli[.]mjs verify-bootstrap --bootstrap-manifest"))
+        (js-call assert :match (aref commands 0) (pattern "BOOTSTRAP_RELEASE_MANIFEST"))
+        (js-call assert :doesNotMatch (aref commands 0) (pattern "bootstrap-backends|prepare-release-package|--stage0|(?:^|[\\s;&|])bootstrap(?=[\\s;&|]|$)"))
+        (js-call assert :ok (js-call source :includes
+          "\ncompiler-release-ci: bootstrap-release\n\t$(MAKE) verify-bootstrap\n"))
+        (let ((readme (await (readFile (resolve root "README.md") "utf8"))))
+          (js-call assert :match readme (pattern "make bootstrap-release"))
+          (js-call assert :match readme (pattern "make verify-bootstrap"))
+          (js-call assert :match readme (pattern "BOOTSTRAP_RELEASE_OUT"))))))
+
+  (test "release CLI rejects cancelled compiler hosts and grid commands before attempting IO"
+    (async ()
+      (let ((inputs (js-array
+          (js-array "compiler-grid") (js-array "matrix") (js-array "bootstrap-all")
+          (js-array "bootstrap" "--host" "wasm") (js-array "bootstrap" "--host" "native")
+          (js-array "bootstrap" "--hosts" "javascript,wasm,native")
+          (js-array "build" "--seed" "--host" "wasm"))) (index 0))
+        (while (< index (js-length inputs))
+          (await (js-call assert :rejects (runReleaseCLI (aref inputs index))
+            (lambda (error)
+              (and (js-call globalThis.TypeError.prototype :isPrototypeOf error)
+                (js-call (pattern "cancelled|JavaScript|unsupported|Unknown option") :test (get error :message))))))
+          (setq index (1+ index))))))
+
+  (test "final compiler resolution refuses a missing bootstrap manifest rather than falling back to a seed"
+    (async ()
+      (let ((directory (await (mkdtemp (join (tmpdir) "eliscript-release-manifest-")))))
+        (try
+          (progn
+            (await (js-call assert :rejects
+              (resolveReleaseCompiler (js-object :bootstrapManifestPath (join directory "missing.json")))))
+            (let ((path (join directory "bootstrap.json")))
+              (await (writeFile path (JSON/stringify
+                (js-object :format "eliscript-js-bootstrap" :version 1 :status "accepted"
+                  :stages (js-array) :fixedPoint (js-object :status "identical")))))
+              (await (js-call assert :rejects
+                (resolveReleaseCompiler (js-object :bootstrapManifestPath path))))))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "release error output preserves structured false and undefined exceptions"
+    (lambda ()
+      (js-call (js-array false undefined) :forEach
+        (lambda (value)
+          (let ((record (JSON/parse (renderReleaseCLIError value (js-object :json t)))))
+            (js-call assert :strictEqual (get record :format) "eliscript-compiler-cli-error")
+            (js-call assert :strictEqual (get record :version) 1)
+            (js-call assert :ok (Object/hasOwn record "error")))))))
+
+  (test "release workflow executes the full JS chain and final three outputs on both native platforms"
+    (async ()
+      (let* ((matrix (JSON/parse (await (readFile (resolve root "contracts/compatibility-matrix.json") "utf8"))))
+             (workflow (renderCompilerReleaseWorkflow matrix)))
+        (js-call (js-array "ubuntu-24\\.04-arm" "macos-15" "make compiler-release-ci" "make byte-compile" "upload-artifact")
+          :forEach (lambda (text) (js-call assert :match workflow (pattern text))))
+        (js-call assert :doesNotMatch workflow (pattern "record-grid|bootstrap-all|--host wasm|--host native"))
+        (js-call assert :doesNotMatch workflow (pattern "timeout-minutes: (10|30)\\b"))
+        (let ((changed (globalThis.structuredClone matrix)))
+          (put changed :operatingSystems (js-array
+            (js-object :id "linux" :runner "ubuntu-24.04" :architecture "x64")))
+          (js-call assert :throws (lambda () (renderCompilerReleaseWorkflow changed))
+            (pattern "ARM64|arm64|platform"))))))
+
+  (test "release package declares generated final compiler assets and its prepack preparation"
+    (async ()
+      (let ((manifest (JSON/parse (await (readFile (resolve root "package.json") "utf8")))))
+        (js-call assert :ok (js-call (get manifest :files) :includes "dist/bootstrap-release/"))
+        (js-call assert :match (get (get manifest :scripts) :prepack) (pattern "prepare-release-package"))))))

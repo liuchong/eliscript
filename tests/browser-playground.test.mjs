@@ -114,7 +114,7 @@ test("the highlighter marks the syntax the editor shows", async () => {
   expect(js).toContain('<span class="tok-string">&quot;a&quot;</span>');
 });
 
-test("the compiler emits only package-relative runtime imports", async () => {
+test("runtime imports resolve through the package prefix and the binding-error helper is self-contained", async () => {
   const { javascript } = await compileAndRun("probe", `(module probe
   (import "eliscript/runtime/core/sequence.mjs" map filter)
   (import "eliscript/runtime/core/order.mjs" sort)
@@ -125,11 +125,19 @@ test("the compiler emits only package-relative runtime imports", async () => {
 `);
   const specifiers = [...javascript.matchAll(/from "([^"]+)"/gu)].map((m) => m[1]);
   expect(specifiers.length).toBeGreaterThan(0);
+  const bindingHelper = 'const E = ReferenceError; const T = TypeError; export function tdz(name) { throw new E("Cannot access \'" + name + "\' before initialization"); } export function immutable() { throw new T("Assignment to constant variable."); }\n';
+  const inlineHelpers = [];
   for (const specifier of specifiers) {
-    // Every emitted import is a bare `eliscript/` specifier, which is exactly
-    // what a single import-map prefix resolves in the browser.
-    expect(specifier.startsWith("eliscript/")).toBe(true);
+    if (specifier.startsWith("data:text/javascript;base64,")) {
+      const source = Buffer.from(specifier.slice("data:text/javascript;base64,".length), "base64").toString("utf8");
+      expect(source).toBe(bindingHelper);
+      inlineHelpers.push(source);
+    } else {
+      // Every external dependency still uses the single browser import map.
+      expect(specifier.startsWith("eliscript/")).toBe(true);
+    }
   }
+  expect(inlineHelpers).toEqual([bindingHelper]);
 });
 
 test("compiled output executes against the public runtime", async () => {

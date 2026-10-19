@@ -1,0 +1,15 @@
+(module tests.bootstrap-seed-proxy
+  (import "node:fs" appendFileSync writeSync)
+  (defconst environment (get globalThis.process :env))
+  (defconst failure (get environment :ELISCRIPT_BATCH_FAILURE))
+  (if (undefined? failure)
+    (progn
+      (appendFileSync (get environment :ELISCRIPT_BATCH_CALL_LOG) "call\n")
+      (let ((child (Bun/spawnSync (js-call (js-array (get environment :ELISCRIPT_BATCH_REAL_EMACS)) :concat
+                     (js-call (get globalThis.process :argv) :slice 2))
+                   (js-object :stdin "inherit" :stdout "inherit" :stderr "inherit"))))
+        (js-call globalThis.process :exit (if (nullish? (get child :exitCode)) 1 (get child :exitCode)))))
+    (progn
+      (writeSync 2 failure)
+      (js-call globalThis.process :exit 17)))
+)

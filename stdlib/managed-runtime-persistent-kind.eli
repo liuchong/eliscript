@@ -1,0 +1,28 @@
+(module eliscript.managed-runtime-persistent-kind
+  (import "../../stdlib/managed-literal-protocols.eli"
+    PERSISTENT_MAP_KIND PERSISTENT_MAP_HAS_VALUE_KEY PERSISTENT_SET_KIND PERSISTENT_SET_HAS_VALUE
+    managed-literal-reduce-iterable managed-literal-reduced)
+  (defun callable? (value) (= (js* "typeof value") "function"))
+  (defun isPersistentMapValue (value)
+    (and (not (nullish? value)) (eq (aref value PERSISTENT_MAP_KIND) t)
+         (callable? (aref value PERSISTENT_MAP_HAS_VALUE_KEY))))
+  (defun isPersistentSetValue (value)
+    (and (not (nullish? value)) (eq (aref value PERSISTENT_SET_KIND) t)
+         (callable? (aref value PERSISTENT_SET_HAS_VALUE))))
+  (defun persistentMapValueEqual (left right equal)
+    (and (isPersistentMapValue right) (= (aref right "count") (aref left "count"))
+      (managed-literal-reduce-iterable left
+        (lambda (same entry)
+          (let (([key value] entry))
+            (if (and (funcall globalThis/Boolean (js-call (aref right PERSISTENT_MAP_HAS_VALUE_KEY) :call right key))
+                     (funcall globalThis/Boolean (funcall equal value (js-call right :get key))))
+                same (managed-literal-reduced false))))
+        (js-array t))))
+  (defun persistentSetValueEqual (left right equal)
+    (and (isPersistentSetValue right) (= (aref right "count") (aref left "count"))
+      (managed-literal-reduce-iterable left
+        (lambda (same value)
+          (if (funcall globalThis/Boolean (js-call (aref right PERSISTENT_SET_HAS_VALUE) :call right value equal))
+              same (managed-literal-reduced false))) (js-array t))))
+  (export PERSISTENT_MAP_KIND PERSISTENT_MAP_HAS_VALUE_KEY PERSISTENT_SET_KIND PERSISTENT_SET_HAS_VALUE
+    isPersistentMapValue isPersistentSetValue persistentMapValueEqual persistentSetValueEqual))

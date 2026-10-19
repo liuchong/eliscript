@@ -7,6 +7,7 @@ import {pathToFileURL} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {buildBackends} from '../tools/backends/build.mjs';
 import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';
+import {invokeWithHeapDiagnostic} from './helpers/managed-heap-diagnostic.mjs';
 let directory,backend,runtime,program,bytes,reference,source;
 const methods=['map','filter','forEach','every','some','reduce','reduceRight','indexOf','lastIndexOf','sort','slice','concat'];
 beforeAll(async()=>{
@@ -46,7 +47,9 @@ beforeAll(async()=>{
      ((= mode 3) (try (throw value) (catch [a b c &rest tail] (js-array a b c tail))))
      ((= mode 4) (Array/from (js-call value :entries)))
      (t (Array/from (js-call value :keys)))))))
- (defun native () (aref globalThis.Array.prototype "push"))
+ (defun native ()
+  (let ((method (aref globalThis.Array.prototype "push")) (value (js-array 1)))
+   (JSON/stringify (js-array (js-call method :call value 2 3) value (get method :name) (get method :length)))))
  ${methods.map(method=>`(defun raw-${method} (value inherited) (JSON/stringify ${['map','filter','forEach','every','some','sort','slice','concat'].includes(method)?'(describe '+operations[method]+')':operations[method]}))`).join('\n')}
  (export iterator-inherited dynamic sort-effect argument-effect prototype object-prototype range-copy throw-callback native ${methods.map(method=>'test-'+method).join(' ')} ${methods.map(method=>'raw-'+method).join(' ')})`;
  program=backend.compiler.compile_ir_string(source,'array-inheritance.eli');const javascript=backend.compiler.emit_ir_string(program);reference=await import('data:text/javascript;base64,'+Buffer.from(javascript).toString('base64'));await writeFile(resolve(directory,'reference.mjs'),javascript);
@@ -104,8 +107,8 @@ test('inherited thrown values retain exact identity including undefined and unwi
  }
 });
 test('HasProperty does not execute the inherited Get while actual Get traps, preserving raw caller frames and roots',async()=>{
- const source=await readFile('bootstrap/runtime/memory.eli','utf8'),first=source.indexOf('  (defun heap-object-read '),last=source.indexOf('  (defun value-object-get ',first);assert(first>=0&&last>first);
- const trapped=source.slice(0,first)+'  (defun heap-object-read (heap object key) (load-u32 4294967295))\n'+source.slice(last);
+ const source=await readFile('bootstrap/runtime/memory.eli','utf8'),first=source.indexOf('  (defun heap-object-read-data '),last=source.indexOf('  (defun heap-object-read ',first);assert(first>=0&&last>first);
+ const trapped=source.slice(0,first)+'  (defun heap-object-read-data (heap object key) (load-u32 4294967295))\n'+source.slice(last);
  const exposed=trapped.trimEnd().slice(0,-1)+'\n (defun test-array-has-inherited (heap value index) (heap-source-array-index-read heap value index 2))\n (export test-array-has-inherited))';
  const injected=backend.compiler.compile_ir_string(exposed,'inheritance-get-trap.eli');
  const artifact=Uint8Array.from(backend.managed.emit_managed_wasm(program,injected));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(artifact)),[]);
@@ -122,10 +125,10 @@ test('inherited-array allocation failure keeps caller frames and live prototype 
  const a=instantiateManagedRuntime(bytes,{maxSlots:64,initialBytes:16384,maxBytes:65536});a.auto(1);const prototype=a.invoke('prototype'),input=a.sourceArray(new Array(4)),caller=a.frame(1);a.frameSet(caller,0,input);a.resize(prototype,2);a.set(prototype,1,undefined);
  const padding=[];let exhausted=false;try{for(let i=0;i<128;i++)padding.push(a.number(i));}catch(error){assert.equal(error.eliscriptDiagnostic?.code,'ELI-RT0002');exhausted=true;}assert(exhausted);
  assert.throws(()=>a.invoke('raw-map',[input,undefined]),error=>error.eliscriptDiagnostic?.code==='ELI-RT0002');assert.equal(a.stats().frameDepth,1);assert.equal(a.length(input),4);
- for(const value of padding)a.release(value);a.collect();const out=a.invoke('raw-slice',[input,undefined]);assert.equal(a.readString(out),withPrototype(()=>{Array.prototype[1]=undefined;return reference.raw_slice(new Array(4),undefined);}));a.leaveFrame(caller);finish(a,[prototype,input,out]);
+ for(const value of padding)a.release(value);a.collect();const out=invokeWithHeapDiagnostic(a,'raw-slice',[input,undefined]);assert.equal(a.readString(out),withPrototype(()=>{Array.prototype[1]=undefined;return reference.raw_slice(new Array(4),undefined);}));a.leaveFrame(caller);finish(a,[prototype,input,out]);
 });
-test('unrepresented native prototype callables remain explicit refusals without fabricated data descriptors',()=>{
- const a=instantiateManagedRuntime(bytes);a.auto(1);assert.throws(()=>a.invoke('native'),error=>error.eliscriptDiagnostic?.code==='ELI-RT0003');finish(a);
+test('native Array prototype callables preserve their real invocation receiver name and arity',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);const out=a.invoke('native');assert.equal(a.readString(out),withPrototype(()=>reference.native()));finish(a,[out]);
 });
 
 test('slice offsets and concat receiver prefixes preserve holes even when the result inherits a different index',()=>{
@@ -144,7 +147,7 @@ test('source Array iterators perform inherited Get for for-of, argument spread, 
  for(const inherited of[7,undefined])for(let mode=0;mode<6;mode++){const expected=withPrototype(()=>reference.iterator_inherited(inherited,mode)),a=instantiateManagedRuntime(bytes);a.auto(1);const input=inherited===undefined?undefined:a.number(inherited),m=a.number(mode),out=a.invoke('iterator-inherited',[input,m]);assert.equal(a.readString(out),expected,'iterator mode '+mode);finish(a,[input,m,out]);}
 });
 test('keys iterator does not Get inherited numeric values while entries and values execute the real inherited read',async()=>{
- const source=await readFile('bootstrap/runtime/memory.eli','utf8'),first=source.indexOf('  (defun heap-object-read '),last=source.indexOf('  (defun value-object-get ',first);assert(first>=0&&last>first);
- const trapped=source.slice(0,first)+'  (defun heap-object-read (heap object key) (load-u32 4294967295))\n'+source.slice(last),exposed=trapped.trimEnd().slice(0,-1)+'\n (defun test-iterator-step (heap iterator) (heap-source-iterator-step heap iterator))\n (export test-iterator-step))',injected=backend.compiler.compile_ir_string(exposed,'iterator-inherited-get-trap.eli'),artifact=Uint8Array.from(backend.managed.emit_managed_wasm(program,injected));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(artifact)),[]);
+ const source=await readFile('bootstrap/runtime/memory.eli','utf8'),first=source.indexOf('  (defun heap-object-read-data '),last=source.indexOf('  (defun heap-object-read ',first);assert(first>=0&&last>first);
+ const trapped=source.slice(0,first)+'  (defun heap-object-read-data (heap object key) (load-u32 4294967295))\n'+source.slice(last),exposed=trapped.trimEnd().slice(0,-1)+'\n (defun test-iterator-step (heap iterator) (heap-source-iterator-step heap iterator))\n (export test-iterator-step))',injected=backend.compiler.compile_ir_string(exposed,'iterator-inherited-get-trap.eli'),artifact=Uint8Array.from(backend.managed.emit_managed_wasm(program,injected));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(artifact)),[]);
  for(const method of[6,7,8]){const e=new WebAssembly.Instance(new WebAssembly.Module(artifact)).exports,h=e['heap-new'](128,32768,65536),prototype=e['value-standard-prototype'](h,0),key=e['value-string'](h,1);new DataView(e.memory.buffer).setUint16(e['value-data'](h,key,5),49,true);e['value-seal'](h,key);e['value-object-put'](h,prototype,key,3,2);const input=e['value-array-new'](h,2),caller=e['frame-new'](h,2);e['frame-set'](h,caller,0,input);const iterator=e['value-source-method'](h,input,method,3,3);e['frame-set'](h,caller,1,iterator);assert.equal(e['test-iterator-step'](h,iterator),1);if(method===7){assert.equal(e['test-iterator-step'](h,iterator),1);assert.equal(e['last-error'](),0);}else assert.throws(()=>e['test-iterator-step'](h,iterator),WebAssembly.RuntimeError);assert.equal(e['frame-depth'](h),1);e['frame-pop'](h,caller);e['value-standard-prototypes-close'](h);e['heap-collect'](h);assert.equal(e['heap-live'](h),0);}
 });

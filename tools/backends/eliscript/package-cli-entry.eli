@@ -1,0 +1,42 @@
+(module tools.backends.package-cli-entry
+  (import "node:path" basename dirname resolve)
+  (import "node:url" fileURLToPath)
+  (import "node:module" createRequire)
+  (import "../../tools/backends/dist/release-cli.mjs" runReleaseCLI)
+
+  ;; This file is emitted at bootstrap/host/eliscript-cli.mjs. Installed bin
+  ;; symlinks may have another name; locate runtime assets beside this module.
+  (defconst here (dirname (fileURLToPath (js* "import.meta.url"))))
+  (defconst root (resolve here "../.."))
+  (defconst environment (get globalThis.process :env))
+  (when (nullish? (get environment :ELISCRIPT_BOOTSTRAP_MODULE_DIR))
+    (put environment :ELISCRIPT_BOOTSTRAP_MODULE_DIR (resolve root "dist/bootstrap")))
+  (defconst commands
+    (js-object
+      :eliscript (js-array "bun.mjs" "eliscript")
+      :eliscript-build (js-array "project-cli.mjs" "eliscript-build")
+      :eliscript-check (js-array "check-cli.mjs" "eliscript-check")
+      :eliscript-format (js-array "format-cli.mjs" "eliscript-format")
+      :eliscript-eval (js-array "evaluation-cli.mjs" "eliscript-eval")
+      :eliscript-watch (js-array "watch-cli.mjs" "eliscript-watch")
+      :eliscript-compiler (js-array "../../tools/backends/compiler-cli.mjs" "eliscript-compiler")))
+
+  (defasync main ()
+    (let* ((arguments (get globalThis.process :argv))
+           (invoked (basename (if (nullish? (aref arguments 1)) "" (aref arguments 1))))
+           (found (get commands invoked))
+           (selected (if (nullish? found) (get commands :eliscript) found))
+           (entry (resolve here (aref selected 0))))
+      (when (nullish? (get environment :ELISCRIPT_COMMAND_NAME))
+        (put environment :ELISCRIPT_COMMAND_NAME (aref selected 1)))
+      ;; The compiler entry has asynchronous ESM dependencies. Its static
+      ;; import completes before main; the six established handlers still
+      ;; capture their command environment only when their namespace loads.
+      (if (= invoked "eliscript-compiler")
+        (await (runReleaseCLI (js-call arguments :slice 2)))
+        (let ((namespace (funcall (createRequire (resolve here "eliscript-cli.mjs")) entry)))
+          (await (js-call namespace :main (js-call arguments :slice 2)))))))
+
+  (js-call (main) :catch (lambda (error)
+    (js-call globalThis.console :error error)
+    (put globalThis.process :exitCode 1))))

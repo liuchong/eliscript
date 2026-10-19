@@ -1,0 +1,584 @@
+(module tests.managed-runtime-extended
+  (import "node:test" before after test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile writeFile rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "../tools/backends/build.mjs" buildBackends root)
+  (import "../tools/backends/managed-runtime.mjs"
+    instantiateManagedRuntime instantiateManagedRuntimeWithHostModules readManagedAllocatorSnapshot readManagedAllocatorValueCounts)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+
+  (defvar directory undefined)
+  (defvar bytes undefined)
+  (defvar legacy-bytes undefined)
+  (defvar raw-module undefined)
+  (defvar lowered undefined)
+  (defvar library undefined)
+  (defconst native-target
+    (when (= (get globalThis.process :arch) "arm64")
+      (cond ((= (get globalThis.process :platform) "darwin") "arm64-macos")
+            ((= (get globalThis.process :platform) "linux") "arm64-linux"))))
+
+  (before (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-extended-loader-"))))
+    (let* ((backend (await (buildBackends (js-object :outputRoot directory))))
+           (runtime (js-call (get backend :compiler) :compile_ir_string
+             (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
+           (program (js-call (get backend :compiler) :compile_ir_string
+             "(module loading (defconst marker 1) (defun identity (value) value) (defun fail (value) (throw value)) (export identity fail))"
+             "extended-loading.eli")))
+      (setq lowered (js-call (get backend :managed) :lower_managed_program program runtime t))
+      (let ((configuration (js-object :initialPages 1 :maximumPages 32768)))
+        (setq bytes (js-call globalThis.Uint8Array :from
+          (js-call (get backend :wasm) :append_metadata_section
+            (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) configuration)
+            "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))))
+        ;; A private raw test image exposes existing word-ABI functions only.
+        ;; Reuse the same lowered runtime/functions; the loader images and
+        ;; their original missing-export assertions remain unchanged.
+        (let* ((typed (Object/assign (js-object) (get lowered :typed)))
+               (exports (js-call (get typed :exports) :slice))
+               (helpers (js-array "value-module-begin" "value-module-status" "value-module-check"
+                 "value-module-abort" "value-module-declare" "value-module-get" "value-module-init"
+                 "value-module-set" "value-module-complete" "value-module-close" "heap-defragment")))
+          (js-call helpers :forEach (lambda (name)
+            (unless (js-call exports :includes name) (js-call exports :push name))))
+          (put typed :exports exports)
+          (setq raw-module (new globalThis.WebAssembly.Module (globalThis.Uint8Array.from
+            (js-call (get backend :wasm) :emit_typed_memory_wasm typed configuration))))
+          (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports raw-module) (js-array)))
+        (let* ((typed (Object/assign (js-object) (get lowered :typed)))
+               (exports (js-call (get typed :exports) :filter (lambda (name) (not (= name "heap-new-extended"))))))
+          (put typed :exports exports)
+          (setq legacy-bytes (js-call globalThis.Uint8Array :from
+            (js-call (get backend :wasm) :append_metadata_section
+              (js-call (get backend :wasm) :emit_typed_memory_wasm typed configuration)
+              "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))))))
+      (js-call assert :deepStrictEqual
+        (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      (when native-target
+        (setq library (resolve directory (if (= native-target "arm64-macos") "extended.dylib" "extended.so")))
+        (await (writeFile library (js-call globalThis.Uint8Array :from
+          (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target)))))))
+    (js-object :timeout 180000))
+
+  (after (async ()
+    (setq bytes undefined legacy-bytes undefined raw-module undefined lowered undefined)
+    (when directory (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun small-options ()
+    (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 65536 :initializeModule false))
+
+  (defun slab-exports ()
+    (get (new globalThis.WebAssembly.Instance raw-module) :exports))
+  (defun slab-call (e name error &rest arguments)
+    (let ((result (Reflect/apply (get e name) e arguments)))
+      (js-call assert :strictEqual (js-call e "last-error") error name)
+      result))
+  (defun slab-string (e heap text seal)
+    (let ((value (slab-call e "value-string" 0 heap (js-length text))) (index 0))
+      (js-call assert :ok (> value 3))
+      (while (< index (js-length text))
+        (js-call assert :strictEqual (slab-call e "value-unit-set" 0 heap value index (js-call text :charCodeAt index)) 1)
+        (setq index (1+ index)))
+      (when seal (js-call assert :strictEqual (slab-call e "value-seal" 0 heap value) value))
+      value))
+  (defun slab-finish (e heap)
+    (js-call assert :strictEqual (slab-call e "value-module-close" 0 heap) 1)
+    (slab-call e "heap-collect" 0 heap)
+    (js-call assert :strictEqual (slab-call e "heap-live" 0 heap) 0)
+    (js-call assert :strictEqual (slab-call e "frame-depth" 0 heap) 0)
+    (js-call assert :strictEqual (slab-call e "retire" 0) 1))
+
+  (test "raw module slab count bounds reject seven-field overflow as capacity and retain the first aborted status"
+    (lambda ()
+      (let ((counts (js-array 9586979 9586980 613566757 4294967295)) (index 0))
+        (while (< index (js-length counts))
+          (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 32 4096 8192)))
+            (try
+              (progn
+                (js-call assert :ok (> heap 0))
+                (js-call assert :strictEqual (slab-call e "value-module-begin" 2 heap (aref counts index)) 0)
+                (js-call assert :strictEqual (slab-call e "value-module-status" 0 heap) 3)
+                (js-call assert :strictEqual (slab-call e "value-module-check" 2 heap) 0)
+                (js-call assert :strictEqual (slab-call e "value-module-begin" 2 heap 0) 0)
+                (js-call assert :strictEqual (slab-call e "value-module-declare" 2 heap 0 2) 0)
+                (js-call assert :strictEqual (slab-call e "value-module-abort" 2 heap 7) 0)
+                (js-call assert :strictEqual (slab-call e "value-module-abort" 3 heap 0) 0)
+                (js-call assert :strictEqual (slab-call e "value-module-status" 0 heap) 3))
+              (finally (slab-finish e heap))))
+          (setq index (1+ index))))
+      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 32 4096 8192)))
+        (js-call assert :strictEqual (slab-call e "value-module-begin" 1 0 4294967295) 0)
+        (js-call assert :strictEqual (slab-call e "value-module-status" 0 heap) 0)
+        (js-call assert :strictEqual (slab-call e "value-module-begin" 0 heap 0) 1)
+        (js-call assert :strictEqual (slab-call e "value-module-complete" 0 heap) 1)
+        (slab-finish e heap))))
+
+  (test "raw module declarations preserve repeated declaration immutable initialization TDZ and completion priorities"
+    (lambda ()
+      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 32 4096 8192)))
+        (try
+          (progn
+            (js-call assert :strictEqual (slab-call e "value-module-get" 8 heap 0) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-begin" 0 heap 3) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-status" 0 heap) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-declare" 0 heap 0 0) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-declare" 3 heap 0 1) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-get" 8 heap 0) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-set" 8 heap 0 2) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-complete" 8 heap) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-declare" 3 heap 3 1) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-declare" 3 heap 1 2) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-init" 0 heap 0 0) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-get" 0 heap 0) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-init" 3 heap 0 2) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-set" 3 heap 0 2) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-declare" 0 heap 1 1) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-init" 0 heap 1 3) 3)
+            (js-call assert :strictEqual (slab-call e "value-module-set" 0 heap 1 1) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-get" 0 heap 1) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-declare" 0 heap 2 1) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-get" 8 heap 2) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-init" 0 heap 2 2) 2)
+            (js-call assert :strictEqual (slab-call e "value-module-complete" 0 heap) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-status" 0 heap) 2)
+            (js-call assert :strictEqual (slab-call e "value-module-declare" 3 heap 0 0) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-init" 3 heap 1 0) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-set" 0 heap 1 2) 2)
+            (js-call assert :strictEqual (slab-call e "value-module-abort" 3 heap 2) 0)
+            (js-call assert :strictEqual (slab-call e "heap-live" 0 heap) 1))
+          (finally (slab-finish e heap))))))
+
+  (test "raw module rejected stale payloads preserve TDZ existing values and a later valid initialization"
+    (lambda ()
+      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 32 4096 16384))
+             (stale (slab-call e "value-bytes" 0 heap 8)))
+        (try
+          (progn
+            (js-call assert :ok (> stale 3))
+            (slab-call e "heap-collect" 0 heap)
+            (js-call assert :strictEqual (slab-call e "value-kind" 1 heap stale) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-begin" 0 heap 2) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-declare" 0 heap 0 0) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-declare" 0 heap 1 1) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-init" 1 heap 0 stale) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-get" 8 heap 0) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-complete" 8 heap) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-init" 0 heap 0 3) 3)
+            (js-call assert :strictEqual (slab-call e "value-module-init" 0 heap 1 1) 1)
+            ;; An immutable write still refuses before inspecting its value;
+            ;; a mutable write validates that value without publishing it.
+            (js-call assert :strictEqual (slab-call e "value-module-set" 3 heap 0 stale) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-set" 1 heap 1 stale) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-get" 0 heap 0) 3)
+            (js-call assert :strictEqual (slab-call e "value-module-get" 0 heap 1) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-set" 0 heap 1 0) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-get" 0 heap 1) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-complete" 0 heap) 1)
+            (slab-call e "heap-collect" 0 heap)
+            (js-call assert :strictEqual (slab-call e "heap-defragment" 0 heap) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-get" 0 heap 0) 3)
+            (js-call assert :strictEqual (slab-call e "value-module-get" 0 heap 1) 0)
+            (js-call assert :strictEqual (slab-call e "frame-depth" 0 heap) 0))
+          (finally (slab-finish e heap))))))
+
+  (test "raw module external declarations validate actual sealed strings in order and keep their owners across GC and compaction"
+    (lambda ()
+      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 32 4096 16384))
+             (module (slab-string e heap "模块😀" false)))
+        (try
+          (progn
+            (js-call assert :strictEqual (slab-call e "value-module-begin" 0 heap 2) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-declare" 0 heap 0 0) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-external-init" 8 heap 1 module 4294967295) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-external-init" 3 heap 2 module 4294967295) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-external-init" 6 heap 0 module 4294967295) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-get" 8 heap 0) 0)
+            (js-call assert :strictEqual (slab-call e "value-seal" 0 heap module) module)
+            (js-call assert :strictEqual (slab-call e "value-module-external-init" 1 heap 0 module 2) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-external-init" 0 heap 0 module 3) 3)
+            (js-call assert :strictEqual (slab-call e "value-module-external-init" 3 heap 0 module 4294967295) 0)
+            (js-call assert :strictEqual (slab-call e "value-module-declare" 0 heap 1 0) 1)
+            (let ((export (slab-string e heap "value" t)))
+              (js-call assert :strictEqual (slab-call e "value-module-external-init" 0 heap 1 module export) 3)
+              (js-call assert :strictEqual (slab-call e "value-module-complete" 0 heap) 1)
+              (slab-call e "heap-collect" 0 heap)
+              (js-call assert :strictEqual (slab-call e "heap-defragment" 0 heap) 1)
+              (js-call assert :strictEqual (slab-call e "value-kind" 0 heap module) 5)
+              (js-call assert :strictEqual (slab-call e "value-unit-get" 0 heap module 0) 27169)
+              (js-call assert :strictEqual (slab-call e "value-kind" 0 heap export) 5)
+              (js-call assert :strictEqual (slab-call e "value-length" 0 heap export) 5)))
+          (finally (slab-finish e heap))))))
+
+  (test "raw module slab traces live negative zero through collection movement and close without retaining dead payloads"
+    (lambda ()
+      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 32 4096 16384))
+             (dead (slab-call e "value-bytes" 0 heap 128)))
+        (try
+          (progn
+            (js-call assert :ok (> dead 3))
+            (js-call assert :strictEqual (slab-call e "value-module-begin" 0 heap 1) 1)
+            (js-call assert :strictEqual (slab-call e "value-module-declare" 0 heap 0 1) 1)
+            (let ((number (slab-call e "value-number" 0 heap 0 2147483648)))
+              (js-call assert :strictEqual (slab-call e "value-module-init" 0 heap 0 number) number)
+              (js-call assert :strictEqual (slab-call e "value-module-complete" 0 heap) 1)
+              (js-call assert :strictEqual (slab-call e "heap-auto" 0 heap 1) 1)
+              (slab-call e "heap-collect" 0 heap)
+              (js-call assert :strictEqual (slab-call e "value-kind" 1 heap dead) 0)
+              (let ((used (slab-call e "heap-used" 0 heap)))
+                (js-call assert :strictEqual (slab-call e "heap-defragment" 0 heap) 1)
+                (js-call assert :ok (< (slab-call e "heap-used" 0 heap) used)))
+              (js-call assert :strictEqual (slab-call e "value-module-get" 0 heap 0) number)
+              (let* ((address (slab-call e "value-data" 0 heap number 4))
+                     (view (new globalThis.DataView (get (get e :memory) :buffer))))
+                (js-call assert :ok (Object/is (js-call view :getFloat64 address t) -0)))
+              (js-call assert :strictEqual (slab-call e "value-module-close" 0 heap) 1)
+              (slab-call e "heap-collect" 0 heap)
+              (js-call assert :strictEqual (slab-call e "value-kind" 1 heap number) 0)
+              (js-call assert :strictEqual (slab-call e "value-module-check" 3 heap) 0)))
+          (finally (slab-finish e heap))))))
+  (defun extended-options ()
+    (js-object :maxSlots 4194303 :initialBytes 134217728 :maxBytes 1073741824
+      :extendedHeap t :initializeModule false :initialPages 1 :maximumPages 32768 :nativeTarget native-target))
+  (defun wide-extended-options ()
+    (js-object :maxSlots 8388607 :initialBytes 268435456 :maxBytes 1073741824
+      :extendedHeap t :initializeModule false :initialPages 1 :maximumPages 32768 :nativeTarget native-target))
+  (defun heap-bounds-p (error)
+    (and (= (get error :name) "Error")
+         (= (get error :message) "managed argument or bounds error")
+         (= (get (get error :eliscriptDiagnostic) :code) "ELI-RT0003")
+         (= (get (get error :eliscriptDiagnostic) :phase) "runtime")))
+  (defun invalid-extended-p (error)
+    (and (= (get error :name) "TypeError") (= (get error :message) "extendedHeap must be a boolean")))
+  (defun missing-extended-p (error)
+    (and (= (get error :name) "TypeError")
+      (= (get error :message) "managed runtime requires heap-new-extended for extendedHeap")))
+
+  (defun exercise-loader (runtime)
+    (let ((input undefined) (output undefined) (frame undefined))
+      (try
+        (progn
+          (js-call runtime :auto 1)
+          (js-call runtime :initializeModule)
+          (setq input (js-call runtime :number -0))
+          (setq frame (js-call runtime :frame 1))
+          (js-call runtime :frameSet frame 0 input)
+          (setq output (js-call runtime :invoke "identity" (js-array input)))
+          (js-call runtime :collect)
+          (js-call assert :ok (Object/is (js-call runtime :readNumber output) -0))
+          (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 1)
+          (let ((held (js-call runtime :frameGet frame 0)))
+            (try (js-call assert :ok (js-call runtime :keyEqual held input))
+              (finally (js-call runtime :release held)))))
+        (finally
+          (unless (undefined? frame) (js-call runtime :leaveFrame frame))
+          (unless (undefined? output) (js-call runtime :release output))
+          (unless (undefined? input) (js-call runtime :release input))
+          (js-call runtime :closeModule) (js-call runtime :collect)
+          (js-call assert :strictEqual (js-call runtime :live) 0)
+          (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)
+          (when (get runtime :close) (js-call runtime :close))))))
+
+  (test "WASM loader keeps omitted and false heap mode on the original constructor"
+    (lambda ()
+      (exercise-loader (instantiateManagedRuntime legacy-bytes (small-options)))
+      (exercise-loader (instantiateManagedRuntime legacy-bytes
+        (Object/assign (small-options) (js-object :extendedHeap false))))
+      (js-call assert :throws
+        (lambda () (instantiateManagedRuntime legacy-bytes
+          (Object/assign (small-options) (js-object :extendedHeap t)))) missing-extended-p)))
+
+  (test "WASM synchronous and host-module loading opt into the extended constructor without changing roots"
+    (async ()
+      (exercise-loader (instantiateManagedRuntime bytes (extended-options)))
+      (exercise-loader (await (instantiateManagedRuntimeWithHostModules bytes (extended-options))))))
+
+  (test "both loader boundaries reject nonboolean heap selection before binary or native IO"
+    (async ()
+      (let ((bad (js-array nil 0 1 "true" (js-object))) (index 0))
+        (while (< index (js-length bad))
+          (let ((options (js-object :extendedHeap (aref bad index))))
+            (js-call assert :throws (lambda () (instantiateManagedRuntime (new globalThis.Uint8Array) options)) invalid-extended-p)
+            (await (js-call assert :rejects
+              (instantiateManagedRuntimeWithHostModules (new globalThis.Uint8Array) options) invalid-extended-p))
+            (await (js-call assert :rejects (instantiateNativeManagedRuntime "unused" nil options) invalid-extended-p)))
+          (setq index (1+ index))))))
+
+  (test "native loading selects the extended ABI and executes without a WASM constructor"
+    (js-object :skip (not native-target) :timeout 120000)
+    (async ()
+      (let* ((webassembly globalThis.WebAssembly) (module (get webassembly :Module)) (instance (get webassembly :Instance))
+             (runtime undefined))
+        (try
+          (progn
+            (put webassembly :Module (lambda (&rest args) (throw (new globalThis.Error "native must not construct WASM"))))
+            (put webassembly :Instance (lambda (&rest args) (throw (new globalThis.Error "native must not instantiate WASM"))))
+            (setq runtime (await (instantiateNativeManagedRuntime library lowered (extended-options)))))
+          (finally (put webassembly :Module module) (put webassembly :Instance instance)))
+        (exercise-loader runtime)
+        (js-call runtime :close)
+        (js-call assert :throws (lambda () (js-call runtime :stats))
+          (lambda (error) (= (get error :message) "native managed runtime is closed"))))))
+
+  (test "native opt in refuses a lowering without the extended constructor and false mode stays compatible"
+    (js-object :skip (not native-target) :timeout 120000)
+    (async ()
+      (let* ((typed (Object/assign (js-object) (get lowered :typed)))
+             (input (Object/assign (js-object) lowered))
+             (options (Object/assign (small-options) (js-object :extendedHeap false :nativeTarget native-target
+                        :initialPages 1 :maximumPages 32))))
+        (put typed :exports (js-call (get typed :exports) :filter (lambda (name) (not (= name "heap-new-extended")))))
+        (put input :typed typed)
+        (await (js-call assert :rejects (instantiateNativeManagedRuntime library input (extended-options)) missing-extended-p))
+        (exercise-loader (await (instantiateNativeManagedRuntime library input options))))))
+
+  (defun assert-snapshot-counts (snapshot)
+    (js-call assert :strictEqual (+ (get snapshot :liveValues) (get snapshot :freeReusableSlots)
+      (get snapshot :retiredSlots)) (get snapshot :highWater))
+    (js-call assert :strictEqual (+ (get snapshot :highWater) (get snapshot :neverAllocatedSlots)) (get snapshot :maxSlots))
+    (js-call assert :strictEqual (get snapshot :availableSlots)
+      (+ (get snapshot :freeReusableSlots) (get snapshot :neverAllocatedSlots)))
+    (js-call assert :strictEqual (+ (get snapshot :usedBytes) (get snapshot :tailCapacityBytes)) (get snapshot :capacityBytes))
+    (js-call assert :strictEqual (+ (get snapshot :usedBytes) (get snapshot :byteHeadroomBytes)) (get snapshot :maxBytes))
+    (js-call assert :ok (<= (get snapshot :largestFreeBlock) (get snapshot :freeBytes)))
+    (js-call assert :ok (Object/isFrozen snapshot)))
+
+  (test "optional initialization detail reports only a unique real refs slab without collecting or changing default counts"
+    (lambda ()
+      (let* ((runtime (instantiateManagedRuntime bytes (small-options)))
+             ;; These are actual kind-8 records containing the existing seven
+             ;; reference fields. They test read-only candidate discrimination,
+             ;; not claim that arbitrary records are compiler module output.
+             (hint (js-object :module (js-object :bindingCount 1)
+                     :project (js-object :preparedBindings (js-array
+                       (js-object :kind 0 :index 0 :name "pending-fixture-binding")))))
+             (first undefined) (second undefined) (number undefined))
+        (try
+          (progn
+            (let ((before (readManagedAllocatorSnapshot runtime)))
+              (js-call assert :strictEqual (Object/hasOwn (readManagedAllocatorValueCounts runtime) "projectInitialization") false)
+              (js-call assert :strictEqual (get (get (readManagedAllocatorValueCounts runtime hint) :projectInitialization) :matchingSlabs) 0)
+              (js-call assert :deepStrictEqual (readManagedAllocatorSnapshot runtime) before))
+            (setq first (js-call runtime :record (js-array t false false false undefined nil undefined)))
+            (let* ((before (readManagedAllocatorSnapshot runtime))
+                   (detail (get (readManagedAllocatorValueCounts runtime hint) :projectInitialization)))
+              (js-call assert :strictEqual (get detail :matchingSlabs) 1)
+              (js-call assert :strictEqual (get detail :uniqueSlab) t)
+              (js-call assert :deepStrictEqual (get detail :firstUninitialized)
+                (js-object :index 0 :name "pending-fixture-binding"))
+              (js-call assert :ok (Object/isFrozen detail))
+              (js-call assert :ok (Object/isFrozen (get detail :firstUninitialized)))
+              (js-call assert :deepStrictEqual (readManagedAllocatorSnapshot runtime) before))
+            (setq number (js-call runtime :number 42))
+            (setq second (js-call runtime :record (js-array t false t false number nil undefined)))
+            (let* ((before (readManagedAllocatorSnapshot runtime))
+                   (detail (get (readManagedAllocatorValueCounts runtime hint) :projectInitialization)))
+              (js-call assert :strictEqual (get detail :matchingSlabs) 2)
+              (js-call assert :strictEqual (get detail :uniqueSlab) false)
+              (js-call assert :strictEqual (get detail :firstUninitialized) undefined)
+              (js-call assert :deepStrictEqual (readManagedAllocatorSnapshot runtime) before)))
+          (finally
+            (js-call runtime :release first) (js-call runtime :release second) (js-call runtime :release number)
+            (js-call runtime :closeModule) (js-call runtime :collect)
+            (js-call assert :strictEqual (js-call runtime :live) 0)
+            (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))))))
+
+  (test "malformed initialization hints and accessors are rejected without managed calls or diagnostic side effects"
+    (lambda ()
+      (let* ((runtime (instantiateManagedRuntime bytes (small-options)))
+             (invalid (js-array nil false (js-object)
+               (js-object :module (js-object :bindingCount -1) :project (js-object :preparedBindings (js-array)))
+               (js-object :module (js-object :bindingCount 1) :project (js-object :preparedBindings
+                 (js-array (js-object :index 1 :name "outside"))))))
+             (index 0) (getter-calls 0) (hint (js-object)))
+        (try
+          (progn
+            (while (< index (js-length invalid))
+              (let ((before (readManagedAllocatorSnapshot runtime)))
+                (js-call assert :throws (lambda () (readManagedAllocatorValueCounts runtime (aref invalid index))) globalThis.TypeError)
+                (js-call assert :deepStrictEqual (readManagedAllocatorSnapshot runtime) before))
+              (setq index (1+ index)))
+            (Object/defineProperty hint "module" (js-object :get (lambda () (setq getter-calls (1+ getter-calls)) (throw false))))
+            (let ((before (readManagedAllocatorSnapshot runtime)))
+              (js-call assert :throws (lambda () (readManagedAllocatorValueCounts runtime hint)) globalThis.TypeError)
+              (js-call assert :strictEqual getter-calls 0)
+              (js-call assert :deepStrictEqual (readManagedAllocatorSnapshot runtime) before)))
+          (finally (js-call runtime :closeModule) (js-call runtime :collect)
+            (js-call assert :strictEqual (js-call runtime :live) 0))))))
+
+  (test "allocator snapshots read real live free and fragmented bytes without changing stats or collecting"
+    (lambda ()
+      (let ((runtime (instantiateManagedRuntime bytes (small-options)))
+            (left undefined) (middle undefined) (right undefined))
+        (try
+          (progn
+            (js-call runtime :collect)
+            (let* ((stats (js-call runtime :stats)) (snapshot (readManagedAllocatorSnapshot runtime)))
+              (assert-snapshot-counts snapshot)
+              (js-call assert :deepStrictEqual (Object/keys stats)
+                (js-array "usedBytes" "capacityBytes" "liveValues" "frameDepth" "collections"))
+              (js-call assert :deepStrictEqual (js-call runtime :stats) stats)
+              (js-call assert :strictEqual (get snapshot :slotBits) 20)
+              (js-call assert :strictEqual (get snapshot :generationMax) 4095)
+              (js-call assert :strictEqual (get snapshot :liveValues) (get stats :liveValues)))
+            (setq left (js-call runtime :bytes (new globalThis.Uint8Array 64)))
+            (setq middle (js-call runtime :bytes (new globalThis.Uint8Array 4096)))
+            (setq right (js-call runtime :bytes (new globalThis.Uint8Array 64)))
+            (let* ((before (js-call runtime :stats)) (snapshot (readManagedAllocatorSnapshot runtime))
+                   (counts (readManagedAllocatorValueCounts runtime)))
+              (js-call assert :deepStrictEqual (js-call runtime :stats) before)
+              (js-call assert :strictEqual
+                (js-call (get counts :liveKinds) :reduce (lambda (sum count) (+ sum count)) 0)
+                (get snapshot :liveValues))
+              (js-call assert :strictEqual (aref (get counts :pinnedKinds) 6) 3)
+              (js-call assert :strictEqual (get counts :frameDepth) (get before :frameDepth))
+              (js-call assert :ok (Object/isFrozen counts))
+              (js-call assert :ok (Object/isFrozen (get counts :liveKinds))))
+            (let ((before (readManagedAllocatorSnapshot runtime)))
+              (js-call runtime :release middle) (setq middle undefined)
+              (js-call assert :strictEqual (get (readManagedAllocatorSnapshot runtime) :liveValues) (get before :liveValues))
+              (js-call runtime :collect)
+              (let ((after (readManagedAllocatorSnapshot runtime)))
+                (assert-snapshot-counts after)
+                (js-call assert :ok (< (get after :liveValues) (get before :liveValues)))
+                (js-call assert :ok (>= (get after :freeBytes) 4096))
+                (js-call assert :ok (>= (get after :largestFreeBlock) 4096))
+                (js-call assert :ok (> (get after :freeBlockCount) 0))
+                (js-call assert :deepStrictEqual (readManagedAllocatorSnapshot runtime) after))))
+          (finally
+            (unless (undefined? left) (js-call runtime :release left))
+            (unless (undefined? middle) (js-call runtime :release middle))
+            (unless (undefined? right) (js-call runtime :release right))
+            (js-call runtime :closeModule) (js-call runtime :collect))))))
+
+  (test "allocator snapshot decodes the actual extended 21 and 22 bit layouts"
+    (lambda ()
+      (let ((configurations (js-array
+              (js-object :maxSlots 1048576 :initialBytes 33554432 :maxBytes 67108864 :extendedHeap t :initializeModule false)
+              (extended-options))) (index 0))
+        (while (< index (js-length configurations))
+          (let* ((options (aref configurations index)) (runtime (instantiateManagedRuntime bytes options)))
+            (try
+              (let ((snapshot (readManagedAllocatorSnapshot runtime)))
+                (assert-snapshot-counts snapshot)
+                (js-call assert :strictEqual (get snapshot :maxSlots) (get options :maxSlots))
+                (js-call assert :strictEqual (get snapshot :slotBits) (+ 21 index))
+                (js-call assert :strictEqual (get snapshot :generationMax) (if (= index 0) 2047 1023))
+                (js-call assert :strictEqual (get snapshot :retiredSlots) 0))
+              (finally (js-call runtime :closeModule) (js-call runtime :collect))))
+          (setq index (1+ index))))))
+
+  (defun assert-wide-snapshot (runtime slots)
+    (let* ((before (js-call runtime :stats)) (snapshot (readManagedAllocatorSnapshot runtime)))
+      (assert-snapshot-counts snapshot)
+      (js-call assert :strictEqual (get snapshot :slotBits) 23)
+      (js-call assert :strictEqual (get snapshot :slotMask) 8388607)
+      (js-call assert :strictEqual (get snapshot :generationMax) 511)
+      (js-call assert :strictEqual (get snapshot :maxSlots) slots)
+      (js-call assert :strictEqual (get snapshot :slotTableBytes) (* (1+ slots) 24))
+      (js-call assert :strictEqual (get snapshot :maxBytes) 1073741824)
+      (js-call assert :strictEqual (get snapshot :retiredSlots) 0)
+      (js-call assert :deepStrictEqual (js-call runtime :stats) before)))
+
+  (test "WASM factories use real 23 bit heaps through the eight million slot boundary"
+    (async ()
+      (let ((runtime (instantiateManagedRuntime bytes
+              (Object/assign (wide-extended-options)
+                (js-object :maxSlots 4194304 :initialBytes 134217728)))))
+        (assert-wide-snapshot runtime 4194304)
+        (exercise-loader runtime))
+      (let ((runtime (instantiateManagedRuntime bytes (wide-extended-options))))
+        (assert-wide-snapshot runtime 8388607)
+        (exercise-loader runtime))
+      (let ((runtime (await (instantiateManagedRuntimeWithHostModules bytes (wide-extended-options)))))
+        (assert-wide-snapshot runtime 8388607)
+        (exercise-loader runtime))))
+
+  (test "eight million slots require explicit extended mode and the real slot table byte lower bound"
+    (async ()
+      (let ((cases (js-array
+              (js-object :extendedHeap false)
+              (js-object :maxSlots 8388608)
+              (js-object :initialBytes 134217728)
+              (js-object :initialBytes 201326623)
+              (js-object :maxBytes 1073741825))) (index 0))
+        (while (< index (js-length cases))
+          (let ((options (Object/assign (wide-extended-options) (aref cases index))))
+            (js-call assert :throws (lambda () (instantiateManagedRuntime bytes options)) heap-bounds-p)
+            (await (js-call assert :rejects
+              (instantiateManagedRuntimeWithHostModules bytes options) heap-bounds-p)))
+          (setq index (1+ index))))
+      ;; Rejected construction must not damage a later genuine heap.
+      (let ((runtime (instantiateManagedRuntime bytes (wide-extended-options))))
+        (assert-wide-snapshot runtime 8388607)
+        (exercise-loader runtime))))
+
+  (test "native factory preserves the real 23 bit ABI and refuses eight million overflow without WASM fallback"
+    (js-object :skip (not native-target) :timeout 120000)
+    (async ()
+      (let ((cases (js-array
+              (js-object :extendedHeap false)
+              (js-object :maxSlots 8388608)
+              (js-object :initialBytes 134217728)
+              (js-object :maxBytes 1073741825))) (index 0))
+        (while (< index (js-length cases))
+          (await (js-call assert :rejects
+            (instantiateNativeManagedRuntime library lowered
+              (Object/assign (wide-extended-options) (aref cases index))) heap-bounds-p))
+          (setq index (1+ index))))
+      (let* ((webassembly globalThis.WebAssembly) (module (get webassembly :Module))
+             (instance (get webassembly :Instance)) (runtime undefined))
+        (try
+          (progn
+            (put webassembly :Module (lambda (&rest args) (throw (new globalThis.Error "native must not construct WASM"))))
+            (put webassembly :Instance (lambda (&rest args) (throw (new globalThis.Error "native must not instantiate WASM"))))
+            (setq runtime (await (instantiateNativeManagedRuntime library lowered (wide-extended-options)))))
+          (finally (put webassembly :Module module) (put webassembly :Instance instance)))
+        (exercise-loader runtime)
+        (js-call runtime :close)
+        (js-call assert :throws (lambda () (js-call runtime :stats))
+          (lambda (error) (= (get error :message) "native managed runtime is closed"))))))
+
+  (test "allocator snapshot counts genuinely retired generations separately from reusable free slots"
+    (js-object :timeout 30000)
+    (lambda ()
+      (let ((runtime (instantiateManagedRuntime bytes
+              (js-object :maxSlots 8 :initialBytes 4096 :maxBytes 65536 :initializeModule false))))
+        (try
+          (progn
+            (js-call runtime :collect)
+            (let* ((before (readManagedAllocatorSnapshot runtime))
+                   (limit (* (get before :availableSlots) (get before :generationMax)))
+                   (index 0) (exhausted false))
+              (js-call assert :ok (> (get before :availableSlots) 0))
+              ;; Finite handle generations are a semantic boundary, not a
+              ;; benchmark. FIFO may have already advanced an idle generation.
+              (while (and (< index limit) (not exhausted))
+                (try
+                  (let ((value (js-call runtime :number 1)))
+                    (js-call runtime :release value) (js-call runtime :collect))
+                  (catch error
+                    (if (= (get (get error :eliscriptDiagnostic) :code) "ELI-RT0002")
+                      (setq exhausted t) (throw error))))
+                (setq index (1+ index)))
+              (let ((after (readManagedAllocatorSnapshot runtime)))
+                (assert-snapshot-counts after)
+                (js-call assert :strictEqual (get after :liveValues) (get before :liveValues))
+                (js-call assert :strictEqual (get after :retiredSlots) (get before :availableSlots))
+                (js-call assert :strictEqual (get after :availableSlots) 0)
+                (js-call assert :strictEqual (get after :freeReusableSlots) 0))))
+          (finally (js-call runtime :closeModule) (js-call runtime :collect))))))
+
+  (test "allocator snapshot refuses unknown and closed instances without extending the runtime object"
+    (lambda ()
+      (js-call assert :throws (lambda () (readManagedAllocatorSnapshot (js-object)))
+        (lambda (error) (= (get error :message) "unknown managed runtime allocator instance")))
+      (let* ((runtime (instantiateManagedRuntime legacy-bytes (small-options))) (keys (Reflect/ownKeys runtime)))
+        (assert-snapshot-counts (readManagedAllocatorSnapshot runtime))
+        (js-call assert :deepStrictEqual (Reflect/ownKeys runtime) keys)
+        (js-call runtime :closeModule)
+        (js-call assert :throws (lambda () (readManagedAllocatorSnapshot runtime))
+          (lambda (error) (= (get error :message) "managed runtime allocator snapshot is closed")))
+        (js-call runtime :collect)))))

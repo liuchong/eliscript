@@ -5,15 +5,16 @@ import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {buildBackends} from '../tools/backends/build.mjs';
 let directory,backend;
+const runtimeModules=new Map();let runtimeSource;
 beforeAll(async()=>{ directory=await mkdtemp(resolve(tmpdir(),'eliscript-memory-')); backend=await buildBackends({outputRoot:directory}); },120000);
-afterAll(async()=>{ if(directory) await rm(directory,{recursive:true,force:true}); });
+afterAll(async()=>{runtimeModules.clear();runtimeSource=undefined;if(directory) await rm(directory,{recursive:true,force:true}); });
 function compile(source,options={}) {
  const ir=backend.compiler.compile_ir_string(source,'memory-test.eli');
  const bytes=Uint8Array.from(backend.wasm.emit_memory_wasm(ir,options));
  assert(WebAssembly.validate(bytes));
  const module=new WebAssembly.Module(bytes);
  assert.deepEqual(WebAssembly.Module.imports(module),[]);
- return {bytes,exports:new WebAssembly.Instance(module).exports};
+ return {bytes,module,exports:new WebAssembly.Instance(module).exports};
 }
 test('memory32 emits owned memory, full u32 literals and unsigned comparisons',()=>{
  const {exports:e}=compile('(defun high () 4294967295) (defun less (a b) (if (< a b) 1 0)) (defun truth (x) (if x 7 8)) (export high less truth)');
@@ -71,8 +72,15 @@ test('memory32 word xor preserves every bit and left-to-right operand effects',(
 });
 
 async function runtime(options={}) {
- const source=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8');
- const {exports:e,bytes}=compile(source,options);
+ runtimeSource??=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8');
+ const key=JSON.stringify(Object.fromEntries(Object.entries(options).sort(([a],[b])=>a<b?-1:a>b?1:0)));
+ let artifact=runtimeModules.get(key);
+ if(!artifact){
+  const {bytes,module}=compile(runtimeSource,options);artifact={bytes,module};runtimeModules.set(key,artifact);
+ }
+ // Only immutable code is shared. Every call receives its original fresh
+ // memory, runtime allocator, handles and error state through a new instance.
+ const {bytes,module}=artifact,e=new WebAssembly.Instance(module).exports;
  const r=Object.fromEntries(Object.entries(e).map(([key,value])=>[key.replaceAll('-','_'),typeof value==='function' ? (...args)=>value(...args)>>>0 : value]));
  return {r,bytes};
 }

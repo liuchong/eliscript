@@ -25,7 +25,7 @@
     (catch error
       (str "async:" (get error :message "unknown")))
     (finally
-      (await (js* "Promise.resolve(null)")))))
+      (await (Promise/resolve nil)))))
 
 (defun rethrow ()
   (try

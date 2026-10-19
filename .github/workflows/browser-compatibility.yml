@@ -38,6 +38,21 @@ jobs:
             architecture: x64
             emacs: "30.2"
             browser: webkit
+          - name: linux-arm64-chromium
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "30.2"
+            browser: chromium
+          - name: linux-arm64-firefox
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "30.2"
+            browser: firefox
+          - name: linux-arm64-webkit
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "30.2"
+            browser: webkit
           - name: macos-chromium
             os: macos-15
             architecture: arm64
@@ -92,9 +107,13 @@ jobs:
           emacs --version
           bun --version
           node --version
+          test "$(bun -p 'process.arch')" = "${{ matrix.architecture }}"
+          test "$(node -p 'process.arch')" = "${{ matrix.architecture }}"
           test "$(node --version)" = "v24.20.0"
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
+      - name: Bootstrap maintained compiler and backend tools
+        run: make bootstrap-backends
       - name: Install selected browser
         run: bun node_modules/playwright-core/cli.js install --with-deps "${{ matrix.browser }}"
       - name: Run complete backend differential suite (performance reacceptance deferred)

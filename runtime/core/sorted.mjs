@@ -31,6 +31,7 @@ import {
 import {
   SORTED_MAP_STATE,
   SORTED_SET_STATE,
+  SortedNode,
   sortedAssoc,
   sortedDissoc,
   sortedEntries,
@@ -55,6 +56,14 @@ const SET_HASH_TAG = 0x51e7_b32d;
 const BOUND_TESTS = new Set(["<", "<=", ">", ">="]);
 const DEFAULT_COMPARATOR = comparator(compareValues);
 
+export function isDefaultSortedComparator(value) {
+  return value === DEFAULT_COMPARATOR;
+}
+
+export function defaultSortedComparator() {
+  return DEFAULT_COMPARATOR;
+}
+
 function normalizeComparator(comparison) {
   return comparison === compareValues || comparison === DEFAULT_COMPARATOR
     ? DEFAULT_COMPARATOR
@@ -72,6 +81,50 @@ function makeMap(root, comparison, metadata = null) {
 
 function makeSet(map, metadata = null) {
   return new PersistentSortedSet(SORTED_SET_TOKEN, map, metadata);
+}
+
+export function readSortedMapState(value) {
+  if (!(value instanceof PersistentSortedMap)) return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(value, SORTED_MAP_STATE);
+  return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined;
+}
+
+export function readSortedSetState(value) {
+  if (!(value instanceof PersistentSortedSet)) return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(value, SORTED_SET_STATE);
+  return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined;
+}
+
+// Transport already supplies ordered, unique data. Rebuild only its physical
+// host representation; normalizing or comparing again would invoke user code
+// a second time and change the comparator's observable identity.
+function materializeSortedRoot(values, set, start, end) {
+  if (start === end) return null;
+  const middle = start + Math.floor((end - start) / 2);
+  const item = values[middle];
+  if (!set && (!Array.isArray(item) || item.length !== 2)) {
+    throw new TypeError("invalid sorted map transport entry");
+  }
+  return new SortedNode(
+    set ? item : item[0],
+    set ? PRESENT : item[1],
+    materializeSortedRoot(values, set, start, middle),
+    materializeSortedRoot(values, set, middle + 1, end),
+  );
+}
+
+export function materializeSortedMap(entries, comparison, metadata = null) {
+  if (!Array.isArray(entries) || typeof comparison !== "function") {
+    throw new TypeError("invalid sorted map transport record");
+  }
+  return makeMap(materializeSortedRoot(entries, false, 0, entries.length), comparison, metadata);
+}
+
+export function materializeSortedSet(values, comparison, metadata = null) {
+  if (!Array.isArray(values) || typeof comparison !== "function") {
+    throw new TypeError("invalid sorted set transport record");
+  }
+  return makeSet(makeMap(materializeSortedRoot(values, true, 0, values.length), comparison), metadata);
 }
 
 function mapPairHash(entry, hash) {

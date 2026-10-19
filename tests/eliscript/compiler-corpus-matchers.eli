@@ -1,0 +1,723 @@
+(module tests.compiler-corpus-matchers
+  (import "bun:test" :as original)
+  (import "bun:jsc" jscDescribeArray jscDescribe)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp mkdir readFile writeFile rm)
+  (import "node:path" resolve dirname)
+  (import "node:url" pathToFileURL)
+  (import "node:os" tmpdir)
+  (import "../tools/backends/compiler-corpus-matchers.mjs" expect test)
+  (import "../tools/backends/managed-source-view.mjs"
+    createManagedSourceView isManagedSourceView snapshotManagedSourceView
+    projectManagedSourceViewForMatcher isManagedSourceViewForRuntime)
+  (import "../tools/backends/build.mjs" buildBackends root)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntimeWithHostModules)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "../tools/backends/managed-module-graph.mjs" createManagedModuleGraph createManagedProjectFacades)
+
+  (defasync matcher-project-options (directory descriptor)
+    (let ((facades (createManagedProjectFacades descriptor (js-object :entry "main.mjs"))))
+      ;; Each actual runtime gets its own real registry and entry URLs. Reusing
+      ;; a URL would reuse an installed ESM registry across heaps or targets.
+      (await (mkdir directory (js-object :recursive t)))
+      (let ((files (get facades :files)) (index 0))
+        (while (< index (js-length files))
+          (let* ((file (aref files index)) (path (resolve directory (get file :id))))
+            (await (mkdir (dirname path) (js-object :recursive t)))
+            (await (writeFile path (get file :source))))
+          (setq index (1+ index))))
+      (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216
+        :moduleGraph (createManagedModuleGraph descriptor)
+        :projectModuleBaseURL (get (pathToFileURL (+ directory "/")) :href))))
+
+  (defun view-of (source &optional replacements)
+    (let ((operations (Object/assign (js-object
+      :keys (lambda () (Reflect/ownKeys source))
+      :descriptor (lambda (key) (Reflect/getOwnPropertyDescriptor source key))
+      :get (lambda (key receiver) (Reflect/get source key source))
+      :set (lambda (key value receiver) (Reflect/set source key value source))
+      :has (lambda (key) (Reflect/has source key))
+      :delete (lambda (key) (Reflect/deleteProperty source key))
+      :define (lambda (key descriptor) (Reflect/defineProperty source key descriptor))
+      :prototype (lambda () (Reflect/getPrototypeOf source))
+      :setPrototype (lambda (prototype) (Reflect/setPrototypeOf source prototype))
+      :extensible (lambda () (Reflect/isExtensible source))
+      :preventExtensions (lambda () (Reflect/preventExtensions source))) replacements)))
+      (get (createManagedSourceView
+        (js-object :target (if (Array/isArray source) (js-array) (js-object)) :operations operations)) :value)))
+
+  (defun captured (operation)
+    (let ((failed false) (error undefined))
+      (try (funcall operation) (catch value (setq failed t error value)))
+      (js-object :failed failed :error error)))
+
+  ;; Official JSC storage inspection is diagnostic only. Bound each native
+  ;; description and never replace the original whole-matcher failure if
+  ;; inspection itself cannot describe an object.
+  (defun native-array-storage (value)
+    (try
+      (js-object :description (js-call (jscDescribeArray value) :slice 0 2048)
+        :structure (js-call (jscDescribe value) :slice 0 2048))
+      (catch ignored (js-object :unavailable t))))
+
+  (defun native-prototype-enumeration (value)
+    (try
+      (let ((owner (Reflect/getPrototypeOf value)) (levels (js-array)) (depth 0))
+        ;; Both real graphs have two prototype levels. Retain the same bound
+        ;; on either side and mark truncation rather than walking indefinitely.
+        (while (and (not (eq owner nil)) (< depth 8))
+          (let* ((keys (Reflect/ownKeys owner))
+                 (enumerable (js-call keys :filter (lambda (key)
+                   (get (Reflect/getOwnPropertyDescriptor owner key) :enumerable)))))
+            (js-call levels :push (js-object :depth depth
+              :native (native-array-storage owner)
+              :keys (js-call keys :map (lambda (key) (funcall globalThis.String key)))
+              :enumerableKeys (js-call enumerable :map (lambda (key) (funcall globalThis.String key))))))
+          (setq owner (Reflect/getPrototypeOf owner) depth (1+ depth)))
+        (js-object :levels levels :truncated (not (eq owner nil))))
+      (catch ignored (js-object :unavailable t))))
+
+  (test "Bun's foreign Proxy array limitation remains visible and unknown inputs keep the original matcher"
+    (lambda ()
+      (let* ((trace (js-array))
+             (foreign (new globalThis.Proxy (js-array 1 2 3)
+               (js-object :get (lambda (target key receiver)
+                 (js-call trace :push key) (Reflect/get target key receiver)))))
+             (golden (js-array 1 2 3)))
+        (js-call assert :strictEqual (isManagedSourceView foreign) false)
+        (js-call assert :strictEqual (snapshotManagedSourceView foreign) foreign)
+        (js-call assert :deepStrictEqual trace (js-array))
+        (let ((baseline (captured (lambda () (js-call (js-call original :expect foreign) :toMatchObject golden))))
+              (before (js-call trace :slice)))
+          (put trace :length 0)
+          (let ((transported (captured (lambda () (js-call (expect foreign) :toMatchObject golden)))))
+            ;; Bun 34cbb9a40 sees IsArray(proxy), but reads its zero-length
+            ;; internal indexing storage. No foreign value is repaired here.
+            (js-call assert :strictEqual (get baseline :failed) t)
+            (js-call assert :strictEqual (get transported :failed) (get baseline :failed))
+            (js-call assert :deepStrictEqual trace before)))
+        (js-call assert :strictEqual test (get original :test))
+        (let* ((prototype-reads 0)
+               (foreign-prototype (new globalThis.Proxy (js-object)
+                 (js-object :getPrototypeOf (lambda (target)
+                   (setq prototype-reads (1+ prototype-reads)) (throw false)))))
+               (source (Object/create foreign-prototype))
+               (copy (snapshotManagedSourceView (view-of source))))
+          (js-call assert :strictEqual (Reflect/getPrototypeOf copy) foreign-prototype)
+          (js-call assert :strictEqual prototype-reads 0))
+        (let ((value (js-object :identity t)))
+          (js-call (expect value) :toBe value)
+          (js-call (get (expect value) :not) :toBe (js-object))))))
+
+  (test "authenticated snapshots preserve sparse storage every descriptor symbols negative zero alias and cycles"
+    (lambda ()
+      (let* ((symbol (funcall globalThis.Symbol "snapshot"))
+             (array (js-array undefined -0.0 3))
+             (array-view (view-of array))
+             (source (js-object :observed array-view :alias array-view :absent undefined :zero -0.0))
+             (view (view-of source)))
+        (Reflect/deleteProperty array "2")
+        (Object/defineProperty array symbol (js-object :value "symbol" :enumerable false :writable false :configurable t))
+        (put source :self view)
+        (let* ((copy (snapshotManagedSourceView view)) (child (get copy :observed)))
+          (js-call assert :strictEqual (isManagedSourceView view) t)
+          (js-call assert :notStrictEqual copy view)
+          (js-call assert :strictEqual (get copy :self) copy)
+          (js-call assert :strictEqual child (get copy :alias))
+          (js-call assert :strictEqual (Array/isArray child) t)
+          (js-call assert :strictEqual (get child :length) 3)
+          (js-call assert :strictEqual (Object/hasOwn child "2") false)
+          (js-call assert :strictEqual (Object/is (get copy :zero) -0.0) t)
+          (js-call assert :strictEqual (Object/hasOwn copy "absent") t)
+          (js-call assert :strictEqual (get copy :absent) undefined)
+          (js-call assert :deepStrictEqual (Reflect/ownKeys child) (Reflect/ownKeys array-view))
+          (js-call (Reflect/ownKeys array-view) :forEach (lambda (key)
+            (js-call assert :deepStrictEqual (Reflect/getOwnPropertyDescriptor child key)
+              (Reflect/getOwnPropertyDescriptor array-view key))))
+          (js-call (expect view) :toMatchObject (js-object :observed array))
+          (js-call (expect view) :toBe view)))))
+
+  (test "the original matcher still rejects wrong array lengths values negative zero and holes"
+    (lambda ()
+      (let ((view (view-of (js-array 1 -0.0 3))))
+        (js-call (expect view) :toMatchObject (js-array 1 -0.0 3))
+        (js-call (get (expect view) :not) :toMatchObject (js-array 1 0 3))
+        (js-call (js-array (js-array 1 -0.0) (js-array 1 -0.0 4) (js-array 1 0 3))
+          :forEach (lambda (bad)
+            (js-call assert :strictEqual
+              (get (captured (lambda () (js-call (expect view) :toMatchObject bad))) :failed) t))))
+      (let* ((sparse (new globalThis.Array 2)) (view (view-of sparse)))
+        (put sparse 0 1)
+        (js-call assert :strictEqual
+          (get (captured (lambda () (js-call (expect view) :toMatchObject (js-array 1 undefined)))) :failed) t))))
+
+  (test "snapshot array storage is defined before its custom prototype while final reflection retains the exact source graph"
+    (lambda ()
+      (let* ((prototype-data (Object/create (get globalThis.Array :prototype)))
+             (prototype-view (view-of prototype-data))
+             (symbol (funcall globalThis.Symbol "own metadata"))
+             (array (js-array undefined -0.0 3))
+             (_prototype (Object/setPrototypeOf array prototype-view))
+             (_symbol (Object/defineProperty array symbol
+               (js-object :value "retained" :writable false :enumerable false :configurable false)))
+             (_length (Object/defineProperty array "length" (js-object :writable false)))
+             (view (view-of array))
+             (copy (snapshotManagedSourceView view))
+             (copy-prototype (Reflect/getPrototypeOf copy)))
+        (js-call assert :strictEqual (Array/isArray copy) t)
+        (js-call assert :strictEqual (get copy :length) 3)
+        (js-call assert :notStrictEqual copy-prototype prototype-view)
+        (js-call assert :strictEqual (Reflect/getPrototypeOf copy-prototype) (get globalThis.Array :prototype))
+        (js-call assert :strictEqual (Reflect/getPrototypeOf view) prototype-view)
+        (js-call assert :deepStrictEqual (Reflect/ownKeys copy) (Reflect/ownKeys view))
+        (js-call (Reflect/ownKeys view) :forEach (lambda (key)
+          (js-call assert :deepStrictEqual (Reflect/getOwnPropertyDescriptor copy key)
+            (Reflect/getOwnPropertyDescriptor view key))))
+        (js-call (js-call original :expect copy) :toMatchObject (js-array undefined -0.0 3))
+        (js-call (expect view) :toMatchObject (js-array undefined -0.0 3)))))
+
+  (test "native array matcher controls distinguish indexing transitions from nonenumerable inherited unscopables"
+    (lambda ()
+      (let* ((standard (get globalThis.Array :prototype))
+             (symbol (get globalThis.Symbol :unscopables))
+             (descriptors (Object/getOwnPropertyDescriptors standard))
+             (with-symbol (Object/create (Reflect/getPrototypeOf standard) descriptors))
+             (without-symbol (Object/create (Reflect/getPrototypeOf standard) descriptors))
+             (golden (js-array 1 2 3))
+             (prototypes (js-array
+               (js-object :name "standard" :value standard)
+               (js-object :name "null" :value nil)
+               (js-object :name "cloned-with-unscopables" :value with-symbol)
+               (js-object :name "cloned-without-unscopables" :value without-symbol)))
+             (outcomes (js-array)))
+        (js-call assert :strictEqual (get (Reflect/getOwnPropertyDescriptor standard symbol) :enumerable) false)
+        (js-call assert :strictEqual (Reflect/deleteProperty without-symbol symbol) t)
+        (js-call (Reflect/ownKeys with-symbol) :forEach (lambda (key)
+          (unless (eq key symbol)
+            (js-call assert :deepStrictEqual (Reflect/getOwnPropertyDescriptor with-symbol key)
+              (Reflect/getOwnPropertyDescriptor without-symbol key)))))
+        (js-call (js-array "literal" "descriptor-transition") :forEach (lambda (construction)
+          (js-call prototypes :forEach (lambda (prototype)
+            (let* ((array (js-array 1 2 3))
+                   (entry (Reflect/getOwnPropertyDescriptor array "0")))
+              ;; Change indexed storage through a reversible descriptor path;
+              ;; the final public descriptor is exactly the original one.
+              ;; Record JSC's actual resulting class instead of asserting an
+              ;; engine-internal transition that this fixture cannot promise.
+              (when (= construction "descriptor-transition")
+                (Object/defineProperty array "0" (js-object :writable false))
+                (Object/defineProperty array "0" entry))
+              (Object/setPrototypeOf array (get prototype :value))
+              (js-call assert :strictEqual (Array/isArray array) t)
+              (js-call assert :deepStrictEqual (Reflect/ownKeys array) (Reflect/ownKeys golden))
+              (js-call (Reflect/ownKeys golden) :forEach (lambda (key)
+                (js-call assert :deepStrictEqual (Reflect/getOwnPropertyDescriptor array key)
+                  (Reflect/getOwnPropertyDescriptor golden key))))
+              (let ((result (captured (lambda ()
+                (js-call (js-call original :expect array) :toMatchObject golden)))))
+                (js-call outcomes :push (js-object :construction construction
+                  :prototype (get prototype :name) :matched (not (get result :failed))
+                  :native (native-array-storage array)
+                  :enumeration (native-prototype-enumeration array)))))))))
+        (when (= (get (get globalThis.process :env) :ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC) "1")
+          (try
+            (console/error "[managed-matcher-native-controls]" (JSON/stringify
+              (js-object :golden (native-array-storage golden)
+                :goldenEnumeration (native-prototype-enumeration golden) :outcomes outcomes)))
+            (catch ignored nil)))
+        ;; This new diagnostic records Bun's actual native contract: its
+        ;; standard Array realm passes and the three unrelated chains do not.
+        ;; The original real managed reports below still must match true.
+        (js-call assert :strictEqual (js-length outcomes) 8)
+        (js-call outcomes :forEach (lambda (row)
+          (js-call assert :strictEqual (get row :matched) (= (get row :prototype) "standard")
+            (+ (get row :construction) "/" (get row :prototype))))))))
+
+  (defun host-array-instance-p (value)
+    (Reflect/apply (get (get globalThis.Function :prototype) (get globalThis.Symbol :hasInstance))
+      globalThis.Array (js-array value)))
+
+  (defun check-matcher-realm (adapter actual)
+    (let* ((array (get actual :observed))
+           (array-prototype (Reflect/getPrototypeOf array))
+           (object-prototype (Reflect/getPrototypeOf array-prototype))
+           (before (js-call adapter :stats))
+           (ordinary (snapshotManagedSourceView actual))
+           (projection (projectManagedSourceViewForMatcher actual)))
+      (js-call assert :strictEqual (isManagedSourceViewForRuntime array adapter) t)
+      (js-call assert :strictEqual (isManagedSourceViewForRuntime array (js-object)) false)
+      (js-call assert :strictEqual (isManagedSourceViewForRuntime (view-of (js-array)) adapter) false)
+      (js-call assert :strictEqual (host-array-instance-p (get ordinary :observed)) false)
+      (js-call assert :strictEqual (host-array-instance-p (get projection :observed)) t)
+      (js-call assert :strictEqual (host-array-instance-p projection) false)
+      (js-call assert :strictEqual (get projection :self) projection)
+      (js-call assert :strictEqual (get projection :alias) (get projection :observed))
+      (js-call assert :notStrictEqual (Reflect/getPrototypeOf
+        (Reflect/getPrototypeOf (get projection :observed))) (Reflect/getPrototypeOf projection))
+      (js-call assert :strictEqual (Reflect/getPrototypeOf array) array-prototype)
+      (js-call assert :strictEqual (Reflect/getPrototypeOf array-prototype) object-prototype)
+      (js-call assert :strictEqual (Reflect/getPrototypeOf object-prototype) nil)
+      (let ((symbol (funcall globalThis.Symbol "matcher own"))
+            (saved (Object/getOwnPropertyDescriptors array)))
+        (try
+          (progn
+            (Object/defineProperty array "1" (js-object :value -0.0))
+            (Reflect/deleteProperty array "2")
+            (Object/defineProperty array symbol (js-object :value undefined :writable false :enumerable false :configurable t))
+            (Object/defineProperty array "length" (js-object :writable t))
+            (let* ((copy (projectManagedSourceViewForMatcher actual)) (child (get copy :observed)))
+              (js-call assert :strictEqual (get child :length) 3)
+              (js-call assert :strictEqual (Object/hasOwn child "2") false)
+              (js-call assert :strictEqual (Object/is (get child "1") -0.0) t)
+              (js-call assert :strictEqual (Object/hasOwn child symbol) t)
+              (js-call assert :strictEqual (get child symbol) undefined)
+              (js-call assert :strictEqual child (get copy :alias))
+              (js-call assert :strictEqual (get copy :self) copy)
+              (js-call (Reflect/ownKeys array) :forEach (lambda (key)
+                (js-call assert :deepStrictEqual (Reflect/getOwnPropertyDescriptor child key)
+                  (Reflect/getOwnPropertyDescriptor array key))))))
+          (finally
+            (Reflect/deleteProperty array symbol)
+            (Object/defineProperties array saved))))
+      (let ((key "__matcher_inherited__"))
+        (try
+          (progn
+            (Object/defineProperty object-prototype key
+              (js-object :value 17 :writable t :enumerable t :configurable t))
+            (let* ((copy (projectManagedSourceViewForMatcher actual))
+                   (child (get copy :observed)))
+              (js-call assert :strictEqual (get copy key) 17)
+              (js-call assert :strictEqual (get child key) 17)
+              (js-call assert :strictEqual (Object/hasOwn copy key) false)
+              (js-call assert :strictEqual (Object/hasOwn child key) false)
+              (js-call assert :strictEqual (host-array-instance-p copy) false)
+              (js-call assert :deepStrictEqual
+                (Reflect/getOwnPropertyDescriptor (Reflect/getPrototypeOf copy) key)
+                (Reflect/getOwnPropertyDescriptor object-prototype key))))
+          (finally (Reflect/deleteProperty object-prototype key))))
+      (let ((key "__matcher_host_pollution__"))
+        (try
+          (progn
+            (Object/defineProperty (get globalThis.Array :prototype) key
+              (js-object :value 71 :enumerable t :configurable t))
+            (let* ((copy (projectManagedSourceViewForMatcher actual)) (child (get copy :observed)))
+              (js-call assert :strictEqual (host-array-instance-p child) false)
+              (js-call assert :strictEqual (Reflect/has child key) false)))
+          (finally (Reflect/deleteProperty (get globalThis.Array :prototype) key))))
+      (let* ((custom-token (js-call adapter :sourceObject (js-object)))
+             (custom (js-call adapter :toHostValue custom-token)))
+        (try
+          (progn
+            (Object/setPrototypeOf array custom)
+            (js-call assert :strictEqual (Reflect/getPrototypeOf array) custom)
+            (js-call assert :strictEqual (host-array-instance-p
+              (get (projectManagedSourceViewForMatcher actual) :observed)) false)
+            (Object/setPrototypeOf array nil)
+            ;; Check the public runtime view before either transport. Explicit
+            ;; null must not be mistaken for an untouched default Array edge.
+            (js-call assert :strictEqual (Reflect/getPrototypeOf array) nil)
+            (js-call assert :strictEqual (Reflect/has array "toString") false)
+            (js-call assert :strictEqual (get array :toString) undefined)
+            (js-call assert :strictEqual (Reflect/getPrototypeOf
+              (get (snapshotManagedSourceView actual) :observed)) nil)
+            (js-call assert :strictEqual (Reflect/getPrototypeOf
+              (get (projectManagedSourceViewForMatcher actual) :observed)) nil)
+            (js-call adapter :collect)
+            (js-call assert :strictEqual (Reflect/getPrototypeOf array) nil)
+            (js-call assert :strictEqual (Reflect/getPrototypeOf array-prototype) object-prototype)
+            (js-call assert :strictEqual (Reflect/getPrototypeOf
+              (get (snapshotManagedSourceView actual) :observed)) nil)
+            (let ((copy (projectManagedSourceViewForMatcher actual)))
+              (js-call assert :strictEqual (Reflect/getPrototypeOf (get copy :observed)) nil)
+              (js-call assert :strictEqual (get copy :alias) (get copy :observed))
+              (js-call assert :strictEqual (get copy :self) copy)
+              (js-call assert :deepStrictEqual (Reflect/ownKeys (get copy :observed)) (Reflect/ownKeys array))
+              (js-call (Reflect/ownKeys array) :forEach (lambda (key)
+                (js-call assert :deepStrictEqual (Reflect/getOwnPropertyDescriptor (get copy :observed) key)
+                  (Reflect/getOwnPropertyDescriptor array key))))))
+          (finally
+            (Object/setPrototypeOf array array-prototype)
+            (js-call adapter :release custom-token))))
+      (js-call assert :strictEqual (Reflect/getPrototypeOf array) array-prototype)
+      (let ((zero (js-call adapter :number -0.0)) (token undefined))
+        (try
+          (progn
+            (setq token (js-call adapter :sourceArray (js-array undefined zero undefined)))
+            (let ((view (js-call adapter :toHostValue token)))
+              (Reflect/deleteProperty view "2")
+              (Object/defineProperty view "length" (js-object :writable false))
+              (let ((copy (projectManagedSourceViewForMatcher view)))
+                (js-call assert :strictEqual (get copy :length) 3)
+                (js-call assert :strictEqual (Object/is (get copy "1") -0.0) t)
+                (js-call assert :strictEqual (Object/hasOwn copy "0") t)
+                (js-call assert :strictEqual (Object/hasOwn copy "2") false)
+                (js-call assert :deepStrictEqual (Reflect/getOwnPropertyDescriptor copy "length")
+                  (Reflect/getOwnPropertyDescriptor view "length")))))
+          (finally
+            (unless (undefined? token) (js-call adapter :release token))
+            (js-call adapter :release zero))))
+      (let* ((spoof (js-array 1 2 3))
+             (prototype (Object/create nil (js-object :constructor
+               (js-object :value globalThis.Array :enumerable false :configurable t)))))
+        (Object/setPrototypeOf spoof prototype)
+        (js-call assert :strictEqual (projectManagedSourceViewForMatcher spoof) spoof)
+        (js-call assert :strictEqual (isManagedSourceViewForRuntime spoof adapter) false)
+        (let* ((view (view-of spoof)) (copy (projectManagedSourceViewForMatcher view)))
+          (js-call assert :strictEqual (Reflect/getPrototypeOf copy) prototype)
+          (js-call assert :strictEqual (host-array-instance-p copy) false))
+        (Object/setPrototypeOf spoof nil)
+        (js-call assert :strictEqual (Reflect/getPrototypeOf
+          (projectManagedSourceViewForMatcher (view-of spoof))) nil))
+      (let ((functions (js-array "getterFalse" "getterUndefined"))
+            (failures (js-array false undefined)) (index 0))
+        (while (< index (js-length functions))
+          (let ((token (js-call adapter :getExport (aref functions index))))
+            (try
+              (progn
+                (Object/defineProperty array-prototype "__matcher_getter__"
+                  (js-object :get (js-call adapter :toHostValue token) :enumerable t :configurable t))
+                (let* ((copy (projectManagedSourceViewForMatcher actual))
+                       (outcome (captured (lambda () (get (get copy :observed) "__matcher_getter__")))))
+                  (js-call assert :strictEqual (get outcome :failed) t)
+                  (js-call assert :strictEqual (get outcome :error) (aref failures index))))
+              (finally
+                (Reflect/deleteProperty array-prototype "__matcher_getter__")
+                (js-call adapter :release token))))
+          (setq index (1+ index))))
+      (js-call adapter :collect)
+      (let ((live (js-call adapter :live)) (iteration 0))
+        (while (< iteration 3)
+          (projectManagedSourceViewForMatcher actual)
+          (js-call adapter :collect)
+          (js-call assert :strictEqual (js-call adapter :live) live)
+          (setq iteration (1+ iteration))))
+      (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) (get before :frameDepth))
+      (js-call assert :strictEqual (host-array-instance-p
+        (get (projectManagedSourceViewForMatcher actual) :observed)) t)))
+
+  (test "accessor snapshots are lazy preserve the original receiver and propagate false and undefined without mutation"
+    (lambda ()
+      (let ((failures (js-array false undefined)) (index 0))
+        (while (< index (js-length failures))
+          (let* ((failure (aref failures index)) (reads 0) (calls 0)
+                 (source (js-object)) (view undefined))
+            (Object/defineProperty source "value" (js-object :enumerable t :configurable t
+              :get (lambda () (setq reads (1+ reads)) (throw failure))))
+            (setq view (view-of source (js-object :get (lambda (key receiver)
+              (js-call assert :strictEqual receiver view)
+              (setq calls (1+ calls)) (Reflect/get source key source)))))
+            (let ((descriptor (Reflect/getOwnPropertyDescriptor view "value"))
+                  (copy (snapshotManagedSourceView view)))
+              (js-call assert :strictEqual reads 0)
+              (js-call assert :strictEqual calls 0)
+              (js-call assert :strictEqual (get (Reflect/getOwnPropertyDescriptor copy "value") :enumerable) t)
+              (js-call assert :strictEqual (get (Reflect/getOwnPropertyDescriptor copy "value") :configurable) t)
+              (let ((result (captured (lambda () (get copy :value)))))
+                (js-call assert :strictEqual (get result :failed) t)
+                (js-call assert :strictEqual (get result :error) failure))
+              (js-call assert :strictEqual reads 1)
+              (js-call assert :strictEqual calls 1)
+              (js-call assert :strictEqual (get (Reflect/getOwnPropertyDescriptor view "value") :get) (get descriptor :get)))
+            (let ((result (captured (lambda () (js-call (expect view) :toMatchObject (js-object :value 1))))))
+              (js-call assert :strictEqual (get result :failed) t)
+              (js-call assert :strictEqual (get result :error) failure)))
+          (setq index (1+ index))))))
+
+  (test "real WASM and native owned report views retain exact fields and descriptors before the unchanged Bun matcher"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-managed-matchers-"))))
+             (backend undefined) (runtime-ir undefined) (adapter undefined) (handle undefined)
+             (graph undefined) (failed false))
+        (try
+          (progn
+            (setq backend (await (buildBackends (js-object :outputRoot (resolve directory "backend")))))
+            (setq runtime-ir (js-call (get backend :compiler) :compile_ir_string
+              (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
+            (let* ((program (js-call (get backend :compiler) :compile_ir_string
+                     "(defconst observed (js-array 1 2 3)) (defconst report (js-object :answer 42 :observed observed :alias observed :missing undefined :zero -0.0)) (put report :self report) (defun getterFalse () (throw false)) (defun getterUndefined () (throw undefined)) (defun makeReport () (js-object :observed (js-array 1 2 3))) (export report getterFalse getterUndefined makeReport)"
+                     "matcher-owned.eli"))
+                   (before (JSON/stringify program))
+                   ;; Keep the original owned program's zero-import contract
+                   ;; separately. The new reflection mutations pass genuine
+                   ;; host descriptor objects through this same program's
+                   ;; public source views, which requires foreign entry.
+                   (owned-lowered (js-call (get backend :managed) :lower_managed_project
+                     (js-array (js-object :id "main.mjs" :program program)) "main.mjs" runtime-ir (js-object :phased t)))
+                   (owned-image (globalThis.Uint8Array.from
+                     (js-call (get backend :wasm) :emit_typed_memory_wasm (get owned-lowered :typed))))
+                   (lowered (js-call (get backend :managed) :lower_managed_project
+                     (js-array (js-object :id "main.mjs" :program program)) "main.mjs" runtime-ir
+                     (js-object :phased t :foreignEntry t)))
+                   (image (globalThis.Uint8Array.from
+                     (js-call (get backend :wasm) :append_metadata_section
+                       (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed))
+                       "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))))
+                   (native-target (when (= (get globalThis.process :arch) "arm64")
+                     (cond ((= (get globalThis.process :platform) "darwin") "arm64-macos")
+                           ((= (get globalThis.process :platform) "linux") "arm64-linux"))))
+                   (targets (if native-target (js-array "wasm" "native") (js-array "wasm"))) (index 0))
+              (js-call assert :deepStrictEqual
+                (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module owned-image)) (js-array))
+              (js-call assert :deepStrictEqual (get (get lowered :descriptor) :hostCapabilities)
+                (js-array (js-object :name "source-operation" :module "eliscript.host"
+                  :arity 2 :abi "managed-host-call-v1")))
+              (let ((imports (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module image))))
+                (js-call assert :deepStrictEqual
+                  (js-call imports :map (lambda (entry)
+                    (js-object :module (get entry :module) :name (get entry :name) :kind (get entry :kind))))
+                  (js-array (js-object :module "eliscript.host" :name "source-operation" :kind "function")))
+                (js-call imports :forEach (lambda (entry)
+                  (when (Object/hasOwn entry "type")
+                    (js-call assert :deepStrictEqual (get entry :type)
+                      (js-object :parameters (js-array "i32" "i32") :results (js-array "i32")))))))
+              (while (< index (js-length targets))
+                (setq adapter undefined handle undefined graph undefined)
+                (try
+                  (let* ((options (await (matcher-project-options
+                           (resolve directory (aref targets index) "main") (get lowered :descriptor))))
+                         (_graph (setq graph (get options :moduleGraph))))
+                    (if (= (aref targets index) "wasm")
+                      (setq adapter (await (instantiateManagedRuntimeWithHostModules image options)))
+                      (let ((path (resolve directory (if (= native-target "arm64-macos") "matcher.dylib" "matcher.so"))))
+                        (await (writeFile path (globalThis.Uint8Array.from
+                          (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target))))
+                        (setq adapter (await (instantiateNativeManagedRuntime path lowered
+                          (Object/assign (js-object) options (js-object :nativeTarget native-target)))))))
+                    (js-call adapter :auto 1)
+                    (setq handle (js-call adapter :getExport "report"))
+                    (let* ((actual (js-call adapter :toHostValue handle)) (array (get actual :observed))
+                           (golden (js-object :answer 42 :observed (js-array 1 2 3) :missing undefined :zero -0.0)))
+                      (js-call assert :strictEqual (isManagedSourceView actual) t)
+                      (js-call assert :strictEqual (isManagedSourceView array) t)
+                      (js-call assert :strictEqual (get actual :self) actual)
+                      (js-call assert :strictEqual (get actual :alias) array)
+                      (js-call assert :strictEqual (Array/isArray array) t)
+                      (js-call assert :strictEqual (get array :length) 3)
+                      (js-call (Object/keys golden) :forEach (lambda (key)
+                        (let ((entry (Reflect/getOwnPropertyDescriptor actual key)))
+                          (js-call assert :strictEqual (Object/hasOwn entry "value") t)
+                          (js-call assert :strictEqual (get entry :writable) t)
+                          (js-call assert :strictEqual (get entry :enumerable) t)
+                          (js-call assert :strictEqual (get entry :configurable) t)
+                          (js-call assert :strictEqual (Object/is (get entry :value)
+                            (if (= key "observed") array (get golden key))) t))))
+                      (js-call (js-array "0" "1" "2" "length") :forEach (lambda (key)
+                        (js-call assert :deepStrictEqual (Reflect/getOwnPropertyDescriptor array key)
+                          (Reflect/getOwnPropertyDescriptor (get golden :observed) key))))
+                      ;; The real decoder has its own managed realm. Copying
+                      ;; only data edges left those prototype Proxies inside
+                      ;; Bun's native property-name walk, unlike the host-only
+                      ;; model above. Keep and verify that real graph as well.
+                      (let* ((prototype (Reflect/getPrototypeOf actual))
+                             (array-prototype (Reflect/getPrototypeOf array))
+                             (copy (snapshotManagedSourceView actual))
+                             (matcher-copy (projectManagedSourceViewForMatcher actual))
+                             (matcher-array (get matcher-copy :observed))
+                             (array-copy (get copy :observed))
+                             (copy-prototype (Reflect/getPrototypeOf copy))
+                             (array-copy-prototype (Reflect/getPrototypeOf array-copy)))
+                        (js-call assert :notStrictEqual copy actual)
+                        (js-call assert :notStrictEqual array-copy array)
+                        (js-call assert :strictEqual (get copy :self) copy)
+                        (js-call assert :strictEqual (get copy :alias) array-copy)
+                        (js-call assert :strictEqual (isManagedSourceView prototype) t)
+                        (js-call assert :strictEqual (isManagedSourceView array-prototype) t)
+                        (js-call assert :notStrictEqual copy-prototype prototype)
+                        (js-call assert :notStrictEqual array-copy-prototype array-prototype)
+                        (js-call assert :strictEqual (Reflect/getPrototypeOf array-copy-prototype) copy-prototype)
+                        (js-call assert :strictEqual (Reflect/getPrototypeOf copy-prototype) nil)
+                        (js-call assert :strictEqual (Array/isArray array-copy-prototype) t)
+                        (js-call assert :strictEqual (get array-copy-prototype :length) 0)
+                        (js-call (js-array (js-array prototype copy-prototype)
+                                         (js-array array-prototype array-copy-prototype)) :forEach
+                          (lambda (pair)
+                            (let* ((source-prototype (aref pair 0)) (snapshot-prototype (aref pair 1))
+                                   (keys (Reflect/ownKeys source-prototype)))
+                              (js-call assert :strictEqual (isManagedSourceView snapshot-prototype) false)
+                              (js-call assert :deepStrictEqual (Reflect/ownKeys snapshot-prototype) keys)
+                              (js-call keys :forEach (lambda (key)
+                                (let ((left (Reflect/getOwnPropertyDescriptor source-prototype key))
+                                      (right (Reflect/getOwnPropertyDescriptor snapshot-prototype key)))
+                                  (js-call assert :deepStrictEqual (Reflect/ownKeys right) (Reflect/ownKeys left))
+                                  (js-call assert :strictEqual (get right :enumerable) (get left :enumerable))
+                                  (js-call assert :strictEqual (get right :configurable) (get left :configurable))
+                                  (when (Object/hasOwn left "value")
+                                    (js-call assert :strictEqual (get right :writable) (get left :writable))))))
+                              ;; Functions remain the original callable views;
+                              ;; no constructor behavior is materialized here.
+                              (js-call assert :strictEqual (get snapshot-prototype :constructor)
+                                (get source-prototype :constructor)))))
+                        (js-call assert :strictEqual (Reflect/getPrototypeOf actual) prototype)
+                        (js-call assert :strictEqual (Reflect/getPrototypeOf array) array-prototype)
+                        ;; Keep the complete original matcher below. These
+                        ;; independent, bounded checks distinguish the actual
+                        ;; snapshot data from its source view and identify a
+                        ;; native matcher rejection without inventing a cause.
+                        (let* ((keys (Object/keys golden))
+                               (field-matches (js-call keys :map (lambda (key)
+                                 (let* ((subset (Object/create nil))
+                                        (_field (Object/defineProperty subset key
+                                          (Reflect/getOwnPropertyDescriptor golden key)))
+                                        (outcome (captured (lambda ()
+                                          (js-call (js-call original :expect matcher-copy) :toMatchObject subset)))))
+                                   (js-object :key key :passed (not (get outcome :failed)))))))
+                               (array-match (captured (lambda ()
+                                 (js-call (js-call original :expect matcher-array) :toMatchObject (get golden :observed)))))
+                               (wrapped-match (captured (lambda ()
+                                 (js-call (js-call original :expect (js-object :observed matcher-array)) :toMatchObject
+                                   (js-object :observed (get golden :observed))))))
+                               (array-keys (Reflect/ownKeys array-copy))
+                               (entries (js-call (js-array "0" "1" "2" "length") :map (lambda (key)
+                                 (let ((entry (Reflect/getOwnPropertyDescriptor array-copy key)))
+                                   (js-object :key key :present (not (undefined? entry))
+                                     :data (when entry (Object/hasOwn entry "value"))
+                                     :value (when entry (get entry :value))
+                                     :writable (when entry (get entry :writable))
+                                     :enumerable (when entry (get entry :enumerable))
+                                     :configurable (when entry (get entry :configurable)))))))
+                               (prototype-enumerable (js-call (js-array array-copy-prototype copy-prototype) :map
+                                 (lambda (owner)
+                                   (js-call (Reflect/ownKeys owner) :filter (lambda (key)
+                                     (get (Reflect/getOwnPropertyDescriptor owner key) :enumerable)))))))
+                          (when (= (get (get globalThis.process :env) :ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC) "1")
+                            (try
+                              (console/error "[managed-matcher-snapshot]" (JSON/stringify
+                                (js-object :target (aref targets index) :fields field-matches
+                                  :arrayMatched (not (get array-match :failed))
+                                  :wrappedArrayMatched (not (get wrapped-match :failed))
+                                  :arrayBrand (Array/isArray array-copy) :arrayLength (get array-copy :length)
+                                  :arrayKeys (js-call array-keys :map (lambda (key) (funcall globalThis.String key)))
+                                  :arrayDescriptors entries
+                                  :nativeArrayStorage (js-object
+                                    :arrayCopy (native-array-storage array-copy)
+                                    :goldenObserved (native-array-storage (get golden :observed))
+                                    :sourceArray (native-array-storage array)
+                                    :snapshotArrayPrototype (native-array-storage array-copy-prototype)
+                                    :snapshotObjectPrototype (native-array-storage copy-prototype))
+                                  :symmetricPrototypeEnumeration (js-object
+                                    :snapshotArray (native-prototype-enumeration array-copy)
+                                    :goldenArray (native-prototype-enumeration (get golden :observed))
+                                    :snapshotObject (native-prototype-enumeration copy)
+                                    :goldenObject (native-prototype-enumeration golden))
+                                  :prototypeEnumerableKeys (js-call prototype-enumerable :map (lambda (list)
+                                    (js-call list :map (lambda (key) (funcall globalThis.String key)))))
+                                  :missingOwn (Object/hasOwn copy "missing")
+                                  :missingUndefined (undefined? (get copy :missing))
+                                  :negativeZero (Object/is (get copy :zero) -0.0))))
+                              (catch ignored nil)))
+                          (js-call assert :strictEqual (Array/isArray array-copy) t)
+                          (js-call assert :strictEqual (get array-copy :length) 3)
+                          (js-call assert :deepStrictEqual array-keys (Reflect/ownKeys (get golden :observed)))
+                          (js-call (js-array "0" "1" "2" "length") :forEach (lambda (key)
+                            (js-call assert :deepStrictEqual (Reflect/getOwnPropertyDescriptor array-copy key)
+                              (Reflect/getOwnPropertyDescriptor (get golden :observed) key))))
+                          (js-call keys :forEach (lambda (key)
+                            (let ((left (Reflect/getOwnPropertyDescriptor copy key))
+                                  (right (Reflect/getOwnPropertyDescriptor golden key)))
+                              (js-call assert :deepStrictEqual (Reflect/ownKeys left) (Reflect/ownKeys right))
+                              (js-call assert :strictEqual (Object/is (get left :value)
+                                (if (= key "observed") array-copy (get right :value))) t)
+                              (js-call assert :strictEqual (get left :writable) (get right :writable))
+                              (js-call assert :strictEqual (get left :enumerable) (get right :enumerable))
+                              (js-call assert :strictEqual (get left :configurable) (get right :configurable)))))
+                          ;; The original whole matcher remains the primary
+                          ;; assertion. If it succeeds, every independently
+                          ;; captured field/array matcher must succeed as well.
+                          (js-call (js-call original :expect matcher-copy) :toMatchObject golden)
+                          (js-call field-matches :forEach (lambda (entry)
+                            (js-call assert :strictEqual (get entry :passed) t (get entry :key))))
+                          (js-call assert :strictEqual (get array-match :failed) false)
+                          (js-call assert :strictEqual (get wrapped-match :failed) false)))
+                      (js-call (expect actual) :toMatchObject golden)
+                      (check-matcher-realm adapter actual)
+                      (let* ((project (get adapter :project))
+                             (entry (js-call (get (get (get lowered :descriptor) :project) :modules) :find
+                               (lambda (module) (= (get module :id) "main.mjs"))))
+                             (bindings (get entry :exports))
+                             (report-binding (js-call bindings :find (lambda (binding) (= (get binding :name) "report"))))
+                             (make-binding (js-call bindings :find (lambda (binding) (= (get binding :name) "makeReport"))))
+                             (read (js-call graph :read (get report-binding :kind) (get report-binding :index)))
+                             (invoked (js-call graph :invoke (get make-binding :kind) (get make-binding :index)
+                               undefined (js-array) undefined)))
+                        (js-call assert :strictEqual read actual)
+                        (js-call assert :strictEqual (isManagedSourceViewForRuntime invoked adapter) t)
+                        (js-call assert :strictEqual (isManagedSourceViewForRuntime (get invoked :observed) adapter) t)
+                        (js-call (expect invoked) :toMatchObject (js-object :observed (js-array 1 2 3)))
+                        (js-call assert :strictEqual (get adapter :project) project))
+                      (let* ((other-options (await (matcher-project-options
+                               (resolve directory (aref targets index) "other") (get lowered :descriptor))))
+                             (other (await (instantiateManagedRuntimeWithHostModules image other-options)))
+                             (other-handle undefined) (other-failed false))
+                        (try
+                          (progn
+                            (js-call other :auto 1)
+                            (setq other-handle (js-call other :getExport "report"))
+                            (let* ((other-view (js-call other :toHostValue other-handle))
+                                   (other-array (get other-view :observed))
+                                   (before-left (js-call adapter :stats))
+                                   (before-right (js-call other :stats))
+                                   (mixed (view-of (js-object :left array :right other-array)))
+                                   (copy (projectManagedSourceViewForMatcher mixed)))
+                              (js-call assert :strictEqual (isManagedSourceViewForRuntime array other) false)
+                              (js-call assert :strictEqual (isManagedSourceViewForRuntime other-array adapter) false)
+                              (js-call assert :strictEqual (isManagedSourceViewForRuntime other-array other) t)
+                              (js-call assert :strictEqual (host-array-instance-p (get copy :left)) t)
+                              (js-call assert :strictEqual (host-array-instance-p (get copy :right)) t)
+                              (js-call assert :notStrictEqual (Reflect/getPrototypeOf (get copy :left))
+                                (Reflect/getPrototypeOf (get copy :right)))
+                              (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) (get before-left :frameDepth))
+                              (js-call assert :strictEqual (get (js-call other :stats) :frameDepth) (get before-right :frameDepth))))
+                          (catch error (setq other-failed t) (throw error))
+                          (finally
+                            (let ((cleanup-failed false) (cleanup undefined))
+                              (js-call (js-array
+                                (lambda () (when other-handle (js-call other :release other-handle)))
+                                (lambda () (js-call other :closeModule))
+                                (lambda () (js-call (get other-options :moduleGraph) :close))
+                                (lambda () (js-call other :collect))
+                                (lambda () (js-call assert :strictEqual (js-call other :live) 0))
+                                (lambda () (js-call assert :strictEqual (get (js-call other :stats) :frameDepth) 0))) :forEach
+                                (lambda (action) (try (funcall action)
+                                  (catch error (unless cleanup-failed (setq cleanup-failed t cleanup error))))))
+                              (when (and cleanup-failed (not other-failed)) (throw cleanup))))))
+                      (js-call adapter :collect)
+                      (js-call (expect actual) :toMatchObject golden)
+                      ;; The held raw handle preserves its heap root, not the
+                      ;; host codec capability closed by closeModule. Neither
+                      ;; public reads nor either transport may reopen it.
+                      (js-call adapter :closeModule)
+                      (js-call graph :close)
+                      (js-call adapter :collect)
+                      (js-call (js-array
+                        (lambda () (get actual :answer))
+                        (lambda () (snapshotManagedSourceView actual))
+                        (lambda () (projectManagedSourceViewForMatcher actual))
+                        (lambda () (js-call (expect actual) :toMatchObject golden))
+                        (lambda () (js-call (js-call original :expect actual) :toMatchObject golden)))
+                        :forEach (lambda (operation)
+                          (js-call assert :throws operation (lambda (error)
+                            (and (= (get error :name) "Error")
+                              (= (get error :message) "managed host value is closed"))))))))
+                  (catch error (setq failed t) (throw error))
+                  (finally
+                    (when adapter
+                      (let ((cleanup-failed false) (cleanup undefined))
+                        (js-call (js-array
+                          (lambda () (when handle (js-call adapter :release handle)))
+                          (lambda () (js-call adapter :closeModule))
+                          (lambda () (when graph (js-call graph :close)))
+                          (lambda () (js-call adapter :collect))
+                          (lambda () (js-call assert :strictEqual (js-call adapter :live) 0))
+                          (lambda () (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0))
+                          (lambda () (when (get adapter :close) (js-call adapter :close)))) :forEach
+                          (lambda (action) (try (funcall action)
+                            (catch error (unless cleanup-failed (setq cleanup-failed t cleanup error))))))
+                        (when (and cleanup-failed (not failed)) (throw cleanup))))
+                    (when (and graph (undefined? adapter))
+                      (try (js-call graph :close) (catch error (unless failed (throw error)))))))
+                (setq index (1+ index)))
+              (js-call assert :strictEqual (JSON/stringify program) before)))
+          (catch error (setq failed t) (throw error))
+          (finally
+            (try (await (rm directory (js-object :recursive t :force t)))
+              (catch error (unless failed (throw error)))))))) 120000))

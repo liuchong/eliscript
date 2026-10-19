@@ -11,9 +11,10 @@
     ir-property)
   (import "./source-map.mjs" create-source-map)
 
-  ;; Identical capsules share cycle guards without global mutation.
+  ;; Identical capsules share cycle guards and deterministic Number method
+  ;; formatting without replacing global prototypes or native function values.
   (defconst array-text-import
-    "import { c as __eliscript_at, d as __eliscript_at_direct } from \"data:text/javascript;base64,dmFyIGU9UmVmbGVjdC5hcHBseSxpPUFycmF5LmlzQXJyYXksbD1BcnJheS5wcm90b3R5cGUuam9pbixhPUFycmF5LnByb3RvdHlwZS50b1N0cmluZyxrPU9iamVjdC5wcm90b3R5cGUudG9TdHJpbmcsdT1TdHJpbmcseT1UeXBlRXJyb3IseD1TeW1ib2wudG9QcmltaXRpdmUsQT1XZWFrU2V0LnByb3RvdHlwZS5oYXMsVD1XZWFrU2V0LnByb3RvdHlwZS5hZGQsQz1XZWFrU2V0LnByb3RvdHlwZS5kZWxldGUsbT1uZXcgV2Vha1NldCxmPW51bGwsZz0odCk9PnQhPT1udWxsJiYodHlwZW9mIHQ9PT0ib2JqZWN0Inx8dHlwZW9mIHQ9PT0iZnVuY3Rpb24ifHx0eXBlb2YgdD4idSImJnQhPT12b2lkIDApLGo9KHQpPT50eXBlb2YgdD09PSJmdW5jdGlvbiJ8fHR5cGVvZiB0PiJ1IiYmdCE9PXZvaWQgMDtmdW5jdGlvbiBXKCl7bGV0IG49bmV3IHkoImN5Y2xpYyBhcnJheSB0ZXh0IGNvbnZlcnNpb24iKTt0aHJvdyBuLmVsaXNjcmlwdERpYWdub3N0aWM9e2Zvcm1hdDoiZWxpc2NyaXB0LWRpYWdub3N0aWMiLHZlcnNpb246MSxjb2RlOiJFTEktUlQwMDA5IixzZXZlcml0eToiZXJyb3IiLHBoYXNlOiJydW50aW1lIixtZXNzYWdlOiJjeWNsaWMgYXJyYXkgdGV4dCBjb252ZXJzaW9uIn0sbn1mdW5jdGlvbiBFKHQpe2lmKCFnKHQpKXJldHVybiB0O2xldCBuPXRbeF07aWYobiE9PXZvaWQgMCYmbiE9PW51bGwpe2xldCBvPWUobix0LFsic3RyaW5nIl0pO2lmKCFnKG8pKXJldHVybiBvO3Rocm93IG5ldyB5KCJDYW5ub3QgY29udmVydCBvYmplY3QgdG8gcHJpbWl0aXZlIHZhbHVlIil9Zm9yKGxldCBvPTA7bzwyO28rKyl7bGV0IHI9dFtvPT09MD8idG9TdHJpbmciOiJ2YWx1ZU9mIl07aWYoaihyKSl7bGV0IGM9cj09PWEmJmkodCk/Uyh0KTplKHIsdCxbXSk7aWYoIWcoYykpcmV0dXJuIGN9fXRocm93IG5ldyB5KCJDYW5ub3QgY29udmVydCBvYmplY3QgdG8gcHJpbWl0aXZlIHZhbHVlIil9ZnVuY3Rpb24gYih0KXtsZXQgbj1FKHQpO2lmKHR5cGVvZiBuPT09InN5bWJvbCIpdGhyb3cgbmV3IHkoIkNhbm5vdCBjb252ZXJ0IGEgU3ltYm9sIHZhbHVlIHRvIGEgc3RyaW5nIik7cmV0dXJuIHUobil9ZnVuY3Rpb24gaCh0LG4pe2xldCBvPSt0Lmxlbmd0aCxyPW8hPT1vfHxvPD0wPzA6bz49OTAwNzE5OTI1NDc0MDk5MT85MDA3MTk5MjU0NzQwOTkxOm8tbyUxLGM9bj09PXZvaWQgMD8iLCI6YihuKSx3PWY9PT1udWxsO2lmKHcpZj10O2Vsc2V7aWYodD09PWZ8fGUoQSxtLFt0XSkpVygpO2UoVCxtLFt0XSl9dHJ5e2xldCBwPSIiO2ZvcihsZXQgcz0wO3M8cjtzKyspe2lmKHMpcCs9YztsZXQgZD10W3NdO2lmKGQhPT1udWxsJiZkIT09dm9pZCAwKXArPWIoZCl9cmV0dXJuIHB9ZmluYWxseXtpZih3KWY9bnVsbDtlbHNlIGUoQyxtLFt0XSl9fWZ1bmN0aW9uIFModCl7bGV0IG49dC5qb2luO3JldHVybiBqKG4pP249PT1sP2godCx2b2lkIDApOmUobix0LFtdKTplKGssdCxbXSl9ZnVuY3Rpb24gUih0LG4pe2xldCBvPXRbbl07cmV0dXJuKC4uLnIpPT57aWYobz09PWwmJmkodCkpcmV0dXJuIGgodCxyWzBdKTtpZihvPT09YSYmaSh0KSlyZXR1cm4gUyh0KTtyZXR1cm4gZShvLHQscil9fWZ1bmN0aW9uIEQodCxuLC4uLm8pe2xldCByPXRbbl07aWYocj09PWwmJmkodCkpcmV0dXJuIGgodCxvWzBdKTtpZihyPT09YSYmaSh0KSlyZXR1cm4gUyh0KTtyZXR1cm4gZShyLHQsbyl9ZXhwb3J0e1IgYXMgYyxEIGFzIGR9Ow==\";\n")
+    "import { c as __eliscript_at, d as __eliscript_at_direct } from \"data:text/javascript;base64,dmFyIG09UmVmbGVjdC5hcHBseSx0dD1OdW1iZXIucHJvdG90eXBlLnZhbHVlT2Ysaj1OdW1iZXIucHJvdG90eXBlLnRvU3RyaW5nLFU9TnVtYmVyLG50PU9iamVjdC5jcmVhdGUsaD1CaWdJbnQsZXQ9RGF0YVZpZXcsb3Q9QXJyYXlCdWZmZXIsaXQ9RGF0YVZpZXcucHJvdG90eXBlLnNldEZsb2F0NjQsSj1EYXRhVmlldy5wcm90b3R5cGUuZ2V0VWludDMyLHJ0PVJhbmdlRXJyb3I7ZnVuY3Rpb24gY3QodCxuKXtsZXQgZT1oKG4pLG89aCh0KSxpPSIiO2lmKG88MG4pbz0tbztkb3tsZXQgZj1vJWU7aT0iMDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6IltVKGYpXStpLG8vPWV9d2hpbGUobyE9PTBuKTtyZXR1cm4gdDwwPyItIitpOml9ZnVuY3Rpb24gc3QodCxuKXtsZXQgZT1uZXcgZXQobmV3IG90KDgpKTttKGl0LGUsWzAsdCwhMV0pO2xldCBvPW0oSixlLFswLCExXSksaT1tKEosZSxbNCwhMV0pLGY9bz4+PjIwJjIwNDcsYj1vJjEwNDg1NzUscD1vPj4+MzEscj1oKGIpPDwzMm58aChpKTtpZihmIT09MClyKz0xbjw8NTJuO3I8PD0ybjtsZXQgbD00bix1PWY+MSYmYj09PTAmJmk9PT0wPzFuOjJuLGs9Mm47aWYoZj49MTA3NSl7bGV0IGM9aChmLTEwNzUpO3I8PD1jLHU8PD1jLGs8PD1jfWVsc2UgbDw8PWgoZj09PTA/MTA3NDoxMDc1LWYpO2xldCBkPWgobiksZz1udChudWxsKSxhPTAsUz0wLEQ9MDtpZihyPGwpd2hpbGUocjxsKXtpZihyKjJuPmwmJnIraz5sKWJyZWFrO3IqPWQsdSo9ZCxrKj1kLFMtLX1lbHNlIHdoaWxlKHI+PWwqZClsKj1kLFMrKztmb3IoOzspe2xldCBjPVUoci9sKTtyJT1sO2xldCBJPXI8dSx4PXIraz5sO2dbYSsrXT1jLEQ9RCoobiYxKStjJjE7bGV0IHE9cioybixQPXE+bHx8cT09PWwmJkQ9PT0xO2lmKFAmJnh8fCFQJiZJKXtpZihQKXtsZXQgUj1hLEI9ITA7d2hpbGUoUj4wJiZCKXtSLS07bGV0IEg9Z1tSXSsxO2lmKEg9PT1uKWdbUl09MDtlbHNlIGdbUl09SCxCPSExfWlmKEIpZ1swXT0xLFMrK31icmVha31pZihhPj02NCl0aHJvdyBuZXcgcnQoIm51bWJlciByYWRpeCBmb3JtYXR0aW5nIGRpZCBub3QgY29udmVyZ2UiKTtyKj1kLHUqPWQsayo9ZH13aGlsZShhPjEmJmdbYS0xXT09PTApYS0tO2xldCB3PSIiO2lmKFM8MCl7dz0iMC4iO2ZvcihsZXQgYz0wO2M8LTEtUztjKyspdys9IjAiO2ZvcihsZXQgYz0wO2M8YTtjKyspdys9IjAxMjM0NTY3ODlhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5eiJbZ1tjXV19ZWxzZXtsZXQgYz1TKzEsST1jPmE/YzphO2ZvcihsZXQgeD0wO3g8STt4Kyspe2lmKHg9PT1jJiZjPGEpdys9Ii4iO3crPXg8YT8iMDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6IltnW3hdXToiMCJ9fXJldHVybiBwPyItIit3Ond9ZnVuY3Rpb24gRyh0LG4pe2xldCBlO3RyeXtlPW0odHQsdCxbXSl9Y2F0Y2h7cmV0dXJuIG0oaix0LFtuXSl9bGV0IG89MTA7aWYobiE9PXZvaWQgMCl7bGV0IGk9K247aWYobz1pIT09aT8wOmktaSUxLG88Mnx8bz4zNnx8byE9PW8pcmV0dXJuIG0oaixlLFtvXSl9aWYobz09PTEwfHxlPT09MHx8ZSE9PWV8fGU9PT0xLzB8fGU9PT0tMS8wKXJldHVybiBtKGosZSxbMTBdKTtyZXR1cm4gZSUxPT09MD9jdChlLG8pOnN0KGUsbyl9dmFyIHM9UmVmbGVjdC5hcHBseSxNPUZ1bmN0aW9uLnByb3RvdHlwZS5jYWxsLE49RnVuY3Rpb24ucHJvdG90eXBlLmFwcGx5LEU9RnVuY3Rpb24ucHJvdG90eXBlLmJpbmQsVD1PYmplY3QuZGVmaW5lUHJvcGVydHksbHQ9T2JqZWN0LmdldE93blByb3BlcnR5RGVzY3JpcHRvcixmdD1PYmplY3QuZ2V0UHJvdG90eXBlT2YsdXQ9T2JqZWN0LnNldFByb3RvdHlwZU9mLGF0PVJlZmxlY3Qub3duS2V5cyxwdD1TeW1ib2wuaGFzSW5zdGFuY2UsVj1BcnJheS5pc0FycmF5LEs9QXJyYXkucHJvdG90eXBlLmpvaW4sej1BcnJheS5wcm90b3R5cGUudG9TdHJpbmcseXQ9T2JqZWN0LnByb3RvdHlwZS50b1N0cmluZyxidD1TdHJpbmcsQz1UeXBlRXJyb3IsZHQ9U3ltYm9sLnRvUHJpbWl0aXZlLGd0PVdlYWtTZXQucHJvdG90eXBlLmhhcyx3dD1XZWFrU2V0LnByb3RvdHlwZS5hZGQseHQ9V2Vha1NldC5wcm90b3R5cGUuZGVsZXRlLEY9bmV3IFdlYWtTZXQsTz1udWxsLFc9KHQpPT50IT09bnVsbCYmKHR5cGVvZiB0PT09Im9iamVjdCJ8fHR5cGVvZiB0PT09ImZ1bmN0aW9uInx8dHlwZW9mIHQ+InUiJiZ0IT09dm9pZCAwKSxBPSh0KT0+dHlwZW9mIHQ9PT0iZnVuY3Rpb24ifHx0eXBlb2YgdD4idSImJnQhPT12b2lkIDA7ZnVuY3Rpb24gaHQoKXtsZXQgbj1uZXcgQygiY3ljbGljIGFycmF5IHRleHQgY29udmVyc2lvbiIpO3Rocm93IG4uZWxpc2NyaXB0RGlhZ25vc3RpYz17Zm9ybWF0OiJlbGlzY3JpcHQtZGlhZ25vc3RpYyIsdmVyc2lvbjoxLGNvZGU6IkVMSS1SVDAwMDkiLHNldmVyaXR5OiJlcnJvciIscGhhc2U6InJ1bnRpbWUiLG1lc3NhZ2U6ImN5Y2xpYyBhcnJheSB0ZXh0IGNvbnZlcnNpb24ifSxufWZ1bmN0aW9uIG10KHQpe2lmKCFXKHQpKXJldHVybiB0O2xldCBuPXRbZHRdO2lmKG4hPT12b2lkIDAmJm4hPT1udWxsKXtsZXQgZT1zKG4sdCxbInN0cmluZyJdKTtpZighVyhlKSlyZXR1cm4gZTt0aHJvdyBuZXcgQygiQ2Fubm90IGNvbnZlcnQgb2JqZWN0IHRvIHByaW1pdGl2ZSB2YWx1ZSIpfWZvcihsZXQgZT0wO2U8MjtlKyspe2xldCBvPXRbZT09PTA/InRvU3RyaW5nIjoidmFsdWVPZiJdO2lmKEEobykpe2xldCBpPW89PT16JiZWKHQpP3YodCk6cyhvLHQsW10pO2lmKCFXKGkpKXJldHVybiBpfX10aHJvdyBuZXcgQygiQ2Fubm90IGNvbnZlcnQgb2JqZWN0IHRvIHByaW1pdGl2ZSB2YWx1ZSIpfWZ1bmN0aW9uIFEodCl7bGV0IG49bXQodCk7aWYodHlwZW9mIG49PT0ic3ltYm9sIil0aHJvdyBuZXcgQygiQ2Fubm90IGNvbnZlcnQgYSBTeW1ib2wgdmFsdWUgdG8gYSBzdHJpbmciKTtyZXR1cm4gYnQobil9ZnVuY3Rpb24gXyh0LG4pe2xldCBlPSt0Lmxlbmd0aCxvPWUhPT1lfHxlPD0wPzA6ZT49OTAwNzE5OTI1NDc0MDk5MT85MDA3MTk5MjU0NzQwOTkxOmUtZSUxLGk9bj09PXZvaWQgMD8iLCI6UShuKSxmPU89PT1udWxsO2lmKGYpTz10O2Vsc2V7aWYodD09PU98fHMoZ3QsRixbdF0pKWh0KCk7cyh3dCxGLFt0XSl9dHJ5e2xldCBiPSIiO2ZvcihsZXQgcD0wO3A8bztwKyspe2lmKHApYis9aTtsZXQgcj10W3BdO2lmKHIhPT1udWxsJiZyIT09dm9pZCAwKWIrPVEocil9cmV0dXJuIGJ9ZmluYWxseXtpZihmKU89bnVsbDtlbHNlIHMoeHQsRixbdF0pfX1mdW5jdGlvbiB2KHQpe2xldCBuPXQuam9pbjtyZXR1cm4gQShuKT9uPT09Sz9fKHQsdm9pZCAwKTpzKG4sdCxbXSk6cyh5dCx0LFtdKX1mdW5jdGlvbiB5KHQsbil7cmV0dXJuIG48dC5sZW5ndGg/dFtuXTp2b2lkIDB9ZnVuY3Rpb24gWCh0LG4pe2xldCBlPVtdO2ZvcihsZXQgbz1uO288dC5sZW5ndGg7bysrKVQoZSxlLmxlbmd0aCx7dmFsdWU6dFtvXSx3cml0YWJsZTohMCxlbnVtZXJhYmxlOiEwLGNvbmZpZ3VyYWJsZTohMH0pO3JldHVybiBlfWZ1bmN0aW9uIFN0KHQsbil7bGV0IGU9W107Zm9yKGxldCBvPTA7bzx0Lmxlbmd0aCtuLmxlbmd0aDtvKyspVChlLG8se3ZhbHVlOm88dC5sZW5ndGg/dFtvXTpuW28tdC5sZW5ndGhdLHdyaXRhYmxlOiEwLGVudW1lcmFibGU6ITAsY29uZmlndXJhYmxlOiEwfSk7cmV0dXJuIGV9ZnVuY3Rpb24gWSguLi50KXtyZXR1cm4gdH1mdW5jdGlvbiBaKHQsbil7cmV0dXJuIG4/cyhOLFksW3ZvaWQgMCx0XSk6cyhZLHZvaWQgMCx0KX1mdW5jdGlvbiBMKHQsbixlKXtmb3IoOzspe2lmKHQ9PT1qKXJldHVybiBHKG4seShlLDApKTtpZih0PT09SyYmVihuKSlyZXR1cm4gXyhuLHkoZSwwKSk7aWYodD09PXomJlYobikpcmV0dXJuIHYobik7aWYodD09PU0pe2lmKCFBKG4pKXJldHVybiBzKHQsbixlKTtsZXQgbz1uLGk9eShlLDApO2U9WChlLDEpLHQ9byxuPWk7Y29udGludWV9aWYodD09PU4pe2lmKCFBKG4pKXJldHVybiBzKHQsbixlKTtsZXQgbz1uLGk9eShlLDApO2U9Wih5KGUsMSksITApLHQ9byxuPWk7Y29udGludWV9aWYodD09PXMpe2xldCBvPXkoZSwwKSxpPXkoZSwxKTtpZighQShvKSlyZXR1cm4gcyh0LG4sZSk7ZT1aKHkoZSwyKSwhMSksdD1vLG49aTtjb250aW51ZX1pZih0PT09RSl7bGV0IG89cyh0LG4sZSk7aWYobiE9PWomJm4hPT1LJiZuIT09eiYmbiE9PU0mJm4hPT1OJiZuIT09cyYmbiE9PUUpcmV0dXJuIG87bGV0IGk9bixmPXkoZSwwKSxiPVgoZSwxKSxwPSguLi51KT0+TChpLGYsU3QoYix1KSk7VChwLHB0LHt2YWx1ZToodSk9PnUgaW5zdGFuY2VvZiBpLGNvbmZpZ3VyYWJsZTohMH0pO2xldCByPXMoRSxwLFt2b2lkIDBdKTt1dChyLGZ0KG8pKTtsZXQgbD1hdChvKTtmb3IobGV0IHU9MDt1PGwubGVuZ3RoO3UrKylUKHIsbFt1XSxsdChvLGxbdV0pKTtyZXR1cm4gcn1yZXR1cm4gcyh0LG4sZSl9fWZ1bmN0aW9uIFJ0KHQsbil7bGV0IGU9dFtuXTtyZXR1cm4oLi4ubyk9PkwoZSx0LG8pfWZ1bmN0aW9uIEF0KHQsbiwuLi5lKXtsZXQgbz10W25dO3JldHVybiBMKG8sdCxlKX1leHBvcnR7UnQgYXMgYyxBdCBhcyBkfTs=\";\n")
 
   (defconst literal-runtime-import
     "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, queue as __eliscript_queue, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n")
@@ -48,22 +49,179 @@
     (lambda (message)
       (throw (new (js* "Error") message))))
   (defconst prefix-locate-mark (js* "(head, tail) => [head, ...tail]"))
+  (defvar function-source-profile false)
   (defconst native-locate
     (lambda (span output)
       (let* ((fragment (if (= (value-type output) "string")
                            (js-object :text output :marks (js-array)) output))
              (marks (aref fragment "marks")))
-        (if (or (= (aref (aref fragment "text") "length") 0)
+        ;; Function text capture consumes function ranges only. Building the
+        ;; unrelated per-expression Source Map marks here copies every child's
+        ;; marks through its ancestors while retaining the complete source IR.
+        ;; Ordinary JS and Source Map emission keep the original locate path.
+        (if (or function-source-profile
+                (= (aref (aref fragment "text") "length") 0)
                 (nullish? span) (eq span false)
                 (and (> (aref marks "length") 0) (= (aref (aref marks 0) "offset") 0)))
             fragment
-          (js-object :text (aref fragment "text")
-            :marks (prefix-locate-mark (js-object :offset 0 :span span) marks))))))
+          (let ((result (js-object :text (aref fragment "text")
+                  :marks (prefix-locate-mark (js-object :offset 0 :span span) marks))))
+            (when function-source-profile (put result :functions (get fragment :functions (js-array))))
+            result)))))
   (defvar temporary-counter 0)
   (defvar binding-temporaries (new globalThis.Map))
+  (defconst tdz-import "import { tdz as __eliscript_tdz_error, immutable as __eliscript_const_error } from \"data:text/javascript;base64,Y29uc3QgRSA9IFJlZmVyZW5jZUVycm9yOyBjb25zdCBUID0gVHlwZUVycm9yOyBleHBvcnQgZnVuY3Rpb24gdGR6KG5hbWUpIHsgdGhyb3cgbmV3IEUoIkNhbm5vdCBhY2Nlc3MgJyIgKyBuYW1lICsgIicgYmVmb3JlIGluaXRpYWxpemF0aW9uIik7IH0gZXhwb3J0IGZ1bmN0aW9uIGltbXV0YWJsZSgpIHsgdGhyb3cgbmV3IFQoIkFzc2lnbm1lbnQgdG8gY29uc3RhbnQgdmFyaWFibGUuIik7IH0K\";\n")
+  ;; Resolve module bindings once, without rewriting source names or raw JS.
+  (defvar tdz-state nil)
+  (defun tdz-ready-name (record) (str "__eliscript_tdz_ready_" (get record :index)))
+  (defun tdz-root-name (name)
+    (let ((dot (js-call name :indexOf ".")) (slash (js-call name :indexOf "/")))
+      (let ((end (if (< dot 0) slash (if (< slash 0) dot (if (< dot slash) dot slash)))))
+        (if (< end 0) name (js-call name :slice 0 end)))))
+  (defun tdz-scope (parent) (js-object :parent parent :names (new globalThis.Map)))
+  (defun tdz-find (scope name)
+    (let ((current scope) (found false) (record nil) (key (binding-name name)))
+      (while (and current (not found))
+        (let ((names (get current :names)))
+          (if (js-call names :has key)
+            (progn (setq record (js-call names :get key)) (setq found t))
+            (setq current (get current :parent))))) record))
+  (defun tdz-pattern-names (node scope)
+    (let ((kind (ir-kind node)) (nodes (children node)))
+      (cond
+        ((= kind "binding-name") (js-call (get scope :names) :set (binding-name (ir-value node)) nil))
+        ((= kind "map-binding-entry") (tdz-pattern-names (js-nth 0 nodes) scope))
+        ((or (= kind "array-binding-pattern") (= kind "map-binding-pattern"))
+         (js-call nodes :forEach (lambda (child) (tdz-pattern-names child scope)))))))
+  (defun tdz-bind (node scope)
+    (if (ir-property node "pattern") (tdz-pattern-names (js-nth 0 (children node)) scope)
+      (js-call (get scope :names) :set (binding-name (ir-value node)) nil)))
+  (defun tdz-pattern-defaults (node scope state)
+    (let ((kind (ir-kind node)) (nodes (children node)))
+      (cond
+        ((= kind "map-binding-entry")
+         (when (> (js-length nodes) 2) (tdz-walk (js-nth 2 nodes) scope state))
+         (tdz-pattern-defaults (js-nth 0 nodes) scope state))
+        ((or (= kind "array-binding-pattern") (= kind "map-binding-pattern"))
+         (js-call nodes :forEach (lambda (child) (tdz-pattern-defaults child scope state)))))))
+  (defun tdz-defaults (node scope state)
+    (when (ir-property node "pattern")
+      (tdz-pattern-defaults (js-nth 0 (children node)) scope state)))
+  (defun tdz-predeclare (nodes scope state)
+    (js-call nodes :forEach
+      (lambda (node)
+        (let ((kind (ir-kind node)))
+          (cond
+            ((= kind "module-declaration") (tdz-predeclare (children node) scope state))
+            ((= kind "variable-declaration")
+             (let ((record (js-object :name (ir-value node) :index (js-length (get state :variables)) :mutable (ir-property node "mutable"))))
+               (js-call (get state :variables) :push record)
+               (js-call (get state :declarations) :set node record)
+               (js-call (get scope :names) :set (binding-name (ir-value node)) record)))
+            ((= kind "function-declaration") (js-call (get scope :names) :set (binding-name (ir-value node)) nil))
+            ((= kind "import-declaration")
+             (js-call (children node) :forEach
+               (lambda (child) (js-call (get scope :names) :set (binding-name (ir-value child)) nil)))))))))
+  (defun tdz-walk (node scope state)
+    (let ((kind (ir-kind node)) (nodes (children node)))
+      (cond
+        ((or (= kind "reference") (= kind "assignment-pair"))
+         (let ((record (tdz-find scope (tdz-root-name (ir-value node)))))
+           (when record
+             (js-call (get state (if (= kind "reference") "reads" "writes")) :set node record)))
+         (js-call nodes :forEach (lambda (child) (tdz-walk child scope state))))
+        ((or (= kind "function-declaration") (= kind "function-expression"))
+         (let ((child (tdz-scope scope)) (count (ir-property node "parameterCount")) (index 0))
+           (while (< index count) (tdz-defaults (js-nth index nodes) scope state) (setq index (1+ index)))
+           (setq index 0)
+           (while (< index count) (tdz-bind (js-nth index nodes) child) (setq index (1+ index)))
+           (while (< index (js-length nodes)) (tdz-walk (js-nth index nodes) child state) (setq index (1+ index)))))
+        ((or (= kind "lexical-bindings") (= kind "binding-loop"))
+         (let ((child (tdz-scope scope)) (count (ir-property node "bindingCount"))
+               (sequential (ir-property node "sequential")) (index 0))
+           (while (< index count)
+             (let* ((binding (js-nth index nodes)) (values (children binding))
+                    (outer (if sequential child scope)) (start (if (ir-property binding "pattern") 1 0)))
+               (while (< start (js-length values)) (tdz-walk (js-nth start values) outer state) (setq start (1+ start)))
+               (tdz-defaults binding outer state)
+               (when sequential (tdz-bind binding child)))
+             (setq index (1+ index)))
+           (unless sequential
+             (setq index 0)
+             (while (< index count) (tdz-bind (js-nth index nodes) child) (setq index (1+ index))))
+           (while (< index (js-length nodes)) (tdz-walk (js-nth index nodes) child state) (setq index (1+ index)))))
+        ((= kind "catch-clause")
+         (let ((child (tdz-scope scope)) (binding (js-nth 0 nodes)) (index 1))
+           (tdz-defaults binding scope state) (tdz-bind binding child)
+           (while (< index (js-length nodes)) (tdz-walk (js-nth index nodes) child state) (setq index (1+ index)))))
+        ((or (= kind "quoted-literal") (= kind "raw-javascript") (= kind "import-declaration")) nil)
+        (t (js-call nodes :forEach (lambda (child) (tdz-walk child scope state)))))))
+  (defun tdz-prepare (program)
+    (let ((state (js-object :variables (js-array) :declarations (new globalThis.Map)
+                   :reads (new globalThis.Map) :writes (new globalThis.Map)))
+          (scope (tdz-scope nil)))
+      (tdz-predeclare (program-body program) scope state)
+      ;; With no tracked module variable, every possible lookup is absent.
+      ;; Function-only modules therefore need no TDZ traversal of their bodies.
+      (when (> (js-length (get state :variables)) 0)
+        (js-call (program-body program) :forEach (lambda (node) (tdz-walk node scope state)))) state))
+  (defun tdz-reader-name (record) (str "__eliscript_tdz_read_" (get record :index)))
+  (defun tdz-writer-name (record) (str "__eliscript_tdz_write_" (get record :index)))
+  (defun tdz-prologue ()
+    (if (or (nil? tdz-state) (= (js-length (get tdz-state :variables)) 0)) ""
+      (str tdz-import
+        (js-call (js-call (get tdz-state :variables) :map
+          (lambda (record)
+            (let ((ready (tdz-ready-name record)) (name (binding-name (get record :name)))
+                  (argument (str "__eliscript_tdz_value_" (get record :index))))
+              (str "var " ready ";\n"
+                "function " (tdz-reader-name record) "() { if (" ready
+                " !== true) __eliscript_tdz_error(" (json-string name) "); return " name "; }\n"
+                "function " (tdz-writer-name record) "(" argument ") { if (" ready
+                " !== true) __eliscript_tdz_error(" (json-string name) "); "
+                (if (get record :mutable) (str "return (" name " = " argument ");") "return __eliscript_const_error();") " }\n")))) :join ""))))
+  (defun tdz-read (node)
+    (let ((record (and tdz-state (js-call (get tdz-state :reads) :get node))))
+      (if (not record) (text-fragment (reference-name (ir-value node)))
+        (let* ((name (binding-name (get record :name))) (reference (reference-name (ir-value node))))
+          (text-fragment (str "(" (tdz-reader-name record) "())" (js-call reference :slice (js-length name))))))))
+  (defun tdz-assignment (pair)
+    (let* ((record (and tdz-state (js-call (get tdz-state :writes) :get pair)))
+           (value (emit-expression (js-nth 0 (children pair)))))
+      (if (not record) (combine (js-array "(" (emit-binding-name pair) " = " value ")"))
+        (combine (js-array (tdz-writer-name record) "(" value ")")))))
 
-  (defun make-fragment (text marks)
-    (js-object :text text :marks marks))
+
+
+  (defun make-fragment (text marks &optional functions)
+    (let ((fragment (js-object :text text :marks marks)))
+      (when function-source-profile (put fragment :functions (or functions (js-array)))) fragment))
+
+  (defun function-source-fragment (node output start end)
+    (let ((fragment (as-fragment output)))
+      (when function-source-profile
+        (let ((functions (js-call (get fragment :functions (js-array)) :slice)))
+          (js-call functions :push (js-object :node node :start start :end end))
+          (put fragment :functions functions))) fragment))
+
+  (defun function-indented-offset (starts offset)
+    (let ((low 0) (high (js-length starts)))
+      (while (< low high)
+        (let ((middle (+ low (Math/floor (/ (- high low) 2)))))
+          (if (<= (js-nth middle starts) offset) (setq low (1+ middle)) (setq high middle))))
+      (+ offset (* low 2))))
+
+  (defun indent-function-sources (source functions)
+    (let ((starts (js-array)) (parts (js-call source :split "\n")) (offset 0) (index 0))
+      (while (< index (js-length parts))
+        (let ((line (js-nth index parts)))
+          (when (> (js-length line) 0) (js-call starts :push offset))
+          (setq offset (+ offset (js-length line) 1)))
+        (setq index (1+ index)))
+      (js-call functions :map (lambda (record)
+        (js-object :node (get record :node)
+          :start (function-indented-offset starts (get record :start))
+          :end (function-indented-offset starts (get record :end)))))))
 
   (defun text-fragment (text)
     (make-fragment text (js-array)))
@@ -76,6 +234,7 @@
   (defun combine (parts)
     (let ((text "")
           (marks (js-array))
+          (functions (js-array))
           (part-index 0)
           (fragment nil)
           (offset 0)
@@ -95,8 +254,12 @@
               :span (get mark :span)))
           (setq mark-index (1+ mark-index)))
         (setq text (str text (get fragment :text)))
+        (when function-source-profile
+          (js-call (get fragment :functions (js-array)) :forEach
+            (lambda (record) (js-call functions :push
+              (js-object :node (get record :node) :start (+ offset (get record :start)) :end (+ offset (get record :end)))))))
         (setq part-index (1+ part-index)))
-      (make-fragment text marks)))
+      (make-fragment text marks functions)))
 
   (defun join-fragments (parts separator)
     (let ((joined (js-array))
@@ -131,7 +294,8 @@
           (setq text (str text (js-call source :charAt index)))
           (setq line-start (= code 10))
           (setq index (1+ index))))
-      (make-fragment text marks)))
+      (make-fragment text marks (when function-source-profile
+        (indent-function-sources source (get input :functions (js-array)))))))
 
   (defconst native-indent
     (lambda (input)
@@ -164,7 +328,10 @@
         (js-object :text (js-call parts :join "\n") :marks marks))))
 
   (defun indent (fragment)
-    (funcall native-indent (as-fragment fragment)))
+    (let* ((input (as-fragment fragment)) (output (funcall native-indent input)))
+      (when function-source-profile
+        (put output :functions (indent-function-sources (get input :text) (get input :functions (js-array)))))
+      output))
 
   (defun reference-locate (node output)
     (let* ((fragment (as-fragment output))
@@ -180,7 +347,7 @@
                (js-array (js-object :offset 0 :span (ir-span node)))))
           (js-call marks :forEach
             (lambda (mark) (js-call located :push mark)))
-          (make-fragment (get fragment :text) located)))))
+          (make-fragment (get fragment :text) located (get fragment :functions (js-array)))))))
 
   (defun locate (node output)
     (native-locate (ir-span node) output))
@@ -212,11 +379,19 @@
                  ", got " count))))))
 
   (defun require-node-arity (node minimum maximum)
-    (require-arity
-      (or (ir-value node) (ir-kind node))
-      (children node)
-      minimum
-      maximum))
+    (try
+      (require-arity
+        (or (ir-value node) (ir-kind node))
+        (children node)
+        minimum
+        maximum)
+      (catch error
+        ;; The node that owns this arity boundary is authoritative. Preserve
+        ;; the original exception even when it cannot accept extra metadata.
+        (try
+          (unless (Object/hasOwn error "eliscriptIRSpan")
+            (put error :eliscriptIRSpan (ir-span node)))
+          (finally (throw error))))))
 
   (defun emit-binding-name (node)
     (native-locate (ir-span node) (binding-name (ir-value node))))
@@ -361,11 +536,23 @@
       (js-call nodes :map (lambda (node) (emit-expression node)))
       ", "))
 
+  (defun qualified-apply-reference-p (node)
+    (and (node-p node) (= (ir-kind node) "reference")
+      (= (value-type (ir-value node)) "string")
+      (let ((name (js-call (ir-value node) :replaceAll "/" ".")))
+        (while (js-call name :endsWith ".") (setq name (js-call name :slice 0 -1)))
+        (js-call name :endsWith ".apply"))))
+
   (defun emit-callee (node)
     (let ((output (emit-expression node)))
-      (if (= (ir-kind node) "reference")
-          output
-        (combine (js-array "(" output ")")))))
+      (cond
+        ((qualified-apply-reference-p node)
+          (combine (js-array "__eliscript_at("
+            (native-locate (ir-span node)
+              (text-fragment (js-call (get output :text) :slice 0 -6)))
+            ", \"apply\")")))
+        ((= (ir-kind node) "reference") output)
+        (t (combine (js-array "(" output ")"))))))
 
   (defun boolean-reference-text-p (text)
     (let ((length (js-length text)) (index 2) (valid t))
@@ -597,7 +784,7 @@
     (let* ((parts (split-counted-children node "parameterCount"))
            (parameters (js-nth 0 parts))
            (body (js-nth 1 parts)))
-      (combine
+      (let ((fragment (combine
         (js-array "(" (if (ir-property node "async") "async " "") "("
          (join-fragments
            (js-call parameters :map
@@ -606,6 +793,7 @@
          ") => {\n"
          (indent (emit-function-body parameters body))
          "\n})"))))
+        (function-source-fragment node fragment 1 (1- (js-length (get fragment :text)))))))
 
   (defun contains-recur-target-p (value target-kind)
     (let ((pending (js-array value))
@@ -1039,18 +1227,8 @@
   (defun emit-assignment (node)
     (let ((assignments (js-array)))
       (js-call (children node) :forEach
-        (lambda (pair)
-          (js-call assignments :push
-            (native-locate
-              (ir-span pair)
-              (combine
-                (js-array "("
-                 (emit-binding-name pair)
-                 " = "
-                 (emit-expression (js-nth 0 (children pair)))
-                 ")"))))))
-      (if (= (ir-value node) "set!")
-          (js-nth 0 assignments)
+        (lambda (pair) (js-call assignments :push (native-locate (ir-span pair) (tdz-assignment pair)))))
+      (if (= (ir-value node) "set!") (js-nth 0 assignments)
         (combine (js-array "(" (join-fragments assignments ", ") ")")))))
 
   (defun emit-loop (node)
@@ -1164,9 +1342,10 @@
            (str " " operator " "))
          ")"))))
 
-  (defun emit-binary-infix (name nodes operator)
-    (require-arity name nodes 2 2)
-    (emit-numeric-binary operator (emit-expression (js-nth 0 nodes)) (emit-expression (js-nth 1 nodes))))
+  (defun emit-binary-infix (node operator)
+    (require-node-arity node 2 2)
+    (let ((nodes (children node)))
+      (emit-numeric-binary operator (emit-expression (js-nth 0 nodes)) (emit-expression (js-nth 1 nodes)))))
 
   (defun temporary-names (nodes)
     (let ((result (js-array)))
@@ -1263,17 +1442,17 @@
          (if numeric-emission-profile
            (combine (js-array "Math.imul(" (emit-expression (js-nth 0 nodes)) ", " (emit-expression (js-nth 1 nodes)) ")"))
            (emit-numeric-binary "imul" (emit-expression (js-nth 0 nodes)) (emit-expression (js-nth 1 nodes)))))
-        ((= name "bit-and") (emit-binary-infix name nodes "&"))
-        ((= name "bit-or") (emit-binary-infix name nodes "|"))
-        ((= name "bit-xor") (emit-binary-infix name nodes "^"))
+        ((= name "bit-and") (emit-binary-infix node "&"))
+        ((= name "bit-or") (emit-binary-infix node "|"))
+        ((= name "bit-xor") (emit-binary-infix node "^"))
         ((= name "bit-not")
          (require-node-arity node 1 1)
          (if numeric-emission-profile (combine (js-array "(~" (emit-expression (js-nth 0 nodes)) ")"))
            (emit-numeric-unary "not" (js-nth 0 nodes))))
-        ((= name "bit-shift-left") (emit-binary-infix name nodes "<<"))
-        ((= name "bit-shift-right") (emit-binary-infix name nodes ">>"))
+        ((= name "bit-shift-left") (emit-binary-infix node "<<"))
+        ((= name "bit-shift-right") (emit-binary-infix node ">>"))
         ((= name "unsigned-bit-shift-right")
-         (emit-binary-infix name nodes ">>>"))
+         (emit-binary-infix node ">>>"))
         ((= name "value-type")
          (require-node-arity node 1 1)
          (combine
@@ -1505,7 +1684,8 @@
 
   (defun array-text-key-p (node)
     (or (not (= (ir-kind node) "literal"))
-        (= (ir-value node) "join") (= (ir-value node) "toString")))
+        (= (ir-value node) "join") (= (ir-value node) "toString")
+        (= (ir-value node) "call") (= (ir-value node) "apply") (= (ir-value node) "bind")))
 
   (defun primitive-literal-arguments-p (nodes)
     (js-call nodes :every
@@ -1522,7 +1702,7 @@
         (ir-span node)
         (cond
           ((= kind "literal") (emit-literal node))
-          ((= kind "reference") (text-fragment (reference-name (ir-value node))))
+          ((= kind "reference") (tdz-read node))
           ((= kind "array-literal") (combine (js-array "[" (emit-arguments nodes) "]")))
           ((= kind "persistent-list-literal")
            (combine (js-array "__eliscript_list(" (emit-arguments nodes) ")")))
@@ -1662,12 +1842,14 @@
               (if (> (get nodes :length) 0)
                   (emit-expression (js-nth 0 nodes))
                 "null")
-              ";")))
+              ";"
+              (let ((record (and tdz-state (js-call (get tdz-state :declarations) :get node))))
+                (if record (str "\n" (tdz-ready-name record) " = true;") "")))))
           ((= kind "function-declaration")
            (let* ((parts (split-counted-children node "parameterCount"))
                   (parameters (js-nth 0 parts))
                   (body (js-nth 1 parts)))
-             (combine
+             (let ((fragment (combine
                (js-array (if (ir-property node "async") "async " "")
                 "function " (binding-name (ir-value node)) "("
                 (join-fragments
@@ -1677,6 +1859,7 @@
                 ") {\n"
                   (indent (emit-function-body parameters body))
                 "\n}"))))
+               (function-source-fragment node fragment 0 (js-length (get fragment :text))))))
           ((= kind "export-declaration")
            (combine
              (js-array "export {"
@@ -1861,13 +2044,16 @@
       found))
 
   (defun node-uses-array-text-p (node)
-    (let ((found (and (= (ir-kind node) "method-call")
-                     (array-text-key-p (js-nth 1 (children node))))))
+    (let ((found (or (and (= (ir-kind node) "method-call")
+                         (array-text-key-p (js-nth 1 (children node))))
+                    (and (js-call (js-array "call" "invoke" "apply-call") :includes (ir-kind node))
+                         (qualified-apply-reference-p (js-nth 0 (children node)))))))
       (js-call (children node) :forEach
         (lambda (child) (when (node-uses-array-text-p child) (setq found t)))) found))
 
   (defun reference-runtime-requirements (program)
     (js-object
+      :math (js-call (program-body program) :some node-uses-math-runtime-p)
       :numericCoercion (program-uses-numeric-coercion-p program)
       :imul (js-call (program-body program) :some node-uses-imul-p)
       :arrayText (js-call (program-body program) :some node-uses-array-text-p)
@@ -1878,6 +2064,17 @@
       :binding (program-uses-binding-runtime-p program)
       :list (program-uses-list-runtime-p program)
       :value (program-uses-value-runtime-p program)))
+
+  (defun math-runtime-reference-p (value)
+    (and (= (value-type value) "string")
+      (or (js-call (js-array "Math" "globalThis/Math" "globalThis.Math") :includes value)
+        (js-call (js-array "Math/" "Math." "globalThis/Math/" "globalThis/Math."
+                           "globalThis.Math/" "globalThis.Math.") :some
+          (lambda (prefix) (js-call value :startsWith prefix))))))
+  (defun node-uses-math-runtime-p (node)
+    (or (and (js-call (js-array "reference" "raw-javascript") :includes (ir-kind node))
+             (math-runtime-reference-p (ir-value node)))
+        (js-call (children node) :some node-uses-math-runtime-p)))
 
   (defun node-uses-imul-p (node)
     (or (and (= (ir-kind node) "intrinsic") (= (ir-value node) "imul32"))
@@ -1906,8 +2103,13 @@
            (static-key-index (literal-runtime-static-key-index node))
           (index 0)
           (child nil))
-      (when (and (= kind "method-call") (array-text-key-p (js-nth 1 nodes)))
+      (when (or (and (= kind "method-call") (array-text-key-p (js-nth 1 nodes)))
+                (and (js-call (js-array "call" "invoke" "apply-call") :includes kind)
+                     (qualified-apply-reference-p (js-nth 0 nodes))))
         (put requirements :arrayText t))
+      (when (and (js-call (js-array "reference" "raw-javascript") :includes kind)
+                 (math-runtime-reference-p value))
+        (put requirements :math t))
       (cond
         ((= kind "map-binding-pattern")
          (put requirements :binding t))
@@ -1954,6 +2156,7 @@
   (defun runtime-requirements (program)
     (let ((requirements
            (js-object
+             :math false
              :numericCoercion false
              :imul false
              :arrayText false
@@ -2031,6 +2234,26 @@
              imul-capsule imul-intrinsic) imul-operator-helper))
 
   (defun emit-module-artifact-in-profile (program)
+    (let ((previous tdz-state))
+      (setq tdz-state (tdz-prepare program))
+      (try (emit-module-artifact-in-profile-ready program)
+        (finally (setq tdz-state previous)))))
+
+  (defun unicode-bootstrap-capsule-p (program)
+    (let* ((filename (program-filename program)) (body (program-body program))
+           (module (if (= (js-length body) 1) (aref body 0) nil)))
+      (and module (= (ir-kind module) "module-declaration")
+        (= (value-type filename) "string")
+        (js-call (js-array
+          (js-array "runtime/unicode-case.eli" "eliscript.runtime.unicode-case")
+          (js-array "runtime/unicode-case-data.eli" "eliscript.runtime.unicode-case-data"))
+          :some (lambda (entry)
+            (and (= (ir-value module) (aref entry 1))
+              (or (= filename (aref entry 0))
+                (and (js-call filename :startsWith "/")
+                     (js-call filename :endsWith (+ "/" (aref entry 0)))))))))))
+
+  (defun emit-module-artifact-in-profile-ready (program)
     (setq temporary-counter 0)
     (setq binding-temporaries (new globalThis.Map))
     (let ((requirements (runtime-requirements program))
@@ -2041,6 +2264,9 @@
               "\n\n")))
       (combine
         (js-array "// Generated by Eliscript. Do not edit.\n"
+         (tdz-prologue)
+         (if (unicode-bootstrap-capsule-p program) "" "import \"eliscript/runtime/unicode-case.mjs\";\n")
+         (if (get requirements :math) "import \"eliscript/runtime/math.mjs\";\n" "")
          (if (get requirements :arrayText) array-text-import "")
          (if (get requirements :literal)
              literal-runtime-import
@@ -2075,6 +2301,17 @@
       (setq numeric-emission-profile false)
       (try (emit-module-artifact-in-profile program)
         (finally (setq numeric-emission-profile previous)))))
+  (defun emit-module-function-sources (program)
+    (let ((previous function-source-profile))
+      (setq function-source-profile t)
+      (try
+        (let* ((artifact (emit-module-artifact program)) (javascript (get artifact :text)))
+          (js-object :javascript javascript
+            :functions (js-call (get artifact :functions (js-array)) :map
+              (lambda (record)
+                (js-object :node (get record :node) :start (get record :start) :end (get record :end)
+                  :sourceText (js-call javascript :slice (get record :start) (get record :end)))))))
+        (finally (setq function-source-profile previous)))))
   ;; Internal code generation entry. The numeric backend must validate the
   ;; complete original program before optimization and before calling this.
   (defun emit-module-numeric (program)
@@ -2110,6 +2347,7 @@
     emit-expression
     emit-top-level
     emit-module-artifact
+    emit-module-function-sources
     emit-module
     emit-module-numeric
     emit-module-with-source-map

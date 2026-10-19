@@ -96,9 +96,9 @@ async function gitOutput(root, ...arguments_) {
   return successfulOutput(["git", ...arguments_], { cwd: root, timeoutMs: 30_000 });
 }
 
-function currentCell(matrix, environment) {
+export function currentCell(matrix, environment) {
   const system = matrix.operatingSystems.find(
-    (candidate) => candidate.id === environment.operatingSystem &&
+    (candidate) => (candidate.operatingSystem ?? candidate.id) === environment.operatingSystem &&
       candidate.architecture === environment.architecture,
   );
   if (!system) {
@@ -112,8 +112,8 @@ function currentCell(matrix, environment) {
     ]);
   }
   return {
-    id: `${system.id}-${system.architecture}-emacs-${environment.emacsVersion}`,
-    operatingSystem: system.id,
+    id: `${system.operatingSystem ?? system.id}-${system.architecture}-emacs-${environment.emacsVersion}`,
+    operatingSystem: system.operatingSystem ?? system.id,
     architecture: system.architecture,
     emacsVersion: environment.emacsVersion,
   };
@@ -127,8 +127,8 @@ export function expectedMatrixCells(matrix) {
 function matrixCells(systems, emacsVersions) {
   return systems.flatMap((system) =>
     emacsVersions.map((emacsVersion) => ({
-      id: `${system.id}-${system.architecture}-emacs-${emacsVersion}`,
-      operatingSystem: system.id,
+      id: `${system.operatingSystem ?? system.id}-${system.architecture}-emacs-${emacsVersion}`,
+      operatingSystem: system.operatingSystem ?? system.id,
       architecture: system.architecture,
       emacsVersion,
     })),
@@ -327,8 +327,8 @@ async function sourceTree(root, commit) {
 }
 
 // This authenticates retained evidence; it does not accept the current source
-// or change any measured result. The sole permitted contract difference is the
-// explicit transition from required performance acceptance to deferred.
+// or change any measured result. Existing cells retain their measured contract;
+// additional optional machines have no evidence until run independently.
 async function historicalMatrixContract(root, report, matrix) {
   const reject = (message) => {throw new Error(message);};
   if (!/^[0-9a-f]{40}$/u.test(report.source?.commit ?? "")) {
@@ -360,9 +360,17 @@ async function historicalMatrixContract(root, report, matrix) {
   const currentFunctional = {...matrix}, measuredFunctional = {...measured};
   delete currentFunctional.performanceAcceptance;
   delete measuredFunctional.performanceAcceptance;
+  const measuredSystemIds = new Set(measured.operatingSystems.map(system => system.id));
+  const retainedSystems = matrix.operatingSystems.filter(system => measuredSystemIds.has(system.id));
+  const addedSystems = matrix.operatingSystems.filter(system => !measuredSystemIds.has(system.id));
+  const unchangedSystems = isDeepStrictEqual(retainedSystems, measured.operatingSystems);
+  const optionalAdditions = addedSystems.every(system => !matrix.acceptanceOperatingSystems.includes(system.id));
+  delete currentFunctional.operatingSystems;
+  delete measuredFunctional.operatingSystems;
   if (matrix.performanceAcceptance !== "deferred" || previousPolicy !== "strict" ||
+      !unchangedSystems || !optionalAdditions ||
       !isDeepStrictEqual(currentFunctional, measuredFunctional)) {
-    reject("historical matrix contract differs beyond performanceAcceptance");
+    reject("historical matrix contract differs beyond performanceAcceptance and optional system additions");
   }
   return {
     report: filename,
@@ -374,6 +382,8 @@ async function historicalMatrixContract(root, report, matrix) {
     historicalResult: "pass",
     currentPerformanceAcceptance: "deferred",
     performanceAccepted: false,
+    ...(addedSystems.length > 0 ? {additionalUnmeasuredCells:
+      matrixCells(addedSystems, matrix.emacsVersions).map(cell => cell.id)} : {}),
   };
 }
 

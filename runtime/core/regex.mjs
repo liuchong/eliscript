@@ -41,6 +41,10 @@ function stateOf(pattern) {
   return state;
 }
 
+export function readRegexState(value) {
+  return patternStates.get(value);
+}
+
 function nativePattern(pattern, global = false) {
   const state = stateOf(pattern);
   return new RegExp(state.source, global ? `${state.flags}g` : state.flags);

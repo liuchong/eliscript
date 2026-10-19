@@ -1,0 +1,220 @@
+(module tools.testing.final-functional-scope
+  (import "./file-workers.mjs" parseTestFileArgs partitionTestFiles runTestFiles)
+  (import "./resource-supervisor.mjs" startResourceSupervisor)
+  (import "node:fs/promises" readFile mkdir writeFile)
+  (import "node:path" resolve relative basename)
+  (import "node:crypto" createHash)
+  (import "node:child_process" spawn)
+
+  (defconst package-file "tests/compiler-package-session.test.mjs")
+  (defconst tools-file "tests/compiler-session-tools.test.mjs")
+  (defconst sequence-file "tests/wasm-managed-sequence-data.test.mjs")
+  (defconst package-sha "cabaee3897e99a1c920dc4d3ba16459351a6d4864b327a03839c0c8d7d7d2b4c")
+  (defconst tools-sha "4668c61b9956b5501e496fc6246300667cf3fb85d5ebdd414d86269c5a56acd0")
+  (defconst cancellation-reason
+    "The user cancelled WASM/native compiler execution hosts; JS stage3 still emits and executes all user-program targets.")
+  (defun sha (source) (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
+  (defun field (value key) (if (nullish? value) undefined (get value key)))
+  (defun option (value key fallback)
+    (let ((found (field value key))) (if (eq found undefined) fallback found)))
+
+  ;; This inventory is bound to the full unchanged original suite bytes, not
+  ;; a substring or a broad host/compiler name match. A suite edit requires an
+  ;; explicit scope update; no unrecognized test is silently cancelled.
+  (defun cancelledCompilerHostCases (file source)
+    (if (and (/= file package-file) (/= file tools-file)) (js-array)
+      (let* ((expected (if (= file package-file) package-sha tools-sha))
+             (actual (sha source)) (cases (js-array)))
+        (unless (= actual expected)
+          (throw (new globalThis.TypeError (+ "final functional scope source identity changed: " file))))
+        (let ((add (lambda (title host group parameters)
+          (js-call cases :push (js-object
+            :id (+ "cancelled-compiler-host:" file ":" (js-length cases))
+            :file file :sourceSha256 actual :title title :host host :sourceGroup group
+            :parameters parameters :status "cancelled" :reason cancellation-reason)))))
+          (if (= file tools-file)
+            (funcall add
+              "a complete real managed compiler driver transports AggregateError graphs with shared errors and cause identity"
+              "wasm" "complete-managed-compiler-aggregate" (js-object))
+            (progn
+              (js-call (js-array
+                "genuine shared WASM package retries streamed HTTP metadata and loads complete default debug without arrayBuffer metadata copies"
+                "package consumption rejects altered metadata, debug and actual WASM bytes before parsing or instantiation"
+                "a genuine WASM package verifies runtime before use, retries failed downloads and shares one concurrent runtime load"
+                "package runtime HTTP failures allow retry and closing during download prevents subsequent session use"
+                "an explicit runtime request wins a concurrent default download without replacing its session state")
+                :forEach (lambda (title) (funcall add title "wasm" "packagedWasm" (js-object))))
+              (js-call (js-array "wasm" "native") :forEach (lambda (host)
+                (funcall add (+ "complete " host " compiler JSON-UTF16 sources survive original and relocated package sessions in Node and Bun")
+                  host "encodedCompiler" (js-object :host host))
+                (js-call (js-array "bun" "node") :forEach (lambda (engine)
+                  (funcall add (+ "the public " engine " CLI consumes original and relocated " host " compilers with exact input bytes and default assets")
+                    host "encodedCompiler" (js-object :host host :engine engine))
+                  (js-call (js-array "emit-ir" "project-ir" "emit-memory-ir" "emit-typed-memory") :forEach (lambda (operation)
+                    (funcall add (+ "Given the original and relocated " host " compiler When " engine
+                      " CLI request submits " operation " Then real products sidecars and recovery preserve their ABI")
+                      host "requestIRInput/encodedCompiler" (js-object :host host :engine engine :operation operation)))))))))))
+        cases)))
+
+  (defun escape-pattern (title)
+    (js-call (js-call (Array/from title) :map (lambda (character)
+      (if (js-call "\\^$.*+?()[]{}|" :includes character) (+ "\\" character) character))) :join ""))
+  (defun functionalScopePattern (cancelled)
+    (if (= (js-length cancelled) 0) undefined
+      (+ "^(?!(?:" (js-call (js-call cancelled :map (lambda (item) (escape-pattern (get item :title)))) :join "|")
+         ")$)[\\s\\S]*$")))
+
+  (defasync file-plan (file source-root)
+    (let* ((name (relative source-root (resolve source-root file)))
+           (mixed (or (= name package-file) (= name tools-file)))
+           (cancelled (if mixed (cancelledCompilerHostCases name
+                         (await (readFile (resolve source-root name) "utf8"))) (js-array))))
+      (js-object :file file :kind (cond (mixed "mixed") ((= name sequence-file) "sequence") (t "ordinary"))
+        :cancelled cancelled :pattern (functionalScopePattern cancelled))))
+
+  ;; The complete sequence file retains every case and original test deadline.
+  ;; Its process belongs to the caller's controlled-run tree (24 GiB build
+  ;; hard ceiling); the smaller file-supervisor ceiling is intentionally absent.
+  ;; stdout/stderr are forwarded as streams, never accumulated by this driver.
+  (defasync runFunctionalChild (file arguments &rest configuration)
+    (let* ((options (if (> (js-length configuration) 0) (aref configuration 0) (js-object)))
+           (environment (option options "environment" (get globalThis.process :env)))
+           (command (if (get (get globalThis.process :versions) :bun) (get globalThis.process :execPath)
+                      (option environment "BUN" "bun")))
+           (child (spawn command arguments (js-object :cwd (option options "sourceRoot" (js-call globalThis.process :cwd))
+                    :env environment :stdio (js-array "ignore" "pipe" "pipe"))))
+           (failure undefined) (cancel-code 0)
+           (interrupt (lambda () (setq cancel-code 130) (js-call child :kill "SIGINT")))
+           (terminate (lambda () (setq cancel-code 143) (js-call child :kill "SIGTERM"))))
+      (js-call (get child :stdout) :pipe (option options "stdout" (get globalThis.process :stdout)) (js-object :end false))
+      (js-call (get child :stderr) :pipe (option options "stderr" (get globalThis.process :stderr)) (js-object :end false))
+      (js-call globalThis.process :on "SIGINT" interrupt)
+      (js-call globalThis.process :on "SIGTERM" terminate)
+      (try
+        (await (new globalThis.Promise (lambda (complete)
+          (js-call child :once "error" (lambda (error) (setq failure error)))
+          (js-call child :once "close" (lambda (code signal)
+            (let ((result (js-object :file file :exitCode
+                    (if (/= cancel-code 0) cancel-code
+                      (if failure 1 (if (Number/isInteger code) code
+                        (cond ((= signal "SIGINT") 130) ((= signal "SIGTERM") 143) (t 1)))))
+                    :monitor "outer-controlled-run")))
+              (when failure (put result :failure "child-start-failed") (put result :message (get failure :message)))
+              (when signal (put result :signal signal))
+              (funcall complete result)))))))
+        (finally (js-call globalThis.process :off "SIGINT" interrupt)
+          (js-call globalThis.process :off "SIGTERM" terminate)))))
+
+  (defasync run-mixed (plan environment cancellation start-supervisor)
+    (let ((supervisor undefined) (result undefined)
+          (interrupt nil) (terminate nil))
+      (try
+        (setq supervisor (await (funcall start-supervisor)))
+        (setq interrupt (lambda () (js-call supervisor :cancel "SIGINT")))
+        (setq terminate (lambda () (js-call supervisor :cancel "SIGTERM")))
+        (js-call globalThis.process :on "SIGINT" interrupt)
+        (js-call globalThis.process :on "SIGTERM" terminate)
+        ;; The outer listeners already cover the asynchronous supervisor start.
+        ;; A signal received there must never launch a test after readiness.
+        (if (/= (get cancellation :code) 0)
+          (setq result (js-object :file (get plan :file) :exitCode (get cancellation :code)
+            :failure "cancelled" :started false))
+          (progn
+            (setq result (await (js-call supervisor :run (js-object :id "0" :file (get plan :file)
+              :command (get globalThis.process :execPath) :args
+                (js-array "--smol" "test" (get plan :file) "--test-name-pattern" (get plan :pattern))
+              :cwd (js-call globalThis.process :cwd) :env environment))))
+            (setq result (Object/assign (js-object :file (get plan :file)) result))))
+        (catch error (setq result (js-object :file (get plan :file)
+          :exitCode (if (/= (get cancellation :code) 0) (get cancellation :code) 1)
+          :failure (if (/= (get cancellation :code) 0) "cancelled" "resource-supervisor-unavailable")
+          :message (get error :message))))
+        (finally
+          (when interrupt (js-call globalThis.process :off "SIGINT" interrupt))
+          (when terminate (js-call globalThis.process :off "SIGTERM" terminate))
+          (when supervisor
+            (try (await (js-call supervisor :close))
+              (catch error
+                (if (and result (/= (get result :exitCode) 0))
+                  (put result :cleanupFailure (get error :message))
+                  (setq result (js-object :file (get plan :file) :exitCode 1
+                    :failure "resource-supervisor-cleanup" :message (get error :message)))))))))
+      result))
+
+  (defasync runFinalFunctionalScope (arguments &rest configuration)
+    (let* ((options (if (> (js-length configuration) 0) (aref configuration 0) (js-object)))
+           (parsed (parseTestFileArgs arguments)) (original (get parsed :files)) (shard (get parsed :shard))
+           (files (if shard (partitionTestFiles original (get shard :index) (get shard :count)) original))
+           (source-root (resolve (option options "sourceRoot" (js-call globalThis.process :cwd))))
+           (environment (option options "environment" (get globalThis.process :env)))
+           (executors (option options "executors" (js-object)))
+           (ordinary (option executors "ordinary" runTestFiles))
+           (mixed (option executors "mixed" (async (plan env cancellation)
+             (await (run-mixed plan env cancellation (option executors "startSupervisor" startResourceSupervisor))))))
+           (sequence (option executors "sequence" (async (plan env)
+             (await (runFunctionalChild (get plan :file) (js-array "--smol" "test" (get plan :file))
+               (js-object :sourceRoot source-root :environment env))))))
+           (plans (js-array)) (cancelled (js-array)) (results (js-array)) (cursor 0) (exit-code 0) (halt false)
+           (cancellation (option options "cancellation" (js-object :code 0)))
+           (interrupt (lambda () (when (= (get cancellation :code) 0) (put cancellation :code 130))))
+           (terminate (lambda () (when (= (get cancellation :code) 0) (put cancellation :code 143)))))
+      ;; Validate every selected mixed-suite source before starting any child.
+      (let ((index 0))
+        (while (< index (js-length files))
+          (let ((plan (await (file-plan (aref files index) source-root))))
+            (js-call plans :push plan)
+            (Reflect/apply (get cancelled :push) cancelled (get plan :cancelled)))
+          (setq index (1+ index))))
+      (when shard (js-call globalThis.console :log
+        (+ "Test file shard " (get shard :index) "/" (get shard :count) ": " (js-length files) "/" (js-length original) " selected")))
+      (js-call globalThis.process :on "SIGINT" interrupt)
+      (js-call globalThis.process :on "SIGTERM" terminate)
+      (try
+        (while (and (not halt) (= (get cancellation :code) 0) (< cursor (js-length plans)))
+          (let ((plan (aref plans cursor)))
+            (if (= (get plan :kind) "ordinary")
+              (let ((batch (js-array)))
+                (while (and (< cursor (js-length plans)) (= (get (aref plans cursor) :kind) "ordinary"))
+                  (js-call batch :push (get (aref plans cursor) :file)) (setq cursor (1+ cursor)))
+                (let ((outcome (await (funcall ordinary batch))))
+                  (Reflect/apply (get results :push) results (get outcome :results))
+                  (when (/= (get outcome :exitCode) 0) (setq exit-code (get outcome :exitCode)))
+                  (when (get outcome :failure) (setq halt t))))
+              (let ((outcome (await (funcall (if (= (get plan :kind) "mixed") mixed sequence) plan environment cancellation))))
+                (js-call results :push outcome) (setq cursor (1+ cursor))
+                (when (/= (get outcome :exitCode) 0) (setq exit-code (get outcome :exitCode)))
+                (when (get outcome :failure) (setq halt t))))))
+        (finally (js-call globalThis.process :off "SIGINT" interrupt)
+          (js-call globalThis.process :off "SIGTERM" terminate)))
+      (let* ((completed (new globalThis.Set (js-call
+                (js-call results :filter (lambda (item) (not (eq (get item :started) false))))
+                :map (lambda (item) (get item :file)))))
+             (directory (resolve (option options "outputDirectory" (resolve source-root ".eliscript-cache" "test-results"))))
+             (archive (resolve directory (+ "final-functional-scope-" (Date/now) "-" (get globalThis.process :pid) ".json")))
+             (record (js-object :format "eliscript-final-functional-test-scope" :version 1
+               :inventory files :originalInventory original :shard shard :results results :cancelled cancelled
+               :unstarted (js-call files :filter (lambda (file) (not (js-call completed :has file))))
+               :exitCode (if (/= (get cancellation :code) 0) (get cancellation :code) exit-code) :archive archive)))
+        (try (await (mkdir directory (js-object :recursive t)))
+          (await (writeFile archive (+ (JSON/stringify record nil 2) "\n")))
+          (catch error
+            (put record :archiveFailure (get error :message))
+            (when (= (get record :exitCode) 0) (put record :exitCode 1))
+            (js-call globalThis.console :error (+ "Cannot archive final functional scope: " (get error :message)))))
+        record)))
+
+  (defasync main ()
+    (try
+      (let ((result (await (runFinalFunctionalScope (js-call (get globalThis.process :argv) :slice 2)))))
+        (js-call globalThis.console :log
+          (+ "Test files: " (js-length (js-call (get result :results) :filter
+                (lambda (item) (not (eq (get item :started) false))))) "/" (js-length (get result :inventory)) " completed; "
+             (js-length (js-call (get result :results) :filter (lambda (item) (/= (get item :exitCode) 0)))) " failed; "
+             (js-length (get result :cancelled)) " compiler-host cases cancelled (not passed); scope: " (get result :archive)))
+        (put globalThis.process :exitCode (get result :exitCode)))
+      (catch error (js-call globalThis.console :error (+ "Invalid final-functional scope: " (get error :message)))
+        (put globalThis.process :exitCode 1))))
+  (when (and (> (js-length (get globalThis.process :argv)) 1)
+             (= (basename (aref (get globalThis.process :argv) 1)) "final-functional-scope.mjs"))
+    (main))
+  (export cancelledCompilerHostCases functionalScopePattern runFunctionalChild runFinalFunctionalScope))

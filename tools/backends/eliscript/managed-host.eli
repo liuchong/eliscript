@@ -1,0 +1,255 @@
+(module tools.backends.managed-host
+  (import "./managed-host-legacy.mjs" :as legacy)
+  (import "./managed-host-lifecycle.mjs" createManagedHostRuntimeWithLifecycle)
+  (import "./managed-foreign-binding.mjs" createManagedForeignBindingRuntime)
+  (import "./managed-host-object-realm.mjs" createManagedHostObjectRealmRuntime)
+  (import "./managed-source-view.mjs" withManagedSourceDecode registerManagedSourceDecodeRuntime)
+
+  ;; Retain all unaffected public functions, including their original defaults
+  ;; and identity. Only the high-level host decoder's function property read
+  ;; needs the generic source Get ABI; raw object Get remains object-only.
+  (defconst failManagedRuntime (get legacy :failManagedRuntime))
+  (defconst validateManagedRuntimeOptions (get legacy :validateManagedRuntimeOptions))
+  (defconst createManagedHostCapabilityBridge (get legacy :createManagedHostCapabilityBridge))
+
+  (defun managedHostLiteralProbeExports (exports descriptor)
+    (let ((literal (when descriptor (get descriptor :literalRuntime nil))))
+      (if (or (nil? literal) (not (or (Object/hasOwn literal "brandProbe") (Object/hasOwn literal "roleProbe")))) exports
+        (let* ((module (get descriptor :module)) (getter-name (get module :get))
+               (descriptors (Object/getOwnPropertyDescriptors exports))
+               (bindings (get literal :bindings)) (slots (new globalThis.Map))
+               (heaps (new globalThis.Map)) (active (new globalThis.Set))
+               (required (js-array getter-name "value-source-invoke-with-this" "last-error"
+                           "value-error-restore" "value-kind" "value-length")))
+          (js-call (js-array (js-array "brandProbe" "literal-kind" 0)
+                            (js-array "roleProbe" "literal-protocol-for-role" 3))
+            :forEach (lambda (item)
+              (when (Object/hasOwn literal (aref item 0))
+                (let* ((probe (get literal (aref item 0))) (binding (get bindings (aref item 1)))
+                       (slot (get binding :index)))
+                  (unless (and (= (get probe :version) 1) (= (get binding :kind) 1)
+                               (Number/isInteger slot) (>= slot 0) (< slot (get module :functionCount))
+                               (not (js-call slots :has slot)))
+                    (throw (new globalThis.TypeError "invalid automatic literal probe binding")))
+                  (js-call slots :set slot (aref item 2))))))
+          (js-call required :forEach (lambda (name)
+            (let ((entry (get descriptors name)))
+              (unless (and entry (Object/hasOwn entry "value") (= (value-type (get entry :value)) "function"))
+                (throw (new globalThis.TypeError (+ "automatic literal probe requires actual export: " name)))))))
+          (let* ((raw (lambda (name &rest arguments)
+                   (Reflect/apply (get (get descriptors name) :value) exports arguments)))
+                 (get-original (get (get descriptors getter-name) :value))
+                 (invoke-original (get (get descriptors "value-source-invoke-with-this") :value))
+                 (get-binding (lambda (heap kind index)
+                   (let ((value (Reflect/apply get-original exports (js-array heap kind index))))
+                     ;; Only the real module getter can identify these private
+                     ;; callees. No fabricated kind, code read, root or handle
+                     ;; lifetime is introduced. Generations never ABA-reuse.
+                     (when (and (= (funcall raw "last-error") 0) (= kind 1) (> value 3)
+                                (js-call slots :has index))
+                       (unless (js-call heaps :has heap) (js-call heaps :set heap (new globalThis.Map)))
+                       (js-call (js-call heaps :get heap) :set value (js-call slots :get index))) value)))
+                 (invoke (lambda (heap function receiver arguments count)
+                   (let ((known (js-call heaps :get heap)))
+                     (if (or (not known) (not (js-call known :has function)))
+                       (Reflect/apply invoke-original exports (js-array heap function receiver arguments count))
+                       (if (js-call active :has heap)
+                         ;; Internal automatic calls have precisely this ABI.
+                         ;; Invalid tuples/counts retain the original validator
+                         ;; and its real error instead of becoming no-brand.
+                         (if (and (= receiver 3) (= count 1)
+                                  (= (funcall raw "value-kind" heap arguments) 7)
+                                  (= (funcall raw "last-error") 0)
+                                  (>= (funcall raw "value-length" heap arguments) 1)
+                                  (= (funcall raw "last-error") 0))
+                           (progn (funcall raw "value-error-restore" 0) (js-call known :get function))
+                           (Reflect/apply invoke-original exports (js-array heap function receiver arguments count)))
+                         (progn
+                           (js-call active :add heap)
+                           (try (Reflect/apply invoke-original exports (js-array heap function receiver arguments count))
+                             (finally (js-call active :delete heap)))))))))
+                 (output (Object/create (Object/getPrototypeOf exports))))
+            (js-call (js-array (js-array getter-name get-original get-binding)
+                              (js-array "value-source-invoke-with-this" invoke-original invoke))
+              :forEach (lambda (item)
+                (let ((name (aref item 0)) (original (aref item 1)) (wrapped (aref item 2)))
+                  (Object/defineProperties wrapped (js-object
+                    :name (Object/getOwnPropertyDescriptor original "name")
+                    :length (Object/getOwnPropertyDescriptor original "length")))
+                  (put descriptors name (Object/assign (js-object) (get descriptors name) (js-object :value wrapped))))))
+            (Object/defineProperties output descriptors) output)))))
+
+  (defun managedHostInvokeDiagnosticExports (exports &rest memories)
+    (if (/= (get (get globalThis.process :env) "ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC") "1") exports
+      (let* ((descriptors (Object/getOwnPropertyDescriptors exports))
+             (code-export (get descriptors "value-function-code"))
+             (code-readable (and code-export (Object/hasOwn code-export "value")
+               (= (value-type (get code-export :value)) "function")))
+             (memory (when (> (js-length memories) 0) (aref memories 0)))
+             (memory-descriptors (when (and memory (= (value-type memory) "object"))
+               (Object/getOwnPropertyDescriptors memory)))
+             (view-export (when memory-descriptors (get memory-descriptors "view")))
+             (data-export (get descriptors "value-data"))
+             (memory-readable (and view-export data-export
+               (Object/hasOwn view-export "value") (Object/hasOwn data-export "value")
+               (= (value-type (get view-export :value)) "function")
+               (= (value-type (get data-export :value)) "function")))
+             (names (js-array "value-source-invoke-with-this" "last-error" "value-exception-class"
+               "value-exception-class-set" "value-error-restore" "value-kind" "value-length"))
+             (valid (js-call names :every (lambda (name)
+               (let ((entry (get descriptors name)))
+                 (and entry (Object/hasOwn entry "value") (= (value-type (get entry :value)) "function")))))))
+        (if (not valid) exports
+          (let* ((raw (lambda (name &rest arguments)
+                   (Reflect/apply (get (get descriptors name) :value) exports arguments)))
+                 (function-code (lambda (heap function kind)
+                   (let ((code nil))
+                     (when (= kind 18)
+                       (try
+                         (if code-readable
+                           (let ((value (funcall raw "value-function-code" heap function)))
+                             (when (and (= (funcall raw "last-error") 0) (Number/isInteger value)
+                                        (>= value 0) (<= value 4294967295)) (setq code value)))
+                           (when memory-readable
+                             ;; value-data validates this exact owner, handle
+                             ;; generation and kind. Its public payload is
+                             ;; block+32; the existing kind18 code is block+12.
+                             ;; Read only this single word from the factory's
+                             ;; actual view, never a caller-supplied offset.
+                             (let ((payload (funcall raw "value-data" heap function 18)))
+                               (when (and (= (funcall raw "last-error") 0) (Number/isInteger payload)
+                                          (>= payload 20) (<= payload 4294967295))
+                                 (let* ((view (Reflect/apply (get view-export :value) memory (js-array)))
+                                        (length (get view :byteLength)))
+                                   (when (and (Number/isInteger length) (<= (- payload 16) length))
+                                     (setq code (Reflect/apply (get (get globalThis.DataView :prototype) :getUint32)
+                                       view (js-array (- payload 20) t)))))))))
+                         (catch ignored nil))) code)))
+                 (entry (get descriptors "value-source-invoke-with-this"))
+                 (invoke (get entry :value))
+                 (wrapped (lambda (heap function receiver arguments count)
+                   (let ((threw false))
+                     (try (Reflect/apply invoke exports (js-array heap function receiver arguments count))
+                       (catch error (setq threw t) (throw error))
+                       (finally
+                         (let ((status 0) (source-class 0) (saved false))
+                           (try
+                             (setq status (funcall raw "last-error"))
+                             (when (or threw (/= status 0))
+                               (setq source-class (funcall raw "value-exception-class" heap) saved t)
+                               (let* ((function-kind (funcall raw "value-kind" heap function))
+                                      (argument-kind (funcall raw "value-kind" heap arguments))
+                                      (report (js-object :phase "value-source-invoke-with-this"
+                                        :callee function :calleeKind function-kind
+                                        :calleeCount (if (= function-kind 18) (funcall raw "value-length" heap function) 0)
+                                        :calleeCode (funcall function-code heap function function-kind)
+                                        :arguments arguments :argumentKind argument-kind
+                                        :argumentLength (if (= argument-kind 7) (funcall raw "value-length" heap arguments) 0)
+                                        :count count :lastError status :sourceClass source-class :threw threw)))
+                                 ;; These raw reads allocate/pin no managed
+                                 ;; values. Operands remain in the original
+                                 ;; caller's frame; no new ownership is created.
+                                 (console/error "[managed-invoke]" (JSON/stringify report))))
+                             (catch ignored nil)
+                             (finally
+                               (when saved
+                                 (try
+                                   (funcall raw "value-exception-class-set" heap source-class)
+                                   (funcall raw "value-error-restore" status)
+                                   (catch ignored nil)))))))))))
+                 (output (Object/create (Object/getPrototypeOf exports))))
+            (Object/defineProperties wrapped (js-object
+              :name (Object/getOwnPropertyDescriptor invoke "name")
+              :length (Object/getOwnPropertyDescriptor invoke "length")))
+            ;; Keep the raw callable in descriptors while the wrapper reads
+            ;; the other original ABI functions; recursion is never injected.
+            (let ((published (Object/assign (js-object) descriptors)))
+              (put published "value-source-invoke-with-this"
+                (Object/assign (js-object) entry (js-object :value wrapped)))
+              (Object/defineProperties output published)) output)))))
+
+  (defun host-property-exports (exports)
+    (let* ((descriptors (Object/getOwnPropertyDescriptors exports))
+           (ordinary (get descriptors "value-object-get"))
+           (generic (get descriptors "value-property-get"))
+           (kind (get descriptors "value-kind")))
+      ;; Older/fake exports and accessor services keep the exact legacy path.
+      ;; Both real factories provide own data functions with this existing ABI.
+      (if (not (and ordinary generic kind (Object/hasOwn ordinary "value")
+                    (Object/hasOwn generic "value") (Object/hasOwn kind "value")
+                    (= (value-type (get ordinary :value)) "function")
+                    (= (value-type (get generic :value)) "function")
+                    (= (value-type (get kind :value)) "function"))) exports
+        (let* ((object-get (get ordinary :value)) (property-get (get generic :value))
+               (value-kind (get kind :value))
+               (read (lambda (heap object key)
+                 (if (= (funcall value-kind heap object) 18)
+                   (funcall property-get heap object key 0)
+                   (funcall object-get heap object key))))
+               (name (Object/getOwnPropertyDescriptor object-get "name")))
+          ;; A fresh descriptor object avoids the nonconfigurable-export Proxy
+          ;; invariant. The original WASM/native exports and their ABI are never
+          ;; mutated; only legacy host IO receives this private view.
+          (when (and name (Object/hasOwn name "value"))
+            (Object/defineProperty read "name" name))
+          (put ordinary :value read)
+          (Object/create (Object/getPrototypeOf exports) descriptors)))))
+  (defun host-decode-runtime (runtime)
+    (let* ((descriptors (Object/getOwnPropertyDescriptors runtime))
+           (facade (Object/create (Object/getPrototypeOf runtime))))
+      (js-call (Reflect/ownKeys descriptors) :forEach (lambda (name)
+        (let* ((entry (get descriptors name)) (method (get entry :value)))
+          (when (and (Object/hasOwn entry "value") (= (value-type method) "function"))
+            (let ((forward (lambda (&rest arguments)
+              (withManagedSourceDecode (lambda () (Reflect/apply method runtime arguments)) runtime))))
+              (Object/defineProperties forward (js-object
+                :name (js-object :value (get method :name)) :length (js-object :value (get method :length))))
+              (put entry :value forward))))))
+      ;; In particular project is the exact original frozen transport object.
+      ;; The already attached graph must never receive a second project clone.
+      (Object/defineProperties facade descriptors)
+      (registerManagedSourceDecodeRuntime facade runtime)
+      (Object/freeze facade)))
+  (defun createManagedHostRuntime (exports descriptor memory &rest tail)
+    ;; The legacy ABI already fixes old images without a case selector to 17.
+    ;; Configurable images receive the language default without probing a host
+    ;; method or evaluating options earlier than the original destructuring.
+    (let ((selector (Object/getOwnPropertyDescriptor exports "runtime-case-version")))
+      (when (and selector (Object/hasOwn selector "value")
+                 (= (value-type (get selector :value)) "function"))
+        (let* ((provided (if (> (js-length tail) 0) (aref tail 0) undefined))
+               (forwarded (js-call tail :slice)))
+          (unless (eq provided nil)
+            (let* ((input (funcall globalThis.Object provided))
+                   (descriptors (Object/getOwnPropertyDescriptors input)))
+              ;; A private configurable slot avoids Proxy invariants for a
+              ;; caller's frozen own undefined. Every actual Get still uses
+              ;; the original receiver, including inherited profile getters.
+              (put descriptors :unicodeVersion
+                (js-object :enumerable t :configurable t :get (lambda ()
+                  (let ((value (Reflect/get input "unicodeVersion" input)))
+                    (if (undefined? value) 17 value)))))
+              (let ((options (new globalThis.Proxy
+                       (Object/create (Object/getPrototypeOf input) descriptors)
+                       (js-object :get (lambda (ignored key receiver)
+                         (let ((value (Reflect/get input key input)))
+                           (if (and (= key "unicodeVersion") (undefined? value)) 17 value)))))))
+                (if (= (js-length forwarded) 0) (js-call forwarded :push options) (put forwarded 0 options)))))
+          (setq tail forwarded))))
+    (let* ((completions (js-array))
+           (runtime (host-decode-runtime (withManagedSourceDecode (lambda ()
+             (createManagedHostRuntimeWithLifecycle
+               (lambda (actual descriptor memory &rest tail)
+                 (createManagedForeignBindingRuntime
+                   (lambda (actual descriptor memory &rest tail)
+                     (createManagedHostObjectRealmRuntime (get legacy :createManagedHostRuntime)
+                       actual descriptor memory tail completions))
+                   actual descriptor memory tail))
+               (host-property-exports (managedHostLiteralProbeExports
+                 (managedHostInvokeDiagnosticExports exports memory) descriptor)) descriptor memory tail))))))
+      (js-call completions :forEach (lambda (complete)
+        (withManagedSourceDecode complete runtime)))
+      runtime))
+
+  (export failManagedRuntime validateManagedRuntimeOptions createManagedHostCapabilityBridge createManagedHostRuntime
+    managedHostInvokeDiagnosticExports managedHostLiteralProbeExports))

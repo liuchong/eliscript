@@ -1,0 +1,255 @@
+(module tests.managed-literal-nth-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:module" createRequire)
+  (import "node:path" basename)
+  (import "node:url" pathToFileURL)
+  (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime loadManagedHostModules readManagedAllocatorSnapshot readManagedAllocatorValueCounts)
+  (import "../../tools/backends/compiler-build.mjs" independentCompilerResources)
+  ;; The original five literal cases have no managed capacity contract. This
+  ;; additional correctness case uses the existing public small profile; the
+  ;; original complete sequence suite separately retains its 1024-slot limit.
+  (defconst nth-runtime-budget (Object/freeze (Object/assign (js-object)
+    (get (independentCompilerResources (js-object :profile "small")) :budget)
+    (js-object :initializeModule false))))
+  (defconst allocator-diagnostic (= (get (get globalThis.process :env) "ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC") "1"))
+  (defun nth-allocation-phase (runtime phase &optional descriptor)
+    (when allocator-diagnostic
+      (try
+        (let ((snapshot undefined) (counts undefined))
+          (try (setq snapshot (readManagedAllocatorSnapshot runtime)) (catch ignored nil))
+          (try (setq counts (if (undefined? descriptor) (readManagedAllocatorValueCounts runtime)
+                             (readManagedAllocatorValueCounts runtime descriptor))) (catch ignored nil))
+          (console/error "[project-allocator]" (JSON/stringify
+            (js-object :suite "literal-nth" :phase phase :allocator snapshot :values counts :stats (js-call runtime :stats)))))
+        (catch ignored nil))))
+
+  ;; The actual fixture remains the language implementation under test. This
+  ;; entry merely forwards to it and calls the real imported collection API.
+  (defconst nth-entry-source
+    (str "(import \"./literal-runtime.mjs\" :as Literal)\n"
+      "(import \"eliscript/runtime/core/collection.mjs\" :as Collection)\n"
+      "(defun language-values () (Literal/nth-language-values))\n"
+      "(defun language-order (mode) (Literal/nth-language-order mode))\n"
+      "(defun language-lookup (index value) (Literal/nth-language index value))\n"
+      "(defun imported-lookup (value index) (funcall Collection/nth value index))\n"
+      "(defun imported-report (value index)\n"
+      " (try (js-array \"value\" (funcall Collection/nth value index))\n"
+      "  (catch error (js-array \"error\" (get error :name)))))\n"
+      "(defun imported-fallback-report (value index fallback)\n"
+      " (try (js-array \"value\" (funcall Collection/nth value index fallback))\n"
+      "  (catch error (js-array \"error\" (get error :name)))))\n"
+      "(export language-values language-order language-lookup imported-lookup imported-report imported-fallback-report)\n"))
+
+  (defconst expected-values
+    (js-array 20 20 "A" "\ud83d" "\ude00" "B" nil nil nil nil nil nil t t t t t t))
+  (defconst expected-orders
+    (js-array (js-array "ci" false 42) (js-array "ci" t t)
+      (js-array "c" t t) (js-array "ci" false 42)))
+
+  (defasync loadNthReference (path)
+    ;; These two emitted fixture modules have no top-level await. Load their
+    ;; real file graph through the existing synchronous ESM IO, then supply
+    ;; that actual namespace through the loader's second-argument contract.
+    (let* ((require-module (createRequire path)) (namespace (funcall require-module path))
+           (_namespace (js-call assert :strictEqual (get namespace globalThis.Symbol.toStringTag) "Module"))
+           (modules (await (loadManagedHostModules
+             (js-object :hostModules (js-array
+               (js-object :id "nth-reference" :specifier (get (pathToFileURL path) :href)
+                 :referrer "nth-entry.mjs" :allowedExports
+                   (js-array "language_values" "language_order" "language_lookup" "imported_lookup" "imported_report" "imported_fallback_report")
+                 :namespace t)))
+             (js-object :hostModules (new globalThis.Map (js-array (js-array "nth-reference" namespace))))))))
+      (js-call assert :strictEqual (js-call modules :get "nth-reference") namespace)
+      (js-call modules :get "nth-reference")))
+
+  (defun nth-public-name (descriptor name)
+    (let* ((public-name (js-call name :replaceAll "-" "_"))
+           (entry (js-call (get descriptor :functions) :find
+             (lambda (item) (= (get item :name) public-name)))))
+      (js-call assert :ok entry (str "missing nth project export: " public-name))
+      (get entry :name)))
+
+  (defun nth-cleanup (primary-failed actions)
+    (let ((failed false) (failure undefined) (index 0))
+      (while (< index (js-length actions))
+        (try (funcall (aref actions index))
+          (catch error
+            (unless failed (setq failed t failure error))))
+        (setq index (1+ index)))
+      (when (and failed (not primary-failed)) (throw failure))))
+
+  (defun finishNth (runtime primary-failed)
+    (nth-cleanup primary-failed
+      (js-array
+        (lambda () (js-call runtime :closeModule))
+        (lambda () (js-call runtime :collect))
+        (lambda () (js-call assert :strictEqual (js-call runtime :live) 0))
+        (lambda () (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
+        (lambda ()
+          (when (= (value-type (get runtime :close)) "function") (js-call runtime :close))))))
+
+  (defun nth-observe (runtime name arguments descriptor)
+    (let ((result (js-call runtime :invoke (nth-public-name descriptor name) arguments)) (failed false))
+      (try (js-call runtime :toHostValue result)
+        (catch error (setq failed t) (throw error))
+        (finally (nth-cleanup failed (js-array (lambda () (js-call runtime :release result))))))))
+
+  (defun nth-field-evidence (value)
+    (cond ((undefined? value) (js-object :kind "undefined"))
+      ((nil? value) (js-object :kind "null"))
+      ((= (value-type value) "number")
+        (js-object :kind "number" :value (str value) :negativeZero (Object/is value -0.0)))
+      ((= (value-type value) "string")
+        (js-object :kind "string" :value (js-call value :slice 0 256) :length (js-length value)))
+      ((= (value-type value) "boolean") (js-object :kind "boolean" :value value))
+      (t (js-object :kind (value-type value)))))
+  (defun nth-array-evidence (array)
+    (let ((keys (Reflect/ownKeys array)) (fields (js-array)) (index 0))
+      ;; Evidence contains only this flat result's own descriptors, never a
+      ;; runtime/IR graph or a coercion of a source object. Read every bounded
+      ;; field before the first comparison so a failing field cannot hide the
+      ;; report's later error name. The original assertions remain below.
+      (while (and (< index (js-length keys)) (< index 32))
+        (let* ((key (aref keys index)) (entry (Object/getOwnPropertyDescriptor array key)))
+          (js-call fields :push (js-object :key (if (= (value-type key) "string") key "<symbol>")
+            :data (Object/hasOwn entry "value")
+            :value (when (Object/hasOwn entry "value") (nth-field-evidence (get entry :value)))
+            :writable (get entry :writable) :enumerable (get entry :enumerable) :configurable (get entry :configurable))))
+        (setq index (1+ index)))
+      (js-object :ownKeyCount (js-length keys) :fields fields)))
+  (defun assert-nth-flat-array (actual expected &optional label)
+    ;; Source arrays retain their real managed Array.prototype. Compare every
+    ;; own data property rather than flattening the source view into a host
+    ;; array, which would hide holes, symbols, flags and signed zero.
+    (js-call assert :strictEqual (Array/isArray actual) t)
+    (let ((keys (Reflect/ownKeys expected)) (index 0)
+          (evidence (JSON/stringify (js-object :phase (or label "nth-flat-array")
+            :actual (nth-array-evidence actual) :expected (nth-array-evidence expected)))))
+      (js-call assert :deepStrictEqual (Reflect/ownKeys actual) keys)
+      (js-call assert :strictEqual (get actual :length) (get expected :length))
+      (while (< index (js-length keys))
+        (let* ((key (aref keys index))
+               (wanted (Object/getOwnPropertyDescriptor expected key))
+               (observed (Object/getOwnPropertyDescriptor actual key)))
+          (js-call assert :strictEqual (Object/hasOwn observed "value") t)
+          (js-call assert :strictEqual (Object/hasOwn observed "get") false)
+          (js-call assert :strictEqual (Object/hasOwn observed "set") false)
+          (js-call assert :strictEqual (get observed :writable) (get wanted :writable))
+          (js-call assert :strictEqual (get observed :enumerable) (get wanted :enumerable))
+          (js-call assert :strictEqual (get observed :configurable) (get wanted :configurable))
+          (js-call assert :strictEqual (Object/is (get observed :value) (get wanted :value)) t evidence)
+          (js-call assert :strictEqual (Object/is (get actual key) (get expected key)) t evidence))
+        (setq index (1+ index)))))
+
+  (defun exerciseNth (runtime reference descriptor)
+    (js-call assert :deepStrictEqual (js-call reference :language_values) expected-values)
+    (js-call runtime :auto 65536)
+    (nth-allocation-phase runtime "before-prepare")
+    (try
+      (js-call (get runtime :project) :prepare)
+      (catch error
+        ;; Preserve the original TypeError and inspect only its still-live
+        ;; declarations before the existing optional diagnostic collection.
+        (try
+          (when (js-call globalThis.TypeError globalThis.Symbol.hasInstance error)
+            (nth-allocation-phase runtime "failure-before-collect" descriptor))
+          (catch diagnostic-error nil))
+        (when allocator-diagnostic
+          (try (js-call runtime :collect) (catch ignored nil))
+          (nth-allocation-phase runtime "failure-after-collect"))
+        (throw error)))
+    (nth-allocation-phase runtime "after-prepare")
+    (nth-allocation-phase runtime "before-steps")
+    (js-call (get (get descriptor :project) :modules) :forEach (lambda (module)
+      (js-call (get module :steps) :forEach (lambda (step)
+        (js-call (get runtime :project) :run (get step :run))))))
+    (nth-allocation-phase runtime "after-steps")
+    (js-call runtime :auto 1)
+    (assert-nth-flat-array (nth-observe runtime "language-values" (js-array) descriptor) expected-values)
+    (let ((mode 0))
+      (while (< mode 4)
+        (let ((argument (js-call runtime :number mode)) (failed false))
+          (try
+            (js-call assert :deepStrictEqual (js-call reference :language_order mode) (aref expected-orders mode))
+            (assert-nth-flat-array
+              (nth-observe runtime "language-order" (js-array argument) descriptor) (aref expected-orders mode))
+            (catch error (setq failed t) (throw error))
+            (finally (nth-cleanup failed (js-array (lambda () (js-call runtime :release argument)))))))
+        (setq mode (1+ mode))))
+    (let* ((host-array (js-array undefined -0.0 (js-object :marker "caller")))
+           (collection (js-call runtime :fromHostValue host-array))
+           (caller (js-call runtime :frame 1)) (index 0) (failed false))
+      (js-call runtime :frameSet caller 0 collection)
+      (try
+        (while (< index 3)
+          (let* ((position (js-call runtime :number index)) (borrowed (js-call runtime :fromHostValue (aref host-array index)))
+                 (result undefined) (item-failed false))
+            (try
+              (setq result (js-call runtime :invoke (nth-public-name descriptor "language-lookup") (js-array position collection)))
+              (js-call assert :strictEqual
+                (Object/is (js-call runtime :toHostValue result) (js-call reference :language_lookup index host-array)) t
+                (str "nth actual foreign element at index " index))
+              (js-call assert :ok (js-call runtime :keyEqual borrowed result)
+                (str "nth caller/result raw identity at index " index))
+              (when (= index 1) (assert (Object/is (js-call runtime :readNumber result) -0.0)))
+              (js-call runtime :collect)
+              (js-call assert :ok (js-call runtime :keyEqual borrowed result)
+                (str "nth caller/result raw identity after GC at index " index))
+              (js-call assert :deepStrictEqual (js-call runtime :toHostValue result)
+                (js-call reference :language_lookup index host-array))
+              (catch error (setq item-failed t) (throw error))
+              (finally (nth-cleanup item-failed (js-array
+                (lambda () (js-call runtime :release result))
+                (lambda () (js-call runtime :release borrowed))
+                (lambda () (js-call runtime :release position)))))))
+          (setq index (1+ index)))
+        (let ((positions (js-array -1 99)) (offset 0))
+          (while (< offset (js-length positions))
+            (let* ((position (aref positions offset)) (number (js-call runtime :number position)) (item-failed false))
+              (try
+                (js-call assert :strictEqual (js-call reference :language_lookup position host-array) nil)
+                (js-call assert :strictEqual (nth-observe runtime "language-lookup" (js-array number collection) descriptor) nil)
+                (js-call assert :throws (lambda () (js-call reference :imported_lookup host-array position)) globalThis.RangeError)
+                (js-call assert :deepStrictEqual (js-call reference :imported_report host-array position)
+                  (js-array "error" "RangeError"))
+                (assert-nth-flat-array (nth-observe runtime "imported-report" (js-array collection number) descriptor)
+                  (js-array "error" "RangeError") (str "imported-report index " position))
+                (let ((fallbacks (js-array undefined nil t)) (index 0))
+                  (while (< index (js-length fallbacks))
+                    (let* ((fallback (aref fallbacks index)) (handle (js-call runtime :fromHostValue fallback))
+                           (expected (if (undefined? fallback) (js-array "error" "RangeError") (js-array "value" fallback))))
+                      (try
+                        (js-call assert :deepStrictEqual (js-call reference :imported_fallback_report host-array position fallback) expected)
+                        (assert-nth-flat-array
+                          (nth-observe runtime "imported-fallback-report" (js-array collection number handle) descriptor) expected
+                          (str "imported-fallback-report index " position " fallback " index))
+                        (finally (js-call runtime :release handle))))
+                    (setq index (1+ index))))
+                (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 1)
+                (catch error (setq item-failed t) (throw error))
+                (finally (nth-cleanup item-failed (js-array (lambda () (js-call runtime :release number)))))))
+            (setq offset (1+ offset))))
+        (js-call assert :deepStrictEqual (js-call runtime :toHostValue collection) host-array)
+        (catch error (setq failed t) (throw error))
+        (finally (nth-cleanup failed (js-array
+          (lambda () (js-call runtime :leaveFrame caller))
+          (lambda () (js-call runtime :release collection)))))))
+    (js-call runtime :collect)
+    (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)
+    (nth-allocation-phase runtime "after-body"))
+
+  (defasync main ()
+    (let* ((arguments (get globalThis.process :argv))
+           (descriptor (JSON/parse (readFileSync (aref arguments 4) "utf8")))
+           (runtime undefined) (failed false))
+      (try
+        (setq runtime (instantiateManagedRuntime (readFileSync (aref arguments 2)) nth-runtime-budget))
+        (exerciseNth runtime (await (loadNthReference (aref arguments 3))) descriptor)
+        (catch error (setq failed t) (throw error))
+        (finally (when runtime (finishNth runtime failed))))))
+  (export nth-entry-source nth-runtime-budget loadNthReference exerciseNth finishNth)
+  (when (= (basename (or (aref (get globalThis.process :argv) 1) "")) "managed-literal-nth-node-selfhosted.mjs")
+    (js-call (main) :catch (lambda (error)
+      (js-call (get globalThis.process :stderr) :write (str (get error :stack (str error)) "\n"))
+      (put globalThis.process :exitCode 1)))))

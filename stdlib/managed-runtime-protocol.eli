@@ -1,0 +1,28 @@
+(module eliscript.managed-runtime-protocol
+  (import "./protocol-error.eli" ProtocolDispatchError)
+  (import "../../stdlib/core/protocol.eli"
+    define-protocol define-protocol-from-definition extend-protocol-category extend-protocol-default
+    extend-protocol-type implements-protocol-operation? implements-protocol? protocol-definition
+    protocol-host-category protocol-method protocol-slot protocol? materialize-protocol-from-definition
+    read-protocol-operations-owner read-protocol-method-owner)
+
+  (defconst defineProtocol define-protocol)
+  (defconst defineProtocolFromDefinition define-protocol-from-definition)
+  (defconst extendProtocolCategory extend-protocol-category)
+  (defconst extendProtocolDefault extend-protocol-default)
+  (defconst extendProtocolType extend-protocol-type)
+  (defconst implementsProtocolOperation implements-protocol-operation?)
+  (defconst implementsProtocol implements-protocol?)
+  (defconst protocolDefinition protocol-definition)
+  (defconst protocolHostCategory protocol-host-category)
+  (defconst protocolMethod protocol-method)
+  (defconst protocolSlot protocol-slot)
+  (defconst isProtocol protocol?)
+  (defconst materializeProtocolFromDefinition materialize-protocol-from-definition)
+  (defconst readProtocolOperationsOwner read-protocol-operations-owner)
+  (defconst readProtocolMethodOwner read-protocol-method-owner)
+
+  (export ProtocolDispatchError defineProtocol defineProtocolFromDefinition extendProtocolCategory
+    extendProtocolDefault extendProtocolType implementsProtocolOperation implementsProtocol
+    protocolDefinition protocolHostCategory protocolMethod protocolSlot isProtocol materializeProtocolFromDefinition
+    readProtocolOperationsOwner readProtocolMethodOwner))

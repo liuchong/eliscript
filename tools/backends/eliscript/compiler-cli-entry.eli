@@ -1,0 +1,16 @@
+(module tools.backends.compiler-cli-entry
+  (import "node:path" resolve)
+  (import "node:url" fileURLToPath)
+  (import "./dist/release-cli.mjs" runReleaseCLI renderReleaseCLIError)
+  (defconst main runReleaseCLI)
+  (defconst runCompilerCLI runReleaseCLI)
+  (defconst renderCompilerCLIError renderReleaseCLIError)
+  (when (and (aref (get globalThis.process :argv) 1)
+             (= (resolve (aref (get globalThis.process :argv) 1)) (fileURLToPath (js* "import.meta.url"))))
+    (js-call (main (js-call (get globalThis.process :argv) :slice 2)) :catch
+      (lambda (error)
+        (js-call (get globalThis.process :stderr) :write
+          (+ (renderCompilerCLIError error (js-object :json
+            (js-call (get globalThis.process :argv) :includes "--json-errors"))) "\n"))
+        (put globalThis.process :exitCode 1))))
+  (export main runCompilerCLI renderCompilerCLIError))

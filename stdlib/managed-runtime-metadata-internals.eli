@@ -1,0 +1,6 @@
+(module eliscript.managed-runtime-metadata-internals
+  (import "../../stdlib/managed-literal-protocols.eli" I_META I_WITH_META METADATA_READ METADATA_WITH)
+  (import "./protocol.eli" protocolMethod)
+  (defconst dispatchMetadataRead (protocolMethod I_META "meta"))
+  (defconst dispatchMetadataWith (protocolMethod I_WITH_META "withMeta"))
+  (export I_META I_WITH_META METADATA_READ METADATA_WITH dispatchMetadataRead dispatchMetadataWith))

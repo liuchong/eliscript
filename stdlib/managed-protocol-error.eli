@@ -1,0 +1,32 @@
+(module eliscript.managed-protocol-error
+  (defun protocol-error-observed-type (value)
+    (let ((category (if (nil? value) "null" (js* "typeof value"))))
+      (if (and (/= category "object") (/= category "function")) category
+        (try
+          (let* ((prototype (Object/getPrototypeOf value))
+                 (constructor (if (nil? prototype) undefined (get prototype :constructor)))
+                 (name (if (and (= (js* "typeof constructor") "function")
+                                (> (get (get constructor :name) :length) 0))
+                           (get constructor :name) "anonymous")))
+            (str category ":" name))
+          (catch error category)))))
+  (defun ProtocolDispatchError (protocol operation receiver &rest reasons)
+    ;; Omitted optional parameters become nil in the source language. The
+    ;; original host constructor defaults only omission/undefined, not null.
+    (let* ((reason (if (or (= (js-length reasons) 0) (undefined? (aref reasons 0)))
+                     "missing" (aref reasons 0)))
+           (type (protocol-error-observed-type receiver))
+           (detail (if (= reason "missing") "has no implementation" "has a non-callable direct slot"))
+           (error (new globalThis/TypeError
+                    (str "protocol " (get protocol :name) "/" operation " " detail " for " type))))
+      (Object/setPrototypeOf error (get ProtocolDispatchError :prototype))
+      (put error :name "ProtocolDispatchError")
+      (put error :code "ELI-RUNTIME-PROTOCOL")
+      (put error :protocol (get protocol :name))
+      (put error :operation operation)
+      (put error :observedType type)
+      (put error :reason reason)
+      error))
+  (Object/setPrototypeOf ProtocolDispatchError globalThis/TypeError)
+  (Object/setPrototypeOf (get ProtocolDispatchError :prototype) (get globalThis/TypeError :prototype))
+  (export ProtocolDispatchError))

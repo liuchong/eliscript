@@ -9,6 +9,7 @@ import { expect, test } from "bun:test";
 import {
   checkLocalMatrixEvidence,
   commandEnvironment,
+  currentCell,
   expectedMatrixCells,
   LocalCompatibilityMatrixError,
   requiredMatrixCells,
@@ -117,6 +118,18 @@ test("local compatibility evidence derives all real machine cells", () => {
       emacsVersion: "30.2",
     },
     {
+      id: "linux-arm64-emacs-29.4",
+      operatingSystem: "linux",
+      architecture: "arm64",
+      emacsVersion: "29.4",
+    },
+    {
+      id: "linux-arm64-emacs-30.2",
+      operatingSystem: "linux",
+      architecture: "arm64",
+      emacsVersion: "30.2",
+    },
+    {
       id: "macos-arm64-emacs-29.4",
       operatingSystem: "macos",
       architecture: "arm64",
@@ -145,6 +158,16 @@ test("local compatibility evidence derives all real machine cells", () => {
   ]);
 });
 
+test("actual Linux ARM environments select their machine cell without duplicating the architecture in its id", () => {
+  for (const cell of expectedMatrixCells(matrix)) {
+    expect(currentCell(matrix, {
+      operatingSystem: cell.operatingSystem, architecture: cell.architecture, emacsVersion: cell.emacsVersion,
+    })).toEqual(cell);
+  }
+  expect(() => currentCell(matrix, {operatingSystem: 'linux-arm64', architecture: 'arm64', emacsVersion: '29.4'}))
+    .toThrow(/not a supported matrix system/);
+});
+
 test("one required local report remains an explicitly incomplete acceptance matrix", async () => {
   const value = report(requiredMatrixCells(matrix)[0]);
   expect(await validateLocalMatrixReport(value, validationOptions)).toEqual({
@@ -158,7 +181,7 @@ test("one required local report remains an explicitly incomplete acceptance matr
     sourceMatches: async () => true,
   })).toEqual({
     schemaVersion: 1,
-    targeted: 4,
+    targeted: 6,
     required: 2,
     retained: 1,
     completed: 1,
@@ -168,6 +191,8 @@ test("one required local report remains an explicitly incomplete acceptance matr
     optionalMissing: [
       "linux-x64-emacs-29.4",
       "linux-x64-emacs-30.2",
+      "linux-arm64-emacs-29.4",
+      "linux-arm64-emacs-30.2",
     ],
     stale: [],
     currentSource: true,
@@ -183,7 +208,7 @@ test("historical reports do not count for changed source", async () => {
     reports: [value],
     sourceMatches: async () => false,
   })).toMatchObject({
-    targeted: 4,
+    targeted: 6,
     required: 2,
     retained: 1,
     completed: 0,
@@ -201,12 +226,12 @@ test("optional Linux reports are validated but do not block acceptance", async (
     reports: [...requiredReports, optionalReport],
     sourceMatches: async () => true,
   })).toMatchObject({
-    targeted: 4,
+    targeted: 6,
     required: 2,
     retained: 3,
     completed: 2,
     missing: [],
-    optionalMissing: ["linux-x64-emacs-30.2"],
+    optionalMissing: ["linux-x64-emacs-30.2", "linux-arm64-emacs-29.4", "linux-arm64-emacs-30.2"],
     complete: true,
   });
 });
@@ -325,6 +350,39 @@ test("historical matrix acceptance rejects every non-policy contract change", as
       const changed = structuredClone(current); mutate(changed); await save(changed);
       await expect(validateLocalMatrixReport(value, {root: directory, env: deferredEnvironment}))
         .rejects.toThrow(/historical matrix contract differs beyond performanceAcceptance|matrixSha256 must bind the current compatibility contract/u);
+    }
+  });
+});
+
+test("adding optional ARM Linux cells preserves authentic old evidence without accepting the new machines", async () => {
+  await historicalFixture(async ({directory, bytes, filename, value, current, save}) => {
+    const extended = structuredClone(current);
+    const added = structuredClone(matrix.operatingSystems.find(system => system.id === 'linux-arm64'));
+    extended.operatingSystems.push(added);
+    extended.operatingSystems.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    await save(extended);
+    const authenticated = await validateLocalMatrixReport(value, {root: directory, env: deferredEnvironment});
+    expect(authenticated.cell).toEqual(value.cell);
+    expect(authenticated.historicalContract.matrixSha256).toBe(value.matrixSha256);
+    expect(authenticated.historicalContract.additionalUnmeasuredCells).toEqual([
+      'linux-arm64-emacs-29.4', 'linux-arm64-emacs-30.2',
+    ]);
+    const aggregate = await checkLocalMatrixEvidence({root: directory, env: deferredEnvironment, sourceMatches: async () => false});
+    expect(aggregate).toMatchObject({targeted: 6, required: 2, retained: 1, completed: 0, currentSource: false, complete: false,
+      optionalMissing: ['linux-x64-emacs-29.4', 'linux-x64-emacs-30.2', 'linux-arm64-emacs-29.4', 'linux-arm64-emacs-30.2']});
+    expect(await readFile(path.join(directory, filename))).toEqual(bytes);
+    const mutations = [
+      m => {m.operatingSystems = m.operatingSystems.filter(system => system.id !== 'linux');},
+      m => {m.operatingSystems.find(system => system.id === 'linux').runner = 'ubuntu-22.04';},
+      m => {m.operatingSystems.find(system => system.id === 'linux').operatingSystem = 'linux';},
+      m => {m.acceptanceOperatingSystems = ['linux-arm64', 'macos'];},
+      m => {m.emacsVersions = ['29.4', '30.3'];},
+      m => {m.localEvidence.timeoutsMs['bun run test']++;},
+    ];
+    for (const mutate of mutations) {
+      const changed = structuredClone(extended);mutate(changed);await save(changed);
+      await expect(validateLocalMatrixReport(value, {root: directory, env: deferredEnvironment}))
+        .rejects.toThrow(/historical matrix contract differs beyond performanceAcceptance|must include linux and macos/);
     }
   });
 });

@@ -1,0 +1,412 @@
+(module tests.managed-root-lifetimes
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile writeFile realpath rm)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "node:child_process" spawnSync)
+  (import "node:module" createRequire)
+  (import "node:url" pathToFileURL)
+  ;; Bootstrap emits tests/managed-root-lifetimes-selfhosted.test.mjs.
+  (import "../tools/backends/build.mjs" buildBackends root)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../tools/compiler/controlled-baseline.mjs" definition)
+
+  (defvar directory undefined)
+  (defvar bytes undefined)
+  (defvar reference undefined)
+  (defvar private-helpers undefined)
+  (defconst options
+    (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 16384 :initializeModule false))
+  (defconst families (js-array "method" "conditional" "cond" "short" "sugar"))
+
+  (defun compile-private-helpers (backend production)
+    (let* ((names (js-array "managed-fail" "word-node" "word-constant" "word-local" "word-set"
+              "word-sequence" "word-compare" "word-if" "append-managed" "new-managed-local"
+              "new-managed-temporary-local" "runtime-call" "runtime-arguments" "capture-error"
+              "managed-guard" "checked-control" "root-local" "managed-result"
+              "clear-managed-temporary-roots" "snapshot-managed"))
+           (parts (js-array "(module tests.private.root.epochs"
+             (str "(import " (JSON/stringify (get (pathToFileURL (resolve directory "backends/numeric.mjs")) :href))
+               " backend-fail find-function)")))
+           (snapshot (definition production "snapshot-managed "))
+           (check "(>= (get root :epoch) (if cleared (or (js-call cleared :get (get root :rootIndex)) 0) 0))")
+           (index 0))
+      ;; The reference differs only in the previously global epoch test. All
+      ;; other production validation, root transfer and emitted words remain.
+      (js-call assert :strictEqual (js-length (js-call snapshot :split check)) 2)
+      (while (< index (js-length names))
+        (js-call parts :push (definition production (str (aref names index) " ")))
+        (setq index (1+ index)))
+      (js-call parts :push
+        (js-call (js-call snapshot :replace "(defun snapshot-managed ("
+          "(defun snapshot-managed-global-epoch (") :replace check
+          "(= (get root :epoch) (get state :snapshotRootEpoch 0))")
+        "(export managed-result new-managed-temporary-local clear-managed-temporary-roots snapshot-managed snapshot-managed-global-epoch))")
+      (js-call (get backend :compiler) :compile_string (js-call parts :join "\n") "private-root-epochs.eli")))
+
+  (defun pressure-source (family)
+    ;; Independent RHS expressions need independent result slots. A runtime
+    ;; loop alone would reuse one slot and would not expose this retention.
+    ;; :repeat uses the specialized text-method result, not the ordinary-method
+    ;; result. Every :length on its primitive or on a kind14 tree also takes
+    ;; the literal-property-key fallback: both private join roots must belong
+    ;; to this RHS interval, after the receiving size binding has been rooted.
+    (let* ((count (if (= family "method") 8 16))
+           (value (cond
+             ((= family "method") "(js-call \"abcdefgh\" :repeat 512)")
+             ((= family "conditional") "(if t (tree) nil)")
+             ((= family "cond") "(cond (false nil) (t (tree)))")
+             ((= family "short") "(or nil (and t (tree)))")
+             (t "(when t (tree))")))
+           (bindings (js-array)) (names (js-array)) (index 0))
+      (while (< index count)
+        (let ((name (str "size-" index)))
+          (js-call names :push name)
+          (js-call bindings :push (str "(" name " (get " value " :length))")))
+        (setq index (1+ index)))
+      (str "(defun pressure-" family " () (let* (" (js-call bindings :join " ")
+        ") (+ " (js-call names :join " ") ")))")))
+
+  (defun fixture-source ()
+    (let ((lines (js-array
+      "(defconst marker 0)"
+      "(defvar saved nil)"
+      "(defun tree () (js-array (js-array (js-array -0.0) (js-array 1)) (js-array (js-array 2) (js-array 3))))"
+      "(defun transfer (flag)"
+      " (let* ((source (if flag (js-array -0.0) (js-array 7))) (alias source)"
+      "        (read (lambda () source)) (size (get (if flag (tree) (tree)) :length)))"
+      "  (js-array source alias (funcall read) size)))"
+      "(defun earlier-operand (flag)"
+      " (js-array (if flag (js-array -0.0) nil)"
+      "  (let* ((discard (get (tree) :length))) (js-array discard))))"
+      "(defun short-order (flag)"
+      " (let ((trace (js-array 0)))"
+      "  (let* ((out (or (and flag (if t (js-array -0.0) nil))"
+      "                  (progn (put trace 0 1) (js-array 9))))"
+      "         (size (get (tree) :length))) (js-array out (get trace 0) size))))"
+      "(defun sugar-values (flag)"
+      " (let* ((yes (when flag (js-array -0.0))) (no (unless flag (js-array 7)))"
+      "        (size (get (tree) :length))) (js-array yes no size)))"
+      "(defun store (flag)"
+      " (let ((local nil))"
+      "  (let* ((out (setq saved (if flag (js-array -0.0) (js-array 7))))"
+      "         (alias (setq local (cond (flag saved) (t saved))))"
+      "         (size (get (tree) :length))) (js-array out local alias size))))"
+      "(defun read-global () saved)"
+      "(defun clear-global () (setq saved nil))"
+      "(defun caught (flag)"
+      " (let* ((out (try (let* ((first (if flag (js-array -0.0) (throw false)))"
+      "                         (answer (and first first))) answer)"
+      "                 (catch error (js-array error))))"
+      "        (size (get (tree) :length))) (js-array out size)))"
+      "(defun throw-exit () (let ((out (if t (throw false) (tree)))) out))"
+      "(defun while-rhs (count)"
+      " (let ((out (let ((index count) (value (js-array -0.0)))"
+      "              (while (> index 0)"
+      "               (let* ((next (if t (js-array (+ (get value 0) 1)) nil)))"
+      "                (setq value next index (1- index)))) value)))"
+      "  (js-array (get out 0) (get out :length))))"
+      "(defun recur-rhs (count)"
+      " (let ((out (loop ((index count) (value (js-array -0.0)))"
+      "              (if (= index 0) value"
+      "               (let* ((next (or nil (js-array (+ (get value 0) 1)))))"
+      "                (recur (1- index) next))))))"
+      "  (js-array (get out 0) (get out :length))))"
+      "(defun capture (flag)"
+      " (let ((value (if flag (js-array -0.0) (js-array 7))))"
+      "  (lambda () (let* ((first value) (size (get (tree) :length)))"
+      "   (setq value (js-array (get first 0))) (js-array first value size)))))"
+      "(defun invoke (callback) (funcall callback))"
+      "(defun both-live ()"
+      " (let* ((first (js-call \"abcdefgh\" :repeat 512))"
+      "        (second (js-call \"abcdefgh\" :repeat 512)))"
+      "  (+ (get first :length) (get second :length))))"
+      "(export marker transfer earlier-operand short-order sugar-values store read-global clear-global"
+      " caught throw-exit while-rhs recur-rhs capture invoke both-live)")) (index 0))
+      (while (< index (js-length families))
+        (let ((family (aref families index)))
+          (js-call lines :push (pressure-source family) (str "(export pressure-" family ")")))
+        (setq index (1+ index)))
+      (js-call lines :join "\n")))
+
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-private-root-lifetimes-"))))
+    (let* ((backend (await (buildBackends (js-object :outputRoot directory))))
+           (source (fixture-source))
+           (program (js-call (get backend :compiler) :compile_ir_string source "private-root-lifetimes.eli"))
+           (original (JSON/stringify program))
+           (runtime (js-call (get backend :compiler) :compile_ir_string
+             (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
+           (lowered (js-call (get backend :managed) :lower_managed_program program runtime))
+           (raw (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed)
+             (js-object :initialPages 1 :maximumPages 8)))
+           (oracle-source (str source "\n"
+             (js-call (js-array
+               "(console/log (JSON/stringify (js-array"
+               " (pressure-method) (pressure-conditional) (pressure-cond) (pressure-short) (pressure-sugar)"
+               " (transfer false) (transfer t) (earlier-operand false) (earlier-operand t)"
+               " (short-order false) (short-order t) (sugar-values false) (sugar-values t)"
+               " (caught false) (caught t) (while-rhs 0) (while-rhs 8) (recur-rhs 0) (recur-rhs 8))"
+               " (lambda (key value) (if (Object/is value -0.0) (js-object :negativeZero t) value))))") :join "\n")))
+           (oracle (spawnSync "node" (js-array "--input-type=module" "-e"
+             (js-call (get backend :compiler) :compile_string oracle-source "private-root-lifetimes-oracle.eli"))
+             (js-object :encoding "utf8" :timeout 10000 :maxBuffer 1048576))))
+      (js-call assert :strictEqual (JSON/stringify program) original)
+      (setq bytes (js-call globalThis.Uint8Array :from
+        (js-call (get backend :wasm) :append_metadata_section raw "eliscript-managed-control"
+          (JSON/stringify (get lowered :descriptor)))))
+      (js-call assert :deepStrictEqual
+        (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      ;; The oracle is the compiler's output of this same Eliscript source,
+      ;; executed independently by Node, without a handwritten JS driver.
+      (js-call assert :strictEqual (get oracle :error) undefined)
+      (js-call assert :strictEqual (get oracle :status) 0 (get oracle :stderr))
+      ;; Preserve signed zero across the oracle transport rather than silently
+      ;; weakening the strict value comparisons to JSON's zero semantics.
+      (setq reference (JSON/parse (get oracle :stdout)
+        (lambda (key value)
+          (if (and value (= (value-type value) "object") (get value :negativeZero false)) -0.0 value))))
+      (js-call assert :deepStrictEqual (js-call reference :slice 0 5) (js-array 32768 32 32 32 32))
+      (let ((helper-path (resolve directory "backends/private-root-epochs.mjs")))
+        (await (writeFile helper-path (compile-private-helpers backend
+          (await (readFile (resolve root "bootstrap/backends/managed.eli") "utf8")))))
+        (let* ((actual-path (await (realpath helper-path))) (require-module (createRequire actual-path)))
+          (setq private-helpers (funcall require-module actual-path))))))
+    120000)
+  (afterAll (async ()
+    (setq bytes undefined reference undefined private-helpers undefined)
+    (when directory (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun fresh ()
+    (let ((adapter (instantiateManagedRuntime bytes options)))
+      (js-call adapter :auto 1)
+      (js-call adapter :initializeModule) adapter))
+  (defun finish (adapter)
+    (try
+      (progn (js-call adapter :closeModule) (js-call adapter :collect)
+        (js-call assert :strictEqual (js-call adapter :live) 0)
+        (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0))
+      (finally
+        (when (= (value-type (get adapter :close)) "function") (js-call adapter :close)))))
+  (defun read-value (adapter value)
+    (cond
+      ((and value (= (get value :kind) 4)) (js-call adapter :readNumber value))
+      ((and value (= (get value :kind) 5)) (js-call adapter :readString value))
+      ((and value (or (= (get value :kind) 14) (= (get value :kind) 7)))
+        (let ((result (js-array)) (index 0))
+          (while (< index (js-call adapter :length value))
+            (let ((child (js-call adapter :get value index)))
+              (try (js-call result :push (read-value adapter child))
+                (finally (js-call adapter :release child))))
+            (setq index (1+ index))) result))
+      (t value)))
+  (defun read-call (adapter name arguments)
+    (let ((result (js-call adapter :invoke name arguments)))
+      (try (read-value adapter result) (finally (js-call adapter :release result)))))
+  (defun capacity-error (error)
+    (= (get (get error :eliscriptDiagnostic (js-object)) :code) "ELI-RT0002"))
+
+  (defun epoch-state ()
+    (js-object :locals (js-array
+      (js-object :name "heap" :index 0 :type "u32")
+      (js-object :name "frame" :index 1 :type "u32")
+      (js-object :name "error" :index 2 :type "u32"))
+      :heap (js-object :index 0) :frame (js-object :index 1) :error (js-object :index 2) :roots 0
+      :runtime (js-array (js-object :name "frame-set" :index 0)
+        (js-object :name "last-error" :index 1) (js-object :name "frame-clear-range" :index 2))))
+  (defun epoch-value (state value)
+    (js-call private-helpers :managed_result state
+      (js-object :kind "literal" :type "u32" :children (js-array) :value value) false))
+  (defun node-count (root-node)
+    (let ((seen (new globalThis.Set)) (pending (js-array root-node)))
+      (while (> (js-length pending) 0)
+        (let ((node (js-call pending :pop)))
+          (unless (js-call seen :has node)
+            (js-call seen :add node)
+            (let ((children (get node :children)) (index 0))
+              (while (< index (js-length children))
+                (js-call pending :push (aref children index)) (setq index (1+ index)))))))
+      (get seen :size)))
+
+  (test "snapshot epochs invalidate only cleared roots and retain all ownership checks across barriers"
+    (lambda ()
+      (let* ((state (epoch-state)) (stable (epoch-value state 7))
+             (first (js-length (get state :temporaryRoots)))
+             (join (js-call private-helpers :new_managed_temporary_local state "conditional"))
+             (cleared (epoch-value state 8)) (epoch (get (get stable :snapshotRoot) :epoch)))
+        (js-call private-helpers :clear_managed_temporary_roots state first (js-length (get state :temporaryRoots)))
+        (js-call assert :strictEqual (get state :snapshotRootEpoch) (1+ epoch))
+        (js-call assert :strictEqual
+          (js-call (get state :snapshotRootClearedAt) :has (get (get stable :snapshotRoot) :rootIndex)) false)
+        (js-call assert :strictEqual
+          (js-call (get state :snapshotRootClearedAt) :get (get join :rootIndex)) (1+ epoch))
+        (js-call assert :strictEqual (js-call private-helpers :snapshot_managed stable state) stable)
+        (js-call assert :notStrictEqual (js-call private-helpers :snapshot_managed cleared state) cleared)
+        (js-call assert :notStrictEqual (js-call private-helpers :snapshot_managed stable (epoch-state)) stable)
+        (let ((rewritten (Object/assign (js-object) stable
+                (js-object :result (Object/assign (js-object) (get stable :result))))))
+          (js-call assert :notStrictEqual (js-call private-helpers :snapshot_managed rewritten state) rewritten))
+        (let ((saved (get (get stable :snapshotRoot) :epoch)))
+          (put (get stable :snapshotRoot) :epoch (1+ (get state :snapshotRootEpoch)))
+          (js-call assert :notStrictEqual (js-call private-helpers :snapshot_managed stable state) stable)
+          (put (get stable :snapshotRoot) :epoch saved))
+        (let* ((barrier-value (epoch-value state 9))
+               (start (1- (js-length (get state :temporaryRoots))))
+               (length (js-length (get state :temporaryRoots))))
+          (put state :temporaryRootCleanupBarrier t)
+          (js-call private-helpers :clear_managed_temporary_roots state start length)
+          (js-call assert :strictEqual (js-length (get state :temporaryRoots)) length)
+          (js-call assert :notStrictEqual (js-call private-helpers :snapshot_managed barrier-value state) barrier-value)
+          (js-call assert :strictEqual (js-call private-helpers :snapshot_managed stable state) stable)))))
+
+  (defun snapshot-growth (count global-epoch)
+    (let* ((state (epoch-state)) (initial (epoch-value state 7)) (current initial)
+           (uses (js-array)) (clears (js-array)) (index 0))
+      (while (< index count)
+        (let ((first (js-length (get state :temporaryRoots))))
+          (js-call private-helpers :new_managed_temporary_local state "conditional")
+          (epoch-value state 8)
+          (js-call clears :push (js-call private-helpers :clear_managed_temporary_roots
+            state first (js-length (get state :temporaryRoots))))
+          (setq current (js-call private-helpers
+            (if global-epoch "snapshot_managed_global_epoch" "snapshot_managed") current state))
+          (js-call uses :push (get current :steps)))
+        (setq index (1+ index)))
+      (let ((emitted (js-object :kind "sequence" :type "u32" :value nil
+              :children (js-call clears :concat uses))))
+        (when (not global-epoch) (js-call assert :strictEqual current initial))
+        (js-object :nodes (node-count emitted) :expanded (js-length (JSON/stringify emitted))))))
+
+  (test "unrelated RHS cleanup keeps generated snapshot DAGs linear without copying earlier steps"
+    (lambda ()
+      (let* ((small (snapshot-growth 8 false)) (large (snapshot-growth 16 false))
+             (old-small (snapshot-growth 8 t)) (old-large (snapshot-growth 16 t)))
+        (js-call assert :ok (< (get large :nodes) (get old-large :nodes)))
+        (js-call assert :ok (< (- (get large :nodes) (get small :nodes))
+          (- (get old-large :nodes) (get old-small :nodes))))
+        (js-call assert :ok (< (get large :expanded) (get old-large :expanded)))
+        (js-call assert :ok (< (- (get large :expanded) (get small :expanded))
+          (- (get old-large :expanded) (get old-small :expanded)))))))
+
+  (test "private method and branch results release repeated RHS trees in the original 64-slot capacity"
+    (lambda ()
+      (let ((index 0))
+        (while (< index (js-length families))
+          (let* ((adapter (fresh)) (name (str "pressure-" (aref families index))))
+            (try
+              (progn
+                (js-call assert :strictEqual (read-call adapter name (js-array)) (aref reference index))
+                (js-call adapter :collect)
+                (let ((live (js-call adapter :live)) (repeat 0))
+                  (while (< repeat 4)
+                    (js-call assert :strictEqual (read-call adapter name (js-array)) (aref reference index))
+                    (js-call adapter :collect)
+                    (js-call assert :strictEqual (js-call adapter :live) live)
+                    (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0)
+                    (setq repeat (1+ repeat)))))
+              (finally (finish adapter))))
+          (setq index (1+ index))))) 30000)
+
+  (test "RHS handoff preserves chosen aliases captured bindings previous operands and short circuit order"
+    (lambda ()
+      (let ((adapter (fresh)) (flag-index 0))
+        (try
+          (while (< flag-index 2)
+            (let* ((flag (= flag-index 1))
+                   (result (js-call adapter :invoke "transfer" (js-array flag)))
+                   (left (js-call adapter :get result 0))
+                   (alias (js-call adapter :get result 1))
+                   (captured (js-call adapter :get result 2)))
+              (try
+                (progn (js-call adapter :collect)
+                  (js-call assert :strictEqual (js-call adapter :keyEqual left alias) t)
+                  (js-call assert :strictEqual (js-call adapter :keyEqual left captured) t)
+                  (js-call assert :deepStrictEqual (read-value adapter result) (aref reference (+ 5 flag-index)))
+                  (when flag
+                    (let ((zero (js-call adapter :get left 0)))
+                      (try (js-call assert :strictEqual (Object/is (js-call adapter :readNumber zero) -0) t)
+                        (finally (js-call adapter :release zero))))))
+                (finally (js-call adapter :release captured) (js-call adapter :release alias)
+                  (js-call adapter :release left) (js-call adapter :release result))))
+            (let ((names (js-array "earlier-operand" "short-order" "sugar-values")) (index 0))
+              (while (< index (js-length names))
+                (js-call assert :deepStrictEqual
+                  (read-call adapter (aref names index) (js-array (= flag-index 1)))
+                  (aref reference (+ 7 (* index 2) flag-index)))
+                (setq index (1+ index))))
+            (js-call adapter :collect)
+            (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0)
+            (setq flag-index (1+ flag-index)))
+          (finally (finish adapter))))) 30000)
+
+  (test "caught abrupt RHS loops recur and global assignment retain receiving roots and caller frames"
+    (lambda ()
+      (let* ((adapter (fresh)) (zero (js-call adapter :number -0)) (frame (js-call adapter :frame 1)))
+        (js-call adapter :frameSet frame 0 zero)
+        (try
+          (progn
+            (let ((flag-index 0))
+              (while (< flag-index 2)
+                (js-call assert :deepStrictEqual
+                  (read-call adapter "caught" (js-array (= flag-index 1)))
+                  (aref reference (+ 13 flag-index)))
+                (setq flag-index (1+ flag-index))))
+            (let ((names (js-array "while-rhs" "recur-rhs")) (index 0))
+              (while (< index 2)
+                (let ((iteration 0))
+                  (while (< iteration 2)
+                    (let ((count (js-call adapter :number (if (= iteration 0) 0 8))))
+                      (try
+                        (js-call assert :deepStrictEqual
+                          (read-call adapter (aref names index) (js-array count))
+                          (aref reference (+ 15 (* index 2) iteration)))
+                        (finally (js-call adapter :release count))))
+                    (setq iteration (1+ iteration))))
+                (setq index (1+ index))))
+            (let* ((stored (js-call adapter :invoke "store" (js-array t)))
+                   (first (js-call adapter :get stored 0)) (alias (js-call adapter :get stored 1))
+                   (again (js-call adapter :invoke "read-global")))
+              (try
+                (progn (js-call adapter :collect)
+                  (js-call assert :strictEqual (js-call adapter :keyEqual first alias) t)
+                  (js-call assert :strictEqual (js-call adapter :keyEqual first again) t))
+                (finally (js-call adapter :release again) (js-call adapter :release alias)
+                  (js-call adapter :release first) (js-call adapter :release stored))))
+            (let ((cleared (js-call adapter :invoke "clear-global"))) (js-call adapter :release cleared))
+            (js-call assert :throws (lambda () (js-call adapter :invoke "throw-exit"))
+              (lambda (error) (= error false)))
+            (js-call adapter :collect)
+            ;; The preceding abrupt/loop/global handoffs already completed;
+            ;; this same pressure family must recover with their roots intact.
+            (js-call assert :strictEqual (read-call adapter "pressure-conditional" (js-array)) 32)
+            (js-call assert :strictEqual (Object/is (js-call adapter :readNumber zero) -0) t)
+            (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 1))
+          (finally (js-call adapter :leaveFrame frame) (js-call adapter :release zero) (finish adapter))))) 30000)
+
+  (test "escaped capture cells survive private RHS cleanup and capacity failures still recover"
+    (lambda ()
+      (let* ((adapter (fresh)) (callback (js-call adapter :invoke "capture" (js-array t))))
+        (try
+          (progn
+            (let ((index 0))
+              (while (< index 3)
+                (js-call adapter :collect)
+                (let* ((pair (js-call adapter :invoke "invoke" (js-array callback)))
+                       (left (js-call adapter :get pair 0)) (right (js-call adapter :get pair 1))
+                       (zero (js-call adapter :get left 0)))
+                  (try
+                    (progn
+                      (js-call assert :strictEqual (js-call adapter :keyEqual left right) false)
+                      (js-call assert :strictEqual (Object/is (js-call adapter :readNumber zero) -0) t)
+                      (js-call assert :deepStrictEqual (read-value adapter left) (read-value adapter right)))
+                    (finally (js-call adapter :release zero) (js-call adapter :release right)
+                      (js-call adapter :release left) (js-call adapter :release pair))))
+                (setq index (1+ index))))
+            (js-call assert :throws (lambda () (js-call adapter :invoke "both-live")) capacity-error)
+            (js-call adapter :collect)
+            (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0)
+            ;; Keep the escaped callback alive during the original text RHS
+            ;; pressure; cleanup must free only the private method/key slots.
+            (js-call assert :strictEqual (read-call adapter "pressure-method" (js-array)) 32768))
+          (finally (js-call adapter :release callback) (finish adapter))))) 30000))

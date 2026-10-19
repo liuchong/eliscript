@@ -28,6 +28,22 @@ function copyBaseline() {
   return structuredClone(baseline);
 }
 
+// Shared by both scheduler and shard tests. The production entry point always
+// constructs the external RSS supervisor; CLI/environment cannot select this
+// local fake.
+function schedulingTestTransport() {
+  const children = new Set();
+  return {
+    failure: null,
+    run({command, args}) {
+      const child = Bun.spawn([command, ...args], {stdin: 'ignore', stdout: 'inherit', stderr: 'inherit'});
+      children.add(child);
+      return child.exited.then(exitCode => ({exitCode})).finally(() => children.delete(child));
+    },
+    cancel(signal) {for (const child of children) child.kill(signal);},
+  };
+}
+
 function expectMatrixFailure(matrix, pattern) {
   try {
     validateCompatibilityMatrix(matrix);
@@ -78,7 +94,8 @@ describe("compatibility matrix contract", () => {
   });
 
   test("fresh file workers reject invalid inventories and retain spawn failures without skipping other files", async () => {
-    const {runTestFiles, FILE_WORKERS} = await import('../tools/testing/file-workers.mjs');expect(FILE_WORKERS).toBe(2);
+    const {scheduleTestFiles, FILE_WORKERS} = await import('../tools/testing/file-workers.mjs');
+    const runTestFiles = files => scheduleTestFiles(files, schedulingTestTransport());expect(FILE_WORKERS).toBe(2);
     for (const files of [null, [], ['a.mjs'], [null], ['a.test.mjs', 'a.test.mjs']]) await expect(runTestFiles(files)).rejects.toThrow('unique test files');
     const spawn = spyOn(Bun, 'spawn').mockImplementation(() => {throw new Error('injected spawn failure');});
     try {
@@ -118,14 +135,15 @@ describe("compatibility matrix contract", () => {
   });
 
   test("exclusive file barriers retain two ordinary workers and ordered complete results after failures", async () => {
-    const {runTestFiles} = await import('../tools/testing/file-workers.mjs');
+    const {scheduleTestFiles} = await import('../tools/testing/file-workers.mjs');
+    const runTestFiles = files => scheduleTestFiles(files, schedulingTestTransport());
     const exclusive = ['wasm-compiler-ir-lower', 'wasm-managed-array-sort', 'native-compiler-modules', 'bootstrap-compiler']
       .map((name, i) => i % 2 ? path.join(root, 'tests', name + '.test.mjs') : 'tests/' + name + '.test.mjs');
     const ordinary = 'abcdefghi'.split('').map(name => name + '.test.mjs');
     const files = [ordinary[0], ordinary[1], ordinary[2], exclusive[0], ordinary[3], ordinary[4], exclusive[1], exclusive[2], ordinary[5], ordinary[6], exclusive[3], ordinary[7], ordinary[8]];
     const active = new Map(), started = [], exits = new Map();
-    const spawn = spyOn(Bun, 'spawn').mockImplementation(([executable, command, file], options) => {
-      expect([executable, command]).toEqual([process.execPath, 'test']);
+    const spawn = spyOn(Bun, 'spawn').mockImplementation(([executable, memoryMode, command, file], options) => {
+      expect([executable, memoryMode, command]).toEqual([process.execPath, '--smol', 'test']);
       expect(options).toEqual({stdin: 'ignore', stdout: 'inherit', stderr: 'inherit'});
       let done;const exited = new Promise(resolve => {done = resolve;});
       const child = {exited, kill(signal) {complete(file, signal === 'SIGINT' ? 130 : 143);}};
@@ -152,10 +170,11 @@ describe("compatibility matrix contract", () => {
   });
 
   test("exclusive file barriers retain an exclusive spawn failure and continue every later ordinary task", async () => {
-    const {runTestFiles} = await import('../tools/testing/file-workers.mjs');
+    const {scheduleTestFiles} = await import('../tools/testing/file-workers.mjs');
+    const runTestFiles = files => scheduleTestFiles(files, schedulingTestTransport());
     const files = ['before.test.mjs', 'tests/wasm-managed-array-sort.test.mjs', 'after-a.test.mjs', 'after-b.test.mjs'];
     const active = new Map(), attempts = [];
-    const spawn = spyOn(Bun, 'spawn').mockImplementation(([, , file]) => {
+    const spawn = spyOn(Bun, 'spawn').mockImplementation(([, , , file]) => {
       attempts.push(file);if (file === files[1]) throw new Error('injected exclusive spawn failure');
       let done;const exited = new Promise(resolve => {done = resolve;});
       active.set(file, done);return {exited, kill() {active.get(file)?.(143);active.delete(file);}};
@@ -171,13 +190,14 @@ describe("compatibility matrix contract", () => {
   });
 
   test("exclusive file barriers cancel ordinary or exclusive phases without dispatching queued files", async () => {
-    const {runTestFiles} = await import('../tools/testing/file-workers.mjs');
+    const {scheduleTestFiles} = await import('../tools/testing/file-workers.mjs');
+    const runTestFiles = files => scheduleTestFiles(files, schedulingTestTransport());
     for (const [signal, status] of [['SIGINT', 130], ['SIGTERM', 143]]) for (const firstExclusive of [false, true]) {
       const exclusive = 'tests/bootstrap-compiler.test.mjs', files = firstExclusive
         ? [exclusive, 'after-a.test.mjs', 'after-b.test.mjs']
         : ['before-a.test.mjs', 'before-b.test.mjs', exclusive, 'after.test.mjs'];
       const started = [], killed = [], listeners = ['SIGINT', 'SIGTERM'].map(name => process.listenerCount(name));
-      const spawn = spyOn(Bun, 'spawn').mockImplementation(([, , file]) => {
+      const spawn = spyOn(Bun, 'spawn').mockImplementation(([, , , file]) => {
         let done;const exited = new Promise(resolve => {done = resolve;});started.push(file);
         return {exited, kill(received) {killed.push([file, received]);done(status);}};
       });
@@ -195,10 +215,13 @@ describe("compatibility matrix contract", () => {
 
   test("repository compatibility matrix renders the committed CI workflow", async () => {
     const report = await checkCompatibilityWorkflow({ root });
-    expect(report.jobs).toBe(8);
+    expect(report.jobs).toBe(12);
     expect(report.acceptanceJobs).toBe(4);
     expect(report.testFileShards).toBe(2);
-    expect(report.systems.map((system) => system.id)).toEqual(["linux", "macos"]);
+    expect(report.systems.map((system) => system.id)).toEqual(["linux", "linux-arm64", "macos"]);
+    expect(report.systems.find(system => system.id === 'linux-arm64')).toEqual({
+      id: 'linux-arm64', operatingSystem: 'linux', runner: 'ubuntu-24.04-arm', architecture: 'arm64',
+    });
     expect(report.acceptanceSystems.map((system) => system.id)).toEqual(["macos"]);
     expect(report.emacsVersions).toEqual(["29.4", "30.2"]);
     expect(report.javascriptHost).toEqual({ name: "bun", version: "1.4.0" });
@@ -216,6 +239,19 @@ describe("compatibility matrix contract", () => {
     const matrix = copyBaseline();
     matrix.emacsVersions = ["30.2"];
     expectMatrixFailure(matrix, /cover Emacs 29 and Emacs 30/);
+  });
+
+  test("matrix distinguishes runner ids from actual platforms and rejects duplicate machine coverage", () => {
+    for (const operatingSystem of ['', 'darwin', 'linux-arm64', null, 1]) {
+      const matrix = copyBaseline();matrix.operatingSystems[1].operatingSystem = operatingSystem;
+      expectMatrixFailure(matrix, /operatingSystem must identify linux or macos/);
+    }
+    const duplicate = copyBaseline();duplicate.operatingSystems[1].architecture = 'x64';
+    expectMatrixFailure(duplicate, /duplicates an actual operatingSystem and architecture/);
+    const wrongCanonical = copyBaseline();wrongCanonical.operatingSystems[0].operatingSystem = 'macos';
+    expectMatrixFailure(wrongCanonical, /operatingSystem must match its canonical system id/);
+    const missingFamily = copyBaseline();delete missingFamily.operatingSystems[1].operatingSystem;
+    expectMatrixFailure(missingFamily, /operatingSystem must identify linux or macos/);
   });
 
   test("matrix rejects an empty or unknown acceptance operating system", () => {
@@ -254,6 +290,8 @@ describe("compatibility matrix contract", () => {
     expect(workflow).toContain("https://nodejs.org/dist/v$node_version/$node_archive");
     expect(workflow).toContain("shasum -a 256 -c node.sha256");
     expect(workflow).toContain(`test "$(node --version)" = "v${baseline.localEvidence.nodeHost.version}"`);
+    expect(workflow).toContain('test "$(bun -p \'process.arch\')" = "${{ matrix.architecture }}"');
+    expect(workflow).toContain('test "$(node -p \'process.arch\')" = "${{ matrix.architecture }}"');
     expect(workflow.indexOf("name: Install Node")).toBeLessThan(
       workflow.indexOf("name: Run test file shard"),
     );
@@ -325,9 +363,9 @@ case "$url" in */SHASUMS256.txt)
 });
 
 describe("browser compatibility matrix", () => {
-  test("all three real engines run on both supported operating systems", async () => {
+  test("all three real engines run on every supported machine combination", async () => {
     const report = await checkBrowserCompatibilityWorkflow({ root });
-    expect(report.jobs).toBe(6);
+    expect(report.jobs).toBe(9);
     expect(report.browserEngines).toEqual(["chromium", "firefox", "webkit"]);
     const workflow = renderBrowserWorkflow(browserContract, baseline);
     for (const system of baseline.operatingSystems) for (const browser of report.browserEngines) {
@@ -337,6 +375,9 @@ describe("browser compatibility matrix", () => {
     expect(workflow).toContain("ELISCRIPT_TEST_BROWSER: ${{ matrix.browser }}");
     expect(workflow).toContain("bun test tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee");
     expect(workflow).toContain("set -o pipefail");
+    expect(workflow).toContain('timeout-minutes: 10');
+    expect(workflow).toContain('test "$(bun -p \'process.arch\')" = "${{ matrix.architecture }}"');
+    expect(workflow).toContain('test "$(node -p \'process.arch\')" = "${{ matrix.architecture }}"');
     expect(workflow).toContain("if: always()");
     expect(workflow).toContain(`actions/upload-artifact@${browserContract.artifactAction.revision}`);
   });
@@ -443,12 +484,12 @@ describe("CI file shards", () => {
     }
   });
 
-  test("eight matrix jobs cover every core and application inventory once per OS and Emacs pair without weakening other gates", async () => {
+  test("twelve matrix jobs cover every core and application inventory once per machine and Emacs pair without weakening other gates", async () => {
     const {partitionTestFiles} = await import('../tools/testing/file-workers.mjs');
     const workflow = renderWorkflow(baseline), validated = validateCompatibilityMatrix(baseline);
-    expect(validated.jobs).toBe(8);expect(validated.acceptanceJobs).toBe(4);expect(validated.testFileShards).toBe(2);
+    expect(validated.jobs).toBe(12);expect(validated.acceptanceJobs).toBe(4);expect(validated.testFileShards).toBe(2);
     const rows = [...workflow.matchAll(/          - name: ([^\n]+)\n            os: ([^\n]+)\n            architecture: ([^\n]+)\n            emacs: "([^"\n]+)"\n            shard: (\d+)$/gm)];
-    expect(rows).toHaveLength(8);
+    expect(rows).toHaveLength(12);
     const makefile = await readFile(path.join(root, 'Makefile'), 'utf8');
     const inventories = makefile.replace(/\\\n/g, ' ').split('\n').filter(line => line.includes('$(BUN) $(BUN_TEST_RUNNER)')).map(line => line.match(/tests\/[a-z0-9-]+\.test\.mjs/g));
     expect(inventories).toHaveLength(2);for (const files of inventories) {expect(files.length).toBeGreaterThan(20);expect(new Set(files).size).toBe(files.length);}
@@ -472,11 +513,12 @@ describe("CI file shards", () => {
   });
 
   test("confirmed expensive functional files are exclusive while normal files still overlap", async () => {
-    const {runTestFiles} = await import('../tools/testing/file-workers.mjs');
+    const {scheduleTestFiles} = await import('../tools/testing/file-workers.mjs');
+    const runTestFiles = files => scheduleTestFiles(files, schedulingTestTransport());
     const expensive = ['wasm-compiler-analyzer', 'wasm-compiler-emitter', 'independent-compiler-producers', 'compiler-producer-stages', 'wasm-managed-str', 'native-backend', 'native-memory-long-branches'].map(name => 'tests/' + name + '.test.mjs');
     const files = ['normal-a.test.mjs', 'normal-b.test.mjs', ...expensive, 'after-a.test.mjs', 'after-b.test.mjs'];
     const active = new Set(), seen = [];
-    const spawn = spyOn(Bun, 'spawn').mockImplementation(([, , file]) => {
+    const spawn = spyOn(Bun, 'spawn').mockImplementation(([, , , file]) => {
       if (expensive.includes(file)) expect(active.size).toBe(0);
       else expect([...active].some(item => expensive.includes(item))).toBe(false);
       active.add(file);seen.push(file);

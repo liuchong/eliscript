@@ -1,0 +1,26 @@
+(module tools.backends.managed-host-object-provider
+  ;; Capture the calling host realm once; values still travel through its
+  ;; original capability codec, not a reflection alias or cloned intrinsic.
+  (defconst ObjectConstructor globalThis.Object)
+  (defconst ObjectPrototype (get globalThis.Object :prototype))
+  (defconst function-source (get (get globalThis.Function :prototype) :toString))
+  (defconst apply-function (get globalThis.Reflect :apply))
+  (defconst own-descriptor (get globalThis.Reflect :getOwnPropertyDescriptor))
+  (defconst object-intrinsics
+    (js-call (js-array "freeze" "hasOwn" "defineProperty") :map (lambda (name)
+      (let* ((entry (Object/getOwnPropertyDescriptor ObjectConstructor name)) (method (get entry :value)))
+        ;; A caller replacement or Proxy around a native function is not the
+        ;; captured native method. In uncertain host formats keep the ordinary
+        ;; capability path instead of claiming an intrinsic implementation.
+        (when (and (= (value-type method) "function")
+                   (= (funcall apply-function function-source method (js-array))
+                      (+ "function " name "() { [native code] }")))
+          (js-object :name name :method method))))))
+  (defun readHostObjectConstructor () ObjectConstructor)
+  (defun readHostObjectPrototype () ObjectPrototype)
+  (defun readHostObjectIntrinsics () object-intrinsics)
+  (defun hostObjectDescriptorPrototypeClear ()
+    (js-call (js-array "enumerable" "configurable" "value" "writable" "get" "set") :every
+      (lambda (name) (undefined? (funcall own-descriptor ObjectPrototype name)))))
+  (export ObjectConstructor ObjectPrototype readHostObjectConstructor readHostObjectPrototype readHostObjectIntrinsics
+    hostObjectDescriptorPrototypeClear))

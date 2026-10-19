@@ -114,6 +114,23 @@
         (make-list items (node-span source))
       (collection-node (node-kind source) items (node-span source))))
 
+  (defun expand-same-items-p (left right)
+    (let ((index 0) (same (= (get left :length) (get right :length))))
+      (while (and same (< index (get left :length)))
+        (unless (eq (js-nth index left) (js-nth index right)) (setq same false))
+        (setq index (1+ index)))
+      same))
+
+  (defun expand-collection-result (kind source items context)
+    ;; Only the compiler's newly read private graph may share unchanged
+    ;; collection wrappers. Public expansion keeps its original copy behavior.
+    ;; Reuse never edits the node or its items, including macro-held syntax.
+    (if (and (get context :ownedForms false) (= (node-kind source) kind)
+             (expand-same-items-p (node-items source) items))
+        source
+      (if (= kind "list") (make-list items (node-span source))
+        (collection-node kind items (node-span source)))))
+
   (defun locate-generated (node span)
     (cond
       ((= (node-kind node) "literal")
@@ -865,8 +882,30 @@
           (js-call environment :set name
             (js-object
               :name name
+              :definitionSpan (node-span name-node)
               :parameters (parse-parameters parameters context span)
               :body (js-call args :slice 2)))))))
+
+  (defun expand-user-macro (definition args environment depth context span top-level)
+    (let* ((events (get context :originEvents nil))
+           (parent (get context :originParent nil)) (event nil))
+      (when events
+        (setq event (js-object :id (js-length events) :macroName (get definition :name)
+          :definitionSpan (get definition :definitionSpan nil) :callSpan span
+          :parent parent :depth depth :status "expanding"))
+        (js-call events :push event)
+        (put context :originParent (get event :id)))
+      (try
+        (let* ((generated (locate-generated (invoke-macro definition args depth context span) span))
+               (result (if top-level
+                         (expand-top-level generated environment (1+ depth) context)
+                         (expand-expression generated environment (1+ depth) context))))
+          (when event (put event :status "expanded"))
+          result)
+        (catch error
+          (when event (put event :status "failed"))
+          (throw error))
+        (finally (when events (put context :originParent parent))))))
 
   (defun bind-macro-args (definition args context)
     (let* ((parameters (get definition :parameters))
@@ -933,7 +972,7 @@
             (lambda (item)
               (js-call expanded :push
                 (expand-expression item environment depth context))))
-          (make-list expanded (node-span binding))))))
+          (expand-collection-result "list" binding expanded context)))))
 
   (defun expand-bindings (args environment depth context)
     (if (= (get args :length) 0)
@@ -949,7 +988,7 @@
                 (js-call expanded-bindings :push
                   (expand-binding binding environment depth context))))
             (js-call result :push
-              (make-list expanded-bindings (node-span bindings-form)))))
+              (expand-collection-result "list" bindings-form expanded-bindings context))))
         (js-call (expand-sequence
                    (js-call args :slice 1) environment depth context)
           :forEach
@@ -1002,9 +1041,8 @@
             (js-call result :push
               (if (eq items undefined)
                   clause
-                (make-list
-                  (expand-sequence items environment depth context)
-                  (node-span clause)))))))
+                (expand-collection-result "list" clause
+                  (expand-sequence items environment depth context) context))))))
       result))
 
   (defun expand-try-clause (clause environment depth context)
@@ -1023,7 +1061,7 @@
                    (js-call items :slice 2) environment depth context)
                  :forEach
                  (lambda (item) (js-call expanded :push item)))
-               (make-list expanded (node-span clause)))
+               (expand-collection-result "list" clause expanded context))
            clause))
         ((= operator "finally")
          (let ((expanded (js-array (js-nth 0 items))))
@@ -1032,7 +1070,7 @@
                (js-call items :slice 1) environment depth context)
              :forEach
              (lambda (item) (js-call expanded :push item)))
-           (make-list expanded (node-span clause))))
+           (expand-collection-result "list" clause expanded context)))
         (t (expand-expression clause environment depth context)))))
 
   (defun desugar-defmulti (args context span)
@@ -2203,10 +2241,10 @@
   (defun expand-expression (form environment depth context)
     (cond
       ((= (node-kind form) "vector")
-       (collection-node
-         "vector"
+       (expand-collection-result
+         "vector" form
          (expand-sequence (node-items form) environment depth context)
-         (node-span form)))
+         context))
       ((not (= (node-kind form) "list")) form)
       (t
        (let* ((items (node-items form))
@@ -2241,13 +2279,8 @@
             (expander-fail
               context span (str operator " is only valid at module top level")))
            ((and operator (js-call environment :has operator))
-            (expand-expression
-              (locate-generated
-                (invoke-macro
-                  (js-call environment :get operator)
-                  args depth context span)
-                span)
-              environment (1+ depth) context))
+            (expand-user-macro (js-call environment :get operator)
+              args environment depth context span false))
            ((= operator "->")
             (expand-expression
               (desugar-thread "->" args "first" context span)
@@ -2377,7 +2410,7 @@
                  (js-call (expand-sequence args environment depth context)
                    :forEach
                    (lambda (item) (js-call expanded :push item)))))
-              (make-list expanded span))))))))
+              (expand-collection-result "list" form expanded context))))))))
 
   (defun expand-top-level (form environment depth context)
     (if (not (= (node-kind form) "list"))
@@ -2386,7 +2419,11 @@
              (operator-node (js-nth 0 items))
              (operator (and (symbol-node-p operator-node)
                             (node-name operator-node)))
-             (args (js-call items :slice 1))
+             (owned-module (and (get context :ownedForms false) (= operator "module")
+                                (not (js-call environment :has operator))))
+             ;; A module's entire member list must not remain in a second
+             ;; args slice while the owned sequence releases its input slots.
+             (args (if owned-module nil (js-call items :slice 1)))
              (span (node-span form)))
         (cond
           ((= operator "defmacro")
@@ -2434,24 +2471,24 @@
                form context span)
              environment depth context))
           ((and operator (js-call environment :has operator))
-           (expand-top-level
-             (locate-generated
-               (invoke-macro
-                 (js-call environment :get operator)
-                 args depth context span)
-               span)
-             environment (1+ depth) context))
+           (expand-user-macro (js-call environment :get operator)
+             args environment depth context span t))
           (t
            (let ((expanded (js-array operator-node)))
              (cond
                ((= operator "module")
-                (when (> (get args :length) 0)
-                  (js-call expanded :push (js-nth 0 args))
-                  (js-call (expand-top-level-sequence
-                             (js-call args :slice 1)
-                             environment depth context)
-                    :forEach
-                    (lambda (item) (js-call expanded :push item)))))
+                (if owned-module
+                    (when (> (get items :length) 1)
+                      (js-call expanded :push (js-nth 1 items))
+                      (js-call (expand-owned-top-level-sequence items 2 environment depth context)
+                        :forEach (lambda (item) (js-call expanded :push item))))
+                  (when (> (get args :length) 0)
+                    (js-call expanded :push (js-nth 0 args))
+                    (js-call (expand-top-level-sequence
+                               (js-call args :slice 1)
+                               environment depth context)
+                      :forEach
+                      (lambda (item) (js-call expanded :push item))))))
                ((or (= operator "defun") (= operator "defn")
                     (= operator "defportable") (= operator "defasync"))
                 (if (>= (get args :length) 2)
@@ -2484,15 +2521,28 @@
                 (setq expanded
                   (node-items
                     (expand-expression form environment depth context)))))
-             (js-array (make-list expanded span))))))))
+             (js-array (expand-collection-result "list" form expanded context))))))))
+
+  (defun expand-owned-top-level-sequence (forms start environment depth context)
+    (let ((result (js-array)) (index start))
+      (while (< index (get forms :length))
+        (let ((expanded (expand-top-level (js-nth index forms) environment depth context)))
+          (js-call expanded :forEach (lambda (form) (js-call result :push form))))
+        ;; Drop only the completed parent edge. Macro definitions retain their
+        ;; own body arrays, and reused output nodes retain their own items.
+        (put forms index nil)
+        (setq index (1+ index)))
+      result))
 
   (defun expand-top-level-sequence (forms environment depth context)
-    (let ((result (js-array)))
-      (js-call forms :forEach
-        (lambda (form)
-          (js-call (expand-top-level form environment depth context) :forEach
-            (lambda (expanded) (js-call result :push expanded)))))
-      result))
+    (if (get context :ownedForms false)
+        (expand-owned-top-level-sequence forms 0 environment depth context)
+      (let ((result (js-array)))
+        (js-call forms :forEach
+          (lambda (form)
+            (js-call (expand-top-level form environment depth context) :forEach
+              (lambda (expanded) (js-call result :push expanded)))))
+        result)))
 
   (defun collect-symbol-names (node names)
     (let ((pending (js-array node))
@@ -2515,7 +2565,7 @@
                (setq index (1- index))))))))
     names)
 
-  (defun expand-module (forms filename &optional macro-context)
+  (defun expand-module-core (forms filename macro-context owned)
     (let ((reserved-names (new (js* "Set"))))
       (js-call forms :forEach
         (lambda (form) (collect-symbol-names form reserved-names)))
@@ -2525,8 +2575,11 @@
         0
         (js-object
           :filename filename
+          :ownedForms owned
           :gensymCounter 0
           :reservedNames reserved-names
+          :originEvents (if macro-context (get macro-context :originEvents nil) nil)
+          :originParent (if macro-context (get macro-context :originParent nil) nil)
           :capabilities
           (if macro-context
               (get macro-context :capabilities)
@@ -2536,4 +2589,25 @@
               (get macro-context :files)
             (new (js* "Map")))))))
 
-  (export expand-module))
+  (defun expand-module (forms filename &optional macro-context)
+    (expand-module-core forms filename macro-context false))
+
+  (defun expand-owned-module (forms filename &optional macro-context)
+    (expand-module-core forms filename macro-context t))
+
+  (defun expand-module-with-origins-core (forms filename macro-context owned)
+    (let* ((events (js-array))
+           (context (js-call globalThis.Object :assign
+             (js-object :capabilities (new globalThis.Set) :files (new globalThis.Map))
+             (or macro-context (js-object)) (js-object :originEvents events :originParent nil)))
+           (expanded (try (expand-module-core forms filename context owned)
+             (catch error (put error :macroOrigins events) (throw error)))))
+      (js-object :forms expanded :macroOrigins events)))
+
+  (defun expand-module-with-origins (forms filename &optional macro-context)
+    (expand-module-with-origins-core forms filename macro-context false))
+
+  (defun expand-owned-module-with-origins (forms filename &optional macro-context)
+    (expand-module-with-origins-core forms filename macro-context t))
+
+  (export expand-module expand-module-with-origins expand-owned-module expand-owned-module-with-origins))

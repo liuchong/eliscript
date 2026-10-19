@@ -1,0 +1,53 @@
+(module tests.browser-workflow
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile)
+  (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/ci/render-browser-workflow.mjs"
+    BrowserCompatibilityError validateBrowserCompatibility renderBrowserWorkflow checkBrowserCompatibilityWorkflow)
+  (import "../tools/ci/render-browser-workflow-legacy.mjs" :as original)
+
+  (defconst bootstrap-step
+    "      - name: Bootstrap maintained compiler and backend tools\n        run: make bootstrap-backends\n")
+  (defasync inputs ()
+    (js-array (JSON/parse (await (readFile (resolve root "contracts/browser-compatibility.json") "utf8")))
+      (JSON/parse (await (readFile (resolve root "contracts/compatibility-matrix.json") "utf8")))))
+
+  (test "browser workflow builds maintained backend tools before all original browser tests"
+    (async ()
+      (let* ((input (await (inputs))) (contract (aref input 0)) (matrix (aref input 1))
+             (workflow (renderBrowserWorkflow contract matrix))
+             (legacy (js-call original :renderBrowserWorkflow contract matrix))
+             (dependencies (js-call workflow :indexOf "run: bun install --frozen-lockfile"))
+             (bootstrap (js-call workflow :indexOf bootstrap-step))
+             (browser (js-call workflow :indexOf "      - name: Install selected browser\n"))
+             (tests (js-call workflow :indexOf (get contract :testCommand))))
+        (js-call assert :ok (>= dependencies 0))
+        (js-call assert :ok (> bootstrap dependencies))
+        (js-call assert :ok (> browser bootstrap))
+        (js-call assert :ok (> tests browser))
+        (js-call assert :strictEqual (js-call workflow :replace bootstrap-step "") legacy
+          "all original browser rows, test commands, budgets and evidence remain byte-identical")
+        (let ((report (await (checkBrowserCompatibilityWorkflow
+                (js-object :root root :contract contract :matrix matrix :workflowText workflow)))))
+          (js-call assert :deepStrictEqual (get report :browserEngines) (js-array "chromium" "firefox" "webkit"))
+          (js-call assert :strictEqual (get report :jobs) (get (validateBrowserCompatibility contract matrix) :jobs)))
+        (js-call assert :strictEqual BrowserCompatibilityError (get original :BrowserCompatibilityError))
+        (js-call assert :strictEqual validateBrowserCompatibility (get original :validateBrowserCompatibility)))))
+
+  (test "browser checker rejects missing or conditionally skipped backend bootstrap"
+    (async ()
+      (let* ((input (await (inputs))) (contract (aref input 0)) (matrix (aref input 1))
+             (workflow (renderBrowserWorkflow contract matrix))
+             (missing (js-call workflow :replace bootstrap-step ""))
+             (conditional (js-call workflow :replace bootstrap-step
+               (js-call bootstrap-step :replace "        run:" "        if: false\n        run:"))))
+        (let ((variants (js-array missing conditional)) (index 0))
+          (while (< index (js-length variants))
+            (await (js-call assert :rejects
+              (checkBrowserCompatibilityWorkflow (js-object :contract contract :matrix matrix :workflowText (aref variants index)))
+              (lambda (error) (and (js-call (get BrowserCompatibilityError :prototype) :isPrototypeOf error)
+                (js-call (get error :message) :includes "differs")))))
+            (setq index (1+ index)))))))
+)

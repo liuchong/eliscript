@@ -4,7 +4,7 @@ import {buildBackends} from '../tools/backends/build.mjs';import {instantiateMan
 let b,runtime,dir;
 beforeAll(async()=>{dir=await mkdtemp(resolve(tmpdir(),'eliscript-managed-regexp-'));b=await buildBackends({outputRoot:dir});runtime=b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli')},120000);
 afterAll(async()=>{if(dir)await rm(dir,{recursive:true,force:true})});
-async function compile(pattern,flags=''){const source=`(defconst pattern (js* ${JSON.stringify('/'+pattern+'/'+flags)})) (defun test-value (x) (js-call pattern :test x)) (defun match-value (x) (js-call pattern :exec x)) (defun meta-value (x key) (get x key)) (export test-value match-value meta-value)`,p=b.compiler.compile_ir_string(source,'regexp.eli'),javascript=b.compiler.emit_ir_string(p),js=await import('data:text/javascript;base64,'+Buffer.from(javascript).toString('base64'));return{p,js,javascript,pattern,flags,emit:()=>Uint8Array.from(b.managed.emit_managed_wasm(p,runtime))}}
+async function compile(pattern,flags='',extraSource=''){const source=`(defconst pattern (js* ${JSON.stringify('/'+pattern+'/'+flags)})) (defun test-value (x) (js-call pattern :test x)) (defun match-value (x) (js-call pattern :exec x)) (defun meta-value (x key) (get x key)) (export test-value match-value meta-value)`+extraSource,p=b.compiler.compile_ir_string(source,'regexp.eli'),javascript=b.compiler.emit_ir_string(p),js=await import('data:text/javascript;base64,'+Buffer.from(javascript).toString('base64'));return{p,js,javascript,pattern,flags,emit:()=>Uint8Array.from(b.managed.emit_managed_wasm(p,runtime))}}
 const box=(a,x)=>typeof x==='number'?a.number(x):typeof x==='string'?a.string(x):x;
 function finish(a,values=[]){for(const x of values)a.release(x);a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0)}
 async function check(pattern,flags,inputs){const c=await compile(pattern,flags);for(const x of inputs)assert.equal(c.js.test_value(x),new RegExp(pattern,flags).test(x));const bytes=c.emit();assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);const a=instantiateManagedRuntime(bytes);a.auto(1);for(const x of inputs){const value=box(a,x);assert.equal(a.invoke('test-value',[value]),c.js.test_value(x),pattern+': '+String(x));a.release(value)}finish(a);return c}
@@ -36,11 +36,54 @@ test('deterministic pattern/text models preserve captures and priorities includi
  for(const[pattern,flags]of cases){const c=await compile(pattern,flags),a=instantiateManagedRuntime(c.emit());a.auto(1);a.collect();const baseline=a.live();for(let t=0;t<24;t++){const chars=['a','b','1','_','\n','😀','\ud800'],text=Array.from({length:next()%7},()=>chars[next()%chars.length]).join('');const expected=complete(a,c,text);assert.equal(a.live(),baseline,'roots after '+pattern);records.push({pattern,flags,text,expected})}finish(a)}
  const path=resolve(dir,'random-models.json');await writeFile(path,JSON.stringify(records));const child=spawnSync('node',['--input-type=module','-e',`import assert from 'node:assert/strict';import{readFileSync}from'node:fs';for(const r of JSON.parse(readFileSync(process.argv[1],'utf8'))){const m=new RegExp(r.pattern,r.flags).exec(r.text),actual=m&&{values:[...m].map(x=>x===undefined?{missing:true}:x),index:m.index,input:m.input};assert.deepEqual(actual,r.expected,r.pattern+': '+r.text)}`,path],{encoding:'utf8',timeout:30000});assert.equal(child.status,0,child.stderr);
 },30000);
-test('raw literal grammar and unimplemented valid syntax are rejected with the original source identity',async()=>{
- for(const[pattern,flags]of[['a{2,3}',''],['(?=a)a',''],['(?<=a)b',''],['(a)\\1',''],['a','g'],['a','y'],['a','i'],['a','d']]){const c=await compile(pattern,flags);assert.throws(c.emit,e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.location.file==='regexp.eli')}
+test('invalid raw literal grammar and malformed IR are rejected with the original source identity',async()=>{
  for(const raw of['/a\nb/','/a\rb/','/a\u2028b/','/a\u2029b/']){const p=b.compiler.compile_ir_string(`(defun f () (js* ${JSON.stringify(raw)})) (export f)`,'bad-literal.eli');const reference=resolve(dir,'invalid-literal.mjs');await writeFile(reference,b.compiler.emit_ir_string(p));const child=spawnSync('node',['--check',reference],{encoding:'utf8',timeout:30000});assert.equal(child.status,1);assert.match(child.stderr,/SyntaxError/);assert.throws(()=>b.managed.emit_managed_wasm(p,runtime),e=>e.eliscriptDiagnostic?.code==='ELI-B0001')}
  const p=b.compiler.compile_ir_string('(defun f () (js* "/a/")) (export f)','bad-ir.eli');p.body[0].children[0].children=[null];assert.throws(()=>b.managed.emit_managed_wasm(p,runtime),e=>e.eliscriptDiagnostic?.code==='ELI-B0001');
 });
+test('the original quantified lookaround backreference and g y i d literals execute with exact captures indices and state',async()=>{
+ const read=(a,value)=>{
+  if(value===null||value===undefined||typeof value==='boolean')return value;
+  if(value.kind===4)return a.readNumber(value);
+  if(value.kind===5)return a.readString(value);
+  assert.equal(value.kind,14);
+  return Array.from({length:a.length(value)},(_,index)=>{const child=a.get(value,index);try{return read(a,child)}finally{a.release(child)}});
+ };
+ const property=(a,target,name)=>{const key=a.string(name);let result;try{result=a.invoke('meta-value',[target,key]);return read(a,result)}finally{a.release(result);a.release(key)}};
+ for(const[pattern,flags]of[['a{2,3}',''],['(?=a)a',''],['(?<=a)b',''],['(a)\\1',''],['a','g'],['a','y'],['a','i'],['a','d']]){
+  const c=await compile(pattern,flags,' (defun pattern-state () (js-array (get pattern :source) (get pattern :flags) (get pattern :lastIndex) (get pattern :hasIndices))) (export pattern-state)');
+  const oracle=new RegExp(pattern,flags),bytes=c.emit();assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);
+  const a=instantiateManagedRuntime(bytes);a.auto(1);
+  const state=()=>{const result=a.invoke('pattern-state');try{return read(a,result)}finally{a.release(result)}};
+  try{
+   const initial=[oracle.source,oracle.flags,oracle.lastIndex,oracle.hasIndices];
+   assert.deepEqual(c.js.pattern_state(),initial);assert.deepEqual(state(),initial);
+   for(const text of['','a','A','aa','aaa','ab','aab','ba','a','none','😀a','aa','a','a']){
+    // Advance each shared literal and the independent oracle exactly once.
+    // In particular, do not run a preliminary test() that changes g/y state.
+    const expected=oracle.exec(text),javascript=c.js.match_value(text);
+    assert.deepEqual(javascript,expected,pattern+'/'+flags+': JS '+text);
+    const input=a.string(text);let out;
+    try{
+     out=a.invoke('match-value',[input]);
+     if(expected===null)assert.equal(out,null);
+     else{
+      assert.deepEqual(read(a,out),[...expected],pattern+'/'+flags+': captures '+text);
+      for(const name of['index','input','groups'])assert.deepEqual(property(a,out,name),expected[name]);
+      assert.deepEqual(property(a,out,'indices'),expected.indices===undefined?undefined:[...expected.indices]);
+      if(expected.indices!==undefined){
+       const key=a.string('indices');let indices;
+       try{indices=a.invoke('meta-value',[out,key]);assert.equal(indices.kind,14);assert.deepEqual(property(a,indices,'groups'),expected.indices.groups)}
+       finally{a.release(indices);a.release(key)}
+      }
+     }
+     const after=[oracle.source,oracle.flags,oracle.lastIndex,oracle.hasIndices];
+     assert.deepEqual(c.js.pattern_state(),after);assert.deepEqual(state(),after,pattern+'/'+flags+': state '+text);
+    }finally{a.release(out);a.release(input)}
+    a.collect();assert.equal(a.stats().frameDepth,0);
+   }
+  }finally{finish(a)}
+ }
+},30000);
 
 test('backtracking capacity failure and actual matching traps preserve caller frames and live source text',async()=>{
  const c=await compile('(a|aa)*b'),a=instantiateManagedRuntime(c.emit(),{maxSlots:128,initialBytes:4096,maxBytes:16384});a.auto(1);const text='a'.repeat(4096)+'b',input=a.string(text),held=a.number(-0),outer=a.frame(1);a.frameSet(outer,0,held);assert.throws(()=>a.invoke('match-value',[input]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0002');assert.equal(a.stats().frameDepth,1);assert.equal(a.readString(input),text);a.leaveFrame(outer);finish(a,[input,held]);
