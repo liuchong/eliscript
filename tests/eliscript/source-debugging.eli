@@ -1,0 +1,71 @@
+(module tests.source-debugging
+  (import "bun:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile)
+  (import "node:path" resolve)
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/backends/compiler-corpus-debugging.mjs" transportOriginalSourceDebuggingCorpus)
+  (import "../tools/testing/source-debugging.mjs" runSourceDebuggingCase presentDebuggingCommandResult)
+  (defun hash (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
+  (defasync original-document ()
+    (let* ((file "tests/source-debugging.test.mjs") (source (await (readFile (resolve root file) "utf8"))))
+      (js-object :records (js-array (js-object :id "original-program:compiler-source-debugging"
+        :modules (js-array "unchanged-original-modules") :coverage (js-array "original-debugging-coverage")
+        :expected (js-object :kind "seed-program" :stdout "")
+        :execution (js-object :kind "original-program" :hostSource "original complete assertions"
+          :requiresBun t :runtimeLaunchers t :compilerSourceMaps t :timeoutMs 30000
+          :setupReplacement (js-object :originalCaseTimeouts (js-array 5000 5000 5000 5000 5000)))
+        :original (js-object :suite file :sourceSha256 (hash source) :sourceAssets (js-array)
+          :regions (js-array (js-object :start 0 :end (js-length source) :byteStart 0
+            :byteEnd (js-call Buffer :byteLength source) :sha256 (hash source)))))) :evidence (js-array))))
+  (test "source mapping decodes V8 and browser stack dialects without a host API"
+    (async () (await (runSourceDebuggingCase "stack"))))
+  (test "compiler failure preserves its complete Eliscript source span"
+    (async () (await (runSourceDebuggingCase "compiler"))))
+  (test "runtime failure maps through persistent evaluation"
+    (async () (await (runSourceDebuggingCase "runtime"))))
+  (test "browser event and async rejection map under Bun and Node"
+    (async () (await (runSourceDebuggingCase "browser"))))
+  (test "source debugging corpus is complete and rejects evidence drift"
+    (async () (await (runSourceDebuggingCase "corpus"))))
+  (test "source debugging preserves complete child stderr and stdout on an unexpected exit"
+    (lambda ()
+      (let ((result (js-object :exitCode 1 :stdout "partial output\n" :stderr "Cannot find package eliscript\nfull child detail\n")))
+        (js-call assert :strictEqual (presentDebuggingCommandResult (js-array "compiler" "invalid.eli") result 1) result)
+        (js-call assert :throws (lambda () (presentDebuggingCommandResult (js-array "bun" "host.mjs") result))
+          (lambda (error)
+            (and (= (get error :name) "Error") (eq (get error :childResult) result)
+                 (js-call (get error :message) :includes "Cannot find package eliscript\nfull child detail\n")
+                 (js-call (get error :message) :includes "partial output\n"))))
+        (let ((ok (js-object :exitCode 0 :stdout "original stdout" :stderr "")))
+          (js-call assert :strictEqual (presentDebuggingCommandResult (js-array "node" "host.mjs") ok) ok)))))
+  (test "source debugging transport binds complete original assertions and rejects source, span, deadline and asset drift"
+    (async ()
+      (let* ((document (await (original-document))) (record (aref (get document :records) 0))
+             (before (globalThis.structuredClone record)))
+        (await (transportOriginalSourceDebuggingCorpus document (js-object :sourceRoot root)))
+        (js-call (js-array "modules" "coverage" "expected") :forEach (lambda (key)
+          (js-call assert :deepStrictEqual (get record key) (get before key))))
+        (js-call assert :deepStrictEqual (get (get record :original) :regions) (get (get before :original) :regions))
+        (js-call assert :strictEqual (get (get record :original) :sourceSha256)
+          "8eb14ca45564e54d1874bd04a791f1d5ca89cfff72a4c0f07c82b2d00dee8ca7")
+        (js-call assert :strictEqual (get (get record :execution) :host) "tools/testing/source-debugging-corpus-host.mjs")
+        (js-call assert :strictEqual (Object/hasOwn (get record :execution) "hostSource") false)
+        (js-call assert :strictEqual (get (get record :execution) :timeoutMs) 30000)
+        (js-call assert :strictEqual (get (get (get record :original) :maintainedAssertions) :sourceSha256)
+          (hash (await (readFile (resolve root "tools/testing/source-debugging.eli")))))
+        (put (aref (get document :evidence) 0) :content "forged")
+        (await (js-call assert :rejects (transportOriginalSourceDebuggingCorpus document (js-object :sourceRoot root)) globalThis.TypeError)))
+      (let ((mutations (js-array
+        (lambda (record) (put (get record :original) :sourceSha256 (js-call "0" :repeat 64)))
+        (lambda (record) (put (get record :execution) :timeoutMs 30001))
+        (lambda (record) (put (aref (get (get record :original) :regions) 0) :end 1))
+        (lambda (record) (put (get (get record :execution) :setupReplacement) :originalCaseTimeouts (js-array 5000))))))
+        (let ((index 0))
+          (while (< index (js-length mutations))
+            (let ((document (await (original-document))))
+              (funcall (aref mutations index) (aref (get document :records) 0))
+              (await (js-call assert :rejects (transportOriginalSourceDebuggingCorpus document (js-object :sourceRoot root)) globalThis.TypeError)))
+            (setq index (1+ index))))))))

@@ -28,6 +28,17 @@ functions in immutable metadata. Its node may be any Eliscript or host value,
 including `nil`, `false`, or `undefined`. Its path contains persistent left and
 right sibling collections, the parent path, the original ancestor nodes, and a
 change marker. Existing locations remain valid after navigation or editing.
+Private paths and their single-parent holders use frozen work arrays, rather
+than public persistent wrappers that eagerly materialize their private graph
+when crossing a host boundary. They store one original parent per link rather
+than a growing copy of the complete ancestor Vector. Registered work arrays
+use direct indexed reads and fixed-slot immutable updates. Copied compact path
+arrays retain their single-parent marker; original Vector/List paths retain
+their existing indexed/reducible behavior. The public `path` operation materializes the
+same root-to-parent persistent Vector on demand. Repeated reads and sibling or
+edit locations sharing that ancestry retain its identity through a weak cache.
+Original five-slot Vector and reducible List paths remain readable, including
+descent from an original path into a new location.
 
 `zipper` accepts a branch predicate, a child reader, a node builder, and a root
 node. The child reader may return any finite reducible collection; the node
@@ -67,7 +78,7 @@ Navigation, upward reconstruction, depth-first enumeration, and removal use
 explicit loops rather than the JavaScript call stack. Working state is bounded
 by the persistent path and immediate sibling collections.
 Ancestor-stack and other persistent Vector slots use indexed access; retrieving
-one ancestor must not reduce its whole prefix. Non-Vector reducible internal
+one ancestor must not reduce its whole prefix. Original non-Vector reducible internal
 paths retain the existing traversal and missing-slot diagnostic. This preserves
 node values including undefined and the identity of unchanged roots.
 

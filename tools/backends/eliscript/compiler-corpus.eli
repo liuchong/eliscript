@@ -6,8 +6,13 @@
   (import "../../dist/bootstrap/reader.mjs" read-string)
   (import "../../dist/bootstrap/compiler.mjs" compile-string)
   (import "./compiler-build.mjs" independentCompilerResources)
+  (import "./compiler-corpus-host-context.mjs" originalInteropFullRuntimeRecipe)
   (import "./build.mjs" root)
   (import "./compiler-corpus-legacy.mjs" :as legacy)
+  (import "./compiler-corpus-fuzz.mjs" transportOriginalFuzzCorpus)
+  (import "./compiler-corpus-bit.mjs" transportOriginalStdlibBitCorpus)
+  (import "./compiler-corpus-debugging.mjs" transportOriginalSourceDebuggingCorpus)
+  (import "./compiler-corpus-emitter.mjs" transportOriginalBootstrapEmitterCorpus prepareOriginalBootstrapEmitterOptions)
 
   ;; Preserve the unaffected public implementations and function identities.
   ;; The source-audit branch and binary replay request transport live here.
@@ -298,6 +303,161 @@
            (= (resource-field original "host") "tests/fixtures/persistent-tree-walk-host.mjs")
            entry (= (get entry :filename) fixture) (= (value-type (get entry :source)) "string")
            (js-call (get entry :source) :includes "(depth 12000)"))))
+  (defun retained-original-graph-resource-recipe-p (record)
+    ;; These original synchronous jobs retain their source views until the job
+    ;; ends. They still execute every assertion; only their functional heap
+    ;; selection differs from the original capacity acceptance.
+    (let* ((id (resource-field record "id")) (original (resource-field record "original"))
+           (execution (resource-field record "execution"))
+           (rows (js-array
+             (js-array "original-program:portable-value-2" "tests/portable-value-semantics.test.mjs" "stdlib/value.eli"
+               "ec84ada97c91d4c0469e39805647f6d18070ce4e764c93c7d79abe8c36c6f275"
+               "162efa2783a29fa34292eacbf65e6d184b1b4876d3d881d2d0d93cdb2108ad73"
+               "bb2616efda941ef7030f6ef5c7835b8fca44ce1b9034698b319e22683e34a2bd"
+               "Eliscript-authored value semantics preserve generated cross-family invariants")
+             (js-array "original-program:portable-persistent-list-1" "tests/portable-persistent-list.test.mjs" "stdlib/persistent-list.eli"
+               "c4003467e353f98c384d547249d47a0c8316344dd27c90aac22d33666fc22e3b"
+               "1166d68ce08c8a22c1ec56452d9e009cd498a8aba241dcd3e7966c49e9c5e970"
+               "192c860e81292669ba31e35a523ff674bddf38d09f3b5666ffced7c3ae415cfa"
+               "Eliscript-authored persistent list shares a million-node suffix")))
+           (row (js-call rows :find (lambda (item) (= (aref item 0) id))))
+           (modules (resource-field record "modules"))
+           (entry (when (Array/isArray modules) (js-call modules :find
+             (lambda (item) (= (get item :id) (get record :entry))))))
+           (host (resource-field execution "hostSource")))
+      (and row entry (= (resource-field original "manifest") "stable-compatibility")
+        (= (resource-field original "suite") (aref row 1))
+        (= (resource-field original "host") (aref row 1))
+        (= (resource-field original "fixture") (aref row 2))
+        (= (get entry :filename) (aref row 2))
+        (= (resource-field original "sourceSha256") (aref row 3))
+        (= (resource-field original "originalAssertion") (aref row 6))
+        (= (value-type host) "string") (= (corpus-hash host) (aref row 4))
+        (= (value-type (get entry :source)) "string") (= (corpus-hash (get entry :source)) (aref row 5)))))
+  (defun retained-original-zipper-resource-coordinate-p (record)
+    ;; These are the complete original assertions, not reduced depth recipes.
+    ;; Their immutable paths and ancestor vectors remain live through ascent.
+    ;; Authenticate their original bytes before binding the entire current
+    ;; request; a functional heap does not accept the original small capacity.
+    (let* ((original (resource-field record "original"))
+           (execution (resource-field record "execution"))
+           (rows (js-array
+             (js-array "original-program:persistent-zipper-complete-hosts"
+               "tests/fixtures/persistent-zipper-host.mjs"
+               "tests/__eliscript_original_persistent-zipper.mjs"
+               "5dc962e505dc5bdc89d6416c21f2448ea47e0563a606c78daca883edda2687dd"
+               "persistent zippers navigate edit and rebuild stack-safe trees"
+               4123 5340 "cd44b17cad6b04f9a73834ead06d4b8b7603e50724f70cd20bfbd417fd44b930")
+             (js-array "original-program:persistent-zipper-indexed-ascent"
+               "tests/persistent-zipper.test.mjs"
+               "tests/__eliscript_original_zipper_indexed_ascent.mjs"
+               "1fec4936176e487244c3edfff95d7af8ae142dcb654517c761c30ff25e88edb1"
+               "deep zipper ascent reads indexed ancestor slots without reducing wide parent vectors"
+               5735 7774 "621879f188e742007f2c2e01cb71da5598592401a3bb7ba786731c2028f6640b")))
+           (row (js-call rows :find (lambda (item) (= (aref item 0) (resource-field record "id")))))
+           (modules (resource-field record "modules"))
+           (entry (when (Array/isArray modules) (js-call modules :find
+             (lambda (item) (= (get item :id) (get record :entry))))))
+           (regions (resource-field original "regions"))
+           (region (when (and (Array/isArray regions) (= (js-length regions) 1)) (aref regions 0)))
+           (host (resource-field execution "hostSource")))
+      (and row entry region
+        (= (resource-field original "manifest") "stable-compatibility")
+        (= (resource-field original "suite") "tests/persistent-zipper.test.mjs")
+        (= (resource-field original "fixture") "tests/fixtures/persistent-zipper.eli")
+        (= (resource-field original "host") (aref row 1))
+        (= (resource-field original "sourceSha256") "70e2fbd82e1b5210daeeb4cdbb329d92cb470d7f30d6e59ff195147645b2180c")
+        (= (resource-field original "originalAssertion") (aref row 4))
+        (= (get record :entry) "tests/fixtures/persistent-zipper.mjs")
+        (= (get entry :filename) "tests/fixtures/persistent-zipper.eli")
+        (= (value-type (get entry :source)) "string")
+        (= (corpus-hash (get entry :source)) "10234df36146cfe881ef33678acc6274ad95c2f775fed51f081dee654ac102cf")
+        (= (resource-field execution "host") (aref row 2))
+        (= (value-type host) "string") (= (corpus-hash host) (aref row 3))
+        (= (resource-field region "start") (aref row 5)) (= (resource-field region "byteStart") (aref row 5))
+        (= (resource-field region "end") (aref row 6)) (= (resource-field region "byteEnd") (aref row 6))
+        (= (resource-field region "sha256") (aref row 7)))))
+  (defun complete-library-functional-resource-coordinate-p (record)
+    ;; Source authentication belongs to the enclosing matrix. Admit complete
+    ;; positive source programs by their original source graph, never by the
+    ;; text of a failure or by weakening an explicit heap/OOM contract.
+    (let* ((original (resource-field record "original"))
+           (fixture (resource-field original "fixture"))
+           (modules (resource-field record "modules"))
+           (entry (when (Array/isArray modules) (js-call modules :find
+             (lambda (item) (= (get item :id) (get record :entry)))))))
+      (or (retained-original-zipper-resource-coordinate-p record)
+       (and (= (resource-field original "manifest") "stable-compatibility")
+        (= (value-type fixture) "string") entry
+        (= (get entry :filename) fixture) (= (value-type (get entry :source)) "string")
+        (or (js-call fixture :startsWith "stdlib/")
+          (js-call (js-array "tests/fixtures/map-patterns.eli"
+                    "tests/fixtures/core-stdlib-usage.eli" "tests/fixtures/core-language-api-usage.eli"
+                    "tests/fixtures/core-set-usage.eli" "tests/fixtures/persistent-zipper.eli") :includes fixture))
+        (= (get record :id) (str "stable-compatibility:program:" fixture))))))
+  (defun complete-library-input-identity (record)
+    (js-object :entry (get record :entry)
+      :fixture (get (get record :original) :fixture) :host (get (get record :original) :host)
+      :modulesSha256 (corpus-hash (JSON/stringify (get record :modules)))
+      :requestSha256 (corpus-hash (JSON/stringify (get record :request)))
+      :executionSha256 (corpus-hash (JSON/stringify (get record :execution)))))
+  (defun complete-library-functional-resource-recipe-p (record)
+    (let* ((original (resource-field record "original"))
+           (retained (resource-field original "functionalResourceInputs"))
+           (coordinate (complete-library-functional-resource-coordinate-p record))
+           (bound-coordinate (and retained
+             (= (resource-field retained "fixture") (resource-field original "fixture"))
+             (or (= (resource-field record "id") (str "stable-compatibility:program:" (resource-field original "fixture")))
+               (js-call (js-array "original-program:persistent-zipper-complete-hosts"
+                         "original-program:persistent-zipper-indexed-ascent") :includes (resource-field record "id"))))))
+      ;; Deleting or renaming an authenticated entry is input corruption, even
+      ;; though the now-incomplete graph no longer satisfies admission. It must
+      ;; not silently fall through to a different functional heap profile.
+      (when (or coordinate bound-coordinate)
+        (unless (and coordinate (= (JSON/stringify retained)
+                      (JSON/stringify (complete-library-input-identity record))))
+          (throw (new globalThis.TypeError "complete positive program functional resource inputs differ from their authenticated archive")))
+        t)))
+  (defun bind-complete-library-resource-inputs (document)
+    (let ((assets (new globalThis.Map)))
+      (js-call (get document :evidence) :forEach (lambda (asset) (js-call assets :set (get asset :file) asset)))
+      (js-call (get document :records) :forEach (lambda (record)
+        (when (complete-library-functional-resource-coordinate-p record)
+          ;; Admission binds every original input, including dependencies and
+          ;; host arguments. The original archive remains the source authority.
+          (js-call (get record :modules) :forEach (lambda (module)
+            (unless (= (request-source assets (get module :filename)) (get module :source))
+              (throw (new globalThis.TypeError "complete positive program module differs from its authenticated archive")))))
+          (let* ((original (get record :original)) (execution (get record :execution))
+                 (host (get original :host)) (origin (request-source assets host))
+                 (inline (get execution :hostEval)) (regions (get original :regions)))
+            (unless (or
+                (and (= (get execution :host) host) (= (get execution :hostSource) origin))
+                ;; The two complete zipper hosts contain unchanged assertion
+                ;; regions plus their authenticated import transport. Validate
+                ;; the original suite as well as the final host and every
+                ;; source module before recording the complete input identity.
+                (and (retained-original-zipper-resource-coordinate-p record)
+                  (let ((suite (request-source assets (get original :suite))))
+                    (and (= (corpus-hash suite) (get original :sourceSha256))
+                      (js-call regions :every (lambda (region)
+                        (= (corpus-hash (js-call suite :slice (get region :start) (get region :end)))
+                           (get region :sha256)))))))
+                ;; Inline CLI bodies are retained contiguous archive bytes.
+                (and (= host "tests/cli-test.sh") (= (value-type inline) "string")
+                     (> (js-length inline) 0) (js-call origin :includes (js-call inline :trimEnd)))
+                ;; The complete core hosts are assembled from authenticated
+                ;; original regions, followed by the declared matcher import
+                ;; transport. Bind their final complete execution here too.
+                (and (js-call (js-array "tests/core-set.test.mjs" "tests/core-stdlib.test.mjs") :includes host)
+                     (= (get original :sourceSha256) (corpus-hash origin))
+                     (Array/isArray regions) (> (js-length regions) 0)
+                     (js-call regions :every (lambda (region)
+                       (= (corpus-hash (js-call origin :slice (get region :start) (get region :end)))
+                          (get region :sha256))))))
+              (throw (new globalThis.TypeError "complete positive program host differs from its authenticated archive")))
+            (put original :functionalResourceInputs (complete-library-input-identity record))))))
+      document))
   (defun compilerCorpusFunctionalResources (record options)
     (let ((profile (resource-field options "functionalRuntimeProfile")) (result undefined))
       (unless (undefined? profile)
@@ -326,8 +486,14 @@
                      (= (resource-field record "kind") "project") (not (Object/hasOwn record "error"))
                      (= (resource-field execution "kind") "original-program")
                      (= (resource-field expected "kind") "seed-program") (= (resource-field expected "oracleRequired") t))
-            (let* ((selected-profile (if (or (million-core-exit-resource-recipe-p record)
-                                          (retained-deep-walk-resource-recipe-p record)) "full-compiler" "small"))
+            (let* ((full-interop (and (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
+                                    (= (get (get globalThis.process :env) :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")
+                                    (originalInteropFullRuntimeRecipe record)))
+                   (selected-profile (cond (full-interop "full-runtime")
+                     ((or (complete-library-functional-resource-recipe-p record)
+                          (million-core-exit-resource-recipe-p record) (retained-deep-walk-resource-recipe-p record)
+                          (retained-original-graph-resource-recipe-p record)) "full-compiler")
+                     (t "small")))
                    (resources (independentCompilerResources (js-object :profile selected-profile)))
                    (before (Object/assign (js-object)
                      (if sequence (js-object) (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216 :auto 0))
@@ -337,12 +503,69 @@
                                       (and declared (Object/hasOwn declared "auto"))
                                       (not (undefined? (resource-field record "auto")))))
                    (after (Object/assign (js-object) before (get resources :budget)
-                     (if (or sequence explicit-auto) (js-object) (js-object :auto (get resources :auto))))))
+                     (cond ((and full-interop (not explicit-auto)) (js-object :auto 65536))
+                       ((or sequence explicit-auto) (js-object)) (t (js-object :auto (get resources :auto)))))))
               (setq result (js-object :functionalRuntimeProfile "small" :effectiveRuntimeProfile selected-profile :resourceAcceptance "deferred"
                 :originalRuntimeOptions before :effectiveRuntimeOptions after))))))
       result))
 
+  (defun zipper-stress-resource-deferred (record target options)
+    (let ((id (resource-field record "id")) (result undefined))
+      ;; The explicit release scope keeps these complete original programs and
+      ;; their known performance failure visible. It never accepts an assertion
+      ;; that has not run, and never changes the JavaScript baseline scope.
+      (when (and (js-call (js-array "stable-compatibility:program:tests/fixtures/persistent-zipper.eli"
+                          "original-program:persistent-zipper-complete-hosts"
+                          "original-program:persistent-zipper-indexed-ascent") :includes id)
+                 (js-call (js-array "wasm" "native") :includes target)
+                 (= (resource-field options "functionalRuntimeProfile") "small")
+                 (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
+                 (Array/isArray (resource-field options "sourceAssets"))
+                 (not (undefined? (compilerCorpusFunctionalResources record options))))
+        (unless (and (complete-library-functional-resource-recipe-p record)
+                     (original-foreign-entry-p record options))
+          (throw (new globalThis.TypeError "zipper stress deferral requires the complete authenticated original recipe")))
+        (let* ((assets (new globalThis.Map)) (proofs (js-array))
+               (original (get record :original)) (execution (get record :execution))
+               (retained-zipper (retained-original-zipper-resource-coordinate-p record)))
+          (js-call (get options :sourceAssets) :forEach (lambda (asset)
+            (let ((previous (js-call assets :get (get asset :file))))
+              (when (and previous (or (/= (get previous :sha256) (get asset :sha256))
+                                     (/= (get previous :content) (get asset :content))))
+                (throw (new globalThis.TypeError "zipper stress deferral has conflicting source assets")))
+              (js-call assets :set (get asset :file) asset))))
+          (js-call (get record :modules) :forEach (lambda (module)
+            (let* ((filename (get module :filename)) (source (request-source assets filename)))
+              (unless (= source (get module :source))
+                (throw (new globalThis.TypeError "zipper stress deferral module differs from its authenticated archive")))
+              (js-call proofs :push (js-object :file filename :sha256 (corpus-hash source))))))
+          (let* ((host (get original :host)) (host-source (request-source assets host)))
+            (unless (or retained-zipper
+                        (and (= (get execution :host) host) (= (get execution :hostSource) host-source)))
+              (throw (new globalThis.TypeError "zipper stress deferral host differs from its authenticated archive")))
+            (js-call proofs :push (js-object :file host :sha256 (corpus-hash host-source)))
+            ;; Only the retained synthetic hosts declare suite regions. The
+            ;; ordinary program is already bound to its complete original host
+            ;; and graph above, exactly as at corpus admission.
+            (when retained-zipper
+              (let* ((suite (get original :suite)) (suite-source (request-source assets suite)))
+                (unless (= (corpus-hash suite-source) (get original :sourceSha256))
+                  (throw (new globalThis.TypeError "zipper stress deferral suite differs from its authenticated archive")))
+                (unless (= host suite)
+                  (js-call proofs :push (js-object :file suite :sha256 (corpus-hash suite-source)))))))
+          (setq result (js-object :id id :target target :status "resource-deferred" :verification "deferred"
+            :functionalRuntimeProfile "small" :functionalVerification "unverified" :fullCorpusVerification "unverified"
+            :performanceAcceptance "failed" :scope "complete-original-zipper-stress-family"
+            :reason "explicit performance deferral retains the original binary zipper stress job and known performance failure; complete functional verification remains unverified in this acceptance scope"
+            :inputIdentity (complete-library-input-identity record) :sourceProofs proofs
+            :originalAssertion (resource-field original "originalAssertion")
+            :hostSourceSha256 (corpus-hash (get execution :hostSource)))))) result))
+
   (defun compilerCorpusResourceDeferred (record target options)
+    (or (zipper-stress-resource-deferred record target options)
+        (million-value-resource-deferred record target options)))
+
+  (defun million-value-resource-deferred (record target options)
     (let* ((id (resource-field record "id"))
            (rows (js-array
              (js-array "stable-compatibility:program:persistent-core-exit-vector" "vector" nil)
@@ -822,6 +1045,56 @@
               (put original :sourceAssets assets)
               (put original :toolsCLITransport (js-object :kind "original-tools-final-cli" :sourceAssets proofs))))))))
     document)
+  (defasync maintained-execution-assets (document options)
+    (let ((reader (createOriginalCorpusSourceReader options))
+          (modules (js-array "compiler-corpus-process" "compiler-corpus-original-program"
+                     "compiler-corpus-program-driver" "compiler-corpus-execution"
+                     "compiler-corpus-isolated-exports" "compiler-corpus-raw-fixture-observer"
+                     "compiler-corpus-raw-special-fixtures" "compiler-corpus-raw-language-fixtures"
+                     "compiler-corpus-raw-math-fixture" "managed-source-view")) (index 0))
+      (while (< index (js-length modules))
+        (let* ((name (aref modules index))
+               (files (js-array (str "tools/backends/eliscript/" name ".eli")
+                         (str "tools/backends/" name ".mjs"))) (position 0))
+          (while (< position (js-length files))
+            (let* ((file (aref files position)) (asset (await (js-call reader :file file)))
+                   (existing (js-call (get document :evidence) :find (lambda (entry) (= (get entry :file) file)))))
+              (when (and existing (or (/= (get existing :sha256) (get asset :sha256))
+                                     (/= (get existing :content) (get asset :content))))
+                (throw (new globalThis.TypeError "maintained execution source archive differs")))
+              (unless existing (js-call (get document :evidence) :push asset)))
+            (setq position (1+ position))))
+        (setq index (1+ index))) document))
+
+  (defasync tools-data-reference-assets (document options)
+    (let* ((ids (js-array "original-tools-artifact:compiler-session-tools:node"
+                  "original-tools-artifact:compiler-session-tools:bun"
+                  "original-managed:compiler-session-tools:node"
+                  "original-managed:compiler-session-tools:bun"))
+           (records (js-call (get document :records) :filter
+             (lambda (record) (js-call ids :includes (get record :id)))))
+           (reader (createOriginalCorpusSourceReader options)) (proofs (js-array))
+           (files (js-array "tools/backends/eliscript/compiler-corpus-tools-reference.eli"
+                    "tools/backends/compiler-corpus-tools-reference.mjs"
+                    "runtime/unicode-case.eli" "runtime/unicode-case.mjs"
+                    "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs")) (index 0))
+      (when (> (js-length records) 0)
+        (while (< index (js-length files))
+          (let* ((file (aref files index)) (asset (await (js-call reader :file file)))
+                 (existing (js-call (get document :evidence) :find (lambda (item) (= (get item :file) file)))))
+            (when (and existing (or (/= (get existing :sha256) (get asset :sha256))
+                                   (/= (get existing :content) (get asset :content))))
+              (throw (new globalThis.TypeError "original tools data reference source identity conflicts")))
+            (unless existing (js-call (get document :evidence) :push asset))
+            (js-call proofs :push (js-object :file file :sourceSha256 (get asset :sha256))))
+          (setq index (1+ index)))
+        (js-call records :forEach (lambda (record)
+          (let ((original (get record :original)))
+            (put original :toolsDataReferenceTransport
+              (js-object :kind "original-tools-data-reference" :version 1 :sourceAssets proofs
+                :hostSha256 (corpus-hash (get (get record :execution) :hostSource))))))))
+      document))
+
   (defasync project-runtime-assets (document options)
     (let* ((records (js-call (get document :records) :filter (lambda (record)
              (let* ((original (get record :original))
@@ -831,7 +1104,9 @@
                        :includes (get original :suite))
                    (and (Array/isArray proofs) (js-call proofs :some (lambda (proof)
                      (= (get proof :file) "bootstrap/host/project.mjs"))))))))))
-           (files (js-array "bootstrap/host/project.mjs" "bootstrap/host/project-legacy.mjs" "tools/project/project.eli")))
+           (files (js-array "bootstrap/host/project.mjs" "bootstrap/host/project-legacy.mjs" "tools/project/project.eli"
+             "bootstrap/host/project-cli.mjs" "bootstrap/host/project-cli.mjs.map"
+             "bootstrap/host/project-cli-legacy.mjs" "tools/project/project-cli.eli")))
       (when (> (js-length records) 0)
         (js-call (js-array "math" "unicode-case" "unicode-case-data") :forEach (lambda (name)
           (js-call files :push (str "runtime/" name ".eli")
@@ -843,6 +1118,9 @@
             (let* ((filename (aref files index)) (asset (await (js-call reader :file filename)))
                    (existing (js-call (get document :evidence) :find
                      (lambda (entry) (= (get entry :file) filename)))))
+              (when (and (= filename "bootstrap/host/project-cli-legacy.mjs")
+                         (/= (get asset :sha256) "79980b2a6e38e4ab9daca31b04cb366bd749b66e3b384fbd04e696ddc465cd82"))
+                (throw (new globalThis.TypeError "original project CLI archive bytes changed")))
               (if existing
                 (unless (and (= (get existing :bytes) (get asset :bytes))
                              (= (get existing :sha256) (get asset :sha256))
@@ -863,8 +1141,105 @@
                     (js-call assets :push (Object/assign (js-object) proof))))))
               (put original :sourceAssets assets))))))) document)
 
+  (defun bindOriginalMaintainedSuiteEvidence (document)
+    (let* ((gate (get document :originalGateEvidence)) (locators (get gate :locators))
+           (claimed (new globalThis.Set)))
+      (when (Array/isArray locators)
+        (js-call (js-array
+          (js-array "original-program:compiler-module-reader-program-fuzz" "tests/reader-program-fuzz-acceptance-selfhosted.test.mjs"
+            "100000 deterministic reader and program mutations preserve every invariant" "maintained-eli-complete-fuzz-acceptance")
+          (js-array "original-program:compiler-stdlib-bit-complete" "tests/stdlib-bit-selfhosted.test.mjs"
+            "portable 32-bit operations and algorithms agree under Bun and Node" "maintained-eli-complete-stdlib-bit")
+          (js-array "original-program:compiler-module-bootstrap-emitter" "tests/bootstrap-emitter-selfhosted.test.mjs"
+            "bootstrapped emitter matches seed ESM and Source Map output" "maintained-eli-complete-bootstrap-emitter")) :forEach
+          (lambda (plan)
+            (let ((selected (js-call locators :filter (lambda (locator)
+                    (and (= (get locator :file) (aref plan 1)) (= (get locator :contains) (aref plan 2)))))))
+              (when (> (js-length selected) 0)
+                (let* ((record (js-call (get document :records) :find (lambda (item) (= (get item :id) (aref plan 0)))))
+                       (original (and record (get record :original)))
+                       (asset (js-call (get document :evidence) :find (lambda (item) (= (get item :file) (aref plan 1)))))
+                       (proof (and original (js-call (get original :sourceAssets) :find
+                         (lambda (item) (= (get item :file) (aref plan 1)))))))
+                  (unless (and record proof asset (= (get (get original :maintainedTransport) :kind) (aref plan 3))
+                               (= (get proof :sourceSha256) (get asset :sha256))
+                               (= (get asset :encoding) "base64")
+                               (= (corpus-hash (js-call Buffer :from (get asset :content) "base64")) (get asset :sha256))
+                               (js-call (js-call (js-call Buffer :from (get asset :content) "base64") :toString "utf8") :includes (aref plan 2)))
+                    (throw (new globalThis.TypeError "maintained suite locator lacks its complete authenticated original execution")))
+                  (let ((bindings (js-array)))
+                    (js-call selected :forEach (lambda (locator)
+                      (let ((id (get locator :id)))
+                        (unless (js-call (get record :coverage) :includes id) (js-call (get record :coverage) :push id))
+                        (js-call claimed :add id)
+                        (js-call bindings :push (js-object :coverageId id :file (aref plan 1)
+                          :sourceSha256 (get asset :sha256) :record (aref plan 0))))))
+                    (put original :maintainedLocatorBindings bindings)))))))
+        (put document :missingCaseAdapters (js-call (get document :missingCaseAdapters) :filter
+          (lambda (item) (not (js-call claimed :has (get item :coverageId))))))
+        (put gate :coverageIds (js-call (get gate :coverageIds) :filter (lambda (id) (not (js-call claimed :has id)))))
+        (put gate :hostOnlyDependencies (js-call (get gate :hostOnlyDependencies) :filter
+          (lambda (item) (not (js-call claimed :has (get item :coverageId)))))))
+      document))
+
+  (defasync bindOriginalRuntimeScanReportEvidence (document options)
+    (let* ((gate (get document :originalGateEvidence)) (locators (get gate :locators))
+           (generated "tests/compiler-runtime-scan-selfhosted.test.mjs")
+           (maintained "tests/eliscript/compiler-runtime-scan.eli")
+           (title "committed compiler runtime scan report matches measured sources")
+           (selected (if (Array/isArray locators) (js-call locators :filter
+             (lambda (item) (and (= (get item :file) generated) (= (get item :contains) title)))) (js-array))))
+      (when (> (js-length selected) 0)
+        (let* ((reader (createOriginalCorpusSourceReader (js-object :sourceRoot (get options :sourceRoot))))
+               (source (await (js-call reader :text maintained)))
+               (pending (read-string source maintained)) (forms (js-array)) (proofs (js-array))
+               (files (js-array maintained generated "benchmarks/compiler-runtime-scan-macos-arm64.json"
+                        "tools/compiler/runtime-scan-benchmark.mjs" "tests/helpers/performance-acceptance.mjs"))
+               (index 0) (claimed (new globalThis.Set))
+               (deferred (or (= (resource-field options "functionalRuntimeProfile") "small")
+                 (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1"))))
+          (while (> (js-length pending) 0)
+            (let* ((form (js-call pending :shift)) (items (get form :items)))
+              (when (Array/isArray items)
+                (if (and (= (get (aref items 0) :name) "funcall")
+                         (= (get (aref items 2) :value) title)
+                         (= (get (aref (get (aref items 1) :items) 0) :name) "currentPerformanceTest"))
+                  (js-call forms :push form) (Reflect/apply (get pending :push) pending items)))))
+          (unless (= (js-length forms) 1)
+            (throw (new globalThis.TypeError "runtime-scan performance evidence requires its exact maintained original gate")))
+          (while (< index (js-length files))
+            (let* ((file (aref files index)) (asset (await (js-call reader :file file)))
+                   (prior (js-call (get document :evidence) :find (lambda (item) (= (get item :file) file)))))
+              (when (and prior (or (/= (get prior :sha256) (get asset :sha256)) (/= (get prior :content) (get asset :content))))
+                (throw (new globalThis.TypeError "runtime-scan performance gate source identity changed")))
+              (unless prior (js-call (get document :evidence) :push asset))
+              (js-call proofs :push (js-object :file file :sourceSha256 (get asset :sha256))))
+            (setq index (1+ index)))
+          (let* ((form (aref forms 0)) (span (get form :span))
+                 (start (audit-unit-offset source (get span :start))) (end (audit-unit-offset source (get span :end)))
+                 (region (js-object :start start :end end :byteStart (js-call Buffer :byteLength (js-call source :slice 0 start))
+                   :byteEnd (js-call Buffer :byteLength (js-call source :slice 0 end)) :sha256 (corpus-hash (js-call source :slice start end)))))
+            (js-call selected :forEach (lambda (locator)
+              (let ((id (get locator :id)))
+                (js-call claimed :add id)
+                (unless (js-call (get gate :coverageIds) :includes id) (js-call (get gate :coverageIds) :push id))
+                (unless (js-call (get gate :hostOnlyDependencies) :some (lambda (item) (= (get item :coverageId) id)))
+                  (js-call (get gate :hostOnlyDependencies) :push (js-object :coverageId id :file maintained
+                    :sourceSha256 (corpus-hash source) :kind "source-bound-performance-report-case" :locator locator
+                    :originalAssertion title :region region :dependencies proofs
+                    :currentPerformanceAcceptance (if deferred "DEFERRED / NOT ACCEPTED" "required-by-original-gate")
+                    :performanceAccepted false
+                    :reason "the original current-source performance test remains strict by default and is explicitly deferred in functional mode; this binding does not assert current performance acceptance")))))))
+          (put document :missingCaseAdapters (js-call (get document :missingCaseAdapters) :filter
+            (lambda (item) (not (js-call claimed :has (get item :coverageId))))))
+          (let* ((required (resource-field (get options :originals) "requiredCoverage"))
+                 (ids (new globalThis.Set (get gate :coverageIds))))
+            (when (Array/isArray required)
+              (put gate :coverageIds (js-call required :filter (lambda (id) (js-call ids :has id))))))))
+      document))
+
   (defasync load-original-corpus (options)
-    (let ((document (await (js-call legacy :loadOriginalCompilerCorpus options))))
+    (let ((document (await (js-call legacy :loadOriginalCompilerCorpus (prepareOriginalBootstrapEmitterOptions options)))))
       ;; The canonical HTTP literal imports the actual host provider. It is
       ;; source evidence and a hostSource, never a fabricated .eli module.
       (when (js-call (get document :records) :some
@@ -882,8 +1257,17 @@
       (await (restore-runtime-scan-recipe document options))
       (await (runtime-scan-replay document options))
       (await (matcher-transport document options))
+      (await (maintained-execution-assets document options))
       (await (tools-cli-assets document options))
-      (await (project-runtime-assets document options))))
+      (await (tools-data-reference-assets document options))
+      (await (project-runtime-assets document options))
+      (await (transportOriginalFuzzCorpus document options))
+      (await (transportOriginalStdlibBitCorpus document options))
+      (await (transportOriginalSourceDebuggingCorpus document options))
+      (await (transportOriginalBootstrapEmitterCorpus document options))
+      (bindOriginalMaintainedSuiteEvidence document)
+      (await (bindOriginalRuntimeScanReportEvidence document options))
+      (bind-complete-library-resource-inputs document)))
 
   (defasync loadOriginalCompilerCorpus (options)
     (let* ((source-root (get options :sourceRoot)) (originals (get options :originals)))
@@ -946,6 +1330,15 @@
                       (put document :coverageIds (Array/from required))
                       document))))))))))
 
+  (defconst transportOriginalExecutionAssets maintained-execution-assets)
+  (defconst transportOriginalToolsDataReferenceAssets tools-data-reference-assets)
+  (defconst bindOriginalFunctionalResourceInputs bind-complete-library-resource-inputs)
+  (defconst transportOriginalProjectRuntimeAssets project-runtime-assets)
+  (defconst transportOriginalToolsCLIAssets tools-cli-assets)
   (export createOriginalCorpusSourceReader cloneCompilerCorpusData cloneCompilerCorpusModules
     compilerCorpusRequest prepareOriginalSeedSources loadOriginalCompilerCorpus readOriginalLiteralRuntimeAudit transportOriginalMatcherRecord
+    bindOriginalMaintainedSuiteEvidence
+    bindOriginalRuntimeScanReportEvidence
+    transportOriginalProjectRuntimeAssets transportOriginalToolsCLIAssets
+    transportOriginalExecutionAssets transportOriginalToolsDataReferenceAssets bindOriginalFunctionalResourceInputs
     originalSequenceNativeInteropP transportOriginalSequenceRuntime compilerCorpusFunctionalResources compilerCorpusResourceDeferred))

@@ -1,0 +1,1 @@
+(module shadows (defun factory () (lambda (&rest values) values)) (defun run (Object trace) (Object/keys (progn (put Object :keys false) (put trace :n 1)) (put trace :n 2))) (defun extras () (let ((trace (js-object :n 0))) (Object/keys (js-object :x 1) (put trace :n 1) (put trace :n 2)) (get trace :n))) (export factory run extras))

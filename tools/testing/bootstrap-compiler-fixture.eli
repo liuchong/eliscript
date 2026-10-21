@@ -1,0 +1,16 @@
+(module tools.testing.bootstrap-compiler-fixture
+  (import "node:crypto" createHash)
+  (import "node:fs" readFileSync)
+  (import "node:path" resolve)
+  (defun bootstrapCompilerFunctionalArguments (source-root environment arguments)
+    (if (and (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
+             (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")
+             (= (js-length arguments) 3) (= (aref arguments 0) "portable compiler driver reaches a reproducible fixed point")
+             (= (value-type (aref arguments 1)) "function") (= (aref arguments 2) 30000))
+      (progn
+        (unless (= (js-call (js-call (createHash "sha256") :update
+                     (readFileSync (resolve source-root "tests/bootstrap-compiler-test-legacy.mjs"))) :digest "hex")
+                   "17abeba4dcf718b78b83636f5e82b136999be9467a5a398ee6a8e3b4473a13a9")
+          (throw (new globalThis.TypeError "portable compiler functional deadline requires the unchanged complete original suite")))
+        (let ((forwarded (js-call arguments :slice))) (put forwarded 2 0) forwarded)) arguments))
+  (export bootstrapCompilerFunctionalArguments))

@@ -1,0 +1,42 @@
+(module tools.project.project-cli
+  (import "node:fs" readFileSync)
+  (import "node:path" resolve)
+  (import "node:url" fileURLToPath)
+  (import "./project-cli-legacy.mjs" :as legacy)
+  (import "./bun.mjs" diagnosticFromError renderDiagnostic requestedDiagnosticFormat)
+  (defconst parseConfigurationJson (get legacy :parseConfigurationJson))
+  (defconst parseArguments (get legacy :parseArguments))
+  (defconst readProjectConfiguration (get legacy :readProjectConfiguration))
+  (defconst usage "Usage: eliscript-build [OPTIONS] [ENTRY ...]\n\nOptions:\n  --out-dir DIR     Write the generated module tree to DIR\n  --config FILE     Read a versioned project request from FILE\n  --root DIR        Contain local source imports below DIR\n  --portable NAME   Emit NAME and its transitive portable closure\n  --stdin-file FILE Use standard input as the current contents of FILE\n  --no-cache        Disable cache reads for this build\n  --json            Print the versioned build decision report\n  --diagnostic-format human|json\n                     Select human-readable or JSON failures\n  -h, --help         Show this help\n")
+  (defasync execute (arguments &rest supplied)
+    (let* ((options (if (or (= (js-length supplied) 0) (undefined? (aref supplied 0)))
+                        (js-object) (aref supplied 0)))
+           ;; Consume an arbitrary argument iterable once, just as the original
+           ;; parser's spread did. Both parses then see the same plain snapshot.
+           (arguments (Array/from arguments))
+           (parsed (funcall parseArguments arguments)))
+      (when (and (not (undefined? (get parsed :stdinFile)))
+                 (nullish? (get options :stdinSource)))
+        ;; fs/promises.readFile accepts a path or FileHandle, not numeric fd 0.
+        ;; The synchronous fs API preserves UTF8 decoding and real EOF, while
+        ;; an explicitly supplied source (including "") must never consume fd0.
+        (setq options (Object/assign (js-object) options
+          (js-object :stdinSource (readFileSync 0 "utf8")))))
+      (await (js-call legacy :execute arguments options))))
+  (defasync main (&rest arguments)
+    (let* ((arguments (if (or (= (js-length arguments) 0) (undefined? (aref arguments 0)))
+                         (js-call (get globalThis.process :argv) :slice 2) (aref arguments 0)))
+           (execution (await (execute arguments))))
+      (if (get execution :help) (js-call (get globalThis.process :stdout) :write usage)
+        (js-call (get globalThis.process :stdout) :write
+          (str (if (get execution :jsonReport) (JSON/stringify (get (get execution :result) :report))
+                 (js-call (get (get execution :result) :entryOutputs) :join "\n")) "\n")))))
+  (let ((entry (aref (get globalThis.process :argv) 1)))
+    (when (and (not (undefined? entry)) (= (resolve entry) (fileURLToPath (js* "import.meta.url"))))
+      (let ((format (requestedDiagnosticFormat (js-call (get globalThis.process :argv) :slice 2))))
+        (js-call (main) :catch (lambda (error)
+          (let ((diagnostic (diagnosticFromError error)))
+            (if (= format "json") (console/error (JSON/stringify diagnostic))
+              (console/error (str "eliscript-build: " (renderDiagnostic diagnostic))))
+            (put globalThis.process :exitCode 1)))))))
+  (export parseConfigurationJson parseArguments readProjectConfiguration execute main))

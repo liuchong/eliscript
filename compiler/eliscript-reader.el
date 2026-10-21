@@ -200,8 +200,10 @@ reader has produced a list."
         (forward-comment (point-max))
         (and (eq (char-after) ?\[) (point))))))
 
-(defun eliscript-reader--scan-node (filename)
-  "Scan one source node at point for FILENAME and return its location tree."
+(defun eliscript-reader--scan-node (filename &optional invalid-dispatch-tag)
+  "Scan one source node at point for FILENAME and return its location tree.
+During an already failed read, throw INVALID-DISPATCH-TAG at the actual
+invalid dispatch.  Ordinary successful reads never enable this recovery."
   (forward-comment (point-max))
   (let* ((start (point))
          (prefix-length (eliscript-reader--prefix-length))
@@ -211,7 +213,7 @@ reader has produced a list."
      (prefix-length
       (forward-char prefix-length)
       (let* ((prefix-end (point))
-             (child (eliscript-reader--scan-node filename))
+             (child (eliscript-reader--scan-node filename invalid-dispatch-tag))
              (end (point)))
         (setq children
               (list
@@ -233,7 +235,7 @@ reader has produced a list."
            'eliscript-read-error "ELI-R0001" "reader"
            filename (eliscript-reader--span start (+ start 6) filename)
            "Invalid read syntax: %S" (char-to-string (char-after))))
-        (push (eliscript-reader--scan-node filename) children)
+        (push (eliscript-reader--scan-node filename invalid-dispatch-tag) children)
         (forward-comment (point-max)))
       (when (eq (char-after) ?\]) (forward-char 1))
       (eliscript-reader--node-create
@@ -250,7 +252,7 @@ reader has produced a list."
            'eliscript-read-error "ELI-R0001" "reader"
            filename (eliscript-reader--span start (+ start 2) filename)
            "Invalid read syntax: %S" (char-to-string (char-after))))
-        (push (eliscript-reader--scan-node filename) children)
+        (push (eliscript-reader--scan-node filename invalid-dispatch-tag) children)
         (forward-comment (point-max)))
       (when (eq (char-after) ?\})
         (forward-char 1))
@@ -276,7 +278,7 @@ reader has produced a list."
              'eliscript-read-error "ELI-R0001" "reader"
              filename (eliscript-reader--span start (1+ start) filename)
              "Invalid read syntax: %S" (char-to-string (char-after))))
-          (push (eliscript-reader--scan-node filename) children)
+          (push (eliscript-reader--scan-node filename invalid-dispatch-tag) children)
           (forward-comment (point-max)))
         (when (eq (char-after) closing)
           (forward-char 1))
@@ -284,6 +286,19 @@ reader has produced a list."
          :span (eliscript-reader--span start (point) filename)
          :children (nreverse children)
          :kind kind)))
+     ((and invalid-dispatch-tag (eq (char-after) ?#))
+      ;; The enclosing Emacs read already failed.  A prior valid numeric
+      ;; dispatch such as #x2a must still be consumed normally rather than
+      ;; mistaken for the later malformed #x that caused that failure.
+      (condition-case nil
+          (let* ((result (read-from-string
+                          (buffer-substring-no-properties start (point-max))))
+                 (end (+ start (cdr result))))
+            (goto-char end)
+            (eliscript-reader--node-create
+             :span (eliscript-reader--span start end filename)
+             :kind 'atom))
+        (invalid-read-syntax (throw invalid-dispatch-tag start))))
      (t
       (let ((end (scan-sexps start 1)))
         (unless end
@@ -412,6 +427,21 @@ two-character dispatch prefix.  Eliscript owns that diagnostic contract."
         "Invalid read syntax: \"}\""
       (error-message-string error-data))))
 
+(defun eliscript-reader--invalid-dispatch-position (filename start)
+  "Locate an invalid dispatch inside an already rejected form at START.
+Reuse the source location scanner so strings, comments, escaped symbols,
+prefixes and nested collections retain their actual lexical boundaries."
+  (catch 'eliscript-reader--invalid-dispatch
+    (condition-case nil
+        (save-excursion
+          (goto-char start)
+          (eliscript-reader--scan-node
+           filename 'eliscript-reader--invalid-dispatch))
+      ;; If this failure is not an invalid dispatch, preserve the original
+      ;; Emacs failure and the existing diagnostic path unchanged.
+      (error nil))
+    nil))
+
 (defun eliscript-read-located-string (source &optional filename)
   "Read every Eliscript form from SOURCE with recursive source locations."
   (with-temp-buffer
@@ -441,11 +471,14 @@ two-character dispatch prefix.  Eliscript owns that diagnostic contract."
                 filename (eliscript-reader--diagnostic-span filename)
                 "unexpected end of input"))
               (invalid-read-syntax
-               (eliscript-diagnostic-signal
-                'eliscript-read-error "ELI-R0001" "reader"
-                filename (eliscript-reader--diagnostic-span filename)
-                "%s" (eliscript-reader--invalid-syntax-message
-                       source (1- start) error-data)))))))
+               (let ((dispatch (eliscript-reader--invalid-dispatch-position
+                                filename start)))
+                 (when dispatch (goto-char dispatch))
+                 (eliscript-diagnostic-signal
+                  'eliscript-read-error "ELI-R0001" "reader"
+                  filename (eliscript-reader--diagnostic-span filename)
+                  "%s" (eliscript-reader--invalid-syntax-message
+                         source (1- (or dispatch start)) error-data))))))))
       (nreverse forms))))
 
 (defun eliscript-read-string (source &optional filename)

@@ -1,0 +1,40 @@
+(module tools.testing.portable-node-fixtures
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:crypto" createHash)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "../backends/build.mjs" :as build)
+  (import "./wasm-static-snapshot.mjs" adaptStaticSnapshotCompiler)
+  (defconst plans (js-array
+    (js-object :suite "tests/wasm-memory-static-data.test.mjs" :entry "tests/wasm-memory-static-data-test-legacy.mjs" :cases 19
+      :archive "tests/wasm-memory-static-data-test-legacy.mjs" :sha256 "8265218c316f48bd22ef4eefaff5303ec5fa1208387ca9fb22afadcd85c2ef5a")
+    (js-object :suite "tests/compiler-portable-guards.test.mjs" :entry "tests/compiler-portable-guards.test.mjs" :cases 5
+      :archive "tests/compiler-portable-guards-test-legacy.mjs" :sha256 "b0b9cd417a7427edd5be0aa5cbc190a19ed617d09a751f944a06a775e2438915")
+    (js-object :suite "tests/wasm-managed-number-text.test.mjs" :entry "tests/wasm-managed-number-text.test.mjs" :cases 9
+      :archive "tests/wasm-managed-number-text-test-legacy.mjs" :sha256 "efb82a6a9f2457924f661ceaf8780412e4d2c80a983a535b7c066817a9f9e913")))
+  (defconst selected (js-call plans :filter (lambda (plan)
+    (js-call (get globalThis.process :argv) :some (lambda (argument) (= (resolve (get build :root) argument) (resolve (get build :root) (get plan :entry))))))))
+  (js-call assert :strictEqual (js-length selected) 1)
+  (defconst portableNodePlan (aref selected 0))
+  (js-call assert :strictEqual
+    (js-call (js-call (createHash "sha256") :update (readFileSync (resolve (get build :root) (get portableNodePlan :archive)))) :digest "hex")
+    (get portableNodePlan :sha256))
+  (defvar portableStaticBackend undefined)
+  (defvar portableStaticDirectory undefined)
+  (defasync portableStaticBuild (&rest arguments)
+    (let ((actual (await (Reflect/apply (get build :buildBackends) build arguments))))
+      (setq portableStaticDirectory (get (aref arguments 0) :outputRoot))
+      (js-call assert :strictEqual (value-type portableStaticDirectory) "string")
+      (setq portableStaticBackend (Object/assign (js-object) actual
+        (js-object :compiler (if (= (get portableNodePlan :cases) 19)
+          (adaptStaticSnapshotCompiler (get actual :compiler) portableStaticDirectory) (get actual :compiler)))))
+      portableStaticBackend))
+  (defun portableNodeRoute (specifier parentURL bridgeURL buildURL)
+    (let ((entryURL (get (pathToFileURL (resolve (get build :root) (get portableNodePlan :entry))) :href)))
+      (cond
+        ((and (= parentURL entryURL) (= specifier "bun:test")) (js-object :url bridgeURL :shortCircuit t))
+        ((and (/= (get portableNodePlan :cases) 5) (= parentURL entryURL) (= specifier "../tools/backends/build.mjs"))
+          (js-object :url buildURL :shortCircuit t))
+        (t undefined))))
+  (export portableNodePlan portableStaticBackend portableStaticDirectory portableStaticBuild portableNodeRoute))

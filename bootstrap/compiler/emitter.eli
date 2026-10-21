@@ -1758,8 +1758,8 @@
                  (emit-arguments arguments) ")"))))
           ((= kind "constructor-call")
            (combine
-             (js-array "new " (emit-expression (js-nth 0 nodes)) "("
-              (emit-arguments (js-call nodes :slice 1)) ")")))
+             (js-array "new (" (emit-expression (js-nth 0 nodes))
+              ")(" (emit-arguments (js-call nodes :slice 1)) ")")))
           ((= kind "raw-javascript")
            ;; The raw form is exactly one string. Accepting several arguments
            ;; emitted only the first, so the module's braces did not close and

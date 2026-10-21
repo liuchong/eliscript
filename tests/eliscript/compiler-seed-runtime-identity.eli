@@ -1,16 +1,21 @@
 (module tests.compiler-seed-runtime-identity
+  (import "../tools/backends/compiler-matrix.mjs" loadCompilerMatrixCorpus)
   (import "bun:test" beforeAll afterAll test)
   (import "node:assert/strict" :default assert)
-  (import "node:fs/promises" mkdtemp readFile writeFile readdir lstat realpath rm)
+  (import "node:fs/promises" mkdtemp readFile writeFile readdir lstat realpath rm mkdir)
   (import "node:path" resolve)
   (import "node:os" tmpdir)
   (import "node:crypto" createHash)
   (import "node:buffer" Buffer)
   (import "../dist/bootstrap/compiler.mjs" compile-string)
   (import "../tools/backends/build.mjs" root loadLiteralSources)
-  (import "../tools/backends/compiler-corpus-execution.mjs" createOriginalSeedOracle)
+  (import "../tools/backends/compiler-corpus-process.mjs" readOriginalCorpusExecutionContext)
+  (import "../tools/backends/compiler-corpus-execution.mjs" createOriginalSeedOracle executeCompilerCorpusRecord)
   (import "../tools/backends/compiler-corpus-source-archive.mjs"
     archiveCompilerCorpusSources readArchivedCompilerCorpusSources)
+
+  (import "../tools/backends/compiler-corpus.mjs" createOriginalCorpusSourceReader)
+  (import "../tools/backends/compiler-corpus-process.mjs" readOriginalProcessHostDependency bindOriginalProcessHostDependency)
 
   (defvar directory undefined)
   (defvar providers undefined)
@@ -91,6 +96,35 @@
     (let ((node (get (get globalThis.process :env) :NODE_BINARY)))
       (createOriginalSeedOracle (js-object :sourceRoot root :directory path
         :node (if (nullish? node) "node" node) :programHost "node"))))
+
+  (test "the original host executor derives evidence from its artifact when the caller supplies no context directory"
+    (async ()
+      (let* ((product (resolve directory "implicit-execution-directory"))
+             (entry (resolve product "entry.mjs"))
+             (payload (js-call "完整原始source/map/alias😀" :repeat 131072))
+             (settings (js-object :sourceAssets (js-array (js-object :source payload :map payload)) :aliases (js-object :original payload)))
+             (record (js-object :id "original-arguments-without-context-directory" :request (js-object :hostSources (js-array))
+               :execution (js-object :kind "original-program" :host "original-host.mjs"
+                 :hostSource (compile-string
+                   "(import \"node:path\" resolve)(import \"node:module\" createRequire)(defconst args (js-call (get globalThis.process :argv) :slice 2))(defconst path (resolve (aref args 0) \"entry.mjs\"))(defconst entry (funcall (createRequire path) path))(console/log (JSON/stringify (js-array (aref args 1) (aref args 2) (get entry :value))))"
+                   "original-argument-host.eli")
+                 :arguments (js-array (js-object :directory t) (js-object :literal "vector") (js-object :literal "1000000")))))
+             (artifact (js-object :target "javascript" :entry "entry.mjs" :path entry :directory product
+               :modules (js-array (js-object :id "entry.mjs")))))
+        (await (mkdir product (js-object :recursive t)))
+        (await (writeFile entry (compile-string "(module original.arguments (defconst value 42)(export value))" "arguments.eli")))
+        (let ((result (await (executeCompilerCorpusRecord (js-object :record record :artifact artifact
+                 :target "javascript" :sourceRoot root :options settings)))))
+          (js-call assert :deepStrictEqual result
+            (js-object :kind "original-program" :stdout "[\"vector\",\"1000000\",42]\n"))
+          (let* ((receipt (JSON/parse (await (readFile (resolve product "original-process/process-outcome.json") "utf8"))))
+                 (reference (JSON/stringify (get receipt :executionContext)))
+                 (transferred (readOriginalCorpusExecutionContext reference)))
+            (js-call assert :strictEqual (get receipt :status) "passed")
+            (js-call assert :ok (< (Buffer/byteLength reference) 2048))
+            (js-call assert :strictEqual (get (aref (get (get transferred :options) :sourceAssets) 0) :source) payload)
+            (js-call assert :strictEqual (get (aref (get (get transferred :options) :sourceAssets) 0) :map) payload)
+            (js-call assert :strictEqual (get (get (get transferred :options) :aliases) :original) payload))))))
 
   (test "independent Seed program literals and relative runtime share exact constructors symbols prototypes and registered protocols"
     (async ()
@@ -243,6 +277,7 @@
           :source (await (readFile (resolve root fixture) "utf8")))))
         (put record :entry "main.mjs")
         (put (get record :execution) :referenceArtifact t)
+        (put (get record :execution) :host "tests/renamed-physical-identity-host.mjs")
         (put (get record :execution) :hostRuntime "bun")
         (put (get record :execution) :arguments (js-array (js-object :directory t) (js-object :literal "main.mjs")))
         (put (get record :execution) :hostSource
@@ -254,12 +289,20 @@
               (js-call (get (get record :original) :sourceAssets) :push
                 (js-object :file file :sourceSha256 (digest bytes))))
             (setq index (1+ index))))
-        (let* ((before (JSON/stringify record)) (run (oracle (resolve directory "physical-identity-oracle")))
-               (actual (await (funcall run (js-object :record record :target "javascript")))))
-          (js-call assert :deepStrictEqual (JSON/parse (get actual :stdout))
-            (js-object :tokens (js-array 1 1 1 2) :effects (js-array t (js-array 1 2))
-              :abrupt (js-array t (js-array 1)) :conversion (js-array) :symbols (js-array t t) :functions (js-array t t)))
-          (js-call assert :strictEqual (JSON/stringify record) before)))) 120000)
+        (let* ((reader (createOriginalCorpusSourceReader (js-object :sourceRoot root)))
+               (dependency (await (readOriginalProcessHostDependency reader)))
+               (bound (bindOriginalProcessHostDependency record dependency))
+               (engines (js-array "node" "bun")) (index 0))
+          (while (< index (js-length engines))
+            (let* ((engine (aref engines index)) (selected (globalThis.structuredClone bound)))
+              (put (get selected :execution) :hostRuntime engine)
+              (let* ((before (JSON/stringify selected)) (run (oracle (resolve directory (str "physical-identity-oracle-" engine))))
+                     (actual (await (funcall run (js-object :record selected :target "javascript")))))
+                (js-call assert :deepStrictEqual (JSON/parse (get actual :stdout))
+                  (js-object :tokens (js-array 1 1 1 2) :effects (js-array t (js-array 1 2))
+                    :abrupt (js-array t (js-array 1)) :conversion (js-array) :symbols (js-array t t) :functions (js-array t t)))
+                (js-call assert :strictEqual (JSON/stringify selected) before)))
+            (setq index (1+ index)))))) 120000)
   (defun seed-provider-fixture (id)
     (let* ((record (recipe id))
            (replacement (js-object :id "managed-runtime-identifier.mjs"
@@ -617,4 +660,30 @@
                   "original canonical native provider identity conflicts with the selected product"))))
               (js-call assert :strictEqual (JSON/stringify record) before)))
           (setq index (1+ index))))) 60000)
+
+  (test "FIX29 original standard-main observes the same Seed protocol graph in both Node and Bun"
+    (async ()
+      (let* ((corpus (await (loadCompilerMatrixCorpus (js-object :sourceRoot root))))
+             (libraries (await (loadLiteralSources (js-object :sourceRoot root))))
+             (identities (js-call libraries :map (lambda (library)
+               (js-object :id (get library :id) :filename (get library :filename)
+                 :sha256 (js-call (js-call (createHash "sha256") :update (get library :source) "utf16le") :digest "hex")))))
+             (engines (js-array "node" "bun")) (index 0))
+        (while (< index (js-length engines))
+          (let* ((engine (aref engines index))
+                 (id (str "original-managed:sequence-data-standard-identities:" engine ":auto-65536"))
+                 (record (js-call (get corpus :records) :find (lambda (item) (= (get item :id) id))))
+                 (before (JSON/stringify record))
+                 (run (provider-oracle (js-object :options (js-object
+                         :sourceAssets (get (get corpus :document) :evidence)
+                         :literalSources libraries :literalSourceIdentity identities))
+                        (resolve directory (str "actual-standard-main-" engine)))))
+            (js-call assert :ok record)
+            ;; This executes the authenticated maintained observer from the
+            ;; actual record, not the reduced vector/queue transport fixture.
+            (let ((actual (await (funcall run (js-object :record record :target "javascript")))))
+              (js-call assert :strictEqual (get actual :stdout) "standard identities preserved\n"))
+            (js-call assert :strictEqual (JSON/stringify record) before))
+          (setq index (1+ index))))))
+
 )

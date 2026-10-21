@@ -10,6 +10,8 @@
 
   (defconst bootstrap-step
     "      - name: Bootstrap maintained compiler and backend tools\n        run: make bootstrap-backends\n")
+  (defconst fixture-preload "bun test --preload ./tools/testing/fixture-environment.mjs --preload ./tests/helpers/direct-wasm-registration-install.mjs --timeout 300000 ")
+  (defconst fixture-environment "          ELISCRIPT_TEST_FIXTURE_PRELOAD: \"1\"\n")
   (defasync inputs ()
     (js-array (JSON/parse (await (readFile (resolve root "contracts/browser-compatibility.json") "utf8")))
       (JSON/parse (await (readFile (resolve root "contracts/compatibility-matrix.json") "utf8")))))
@@ -22,13 +24,15 @@
              (dependencies (js-call workflow :indexOf "run: bun install --frozen-lockfile"))
              (bootstrap (js-call workflow :indexOf bootstrap-step))
              (browser (js-call workflow :indexOf "      - name: Install selected browser\n"))
-             (tests (js-call workflow :indexOf (get contract :testCommand))))
+             (tests (js-call workflow :indexOf fixture-preload)))
         (js-call assert :ok (>= dependencies 0))
         (js-call assert :ok (> bootstrap dependencies))
         (js-call assert :ok (> browser bootstrap))
         (js-call assert :ok (> tests browser))
-        (js-call assert :strictEqual (js-call workflow :replace bootstrap-step "") legacy
-          "all original browser rows, test commands, budgets and evidence remain byte-identical")
+        (js-call assert :strictEqual
+          (js-call (js-call (js-call workflow :replace bootstrap-step "")
+            :replace fixture-preload "bun test ") :replace fixture-environment "") legacy
+          "all original browser rows, six suite inputs, performance budgets and evidence remain byte-identical")
         (let ((report (await (checkBrowserCompatibilityWorkflow
                 (js-object :root root :contract contract :matrix matrix :workflowText workflow)))))
           (js-call assert :deepStrictEqual (get report :browserEngines) (js-array "chromium" "firefox" "webkit"))
@@ -42,8 +46,12 @@
              (workflow (renderBrowserWorkflow contract matrix))
              (missing (js-call workflow :replace bootstrap-step ""))
              (conditional (js-call workflow :replace bootstrap-step
-               (js-call bootstrap-step :replace "        run:" "        if: false\n        run:"))))
-        (let ((variants (js-array missing conditional)) (index 0))
+               (js-call bootstrap-step :replace "        run:" "        if: false\n        run:")))
+             (no-preload (js-call workflow :replace fixture-preload "bun test "))
+             (no-environment (js-call workflow :replace fixture-environment ""))
+             (no-timeout (js-call workflow :replace "--timeout 300000 " ""))
+             (no-registration (js-call workflow :replace "--preload ./tests/helpers/direct-wasm-registration-install.mjs " "")))
+        (let ((variants (js-array missing conditional no-preload no-environment no-timeout no-registration)) (index 0))
           (while (< index (js-length variants))
             (await (js-call assert :rejects
               (checkBrowserCompatibilityWorkflow (js-object :contract contract :matrix matrix :workflowText (aref variants index)))

@@ -1,0 +1,23 @@
+(module tests.dogfood-workflow-install
+  (import "bun:test" :as framework)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:crypto" createHash)
+  (import "node:path" resolve)
+  (import "../../tools/backends/build.mjs" root)
+  (import "./direct-wasm-registration.mjs" createDirectWasmRegistration)
+  (import "./dogfood-action-source.mjs" runSourceWorkflowCase)
+  (defconst original (Object/assign (js-object) framework))
+  (js-call assert :strictEqual
+    (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root "tests/dogfood-workflow-test-legacy.mjs"))) :digest "hex")
+    "4a80cf7a80a3faa921f2438ee87974a74c9fa6225acde2b936ba60776aa8d44e")
+  (defconst registration (createDirectWasmRegistration original (js-object
+    "the template checks out the consumer repository and invokes the action" runSourceWorkflowCase)))
+  (defvar restored false)
+  (defun restore ()
+    (unless restored (js-call (get original :mock) :module "bun:test" (lambda () original)) (setq restored t)))
+  (defun completeWorkflowRegistration () (try (js-call registration :complete) (finally (restore))))
+  (js-call original :beforeAll completeWorkflowRegistration)
+  (js-call original :afterAll restore)
+  (js-call (get original :mock) :module "bun:test" (lambda () (get registration :exports)))
+  (export completeWorkflowRegistration))

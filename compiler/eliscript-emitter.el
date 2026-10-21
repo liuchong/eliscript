@@ -1920,7 +1920,7 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
       ('js-call (eliscript-emitter--emit-js-call arguments))
       ('new
        (eliscript-emitter--require-arity "new" arguments 1)
-       (format "new %s(%s)"
+       (format "new (%s)(%s)"
                (eliscript-emitter-emit-expression (car arguments))
                (eliscript-emitter--emit-arguments (cdr arguments))))
       ('js*

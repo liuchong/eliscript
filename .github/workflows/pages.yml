@@ -61,7 +61,7 @@ jobs:
           sudo apt-get install -y emacs-nox
       - name: Build the compiler, the browser bundle, and the playground
         run: |
-          ./bin/eliscript-bootstrap
+          make bootstrap-backends
           bun run build:browser
           bun run build:browser-playground
           bun run build:docs-site

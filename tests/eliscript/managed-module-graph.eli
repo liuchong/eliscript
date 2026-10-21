@@ -6,6 +6,8 @@
   (import "node:url" pathToFileURL fileURLToPath)
   (import "node:os" tmpdir)
   (import "node:module" createRequire)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/testing/fixture-environment.mjs" prepareFixtureEnvironment)
   (import "../dist/bootstrap/compiler.mjs" compile-string)
   (import "../tools/backends/managed-module-graph.mjs" createManagedModuleGraph
     createManagedProjectFacades loadManagedProjectGraph)
@@ -24,7 +26,8 @@
 
   (test "actual cyclic ESM namespaces validate export names before values initialize"
     (async ()
-      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-namespace-"))))
+      (let* ((fixture-environment (prepareFixtureEnvironment root (get globalThis.process :env)))
+             (directory (get fixture-environment :directory))
              (graph (createManagedModuleGraph (graph-descriptor)))
              (state (js-object :graph graph)) (key "__eliscript_namespace_regression__"))
         (try
@@ -48,7 +51,7 @@
               (js-call assert :strictEqual (get (js-call (get graph :hostModules) :get "provider") :value) 31)))
           (finally
             (js-call graph :close) (Reflect/deleteProperty globalThis.globalThis key)
-            (await (rm directory (js-object :recursive t :force t))))))))
+            (js-call fixture-environment :close))))))
 
   (test "graph options preserve omitted undefined explicit null and close callback semantics"
     (lambda ()
@@ -112,7 +115,8 @@
 
   (test "prepared canonical exports preserve actual ESM aliases watches ordinary phases and hoisted function metadata"
     (async ()
-      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-prepared-exports-"))))
+      (let* ((fixture-environment (prepareFixtureEnvironment root (get globalThis.process :env)))
+             (directory (get fixture-environment :directory))
              (descriptor (prepared-descriptor)) (saved (JSON/stringify descriptor))
              (facades (createManagedProjectFacades descriptor (js-object :entry "main.mjs")))
              (graph (createManagedModuleGraph descriptor))
@@ -166,7 +170,7 @@
               (js-call assert :deepStrictEqual (get (get loaded :facades) :files) (get facades :files))
               (js-call assert :strictEqual (await (loadManagedProjectGraph runtime descriptor options)) loaded)
               (js-call assert :strictEqual (JSON/stringify descriptor) saved)))
-          (finally (js-call graph :close) (await (rm directory (js-object :recursive t :force t))))))))
+          (finally (js-call graph :close) (js-call fixture-environment :close))))))
 
   (test "prepare notifications preserve ready boundaries later listener order and a single successful initialization"
     (lambda ()
@@ -261,7 +265,8 @@
           (lambda (error) (Object/is error failure))))
         (js-call assert :strictEqual closed 1)
         (js-call assert :strictEqual (get graph :closed) t))
-      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-prepared-tdz-"))))
+      (let* ((fixture-environment (prepareFixtureEnvironment root (get globalThis.process :env)))
+             (directory (get fixture-environment :directory))
              (descriptor (prepared-descriptor)) (graph (createManagedModuleGraph descriptor))
              (facades (createManagedProjectFacades descriptor (js-object :entry "main.mjs")))
              (runtime (graph-runtime)) (failure (new globalThis.ReferenceError "real cell is uninitialized")))
@@ -282,5 +287,5 @@
                     (let ((path (fileURLToPath url))) (funcall (createRequire path) path))))))
               (lambda (error) (Object/is error failure))))
             (js-call assert :strictEqual (get graph :closed) t))
-          (finally (js-call graph :close) (await (rm directory (js-object :recursive t :force t))))))))
+          (finally (js-call graph :close) (js-call fixture-environment :close))))))
 )

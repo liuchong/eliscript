@@ -96,15 +96,24 @@
       (+ "Given an actual posted " operation " request in the wasm browser compiler Worker When it is cancelled and disposed Then owned resources are released") 1127 1175)))
 
   (defasync bundle (path &optional external)
-    (let ((result (await (js-call globalThis.Bun :build (js-object :entrypoints (js-array (resolve path)) :target "browser" :format "esm"
-      :external (if external external (js-array))
-      :plugins (js-array (js-object :name "eliscript-unicode-runtime-url"
-        :setup (lambda (builder)
-          (js-call builder :onResolve
-            (js-object :filter (new globalThis.RegExp "^eliscript/runtime/unicode-case\\.mjs$"))
-            (lambda (request) (js-object :path "/runtime/unicode-case.mjs" :external t)))))))))))
-      (js-call assert :strictEqual (get result :success) t (funcall globalThis.String (get result :logs)))
-      (await (js-call (aref (get result :outputs) 0) :text))))
+    (let* ((plugins (js-array (js-object :name "eliscript-unicode-runtime-url"
+                     :setup (lambda (builder)
+                       (js-call builder :onResolve
+                         (js-object :filter (new globalThis.RegExp "^eliscript/runtime/unicode-case\\.mjs$"))
+                         (lambda (request) (js-object :path "/runtime/unicode-case.mjs" :external t)))))))
+           (options (js-object :entrypoints (js-array (resolve path)) :target "browser" :format "esm"
+                      :external (if external external (js-array)) :plugins plugins)))
+      (when (and external (js-call external :includes "./program.mjs"))
+        ;; The browser serves this exact future-emitted module beside its
+        ;; runner; it must never resolve against the test source directory.
+        (js-call plugins :push (js-object :name "eliscript-emitted-program-url"
+          :setup (lambda (builder)
+            (js-call builder :onResolve
+              (js-object :filter (new globalThis.RegExp "^\\./program\\.mjs$"))
+              (lambda (request) (js-object :path (get request :path) :external t)))))))
+      (let ((result (await (js-call globalThis.Bun :build options))))
+        (js-call assert :strictEqual (get result :success) t (funcall globalThis.String (get result :logs)))
+        (await (js-call (aref (get result :outputs) 0) :text)))))
   (defasync browser-call (owned input)
     ;; Playwright serializes only this closure-free Eli-emitted function. All
     ;; actual case code is the statically imported browser ESM page module.

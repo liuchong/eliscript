@@ -1,6 +1,7 @@
 (module tools.backends.managed-host-object-realm
   (import "./managed-host-object-provider.mjs" readHostObjectConstructor readHostObjectPrototype readHostObjectIntrinsics
-    hostObjectDescriptorPrototypeClear)
+    hostObjectDescriptorPrototypeClear readHostArrayConstructor readHostArrayPrototype readHostArrayIntrinsics
+    readHostReflectIntrinsics)
   (import "./managed-host-legacy.mjs" failManagedRuntime)
 
   (defun data-function (descriptors name)
@@ -25,34 +26,64 @@
            (parent (js-call (js-call (get context :memory) :view) :getUint32
              (+ (funcall checked "value-data" heap definition 13) 4) t))
            (canonical (funcall checked "value-standard-prototype-existing" heap 0)))
+      ;; The original raw DefineProperty owns existing-property compatibility,
+      ;; flags and extensibility. A data-only definition can legally update an
+      ;; existing configurable property on a nonextensible target as well.
       (when (and (or (= parent 0) (= parent 3) (and (> canonical 3) (= parent canonical)))
                  (or (= parent 0) (hostObjectDescriptorPrototypeClear))
-                 (= (funcall checked "value-source-extensible" heap target) 2)
-                 (= (funcall checked "value-source-own-descriptor" heap target key) 3))
-        (let ((frame (funcall checked "frame-new" heap 3)) (valid t))
-          (try
-            (let ((value-name (funcall checked "value-string" heap 5)) (index 0))
-              (funcall checked "frame-set" heap frame 0 value-name)
-              (while (< index 5)
-                (funcall checked "value-unit-set" heap value-name index (js-call "value" :charCodeAt index))
-                (setq index (1+ index)))
-              (funcall checked "value-seal" heap value-name)
-              (js-call (js-array "enumerable" "configurable" "value" "writable" "get" "set") :forEach
-                (lambda (field)
-                  (when valid
-                    (let ((name (funcall checked "value-string" heap (js-length field))) (index 0))
-                      (funcall checked "frame-set" heap frame 1 name)
-                      (while (< index (js-length field))
-                        (funcall checked "value-unit-set" heap name index (js-call field :charCodeAt index))
-                        (setq index (1+ index)))
-                      (funcall checked "value-seal" heap name)
-                      (let ((own (funcall checked "value-source-own-descriptor" heap definition name)))
-                        (funcall checked "frame-set" heap frame 2 own)
-                        (unless (or (= own 3)
-                          (and (/= field "get") (/= field "set")
-                            (= (funcall checked "value-object-has" heap own value-name) 1)))
-                          (setq valid false))))))) valid)
-            (finally (funcall checked "frame-pop" heap frame)))))))
+                 (get context :dataDefinition))
+        (= (funcall checked "value-source-data-definition-p" heap definition) 1))))
+
+  (defun native-constructor-method-p (method)
+    (or (and (Object/hasOwn method "constructArray") (eq (get method :constructArray) t))
+        (and (Object/hasOwn method "constructObject") (eq (get method :constructObject) t))))
+  (defun native-intrinsic-operation (context heap arguments count opcode)
+    ;; Authenticate the actual function, rather than a property name. Borrowed
+    ;; native methods keep their identities; replacements and host Proxies do
+    ;; not qualify. Existing source algorithms own iteration, species and holes.
+    (when (>= count (if (= opcode 9) 2 3))
+      (let* ((checked (get context :checked)) (tokens (get context :nativeTokens))
+             (target (funcall checked "value-get" heap arguments 1)))
+        (when (and tokens (> target 3)
+                   (= (funcall checked "value-kind" heap target) 35))
+          (let ((method (js-call tokens :get (funcall checked "value-foreign-token" heap target))))
+            (when (and method (get method :runtime))
+              (cond
+                ((= (get method :runtime) "value-reflect-builtin")
+                  (when (and (= opcode 8) (>= (- count 3) (get method :minimumArity)))
+                    (let* ((value (funcall checked "value-get" heap arguments 3))
+                           (kind (if (> value 3) (funcall checked "value-kind" heap value) 0)))
+                      ;; The original foreign path owns host Proxies and their
+                      ;; native exception identities. Only represented source
+                      ;; targets enter the existing owned Reflect algorithms.
+                      (when (or (= kind 18) (ordinary-native-object-p context heap value kind))
+                        (js-object :name (get method :name) :arity (- count 3)
+                          :runtime (get method :runtime) :operation (get method :operation))))))
+                ((= (get method :runtime) "value-builtin-primitive")
+                  (when (= opcode 8)
+                    (js-object :name (get method :name) :arity (if (> count 3) 1 0)
+                      :value (if (> count 3) (funcall checked "value-get" heap arguments 3) 3)
+                      :runtime (get method :runtime) :operation (get method :operation))))
+                ((native-constructor-method-p method)
+                (when (or (/= opcode 19) (= (funcall checked "value-get" heap arguments 2) target))
+                  (let* ((offset (if (= opcode 9) 2 3))
+                         (input (if (> count offset) (funcall checked "value-get" heap arguments offset) 3)))
+                    ;; Object's identity/nullish cases consume no source
+                    ;; properties. Primitive boxing retains the host route;
+                    ;; a different newTarget retains its allocation semantics.
+                    (when (or (= (get method :operation) 75) (= input 0) (= input 3)
+                      (and (> input 3) (js-call (js-array 13 14 15 16 17 18 21 23 24 26 35 36)
+                        :includes (funcall checked "value-kind" heap input))))
+                      (js-object :name (get method :name) :arity (- count offset) :value target
+                        :argumentOffset offset :nativeConstructor t :construct (if (= opcode 8) 0 1)
+                        :runtime (get method :runtime) :operation (get method :operation))))))
+                (t (when (= opcode 8)
+                  (let ((receiver (funcall checked "value-get" heap arguments 2)))
+                    (when (and (> receiver 3)
+                      (= (funcall checked "value-kind" heap receiver)
+                         (if (= (get method :runtime) "value-array-prototype-call") 14 17)))
+                      (js-object :name (get method :name) :arity (- count 3) :value receiver
+                        :runtime (get method :runtime) :operation (get method :operation)))))))))))))
 
   (defun native-object-operation (context heap arguments count)
     ;; Return a routing decision, not an ABI result (nil/false/zero are valid
@@ -61,19 +92,27 @@
            (target (if (>= count 3) (funcall checked "value-get" heap arguments 1) 0)))
       (when (and tokens (> target 3) (= (funcall checked "value-kind" heap target) 35))
         (let ((method (js-call tokens :get (funcall checked "value-foreign-token" heap target))))
-          (when method
-            (let* ((name (get method :name)) (arity (if (= name "freeze") 1 (if (= name "hasOwn") 2 3)))
+          (when (and method (not (get method :runtime)))
+            (let* ((name (get method :name)) (arity (if (or (= name "freeze") (= name "isFrozen") (= name "create") (= name "getPrototypeOf")) 1
+                      (if (or (= name "hasOwn") (= name "getOwnPropertyDescriptor") (= name "defineProperties")) 2 3)))
                    (value (if (= count (+ arity 3)) (funcall checked "value-get" heap arguments 3) 0))
                    (kind (if (> value 3) (funcall checked "value-kind" heap value) 0)))
               ;; Foreign targets include actual host Proxies. They and every
               ;; unsupported shape retain the unchanged host implementation.
-              (when (and (= count (+ arity 3)) (ordinary-native-object-p context heap value kind))
+              (when (and (= count (+ arity 3))
+                         (if (= name "create") (or (= value 0)
+                           (and (= kind 13) (ordinary-native-object-p context heap value kind)))
+                           (or (ordinary-native-object-p context heap value kind)
+                               (and (= kind 18) (or (= name "defineProperty")
+                                 (= name "defineProperties") (= name "freeze") (= name "isFrozen") (= name "getOwnPropertyDescriptor"))))))
                 (let* ((key (if (> arity 1) (funcall checked "value-get" heap arguments 4) 3))
                        (key-kind (if (> key 3) (funcall checked "value-kind" heap key) 0))
                        (definition (if (= arity 3) (funcall checked "value-get" heap arguments 5) 3)))
                   ;; Object-valued keys may invoke arbitrary host coercion.
                   ;; Keep their original evaluation/first-error path intact.
-                  (when (and (or (= arity 1) (<= key 3) (= key-kind 4) (= key-kind 5) (= key-kind 22) (= key-kind 34))
+                  (when (and (if (= name "defineProperties")
+                               (and (> key 3) (ordinary-native-object-p context heap key key-kind))
+                               (or (= arity 1) (<= key 3) (= key-kind 4) (= key-kind 5) (= key-kind 22) (= key-kind 34)))
                              (or (/= arity 3) (and (> definition 3)
                                (= (funcall checked "value-kind" heap definition) 13)
                                (ordinary-native-object-p context heap definition 13)
@@ -82,7 +121,7 @@
 
   (defun call-native-object-operation (context heap arguments operation)
     (let ((raw (get context :raw)) (checked (get context :checked))
-          (arity (get operation :arity)) (frame 0) (result 0)
+          (arity (get operation :arity)) (offset (get operation :argumentOffset 3)) (frame 0) (result 0)
           (status 0) (source-class 0))
       (try
         (progn
@@ -90,16 +129,54 @@
           (let ((tuple (funcall checked "value-refs" heap 7 arity)) (index 0))
             (funcall checked "frame-set" heap frame 0 tuple)
             (while (< index arity)
-              (funcall checked "value-set" heap tuple index (funcall checked "value-get" heap arguments (+ index 3)))
+              (funcall checked "value-set" heap tuple index (funcall checked "value-get" heap arguments (+ index offset)))
               (setq index (1+ index)))
             ;; These are the same public raw implementations used by an owned
             ;; zero-import Object builtin. No source value crosses the host
             ;; codec solely because the real native intrinsic consumed it.
             (setq result (cond
+              ((and (Object/hasOwn operation "nativeConstructor") (eq (get operation :nativeConstructor) t))
+                (funcall raw "value-native-constructor-call" heap (get operation :value) tuple arity
+                  (get operation :operation) (get operation :construct)))
+              ((= (get operation :runtime) "value-builtin-primitive")
+                (funcall raw "value-builtin-primitive" heap (get operation :value) arity (get operation :operation)))
+              ((= (get operation :runtime) "value-reflect-builtin")
+                (funcall raw "value-reflect-builtin" heap tuple arity (get operation :operation)))
+              ((get operation :runtime)
+                (funcall raw (get operation :runtime) heap (get operation :value) tuple arity (get operation :operation)))
+              ((= (get operation :name) "create")
+                ;; A null or owned ordinary prototype starts an owned object
+                ;; with that exact source chain. Creating a foreign host object
+                ;; instead would leave a source WeakMap's foreign iterator key
+                ;; unrooted between native iterator callbacks. Actual foreign
+                ;; prototypes and two-argument Create retain their host route.
+                (funcall raw "value-object-new" heap (get operation :value)))
+              ((= (get operation :name) "getPrototypeOf")
+                ;; The native intrinsic observes the source object itself.
+                ;; Decoding a persistent value first would substitute its host
+                ;; materializer prototype for the registered source prototype.
+                (funcall raw "value-object-reflection" heap tuple arity 0))
+              ((= (get operation :name) "getOwnPropertyDescriptor")
+                ;; Read the source descriptor before a transport predicate can
+                ;; publish its target as an ordinary host view. This raw ABI
+                ;; retains descriptor presence and original value/accessor
+                ;; identities without decoding the object being inspected.
+                (funcall raw "value-object-reflection" heap tuple arity 2))
               ((= (get operation :name) "freeze")
                 (funcall raw "value-object-integrity" heap (get operation :value) 0))
+              ((= (get operation :name) "isFrozen")
+                ;; Observe the source descriptors before a literal predicate
+                ;; finishes branding; decoding here would publish an ordinary
+                ;; view during that same predicate's automatic brand probe.
+                (funcall raw "value-object-integrity" heap (get operation :value) 1))
               ((= (get operation :name) "hasOwn")
                 (funcall raw "value-object-properties" heap tuple arity 1))
+              ((= (get operation :name) "defineProperties")
+                ;; The existing raw algorithm collects and normalizes every
+                ;; descriptor before applying any of them, including accessors
+                ;; and their first source throw. No constructor is decoded
+                ;; merely to prepare its own declaration before branding.
+                (funcall raw "value-object-meta-builtin" heap tuple arity 1))
               (t (funcall raw "value-object-meta-builtin" heap tuple arity 0))))))
         (finally
           (setq status (funcall raw "last-error") source-class (funcall raw "value-exception-class" heap))
@@ -107,12 +184,32 @@
           (funcall raw "value-exception-class-set" heap source-class)
           (funcall raw "value-error-restore" status))) result))
 
+  (defun native-runtime-intrinsic-tag (method)
+    ;; These records come only from the existing native identity authenticator.
+    ;; Source property names and user brands never grant a tag.
+    (let ((runtime (get method :runtime)) (operation (get method :operation)))
+      (cond
+        ((and (= runtime "value-native-constructor-call") (= operation 76)
+              (Object/hasOwn method "constructObject") (eq (get method :constructObject) t)) 76)
+        ((and (= runtime "value-builtin-primitive") (= operation 5)) 5)
+        ((and (= runtime "value-reflect-builtin") (>= operation 0) (<= operation 12)) (+ operation 181))
+        ((and (= runtime "value-array-prototype-call")
+              (js-call (js-array 202 223 224 225) :includes operation)) operation)
+        ((and (= runtime "value-collection-prototype-iterator-builtin") (= operation 328)) 328)
+        ((not runtime)
+          (let ((name (get method :name)))
+            (cond ((= name "freeze") 401) ((= name "isFrozen") 402)
+              ((= name "create") 403) ((= name "getPrototypeOf") 404)
+              ((= name "getOwnPropertyDescriptor") 405) ((= name "hasOwn") 406)
+              ((= name "defineProperties") 407) (t 0))))
+        (t 0))))
+
   (defun register-native-object-operations (context lifecycle)
     (let ((runtime (get context :runtime)) (checked (get context :checked))
           (raw (get context :raw)) (owner (get context :owner))
-          (roots (js-array)) (tokens (new globalThis.Map)) (released false))
+          (roots (js-array)) (registered (js-array)) (tokens (new globalThis.Map)) (released false))
       (put context :nativeTokens tokens)
-      ;; These three fixed host-function roots authenticate the actual native
+      ;; These fixed host-function roots authenticate the actual native
       ;; targets. They never retain a user receiver, descriptor or key.
       (let ((dispose (get lifecycle :dispose)))
         (put lifecycle :dispose (lambda ()
@@ -120,6 +217,12 @@
                 (failure undefined) (failed false))
             (unless released
               (setq released t)
+              ;; Revoke before releasing roots: an escaped foreign callable
+              ;; must not retain an internal route after its capability closes.
+              (js-call registered :forEach (lambda (function)
+                (try (funcall checked "value-foreign-intrinsic-register" owner function 0)
+                  (catch error (unless failed (setq failed t failure error))))))
+              (put registered :length 0)
               (js-call roots :forEach (lambda (root)
                 (try (js-call runtime :release root)
                   (catch error (unless failed (setq failed t failure error))))))
@@ -129,7 +232,14 @@
             (Reflect/apply dispose lifecycle (js-array))
             (when failed (throw failure))))))
       (try
-        (js-call (readHostObjectIntrinsics) :forEach (lambda (method)
+        (js-call (js-call (js-call (readHostObjectIntrinsics) :concat (readHostArrayIntrinsics) (readHostReflectIntrinsics))
+          :filter (lambda (method)
+            (or (not method) (cond ((not (get method :runtime)) t)
+              ((native-constructor-method-p method) (get context :nativeConstructor))
+              ((= (get method :runtime) "value-builtin-primitive") (get context :primitivePredicate))
+              ((= (get method :runtime) "value-reflect-builtin") (get context :reflectBuiltin))
+              ((= (get method :runtime) "value-array-prototype-call") (get context :arraySlice))
+              (t (get context :arrayIterator)))))) :forEach (lambda (method)
           (when method
             (let ((frame (js-call runtime :frame 1)) (token undefined))
               (try
@@ -139,7 +249,13 @@
                   (js-call runtime :frameSet frame 0 token)
                   (let ((function (funcall checked "frame-get" owner (funcall checked "frame-current" owner) 0)))
                     (unless (= (funcall checked "value-kind" owner function) 35) (failManagedRuntime 3))
-                    (js-call tokens :set (funcall checked "value-foreign-token" owner function) method)))
+                    (js-call tokens :set (funcall checked "value-foreign-token" owner function) method)
+                    (let ((operation (native-runtime-intrinsic-tag method)))
+                      (when (and (/= operation 0) (get context :foreignIntrinsic))
+                        ;; The existing root owns the full-generation handle;
+                        ;; this numeric list adds no second retained value.
+                        (js-call registered :push function)
+                        (funcall checked "value-foreign-intrinsic-register" owner function operation)))))
                 (finally (js-call runtime :leaveFrame frame)))))))
         (catch error
           (try (funcall (get lifecycle :dispose)) (catch ignored nil))
@@ -157,7 +273,9 @@
                    (js-call (js-call (get context :memory) :view) :getFloat64
                      (funcall checked "value-data" heap opcode 4) t) -1)))
             (if (/= operation 35)
-              (let ((native (when (= operation 8) (native-object-operation context heap arguments count))))
+              (let ((native (when (or (= operation 8) (= operation 9) (= operation 19))
+                (or (native-intrinsic-operation context heap arguments count operation)
+                    (when (= operation 8) (native-object-operation context heap arguments count))))))
                 (if native (call-native-object-operation context heap arguments native)
                   (funcall handler name heap arguments)))
               (progn
@@ -166,14 +284,15 @@
                        (runtime (get context :runtime))
                        (frame undefined) (callee undefined) (result 0) (primary false)
                        (status 0) (source-class 0) (cleanup undefined) (cleanup-failed false))
-                  (unless (and (not (undefined? runtime)) (or (= member 0) (= member 1)))
+                  (unless (and (not (undefined? runtime)) (or (= member 0) (= member 1) (= member 2) (= member 3)))
                     (failManagedRuntime 3))
                   (try
                     (progn
                       (setq frame (js-call runtime :frame 3))
                       (let ((frame-id (funcall checked "frame-current" heap)))
                         (setq callee (js-call runtime :fromHostValue
-                          (if (= member 0) readHostObjectPrototype readHostObjectConstructor)))
+                          (cond ((= member 0) readHostObjectPrototype) ((= member 1) readHostObjectConstructor)
+                            ((= member 2) readHostArrayPrototype) (t readHostArrayConstructor))))
                         (js-call runtime :frameSet frame 0 callee)
                         (let ((tuple (funcall checked "value-refs" heap 7 3)))
                           (funcall checked "frame-set" heap frame-id 1 tuple)
@@ -228,9 +347,19 @@
                (receiver (if (undefined? options) original-options options))
                (option-descriptors (Object/getOwnPropertyDescriptors original-options))
                (initialize t) (runtime undefined)
-               (context (js-object :owner 0 :runtime undefined :memory memory))
+               (context (js-object :owner 0 :runtime undefined :memory memory
+                         :dataDefinition (data-function descriptors "value-source-data-definition-p")
+                         :foreignIntrinsic (data-function descriptors "value-foreign-intrinsic-register")
+                         :nativeConstructor (data-function descriptors "value-native-constructor-call")
+                         :primitivePredicate (data-function descriptors "value-builtin-primitive")
+                         :reflectBuiltin (data-function descriptors "value-reflect-builtin")
+                         :arraySlice (data-function descriptors "value-array-prototype-call")
+                         :arrayIterator (data-function descriptors "value-collection-prototype-iterator-builtin")))
                (raw (lambda (name &rest arguments)
-                 (Reflect/apply (data-function descriptors name) exports arguments)))
+                 ;; All exports used by this bridge return u32 ABI words.
+                 ;; Normalize both inspected handles and capability results.
+                 (unsigned-bit-shift-right
+                   (Reflect/apply (data-function descriptors name) exports arguments) 0)))
                (checked (lambda (name &rest arguments)
                  (let* ((value (Reflect/apply raw undefined (js-call (js-array name) :concat arguments)))
                         (code (funcall raw "last-error")))
@@ -268,12 +397,13 @@
           (setq runtime (Reflect/apply creator undefined (js-call (js-array
             (Object/create (Object/getPrototypeOf exports) descriptors) descriptor memory) :concat forwarded)))
           (put context :runtime runtime)
-          (when (and (get (get descriptor :literalRuntime (js-object)) :brandProbe nil)
-                     (js-call (js-array "value-foreign-token" "value-object-properties" "value-object-integrity"
-                               "value-object-meta-builtin" "frame-new" "frame-pop" "value-string" "value-unit-set"
+          ;; Native Object operations belong to this authenticated host realm
+          ;; even when the source program has no persistent literal library.
+          (when (js-call (js-array "value-foreign-token" "value-object-new" "value-object-properties" "value-object-integrity"
+                               "value-object-meta-builtin" "value-object-reflection" "frame-new" "frame-pop" "value-string" "value-unit-set"
                                "value-seal" "value-object-has" "value-source-own-descriptor"
                                "value-source-extensible" "value-standard-prototype-existing")
-                       :every (lambda (name) (data-function descriptors name))))
+                       :every (lambda (name) (data-function descriptors name)))
             (register-native-object-operations context lifecycle))
           ;; Outer lifecycle/foreign/decode registrations finish first. This
           ;; runs the same initializer before the public factory returns.

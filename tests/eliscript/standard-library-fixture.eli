@@ -1,0 +1,135 @@
+(module tests.standard-library-fixture
+  (import "../../dist/bootstrap/symbol.mjs" binding-name)
+  (import "../../tools/backends/compiler-build.mjs" independentCompilerResources)
+  (import "../../tools/backends/managed-runtime.mjs" readManagedModuleMetadata)
+  (defconst standardLibraryFixturePlans (js-array
+
+    (js-object :suite "tests/wasm-managed-transient-state.test.mjs" :resources false
+      :sha256 "cef9524c8f9e95420ba13b0ce4189ac7e171ea662a92275b89c01c828f4f1f19")
+    (js-object :suite "tests/wasm-managed-core-modules.test.mjs" :resources t
+      :sha256 "0925889b35d1a8c2f2d0142a0bfe9ff9f2e249d87221ca09afd50f4730673140")
+    (js-object :suite "tests/wasm-managed-sorted-core.test.mjs" :resources t
+      :sha256 "84fd970f85e0df39b2efad23a8aa445106954fd9fa8df41d7c5978a70f70f303")
+    (js-object :suite "tests/managed-stdlib-value-json.test.mjs" :resources false
+      :sha256 "3e91ede35722125fd5b4b10d5f6c86bd530f7a4a2adfdf576e9b3dda72b7ae8d"
+      :deadlineTitle "Given collection at every allocation when complete original stdlib modules execute then persistent callbacks identities and error recovery retain their roots")
+    (js-object :suite "tests/wasm-managed-math-transcendental.test.mjs" :resources false
+      :sha256 "eb220c5bcb3a1b18d663d54dca398ac63c542b0b2c8c10f0532f3c820429706f"
+      :deadlineTitle "Given cold held borrowed bound callback and Reflect Math routes When coerced overridden reflected or constructed Then every original call boundary is preserved")))
+  (defun standardLibraryFixtureOptions (suite environment input)
+    (let* ((plan (js-call standardLibraryFixturePlans :find (lambda (item) (= (get item :suite) suite))))
+           (enabled (and plan (get plan :resources)
+             (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")
+             (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
+             input (= (get input :maxSlots) 8192) (= (get input :initialBytes) 262144)
+             (= (get input :maxBytes) 16777216)))
+           (resources (when enabled (independentCompilerResources (js-object :profile "small"))))
+           (effective (if enabled (Object/assign (js-object) input (get resources :budget)) input)))
+      (js-object :options effective :resourceAcceptance (if enabled "deferred" "baseline")
+        :originalCapacityAcceptance (if enabled "DEFERRED / NOT ACCEPTED" "required-by-original-gate")
+        :originalRuntimeOptions input :effectiveRuntimeOptions effective)))
+  (defun standardLibraryFixtureTestRegistration (original plan environment cases)
+    (let* ((expected (and plan (js-call standardLibraryFixturePlans :find
+                      (lambda (item) (= (get item :suite) (get plan :suite))))))
+           (enabled (and expected (= (get expected :sha256) (get plan :sha256)) (Array/isArray cases)
+             (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")
+             (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1"))))
+      (if (not enabled) original
+        (letfn ((wrap (target)
+          (new globalThis.Proxy target (js-object
+            :apply (lambda (actual receiver arguments)
+              (let ((forwarded arguments))
+                (when (and (= (js-length arguments) 3) (= (value-type (aref arguments 1)) "function")
+                      (js-call (js-array 30000 120000) :includes (aref arguments 2))
+                      (or (not (get expected :deadlineTitle)) (= (aref arguments 0) (get expected :deadlineTitle)))
+                      (js-call cases :some (lambda (record)
+                        (let ((item (get record :originalCase)))
+                          (and (= (get item :title) (aref arguments 0)) (= (get item :timeoutMs) (aref arguments 2)))))))
+                  (setq forwarded (js-call arguments :slice)) (put forwarded 2 0))
+                (Reflect/apply actual receiver forwarded)))
+            :get (lambda (actual key receiver)
+              (let ((value (Reflect/get actual key actual)))
+                (cond ((and (= key "skipIf") (= (value-type value) "function"))
+                       (lambda (&rest arguments) (wrap (Reflect/apply value actual arguments))))
+                      ((= (value-type value) "function") (js-call value :bind actual)) (t value))))))))
+          (wrap original)))))
+  (defun readStandardLibraryDescriptor (bytes)
+    (let* ((module (if (js-call globalThis.WebAssembly.Module (get globalThis.Symbol :hasInstance) bytes)
+                     bytes (new globalThis.WebAssembly.Module bytes)))
+           (sections (globalThis.WebAssembly.Module.customSections module "eliscript-managed-control")))
+      (unless (= (js-length sections) 1)
+        (throw (new globalThis.TypeError "standard library fixture requires its actual managed descriptor")))
+      (readManagedModuleMetadata module "eliscript-managed-control")))
+  (defun sortedFixtureSourceError (runtime error)
+    ;; The original low-level invoke API transfers an owned source throw.
+    ;; Read its actual fields without creating a cached, live source view.
+    (let ((name-key (js-call runtime :string "name")) (message-key undefined)
+          (name undefined) (message undefined) (decoded undefined))
+      (try
+        (progn
+          (setq name (js-call runtime :objectGet error name-key))
+          (unless (= (js-call runtime :readString name) "TypeError") (throw error))
+          (setq message-key (js-call runtime :string "message")
+                message (js-call runtime :objectGet error message-key))
+          (setq decoded (new globalThis.TypeError (js-call runtime :readString message))))
+        (finally
+          (js-call (js-array name-key message-key name message) :forEach
+            (lambda (token) (unless (undefined? token) (js-call runtime :release token))))))
+      (js-call runtime :release error) decoded))
+  (defun standardLibraryRuntimeFacade (runtime descriptor &rest proofs)
+    (unless (and descriptor (= (get descriptor :format) "eliscript-managed-control")
+                 (= (get descriptor :version) 1) (Array/isArray (get descriptor :functions)))
+      (throw (new globalThis.TypeError "standard library fixture requires actual export metadata")))
+    (let* ((proof (aref proofs 0))
+           (source-inputs (and proof (= (get proof :suite) "tests/wasm-managed-sorted-core.test.mjs")
+             (= (get proof :sha256) "84fd970f85e0df39b2efad23a8aa445106954fd9fa8df41d7c5978a70f70f303")))
+           (names (new globalThis.Set (js-call (get descriptor :functions) :map (lambda (item) (get item :name)))))
+           (descriptors (Object/getOwnPropertyDescriptors runtime))
+           (facade (Object/create (Object/getPrototypeOf runtime))))
+      (unless (and (get descriptors :invoke) (Object/hasOwn (get descriptors :invoke) "value")
+                   (= (value-type (get (get descriptors :invoke) :value)) "function"))
+        (throw (new globalThis.TypeError "standard library fixture requires the actual invoke API")))
+      (js-call (js-array "invoke" "invokeAsync") :forEach (lambda (method)
+        (let ((entry (get descriptors method)))
+          (when entry
+            (unless (and (Object/hasOwn entry "value") (= (value-type (get entry :value)) "function"))
+              (throw (new globalThis.TypeError "standard library fixture requires actual source invocation methods")))
+            (let* ((original (get entry :value))
+                   (invoke (lambda (name &rest arguments)
+                     (let ((selected name))
+                       (when (and (= (value-type name) "string") (not (js-call names :has name)) (js-call name :includes "-"))
+                         (let ((public (try (binding-name name) (catch ignored name))))
+                           (when (js-call names :has public) (setq selected public))))
+                       (try
+                         (Reflect/apply original runtime (js-call (js-array selected) :concat arguments))
+                         (catch error
+                           (when (and source-inputs (= method "invoke")
+                                      (js-call (js-array "throw_comparison" "throw-comparison") :includes selected)
+                                      (not (nullish? error)) (= (value-type error) "object")
+                                      (= (get error :kind) 13))
+                             (throw (sortedFixtureSourceError runtime error)))
+                           ;; Report only the selected entry; never inspect a
+                           ;; thrown user value or replace the original error.
+                           (try (js-call globalThis.console :error "standard library invocation failed"
+                             (js-object :method method :sourceName name :selectedName selected))
+                             (catch ignored nil))
+                           (throw error)))))))
+              (Object/defineProperties invoke (js-object
+                :name (Object/getOwnPropertyDescriptor original "name")
+                :length (Object/getOwnPropertyDescriptor original "length")))
+              (put entry :value invoke))))))
+      (when source-inputs
+        ;; The authenticated original boxedOperations constructs source-level
+        ;; input arrays. Keep the private kind-7 API untouched on the runtime.
+        (let* ((entry (get descriptors :array)) (original (get entry :value))
+               (source-array (get runtime :sourceArray))
+               (array (lambda (&rest arguments) (Reflect/apply source-array runtime arguments))))
+          (unless (and entry (Object/hasOwn entry "value") (= (value-type original) "function")
+                    (= (value-type source-array) "function"))
+            (throw (new globalThis.TypeError "sorted source-input fixture requires the actual source array factory")))
+          (Object/defineProperties array (js-object :name (Object/getOwnPropertyDescriptor original "name")
+            :length (Object/getOwnPropertyDescriptor original "length")))
+          (put entry :value array)))
+      (Object/defineProperties facade descriptors)
+      (unless (Reflect/isExtensible runtime) (Object/preventExtensions facade)) facade))
+  (export standardLibraryFixturePlans standardLibraryFixtureOptions readStandardLibraryDescriptor standardLibraryRuntimeFacade standardLibraryFixtureTestRegistration))

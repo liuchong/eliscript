@@ -1,0 +1,29 @@
+(module tests.number-text-node-bridge
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "../tools/testing/number-text-node.mjs" numberTextSuiteURL numberTextTestArguments numberTextHookArguments numberTextImportRoute verifyNumberTextSource)
+  (test "the exact original Number text suite retains every source byte and explicit callback timeout"
+    (lambda ()
+      (verifyNumberTextSource)
+      (let* ((callback (lambda () 7)) (input (js-array "original title" callback 120000))
+             (copy (js-call input :slice)) (actual (numberTextTestArguments input)))
+        (js-call assert :strictEqual (aref actual 0) "original title")
+        (js-call assert :strictEqual (aref actual 2) callback)
+        (js-call assert :deepStrictEqual (aref actual 1) (js-object :timeout 120000))
+        (js-call assert :deepStrictEqual input copy)
+        (js-call assert :deepStrictEqual (numberTextTestArguments (js-array "ordinary" callback)) (js-array "ordinary" (js-object :timeout 300000) callback))
+        (js-call assert :deepStrictEqual (numberTextHookArguments (js-array callback 120000)) (js-array callback (js-object :timeout 120000)))
+        (js-call assert :deepStrictEqual (numberTextHookArguments (js-array callback)) (js-array callback (js-object :timeout 300000))))))
+  (test "the Node bridge resolves only the original suite's bun:test import and preserves every other resolver route"
+    (lambda ()
+      (let ((url "file:///fixture/number-text-node-test.mjs"))
+        (js-call assert :deepStrictEqual (numberTextImportRoute "bun:test" numberTextSuiteURL url) (js-object :url url :shortCircuit t))
+        (js-call assert :strictEqual (numberTextImportRoute "bun:test" "file:///unrelated.test.mjs" url) undefined)
+        (js-call assert :strictEqual (numberTextImportRoute "node:test" numberTextSuiteURL url) undefined)
+        (js-call assert :strictEqual (numberTextImportRoute "bun:test" (+ numberTextSuiteURL "?other") url) undefined))))
+  (test "the narrow Number text bridge rejects changed calling conventions instead of silently losing arguments"
+    (lambda ()
+      (js-call (js-array (js-array) (js-array "title") (js-array "title" false) (js-array "title" (lambda () nil) (js-object :timeout 7))
+        (js-array "title" (lambda () nil) 120000 "extra")) :forEach
+        (lambda (arguments) (js-call assert :throws (lambda () (numberTextTestArguments arguments)) globalThis.TypeError)))
+      (js-call assert :throws (lambda () (numberTextHookArguments (js-array false 120000))) globalThis.TypeError))))

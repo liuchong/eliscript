@@ -113,9 +113,10 @@ complete in this state.
 
 ## GitHub Action
 
-The packaged Action is a single generated CommonJS file that runs on the Node 24
-runtime supplied by GitHub Actions. No Emacs, Bun, or installed package is
-required at consumer run time.
+The packaged Action is a single generated CommonJS file that runs on Node 24.
+The consumer workflow checks out a pinned source revision, installs Emacs and
+Bun, bootstraps the compiler and builds the ignored package before invoking the
+local Action. The generated Action process needs no Emacs, Bun or dependencies.
 
 Build the package locally:
 

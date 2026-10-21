@@ -1,0 +1,18 @@
+(module tests.repository-integrity-original
+  ;; Run every unchanged original assertion through a maintained test entry.
+  (import "./repository-integrity-test-legacy.mjs")
+  (import "node:fs" readFileSync)
+  (import "node:crypto" createHash)
+  (import "node:assert/strict" :default assert)
+  (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" root)
+  (defconst original (readFileSync (resolve root "tests/repository-integrity-test-legacy.mjs")))
+  (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update original) :digest "hex")
+    "72d5fa7b1f5dff8502adcb798fd94080c1610c078b3cd999d1f25b96004f3e5b")
+  (js-call (js-array
+    "repository dependencies and generated artifacts satisfy declared boundaries"
+    "repository integrity rejects undeclared and boundary-crossing imports"
+    "repository integrity isolates declared dependencies at the nearest package boundary"
+    "repository integrity rejects stale benchmark source evidence"
+    "repository integrity rejects incomplete artifact registries") :forEach
+    (lambda (title) (js-call assert :ok (js-call (js-call original :toString "utf8") :includes title)))))

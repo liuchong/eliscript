@@ -1,0 +1,184 @@
+(module tools.testing.persistent-literal-fixture
+  (import "node:crypto" createHash)
+  (import "node:path" resolve relative dirname)
+  (import "node:fs" readFileSync writeFileSync mkdtempSync symlinkSync realpathSync lstatSync rmSync)
+  (import "node:child_process" spawnSync)
+  (import "node:assert/strict" :default assert)
+  (import "node:url" pathToFileURL)
+  (import "../../dist/bootstrap/compiler.mjs" compile-string compile-ir-string)
+  (import "../../dist/bootstrap/emitter.mjs" emit-top-level emit-expression)
+  (import "../../dist/bootstrap/ir.mjs" make-node)
+  (defun unique-boundary (source text start)
+    (let ((index (js-call source :indexOf text start)))
+      (unless (and (>= index 0) (= (js-call source :indexOf text (1+ index)) -1))
+        (throw (new globalThis.TypeError "original persistent literal oracle source boundary changed"))) index))
+  (defun persistentLiteralHostArtifactSource ()
+    ;; Analyze the complete original host scope before selecting its body.
+    ;; Parameters are mutable bindings, matching the two real output locals;
+    ;; no analysis-only declaration or parameter is emitted into the host.
+    (let* ((program (compile-ir-string (js-call (js-array
+      "(defun persistent-literal-host-boundary-context"
+      " (lowered wasmBytes backend modules runtime literalModules memory originalModules originalLibrary assert)"
+      "(funcall (lambda (originalRuntime)"
+      " (setq lowered (js-call (get backend :managed) :lower_managed_project modules \"boundary.mjs\" runtime"
+      "   (js-object :literalModules literalModules :phased t :foreignEntry t)))"
+      " (js-call assert :deepEqual modules originalModules)"
+      " (js-call assert :deepEqual literalModules originalLibrary)"
+      " (js-call assert :deepEqual runtime originalRuntime)"
+      " (js-call assert :deepEqual (get (get lowered :descriptor) :hostCapabilities)"
+      "   (js-array (js-object :module \"eliscript.host\" :name \"source-operation\" :arity 2 :abi \"managed-host-call-v1\")))"
+      " (setq wasmBytes (Uint8Array/from (js-call (get backend :wasm) :append_metadata_section"
+      "   (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) memory)"
+      "   \"eliscript-managed-control\" (JSON/stringify (get lowered :descriptor)))))"
+      " (funcall (lambda (imports)"
+      "   (js-call assert :deepStrictEqual (js-call imports :map (lambda (entry)"
+      "     (js-object :module (get entry :module) :name (get entry :name) :kind (get entry :kind))))"
+      "     (js-array (js-object :module \"eliscript.host\" :name \"source-operation\" :kind \"function\")))"
+      "   (js-call imports :forEach (lambda (entry)"
+      "     (when (Object/hasOwn entry \"type\")"
+      "       (js-call assert :deepStrictEqual (get entry :type)"
+      "         (js-object :parameters (js-array \"i32\" \"i32\") :results (js-array \"i32\")))))))"
+      "   (WebAssembly.Module/imports (new globalThis.WebAssembly.Module wasmBytes))))"
+      " (globalThis.structuredClone runtime)))") :join "\n")
+      "persistent-literal-host-boundary.eli"))
+           (context (aref (get program :body) 0))
+           (parameters (get (get context :properties) :parameterCount))
+           (children (get context :children)))
+      (unless (and (= (js-length (get program :body)) 1)
+                   (= (get context :kind) "function-declaration")
+                   (= (get context :value) "persistent-literal-host-boundary-context")
+                   (= parameters 10) (= (js-length children) 11))
+        (throw (new globalThis.TypeError "persistent host activation lost its complete lexical context")))
+      (let* ((body (aref children parameters))
+             (statement (make-node "expression-statement" (get body :span) nil (js-array body) nil)))
+        ;; Reuse the analyzed expression unchanged. Only its statement framing
+        ;; is added through the ordinary validated IR constructor and emitter.
+        (str (get (emit-top-level statement) :text) "\n"))))
+  (defun persistentLiteralHostOptions (root environment executable)
+    (js-object :cwd root :encoding "utf8" :env (Object/assign (js-object) environment (js-object :BUN executable))))
+  (defun persistentLiteralFunctionalHostScript (root engine script arguments)
+    (let* ((environment (get globalThis.process :env))
+           (executable (get globalThis.process :execPath))
+           (configured (get environment :NODE_BINARY))
+           (command (if (= engine "bun") executable (if (nullish? configured) "node" configured)))
+           (result (spawnSync command (js-call (js-array script) :concat arguments)
+                     (persistentLiteralHostOptions root environment executable))))
+      ;; Retain the original first failure, status, full report and JSON parser.
+      ;; Only this authenticated functional caller omits its total deadline.
+      (js-call assert :equal (get result :error) undefined)
+      (js-call assert :equal (get result :status) 0 (str (get result :stderr) (get result :stdout)))
+      (JSON/parse (js-call (get result :stdout) :trim))))
+  (defun persistentLiteralPrivateRegexURL (root directory)
+    (let* ((base (resolve root ".eliscript-cache/test-fixtures"))
+           (path (resolve directory))
+           (owned (relative base path))
+           (session-name (aref (js-call owned :split "/") 0))
+           (session (resolve base session-name)))
+      (unless (and (not (= owned "")) (not (js-call owned :startsWith ".."))
+                   (js-call session-name :startsWith "session-") (= (dirname session) base)
+                   (= (realpathSync session) session) (= (realpathSync path) path)
+                   (js-call (lstatSync session) :isDirectory) (js-call (lstatSync path) :isDirectory))
+        (throw (new globalThis.TypeError "private regex fixture requires its actual owned session directory")))
+      (let* ((source (readFileSync (resolve root "runtime/core/regex.mjs")))
+             (digest (js-call (js-call (createHash "sha256") :update source) :digest "hex")))
+        (unless (= digest "9594a0cdad60ca84aa1e1a3786d676eba67239162bfae7f0a151f6ff2a7308b9")
+          (throw (new globalThis.TypeError "complete original private regex module source changed")))
+        (let ((private (mkdtempSync (resolve path "private-regex-"))))
+          (try
+            ;; Copy only authenticated original bytes. Its two dependencies
+            ;; keep the real canonical module identity; the WeakMap owner gets
+            ;; a distinct physical URL even on hosts that merge query imports.
+            (js-call (js-array "collection.mjs" "vector.mjs") :forEach (lambda (name)
+              (let ((actual (realpathSync (resolve root "runtime/core" name))))
+                (symlinkSync actual (resolve private name) "file"))))
+            (let ((file (resolve private "regex.mjs")))
+              (writeFileSync file source (js-object :flag "wx"))
+              (get (pathToFileURL file) :href))
+            (catch error (rmSync private (js-object :recursive t :force t)) (throw error)))))))
+  (defun persistentLiteralPrivateRegexExpression ()
+    (let* ((program (compile-ir-string
+             "(defun persistent-literal-private-coordinate (persistentLiteralPrivateRegexURL root directory) (funcall persistentLiteralPrivateRegexURL root directory))"
+             "persistent-literal-private-coordinate.eli"))
+           (context (aref (get program :body) 0))
+           (parameters (get (get context :properties) :parameterCount))
+           (children (get context :children)))
+      (unless (and (= (js-length (get program :body)) 1) (= (get context :kind) "function-declaration")
+                   (= (get context :value) "persistent-literal-private-coordinate")
+                   (= parameters 3) (= (js-length children) 4))
+        (throw (new globalThis.TypeError "private regex coordinate lost its complete lexical context")))
+      (get (emit-expression (aref children parameters)) :text)))
+  (defun persistent-literal-tail (source start functional)
+    (let* ((coordinate "pathToFileURL(resolve(root, 'runtime/core/regex.mjs')).href")
+           (coordinate-at (unique-boundary source coordinate start))
+           (expression (persistentLiteralPrivateRegexExpression))
+           (tail (str (js-call source :slice start coordinate-at) expression
+                   (js-call source :slice (+ coordinate-at (js-length coordinate))))))
+      (when functional
+        (let* ((begin (unique-boundary tail "function hostScript(" 0))
+               (end (unique-boundary tail "\n\nfor (const host of" begin))
+               (deadline "    }, 60000);")
+               (at (unique-boundary tail deadline end))
+               (number-at (+ at (js-length "    }, ")))
+               (zero-program (compile-ir-string "0" "persistent-functional-deadline.eli"))
+               (zero-statement (aref (get zero-program :body) 0))
+               (zero (get (emit-expression (aref (get zero-statement :children) 0)) :text)))
+          (setq tail (str (js-call tail :slice 0 begin) (js-call tail :slice end number-at)
+                      zero (js-call tail :slice (+ number-at (js-length "60000")))))))
+      tail))
+  (defun projectPersistentLiteralSuite (root source &rest supplied)
+    (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex")
+               "bb8fe651361e49b5dee4f12252209a054401e03beed7d150efd8fd9781e81287")
+      (throw (new globalThis.TypeError "complete original persistent literal suite source changed")))
+    (unless (= (js-call (js-call (createHash "sha256") :update
+                 (readFileSync (resolve root "tools/testing/persistent-literal-oracle.eli"))) :digest "hex")
+               "6fada646b540292d8c44d346b4806e651c659489ef6dbe10b0a6df4fc3e031ba")
+      (throw (new globalThis.TypeError "complete independent persistent literal expectation source changed")))
+    (let* ((environment (if (or (= (js-length supplied) 0) (undefined? (aref supplied 0)))
+                         (get globalThis.process :env) (aref supplied 0)))
+           (functional (and (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
+                            (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")))
+           (variable (unique-boundary source "assertOriginalReport, " 0))
+           (begin (unique-boundary source "  const originalTest =" variable))
+           (end (unique-boundary source "  const oracleDirectory =" begin))
+           (root-declaration "const root = resolve(import.meta.dir, '..');")
+           (root-at (unique-boundary source root-declaration 0))
+           (budget-declaration "const budget = Object.freeze({maxSlots: 1024, initialBytes: 65536, maxBytes: 16777216});")
+           (budget-at (unique-boundary source budget-declaration 0))
+           (pure-witness "  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(wasmBytes)), []);\n")
+           (host-at (+ (unique-boundary source pure-witness variable) (js-length pure-witness)))
+           (header (compile-string (str "(import "
+             (JSON/stringify (get (pathToFileURL (resolve root "tools/testing/persistent-literal-oracle.mjs")) :href))
+             " assertOriginalReport)\n(import "
+             (JSON/stringify (get (pathToFileURL (resolve root "tools/testing/persistent-literal-fixture.mjs")) :href))
+             " persistentLiteralPrivateRegexURL persistentLiteralFunctionalHostScript)\n(defconst root " (JSON/stringify (resolve root)) ")\n"
+             (if functional
+               "(defconst budget (Object/freeze (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864)))\n(defun hostScript (engine script args &rest ignored) (persistentLiteralFunctionalHostScript root engine script args))\n" ""))
+             "persistent-literal-projection.eli")))
+      ;; Every remaining byte belongs to the authenticated original source.
+      (unless (and (>= root-at 0) (< (+ root-at (js-length root-declaration)) budget-at)
+                   (< (+ budget-at (js-length budget-declaration)) variable) (< variable host-at) (< host-at begin))
+        (throw (new globalThis.TypeError "original persistent literal source root is outside its authenticated setup")))
+      ;; Import coordinates in this projection still belong to the original
+      ;; repository. Only the alternate private provider gets a separate physical
+      ;; file; its original query suffix and every brand assertion stay intact.
+      (when functional
+        (js-call globalThis.console :error "persistent literal original 1024-slot capacity DEFERRED / NOT ACCEPTED"
+          (js-object :original (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)
+            :effective (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864)))
+        (js-call globalThis.console :error "persistent literal original 60000ms host and case deadlines DEFERRED / NOT ACCEPTED"
+          (js-object :originalHostDeadlineMs 60000 :originalCaseDeadlineMs 60000 :functionalDeadlineMs 0)))
+      ;; Compile all new declarations together: separate compiled modules
+      ;; cannot share a lexical file because each owns its compiler prelude.
+      (str header (js-call source :slice 0 root-at)
+        (js-call source :slice (+ root-at (js-length root-declaration)) budget-at)
+        (if functional "" budget-declaration)
+        (js-call source :slice (+ budget-at (js-length budget-declaration)) variable)
+        ;; Keep the original pure lower, capability inventory and executable
+        ;; zero-import witness, then declare the actual external host boundary.
+        ;; Both artifacts use the same complete immutable source input graph.
+        (js-call source :slice (+ variable (js-length "assertOriginalReport, ")) host-at)
+        (persistentLiteralHostArtifactSource)
+        (js-call source :slice host-at begin)
+        (persistent-literal-tail source end functional))))
+  (export projectPersistentLiteralSuite persistentLiteralHostArtifactSource
+    persistentLiteralPrivateRegexURL persistentLiteralPrivateRegexExpression persistentLiteralHostOptions persistentLiteralFunctionalHostScript))

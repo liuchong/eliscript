@@ -1,0 +1,25 @@
+(module tests.math-oracle-fixture-install
+  (import "bun:test" mock afterAll)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:crypto" createHash)
+  (import "node:path" resolve)
+  (import "../../tools/backends/build.mjs" :as build)
+  (import "../../tools/testing/math-oracle-fixture.mjs" prepareMathOracleCompiler)
+  (defconst actual (Object/assign (js-object) build))
+  (defconst root (get actual :root))
+  (defconst suite "tests/wasm-managed-math.test.mjs")
+  (js-call assert :ok (js-call (get globalThis.process :argv) :some
+    (lambda (argument) (= (resolve root argument) (resolve root suite)))))
+  (js-call assert :strictEqual
+    (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root suite))) :digest "hex")
+    "364144cc482b0ea756505ee1723f3831f2d1439f147e9380906d6ef0c19b5b9d")
+  (defasync buildBackends (&rest arguments)
+    (let* ((backend (await (Reflect/apply (get actual :buildBackends) actual arguments)))
+           (scanner (new globalThis.Bun.Transpiler (js-object :loader "js")))
+           (compiler (await (prepareMathOracleCompiler (get backend :compiler) root
+             (lambda (source) (js-call scanner :scanImports source))))))
+      (Object/assign (js-object) backend (js-object :compiler compiler))))
+  (js-call mock :module (resolve root "tools/backends/build.mjs")
+    (lambda () (Object/assign (js-object) actual (js-object :buildBackends buildBackends))))
+  (afterAll (lambda () (js-call mock :module (resolve root "tools/backends/build.mjs") (lambda () actual)))))

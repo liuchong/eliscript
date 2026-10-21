@@ -1232,28 +1232,40 @@
       (js-call (get child :stdout) :trim)))
   (defasync run-node ()
     (let* ((path (aref (get globalThis.process :argv) 2)) (context (js-call vm :createContext (js-object)))
+           (dependencies (new globalThis.Map))
            (module (new (get vm :SourceTextModule) (js-call (readFileSync path) :toString "utf8")
              (js-object :context context))))
-      (await (js-call module :link (async (specifier)
-        (if (= specifier "eliscript/runtime/math.mjs")
-          ;; Execute the actual production dependency inside the same realm,
-          ;; before the user program freezes or mutates standard prototypes.
-          (new (get vm :SourceTextModule)
-            (js-call (readFileSync (resolve root "runtime/math.mjs")) :toString "utf8")
-            (js-object :context context))
-        (progn
-          (unless (js-call specifier :startsWith "data:text/javascript;base64,")
-            (throw (new globalThis.Error (+ "unexpected oracle dependency: " specifier))))
-        ;; These are the real immutable intrinsic capsules imported by the
-        ;; emitted file. Loading them is IO; no oracle code is reconstructed.
-        (let* ((loaded (await (loadManagedHostModules (js-object :hostModules
-                  (js-array (js-object :id "capsule" :specifier specifier :referrer "scope-oracle.mjs"
-                    :allowedExports (js-array) :namespace t)))
-                  (js-object :moduleBaseURL (pathToFileURL path)))))
-               (namespace (js-call loaded :get "capsule")) (names (Object/keys namespace)) (synthetic nil))
-          (setq synthetic (new (get vm :SyntheticModule) names
-            (lambda () (each names (lambda (name) (js-call synthetic :setExport name (get namespace name)))))
-            (js-object :context context))) synthetic))))))
+      (await (js-call module :link (async (specifier referrer)
+        (let* ((runtime-file
+                 (cond ((= specifier "eliscript/runtime/math.mjs") "runtime/math.mjs")
+                       ((= specifier "eliscript/runtime/unicode-case.mjs") "runtime/unicode-case.mjs")
+                       ((and (= specifier "./unicode-case-data.mjs")
+                             (= (get referrer :identifier) (get (pathToFileURL (resolve root "runtime/unicode-case.mjs")) :href)))
+                        "runtime/unicode-case-data.mjs")
+                       (t nil)))
+               (identity (if runtime-file (get (pathToFileURL (resolve root runtime-file)) :href) specifier)))
+          (if (js-call dependencies :has identity) (js-call dependencies :get identity)
+            (let ((dependency
+              (if runtime-file
+                ;; The real complete runtime executes in the oracle realm,
+                ;; before the program freezes or mutates its prototypes.
+                (new (get vm :SourceTextModule)
+                  (js-call (readFileSync (resolve root runtime-file)) :toString "utf8")
+                  (js-object :context context :identifier identity))
+                (progn
+                  (unless (js-call specifier :startsWith "data:text/javascript;base64,")
+                    (throw (new globalThis.Error (+ "unexpected oracle dependency: " specifier))))
+                  ;; These are the original immutable intrinsic capsules.
+                  (let* ((loaded (await (loadManagedHostModules (js-object :hostModules
+                            (js-array (js-object :id "capsule" :specifier specifier :referrer "scope-oracle.mjs"
+                              :allowedExports (js-array) :namespace t)))
+                            (js-object :moduleBaseURL (pathToFileURL path)))))
+                         (namespace (js-call loaded :get "capsule")) (names (Object/keys namespace)) (synthetic nil))
+                    (setq synthetic (new (get vm :SyntheticModule) names
+                      (lambda () (each names (lambda (name) (js-call synthetic :setExport name (get namespace name)))))
+                      (js-object :context context :identifier identity))) synthetic)))))
+              (js-call dependencies :set identity dependency)
+              dependency))))))
       (await (js-call module :evaluate))
       (let* ((namespace (get module :namespace))
              (result (if (= node-mode "frozen-prefix") (js-call namespace :prototype_prefix) (JSON/stringify (js-call namespace :run)))))

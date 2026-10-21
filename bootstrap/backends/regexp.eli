@@ -1671,7 +1671,7 @@
             (t (setq unit (string-code-unit-at source (+ start number))) (setq pc yes))))) result))
   (defun regexp-property-id-base (source start length)
     (if (= length 0) 0
-      (if (or (/= (js* "typeof source") "string") (not (Number/isInteger start))
+      (if (or (/= (value-type source) "string") (not (Number/isInteger start))
               (not (Number/isInteger length)) (< start 0) (< length 0) (> (+ start length) (js-length source)))
         (regexp-property-legacy-lookup source start length)
         (let ((table (regexp-property-name-table)) (low 0) (high 1715) (found 0))

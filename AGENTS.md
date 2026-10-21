@@ -85,8 +85,37 @@ precedence over parent rules when they address the same decision.
   not valid estimation evidence. When maintaining roadmap documents, replace
   human-duration language with completion percentages, acceptance-unit counts,
   dependencies, and exit-gate status.
+- **PROGRESS-09** - Report acceptance by fixed denominator with only passed
+  and failed counts and percentages for each required output; every required
+  unit without valid passing evidence fails acceptance, including skipped,
+  cancelled, deferred and unverified units. Preserve their actual execution
+  reasons in the evidence; do not fabricate assertion failures. Keep candidates
+  separate, and do not present an ongoing run as final acceptance. Track
+  repeated problems by stable issue ID in the
+  active plan: count actual validation failures and failed behavioral repair
+  attempts separately, including repair compilation failures. Record diagnostic
+  reruns, launcher failures and cancellations separately. Preserve counts after
+  closure; use explicit lower bounds when historical evidence is incomplete.
+  Do not rerun an unchanged failure without a concrete new diagnostic reason.
+- **PROGRESS-10** - Finish all authorized implementation before starting
+  unified acceptance. After acceptance exposes defects, collect them into one
+  corrective batch and finish all related code before starting its unified
+  verification. Do not run focused tests while other known implementation in
+  that batch remains unwritten. Preserve already running useful work and its
+  evidence; do not cancel and restart it merely to change reporting categories.
 
 ## Eliscript Core Boundary
+
+- **PLATFORMS-01** - Establish a passing baseline on a current stable or latest
+  long-term-support platform, JavaScript runtime and browser release. Choose
+  the simplest route to that complete working release. Retain compatibility
+  that already works; neither adding compatibility nor removing it is a goal.
+  Historical platform evidence does not create a current support obligation.
+- **PLATFORMS-02** - Update this project's outdated test pages and tools
+  directly when they block the current delivery. Preserve valid language
+  assertions and independently checkable evidence, but do not preserve obsolete
+  implementation constraints or add unrelated modernization work. Prefer the
+  smallest complete change that passes the active bootstrap and output gates.
 
 - **SEMANTICS-01** - Eliscript semantics are authoritative across JavaScript,
   WASM and native outputs and supported hosts. Missing host methods, incorrect

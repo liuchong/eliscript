@@ -1,0 +1,5 @@
+(defun f (items ctor)
+  (put ctor (js* "Symbol.species") (lambda () (js-array)))
+  (put items :constructor ctor)
+  (js-call items :splice 0 1))
+(export f)

@@ -1,0 +1,1 @@
+(defun run (target trace) (Object/hasOwn target (js-object :toString (lambda () (put trace :visited 1) "x")))) (defun bad () (Object/hasOwn (js-object) (js-object :toString (lambda () (js-object)) :valueOf (lambda () (js-object))))) (export run bad)

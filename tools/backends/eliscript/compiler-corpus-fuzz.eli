@@ -1,0 +1,77 @@
+(module tools.backends.compiler-corpus-fuzz
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "./build.mjs" root)
+  (import "./compiler-corpus-legacy.mjs" createOriginalCorpusSourceReader)
+  (defconst id "original-program:compiler-module-reader-program-fuzz")
+  (defconst suite "tests/reader-program-fuzz.test.mjs")
+  (defconst suite-sha "d53a6fab62d6ca7f9a58ae56265149d1a8b51ce4b53080da018724a29ce52b6d")
+  (defconst files (js-array
+    "tools/backends/eliscript/compiler-corpus-fuzz.eli" "tools/backends/compiler-corpus-fuzz.mjs"
+    "tests/reader-program-fuzz.test.mjs"
+    "tests/eliscript/reader-program-fuzz-acceptance.eli" "tests/reader-program-fuzz-acceptance-selfhosted.test.mjs"
+    "tools/fuzz/reader-program-acceptance.eli" "tools/fuzz/reader-program-acceptance.mjs"
+    "tools/fuzz/reader-program-corpus-host.eli" "tools/fuzz/reader-program-corpus-host.mjs"
+    "tools/fuzz/reader-program-host.eli" "tools/fuzz/reader-program-host.mjs"
+    "tools/fuzz/program-emission-node.eli" "tools/fuzz/program-emission-node.mjs"
+    "tools/fuzz/program-emission-proof.eli" "tools/fuzz/program-emission-proof.mjs"
+    "tools/fuzz/program-emission-oracle.el"
+    "tools/fuzz/reader-program-fuzz.eli" "tools/fuzz/reader-program-fuzz.mjs" "tools/fuzz/reader-program-fuzz-legacy.mjs"
+    "tests/bootstrap-emitter-oracle.el" "tests/bootstrap-analyzer-oracle.el"))
+  (defun hash (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
+  (defun fail (message) (throw (new globalThis.TypeError message)))
+  (defasync transportOriginalFuzzCorpus (document options)
+    (let ((records (js-call (get document :records) :filter (lambda (record) (= (get record :id) id)))))
+      (when (> (js-length records) 0)
+        (unless (= (js-length records) 1) (fail "original full fuzz record must be unique"))
+        (let* ((record (aref records 0)) (original (get record :original)) (execution (get record :execution))
+               (reader (createOriginalCorpusSourceReader (js-object :sourceRoot (get options :sourceRoot root))))
+               (source (await (js-call reader :text suite))) (proofs (js-array)) (index 0))
+          (unless (and (= (hash source) suite-sha) (= (get original :sourceSha256) suite-sha)
+                       (= (get original :suite) suite) (= (get execution :kind) "original-program")
+                       (= (get execution :timeoutMs) 320000) (= (get execution :requiresBun) t))
+            (fail "original full fuzz source identity or execution contract changed"))
+          (js-call (get original :regions) :forEach (lambda (region)
+            (unless (and (= (get region :sha256) (hash (js-call source :slice (get region :start) (get region :end))))
+                         (= (get region :byteStart) (js-call Buffer :byteLength (js-call source :slice 0 (get region :start))))
+                         (= (get region :byteEnd) (js-call Buffer :byteLength (js-call source :slice 0 (get region :end)))))
+              (fail "original full fuzz assertion region changed"))))
+          (while (< index (js-length files))
+            (let* ((filename (aref files index)) (asset (await (js-call reader :file filename)))
+                   (existing (js-call (get document :evidence) :find (lambda (item) (= (get item :file) filename)))))
+              (when existing
+                (unless (and (= (get existing :sha256) (get asset :sha256)) (= (get existing :bytes) (get asset :bytes))
+                             (= (get existing :encoding) (get asset :encoding)) (= (get existing :content) (get asset :content)))
+                  (fail (+ "original full fuzz asset identity changed: " filename))))
+              (unless existing (js-call (get document :evidence) :push asset))
+              (js-call proofs :push (js-object :file filename :sourceSha256 (get asset :sha256))))
+            (setq index (1+ index)))
+          (let* ((host-file "tools/fuzz/reader-program-corpus-host.mjs")
+                 (host (await (js-call reader :text host-file)))
+                 (assets (js-call (get original :sourceAssets (js-array)) :slice)))
+            (js-call proofs :forEach (lambda (proof)
+              (let ((previous (js-call assets :find (lambda (item) (= (get item :file) (get proof :file))))))
+                (when (and previous (/= (get previous :sourceSha256) (get proof :sourceSha256)))
+                  (fail "original full fuzz maintained proof changed"))
+                (unless previous (js-call assets :push proof)))))
+            (let ((maintained-execution (Object/assign (js-object) execution (js-object :host host-file))))
+              ;; Preserve relative static imports by executing the authenticated
+              ;; source-root module through the existing native host path.
+              (Reflect/deleteProperty maintained-execution "hostSource")
+              (put record :execution maintained-execution))
+            (put record :original (Object/assign (js-object) original
+              (js-object :sourceAssets assets
+                :assertionSource (js-object :file suite :sourceSha256 suite-sha :regions (get original :regions))
+                :maintainedAssertions (js-object :sourceFile "tools/fuzz/reader-program-acceptance.eli"
+                  :sourceSha256 (get (js-call proofs :find (lambda (proof) (= (get proof :file) "tools/fuzz/reader-program-acceptance.eli"))) :sourceSha256)
+                  :generatedFile "tools/fuzz/reader-program-acceptance.mjs"
+                  :generatedSha256 (get (js-call proofs :find (lambda (proof) (= (get proof :file) "tools/fuzz/reader-program-acceptance.mjs"))) :sourceSha256))
+                :maintainedTransport (js-object :kind "maintained-eli-complete-fuzz-acceptance" :version 1
+                  :logicalSuite suite :originalSourceSha256 suite-sha
+                  :sourceFile "tools/fuzz/reader-program-corpus-host.eli" :generatedFile host-file :generatedSha256 (hash host)
+                  :programInputs 50000 :readerInputs 50000 :originalTimeoutMs 320000
+                  :independentOracle "tools/fuzz/program-emission-oracle.el"
+                  :historicalUnicodeCompatibilityDigest "b31c1f4546e42b3501fcc8a97403b171a6d3bb0ba8976bbe8bf305a235db7024"
+                  :currentDigest "unmodified-complete-emission-bytes" :fallback false)))))))
+      document))
+  (export transportOriginalFuzzCorpus))

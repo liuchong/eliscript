@@ -1,0 +1,35 @@
+(module tests.managed-integrity-install
+  (import "bun:test" :as framework)
+  (import "node:fs" readFileSync)
+  (import "node:path" resolve)
+  (import "node:crypto" createHash)
+  (import "../../tools/backends/build.mjs" root)
+  (import "./managed-integrity-cases.mjs" managedIntegrityCases prepareManagedIntegrity closeManagedIntegrity)
+  (defconst original (Object/assign (js-object) framework))
+  (unless (= (js-call (js-call (createHash "sha256") :update
+               (readFileSync (resolve root "tests/wasm-managed-object-integrity-test-legacy.mjs"))) :digest "hex")
+             "a6a752d58e7399aa5228061736c52cdd7ca81129b6ab810205f109317abed349")
+    (throw (new globalThis.TypeError "complete original integrity suite source identity changed")))
+  (defconst counts (new globalThis.Map))
+  (defvar restored false)
+  (defun restore ()
+    (unless restored (js-call (get original :mock) :module "bun:test" (lambda () original)) (setq restored t)))
+  (defconst forwarded (new globalThis.Proxy (get original :test) (js-object
+    :apply (lambda (target receiver arguments)
+      (let ((title (aref arguments 0)))
+        (if (Object/hasOwn managedIntegrityCases title)
+          (let ((copy (js-call arguments :slice)))
+            (when (js-call counts :has title) (throw (new globalThis.Error (+ "duplicate original integrity case: " title))))
+            (js-call counts :set title 1) (put copy 1 (get managedIntegrityCases title)) (Reflect/apply target receiver copy))
+          (Reflect/apply target receiver arguments))))
+    :get (lambda (target key receiver) (Reflect/get target key target)))))
+  (js-call original :beforeAll (async ()
+    (try
+      (progn
+        (js-call (Object/keys managedIntegrityCases) :forEach (lambda (title)
+          (unless (= (js-call counts :get title) 1) (throw (new globalThis.Error (+ "missing original integrity case: " title))))))
+        (await (prepareManagedIntegrity)))
+      (finally (restore)))) 120000)
+  (js-call original :afterAll (async () (restore) (await (closeManagedIntegrity))))
+  (js-call (get original :mock) :module "bun:test"
+    (lambda () (Object/assign (js-object) original (js-object :test forwarded)))))

@@ -1,0 +1,64 @@
+(module tests.managed-collection-install
+  (import "bun:test" :as framework)
+  (import "node:fs" readFileSync)
+  (import "node:path" resolve)
+  (import "node:crypto" createHash)
+  (import "../../tools/backends/build.mjs" root)
+  (import "./performance-acceptance.mjs" currentPerformanceTest)
+  (import "./managed-collection-affected.mjs" sourceCollectionCases prepareManagedCollectionCases closeManagedCollectionCases
+    sourceCollectionNormalCapacity collectionForEachNormalCapacity)
+  (defconst original (Object/assign (js-object) framework))
+  (defconst rows (js-array
+    (js-array "tests/wasm-managed-source-collections.test.mjs" "tests/wasm-managed-source-collections-test-legacy.mjs"
+      "544c284cd764eaa7dfa82cb5834fd7463a9eebf11f15b8e43a133e8634193215"
+      "source table capacity failures leave committed entries intact and unwind only private roots" sourceCollectionCases
+      "512 source table writes preserve every committed value at the normal functional budget" sourceCollectionNormalCapacity)
+    (js-array "tests/wasm-managed-collection-for-each.test.mjs" "tests/wasm-managed-collection-for-each-test-legacy.mjs"
+      "793522a737ca6493ec25fa763a8b1251c17460ff98d9c5ac04eba2e4ebab3cfd"
+      "Given callback allocation pressure, when live iteration exhausts capacity, then prior effects remain and only private roots unwind" (js-object)
+      "all 128 original Map and Set callback inputs complete with caller roots at the normal functional budget" collectionForEachNormalCapacity)))
+  (defvar selected undefined)
+  (js-call rows :forEach (lambda (row)
+    (when (js-call (get globalThis.process :argv) :some (lambda (argument) (= (resolve root argument) (resolve root (aref row 0)))))
+      (when selected (throw (new globalThis.Error "collection suites require separate owned registration contexts")))
+      (setq selected row))))
+  (unless selected (throw (new globalThis.Error "collection registration requires an exact original suite coordinate")))
+  (defconst source (readFileSync (resolve root (aref selected 1))))
+  (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex") (aref selected 2))
+    (throw (new globalThis.TypeError "the complete original collection suite source identity changed")))
+  (defconst replacements (aref selected 4))
+  (defconst counts (new globalThis.Map))
+  (defvar capacity-count 0)
+  (defvar normal-registered false)
+  (defvar restored false)
+  (defun restore ()
+    (unless restored (js-call (get original :mock) :module "bun:test" (lambda () original)) (setq restored t)))
+  (defconst replacement-test (new globalThis.Proxy (get original :test) (js-object
+    :apply (lambda (target receiver arguments)
+      (unless normal-registered
+        (setq normal-registered t)
+        (Reflect/apply target receiver (js-array (aref selected 5) (aref selected 6) 120000)))
+      (let ((title (aref arguments 0)))
+        (cond
+          ((= title (aref selected 3))
+            (setq capacity-count (1+ capacity-count))
+            (Reflect/apply (currentPerformanceTest target) receiver arguments))
+          ((Object/hasOwn replacements title)
+            (when (js-call counts :has title) (throw (new globalThis.Error (+ "duplicate original collection case: " title))))
+            (js-call counts :set title 1)
+            (let ((forwarded (js-call arguments :slice))) (put forwarded 1 (get replacements title))
+              (Reflect/apply target receiver forwarded)))
+          (t (Reflect/apply target receiver arguments)))))
+    :get (lambda (target key receiver) (Reflect/get target key target)))))
+  (defconst exports (Object/assign (js-object) original (js-object :test replacement-test)))
+  (js-call original :beforeAll (async ()
+    (try
+      (progn
+        (unless normal-registered (throw (new globalThis.Error "the normal collection capacity case must be registered inside the original suite")))
+        (unless (= capacity-count 1) (throw (new globalThis.Error "the original collection capacity case must occur exactly once")))
+        (js-call (Object/keys replacements) :forEach (lambda (title)
+          (unless (= (js-call counts :get title) 1) (throw (new globalThis.Error (+ "missing original collection case: " title))))))
+        (await (prepareManagedCollectionCases)))
+      (finally (restore)))) 120000)
+  (js-call original :afterAll (async () (restore) (closeManagedCollectionCases)))
+  (js-call (get original :mock) :module "bun:test" (lambda () exports)))

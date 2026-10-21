@@ -1,21 +1,31 @@
 (module tests.compiler-literal-corpus
-  (import "node:test" test)
+  (import "node:test" test after)
   (import "node:assert/strict" :default assert)
   (import "node:fs/promises" readFile writeFile mkdir mkdtemp rm symlink)
   (import "node:path" resolve posix dirname basename relative)
-  (import "node:os" tmpdir)
   (import "node:url" pathToFileURL)
   (import "node:child_process" spawn)
   (import "node:crypto" createHash)
   (import "node:buffer" Buffer)
   (import "node:util" isDeepStrictEqual)
   (import "../tools/backends/build.mjs" root)
+  (import "../tools/testing/fixture-environment.mjs" prepareFixtureEnvironment)
+  (defconst package-fixture (prepareFixtureEnvironment root (get globalThis.process :env)))
+  (defun tmpdir () (get package-fixture :directory))
+  (after (lambda () (js-call package-fixture :close)))
   (import "../tools/backends/compiler-corpus-project-adapters.mjs" addOriginalProjectPrograms)
   (import "../tools/backends/compiler-matrix.mjs" loadOriginalCompilerManifests)
   (import "../tools/backends/compiler-build.mjs" independentCompilerResources loadCompilerSources)
   (import "../tools/backends/compiler-bootstrap.mjs" compilerSourceIdentity)
   (import "../tools/backends/compiler-corpus.mjs"
-    loadOriginalCompilerCorpus readOriginalLiteralRuntimeAudit compilerCorpusRequest createOriginalCorpusSourceReader)
+    loadOriginalCompilerCorpus readOriginalLiteralRuntimeAudit compilerCorpusRequest createOriginalCorpusSourceReader
+    bindOriginalMaintainedSuiteEvidence bindOriginalRuntimeScanReportEvidence
+    transportOriginalProjectRuntimeAssets transportOriginalToolsCLIAssets
+    transportOriginalExecutionAssets transportOriginalToolsDataReferenceAssets bindOriginalFunctionalResourceInputs)
+  (import "../tools/backends/compiler-corpus-fuzz.mjs" transportOriginalFuzzCorpus)
+  (import "../tools/backends/compiler-corpus-bit.mjs" transportOriginalStdlibBitCorpus)
+  (import "../tools/backends/compiler-corpus-debugging.mjs" transportOriginalSourceDebuggingCorpus)
+  (import "../tools/backends/compiler-corpus-emitter.mjs" transportOriginalBootstrapEmitterCorpus prepareOriginalBootstrapEmitterOptions)
   (import "../tools/backends/compiler-corpus-legacy.mjs" :as legacy-corpus)
   (import "../tools/backends/compiler-corpus-execution.mjs" createOriginalSeedOracle)
   (import "../tools/backends/compiler-corpus-runtime-adapters.mjs"
@@ -162,7 +172,8 @@
         (js-call assert :deepStrictEqual (get setup :changes) (js-array))
         (js-call assert :deepStrictEqual (get setup :originalCaseTimeouts) literal-timeouts)
         (js-call assert :deepStrictEqual (get original :originalAssertions) literal-titles)
-        (js-call assert :strictEqual (get execution :timeoutMs) 245000)
+        (js-call assert :strictEqual (get execution :timeoutMs) undefined)
+        (js-call assert :strictEqual (get setup :originalTotalTimeoutMs) 245000)
         (js-call assert :strictEqual (get execution :referenceArtifact) t)
         (js-call assert :strictEqual (get execution :runtimeLaunchers) t)
         (js-call assert :strictEqual (get execution :compilerSourceMaps) t)
@@ -287,7 +298,7 @@
                  (js-object :requiredCoverage (js-call (get originals :requiredCoverage) :filter (lambda (value) (/= value id))))))
                (before (Array/from (get originals :requiredCoverage)))
                (legacy (await (js-call legacy-corpus :loadOriginalCompilerCorpus
-                                (js-object :sourceRoot root :originals private-originals))))
+                                (prepareOriginalBootstrapEmitterOptions (js-object :sourceRoot root :originals private-originals)))))
                (actual (await (loadOriginalCompilerCorpus (js-object :sourceRoot root :originals originals))))
                (gate (get actual :originalGateEvidence)) (legacy-gate (get legacy :originalGateEvidence))
                (dependencies (get gate :hostOnlyDependencies))
@@ -296,6 +307,18 @@
           (js-call assert :deepStrictEqual (get originals :requiredCoverage) before)
           (js-call assert :deepStrictEqual (get actual :coverageIds) before)
           (js-call expected-gate-ids :add id)
+          (js-call (get gate :locators) :forEach (lambda (locator)
+            (when (and (= (get locator :file) "tests/compiler-runtime-scan-selfhosted.test.mjs")
+                       (= (get locator :contains) "committed compiler runtime scan report matches measured sources"))
+              (js-call expected-gate-ids :add (get locator :id)))
+            (when (or
+              (and (= (get locator :file) "tests/reader-program-fuzz-acceptance-selfhosted.test.mjs")
+                   (= (get locator :contains) "100000 deterministic reader and program mutations preserve every invariant"))
+              (and (= (get locator :file) "tests/stdlib-bit-selfhosted.test.mjs")
+                   (= (get locator :contains) "portable 32-bit operations and algorithms agree under Bun and Node"))
+              (and (= (get locator :file) "tests/bootstrap-emitter-selfhosted.test.mjs")
+                   (= (get locator :contains) "bootstrapped emitter matches seed ESM and Source Map output")))
+              (js-call expected-gate-ids :delete (get locator :id)))))
           (js-call assert :deepStrictEqual (get gate :coverageIds)
             (js-call before :filter (lambda (value) (js-call expected-gate-ids :has value))))
           (js-call assert :strictEqual (js-length audit) 1)
@@ -367,7 +390,7 @@
                  (without-audit (Object/assign (js-object) actual (js-object
                    :coverageIds (get legacy :coverageIds)
                    :originalGateEvidence (Object/assign (js-object) gate (js-object
-                     :coverageIds (get legacy-gate :coverageIds)
+                     :coverageIds (js-call (get gate :coverageIds) :filter (lambda (value) (/= value id)))
                      :hostOnlyDependencies (js-call dependencies :filter (lambda (item) (/= (get item :coverageId) id)))))))))
             ;; The request-source transport independently adds one real HTTP
             ;; provider asset. Authenticate that precise addition; never drop
@@ -482,10 +505,33 @@
                     :originalHostSha256 (literal-hash source) :transportedHostSha256 (literal-hash output)
                     :originalSpecifier "bun:test" :sourceAssets proofs :assertionsUnchanged t))
                   (put records at record)))))
+            ;; These explicit maintained transports have their independent
+            ;; original-source/byte/negative tests. Applying only the named
+            ;; migrations to the retained model keeps every unrelated recipe,
+            ;; source asset and coverage value in this full-object comparison.
+            (let ((migration-options (js-object :sourceRoot root :originals private-originals)))
+              (await (transportOriginalExecutionAssets expected migration-options))
+              (await (transportOriginalToolsCLIAssets expected migration-options))
+              (await (transportOriginalToolsDataReferenceAssets expected migration-options))
+              (await (transportOriginalProjectRuntimeAssets expected migration-options))
+              (await (transportOriginalFuzzCorpus expected migration-options))
+              (await (transportOriginalStdlibBitCorpus expected migration-options))
+              (await (transportOriginalSourceDebuggingCorpus expected migration-options))
+              (await (transportOriginalBootstrapEmitterCorpus expected migration-options))
+              (bindOriginalMaintainedSuiteEvidence expected)
+              (await (bindOriginalRuntimeScanReportEvidence expected migration-options))
+              (bindOriginalFunctionalResourceInputs expected))
             ;; Compare complete values; failures cannot format the entire
             ;; multi-megabyte source/recipe inventory into a diagnostic diff.
             (js-call assert :strictEqual (isDeepStrictEqual without-audit expected) t
-              "only the authenticated literal gate HTTP runtime-scan and exact matcher dependency transports may differ from the unchanged legacy corpus")
+              "only the exact authenticated literal, HTTP, runtime-scan, matcher, execution assets, tools reference inputs, functional input proofs, runtime assets and maintained complete-suite transports may differ from the unchanged legacy corpus")
+            (let* ((changed (globalThis.structuredClone without-audit))
+                   (untouched (js-call (get changed :records) :find (lambda (record)
+                     (= (get record :id) "original-program:compiler-module-bootstrap-reader")))))
+              (js-call assert :ok untouched)
+              (put untouched :entry "changed-unrelated-entry.mjs")
+              (js-call assert :strictEqual (isDeepStrictEqual changed expected) false
+                "an unrelated original recipe change must still fail complete corpus equality"))
             (let ((variants (js-array "missing" "duplicate" "hash" "bytes")) (index 0))
               (while (< index (js-length variants))
                 (let* ((changed (Object/assign (js-object) without-audit

@@ -1,0 +1,35 @@
+(module tests.compiler-corpus-raw-math-fixture
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile)
+  (import "node:crypto" createHash)
+  (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/backends/compiler-corpus-raw-math-fixture.mjs" loadOriginalRawMathModels)
+  (test "original Math independent models retain exact cancellation and binary16 double rounding witnesses"
+    (async ()
+      (let* ((source (await (readFile (resolve root "tests/wasm-managed-math.test.mjs") "utf8")))
+             (digest (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
+             (models (loadOriginalRawMathModels (js-object :source source :sourceSha256 digest))))
+        ;; The authentic suite repeats declaration text in its later child-process
+        ;; template. The bounded model region still owns a single declaration.
+        (js-call assert :ok (/= (js-call source :indexOf "const unaryNames =")
+          (js-call source :lastIndexOf "const unaryNames =")))
+        (js-call assert :strictEqual (value-type (get models :sumPreciseModel)) "function")
+        (js-call assert :strictEqual (value-type (get models :f16Model)) "function")
+        (js-call assert :ok (Array/isArray (get models :unaryNames)))
+        (js-call assert :ok (Object/is (js-call models :sumPreciseModel (js-array)) -0))
+        (js-call assert :strictEqual (js-call models :sumPreciseModel (js-array 1e16 1 -1e16)) 1)
+        (js-call assert :strictEqual (js-call models :sumPreciseModel
+          (js-array Number.MAX_VALUE Number.MAX_VALUE (- Number.MAX_VALUE))) Number.MAX_VALUE)
+        (let ((witness (js-call models :adjacent (+ 1 (Math/pow 2 -11)) t)))
+          (js-call assert :strictEqual (js-call models :f16Model witness) (+ 1 (Math/pow 2 -10)))
+          (js-call assert :strictEqual (js-call models :f16Model (Math/fround witness)) 1))
+        (js-call assert :ok (> (js-length (js-call models :froundRandom)) 128))
+        (js-call assert :ok (> (js-length (js-call models :sumSamples)) 70))
+        (js-call assert :strictEqual (aref (js-call models :sumIteratorObservation 6) 0) "TypeError")
+        (js-call assert :throws (lambda ()
+          (loadOriginalRawMathModels (js-object :source (str source "\n") :sourceSha256 digest)))))))
+  ;; Full original mathBody is the integration B: every original recipe group,
+  ;; both engines and both collector thresholds remain selected by the corpus.
+)

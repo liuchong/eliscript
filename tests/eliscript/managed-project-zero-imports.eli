@@ -14,11 +14,25 @@
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntimeWithHostModules)
   (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
   (import "./helpers/managed-numeric-selfhosted.mjs" loadReference)
+  (import "./helpers/performance-acceptance.mjs" currentPerformanceTest)
   (import "../tools/backends/managed-source-view.mjs"
     createManagedSourceView bindManagedSourceBoundary withManagedSourceBoundary withManagedSourceBindingPoll)
   (defvar directory undefined)
   (defvar backend undefined)
   (defvar runtime undefined)
+  (defun owned-report-functional-resources (profile deferred variant)
+    (unless (or (undefined? profile) (= profile "small"))
+      (throw (new globalThis.TypeError "owned report functional runtime profile must be small")))
+    (let* ((enabled (and (= profile "small") (= deferred "1") (= variant "complete")))
+           (selected (if enabled "full-runtime" "small"))
+           (small (independentCompilerResources (js-object :profile "small")))
+           (resources (independentCompilerResources (js-object :profile selected))))
+      (js-object :resources resources :effectiveRuntimeProfile selected
+        :resourceAcceptance (if enabled "deferred" "baseline")
+        :smallCapacityAcceptance (if enabled "DEFERRED / NOT ACCEPTED" "required-by-original-gate")
+        :originalRuntimeOptions (Object/assign (js-object) (get small :budget) (js-object :auto 65536))
+        :effectiveRuntimeOptions (Object/assign (js-object) (get resources :budget)
+          (js-object :auto (if enabled (get resources :auto) 65536))))))
   (defconst native-target (when (= (get globalThis.process :arch) "arm64")
     (cond ((= (get globalThis.process :platform) "darwin") "arm64-macos")
           ((= (get globalThis.process :platform) "linux") "arm64-linux"))))
@@ -34,13 +48,17 @@
       "(defun begin () (setq pending (fulfilled)) pending)"
       "(defun same-pending () pending)"
       "(defasync rejected () (await (Promise/resolve 0)) (setq count (+ count 1)) (throw false))"
-      "(export count bump abrupt later holder begin same-pending rejected)") :join "\n"))
+      "(defvar deferred-resolve nil)"
+      "(defvar deferred-reject nil)"
+      "(defun deferred-begin () (new globalThis/Promise (lambda (resolve reject) (setq deferred-resolve resolve deferred-reject reject))))"
+      "(defun deferred-finish (value rejected) (let ((complete (if rejected deferred-reject deferred-resolve))) (setq deferred-resolve nil deferred-reject nil) (funcall complete value)))"
+      "(export count bump abrupt later holder begin same-pending rejected deferred-begin deferred-finish)") :join "\n"))
     (js-object :id "main.mjs" :source (js-call (js-array
       ;; Both direct IR linking and the independent emitted ESM oracle use
       ;; these same actual output module IDs without a source resolver pass.
-      "(import \"./dep.mjs\" count bump abrupt later holder begin same-pending rejected)"
+      "(import \"./dep.mjs\" count bump abrupt later holder begin same-pending rejected deferred-begin deferred-finish)"
       "(defun read-count () count)"
-      "(export count bump abrupt later holder read-count begin same-pending rejected)"
+      "(export count bump abrupt later holder read-count begin same-pending rejected deferred-begin deferred-finish)"
       "(export-default bump)") :join "\n"))))
   (beforeAll (async ()
     (setq directory (await (realpath (await (mkdtemp (resolve (tmpdir) "eliscript-project-zero-imports-"))))))
@@ -82,6 +100,38 @@
       (js-call assert :strictEqual (get namespace :count) (+ before 2))
       (await (js-call assert :rejects (js-call namespace :rejected) (lambda (error) (eq error false))))
       (js-call assert :strictEqual (get namespace :count) (+ before 3))))
+  (defun deferred-await-value (namespace state)
+    (let ((promise (js-call namespace :deferred_begin)))
+      (put state :reference (new globalThis.WeakRef promise))
+      promise))
+  (defun begin-awaited-deferred (namespace)
+    (let* ((state (js-object))
+           (consume (async ()
+             (try (js-object :rejected false :value (await (deferred-await-value namespace state)))
+               (catch error (js-object :rejected t :value error))))))
+      ;; Do not capture the awaited Promise in this async closure's lexical
+      ;; environment: that would itself mask the missing runtime owner.
+      (put state :completion (funcall consume))
+      state))
+  (defasync exercise-retained-async (namespace)
+    ;; Only the consuming continuation survives this helper. The runtime's
+    ;; active job must keep its native resolver alive until source settlement,
+    ;; including across GC and real host turns with no source job queued.
+    (let ((rejections (js-array false t)) (index 0))
+      (while (< index (js-length rejections))
+        (let* ((rejected (aref rejections index))
+               (state (begin-awaited-deferred namespace)) (turn 0))
+          (while (< turn 3)
+            (await (new globalThis.Promise
+              (lambda (resolve) (globalThis.setTimeout resolve 0))))
+            (js-call globalThis.Bun :gc t)
+            (setq turn (1+ turn)))
+          (js-call assert :notStrictEqual
+            (js-call (get state :reference) :deref) undefined)
+          (js-call namespace :deferred_finish (if rejected false 42) rejected)
+          (js-call assert :deepStrictEqual (await (get state :completion))
+            (js-object :rejected rejected :value (if rejected false 42))))
+        (setq index (1+ index)))))
   (defun check-foreign-initializer-bindings (namespace dependency)
     (js-call assert :strictEqual (get namespace :set_order) "12")
     (js-call assert :strictEqual (get namespace :queue_order) "12")
@@ -183,7 +233,8 @@
                 (js-call (get backend :compiler) :compile_string (get item :source) (get item :id)))))
             (setq index (1+ index))))
         (let ((namespace (funcall (createRequire (resolve reference "main.mjs")) (resolve reference "main.mjs"))))
-          (exercise namespace) (await (exercise-async namespace 6))))
+          (exercise namespace) (await (exercise-async namespace 6))
+          (await (exercise-retained-async namespace))))
       (let* ((lowered (project)) (descriptor (get lowered :descriptor))
              (bytes (js-call globalThis.Uint8Array :from
                (js-call (get backend :wasm) :append_metadata_section
@@ -257,6 +308,7 @@
                         (when result (js-call adapter :release result))
                         (js-call adapter :release argument))))
                   (await (exercise-async namespace 10))
+                  (await (exercise-retained-async namespace))
                   (let ((pending (js-call namespace :begin)))
                     ;; Teardown rejects the original outstanding Promise and
                     ;; queued polling must not read cells after module close.
@@ -1317,12 +1369,43 @@
               :forEach (lambda (action)
                 (try (funcall action) (catch error (unless cleanup-failed (setq cleanup-failed t cleanup error))))))
             (when (and cleanup-failed (not failed)) (throw cleanup)))))))
-  (test "owned map and ordinary methods stay import free while the complete original async fixture retains its exact host ABI"
-    (async ()
+  (test "only the explicit deferred complete report uses bounded functional resources while small capacity stays unaccepted"
+    (lambda ()
+      (let* ((small (independentCompilerResources (js-object :profile "small")))
+             (full (independentCompilerResources (js-object :profile "full-runtime")))
+             (baseline (owned-report-functional-resources undefined undefined "complete"))
+             (functional (owned-report-functional-resources "small" "1" "complete")))
+        (js-call assert :deepStrictEqual (get baseline :originalRuntimeOptions)
+          (Object/assign (js-object) (get small :budget) (js-object :auto 65536)))
+        (js-call assert :deepStrictEqual (get baseline :effectiveRuntimeOptions) (get baseline :originalRuntimeOptions))
+        (js-call assert :strictEqual (get baseline :resourceAcceptance) "baseline")
+        (js-call assert :strictEqual (get baseline :smallCapacityAcceptance) "required-by-original-gate")
+        (js-call (js-array (js-array undefined "1" "complete") (js-array "small" undefined "complete")
+                          (js-array "small" "0" "complete") (js-array "small" "1" "pure")) :forEach
+          (lambda (arguments)
+            (let ((actual (apply owned-report-functional-resources arguments)))
+              (js-call assert :strictEqual (get actual :effectiveRuntimeProfile) "small")
+              (js-call assert :strictEqual (get actual :resourceAcceptance) "baseline")
+              (js-call assert :deepStrictEqual (get actual :resources) small))))
+        (js-call assert :strictEqual (get functional :effectiveRuntimeProfile) "full-runtime")
+        (js-call assert :strictEqual (get functional :resourceAcceptance) "deferred")
+        (js-call assert :strictEqual (get functional :smallCapacityAcceptance) "DEFERRED / NOT ACCEPTED")
+        (js-call assert :deepStrictEqual (get functional :originalRuntimeOptions) (get baseline :originalRuntimeOptions))
+        (js-call assert :deepStrictEqual (get functional :effectiveRuntimeOptions)
+          (Object/assign (js-object) (get full :budget) (js-object :auto (get full :auto))))
+        (js-call assert :deepStrictEqual (get functional :resources) full)
+        (js-call assert :strictEqual (get (get functional :effectiveRuntimeOptions) :maxSlots) 1048575)
+        (js-call assert :strictEqual (get (get functional :effectiveRuntimeOptions) :maxBytes) 268435456)
+        (js-call assert :strictEqual (get (get functional :originalRuntimeOptions) :auto) 65536)
+        (js-call assert :strictEqual (get (get functional :effectiveRuntimeOptions) :auto) 4194304)
+        (js-call (js-array "" "full-runtime" "full-compiler") :forEach (lambda (profile)
+          (js-call assert :throws (lambda () (owned-report-functional-resources profile "1" "complete")) globalThis.TypeError))))))
+
+  (defasync runOwnedBindingsAcceptance (iterations)
       (let* ((compiler (get backend :compiler))
              (records (js-array))
              (files (js-array "tests/fixtures/map-patterns.eli" "tests/fixtures/multi-arity.eli" "stdlib/persistent-queue.eli"))
-             (reference-root (resolve directory "owned-bindings-reference"))
+             (reference-root (resolve directory (+ "owned-bindings-reference-" iterations)))
              (source-parts (js-array
                "(import \"./tests/fixtures/map-patterns.mjs\" :as Patterns)"
                "(import \"./tests/fixtures/multi-arity.mjs\" :as Multi)"
@@ -1389,6 +1472,19 @@
                " (JSON/stringify (js-array same (get row :value) (Object/hasOwn row -0) (Object/hasOwn row slot)"
                " (Object/hasOwn row \"absent\") (Object/is (Object/freeze row) row) (Object/isFrozen row) failed events)))))"
                "(defun owned-native-has-own () (Object/hasOwn (js-object :value 42) \"value\"))"
+               "(defun owned-native-function-report () (let* ((target (lambda (left right) (+ left right)))"
+               " (old (Object/getOwnPropertyDescriptor target \"length\")) (failure nil)"
+               " (same (Object/is (Object/defineProperty target \"length\" (js-object :value 7)) target))"
+               " (row (js-object :value 1)))"
+               " (Object/defineProperty row \"value\" (js-object :value 2))"
+               " (Object/defineProperty target \"fixed\" (js-object :value false))"
+               " (try (Object/defineProperty target \"fixed\" (js-object :value t)) (catch error (setq failure (get error :name))))"
+               " (let ((length (Object/getOwnPropertyDescriptor target \"length\"))"
+               " (field (Object/getOwnPropertyDescriptor row \"value\")))"
+               " (JSON/stringify (js-array same (get old :value) (get target :length) (funcall target 3 4)"
+               " (get length :writable) (get length :enumerable) (get length :configurable)"
+               " (get row :value) (get field :writable) (get field :enumerable) (get field :configurable)"
+               " (get target :fixed) failure)))))"
                "(defun report () (let* ((queue (Queue/persistent-queue 1 2 3))"
                " (appended (Queue/persistent-queue-conj queue 4)) (popped (Queue/persistent-queue-pop appended)))"
                " (JSON/stringify (js-object"
@@ -1397,11 +1493,11 @@
                " (Patterns/shortcuts (js-object \"profile/name\" \"Ada\" \"account/id\" 5 :label \"text\" :token \"symbol\"))"
                " (Patterns/shortcuts (js-object \"profile/name\" \"Ada\" :label \"text\" :token \"symbol\"))"
                " (Patterns/persistent-shortcuts) (Patterns/lexical-map (js-object :name \"Ada\"))"
-               " (Patterns/countdown (js-object :remaining 10000)) (Patterns/catch-map) (Patterns/portable-name (js-object :name \"portable\")) (Patterns/persistent-map-pattern))"
+               (str " (Patterns/countdown (js-object :remaining " iterations ")) (Patterns/catch-map) (Patterns/portable-name (js-object :name \"portable\")) (Patterns/persistent-map-pattern))")
                " :multi (Multi/report) :queue (js-array (Queue/persistent-queue-to-array queue) (Queue/persistent-queue-to-array appended) (Queue/persistent-queue-to-array popped))"
                " :tagged (tagged) :ordinary (ordinary)))))"
                "(defasync async-report () (JSON/stringify (await (Multi/async-report))))"
-               "(export report async-report plain-binding-report queue-value ordinary-value object-native-call owned-native-object-report owned-native-has-own)"))
+               "(export report async-report plain-binding-report queue-value ordinary-value object-native-call owned-native-object-report owned-native-has-own owned-native-function-report)"))
              (main-source (js-call source-parts :join "\n"))
              ;; Preserve the original complete multi-arity module, including
              ;; its genuine awaits. A separately rooted graph reuses exactly
@@ -1413,7 +1509,7 @@
                    "(defun report () (let* ((queue (Queue/persistent-queue 1 2 3)) (popped (Queue/persistent-queue-pop queue)))"
                    " (JSON/stringify (js-object :patterns (Patterns/persistent-shortcuts) :defaults (Patterns/persistent-map-pattern)"
                    " :tagged (tagged) :ordinary (ordinary) :queue (Queue/persistent-queue-to-array popped)))))"
-                   "(export report plain-binding-report queue-value ordinary-value object-native-call owned-native-object-report owned-native-has-own)")) :join "\n"))
+                   "(export report plain-binding-report queue-value ordinary-value object-native-call owned-native-object-report owned-native-has-own owned-native-function-report)")) :join "\n"))
              (libraries (get (await (js-call backend :loadLiteralModules)) :literalModules)))
         (await (mkdir reference-root (js-object :recursive t)))
         (await (mkdir (resolve reference-root "node_modules") (js-object :recursive t)))
@@ -1439,8 +1535,8 @@
                (pure-expected (js-call pure-reference :report))
                (plain-expected (js-call reference :plain_binding_report))
                (native-object-expected (js-call reference :owned_native_object_report))
+               (native-function-expected (js-call reference :owned_native_function_report))
                (expected-queue (js-call reference :queue_value))
-               (resources (independentCompilerResources (js-object :profile "small")))
                (variants (js-array
                  (js-object :name "pure" :expected pure-expected :async false
                    :lowered (js-call (get backend :managed) :lower_managed_project records "pure.mjs" runtime
@@ -1458,6 +1554,9 @@
           (js-call assert :deepStrictEqual (get (JSON/parse pure-expected) :tagged) (get (JSON/parse expected) :tagged))
           (js-call assert :deepStrictEqual (get (JSON/parse pure-expected) :ordinary) (get (JSON/parse expected) :ordinary))
           (js-call assert :strictEqual plain-expected (js-call pure-reference :plain_binding_report))
+          (js-call assert :deepStrictEqual (JSON/parse native-function-expected)
+            (js-array t 2 7 7 false false t 2 t t t false "TypeError"))
+          (js-call assert :strictEqual native-function-expected (js-call pure-reference :owned_native_function_report))
           (let ((refusal (js-array t "ProtocolDispatchError" "ELI-RUNTIME-PROTOCOL" "ILookup" "get"
                             "object:anonymous" "missing" "protocol ILookup/get has no implementation for object:anonymous")))
             (js-call assert :deepStrictEqual (JSON/parse plain-expected)
@@ -1465,6 +1564,11 @@
                 (js-array "get") (js-array "after" 18 "missing"))))
           (while (< variant-index (js-length variants))
             (let* ((variant (aref variants variant-index)) (lowered (get variant :lowered))
+                   (acceptance (owned-report-functional-resources
+                     (get (get globalThis.process :env) "ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE")
+                     (get (get globalThis.process :env) "ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE")
+                     (get variant :name)))
+                   (resources (get acceptance :resources))
                    (descriptor (get lowered :descriptor))
                    (bytes (globalThis.Uint8Array.from
                      (js-call (get backend :wasm) :append_metadata_section
@@ -1476,6 +1580,13 @@
                      (js-array (js-object :module "eliscript.host" :name "source-operation" :kind "function"
                        :type (js-object :parameters (js-array 127 127) :results (js-array 127)))) (js-array)))
                    (position 0))
+              (when (= (get acceptance :resourceAcceptance) "deferred")
+                (console/error "[owned-report-resource-acceptance]" (JSON/stringify
+                  (js-object :variant (get variant :name) :resourceAcceptance (get acceptance :resourceAcceptance)
+                    :smallCapacityAcceptance (get acceptance :smallCapacityAcceptance)
+                    :effectiveRuntimeProfile (get acceptance :effectiveRuntimeProfile)
+                    :originalRuntimeOptions (get acceptance :originalRuntimeOptions)
+                    :effectiveRuntimeOptions (get acceptance :effectiveRuntimeOptions)))))
               (js-call assert :deepStrictEqual (get descriptor :hostCapabilities (js-array)) required)
               (js-call assert :deepStrictEqual (owned-binding-wasm-imports bytes) required-imports)
               (js-call assert :deepStrictEqual
@@ -1491,12 +1602,12 @@
                     (lambda (item) (= (get item :id) "tests/fixtures/multi-arity.mjs"))) false))
               (while (< position (js-length targets))
                 (let* ((target (aref targets position))
-                   (deployment (resolve directory (+ "owned-bindings-" (get variant :name)) target))
+                   (deployment (resolve directory (+ "owned-bindings-" iterations "-" (get variant :name)) target))
                    (entry (get (get descriptor :project) :entry))
                    (graph (createManagedModuleGraph descriptor))
                    (base (get (pathToFileURL (+ deployment "/")) :href))
-                   (options (Object/assign (js-object) (get resources :budget) (get resources :memory)
-                     (js-object :initializeModule false :auto 65536 :moduleGraph graph
+                   (options (Object/assign (js-object) (get acceptance :effectiveRuntimeOptions) (get resources :memory)
+                     (js-object :initializeModule false :moduleGraph graph
                        :projectEntry entry :projectModuleBaseURL base :nativeTarget native-target)))
                    (adapter undefined) (out undefined) (async-handle undefined) (failed false)
                    (phase "construct-runtime"))
@@ -1549,6 +1660,7 @@
                             (js-object :moduleGraph graph :projectEntry entry :projectModuleBaseURL base))))
                          (namespace (get loaded :namespace)))
                     (js-call assert :strictEqual (js-call namespace :owned_native_object_report) native-object-expected)
+                    (js-call assert :strictEqual (js-call namespace :owned_native_function_report) native-function-expected)
                     (when (get variant :async)
                     ;; Foreign values/Proxy traps and an object-valued key keep
                     ;; the genuine native operation and its exact call order.
@@ -1630,5 +1742,13 @@
           ;; All original pure/complete WASM/native calls and goldens finish
           ;; before this additional raw pre-initialization regression runs.
           (js-call assert :strictEqual (value-type raw-admission) "function")
-          (funcall raw-admission)))) 120000)
+          (funcall raw-admission))))
+
+  ;; The complete ten-thousand-step input and all its original assertions stay
+  ;; available unchanged. Explicit performance deferral never marks it passed.
+  (funcall (currentPerformanceTest test)
+    "owned map and ordinary methods stay import free while the complete original async fixture retains its exact host ABI"
+    (async () (await (runOwnedBindingsAcceptance 10000))) 120000)
+  (test "complete owned async fixture preserves every semantic assertion with a bounded functional map input"
+    (async () (await (runOwnedBindingsAcceptance 2))) 120000)
 )

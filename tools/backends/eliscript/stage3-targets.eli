@@ -189,7 +189,10 @@
                :semanticComparison "each effective record uses the original independent Seed oracle and exact comparison"
                :functionalRuntimeProfile (get options :functionalRuntimeProfile) :resourceAcceptance "not-evaluated"
                :targets (js-array)))
-             (schedule-options (js-object :parallelTargets t :stage3MetadataPath (get authentication :stage3MetadataPath)
+             ;; Each complete binary-output cell can retain a large compiler
+             ;; and managed heap. Keep final acceptance sequential; the
+             ;; uncertified parallel seam remains available to its unit tests.
+             (schedule-options (js-object :parallelTargets false :stage3MetadataPath (get authentication :stage3MetadataPath)
                :bootstrapManifestPath (get authentication :bootstrapManifestPath)
                :corpusRecordsPath frozen-path :outputRoot output :sourceRoot source-root
                :programCache (new globalThis.Map)

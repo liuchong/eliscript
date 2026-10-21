@@ -4,6 +4,7 @@
   (import "./capabilities.mjs" prepare-host-capabilities)
   (import "../bootstrap/ir.mjs" validate-serializable-program)
   (import "../bootstrap/emitter.mjs" emit-module-function-sources)
+  (import "../bootstrap/compiler.mjs" compile-ir-string)
   (import "../bootstrap/project.mjs" project-plan)
   (import "../bootstrap/symbol.mjs" binding-name munge-segment)
   (import "./regexp.mjs" compile-regexp-literal)
@@ -14,6 +15,8 @@
   ;; markers. Their keys are real linked programs and cannot retain a build.
   (defconst literal-brand-registries (new globalThis.WeakMap))
   (defconst literal-role-registry (new globalThis.WeakMap))
+  (defconst canonical-string-hash-admissions (new globalThis.WeakMap))
+  (defvar canonical-string-hash-templates nil)
 
   ;; Ordinary control-flow values use the managed heap. This explicit
   ;; experimental profile does not admit unimplemented language operations.
@@ -98,7 +101,15 @@
   (defun root-local (state local)
     (checked-control state "frame-set" (runtime-arguments state
       (js-array (word-local (get state :frame)) (word-constant (get local :rootIndex)) (word-local local)))))
+  (defun managed-immediate-result-p (expression)
+    (and (= (get expression :kind) "literal") (= (get expression :type) "u32")
+         (Number/isInteger (get expression :value))
+         (>= (get expression :value) 0) (<= (get expression :value) 3)))
   (defun managed-result (state expression allocating)
+    ;; Only actual nil/Boolean/undefined constants bypass ownership. A call or
+    ;; a nonallocating read can still return a handle and needs its normal root.
+    (if (managed-immediate-result-p expression)
+      (js-object :steps (word-constant 0) :result expression)
     (let* ((local (new-managed-local state "temporary" t))
            (steps (js-array (managed-guard state (word-set local expression)))))
       ;; Root ownership belongs to this lowering state, never to a local's
@@ -113,7 +124,7 @@
         (unless owner (setq owner (js-object)) (put state :snapshotOwnerToken owner))
         (js-object :steps (word-sequence steps) :result result
           :snapshotRoot (js-object :stable t :owner owner :epoch (get state :snapshotRootEpoch 0)
-            :local local :index (get local :index) :rootIndex (get local :rootIndex) :result result)))))
+            :local local :index (get local :index) :rootIndex (get local :rootIndex) :result result))))))
   (defun managed-temporary-root-count (state)
     (let ((roots (get state :temporaryRoots nil))) (if roots (js-length roots) 0)))
   (defun managed-temporary-root-barrier-p (state node)
@@ -225,6 +236,20 @@
             (let* ((captures (get state :captures)) (entry (new-managed-local state name t)))
               (put entry :captured t) (put entry :patternCell (get source :patternCell nil)) (put entry :source source) (put entry :captureIndex (js-length captures))
               (js-call captures :push entry) entry))))))
+  (defun managed-lexical-this-binding (state)
+    ;; Anonymous source functions are arrows in both JavaScript emitters.
+    ;; Reuse the existing lexical cell/capture graph only when this is read;
+    ;; a nested arrow forwards its creator's binding instead of its receiver.
+    (or (get state :lexicalThis nil)
+      (let* ((source (when (get state :lambda nil)
+                       (managed-lexical-this-binding (get state :outerState))))
+             (entry (new-managed-local state "lexical-this" t)))
+        (put entry :captured t)
+        (when source
+          (let ((captures (get state :captures)))
+            (put entry :source source) (put entry :captureIndex (js-length captures))
+            (js-call captures :push entry)))
+        (put state :lexicalThis entry) entry)))
   (defun finish-managed-bindings (node state)
     (managed-source-root (finish-managed-bindings-core node state) (get node :span nil)))
   (defun finish-managed-bindings-core (node state)
@@ -493,6 +518,22 @@
     (let ((pending (js-call (get program :body) :slice)))
       (while (> (js-length pending) 0)
         (let ((node (js-call pending :pop)))
+          (when (= (get node :kind) "raw-javascript")
+            (let ((children (get node :children)))
+              (unless (and (Array/isArray children) (= (js-length children) 1)
+                           (= (get (js-nth 0 children) :kind) "literal")
+                           (= (value-type (get (js-nth 0 children) :value)) "string"))
+                (managed-fail node "raw source requires one literal string"))))
+          ;; Source-text capture precedes lowering. Reject malformed object
+          ;; children here too, before the JS renderer can dereference them.
+          (when (= (get node :kind) "object-literal")
+            (js-call (get node :children) :forEach (lambda (property)
+              (let ((children (get property :children)))
+                (unless (and (= (get property :kind) "object-property")
+                             (Array/isArray children)
+                             (= (js-length children)
+                                (if (get (get property :properties) :computed) 2 1)))
+                  (managed-fail property "invalid managed object property"))))))
           (when (= (get node :kind) "method-call")
             (let ((children (get node :children)))
               (unless (and (Array/isArray children) (>= (js-length children) 2)
@@ -554,6 +595,8 @@
           (unless (js-call seen :has node)
             (js-call seen :add node)
             (when (= (get node :kind) "constructor-call")
+              (when (= (js-length (get node :children)) 0)
+                (managed-fail node "managed constructor requires a constructor expression"))
               (let* ((ctor (js-nth 0 (get node :children))) (name (managed-static-reference ctor))
                      (root (and name (js-nth 0 (js-call name :split ".")))))
                 (when (and (js-call (js-array "Map" "Set" "WeakMap" "WeakSet" "globalThis.Map" "globalThis.Set" "globalThis.WeakMap" "globalThis.WeakSet") :includes name)
@@ -815,7 +858,9 @@
         ;; at their first own/inherited observation, independently of statics.
         (when (and (>= builtin 47) (<= builtin 50))
           (js-call steps :push (lower-managed-collection-prototype-initialization value builtin state functions)))
-        (when (or (= builtin 75) (= builtin 6) (= builtin 71) (and (>= builtin 47) (<= builtin 50)))
+        ;; Reading Array's statics does not observe any iterator. Its existing
+        ;; per-member prototype publication prepares iterators when requested.
+        (when (or (= builtin 6) (= builtin 71) (and (>= builtin 47) (<= builtin 50)))
           (js-call steps :push (lower-managed-collection-iterator-initialization state functions)))
         (when (= builtin 71)
           (let ((members (js-array)) (index 0))
@@ -1015,17 +1060,18 @@
               (runtime-arguments state (js-array value))) (word-constant 1) "=")
               (word-sequence (js-array (word-set array-owner value) array-statics)) common))))))
   (defun lower-managed-function-value (function state)
-    (if (/= (get function :builtin -1) 76)
+    (if (and (/= (get function :builtin -1) 76) (/= (get function :builtin -1) 75))
       (lower-managed-owned-function-value function state)
       (let* ((owned (lower-managed-owned-function-value function state))
              (foreign (managed-result state (runtime-call state "value-host-object-identity"
-               (runtime-arguments state (js-array (word-constant 1)))) t))
-             (output (new-managed-local state "object-constructor" t)))
+               (runtime-arguments state (js-array (word-constant (if (= (get function :builtin) 76) 1 3))))) t))
+             (output (new-managed-local state "host-realm-constructor" t)))
         ;; Only the actual source-operation graph replaces this stub. Pure
         ;; control/module graphs retain their original owned callable and ABI.
         (js-object :result (word-local output) :steps (word-sequence (js-array
           (managed-guard state (word-if
-            (word-compare (runtime-call state "host-object-identity-enabled" (js-array)) (word-constant 1) "=")
+            (word-compare (runtime-call state (if (= (get function :builtin) 75)
+              "host-array-identity-enabled" "host-object-identity-enabled") (js-array)) (word-constant 1) "=")
             (word-sequence (js-array (get foreign :steps) (managed-guard state (word-set output (get foreign :result)))))
             (word-sequence (js-array (get owned :steps) (managed-guard state (word-set output (get owned :result)))))))
           (root-local state output)))))))
@@ -1295,7 +1341,7 @@
           (when (and (>= operation 300) (<= operation 334)) (setq arity (managed-collection-native-length operation)))
           (when (and (>= operation 163) (<= operation 169)) (setq arity (managed-object-native-length operation)))
           (when (and (>= operation 150) (<= operation 162))
-            (setq arity (if (or (= operation 151) (= operation 157) (= operation 162)) 1 0)))
+            (setq arity (if (or (= operation 151) (= operation 162)) 1 0)))
           (when (and (>= operation 170) (<= operation 179))
             (setq arity (js-nth (- operation 170) (js-array 3 2 2 2 1 1 1 1 1 1))))
           (when (and (>= operation 181) (<= operation 193))
@@ -1360,6 +1406,8 @@
             (setq start 2 value (lower-managed-namespace-value (managed-namespace-operation (js-nth 1 parts)) state functions)))
           ((and (= root "globalThis") (> (js-length parts) 1)
                 (>= (managed-builtin-operation (js-nth 1 parts)) 0))
+            (when (= (js-nth 1 parts) "Array")
+              (put (managed-builtin-function 75 state functions) :hostArrayIdentity t))
             (setq start 2 value (lower-managed-function-value
               (managed-builtin-function (managed-builtin-operation (js-nth 1 parts)) state functions) state)))
           (t
@@ -1389,6 +1437,9 @@
     (let* ((name (managed-static-reference node)) (operation (managed-builtin-operation name)) (prototype (managed-standard-prototype name))
            (parts (and name (js-call name :split "."))) (root (and parts (js-nth 0 parts)))
            (shadow (and root (or (resolve-managed-local scope state root) (managed-global state root) (find-function functions root)))))
+      (when (and (not shadow) parts (= root "globalThis") (> (js-length parts) 1)
+                 (= (js-nth 1 parts) "Array"))
+        (put (managed-builtin-function 75 state functions) :hostArrayIdentity t))
       (when (or (>= operation 0) (>= prototype 0) (>= (managed-parser-intrinsic name) 0) (>= (managed-well-known-symbol name) 0)
                 (>= (managed-namespace-operation name) 0))
         (if shadow
@@ -1481,10 +1532,13 @@
              :publicArity (js-length kinds) :parameterKinds kinds :uniform t :tableSlot slot
              :source node :reflectionName (get node :managedFunctionName "") :lambda t :outerState state :outerScope (js-call scope :slice)
              :globals (get state :globals nil) :module (get state :module nil) :projectNamespaces (get state :projectNamespaces nil)
+             :literalKeyCells (get state :literalKeyCells nil)
+             :literalNumberCells (get state :literalNumberCells nil)
              :hostIdentities (get state :hostIdentities nil))))
       (js-call functions :push function)
       (lower-managed-function function functions (get state :runtime))
-      (let* ((captures (get function :captures))
+      (let* ((first-root (get state :roots))
+             (captures (get function :captures))
              (result (managed-result state (runtime-call state "value-function-new" (runtime-arguments state
                (js-array (word-constant slot) (word-constant (js-length captures))))) t))
              (steps (js-array (get result :steps))) (index 0))
@@ -1493,7 +1547,15 @@
             (js-array (get result :result) (word-constant index) (word-local (get (js-nth index captures) :source))))))
           (setq index (1+ index)))
         (let ((described (lower-managed-function-description (get result :result) function state)))
-          (js-call steps :push (get described :steps)) (put described :steps (word-sequence steps)) described))))
+          (js-call steps :push (get described :steps))
+          ;; Captures and reflection metadata now belong to the closure graph.
+          ;; As with named callable values, retain the returned function only;
+          ;; temporary description roots must not survive into the next lambda.
+          (let ((result-local (js-nth (get (get described :result) :value) (get state :locals))))
+            (js-call steps :push (checked-control state "frame-clear-range" (runtime-arguments state
+              (js-array (word-local (get state :frame)) (word-constant first-root)
+                (word-constant (get state :roots)) (word-constant (get result-local :rootIndex)))))))
+          (put described :steps (word-sequence steps)) described))))
   (defun managed-qualified-owner-p (name scope state functions)
     (when name
       (let* ((parts (js-call name :split ".")) (root (js-nth 0 parts))
@@ -1534,9 +1596,13 @@
   (defun lower-managed-call (node scope state functions)
     (let* ((children (get node :children)) (callee (js-nth 0 children))
            (name (and (= (get callee :kind) "reference") (get callee :value)))
-           (function (and name (not (get state :module nil))
-                         (not (resolve-managed-local scope state name)) (find-function functions name)))
+           ;; Named synchronous declarations are immutable in modules too.
+           ;; Resolve the same local/global precedence as a value reference;
+           ;; mutable cells and captured callbacks must keep ordinary lookup.
+           (function (and name (not (resolve-managed-local scope state name))
+                         (not (managed-global state name)) (find-function functions name)))
            (direct (and function (not (get function :uniform nil))
+                        (not (and (get state :tailCalls nil) (js-call (get state :tailCalls) :has node)))
                         (= (1- (js-length children)) (get function :publicArity))))
            (target (and (not direct) (lower-managed-call-target callee scope state functions)))
            (steps (if target (js-array (get target :steps)) (js-array)))
@@ -1606,7 +1672,49 @@
            (result (managed-result state (runtime-call state "value-bigint-parse" (runtime-arguments state
              (js-array (get text :result)))) t)))
       (put result :steps (word-sequence (js-array (get text :steps) (get result :steps)))) result))
+  (defun managed-number-literal-key (value)
+    (let ((words (number-float64-words value)))
+      ;; Map<number> treats both zero signs as the same key. The raw payload
+      ;; words also retain every other binary64 boundary without decimal loss.
+      (when (and (= value 0) (< (/ 1 value) 0)) (put words 1 2147483648))
+      (str (js-nth 0 words) "/" (js-nth 1 words))))
+  (defun lower-managed-module-literal (node state cell)
+    (let* ((index (word-constant (get cell :index)))
+           (result (managed-result state (runtime-call state "value-module-get"
+                     (runtime-arguments state (js-array index))) t))
+           (local (get (get result :snapshotRoot) :local))
+           (literal (lower-managed-literal-uncached node state local)))
+      (put result :steps (word-sequence (js-array (get result :steps)
+        (managed-guard state (word-if (word-compare (get result :result) (word-constant 0) "=")
+          (word-sequence (js-array (get literal :steps)
+            (managed-guard state (word-set local (runtime-call state "value-module-literal-init"
+              (runtime-arguments state (js-array index (get literal :result))))))
+            ;; The cold allocation already rooted this exact value in LOCAL.
+            ;; literal-init cannot allocate and returns its input unchanged.
+            (capture-error state))) (word-constant 0)))))) result))
   (defun lower-managed-literal (node state)
+    (let* ((value (get node :value)) (properties (get node :properties (js-object)))
+           (type (value-type value))
+           (cell (unless (Object/hasOwn properties "literalKind")
+             (cond
+               ((and (= type "string") (get state :literalKeyCells nil))
+                 (js-call (get state :literalKeyCells) :get value))
+               ((and (= type "number") (get state :literalNumberCells nil))
+                 (js-call (get state :literalNumberCells) :get (managed-number-literal-key value)))))))
+      ;; Modules prepare their private nil cells before any source initializer.
+      ;; No cell means an ordinary/nonmodule or compiler-created literal; keep
+      ;; its previous allocation and error behavior instead of inventing a pool.
+      (if cell (lower-managed-module-literal node state cell)
+        (lower-managed-literal-uncached node state))))
+  (defun managed-literal-allocation (state expression target)
+    (if (not target) (managed-result state expression t)
+      ;; Pool misses initialize directly into the already reserved hot-result
+      ;; root. Strings need this root before their raw payload is borrowed.
+      (js-object :result (word-local target)
+        :steps (word-sequence (js-array
+          (managed-guard state (word-set target expression))
+          (capture-error state) (root-local state target))))))
+  (defun lower-managed-literal-uncached (node state &optional target)
     (let* ((value (get node :value)) (properties (get node :properties (js-object))) (type (value-type value)))
       (if (Object/hasOwn properties "literalKind")
         (if (= (get properties :literalKind nil) "undefined") (managed-result state (word-constant 3) nil)
@@ -1617,11 +1725,11 @@
           ((= type "number")
            (let ((words (number-float64-words value)))
              (when (and (= value 0) (< (/ 1 value) 0)) (put words 1 2147483648))
-             (managed-result state (runtime-call state "value-number" (runtime-arguments state
-               (js-array (word-constant (js-nth 0 words)) (word-constant (js-nth 1 words))))) t)))
+             (managed-literal-allocation state (runtime-call state "value-number" (runtime-arguments state
+               (js-array (word-constant (js-nth 0 words)) (word-constant (js-nth 1 words))))) target)))
           ((= type "string")
-           (let* ((result (managed-result state (runtime-call state "value-string" (runtime-arguments state
-                            (js-array (word-constant (js-length value))))) t))
+           (let* ((result (managed-literal-allocation state (runtime-call state "value-string" (runtime-arguments state
+                            (js-array (word-constant (js-length value))))) target))
                   (steps (js-array (get result :steps)))
                   (data (new-managed-local state "literal-string-data" nil)))
              ;; Allocate and root the owned string before obtaining its raw
@@ -2082,14 +2190,15 @@
            (result (get lowered :result)) (cleared (get state :snapshotRootClearedAt nil)))
       ;; Named bindings, captures and rewrapped control-flow results lack this
       ;; provenance and still require a separate snapshot before later effects.
-      (if (and root owner (get root :stable nil) (Object/is (get root :owner) owner)
+      (if (or (managed-immediate-result-p result)
+          (and root owner (get root :stable nil) (Object/is (get root :owner) owner)
                (= (value-type (get root :epoch)) "number")
                (<= (get root :epoch) (get state :snapshotRootEpoch 0))
                (>= (get root :epoch) (if cleared (or (js-call cleared :get (get root :rootIndex)) 0) 0))
                (Object/is (get root :result) result) (= (get result :kind) "local") (= (get result :type) "u32")
                (= (get result :value) (get root :index))
                (Object/is (js-nth (get root :index) (get state :locals)) (get root :local))
-               (= (get (get root :local) :rootIndex) (get root :rootIndex)))
+               (= (get (get root :local) :rootIndex) (get root :rootIndex))))
         lowered
         (let ((snapshot (managed-result state result nil)))
           (put snapshot :steps (word-sequence (js-array (get lowered :steps) (get snapshot :steps)))) snapshot))))
@@ -2219,6 +2328,8 @@
           (js-call steps :push (checked-control state "value-set" (runtime-arguments state
             (js-array (get result :result) (word-constant i) (js-nth i values))))) (setq i (1+ i)))
         (put result :steps (word-sequence steps)) result)))
+  (defun lower-managed-static-key (property state)
+    (lower-managed-literal (js-object :kind "literal" :value (get property :value) :children (js-array)) state))
   (defun lower-managed-object (node scope state functions)
     (let* ((properties (get node :children))
            (clone-source (when (= (js-length properties) 0) (get state :managedCloneSource nil)))
@@ -2239,7 +2350,7 @@
                (prototype (and (not computed) (= (get property :value) "__proto__")))
                (key (snapshot-managed (if computed
                       (lower-managed-key (js-nth 0 children) scope state functions)
-                      (lower-managed-literal (js-object :kind "literal" :value (get property :value) :children (js-array)) state)) state))
+                      (lower-managed-static-key property state)) state))
                (value (snapshot-managed (lower-managed-expression (js-nth (if computed 1 0) children) scope state functions) state)))
           (when prototype
             (when prototype-seen (managed-fail property "duplicate object prototype setter")) (setq prototype-seen t))
@@ -2365,16 +2476,26 @@
   (defun managed-invoke-arguments (state callee values &optional receiver tail)
     (put state :callable t)
     (let* ((list (managed-values-arguments state values))
-           (result (managed-result state (runtime-call state (if tail "value-source-tail-call" "value-source-invoke-with-this")
+           ;; Callee, receiver and arguments already belong to this source
+           ;; frame. Preserve the displaced receiver here too, including when
+           ;; a nested callback collects or a trap unwinds this entire frame.
+           (previous (unless tail (managed-result state
+             (runtime-call state "value-function-current-this" (runtime-arguments state (js-array))) t)))
+           (result (managed-result state (runtime-call state (if tail "value-source-tail-call" "value-source-invoke-rooted-with-this")
               (runtime-arguments state (js-array callee (or receiver (word-constant 3))
                 (get list :result) (word-constant (js-length values))))) t))
-           (list-local (js-nth (get (get list :result) :value) (get state :locals))))
+           (list-local (js-nth (get (get list :result) :value) (get state :locals)))
+           (previous-local (when previous (js-nth (get (get previous :result) :value) (get state :locals)))))
       ;; Source code can retain argument values, but cannot observe this private
       ;; kind-7 transport container. The result has its own root before removal.
-      (put result :steps (word-sequence (js-array (get list :steps) (get result :steps)
+      (put result :steps (word-sequence (js-array (get list :steps)
+        (if previous (get previous :steps) (word-constant 0)) (get result :steps)
         (checked-control state "frame-set" (runtime-arguments state
           (js-array (word-local (get state :frame)) (word-constant (get list-local :rootIndex))
-            (word-constant 0))))))) result))
+            (word-constant 0))))
+        (if previous-local (checked-control state "frame-set" (runtime-arguments state
+          (js-array (word-local (get state :frame)) (word-constant (get previous-local :rootIndex))
+            (word-constant 0)))) (word-constant 0))))) result))
   (defun lower-managed-callback-loop (node scope state functions method receiver arguments)
     (put state :callable t)
     (let* ((operation (js-call (js-array "map" "filter" "forEach" "some" "every" "find"
@@ -2597,11 +2718,11 @@
              (key (lower-managed-key (js-nth 1 children) scope state functions))
              (builtin (new-managed-local state "text-method-builtin" nil))
              (steps (js-array (get receiver :steps) (get key :steps)
-               (managed-guard state (word-set builtin (runtime-call state "value-text-method-kind"
-                 (runtime-arguments state (js-array (get receiver :result)))))) (capture-error state)))
+               (managed-guard state (word-set builtin (runtime-call state "value-text-key-method-kind"
+                 (runtime-arguments state (js-array (get receiver :result) (get key :result)))))) (capture-error state)))
              (callee (managed-result state (word-if (word-compare (word-local builtin) (word-constant 0) "=")
-               (runtime-call state "value-array-callback-get" (runtime-arguments state
-                 (js-array (get receiver :result) (get key :result)))) (word-constant 3)) t))
+               (managed-property-get state (runtime-arguments state
+                 (js-array (get receiver :result) (get key :result) (word-constant 0)))) (word-constant 3)) t))
              (arguments (js-array)) (i 2) (output (new-managed-temporary-local state "text-method-output")))
         (js-call steps :push (get callee :steps))
         ;; Resolve the method before every argument, including ignored extras.
@@ -3161,6 +3282,14 @@
                         (js-array (get receiver :result) (word-constant operation)
                           (if (> count 2) (js-nth 0 arguments) (word-constant 3))
                           (if (> count 3) (js-nth 1 arguments) (word-constant 3))))) t)))
+          ;; A direct native entries/keys/values call can bypass reflected
+          ;; prototype publication. Prepare the real iterator prototypes here,
+          ;; only in that selected native branch, before exposing its result.
+          ;; Later GetIterator must observe an iterator's own next override.
+          (when (and (>= operation 6) (<= operation 8))
+            (put result :steps (word-sequence (js-array
+              (lower-managed-collection-iterator-initialization state functions)
+              (get result :steps)))))
           (js-call steps :push (managed-guard state (word-if (word-compare (word-local available) (word-constant 0) "=")
             (word-sequence (js-array (get ordinary :steps) (managed-guard state (word-set output (get ordinary :result)))))
             (word-sequence (js-array (get result :steps) (managed-guard state (word-set output (get result :result))))))) (root-local state output)))
@@ -3366,7 +3495,9 @@
         ((and (= kind "raw-javascript") (managed-empty-weak-constructor node))
          (lower-managed-constructor (managed-weak-constructor-node node (managed-empty-weak-constructor node)) scope state functions))
         ((and (= kind "raw-javascript") (= (managed-static-reference node) "this"))
-         (managed-result state (runtime-call state "value-function-current-this" (runtime-arguments state (js-array))) t))
+         (if (get state :lambda nil)
+           (js-object :steps (word-sequence (js-array)) :result (binding-read (managed-lexical-this-binding state)))
+           (managed-result state (runtime-call state "value-function-current-this" (runtime-arguments state (js-array))) t)))
         ((and (= kind "raw-javascript") (managed-bigint-literal node))
          (lower-managed-bigint-literal (managed-bigint-literal node) state))
         ((= kind "raw-javascript")
@@ -3856,9 +3987,11 @@
              (arity (get function :publicArity)) (uniform (get function :uniform nil))
              (kinds (get function :parameterKinds)) (patterns (managed-function-patterns-p node))
              (state (js-object :locals (js-array) :roots 0 :runtime runtime :captures (js-array)
-               :tailCalls tail-calls
+               :tailCalls tail-calls :lambda (get function :lambda nil)
                :outerState (get function :outerState nil) :outerScope (get function :outerScope nil)
                :globals (get function :globals nil) :module (get function :module nil) :initializer (get function :initializer nil)
+               :literalKeyCells (get function :literalKeyCells nil)
+               :literalNumberCells (get function :literalNumberCells nil)
                :projectNamespaces (get function :projectNamespaces nil) :hostIdentities (get function :hostIdentities nil)))
              (heap (new-managed-local state "heap" nil)) (scope (js-array)) (index 0))
         (unless (and (Array/isArray children) (= (value-type arity) "number")
@@ -3973,6 +4106,16 @@
                         (runtime-arguments state (js-array (word-local (get state :function)) (word-constant index))))))
                       (capture-error state) (root-local state entry)))
                   (setq index (1+ index)))
+                (let ((receiver (get state :lexicalThis nil)))
+                  (when (and receiver (not (get state :lambda nil)))
+                    ;; The nearest named function owns the arrow's immutable
+                    ;; this cell. Caller frames already root its receiver;
+                    ;; publish the cell before executing any source body.
+                    (js-call frame-steps :push
+                      (managed-guard state (word-set receiver (runtime-call state "value-cell-new"
+                        (runtime-arguments state (js-array
+                          (runtime-call state "value-function-current-this" (runtime-arguments state (js-array))))))))
+                      (capture-error state) (root-local state receiver))))
                 (setq index 0)
                 (while (< index arity)
                   (let ((entry (js-nth index scope)))
@@ -3991,12 +4134,24 @@
                     (runtime-call state "frame-pop" (runtime-arguments state (js-array (word-local (get state :frame)))))
                     (word-constant 0)))
                 (js-call steps :push
+                  (if (get function :canonicalStringHash nil)
+                    ;; Admission belongs to the linked program's private map.
+                    ;; All original uniform/module/argument checks above still
+                    ;; run. A successful word helper needs no rest array or
+                    ;; source frame; a genuine error must not run the fallback.
+                    (word-sequence (js-array
+                      (managed-guard state (word-set result
+                        (runtime-call state "value-canonical-string-hash-try" (runtime-arguments state
+                          (js-array (word-local (get state :arguments)) (word-local (get state :count)))))))
+                      (capture-error state)
+                      (managed-guard state (word-if (word-compare (word-local result) (word-constant 0) "=")
+                        (word-sequence frame-steps) (word-constant 0)))))
                   (if query
                     (word-if (get query :condition)
                       (word-sequence (js-array
                         (managed-guard state (word-set result (get query :result))) (capture-error state)))
                       (word-sequence frame-steps))
-                    (word-sequence frame-steps))))))
+                    (word-sequence frame-steps)))))))
           (js-call steps :push (word-if (word-compare (word-local (get state :error)) (word-constant 0) "=")
             (word-local result) (runtime-call state "fail" (js-array (word-local (get state :error))))))
           (let ((typed (managed-source-root
@@ -4197,19 +4352,41 @@
       (managed-finish-wrapper function (word-if
         (word-compare (runtime-call state "value-module-status" (runtime-arguments state (js-array))) (word-constant 2) "=")
         (word-constant 1) (word-node "sequence" steps nil)))))
+  (defun managed-module-function-dispatch (cases slot first end fallback)
+    ;; Slot tests are pure and mutually exclusive. Keep the exact equality at
+    ;; each leaf so out-of-range slots retain the original bounds failure.
+    (if (= first end) fallback
+      (if (= (1+ first) end)
+        (word-if (word-compare slot (word-constant first) "=") (js-nth first cases) fallback)
+        (let ((middle (Math/floor (/ (+ first end) 2))))
+          (word-if (word-compare slot (word-constant middle) "<")
+            (managed-module-function-dispatch cases slot first middle fallback)
+            (managed-module-function-dispatch cases slot middle end fallback))))))
   (defun managed-module-getter (index runtime function-count functions)
     (let* ((function (managed-module-wrapper "__eliscript_module_get" index runtime 3))
            (state (get function :state)) (arguments (get function :arguments))
            (kind (word-local (js-nth 0 arguments))) (slot (word-local (js-nth 1 arguments)))
            (error (new-managed-local state "error" nil)) (frame (new-managed-local state "frame" nil))
            (result (new-managed-local state "result" nil))
-           (dispatch (runtime-call state "fail" (js-array (word-constant 3)))) (position 0))
+           (fallback (runtime-call state "fail" (js-array (word-constant 3))))
+           (cases (js-array)) (root-maximum 0) (local-maximum (get state :locals)) (position 0))
       (put state :error error) (put state :frame frame) (put state :functions functions)
       (while (< position function-count)
-        (let ((value (lower-managed-function-value (js-nth position functions) state)))
-          (setq dispatch (word-if (word-compare slot (word-constant position) "=")
-            (word-node "sequence" (js-array (get value :steps) (get value :result)) nil) dispatch)))
+        ;; Each lookup executes exactly one arm. Give each arm its own
+        ;; lowering state and the same local/root prefix, then reserve only
+        ;; the largest arm. Summing all arms made every host export read
+        ;; allocate and clear a frame proportional to the entire module.
+        ;; Private snapshot provenance cannot cross these disjoint states.
+        (let* ((branch (Object/assign (js-object) state
+                        (js-object :locals (js-call (get state :locals) :slice) :roots 0)))
+               (value (lower-managed-function-value (js-nth position functions) branch)))
+          (setq root-maximum (Math/max root-maximum (get branch :roots)))
+          (when (> (js-length (get branch :locals)) (js-length local-maximum))
+            (setq local-maximum (get branch :locals)))
+          (js-call cases :push (word-node "sequence" (js-array (get value :steps) (get value :result)) nil)))
         (setq position (1+ position)))
+      (put state :roots root-maximum) (put state :locals local-maximum)
+      (let ((dispatch (managed-module-function-dispatch cases slot 0 function-count fallback)))
       (managed-finish-wrapper function (word-node "sequence" (js-array
         (runtime-call state "begin-operation" (js-array))
         (word-set frame (runtime-call state "frame-new" (runtime-arguments state (js-array (word-constant (get state :roots))))))
@@ -4220,7 +4397,7 @@
           (word-if (word-compare kind (word-constant 1) "=") dispatch
             (runtime-call state "fail" (js-array (word-constant 3)))))))
         (capture-error state)
-        (runtime-call state "heap-frame-result" (runtime-arguments state (js-array (word-local frame) (word-local result))))) nil))))
+        (runtime-call state "heap-frame-result" (runtime-arguments state (js-array (word-local frame) (word-local result))))) nil)))))
   (defun managed-module-runtime-wrapper (name index runtime helper arity)
     (let* ((function (managed-module-wrapper name index runtime arity)) (state (get function :state))
            (arguments (get function :arguments)) (values (js-array)) (i 0))
@@ -4284,6 +4461,7 @@
       (if (and (= kind "map-binding-entry") (= index 1)) "pattern"
       (or (and (= index 1) (js-call (js-array "property-read" "property-write" "method-call") :includes kind))
           (and (= kind "intrinsic") (= index 1) (js-call (js-array "aref" "object-has?" "object-assoc") :includes name))
+          (and (= kind "intrinsic") (= index 0) (= name "js-nth"))
           (and (= kind "object-property") (= index 0) (get (get node :properties (js-object)) :computed false))))))
   (defun managed-literal-key-literal-p (node position)
     (and position
@@ -4478,6 +4656,103 @@
           (js-call provided :some (lambda (item)
             (and (= (get item :id) "stdlib/core/protocol.mjs")
                  (managed-protocol-ir-equal program (get item :program)))))))))
+  (defun managed-string-hash-shape (value)
+    ;; Only source locations are irrelevant. Keep every other IR field,
+    ;; including unknown caller markers, as part of complete authentication.
+    (if (or (nil? value) (/= (value-type value) "object")) value
+      (if (Array/isArray value) (js-call value :map managed-string-hash-shape)
+        (let ((copy (Object/create nil)))
+          (js-call (Object/getOwnPropertyNames value) :forEach (lambda (key)
+            (unless (= key "span")
+              (let ((descriptor (Object/getOwnPropertyDescriptor value key)))
+                (unless (Object/hasOwn descriptor "value") (managed-fail nil "hash helper IR requires data fields"))
+                (put copy key (managed-string-hash-shape (get descriptor :value))))))) copy))))
+  (defun managed-string-hash-expected ()
+    (unless canonical-string-hash-templates
+      ;; This is Eliscript source, parsed by the same maintained frontend.
+      ;; A source change must deliberately update this exact implementation;
+      ;; changed library algorithms simply keep their complete ordinary body.
+      (let* ((source (js-call (js-array
+        "(defun avalancheHash (value)"
+        " (let ((hash (uint32 value)))"
+        "  (setq hash (bit-xor hash (unsigned-bit-shift-right hash 16)))"
+        "  (setq hash (imul32 hash 2246822507))"
+        "  (setq hash (bit-xor hash (unsigned-bit-shift-right hash 13)))"
+        "  (setq hash (imul32 hash 3266489909))"
+        "  (uint32 (bit-xor hash (unsigned-bit-shift-right hash 16)))))"
+        "(defun mixHash (hash value)"
+        " (let ((mixed (imul32 (uint32 (bit-xor hash value)) 1540483477)))"
+        "  (uint32 (bit-xor mixed (unsigned-bit-shift-right mixed 15)))))"
+        "(defun finishHash (hash count) (avalancheHash (mixHash hash (uint32 count))))"
+        "(defun hashString (value &rest tags)"
+        " (let* ((tag (if (or (= (js-length tags) 0) (undefined? (aref tags 0)))"
+        "                 1831565813 (aref tags 0)))"
+        "        (hash (mixHash tag (aref value \"length\"))) (index 0))"
+        "  (while (< index (aref value \"length\"))"
+        "    (setq hash (mixHash hash (js-call value :charCodeAt index)) index (1+ index)))"
+        "  (finishHash hash (aref value \"length\"))))") :join "\n"))
+             (program (compile-ir-string source "canonical-string-hash.eli"))
+             (declarations (collect-managed-declarations (get program :body) (js-array)))
+             (expected (new globalThis.Map)))
+        (js-call declarations :forEach (lambda (node)
+          (js-call expected :set (get node :value) (managed-string-hash-shape node))))
+        (setq canonical-string-hash-templates expected))) canonical-string-hash-templates)
+  (defun managed-canonical-string-hash-p (id program context)
+    (let ((canonical-id (if (and context (js-call id :startsWith (get context :prefix)))
+                          (js-call id :slice (js-length (get context :prefix))) id)))
+      (when (= canonical-id "stdlib/managed-value-state.mjs")
+        (let* ((expected (managed-string-hash-expected))
+               (definitions (new globalThis.Map)) (valid t)
+               (declarations (collect-managed-declarations (get program :body) (js-array))))
+          (js-call declarations :forEach (lambda (node)
+            (let ((name (get node :value)))
+              (when (and (= (get node :kind) "function-declaration") (js-call expected :has name))
+                (if (js-call definitions :has name) (setq valid false)
+                  (progn
+                    (js-call definitions :set name node)
+                    (unless (managed-protocol-ir-equal (managed-string-hash-shape node) (js-call expected :get name))
+                      (setq valid false))))))))
+          (unless (= (get definitions :size) 4) (setq valid false))
+          ;; Reject all later writes and every lexical/import/pattern shadow,
+          ;; even in otherwise unrelated bodies. This deliberately admits less
+          ;; than the source language rather than approximating mutation flow.
+          (let ((pending (js-call (get program :body) :slice)))
+            (while (and valid (> (js-length pending) 0))
+              (let* ((node (js-call pending :pop)) (kind (get node :kind))
+                     (name (managed-binding-key (get node :value))))
+                (when (and (js-call expected :has name)
+                           (js-call (js-array "function-declaration" "variable-declaration" "lexical-binding"
+                             "parameter-binding" "binding-name" "catch-binding" "import-named" "import-default"
+                             "import-namespace" "assignment-pair") :includes kind)
+                           (not (eq node (js-call definitions :get name))))
+                  (setq valid false))
+                (append-managed pending (get node :children))))) valid))))
+  (defun managed-string-hash-admitted-bindings (program)
+    ;; link-managed-project is public and its returned IR is mutable. Recheck
+    ;; the private snapshots before lowering; identity is necessary, not a
+    ;; license to alter authenticated code or insert later binding writes.
+    (let ((groups (js-call canonical-string-hash-admissions :get program)) (admitted (new globalThis.Set)))
+      (when groups
+        (js-call groups :forEach (lambda (group)
+          (let ((expected (get group :definitions)) (definitions (new globalThis.Map)) (valid t)
+                (pending (js-call (get program :body) :slice)))
+            (js-call (collect-managed-declarations (get program :body) (js-array)) :forEach (lambda (node)
+              (when (and (= (get node :kind) "function-declaration") (js-call expected :has (get node :value)))
+                (let ((name (get node :value)))
+                  (when (or (js-call definitions :has name)
+                            (not (managed-protocol-ir-equal (managed-string-hash-shape node) (js-call expected :get name))))
+                    (setq valid false))
+                  (js-call definitions :set name node)))))
+            (unless (= (get definitions :size) 4) (setq valid false))
+            (while (and valid (> (js-length pending) 0))
+              (let* ((node (js-call pending :pop)) (name (managed-binding-key (get node :value))) (kind (get node :kind)))
+                (when (and (js-call expected :has name)
+                           (js-call (js-array "function-declaration" "variable-declaration" "lexical-binding"
+                             "parameter-binding" "binding-name" "catch-binding" "import-named" "import-default"
+                             "import-namespace" "assignment-pair") :includes kind)
+                           (not (eq node (js-call definitions :get name)))) (setq valid false))
+                (append-managed pending (get node :children))))
+            (when valid (js-call admitted :add (get group :hash))))))) admitted))
   (defun managed-literal-dependency (node id context)
     (let* ((children (get node :children)) (output nil) (value (get node :value)) (index 0))
       (while (< index (js-length children))
@@ -4724,6 +4999,39 @@
       (while (and (not foreign) (< index (js-length awaits)))
         (unless (managed-owned-await-operand-p (js-nth index awaits) shadowed) (setq foreign t))
         (setq index (1+ index))) foreign))
+  (defun managed-object-literal-key-cells (program globals initializers)
+    ;; Source primitive literals and static keys share private readonly nil
+    ;; cells. Source strings pool by UTF16 value, Numbers by exact payload words.
+    ;; The slab owns first-used constants; unused functions allocate no values.
+    (let ((pending (js-call (get program :body) :slice))
+          (keys (new globalThis.Map)) (numbers (new globalThis.Map)))
+      (while (> (js-length pending) 0)
+        (let* ((node (js-call pending :pop)) (children (get node :children (js-array))) (index 0))
+          (when (and (= (get node :kind) "literal")
+                     (not (Object/hasOwn (get node :properties (js-object)) "literalKind")))
+            (let ((value (get node :value)))
+              (cond
+                ((= (value-type value) "string") (js-call keys :set value nil))
+                ((= (value-type value) "number") (js-call numbers :set (managed-number-literal-key value) nil)))))
+          (when (= (get node :kind) "object-literal")
+            (js-call children :forEach (lambda (property)
+              (when (and (= (get property :kind) "object-property")
+                         (not (get (get property :properties (js-object)) :computed nil))
+                         (= (value-type (get property :value)) "string"))
+                (js-call keys :set (get property :value) nil)))))
+          (while (< index (js-length children))
+            (js-call pending :push (js-nth index children)) (setq index (1+ index)))))
+      (js-call (js-array keys numbers) :forEach (lambda (cells)
+        (js-call cells :forEach (lambda (unused identity)
+          (let* ((source (js-object :projectPrepare t :children
+                           (js-array (js-object :kind "literal" :value nil :children (js-array)))))
+                 (entry (js-object :name nil :index (js-length globals) :mutable false :source source)))
+            (js-call globals :push entry)
+            ;; Ordinary modules initialize nil sentinels before source bodies.
+            ;; Phased projects publish them in the existing preparation stage.
+            (js-call initializers :unshift (js-object :kind "managed-global-init" :globalEntry entry :children (js-array)))
+            (js-call cells :set identity entry))))))
+      (js-object :strings keys :numbers numbers)))
   (defun lower-managed-program-core (program runtime-program &optional module-mode export-names project-namespaces host-identity-groups host-modules source-modules phased foreign-entry)
     (unless (or (nil? module-mode) (= (value-type module-mode) "boolean"))
       (managed-fail program "invalid managed module mode"))
@@ -4733,7 +5041,8 @@
       (setq program (managed-portable-program (managed-program-source-texts program))))
     (let ((await-host-capability (managed-await-host-capability-p program))
           (probe-registries (js-call literal-brand-registries :get program))
-          (role-registry (js-call literal-role-registry :get program)))
+          (role-registry (js-call literal-role-registry :get program))
+          (string-hash-bindings (managed-string-hash-admitted-bindings program)))
     (setq program (lower-async-program program))
     (setq program (js-call globalThis.Object :assign (js-object) program
       (js-object :body (js-call (get program :body) :map (lambda (node)
@@ -4741,7 +5050,8 @@
     (let* ((runtime (lower-memory-program runtime-program)) (runtime-functions (get runtime :functions))
            (declarations (collect-managed-declarations (get program :body) (js-array)))
            (functions (js-array)) (exports (js-array)) (globals (js-array)) (initializers (js-array))
-           (names (new globalThis.Set)) (positions (new globalThis.Map)) (module (or module-mode nil)) (index 0))
+           (names (new globalThis.Set)) (positions (new globalThis.Map)) (module (or module-mode nil))
+           (literal-key-cells nil) (literal-number-cells nil) (index 0))
       (while (< index (js-length declarations))
         (let* ((node (js-nth index declarations)) (kind (get node :kind)) (name (get node :value)))
           (js-call positions :set node (js-length initializers))
@@ -4757,7 +5067,8 @@
                     (uniform (or (managed-function-patterns-p node) (js-call kinds :some (lambda (kind) (not (= kind "required")))))))
                (js-call functions :push (js-object :name name :internalName (str "__eliscript_managed_" (js-length functions))
                  :index (+ (js-length runtime-functions) (js-length functions)) :arity (if uniform 4 (1+ (js-length kinds)))
-                 :publicArity (js-length kinds) :parameterKinds kinds :uniform uniform :tableSlot (js-length functions) :source node))))
+                 :publicArity (js-length kinds) :parameterKinds kinds :uniform uniform :tableSlot (js-length functions) :source node
+                 :canonicalStringHash (and string-hash-bindings (js-call string-hash-bindings :has name))))))
             ((= kind "variable-declaration")
              (unless (and (Array/isArray (get node :children)) (<= (js-length (get node :children)) 1)
                           (= (value-type (get (get node :properties) :mutable)) "boolean"))
@@ -4822,6 +5133,9 @@
           (setq group-index (1+ group-index)))
         (unless (= (get ownership :size) (js-length nodes)) (managed-fail program "missing managed host identity ownership"))
         (when (> (js-length groups) 0) (setq module t))
+      (when module
+        (let ((cells (managed-object-literal-key-cells program globals initializers)))
+          (setq literal-key-cells (get cells :strings) literal-number-cells (get cells :numbers))))
       (let* ((literal-probe (managed-literal-brand-probe-function program functions runtime-functions probe-registries
                               "literal-kind" "__eliscript_literal_brand_probe" 0))
              (role-probe (when (and probe-registries role-registry)
@@ -4870,6 +5184,8 @@
         (while (< index (js-length functions))
           (let ((function (js-nth index functions)))
             (put function :globals globals) (put function :module module) (put function :projectNamespaces project-namespaces)
+            (put function :literalKeyCells literal-key-cells)
+            (put function :literalNumberCells literal-number-cells)
             (put function :hostIdentities ownership)
             (lower-managed-function function functions runtime-functions)) (setq index (1+ index)))
         (let ((aliases (js-array)) (descriptors (js-array)) (seen (new globalThis.Set))
@@ -4958,6 +5274,10 @@
                     (word-local (js-nth 0 locals)) (word-local (js-nth 1 locals))) "source-operation"))))
               (when (or external (eq foreign-entry t))
                 (put (find-function combined "host-object-identity-enabled") :body (word-constant 1)))
+              (when (and (or external (eq foreign-entry t))
+                         (or (eq foreign-entry t)
+                           (js-call functions :some (lambda (function) (get function :hostArrayIdentity false)))))
+                (put (find-function combined "host-array-identity-enabled") :body (word-constant 1)))
               (when (and project (or external (eq foreign-entry t)))
                 (let* ((stub (find-function combined "host-project-binding-changed")) (locals (get stub :locals)))
                   (put stub :body (word-node "call" (js-array (word-local (js-nth 0 locals))
@@ -5285,6 +5605,8 @@
              (setq index (1+ index)))))
         (t
           (when (= kind "constructor-call")
+            (when (= (js-length children) 0)
+              (managed-link-fail node "managed constructor requires a constructor expression"))
             (let* ((ctor (js-nth 0 children)) (name (if (= (get ctor :kind) "raw-javascript")
                      (get (js-nth 0 (get ctor :children)) :value) (get ctor :value)))
                    (base (if (or (= name "globalThis.Map") (= name "globalThis.Set") (= name "globalThis.WeakMap") (= name "globalThis.WeakSet")) "globalThis" name)))
@@ -5372,10 +5694,11 @@
                                     (js-call globalThis.Object :hasOwn (js-call globalThis.Object :getOwnPropertyDescriptor input "id") "value")
                                     (js-call globalThis.Object :hasOwn (js-call globalThis.Object :getOwnPropertyDescriptor input "program") "value"))
                           (managed-link-fail nil "managed project module records require id and program data fields")))
-               (id (get input :id nil)) (program (get input :program nil)))
+               (id (get input :id nil)) (program (get input :program nil)) (canonical-hash nil))
           (unless (and (managed-link-id-p id) program (not (js-call records :has id)))
             (managed-link-fail program "invalid or duplicate managed project module identity"))
           (unless (js-call validated :has program) (managed-validate-source-program program t))
+          (setq canonical-hash (managed-canonical-string-hash-p id program literal-context))
           ;; A direct canonical protocol entry does not necessarily request
           ;; persistent literals. Authenticate its complete supplied source IR
           ;; before adding the same private bridge used by the literal graph.
@@ -5397,7 +5720,7 @@
                   (managed-literal-dependency node (js-call id :slice (js-length (get literal-context :prefix))) literal-context)))))
               (managed-literal-program program id literal-context))))
           (js-call ids :push id)
-          (js-call records :set id (js-object :id id :program program
+          (js-call records :set id (js-object :id id :program program :canonicalStringHash canonical-hash
             :declarations (collect-managed-declarations (get program :body) (js-array))
             :bindings (new globalThis.Map) :exports (new globalThis.Map) :dependencies (js-array)))) (setq index (1+ index)))
       (unless (js-call records :has entry) (managed-link-fail nil "managed project entry module is missing"))
@@ -5542,6 +5865,18 @@
               (when (> (js-length identities) 0) (js-call host-identities :push (js-object :nodes identities :before (js-nth 0 copies)))))) (setq index (1+ index)))
         (let* ((record (js-call records :get entry)) (exports (js-array))
                (program (js-call globalThis.Object :assign (js-object) (get record :program) (js-object :body body :projectEntry entry :managedPortableManifest (get (get record :program) :managedPortableManifest false)))))
+          (let ((admitted (js-array)))
+            (js-call records :forEach (lambda (owner id)
+              (when (and (js-call reachable-ids :has id) (get owner :canonicalStringHash nil))
+                (let ((definitions (new globalThis.Map)))
+                  (js-call (js-array "avalancheHash" "mixHash" "finishHash" "hashString") :forEach (lambda (name)
+                    (let* ((canonical (get (managed-link-binding owner name records (get owner :program)) :canonical))
+                           (node (js-call body :find (lambda (node)
+                             (and (= (get node :kind) "function-declaration") (= (get node :value) canonical))))))
+                      (js-call definitions :set canonical (managed-string-hash-shape node)))))
+                  (js-call admitted :push (js-object :definitions definitions :hash
+                    (get (managed-link-binding owner "hashString" records (get owner :program)) :canonical)))))))
+            (when (> (js-length admitted) 0) (js-call canonical-string-hash-admissions :set program admitted)))
           (when (and literal-context (js-call reachable-ids :has (get literal-context :adapter)))
             (let ((adapter (js-call records :get (get literal-context :adapter))) (bindings (js-array)))
               (js-call (get adapter :exports) :forEach (lambda (exported name)

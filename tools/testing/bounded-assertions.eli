@@ -1,0 +1,24 @@
+(module tools.testing.bounded-assertions
+  (import "node:assert/strict" :default standard)
+  ;; Pass an Error message to the original assertion. Its original comparator
+  ;; still reads and compares the complete operands, in its original order;
+  ;; an actual mismatch throws this ordinary AssertionError before constructing
+  ;; a textual diff or retaining the entire compiler products in the failure.
+  (defun boundedStrictAssertions (original)
+    (let ((wrappers (new globalThis.Map)))
+      (js-call (js-array "equal" "strictEqual" "deepEqual" "deepStrictEqual") :forEach (lambda (key)
+        (let ((method (get original key)))
+          (js-call wrappers :set key (lambda (actual expected &optional message)
+            (let* ((message-type (value-type message))
+                   (supplied-object (or (= message-type "function")
+                     (and (= message-type "object") (not (nullish? message)))))
+                   (text (if (= (value-type message) "string") (js-call message :slice 0 160)
+                           "complete strict comparison failed"))
+                   (failure (if supplied-object message
+                     (new (get standard :AssertionError) (js-object :message text
+                       :operator (if (or (= key "equal") (= key "strictEqual")) "strictEqual" "deepStrictEqual")
+                       :actual undefined :expected undefined)))))
+              (Reflect/apply method original (js-array actual expected failure))))))))
+      (new globalThis.Proxy original (js-object :get (lambda (target key receiver)
+        (if (js-call wrappers :has key) (js-call wrappers :get key) (Reflect/get target key receiver)))))))
+  (export boundedStrictAssertions))

@@ -104,6 +104,39 @@
           (js-call assert :strictEqual (js-call custom :kind (new globalThis.Proxy (js-object) traps)) "custom"))
         (js-call assert :strictEqual reads 0))))
 
+  (test "automatic literal classification does not enter a foreign Proxy anywhere in an ordinary prototype chain"
+    (async ()
+      (await (loadManagedHostModules (js-object :hostModules (js-array))))
+      (let ((provider (createManagedLiteralHostProvider)) (reads 0))
+        (js-call (js-array false undefined) :forEach (lambda (first)
+          (let ((proxy (new globalThis.Proxy (js-object) (js-object
+            :get (lambda (&rest ignored) (setq reads (1+ reads)) (throw first))
+            :getPrototypeOf (lambda (&rest ignored) (setq reads (1+ reads)) (throw first))
+            :getOwnPropertyDescriptor (lambda (&rest ignored) (setq reads (1+ reads)) (throw first))))))
+            (js-call (js-array (js-object) (js-array) (lambda () nil)) :forEach (lambda (value)
+              (Object/setPrototypeOf value proxy)
+              (js-call assert :strictEqual (js-call provider :kind value) nil)
+              (Object/setPrototypeOf value (Object/create proxy))
+              (js-call assert :strictEqual (js-call provider :kind value) nil)))
+            (let ((custom (js-object :kind (lambda (value) "custom") :read (lambda (value) value)
+                            :create (lambda (&rest ignored) nil))))
+              (js-call assert :strictEqual (createManagedLiteralHostProvider custom) custom)
+              (js-call assert :strictEqual (js-call custom :kind (Object/create proxy)) "custom")))))
+        (let ((revoked (globalThis.Proxy.revocable (js-object) (js-object))))
+          (js-call revoked :revoke)
+          (js-call assert :strictEqual (js-call provider :kind (Object/create (get revoked :proxy))) nil))
+        (js-call (js-array nil undefined false 0 "value" (funcall globalThis.Symbol "primitive")
+                   (funcall globalThis.BigInt 1)) :forEach
+          (lambda (value) (js-call assert :strictEqual (js-call provider :kind value) nil)))
+        (js-call assert :strictEqual reads 0)
+        ;; Classification must not patch normal user reflection or swallow
+        ;; its first thrown value after it has declined automatic branding.
+        (let* ((first (js-object :original t)) (caught false) (actual nil)
+               (proxy (new globalThis.Proxy (js-object) (js-object
+                 :getPrototypeOf (lambda (&rest ignored) (throw first))))))
+          (try (Reflect/getPrototypeOf proxy) (catch error (setq caught t actual error)))
+          (js-call assert :strictEqual caught t) (js-call assert :strictEqual actual first)))))
+
   (defvar directory undefined)
   (defvar backend undefined)
   (defvar lowered undefined)
@@ -111,6 +144,7 @@
   (defvar reference undefined)
   (defvar library undefined)
   (defvar runtime-ir undefined)
+  (defvar canonical-hash-runtime-ir undefined)
   (defconst native-target (when (= (get globalThis.process :arch) "arm64")
     (cond ((= (get globalThis.process :platform) "darwin") "arm64-macos")
           ((= (get globalThis.process :platform) "linux") "arm64-linux"))))
@@ -214,6 +248,215 @@
         (let ((node (js-call pending :pop)))
           (when (get node :managedProtocolExactPrototype false) (js-call found :push node))
           (js-call (get node :children) :forEach (lambda (child) (js-call pending :push child))))) found))
+  (defconst canonical-hash-names (js-array "avalancheHash" "mixHash" "finishHash" "hashString"))
+  (defun canonical-hash-helpers (program)
+    (let ((pending (js-call (get program :body) :slice)) (helpers (js-array)))
+      (while (> (js-length pending) 0)
+        (let ((node (js-call pending :shift)))
+          (if (= (get node :kind) "module-declaration")
+            (setq pending (js-call (get node :children) :concat pending))
+            (when (and (= (get node :kind) "function-declaration")
+                       (js-call canonical-hash-names :includes (get node :value)))
+              (js-call helpers :push node))))) helpers))
+  (defun canonical-hash-test-program (compiler helpers extra)
+    ;; Analyze the callers with declared bindings, then substitute the exact
+    ;; standard-library IR. The placeholders never reach either target.
+    (let* ((bindings (js-call (js-array
+               "(defun avalancheHash (value) value)"
+               "(defun mixHash (hash value) hash)"
+               "(defun finishHash (hash count) hash)"
+               "(defvar hashString (lambda (value &rest tags) value))") :join "\n"))
+           (program (js-call compiler :compile_ir_string
+                      (js-call (js-array bindings extra) :join "\n") "canonical-hash-test.eli"))
+           (body (js-call (get program :body) :filter (lambda (node)
+             (not (and (js-call (js-array "function-declaration" "variable-declaration") :includes (get node :kind))
+                       (js-call canonical-hash-names :includes (get node :value))))))))
+      (put program :body (js-call helpers :concat body)) program))
+  (defun canonical-hash-fast-call-count (lowered)
+    (let* ((functions (get (get lowered :typed) :functions))
+           (helper (js-call functions :find (lambda (function) (= (get function :name) "value-canonical-string-hash-try"))))
+           (count 0))
+      (js-call assert :ok helper)
+      (js-call functions :forEach (lambda (function)
+        (when (js-call (get function :name "") :startsWith "__eliscript_managed_")
+          (let ((pending (js-array (get function :body))))
+            (while (> (js-length pending) 0)
+              (let ((node (js-call pending :pop)))
+                (when (and (= (get node :kind) "call") (= (get node :value) (get helper :index)))
+                  (setq count (1+ count)))
+                (js-call (get node :children) :forEach (lambda (child) (js-call pending :push child))))))))) count))
+  (defasync canonical-hash-counted-runtime ()
+    (unless canonical-hash-runtime-ir
+      (let* ((source (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")))
+             (needle "(heap-number-from-word heap string-hash 0)")
+             (counted (js-call source :replace needle
+               "(progn (store-u32 144 (1+ (load-u32 144))) (heap-number-from-word heap string-hash 0))")))
+        (js-call assert :notStrictEqual counted source)
+        (setq canonical-hash-runtime-ir
+          (js-call (get backend :compiler) :compile_ir_string counted "canonical-hash-counted-runtime.eli"))))
+    canonical-hash-runtime-ir)
+  (defasync canonical-hash-observed-runtime (image options)
+    (let ((original (get globalThis.WebAssembly :Instance)) (captured undefined) (adapter undefined))
+      (try
+        (progn
+          (put globalThis.WebAssembly :Instance (new globalThis.Proxy original (js-object
+            :construct (lambda (target arguments)
+              (setq captured (Reflect/construct target arguments)) captured))))
+          (setq adapter (await (instantiateManagedRuntimeWithHostModules image options))))
+        (finally (put globalThis.WebAssembly :Instance original)))
+      (js-call assert :ok captured)
+      (js-object :adapter adapter :hits (lambda ()
+        (js-call (new globalThis.DataView (get (get (get captured :exports) :memory) :buffer)) :getUint32 144 t)))))
+  (test "only all four canonical hash definitions without writes or shadows receive the private whole-hash lowering"
+    (async ()
+      (let* ((compiler (get backend :compiler))
+             (source (await (readFile (resolve root "stdlib/managed-value-state.eli") "utf8")))
+             (canonical (js-call compiler :compile_ir_string source "stdlib/managed-value-state.eli"))
+             (before (JSON/stringify canonical)) (helpers (canonical-hash-helpers canonical))
+             (program (canonical-hash-test-program compiler helpers "(export hashString)"))
+             (lower (lambda (input id)
+               (js-call (get backend :managed) :lower_managed_project
+                 (js-array (js-object :id id :program input)) id runtime-ir))))
+        (js-call assert :strictEqual (js-length helpers) 4)
+        (js-call assert :strictEqual (canonical-hash-fast-call-count (funcall lower program "stdlib/managed-value-state.mjs")) 1)
+        (js-call assert :strictEqual (canonical-hash-fast-call-count (funcall lower program "user/managed-value-state.mjs")) 0)
+        (let ((changed (globalThis.structuredClone program)) (pending undefined) (replaced false))
+          (setq pending (js-call (get changed :body) :slice))
+          (while (> (js-length pending) 0)
+            (let ((node (js-call pending :pop)))
+              (when (and (= (get node :kind) "literal") (= (get node :value) 2246822507))
+                (put node :value 2246822509) (setq replaced t))
+              (js-call (get node :children) :forEach (lambda (child) (js-call pending :push child)))))
+          (js-call assert :strictEqual replaced t)
+          (js-call assert :strictEqual (canonical-hash-fast-call-count (funcall lower changed "stdlib/managed-value-state.mjs")) 0))
+        (let ((shadow (canonical-hash-test-program compiler helpers
+                        "(defun shadow (mixHash) mixHash) (export hashString)")))
+          (js-call assert :strictEqual (canonical-hash-fast-call-count (funcall lower shadow "stdlib/managed-value-state.mjs")) 0))
+        (let ((written (canonical-hash-test-program compiler helpers
+                         "(defun replaceHash () (setq hashString undefined)) (export hashString)")))
+          ;; The original backend refuses assignment to a function declaration.
+          ;; Neither authentication nor a caller marker may bypass that error.
+          (js-call assert :throws (lambda () (funcall lower written "stdlib/managed-value-state.mjs"))
+            (lambda (error) (js-call (get error :message "") :includes "existing mutable managed binding"))))
+        (let ((forged (globalThis.structuredClone program)))
+          (put forged :canonicalStringHash t)
+          (put forged :managedStringHashFast t)
+          (js-call (get forged :body) :forEach (lambda (node)
+            (when (= (get node :value) "hashString") (put node :canonicalStringHash t))))
+          (js-call assert :throws (lambda () (funcall lower forged "user/managed-value-state.mjs"))
+            (lambda (error) (js-call (get error :message "") :includes "unknown or missing fields"))))
+        ;; A serialized or cloned linked program carries no private admission,
+        ;; even when it retains all of the linker's visible ordinary fields.
+        (let* ((linked (js-call (get backend :managed) :link_managed_project
+                        (js-array (js-object :id "stdlib/managed-value-state.mjs" :program program))
+                        "stdlib/managed-value-state.mjs"))
+               (copy (globalThis.structuredClone (get linked :program)))
+               (plain (js-call (get backend :managed) :lower_managed_program copy runtime-ir t)))
+          (js-call assert :strictEqual (canonical-hash-fast-call-count plain) 0))
+        (let* ((linked (js-call (get backend :managed) :link_managed_project
+                        (js-array (js-object :id "stdlib/managed-value-state.mjs" :program (globalThis.structuredClone program)))
+                        "stdlib/managed-value-state.mjs"))
+               (same (get linked :program)) (pending (js-call (get same :body) :slice)))
+          (while (> (js-length pending) 0)
+            (let ((node (js-call pending :pop)))
+              (when (and (= (get node :kind) "literal") (= (get node :value) 2246822507))
+                (put node :value 2246822509))
+              (js-call (get node :children) :forEach (lambda (child) (js-call pending :push child)))))
+          (js-call assert :strictEqual (canonical-hash-fast-call-count
+            (js-call (get backend :managed) :lower_managed_program same runtime-ir t)) 0))
+        (js-call assert :strictEqual (JSON/stringify canonical) before))) (js-object :timeout 120000))
+  (defconst canonical-hash-report-source (js-call (js-array
+    "(defvar early (hashString \"Eliscript\"))"
+    "(defun hashReport () (JSON/stringify (js-array early (hashString \"\") (hashString \"Eliscript\")"
+    " (hashString \"\" undefined) (hashString \"\" nil) (hashString \"\" 0)"
+    " (hashString \"key-50691\") (hashString \"key-194634\")"
+    " (hashString (String/fromCharCode 55296 0 65 56320) 4294967295))))"
+    "(defun overrideReport (mode)"
+    " (let* ((prototype (get globalThis.String :prototype)) (original (get prototype :charCodeAt)))"
+    "  (try (progn (put prototype :charCodeAt (lambda (index) (if (= mode 0) 65 (if (= mode 1) (throw false) (throw undefined)))))"
+    "    (hashString \"ab\"))"
+    "   (catch error (if (undefined? error) \"undefined\" (if (eq error false) \"false\" \"other\")))"
+    "   (finally (put prototype :charCodeAt original)))))"
+    "(export hashReport overrideReport)") :join "\n"))
+  (test "canonical hash generated WASM keeps JS goldens early calls and overridden charCodeAt primitive throws"
+    (async ()
+      (let* ((compiler (get backend :compiler))
+             (canonical (js-call compiler :compile_ir_string
+               (await (readFile (resolve root "stdlib/managed-value-state.eli") "utf8")) "stdlib/managed-value-state.eli"))
+             (helpers (canonical-hash-helpers canonical))
+             (program (canonical-hash-test-program compiler helpers canonical-hash-report-source))
+             (body (get program :body))
+             (early (js-call body :find (lambda (node) (= (get node :value) "early")))))
+        ;; Function declarations are hoisted in both targets: this initializer
+        ;; occurs before their source positions, not after all ordinary values.
+        (put program :body (js-call (js-array early) :concat (js-call body :filter (lambda (node) (not (eq node early))))))
+        (let* ((reference (await (loadReference (resolve directory "canonical-hash-reference.mjs")
+                            (js-call compiler :emit_ir_string program))))
+               (actual (js-call (get backend :managed) :lower_managed_project
+                 (js-array (js-object :id "stdlib/managed-value-state.mjs" :program program))
+                 "stdlib/managed-value-state.mjs" (await (canonical-hash-counted-runtime))))
+               (image (globalThis.Uint8Array.from (js-call (get backend :wasm) :append_metadata_section
+                 (js-call (get backend :wasm) :emit_typed_memory_wasm (get actual :typed))
+                 "eliscript-managed-control" (JSON/stringify (get actual :descriptor)))))
+               (adapter undefined) (observed undefined) (result undefined))
+          (js-call assert :strictEqual (canonical-hash-fast-call-count actual) 1)
+          (let ((expected (js-call reference :hashReport)))
+            (js-call assert :deepStrictEqual (js-call (JSON/parse expected) :slice 0 8)
+              (js-array 1222682721 439960318 1222682721 439960318 0 0 2357254775 2357254775))
+            (try
+              (progn
+                (setq observed (await (canonical-hash-observed-runtime image
+                  (js-object :maxSlots 8192 :initialBytes 1048576 :maxBytes 16777216 :auto 1))))
+                (setq adapter (get observed :adapter))
+                (setq result (js-call adapter :invoke "hashReport" (js-array)))
+                (js-call assert :strictEqual (js-call adapter :readString result) expected)
+                (js-call assert :ok (> (funcall (get observed :hits)) 0))
+                (js-call adapter :release result) (setq result undefined)
+                (let ((handle (js-call adapter :getExport "overrideReport")))
+                  (try
+                    (let ((invoke (js-call adapter :toHostValue handle)) (hits (funcall (get observed :hits))))
+                      (js-call assert :strictEqual (funcall invoke 0) (js-call reference :overrideReport 0))
+                      (js-call assert :strictEqual (funcall invoke 1) "false")
+                      (js-call assert :strictEqual (funcall invoke 2) "undefined")
+                      (js-call assert :strictEqual (funcall (get observed :hits)) hits))
+                    (finally (js-call adapter :release handle)))))
+              (finally
+                (when adapter
+                  (when result (js-call adapter :release result))
+                  (js-call adapter :closeModule) (js-call adapter :collect)
+                  (js-call assert :strictEqual (js-call adapter :live) 0)
+                  (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0)
+                  (when (get adapter :close) (js-call adapter :close))))))))) (js-object :timeout 120000))
+  (test "the real persistent literal library graph reaches whole string hashing before String exposure"
+    (async ()
+      (let* ((compiler (get backend :compiler))
+             (libraries (get (await (js-call backend :loadLiteralModules)) :literalModules))
+             (program (js-call compiler :compile_ir_string
+               "(import \"eliscript/runtime/core/value.mjs\" hashValue) (defun report () (hashValue \"Eliscript\")) (export report)"
+               "canonical-library-hash.eli"))
+             (actual (js-call (get backend :managed) :lower_managed_project
+               (js-array (js-object :id "main.mjs" :program program)) "main.mjs"
+               (await (canonical-hash-counted-runtime)) (js-object :literalModules libraries)))
+             (image (globalThis.Uint8Array.from (js-call (get backend :wasm) :append_metadata_section
+               (js-call (get backend :wasm) :emit_typed_memory_wasm (get actual :typed))
+               "eliscript-managed-control" (JSON/stringify (get actual :descriptor)))))
+             (observed undefined) (adapter undefined) (handle undefined))
+        (js-call assert :strictEqual (canonical-hash-fast-call-count actual) 1)
+        (try
+          (progn
+            (setq observed (await (canonical-hash-observed-runtime image
+              (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864 :auto 1))))
+            (setq adapter (get observed :adapter) handle (js-call adapter :getExport "report"))
+            (let ((report (js-call adapter :toHostValue handle)))
+              (js-call assert :strictEqual (funcall report) 1222682721))
+            (js-call assert :ok (> (funcall (get observed :hits)) 0)))
+          (finally
+            (when adapter
+              (when handle (js-call adapter :release handle))
+              (js-call adapter :closeModule) (js-call adapter :collect)
+              (js-call assert :strictEqual (js-call adapter :live) 0)
+              (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0)
+              (when (get adapter :close) (js-call adapter :close))))))) (js-object :timeout 120000))
   (defun direct-protocol-host-declarations (referrer)
     ;; The full original project session resolves this actual relative import
     ;; from its authenticated hostSources. Direct lower/link entry points have
@@ -672,6 +915,472 @@
                     (when (and cleanup-failed (not failed)) (throw cleanup)))))))
           (setq position (1+ position)))
         (js-call assert :strictEqual (JSON/stringify program) before))) (js-object :timeout 120000))
+
+  (test "missing ILookup on native Error objects retains the full ProtocolDispatchError instead of an ABI argument failure"
+    (async ()
+      (let* ((source (js-call (js-array
+               "(defun report (mode)"
+               " (let ((value (cond ((= mode 0) (new globalThis.Error \"x\"))"
+               "  ((= mode 1) (new globalThis.TypeError \"x\"))"
+               "  ((= mode 2) (new globalThis.RangeError \"x\"))"
+               "  ((= mode 3) (new globalThis.SyntaxError \"x\"))"
+               "  (t (new globalThis.ReferenceError \"x\")))))"
+               "  (try (try (throw value) (catch {:strs [message]} message))"
+               "   (catch error (JSON/stringify (js-array"
+               "    (get error :name) (get error :message) (get error :code)"
+               "    (get error :protocol) (get error :operation) (get error :observedType)"
+               "    (get error :reason) (Object/hasOwn error \"name\") (Object/keys error)"
+               "    (js-call (js-array \"name\" \"code\" \"protocol\" \"operation\" \"observedType\" \"reason\")"
+               "      :map (lambda (key) (let ((descriptor (Object/getOwnPropertyDescriptor error key)))"
+               "        (js-array (get descriptor :enumerable) (get descriptor :writable) (get descriptor :configurable)))))))))))"
+               "(export report)") :join "\n"))
+             (compiler (get backend :compiler))
+             (program (js-call compiler :compile_ir_string source "native-error-binding-label.eli"))
+             (independent (await (loadReference (resolve directory "native-error-binding-label-reference.mjs")
+               (js-call compiler :emit_ir_string program))))
+             (image (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm program runtime-ir)))
+             (adapter (instantiateManagedRuntime image (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216))))
+        (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module image)) (js-array))
+        (js-call adapter :auto 1)
+        (try
+          (let ((names (js-array "Error" "TypeError" "RangeError" "SyntaxError" "ReferenceError")) (mode 0))
+            (while (< mode (js-length names))
+              (let* ((input (js-call adapter :number mode)) (output undefined)
+                     (expected (JSON/parse (js-call independent :report mode))))
+                (js-call assert :strictEqual (aref expected 0) "ProtocolDispatchError")
+                (js-call assert :strictEqual (aref expected 2) "ELI-RUNTIME-PROTOCOL")
+                (js-call assert :deepStrictEqual (js-call expected :slice 3 8)
+                  (js-array "ILookup" "get" (+ "object:" (aref names mode)) "missing" t))
+                (js-call assert :deepStrictEqual (aref expected 8)
+                  (js-array "name" "code" "protocol" "operation" "observedType" "reason"))
+                (js-call assert :deepStrictEqual (aref expected 9)
+                  (js-call (aref expected 8) :map (lambda () (js-array t t t))))
+                (try
+                  (progn
+                    (setq output (js-call adapter :invoke "report" (js-array input)))
+                    (js-call assert :deepStrictEqual (JSON/parse (js-call adapter :readString output)) expected))
+                  (finally (js-call adapter :release input) (when output (js-call adapter :release output))))
+                (js-call adapter :collect)
+                (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0))
+              (setq mode (1+ mode))))
+          (finally
+            (js-call adapter :closeModule) (js-call adapter :collect)
+            (js-call assert :strictEqual (js-call adapter :live) 0)
+            (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0))))))
+
+  (test "native Error protocol failures expose the first error before descriptor and captured-callback observations"
+    (async ()
+      (let* ((source (js-call (js-array
+               "(defun make-error (mode)"
+               " (cond ((= mode 0) (new globalThis.Error \"x\"))"
+               "  ((= mode 1) (new globalThis.TypeError \"x\"))"
+               "  ((= mode 2) (new globalThis.RangeError \"x\"))"
+               "  ((= mode 3) (new globalThis.SyntaxError \"x\"))"
+               "  (t (new globalThis.ReferenceError \"x\"))))"
+               "(defun fields (mode)"
+               " (try (try (throw (make-error mode)) (catch {:strs [message]} message))"
+               "  (catch error (JSON/stringify (js-array"
+               "   (get error :name) (get error :message) (get error :code)"
+               "   (get error :protocol) (get error :operation) (get error :observedType)"
+               "   (get error :reason) (Object/hasOwn error \"name\") (Object/keys error))))))"
+               "(defun descriptors (mode)"
+               " (try (try (throw (make-error mode)) (catch {:strs [message]} message))"
+               "  (catch error (let ((keys (js-array \"name\" \"code\" \"protocol\" \"operation\" \"observedType\" \"reason\"))"
+               "                      (rows (js-array)) (index 0))"
+               "   (while (< index (js-length keys))"
+               "    (let* ((key (aref keys index)) (descriptor (Object/getOwnPropertyDescriptor error key)))"
+               "     (js-call rows :push (if descriptor"
+               "      (js-array key t (get descriptor :enumerable) (get descriptor :writable) (get descriptor :configurable))"
+               "      (js-array key false)))) (setq index (1+ index))) (JSON/stringify rows)))))"
+               "(defun captured (mode)"
+               " (try (try (throw (make-error mode)) (catch {:strs [message]} message))"
+               "  (catch error (JSON/stringify"
+               "   (js-call (js-array \"name\" \"code\" \"protocol\" \"operation\" \"observedType\" \"reason\") :map"
+               "    (lambda (key) (let ((descriptor (Object/getOwnPropertyDescriptor error key)))"
+               "     (if descriptor"
+               "      (js-array key t (get descriptor :enumerable) (get descriptor :writable) (get descriptor :configurable))"
+               "      (js-array key false)))))))))"
+               "(export fields descriptors captured)") :join "\n"))
+             (compiler (get backend :compiler))
+             (program (js-call compiler :compile_ir_string source "native-error-binding-first-error.eli"))
+             (independent (await (loadReference (resolve directory "native-error-binding-first-error-reference.mjs")
+               (js-call compiler :emit_ir_string program))))
+             (image (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm program runtime-ir)))
+             (adapter (instantiateManagedRuntime image (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216))))
+        (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module image)) (js-array))
+        (js-call adapter :auto 1)
+        (try
+          (let ((names (js-array "Error" "TypeError" "RangeError" "SyntaxError" "ReferenceError"))
+                (failures (js-array)) (mode 0))
+            (while (< mode (js-length names))
+              (let ((input (js-call adapter :number mode)))
+                (try
+                  (let ((phases (js-array "fields" "descriptors" "captured")) (position 0))
+                    (while (< position (js-length phases))
+                      (let* ((phase (aref phases position)) (label (+ (aref names mode) "/" phase))
+                             (expected (JSON/parse (Reflect/apply (aref independent phase) independent (js-array mode))))
+                             (output undefined))
+                        (if (= phase "fields")
+                          (progn
+                            (js-call assert :strictEqual (aref expected 0) "ProtocolDispatchError")
+                            (js-call assert :strictEqual (aref expected 2) "ELI-RUNTIME-PROTOCOL")
+                            (js-call assert :deepStrictEqual (js-call expected :slice 3 8)
+                              (js-array "ILookup" "get" (+ "object:" (aref names mode)) "missing" t)))
+                          (js-call assert :deepStrictEqual expected
+                            (js-call (js-array "name" "code" "protocol" "operation" "observedType" "reason") :map
+                              (lambda (key) (js-array key t t t t)))))
+                        (try
+                          (progn
+                            (setq output (js-call adapter :invoke phase (js-array input)))
+                            (js-call assert :deepStrictEqual (JSON/parse (js-call adapter :readString output)) expected label))
+                          (catch error
+                            (js-call failures :push (js-object :phase label :name (get error :name)
+                              :message (get error :message) :diagnostic (get error :eliscriptDiagnostic)
+                              :actual (get error :actual) :expected (get error :expected))))
+                          (finally (when output (js-call adapter :release output)))))
+                      (setq position (1+ position))))
+                  (finally (js-call adapter :release input))))
+              (js-call adapter :collect)
+              (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0)
+              (setq mode (1+ mode)))
+            (js-call assert :deepStrictEqual failures (js-array) "native Error first-error observations"))
+          (finally
+            (js-call adapter :closeModule) (js-call adapter :collect)
+            (js-call assert :strictEqual (js-call adapter :live) 0)
+            (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0))))))
+
+  ;; C123b exercises the real authenticated host functions as source values.
+  ;; The source, rather than a host surrogate, creates every eligible receiver.
+  (defconst intrinsic-boundary-source (js-call (js-array
+    "(defun makeBoundaryBox (value) (js-object :value value))"
+    "(defun applyBoundary (function receiver arguments) (Reflect/apply function receiver arguments))"
+    "(defun intrinsicBoundaryReport (native)"
+    " (let* ((object (js-object :a 7)) (array (js-array 2 3 4)) (prototype (js-object :inherited 9))"
+    "        (apply (get native :apply)) (next (get native :next)) (trace (js-array)))"
+    "  (funcall (get native :defineProperty) object \"observed\" (js-object :configurable t :get (lambda () (js-call trace :push \"get\") false)))"
+    "  (let* ((identity (eq (funcall (get native :object) object) object))"
+    "         (nullish (funcall (get native :object) nil))"
+    "         (omitted (funcall (get native :object)))"
+    "         (array-test (funcall (get native :isArray) array))"
+    "         (not-array (funcall (get native :isArray) object))"
+    "         (missing-array (funcall (get native :isArray)))"
+    "         (read (funcall (get native :get) object \"observed\"))"
+    "         (written (funcall (get native :set) object \"b\" 8))"
+    "         (parent-set (funcall (get native :setPrototypeOf) object prototype))"
+    "         (parent (eq (funcall (get native :getPrototypeOf) object) prototype))"
+    "         (keys (funcall (get native :ownKeys) object))"
+    "         (descriptor (funcall (get native :getOwnPropertyDescriptor) object \"a\"))"
+    "         (defined (funcall (get native :defineProperty) object \"empty\" (js-object :value undefined :configurable t)))"
+    "         (present (funcall (get native :has) object \"empty\"))"
+    "         (empty (funcall (get native :get) object \"empty\"))"
+    "         (deleted (funcall (get native :deleteProperty) object \"b\"))"
+    "         (extensible (funcall (get native :isExtensible) object))"
+    "         (prevented (funcall (get native :preventExtensions) object))"
+    "         (closed (funcall (get native :isExtensible) object))"
+    "         (called (funcall apply (lambda (a b) (+ a b)) nil (js-array 5 6)))"
+    "         (box (funcall (get native :construct) makeBoundaryBox (js-array 12)))"
+    "         (slice (funcall apply (get native :slice) array (js-array 1)))"
+    "         (entries (funcall apply (get native :entries) array (js-array)))"
+    "         (indices (funcall apply (get native :keys) array (js-array)))"
+    "         (values (funcall apply (get native :values) array (js-array))))"
+    "   (JSON/stringify (js-array identity (funcall (get native :ownKeys) nullish) (funcall (get native :ownKeys) omitted) array-test not-array missing-array"
+    "    read trace written parent-set parent keys (get descriptor :value) defined present empty deleted extensible prevented closed called (get box :value) slice"
+    "    (funcall apply next entries (js-array)) (funcall apply next indices (js-array)) (funcall apply next values (js-array)))))))"
+    "(defun intrinsicBoundaryThrow (get first)"
+    " (let ((object (js-object))) (Object/defineProperty object \"x\" (js-object :get (lambda () (throw first))))"
+    "  (funcall get object \"x\")))"
+    "(defun intrinsicBoundaryKey (get)"
+    " (let ((trace (js-array)) (object (js-object :x 14)))"
+    "  (let ((key (js-object :toString (lambda () (js-call trace :push \"key\") \"x\"))))"
+    "   (JSON/stringify (js-array (funcall get object key) trace)))))"
+    "(defun intrinsicBoundaryWrongIterator (apply next)"
+    " (funcall apply next (js-call (new globalThis.Set (js-array 1)) :values) (js-array)))"
+    "(defun intrinsicBoundaryForeignArguments (apply slice arguments)"
+    " (funcall apply slice (js-array 2 3) arguments))"
+    "(defun objectBoundaryReport (native)"
+    " (let* ((object (js-object :a 7)) (array (js-array 2 3)) (prototype (js-object :inherited 9))"
+    "        (created (funcall (get native :objectCreate) prototype))"
+    "        (null-prototype (funcall (get native :objectCreate) nil))"
+    "        (descriptor (funcall (get native :objectGetOwnPropertyDescriptor) object \"a\"))"
+    "        (has (funcall (get native :objectHasOwn) object \"a\"))"
+    "        (missing (funcall (get native :objectHasOwn) object \"absent\"))"
+    "        (defined (eq (funcall (get native :objectDefineProperties) object"
+    "          (js-object :empty (js-object :value undefined) :b (js-object :value 8 :enumerable t))) object))"
+    "        (empty (funcall (get native :objectHasOwn) object \"empty\"))"
+    "        (frozen (eq (funcall (get native :objectFreeze) object) object))"
+    "        (frozen-array (eq (funcall (get native :objectFreeze) array) array))"
+    "        (function (lambda () 1)))"
+    "  (funcall (get native :objectDefineProperties) function (js-object :mark (js-object :value 11)))"
+    "  (funcall (get native :objectFreeze) function)"
+    "  (JSON/stringify (js-array (eq (funcall (get native :objectGetPrototypeOf) created) prototype)"
+    "   (eq (funcall (get native :objectGetPrototypeOf) null-prototype) nil) (get created :inherited)"
+    "   (get descriptor :value) has missing defined empty (get object :b) frozen frozen-array"
+    "   (funcall (get native :objectIsFrozen) object) (funcall (get native :objectIsFrozen) array)"
+    "   (funcall (get native :objectIsFrozen) function) (get function :mark)))))"
+    "(defun boundaryDefinition (kind)"
+    " (let ((definition (Object/create nil)))"
+    "  (cond ((= kind 0) (put definition :value undefined) (put definition :writable t))"
+    "   ((= kind 1) (Object/defineProperty definition \"value\" (js-object :get (lambda () (throw false)))))"
+    "   ((= kind 2) (put definition :get undefined)) ((= kind 3) (put definition :set nil))"
+    "   ((= kind 4) (setq definition (Object/create (js-object :value 1))))"
+    "   ((= kind 5) (put definition (funcall globalThis.Symbol \"ignored\") 1) (put definition :value 2))"
+    "   ((= kind 6) (Object/defineProperty definition \"enumerable\" (js-object :get (lambda () (throw undefined)))))"
+    "   ((= kind 7) (put definition :value false) (put definition :writable false))"
+    "   ((= kind 9) (put definition :value 3) (Object/freeze definition))) definition))"
+    "(defun objectBoundaryDefine (function kind)"
+    " (let ((target (js-object))) (funcall function target \"x\" (boundaryDefinition kind)) (get target :x)))"
+    "(defun objectBoundaryPolluted (function) (let ((target (js-object)))"
+    " (funcall function target \"x\" (js-object :value 1)) (get target :x)))"
+    "(defun objectBoundaryDefinitions (function descriptor)"
+    " (let ((target (js-object))) (funcall function target (js-object :x descriptor)) (get target :x)))"
+    "(defun objectBoundaryKey (function first)"
+    " (funcall function (js-object :x 1) (js-object :toString (lambda () (throw first)))))"
+    "(export intrinsicBoundaryReport intrinsicBoundaryThrow intrinsicBoundaryKey intrinsicBoundaryWrongIterator intrinsicBoundaryForeignArguments"
+    " objectBoundaryReport boundaryDefinition objectBoundaryDefine objectBoundaryPolluted objectBoundaryDefinitions objectBoundaryKey applyBoundary)") :join "\n"))
+  (defun intrinsic-boundary-hosts ()
+    (let* ((iterator (js-call (js-array) :values))
+           (native (js-object :object globalThis.Object :isArray globalThis.Array.isArray
+        :slice globalThis.Array.prototype.slice :entries globalThis.Array.prototype.entries
+        :keys globalThis.Array.prototype.keys :values globalThis.Array.prototype.values
+        :next (get (Object/getPrototypeOf iterator) :next))))
+      (js-call (js-array "get" "set" "getPrototypeOf" "setPrototypeOf" "ownKeys" "getOwnPropertyDescriptor"
+        "defineProperty" "deleteProperty" "has" "isExtensible" "preventExtensions" "apply" "construct")
+        :forEach (lambda (name) (put native name (get globalThis.Reflect name))))
+      (js-call (js-array "freeze" "isFrozen" "create" "getPrototypeOf" "getOwnPropertyDescriptor" "hasOwn" "defineProperties")
+        :forEach (lambda (name)
+          (put native (+ "object" (js-call (js-call name :slice 0 1) :toUpperCase) (js-call name :slice 1))
+            (get globalThis.Object name)))) native))
+  (defasync intrinsic-boundary-observed-runtime (image options)
+    (let* ((original (get globalThis.WebAssembly :Instance)) (raw undefined) (owner 0)
+           (registrations (js-array)) (adapter undefined)
+           (instrument (lambda (exports)
+             (let ((descriptors (Object/getOwnPropertyDescriptors exports)))
+               (setq raw exports)
+               (js-call (js-array "heap-new" "value-foreign-intrinsic-register") :forEach
+                 (lambda (name)
+                   (let ((function (get (get descriptors name) :value)))
+                     (put (get descriptors name) :value
+                       (lambda (&rest arguments)
+                         (let ((result (Reflect/apply function exports arguments)))
+                           (if (= name "heap-new")
+                             (setq owner result)
+                             (js-call registrations :push
+                               (js-array (aref arguments 1) (aref arguments 2))))
+                           result))))))
+               (Object/create (Object/getPrototypeOf exports) descriptors))))
+           (construct (lambda (target arguments)
+             (let* ((instance (Reflect/construct target arguments))
+                    (forwarded (funcall instrument (get instance :exports))))
+               (new globalThis.Proxy instance
+                 (js-object :get (lambda (target key receiver)
+                   (if (= key "exports") forwarded (Reflect/get target key receiver)))))))))
+      (try
+        (progn
+          (put globalThis.WebAssembly :Instance (new globalThis.Proxy original (js-object :construct construct)))
+          (setq adapter (await (instantiateManagedRuntimeWithHostModules image options))))
+        (finally (put globalThis.WebAssembly :Instance original)))
+      (js-object :adapter adapter :raw raw :owner owner :registrations registrations
+        :reset (lambda () (js-call (new globalThis.DataView (get (get raw :memory) :buffer)) :setUint32 144 0 t))
+        :calls (lambda () (js-call (new globalThis.DataView (get (get raw :memory) :buffer)) :getUint32 144 t)))))
+  (defun exercise-intrinsic-boundary (api expected)
+    (let ((native (intrinsic-boundary-hosts)))
+      (js-call assert :strictEqual (js-call api :intrinsicBoundaryReport native) expected)
+      (js-call assert :strictEqual (js-call api :intrinsicBoundaryKey (get native :get)) "[14,[\"key\"]]")
+      (js-call (js-array false undefined) :forEach (lambda (first)
+        (let ((caught false) (actual nil))
+          (try (js-call api :intrinsicBoundaryThrow (get native :get) first)
+            (catch error (setq caught t actual error)))
+          (js-call assert :strictEqual caught t) (js-call assert :strictEqual actual first))))
+      (js-call assert :throws (lambda ()
+        (js-call api :intrinsicBoundaryWrongIterator (get native :apply) (get native :next)))
+        (lambda (error) (= (get error :name) "TypeError")))))
+  (defun exercise-object-boundary (api independent target)
+    (js-call (js-array "freeze" "isFrozen" "create" "getPrototypeOf" "getOwnPropertyDescriptor" "hasOwn" "defineProperties")
+      :forEach (lambda (name)
+        (let ((observe (lambda (callee)
+          (let* ((trace (js-array)) (target (js-object :x 1))
+                 (proxy (new globalThis.Proxy target (js-object
+                   :getPrototypeOf (lambda (target) (js-call trace :push "prototype") (Reflect/getPrototypeOf target))
+                   :isExtensible (lambda (target) (js-call trace :push "extensible") (Reflect/isExtensible target))
+                   :preventExtensions (lambda (target) (js-call trace :push "prevent") (Reflect/preventExtensions target))
+                   :ownKeys (lambda (target) (js-call trace :push "keys") (Reflect/ownKeys target))
+                   :getOwnPropertyDescriptor (lambda (target key) (js-call trace :push (str "own:" key)) (Reflect/getOwnPropertyDescriptor target key))
+                   :defineProperty (lambda (target key descriptor) (js-call trace :push (str "define:" key)) (Reflect/defineProperty target key descriptor)))))
+                 (arguments (cond ((or (= name "getOwnPropertyDescriptor") (= name "hasOwn")) (js-array proxy "x"))
+                   ((= name "defineProperties") (js-array proxy (js-object :y (js-object :value 2))))
+                   (t (js-array proxy))))
+                 (result (js-call callee :applyBoundary (get globalThis.Object name) undefined arguments)))
+            (js-array trace (if (eq result proxy) "identity"
+              (cond ((= name "getOwnPropertyDescriptor") (get result :value))
+                ((= name "create") (eq (Object/getPrototypeOf result) proxy))
+                ((= name "getPrototypeOf") (eq result globalThis.Object.prototype)) (t result))))))))
+          (let ((expected (funcall observe independent)))
+            (js-call assert :deepStrictEqual (funcall observe api) expected (str target " Object." name " Proxy trace/result"))))))
+    (js-call (js-array false undefined) :forEach (lambda (first)
+      (js-call (js-array globalThis.Object.hasOwn globalThis.Object.getOwnPropertyDescriptor) :forEach (lambda (function)
+        (let ((caught false) (actual nil))
+          (try (js-call api :objectBoundaryKey function first) (catch error (setq caught t actual error)))
+          (js-call assert :strictEqual caught t) (js-call assert :strictEqual actual first))))
+      (let ((caught false) (actual nil) (reads 0))
+        (let ((descriptor (new globalThis.Proxy (js-object :value 1) (js-object
+          :has (lambda (target key) (setq reads (1+ reads)) (throw first))))))
+          (try (js-call api :objectBoundaryDefinitions globalThis.Object.defineProperties descriptor)
+            (catch error (setq caught t actual error)))
+          (js-call assert :strictEqual caught t) (js-call assert :strictEqual actual first)
+          (js-call assert :strictEqual reads 1)))
+      (let ((caught false) (actual nil) (reads 0))
+        (try
+          (progn
+            (Object/defineProperty globalThis.Object.prototype "enumerable" (js-object :configurable t
+              :get (lambda () (setq reads (1+ reads)) (throw first))))
+            (try (js-call api :objectBoundaryPolluted globalThis.Object.defineProperty)
+              (catch error (setq caught t actual error))))
+          (finally (Reflect/deleteProperty globalThis.Object.prototype "enumerable")))
+        (js-call assert :strictEqual caught t) (js-call assert :strictEqual actual first)
+        (js-call assert :strictEqual reads 1))))
+    (let ((kind 0))
+      (while (< kind 10)
+        (let ((observe (lambda (callee)
+          (try (js-array "value" (js-call callee :objectBoundaryDefine globalThis.Object.defineProperty kind))
+            (catch error (js-array "throw" (if (and error (= (value-type error) "object")) (get error :name) error)))))))
+          (js-call assert :deepStrictEqual (funcall observe api) (funcall observe independent)))
+        (setq kind (1+ kind))))
+    (let ((calls 0))
+      (let ((replacement (lambda (value) (setq calls (1+ calls)) 37)))
+        (js-call assert :strictEqual (js-call api :applyBoundary replacement undefined (js-array (js-object))) 37)
+        (js-call assert :strictEqual calls 1))
+      (let ((proxy (new globalThis.Proxy globalThis.Object.freeze (js-object
+        :apply (lambda (target receiver arguments) (setq calls (1+ calls)) (Reflect/apply target receiver arguments))))))
+        (let ((value (js-object :x 1)))
+          (js-call assert :strictEqual (js-call api :applyBoundary proxy undefined (js-array value)) value)
+          (js-call assert :strictEqual calls 2)))))
+  (test "authenticated native operations stay inside the owned runtime and retain real JS WASM native semantics"
+    (async ()
+      (let* ((compiler (get backend :compiler))
+             (source (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")))
+             (needle "(defun heap-host-request (heap operation a b c arguments count)")
+             (counted (js-call source :replace needle (+ needle
+               "\n    (when (= operation 8) (store-u32 144 (1+ (load-u32 144))))")))
+             (counted-ir (js-call compiler :compile_ir_string counted "intrinsic-boundary-counted-runtime.eli"))
+             (program (js-call compiler :compile_ir_string intrinsic-boundary-source "intrinsic-boundary.eli"))
+             (independent (await (loadReference (resolve directory "intrinsic-boundary-reference.mjs")
+               (js-call compiler :emit_ir_string program))))
+             (actual (js-call (get backend :managed) :lower_managed_project
+               (js-array (js-object :id "main.mjs" :program program)) "main.mjs" counted-ir
+               (js-object :foreignEntry t :entries (js-array "main.mjs"))))
+             (image (globalThis.Uint8Array.from (js-call (get backend :wasm) :append_metadata_section
+               (js-call (get backend :wasm) :emit_typed_memory_wasm (get actual :typed))
+               "eliscript-managed-control" (JSON/stringify (get actual :descriptor)))))
+             (options (js-object :maxSlots 65536 :initialBytes 8388608 :maxBytes 67108864 :auto 1))
+             (observed (await (intrinsic-boundary-observed-runtime image options)))
+             (expected (js-call independent :intrinsicBoundaryReport (intrinsic-boundary-hosts)))
+             (object-expected (js-call independent :objectBoundaryReport (intrinsic-boundary-hosts)))
+             (targets (js-array (js-object :target "wasm" :adapter (get observed :adapter)))))
+        (js-call assert :notStrictEqual counted source)
+        (exercise-intrinsic-boundary independent expected)
+        (when native-target
+          (let ((path (resolve directory (if (= native-target "arm64-macos") "intrinsic-boundary.dylib" "intrinsic-boundary.so"))))
+            (await (writeFile path (globalThis.Uint8Array.from
+              (js-call (get backend :native) :emit_typed_native_memory_library (get actual :typed) native-target))))
+            (js-call targets :push (js-object :target "native" :adapter
+              (await (instantiateNativeManagedRuntime path actual (Object/assign (js-object :nativeTarget native-target) options)))))))
+        (js-call targets :forEach (lambda (entry)
+          (let ((adapter (get entry :adapter)) (handles (js-array)) (api (js-object)))
+            (try
+              (progn
+                (js-call (js-array "intrinsicBoundaryReport" "intrinsicBoundaryThrow" "intrinsicBoundaryKey"
+                  "intrinsicBoundaryWrongIterator" "intrinsicBoundaryForeignArguments" "objectBoundaryReport" "boundaryDefinition"
+                  "objectBoundaryDefine" "objectBoundaryPolluted" "objectBoundaryDefinitions" "objectBoundaryKey" "applyBoundary") :forEach (lambda (name)
+                    (let ((handle (js-call adapter :getExport name)))
+                      (js-call handles :push handle) (put api name (js-call adapter :toHostValue handle)))))
+                (when (= (get entry :target) "wasm") (js-call observed :reset))
+                (js-call assert :strictEqual (js-call api :intrinsicBoundaryReport (intrinsic-boundary-hosts)) expected)
+                ;; Exact native callees on represented receivers need no Call
+                ;; capability roundtrip, including Reflect.apply's nested calls.
+                (when (= (get entry :target) "wasm") (js-call assert :strictEqual (js-call observed :calls) 0))
+                (when (= (get entry :target) "wasm") (js-call observed :reset))
+                (js-call assert :strictEqual (js-call api :objectBoundaryReport (intrinsic-boundary-hosts)) object-expected)
+                (when (= (get entry :target) "wasm") (js-call assert :strictEqual (js-call observed :calls) 0))
+                (js-call adapter :collect)
+                (js-call assert :strictEqual (js-call api :objectBoundaryReport (intrinsic-boundary-hosts)) object-expected)
+                (when (= (get entry :target) "wasm") (js-call assert :strictEqual (js-call observed :calls) 0))
+                (exercise-intrinsic-boundary api expected)
+                (exercise-object-boundary api independent (get entry :target))
+                (let ((calls 0) (receiver (js-object :original t)))
+                  (let ((replacement (lambda (&rest arguments) (setq calls (1+ calls)) receiver)))
+                    (js-call assert :strictEqual (js-call api :applyBoundary replacement receiver (js-array)) receiver)
+                    (js-call assert :strictEqual calls 1))
+                  (let ((proxy (new globalThis.Proxy globalThis.Reflect.get (js-object
+                    :apply (lambda (target receiver arguments) (setq calls (1+ calls)) (Reflect/apply target receiver arguments))))))
+                    (js-call assert :strictEqual (js-call api :applyBoundary proxy undefined (js-array receiver "original")) t)
+                    (js-call assert :strictEqual calls 2)))
+                (let ((reads (js-array)) (array (js-array 2 3)))
+                  (let ((proxy (new globalThis.Proxy array (js-object :get (lambda (target key receiver)
+                    (js-call reads :push key) (Reflect/get target key receiver))))))
+                    (js-call assert :deepStrictEqual (js-call api :applyBoundary globalThis.Array.prototype.slice proxy (js-array 1)) (js-array 3))
+                    (js-call assert :deepStrictEqual reads (js-array "length" "constructor" "1"))))
+                (when (= (get entry :target) "wasm") (js-call observed :reset))
+                (let ((reads (js-array)))
+                  (let ((arguments (new globalThis.Proxy (js-array 1) (js-object :get (lambda (target key receiver)
+                    (js-call reads :push key) (Reflect/get target key receiver))))))
+                    (js-call assert :deepStrictEqual
+                      (js-call api :intrinsicBoundaryForeignArguments globalThis.Reflect.apply globalThis.Array.prototype.slice arguments)
+                      (js-array 3))
+                    (js-call assert :deepStrictEqual reads (js-array "length" "0"))))
+                (when (= (get entry :target) "wasm") (js-call assert :ok (> (js-call observed :calls) 0)))
+                (js-call (js-array "get" "set" "getPrototypeOf" "setPrototypeOf" "ownKeys" "getOwnPropertyDescriptor"
+                  "defineProperty" "deleteProperty" "has" "isExtensible" "preventExtensions" "apply" "construct")
+                  :forEach (lambda (name)
+                    (js-call assert :throws (lambda ()
+                      (js-call api :applyBoundary (get globalThis.Reflect name) undefined (js-array)))
+                      (lambda (error) (= (get error :name) "TypeError")))))
+                (let ((boxed (js-call api :applyBoundary globalThis.Object undefined (js-array 7))))
+                  (js-call assert :strictEqual (js-call boxed :valueOf) 7))
+                (when (= (get entry :target) "wasm")
+                  (js-call assert :ok (> (js-call observed :calls) 0))
+                  (let* ((raw (get observed :raw)) (owner (get observed :owner))
+                         (registered (js-call (get observed :registrations) :filter (lambda (row) (/= (aref row 1) 0))))
+                         (operations (new globalThis.Set (js-call registered :map (lambda (row) (aref row 1))))))
+                    (js-call (js-array 76 5 181 182 183 184 185 186 187 188 189 190 191 192 193 202 223 224 225 328
+                      401 402 403 404 405 406 407)
+                      :forEach (lambda (operation) (js-call assert :ok (js-call operations :has operation) (str operation))))
+                    (let ((function (aref (aref registered 0) 0)))
+                      (js-call assert :strictEqual (js-call raw :value-foreign-intrinsic-register owner function 75) 0)
+                      (js-call assert :strictEqual (js-call raw :last-error) 3)
+                      (js-call raw :value-error-restore 0)
+                      (js-call assert :strictEqual (js-call raw :value-foreign-intrinsic-register owner 3 5) 0)
+                      (js-call assert :notStrictEqual (js-call raw :last-error) 0)
+                      (js-call raw :value-error-restore 0))
+                    (let ((kind 0) (expected (js-array 1 0 0 0 0 1 0 1 1 1)))
+                      (while (< kind 10)
+                        (let* ((argument (js-call adapter :number kind))
+                               (definition (js-call adapter :invoke "boundaryDefinition" (js-array argument)))
+                               (frame (js-call adapter :frame 1)))
+                          (try
+                            (progn
+                              (js-call adapter :frameSet frame 0 definition)
+                              (let* ((handle (js-call raw :frame-get owner (js-call raw :frame-current owner) 0))
+                                     (live (js-call raw :heap-live owner)) (used (js-call raw :heap-used owner)))
+                                (js-call assert :strictEqual (js-call raw :value-source-data-definition-p owner handle) (aref expected kind))
+                                (js-call assert :strictEqual (js-call raw :last-error) 0)
+                                (js-call assert :strictEqual (js-call raw :heap-live owner) live)
+                                (js-call assert :strictEqual (js-call raw :heap-used owner) used)))
+                            (finally
+                              (js-call adapter :leaveFrame frame)
+                              (js-call adapter :release definition) (js-call adapter :release argument))))
+                        (setq kind (1+ kind))))))
+                (js-call adapter :collect)
+                (js-call assert :strictEqual (get (js-call adapter :stats) :frameDepth) 0))
+              (finally
+                (js-call handles :forEach (lambda (handle) (js-call adapter :release handle)))
+                (js-call adapter :closeModule) (js-call adapter :collect)
+                (when (get adapter :close) (js-call adapter :close)))))))
+        (let ((registered (new globalThis.Set)) (cleared (new globalThis.Set)))
+          (js-call (get observed :registrations) :forEach (lambda (row)
+            (js-call (if (= (aref row 1) 0) cleared registered) :add (aref row 0))))
+          (js-call assert :ok (> (get registered :size) 0))
+          (js-call assert :deepStrictEqual cleared registered))))
+    (js-object :timeout 120000))
 
   (test "the actual protocol error constructor distinguishes omitted undefined null false and invalid direct slots in JS and real WASM"
     (lambda ()

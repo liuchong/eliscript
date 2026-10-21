@@ -179,6 +179,43 @@
              (regexp-quote "columns.eli:1:3: Invalid read syntax")
              (error-message-string error-data)))))
 
+(ert-deftest eliscript-reader-invalid-dispatch-locates-the-original-nested-token ()
+  "A failed Emacs whole-form read must not hide the nested dispatch or point."
+  (dolist (source '("#x"
+                    "(module nested\n  (defconst answer #x)\n)"
+                    "(module nested\n  ; #x in comment\n  (defconst text \"#x\")\n  (defconst answer #x)\n)"
+                    "(module nested\n  (defconst escaped \\#x)\n  (defconst answer [中😀 #x])\n)"
+                    "(module nested\n  (defconst radix #x2a)\n  (defconst answer #x)\n)"
+                    "(module nested\n  (defconst answer [#x #q])\n)"))
+    (let* ((offset (if (equal source "#x") 0
+                     (string-match "#x[] )]" source
+                                   (string-match "(defconst answer" source))))
+           (condition (should-error
+                       (eliscript-read-located-string source "dispatch.eli")
+                       :type 'eliscript-read-error))
+           (diagnostic (eliscript-diagnostic-from-condition condition))
+           (span (eliscript-diagnostic-span diagnostic)))
+      (should (integerp offset))
+      (should (equal (eliscript-diagnostic-code diagnostic) "ELI-R0001"))
+      (should (equal (eliscript-diagnostic-phase diagnostic) "reader"))
+      (should (equal (eliscript-diagnostic-message diagnostic)
+                     "Invalid read syntax: \"#x\""))
+      (should (= (eliscript-source-span-start span) offset))
+      (should (= (eliscript-source-span-end span) (1+ offset)))
+      (with-temp-buffer
+        (insert source)
+        (goto-char (1+ offset))
+        (let ((line (line-number-at-pos))
+              (column (1+ (- (point) (line-beginning-position)))))
+          (should (= (eliscript-source-span-line span) line))
+          (should (= (eliscript-source-span-column span) column))
+          (should (equal (cadr condition)
+                         (format "dispatch.eli:%s:%s: Invalid read syntax: \"#x\""
+                                 line column)))))))
+  ;; Error recovery cannot change the original successful Emacs read path.
+  (should (equal (eliscript-read-string "(defconst radix #x2a)")
+                 '((defconst radix 42)))))
+
 (ert-deftest eliscript-reader-line-index-matches-native-buffer-positions ()
   "Indexed positions retain Emacs character columns at every boundary."
   (dolist (source '("" "x" "\n" "\n\n" "a\r\nb\r\n" "a\rb"
@@ -1913,7 +1950,7 @@ already nested suffix, or use either production emitter to build the oracle."
              (regexp-quote "__eliscript_equal(case_value") output))
     (should (string-match-p "condp_predicate\$G[0-9]+" output))
     (should (string-match-p
-             (regexp-quote "new globalThis.TypeError(\"condp found no matching clause\")")
+             (regexp-quote "new (globalThis.TypeError)(\"condp found no matching clause\")")
              (eliscript-compile-string
               "(defun select (predicate value) (condp predicate value 1 :one))"
               "value-dispatch-no-default.eli")))

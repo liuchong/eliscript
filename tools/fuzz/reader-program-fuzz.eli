@@ -5,6 +5,7 @@
   (import "node:os" tmpdir)
   (import "../backends/build.mjs" root)
   (import "./reader-program-fuzz-legacy.mjs" :as legacy)
+  (import "./program-emission-proof.mjs" proveFullProgramEmission)
 
   ;; Keep the deterministic generator, complete verifier, independent Emacs
   ;; oracle and all original limits. Only the default compiler's package
@@ -12,6 +13,11 @@
   (defconst parseArguments (get legacy :parseArguments))
   (defconst fuzzCases (get legacy :fuzzCases))
   (defconst children (new globalThis.Set))
+  (defasync verified-report (compiler total seed)
+    (let* ((report (await (js-call legacy :runReaderProgramFuzz
+                     (js-object :cases total :seed seed :compilerDirectory compiler))))
+           (proof (await (proveFullProgramEmission compiler total seed report))))
+      (put (get report :compiler) :independentEmission proof) report))
   (defun fail (message)
     (let ((error (new globalThis.Error message))) (put error :eliscriptFuzzInvariant t) (throw error)))
   (defun stopReaderProgramFuzz (signal)
@@ -60,7 +66,7 @@
             (fail "compilerDirectory must select an actual compiler module directory")))
         (if supplied
           (let ((selected (resolve (get options :compilerDirectory))))
-            (await (js-call legacy :runReaderProgramFuzz (js-object :cases total :seed seed :compilerDirectory selected))))
+            (await (verified-report selected total seed)))
           (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-fuzz-compiler-"))))
                  (compiler (resolve directory "compiler")) (failed false))
             (try
@@ -70,7 +76,7 @@
               ;; resolution as an installed compiler; no compiler is substituted.
               (await (mkdir (resolve directory "node_modules") (js-object :recursive t)))
               (await (symlink root (resolve directory "node_modules/eliscript")))
-              (await (js-call legacy :runReaderProgramFuzz (js-object :cases total :seed seed :compilerDirectory compiler)))
+              (await (verified-report compiler total seed))
               (catch error (setq failed t) (throw error))
               (finally
                 (try (await (rm directory (js-object :recursive t :force t)))

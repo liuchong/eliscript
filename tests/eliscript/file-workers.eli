@@ -4,6 +4,7 @@
   (import "node:path" resolve)
   (import "../tools/testing/file-workers.mjs"
     FILE_WORKERS isExclusiveTestFile parseTestFileArgs partitionTestFiles scheduleTestFiles)
+  (import "../tools/testing/fixture-environment.mjs" fixtureChildArguments)
 
   (defasync tick ()
     (await (new globalThis.Promise (lambda (resolve reject) (funcall globalThis.setImmediate resolve)))))
@@ -28,12 +29,71 @@
         (js-call assert :deepStrictEqual (js-call (get result :results) :map (lambda (row) (get row :file))) files)
         (js-call requests :forEach (lambda (request index)
           (js-call assert :deepStrictEqual (get request :args)
-            (if (< index 2) (js-array "test" (aref files index))
-              (js-array "--smol" "test" (aref files index))))
+            (fixtureChildArguments
+              (if (< index 2) (js-array "test" "--timeout" "300000" (aref files index))
+                (js-array "--smol" "test" "--timeout" "300000" (aref files index))) (get globalThis.process :env)))
           (js-call assert :strictEqual (get request :command) (get globalThis.process :execPath))
           (js-call assert :strictEqual (get request :env) (get globalThis.process :env))
           (js-call assert :strictEqual (get request :cwd) (js-call globalThis.process :cwd))
           (js-call assert :strictEqual (get request :id) (funcall globalThis.String index)))))))
+
+  (test "only the exact Number text suite selects the Node LTS bridge while preserving inventory and ordinary Bun commands"
+    (async ()
+      (let* ((root (js-call globalThis.process :cwd)) (environment (js-object :NODE "selected-node24"))
+             (files (js-array "./tests/wasm-managed-number-text.test.mjs" "./tests/wasm-managed-number-text-copy.test.mjs"))
+             (requests (js-array)) (supervisor (js-object :failure nil
+               :run (async (request) (js-call requests :push request) (js-object :exitCode 0))))
+             (result (await (scheduleTestFiles files supervisor (js-object :environment environment :sourceRoot root)))))
+        (js-call assert :strictEqual (get result :exitCode) 0)
+        (js-call assert :deepStrictEqual (js-call (get result :results) :map (lambda (row) (get row :file))) files)
+        (js-call assert :strictEqual (get (aref requests 0) :command) "selected-node24")
+        (js-call assert :deepStrictEqual (get (aref requests 0) :args) (js-array
+          "--import" (resolve root "tools/testing/fixture-environment.mjs")
+          "--import" (resolve root "tests/helpers/number-text-node-install.mjs") "--test" (aref files 0)))
+        (js-call assert :strictEqual (get (aref requests 1) :command) (get globalThis.process :execPath))
+        (js-call assert :deepStrictEqual (get (aref requests 1) :args)
+          (fixtureChildArguments (js-array "--smol" "test" "--timeout" "300000" (aref files 1)) environment))
+        (js-call requests :forEach (lambda (request)
+          (js-call assert :strictEqual (get request :env) environment)
+          (js-call assert :strictEqual (get request :cwd) root))))))
+  (test "only the exact static data and guard logical suites select their complete Node entries without dropping inventory rows"
+    (async ()
+      (let* ((root (js-call globalThis.process :cwd)) (environment (js-object :NODE "selected-node24"))
+             (files (js-array "./tests/wasm-memory-static-data.test.mjs" "./tests/compiler-portable-guards.test.mjs"
+               "./tests/wasm-memory-static-data-copy.test.mjs" "./tests/compiler-portable-guards-copy.test.mjs"))
+             (requests (js-array)) (supervisor (js-object :failure nil
+               :run (async (request) (js-call requests :push request) (js-object :exitCode 0))))
+             (result (await (scheduleTestFiles files supervisor (js-object :environment environment :sourceRoot root)))))
+        (js-call assert :strictEqual (get result :exitCode) 0)
+        (js-call assert :deepStrictEqual (js-call (get result :results) :map (lambda (row) (get row :file))) files)
+        (js-call (js-array 0 1) :forEach (lambda (index)
+          (js-call assert :strictEqual (get (aref requests index) :command) "selected-node24")
+          (js-call assert :deepStrictEqual (get (aref requests index) :args) (js-array
+            "--import" (resolve root "tools/testing/fixture-environment.mjs")
+            "--import" (resolve root "tests/helpers/portable-node-install.mjs") "--test"
+            (if (= index 0) "./tests/wasm-memory-static-data-test-legacy.mjs" (aref files index))))))
+        (js-call (js-array 2 3) :forEach (lambda (index)
+          (js-call assert :strictEqual (get (aref requests index) :command) (get globalThis.process :execPath))
+          (js-call assert :deepStrictEqual (get (aref requests index) :args)
+            (fixtureChildArguments (js-array "--smol" "test" "--timeout" "300000" (aref files index)) environment))))
+        (js-call requests :forEach (lambda (request)
+          (js-call assert :strictEqual (get request :env) environment)
+          (js-call assert :strictEqual (get request :cwd) root))))))
+  (test "worker fixture overrides reach only the owned children with original supervision and arguments"
+    (async ()
+      (let* ((environment (js-object :PATH "original-path" :TMPDIR "private-fixtures"))
+             (requests (js-array)) (parent (get (get globalThis.process :env) :TMPDIR))
+             (supervisor (js-object :failure nil
+               :run (async (request) (js-call requests :push request) (js-object :exitCode 0))
+               :cancel (lambda (signal) (js-call assert :fail "unexpected cancellation"))))
+             (result (await (scheduleTestFiles (js-array "original.test.mjs") supervisor
+               (js-object :environment environment :sourceRoot "/fixture-project")))))
+        (js-call assert :strictEqual (get result :exitCode) 0)
+        (js-call assert :strictEqual (get (aref requests 0) :env) environment)
+        (js-call assert :strictEqual (get (aref requests 0) :cwd) "/fixture-project")
+        (js-call assert :deepStrictEqual (get (aref requests 0) :args)
+          (js-array "--smol" "test" "--timeout" "300000" "original.test.mjs"))
+        (js-call assert :strictEqual (get (get globalThis.process :env) :TMPDIR) parent))))
 
   (test "two ordinary workers settle before exact standard-mode files and later results retain original order"
     (async ()
@@ -72,6 +132,27 @@
               (js-call assert :deepStrictEqual (get result :results)
                 (js-call files :map (lambda (file index) (js-object :file file :exitCode (if (= index 1) 9 0)))))))
           (finally (js-call globalThis.process :emit "SIGTERM") (await running))))))
+
+  (test "documentation builders settle ordinary workers and each other before touching shared generated inputs"
+    (async ()
+      (let* ((files (js-array "ordinary.test.mjs" "tests/docs-site.test.mjs"
+                      "tests/pages-assembly.test.mjs" "later.test.mjs"))
+             (active (new globalThis.Map)) (started (js-array))
+             (supervisor (js-object :failure nil :run (lambda (request)
+               (js-call started :push (get request :file))
+               (new globalThis.Promise (lambda (complete)
+                 (js-call active :set (get request :file) complete))))))
+             (running (scheduleTestFiles files supervisor)))
+        (let ((index 0))
+          (while (< index (js-length files))
+            (js-call assert :deepStrictEqual (Array/from (js-call active :keys)) (js-array (aref files index)))
+            (let ((complete (js-call active :get (aref files index))))
+              (js-call active :delete (aref files index)) (funcall complete (js-object :exitCode 0)))
+            (await (tick)) (setq index (1+ index))))
+        (js-call assert :strictEqual (get (await running) :exitCode) 0)
+        (js-call assert :deepStrictEqual started files)
+        (js-call assert :strictEqual (isExclusiveTestFile "tests/docs-site-copy.test.mjs") false)
+        (js-call assert :strictEqual (isExclusiveTestFile "tests/pages-assembly-copy.test.mjs") false))))
 
   (test "cancellation keeps its original code stops queued work and restores both signal listeners"
     (async ()

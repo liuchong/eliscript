@@ -167,6 +167,8 @@ The release package passes only when:
 - runtime dependencies are bundled;
 - source maps resolve to `.eli` source;
 - rebuilding produces identical `dist/`;
+- preferred sources match their tracked index bytes and generated products are
+  ignored and untracked;
 - a source change without rebuilt `dist/` fails validation;
 - a modified generated artifact without source change fails validation.
 

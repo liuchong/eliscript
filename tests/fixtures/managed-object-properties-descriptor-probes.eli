@@ -1,0 +1,5 @@
+(defun read-probe (object) (get object :x))
+(defun invalid-target () (Object/defineProperty nil "x" (js-object)))
+(defun invalid-descriptor () (Object/defineProperty (js-object) "x" false))
+(defun mixed-descriptor () (Object/defineProperty (js-object) "x" (js-object :value 1 :get (lambda () 1))))
+(export read-probe invalid-target invalid-descriptor mixed-descriptor)

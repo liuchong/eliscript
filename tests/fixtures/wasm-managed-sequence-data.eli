@@ -14,6 +14,15 @@
   (import "eliscript/runtime/core/order.mjs" :as Order)
   (import "eliscript/runtime/core/data-text.mjs" :as DataText)
 
+  (import "eliscript/runtime/core/map.mjs" :as Map)
+
+  (defun persistent-map-prototype-identity ()
+    (let* ((value (Map/persistentHashMap (js-array "x" 7)))
+           (text (DataText/printValue value)) (restored (DataText/readValue text)))
+      (js-array (eq (Object/getPrototypeOf value) (get Map/PersistentHashMap :prototype))
+        (eq (Object/getPrototypeOf restored) (get Map/PersistentHashMap :prototype))
+        (= (DataText/printValue restored) text) (V/equalValues value restored))))
+
   (defun array-of (value) (T/into (js-array) value))
   (defun observed-source (state failure)
     (let* ((iterator (js-object
@@ -136,4 +145,4 @@
     (js-array (DataText/printValue value) (Order/compareValues value value)))
   (export bounded-consumption cached-realization successful-cache early-stop-and-partitions
     paths-aliases-and-collisions shared-hash-state ieee-arithmetic rejection-order
-    standard-protocol-identities read-standard-input))
+    standard-protocol-identities read-standard-input persistent-map-prototype-identity))

@@ -516,6 +516,15 @@
               (serialize-ir-program (compile-ir-string runtime-source "runtime-cold.eli")))
             (js-call assert :strictEqual (serialize-ir-program program)
               (serialize-ir-program (compile-ir-string literal-source "冷😀.eli")))
+            ;; Private cold packing must retain every frontend own-key in its
+            ;; original order as well as spans, Unicode and signed zero.
+            (let* ((expected (encodeCompilerIR (compile-ir-string literal-source "冷😀.eli")))
+                   (cached (JSON/parse (js-call driver :compiler_session_request state
+                     (JSON/stringify (js-object :operation "cached-ir" :kind "literal"
+                       :id (get literal :id) :revision (get ready :literalRevision)))))))
+              (js-call assert :strictEqual (encodeCompilerIR program) expected)
+              (js-call assert :strictEqual (get cached :ir) expected)
+              (js-call assert :strictEqual (get cached :canonicalIR) (serialize-ir-program program)))
             (js-call assert :strictEqual (get record :program) program)
             (js-call assert :deepStrictEqual (Object/keys (aref modules 0)) (js-array "id" "program"))
             (js-call assert :deepStrictEqual (Object/keys record) (js-array "source" "filename" "program"))
@@ -543,6 +552,9 @@
             (js-call assert :strictEqual (get state :runtime) runtime)
             (js-call assert :strictEqual (get state :literalModules) modules)
             (js-call assert :strictEqual (get state :literalCache) cache)
+            (js-call assert :strictEqual
+              (encodeCompilerIR (get (aref (get state :literalModules) 0) :program))
+              (encodeCompilerIR (compile-ir-string literal-source "冷😀.eli")))
             (js-call assert :strictEqual (js-call cache :get (get literal :id)) record)
             (js-call assert :deepStrictEqual phases
               (js-array "runtime-literals-start" "runtime-literals-complete"

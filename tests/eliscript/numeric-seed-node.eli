@@ -1,0 +1,11 @@
+(module tests.numeric-seed-node
+  (import "node:fs" readFileSync)
+  (import "node:assert/strict" :default assert)
+  (import "../../bootstrap/host/bun.mjs" loadCompiler)
+  (defasync main ()
+    (let* ((program (JSON/parse (readFileSync 0 "utf8"))) (before (JSON/stringify program))
+           (seed (await (loadCompiler (aref (get globalThis.process :argv) 2))))
+           (code (js-call seed :emit_numeric_javascript program)))
+      (js-call assert :strictEqual (JSON/stringify program) before)
+      (js-call (get globalThis.process :stdout) :write (JSON/stringify code))))
+  (js-call (main) :catch (lambda (error) (console/error error) (put globalThis.process :exitCode 1))))

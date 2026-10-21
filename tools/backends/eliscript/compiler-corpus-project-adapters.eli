@@ -97,11 +97,12 @@
           :execution (js-object :kind "original-program" :host "tests/__eliscript_original_literal_runtime_complete.mjs"
             :hostSource source :arguments (js-array (js-object :directory t)) :aliases t :requiresBun t :hostRuntime "bun"
             :referenceArtifact t :childProcesses "inherit-selected-artifact" :runtimeLaunchers t
-            :compilerSourceMaps t :runtimeProfile "compiler" :timeoutMs 245000
+            :compilerSourceMaps t :runtimeProfile "compiler"
             :hostToolProjection (js-object :kind "literal-runtime-host-tools" :files tool-projections)
             :setupReplacement (js-object :kind "selected-and-independent-reference-compiler-directories"
               :algorithms "selected-target-only" :sourceSha256 (get identity :sha256) :modules entries
-              :changes changes :originalCaseTimeouts literal-timeouts :originalHost "tests/fixtures/literal-runtime-host.mjs"))
+              :changes changes :originalCaseTimeouts literal-timeouts :originalTotalTimeoutMs 245000
+              :originalHost "tests/fixtures/literal-runtime-host.mjs"))
           :expected (js-object :kind "seed-program" :oracleRequired t :stdout "")
           :original (js-object :manifest "stable-compatibility" :suite literal-suite
             :fixture "tests/fixtures/literal-runtime.eli" :host "tests/fixtures/literal-runtime-host.mjs"
@@ -110,7 +111,7 @@
               :byteEnd (js-call Buffer :byteLength source) :sha256 (literal-hash source)))
             :setupReplacement (js-object :kind "selected-and-independent-reference-compiler-directories" :changes changes))))))
 
-  (defasync addOriginalProjectPrograms (options)
+  (defasync add-original-project-programs (options)
     (let ((locators (get options :locators)))
       (if (not (Array/isArray locators))
           (await (js-call legacy :addOriginalProjectPrograms options))
@@ -134,4 +135,33 @@
               (unless published (funcall add record))
               (js-call mapped :splice (if (< position 0) (js-length mapped) position) 0 literal-suite)
               mapped))))))
+  (defasync addOriginalProjectPrograms (options)
+    (let* ((locators (get options :locators))
+           (actual "tests/source-debugging-selfhosted.test.mjs")
+           (archive "tests/source-debugging.test.mjs")
+           (selected (if (Array/isArray locators)
+             (js-call locators :filter (lambda (item) (= (get item :file) actual))) (js-array))))
+      (if (= (js-length selected) 0) (await (add-original-project-programs options))
+        (let* ((identity (await (funcall (get options :file) actual)))
+               (add (get options :add)) (published 0)
+               ;; The original builder consumes its real historical assertion
+               ;; file. Preserve current locator IDs and explicitly record the
+               ;; actual executing file instead of relabeling its bytes.
+               (delegated (Object/assign (js-object) options (js-object
+                 :locators (js-call locators :map (lambda (item)
+                   (if (= (get item :file) actual) (Object/assign (js-object) item (js-object :file archive)) item)))
+                 :add (lambda (record)
+                   (when (= (get record :id) "original-program:compiler-source-debugging")
+                     (setq published (1+ published))
+                     (put record :original (Object/assign (js-object) (get record :original)
+                       (js-object :locatorSourceMigration (js-object
+                         :actualEvidenceFile actual :actualEvidenceSha256 (get identity :sha256)
+                         :assertionSourceFile archive
+                         :locatorIds (js-call selected :map (lambda (item) (get item :id))))))))
+                   (funcall add record)))))
+               (mapped (await (add-original-project-programs delegated))))
+          (unless (= published 1)
+            (throw (new globalThis.TypeError "maintained debugging evidence requires one complete original source recipe")))
+          (unless (js-call mapped :includes actual) (js-call mapped :push actual))
+          mapped))))
   (export addOriginalProjectPrograms))

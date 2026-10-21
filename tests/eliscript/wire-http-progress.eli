@@ -1,0 +1,33 @@
+(module tests.wire-http-progress
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "../tools/testing/wire-project-fixture.mjs" createWireHTTPProgressObserver)
+  (test "wire progress preserves actual Promise rejection identity and business timer delay and arguments"
+    (async ()
+      (let* ((events (js-array)) (observer (createWireHTTPProgressObserver (lambda (event) (js-call events :push event))))
+             (callback undefined) (delay undefined) (cancelled undefined) (token (js-object))
+             (platform (js-call observer :platform (js-object :globals (js-object
+               :setTimeout (lambda (fn ms &rest args) (setq callback (lambda () (Reflect/apply fn token args)) delay ms) token)
+               :clearTimeout (lambda (value) (setq cancelled value))))))
+             (reason (Object/freeze (new globalThis.Error "original rejection")))
+             (promise (Promise/reject reason))
+             (client (js-call observer :client (js-object :usage (lambda () promise)))))
+        (js-call promise :catch (lambda () undefined))
+        (js-call assert :strictEqual (js-call client :usage "original-url") promise)
+        (await (js-call assert :rejects promise (lambda (error) (eq error reason))))
+        (let ((seen undefined))
+          (js-call assert :strictEqual (js-call (get platform :globals) :setTimeout
+            (lambda (value) (setq seen value)) 10 "original-argument") token)
+          (js-call assert :strictEqual delay 10)
+          (funcall callback)
+          (js-call assert :strictEqual seen "original-argument")
+          (js-call (get platform :globals) :clearTimeout token)
+          (js-call assert :strictEqual cancelled token))
+        (js-call assert :ok (js-call events :some (lambda (e) (= (get e :phase) "timer-fired"))))
+        (js-call assert :ok (js-call events :some (lambda (e) (= (get e :phase) "reject")))))))
+  (test "wire observation failure cannot replace original synchronous failure or start timers"
+    (lambda ()
+      (let* ((observer (createWireHTTPProgressObserver (lambda (event) (throw false))))
+             (service (js-call observer :service (lambda () (throw undefined)))) (caught false))
+        (try (funcall service) (catch error (setq caught t) (js-call assert :strictEqual error undefined)))
+        (js-call assert :strictEqual caught t)))))

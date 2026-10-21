@@ -1,0 +1,107 @@
+(module tests.wire-project-fixture-install
+  (import "bun:test" mock afterAll)
+  (import "bun:test" :as framework)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync mkdirSync appendFileSync)
+  (import "node:path" resolve)
+  (import "node:crypto" createHash)
+  (import "../../tools/backends/build.mjs" root)
+  (import "../../tools/backends/managed-runtime.mjs" :as wasm)
+  (import "../../tools/backends/native-managed-runtime.mjs" :as native)
+  (import "../../tools/testing/wire-project-fixture.mjs" createWireProjectFixture readWireProjectDescriptor observeWireRuntimeFailures diagnoseWireRoundtrip wireFixtureRuntimeOptions wireRuntimeResourceSnapshot wireFixtureFunctionalProfile wireFixtureTestRegistration observeWireCorpusProgress createWireHTTPProgressObserver wireHTTPRuntimeFacade)
+  (import "../../platform/http.mjs" :as http-platform)
+  (import "./standard-library-fixture.mjs" standardLibraryRuntimeFacade)
+  (defconst original-wasm (Object/assign (js-object) wasm))
+  (defconst original-native (Object/assign (js-object) native))
+  (defconst original-framework (Object/assign (js-object) framework))
+  (defconst fixture (createWireProjectFixture))
+  (defvar progress-runtime-id 0)
+  (defun progress-observer ()
+    (let* ((id progress-runtime-id) (directory (resolve root "_worktree/evidence/goal-0.0.2"))
+           (path (resolve directory (str "wire-http-progress-" (get globalThis.process :pid) ".jsonl"))))
+      (setq progress-runtime-id (1+ progress-runtime-id))
+      (mkdirSync directory (js-object :recursive t))
+      (createWireHTTPProgressObserver (lambda (event)
+        (appendFileSync path (str (JSON/stringify (Object/assign (js-object :runtimeId id) event)) "\n"))))))
+  (defun progress-options (settings observer)
+    (let* ((platform (js-call observer :platform http-platform))
+           (modules (new globalThis.Map (get settings :hostModules)))
+           (resolver (get settings :importModule)))
+      (js-call modules :set "eliscript/platform/http.mjs" platform)
+      (Object/assign (js-object) settings (js-object :hostModules modules
+        :importModule (lambda (specifier &rest arguments)
+          (if (or (= specifier "eliscript/platform/http.mjs") (= specifier "eliscript/platform/http")) platform
+            (Reflect/apply resolver undefined (js-call (js-array specifier) :concat arguments))))))))
+  (defun observe (runtime descriptor settings observer)
+    (let ((facade (js-call observer :runtime (observeWireCorpusProgress (standardLibraryRuntimeFacade runtime descriptor)
+                   (lambda (event) (js-call globalThis.console :error "wire original corpus case collected" event))))))
+    (js-call globalThis.console :error "wire actual initial resources" (wireRuntimeResourceSnapshot runtime settings))
+    (observeWireRuntimeFailures facade
+      (lambda (method arguments error)
+        (js-call globalThis.console :error "wire intercepted target throw before cleanup (may be an expected negative assertion)" method (aref arguments 0)
+          (js-object :kind (get error :kind)))
+        (try (js-call globalThis.console :error "wire actual resources at first failure"
+               (wireRuntimeResourceSnapshot runtime settings))
+          (catch stats-error (js-call globalThis.console :error "wire resource snapshot unavailable" (get stats-error :message))))
+        (try
+          (let ((decoded (if (and error (= (value-type error) "object")
+                               (Object/hasOwn error "kind") (= (value-type (get error :kind)) "number"))
+                           (js-call runtime :toHostValue error) error)))
+            (js-call globalThis.console :error "wire original decoded error fields"
+              (js-object :name (get decoded :name) :message (get decoded :message)
+                :code (get decoded :code) :stack (get decoded :stack))))
+          (catch failure
+            (js-call globalThis.console :error "wire error decode failed before cleanup"
+              (js-object :name (get failure :name) :message (get failure :message) :code (get failure :code)))
+            (js-call (js-array "name" "message" "stack") :forEach (lambda (key)
+              (try
+                (let ((name (js-call runtime :string key)))
+                  (try
+                    (let ((field (js-call runtime :objectGet error name)))
+                      (try (js-call globalThis.console :error "wire managed error field" key (js-call runtime :readString field))
+                        (finally (js-call runtime :release field))))
+                    (finally (js-call runtime :release name))))
+                (catch field-failure (js-call globalThis.console :error "wire managed error field unavailable" key
+                  (get field-failure :message) (get field-failure :code))))))))
+        (when (and (= (get (get globalThis.process :env) :ELISCRIPT_WIRE_BRANCH_DIAGNOSTIC) "1")
+                   (= method "invoke") (= (aref arguments 0) "roundtrip-report"))
+          (diagnoseWireRoundtrip facade (js-call runtime :readString (aref (aref arguments 1) 0))))))))
+  (defconst original-source-sha (js-call (js-call (createHash "sha256") :update
+    (readFileSync (resolve root "tests/wasm-managed-wire-test-legacy.mjs"))) :digest "hex"))
+  (js-call assert :strictEqual original-source-sha
+    "05835e2d5f6fd6e973a052df3389cafb3e131fbcfce305272070b13d20453df0")
+  (defun functional-settings (settings)
+    (let ((selection (wireFixtureRuntimeOptions original-source-sha (get globalThis.process :env) settings)))
+      (js-call globalThis.console :error "wire original capacity acceptance"
+        (get selection :originalCapacityAcceptance)
+        (js-object :original (js-object :maxSlots (get settings :maxSlots) :initialBytes (get settings :initialBytes) :maxBytes (get settings :maxBytes))
+          :effective (let ((options (get selection :options)))
+            (js-object :maxSlots (get options :maxSlots) :initialBytes (get options :initialBytes) :maxBytes (get options :maxBytes)))))
+      (get selection :options)))
+  (defasync instantiateManagedRuntimeWithHostModules (bytes settings)
+    (let* ((descriptor (readWireProjectDescriptor bytes)) (observer (progress-observer))
+           (effective (progress-options (functional-settings settings) observer)))
+      (wireHTTPRuntimeFacade (observe
+        (await (Reflect/apply (get original-wasm :instantiateManagedRuntimeWithHostModules) original-wasm
+          (js-array bytes (await (js-call fixture :options descriptor effective))))) descriptor effective observer))))
+  (defasync instantiateNativeManagedRuntime (path lowered settings)
+    (let* ((observer (progress-observer)) (effective (progress-options (functional-settings settings) observer)))
+      (wireHTTPRuntimeFacade (observe
+      (await (Reflect/apply (get original-native :instantiateNativeManagedRuntime) original-native
+        (js-array path lowered (await (js-call fixture :options (get lowered :descriptor) effective)))))
+      (get lowered :descriptor) effective observer))))
+  (afterAll (async ()
+    (js-call mock :module "bun:test" (lambda () original-framework))
+    (js-call mock :module (resolve root "tools/backends/managed-runtime.mjs") (lambda () original-wasm))
+    (js-call mock :module (resolve root "tools/backends/native-managed-runtime.mjs") (lambda () original-native))
+    (await (js-call fixture :close))))
+  (when (wireFixtureFunctionalProfile original-source-sha (get globalThis.process :env))
+    (js-call globalThis.console :error "wire original total-time acceptance DEFERRED / NOT ACCEPTED; exact original complete functional cases have no total deadline")
+    (js-call mock :module "bun:test" (lambda () (Object/assign (js-object) original-framework
+      (js-object :test (wireFixtureTestRegistration (get original-framework :test) original-source-sha (get globalThis.process :env)))))))
+  (js-call mock :module (resolve root "tools/backends/managed-runtime.mjs")
+    (lambda () (Object/assign (js-object) original-wasm
+      (js-object :instantiateManagedRuntimeWithHostModules instantiateManagedRuntimeWithHostModules))))
+  (js-call mock :module (resolve root "tools/backends/native-managed-runtime.mjs")
+    (lambda () (Object/assign (js-object) original-native
+      (js-object :instantiateNativeManagedRuntime instantiateNativeManagedRuntime)))))

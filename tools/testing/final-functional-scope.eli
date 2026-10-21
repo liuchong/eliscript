@@ -1,6 +1,7 @@
 (module tools.testing.final-functional-scope
   (import "./file-workers.mjs" parseTestFileArgs partitionTestFiles runTestFiles)
   (import "./resource-supervisor.mjs" startResourceSupervisor)
+  (import "./fixture-environment.mjs" prepareFixtureEnvironment fixtureChildArguments)
   (import "node:fs/promises" readFile mkdir writeFile)
   (import "node:path" resolve relative basename)
   (import "node:crypto" createHash)
@@ -9,6 +10,14 @@
   (defconst package-file "tests/compiler-package-session.test.mjs")
   (defconst tools-file "tests/compiler-session-tools.test.mjs")
   (defconst sequence-file "tests/wasm-managed-sequence-data.test.mjs")
+  (defconst record-grid-file "tests/record-grid-selfhosted.test.mjs")
+  (defconst response-events-file "tests/compiler-response-events.test.mjs")
+  (defconst literal-runtime-file "tests/literal-runtime.test.mjs")
+  (defconst wire-runtime-file "tests/wasm-managed-wire-selfhosted.test.mjs")
+  (defconst ingress-file "tests/compiler-ir-session-ingress.test.mjs")
+  (defconst artifact-archive-file "tests/compiler-artifact-archive-selfhosted.test.mjs")
+  (defconst persistent-literals-file "tests/wasm-managed-persistent-literals.test.mjs")
+  (defconst ingress-sha "510213d89769be93ce574f11de72061e2f7ff5605cfb792d79388aa419807183")
   (defconst package-sha "cabaee3897e99a1c920dc4d3ba16459351a6d4864b327a03839c0c8d7d7d2b4c")
   (defconst tools-sha "4668c61b9956b5501e496fc6246300667cf3fb85d5ebdd414d86269c5a56acd0")
   (defconst cancellation-reason
@@ -22,8 +31,8 @@
   ;; a substring or a broad host/compiler name match. A suite edit requires an
   ;; explicit scope update; no unrecognized test is silently cancelled.
   (defun cancelledCompilerHostCases (file source)
-    (if (and (/= file package-file) (/= file tools-file)) (js-array)
-      (let* ((expected (if (= file package-file) package-sha tools-sha))
+    (if (and (/= file package-file) (/= file tools-file) (/= file ingress-file)) (js-array)
+      (let* ((expected (cond ((= file package-file) package-sha) ((= file ingress-file) ingress-sha) (t tools-sha)))
              (actual (sha source)) (cases (js-array)))
         (unless (= actual expected)
           (throw (new globalThis.TypeError (+ "final functional scope source identity changed: " file))))
@@ -32,6 +41,15 @@
             :id (+ "cancelled-compiler-host:" file ":" (js-length cases))
             :file file :sourceSha256 actual :title title :host host :sourceGroup group
             :parameters parameters :status "cancelled" :reason cancellation-reason)))))
+          (if (= file ingress-file)
+            (js-call (js-array "wasm" "native") :forEach (lambda (host)
+              (js-call (js-array
+                "When validated single IR is emitted Then actual WASM and native output preserve IEEE values"
+                "When original IR intrinsic operands are corrupted Then original lowering rejects them and later IR still emits"
+                "When a source graph and its exact IR graph are emitted Then all target bytes and JS maps agree"
+                "When original memory IR or typed memory IR is emitted Then the real raw ABI and refusal paths are preserved")
+                :forEach (lambda (suffix)
+                  (funcall add (+ "Given complete " host " compiler " suffix) host "completeCompilerIRIngress" (js-object :host host))))))
           (if (= file tools-file)
             (funcall add
               "a complete real managed compiler driver transports AggregateError graphs with shared errors and cause identity"
@@ -53,7 +71,7 @@
                   (js-call (js-array "emit-ir" "project-ir" "emit-memory-ir" "emit-typed-memory") :forEach (lambda (operation)
                     (funcall add (+ "Given the original and relocated " host " compiler When " engine
                       " CLI request submits " operation " Then real products sidecars and recovery preserve their ABI")
-                      host "requestIRInput/encodedCompiler" (js-object :host host :engine engine :operation operation)))))))))))
+                      host "requestIRInput/encodedCompiler" (js-object :host host :engine engine :operation operation))))))))))))
         cases)))
 
   (defun escape-pattern (title)
@@ -66,13 +84,18 @@
 
   (defasync file-plan (file source-root)
     (let* ((name (relative source-root (resolve source-root file)))
-           (mixed (or (= name package-file) (= name tools-file)))
+           (mixed (or (= name package-file) (= name tools-file) (= name ingress-file)))
            (cancelled (if mixed (cancelledCompilerHostCases name
-                         (await (readFile (resolve source-root name) "utf8"))) (js-array))))
-      (js-object :file file :kind (cond (mixed "mixed") ((= name sequence-file) "sequence") (t "ordinary"))
+                         (await (readFile (resolve source-root
+                           (if (= name ingress-file) "tests/compiler-ir-session-ingress-test-legacy.mjs" name)) "utf8"))) (js-array))))
+      (js-object :file file :kind (cond ((or (= name ingress-file) (= name package-file)) "sequence") (mixed "mixed")
+          ((or (= name sequence-file) (= name record-grid-file) (= name response-events-file)
+               (= name literal-runtime-file) (= name wire-runtime-file) (= name artifact-archive-file)
+               (= name persistent-literals-file)) "sequence") (t "ordinary"))
         :cancelled cancelled :pattern (functionalScopePattern cancelled))))
 
-  ;; The complete sequence file retains every case and original test deadline.
+  ;; Complete artifact-archive, package, sequence, record-grid and measured large-runtime files retain every original case and
+  ;; deadline; IR ingress retains every active JavaScript compiler case.
   ;; Its process belongs to the caller's controlled-run tree (24 GiB build
   ;; hard ceiling); the smaller file-supervisor ceiling is intentionally absent.
   ;; stdout/stderr are forwarded as streams, never accumulated by this driver.
@@ -81,7 +104,7 @@
            (environment (option options "environment" (get globalThis.process :env)))
            (command (if (get (get globalThis.process :versions) :bun) (get globalThis.process :execPath)
                       (option environment "BUN" "bun")))
-           (child (spawn command arguments (js-object :cwd (option options "sourceRoot" (js-call globalThis.process :cwd))
+           (child (spawn command (fixtureChildArguments arguments environment) (js-object :cwd (option options "sourceRoot" (js-call globalThis.process :cwd))
                     :env environment :stdio (js-array "ignore" "pipe" "pipe"))))
            (failure undefined) (cancel-code 0)
            (interrupt (lambda () (setq cancel-code 130) (js-call child :kill "SIGINT")))
@@ -122,7 +145,8 @@
           (progn
             (setq result (await (js-call supervisor :run (js-object :id "0" :file (get plan :file)
               :command (get globalThis.process :execPath) :args
-                (js-array "--smol" "test" (get plan :file) "--test-name-pattern" (get plan :pattern))
+                (fixtureChildArguments
+                  (js-array "--smol" "test" "--timeout" "300000" (get plan :file) "--test-name-pattern" (get plan :pattern)) environment)
               :cwd (js-call globalThis.process :cwd) :env environment))))
             (setq result (Object/assign (js-object :file (get plan :file)) result))))
         (catch error (setq result (js-object :file (get plan :file)
@@ -148,13 +172,17 @@
            (source-root (resolve (option options "sourceRoot" (js-call globalThis.process :cwd))))
            (environment (option options "environment" (get globalThis.process :env)))
            (executors (option options "executors" (js-object)))
-           (ordinary (option executors "ordinary" runTestFiles))
+           (ordinary (option executors "ordinary" (async (batch env)
+             (await (runTestFiles batch (js-object :environment env :sourceRoot source-root))))))
            (mixed (option executors "mixed" (async (plan env cancellation)
              (await (run-mixed plan env cancellation (option executors "startSupervisor" startResourceSupervisor))))))
            (sequence (option executors "sequence" (async (plan env)
-             (await (runFunctionalChild (get plan :file) (js-array "--smol" "test" (get plan :file))
+             (await (runFunctionalChild (get plan :file)
+               (let ((arguments (js-array "--smol" "test" "--timeout" "300000" (get plan :file))))
+                 (when (get plan :pattern) (js-call arguments :push "--test-name-pattern" (get plan :pattern))) arguments)
                (js-object :sourceRoot source-root :environment env))))))
            (plans (js-array)) (cancelled (js-array)) (results (js-array)) (cursor 0) (exit-code 0) (halt false)
+           (fixture undefined)
            (cancellation (option options "cancellation" (js-object :code 0)))
            (interrupt (lambda () (when (= (get cancellation :code) 0) (put cancellation :code 130))))
            (terminate (lambda () (when (= (get cancellation :code) 0) (put cancellation :code 143)))))
@@ -167,6 +195,8 @@
           (setq index (1+ index))))
       (when shard (js-call globalThis.console :log
         (+ "Test file shard " (get shard :index) "/" (get shard :count) ": " (js-length files) "/" (js-length original) " selected")))
+      (setq fixture (prepareFixtureEnvironment source-root environment))
+      (setq environment (get fixture :environment))
       (js-call globalThis.process :on "SIGINT" interrupt)
       (js-call globalThis.process :on "SIGTERM" terminate)
       (try
@@ -176,7 +206,7 @@
               (let ((batch (js-array)))
                 (while (and (< cursor (js-length plans)) (= (get (aref plans cursor) :kind) "ordinary"))
                   (js-call batch :push (get (aref plans cursor) :file)) (setq cursor (1+ cursor)))
-                (let ((outcome (await (funcall ordinary batch))))
+                (let ((outcome (await (funcall ordinary batch environment))))
                   (Reflect/apply (get results :push) results (get outcome :results))
                   (when (/= (get outcome :exitCode) 0) (setq exit-code (get outcome :exitCode)))
                   (when (get outcome :failure) (setq halt t))))
@@ -185,7 +215,8 @@
                 (when (/= (get outcome :exitCode) 0) (setq exit-code (get outcome :exitCode)))
                 (when (get outcome :failure) (setq halt t))))))
         (finally (js-call globalThis.process :off "SIGINT" interrupt)
-          (js-call globalThis.process :off "SIGTERM" terminate)))
+          (js-call globalThis.process :off "SIGTERM" terminate)
+          (js-call fixture :close)))
       (let* ((completed (new globalThis.Set (js-call
                 (js-call results :filter (lambda (item) (not (eq (get item :started) false))))
                 :map (lambda (item) (get item :file)))))

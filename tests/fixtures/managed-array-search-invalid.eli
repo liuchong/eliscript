@@ -1,0 +1,6 @@
+(defconst marker 1)
+(defun bad (items trace) (js-call items :indexOf (put trace :visited t) 0))
+(defun convert (items trace)
+  (js-call items :includes nil (js-object :valueOf (lambda () (put trace :visited t) (js-object))
+                                         :toString (lambda () (js-object)))))
+(export bad convert)

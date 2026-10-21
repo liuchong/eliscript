@@ -213,6 +213,18 @@
       (js-call assert :strictEqual (aref values 3) IPrint)
       (js-call assert :strictEqual (aref values 4) (protocolSlot IComparable "compare"))
       (js-call assert :strictEqual (aref values 5) IComparable)
+      ;; The first slot reads precede decoding their protocol owners above.
+      ;; Later calls must keep the exact canonical identity for those raw IDs.
+      (let ((index 0))
+        (while (< index 2)
+          (js-call assert :strictEqual (aref values 0) (protocolSlot IPrint "print"))
+          (js-call assert :strictEqual (aref values 4) (protocolSlot IComparable "compare"))
+          (let ((again (js-call module :standard_protocol_identities)))
+            (js-call assert :strictEqual (aref again 0) (aref values 0))
+            (js-call assert :strictEqual (aref again 3) IPrint)
+            (js-call assert :strictEqual (aref again 4) (aref values 4))
+            (js-call assert :strictEqual (aref again 5) IComparable))
+          (setq index (1+ index))))
       (js-call assert :strictEqual (printValue (aref values 6)) "target-print")
       (js-call assert :strictEqual (compareValues (aref values 6) (aref values 6)) 0)
       (js-call assert :strictEqual (isProtocol (aref values 7)) t)
@@ -356,7 +368,7 @@
                 (js-call runtime :auto 65536)
                 (try
                   (await (loadManagedProjectGraph runtime descriptor (js-object :moduleGraph
-                    (if allocator-diagnostic (createSequenceDiagnosticGraph runtime graph) graph)
+                    (createSequenceDiagnosticGraph runtime graph)
                     :projectEntry (get configuration :entry) :projectModuleBaseURL
                     (get (pathToFileURL (+ (get configuration :deployment) "/")) :href))))
                   (catch error
@@ -371,7 +383,7 @@
           (when runtime (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)))
         (catch error
           (setq failed t)
-          (when allocator-diagnostic (capture-sequence-source-failure runtime error))
+          (capture-sequence-source-failure runtime error)
           (throw error))
         (finally
           (put globalThis.WebAssembly :Module old-module) (put globalThis.WebAssembly :Instance old-instance)
@@ -396,6 +408,6 @@
   (export withSequenceSourceFailure readSequenceSourceFailureReport createSequenceDiagnosticGraph assertSequenceProtocolRejection)
   (when (= (basename (get (get globalThis.process :argv) 1 "")) "managed-sequence-data-host-selfhosted.mjs")
     (js-call (run) :catch (lambda (error)
-      (let ((report (when allocator-diagnostic (readSequenceSourceFailureReport error))))
+      (let ((report (readSequenceSourceFailureReport error)))
         (if report (console/error "[sequence-source-throw]" (JSON/stringify report)) (console/error error)))
       (put globalThis.process :exitCode 1)))))

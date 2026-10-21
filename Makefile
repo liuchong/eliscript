@@ -1,7 +1,12 @@
 EMACS ?= emacs
 BUN ?= bun
 NODE ?= node
+# The full original managed programs need more than V8's default 4 GiB heap.
+# This is per Node process; a separate supervisor must bound the complete tree.
+ELISCRIPT_NODE_HEAP_MIB ?= 12288
+export NODE_OPTIONS ?= --max-old-space-size=$(ELISCRIPT_NODE_HEAP_MIB)
 BUN_TEST_RUNNER ?= tools/testing/final-functional-scope.mjs
+BUN_ARTIFACT_TEST_RUNNER ?= $(BUN_TEST_RUNNER)
 ELISCRIPT_JS_RUNTIME ?= $(shell command -v node)
 BOOTSTRAP_RELEASE_OUT ?= dist/bootstrap-release
 BOOTSTRAP_RELEASE_MANIFEST ?= $(BOOTSTRAP_RELEASE_OUT)/bootstrap.json
@@ -35,14 +40,28 @@ check-release-workflow:
 compiler-release-ci: bootstrap-release
 	$(MAKE) verify-bootstrap
 	$(NODE) tools/ci/dist/compiler-release.mjs --check
-	$(NODE) --test tests/bootstrap-js-stages-selfhosted.test.mjs tests/stage3-targets-selfhosted.test.mjs tests/bootstrap-release-integration-selfhosted.test.mjs
-	$(MAKE) check-stage3-targets STAGE3_FUNCTIONAL_RUNTIME_PROFILE=small
+	$(NODE) --test --test-concurrency=1 tests/bootstrap-js-stages-selfhosted.test.mjs tests/stage3-targets-selfhosted.test.mjs tests/bootstrap-release-integration-selfhosted.test.mjs
+	ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(MAKE) check-stage3-targets STAGE3_FUNCTIONAL_RUNTIME_PROFILE=small
 	# Reuse the already generated and authenticated cohort. Rebuilding here
 	# would replace the installed stage3 runtime with an Emacs bootstrap product.
 	ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE=small ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(MAKE) --assume-old=bootstrap-backends test
 
-.PHONY: test test-core test-applications check-contracts byte-compile bootstrap-backends
+.PHONY: test test-pre-bootstrap test-pre-bootstrap-originals test-bootstrap-artifacts test-core test-applications check-contracts byte-compile bootstrap-backends
 test: test-core test-applications
+
+test: test-pre-bootstrap-originals test-bootstrap-artifacts
+
+# Source/runtime functionality closes before formal self-recompilation. These
+# artifact consumers stay in the complete test gate and run after a real final
+# stage3 exists; a missing receipt must fail, never trigger a synthetic fixture.
+test-pre-bootstrap: test-core test-applications test-pre-bootstrap-originals
+
+test-pre-bootstrap-originals:
+	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=1 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
+
+test-bootstrap-artifacts:
+	$(BUN) $(BUN_ARTIFACT_TEST_RUNNER) ./tests/package-surface.test.mjs ./tests/compiler-browser-session.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs
+	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-tools-cli-selfhosted.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
 
 test-core: check-contracts
 	$(EMACS) --batch -Q -L compiler -L editor -L tools/org -L tools/worker -L tests \
@@ -77,10 +96,9 @@ test-core: check-contracts
 		./tests/local-onboarding.test.mjs \
 		./tests/test-partition.test.mjs \
 		./tests/repository-integrity.test.mjs \
-		./tests/repository-integrity-test-legacy.mjs \
-		./tests/package-surface.test.mjs \
+		./tests/repository-integrity-original-selfhosted.test.mjs \
 		./tests/platform-capabilities.test.mjs \
-		./tests/reader-program-fuzz.test.mjs \
+		./tests/reader-program-fuzz-acceptance-selfhosted.test.mjs \
 		./tests/reader-program-fuzz-runtime-selfhosted.test.mjs \
 		./tests/persistent-semantics.test.mjs \
 		./tests/project-scale.test.mjs \
@@ -88,10 +106,11 @@ test-core: check-contracts
 		./tests/performance-acceptance-mode.test.mjs \
 		./tests/maturity-progress.test.mjs \
 		./tests/diagnostic-corpus.test.mjs \
-		./tests/source-debugging.test.mjs \
+		./tests/source-debugging-selfhosted.test.mjs \
 		./tests/core-acceptance-corpus.test.mjs \
 		./tests/repeated-determinism.test.mjs \
 		./tests/final-acceptance.test.mjs \
+		./tests/final-acceptance-history-selfhosted.test.mjs \
 		./tests/retained-soak-refresh.test.mjs \
 		./tests/retained-transient-refresh.test.mjs \
 		./tests/retained-performance-deferral.test.mjs \
@@ -101,6 +120,8 @@ test-core: check-contracts
 		./tests/ci-contract.test.mjs \
 		./tests/file-workers-selfhosted.test.mjs \
 		./tests/test-resource-supervisor.test.mjs \
+		./tests/resource-supervisor-selfhosted.test.mjs \
+		./tests/independent-cli-named-selfhosted.test.mjs \
 		./tests/local-compatibility-matrix.test.mjs \
 		./tests/collection-layout-benchmark.test.mjs \
 		./tests/transient-builder-benchmark.test.mjs \
@@ -108,33 +129,38 @@ test-core: check-contracts
 		./tests/bootstrap-formatter.test.mjs \
 		./tests/bootstrap-expander.test.mjs ./tests/bootstrap-analyzer.test.mjs \
 		./tests/bootstrap-ir.test.mjs ./tests/bootstrap-ir-serialization.test.mjs \
-		./tests/bootstrap-emitter.test.mjs \
+		./tests/bootstrap-emitter-selfhosted.test.mjs \
 		./tests/compiler-ir-kind.test.mjs \
 		./tests/compiler-indent.test.mjs \
 		./tests/compiler-locate.test.mjs \
 		./tests/compiler-binary-comparison.test.mjs \
 		./tests/compiler-js-codegen.test.mjs \
-		./tests/compiler-artifact-archive.test.mjs \
+		./tests/compiler-artifact-archive-selfhosted.test.mjs \
 		./tests/compiler-source-archive-streaming.test.mjs \
-		./tests/compiler-matrix-original-gates.test.mjs \
+		./tests/compiler-matrix-original-gates-selfhosted.test.mjs \
 		./tests/compiler-corpus-arguments.test.mjs \
 		./tests/compiler-corpus-f64-replay.test.mjs \
 		./tests/compiler-corpus-source-archive.test.mjs \
 		./tests/compiler-corpus-tools-artifact-adapters.test.mjs \
 		./tests/compiler-matrix-snapshot.test.mjs \
 		./tests/compiler-corpus-source-sharing.test.mjs \
-		./tests/compiler-metadata-codec.test.mjs \
+		./tests/compiler-metadata-codec-selfhosted.test.mjs \
 		./tests/compiler-sha256.test.mjs \
 		./tests/compiler-worker-identities.test.mjs \
 		./tests/compiler-ir-validation.test.mjs \
 		./tests/compiler-ir-session-ingress.test.mjs \
+		./tests/bounded-assertions-selfhosted.test.mjs \
+		./tests/persistent-literal-fixture-selfhosted.test.mjs \
+		./tests/compiler-package-execution-selfhosted.test.mjs \
+		./tests/unicode-property-aliases-selfhosted.test.mjs \
+		./tests/bootstrap-compiler-fixture-selfhosted.test.mjs \
+		./tests/generated-fixture-module-selfhosted.test.mjs \
 		./tests/compiler-ir-arity-diagnostics.test.mjs \
 		./tests/compiler-corpus-json-patch.test.mjs \
 		./tests/compiler-package-session.test.mjs \
 		./tests/compiler-session-tools.test.mjs \
 		./tests/compiler-session-error-transport.test.mjs \
 		./tests/compiler-build-selfhosted.test.mjs \
-		./tests/compiler-matrix-archive-debug-selfhosted.test.mjs \
 		./tests/compiler-corpus-host-tool-projection-selfhosted.test.mjs \
 		./tests/emitter-tdz-seed-parity-selfhosted.test.mjs \
 		./tests/compiler-tools-source-identity.test.mjs \
@@ -154,8 +180,9 @@ test-core: check-contracts
 		./tests/record-grid-selfhosted.test.mjs \
 		./tests/compiler-literal-corpus-selfhosted.test.mjs \
 		./tests/compiler-error-transport.test.mjs \
-		./tests/compiler-browser-session.test.mjs \
 		./tests/direct-wasm-backend.test.mjs \
+		./tests/direct-wasm-registration-selfhosted.test.mjs \
+		./tests/direct-wasm-error-profile-selfhosted.test.mjs \
 		./tests/wasm-memory-runtime.test.mjs \
 		./tests/wasm-memory-allocator.test.mjs \
 		./tests/wasm-managed-function-description.test.mjs \
@@ -183,7 +210,7 @@ test-core: check-contracts
 		./tests/wasm-managed-persistent-literals.test.mjs \
 		./tests/wasm-managed-transient-state.test.mjs \
 		./tests/wasm-managed-core-modules.test.mjs \
-	./tests/wasm-managed-wire.test.mjs \
+	./tests/wasm-managed-wire-selfhosted.test.mjs \
 	./tests/wasm-managed-sorted-core.test.mjs \
 	./tests/wasm-managed-sequence-data.test.mjs \
 		./tests/wasm-managed-empty-bindings.test.mjs \
@@ -193,6 +220,8 @@ test-core: check-contracts
 		./tests/wasm-managed-exceptions.test.mjs \
 		./tests/wasm-managed-catch-destructuring.test.mjs \
 		./tests/wasm-managed-symbols.test.mjs \
+		./tests/wasm-managed-regexp-split-selfhosted.test.mjs \
+		./tests/wasm-managed-array-construction-regressions-selfhosted.test.mjs \
 		./tests/wasm-managed-exceptions-browser.test.mjs \
 		./tests/wasm-managed-iteration.test.mjs \
 		./tests/wasm-managed-primitive-properties.test.mjs \
@@ -246,6 +275,9 @@ test-core: check-contracts
 		./tests/wasm-managed-array-search.test.mjs \
 		./tests/wasm-managed-array-construction.test.mjs \
 		./tests/wasm-managed-js-cons.test.mjs \
+		./tests/wasm-managed-js-cons-fast.test.mjs \
+		./tests/wasm-managed-vector-copy.test.mjs \
+		./tests/wasm-managed-type-construction.test.mjs \
 		./tests/managed-persistent-vector.test.mjs \
 		./tests/managed-stdlib-value-json.test.mjs \
 		./tests/wasm-managed-object-properties.test.mjs \
@@ -298,7 +330,7 @@ test-core: check-contracts
 		./tests/stdlib-sequence.test.mjs \
 		./tests/stdlib-text.test.mjs ./tests/stdlib-object.test.mjs \
 		./tests/markdown-wire.test.mjs ./tests/http-rpc.test.mjs ./tests/wire-compiler.test.mjs \
-		./tests/stdlib-bit.test.mjs ./tests/stdlib-function.test.mjs \
+		./tests/stdlib-bit-selfhosted.test.mjs ./tests/stdlib-function.test.mjs \
 		./tests/stdlib-deferred.test.mjs \
 		./tests/portable-persistent-list.test.mjs \
 		./tests/portable-persistent-map.test.mjs \
@@ -323,7 +355,7 @@ test-core: check-contracts
 		./tests/interop-package.test.mjs \
 		./tests/identifier.test.mjs ./tests/metadata.test.mjs \
 		./tests/data-text.test.mjs \
-		./tests/protocol.test.mjs ./tests/eliscript-protocol.test.mjs \
+		./tests/protocol.test.mjs ./tests/eliscript-protocol-selfhosted.test.mjs \
 		./tests/collection-protocol.test.mjs \
 		./tests/core-text-object.test.mjs \
 		./tests/literal-runtime.test.mjs \
@@ -335,7 +367,8 @@ test-core: check-contracts
 		./tests/persistent-list.test.mjs ./tests/persistent-queue.test.mjs ./tests/persistent-vector.test.mjs ./tests/value-semantics.test.mjs \
 		./tests/persistent-map.test.mjs ./tests/persistent-set.test.mjs \
 		./tests/record.test.mjs ./tests/type.test.mjs
-	$(NODE) --test ./tests/compiler-session-protocol-selfhosted.test.mjs ./tests/compiler-matrix-selfhosted.test.mjs ./tests/managed-module-graph-selfhosted.test.mjs ./tests/compiler-corpus-managed-adapters-selfhosted.test.mjs \
+	$(NODE) --test --test-concurrency=1 ./tests/compiler-session-protocol-selfhosted.test.mjs ./tests/compiler-matrix-selfhosted.test.mjs ./tests/managed-module-graph-selfhosted.test.mjs ./tests/compiler-corpus-managed-adapters-selfhosted.test.mjs \
+		./tests/number-text-node-bridge-selfhosted.test.mjs \
 		./tests/compiler-host-scope-selfhosted.test.mjs \
 		./tests/managed-host-selfhosted.test.mjs \
 		./tests/managed-host-lifecycle-selfhosted.test.mjs \
@@ -343,21 +376,42 @@ test-core: check-contracts
 		./tests/managed-protocol-dispatch-selfhosted.test.mjs \
 		./tests/managed-source-view-refresh-selfhosted.test.mjs \
 		./tests/managed-source-view-decode-selfhosted.test.mjs \
+		./tests/persistent-zipper-path-selfhosted.test.mjs \
 		./tests/compiler-corpus-literal-provider-selfhosted.test.mjs \
 		./tests/compiler-corpus-implicit-resources-selfhosted.test.mjs \
-		./tests/compiler-corpus-tools-cli-selfhosted.test.mjs \
+		./tests/compiler-corpus-process-selfhosted.test.mjs \
+		./tests/compiler-corpus-raw-fixture-observer-selfhosted.test.mjs \
+		./tests/compiler-corpus-raw-special-fixtures-selfhosted.test.mjs \
+		./tests/compiler-corpus-raw-math-fixture-selfhosted.test.mjs \
+		./tests/compiler-corpus-raw-receipts-selfhosted.test.mjs \
+		./tests/compiler-corpus-identity-host-selfhosted.test.mjs \
+		./tests/wire-http-progress-selfhosted.test.mjs \
 		./tests/compiler-package-selfhosted.test.mjs \
 		./tests/bootstrap-project-runtime-selfhosted.test.mjs \
+		./tests/acceptance-generated-evidence-selfhosted.test.mjs \
 		./tests/browser-workflow-selfhosted.test.mjs \
+		./tests/project-cli-stdin-selfhosted.test.mjs \
 		./tests/compiler-runtime-scan-selfhosted.test.mjs \
 		./tests/compiler-corpus-host-completion-selfhosted.test.mjs \
 		./tests/final-functional-scope-selfhosted.test.mjs \
+		./tests/independent-cli-fixture-selfhosted.test.mjs \
+		./tests/independent-cli-invocation-selfhosted.test.mjs \
+		./tests/wasm-static-snapshot-fixture-selfhosted.test.mjs \
+		./tests/managed-fixture-repairs-selfhosted.test.mjs \
+		./tests/wire-project-fixture-selfhosted.test.mjs \
+		./tests/fixture-environment-selfhosted.test.mjs \
+		./tests/standard-library-fixture-selfhosted.test.mjs \
+		./tests/managed-capacity-registration-selfhosted.test.mjs \
+		./tests/managed-sharing-fixture-selfhosted.test.mjs \
+		./tests/array-text-fixture-selfhosted.test.mjs \
+		./tests/math-oracle-fixture-selfhosted.test.mjs \
+		./tests/initializer-array-fixture-selfhosted.test.mjs \
+		./tests/managed-primitive-own-repairs-selfhosted.test.mjs \
 		./tests/release-package-install-selfhosted.test.mjs \
 		./tests/managed-runtime-extended-selfhosted.test.mjs \
 		./tests/math-runtime-selfhosted.test.mjs \
 		./tests/unicode-case-selfhosted.test.mjs \
 		./tests/unicode-default-selfhosted.test.mjs \
-		./tests/compiler-matrix-archive-debug-selfhosted.test.mjs \
 		./tests/compiler-corpus-host-tool-projection-selfhosted.test.mjs \
 		./tests/emitter-tdz-seed-parity-selfhosted.test.mjs \
 		./tests/compiler-tools-source-identity.test.mjs \
@@ -367,7 +421,11 @@ test-core: check-contracts
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/check-cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/format-cli-test.sh
 
-test-applications:
+.PHONY: prepare-application-assets
+prepare-application-assets: bootstrap-backends
+	$(BUN) run build:browser
+
+test-applications: prepare-application-assets
 	$(EMACS) --batch -Q -L tools/org -L tests \
 		-l tests/eliscript-org-tests.el \
 		-f ert-run-tests-batch-and-exit

@@ -33,7 +33,11 @@
         (error "invalid bootstrap module name: %s" name)))
     (make-directory output t)
     (eliscript-bootstrap-prepare-runtime root output)
-    (eliscript-bootstrap-prepare-project-host root)
+    ;; An independent seed owns OUTPUT. Do not replace an already installed
+    ;; stage3 host/runtime in ROOT while creating an unrelated compiler fixture.
+    (eliscript-bootstrap-prepare-project-host
+     root (not (equal (file-truename output)
+                      (file-truename (expand-file-name "dist/bootstrap" root)))))
     (dolist (name arguments)
       (eliscript-compile-file-with-source-map
        (expand-file-name (concat "bootstrap/compiler/" name ".eli") root)

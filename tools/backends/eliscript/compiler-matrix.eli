@@ -616,6 +616,7 @@
                            (cloneCompilerCorpusData (otherwise (get (get corpus :document) :evidence) (js-array))) undefined)
                :directory directory :signal (get options :signal) :options execution-options
                :transportEvidence (js-object) :sourceAssets (get (get corpus :document) :evidence)
+               :literalSources literal-sources :literalSourceIdentity literal-identity
                :archiveProduct (async (value &optional name product-target)
                  (await (archiveProduct value (if (undefined? product-target) target product-target)
                    (join directory (relative-identity (if (undefined? name) "product" name)))))))))
@@ -916,6 +917,7 @@
                  :originalOracle (if (nullish? (get options :originalOracle))
                    (createOriginalSeedOracle (js-object :sourceRoot source-root :emacs (get options :emacs) :signal (get options :signal)
                      :bootstrapManifestPath (get options :bootstrapManifestPath)
+                     :functionalRuntimeProfile (get options :functionalRuntimeProfile)
                      :directory (join directory "original-seed-oracles") :node (get options :node) :bun (get options :bun)
                      :sourceAssets (get (get corpus :document) :evidence) :literalSources (get sources :literalSources)
                      :literalSourceIdentity (get source-identity :literalSources) :programCache (get options :programCache)
@@ -1045,6 +1047,7 @@
                  :originalOracle (if (nullish? (get options :originalOracle))
                    (createOriginalSeedOracle (js-object :sourceRoot source-root :emacs (get options :emacs) :signal (get options :signal)
                      :bootstrapManifestPath (get options :bootstrapManifestPath)
+                     :functionalRuntimeProfile (get options :functionalRuntimeProfile)
                      :directory (join directory "original-seed-oracles") :node (get options :node) :bun (get options :bun)
                      :sourceAssets (get (get corpus :document) :evidence) :literalSources (get sources :literalSources)
                      :literalSourceIdentity (get source-identity :literalSources) :programCache (get options :programCache)

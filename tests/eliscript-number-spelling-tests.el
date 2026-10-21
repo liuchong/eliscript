@@ -126,7 +126,7 @@
                            "./runtime/math.mjs"))
             ;; Use a real Eliscript driver, retaining all exact JS comparisons.
             (eliscript-compile-file-with-source-map
-             (expand-file-name "tests/fixtures/number-spelling-selfhost-driver.eli" root)
+             (expand-file-name "tools/testing/number-spelling-selfhost-driver.eli" root)
              driver)
             (with-current-buffer bootstrap-output (erase-buffer))
             (with-temp-buffer

@@ -1,0 +1,18 @@
+(module tests.array-text-fixture
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "../tools/testing/array-text-fixture.mjs" arrayTextMeasuredSource)
+  (test "original measured array text source retains all bytes except its authenticated dependency coordinate"
+    (async ()
+      (let* ((root (resolve ".")) (source (await (readFile (resolve root "runtime/array-text.mjs") "utf8")))
+             (url (get (pathToFileURL (resolve root "runtime/number-radix.mjs")) :href))
+             (output (arrayTextMeasuredSource root source)))
+        (js-call assert :strictEqual
+          (js-call output :replace (JSON/stringify url) "'./number-radix.mjs'") source)
+        (js-call assert :ok (> (js-length (await (readFile (resolve root "runtime/number-radix.mjs")))) 0))
+        (js-call assert :throws (lambda () (arrayTextMeasuredSource root (str source "\n"))) globalThis.TypeError)
+        (js-call assert :throws (lambda ()
+          (arrayTextMeasuredSource root (js-call source :replace "./number-radix.mjs" "./unrelated.mjs"))) globalThis.TypeError)))))

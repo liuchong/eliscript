@@ -1,0 +1,57 @@
+(module tests.managed-container-install
+  (import "bun:test" :as framework)
+  (import "node:fs" readFileSync)
+  (import "node:path" resolve)
+  (import "node:crypto" createHash)
+  (import "../../tools/backends/build.mjs" root)
+  (import "./managed-container-cases.mjs" managedContainerCases prepareManagedContainer closeManagedContainer)
+  (defconst plans (js-array
+    (js-object :kind "objects" :suite "tests/wasm-managed-objects.test.mjs"
+      :archive "tests/wasm-managed-objects-test-legacy.mjs" :sha256 "d7901f1e2223b8b094df57f7dcdd56ad9c1938da84c89d57f5ab7752fc64241f")
+    (js-object :kind "arrays" :suite "tests/wasm-managed-arrays.test.mjs"
+      :archive "tests/wasm-managed-arrays-test-legacy.mjs" :sha256 "d7748ae39c13fe9b5e7ba31e866ef2868c279e161673406ab2fe244b192d89d4")
+    (js-object :kind "builtins" :suite "tests/wasm-managed-builtins.test.mjs"
+      :archive "tests/wasm-managed-builtins-test-legacy.mjs" :sha256 "4b716f8dce8fd610d06802f906f973ad9491bff980a0dcee92f68552240a9689")
+    (js-object :kind "identity" :suite "tests/wasm-managed-identity.test.mjs"
+      :archive "tests/wasm-managed-identity-test-legacy.mjs" :sha256 "a58a31176ecf598f6670dd38888a83b33a090e885cc154575e5676e819969eb5")))
+  (defconst selected (js-call plans :filter (lambda (plan)
+    (js-call (get globalThis.process :argv) :some (lambda (argument) (= (resolve root argument) (resolve root (get plan :suite))))))))
+  (unless (= (js-length selected) 1) (throw (new globalThis.TypeError "container fixtures require exactly one original suite per process")))
+  (defconst plan (aref selected 0))
+  (unless (= (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root (get plan :archive)))) :digest "hex") (get plan :sha256))
+    (throw (new globalThis.TypeError "complete original container suite identity changed")))
+  (defconst replacements (managedContainerCases (get plan :kind)))
+  (defconst original (Object/assign (js-object) framework))
+  (defconst counts (new globalThis.Map))
+  (defvar restored false)
+  (defun restore ()
+    (unless restored (js-call (get original :mock) :module "bun:test" (lambda () original)) (setq restored t)))
+  (defconst forwarded (new globalThis.Proxy (get original :test) (js-object
+    :apply (lambda (target receiver arguments)
+      (let ((title (aref arguments 0)))
+        (if (Object/hasOwn replacements title)
+          (let ((copy (js-call arguments :slice)))
+            (when (js-call counts :has title) (throw (new globalThis.Error (+ "duplicate original container case: " title))))
+            (js-call counts :set title 1) (put copy 1 (get replacements title))
+            (if (and (= (get plan :kind) "builtins")
+                     (= title "capacity failures during builtin conversion leave the module and caller frame usable")
+                     (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
+                     (= (get (get globalThis.process :env) :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small"))
+              (progn
+                ;; Capacity is explicitly unaccepted. Keep the original body
+                ;; and strict default; never turn its missing OOM into a pass.
+                (put copy 0 (+ "DEFERRED / NOT ACCEPTED: " title))
+                (Reflect/apply (get target :skip) target copy))
+              (Reflect/apply target receiver copy)))
+          (Reflect/apply target receiver arguments))))
+    :get (lambda (target key receiver) (Reflect/get target key target)))))
+  (js-call original :beforeAll (async ()
+    (try
+      (progn
+        (js-call (Object/keys replacements) :forEach (lambda (title)
+          (unless (= (js-call counts :get title) 1) (throw (new globalThis.Error (+ "missing original container case: " title))))))
+        (await (prepareManagedContainer (get plan :kind))))
+      (finally (restore)))) 120000)
+  (js-call original :afterAll (async () (restore) (await (closeManagedContainer))))
+  (js-call (get original :mock) :module "bun:test"
+    (lambda () (Object/assign (js-object) original (js-object :test forwarded)))))

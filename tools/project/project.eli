@@ -4,6 +4,7 @@
   (import "node:path" basename dirname resolve)
   (import "node:url" fileURLToPath)
   (import "node:buffer" Buffer)
+  (import "node:module" createRequire)
   (import "./project-legacy.mjs" :as legacy)
 
   (defconst checkProject (get legacy :checkProject))
@@ -78,6 +79,16 @@
         (js-call Buffer :from (str (JSON/stringify (js-object :format "eliscript-project-runtime"
           :version 1 :capsules identities)) "\n") "utf8")))
       (js-object :files files :inputs inputs)))
+  (defun existing-runtime-route (out-dir)
+    ;; Preserve an already available complete package and its actual provider
+    ;; identities. A second package with equal bytes is not the same runtime.
+    (let ((require (createRequire (resolve out-dir "__eliscript_runtime_scope.mjs"))))
+      (try
+        (js-call capsules :every (lambda (name)
+          (js-call (js-array ".mjs" ".mjs.map") :every (lambda (suffix)
+            (= (realpathSync (js-call require :resolve (str "eliscript/runtime/" name suffix)))
+               (realpathSync (resolve source-root (str "runtime/" name suffix))))))))
+        (catch error false))))
   (defun complete-runtime (result)
     (let* ((out-dir (get result :outDir)) (base (resolve out-dir "node_modules/eliscript"))
            (runtime (runtime-inputs)) (files (get runtime :files))
@@ -85,21 +96,22 @@
       ;; All source authentication and all user-output conflicts precede the
       ;; first support write. The original project manifest/result stay exact.
       (js-call directories :forEach (lambda (path) (plain-directory out-dir path)))
-      (js-call files :forEach (lambda (record)
-        (check-target base record)
-        (reject-source-alias base record (get runtime :inputs))))
-      (js-call directories :forEach (lambda (path)
-        (plain-directory out-dir path)
-        (try (mkdirSync (resolve out-dir path))
-          (catch error (unless (= (get error :code) "EEXIST") (throw error))))
-        (plain-directory out-dir path)))
-      (js-call files :forEach (lambda (record)
-        (js-call directories :forEach (lambda (path) (plain-directory out-dir path)))
-        (reject-source-alias base record (get runtime :inputs))
-        (unless (check-target base record)
-          (try (writeFileSync (resolve base (get record :path)) (get record :content) (js-object :flag "wx"))
-            (catch error
-              (if (= (get error :code) "EEXIST") (check-target base record) (throw error)))))))
+      (unless (and (undefined? (attributes base)) (existing-runtime-route out-dir))
+        (js-call files :forEach (lambda (record)
+          (check-target base record)
+          (reject-source-alias base record (get runtime :inputs))))
+        (js-call directories :forEach (lambda (path)
+          (plain-directory out-dir path)
+          (try (mkdirSync (resolve out-dir path))
+            (catch error (unless (= (get error :code) "EEXIST") (throw error))))
+          (plain-directory out-dir path)))
+        (js-call files :forEach (lambda (record)
+          (js-call directories :forEach (lambda (path) (plain-directory out-dir path)))
+          (reject-source-alias base record (get runtime :inputs))
+          (unless (check-target base record)
+            (try (writeFileSync (resolve base (get record :path)) (get record :content) (js-object :flag "wx"))
+              (catch error
+                (if (= (get error :code) "EEXIST") (check-target base record) (throw error))))))))
       result))
 
   (defasync buildProject (options)

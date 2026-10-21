@@ -26,7 +26,7 @@
             (js-call units :push (bit-and value 65535) (unsigned-bit-shift-right value 16)))
           (setq index (1+ index)))
         (put (get words :chunks) (get words :cacheIndex)
-          (Reflect/apply (js* "String.fromCharCode") nil units))
+          (Reflect/apply (get globalThis.String :fromCharCode) nil units))
         (put words :dirty false))) words)
 
   (defun native-word-cache (words block)

@@ -1650,7 +1650,7 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
                (eliscript-ir-emitter--emit-property-key (nth 1 children))
                (eliscript-ir-emitter--emit-arguments (nthcdr 2 children))))
       ('constructor-call
-       (format "new %s(%s)"
+       (format "new (%s)(%s)"
                (eliscript-ir-emitter-emit-expression (car children))
                (eliscript-ir-emitter--emit-arguments (cdr children))))
       ('raw-javascript (eliscript-ir-node-value (car children)))

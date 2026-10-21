@@ -1,0 +1,8 @@
+(module tests.bootstrap-emitter-node
+  (import "node:module" createRequire)
+  (import "node:url" fileURLToPath)
+  (defconst path (fileURLToPath (get (get globalThis.process :env) :ELISCRIPT_TEST_MODULE)))
+  (defconst m (funcall (createRequire path) path))
+  (js-call globalThis.console :log (JSON/stringify (js-object
+    :factorial (js-call m :factorial 5) :sum (js-call m :sum_to 5)
+    :message (get (get m :result) :message)))))

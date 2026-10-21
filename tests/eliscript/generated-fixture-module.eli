@@ -1,0 +1,21 @@
+(module tests.generated-fixture-module
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:child_process" spawnSync)
+  (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/testing/fixture-environment.mjs" prepareFixtureEnvironment)
+  (test "Node and Bun load exact physical generated modules with real package imports and independent state"
+    (lambda ()
+      (js-call (js-array (get (get globalThis.process :env) :NODE "node")
+                          (get (get globalThis.process :env) :BUN "bun")) :forEach
+        (lambda (engine)
+          (let* ((fixture (prepareFixtureEnvironment root (get globalThis.process :env)))
+                 (directory (get fixture :directory)))
+            (try
+              (let ((child (spawnSync engine (js-array (resolve root "tests/helpers/generated-fixture-module-runner.mjs") directory)
+                (js-object :cwd root :env (get fixture :environment) :encoding "utf8"))))
+                (js-call assert :strictEqual (get child :error) undefined)
+                (js-call assert :strictEqual (get child :status) 0 (str engine "\n" (get child :stderr)))
+                (js-call assert :deepStrictEqual (JSON/parse (get child :stdout)) (js-object :executed 42 :independent t)))
+              (finally (js-call fixture :close)))))))))

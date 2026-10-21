@@ -1,0 +1,27 @@
+(module tests.direct-wasm-registration
+  (defun createDirectWasmRegistration (framework replacements)
+    (let* ((counts (new globalThis.Map)) (actual-test (get framework :test))
+           (forward (new globalThis.Proxy actual-test (js-object
+             :apply (lambda (target receiver arguments)
+               (let ((title (aref arguments 0)))
+                 (if (Object/hasOwn replacements title)
+                   (let ((count (if (js-call counts :has title) (js-call counts :get title) 0)))
+                     (when (/= count 0) (throw (new globalThis.Error (str "duplicate direct WASM replacement: " title))))
+                     (js-call counts :set title 1)
+                     (Reflect/apply target receiver (js-array title (get replacements title) 300000)))
+                   (Reflect/apply target receiver arguments))))
+             ;; Bun exposes host registration methods beyond enumerable or own
+             ;; properties. Forward every Get to the actual callable itself.
+             :get (lambda (target key receiver) (Reflect/get target key target)))))
+           (exports (Object/assign (js-object) framework)))
+      (put exports :test forward)
+      (js-object :exports exports :complete (lambda ()
+        (js-call (Object/keys replacements) :forEach (lambda (title)
+          (unless (= (js-call counts :get title) 1)
+            (throw (new globalThis.Error (str "missing direct WASM replacement: " title)))))) t))))
+  (defun registerDirectWasmCompletion (framework registration restore)
+    ;; Bun collects describe callbacks after entry-module evaluation. Require
+    ;; complete registration at the real beforeAll boundary, never earlier.
+    (js-call framework :beforeAll (lambda ()
+      (try (js-call registration :complete) (finally (funcall restore))))))
+  (export createDirectWasmRegistration registerDirectWasmCompletion))

@@ -6,10 +6,12 @@
   (import "node:url" pathToFileURL)
   (import "node:os" tmpdir)
   (import "node:child_process" spawnSync)
+  (import "node:module" createRequire)
   (import "../tools/backends/build.mjs" root buildBackends)
   (import "../tools/backends/managed-runtime.mjs" loadManagedHostModules)
   (defvar directory undefined)
   (defvar implementations (js-array))
+  (defvar physical-namespaces (js-array))
   (defconst lexical "(defun outer (x) (let ((x (+ x 1))) (setq x (+ x 2)) x)) (export outer)")
   (before (async ()
     (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-tools-source-identity-"))))
@@ -24,22 +26,36 @@
         (js-call assert :strictEqual (get child :error) undefined)
         (js-call assert :strictEqual (get child :signal) nil (get child :stderr))
         (js-call assert :strictEqual (get child :status) 0 (get child :stderr)))
-      (let ((modules (await (loadManagedHostModules (js-object :hostModules
+      (let* ((self-namespace (funcall (createRequire self) self))
+             (seed-namespace (funcall (createRequire seed) seed))
+             (provided (new globalThis.Map (js-array (js-array "self" self-namespace) (js-array "seed" seed-namespace))))
+             (modules (await (loadManagedHostModules (js-object :hostModules
         (js-array
           (js-object :id "self" :specifier (get (pathToFileURL self) :href) :referrer "identity.mjs"
             :allowedExports (js-array "tools_request") :namespace t)
           (js-object :id "seed" :specifier (get (pathToFileURL seed) :href) :referrer "identity.mjs"
-            :allowedExports (js-array "tools_request") :namespace t)))))))
+            :allowedExports (js-array "tools_request") :namespace t)))
+          (js-object :hostModules provided)))))
+        (setq physical-namespaces (js-array seed-namespace self-namespace))
         (setq implementations (js-array (js-call modules :get "seed") (js-call modules :get "self"))))
       (js-call assert :strictEqual (await (readFile input "utf8")) source))) (js-object :timeout 120000))
   (after (async ()
     (setq implementations (js-array))
+    (setq physical-namespaces (js-array))
     (when directory (await (rm directory (js-object :recursive t :force t))))))
 
   (defun request (operation source &rest expected)
     (let ((value (js-object :operation operation :source source :filename "tools.eli"
                    :offset 0 :offsetUnit "unicode-scalar" :query "symbol" :edits (js-array))))
       (when (> (js-length expected) 0) (put value :expectedSourceIdentity (aref expected 0))) value))
+  (test "semantic tool loading retains both exact physical namespaces through the original second host-module Map"
+    (lambda ()
+      (js-call assert :strictEqual (js-length implementations) 2)
+      (js-call assert :strictEqual (js-length physical-namespaces) 2)
+      (js-call implementations :forEach (lambda (implementation index)
+        (js-call assert :strictEqual implementation (aref physical-namespaces index))
+        (js-call assert :strictEqual (get implementation globalThis.Symbol.toStringTag) "Module")
+        (js-call assert :strictEqual (value-type (get implementation :tools_request)) "function")))))
   (defun rejected (report code)
     (js-call assert :strictEqual (get report :ok) false)
     (js-call assert :strictEqual (get report :readOnly) t)

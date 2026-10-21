@@ -27,9 +27,11 @@ runs:
   main: dist/action/index.js
 ```
 
-The generated JavaScript bundle and all runtime dependencies are committed for
-release. The consumer runner requires only the JavaScript runtime supplied by
-GitHub Actions.
+The source repository contains maintained Eliscript and Emacs Lisp sources.
+Generated JavaScript, maps and bundles are ignored and never committed. The
+consumer workflow checks out a pinned source revision, performs the Emacs
+bootstrap and packages the Action before invoking its local path. The resulting
+Action process itself requires only Node and its bundled dependencies.
 
 ## Inputs
 
@@ -65,7 +67,8 @@ The Action builds and validates only. It does not call the Pages deployment API.
 The standalone package includes a workflow template that:
 
 1. checks out the consumer repository;
-2. invokes the dogfood Action pinned to a full commit digest;
+2. checks out the Action sources at a full commit digest, bootstraps and packages
+   them, then invokes the local Action;
 3. skips upload when `built=false`;
 4. uploads `_site` with the maintained Pages artifact action;
 5. deploys in a separate job and protected `github-pages` environment;
@@ -140,7 +143,7 @@ verified:
 - the standalone repository is public;
 - Action metadata validation passes;
 - the display name is accepted;
-- generated `dist/` is committed and reproducible;
+- the committed preferred sources reproduce the ignored `dist/` byte-for-byte;
 - a commit-pinned consumer workflow builds a fixture site;
 - Pages deploys the exact uploaded artifact;
 - the release tag points to the accepted signed commit;

@@ -1,0 +1,58 @@
+(module tools.testing.managed-primitive-own-repairs
+  (import "node:crypto" createHash)
+  (import "../../dist/bootstrap/compiler.mjs" compile-ir-string)
+  (import "../../dist/bootstrap/emitter.mjs" emit-expression)
+
+  (defun replace-once (source before after)
+    (let ((position (js-call source :indexOf before)))
+      (unless (and (>= position 0) (= (js-call source :indexOf before (1+ position)) -1))
+        (throw (new globalThis.TypeError "original primitive runtime source boundary changed")))
+      (str (js-call source :slice 0 position) after (js-call source :slice (+ position (js-length before))))))
+
+  (defun symbol-observation ()
+    (let* ((program (compile-ir-string
+             "(let* ((artifact (Uint8Array/from (js-call (get (js* \"b\") :managed) :emit_managed_wasm (js* \"p\") (js* \"runtime\")))) (actual (funcall (js* \"instantiateManagedRuntime\") artifact)) (value undefined)) (try (setq value (js-call actual :invoke \"unsupported\")) (js-call (js* \"assert\") :strictEqual (js-call actual :toHostValue value) globalThis.Symbol.split) (js-call (js* \"assert\") :strictEqual (get (js-call actual :stats) :frameDepth) 0) (finally (js-call actual :release value) (js-call actual :closeModule) (js-call actual :collect))) (js-call (js* \"assert\") :strictEqual (js-call actual :live) 0))"
+             "primitive-symbol-observation.eli"))
+           (statement (aref (get program :body) 0)))
+      (unless (= (get statement :kind) "expression-statement")
+        (throw (new globalThis.TypeError "primitive observation requires one expression statement")))
+      (get (emit-expression (aref (get statement :children) 0)) :text)))
+
+  (defun operand-setup-capacity-observation ()
+    ;; The original 8KiB pool includes its 3096-byte slot table. Keep that exact
+    ;; failed setup as a cleanup regression; the operation-exhaustion phase
+    ;; below retains 128 slots and all original conversion/recovery assertions.
+    (let* ((program (compile-ir-string
+             "(let* ((actual (funcall (js* \"instance\") (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 8192))) (roots (js-array)) (keep (lambda (value) (js-call roots :push value) value))) (try (js-call (js* \"assert\") :throws (lambda () (let* ((empty (funcall keep (js-call actual :string \"\"))) (trace (funcall keep (js-call actual :sourceObject (js-object :events empty))))) (funcall keep (funcall (js* \"hook\") actual trace \"l\" 2 2)) (funcall keep (funcall (js* \"hook\") actual trace \"r\" 3 3)))) (lambda (error) (= (get (get error :eliscriptDiagnostic (js-object)) :code) \"ELI-RT0002\")) \"operand setup byte budget\") (js-call (js* \"assert\") :strictEqual (get (js-call actual :stats) :frameDepth) 0) (finally (js-call roots :forEach (lambda (value) (js-call actual :release value))) (js-call actual :closeModule) (js-call actual :collect))) (js-call (js* \"assert\") :strictEqual (js-call actual :live) 0))"
+             "operand-setup-capacity-observation.eli"))
+           (statement (aref (get program :body) 0)))
+      (unless (= (get statement :kind) "expression-statement")
+        (throw (new globalThis.TypeError "operand setup observation requires one expression statement")))
+      (get (emit-expression (aref (get statement :children) 0)) :text)))
+
+  (defun transformOriginalPrimitiveRuntimeSuite (source relative)
+    (let* ((primitive (= relative "tests/wasm-managed-primitive-own-runtime.test.mjs"))
+           (operand (= relative "tests/wasm-managed-operand-conversion.test.mjs"))
+           (expected (if primitive "62d634ad2bf4e02f83a5fd2f7c7fc7cdf1ff570a81aada0d6e2e761d00c24069"
+                       "d9385ea1cf4c2b17bd046590950e524f1cbf2e33adf87afeceba8c554ea5a95d")))
+      (unless (and (or primitive operand)
+                   (= (js-call (js-call (createHash "sha256") :update source) :digest "hex") expected))
+        (throw (new globalThis.TypeError "complete original primitive runtime source identity changed")))
+      (if primitive
+        (replace-once
+          (replace-once source
+            "(when (and (= value 2) (= (load-u32 20) 0)) (store-u32 20 1) (load-u32 4294967295))"
+            "(when (= value 2) (load-u32 4294967295))")
+          "assert.equal(a.invoke('own', [true, field]), false);"
+          "assert.equal(a.invoke('own', [false, field]), false);")
+        ;; Symbol.split is now represented. Keep the raw-container refusal,
+        ;; and observe the actual compiled well-known Symbol instead of
+        ;; retaining an obsolete compile-time refusal.
+        (replace-once
+          (replace-once source
+            "assert.throws(()=>b.managed.emit_managed_wasm(p,runtime),e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.location.file==='conversion-protocol.eli');"
+            (str (symbol-observation) ";"))
+          "const a=instance({maxSlots:128,initialBytes:8192,maxBytes:8192}),empty=a.string(''),trace=a.sourceObject({events:empty}),left=hook(a,trace,'l',2,2),right=hook(a,trace,'r',3,3),saved=a.number(-0),frame=a.frame(1);"
+          (str (operand-setup-capacity-observation) ";\n"
+            "const a=instance({maxSlots:128,initialBytes:8192,maxBytes:65536}),empty=a.string(''),trace=a.sourceObject({events:empty}),left=hook(a,trace,'l',2,2),right=hook(a,trace,'r',3,3),saved=a.number(-0),frame=a.frame(1);")))))
+  (export transformOriginalPrimitiveRuntimeSuite))

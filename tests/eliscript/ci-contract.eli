@@ -1,0 +1,79 @@
+(module tests.ci-contract
+  (import "./helpers/ci-contract-install.mjs" assertCIOriginalTitles)
+  (import "./helpers/ci-contract-affected.mjs" originalWorkerArguments adaptedSpyOn)
+  (import "bun:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:path" resolve)
+  (import "node:fs/promises" readFile)
+  (import "../tools/backends/build.mjs" root)
+  (import "./ci-contract-test-legacy.mjs")
+  (test "default validation preserves the literal core and application contract plus both original bootstrap phases"
+    (async ()
+      (let* ((makefile (await (readFile (resolve root "Makefile") "utf8")))
+             (aggregates (js-call (js-call makefile :split "\n") :filter (lambda (line) (js-call line :startsWith "test:"))))
+             (dependencies (js-call aggregates :flatMap (lambda (line)
+               (js-call (js-call (js-call line :slice 5) :trim) :split (new globalThis.RegExp "\\s+"))))))
+        (js-call assert :strictEqual (aref aggregates 0) "test: test-core test-applications")
+        ;; Make combines prerequisites from every declaration of the target.
+        (js-call assert :deepStrictEqual (Array/from (new globalThis.Set dependencies))
+          (js-array "test-core" "test-applications" "test-pre-bootstrap-originals" "test-bootstrap-artifacts"))
+        (js-call assert :ok (js-call makefile :includes "test-pre-bootstrap: test-core test-applications test-pre-bootstrap-originals"))
+        (js-call assert :ok (js-call makefile :includes "ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0"))
+        (js-call assert :ok (js-call makefile :includes "BUN_ARTIFACT_TEST_RUNNER ?= $(BUN_TEST_RUNNER)")))))
+  (assertCIOriginalTitles (js-array
+    "repository compatibility matrix renders the committed CI workflow"
+    "matrix rejects an empty or unknown acceptance operating system"))
+  (test "CI argument adaptation preserves a readonly native spy and returns its real identity"
+    (lambda ()
+      (let* ((implementation undefined)
+             (spy (lambda (&rest arguments) (Reflect/apply implementation undefined arguments)))
+             (set-implementation (lambda (callback) (setq implementation callback) spy))
+             (framework (js-object :spyOn (lambda (target property)
+               (js-call assert :strictEqual target globalThis.Bun)
+               (js-call assert :strictEqual property "spawn") spy)))
+             (arguments (js-array (get globalThis.process :execPath) "--smol" "test"))
+             (options (js-object :stdout "inherit"))
+             (result (js-object :identity "original-child")))
+        (Object/defineProperty spy "mockImplementation"
+          (js-object :value set-implementation :writable false :configurable false))
+        (when (= (get (get globalThis.process :env) :ELISCRIPT_TEST_FIXTURE_PRELOAD) "1")
+          (js-call arguments :push "--preload"
+            (get (get globalThis.process :env) :ELISCRIPT_TEST_FIXTURE_PRELOAD_PATH)))
+        (js-call arguments :push "--timeout" "300000" "fixture.test.mjs")
+        (js-call assert :strictEqual
+          (js-call (adaptedSpyOn framework globalThis.Bun "spawn") :mockImplementation
+            (lambda (actual actual-options)
+              (js-call assert :deepStrictEqual actual
+                (js-array (get globalThis.process :execPath) "--smol" "test" "fixture.test.mjs"))
+              (js-call assert :strictEqual actual-options options) result)) spy)
+        (js-call assert :strictEqual (funcall spy arguments options) result)
+        (js-call assert :strictEqual (get spy :mockImplementation) set-implementation))))
+  (test "maintained CI fake transport checks complete current arguments and rejects changed deadlines or filtering"
+    (lambda ()
+      (let* ((environment (get globalThis.process :env))
+             (arguments (js-array (get globalThis.process :execPath) "--smol" "test")))
+        (when (= (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD) "1")
+          (js-call arguments :push "--preload" (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD_PATH)))
+        (js-call arguments :push "--timeout" "300000" "fixture.test.mjs")
+        (js-call assert :deepStrictEqual (originalWorkerArguments arguments)
+          (js-array (get globalThis.process :execPath) "--smol" "test" "fixture.test.mjs"))
+        (when (= (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD) "1")
+          (let* ((installer (resolve root "tests/helpers/managed-fixture-repairs-install.mjs"))
+                 (str-arguments (js-call (js-call arguments :slice 0 -3) :concat
+                   (js-array "--preload" installer "--timeout" "300000" "tests/wasm-managed-str.test.mjs"))))
+            (js-call assert :deepStrictEqual (originalWorkerArguments str-arguments)
+              (js-array (get globalThis.process :execPath) "--smol" "test" "tests/wasm-managed-str.test.mjs"))
+            (js-call assert :throws (lambda () (originalWorkerArguments
+              (js-call str-arguments :map (lambda (argument)
+                (if (= argument "tests/wasm-managed-str.test.mjs") "tests/not-str.test.mjs" argument)))))
+              (lambda (error) (= (get error :code) "ERR_ASSERTION")))
+            (js-call assert :throws (lambda () (originalWorkerArguments
+              (js-call str-arguments :filter (lambda (argument) (/= argument installer)))))
+              (lambda (error) (= (get error :code) "ERR_ASSERTION")))))
+        (js-call (js-array
+          (js-call arguments :filter (lambda (argument) (/= argument "--timeout")))
+          (js-call arguments :map (lambda (argument) (if (= argument "300000") "300001" argument)))
+          (js-call arguments :concat (js-array "--test-name-pattern" "filtered"))
+          (js-call arguments :map (lambda (argument) (if (= argument "fixture.test.mjs") "fixture.mjs" argument)))) :forEach
+          (lambda (changed) (js-call assert :throws (lambda () (originalWorkerArguments changed))
+            (lambda (error) (= (get error :code) "ERR_ASSERTION")))))))))

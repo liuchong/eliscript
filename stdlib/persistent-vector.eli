@@ -6,15 +6,28 @@
   (defconst persistent-vector-max-count 2147483647)
 
   (defportable array-reverse (values)
-    (let ((result (js-array))
+    (cond
+      ((= (js-length values) 0) (js-array))
+      ((= (js-length values) 1) (js-array (get values 0)))
+      ((= (js-length values) 2)
+       ;; Snapshot in original getter order before reversing the data slots.
+       (let* ((first (get values 0)) (second (get values 1))) (js-array second first)))
+      (t (let ((result (js-array))
           (index 0))
       (while (< index (js-length values))
         (setq result (js-cons (get values index) result)
               index (1+ index)))
-      result))
+      result))))
 
   (defportable array-copy-assoc (values wanted-index wanted-value)
-    (let ((result (js-array))
+    (cond
+      ((and (= (js-length values) 0) (= wanted-index 0)) (js-array wanted-value))
+      ((and (= (js-length values) 1) (= wanted-index 0)) (js-array wanted-value))
+      ((and (= (js-length values) 1) (= wanted-index 1)) (js-array (get values 0) wanted-value))
+      ((and (= (js-length values) 2) (= wanted-index 0)) (js-array wanted-value (get values 1)))
+      ((and (= (js-length values) 2) (= wanted-index 1)) (js-array (get values 0) wanted-value))
+      ((and (= (js-length values) 2) (= wanted-index 2)) (js-array (get values 0) (get values 1) wanted-value))
+      (t (let ((result (js-array))
           (index 0)
           (result-length
            (if (< wanted-index (js-length values))
@@ -28,16 +41,20 @@
                  (get values index))
                result)
               index (1+ index)))
-      (array-reverse result)))
+      (array-reverse result)))))
 
   (defportable array-drop-last (values)
-    (let ((result (js-array))
+    (cond
+      ((<= (js-length values) 1) (js-array))
+      ((= (js-length values) 2) (js-array (get values 0)))
+      ((= (js-length values) 3) (js-array (get values 0) (get values 1)))
+      (t (let ((result (js-array))
           (index 0)
           (result-length (1- (js-length values))))
       (while (< index result-length)
         (setq result (js-cons (get values index) result)
               index (1+ index)))
-      (array-reverse result)))
+      (array-reverse result)))))
 
   (defportable make-vector-node (slots)
     (js-object :slots slots))

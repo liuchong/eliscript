@@ -1,0 +1,1 @@
+(defun run () (let ((target (js-object :first 1)) (trace (js-array))) (let ((found (Object/hasOwn target (js-object :toString (lambda () (js-call trace :push (Object/keys target)) (Object/assign target (js-object :later 2)) "later"))))) (js-array found trace (Object/keys target))))) (export run)

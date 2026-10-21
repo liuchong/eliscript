@@ -6,10 +6,12 @@
   (import "node:path" dirname posix resolve)
   (import "node:url" pathToFileURL)
   (import "node:child_process" spawnSync)
+  (import "node:crypto" createHash)
   (import "node:module" createRequire)
   (import "../dist/bootstrap/ir.mjs" deserialize-program)
   (import "../tools/backends/build.mjs" buildBackends root)
   (import "../tools/backends/compiler-build.mjs" independentCompilerResources)
+  (import "../tools/backends/compiler-corpus-process.mjs" originalCorpusExecutionPolicy runOriginalCorpusProcess)
   (import "../tools/backends/managed-module-graph.mjs" createManagedProjectFacades createManagedModuleGraph)
   (import "../tools/backends/managed-runtime.mjs" loadManagedHostModules)
   (import "../tools/backends/managed-source-view.mjs" createManagedSourceView isManagedSourceView)
@@ -37,7 +39,7 @@
     (console/error "[sequence-resource-acceptance]" (JSON/stringify functional-resources)))
   (defconst entry "sequence-data.mjs")
   (defconst observations (js-array "bounded_consumption" "cached_realization" "successful_cache"
-    "early_stop_and_partitions" "paths_aliases_and_collisions" "shared_hash_state" "ieee_arithmetic" "rejection_order"))
+    "early_stop_and_partitions" "paths_aliases_and_collisions" "shared_hash_state" "ieee_arithmetic" "rejection_order" "persistent_map_prototype_identity"))
   (defconst original-hosts (js-array "transducer" "core-stdlib" "data-text" "value-hash"))
   (defvar directory undefined) (defvar backend undefined) (defvar lowered undefined)
   (defvar runtime-ir undefined) (defvar literal-ir undefined)
@@ -57,6 +59,25 @@
         (js-call assert :deepStrictEqual (get functional :effectiveRuntimeOptions)
           (Object/assign (js-object) (get (independentCompilerResources (js-object :profile "small")) :budget) (js-object :auto 65536)))
         (js-call assert :strictEqual (get functional :resourceAcceptance) "deferred")
+        (js-call assert :strictEqual (get (sequence-execution-policy baseline) :effectiveDeadlineMs) 60000)
+        (js-call assert :strictEqual (get (sequence-execution-policy functional) :originalDeadlineMs) 60000)
+        (js-call assert :strictEqual (get (sequence-execution-policy functional) :effectiveDeadlineMs) nil)
+        (js-call assert :strictEqual (sequence-test-deadline baseline) 60000)
+        (js-call assert :strictEqual (sequence-test-deadline functional) 0)
+        (let* ((registrations (js-array))
+               (body (lambda () "original body"))
+               (receipt (js-object :registered t))
+               (registrar (lambda (name callback deadline)
+                 (js-call registrations :push (js-array name callback deadline))
+                 receipt)))
+          (js-call assert :strictEqual
+            (funcall (sequence-test-registrar registrar baseline) "strict original" body 60000) receipt)
+          (js-call assert :strictEqual
+            (funcall (sequence-test-registrar registrar functional) "functional original" body 60000) receipt)
+          (js-call assert :deepStrictEqual registrations
+            (js-array (js-array "strict original" body 60000)
+                      (js-array "functional original" body 0)))
+          (js-call assert :strictEqual (get (sequence-execution-policy functional) :originalDeadlineMs) 60000))
         (js-call assert :strictEqual (get build-receipt :format) "eliscript-sequence-build")
         (js-call assert :strictEqual (get build-receipt :version) 1)
         (js-call assert :strictEqual (get build-receipt :directory) directory)
@@ -81,6 +102,29 @@
             (resolve root "tests/fixtures/compiled-eli-node-loader.mjs")))
         (js-call assert :deepStrictEqual (sequence-child-flags "bun")
           (js-array "--preload" (resolve root "tests/fixtures/compiled-eli-bun-preload.mjs"))))))
+
+  (test "sequence original host launch preserves complete output identity first failure and later execution"
+    (async ()
+      (let* ((context (js-object :directory (resolve root "_worktree/sequence-launch-contract")
+                        :target "native" :caseId "original-sequence" :sourceIdentity (js-object :sha256 "retained")))
+             (configuration "original-run.json") (calls 0)
+             (first (Object/freeze (new globalThis.Error "original child failed")))
+             (output (str "  " (js-call "original-output" :repeat 10000) "\n"))
+             (runner (async (command args options)
+               (setq calls (1+ calls))
+               (js-call assert :deepStrictEqual args (js-call (sequence-child-flags "node") :concat
+                 (js-array (resolve root "tests/helpers/managed-sequence-data-host-selfhosted.mjs") configuration)))
+               (js-call assert :strictEqual (get options :sourceIdentity) (get context :sourceIdentity))
+               (js-call assert :strictEqual (get options :directory) (get context :directory))
+               (js-call assert :strictEqual (get (get options :policy) :effectiveDeadlineMs) nil)
+               (if (= calls 1) (throw first) (js-object :stdout output)))))
+        (await (js-call assert :rejects
+          (run-sequence-child "node" configuration context (sequence-functional-resources "small") runner)
+          (lambda (error) (eq error first))))
+        (js-call assert :strictEqual
+          (await (run-sequence-child "node" configuration context (sequence-functional-resources "small") runner))
+          (js-call output :trim))
+        (js-call assert :strictEqual calls 2))))
 
   (defasync write (path source)
     (await (mkdir (dirname path) (js-object :recursive t))) (await (writeFile path source)))
@@ -362,7 +406,8 @@
 
   ;; Bound V8's parallel compiler workers, whose default is 128 on this
   ;; engine. This changes scheduling only: the original image, tiering, host
-  ;; source, inputs, GC threshold, assertions and deadline remain exact.
+  ;; source, inputs, GC threshold and assertions remain exact. Strict execution
+  ;; retains the original deadline; explicit functional execution defers it.
   (defun sequence-child-flags (engine)
     (if (= engine "bun")
       (js-array "--preload" (resolve root "tests/fixtures/compiled-eli-bun-preload.mjs"))
@@ -370,24 +415,55 @@
         (resolve root "tests/fixtures/compiled-eli-node-loader.mjs"))))
 
   (defun collect-sequence-build-garbage ()
-    ;; spawnSync blocks the parent's event loop. Collect dead emitter/build
-    ;; objects after their scopes have returned, before adding the real child
+    ;; Collect dead emitter/build objects after their scopes have returned,
+    ;; before adding the real child
     ;; compiler's memory to this process tree. Live test inputs stay rooted.
     (js-call globalThis.Bun :gc t))
 
-  (defun successful (engine configuration)
-    (collect-sequence-build-garbage)
+  (defun sequence-execution-policy (resources)
+    (originalCorpusExecutionPolicy (js-object
+      :record (js-object :execution (js-object :timeoutMs 60000))
+      :options (js-object :functionalRuntimeProfile (get resources :functionalRuntimeProfile)))))
+  (defun sequence-test-deadline (resources)
+    (let ((deadline (get (sequence-execution-policy resources) :effectiveDeadlineMs)))
+      (if (nullish? deadline) 0 deadline)))
+  (defun sequence-test-registrar (registrar resources)
+    ;; Keep numeric deadlines at each original callsite for authenticated
+    ;; corpus discovery. Only the selected Bun registrar receives the
+    ;; functional execution override; strict registration keeps its argument.
+    (lambda (name body original-deadline)
+      (funcall registrar name body
+        (if (nullish? (get (sequence-execution-policy resources) :effectiveDeadlineMs))
+          0 original-deadline))))
+  (defasync run-sequence-child (engine configuration context resources runner)
     (let* ((node (get (get globalThis.process :env) "NODE_BINARY" "node"))
            (command (if (= engine "bun") (get globalThis.process :execPath) node))
            (flags (sequence-child-flags engine))
-           (child (spawnSync command (js-call flags :concat
-                    (js-array (resolve root "tests/helpers/managed-sequence-data-host-selfhosted.mjs") configuration))
-                    (js-object :cwd root :encoding "utf8" :timeout 60000
-                      :env (Object/assign (js-object) (get globalThis.process :env)
-                             (js-object :BUN (get globalThis.process :execPath)))))))
-      (js-call assert :strictEqual (get child :error) undefined)
-      (js-call assert :strictEqual (get child :status) 0 (+ (get child :stderr) "\n" (get child :stdout)))
-      (js-call (get child :stdout) :trim)))
+           (receipt (await (funcall runner command (js-call flags :concat
+             (js-array (resolve root "tests/helpers/managed-sequence-data-host-selfhosted.mjs") configuration))
+             (Object/assign (js-object) context (js-object :cwd root
+               :policy (sequence-execution-policy resources)
+               :env (Object/assign (js-object) (get globalThis.process :env)
+                 (js-object :BUN (get globalThis.process :execPath)))))))))
+      (js-call (get receipt :stdout) :trim)))
+  (defvar sequence-execution-index 0)
+  (defasync successful (engine configuration)
+    (collect-sequence-build-garbage)
+    (let* ((source (await (readFile configuration "utf8"))) (input (JSON/parse source))
+           (index sequence-execution-index)
+           (context (js-object
+             :directory (resolve root "_worktree/evidence/goal-0.0.2"
+               (str "sequence-process-" (get globalThis.process :pid)) (str index "-" engine))
+             :caseId (str "original-sequence:" (get input :host) ":" engine ":" (get input :mode) ":" index)
+             :target (if (= (get input :host) "reference") "javascript" (get input :host))
+             :sourceIdentity (js-object :suite "tests/wasm-managed-sequence-data.test.mjs"
+               :configurationSha256 (js-call (js-call (createHash "sha256") :update source) :digest "hex")
+               :originalSourcesSha256 (js-call (js-call (createHash "sha256")
+                 :update (JSON/stringify (Array/from original-sources))) :digest "hex")))))
+      (setq sequence-execution-index (1+ sequence-execution-index))
+      ;; Output and lifecycle receipts survive afterAll's temporary build cleanup.
+      ;; The existing outer controlled run owns the complete spawned process tree.
+      (await (run-sequence-child engine configuration context functional-resources runOriginalCorpusProcess))))
   (defun selected-imports (source deployment)
     (js-call source :replace (new globalThis.RegExp "from ([\"'])(?:\\.\\.\\/)+runtime\\/(core|testing)\\/([^\"']+)\\1" "g")
       (lambda (all quote family filename)
@@ -431,7 +507,8 @@
       (successful engine configuration)))
 
   (defun register-cases (host engine)
-    (let ((actual-test (js-call test :skipIf (and (= host "native") (not native-supported))))
+    (let ((actual-test (sequence-test-registrar
+            (js-call test :skipIf (and (= host "native") (not native-supported))) functional-resources))
           (index 0))
       (while (< index (js-length original-hosts))
         (let ((name (aref original-hosts index)))
@@ -485,6 +562,7 @@
             (js-call assert :deepStrictEqual actual expected)
             (js-call assert :deepStrictEqual (get actual :bounded_consumption)
               (js-array (js-array 1 2 3) (js-object :pulls 3 :closes 1) 7 (js-object :pulls 0 :closes 0) (js-array 0 1 2 3 4)))
+            (js-call assert :deepStrictEqual (get actual :persistent_map_prototype_identity) (js-array t t t t))
             (js-call assert :deepStrictEqual (get actual :cached_realization)
               (js-array 1 2 (js-array 1 2) 1 (js-object :pulls 3 :closes 1) t t t 2))
             (js-call assert :deepStrictEqual (get actual :successful_cache)

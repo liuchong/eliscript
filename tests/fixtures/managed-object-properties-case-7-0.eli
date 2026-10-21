@@ -1,0 +1,5 @@
+(module proto
+ (defun run () (let* ((p (js-object :inherited "new")) (source (js-object :__proto__ nil)) (target (js-object))) (put source :__proto__ p) (Object/assign target source) (js-array (get target :inherited) (Object/hasOwn target "__proto__") (Object/keys source))))
+ (defun own () (let* ((target (js-object :__proto__ nil)) (source (js-object :__proto__ nil :x 1))) (put source :__proto__ "data") (Object/assign target source) (js-array (get target :__proto__) (Object/keys target))))
+ (defun partial (target) (let ((source (js-object :__proto__ nil))) (put source :__proto__ target) (Object/assign target (js-object :first 1) source (js-object :late 2))))
+ (export run own partial))

@@ -1,0 +1,13 @@
+(module tests.managed-regexp-oracle-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (defconst records (JSON/parse (readFileSync 0 "utf8")))
+  (js-call assert :strictEqual (Array/isArray records) t)
+  (js-call assert :strictEqual (js-length records) 14)
+  (js-call records :forEach (lambda (record)
+    (let* ((pattern (new globalThis.RegExp (get record :pattern) (get record :flags)))
+           (match (js-call pattern :exec (get record :text)))
+           (actual (if (eq match nil) nil
+             (js-object :values (Array/from match (lambda (value) (if (undefined? value) (js-object :missing t) value)))
+               :index (get match :index) :input (get match :input)))))
+      (js-call assert :deepStrictEqual (get record :expected) actual (get record :pattern))))))

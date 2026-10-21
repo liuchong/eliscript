@@ -82,10 +82,10 @@
              (epoch (allocator-word view 4)))
         (unless (and (> heap 0) (= (allocator-word view heap) 3)
                      (= (allocator-word view (+ heap 4)) epoch)
-                     (= (allocator-word view (+ heap 8)) 294)
-                     (= (allocator-word view (+ heap 12)) 294)) (allocator-invalid))
+                     (= (allocator-word view (+ heap 8)) 551)
+                     (= (allocator-word view (+ heap 12)) 551)) (allocator-invalid))
         (let* ((control (allocator-word view (+ heap 16)))
-               (_bounds (allocator-word view (+ control (* 293 4))))
+               (_bounds (allocator-word view (+ control (* 550 4))))
                (pool (allocator-word view (+ control 4)))
                (max-slots (allocator-word view (+ control 8)))
                (high-water (allocator-word view (+ control 12)))
@@ -436,5 +436,6 @@
           (instantiateManagedRuntime bytes
             (runtime-copy (runtime-copy (js-object) options) (js-object :hostModules host-modules)))))))
 
-  (export instantiateManagedRuntime instantiateManagedRuntimeWithHostModules loadManagedHostModules readManagedAllocatorSnapshot readManagedAllocatorValueCounts
+  (defconst readManagedModuleMetadata module-metadata)
+  (export instantiateManagedRuntime instantiateManagedRuntimeWithHostModules loadManagedHostModules readManagedAllocatorSnapshot readManagedAllocatorValueCounts readManagedModuleMetadata
     createManagedModuleGraph createManagedProjectFacades loadManagedProjectGraph))

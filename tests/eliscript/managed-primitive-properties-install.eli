@@ -1,0 +1,40 @@
+(module tests.managed-primitive-properties-install
+  (import "bun:test" :as framework)
+  (import "node:fs" readFileSync)
+  (import "node:path" resolve)
+  (import "node:crypto" createHash)
+  (import "../../tools/backends/build.mjs" root)
+  (import "./managed-primitive-properties-cases.mjs"
+    managedPrimitivePropertiesCases prepareManagedPrimitiveProperties closeManagedPrimitiveProperties)
+  (defconst original (Object/assign (js-object) framework))
+  (defconst source (readFileSync (resolve root "tests/wasm-managed-primitive-properties-test-legacy.mjs")))
+  (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex")
+             "4bc4538a02623f53c7ef8e54ad62fa047afddb9c6a1e78923a0e4bcea8a60a98")
+    (throw (new globalThis.TypeError "the complete original primitive properties suite identity changed")))
+  (defconst counts (new globalThis.Map))
+  (defvar restored false)
+  (defun restore ()
+    (unless restored
+      (js-call (get original :mock) :module "bun:test" (lambda () original))
+      (setq restored t)))
+  (defconst forwarded-test (new globalThis.Proxy (get original :test) (js-object
+    :apply (lambda (target receiver arguments)
+      (let ((title (aref arguments 0)))
+        (if (Object/hasOwn managedPrimitivePropertiesCases title)
+          (let ((forwarded (js-call arguments :slice)))
+            (when (js-call counts :has title) (throw (new globalThis.Error (+ "duplicate primitive properties original case: " title))))
+            (js-call counts :set title 1)
+            (put forwarded 1 (get managedPrimitivePropertiesCases title))
+            (Reflect/apply target receiver forwarded))
+          (Reflect/apply target receiver arguments))))
+    :get (lambda (target key receiver) (Reflect/get target key target)))))
+  (js-call original :beforeAll (async ()
+    (try
+      (progn
+        (js-call (Object/keys managedPrimitivePropertiesCases) :forEach (lambda (title)
+          (unless (= (js-call counts :get title) 1) (throw (new globalThis.Error (+ "missing primitive properties original case: " title))))))
+        (await (prepareManagedPrimitiveProperties)))
+      (finally (restore)))) 120000)
+  (js-call original :afterAll (async () (restore) (await (closeManagedPrimitiveProperties))))
+  (js-call (get original :mock) :module "bun:test"
+    (lambda () (Object/assign (js-object) original (js-object :test forwarded-test)))))

@@ -368,7 +368,7 @@
         (Object/assign (js-object) options (js-object
           :add (lambda (record) (funcall publish (core-project-transport-record record assets))))))))
 
-  (defasync addOriginalStdlibRuntimeAdapters (options)
+  (defasync add-original-stdlib-runtime-adapters (options)
     (let* ((options (await (core-project-options options)))
            (locators (get options :locators))
            (selected (js-call locators :filter (lambda (locator) (= (get locator :file) suite)))))
@@ -413,5 +413,25 @@
             (js-call mapped :splice (if (< position 0) (js-length mapped) position) 0 suite))
           mapped)))))
 
+  (defasync addOriginalStdlibRuntimeAdapters (options)
+    (let* ((actual "tests/eliscript-protocol-selfhosted.test.mjs")
+           (archive "tests/eliscript-protocol.test.mjs") (locators (get options :locators))
+           (selected (js-call locators :filter (lambda (item) (= (get item :file) actual)))))
+      (if (= (js-length selected) 0) (await (add-original-stdlib-runtime-adapters options))
+        (let* ((identity (await (funcall (get options :file) actual))) (add (get options :add)) (published 0)
+               (delegated (Object/assign (js-object) options (js-object
+                 :locators (js-call locators :map (lambda (item)
+                   (if (= (get item :file) actual) (Object/assign (js-object) item (js-object :file archive)) item)))
+                 :add (lambda (record)
+                   (when (= (get record :id) "original-program:eliscript-protocol-complete-hosts")
+                     (setq published (1+ published))
+                     (put record :original (Object/assign (js-object) (get record :original)
+                       (js-object :locatorSourceMigration (js-object
+                         :actualEvidenceFile actual :actualEvidenceSha256 (get identity :sha256)
+                         :assertionSourceFile archive :locatorIds (js-call selected :map (lambda (item) (get item :id))))))))
+                   (funcall add record)))))
+               (mapped (await (add-original-stdlib-runtime-adapters delegated))))
+          (unless (= published 1)
+            (throw (new globalThis.TypeError "maintained protocol evidence requires its complete original source recipe"))) mapped))))
   (export originalRuntimeSourceSuites originalRuntimeCaseLocators isOriginalRuntimeHostOnly originalRuntimeHostCompletionSource
     originalRuntimeOnlyCase addOriginalStdlibRuntimeAdapters))

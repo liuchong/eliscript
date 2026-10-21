@@ -1,0 +1,149 @@
+(module tests.compiler-corpus-original-regressions
+  (import "node:test" before test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdir mkdtemp readFile)
+  (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/backends/stage3-targets.mjs" authenticateStage3Targets)
+  (import "../tools/backends/compiler-metadata.mjs" readCompilerMetadata)
+  (import "../tools/backends/compiler-bootstrap.mjs" openCompilerArtifact compilerSourceIdentity saveCompilerMetadata)
+  (import "../tools/backends/compiler-build.mjs" loadCompilerSources buildIndependentCompiler)
+  (import "../tools/backends/compiler-matrix.mjs" loadCompilerMatrixCorpus archiveProduct)
+  (import "../tools/backends/compiler-corpus.mjs" compilerCorpusResourceDeferred)
+  (import "../tools/backends/compiler-corpus-source-archive.mjs" archiveCompilerCorpusSources)
+  (import "../tools/testing/original-regression-product.mjs" originalCompilerProductRequest requestOriginalCompilerProduct)
+  (import "../tools/backends/compiler-corpus-execution.mjs"
+    executeCompilerCorpusRecord createOriginalSeedOracle compareCompilerCorpusObservation)
+
+  ;; Historical zero-based positions are labels only. Selection always uses
+  ;; these stable IDs in the current complete authenticated corpus, never a
+  ;; retired record, a reduced fixture, or an adjacent helper.
+  (defconst regressions (js-array
+    (js-array 570 "stable-compatibility:program:tests/fixtures/persistent-zipper.eli")
+    (js-array 591 "original-program:stdlib-object-complete-host")
+    (js-array 631 "original-program:persistent-zipper-complete-hosts")
+    (js-array 649 "original-program:persistent-zipper-indexed-ascent")
+    (js-array 604 "original-program:portable-persistent-list-1")
+    ;; The 52,000-call cross-family program remains complete. Run it last in
+    ;; each target so it cannot hide the other five independent case results.
+    (js-array 601 "original-program:portable-value-2")))
+  (defvar corpus undefined)
+  (defvar compiler-artifact undefined)
+  (defvar runtime-source undefined)
+  (defvar directory undefined)
+  (defvar options undefined)
+  (defvar literal-sources undefined)
+  (defvar literal-identity undefined)
+  (defconst pre-bootstrap (= (get (get globalThis.process :env) :ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL) "1"))
+  (defconst execution-label (if pre-bootstrap "pre-bootstrap candidate" "authenticated final stage3"))
+  (before (async ()
+    (let* ((environment (get globalThis.process :env))
+           (sources (await (loadCompilerSources (js-object :sourceRoot root))))
+           (identity (compilerSourceIdentity sources))
+           (emacs (get environment :EMACS "emacs"))
+           (parent (resolve root "_worktree/evidence/original-blocking-regressions"))
+           (artifact undefined) (authentication undefined))
+      (await (mkdir parent (js-object :recursive t)))
+      (setq directory (await (mkdtemp (resolve parent "attempt-"))))
+      (setq corpus (await (loadCompilerMatrixCorpus (js-object :sourceRoot root))))
+      (setq literal-sources (get sources :literalSources) literal-identity (get identity :literalSources))
+      (if pre-bootstrap
+        ;; No supplied frontend or session: the maintained independent builder
+        ;; invokes the real Emacs seed path and emits this current JS compiler.
+        ;; This candidate cannot certify a generation or a fixed point.
+        (setq artifact (await (buildIndependentCompiler (js-object :host "javascript"
+          :sourceRoot root :sources sources :profile "small"
+          :outputRoot (resolve directory "pre-bootstrap-candidate")))))
+        (let ((manifest (get environment :ELISCRIPT_BOOTSTRAP_MANIFEST
+                          (resolve root "dist/bootstrap-release/bootstrap.json"))))
+          ;; Default and value 0 always require the real final-stage receipt.
+          ;; A missing receipt never falls back to a candidate or a fixture.
+          (setq authentication (await (authenticateStage3Targets (js-object :bootstrapManifestPath manifest))))
+          (setq artifact (await (readCompilerMetadata (get authentication :stage3MetadataPath))))
+          (put artifact :metadataPath (get authentication :stage3MetadataPath))))
+      (setq compiler-artifact artifact
+        runtime-source (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")))
+      (let ((oracle-options (js-object :sourceRoot root :emacs emacs
+              :directory (resolve directory "independent-seed") :functionalRuntimeProfile "small"
+              :sourceAssets (get (get corpus :document) :evidence)
+              :literalSources literal-sources :literalSourceIdentity literal-identity))
+            (selection (js-object :mode execution-label :stage3Authenticated (not pre-bootstrap)
+              :sourceIdentity identity :compilerMetadataPath (get artifact :metadataPath)
+              :compilerProvenance (get artifact :provenance) :emacs emacs
+              :recordIds (js-call regressions :map (lambda (plan) (aref plan 1))))))
+        (setq options (js-object :functionalRuntimeProfile "small" :profile "small"
+          :sourceAssets (get (get corpus :document) :evidence)
+          :literalSources literal-sources :literalSourceIdentity literal-identity))
+        (unless pre-bootstrap
+          (put options :bootstrapManifestPath (get authentication :bootstrapManifestPath))
+          (put oracle-options :bootstrapManifestPath (get authentication :bootstrapManifestPath))
+          (put selection :bootstrapManifestPath (get authentication :bootstrapManifestPath)))
+        (put options :originalOracle (createOriginalSeedOracle oracle-options))
+        (await (saveCompilerMetadata (resolve directory "compiler-selection.json") selection))
+        (js-call globalThis.console :error execution-label (js-object :directory directory :stage3Authenticated (not pre-bootstrap)))))))
+  (defasync run-original-regression (target plan test-context)
+          (let* ((id (aref plan 1))
+                 (matches (js-call (get corpus :records) :filter (lambda (record) (= (get record :id) id))))
+                 (record (aref matches 0))
+                 (output (resolve directory target (str (aref plan 0))))
+                 (product undefined) (response undefined) (failure undefined) (failed false))
+            (js-call assert :strictEqual (js-length matches) 1 id)
+            (js-call assert :strictEqual (get (get record :expected) :kind) "seed-program")
+            (js-call assert :strictEqual (get (get record :expected) :oracleRequired) t)
+            (await (mkdir output (js-object :recursive t)))
+            (let* ((source-identity (await (archiveCompilerCorpusSources record (resolve output "sources"))))
+                   (request (originalCompilerProductRequest record target options))
+                   (deferred (compilerCorpusResourceDeferred record target options))
+                   (context (js-object :target target :record (globalThis.structuredClone record)
+                     :sourceRoot root :directory output :sourceIdentity source-identity
+                     :options options :sourceAssets (get (get corpus :document) :evidence)
+                     :literalSources literal-sources :literalSourceIdentity literal-identity
+                     :transportEvidence (js-object)
+                     :archiveProduct (async (value &optional name product-target)
+                       (await (archiveProduct value (if (undefined? product-target) target product-target)
+                         (resolve output (if (undefined? name) "product" name))))))))
+              (await (saveCompilerMetadata (resolve output "request.json") request))
+              (if deferred
+                (progn
+                ;; A deferred original keeps its stable test ID and complete
+                ;; authenticated source. It is skipped, never an equivalent
+                ;; result, and opens no compiler session or generated program.
+                (await (saveCompilerMetadata (resolve output "resource-deferred.json")
+                  (Object/assign (js-object :directory output :sourceIdentity source-identity
+                    :execution (js-object :status "not-executed" :reason (get deferred :reason))) deferred)))
+                (js-call test-context :skip (get deferred :reason)))
+              (let ((session (await (openCompilerArtifact compiler-artifact))))
+                (put context :session session)
+              (try
+                (progn
+                (await (js-call session :request (js-object :operation "runtime"
+                  :source runtime-source :filename "bootstrap/runtime/memory.eli")))
+              (try
+                (setq response (await (requestOriginalCompilerProduct session request)))
+                (setq product (await (archiveProduct response target (resolve output "product"))))
+                (catch error (setq failed t failure error)))
+              (if failed (put context :failure failure)
+                (progn (put context :response response) (put context :artifact product)))
+              (let* ((observation (await (executeCompilerCorpusRecord context)))
+                     (comparison (await (compareCompilerCorpusObservation
+                       (Object/assign (js-object) context (js-object :observation observation))))))
+                (await (saveCompilerMetadata (resolve output "execution.json") observation))
+                (await (saveCompilerMetadata (resolve output "comparison.json") comparison))
+                (js-call assert :strictEqual (get comparison :status) "equivalent" (JSON/stringify comparison))
+                ;; 601/604 retain their original complete inputs and golden.
+                ;; Functional success never certifies their original heap gate.
+                (when (js-call (js-array 601 604) :includes (aref plan 0))
+                  (js-call assert :strictEqual (get observation :resourceAcceptance) "deferred")
+                  (js-call assert :strictEqual (get observation :effectiveRuntimeProfile) "full-compiler"))))
+                (finally (await (js-call session :close)))))))))
+
+  ;; Each complete case owns its real compiler session. Closing releases its
+  ;; last project IR, literals and runtime before the next case builds them.
+  ;; This bounds overlapping case state without changing production reuse or
+  ;; increasing the engine heap limit. Every case still uses this same artifact.
+  (js-call (js-array "javascript" "wasm" "native") :forEach (lambda (target)
+    (js-call regressions :forEach (lambda (plan)
+      (test (str execution-label ": original case " (aref plan 0) " retains its complete program and independent Seed oracle on " target)
+        (async (test-context)
+          (await (run-original-regression target plan test-context))))))))
+)

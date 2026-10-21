@@ -1,0 +1,27 @@
+(module tests.array-text-fixture-install
+  (import "bun:test" mock afterAll)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" :as files)
+  (import "node:fs" readFileSync)
+  (import "node:crypto" createHash)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "../../tools/backends/build.mjs" root)
+  (import "../../tools/testing/array-text-fixture.mjs" arrayTextMeasuredSource)
+  (defconst suite "tests/js-array-text-fast-path.test.mjs")
+  (js-call assert :ok (js-call (get globalThis.process :argv) :some
+    (lambda (argument) (= (resolve root argument) (resolve root suite)))))
+  (js-call assert :strictEqual
+    (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root suite))) :digest "hex")
+    "be07405cef94d217503e40a1606ccb7d0a824cb5a4ca63ebbe8bc3d415ce7def")
+  (defconst original (Object/assign (js-object) files))
+  (defconst runtime-url (get (pathToFileURL (resolve root "runtime/array-text.mjs")) :href))
+  (defasync readFile (path &rest options)
+    (let ((output (await (Reflect/apply (get original :readFile) original
+                    (js-call (js-array path) :concat options)))))
+      (if (and path (= (get path :href) runtime-url)
+               (= (aref options 0) "utf8"))
+        (arrayTextMeasuredSource root output) output)))
+  (js-call mock :module "node:fs/promises"
+    (lambda () (Object/assign (js-object) original (js-object :readFile readFile))))
+  (afterAll (lambda () (js-call mock :module "node:fs/promises" (lambda () original)))))

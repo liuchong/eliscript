@@ -1,0 +1,5 @@
+(module tests.bootstrap-emitter
+  (import "bun:test" test)
+  (import "../tools/testing/bootstrap-emitter.mjs" runBootstrapEmitterAcceptance)
+  (test "bootstrapped emitter matches seed ESM and Source Map output"
+    (async () (await (runBootstrapEmitterAcceptance))) 30000))

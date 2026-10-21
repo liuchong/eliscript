@@ -23,6 +23,7 @@
     "transport/backends/managed-module-graph-legacy.mjs"
     "transport/backends/managed-source-view-legacy.mjs"))
   (defconst helper-support (js-array "transport/backends/managed-host-object-realm.mjs"
+    "transport/backends/managed-host-runtime.mjs" "transport/backends/managed-host-runtime.mjs.map"
     "transport/backends/managed-host-object-provider.mjs"
     "transport/backends/managed-host-lifecycle.mjs"
     "transport/backends/managed-foreign-binding.mjs" "transport/backends/managed-host-proxy.mjs"))
@@ -191,6 +192,21 @@
           (js-call assert :deepStrictEqual (get certified :artifactIdentity) before))
         (setq index (1+ index)))))
 
+  (test "fresh bootstrap frontend runtime companions retain every maintained source byte and original source-map coordinate"
+    (async ()
+      (let ((index 0))
+        (while (< index (js-length runtime-capsules))
+          (let* ((name (aref runtime-capsules index))
+                 (file (resolve root "dist/runtime" (str name ".mjs")))
+                 (bytes (await (readFile file)))
+                 (map (JSON/parse (await (readFile (str file ".map") "utf8"))))
+                 (source (resolve root "runtime" (str name ".eli"))))
+            (js-call assert :ok (> (js-length bytes) 0))
+            (js-call assert :strictEqual (get map :version) 3)
+            (js-call assert :deepStrictEqual (js-call (get map :sources) :map (lambda (path)
+              (resolve (dirname file) (get map :sourceRoot "") path))) (js-array source))
+            (js-call assert :deepStrictEqual (get map :sourcesContent) (js-array (await (readFile source "utf8")))))
+          (setq index (1+ index))))))
   (test "packaged loader worker and browser carry the exact preserved runtime dependency and original identities"
     (async ()
       (await (workspace (async (directory)
@@ -342,6 +358,17 @@
                (missing (resolve directory "missing")) (path (resolve (get packaged :directory) dependency))
                (bytes (await (readFile path))))
           (await (cp (get packaged :directory) missing (js-object :recursive t)))
+          (let ((paths (js-array "transport/backends/managed-host-runtime.mjs"
+                                 "transport/backends/managed-host-runtime.mjs.map")) (index 0))
+            (while (< index (js-length paths))
+              (let* ((relative (aref paths index))
+                     (entry (js-call (get (get packaged :manifest) :files) :find
+                       (lambda (item) (= (get item :path) relative))))
+                     (actual (await (readFile (resolve missing relative)))))
+                (js-call assert :ok entry)
+                (js-call assert :strictEqual (js-length actual) (get entry :bytes))
+                (js-call assert :strictEqual (digest actual) (get entry :sha256)))
+              (setq index (1+ index))))
           (await (rm (resolve missing dependency)))
           (await (js-call assert :rejects
             (load-module (resolve missing "compiler-loader.mjs"))

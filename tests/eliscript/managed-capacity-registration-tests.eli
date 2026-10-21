@@ -1,0 +1,36 @@
+(module tests.managed-capacity-registration-tests
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:crypto" createHash)
+  (import "./helpers/managed-capacity-registration.mjs" managedCapacityPlans managedCapacityRegistration)
+
+  (test "capacity registration preserves the complete original suite bytes and strict default runner" (lambda ()
+    (js-call assert :strictEqual (js-length managedCapacityPlans) 3)
+    (js-call managedCapacityPlans :forEach (lambda (plan)
+      (let* ((bytes (readFileSync (get plan :suite)))
+             (actual (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+             (runner (lambda () (throw (new globalThis.Error "registration must not execute a test")))))
+        (js-call assert :strictEqual actual (get plan :sha256))
+        (js-call (js-array (js-object) (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "0")
+          (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "true")) :forEach (lambda (environment)
+            (js-call assert :strictEqual (managedCapacityRegistration runner (get plan :title) environment) runner))))))))
+
+  (test "explicit capacity deferral forwards every original callback and deadline while retaining all functional registrations" (lambda ()
+    (let* ((calls (js-array)) (runner (lambda (&rest values) (js-call calls :push values)))
+           (skip (lambda (&rest values) (js-call calls :push values)))
+           (environment (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1"))
+           (callback (lambda () undefined)))
+      (put runner :skip skip)
+      (js-call managedCapacityPlans :forEach (lambda (plan)
+        (let ((title (get plan :title)))
+          (funcall (managedCapacityRegistration runner title environment) title callback 120000)
+          (js-call assert :deepStrictEqual (js-call calls :pop)
+            (js-array (+ "DEFERRED / NOT ACCEPTED: " title) callback 120000)))))
+      (js-call (js-array "ordinary indexed storage does not consume one permanent descriptor handle per element"
+        "committed Emacs analysis soak proves buffer lifecycle safety"
+        "failed first native member materialization recovers in the original 256 slot budget"
+        "independent Node native JS and identical WASM bytes exercise the full inherited-array HasProperty family")
+        :forEach (lambda (title)
+          (js-call assert :strictEqual (managedCapacityRegistration runner title environment) runner))))))
+)

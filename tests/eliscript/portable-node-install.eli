@@ -1,0 +1,12 @@
+(module tests.portable-node-install
+  (import "node:module" registerHooks)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "../../tools/backends/build.mjs" root)
+  (import "../../tools/testing/portable-node-fixtures.mjs" portableNodeRoute)
+  (import "./managed-reference-node.mjs")
+  (defconst bridge (get (pathToFileURL (resolve root "tests/helpers/portable-node-test.mjs")) :href))
+  (defconst build (get (pathToFileURL (resolve root "tests/helpers/portable-node-build.mjs")) :href))
+  (registerHooks (js-object :resolve (lambda (specifier context nextResolve)
+    (let ((route (portableNodeRoute specifier (get context :parentURL) bridge build)))
+      (if (undefined? route) (funcall nextResolve specifier context) route))))))

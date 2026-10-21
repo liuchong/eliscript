@@ -1,5 +1,6 @@
 (module tools.backends.managed-host
   (import "./managed-host-legacy.mjs" :as legacy)
+  (import "./managed-host-runtime.mjs" :as maintained)
   (import "./managed-host-lifecycle.mjs" createManagedHostRuntimeWithLifecycle)
   (import "./managed-foreign-binding.mjs" createManagedForeignBindingRuntime)
   (import "./managed-host-object-realm.mjs" createManagedHostObjectRealmRuntime)
@@ -32,6 +33,19 @@
                                (not (js-call slots :has slot)))
                     (throw (new globalThis.TypeError "invalid automatic literal probe binding")))
                   (js-call slots :set slot (aref item 2))))))
+          ;; These actual codec entries call the original brand logic inside
+          ;; WASM, beyond the host invoke wrapper. Keep their whole synchronous
+          ;; operation in the same automatic-probe scope without replacing any
+          ;; codec result. Probe-only descriptors retain their declared ABI.
+          (js-call (js-array "literal-export-value" "literal-import-value") :forEach
+            (lambda (name)
+              (when (Object/hasOwn bindings name)
+                (let* ((binding (get bindings name)) (slot (get binding :index)))
+                  (unless (and (= (get binding :kind) 1) (Number/isInteger slot)
+                               (>= slot 0) (< slot (get module :functionCount))
+                               (not (js-call slots :has slot)))
+                    (throw (new globalThis.TypeError "invalid automatic literal codec binding")))
+                  (js-call slots :set slot "codec-scope")))))
           (js-call required :forEach (lambda (name)
             (let ((entry (get descriptors name)))
               (unless (and entry (Object/hasOwn entry "value") (= (value-type (get entry :value)) "function"))
@@ -40,20 +54,29 @@
                    (Reflect/apply (get (get descriptors name) :value) exports arguments)))
                  (get-original (get (get descriptors getter-name) :value))
                  (invoke-original (get (get descriptors "value-source-invoke-with-this") :value))
+                 (handle-identity (lambda (value)
+                   ;; WASM exports return signed i32, while the host transport
+                   ;; carries the same handle bits as uint32. Identity uses the
+                   ;; bits; forwarding still preserves the original ABI value.
+                   (if (and (Number/isInteger value) (>= value -2147483648) (<= value 4294967295))
+                     (uint32 value) value)))
                  (get-binding (lambda (heap kind index)
-                   (let ((value (Reflect/apply get-original exports (js-array heap kind index))))
+                   (let* ((value (Reflect/apply get-original exports (js-array heap kind index)))
+                          (identity (funcall handle-identity value)))
                      ;; Only the real module getter can identify these private
                      ;; callees. No fabricated kind, code read, root or handle
                      ;; lifetime is introduced. Generations never ABA-reuse.
-                     (when (and (= (funcall raw "last-error") 0) (= kind 1) (> value 3)
+                     (when (and (= (funcall raw "last-error") 0) (= kind 1)
+                                (Number/isInteger value) (>= value -2147483648) (<= value 4294967295) (> identity 3)
                                 (js-call slots :has index))
                        (unless (js-call heaps :has heap) (js-call heaps :set heap (new globalThis.Map)))
-                       (js-call (js-call heaps :get heap) :set value (js-call slots :get index))) value)))
+                       (js-call (js-call heaps :get heap) :set identity (js-call slots :get index))) value)))
                  (invoke (lambda (heap function receiver arguments count)
-                   (let ((known (js-call heaps :get heap)))
-                     (if (or (not known) (not (js-call known :has function)))
+                   (let ((known (js-call heaps :get heap)) (identity (funcall handle-identity function)))
+                     (if (or (not known) (not (js-call known :has identity)))
                        (Reflect/apply invoke-original exports (js-array heap function receiver arguments count))
-                       (if (js-call active :has heap)
+                       (if (and (js-call active :has heap)
+                                (/= (js-call known :get identity) "codec-scope"))
                          ;; Internal automatic calls have precisely this ABI.
                          ;; Invalid tuples/counts retain the original validator
                          ;; and its real error instead of becoming no-brand.
@@ -62,12 +85,12 @@
                                   (= (funcall raw "last-error") 0)
                                   (>= (funcall raw "value-length" heap arguments) 1)
                                   (= (funcall raw "last-error") 0))
-                           (progn (funcall raw "value-error-restore" 0) (js-call known :get function))
+                           (progn (funcall raw "value-error-restore" 0) (js-call known :get identity))
                            (Reflect/apply invoke-original exports (js-array heap function receiver arguments count)))
-                         (progn
-                           (js-call active :add heap)
+                         (let ((entered (not (js-call active :has heap))))
+                           (when entered (js-call active :add heap))
                            (try (Reflect/apply invoke-original exports (js-array heap function receiver arguments count))
-                             (finally (js-call active :delete heap)))))))))
+                             (finally (when entered (js-call active :delete heap))))))))))
                  (output (Object/create (Object/getPrototypeOf exports))))
             (js-call (js-array (js-array getter-name get-original get-binding)
                               (js-array "value-source-invoke-with-this" invoke-original invoke))
@@ -80,7 +103,9 @@
             (Object/defineProperties output descriptors) output)))))
 
   (defun managedHostInvokeDiagnosticExports (exports &rest memories)
-    (if (/= (get (get globalThis.process :env) "ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC") "1") exports
+    (if (or (nullish? (get globalThis.globalThis :process))
+            (nullish? (get (get globalThis.globalThis :process) :env))
+            (/= (get (get globalThis.process :env) "ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC") "1")) exports
       (let* ((descriptors (Object/getOwnPropertyDescriptors exports))
              (code-export (get descriptors "value-function-code"))
              (code-readable (and code-export (Object/hasOwn code-export "value")
@@ -102,7 +127,7 @@
         (if (not valid) exports
           (let* ((raw (lambda (name &rest arguments)
                    (Reflect/apply (get (get descriptors name) :value) exports arguments)))
-                 (function-code (lambda (heap function kind)
+                 (function-code (lambda (heap function kind observed-view)
                    (let ((code nil))
                      (when (= kind 18)
                        (try
@@ -110,7 +135,7 @@
                            (let ((value (funcall raw "value-function-code" heap function)))
                              (when (and (= (funcall raw "last-error") 0) (Number/isInteger value)
                                         (>= value 0) (<= value 4294967295)) (setq code value)))
-                           (when memory-readable
+                           (when (and memory-readable (not (nullish? observed-view)))
                              ;; value-data validates this exact owner, handle
                              ;; generation and kind. Its public payload is
                              ;; block+32; the existing kind18 code is block+12.
@@ -119,7 +144,7 @@
                              (let ((payload (funcall raw "value-data" heap function 18)))
                                (when (and (= (funcall raw "last-error") 0) (Number/isInteger payload)
                                           (>= payload 20) (<= payload 4294967295))
-                                 (let* ((view (Reflect/apply (get view-export :value) memory (js-array)))
+                                 (let* ((view observed-view)
                                         (length (get view :byteLength)))
                                    (when (and (Number/isInteger length) (<= (- payload 16) length))
                                      (setq code (Reflect/apply (get (get globalThis.DataView :prototype) :getUint32)
@@ -139,16 +164,44 @@
                                (setq source-class (funcall raw "value-exception-class" heap) saved t)
                                (let* ((function-kind (funcall raw "value-kind" heap function))
                                       (argument-kind (funcall raw "value-kind" heap arguments))
+                                      ;; Observe once. The code word and heap
+                                      ;; counters belong to this same view;
+                                      ;; a diagnostic observer failure must
+                                      ;; still leave the original report intact.
+                                      (observed-view (when memory-readable
+                                        (try (Reflect/apply (get view-export :value) memory (js-array))
+                                          (catch ignored nil))))
                                       (report (js-object :phase "value-source-invoke-with-this"
                                         :callee function :calleeKind function-kind
                                         :calleeCount (if (= function-kind 18) (funcall raw "value-length" heap function) 0)
-                                        :calleeCode (funcall function-code heap function function-kind)
+                                        :calleeCode (funcall function-code heap function function-kind observed-view)
                                         :arguments arguments :argumentKind argument-kind
                                         :argumentLength (if (= argument-kind 7) (funcall raw "value-length" heap arguments) 0)
                                         :count count :lastError status :sourceClass source-class :threw threw)))
                                  ;; These raw reads allocate/pin no managed
                                  ;; values. Operands remain in the original
                                  ;; caller's frame; no new ownership is created.
+                                 (js-call (js-array (js-array "heap-used" "heapUsedBytes")
+                                                   (js-array "heap-capacity" "heapCapacityBytes")
+                                                   (js-array "heap-live" "heapLiveValues")
+                                                   (js-array "heap-collections" "heapCollections")) :forEach
+                                   (lambda (field)
+                                     (let ((entry (get descriptors (aref field 0))))
+                                       (when (and entry (= (value-type (get entry :value)) "function"))
+                                         (let ((value (funcall raw (aref field 0) heap)))
+                                           (when (and (Number/isInteger value) (>= value 0) (<= value 4294967295))
+                                             (put report (aref field 1) value)))))))
+                                 (when (and memory-readable (not (nullish? observed-view)))
+                                   (let* ((view observed-view)
+                                          (length (get view :byteLength)))
+                                     (when (and (Number/isInteger heap) (>= heap 0) (<= (+ heap 20) length))
+                                       (let ((control (js-call view :getUint32 (+ heap 16) t)))
+                                         (when (and (> control 0) (<= (+ control 20) length))
+                                           (put report :heapMaxSlots (js-call view :getUint32 (+ control 8) t))
+                                           (put report :heapHighwaterSlots (js-call view :getUint32 (+ control 12) t))
+                                           (put report :heapFreeSlotHead (js-call view :getUint32 (+ control 16) t)))))))
+                                 (let ((recent (js-call maintained :readManagedSourceOperationDiagnostics memory)))
+                                   (when recent (put report :sourceOperations recent)))
                                  (console/error "[managed-invoke]" (JSON/stringify report))))
                              (catch ignored nil)
                              (finally
@@ -163,7 +216,61 @@
               :length (Object/getOwnPropertyDescriptor invoke "length")))
             ;; Keep the raw callable in descriptors while the wrapper reads
             ;; the other original ABI functions; recursion is never injected.
-            (let ((published (Object/assign (js-object) descriptors)))
+            (let ((published (Object/assign (js-object) descriptors)) (first-export-failure false))
+              ;; Keep the first observed failure for this runtime factory. The
+              ;; operands are raw ABI numbers, never decoded user objects.
+              (js-call (js-array "value-source-own-descriptor" "value-source-object-keys" "value-object-copy") :forEach
+                (lambda (name)
+                  (let ((service (get descriptors name)))
+                    (when (and service (Object/hasOwn service "value")
+                               (= (value-type (get service :value)) "function"))
+                      (let* ((original (get service :value))
+                             (observed (lambda (&rest arguments)
+                               (let ((threw false))
+                                 (try (Reflect/apply original exports arguments)
+                                   (catch error (setq threw t) (throw error))
+                                   (finally
+                                     (when (not first-export-failure)
+                                       (let ((status 0) (source-class 0) (saved false)
+                                             (heap (aref arguments 0)))
+                                         (try
+                                           (setq status (funcall raw "last-error"))
+                                           (when (or threw (/= status 0))
+                                             ;; Claim before observation so reentrant sinks
+                                             ;; cannot replace the original failure.
+                                             (setq first-export-failure t)
+                                             (when (Number/isInteger heap)
+                                               (setq source-class (funcall raw "value-exception-class" heap) saved t)
+                                               (let* ((receiver (aref arguments 1))
+                                                      (key (if (= name "value-source-own-descriptor") (aref arguments 2) nil))
+                                                      (receiver-raw (if (Number/isInteger receiver) receiver nil))
+                                                      (key-raw (if (Number/isInteger key) key nil))
+                                                      (report (js-object :phase name :heap heap
+                                                        :receiver receiver-raw
+                                                        :receiverKind (if (Number/isInteger receiver-raw)
+                                                          (funcall raw "value-kind" heap receiver-raw) nil)
+                                                        :key key-raw
+                                                        :keyKind (if (Number/isInteger key-raw)
+                                                          (funcall raw "value-kind" heap key-raw) nil)
+                                                        :lastError status :sourceClass source-class :threw threw))
+                                                      (sink (Object/getOwnPropertyDescriptor globalThis.console "error")))
+                                                 (let ((recent (js-call maintained :readManagedSourceOperationDiagnostics memory)))
+                                                   (when recent (put report :sourceOperations recent)))
+                                                 (when (and sink (Object/hasOwn sink "value")
+                                                            (= (value-type (get sink :value)) "function"))
+                                                   (Reflect/apply (get sink :value) globalThis.console
+                                                     (js-array "[managed-export-failure]" (JSON/stringify report)))))))
+                                           (catch ignored nil)
+                                           (finally
+                                             (when saved
+                                               (try
+                                                 (funcall raw "value-exception-class-set" heap source-class)
+                                                 (funcall raw "value-error-restore" status)
+                                                 (catch ignored nil)))))))))))))
+                        (Object/defineProperties observed (js-object
+                          :name (Object/getOwnPropertyDescriptor original "name")
+                          :length (Object/getOwnPropertyDescriptor original "length")))
+                        (put published name (Object/assign (js-object) service (js-object :value observed))))))))
               (put published "value-source-invoke-with-this"
                 (Object/assign (js-object) entry (js-object :value wrapped)))
               (Object/defineProperties output published)) output)))))
@@ -242,7 +349,7 @@
                (lambda (actual descriptor memory &rest tail)
                  (createManagedForeignBindingRuntime
                    (lambda (actual descriptor memory &rest tail)
-                     (createManagedHostObjectRealmRuntime (get legacy :createManagedHostRuntime)
+                     (createManagedHostObjectRealmRuntime (get maintained :createManagedHostRuntime)
                        actual descriptor memory tail completions))
                    actual descriptor memory tail))
                (host-property-exports (managedHostLiteralProbeExports

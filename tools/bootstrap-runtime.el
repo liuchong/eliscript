@@ -31,13 +31,28 @@
                              (./runtime/unicode-case-data.mjs . "./runtime/unicode-case-data.mjs")))))
               "\n"))))
 
-(defun eliscript-bootstrap-prepare-project-host (root)
+(defun eliscript-bootstrap-prepare-project-host (root &optional preserve-existing)
   "Prepare ROOT's maintained project host before loading the JS build driver."
-  (let ((source (expand-file-name "tools/project/project.eli" root))
-        (output (expand-file-name "bootstrap/host/project.mjs" root)))
-    (when (file-exists-p source)
-      (make-directory (file-name-directory output) t)
-      (eliscript-compile-file-with-source-map source output))))
+  (let ((entries '(("tools/project/project.eli" . "bootstrap/host/project.mjs")
+                   ("tools/project/project-cli.eli" . "bootstrap/host/project-cli.mjs")
+                   ("tools/project/check-cli.eli" . "bootstrap/host/check-cli.mjs"))))
+    (when (file-exists-p (expand-file-name (caar entries) root))
+      ;; The generated host lives in ROOT, outside the private compiler output
+      ;; scope. Its bare runtime imports must resolve in this same source tree.
+      (dolist (name '("unicode-case-data" "unicode-case" "math"))
+        (let ((module (expand-file-name (concat "runtime/" name ".mjs") root)))
+          (unless (and preserve-existing (file-exists-p module)
+                       (file-exists-p (concat module ".map")))
+            (eliscript-compile-file-with-source-map
+             (expand-file-name (concat "runtime/" name ".eli") root) module))))
+      (dolist (entry entries)
+        (let ((source (expand-file-name (car entry) root))
+              (output (expand-file-name (cdr entry) root)))
+          (when (file-exists-p source)
+            (make-directory (file-name-directory output) t)
+            (unless (and preserve-existing (file-exists-p output)
+                         (file-exists-p (concat output ".map")))
+              (eliscript-compile-file-with-source-map source output))))))))
 
 (defun eliscript-bootstrap--call-emacs (emacs arguments)
   "Call EMACS with ARGUMENTS, preserving its output and error streams."

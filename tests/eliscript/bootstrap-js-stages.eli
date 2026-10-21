@@ -1,7 +1,7 @@
 (module tests.bootstrap-js-stages
   (import "node:test" test before after)
   (import "node:assert/strict" :default assert)
-  (import "node:fs/promises" mkdtemp mkdir readFile writeFile readdir rm cp symlink)
+  (import "node:fs/promises" mkdtemp mkdir readFile writeFile readdir rm cp symlink stat)
   (import "node:path" resolve dirname relative isAbsolute)
   (import "node:os" tmpdir)
   (import "node:child_process" spawnSync)
@@ -46,6 +46,8 @@
       (await (readFile (resolve root "tools/backends/bootstrap.el")))))
     (await (write-source destination "tools/runtime/unicode-case-runtime.el"
       (await (readFile (resolve root "tools/runtime/unicode-case-runtime.el")))))
+    (await (write-source destination "package.json"
+      (await (readFile (resolve root "package.json")))))
     (let ((support (js-array "tools/project/project.eli" "bootstrap/host/project-legacy.mjs"
                     "bootstrap/host/bun.mjs" "bootstrap/host/build.mjs"
                     "tools/bootstrap-seed.el" "tools/bootstrap-runtime.el")) (index 0))
@@ -142,7 +144,28 @@
           (let ((run (spawnSync (get globalThis.process :execPath) (js-array product)
                        (js-object :cwd checkout :encoding "utf8"))))
             (js-call assert :strictEqual (get run :status) 0 (get run :stderr))
-            (js-call assert :strictEqual (js-call (get run :stdout) :trim) "43"))))))
+            (js-call assert :strictEqual (js-call (get run :stdout) :trim) "43")))
+        (let ((paths (js-array "runtime/math.mjs" "runtime/unicode-case.mjs"
+                       "runtime/unicode-case-data.mjs" "bootstrap/host/project.mjs"))
+              (before (js-array)))
+          (let ((index 0))
+            (while (< index (js-length paths))
+              (let ((path (resolve checkout (aref paths index))))
+                (js-call before :push (js-array (await (readFile path)) (get (await (stat path)) :mtimeMs))))
+              (setq index (1+ index))))
+          (let* ((arguments (js-array "--batch" "-Q" "--script" (resolve checkout "tools/bootstrap-seed.el")
+                    "--" checkout (resolve directory "independent-public-seed")
+                    "symbol" "syntax" "reader" "formatter" "expander" "transient-analysis"
+                    "analyzer" "ir" "lower" "source-map" "emitter" "project" "compiler"))
+                 (independent (spawnSync (get (get globalThis.process :env) :EMACS "emacs") arguments
+                                (js-object :cwd checkout :encoding "utf8" :maxBuffer 8388608))))
+            (js-call assert :strictEqual (get independent :status) 0 (get independent :stderr)))
+          (let ((index 0))
+            (while (< index (js-length paths))
+              (let ((path (resolve checkout (aref paths index))) (snapshot (aref before index)))
+                (js-call assert :deepStrictEqual (await (readFile path)) (aref snapshot 0))
+                (js-call assert :strictEqual (get (await (stat path)) :mtimeMs) (aref snapshot 1)))
+              (setq index (1+ index))))))))
 
   (test "T01 Emacs alone builds the complete formal stage0 from a checkout containing no compiler artifacts"
     (async ()

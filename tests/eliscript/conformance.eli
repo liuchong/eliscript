@@ -1,0 +1,96 @@
+(module tests.conformance
+  (import "bun:test" expect test)
+  (import "node:fs/promises" readFile)
+  (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/conformance/check.mjs" checkContracts ContractValidationError)
+  (defasync read-json (file) (JSON/parse (await (readFile (resolve root file) "utf8"))))
+  (defasync validation-errors (options)
+    (let ((errors undefined))
+      (try (await (checkContracts (Object/assign (js-object :root root) options)))
+        (catch error
+          (js-call (expect error) :toBeInstanceOf ContractValidationError)
+          (setq errors (get error :errors))))
+      (when (undefined? errors) (throw (new globalThis.Error "expected contract validation to fail")))
+      errors))
+  (test "repository specifications have complete conformance evidence"
+    (async ()
+      (js-call (expect (await (checkContracts (js-object :root root)))) :toEqual
+        (js-object :schemaVersion 1
+          :specifications (js-object :total 181
+            :statuses (js-object :draft 2 :accepted 3 :stable 175 :superseded 1)
+            :implementations (js-object "in-progress" 3 :implemented 176 :pending 1 :superseded 1)
+            :coveredImplemented 176)
+          :features (js-object :total 176 :evidence 689 :domains (js-object
+            :acceleration (js-object :features 1 :evidence 2)
+            :bootstrap (js-object :features 13 :evidence 37)
+            :compiler (js-object :features 15 :evidence 45)
+            :editor (js-object :features 4 :evidence 22)
+            :language (js-object :features 32 :evidence 139)
+            :macro (js-object :features 3 :evidence 9)
+            :portable (js-object :features 3 :evidence 5)
+            :platform (js-object :features 1 :evidence 8)
+            :project (js-object :features 5 :evidence 7)
+            :publishing (js-object :features 1 :evidence 2)
+            :quality (js-object :features 25 :evidence 83)
+            :runtime (js-object :features 16 :evidence 105)
+            :stdlib (js-object :features 43 :evidence 170)
+            :toolchain (js-object :features 5 :evidence 20)
+            :tooling (js-object :features 1 :evidence 2)
+            :worker (js-object :features 8 :evidence 33)))
+          :baseline (js-object :stableSpecifications 175 :provisionalSpecifications 1
+            :planningSpecifications 4 :supersededSpecifications 1 :stableFeatures 175 :provisionalFeatures 1)))))
+  (test "contract checker rejects specification metadata drift"
+    (async ()
+      (let ((index (await (read-json "specs/index.json"))))
+        (put (aref (get index :specifications) 0) :title "Outdated title")
+        (js-call (expect (await (validation-errors (js-object :specIndex index)))) :toContain
+          "specs/0001-language-and-toolchain.md title is \"Language and Toolchain Boundary\", index declares \"Outdated title\""))))
+  (test "contract checker rejects missing evidence locators"
+    (async ()
+      (let ((manifest (await (read-json "tests/conformance/manifest.json"))))
+        (put (aref (get (aref (get manifest :features) 0) :evidence) 0) :contains "missing-test-name")
+        (js-call (expect (aref (await (validation-errors (js-object :manifest manifest))) 0)) :toContain
+          "locator \"missing-test-name\" is absent"))))
+  (test "contract checker rejects evidence outside the default test suite"
+    (async ()
+      (let ((manifest (await (read-json "tests/conformance/manifest.json"))))
+        (put (get (aref (get manifest :features) 0) :evidence) 0
+          (js-object :kind "bun-test" :file "README.md" :contains "# Eliscript"))
+        (js-call (expect (await (validation-errors (js-object :manifest manifest)))) :toContain
+          "acceleration.measurement-probe evidence 0 file README.md is not executed by the default test target"))))
+  (test "contract checker rejects application-only evidence for core features"
+    (async ()
+      (let* ((manifest (await (read-json "tests/conformance/manifest.json")))
+             (feature (js-call (get manifest :features) :find (lambda (item)
+               (= (get item :id) "language.framework-neutral-library-interop")))))
+        (put (get feature :evidence) 0 (js-object :kind "bun-test" :file "tests/vite-plugin.test.mjs"
+          :contains "Vite remains an application adapter outside language core"))
+        (js-call (expect (await (validation-errors (js-object :manifest manifest)))) :toContain
+          "language.framework-neutral-library-interop evidence 0 file tests/vite-plugin.test.mjs is not executed by test-core"))))
+  (test "contract checker rejects core-only evidence for application features"
+    (async ()
+      (let* ((manifest (await (read-json "tests/conformance/manifest.json")))
+             (feature (js-call (get manifest :features) :find (lambda (item) (= (get item :id) "tooling.vite-adapter")))))
+        (put (get feature :evidence) 0 (js-object :kind "bun-test" :file "tests/esm-imports.test.mjs"
+          :contains "complete ESM imports are identical and executable across compilers and hosts"))
+        (js-call (expect (await (validation-errors (js-object :manifest manifest)))) :toContain
+          "tooling.vite-adapter evidence 0 file tests/esm-imports.test.mjs is not executed by test-applications"))))
+  (test "contract checker rejects uncovered implemented specifications"
+    (async ()
+      (let ((manifest (await (read-json "tests/conformance/manifest.json"))))
+        (put manifest :features (js-call (get manifest :features) :filter (lambda (item) (/= (get item :spec) "0039"))))
+        (js-call (expect (await (validation-errors (js-object :manifest manifest)))) :toContain
+          "implemented spec 0039 has no conformance feature"))))
+  (test "contract checker rejects incomplete stable baselines"
+    (async ()
+      (let ((baseline (await (read-json "contracts/compatibility-baseline.json"))))
+        (js-call (get (get baseline :specifications) :stable) :shift)
+        (js-call (expect (await (validation-errors (js-object :baseline baseline)))) :toContain
+          "stable specification baseline is missing: 0002"))))
+  (test "contract checker rejects partially promoted stable contracts"
+    (async ()
+      (let ((manifest (await (read-json "tests/conformance/manifest.json"))))
+        (put (js-call (get manifest :features) :find (lambda (item) (= (get item :spec) "0004"))) :status "accepted")
+        (js-call (expect (await (validation-errors (js-object :manifest manifest)))) :toContain
+          "compiler.lexical-analysis must be stable because spec 0004 is stable")))))

@@ -1,0 +1,63 @@
+(module tests.compiler-build-private
+  (import "node:fs/promises" readFile writeFile)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "node:module" createRequire)
+  (import "node:crypto" createHash)
+  (import "../../tools/backends/build.mjs" root)
+  (import "../../tools/testing/fixture-environment.mjs" prepareFixtureEnvironment)
+  (import "../../dist/bootstrap/reader.mjs" read-string)
+  (import "../../dist/bootstrap/compiler.mjs" compile-string)
+  (defvar fixture undefined)
+  (defvar pending undefined)
+  (defconst names (js-array "build-truth" "build-nullish" "build-optional-get" "build-copy-properties"
+    "compiler-metadata-utf8-block" "compilerMetadataDigest" "compiler-file-identity"
+    "writeCompilerMetadata" "write-owned-compiler-metadata" "seed-javascript-product"))
+  (defun source-part (source node)
+    (js-call source :slice (get (get node :span) :start) (get (get node :span) :end)))
+  (defasync loadCompilerBuildPrivateUnit ()
+    (unless pending
+      (setq pending (funcall (async ()
+        (let* ((path "tools/backends/compiler-build.eli") (source (await (readFile (resolve root path) "utf8")))
+               (forms (get (aref (read-string source path) 0) :items))
+               (selected (new globalThis.Map)) (index 2))
+          (while (< index (js-length forms))
+            (let* ((form (aref forms index)) (items (get form :items))
+                   (kind (and items (get (aref items 0) :name)))
+                   (name (and items (get (aref items 1) :name))))
+              (when (and (js-call (js-array "defun" "defasync") :includes kind) (js-call names :includes name))
+                (when (js-call selected :has name) (throw (new globalThis.Error "duplicate production private function")))
+                (js-call selected :set name form)))
+            (setq index (1+ index)))
+          (unless (= (get selected :size) (js-length names))
+            (throw (new globalThis.Error "production private function inventory changed")))
+          (let* ((definitions (js-call names :map (lambda (name)
+                    (let* ((form (js-call selected :get name)) (items (get form :items))
+                           (parameters (source-part source (aref items 2)))
+                           (body (js-call source :slice (get (get (aref items 3) :span) :start)
+                             (get (get (aref items (1- (js-length items))) :span) :end))))
+                      ;; Only the original maintained Eli bodies are compiled.
+                      ;; IO bindings become lexical fixture arguments; no JS
+                      ;; source extraction, rewriting or template is involved.
+                      (str "(setq " name " (" (if (= (get (aref items 0) :name) "defasync") "async" "lambda")
+                        " " parameters " " body "))")))))
+                 (module (str
+                   "(import \"node:fs/promises\" :as fileIO)\n(import \"node:fs\" :as syncIO)\n"
+                   "(import \"node:crypto\" createHash)\n(import "
+                   (JSON/stringify (get (pathToFileURL (resolve root "tools/backends/compiler-session.mjs")) :href))
+                   " forEachCompilerMetadataChunk)\n(defun makeUnit (&rest arguments)\n(let ((open (if (> (js-length arguments) 0) (aref arguments 0) (get fileIO :open)))"
+                   " (writeSync (if (> (js-length arguments) 1) (aref arguments 1) (get syncIO :writeSync))) "
+                   (js-call (js-call names :map (lambda (name) (str "(" name " undefined)"))) :join " ") ")\n"
+                   (js-call definitions :join "\n")
+                   "\n(js-object :compilerMetadataUtf8Block compiler-metadata-utf8-block :compilerMetadataDigest compilerMetadataDigest"
+                   " :compilerFileIdentity compiler-file-identity :writeCompilerMetadata writeCompilerMetadata"
+                   " :writeOwnedCompilerMetadata write-owned-compiler-metadata :seedJavaScriptProduct seed-javascript-product)))\n(export makeUnit)\n")))
+            (setq fixture (prepareFixtureEnvironment root (get globalThis.process :env)))
+            (let ((output (resolve (get fixture :directory) "production-private-unit.mjs")))
+              (await (writeFile output (compile-string module "production-private-unit.eli")))
+              (let ((loaded (funcall (createRequire output) output)))
+                (js-object :makeUnit (get loaded :makeUnit) :real (js-call loaded :makeUnit)
+                  :sourcePath path :sourceSha256 (js-call (js-call (createHash "sha256") :update source) :digest "hex"))))))))))
+    (await pending))
+  (defun closeCompilerBuildPrivateUnit () (when fixture (js-call fixture :close) (setq fixture undefined)))
+  (export loadCompilerBuildPrivateUnit closeCompilerBuildPrivateUnit))

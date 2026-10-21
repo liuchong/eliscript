@@ -1,0 +1,60 @@
+(module tests.ci-contract-affected
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile)
+  (import "node:path" resolve)
+  (import "../../tools/backends/build.mjs" root)
+  (import "../../tools/ci/render-browser-workflow.mjs" checkBrowserCompatibilityWorkflow renderBrowserWorkflow)
+  (defun originalWorkerArguments (arguments)
+    (let* ((file (aref arguments (1- (js-length arguments))))
+           (expected (js-array (get globalThis.process :execPath) "--smol" "test"))
+           (environment (get globalThis.process :env)))
+      (js-call assert :strictEqual (= (value-type file) "string") t)
+      (js-call assert :ok (js-call file :endsWith ".test.mjs"))
+      (when (= (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD) "1")
+        (js-call assert :strictEqual (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD_PATH)
+          (resolve root "tools/testing/fixture-environment.mjs"))
+        (js-call expected :push "--preload" (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD_PATH))
+        (when (= (resolve root file) (resolve root "tests/wasm-managed-str.test.mjs"))
+          (js-call expected :push "--preload"
+            (resolve root "tests/helpers/managed-fixture-repairs-install.mjs"))))
+      (js-call expected :push "--timeout" "300000" file)
+      ;; Assert the complete real argv before supplying the unchanged fake's
+      ;; four-field fixture interface. No current option is discarded untested.
+      (js-call assert :deepStrictEqual arguments expected)
+      (js-array (aref arguments 0) "--smol" "test" file)))
+  (defun adaptedSpyOn (framework target property)
+    (let ((spy (js-call framework :spyOn target property)))
+      (if (and (eq target globalThis.Bun) (= property "spawn"))
+        (let ((set-implementation (get spy :mockImplementation)))
+          ;; Native Bun spies expose readonly methods. Adapt the setup call
+          ;; through a separate facade and return the original spy unchanged.
+          (new globalThis.Proxy (lambda (&rest arguments) (Reflect/apply spy undefined arguments))
+            (js-object :get (lambda (target key receiver)
+              (if (= key "mockImplementation")
+                (lambda (callback)
+                  (Reflect/apply set-implementation spy (js-array
+                    (lambda (arguments &rest options)
+                      (Reflect/apply callback undefined
+                        (js-call (js-array (originalWorkerArguments arguments)) :concat options))))))
+                (Reflect/get spy key spy))))))
+        spy)))
+  (defasync runBrowserWorkflowCase ()
+    (let* ((report (await (checkBrowserCompatibilityWorkflow (js-object :root root))))
+           (baseline (JSON/parse (await (readFile (resolve root "contracts/compatibility-matrix.json") "utf8"))))
+           (contract (JSON/parse (await (readFile (resolve root "contracts/browser-compatibility.json") "utf8"))))
+           (workflow (renderBrowserWorkflow contract baseline)))
+      (js-call assert :strictEqual (get report :jobs) 9)
+      (js-call assert :deepStrictEqual (get report :browserEngines) (js-array "chromium" "firefox" "webkit"))
+      (js-call (get baseline :operatingSystems) :forEach (lambda (system)
+        (js-call (get report :browserEngines) :forEach (lambda (browser)
+          (js-call assert :ok (js-call workflow :includes (str "name: " (get system :id) "-" browser)))))))
+      (js-call (js-array
+        "install --with-deps \"${{ matrix.browser }}\""
+        "ELISCRIPT_TEST_BROWSER: ${{ matrix.browser }}"
+        "bun test --preload ./tools/testing/fixture-environment.mjs --preload ./tests/helpers/direct-wasm-registration-install.mjs --timeout 300000 tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee"
+        "set -o pipefail" "timeout-minutes: 10"
+        "test \"$(bun -p 'process.arch')\" = \"${{ matrix.architecture }}\""
+        "test \"$(node -p 'process.arch')\" = \"${{ matrix.architecture }}\""
+        "if: always()" (str "actions/upload-artifact@" (get (get contract :artifactAction) :revision))) :forEach
+        (lambda (text) (js-call assert :ok (js-call workflow :includes text))))))
+  (export originalWorkerArguments adaptedSpyOn runBrowserWorkflowCase))

@@ -7,6 +7,7 @@
   (import "node:module" createRequire)
   (import "node:child_process" spawnSync)
   (import "../tools/backends/build.mjs" root)
+  (import "../tools/testing/fixture-environment.mjs" prepareFixtureEnvironment)
   (import "../dist/bootstrap/compiler.mjs"
     compile-string compile-string-with-source-map compile-ir-string
     emit-ir-string emit-ir-string-with-source-map serialize-ir-program)
@@ -73,8 +74,10 @@
     "                      (diagnostic . ,(eliscript-diagnostic-to-alist (eliscript-diagnostic-from-condition error-data))))))))"
     "     (princ (decode-coding-string (json-serialize `((cases . ,(vconcat results)) (immutableMessage . ,(alist-get 'message failure)) (immutableDiagnostic . ,(alist-get 'diagnostic failure))) :null-object nil :false-object :false) 'utf-8-unix)))))") :join "\n"))
 
+  (defvar fixture-environment undefined)
   (before (async ()
-    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-tdz-parity-"))))
+    (setq fixture-environment (prepareFixtureEnvironment root (get globalThis.process :env)))
+    (setq directory (get fixture-environment :directory))
     (let* ((fixture (resolve directory "cases.json"))
            (env (Object/assign (js-object) (get globalThis.process :env)
                   (js-object :ELISCRIPT_TDZ_FIXTURE fixture))))
@@ -90,7 +93,7 @@
           (setq seed-immutable-message (get output :immutableMessage))
           (setq seed-immutable-diagnostic (get output :immutableDiagnostic)))
         (js-call assert :strictEqual (js-length results) (js-length cases))))))
-  (after (async () (when directory (await (rm directory (js-object :recursive t :force t))))))
+  (after (async () (when fixture-environment (js-call fixture-environment :close))))
 
   (defun assert-emission (actual expected source filename)
     (js-call assert :strictEqual (get actual :javascript) (get expected :javascript))

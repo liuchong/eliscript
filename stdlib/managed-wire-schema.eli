@@ -131,7 +131,8 @@
         (let ((errors (js-array)) (error nil) (check-row nil))
           (setq error (lambda (path rule expected actual)
             (js-call errors :push (js-object :path path :rule rule :expected expected :actual actual))))
-          (setq check-row (lambda (value rows path &optional additional)
+          (setq check-row (lambda (value rows path &rest optional-arguments)
+    (let ((additional (aref optional-arguments 0)))
             (when (undefined? additional) (setq additional t))
             (if (not (object? value)) (funcall error path "kind" "object" value)
               (progn
@@ -165,7 +166,7 @@
                     (each (Object/keys value) (lambda (key)
                       (when (and (not (js-call allowed :has key))
                                  (or (nil? (aref value key)) (let ((item (aref value key))) (/= (js* "typeof item") "object"))))
-                        (funcall error (str path "." key) "additional" false (aref value key)))))))))))
+                        (funcall error (str path "." key) "additional" false (aref value key))))))))))))
           (when (js-call fields :has "Preamble") (funcall check-row data (js-call fields :get "Preamble") "preamble"))
           (let ((names (new globalThis/Set definitions)))
             (each (js-call declared :keys) (lambda (name) (js-call names :add name)))

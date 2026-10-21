@@ -1,7 +1,7 @@
 (module tests.managed-foreign-binding
   (import "node:test" test)
   (import "node:assert/strict" :default assert)
-  (import "../tools/backends/managed-foreign-binding.mjs" readManagedForeignBinding createManagedForeignPlainObject)
+  (import "../tools/backends/managed-foreign-binding.mjs" readManagedForeignBinding createManagedForeignPlainObject readManagedForeignProtocolPrototype)
   (import "../runtime/literals.mjs" keyword symbol)
   (import "../runtime/core/collection.mjs" ILookup)
   (test "foreign collection clone allocation creates independent ordinary objects without observing its source"
@@ -69,4 +69,17 @@
           (Object/defineProperty row "value" (js-object :get (lambda () (throw false))))
           (try (readManagedForeignBinding row "value" 1) (catch error (setq failed t actual error)))
           (js-call assert :strictEqual failed t) (js-call assert :strictEqual actual false))
-        (js-call assert :throws (lambda () (readManagedForeignBinding target "value" 3)) globalThis.TypeError)))))
+        (js-call assert :throws (lambda () (readManagedForeignBinding target "value" 3)) globalThis.TypeError))))
+  (test "op33 classifies only the four exact native prototypes and never observes a custom prototype"
+    (lambda ()
+      (js-call (js-array globalThis.Object.prototype globalThis.Array.prototype
+                         globalThis.Map.prototype globalThis.Set.prototype) :forEach
+        (lambda (prototype index)
+          (js-call assert :strictEqual (readManagedForeignProtocolPrototype prototype) index)))
+      (let* ((unexpected (lambda (&rest arguments) (throw "prototype classification must not invoke traps")))
+             (custom (new globalThis.Proxy (js-object)
+               (js-object :get unexpected :getPrototypeOf unexpected :ownKeys unexpected
+                 :getOwnPropertyDescriptor unexpected))))
+        (js-call assert :strictEqual (readManagedForeignProtocolPrototype custom) custom)
+        (js-call assert :strictEqual (readManagedForeignProtocolPrototype nil) nil))))
+)

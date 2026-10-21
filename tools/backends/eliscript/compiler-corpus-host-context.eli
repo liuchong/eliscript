@@ -4,6 +4,8 @@
   (import "node:path" resolve)
   (import "node:url" pathToFileURL fileURLToPath)
   (import "node:module" createRequire)
+  (import "node:crypto" createHash)
+  (import "./compiler-build.mjs" independentCompilerResources)
   (import "./compiler-metadata.mjs" readCompilerMetadata)
   (import "./managed-runtime.mjs" createManagedModuleGraph createManagedProjectFacades instantiateManagedRuntimeWithHostModules)
   (import "./native-managed-runtime.mjs" instantiateNativeManagedRuntime)
@@ -13,6 +15,41 @@
   (defconst environment-key "ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT")
   (defconst program-contexts (new globalThis.Map))
   (defconst contexts (new globalThis.WeakMap))
+  (defconst interop-main-sha "3304e489ab6ace797f9177473279ed95840949719bf39dda7308d03184ba82ac")
+  (defconst interop-host-sha "c82823f3489de0ea565ae9b44d27439ccaa66d75e55f5b273baa0324a5b7767a")
+  (defun interop-digest (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
+  (defun originalInteropFullRuntimeRecipe (record)
+    (let* ((original (get record :original)) (execution (get record :execution)) (modules (get record :modules))
+           (main (when (Array/isArray modules) (js-call modules :find (lambda (item)
+             (and (= (get item :id) "stdlib/interop/js.mjs") (= (get item :filename) "stdlib/interop/js.eli")))))))
+      (and (= (get record :id) "stable-compatibility:program:stdlib/interop/js.eli") (= (get record :kind) "project")
+        (= (get record :entry) "stdlib/interop/js.mjs") original execution
+        (= (get original :manifest) "stable-compatibility") (= (get original :fixture) "stdlib/interop/js.eli")
+        (= (get original :host) "tests/fixtures/interop-js-host.mjs") (= (get execution :kind) "original-program")
+        (= (get execution :host) "tests/fixtures/interop-js-host.mjs") main
+        (= (value-type (get main :source)) "string") (= (interop-digest (get main :source)) interop-main-sha)
+        (= (value-type (get execution :hostSource)) "string") (= (interop-digest (get execution :hostSource)) interop-host-sha))))
+  (defasync selectOriginalInteropRuntimeOptions (input environment)
+    (let ((settings (get input :runtimeOptions)))
+      (if (not (and (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
+                    (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")
+                    (js-call (js-array "wasm" "native") :includes (get input :target))
+                    (= (get input :entry) "stdlib/interop/js.mjs") settings
+                    (= (get settings :maxSlots) 131072) (= (get settings :initialBytes) 8388608)
+                    (= (get settings :maxBytes) 67108864) (= (get settings :auto) 65536))) settings
+        (let* ((host-path (fileURLToPath (new globalThis.URL "tests/fixtures/interop-js-host.mjs" (get input :base))))
+               (record-path (fileURLToPath (new globalThis.URL "../sources/record.json" (get input :base))))
+               (record (await (readCompilerMetadata record-path))))
+          (if (not (and (= (resolve (get input :host)) host-path) (originalInteropFullRuntimeRecipe record))) settings
+          (progn
+            (unless (= (interop-digest (await (readFile host-path))) interop-host-sha)
+              (throw (new globalThis.TypeError "complete interop functional resources require the original source and host identity")))
+          (let ((selected (Object/assign (js-object) settings (get (independentCompilerResources (js-object :profile "full-runtime")) :budget))))
+            (js-call globalThis.console :error "original interop strict and small capacity DEFERRED / NOT ACCEPTED; full-runtime functional resources"
+              (js-object :original (js-object :maxSlots (get settings :maxSlots) :initialBytes (get settings :initialBytes)
+                :maxBytes (get settings :maxBytes) :auto (get settings :auto))
+                :effective (js-object :maxSlots (get selected :maxSlots) :initialBytes (get selected :initialBytes)
+                  :maxBytes (get selected :maxBytes) :auto (get selected :auto)))) selected)))))))
   (defun closeOriginalProgramResources (runtime graph)
     (let ((failed false) (failure undefined))
       (js-call (js-array
@@ -92,7 +129,7 @@
     (and input (js-call (js-array "wasm" "native") :includes (get input :target))
       (= (value-type (get input :host)) "string")
       (js-call (new globalThis.RegExp
-        "(?:^|/)tests/__eliscript_managed_transient-state_(?:node|bun)_(?:65536|1)\\.mjs$")
+        "(?:^|/)tests/__eliscript_(?:managed_(?:transient-state|wire)_(?:node|bun)_(?:65536|1)|identity_value_host-token-single_(?:node|bun)_(?:65536|1)|managed_fixture_(?:arrays|objects|array-callbacks|array-search|array-construction|variadic-calls|source-collections|symbols|regexp|module-bindings|persistent-vector-auto-(?:1|65536)|object-properties|math|empty-bindings|exceptions|catch-destructuring|builtins|typeof|array-text|strings|callables|primitive-operators|js-cons|json)_(?:node|bun))\\.mjs$")
         :test (js-call (get input :host) :replaceAll "\\" "/"))))
 
   ;; This is a private original-test adapter. A phased project uses JavaScript
@@ -117,17 +154,22 @@
                   (throw (new globalThis.TypeError "original transient context has ambiguous source aliases")))
                 (js-call aliases :set alias name)))))
           (let* ((descriptors (Object/getOwnPropertyDescriptors runtime))
-                 (entry (get descriptors :invoke)) (invoke (get entry :value))
                  (facade (Object/create (Object/getPrototypeOf runtime)))
-                 (call (lambda (name &rest arguments)
-                   (Reflect/apply invoke runtime (js-call
-                     (js-array (if (js-call aliases :has name) (js-call aliases :get name) name))
-                     :concat arguments))))
                  (context-descriptors (Object/getOwnPropertyDescriptors context))
                  (result (Object/create (Object/getPrototypeOf context))))
-            (Object/defineProperties call (js-object
-              :name (js-object :value (get invoke :name)) :length (js-object :value (get invoke :length))))
-            (put entry :value call)
+            (js-call (js-array "invoke" "invokeAsync") :forEach (lambda (method)
+              (let ((entry (get descriptors method)))
+                (when entry
+                  (let* ((invoke (get entry :value))
+                         (call (lambda (name &rest arguments)
+                           (Reflect/apply invoke runtime (js-call
+                             (js-array (if (js-call aliases :has name) (js-call aliases :get name) name))
+                             :concat arguments)))))
+                    (unless (= (value-type invoke) "function")
+                      (throw (new globalThis.TypeError "original managed invocation must be a method")))
+                    (Object/defineProperties call (js-object
+                      :name (js-object :value (get invoke :name)) :length (js-object :value (get invoke :length))))
+                    (put entry :value call))))))
             (Object/defineProperties facade descriptors)
             (put (get context-descriptors :runtime) :value (Object/freeze facade))
             (Object/defineProperties result context-descriptors)
@@ -154,7 +196,8 @@
            (driver-close (createOriginalProgramDriverClose input close-now))
            (close (async () (funcall driver-close))))
       (try
-        (let ((options (Object/assign (js-object) (get input :memory) (get input :runtimeOptions)
+        (let ((options (Object/assign (js-object) (get input :memory)
+                (await (selectOriginalInteropRuntimeOptions input (get globalThis.process :env)))
                 (js-object :moduleGraph graph :initializeModule false :projectEntry (get input :entry)
                   :projectModuleBaseURL (get input :base) :moduleBaseURL (get (pathToFileURL (get input :path)) :href)
                   :nativeTarget (get input :nativeTarget)))))
@@ -213,5 +256,5 @@
         :closeOriginalProgramResources closeOriginalProgramResources
         :installOriginalProgramExitCleanup installOriginalProgramExitCleanup
         :createOriginalProgramDriverClose createOriginalProgramDriverClose)))) reject))
-  (export openOriginalProgramContext inheritOriginalProgramContext originalProgramBunLauncher
+  (export originalInteropFullRuntimeRecipe selectOriginalInteropRuntimeOptions openOriginalProgramContext inheritOriginalProgramContext originalProgramBunLauncher
     bindOriginalManagedProgramContext closeOriginalProgramResources installOriginalProgramExitCleanup createOriginalProgramDriverClose then))

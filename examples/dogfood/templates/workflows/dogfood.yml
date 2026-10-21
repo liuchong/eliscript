@@ -4,8 +4,8 @@
 # holds the content. The Action builds and validates only; this workflow
 # decides when it runs and when the result is deployed.
 #
-# The action reference is pinned to a full commit digest. The placeholder is
-# resolved when the package is produced, so a copy always names a real commit.
+# The source checkout is pinned to a full commit digest. Generated bundles are
+# built in that checkout and are never expected to exist in its Git tree.
 #
 # Event filters live here rather than in the configuration, because a
 # configuration file cannot add workflow triggers. The `:event` comment policy
@@ -79,6 +79,31 @@ jobs:
         with:
           fetch-depth: 1
 
+      - id: action-source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: liuchong/eliscript
+          ref: PLACEHOLDER_ACTION_DIGEST
+          path: .eliscript-action
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: "24"
+      - name: Install the source bootstrap host
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y emacs-nox
+      - id: action-package
+        working-directory: .eliscript-action
+        shell: bash
+        run: |
+          bun install --frozen-lockfile
+          make bootstrap-backends
+          bun run build:dogfood-browser
+          bun run package:dogfood
+
       # Only the build manifest is restored. It is what tells the next run
       # whether the publishable inputs changed, and it is a few hundred bytes
       # rather than the whole site.
@@ -91,7 +116,7 @@ jobs:
             ${{ github.workflow }}-
 
       - id: build
-        uses: liuchong/eliscript/examples/dogfood@PLACEHOLDER_ACTION_DIGEST
+        uses: ./.eliscript-action/examples/dogfood
         with:
           config-file: dogfood.config.eli
           output-directory: _site

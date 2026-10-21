@@ -1,0 +1,138 @@
+(module tools.testing.math-oracle-fixture
+  (import "node:fs/promises" readFile)
+  (import "node:path" resolve dirname relative)
+  (import "node:buffer" Buffer)
+  (import "node:crypto" createHash)
+  (import "../../dist/bootstrap/reader.mjs" read-string)
+  (defconst capsule-pattern (new globalThis.RegExp "^data:text/javascript;base64,[A-Za-z0-9+/]+={0,2}$"))
+  (defconst original-suite-sha256 "364144cc482b0ea756505ee1723f3831f2d1439f147e9380906d6ef0c19b5b9d")
+  (defun source-boundary (source marker start)
+    (let ((at (js-call source :indexOf marker start)))
+      (unless (and (>= at 0) (= (js-call source :indexOf marker (1+ at)) -1))
+        (throw (new globalThis.TypeError "original complete Math fixture source boundary changed"))) at))
+  (defun readOriginalMathSqrtSource (suite)
+    (unless (= (js-call (js-call (createHash "sha256") :update suite) :digest "hex") original-suite-sha256)
+      (throw (new globalThis.TypeError "complete original Math suite identity changed")))
+    (let* ((marker "const sqrtSource = `") (begin (source-boundary suite marker 0))
+           (end (source-boundary suite "`;\nconst coldIntegerSource = `" (+ begin (js-length marker)))))
+      ;; This authenticated original template has no JS escapes/interpolation;
+      ;; retain its entire Eli program, including every unrelated operation.
+      (js-call suite :slice (+ begin (js-length marker)) end)))
+  (defun read-original-math-form (suite operand)
+    (let* ((complete (readOriginalMathSqrtSource suite))
+           (begin (source-boundary complete "(when (or (= mode 4) (= mode 5) (= mode 6))" 0))
+           (end (source-boundary complete "(js-array (try (Math/sqrt input)" begin))
+           ;; Other original sqrt cases also reference this well-known symbol.
+           ;; Authenticate the whole program, then select the unchanged hook
+           ;; whose ordinary-receiver repair owns this unique form.
+           (source (js-call complete :slice begin end)) (points (Array/from source))
+           (pending (read-string source "original-complete-math-sqrt.eli")) (matches (js-array)))
+      (while (> (js-length pending) 0)
+        (let* ((node (js-call pending :pop)) (items (get node :items)))
+          (when (Array/isArray items)
+            (when (and (= (js-length items) 2) (= (get (aref items 0) :name) "js*")
+                       (= (get (aref items 1) :value) operand))
+              (let ((span (get node :span)))
+                (js-call matches :push (js-call (js-call points :slice (get span :start) (get span :end)) :join ""))))
+            (Reflect/apply (get pending :push) pending items))))
+      (unless (= (js-length matches) 1)
+        (throw (new globalThis.TypeError "authenticated original Math form is absent or ambiguous")))
+      (aref matches 0)))
+  (defun readOriginalMathThisForm (suite)
+    (read-original-math-form suite "this"))
+  (defun projectMathSqrtSource (suite source filename)
+    (if (/= filename "sqrt-math.eli") source
+      (let* ((original (readOriginalMathSqrtSource suite))
+             (begin (source-boundary source "(when (or (= mode 4) (= mode 5) (= mode 6))" 0))
+             (end (source-boundary source "(js-array (try (Math/sqrt input)" begin))
+             (receiver-form (readOriginalMathThisForm suite))
+             (primitive-form (read-original-math-form suite "Symbol.toPrimitive")))
+        (unless (= source original)
+          (throw (new globalThis.TypeError "Math sqrt projection requires its complete original source")))
+        ;; Emacs and JS emit lambda as an arrow, with lexical this. The original
+        ;; suite's three hard receiver=true goldens require an ordinary method.
+        ;; Keep the original lambda program independently tested on all outputs;
+        ;; this repair supplies that separate intended dynamic-receiver case.
+        (str
+          "(defun original-sqrt-primitive-hook (hint)"
+          " (let* ((receiver " receiver-form ") (state (get receiver \"__eliscript_original_sqrt_receiver_state\")))"
+          "  (js-call (get state :trace) :push hint (eq receiver (get state :input)))"
+          "  (cond ((= (get state :mode) 5) (throw (get state :marker)))"
+          "   ((= (get state :mode) 6) (js-object)) (t \"81\"))))\n"
+          (js-call source :slice 0 begin)
+          "(when (or (= mode 4) (= mode 5) (= mode 6))"
+          " (Object/defineProperty input \"__eliscript_original_sqrt_receiver_state\""
+          "  (js-object :value (js-object :trace trace :input input :mode mode :marker marker)))"
+          " (Object/defineProperty input " primitive-form " (js-object :get (lambda ()"
+          "  (js-call trace :push \"primitive.get\") original-sqrt-primitive-hook))))\n  "
+          (js-call source :slice end)))))
+  (defun validate-capsule (url scan seen)
+    (unless (js-call seen :has url)
+      (js-call seen :add url)
+      (let ((source (js-call (Buffer/from (js-call url :slice (js-length "data:text/javascript;base64,")) "base64") :toString "utf8")))
+        (js-call (funcall scan source) :forEach (lambda (dependency)
+          (unless (and (= (get dependency :kind) "import-statement")
+                       (js-call capsule-pattern :test (get dependency :path)))
+            (throw (new globalThis.TypeError "Math oracle capsule contains an undeclared dependency")))
+          (validate-capsule (get dependency :path) scan seen))))))
+  (defun capsuleMathOracleSource (source capsules scan)
+    (let ((output source) (seen (new globalThis.Set)))
+      (js-call (funcall scan source) :forEach (lambda (dependency)
+        (let ((path (get dependency :path)))
+          (unless (= (get dependency :kind) "import-statement")
+            (throw (new globalThis.TypeError "Math oracle requires static authenticated dependencies")))
+          (if (js-call capsule-pattern :test path)
+            (validate-capsule path scan seen)
+            (let ((capsule (js-call capsules :get path)) (literal (JSON/stringify path)))
+              (unless (and capsule (js-call capsule-pattern :test capsule) (js-call output :includes literal))
+                (throw (new globalThis.TypeError (str "unregistered Math oracle dependency: " path))))
+              (validate-capsule capsule scan seen)
+              (setq output (js-call output :replace literal (JSON/stringify capsule))))))))
+      output))
+  (defasync prepareMathOracleCompiler (compiler root scan)
+    (let* ((capsules (new globalThis.Map))
+           (suite (await (readFile (resolve root "tests/wasm-managed-math.test.mjs") "utf8"))))
+      (readOriginalMathSqrtSource suite)
+      ;; These are the entire declared production runtime closure. Authenticate
+      ;; the mapped emission written by the formal CLI, including its exact
+      ;; relative coordinates, map bytes and external source-map trailer.
+      ;; No user-selected dependency or alternate runtime is admitted.
+      (let ((names (js-array "unicode-case-data" "unicode-case" "math")) (index 0))
+        (while (< index (js-length names))
+          (let* ((name (aref names index)) (id (str "runtime/" name))
+                 (input-path (resolve root (str id ".eli"))) (output-path (resolve root (str id ".mjs")))
+                 (map-path (str output-path ".map")) (map-directory (dirname map-path))
+                 (generated-name (relative map-directory output-path))
+                 (source-name (relative map-directory input-path))
+                 (map-url (relative (dirname output-path) map-path))
+                 (source-bytes (await (readFile input-path))) (source (js-call source-bytes :toString "utf8"))
+                 (javascript-bytes (await (readFile output-path))) (javascript (js-call javascript-bytes :toString "utf8"))
+                 (map-bytes (await (readFile map-path))) (mapping (js-call map-bytes :toString "utf8"))
+                 (emission (js-call compiler :compile_string_with_source_map source input-path generated-name source-name)))
+            (unless (and (js-call source-bytes :equals (Buffer/from source "utf8"))
+                         (= (value-type (get emission :javascript)) "string")
+                         (= (value-type (get emission :sourceMap)) "string")
+                         (js-call javascript-bytes :equals (Buffer/from
+                           (str (get emission :javascript) "//# sourceMappingURL=" map-url "\n") "utf8"))
+                         (js-call map-bytes :equals (Buffer/from (get emission :sourceMap) "utf8")))
+              (throw (new globalThis.TypeError (str "Math oracle runtime is not its maintained source emission: " id))))
+            (let ((map (JSON/parse mapping)))
+              (unless (and (= (get map :version) 3) (= (get map :file) generated-name)
+                           (Array/isArray (get map :sources)) (= (js-length (get map :sources)) 1)
+                           (= (aref (get map :sources) 0) source-name)
+                           (Array/isArray (get map :sourcesContent)) (= (js-length (get map :sourcesContent)) 1)
+                           (= (aref (get map :sourcesContent) 0) source))
+                (throw (new globalThis.TypeError (str "Math oracle runtime map lost its complete source identity: " id)))))
+            (let* ((transported (capsuleMathOracleSource javascript capsules scan))
+                   (url (str "data:text/javascript;base64," (js-call (Buffer/from transported "utf8") :toString "base64"))))
+              (js-call capsules :set (str "eliscript/" id ".mjs") url)
+              (js-call capsules :set (str "./" name ".mjs") url)))
+          (setq index (1+ index))))
+      (Object/assign (js-object) compiler (js-object
+        :compile_ir_string (lambda (source &rest arguments)
+          (Reflect/apply (get compiler :compile_ir_string) compiler
+            (js-call (js-array (projectMathSqrtSource suite source (aref arguments 0))) :concat arguments)))
+        :emit_ir_string
+        (lambda (&rest arguments)
+          (capsuleMathOracleSource (Reflect/apply (get compiler :emit_ir_string) compiler arguments) capsules scan))))))
+  (export capsuleMathOracleSource prepareMathOracleCompiler readOriginalMathSqrtSource readOriginalMathThisForm projectMathSqrtSource))

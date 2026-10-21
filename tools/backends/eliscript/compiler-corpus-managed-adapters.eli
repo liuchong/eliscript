@@ -1,12 +1,275 @@
 (module tools.backends.compiler-corpus-managed-adapters
   (import "node:crypto" createHash)
   (import "node:buffer" Buffer)
-  (import "node:path" posix)
+  (import "node:path" posix resolve join)
+  (import "node:url" pathToFileURL)
+  (import "node:os" tmpdir)
+  (import "node:fs/promises" mkdtemp mkdir writeFile readFile rm symlink)
+  (import "node:assert/strict" :default assert)
+  (import "./compiler-corpus-process.mjs" originalCorpusExecutionPolicy runOriginalCorpusProcess readOriginalCorpusExecutionContext readOriginalProcessHostDependency bindOriginalProcessHostDependency)
   (import "../../dist/bootstrap/reader.mjs" read-string)
-  (import "../../dist/bootstrap/compiler.mjs" compile-string)
-  (import "./build.mjs" loadLiteralSources)
+  (import "../../dist/bootstrap/compiler.mjs" compile-string compile-ir-string)
+  (import "../../dist/bootstrap/emitter.mjs" emit-expression)
+  (import "./build.mjs" root loadLiteralSources)
   (import "./compiler-corpus-managed-adapters-legacy.mjs" :as legacy)
   (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
+
+
+  (defun originalManagedProgramCompletionSource (body)
+    (str "(defasync original-program-main () " body ")\n"
+      "(defconst original-program-completion (original-program-main))\n"
+      "(js-call original-program-completion :catch (lambda (error)"
+      " (try (js-call (get globalThis.process :stderr) :write (str (funcall globalThis.String error) \"\\n\")) (catch ignored nil))"
+      " (put globalThis.process :exitCode 1)))\n"
+      "(defun then (resolve reject) (js-call original-program-completion :then"
+      " (lambda (ignored) (funcall resolve undefined)) reject)) (export then)\n"))
+
+  (defasync originalManagedObservationLaunch (input)
+    (let* ((source (get input :source)) (engine (get input :engine "node"))
+           (source-root (get input :sourceRoot)) (selected (get input :selected false))
+           (environment (Object/assign (js-object) (get input :environment)))
+           (context-url (get (pathToFileURL (resolve source-root "tools/backends/compiler-corpus-host-context.mjs")) :href))
+           (base (get input :directory (tmpdir))))
+      (unless (and (= (value-type source) "string")
+                   (js-call (js-array "node" "bun") :includes engine)
+                   (Array/isArray (get input :args)))
+        (fail "original observation requires unchanged source, host and arguments"))
+      (unless selected
+        (put environment :ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT undefined)
+        (put environment :ELISCRIPT_ORIGINAL_TARGET undefined)
+        (when (get environment :NODE_OPTIONS)
+          (put environment :NODE_OPTIONS (js-call
+            (js-call (js-call (get environment :NODE_OPTIONS) :split (new globalThis.RegExp "\\s+")) :filter
+              (lambda (value) (/= value (str "--import=" context-url)))) :join " "))))
+      (await (mkdir base (js-object :recursive t)))
+      (let* ((directory (await (mkdtemp (join base "original-observation-"))))
+             (body (resolve directory "body.mjs")) (driver (resolve directory "driver.mjs"))
+             (cleanup (async () (await (rm directory (js-object :recursive t :force t))))))
+        (try
+          (await (mkdir (resolve directory "node_modules") (js-object :recursive t)))
+          (await (symlink root (resolve directory "node_modules/eliscript") "dir"))
+          ;; The original body is a different module. Its static dependencies
+          ;; cannot run while installation is still pending.
+          (await (writeFile body source))
+          (letfn ((bridge (specifier filename)
+                    (async ()
+                      (let* ((bridge-directory (resolve directory filename))
+                             (path (resolve bridge-directory "compiler.mjs")))
+                        (await (mkdir bridge-directory (js-object :recursive t)))
+                        (await (writeFile path (compile-string
+                          (str "(import " (JSON/stringify specifier) " :as originalNamespace)\n"
+                            "(defun readOriginalNamespace () originalNamespace)\n(export readOriginalNamespace)")
+                          "original-observation-namespace.eli")))
+                        bridge-directory))))
+            (let ((body-bridge (await (funcall (bridge (get (pathToFileURL body) :href) "body-loader"))))
+                  (context-bridge (when (and selected (get environment :ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT))
+                    (await (funcall (bridge context-url "context-loader"))))))
+          (let* ((forms (js-array
+                   (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/backends/managed-runtime.mjs")) :href)) " loadManagedHostModules)"
+                     "(import " (JSON/stringify (get (pathToFileURL (resolve root "bootstrap/host/bun.mjs")) :href)) " loadCompiler)")
+                   (str "(defasync import-module (directory)"
+                     " (let* ((namespace (await (loadCompiler directory)))"
+                     " (descriptor (js-object :hostModules (js-array (js-object :id \"original-observation-body\""
+                     " :specifier (str directory \"/compiler.mjs\") :referrer \"original-observation-driver.mjs\""
+                     " :allowedExports (js-array \"readOriginalNamespace\") :namespace t))))"
+                     " (provided (js-object :hostModules (new globalThis.Map (js-array (js-array \"original-observation-body\" namespace)))))"
+                     " (modules (await (loadManagedHostModules descriptor provided))))"
+                     " (await (js-call (js-call modules :get \"original-observation-body\") :readOriginalNamespace))))")
+                   "(put globalThis.process :argv (js-call (js-array (aref (get globalThis.process :argv) 0)) :concat (js-call (get globalThis.process :argv) :slice 2)))"))
+                 (url body-bridge))
+            (when selected
+              (js-call forms :push (str "(import "
+                (JSON/stringify (get (pathToFileURL (resolve root "tools/backends/compiler-corpus-program-driver.mjs")) :href))
+                " recordOriginalWireFailure)")))
+            (js-call forms :push (str "(defconst url " (JSON/stringify url) ")"))
+            (js-call forms :push "(defasync original-observation-main ()")
+            (when (and selected (get environment :ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT))
+              (js-call forms :push (str "(await (import-module " (JSON/stringify context-bridge) "))")))
+            (if selected
+              (progn
+                (js-call forms :push (str "(try (await (import-module url)) (catch error "
+                  "(try (await (recordOriginalWireFailure (js-object :sourceRoot " (JSON/stringify source-root)
+                  " :host " (JSON/stringify body) ") error)) (catch ignored nil)) (throw error)))")))
+              (js-call forms :push "(await (import-module url))"))
+            (js-call forms :push ")" (originalManagedProgramCompletionSource "(await (original-observation-main))"))
+            (await (writeFile driver (compile-string (js-call forms :join "\n") "original-observation-driver.eli"))))))
+          (let* ((preload (if (= engine "bun")
+                     (js-array "--preload" (resolve source-root "tests/fixtures/compiled-eli-bun-preload.mjs"))
+                     (js-array "--experimental-loader" (resolve source-root "tests/fixtures/compiled-eli-node-loader.mjs"))))
+                 (unused nil))
+            (js-object :executable (get environment (if (= engine "bun") :BUN :NODE) engine)
+              :args (js-call preload :concat (js-array driver) (get input :args))
+              :env environment :cleanup cleanup :directory directory))
+          (catch error (try (await (funcall cleanup)) (catch ignored nil)) (throw error))))))
+
+  (defasync runOriginalManagedObservation (input context)
+    (let* ((record (Object/assign (js-object) (get context :record)
+                     (js-object :execution (js-object :timeoutMs (get input :timeoutMs 30000)))))
+           (policy (originalCorpusExecutionPolicy (Object/assign (js-object) context (js-object :record record))))
+           (launch (await (originalManagedObservationLaunch
+                    (Object/assign (js-object) input (js-object :directory (get context :directory))))))
+           (cleanup (get context :cleanup)) (failed false)
+           (options (Object/assign (js-object) context (js-object :policy policy :cwd (get input :sourceRoot)
+             :env (get launch :env) :cleanup (async (child)
+               (let ((failure undefined) (caught false))
+                 (try (when cleanup (await (funcall cleanup child)))
+                   (catch error (setq caught t failure error)))
+                 (try (await (js-call launch :cleanup))
+                   (catch error (unless caught (setq caught t failure error))))
+                 (when caught (throw failure))))))))
+      (try
+        (let ((receipt (await (runOriginalCorpusProcess (get launch :executable) (get launch :args) options))))
+          (JSON/parse (get receipt :stdout)))
+        (catch error (setq failed t) (throw error))
+        ;; Setup/spawn failures have no child cleanup. Never replace their
+        ;; original failure with a later temporary-file cleanup failure.
+        (finally (try (await (js-call launch :cleanup))
+          (catch error (unless failed (throw error))))))))
+
+  (defasync runOriginalManagedSequenceHost (configuration)
+    (let* ((environment (get globalThis.process :env)) (argv (get globalThis.process :argv))
+           (source-root (get environment :ELISCRIPT_ORIGINAL_SOURCE_ROOT))
+           (reference (get environment :ELISCRIPT_ORIGINAL_REFERENCE_PRODUCT_ROOT))
+           (product (aref argv 2)) (engine (get configuration :engine))
+           (source (get configuration :source)) (family (get configuration :family))
+           (public-ids (new globalThis.Set (get configuration :publicIds)))
+           (argument-ids (cond ((= family "lazy-sequence") (js-array "tests/fixtures/lazy-sequence.mjs"))
+             ((= family "core-text-object") (js-array "public/runtime/core/text.mjs" "public/runtime/core/object.mjs"))
+             (t (js-array))))
+           (inherited (get environment :ELISCRIPT_ORIGINAL_EXECUTION_CONTEXT))
+           (context (if inherited (readOriginalCorpusExecutionContext inherited)
+             (js-object :directory (resolve product "original-observations") :target (get environment :ELISCRIPT_ORIGINAL_TARGET)
+               :caseId (get configuration :recordId) :sourceIdentity (get configuration :sourceIdentity) :options (js-object)))))
+      (unless (and source-root reference product)
+        (fail "complete original managed corpus requires its independent Seed source graph"))
+      (letfn ((relocate (directory selected)
+                (js-call source :replace (new globalThis.RegExp "from ([\"'])(?:\\.\\.\\/)+runtime\\/(core|testing)\\/([^\"']+)\\1" "g")
+                  (lambda (all quote category filename)
+                    (let* ((canonical (str "runtime/" category "/" filename))
+                           (id (if selected (str "public/" canonical) canonical)))
+                      (when (and selected (not (js-call public-ids :has id)))
+                        (fail (str "actual public source module " canonical)))
+                      (str "from " (JSON/stringify (get (pathToFileURL
+                        (resolve (if selected directory source-root) id)) :href)))))))
+              (observe (directory selected role)
+                (runOriginalManagedObservation (js-object :source (relocate directory selected)
+                  :sourceRoot source-root :engine engine :recordId (get configuration :recordId)
+                  :args (js-call (js-array "original-host.mjs") :concat
+                    (js-call argument-ids :map (lambda (id) (resolve directory id))))
+                  :selected selected :environment environment :timeoutMs 30000)
+                  (Object/assign (js-object) context (js-object :directory (resolve (get context :directory) role))))))
+        (let* ((expected (await (observe reference false "reference")))
+               (actual (await (observe product t "selected"))))
+          (js-call assert :deepEqual actual expected)
+          (when (= family "value-hash")
+            (js-call assert :deepEqual actual (JSON/parse
+              (await (readFile (resolve source-root "tests/fixtures/value-hashes.json") "utf8")))))
+          (js-call globalThis.console :log (JSON/stringify expected))))))
+
+
+  (defconst observation-counts (new globalThis.Map))
+  (defasync runInheritedOriginalManagedObservation (source engine arguments selected configuration)
+    (let* ((environment (get globalThis.process :env))
+           (inherited (get environment :ELISCRIPT_ORIGINAL_EXECUTION_CONTEXT))
+           (id (get configuration :recordId))
+           (position (if (js-call observation-counts :has id) (js-call observation-counts :get id) 0))
+           (context (if inherited (readOriginalCorpusExecutionContext inherited)
+             (js-object :directory (resolve (aref (get globalThis.process :argv) 2) "original-observations")
+               :caseId id :target (get environment :ELISCRIPT_ORIGINAL_TARGET)
+               :sourceIdentity (get configuration :sourceIdentity) :options (js-object)))))
+      (js-call observation-counts :set id (1+ position))
+      (await (runOriginalManagedObservation
+        (js-object :source source :sourceRoot (get environment :ELISCRIPT_ORIGINAL_SOURCE_ROOT)
+          :engine (if (undefined? engine) "node" engine) :args (if (undefined? arguments) (js-array) arguments)
+          :selected (if (undefined? selected) false selected) :environment environment :recordId id :timeoutMs 30000)
+        (Object/assign (js-object) context
+          (js-object :directory (resolve (get context :directory) (str "nested-" position))))))))
+
+  (defun original-observation-call-end (source start)
+    ;; The caller is one authenticated generated wrapper expression. Scan its
+    ;; balanced argument list; do not interpret or rewrite its original args.
+    (let ((index (+ start (js-length "originalObservation"))) (depth 0)
+          (quote nil) (escaped false) (done false))
+      (while (and (< index (js-length source)) (not done))
+        (let ((character (aref source index)))
+          (cond
+            (quote (cond (escaped (setq escaped false))
+                     ((= character "\\") (setq escaped t))
+                     ((= character quote) (setq quote nil))))
+            ((js-call (js-array "\"" "'" "`") :includes character) (setq quote character))
+            ((= character "(") (setq depth (1+ depth)))
+            ((= character ")") (setq depth (1- depth)) (when (= depth 0) (setq done t)))))
+        (setq index (1+ index)))
+      (unless done (fail "original observation invocation has no complete argument boundary"))
+      index))
+
+  (defun migrate-original-observation-record (record assets helper-url)
+    (let* ((execution (get record :execution)) (host (and execution (get execution :hostSource))))
+      (if (or (/= (value-type host) "string")
+              (not (js-call host :includes "function originalObservation("))) record
+        (let* ((begin (js-call host :indexOf "function originalObservation("))
+               (end (js-call host :indexOf "function plain(" begin))
+               (original (get record :original))
+               (configuration (js-object :recordId (get record :id) :sourceIdentity (hash host)))
+               (declaration (str "(import " (JSON/stringify helper-url) " runInheritedOriginalManagedObservation)\n"
+                 "(defasync originalObservation (source &optional engine args selected)"
+                 " (await (runInheritedOriginalManagedObservation source engine args selected (JSON/parse "
+                 (JSON/stringify (JSON/stringify configuration)) "))))"))
+               (tail (js-call host :slice end)) (parts (js-array)) (position 0) (calls 0))
+          (unless (and (>= end 0)
+                       (= (js-call host :indexOf "function originalObservation(" (1+ begin)) -1)
+                       (js-call (new globalThis.RegExp "^original-managed:") :test (get record :id)))
+            (fail "original observation helper no longer identifies one maintained wrapper"))
+          (let ((at (js-call tail :indexOf "originalObservation(" position)))
+            (while (>= at 0)
+              (let* ((prefix (js-call tail :slice 0 at))
+                     (finish (original-observation-call-end tail at))
+                     (call (js-call tail :slice at finish)))
+                (unless (or (js-call prefix :endsWith "const expected=")
+                            (js-call prefix :endsWith "const actual=")
+                            (js-call prefix :endsWith "assert.deepEqual("))
+                  (fail "original observation call is outside its authenticated wrapper grammar"))
+                (let* ((program (compile-ir-string (str "(async () (await (js* " (JSON/stringify call) ")))")
+                                  "original-observation-await.eli"))
+                       (function-node (aref (get (aref (get program :body) 0) :children) 0))
+                       (awaited (get (emit-expression (aref (get function-node :children) 0)) :text)))
+                  (js-call parts :push (js-call tail :slice position at) awaited))
+                (setq position finish calls (1+ calls)))
+              (setq at (js-call tail :indexOf "originalObservation(" position))))
+          (js-call parts :push (js-call tail :slice position))
+          (let ((combined (js-call (get original :sourceAssets (js-array)) :slice)))
+            (js-call assets :forEach (lambda (asset)
+              (let ((previous (js-call combined :find (lambda (item) (= (get item :file) (get asset :file))))))
+                (when (and previous (/= (get previous :sourceSha256) (get asset :sourceSha256)))
+                  (fail "original observation transport source identity conflicts"))
+                (unless previous (js-call combined :push asset)))))
+            (Object/assign (js-object) record (js-object
+              :execution (Object/assign (js-object) execution (js-object :hostSource
+                (str (js-call host :slice 0 begin) (if (> calls 0) (compile-string declaration "original-observation-helper.eli") "")
+                  (js-call parts :join ""))))
+              :original (Object/assign (js-object) original (js-object :sourceAssets combined
+                :observationTransport (js-object :kind "original-managed-observation" :version 1
+                  :originalHostSource host :originalHostSha256 (hash host) :calls calls))))))))))
+
+  (defasync observation-transport-options (options)
+    (if (or (nullish? options) (/= (value-type (get options :add)) "function")
+            (/= (value-type (get options :file)) "function")
+            (/= (value-type (get options :text)) "function") (nullish? (get options :stableFiles))) options
+      (let* ((files (js-array "tools/backends/eliscript/compiler-corpus-managed-adapters.eli"
+                     "tools/backends/compiler-corpus-managed-adapters.mjs"
+                     "tools/backends/compiler-corpus-managed-adapters-legacy.mjs"
+                     "tools/backends/eliscript/compiler-corpus-process.eli" "tools/backends/compiler-corpus-process.mjs"
+                     "tools/backends/eliscript/compiler-corpus-program-driver.eli" "tools/backends/compiler-corpus-program-driver.mjs"
+                     "tools/backends/eliscript/managed-source-view.eli" "tools/backends/managed-source-view.mjs"))
+             (assets (js-array)) (index 0) (add (get options :add))
+             (helper-url (get (pathToFileURL (resolve (get options :sourceRoot)
+                            "tools/backends/compiler-corpus-managed-adapters.mjs")) :href)))
+        (while (< index (js-length files))
+          (let* ((filename (aref files index)) (identity (await (js-call options :file filename))))
+            (js-call assets :push (js-object :file filename :sourceSha256 (get identity :sha256))))
+          (setq index (1+ index)))
+        (Object/assign (js-object) options (js-object :add (lambda (record)
+          (funcall add (migrate-original-observation-record record assets helper-url))))))))
 
   (defconst suite "tests/wasm-managed-sequence-data.test.mjs")
   (defconst retained "tests/wasm-managed-sequence-data-test-legacy.mjs")
@@ -142,12 +405,43 @@
     (if (and (= (get (get record :original) :suite) suite)
              (js-call (new globalThis.RegExp
                "^original-managed:sequence-data-standard-identities:(node|bun):auto-65536$") :test (get record :id)))
-      (Object/assign (js-object) record (js-object :execution
-        (Object/assign (js-object) (get record :execution) (js-object :hostSource javascript)))) record))
+      (let ((host (get (get record :execution) :hostSource)))
+        (Object/assign (js-object) record (js-object :execution
+          (Object/assign (js-object) (get record :execution) (js-object :hostSource javascript))
+          :original (Object/assign (js-object) (get record :original) (js-object
+            :observationTransport (js-object :kind "original-managed-standard-identities-host" :version 1
+              :originalHostSource host :originalHostSha256 (hash host) :calls 0)))))) record))
+
+  (defun sequence-observation-record (record inputs helper-url)
+    (let ((match (js-call (new globalThis.RegExp
+            "^original-managed:sequence-data-host-(transducer|core-stdlib|data-text|value-hash|lazy-sequence|core-text-object):(node|bun):auto-65536$")
+            :exec (get record :id))))
+      (if (not match) record
+        (let* ((family (aref match 1)) (input (js-call inputs :get family))
+               (configuration (js-object :family family :engine (aref match 2) :recordId (get record :id)
+                 :source (get input :source) :sourceIdentity (get input :sourceSha256)
+                 :publicIds (js-call (js-call (get record :modules) :filter
+                   (lambda (item) (js-call (get item :id) :startsWith "public/runtime/"))) :map
+                   (lambda (item) (get item :id)))))
+               (host-source (str "(import " (JSON/stringify helper-url) " runOriginalManagedSequenceHost)\n"
+                 (originalManagedProgramCompletionSource (str "(await (runOriginalManagedSequenceHost (JSON/parse "
+                   (JSON/stringify (JSON/stringify configuration)) ")))"))))
+               (original (get record :original))
+               (assets (js-call (get original :sourceAssets) :slice)))
+          (unless (js-call assets :some (lambda (asset) (= (get asset :file) (get input :file))))
+            (js-call assets :push (js-object :file (get input :file) :sourceSha256 (get input :sourceSha256))))
+          (Object/assign (js-object) record (js-object
+            :execution (Object/assign (js-object) (get record :execution)
+              (js-object :hostSource (compile-string host-source "original-sequence-observation-host.eli")))
+            :original (Object/assign (js-object) original (js-object :sourceAssets assets
+              :observationTransport (js-object :kind "original-managed-sequence-host" :version 1
+                :originalHostSource (get (get record :execution) :hostSource)
+                :originalHostSha256 (hash (get (get record :execution) :hostSource))
+                :sourceFile (get input :file) :sourceSha256 (get input :sourceSha256))))))))))
   (defasync addOriginalManagedLibraryAdapters (options)
     ;; Invalid services and every unrelated capability keep their original
     ;; diagnostics and evaluation order. Only the migrated suite reads differ.
-    (setq options (await (transient-transport-options options)))
+    (setq options (await (observation-transport-options (await (transient-transport-options options)))))
     (if (or (nullish? options) (/= (value-type (get options :text)) "function")
             (/= (value-type (get options :file)) "function")
             (/= (value-type (get options :add)) "function")
@@ -160,9 +454,17 @@
              (identity (await (funcall file retained)))
              (cases (originalSourceCaseLocators suite source))
              (proof (js-object :file retained :sourceSha256 (get identity :sha256) :bytes (get identity :bytes)))
-             (assets (js-array)) (files (js-array suite retained maintained identity-host
+             (assets (js-array)) (inputs (new globalThis.Map))
+             (files (js-array suite retained maintained identity-host
+               "tools/backends/eliscript/compiler-corpus-managed-adapters.eli" "tools/backends/compiler-corpus-managed-adapters.mjs"
+               "tools/backends/eliscript/compiler-corpus-process.eli" "tools/backends/compiler-corpus-process.mjs"
+                     "tools/backends/eliscript/compiler-corpus-program-driver.eli" "tools/backends/compiler-corpus-program-driver.mjs"
+                     "tools/backends/eliscript/managed-source-view.eli" "tools/backends/managed-source-view.mjs"
+               "tools/backends/eliscript/compiler-corpus-host-context.eli" "tools/backends/compiler-corpus-host-context.mjs"
+               "tools/backends/eliscript/managed-foreign-binding.eli" "tools/backends/managed-foreign-binding.mjs"
                "tools/backends/eliscript/managed-host.eli"
                "tools/backends/managed-host.mjs" "tools/backends/managed-host-legacy.mjs"
+               "tools/backends/eliscript/managed-host-runtime.eli" "tools/backends/managed-host-runtime.mjs" "tools/backends/managed-host-runtime.mjs.map"
                "tools/backends/eliscript/managed-host-lifecycle.eli" "tools/backends/managed-host-lifecycle.mjs"
                "tools/backends/eliscript/managed-host-object-provider.eli" "tools/backends/managed-host-object-provider.mjs"
                "tools/backends/eliscript/managed-host-object-realm.eli" "tools/backends/managed-host-object-realm.mjs")) (index 0))
@@ -177,6 +479,7 @@
                (host-source (await (funcall text identity-host)))
                (host-identity (await (funcall file identity-host)))
                (javascript (compile-string host-source identity-host))
+               (dependency (await (readOriginalProcessHostDependency options)))
                (forwarded (Object/assign (js-object) options)))
           (unless (and (= (hash host-source) (get host-identity :sha256))
                        (= (js-call Buffer :byteLength host-source) (get host-identity :bytes)))
@@ -189,10 +492,24 @@
                 (fail "original sequence canonical source differs from its source asset"))
               (js-call assets :push (js-object :file filename :sourceSha256 (get identity :sha256))))
             (setq index (1+ index)))
+
+          (let ((families (js-array "transducer" "core-stdlib" "data-text" "value-hash" "lazy-sequence" "core-text-object")) (position 0))
+            (while (< position (js-length families))
+              (let* ((family (aref families position)) (filename (str "tests/fixtures/" family "-host.mjs"))
+                     (body (await (funcall text filename))) (identity (await (funcall file filename))))
+                (unless (and (= (hash body) (get identity :sha256))
+                             (= (js-call Buffer :byteLength body) (get identity :bytes)))
+                  (fail "original sequence host source differs from its authenticated bytes"))
+                (js-call inputs :set family (js-object :source body :file filename :sourceSha256 (get identity :sha256))))
+              (setq position (1+ position))))
           (put forwarded :text (async (filename)
             (if (= filename suite) source (await (funcall text filename)))))
           (put forwarded :add (lambda (record)
-            (funcall add (linker-refusal-record (sequence-host-record
-              (sequence-record record cases proof assets libraries) javascript)))))
+            (let* ((selected (linker-refusal-record (sequence-host-record
+              (sequence-observation-record (sequence-record record cases proof assets libraries) inputs
+                (get (pathToFileURL (resolve (get options :sourceRoot) "tools/backends/compiler-corpus-managed-adapters.mjs")) :href)) javascript)))
+                   (transport (get (get selected :original) :observationTransport)))
+              (funcall add (if (and transport (= (get transport :kind) "original-managed-standard-identities-host"))
+                (bindOriginalProcessHostDependency selected dependency) selected)))))
           (await (js-call legacy :addOriginalManagedLibraryAdapters forwarded)))))))
-  (export addOriginalManagedLibraryAdapters))
+  (export addOriginalManagedLibraryAdapters originalManagedObservationLaunch runOriginalManagedObservation runOriginalManagedSequenceHost runInheritedOriginalManagedObservation originalManagedProgramCompletionSource))

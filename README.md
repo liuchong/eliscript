@@ -62,8 +62,13 @@ Org sources. Each has a documented page in the
 | Applications | The [proving-ground site](https://liuchong.org/eliscript/examples/dogfood/_site/) and the packaged Action built from it, plus React, Org, and Vite probes as replaceable application evidence |
 
 Experimental direct backends and the zero-import managed WASM heap are described
-in the [backend runtime reference](tools/backends/README.md). The complete
-WASM/native compiler hosts and full 3×3 self-bootstrap remain under development.
+in the [backend runtime reference](tools/backends/README.md). The current delivery
+uses a JavaScript-hosted stage0–stage3 compiler chain that emits JavaScript,
+WASM and native programs. WASM/native compiler hosts are outside this release.
+Deep zipper stress on binary outputs remains performance-unqualified; the
+[active plan](docs/bootstrap-0.0.2-plan.md) retains the original cases and results.
+Explicit functional-profile acceptance reports deferred stress cases separately
+and does not certify full-corpus or performance acceptance.
 
 ## Project Status
 

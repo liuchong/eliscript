@@ -1,0 +1,70 @@
+(module tools.backends.compiler-corpus-debugging
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "./build.mjs" root)
+  (import "./compiler-corpus-legacy.mjs" createOriginalCorpusSourceReader)
+  (defconst id "original-program:compiler-source-debugging")
+  (defconst suite "tests/source-debugging.test.mjs")
+  (defconst suite-sha "8eb14ca45564e54d1874bd04a791f1d5ca89cfff72a4c0f07c82b2d00dee8ca7")
+  (defconst files (js-array suite
+    "tools/backends/eliscript/compiler-corpus-debugging.eli" "tools/backends/compiler-corpus-debugging.mjs"
+    "tests/eliscript/source-debugging.eli" "tests/source-debugging-selfhosted.test.mjs"
+    "tools/testing/source-debugging.eli" "tools/testing/source-debugging.mjs"
+    "tools/testing/source-debugging-corpus-host.eli" "tools/testing/source-debugging-corpus-host.mjs"
+    "tools/testing/fixture-environment.eli" "tools/testing/fixture-environment.mjs" "package.json"))
+  (defun hash (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
+  (defun fail (message) (throw (new globalThis.TypeError message)))
+  (defasync transportOriginalSourceDebuggingCorpus (document options)
+    (let ((records (js-call (get document :records) :filter (lambda (record) (= (get record :id) id)))))
+      (when (> (js-length records) 0)
+        (unless (= (js-length records) 1) (fail "original source debugging record must be unique"))
+        (let* ((record (aref records 0)) (original (get record :original)) (execution (get record :execution))
+               (reader (createOriginalCorpusSourceReader (js-object :sourceRoot (get options :sourceRoot root))))
+               (source (await (js-call reader :text suite))) (proofs (js-array)) (index 0))
+          (unless (and (= (hash source) suite-sha) (= (get original :sourceSha256) suite-sha)
+                       (= (get original :suite) suite) (= (get execution :kind) "original-program")
+                       (= (get execution :timeoutMs) 30000) (= (get execution :requiresBun) t)
+                       (= (get execution :runtimeLaunchers) t) (= (get execution :compilerSourceMaps) t)
+                       (= (JSON/stringify (get (get execution :setupReplacement) :originalCaseTimeouts)) "[5000,5000,5000,5000,5000]"))
+            (fail "original source debugging source identity or execution contract changed"))
+          (unless (and (= (js-length (get original :regions)) 1)
+                       (= (get (aref (get original :regions) 0) :start) 0)
+                       (= (get (aref (get original :regions) 0) :end) (js-length source))
+                       (= (get (aref (get original :regions) 0) :byteStart) 0)
+                       (= (get (aref (get original :regions) 0) :byteEnd) (js-call Buffer :byteLength source))
+                       (= (get (aref (get original :regions) 0) :sha256) suite-sha))
+            (fail "original source debugging complete assertion span changed"))
+          (while (< index (js-length files))
+            (let* ((filename (aref files index)) (asset (await (js-call reader :file filename)))
+                   (previous (js-call (get document :evidence) :find (lambda (item) (= (get item :file) filename)))))
+              (when previous
+                (unless (and (= (get previous :sha256) (get asset :sha256)) (= (get previous :bytes) (get asset :bytes))
+                             (= (get previous :encoding) (get asset :encoding)) (= (get previous :content) (get asset :content)))
+                  (fail (str "original source debugging asset identity changed: " filename))))
+              (unless previous (js-call (get document :evidence) :push asset))
+              (js-call proofs :push (js-object :file filename :sourceSha256 (get asset :sha256))))
+            (setq index (1+ index)))
+          (let* ((host-file "tools/testing/source-debugging-corpus-host.mjs")
+                 (host (await (js-call reader :text host-file)))
+                 (assets (js-call (get original :sourceAssets) :slice))
+                 (updated (Object/assign (js-object) execution (js-object :host host-file))))
+            (js-call proofs :forEach (lambda (proof)
+              (let ((previous (js-call assets :find (lambda (item) (= (get item :file) (get proof :file))))))
+                (when (and previous (/= (get previous :sourceSha256) (get proof :sourceSha256)))
+                  (fail "original source debugging maintained proof changed"))
+                (unless previous (js-call assets :push proof)))))
+            (Reflect/deleteProperty updated "hostSource")
+            (put record :execution updated)
+            (put record :original (Object/assign (js-object) original (js-object :sourceAssets assets
+              :assertionSource (js-object :file suite :sourceSha256 suite-sha :regions (get original :regions))
+              :maintainedAssertions (js-object :sourceFile "tools/testing/source-debugging.eli"
+                :sourceSha256 (get (js-call proofs :find (lambda (proof) (= (get proof :file) "tools/testing/source-debugging.eli"))) :sourceSha256)
+                :generatedFile "tools/testing/source-debugging.mjs"
+                :generatedSha256 (get (js-call proofs :find (lambda (proof) (= (get proof :file) "tools/testing/source-debugging.mjs"))) :sourceSha256))
+              :maintainedTransport (js-object :kind "maintained-eli-complete-source-debugging" :version 1 :logicalSuite suite
+                :originalSourceSha256 suite-sha :sourceFile "tools/testing/source-debugging-corpus-host.eli"
+                :generatedFile host-file :generatedSha256 (hash host) :originalTimeoutMs 30000
+                :originalCaseTimeouts (js-array 5000 5000 5000 5000 5000)
+                :hosts (js-array "bun" "node") :fallback false)))))))
+      document))
+  (export transportOriginalSourceDebuggingCorpus))

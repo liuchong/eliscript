@@ -1,0 +1,12 @@
+(defconst marker 1)
+(defun rejected (mode trace)
+  (let ((items (js-array 1 2 3)))
+    (if (= mode 0) (Object/freeze items) (put items :constructor 7))
+    (try (js-call items :splice
+           (js-object :valueOf (lambda () (js-call trace :push "start") 0))
+           (js-object :valueOf (lambda () (js-call trace :push "count") 1))
+           (progn (js-call trace :push "arg") 7))
+      (catch error (js-array (get error :name) items)))))
+(defun own (items key) (object-has? items key))
+(defun field-value (items key) (get items key))
+(export rejected own field-value)

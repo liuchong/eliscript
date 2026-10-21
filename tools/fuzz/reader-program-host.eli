@@ -1,0 +1,13 @@
+(module tools.fuzz.reader-program-host
+  (import "./reader-program-fuzz.mjs" runReaderProgramFuzz stopReaderProgramFuzz)
+  (defasync main ()
+    (let* ((directory (aref (get globalThis.process :argv) 2))
+           (options (js-object :cases 100000 :seed 1162627377)))
+      (unless (undefined? directory) (put options :compilerDirectory directory))
+      (js-call globalThis.process :once "SIGINT" (lambda () (stopReaderProgramFuzz "SIGINT")))
+      (js-call globalThis.process :once "SIGTERM" (lambda () (stopReaderProgramFuzz "SIGTERM")))
+      (try
+        (let ((report (await (runReaderProgramFuzz options))))
+          (js-call (get globalThis.process :stdout) :write (+ (JSON/stringify report) "\n")))
+        (catch error (console/error (get error :stack error)) (put globalThis.process :exitCode 1)))))
+  (main))

@@ -1,4 +1,6 @@
 (module tests.compiler-corpus-exports
+  (import "../tools/backends/compiler-corpus.mjs" createOriginalCorpusSourceReader)
+  (import "../tools/backends/compiler-corpus-process.mjs" readOriginalProcessHostDependency bindOriginalProcessHostDependency)
   (import "bun:test" beforeAll afterAll test)
   (import "node:assert/strict" :default assert)
   (import "node:fs/promises" mkdtemp readFile writeFile rm mkdir readdir lstat)
@@ -11,6 +13,8 @@
   (import "../tools/backends/compiler-build.mjs" independentCompilerResources)
   (import "../tools/backends/compiler-corpus-execution.mjs" executeCompilerCorpusRecord)
   (import "../tools/backends/compiler-matrix.mjs" archiveProduct)
+
+  (import "../tools/backends/compiler-corpus-managed-fixtures.mjs" addOriginalManagedLanguageIntrinsics)
 
   (defvar directory undefined)
   (defvar backend undefined)
@@ -371,6 +375,8 @@
     (async ()
       (let* ((source (await (readFile (resolve root "tests/fixtures/wasm-managed-host-identity.eli") "utf8")))
              (host (await (readFile (resolve root "tools/backends/compiler-corpus-identity-host.mjs") "utf8")))
+             (reader (createOriginalCorpusSourceReader (js-object :sourceRoot root)))
+             (dependency (await (readOriginalProcessHostDependency reader)))
              (hosts (js-array "node" "bun")) (index 0))
         (while (< index (js-length hosts))
           (let* ((product (await (mkdtemp (resolve directory "identity-product-")))) (entry "main.mjs")
@@ -383,9 +389,10 @@
                      :hostSource legacy-host :javascriptHostSource host :hostRuntime (aref hosts index)
                      :referenceArtifact t :arguments (js-array (js-object :directory t) (js-object :literal entry))
                      :timeoutMs 30000)))
-                 (before (JSON/stringify record)))
+                 (bound (bindOriginalProcessHostDependency record dependency))
+                 (before (JSON/stringify bound)))
             (await (writeFile (resolve product entry) javascript))
-            (let* ((result (await (executeCompilerCorpusRecord (js-object :record record :target "javascript"
+            (let* ((result (await (executeCompilerCorpusRecord (js-object :record bound :target "javascript"
                       :sourceRoot root :directory product :options (js-object)
                       :artifact (js-object :target "javascript" :directory product :path (resolve product entry) :entry entry
                         :modules (js-array (js-object :id entry :exports (js-array))))))))
@@ -402,7 +409,7 @@
                 (while (< position (js-length copies))
                   (js-call assert :strictEqual (await (readFile (resolve product (aref copies position)) "utf8")) javascript)
                   (setq position (1+ position))))
-              (js-call assert :strictEqual (JSON/stringify record) before)))
+              (js-call assert :strictEqual (JSON/stringify bound) before)))
           (setq index (1+ index))))))
   (test "binary pure product repeats release unreferenced complete responses while retaining strict product identities"
     (async ()
@@ -552,4 +559,35 @@
           (finally
             (if previous (Object/defineProperty globalThis.globalThis counter-key previous)
               (Reflect/deleteProperty globalThis.globalThis counter-key)))))) 120000)
+
+  (test "FIX27 JavaScript executes all 42 unchanged original encoded intrinsics twice without mutating their archived markers"
+    (async ()
+      (let* ((reader (createOriginalCorpusSourceReader (js-object :sourceRoot root)))
+             (records (js-array)) (fixture "tests/fixtures/wasm-managed-language-intrinsics.eli"))
+        (await (addOriginalManagedLanguageIntrinsics (js-object :sourceRoot root
+          :text (get reader :text) :file (get reader :file)
+          :stableFiles (new globalThis.Set (js-array fixture))
+          :add (lambda (item) (js-call records :push item)))))
+        (js-call assert :strictEqual (js-length records) 1)
+        (let* ((item (aref records 0)) (before (JSON/stringify item))
+               (requests (js-array))
+               (context (js-object :record item :target "javascript" :sourceRoot root
+                 :directory directory :options (js-object)
+                 :session (js-object :request (async (request)
+                   (js-call requests :push request)
+                   (js-object :target "javascript" :entry (get request :entry)
+                     :modules (js-call (get request :modules) :map (lambda (module)
+                       (js-object :id (get module :id) :javascript
+                         (js-call (get backend :compiler) :compile_string
+                           (get module :source) (get module :filename))))))))
+                 :archiveProduct (async (product name target)
+                   (await (archiveProduct product target (resolve directory (str "encoded-" name))))))))
+          (js-call assert :strictEqual (get item :id) "original-sequence:managed-language-intrinsics-source")
+          (js-call assert :strictEqual (js-length (get (get (aref (get item :steps) 0) :artifact) :calls)) 42)
+          (let ((actual (await (executeCompilerCorpusRecord context))))
+            (js-call assert :strictEqual (get actual :expectedSatisfied) t
+              (sequence-evidence actual item "javascript"))
+            (js-call assert :strictEqual (js-length requests) 2))
+          (js-call assert :strictEqual (JSON/stringify item) before)))) 120000)
+
 )

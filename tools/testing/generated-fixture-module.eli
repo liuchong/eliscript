@@ -1,0 +1,9 @@
+(module tools.testing.generated-fixture-module
+  (import "node:module" createRequire)
+  (import "../../tests/helpers/managed-browser-transport.mjs" writeManagedReference)
+  (defasync loadGeneratedFixture (directory javascript label)
+    ;; The actual generated file owns its package imports. Requiring that
+    ;; physical ESM entry avoids Bun's stale directory cache at a new alias.
+    (let ((path (await (writeManagedReference directory javascript label))))
+      (funcall (createRequire path) path)))
+  (export loadGeneratedFixture))

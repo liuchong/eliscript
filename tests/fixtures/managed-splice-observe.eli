@@ -1,0 +1,6 @@
+(defun observe (items ctor)
+  (let ((name "returned") (result undefined))
+    (try (setq result (f items ctor)) (catch error (setq name (get error :name))))
+    (js-array name result (get items :length) (aref items 0) (aref items 1) (aref items 2))))
+(defun field-value (items key) (get items key))
+(export observe field-value)

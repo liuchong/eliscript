@@ -7,6 +7,7 @@
   (import "node:module" createRequire)
   (import "../bootstrap/host/bun.mjs" compileFile loadCompiler parseArguments)
   (import "../tools/backends/build.mjs" root)
+  (import "../tools/testing/bootstrap-compiler-fixture.mjs" bootstrapCompilerFunctionalArguments)
 
   (defconst project-directory root)
   (defconst build-path (resolve project-directory "bin/eliscript-bootstrap"))
@@ -57,7 +58,13 @@
       (await (writeFile path javascript))
       (funcall (createRequire (get (pathToFileURL path) :href)) path)))
 
-  (test "portable compiler driver reaches a reproducible fixed point"
+  (defun register-bootstrap-compiler-case (&rest arguments)
+    (let ((forwarded (bootstrapCompilerFunctionalArguments project-directory (get globalThis.process :env) arguments)))
+      (unless (eq forwarded arguments)
+        (js-call globalThis.console :error "portable compiler original 30000ms total-time acceptance DEFERRED / NOT ACCEPTED"
+          (js-object :originalDeadlineMs 30000 :functionalDeadlineMs 0 :completeCompilerModules (js-length module-names))))
+      (Reflect/apply test undefined forwarded)))
+  (register-bootstrap-compiler-case "portable compiler driver reaches a reproducible fixed point"
     (async ()
       (js-call (expect (parseArguments (js-array "--" "-o" "out.mjs" "input.eli"))) :toEqual
         (js-object :input "input.eli" :output "out.mjs" :sourceMap false :portableEntries (js-array) :diagnosticFormat "human"))

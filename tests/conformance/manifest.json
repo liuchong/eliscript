@@ -82,7 +82,7 @@
       "evidence": [
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-ir-emitter-matches-compatibility-backend" },
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-ir-emitter-does-not-call-form-backend" },
-        { "kind": "bun-test", "file": "tests/bootstrap-emitter.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
+        { "kind": "bun-test", "file": "tests/bootstrap-emitter-selfhosted.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
         { "kind": "bun-test", "file": "tests/esm-imports.test.mjs", "contains": "complete ESM imports are identical and executable across compilers and hosts" }
       ]
     },
@@ -139,7 +139,8 @@
       "evidence": [
         { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-reader-satisfies-bootstrap-cases" },
         { "kind": "bun-test", "file": "tests/bootstrap-reader.test.mjs", "contains": "bootstrapped reader matches normalized seed syntax and diagnostics" },
-        { "kind": "bun-test", "file": "tests/reader-program-fuzz.test.mjs", "contains": "100000 deterministic reader and program mutations preserve every invariant" },
+        { "kind": "fixture", "file": "tests/reader-program-fuzz.test.mjs", "contains": "100000 deterministic reader and program mutations preserve every invariant" },
+        { "kind": "bun-test", "file": "tests/reader-program-fuzz-acceptance-selfhosted.test.mjs", "contains": "100000 deterministic reader and program mutations preserve every invariant" },
         { "kind": "bun-test", "file": "tests/diagnostic-corpus.test.mjs", "contains": "complete negative diagnostic corpus is frozen and source-derived" }
       ]
     },
@@ -187,7 +188,7 @@
       "contracts": ["Matches complete seed ESM", "Matches parsed Source Map documents"],
       "evidence": [
         { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-emitter-satisfies-bootstrap-cases" },
-        { "kind": "bun-test", "file": "tests/bootstrap-emitter.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
+        { "kind": "bun-test", "file": "tests/bootstrap-emitter-selfhosted.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
         { "kind": "bun-test", "file": "tests/esm-imports.test.mjs", "contains": "complete ESM imports are identical and executable across compilers and hosts" }
       ]
     },
@@ -542,7 +543,8 @@
       "evidence": [
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-portable-32-bit-operations" },
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-rejects-invalid-32-bit-operation-arities" },
-        { "kind": "bun-test", "file": "tests/stdlib-bit.test.mjs", "contains": "portable 32-bit operations and algorithms agree under Bun and Node" },
+        { "kind": "fixture", "file": "tests/stdlib-bit.test.mjs", "contains": "portable 32-bit operations and algorithms agree under Bun and Node" },
+        { "kind": "bun-test", "file": "tests/stdlib-bit-selfhosted.test.mjs", "contains": "portable 32-bit operations and algorithms agree under Bun and Node" },
         { "kind": "fixture", "file": "tests/fixtures/bootstrap-ir.json", "contains": "portable-bit-operations" },
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "persistent value library builds as one project and executes under Bun and Node" }
       ]
@@ -936,7 +938,7 @@
       "spec": "0079",
       "contracts": ["Authors protocol definition, registration, dispatch, and implementation queries in Eliscript", "Preserves direct, exact-prototype, host-category, default, and structured missing behavior", "Validates extensions atomically without invoking accessors or modifying host prototypes", "Matches seed and self-hosted artifacts plus million-dispatch Bun and Node reports"],
       "evidence": [
-        { "kind": "bun-test", "file": "tests/eliscript-protocol.test.mjs", "contains": "Eliscript-authored protocol policy preserves open dispatch semantics" },
+        { "kind": "bun-test", "file": "tests/eliscript-protocol-selfhosted.test.mjs", "contains": "Eliscript-authored protocol policy preserves open dispatch semantics" },
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" },
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "stable protocol and core algorithms build as one project across Bun and Node" }
       ]
@@ -948,7 +950,7 @@
       "spec": "0080",
       "contracts": ["Treats stdlib/core/protocol.eli as the only maintained protocol policy source", "Commits seed-generated ESM and Source Map artifacts with byte-for-byte drift checks", "Keeps runtime/core/protocol.mjs as a policy-free camel-case compatibility facade", "Preserves exact undefined dispatch semantics across generated Bun and Node execution"],
       "evidence": [
-        { "kind": "bun-test", "file": "tests/eliscript-protocol.test.mjs", "contains": "Eliscript-authored protocol policy preserves open dispatch semantics" },
+        { "kind": "bun-test", "file": "tests/eliscript-protocol-selfhosted.test.mjs", "contains": "Eliscript-authored protocol policy preserves open dispatch semantics" },
         { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "public surface checker follows aliased runtime re-exports" },
         { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "canonical data text prints scalar and identifier values" },
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "stable protocol and core algorithms build as one project across Bun and Node" }
@@ -1021,7 +1023,7 @@
         { "kind": "bun-test", "file": "tests/bootstrap-reader.test.mjs", "contains": "bootstrapped reader matches normalized seed syntax and diagnostics" },
         { "kind": "bun-test", "file": "tests/bootstrap-expander.test.mjs", "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics" },
         { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
-        { "kind": "bun-test", "file": "tests/bootstrap-emitter.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
+        { "kind": "bun-test", "file": "tests/bootstrap-emitter-selfhosted.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "persistent literals and quoted data preserve language value categories" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
@@ -1055,7 +1057,7 @@
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "portable closures produce persistent values for the versioned worker codec" },
         { "kind": "bun-test", "file": "tests/macro-generated-names.test.mjs", "contains": "macro-generated names are deterministic and capture-safe" },
         { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
-        { "kind": "bun-test", "file": "tests/bootstrap-emitter.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
+        { "kind": "bun-test", "file": "tests/bootstrap-emitter-selfhosted.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
     },
@@ -1113,7 +1115,7 @@
         { "kind": "bun-test", "file": "tests/protocol.test.mjs", "contains": "protocol definitions round trip as isolated declarative data" },
         { "kind": "bun-test", "file": "tests/protocol.test.mjs", "contains": "protocol definition validation rejects executable and ambiguous input" },
         { "kind": "bun-test", "file": "tests/worker-value-codec.test.mjs", "contains": "worker value codec transports protocol definitions without runtime identity" },
-        { "kind": "bun-test", "file": "tests/eliscript-protocol.test.mjs", "contains": "Eliscript-authored protocol policy preserves open dispatch semantics" }
+        { "kind": "bun-test", "file": "tests/eliscript-protocol-selfhosted.test.mjs", "contains": "Eliscript-authored protocol policy preserves open dispatch semantics" }
       ]
     },
     {
@@ -2050,8 +2052,13 @@
       ],
       "evidence": [
         {
-          "kind": "bun-test",
+          "kind": "fixture",
           "file": "tests/reader-program-fuzz.test.mjs",
+          "contains": "100000 deterministic reader and program mutations preserve every invariant"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/reader-program-fuzz-acceptance-selfhosted.test.mjs",
           "contains": "100000 deterministic reader and program mutations preserve every invariant"
         },
         {
@@ -2205,27 +2212,27 @@
       "evidence": [
         {
           "kind": "bun-test",
-          "file": "tests/repository-integrity-test-legacy.mjs",
+          "file": "tests/repository-integrity-original-selfhosted.test.mjs",
           "contains": "repository dependencies and generated artifacts satisfy declared boundaries"
         },
         {
           "kind": "bun-test",
-          "file": "tests/repository-integrity-test-legacy.mjs",
+          "file": "tests/repository-integrity-original-selfhosted.test.mjs",
           "contains": "repository integrity rejects undeclared and boundary-crossing imports"
         },
         {
           "kind": "bun-test",
-          "file": "tests/repository-integrity-test-legacy.mjs",
+          "file": "tests/repository-integrity-original-selfhosted.test.mjs",
           "contains": "repository integrity isolates declared dependencies at the nearest package boundary"
         },
         {
           "kind": "bun-test",
-          "file": "tests/repository-integrity-test-legacy.mjs",
+          "file": "tests/repository-integrity-original-selfhosted.test.mjs",
           "contains": "repository integrity rejects stale benchmark source evidence"
         },
         {
           "kind": "bun-test",
-          "file": "tests/repository-integrity-test-legacy.mjs",
+          "file": "tests/repository-integrity-original-selfhosted.test.mjs",
           "contains": "repository integrity rejects incomplete artifact registries"
         }
       ]
@@ -2616,17 +2623,17 @@
       "evidence": [
         {
           "kind": "bun-test",
-          "file": "tests/source-debugging.test.mjs",
+          "file": "tests/source-debugging-selfhosted.test.mjs",
           "contains": "compiler failure preserves its complete Eliscript source span"
         },
         {
           "kind": "bun-test",
-          "file": "tests/source-debugging.test.mjs",
+          "file": "tests/source-debugging-selfhosted.test.mjs",
           "contains": "runtime failure maps through persistent evaluation"
         },
         {
           "kind": "bun-test",
-          "file": "tests/source-debugging.test.mjs",
+          "file": "tests/source-debugging-selfhosted.test.mjs",
           "contains": "browser event and async rejection map under Bun and Node"
         },
         {
@@ -2736,7 +2743,7 @@
         },
         {
           "kind": "bun-test",
-          "file": "tests/bootstrap-emitter.test.mjs",
+          "file": "tests/bootstrap-emitter-selfhosted.test.mjs",
           "contains": "bootstrapped emitter matches seed ESM and Source Map output"
         }
       ]
@@ -3396,7 +3403,7 @@
         },
         {
           "kind": "bun-test",
-          "file": "tests/bootstrap-emitter.test.mjs",
+          "file": "tests/bootstrap-emitter-selfhosted.test.mjs",
           "contains": "bootstrapped emitter matches seed ESM and Source Map output"
         },
         {

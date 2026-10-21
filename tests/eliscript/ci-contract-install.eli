@@ -1,0 +1,28 @@
+(module tests.ci-contract-install
+  (import "bun:test" :as framework)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:crypto" createHash)
+  (import "node:path" resolve)
+  (import "../../tools/backends/build.mjs" root)
+  (import "./direct-wasm-registration.mjs" createDirectWasmRegistration)
+  (import "./ci-contract-affected.mjs" adaptedSpyOn runBrowserWorkflowCase)
+  (defconst original (Object/assign (js-object) framework))
+  (defconst source (readFileSync (resolve root "tests/ci-contract-test-legacy.mjs")))
+  (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update source) :digest "hex")
+    "d606f4a33414e046387d27b0ed2b1f33f8a89eec1ef7d5aae0cb91d2903f3ba5")
+  (defun assertCIOriginalTitles (titles)
+    (js-call titles :forEach (lambda (title) (js-call assert :ok (js-call (js-call source :toString "utf8") :includes title)))))
+  (defconst selected (Object/assign (js-object) original
+    (js-object :spyOn (lambda (target property) (adaptedSpyOn original target property)))))
+  (defconst registration (createDirectWasmRegistration selected (js-object
+    "all three real engines run on every supported machine combination" runBrowserWorkflowCase)))
+  (defvar restored false)
+  (defun restore () (unless restored
+    (js-call (get original :mock) :module "bun:test" (lambda () original)) (setq restored t)))
+  ;; spyOn is a live module binding used by the original callbacks themselves.
+  ;; Keep the exact adapter installed until the entire original suite finishes.
+  (js-call original :beforeAll (lambda () (js-call registration :complete)))
+  (js-call original :afterAll restore)
+  (js-call (get original :mock) :module "bun:test" (lambda () (get registration :exports)))
+  (export assertCIOriginalTitles))

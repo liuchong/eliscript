@@ -10,6 +10,7 @@
   (import "playwright-core" chromium)
   (import "../tools/backends/build.mjs" root)
   (import "../tools/pages/assemble.mjs" assemblePages PUBLISHED_FILES)
+  (import "../tools/backends/compiler-package.mjs" bundleCompilerBrowserTransport)
   (import "../dist/bootstrap/compiler.mjs" compile-string)
   (import "./helpers/pages-build.mjs" buildPagesInputs)
   (defvar directory undefined)
@@ -31,6 +32,11 @@
   (afterAll (async () (when directory (await (rm directory (js-object :recursive t :force t))))))
   (test "Pages keeps every published source byte and binds separate browser representations to their real files"
     (async ()
+      (js-call (js-array "tools/backends/managed-host-runtime.mjs"
+                        "tools/backends/managed-host-runtime.mjs.map") :forEach
+        (lambda (path)
+          (js-call assert :ok (js-call PUBLISHED_FILES :includes path)
+            (str "published managed host dependency is missing: " path))))
       (let ((position 0))
         (while (< position (js-length PUBLISHED_FILES))
           (let* ((path (aref PUBLISHED_FILES position))
@@ -69,14 +75,16 @@
              (server undefined) (browser undefined) (errors (js-array)))
         (try
           (progn
-            (await (writeFile (resolve artifact "tools/backends/browser/test-worker.mjs")
+            (await (writeFile (resolve artifact "tools/backends/browser/test-worker-source.mjs")
               (compile-string (str "(import \"./compiler-worker.mjs\" compilerRequestIdentity)\n"
                 "(defasync run () (js-call globalThis.self :postMessage (await (compilerRequestIdentity "
                 "(js-object :operation \"analyze\" :filename " (JSON/stringify (get request :filename))
                 " :source " (JSON/stringify (get request :source)) ")))))\n"
                 "(js-call (run) :catch (lambda (error) (js-call globalThis.self :postMessage (js-object :error (get error :message)))))\n")
                 "pages-worker-probe.eli")))
-            (await (writeFile (resolve artifact "probe.mjs")
+            (await (bundleCompilerBrowserTransport (resolve artifact "tools/backends/browser/test-worker-source.mjs")
+              (resolve artifact "tools/backends/browser/test-worker.mjs") artifact))
+            (await (writeFile (resolve artifact "probe-source.mjs")
               (compile-string (str
                 "(defconst worker (new globalThis.Worker (new globalThis.URL \"./tools/backends/browser/test-worker.mjs\" (get globalThis.location :href)) (js-object :type \"module\")))\n"
                 "(js-call worker :addEventListener \"message\" (lambda (event)\n"
@@ -85,6 +93,8 @@
                 "(js-call worker :addEventListener \"error\" (lambda (event)\n"
                 " (js-call (get globalThis.document :documentElement) :setAttribute \"data-status\" (get event :message)) (js-call worker :terminate)))\n")
                 "pages-worker-page.eli")))
+            (await (bundleCompilerBrowserTransport (resolve artifact "probe-source.mjs")
+              (resolve artifact "probe.mjs") artifact))
             (await (writeFile (resolve artifact "probe.html")
               "<!doctype html><html><head><title>Pages Worker</title></head><body><script type=\"module\" src=\"./probe.mjs\"></script></body></html>"))
             (setq server (createServer (lambda (request response)

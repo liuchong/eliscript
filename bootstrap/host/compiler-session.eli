@@ -21,6 +21,7 @@
     expand-owned-module expand-owned-module-with-origins)
   (import "../bootstrap/analyzer.mjs" analyze-module select-portable-module)
   (import "../bootstrap/lower.mjs" lower-module lower-owned-module)
+  (import "../bootstrap/ir.mjs" validate-serializable-program)
   (import "../bootstrap/symbol.mjs" binding-name)
 
   ;; Private JSON buffers contain only already encoded string tokens. Invoke
@@ -130,7 +131,11 @@
     ;; program roots end here, before the next literal or the runtime Reader.
     (let ((program (session-runtime-ir state source filename "literal" index)))
       (put (get state :lastPhase) :phase "literal-snapshot")
-      (serialize-ir-program program)))
+      ;; Packing is private lifetime management, not a canonical IR protocol
+      ;; conversion. Keep the frontend's original own-key insertion order so
+      ;; a later cached-ir response retains the same complete wire bytes.
+      (validate-serializable-program program)
+      (session-ir-wire program (new globalThis.Set))))
 
   (defun session-shared-ir-primitive (value pool)
     (if (js-call pool :has value) (js-call pool :get value)
@@ -176,7 +181,7 @@
             (put state :lastPhase (js-object :phase "literal-restore"
               :filename (get source :filename) :index index))
             (let ((program (session-restore-ir-value
-                    (deserialize-ir-program (get module :packedIR)) strings numbers)))
+                    (JSON/parse (get module :packedIR)) strings numbers)))
               (put module :program program)
               (put cached :program program)
               (Reflect/deleteProperty module "packedIR")
@@ -1196,7 +1201,8 @@
               (lambda (item)
                 (let* ((id (session-normalize-path (session-string item "id" undefined)))
                        (filename (session-normalize-path (session-string item "filename" id))))
-                  (when (js-call aliases :has id) (session-fail "host source collides with a compiled module" id))
+                  (when (or (js-call aliases :has id) (js-call aliases :has filename))
+                    (session-fail "host source collides with a project source" id))
                   (js-call aliases :set id id) (js-call aliases :set filename id)))))
           (js-call modules :map
             (lambda (item)
@@ -1207,7 +1213,10 @@
                       (get request :hostModules (js-array)))))))))))))
 
   (defun session-project-host-modules (modules request)
-    (let ((declarations (js-call (get request :hostModules (js-array)) :slice))
+    (let ((declarations (js-call (get request :hostModules (js-array)) :map
+            (lambda (item)
+              (js-call globalThis.Object :assign (js-object) item
+                (js-object :allowedExports (js-call (get item :allowedExports (js-array)) :slice))))))
           (providers (new globalThis.Map)))
       (js-call (get request :hostSources (js-array)) :forEach
         (lambda (item) (js-call providers :set (session-normalize-path (get item :id)) item)))
@@ -1227,6 +1236,8 @@
                       (when (and path (js-call providers :has path))
                         (let ((existing (js-call declarations :find (lambda (value)
                                   (and (= (get value :referrer) (get item :id)) (= (get value :specifier) specifier))))))
+                          (when (and existing (not (= (get existing :id) path)))
+                            (session-fail "host declaration conflicts with its source identity" specifier))
                           (unless existing
                             (setq existing (js-object :id path :specifier specifier :referrer (get item :id)
                               :allowedExports (js-array) :namespace false))
@@ -1288,19 +1299,32 @@
               (session-fail (+ "missing virtual project module: " resolved) importer))
             resolved)))))
 
-  (defun session-module-imports (nodes importer ids dependencies external)
+  (defun session-module-imports (nodes importer ids dependencies external host-modules)
     (let ((index 0))
       (while (< index (js-length nodes))
         (let* ((node (js-nth index nodes)) (kind (get node :kind)))
           (cond
             ((= kind "import-declaration")
               (let* ((specifier (get node :value))
-                     (resolved (session-resolve-import importer specifier ids)))
-                (if (nil? resolved)
-                  (js-call external :add specifier)
-                  (js-call dependencies :add resolved))))
+                     (provider (js-call host-modules :find
+                       (lambda (item)
+                         (and (= (get item :referrer) importer)
+                              (= (get item :specifier) specifier))))))
+                (if provider
+                  (progn
+                    ;; Validate relative coordinates even for declared providers.
+                    (when (js-call specifier :startsWith ".")
+                      (let ((parts (js-call importer :split "/")))
+                        (js-call parts :pop)
+                        (session-normalize-path
+                          (+ (if (> (js-length parts) 0) (+ (js-call parts :join "/") "/") "") specifier))))
+                    (js-call external :add (get provider :id)))
+                  (let ((resolved (session-resolve-import importer specifier ids)))
+                    (if (nil? resolved)
+                      (js-call external :add specifier)
+                      (js-call dependencies :add resolved))))))
             ((= kind "module-declaration")
-              (session-module-imports (get node :children) importer ids dependencies external))))
+              (session-module-imports (get node :children) importer ids dependencies external host-modules))))
         (setq index (1+ index)))))
 
   (defun session-project-transaction (state operation)
@@ -1327,14 +1351,15 @@
     (let ((modules (session-project-modules state request)) (ids (new globalThis.Map))
           (external (new globalThis.Set)))
       (js-call modules :forEach (lambda (item) (js-call ids :set (get item :id) item)))
-      (let* ((entries (get request :entries (js-array (get request :entry))))
+      (let* ((host-modules (session-project-host-modules modules request))
+             (entries (get request :entries (js-array (get request :entry))))
              (plan (or (get state :projectPortablePlan)
                (project-plan entries
                (lambda (id)
                  (unless (js-call ids :has id) (session-fail "project entry is absent from modules" id))
                  (let ((dependencies (new globalThis.Set)))
                    (session-module-imports (get (get (js-call ids :get id) :program) :body)
-                     id ids dependencies external)
+                     id ids dependencies external host-modules)
                    (js-call (Array/from dependencies) :sort))))))
              (result (js-call globalThis.Object :assign (js-object) plan)))
         (put result :external (js-call (Array/from external) :sort))
@@ -1362,8 +1387,13 @@
                  ;; Host providers require retaining the complete source graph
                  ;; for ESM transport. They do not make every retained source
                  ;; an evaluation root of the managed project.
-                 (when (Object/hasOwn request "entries")
-                   (put options :entries (get request :entries)))
+                 (if (get state :projectPortablePlan)
+                   (let ((roots (new globalThis.Set)))
+                     (js-call (get (get state :projectPortablePlan) :entries) :forEach
+                       (lambda (item) (js-call roots :add (get item :id))))
+                     (put options :entries (Array/from roots)))
+                   (when (Object/hasOwn request "entries")
+                     (put options :entries (get request :entries))))
                  (when (Object/hasOwn request "foreignEntry")
                    (let ((foreign-entry (get request :foreignEntry)))
                      (unless (= (value-type foreign-entry) "boolean")

@@ -1,0 +1,163 @@
+(module tools.fuzz.program-emission-proof
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" createReadStream)
+  (import "node:fs/promises" mkdir mkdtemp open rm realpath)
+  (import "node:path" resolve)
+  (import "node:module" createRequire)
+  (import "node:readline" createInterface)
+  (import "node:child_process" spawn)
+  (import "node:crypto" createHash)
+  (import "../backends/build.mjs" root)
+  (import "./reader-program-fuzz-legacy.mjs" fuzzCases)
+
+  (defconst unicode-line "import \"eliscript/runtime/unicode-case.mjs\";")
+  (defun historicalUnicodeOutput (source)
+    (let* ((lines (js-call source :split "\n"))
+           (matches (js-call lines :filter (lambda (line) (= line unicode-line)))))
+      (unless (= (js-length matches) 1)
+        (throw (new globalThis.TypeError "historical output requires exactly one declared Unicode import line")))
+      (js-call (js-call lines :filter (lambda (line) (/= line unicode-line))) :join "\n")))
+  (defun canonical (value)
+    (cond ((or (nil? value) (/= (value-type value) "object")) (JSON/stringify value))
+      ((Array/isArray value) (+ "[" (js-call (js-call value :map canonical) :join ",") "]"))
+      (t (+ "{" (js-call (js-call (js-call (Object/keys value) :sort) :map
+                     (lambda (key) (+ (JSON/stringify key) ":" (canonical (get value key))))) :join ",") "}"))))
+  (defun digest (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
+
+  (defun runFuzzProofCommand (command environment timeout)
+    (new globalThis.Promise (lambda (accept reject)
+      (let* ((child (spawn (aref command 0) (js-call command :slice 1)
+                     (js-object :cwd root :env (Object/assign (js-object) (get globalThis.process :env) environment)
+                       :stdio (js-array "ignore" "pipe" "pipe"))))
+             (stdout "") (stderr "") (expired false) (force-kill undefined) (failure undefined)
+             (timer (globalThis.setTimeout (lambda ()
+               (setq expired t) (js-call child :kill "SIGTERM")
+               (setq force-kill (globalThis.setTimeout (lambda () (js-call child :kill "SIGKILL")) 1000))) timeout)))
+        (js-call (get child :stdout) :on "data" (lambda (chunk) (setq stdout (+ stdout chunk))))
+        (js-call (get child :stderr) :on "data" (lambda (chunk) (setq stderr (+ stderr chunk))))
+        (js-call child :once "error" (lambda (error) (setq failure error)))
+        (js-call child :once "close" (lambda (status signal)
+          (globalThis.clearTimeout timer) (globalThis.clearTimeout force-kill)
+          (cond (expired (funcall reject (new globalThis.Error (str "fuzz proof command exceeded " timeout " ms"))))
+            ((not (undefined? failure)) (funcall reject failure))
+            ((/= status 0) (funcall reject (new globalThis.Error
+              (let ((err (js-call stderr :trim)) (out (js-call stdout :trim)))
+                (cond ((/= err "") err) ((/= out "") out) (t (str "fuzz proof command exited with " status)))))))
+            (t (funcall accept stdout)))))))))
+
+  (defasync proveFullProgramEmission (compiler-directory total seed report)
+    (let* ((directory (await (mkdtemp (resolve root ".eliscript-fuzz-full-emission-"))))
+           (input (resolve directory "programs.ndjson")) (output (resolve directory "oracle.ndjson"))
+           (compiler-path (await (realpath (resolve compiler-directory "compiler.mjs"))))
+           (compiler (funcall (createRequire compiler-path) compiler-path))
+           (cases (js-call (Array/from (fuzzCases total seed)) :filter (lambda (item) (= (get item :kind) "program"))))
+           (actual-digest (createHash "sha256")) (oracle-digest (createHash "sha256"))
+           (historical (createHash "sha256")) (accepted 0) (rejected 0) (index 0)
+           (differences 0) (samples (js-array)) (difference-path undefined) (difference-file undefined)
+           (historical-valid t)
+           (record-difference (async (record)
+             (unless difference-file
+               (let ((evidence (resolve root "_worktree/evidence/goal-0.0.2")))
+                 (await (mkdir evidence (js-object :recursive t)))
+                 (setq difference-path (resolve (await (mkdtemp (resolve evidence "full-emission-differences-"))) "differences.ndjson"))
+                 (setq difference-file (await (open difference-path "wx")))))
+             (await (js-call difference-file :writeFile (+ (JSON/stringify record) "\n")))
+             (setq differences (1+ differences))
+             (when (< (js-length samples) 8)
+               (js-call samples :push (js-object :index (get record :index) :filename (get record :filename) :kind (get record :kind)))))))
+      (try
+        (let ((file (await (open input "wx"))))
+          (try
+            (while (< index (js-length cases))
+              (await (js-call file :writeFile (+ (JSON/stringify (aref cases index)) "\n")))
+              (setq index (1+ index)))
+            (finally (await (js-call file :close)))))
+        (let ((count (await (runFuzzProofCommand
+                 (js-array (get (get globalThis.process :env) :EMACS "emacs") "--batch" "-Q" "--script"
+                   (resolve root "tools/fuzz/program-emission-oracle.el"))
+                 (js-object :ELISCRIPT_FUZZ_EMISSION_INPUT input :ELISCRIPT_FUZZ_EMISSION_OUTPUT output) 240000))))
+          (js-call assert :strictEqual (js-call count :trim) (funcall globalThis.String (js-length cases))))
+        (setq index 0)
+        (let* ((stream (createReadStream output (js-object :encoding "utf8")))
+               (lines (createInterface (js-object :input stream :crlfDelay globalThis.Infinity)))
+               (iterator (js-call lines (get globalThis.Symbol :asyncIterator))) (done false))
+          (try
+            (while (not done)
+              (let ((next (await (js-call iterator :next))))
+                (if (get next :done) (setq done t)
+                  (let* ((oracle (JSON/parse (get next :value))) (item (aref cases index))
+                         (javascript undefined) (failure undefined) (failed false))
+                    (js-call assert :ok (< index (js-length cases)) "independent emitter returned an extra program")
+                    (js-call assert :strictEqual (get oracle :index) (get item :index))
+                    (try (setq javascript (js-call compiler :compile_string (get item :source) (get item :filename)))
+                      (catch error (setq failed t failure error)))
+                    (let* ((actual (if failed
+                             (js-object :status "error" :message (unless (nullish? failure) (get failure :message))
+                               :diagnostic (unless (nullish? failure) (get failure :eliscriptDiagnostic)))
+                             (js-object :status "ok" :javascript javascript)))
+                           (compare-error undefined) (different false))
+                      ;; Keep the original strict comparisons. A mismatch is
+                      ;; recorded in full and fails the final result, while
+                      ;; independent later inputs still run in this same pass.
+                      (try
+                        (js-call assert :strictEqual (get oracle :status) (get actual :status))
+                        (if failed
+                          (progn
+                            (js-call assert :strictEqual (get actual :message) (get oracle :message))
+                            (js-call assert :deepStrictEqual (get actual :diagnostic) (get oracle :diagnostic)))
+                          (js-call assert :strictEqual javascript (get oracle :javascript)
+                            (str "full independent emitter bytes differ for " (get item :filename))))
+                        (catch error (setq different t compare-error error)))
+                      (when different
+                        (await (funcall record-difference (js-object :kind "full-emission-comparison"
+                          :index (get item :index) :filename (get item :filename) :source (get item :source)
+                          :actual actual :oracle oracle :comparisonMessage (get compare-error :message)))))
+                      ;; Each digest uses its own complete result. In
+                      ;; particular never hash the oracle diagnostic as if it
+                      ;; were the selected compiler's rejected-program result.
+                      (if failed
+                        (let ((line (+ "error:" (canonical (get actual :diagnostic)) "\n")))
+                          (js-call actual-digest :update line) (js-call historical :update line)
+                          (setq rejected (1+ rejected)))
+                        (progn
+                          (js-call actual-digest :update (+ "ok:" (digest javascript) "\n"))
+                          (try
+                            (js-call historical :update (+ "ok:" (digest (historicalUnicodeOutput javascript)) "\n"))
+                            (catch error
+                              (setq historical-valid false)
+                              (await (funcall record-difference (js-object :kind "historical-unicode-contract"
+                                :index (get item :index) :filename (get item :filename) :source (get item :source)
+                                :actual actual :oracle oracle :comparisonMessage (get error :message))))))
+                          (setq accepted (1+ accepted))))
+                      (cond
+                        ((= (get oracle :status) "error")
+                          (js-call oracle-digest :update (+ "error:" (canonical (get oracle :diagnostic)) "\n")))
+                        ((= (get oracle :status) "ok")
+                          (js-call oracle-digest :update (+ "ok:" (digest (get oracle :javascript)) "\n")))
+                        (t (throw (new globalThis.Error "independent emitter returned an invalid result contract")))))
+                    (setq index (1+ index))))))
+            (finally (js-call lines :close) (js-call stream :destroy))))
+        (when difference-file
+          (await (js-call difference-file :close)) (setq difference-file undefined))
+        (let ((actual (js-call actual-digest :digest "hex")) (oracle (js-call oracle-digest :digest "hex"))
+              (compatibility (js-call historical :digest "hex")))
+          (when (> differences 0)
+            (throw (new globalThis.Error (str "full independent emitter comparison failed: "
+              (JSON/stringify (js-object :differences differences :programs index :expectedPrograms (js-length cases)
+                :accepted accepted :rejected rejected :resultDigest actual :independentEmacsResultDigest oracle
+                :historicalDigestValid historical-valid
+                :historicalUnicodeCompatibilityDigest (if historical-valid compatibility undefined)
+                :samples samples :completeEvidence difference-path))))))
+        (js-call assert :strictEqual index (js-length cases))
+        (js-call assert :strictEqual index (get report :programInputs))
+        (js-call assert :strictEqual accepted (get (get report :compiler) :accepted))
+        (js-call assert :strictEqual rejected (get (get report :compiler) :rejected))
+          (js-call assert :strictEqual actual oracle)
+          (js-call assert :strictEqual actual (get (get report :compiler) :resultDigest))
+          (js-object :programs index :accepted accepted :rejected rejected :fullByteAgreements accepted
+            :structuredDiagnosticAgreements rejected :resultDigest actual :independentEmacsResultDigest oracle
+            :historicalUnicodeCompatibilityDigest compatibility))
+        (finally
+          (try (when difference-file (await (js-call difference-file :close)))
+            (finally (await (rm directory (js-object :recursive t :force t)))))))))
+  (export historicalUnicodeOutput runFuzzProofCommand proveFullProgramEmission))

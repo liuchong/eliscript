@@ -335,12 +335,14 @@
           (setq index (1+ index))))
       (await (writeFile (resolve directory "bootstrap/host/compiler-session.eli") "(export)"))
       (await (writeFile (resolve directory "bootstrap/runtime/memory.eli") "; unit fixture runtime\n"))
-      ;; The formal source graph includes the maintained Math support module.
-      ;; Supply its real source in this isolated gate fixture as well.
+      ;; Keep every real runtime source dependency in the isolated gate fixture.
       (await (mkdir (resolve directory "runtime") (js-object :recursive t)))
-      (let ((math (await (readFile (resolve root "runtime/math.eli")))))
-        (await (writeFile (resolve directory "runtime/math.eli") math))
-        (js-call assert :deepStrictEqual (await (readFile (resolve directory "runtime/math.eli"))) math))
+      (let ((files (js-array "runtime/math.eli" "runtime/unicode-case.eli" "runtime/unicode-case-data.eli")) (index 0))
+        (while (< index (js-length files))
+          (let* ((file (aref files index)) (bytes (await (readFile (resolve root file)))))
+            (await (writeFile (resolve directory file) bytes))
+            (js-call assert :deepStrictEqual (await (readFile (resolve directory file))) bytes))
+          (setq index (1+ index))))
       (let* ((file "original-corpus.json") (bytes (js-call Buffer :from "{\"original\":\"unit fixture\"}\n")))
         (await (writeFile (resolve directory file) bytes))
         (let* ((corpus (js-object :document (js-object :originalGateEvidence (js-object :required t
@@ -625,4 +627,35 @@
           (js-call assert :strictEqual (get metadata :sourceUnchanged) t)
           (js-call assert :strictEqual (get metadata :originalCorpusUnchanged) t)
           (js-call assert :deepStrictEqual (await (readCompilerMetadata (join (get result :directory) "matrix.json"))) metadata))))))))
+
+  (test "FIX30 real matrix execution forwards the same complete literal declarations and identities to every target"
+    (async ()
+      (await (workspace (async (directory)
+        (let* ((libraries (await (loadLiteralSources)))
+               (identities (js-call libraries :map (lambda (item)
+                 (js-object :id (get item :id) :filename (get item :filename)
+                   :sha256 (compilerDigest (get item :source))))))
+               (assets (js-array)) (targets (js-array "javascript" "wasm" "native")) (index 0))
+          (while (< index (js-length targets))
+            (let* ((target (aref targets index)) (seen false)
+                   (cell (js-object :records (js-array)))
+                   (metadata (js-object :cells (js-array cell)))
+                   (record (js-object :id (str "literal-context-" target) :kind "sequence"
+                     :steps (js-array) :original (js-object :suite "literal-context-contract")
+                     :expected (js-object :kind "sequence")))
+                   (options (js-object :execute (async (context)
+                     (setq seen t)
+                     (js-call assert :strictEqual (get context :literalSources) libraries)
+                     (js-call assert :strictEqual (get context :literalSourceIdentity) identities)
+                     (js-call assert :strictEqual (get context :sourceAssets) assets)
+                     (js-call assert :strictEqual (get context :target) target)
+                     (js-object :kind "sequence" :expectedSatisfied t :identity (js-array))))))
+              (await (matrix-case-execution record index "javascript" target
+                (js-object :host "javascript" :request (async () (throw "unexpected request")))
+                undefined directory metadata (join directory "matrix.json")
+                (js-object :document (js-object :evidence assets)) options options cell libraries identities))
+              (js-call assert :strictEqual seen t)
+              (js-call assert :strictEqual (get (aref (get cell :records) 0) :verification) "equivalent"))
+            (setq index (1+ index)))))))))
+
 )

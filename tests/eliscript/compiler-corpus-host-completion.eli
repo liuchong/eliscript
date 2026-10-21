@@ -5,6 +5,7 @@
   (import "node:path" resolve dirname)
   (import "node:os" tmpdir)
   (import "node:url" pathToFileURL)
+  (import "../tools/backends/build.mjs" root)
   (import "../dist/bootstrap/compiler.mjs" compile-string)
   (import "../tools/backends/compiler-corpus-runtime-adapters.mjs" originalRuntimeHostCompletionSource)
   (import "../tools/backends/managed-module-graph.mjs"
@@ -30,7 +31,7 @@
       (lambda (error) (put state :settled t) (js-object :fulfilled false :value error))))
 
   (defasync check-completion (reject-body failure)
-    (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-host-completion-"))))
+    (let* ((directory (await (mkdtemp (resolve root ".eliscript-host-completion-"))))
            (previous-state (Object/getOwnPropertyDescriptor globalThis.globalThis state-key))
            (stderr (get globalThis.process :stderr))
            (previous-write (Object/getOwnPropertyDescriptor stderr "write"))

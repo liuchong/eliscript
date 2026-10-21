@@ -1,0 +1,4 @@
+(defun f (items)
+  (Object/defineProperty items "0" (js-object :get (lambda () 7)))
+  (js-call items :splice 0 1))
+(export f)

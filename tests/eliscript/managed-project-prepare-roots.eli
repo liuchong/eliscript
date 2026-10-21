@@ -68,17 +68,25 @@
       (js-call forms :join "\n")))
 
   (defun source-modules (fail)
-    (let ((compiler (get backend :compiler)))
+    (let ((compiler (get backend :compiler)) (names (js-array "shared" "trace" "report")) (index 0))
+      (while (< index width)
+        (js-call names :push (str "value" index)) (setq index (1+ index)))
       (js-object :modules (js-array (js-object :id "main.mjs" :program
         (js-call compiler :compile_ir_string
           (str "(import \"eliscript/runtime/core/value.mjs\" :as First)\n"
                "(import \"eliscript/runtime/core/value.mjs\" :as Second)\n"
                "(defun report () (First/report))\n"
-               "(import \"eliscript/runtime/core/value-alias.mjs\" :as Third)\n"
+               "(import \"./value-alias.mjs\" :as Third)\n"
                "(defun aliases () (and (eq First Second) (eq First.shared Third.shared) (eq First.report Third.report)))\n"
                "(defun namespace-keys () (js-array (Reflect/ownKeys First) (Reflect/ownKeys Third)))\n"
                "(defun array-prototype () Array.prototype)\n"
-               "(export report aliases namespace-keys array-prototype)") "prepare-main.eli")))
+               "(export report aliases namespace-keys array-prototype)") "prepare-main.eli"))
+          ;; This fixture's alias is a normal source module. Only the actual
+          ;; canonical value module belongs to the supplied literal graph.
+          (js-object :id "value-alias.mjs" :program
+            (js-call compiler :compile_ir_string
+              (str "(import \"eliscript/runtime/core/value.mjs\" " (js-call names :join " ") ")\n"
+                "(export " (js-call names :join " ") ")") "prepare-value-alias.eli")))
         :literals (js-array
           (js-object :id "stdlib/managed-literals.mjs" :program
             (js-call compiler :compile_ir_string
@@ -89,14 +97,7 @@
                    "(defun literal-import-value (value) value)\n"
                    "(export literal-kind literal-export-value literal-import-value)") "prepare-adapter.eli"))
           (js-object :id "runtime/core/value.mjs" :program
-            (js-call compiler :compile_ir_string (library-source fail) "prepare-values.eli"))
-          (js-object :id "runtime/core/value-alias.mjs" :program
-            (let* ((names (js-array "shared" "trace" "report")) (index 0))
-              (while (< index width)
-                (js-call names :push (str "value" index)) (setq index (1+ index)))
-              (js-call compiler :compile_ir_string
-                (str "(import \"eliscript/runtime/core/value.mjs\" " (js-call names :join " ") ")\n"
-                  "(export " (js-call names :join " ") ")") "prepare-value-alias.eli")))))))
+            (js-call compiler :compile_ir_string (library-source fail) "prepare-values.eli"))))))
 
   (defasync product (name fail)
     (let* ((sources (source-modules fail)) (saved (JSON/stringify sources))
@@ -203,6 +204,48 @@
               (js-call assert :ok (get part :body)))))
           (js-call assert :ok (>= (js-length (get (get (get artifact :descriptor) :project) :preparedBindings)) width))
           (js-call assert :strictEqual (JSON/stringify (get artifact :sources)) (get artifact :saved)))))))
+
+  (test "prepare aliases remain explicit managed source dependencies while undeclared bare imports remain host declarations"
+    (lambda ()
+      (js-call (js-array successful abrupt) :forEach (lambda (artifact)
+        (let* ((descriptor (get artifact :descriptor))
+               (host-modules (get descriptor :hostModules (js-array)))
+               (modules (get (get descriptor :project) :modules))
+               (main (js-call modules :find (lambda (item) (= (get item :id) "main.mjs"))))
+               (aliases (js-call modules :filter (lambda (item) (= (get item :id) "value-alias.mjs"))))
+               (values (js-call (get (get artifact :lowered) :privateModules) :filter
+                 (lambda (id) (js-call id :endsWith "/runtime/core/value.mjs"))))
+               (alias-source (js-call (get (get artifact :sources) :modules) :find
+                 (lambda (item) (= (get item :id) "value-alias.mjs")))))
+          (js-call assert :deepStrictEqual host-modules (js-array)
+            "the complete original prepare graph must not request an undeclared host namespace")
+          (js-call assert :strictEqual (js-length aliases) 1)
+          (js-call assert :strictEqual (js-length values) 1)
+          (js-call assert :ok (js-call (get main :dependencies) :some (lambda (dependency)
+            (and (= (get dependency :kind) "managed") (= (get dependency :id) "value-alias.mjs")))))
+          ;; Private literal modules are deliberately absent from the public
+          ;; facade dependencies. Prove the original alias import and its real
+          ;; resolved prepare declarations without publishing that private edge.
+          (js-call assert :ok (js-call (get (get alias-source :program) :body) :some (lambda (node)
+            (and (= (get node :kind) "import-declaration")
+                 (= (get node :value) "eliscript/runtime/core/value.mjs")))))
+          (js-call assert :ok (js-call (get artifact :provenance) :some (lambda (node)
+            (= (get node :projectModule) (aref values 0)))))
+          (js-call assert :strictEqual (JSON/stringify (get artifact :sources)) (get artifact :saved)))))
+      ;; The former fixture spelling is not a public canonical runtime name.
+      ;; Keep the linker's actual bare-import contract rather than admitting an
+      ;; arbitrary literalModules filename as a new public host capability.
+      (let* ((specifier "eliscript/runtime/core/value-alias.mjs")
+             (program (js-call (get backend :compiler) :compile_ir_string
+               (str "(import " (JSON/stringify specifier) " :as Missing)\n"
+                    "(defun report () Missing)\n(export report)\n") "undeclared-prepare-alias.eli"))
+             (linked (js-call (get backend :managed) :link_managed_project
+               (js-array (js-object :id "main.mjs" :program program)) "main.mjs" (js-object :phased t)))
+             (declarations (get linked :hostModules)))
+        (js-call assert :strictEqual (js-length declarations) 1)
+        (js-call assert :strictEqual (get (aref declarations 0) :specifier) specifier)
+        (js-call assert :strictEqual (get (aref declarations 0) :referrer) "main.mjs")
+        (js-call assert :strictEqual (get (aref declarations 0) :namespace) t))))
 
   (defun prepare-observation (runtime value)
     ;; Source arrays keep the managed realm's prototype when decoded. Compare

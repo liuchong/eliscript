@@ -1,0 +1,39 @@
+(module tools.testing.managed-sharing-fixture
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:path" resolve basename)
+  (import "node:url" pathToFileURL)
+  (import "../backends/build.mjs" root)
+  (import "../compiler/controlled-baseline.mjs" definition)
+  (import "./managed-fixture-repairs.mjs" managedReferenceChildArguments)
+  (defun managedSharingNodeArguments (command arguments)
+    (if (= (basename command) "node")
+      (managedReferenceChildArguments arguments (resolve root "tests/helpers/managed-reference-node.mjs")) arguments))
+  (defconst sharingHelpers (js-array "managed-fail" "word-node" "word-constant" "word-local" "word-set"
+    "word-sequence" "word-compare" "word-if" "append-managed" "new-managed-local" "runtime-call"
+    "runtime-arguments" "capture-error" "managed-guard" "finish-managed-bindings"
+    "managed-local-backedge-p" "managed-local-bank-compatible-p" "compact-managed-function-locals"))
+  (defconst sharingReference
+    "(defun managed-guard-reference (state expression)\n  (word-if\n    (word-compare (word-local (get state :error)) (word-constant 0) \"=\")\n    expression\n    (word-constant 0)))")
+  (defun managedSharingFixtureSource (source numeric-url dependencies)
+    (let ((names (if dependencies (js-call sharingHelpers :concat
+      (js-array "managed-source-root" "finish-managed-bindings-core")) sharingHelpers)))
+      (str "(module managed.guard.sharing\n(import " (JSON/stringify numeric-url)
+        " backend-fail find-function)\n"
+        (js-call (js-call names :map (lambda (name) (definition source (str name " ")))) :join "\n")
+        "\n" sharingReference
+        "\n(export managed-guard managed-guard-reference finish-managed-bindings compact-managed-function-locals))")))
+  (defun adaptManagedSharingCompiler (compiler directory)
+    (let* ((source (readFileSync (resolve root "bootstrap/backends/managed.eli") "utf8"))
+           (numeric-url (get (pathToFileURL (resolve directory "backends/numeric.mjs")) :href))
+           (descriptors (Object/getOwnPropertyDescriptors compiler))
+           (entry (get descriptors :compile_string)) (original (get entry :value))
+           (facade (Object/create (Object/getPrototypeOf compiler))))
+      (put entry :value (lambda (&rest arguments)
+        (let ((forwarded (js-call arguments :slice)))
+          (when (= (aref arguments 1) "managed-guard-sharing.eli")
+            (js-call assert :strictEqual (aref arguments 0) (managedSharingFixtureSource source numeric-url false))
+            (put forwarded 0 (managedSharingFixtureSource source numeric-url t)))
+          (Reflect/apply original compiler forwarded))))
+      (Object/defineProperties facade descriptors) facade))
+  (export managedSharingFixtureSource adaptManagedSharingCompiler managedSharingNodeArguments))

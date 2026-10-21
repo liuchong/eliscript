@@ -8,7 +8,13 @@
   ;; source-name policy. The Seed must not invent a different TDZ namespace.
   (let* ((root (expand-file-name ".." (file-name-directory (locate-library "eliscript"))))
          (compiler (expand-file-name "dist/bootstrap/compiler.mjs" root))
-         (directory (make-temp-file "eliscript-emitted-alias-" t))
+         ;; Generated modules import the real package runtime. Keep this
+         ;; disposable fixture in that package scope instead of a system temp
+         ;; directory where Node cannot resolve the package's self reference.
+         (directory (progn
+                      (make-directory (expand-file-name "_worktree" root) t)
+                      (make-temp-file
+                       (expand-file-name "_worktree/emitted-alias-" root) t)))
          (node (or (getenv "NODE") "node"))
          (cases
           '(("(defvar value-name 3) (defun f (value_name) value-name) (export f)" 5)

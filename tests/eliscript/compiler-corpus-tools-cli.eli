@@ -11,7 +11,8 @@
   (import "../tools/backends/compiler-build.mjs" loadCompilerSources buildIndependentCompiler)
   (import "../tools/backends/compiler-corpus-tools-cli.mjs"
     authenticateOriginalToolsCLI projectOriginalToolsCLIArguments)
-  (import "../tools/backends/compiler-corpus-execution.mjs" prepareOriginalToolsCLIContext)
+  (import "../tools/backends/compiler-corpus-execution.mjs" prepareOriginalToolsCLIContext prepareOriginalToolsDataReferenceContext)
+  (import "../tools/backends/compiler-matrix.mjs" loadCompilerMatrixCorpus)
   (defvar directory undefined)
   (defvar selected undefined)
   (defvar authentication undefined)
@@ -151,4 +152,44 @@
                        (js-object :id "original-tools-artifact:compiler-session-tools:node"))))
         (Object/defineProperty context "artifact" (js-object :get (lambda () (throw false))))
         (js-call assert :strictEqual (await (prepareOriginalToolsCLIContext context)) context))))
+
+  (test "FIX28 both original tools prefixes and both engines authenticate the same data-reference preparation from original corpus bytes"
+    (async ()
+      (let* ((corpus (await (loadCompilerMatrixCorpus (js-object :sourceRoot root))))
+             (assets (get (get corpus :document) :evidence))
+             (ids (js-array "original-tools-artifact:compiler-session-tools:node"
+               "original-tools-artifact:compiler-session-tools:bun"
+               "original-managed:compiler-session-tools:node"
+               "original-managed:compiler-session-tools:bun"))
+             (index 0))
+        (while (< index (js-length ids))
+          (let* ((id (aref ids index))
+                 (record (js-call (get corpus :records) :find (lambda (item) (= (get item :id) id))))
+                 (before (JSON/stringify record))
+                 (context (js-object :record record :target "javascript" :sourceRoot root
+                   :directory (resolve directory (str "data-reference-" index))
+                   :artifact (js-object :directory (dirname configuration) :path (get selected :path))
+                   :options (js-object :bootstrapManifestPath (get authentication :bootstrapManifestPath))
+                   :sourceAssets assets :transportEvidence (js-object)))
+                 (prepared (await (prepareOriginalToolsDataReferenceContext context)))
+                 (proof (get (get prepared :transportEvidence) :originalToolsDataReference)))
+            (js-call assert :ok record)
+            (js-call assert :strictEqual (get proof :kind) "original-tools-data-reference")
+            (js-call assert :strictEqual (get proof :version) 1)
+            (js-call assert :strictEqual (get proof :recordId) id)
+            (js-call assert :strictEqual (get proof :originalHostSource) (get (get record :execution) :hostSource))
+            (js-call assert :deepStrictEqual (get proof :importSites) (js-array "compile" "aggregate-error" "edit-preview"))
+            (js-call assert :strictEqual (JSON/stringify record) before)
+            (await (js-call assert :rejects (lambda () (prepareOriginalToolsDataReferenceContext
+              (Object/assign (js-object) context (js-object :sourceAssets (js-array)))))))
+            (let* ((changed (globalThis.structuredClone record))
+                   (execution (get changed :execution)))
+              (put execution :hostSource (str (get execution :hostSource) "\n"))
+              (await (js-call assert :rejects (lambda () (prepareOriginalToolsDataReferenceContext
+                (Object/assign (js-object) context (js-object :record changed))))))))
+          (setq index (1+ index)))
+        (let ((unrelated (js-object :target "javascript" :record (js-object :id "original-managed:unrelated:node"))))
+          (Object/defineProperty unrelated "artifact" (js-object :get (lambda () (throw false))))
+          (js-call assert :strictEqual (await (prepareOriginalToolsDataReferenceContext unrelated)) unrelated)))))
+
 )

@@ -1,0 +1,21 @@
+(module tests.retained-soak-refresh-install
+  (import "bun:test" :as framework)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:crypto" createHash)
+  (import "node:path" resolve)
+  (import "../../tools/backends/build.mjs" root)
+  (import "./direct-wasm-registration.mjs" createDirectWasmRegistration)
+  (import "./retained-refresh.mjs" runFreshSoakCase)
+  (defconst original (Object/assign (js-object) framework))
+  (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update
+    (readFileSync (resolve root "tests/retained-soak-refresh-test-legacy.mjs"))) :digest "hex")
+    "c4253b3d983af955bb6fd967e06e13b42461f617f0c756bb9d4e1a9f7b114667")
+  (defconst registration (createDirectWasmRegistration original (js-object
+    "fresh strict soak acceptance remains accepted when deferral is explicitly enabled" runFreshSoakCase)))
+  (defvar restored false)
+  (defun restore () (unless restored
+    (js-call (get original :mock) :module "bun:test" (lambda () original)) (setq restored t)))
+  (js-call original :beforeAll (lambda () (try (js-call registration :complete) (finally (restore)))))
+  (js-call original :afterAll restore)
+  (js-call (get original :mock) :module "bun:test" (lambda () (get registration :exports))))

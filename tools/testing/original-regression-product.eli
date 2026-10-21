@@ -1,0 +1,23 @@
+(module tools.testing.original-regression-product
+  (import "../backends/compiler-corpus.mjs" compilerCorpusRequest)
+  (import "../backends/compiler-session.mjs" requestCompilerBuildProduct)
+
+  (defun originalCompilerProductRequest (record target &rest options)
+    (let ((request (Reflect/apply compilerCorpusRequest undefined
+                     (js-call (js-array record target) :concat options))))
+      ;; Match the main matrix's existing binary transport selection. The
+      ;; archived recipe, complete input graph and public default stay intact.
+      (if (and request (/= target "javascript") (= (get request :target) target))
+        (Object/assign (js-object) request (js-object :binaryEncoding "u16le-chunks")) request)))
+
+  (defun requestOriginalCompilerProduct (session request &rest options)
+    ;; Only fresh binary project emission selects the existing private owner.
+    ;; An ordinary producer still falls back inside requestCompilerBuildProduct;
+    ;; no field on a wrapper or returned value can manufacture that ownership.
+    (if (and request (= (get request :operation) "project")
+             (or (= (get request :target) "wasm") (= (get request :target) "native")))
+      (Reflect/apply requestCompilerBuildProduct undefined
+        (js-call (js-array session request) :concat options))
+      (Reflect/apply (get session :request) session (js-call (js-array request) :concat options))))
+
+  (export originalCompilerProductRequest requestOriginalCompilerProduct))

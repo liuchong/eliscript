@@ -66,7 +66,10 @@
         (Reflect/apply creator undefined (js-call (js-array exports descriptor memory) :concat tail))
         (let* ((runtime undefined) (owner 0) (realm (js-object))
                (raw (lambda (name &rest arguments)
-                 (Reflect/apply (data-function descriptors name) exports arguments)))
+                 ;; The bridge consumes and returns u32 ABI words, even when
+                 ;; WASM exposes their high bit as a signed JavaScript i32.
+                 (unsigned-bit-shift-right
+                   (Reflect/apply (data-function descriptors name) exports arguments) 0)))
                (checked (lambda (name &rest arguments)
                  (let* ((value (Reflect/apply raw undefined (js-call (js-array name) :concat arguments)))
                         (code (funcall raw "last-error")))

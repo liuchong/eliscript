@@ -1,0 +1,23 @@
+(module tests.bounded-assertions-install
+  (import "bun:test" mock afterAll)
+  (import "node:assert/strict" :default original)
+  (import "node:assert/strict" :as exports)
+  (import "node:fs" readFileSync)
+  (import "node:crypto" createHash)
+  (import "node:path" resolve)
+  (import "../../tools/backends/build.mjs" root)
+  (import "../../tools/testing/bounded-assertions.mjs" boundedStrictAssertions)
+  (defconst suite "tests/compiler-package-session.test.mjs")
+  (unless (js-call (get globalThis.process :argv) :some
+            (lambda (argument) (= (resolve root argument) (resolve root suite))))
+    (throw (new globalThis.TypeError "bounded compiler assertions require their exact original suite")))
+  (unless (= (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root suite))) :digest "hex")
+             "cabaee3897e99a1c920dc4d3ba16459351a6d4864b327a03839c0c8d7d7d2b4c")
+    (throw (new globalThis.TypeError "bounded compiler assertions refuse changed original suite bytes")))
+  (defconst saved (Object/assign (js-object) exports))
+  (defconst facade (boundedStrictAssertions original))
+  (js-call mock :module "node:assert/strict" (lambda ()
+    (Object/assign (js-object) saved (js-object :default facade
+      :equal (get facade :equal) :strictEqual (get facade :strictEqual)
+      :deepEqual (get facade :deepEqual) :deepStrictEqual (get facade :deepStrictEqual)))))
+  (afterAll (lambda () (js-call mock :module "node:assert/strict" (lambda () saved)))))

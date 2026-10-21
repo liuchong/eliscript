@@ -1,0 +1,5 @@
+(module tests.direct-wasm-backend
+  ;; Normal runners preload the installer before entry dependency linking.
+  ;; This import reuses that installed module; the full archive is unchanged.
+  (import "./helpers/direct-wasm-registration-install.mjs")
+  (import "./direct-wasm-backend-test-legacy.mjs"))

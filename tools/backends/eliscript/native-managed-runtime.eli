@@ -38,6 +38,15 @@
 
   (defun native-debug-value (options lowered)
     (let ((value (get options :debug))) (if (nullish? value) (get lowered :debug) value)))
+  (defun closeNativeManagedResources (lifecycle owned)
+    (let ((failed false) (failure undefined))
+      (try (when (get lifecycle :dispose) (js-call lifecycle :dispose))
+        (catch error (setq failed t failure error)))
+      ;; Releasing the native owner is mandatory even when managed disposal
+      ;; failed. A later cleanup failure cannot replace false or undefined.
+      (try (js-call owned :close)
+        (catch error (unless failed (setq failed t failure error))))
+      (when failed (throw failure))))
   (defun native-trap-sites (options lowered)
     (let ((value (get options :trapSites)))
       (if (not (nullish? value)) value
@@ -47,6 +56,33 @@
   (defun native-memory-view (owned offset length)
     (let ((bytes (js-call owned :read offset length)))
       (new globalThis.DataView (get bytes :buffer) (get bytes :byteOffset) (get bytes :byteLength))))
+
+  (defun native-memory-scalar-view (owned)
+    ;; This facade contains scalar operations only. The private backing view
+    ;; remains inside its owner, while the Node child transport keeps its
+    ;; existing independent byte-copy fallback.
+    (let ((read16 (= (value-type (get owned :getUint16)) "function"))
+          (read32 (= (value-type (get owned :getUint32)) "function"))
+          (read64 (= (value-type (get owned :getFloat64)) "function"))
+          (write16 (= (value-type (get owned :setUint16)) "function"))
+          (write32 (= (value-type (get owned :setUint32)) "function")))
+      (Object/freeze (js-object
+        :getFloat64 (lambda (offset endian)
+          (if read64 (js-call owned :getFloat64 offset endian) (js-call (native-memory-view owned offset 8) :getFloat64 0 endian)))
+        :getUint16 (lambda (offset endian)
+          (if read16 (js-call owned :getUint16 offset endian) (js-call (native-memory-view owned offset 2) :getUint16 0 endian)))
+        :getUint32 (lambda (offset endian)
+          (if read32 (js-call owned :getUint32 offset endian) (js-call (native-memory-view owned offset 4) :getUint32 0 endian)))
+        :setUint16 (lambda (offset value endian)
+          (if write16 (js-call owned :setUint16 offset value endian)
+            (let ((bytes (new globalThis.Uint8Array 2)))
+              (js-call (new globalThis.DataView (get bytes :buffer)) :setUint16 0 value endian)
+              (js-call owned :write bytes offset))))
+        :setUint32 (lambda (offset value endian)
+          (if write32 (js-call owned :setUint32 offset value endian)
+            (let ((bytes (new globalThis.Uint8Array 4)))
+              (js-call (new globalThis.DataView (get bytes :buffer)) :setUint32 0 value endian)
+              (js-call owned :write bytes offset))))))))
 
   (defun native-heap-exports (exports options)
     (if (not (= (get options :extendedHeap) t)) exports
@@ -128,13 +164,26 @@
                  (_graph-options (when module-graph
                    (native-copy load-options (js-object :moduleGraph module-graph :hostModules (get module-graph :hostModules)))))
                  (host-modules (await (loadManagedHostModules descriptor load-options)))
+                 (_provided-namespaces
+                   (when module-graph
+                     (let ((provided (get options :hostModules))
+                           (declarations (native-nullish (get descriptor :hostModules) (js-array))))
+                       ;; Keep the graph's live NamespaceBindings instance. Its
+                       ;; declared IDs still resolve through the original phased
+                       ;; namespace validation, while explicit auxiliary literal
+                       ;; providers retain the caller's exact namespace identity.
+                       (when (and (js-call globalThis.Map globalThis.Symbol.hasInstance provided)
+                                  (not (eq provided host-modules)))
+                         (js-call provided :forEach (lambda (namespace id)
+                           (unless (js-call declarations :some (lambda (entry) (= (get entry :id) id)))
+                             (js-call host-modules :set id namespace))))))))
                  (configuration (native-copy (native-copy (js-object) options) (js-object :hostModules host-modules)))
                  (_configuration-graph (when module-graph
                    (native-copy configuration (js-object :moduleGraph module-graph :initializeModule false))))
                  (bridge (createManagedHostCapabilityBridge descriptor configuration))
                  (debug (native-debug-value options lowered))
                  (source-map (when (and (native-truth debug) (= (value-type debug) "object")) (createCompilerDebugMap debug)))
-                 (lifecycle (js-object :capabilityBridge bridge)) (owned undefined))
+                 (lifecycle (js-object :capabilityBridge bridge)) (owned undefined) (closed false))
             (try
               (setq owned (await (openNativeMemory path arities
                 (js-object :initialPages (native-nullish (get options :initialPages) 1)
@@ -148,8 +197,9 @@
                       (unless (native-truth capability) (throw (new globalThis.TypeError "undeclared native host capability")))
                       (js-call bridge :dispatch (get capability :name) heap argv)))))))
               (catch error
-                (js-call bridge :close)
-                (when module-graph (js-call module-graph :close)) (throw error)))
+                (try (js-call bridge :close) (catch ignored nil))
+                (try (when module-graph (js-call module-graph :close)) (catch ignored nil))
+                (throw error)))
             (try
               (let ((exports (Object/create nil)) (entries (Object/entries arities)) (position 0))
                 (while (< position (js-length entries))
@@ -157,25 +207,15 @@
                          (fn (lambda (&rest args) (Reflect/apply (get owned :invoke) owned (js-call (js-array name) :concat args)))))
                     (Object/defineProperty fn "length" (js-object :value arity)) (put exports name fn))
                   (setq position (1+ position)))
-                (let* ((memory (js-object
-                        :view (lambda () (js-object
-                          :getFloat64 (lambda (offset endian) (js-call (native-memory-view owned offset 8) :getFloat64 0 endian))
-                          :getUint16 (lambda (offset endian) (js-call (native-memory-view owned offset 2) :getUint16 0 endian))
-                          :getUint32 (lambda (offset endian) (js-call (native-memory-view owned offset 4) :getUint32 0 endian))
-                          :setUint16 (lambda (offset value endian)
-                            (let ((bytes (new globalThis.Uint8Array 2)))
-                              (js-call (new globalThis.DataView (get bytes :buffer)) :setUint16 0 value endian)
-                              (js-call owned :write bytes offset)))
-                          :setUint32 (lambda (offset value endian)
-                            (let ((bytes (new globalThis.Uint8Array 4)))
-                              (js-call (new globalThis.DataView (get bytes :buffer)) :setUint32 0 value endian)
-                              (js-call owned :write bytes offset)))))
+                (let* ((scalar-view (native-memory-scalar-view owned))
+                       (memory (js-object
+                        :view (lambda () scalar-view)
                         :readBytes (lambda (offset length) (js-call owned :read offset length))
                         :writeBytes (lambda (offset bytes) (js-call owned :write bytes offset))))
                        (api (createManagedHostRuntime
                               (observeManagedProjectExports (native-heap-exports exports options) module-graph)
                               descriptor memory configuration lifecycle))
-                       (closed false) (methods (js-object)) (api-entries (Object/entries api)) (item 0))
+                       (methods (js-object)) (api-entries (Object/entries api)) (item 0))
                   (while (< item (js-length api-entries))
                     (let* ((entry (aref api-entries item)) (name (aref entry 0)) (value (aref entry 1)))
                       (cond
@@ -205,8 +245,7 @@
                   (put methods :close (lambda ()
                     (unless closed
                       (setq closed t)
-                      (try (when (get lifecycle :dispose) (js-call lifecycle :dispose))
-                        (finally (js-call owned :close))))))
+                      (closeNativeManagedResources lifecycle owned))))
                   (let ((runtime (observeManagedProjectRuntime
                                   (registerManagedSourceDecodeRuntime (Object/freeze methods) api) module-graph)))
                     (when module-graph
@@ -214,8 +253,9 @@
                         (await (loadManagedProjectGraph runtime descriptor
                           (native-copy (native-copy (js-object) options) (js-object :moduleGraph module-graph)))))) runtime)))
               (catch error
-                (try (when (get lifecycle :dispose) (js-call lifecycle :dispose))
-                  (catch ignored nil) (finally (js-call owned :close)))
+                (unless closed
+                  (setq closed t)
+                  (try (closeNativeManagedResources lifecycle owned) (catch ignored nil)))
                 (throw (native-source-error source-map error))))))))
 
-  (export instantiateNativeManagedRuntime snapshotNativeManagedRuntimeABI))
+  (export instantiateNativeManagedRuntime snapshotNativeManagedRuntimeABI closeNativeManagedResources))

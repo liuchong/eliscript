@@ -4,7 +4,7 @@
   (import "node:module" createRequire)
   (import "node:path" basename)
   (import "node:url" pathToFileURL)
-  (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime loadManagedHostModules readManagedAllocatorSnapshot readManagedAllocatorValueCounts)
+  (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime createManagedModuleGraph loadManagedHostModules readManagedAllocatorSnapshot readManagedAllocatorValueCounts)
   (import "../../tools/backends/compiler-build.mjs" independentCompilerResources)
   ;; The original five literal cases have no managed capacity contract. This
   ;; additional correctness case uses the existing public small profile; the
@@ -12,6 +12,20 @@
   (defconst nth-runtime-budget (Object/freeze (Object/assign (js-object)
     (get (independentCompilerResources (js-object :profile "small")) :budget)
     (js-object :initializeModule false))))
+  (defun assert-nth-runtime-options (options descriptor)
+    (js-call (Reflect/ownKeys nth-runtime-budget) :forEach (lambda (key)
+      (js-call assert :strictEqual (get options key) (get nth-runtime-budget key))))
+    (let ((graph (get options :moduleGraph)))
+      (js-call assert :strictEqual (get graph :descriptor) descriptor)
+      (js-call assert :strictEqual (get options :hostModules) (get graph :hostModules))
+      (js-call assert :strictEqual (get graph :attached) false)
+      (js-call assert :strictEqual (get graph :closed) false)))
+  (defun createNthRuntimeOptions (descriptor)
+    (let* ((graph (createManagedModuleGraph descriptor))
+           (options (Object/assign (js-object) nth-runtime-budget
+             (js-object :moduleGraph graph :hostModules (get graph :hostModules)))))
+      (assert-nth-runtime-options options descriptor)
+      options))
   (defconst allocator-diagnostic (= (get (get globalThis.process :env) "ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC") "1"))
   (defun nth-allocation-phase (runtime phase &optional descriptor)
     (when allocator-diagnostic
@@ -79,15 +93,17 @@
         (setq index (1+ index)))
       (when (and failed (not primary-failed)) (throw failure))))
 
-  (defun finishNth (runtime primary-failed)
+  (defun finishNth (runtime primary-failed graph)
     (nth-cleanup primary-failed
       (js-array
-        (lambda () (js-call runtime :closeModule))
-        (lambda () (js-call runtime :collect))
-        (lambda () (js-call assert :strictEqual (js-call runtime :live) 0))
-        (lambda () (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
+        (lambda () (when runtime (js-call runtime :closeModule)))
+        (lambda () (js-call graph :close))
+        (lambda () (js-call assert :strictEqual (get graph :closed) t))
+        (lambda () (when runtime (js-call runtime :collect)))
+        (lambda () (when runtime (js-call assert :strictEqual (js-call runtime :live) 0)))
+        (lambda () (when runtime (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)))
         (lambda ()
-          (when (= (value-type (get runtime :close)) "function") (js-call runtime :close))))))
+          (when (and runtime (= (value-type (get runtime :close)) "function")) (js-call runtime :close))))))
 
   (defun nth-observe (runtime name arguments descriptor)
     (let ((result (js-call runtime :invoke (nth-public-name descriptor name) arguments)) (failed false))
@@ -142,12 +158,15 @@
           (js-call assert :strictEqual (Object/is (get actual key) (get expected key)) t evidence))
         (setq index (1+ index)))))
 
-  (defun exerciseNth (runtime reference descriptor)
+  (defun exerciseNth (runtime reference descriptor graph)
+    (js-call assert :strictEqual (get graph :descriptor) descriptor)
+    (js-call assert :strictEqual (get graph :attached) t)
+    (js-call assert :strictEqual (get graph :closed) false)
     (js-call assert :deepStrictEqual (js-call reference :language_values) expected-values)
     (js-call runtime :auto 65536)
     (nth-allocation-phase runtime "before-prepare")
     (try
-      (js-call (get runtime :project) :prepare)
+      (js-call graph :prepare)
       (catch error
         ;; Preserve the original TypeError and inspect only its still-live
         ;; declarations before the existing optional diagnostic collection.
@@ -163,7 +182,7 @@
     (nth-allocation-phase runtime "before-steps")
     (js-call (get (get descriptor :project) :modules) :forEach (lambda (module)
       (js-call (get module :steps) :forEach (lambda (step)
-        (js-call (get runtime :project) :run (get step :run))))))
+        (js-call graph :step (get step :run))))))
     (nth-allocation-phase runtime "after-steps")
     (js-call runtime :auto 1)
     (assert-nth-flat-array (nth-observe runtime "language-values" (js-array) descriptor) expected-values)
@@ -242,13 +261,15 @@
   (defasync main ()
     (let* ((arguments (get globalThis.process :argv))
            (descriptor (JSON/parse (readFileSync (aref arguments 4) "utf8")))
+           (options (createNthRuntimeOptions descriptor)) (graph (get options :moduleGraph))
            (runtime undefined) (failed false))
       (try
-        (setq runtime (instantiateManagedRuntime (readFileSync (aref arguments 2)) nth-runtime-budget))
-        (exerciseNth runtime (await (loadNthReference (aref arguments 3))) descriptor)
+        (setq runtime (instantiateManagedRuntime (readFileSync (aref arguments 2)) options))
+        (js-call graph :attachRuntime runtime)
+        (exerciseNth runtime (await (loadNthReference (aref arguments 3))) descriptor graph)
         (catch error (setq failed t) (throw error))
-        (finally (when runtime (finishNth runtime failed))))))
-  (export nth-entry-source nth-runtime-budget loadNthReference exerciseNth finishNth)
+        (finally (finishNth runtime failed graph)))))
+  (export nth-entry-source nth-runtime-budget createNthRuntimeOptions loadNthReference exerciseNth finishNth)
   (when (= (basename (or (aref (get globalThis.process :argv) 1) "")) "managed-literal-nth-node-selfhosted.mjs")
     (js-call (main) :catch (lambda (error)
       (js-call (get globalThis.process :stderr) :write (str (get error :stack (str error)) "\n"))

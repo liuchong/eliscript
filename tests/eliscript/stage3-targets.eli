@@ -459,6 +459,25 @@
             (js-call assert :deepStrictEqual (get selection :effectiveIds) (js-array (get ordinary :id))))))
         (js-call assert :strictEqual (JSON/stringify record) before))))
 
+  (test "the complete source-debugging compiler graph keeps its five JS cases and cancels only binary compiler hosts"
+    (async ()
+      (let* ((corpus (await (loadCompilerMatrixCorpus (js-object :sourceRoot root))))
+             (record (js-call (get corpus :records) :find
+               (lambda (item) (= (get item :id) "original-program:compiler-source-debugging"))))
+             (execution (get record :execution)) (original (get record :original)))
+        (js-call assert :strictEqual (get record :entry) "bootstrap/compiler/compiler.mjs")
+        (js-call assert :strictEqual (js-length (get record :modules)) 13)
+        (js-call assert :strictEqual (get execution :runtimeProfile) "compiler")
+        (js-call assert :strictEqual (js-length (get original :originalAssertions)) 5)
+        (js-call assert :deepStrictEqual (get (classifyStage3Corpus (js-array record) "javascript") :effectiveIds)
+          (js-array (get record :id)))
+        (js-call (js-array "wasm" "native") :forEach (lambda (target)
+          (js-call assert :deepStrictEqual (get (classifyStage3Corpus (js-array record) target) :effectiveIds) (js-array))
+          (let ((user (js-object :id (get record :id) :kind "project" :entry "user.mjs"
+                        :modules (js-array (js-object :id "user.mjs" :source "(defun compiler () 3) (export compiler)"))
+                        :execution (js-object :kind "exports"))))
+            (js-call assert :deepStrictEqual (get (classifyStage3Corpus (js-array user) target) :cancelled) (js-array))))))))
+
   (test "cancellation preserves its original reason and never starts pending targets or restarts completed work"
     (async ()
       (let ((positions (js-array "before" "after-javascript")) (index 0))

@@ -13,8 +13,14 @@
   (defun does-not (value) (get (expect value) :not))
   (defun pattern (source flags) (new globalThis.RegExp source flags))
   (defasync package-command (arguments)
-    (let* ((child (Bun/spawn arguments
-              (js-object :cwd root :stdin (Bun/file "/dev/null") :stdout "pipe" :stderr "pipe")))
+    (let* ((environment (Object/assign (js-object) (get globalThis.process :env)))
+           (receipt (or (get environment :BOOTSTRAP_RELEASE_MANIFEST)
+                        (get environment :ELISCRIPT_BOOTSTRAP_MANIFEST)
+                        (get environment :ELISCRIPT_RELEASE_PACKAGE_BOOTSTRAP_MANIFEST)))
+           (child (progn
+             (when receipt (put environment :BOOTSTRAP_RELEASE_MANIFEST (resolve root receipt)))
+             (Bun/spawn arguments
+              (js-object :cwd root :env environment :stdin (Bun/file "/dev/null") :stdout "pipe" :stderr "pipe"))))
            (results (await (Promise/all
              (js-array (get child :exited)
                (js-call (new globalThis.Response (get child :stdout)) :text)

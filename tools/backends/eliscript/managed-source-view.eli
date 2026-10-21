@@ -1,8 +1,27 @@
 (module tools.backends.managed-source-view
   (import "./managed-source-view-legacy.mjs" :as legacy)
-  (import "./managed-host-proxy.mjs" isManagedHostProxy)
-  ;; The literal materializer and Proxy implementation remain the original
-  ;; bytes. Only completed source-operation boundaries gain a private hook.
+  (import "./managed-host-proxy.mjs" isManagedHostProxy prepareManagedHostProxyClassifierSync)
+  (defconst host-literal-prototype globalThis.Object.getPrototypeOf)
+  (defun host-literal-foreign-proxy-chain-p (value)
+    ;; A host without an engine-owned recognizer keeps the original provider
+    ;; behavior. Never perform a speculative prototype walk on such a host.
+    (if (not (prepareManagedHostProxyClassifierSync)) false
+    (let ((current value) (foreign false) (done false))
+      (while (not done)
+        (cond
+          ;; Registered source views keep their existing provider path. This
+          ;; registry check observes neither a property nor a Proxy trap.
+          ((isManagedSourceView current) (setq done t))
+          ((isManagedHostProxy current) (setq foreign t done t))
+          ((nullish? current) (setq done t))
+          ;; An ordinary host object's native [[GetPrototypeOf]] has no user
+          ;; callback. Stop before a Proxy, including a revoked one, instead of
+          ;; letting each automatic instanceof brand probe enter its traps.
+          ;; Object.getPrototypeOf also accepts primitives without observable
+          ;; conversion. Avoid value-type's extra visible-brand inspection.
+          (t (setq current (Reflect/apply host-literal-prototype undefined (js-array current)))))) foreign)))
+  ;; Public materializers retain the original implementation. Private decoder
+  ;; targets use shared traps without retaining per-view operation functions.
   (defun createManagedLiteralHostProvider (&rest arguments)
     (let* ((provider (Reflect/apply (get legacy :createManagedLiteralHostProvider) undefined arguments))
            (direct (when (> (js-length arguments) 0) (aref arguments 0))))
@@ -12,7 +31,7 @@
         (let* ((descriptors (Object/getOwnPropertyDescriptors provider))
                (entry (get descriptors :kind)) (original (get entry :value))
                (kind (lambda (value)
-                 (if (and (isManagedHostProxy value) (not (isManagedSourceView value))) nil
+                 (if (host-literal-foreign-proxy-chain-p value) nil
                    (Reflect/apply original provider (js-array value))))))
           ;; Unknown host Proxies remain foreign capabilities. They are not
           ;; canonical persistent instances; instanceof classification would
@@ -284,6 +303,160 @@
                 (try (funcall observer) (catch ignored nil)))
               (finally (setq current-boundary previous))))))))
 
+  ;; A decoder supplies a fresh private target. Public caller-owned targets
+  ;; never enter this map: their operations/getter contract stays in legacy.
+  ;; Weak keys allow the private target/record/view cycle to be reclaimed.
+  (defconst decoded-source-records (new globalThis.WeakMap))
+
+  (defun decoded-source-call (record name arguments)
+    ;; These two callbacks exist only for the synchronous operation. No view
+    ;; retains them, and polling/first-throw restoration remains per operation.
+    (withManagedSourceBoundary (get record :observer)
+      (lambda ()
+        (source-decode-with-realm
+          (lambda () (funcall (get record :invoke) (get record :state) name arguments))
+          (get record :realm)))))
+
+  (defun decoded-source-mirror (target key entry)
+    (let ((existing (Reflect/getOwnPropertyDescriptor target key)))
+      (if (undefined? entry)
+        (when (and existing (get existing :configurable)) (Reflect/deleteProperty target key))
+        (unless (Reflect/defineProperty target key entry)
+          (throw (new globalThis.TypeError "cannot mirror managed property"))))))
+
+  (defun decoded-source-synchronize (target all)
+    (let* ((record (js-call decoded-source-records :get target))
+           (keys (decoded-source-call record "keys" (js-array)))
+           (seen (new globalThis.Set keys))
+           (extensible (decoded-source-call record "extensible" (js-array)))
+           (existing (Reflect/ownKeys target)) (index 0))
+      (while (< index (js-length existing))
+        (let ((key (aref existing index)))
+          (unless (js-call seen :has key) (decoded-source-mirror target key undefined)))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (js-length keys))
+        (let* ((key (aref keys index))
+               (entry (decoded-source-call record "descriptor" (js-array key))))
+          (when (and (not (undefined? entry))
+                     (or all (not extensible) (not (get entry :configurable))))
+            (decoded-source-mirror target key entry)))
+        (setq index (1+ index)))
+      (unless extensible
+        (unless (Reflect/setPrototypeOf target (decoded-source-call record "prototype" (js-array)))
+          (throw (new globalThis.TypeError "cannot mirror managed prototype")))
+        (Reflect/preventExtensions target))
+      keys))
+
+  (defun decoded-source-get (target key receiver)
+    (let ((record (js-call decoded-source-records :get target)))
+      ;; A private runtime target need not publish an own descriptor merely to
+      ;; perform Get. Already published immutable properties stay exact through
+      ;; descriptor/define/integrity traps; writable properties impose no Get
+      ;; invariant. Keep the original callback order for all other factories.
+      (unless (get record :directGet)
+        (let ((entry (decoded-source-call record "descriptor" (js-array key))))
+          (when (and entry (not (get entry :configurable))) (decoded-source-mirror target key entry))))
+      (decoded-source-call record "get" (js-array key receiver))))
+
+  (defun decoded-source-set (target key value receiver)
+    (let* ((record (js-call decoded-source-records :get target))
+           (changed (decoded-source-call record "set" (js-array key value receiver))))
+      (when changed
+        (let ((entry (decoded-source-call record "descriptor" (js-array key))))
+          (when (or (and entry (not (get entry :configurable))) (not (Reflect/isExtensible target)))
+            (decoded-source-mirror target key entry))))
+      changed))
+
+  (defun decoded-source-has (target key)
+    (decoded-source-call (js-call decoded-source-records :get target) "has" (js-array key)))
+
+  (defun decoded-source-own-keys (target) (decoded-source-synchronize target false))
+
+  (defun decoded-source-descriptor (target key)
+    (let* ((record (js-call decoded-source-records :get target))
+           (entry (decoded-source-call record "descriptor" (js-array key))))
+      (when (or (and entry (not (get entry :configurable))) (not (Reflect/isExtensible target)))
+        (decoded-source-mirror target key entry))
+      entry))
+
+  (defun decoded-source-define (target key entry)
+    (let ((record (js-call decoded-source-records :get target)))
+      (if (not (decoded-source-call record "define" (js-array key entry))) false
+        (progn
+          (decoded-source-mirror target key (decoded-source-call record "descriptor" (js-array key)))
+          t))))
+
+  (defun decoded-source-delete (target key)
+    (if (not (decoded-source-call (js-call decoded-source-records :get target) "delete" (js-array key))) false
+      (progn (decoded-source-mirror target key undefined) t)))
+
+  (defun decoded-source-prototype (target)
+    (let ((prototype (decoded-source-call (js-call decoded-source-records :get target) "prototype" (js-array))))
+      (unless (Reflect/isExtensible target) (Reflect/setPrototypeOf target prototype))
+      prototype))
+
+  (defun decoded-source-set-prototype (target prototype)
+    (if (not (decoded-source-call (js-call decoded-source-records :get target) "setPrototype" (js-array prototype))) false
+      (Reflect/setPrototypeOf target prototype)))
+
+  (defun decoded-source-extensible (target)
+    (decoded-source-synchronize target false) (Reflect/isExtensible target))
+
+  (defun decoded-source-prevent-extensions (target)
+    (if (not (decoded-source-call (js-call decoded-source-records :get target) "preventExtensions" (js-array))) false
+      (progn (decoded-source-synchronize target t) (not (Reflect/isExtensible target)))))
+
+  (defun decoded-source-apply (target receiver arguments)
+    (decoded-source-call (js-call decoded-source-records :get target) "apply" (js-array receiver arguments)))
+
+  (defun decoded-source-construct (target arguments new-target)
+    (decoded-source-call (js-call decoded-source-records :get target) "construct" (js-array arguments new-target)))
+
+  ;; Functions and non-callable objects share the same handler. Proxy itself
+  ;; rejects apply/construct for targets lacking the corresponding internal
+  ;; method before entering a trap; no per-target function wrappers are needed.
+  (defconst decoded-source-handler (Object/freeze (js-object
+    :get decoded-source-get :set decoded-source-set :has decoded-source-has
+    :ownKeys decoded-source-own-keys :getOwnPropertyDescriptor decoded-source-descriptor
+    :defineProperty decoded-source-define :deleteProperty decoded-source-delete
+    :getPrototypeOf decoded-source-prototype :setPrototypeOf decoded-source-set-prototype
+    :isExtensible decoded-source-extensible :preventExtensions decoded-source-prevent-extensions
+    :apply decoded-source-apply :construct decoded-source-construct)))
+
+  (defun decoded-source-refresh (proxy)
+    ;; This sole retained callback captures only the completed Proxy identity.
+    (let ((refresh (lambda () proxy)))
+      (Object/defineProperties refresh (js-object
+        :name (js-object :value "refresh") :length (js-object :value 0)))
+      refresh))
+
+  (defun createManagedDecodedSourceView (configuration)
+    (let ((target (get configuration :target)) (state (get configuration :state))
+          (invoke (get configuration :invoke)))
+      (if (not current-source-decode)
+        ;; Existing direct factory callers still require public full refresh
+        ;; and retry semantics. Only private decoder publication is optimized.
+        (let ((operations (js-object)))
+          (js-call (js-array "descriptor" "keys" "get" "set" "has" "define" "delete"
+                            "prototype" "setPrototype" "extensible" "preventExtensions" "apply")
+            :forEach (lambda (name)
+              (put operations name (lambda (&rest arguments) (funcall invoke state name arguments)))))
+          (when (get state :constructible)
+            (put operations :construct (lambda (&rest arguments) (funcall invoke state "construct" arguments))))
+          (createManagedSourceView (js-object :target target :operations operations)))
+        ;; Private targets can be arrays, boxed primitives or callables too.
+        ;; Proxy validates the target without a language-level brand query.
+        (let* ((record (js-object :target target :state state :invoke invoke
+                         :observer current-boundary :realm current-source-realm
+                         :directGet (eq (get configuration :directGet) t)))
+               (proxy (new globalThis.Proxy target decoded-source-handler)))
+          (js-call decoded-source-records :set target record)
+          (js-call source-boundaries :set proxy record)
+          ;; Deferred refresh deliberately omits the redundant all:true walk.
+          ;; Each live trap still mirrors exactly the original invariants.
+          (Object/freeze (js-object :value proxy :refresh (decoded-source-refresh proxy)))))))
+
   (defun createManagedSourceView (configuration)
     (let* ((target (get configuration :target)) (operations (get configuration :operations))
            (deferred current-source-decode) (realm current-source-realm)
@@ -332,7 +505,7 @@
           :length (js-object :value (get (get view :refresh) :length))))
         (Object/freeze (js-object :value proxy :refresh refresh)))))
 
-  (export createManagedLiteralHostProvider createManagedSourceView
+  (export createManagedLiteralHostProvider createManagedSourceView createManagedDecodedSourceView
     bindManagedSourceBoundary withManagedSourceBoundary withManagedSourceBindingPoll withManagedSourceDecode
     registerManagedSourceDecodeRuntime isManagedSourceViewForRuntime
     isManagedSourceView snapshotManagedSourceView projectManagedSourceViewForMatcher))

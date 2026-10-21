@@ -1,0 +1,32 @@
+(module tools.testing.persistent-literal-oracle
+  ;; Retain the complete independent literal report used by the maintained
+  ;; JavaScript host suite. No generated JavaScript text is parsed or executed.
+  (defun expectedPersistentLiteralReport ()
+    (js-object
+                :vector (js-object :persistent t :count 3 :languageCount 3 :first 1
+                  :values (js-array 1 2 (js-object)) :nestedPersistent t)
+                :map (js-object :persistent t :count 2 :name "Eliscript" :valueKey (js-array 5 6))
+                :mapLiteral (js-object :persistent t :count 4 :name "source" :valueKey (js-array 7 8)
+                  :nestedPersistent t :nestedReady t :duplicate 2)
+                :set (js-object :explicitPersistent t :explicitCount 2 :explicitValueKey t
+                  :literalPersistent t :literalCount 3 :duplicate t :valueKey t :nestedMap t :nestedReady t
+                  :evaluationOrder "12" :macroPersistent t :macroKeyword t :macroValue t)
+                :queue (js-object :explicitPersistent t :explicitValues (js-array "explicit" (js-array 5 6))
+                  :literalPersistent t :literalValues (js-array "source" (js-array 7 8) (js-object :ready t))
+                  :evaluationOrder "12" :text "#queue [\"source\" [7 8] {:ready true}]")
+                :keyword (js-object :value t :interned t :qualifiedName "article/title" :printed ":article/title"
+                  :mapPersistent t :mapCount 2 :mapQualified "qualified" :mapReady t :stringKeyMiss nil
+                  :macroValue t :macroQualifiedName "macro/value"
+                  :quotedSyntax (js-object :value t :qualifiedName "quoted/value"))
+                :quoted (js-object :persistentList t :count 5 :symbol t :symbolName "alpha" :keyword t
+                  :vector t :vectorValues (js-array 1 nil) :emptyList t :falseSymbol t
+                  :text "(alpha :beta [1 undefined] () #eliscript/symbol [nil \"false\"])"
+                  :mapSyntax "(hash-map :ready true)" :setSyntax "(hash-set :ready [1 undefined])"
+                  :queueSyntax "(queue 1 :ready)")
+                :list (js-object :persistent t :values (js-array 1 2 3) :first 1 :restPersistent t
+                  :restValues (js-array 2 3) :consPersistent t :consValues (js-array 0 1 2 3) :emptyRest t)
+                :host (js-object :array t :prependedArray (js-array 0 1 2 3) :languageCount 3 :second 2
+                  :object t :objectValue (js-object :name "host" :count 2))))
+  (defun assertOriginalReport (expect report)
+    (js-call (funcall expect report) :toEqual (expectedPersistentLiteralReport)))
+  (export expectedPersistentLiteralReport assertOriginalReport))

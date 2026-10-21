@@ -1,0 +1,17 @@
+(module tools.testing.bootstrap-emitter-corpus-host
+  (import "node:path" resolve)
+  (import "./bootstrap-emitter.mjs" runBootstrapEmitterAcceptance)
+  (defasync main ()
+    (let* ((source (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_SOURCE_ROOT))
+           (product (aref (get globalThis.process :argv) 2)))
+      (unless (and (= (value-type source) "string") (> (js-length source) 0)
+                   (= (value-type product) "string") (> (js-length product) 0))
+        (throw (new globalThis.TypeError "original emitter requires its actual source root and selected compiler")))
+      (await (runBootstrapEmitterAcceptance (js-object :sourceRoot source
+        :compilerDirectory (resolve product "bootstrap/compiler"))))))
+  (defconst completion (main))
+  (js-call completion :catch (lambda (error)
+    (console/error (get error :stack error)) (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

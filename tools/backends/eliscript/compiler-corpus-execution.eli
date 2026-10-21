@@ -4,20 +4,23 @@
   (import "node:fs" constants)
   (import "node:path" resolve join relative isAbsolute sep posix)
   (import "node:url" pathToFileURL)
-  (import "node:child_process" spawn)
   (import "node:crypto" createHash)
   (import "node:buffer" Buffer)
   (import "./compiler-corpus-execution-legacy.mjs" :as legacy)
   (import "./compiler-build.mjs" independentCompilerResources buildIndependentCompiler compilerMetadataDigest)
   (import "./compiler-corpus.mjs" prepareOriginalSeedSources originalSequenceNativeInteropP transportOriginalSequenceRuntime
-    compilerCorpusRequest compilerCorpusFunctionalResources)
+    compilerCorpusRequest compilerCorpusFunctionalResources bindOriginalFunctionalResourceInputs)
   (import "./build.mjs" loadLiteralSources)
   (import "./compiler-bootstrap.mjs" openCompilerArtifact saveCompilerMetadata)
   (import "./compiler-matrix.mjs" archiveProduct)
-  (import "./managed-runtime.mjs" instantiateManagedRuntimeWithHostModules)
+  (import "./managed-runtime.mjs" instantiateManagedRuntimeWithHostModules loadManagedHostModules)
   (import "./native-managed-runtime.mjs" instantiateNativeManagedRuntime snapshotNativeManagedRuntimeABI)
   (import "./compiler-corpus-literal-provider.mjs" prepareOriginalLiteralHostProvider)
+  (import "./compiler-corpus-original-program.mjs" executeOriginalProgram executeCompilerSessionProgram)
+  (import "./compiler-corpus-process.mjs" originalCorpusExecutionPolicy runOriginalCorpusProcess)
   (import "../../dist/bootstrap/reader.mjs" read-string)
+  (import "../../dist/bootstrap/compiler.mjs" compile-string)
+  (import "../../bootstrap/host/bun.mjs" loadCompiler)
   (defconst resolveOriginalCorpusRequest (get legacy :resolveOriginalCorpusRequest))
   (defconst originalProgramArguments (get legacy :originalProgramArguments))
   (defconst compareCompilerCorpusObservation (get legacy :compareCompilerCorpusObservation))
@@ -34,22 +37,18 @@
         (if (or (= (get configuration :programHost) "bun")
                 (original-host-enabled (field (field record "execution") "requiresBun"))) "bun" "node"))))
 
-  (defun seed-child-output (command arguments source-root signal)
-    ;; Keep the original independent Seed command, inherited environment,
-    ;; cancellation and first rejection. This is IO, not a compiler substitute.
-    (new globalThis.Promise (lambda (accept reject)
-      (let* ((stdout (js-array)) (stderr (js-array))
-             (child (spawn command arguments (js-object :cwd source-root :signal signal
-                      :stdio (js-array "ignore" "pipe" "pipe")))))
-        (js-call (get child :stdout) :on "data" (lambda (chunk) (js-call stdout :push chunk)))
-        (js-call (get child :stderr) :on "data" (lambda (chunk) (js-call stderr :push chunk)))
-        (js-call child :once "error" reject)
-        (js-call child :once "close" (lambda (code)
-          (if (/= code 0)
-            (let ((message (js-call (js-call (js-call Buffer :concat stderr) :toString "utf8") :trim)))
-              (funcall reject (new globalThis.Error (if (= message "")
-                (str "corpus host exited with " code) message))))
-            (funcall accept (js-call (js-call Buffer :concat stdout) :toString "utf8")))))))))
+  (defasync seed-child-output (command arguments source-root signal evidence-root &optional context)
+    ;; Stream the original independent command's IO through the same owner.
+    (await (mkdir evidence-root (js-object :recursive t)))
+    (let* ((directory (await (mkdtemp (resolve evidence-root "process-"))))
+           (configured (fallback context (js-object :record (js-object :execution (js-object))
+                         :target "javascript" :options (js-object))))
+           (receipt (await (runOriginalCorpusProcess command arguments
+             (js-object :cwd source-root :signal signal :directory directory
+               :caseId (field (get configured :record) "id") :target (get configured :target)
+               :sourceIdentity (get configured :sourceIdentity)
+               :policy (originalCorpusExecutionPolicy configured))))))
+      (get receipt :stdout)))
 
   (defun seed-project-groups (record)
     (let* ((request (field record "request")) (portable (field request "portableEntries"))
@@ -98,9 +97,23 @@
       (let* ((proofs (js-object :sourceAssets (get configuration :sourceAssets)
                        :literalSources (get configuration :literalSources)
                        :literalSourceIdentity (get configuration :literalSourceIdentity)))
-             (request (prepareOriginalSeedSources record proofs)))
-        (if (or (nullish? request) (not (= (get request :resolveImports) t))) record
-          (copy record (js-object :modules (get request :modules) :request request))))))
+             (retained (field (get record :original) "functionalResourceInputs")))
+        ;; Authenticate the original complete input before resolving its private
+        ;; Seed graph. An altered original proof can never be refreshed away.
+        (when retained
+          (compilerCorpusFunctionalResources record (js-object :functionalRuntimeProfile "small")))
+        (let ((request (prepareOriginalSeedSources record proofs)))
+          (if (or (nullish? request) (not (= (get request :resolveImports) t))) record
+            (let* ((original (get record :original))
+                   (private (copy record (js-object :modules (get request :modules) :request request
+                     :original (copy original)))))
+              (when retained
+                ;; The existing archive binder verifies every expanded module
+                ;; and the complete original host against actual source bytes.
+                ;; Only this independently resolved record receives its proof.
+                (bindOriginalFunctionalResourceInputs (js-object :evidence (get configuration :sourceAssets)
+                  :records (js-array private))))
+              private))))))
 
   (defun seed-host-tokens (source)
     ;; Source-data scanning only: preserve the original suite scanner's opaque
@@ -303,7 +316,7 @@
           (let ((item (js-call by-id :get id)))
             (unless item (throw (new globalThis.TypeError "original Seed entry is outside its authenticated source graph")))
             (js-call arguments :push (resolve output "sources" (get item :filename)))))))
-      (await (seed-child-output (resolve source-root "bin/eliscript-seed-build") arguments source-root signal))
+      (await (seed-child-output (resolve source-root "bin/eliscript-seed-build") arguments source-root signal output))
       (let* ((bytes (await (readFile (resolve product "eliscript-project.json"))))
              (manifest (JSON/parse (js-call bytes :toString "utf8"))) (seen (new globalThis.Set)))
         (unless (and (= (get manifest :format) "eliscript-project") (Array/isArray (get manifest :modules)))
@@ -419,7 +432,7 @@
       (js-call inputs :forEach (lambda (item)
         (when (or (not pruned) (= (get item :id) (get record :entry)))
           (js-call arguments :push (resolve output "sources" (get item :filename))))))
-      (await (seed-child-output (resolve source-root "bin/eliscript-seed-build") arguments source-root signal))
+      (await (seed-child-output (resolve source-root "bin/eliscript-seed-build") arguments source-root signal output))
       (let* ((bytes (await (readFile (resolve product "eliscript-project.json"))))
              (manifest (JSON/parse (js-call bytes :toString "utf8"))))
         (unless (and (= (get manifest :format) "eliscript-project") (Array/isArray (get manifest :modules)))
@@ -486,7 +499,7 @@
                   (js-call (get (get record :request) :portableEntries) :forEach
                     (lambda (name) (js-call arguments :push "--portable" name))))
                 (js-call arguments :push input)
-                (await (seed-child-output (resolve source-root "bin/eliscript-seed") arguments source-root signal)))
+                (await (seed-child-output (resolve source-root "bin/eliscript-seed") arguments source-root signal output)))
               (js-call compiled :set (get item :id) (js-object :id (get item :id) :path path)))))
         (setq index (1+ index)))
       (unless authenticated
@@ -499,6 +512,7 @@
                :budget (get configuration :budget) :memory (get configuration :memory)
                :auto (get configuration :auto) :nativeTarget (get configuration :nativeTarget)
                :sessionOptions (get configuration :sessionOptions)
+               :functionalRuntimeProfile (get configuration :functionalRuntimeProfile)
                :bootstrapManifestPath (get configuration :bootstrapManifestPath)))
              (context (js-object :artifact artifact :record record :target "javascript"
                :independentSeedProgram t
@@ -542,6 +556,9 @@
       (when (Object/hasOwn options "bootstrapManifestPath")
         (Object/defineProperty configuration "bootstrapManifestPath"
           (js-object :value (get options :bootstrapManifestPath) :enumerable t)))
+      (when (Object/hasOwn options "functionalRuntimeProfile")
+        (Object/defineProperty configuration "functionalRuntimeProfile"
+          (js-object :value (get options :functionalRuntimeProfile) :enumerable t)))
       ;; Freeze the private declaration records once. Their string payloads
       ;; stay shared and immutable; repeated records never rehash the entire
       ;; corpus source archive and caller mutation cannot change this proof.
@@ -760,7 +777,17 @@
     ;; original-program launchers and all other legacy capabilities are intact.
     (let* ((record (get context :record)) (steps (field record "steps")) (found false) (valid t) (index 0))
       (when (and (= (field record "kind") "sequence") (Array/isArray steps)
-                 (or (= (get context :target) "wasm") (= (get context :target) "native")))
+                 (or (= (get context :target) "wasm") (= (get context :target) "native")
+                     (and (= (get context :target) "javascript")
+                       (or (= (get record :id) "original-sequence:managed-language-intrinsics-source")
+                         (js-call steps :some (lambda (step)
+                           (let* ((request (field step "request"))
+                                  (operation (field (and request (Object/getOwnPropertyDescriptor request "operation")) "value"))
+                                  (phased (field (and request (Object/getOwnPropertyDescriptor request "phased")) "value"))
+                                  (entries (field (and request (Object/getOwnPropertyDescriptor request "entries")) "value")))
+                             (and (= (field (field step "artifact") "kind") "exports")
+                               (= operation "project") (eq phased t)
+                               (Array/isArray entries) (> (js-length entries) 0)))))))))
         (while (and valid (< index (js-length steps)))
           (let* ((step (aref steps index)) (kind (field (get step :artifact) "kind")))
             (when (= kind "exports") (setq found t))
@@ -770,7 +797,8 @@
                   (when (js-call (js-array "project" "project-ir" "emit-ir" "emit-memory-ir" "emit-typed-memory") :includes operation)
                     (setq found t)))))
             (when (or (and (not (undefined? kind)) (not (= kind "exports")))
-                      (= (get step :backendTarget) "javascript") (= (field (get step :request) "target") "javascript"))
+                      (and (/= (get context :target) "javascript")
+                        (or (= (get step :backendTarget) "javascript") (= (field (get step :request) "target") "javascript"))))
               (setq valid false)))
           (setq index (1+ index))) (and valid found))))
   (defun export-stage (evidence stage) (put evidence :stage stage))
@@ -891,9 +919,13 @@
           (js-call (get (get context :transportEvidence) :isolatedExports) :push proof))
         (await (saveCompilerMetadata input (js-object :artifact saved-artifact :contract contract
           :resources resources :sourceRoot source-root :options options)))
-        (await (seed-child-output
+        (await (runOriginalCorpusProcess
           (fallback (get original-options :node) (fallback (get (get globalThis.process :env) "NODE") "node"))
-          (js-array (resolve source-root runner) input output) (get context :directory) (get context :signal)))
+          (js-array (resolve source-root runner) input output)
+          (js-object :directory directory :caseId (get (get context :record) :id)
+            :target (get artifact :target) :sourceIdentity (get context :sourceIdentity)
+            :policy (originalCorpusExecutionPolicy context)
+            :cwd (get context :directory) :signal (get context :signal))))
         (let ((result (JSON/parse (await (readFile output "utf8")))))
           (unless (and result (= (value-type (get result :failed)) "boolean"))
             (throw (new globalThis.Error "isolated corpus export child did not return its original result")))
@@ -916,15 +948,102 @@
                   (when (Object/hasOwn description "diagnostic")
                     (put error :eliscriptDiagnostic (get description :diagnostic)))
                   (throw error)))))))))
+  (defun decodeCompilerCorpusObservation (value)
+    (cond ((Array/isArray value) (js-call value :map decodeCompilerCorpusObservation))
+      ((and (not (eq value nil)) (= (value-type value) "object"))
+        (if (Object/hasOwn value "$eliscriptObservation")
+          (let* ((kind (get value :$eliscriptObservation)) (keys (Object/keys value)))
+            (unless (and (= (value-type kind) "string")
+                         (= (js-length keys) (if (= kind "bigint") 2 1)))
+              (throw (new globalThis.TypeError "invalid compiler corpus observation marker")))
+            (cond ((= kind "undefined") undefined) ((= kind "-0") -0)
+              ((= kind "NaN") globalThis.NaN) ((= kind "Infinity") globalThis.Infinity)
+              ((= kind "-Infinity") (- globalThis.Infinity))
+              ((= kind "bigint")
+                (unless (and (Object/hasOwn value "decimal") (= (value-type (get value :decimal)) "string")
+                  (js-call (new globalThis.RegExp "^-?(?:0|[1-9][0-9]*)$") :test (get value :decimal)))
+                  (throw (new globalThis.TypeError "invalid compiler corpus BigInt observation")))
+                (globalThis.BigInt (get value :decimal)))
+              (t (throw (new globalThis.TypeError "unknown compiler corpus observation marker")))))
+          (Object/fromEntries (js-call (Object/entries value) :map
+            (lambda (entry) (js-array (aref entry 0) (decodeCompilerCorpusObservation (aref entry 1))))))))
+      (t value)))
   (defasync execute-exports (context artifact contract resources evidence)
+    (when (Object/hasOwn contract "valueEncoding")
+      (unless (and (= (get contract :valueEncoding) "eliscript-observation-v1")
+        (= (get (get context :record) :id) "original-sequence:managed-language-intrinsics-source"))
+        (throw (new globalThis.TypeError "encoded export observations require their exact original intrinsic recipe"))))
+    ;; Encoded data must cross JSON intact; decode in the executing process.
     (if (= (get contract :isolated) t)
       (await (execute-isolated-exports context artifact contract resources evidence))
+      (await (execute-target-exports context artifact contract resources evidence))))
+  (defasync execute-target-exports (context artifact contract resources evidence)
+    (when (Object/hasOwn contract "valueEncoding")
+      (unless (= (get contract :valueEncoding) "eliscript-observation-v1")
+        (throw (new globalThis.TypeError "unknown compiler corpus value encoding")))
+      (setq contract (decodeCompilerCorpusObservation contract)))
+    (if (= (get artifact :target) "javascript")
+      (await (execute-javascript-exports context artifact contract evidence))
       (await (execute-local-exports context artifact contract resources evidence))))
+  (defasync load-javascript-export-modules (context artifact)
+    ;; Native import evaluates the exact selected artifact. Its real namespace
+    ;; is returned synchronously by an Eli reader, so an exported `then` is
+    ;; never mistaken for the module-loading Promise's completion callback.
+    (let* ((directory (await (mkdtemp (resolve (get context :directory) "javascript-export-namespace-"))))
+           (source (str "(import " (JSON/stringify (get (pathToFileURL (get artifact :path)) :href))
+             " :as selectedNamespace)\n(defun readSelectedNamespace () selectedNamespace)\n(export readSelectedNamespace)")))
+      (await (writeFile (resolve directory "compiler.mjs")
+        (compile-string source "original-javascript-export-namespace.eli")))
+      (let* ((reader (await (loadCompiler directory)))
+             (namespace (js-call reader :readSelectedNamespace))
+             (descriptor (js-object :hostModules (js-array (js-object :id "original-javascript-exports"
+               :specifier (get (pathToFileURL (get artifact :path)) :href)
+               :referrer "compiler-corpus-execution.mjs" :allowedExports (js-array) :namespace t))))
+             (provided (js-object :hostModules (new globalThis.Map
+               (js-array (js-array "original-javascript-exports" namespace))))))
+        (await (loadManagedHostModules descriptor provided)))))
+  (defasync execute-javascript-exports (context artifact contract evidence)
+    (let* ((modules (resolve (get artifact :path) ".." "node_modules"))
+           (observations (js-array)))
+      (await (mkdir modules (js-object :recursive t)))
+      (try (await (symlink (resolve (get context :sourceRoot)) (join modules "eliscript") "dir"))
+        (catch error (unless (= (get error :code) "EEXIST") (throw error))))
+      (export-stage evidence "javascript-import")
+      (let* ((loaded (await (load-javascript-export-modules context artifact)))
+            (module (js-call loaded :get "original-javascript-exports"))
+            (values (Object/entries (fallback (get contract :values) (js-object))))
+            (calls (fallback (get contract :calls) (js-array))) (index 0))
+        (while (< index (js-length values))
+          (let* ((pair (aref values index)) (name (aref pair 0)) (value (get module name)))
+            (js-call assert :deepStrictEqual value (aref pair 1))
+            (js-call observations :push (js-object :name name :value (value-record value))))
+          (setq index (1+ index)))
+        (setq index 0)
+        (put evidence :completedCalls 0)
+        (while (< index (js-length calls))
+          (let* ((call (aref calls index)) (value undefined) (error undefined) (failed false))
+            (put evidence :callIndex index) (put evidence :callName (get call :name))
+            (export-stage evidence "javascript-call")
+            (try (setq value (await (Reflect/apply
+                    (get module (fallback (get call :javascriptName) (get call :name)))
+                    module (get call :args))))
+              (catch caught (setq failed t error caught)))
+            (if (not (undefined? (get call :error)))
+              (progn
+                (js-call assert :ok failed "original exported call must throw")
+                (js-call assert :strictEqual (field error "message") (get call :error))
+                (js-call observations :push (js-object :name (get call :name) :error (get call :error))))
+              (progn
+                (when failed (throw error))
+                (js-call assert :deepStrictEqual value (get call :expected))
+                (js-call observations :push (js-object :name (get call :name) :value (value-record value)))))
+            (put evidence :completedCalls (1+ index)))
+          (setq index (1+ index)))) observations))
   (defasync executeIsolatedCompilerCorpusExports (input)
     (let ((evidence (js-object))
           (context (js-object :sourceRoot (get input :sourceRoot) :options (get input :options))))
       (try
-        (let ((value (await (execute-local-exports context (get input :artifact) (get input :contract)
+        (let ((value (await (execute-target-exports context (get input :artifact) (get input :contract)
                         (get input :resources) evidence))))
           (js-object :failed false :value value :evidence evidence))
         (catch error
@@ -1384,7 +1503,7 @@
       (let* ((command (fallback (get options :node) "node"))
              (host (resolve source-root "tools/backends/compiler-unicode-profile-host.mjs"))
              (stdout (await (seed-child-output command
-               (js-array host (resolve (get artifact :path)) profile-path) source-root (get context :signal))))
+               (js-array host (resolve (get artifact :path)) profile-path) source-root (get context :signal) directory context)))
              (observation (JSON/parse stdout)))
         (js-call assert :deepStrictEqual observation (js-object :kind "unicode-profile" :expectedSatisfied t
           :version (get profile :version) :checked 1112064 :sigmaCases (js-length (get profile :sigma))
@@ -1449,8 +1568,74 @@
             (copy context (js-object :record (copy record
               (js-object :execution (copy execution (js-object :hostSource projected)))))))))))
 
+  (defasync prepareOriginalToolsDataReferenceContext (context)
+    (let* ((record (get context :record)) (id (field record "id"))
+           (ids (js-array "original-tools-artifact:compiler-session-tools:node"
+                  "original-tools-artifact:compiler-session-tools:bun"
+                  "original-managed:compiler-session-tools:node"
+                  "original-managed:compiler-session-tools:bun")))
+      (if (or (Object/hasOwn context "failure") (/= (get context :target) "javascript")
+              (not (js-call ids :includes id))) context
+        (let* ((execution (get record :execution)) (original (get record :original))
+               (declaration (get original :toolsDataReferenceTransport))
+               (assets (field declaration "sourceAssets"))
+               (host (get execution :hostSource)) (source-root (get context :sourceRoot))
+               (cli (field (get context :transportEvidence) "originalToolsCLI"))
+               (original-host (if cli
+                 (js-call host :replace (get cli :after) (get cli :before)) host))
+               (files (js-array "tools/backends/eliscript/compiler-corpus-tools-reference.eli"
+                        "tools/backends/compiler-corpus-tools-reference.mjs"
+                        "runtime/unicode-case.eli" "runtime/unicode-case.mjs"
+                        "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs"))
+               (seen (new globalThis.Set)) (index 0))
+          (unless (and (= (get execution :kind) "compiler-session-program")
+                       (= (get original :suite) "tests/compiler-session-tools.test.mjs")
+                       (= (field declaration "kind") "original-tools-data-reference")
+                       (= (field declaration "version") 1)
+                       (= (value-type host) "string")
+                       (= (execution-digest original-host) (field declaration "hostSha256"))
+                       (or (not cli) (= (execution-digest host) (get cli :transportHostSha256)))
+                       (Array/isArray assets) (= (js-length assets) (js-length files))
+                       (Array/isArray (get context :sourceAssets)))
+            (throw (new globalThis.TypeError "original tools data reference requires its unchanged authenticated host")))
+          (while (< index (js-length assets))
+            (let* ((proof (aref assets index)) (file (get proof :file))
+                   (archive (js-call (get context :sourceAssets) :find (lambda (item) (= (get item :file) file))))
+                   (bytes (await (readFile (resolve source-root file)))))
+              (unless (and (js-call files :includes file) (not (js-call seen :has file)) archive
+                           (= (get proof :sourceSha256) (execution-digest bytes))
+                           (= (get archive :sha256) (execution-digest bytes))
+                           (= (get archive :encoding) "base64") (= (get archive :bytes) (js-length bytes))
+                           (= (get archive :content) (js-call bytes :toString "base64"))
+                           (= (await (realpath (resolve source-root file))) (resolve (await (realpath source-root)) file)))
+                (throw (new globalThis.TypeError "original tools data reference source archive differs")))
+              (js-call seen :add file))
+            (setq index (1+ index)))
+          (let* ((tokens (seed-host-tokens host)) (matches (js-call tokens :filter
+                           (lambda (token) (= (seed-host-string token) "node:child_process"))))
+                 (token (aref matches 0)) (before (field token "text"))
+                 (module-file "tools/backends/compiler-corpus-tools-reference.mjs")
+                 (after (JSON/stringify (get (pathToFileURL (resolve source-root module-file)) :href))))
+            (unless (and (= (js-length matches) 1) (= (js-call host :indexOf before (1+ (js-call host :indexOf before))) -1))
+              (throw (new globalThis.TypeError "original tools child-process import changed")))
+            (let* ((projected (js-call host :replace before after)) (artifact (get context :artifact))
+                   (directory (fallback (get artifact :directory) (resolve (get artifact :path) "..")))
+                   (proof (js-object :kind "original-tools-data-reference" :version 1 :recordId id
+                     :sourceRoot source-root :configurationPath (resolve directory "__eliscript_original_compiler_session.json")
+                     :sourceAssets assets :moduleFile module-file :runtimeFile "runtime/unicode-case.mjs"
+                     :runtimeSha256 (execution-digest (await (readFile (resolve source-root "runtime/unicode-case.mjs"))))
+                     :originalHostSource original-host :originalHostSha256 (execution-digest original-host)
+                     :transportHostSha256 (execution-digest projected)
+                     :importSites (js-array "compile" "aggregate-error" "edit-preview"))))
+              (await (saveCompilerMetadata (resolve directory "__eliscript_tools_data_reference.json") proof))
+              (when (get context :transportEvidence)
+                (put (get context :transportEvidence) :originalToolsDataReference proof))
+              (copy context (js-object :record (copy record
+                (js-object :execution (copy execution (js-object :hostSource projected))))))))))))
+
   (defasync execute-compiler-corpus-record (context)
     (setq context (await (prepareOriginalToolsCLIContext context)))
+    (setq context (await (prepareOriginalToolsDataReferenceContext context)))
     (let* ((record (field (Object/getOwnPropertyDescriptor context "record") "value"))
            (execution (and record (field (Object/getOwnPropertyDescriptor record "execution") "value"))))
       ;; No marker means no added await, artifact access or caller getter read.
@@ -1478,7 +1663,13 @@
       (if (and (not (Object/hasOwn context "failure")) (= (get context :target) "javascript")
                (= (field (get (get context :record) :execution) "kind") "unicode-profile"))
         (await (execute-js-unicode-profile context))
-        (await (js-call legacy :executeCompilerCorpusRecord context)))
+        (let ((kind (field (get (get context :record) :execution) "kind")))
+          (cond
+            ((and (not (Object/hasOwn context "failure")) (= kind "original-program"))
+              (await (executeOriginalProgram context)))
+            ((and (not (Object/hasOwn context "failure")) (= kind "compiler-session-program"))
+              (await (executeCompilerSessionProgram context)))
+            (t (await (js-call legacy :executeCompilerCorpusRecord context))))))
       (let* ((record (get context :record)) (options (fallback (get context :options) (js-object)))
              (resources (independentCompilerResources options)) (configured (copy context (js-object :options options)))
              (results (new globalThis.Map)) (products (new globalThis.Map)) (observations (js-array))
@@ -1525,6 +1716,7 @@
         (unless (undefined? acceptance) (setq observation (copy observation acceptance)))
         (if (undefined? provider) observation
           (copy observation (js-object :nativeProviderIdentity provider))))))
-  (export resolveOriginalCorpusRequest originalProgramArguments createOriginalSeedOracle executeCompilerCorpusRecord
-    executeIsolatedCompilerCorpusExports compilerCorpusRuntimeAcceptance prepareCompilerCorpusRuntimeContext prepareOriginalToolsCLIContext prepareCompilerCorpusNativeProviders prepareCompilerCorpusSourceMapContext
-    prepareOriginalProgramProcessLifetime compareCompilerCorpusObservation))
+  (defconst prepareOriginalSeedCorpusRecord seed-authenticated-record)
+  (export prepareOriginalSeedCorpusRecord resolveOriginalCorpusRequest originalProgramArguments createOriginalSeedOracle executeCompilerCorpusRecord
+    executeIsolatedCompilerCorpusExports decodeCompilerCorpusObservation compilerCorpusRuntimeAcceptance prepareCompilerCorpusRuntimeContext prepareOriginalToolsCLIContext prepareCompilerCorpusNativeProviders prepareCompilerCorpusSourceMapContext
+    prepareOriginalProgramProcessLifetime prepareOriginalToolsDataReferenceContext compareCompilerCorpusObservation))

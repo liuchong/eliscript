@@ -1,0 +1,77 @@
+(module tools.backends.compiler-corpus-bit
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "./build.mjs" root)
+  (import "./compiler-corpus-legacy.mjs" createOriginalCorpusSourceReader)
+  (defconst id "original-program:compiler-stdlib-bit-complete")
+  (defconst suite "tests/stdlib-bit.test.mjs")
+  (defconst suite-sha "c550405d71455b5ce694c929b63b6a0843ea637f5b35ccf221afd5780ce16771")
+  (defconst files (js-array
+    "tools/backends/eliscript/compiler-corpus-bit.eli" "tools/backends/compiler-corpus-bit.mjs"
+    "tests/stdlib-bit.test.mjs" "tests/eliscript/stdlib-bit.eli" "tests/stdlib-bit-selfhosted.test.mjs"
+    "tools/testing/stdlib-bit.eli" "tools/testing/stdlib-bit.mjs"
+    "tools/testing/stdlib-bit-corpus-host.eli" "tools/testing/stdlib-bit-corpus-host.mjs"
+    "tests/helpers/seed-compiler.mjs" "tools/backends/build.mjs" "package.json"
+    "stdlib/bit.eli" "tests/fixtures/bit-usage.eli" "tests/fixtures/bit-host.mjs"
+    "runtime/math.eli" "runtime/math.mjs" "runtime/math.mjs.map"
+    "runtime/unicode-case.eli" "runtime/unicode-case.mjs" "runtime/unicode-case.mjs.map"
+    "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs" "runtime/unicode-case-data.mjs.map"))
+  (defun hash (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
+  (defun fail (message) (throw (new globalThis.TypeError message)))
+  (defasync transportOriginalStdlibBitCorpus (document options)
+    (let ((records (js-call (get document :records) :filter (lambda (record) (= (get record :id) id)))))
+      (when (> (js-length records) 0)
+        (unless (= (js-length records) 1) (fail "original complete bit record must be unique"))
+        (let* ((record (aref records 0)) (original (get record :original)) (execution (get record :execution))
+               (reader (createOriginalCorpusSourceReader (js-object :sourceRoot (get options :sourceRoot root))))
+               (source (await (js-call reader :text suite))) (proofs (js-array)) (index 0))
+          (unless (and (= (hash source) suite-sha) (= (get original :sourceSha256) suite-sha)
+                       (= (get original :suite) suite) (= (get original :fixture) suite) (= (get original :host) suite)
+                       (= (get execution :kind) "original-program") (= (get execution :timeoutMs) 30000)
+                       (= (get execution :requiresBun) t) (= (get execution :hostRuntime) "bun")
+                       (= (get execution :referenceArtifact) t)
+                       (= (get execution :host) "tests/__eliscript_original_stdlib-bit_complete.mjs")
+                       (= (get (get execution :setupReplacement) :kind) "selected-and-independent-reference-compiler-directories")
+                       (= (JSON/stringify (get (get execution :setupReplacement) :originalCaseTimeouts)) "[30000]"))
+            (fail "original complete bit source identity or execution contract changed"))
+          (unless (and (Array/isArray (get original :regions)) (= (js-length (get original :regions)) 1))
+            (fail "original complete bit assertion region changed"))
+          (let ((region (aref (get original :regions) 0)))
+            (unless (and (= (get region :start) 0) (= (get region :end) (js-length source))
+                         (= (get region :byteStart) 0) (= (get region :byteEnd) (js-call Buffer :byteLength source))
+                         (= (get region :sha256) suite-sha))
+              (fail "original complete bit assertion region changed")))
+          (while (< index (js-length files))
+            (let* ((filename (aref files index)) (asset (await (js-call reader :file filename)))
+                   (previous (js-call (get document :evidence) :find (lambda (item) (= (get item :file) filename)))))
+              (when previous
+                (unless (and (= (get previous :sha256) (get asset :sha256)) (= (get previous :bytes) (get asset :bytes))
+                             (= (get previous :encoding) (get asset :encoding)) (= (get previous :content) (get asset :content)))
+                  (fail (str "original complete bit asset identity changed: " filename))))
+              (unless previous (js-call (get document :evidence) :push asset))
+              (js-call proofs :push (js-object :file filename :sourceSha256 (get asset :sha256))))
+            (setq index (1+ index)))
+          (let* ((host-file "tools/testing/stdlib-bit-corpus-host.mjs") (host (await (js-call reader :text host-file)))
+                 (assets (js-call (get original :sourceAssets (js-array)) :slice)))
+            (js-call proofs :forEach (lambda (proof)
+              (let ((previous (js-call assets :find (lambda (item) (= (get item :file) (get proof :file))))))
+                (when (and previous (/= (get previous :sourceSha256) (get proof :sourceSha256)))
+                  (fail "original complete bit maintained proof changed"))
+                (unless previous (js-call assets :push proof)))))
+            (let ((forwarded (Object/assign (js-object) execution (js-object :host host-file))))
+              (Reflect/deleteProperty forwarded "hostSource")
+              (put record :execution forwarded))
+            (put record :original (Object/assign (js-object) original
+              (js-object :sourceAssets assets
+                :assertionSource (js-object :file suite :sourceSha256 suite-sha :regions (get original :regions))
+                :maintainedAssertions (js-object :sourceFile "tools/testing/stdlib-bit.eli"
+                  :sourceSha256 (get (js-call proofs :find (lambda (proof) (= (get proof :file) "tools/testing/stdlib-bit.eli"))) :sourceSha256)
+                  :generatedFile "tools/testing/stdlib-bit.mjs"
+                  :generatedSha256 (get (js-call proofs :find (lambda (proof) (= (get proof :file) "tools/testing/stdlib-bit.mjs"))) :sourceSha256))
+                :maintainedTransport
+                (js-object :kind "maintained-eli-complete-stdlib-bit" :version 1 :logicalSuite suite
+                  :originalSourceSha256 suite-sha :sourceFile "tools/testing/stdlib-bit-corpus-host.eli"
+                  :generatedFile host-file :generatedSha256 (hash host) :originalTimeoutMs 30000
+                  :hosts (js-array "bun" "node") :compilerCount 2 :hostExecutions 4 :fallback false)))))))
+      document))
+  (export transportOriginalStdlibBitCorpus))

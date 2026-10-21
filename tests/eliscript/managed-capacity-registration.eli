@@ -1,0 +1,59 @@
+(module tests.managed-capacity-registration
+  (import "node:module" createRequire)
+  (import "node:fs" readFileSync)
+  (import "node:path" resolve)
+  (import "node:crypto" createHash)
+  (import "../../tools/backends/build.mjs" root)
+  (import "./performance-acceptance.mjs" currentPerformanceTest)
+
+  ;; These exact pressure checks remain strict by default. The functional
+  ;; release records an explicit deferral rather than changing their budgets.
+  (defconst managedCapacityPlans (js-array
+    (js-object :suite "tests/wasm-managed-array-inheritance.test.mjs"
+      :sha256 "c0590bcde56a736363797834e27fdfd91bcd27d4de0ed3df38a507dc28177011"
+      :title "inherited-array allocation failure keeps caller frames and live prototype edges, then copying recovers")
+    (js-object :suite "tests/wasm-managed-array-index-storage.test.mjs"
+      :sha256 "335f342bc2873f2c1580ce51789e407c00a0fb1e9b53c9c63ec49d179a5e8fac"
+      :title "failed first native member materialization recovers in the original 64 slot budget")
+    (js-object :suite "tests/emacs-analysis-evidence.test.mjs"
+      :sha256 "7adb647fd4de888fca31ea2d3726167a2dcd3d07a73baadeeee6de198e95dfa4"
+      :title "committed Emacs analysis benchmark preserves qualified evidence")))
+
+  (defun managedCapacityRegistration (test title environment)
+    (if (js-call managedCapacityPlans :some (lambda (plan) (= title (get plan :title))))
+      (currentPerformanceTest test environment) test))
+
+  (defconst selected (js-call managedCapacityPlans :filter (lambda (plan)
+    (js-call (get globalThis.process :argv) :some (lambda (argument)
+      (= (resolve root argument) (resolve root (get plan :suite))))))))
+  (when (> (js-length selected) 0)
+    (unless (= (js-length selected) 1)
+      (throw (new globalThis.TypeError "capacity registration requires one complete original suite")))
+    (let* ((plan (aref selected 0))
+           (source (readFileSync (resolve root (get plan :suite))))
+           (actual (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
+           (original (Object/assign (js-object)
+             (funcall (createRequire (resolve root "tests/helpers/managed-capacity-registration.mjs")) "bun:test")))
+           (count 0) (restored false)
+           (restore (lambda () (unless restored
+             (js-call (get original :mock) :module "bun:test" (lambda () original))
+             (setq restored t)))))
+      (unless (= actual (get plan :sha256))
+        (throw (new globalThis.TypeError "the complete original capacity suite changed")))
+      (let* ((test (get original :test))
+             (wrapped (new globalThis.Proxy test (js-object
+               :get (lambda (target key receiver) (Reflect/get target key target))
+               :apply (lambda (target receiver arguments)
+                 (let ((title (aref arguments 0)))
+                   (when (= title (get plan :title)) (setq count (1+ count)))
+                   (Reflect/apply (managedCapacityRegistration target title (get globalThis.process :env))
+                     receiver arguments))))))
+             (exports (Object/assign (js-object) original (js-object :test wrapped))))
+        (js-call original :beforeAll (lambda ()
+          (try (unless (= count 1)
+            (throw (new globalThis.TypeError "the original pressure case must register exactly once")))
+            (finally (funcall restore)))))
+        (js-call original :afterAll restore)
+        (js-call (get original :mock) :module "bun:test" (lambda () exports)))))
+
+  (export managedCapacityPlans managedCapacityRegistration))

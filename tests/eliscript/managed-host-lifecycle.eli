@@ -5,10 +5,9 @@
   (import "node:path" resolve)
   (import "node:os" tmpdir)
   (import "../tools/backends/build.mjs" root buildBackends)
-  (import "../tools/backends/managed-host-legacy.mjs" :as legacy)
   (import "../tools/backends/managed-host-lifecycle.mjs" createManagedHostRuntimeWithLifecycle)
   (import "../tools/backends/managed-module-graph.mjs" createManagedModuleGraph)
-  (import "../tools/backends/managed-host.mjs" createManagedHostCapabilityBridge)
+  (import "../tools/backends/managed-host.mjs" createManagedHostCapabilityBridge createManagedHostRuntime)
   (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
 
   ;; This small ABI model proves only notification lifetime/error ordering.
@@ -285,7 +284,7 @@
                  (setq creator-called t)
                  (js-call assert :notStrictEqual received exports "the actual exports must enter the lifecycle bridge rather than its compatibility fallback")
                  (js-call assert :notStrictEqual (get received "__eliscript_project_prepare") (get exports "__eliscript_project_prepare"))
-                 (Reflect/apply (get legacy :createManagedHostRuntime) undefined
+                 (Reflect/apply createManagedHostRuntime undefined
                    (js-call (js-array received description owned-memory) :concat tail))))
                (runtime (createManagedHostRuntimeWithLifecycle creator exports descriptor memory
                           (js-array options lifecycle))))

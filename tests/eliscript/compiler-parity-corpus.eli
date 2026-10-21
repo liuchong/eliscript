@@ -1,0 +1,41 @@
+(module tests.compiler-parity-corpus
+  (import "bun:test" expect test)
+  (import "node:fs/promises" readFile)
+  (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/parity/check.mjs" checkCompilerParityCorpus CompilerParityCorpusError validateCompilerParityCorpus)
+  (defasync contract ()
+    (JSON/parse (await (readFile (resolve root "contracts/compiler-parity-corpus.json") "utf8"))))
+  (defasync validation-errors (value)
+    (try
+      (await (validateCompilerParityCorpus value (js-object :root root)))
+      (throw (new globalThis.Error "expected compiler parity corpus validation to fail"))
+      (catch error
+        (js-call (expect error) :toBeInstanceOf CompilerParityCorpusError)
+        (get error :errors))))
+  (test "complete compiler parity corpus closes every local parity dimension"
+    (async ()
+      (js-call (expect (await (checkCompilerParityCorpus (js-object :root root)))) :toEqual
+        (js-object :schemaVersion 1 :stableFeatures 71 :fixtures 4 :validCases 122
+          :diagnosticCases 110 :bootstrapSources 13 :irKinds 58 :dimensions 7
+          :evidence 11 :sourceFiles 153
+          :identity (js-call expect :stringMatching (new globalThis.RegExp "^[0-9a-f]{64}$" "u"))))))
+  (test "compiler parity corpus rejects omitted features and dimensions"
+    (async ()
+      (let ((value (await (contract))))
+        (js-call (get value :featureIds) :pop)
+        (js-call (get value :dimensions) :pop)
+        (let ((errors (await (validation-errors value))))
+          (js-call (expect errors) :toContain "featureIds must match every stable compiler-relevant conformance feature")
+          (js-call (expect errors) :toContain "dimensions must contain the exact seven compiler parity boundaries")
+          (js-call (expect errors) :toContain "dimension project-graphs must contain executable evidence")))))
+  (test "compiler parity corpus rejects fixture source and evidence drift"
+    (async ()
+      (let* ((value (await (contract))) (fixture (aref (get value :fixtures) 0)))
+        (put fixture :valid (1+ (get fixture :valid)))
+        (put (aref (get (aref (get value :dimensions) 0) :evidence) 0) :contains "missing parity test")
+        (let ((errors (await (validation-errors value))))
+          (js-call (expect errors) :toContain "fixture reader counts must match its source file")
+          (js-call (expect errors) :toContain "dimension acceptance evidence 0 locator is absent from tests/bootstrap-reader.test.mjs")
+          (js-call (expect errors) :toContain "identity must bind the complete parity inventory and source files")))))
+)

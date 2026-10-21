@@ -1,0 +1,14 @@
+(module tools.testing.array-text-fixture
+  (import "node:crypto" createHash)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (defun arrayTextMeasuredSource (root source)
+    (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex")
+               "06bf5e24ab43d0d9b65f242dd0ba47524d30f39b327a95ac9a0ced3d73675a4c")
+      (throw (new globalThis.TypeError "original measured array text source identity changed")))
+    ;; The original suite makes a data URL from this source. Preserve its
+    ;; complete algorithm and measurement edits, supplying only the real
+    ;; dependency coordinate that a data URL cannot resolve relatively.
+    (js-call source :replace "'./number-radix.mjs'"
+      (JSON/stringify (get (pathToFileURL (resolve root "runtime/number-radix.mjs")) :href))))
+  (export arrayTextMeasuredSource))

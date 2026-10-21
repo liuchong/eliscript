@@ -3,24 +3,90 @@
   ;; original capability codec, not a reflection alias or cloned intrinsic.
   (defconst ObjectConstructor globalThis.Object)
   (defconst ObjectPrototype (get globalThis.Object :prototype))
+  (defconst ArrayConstructor globalThis.Array)
+  (defconst ArrayPrototype (get globalThis.Array :prototype))
   (defconst function-source (get (get globalThis.Function :prototype) :toString))
   (defconst apply-function (get globalThis.Reflect :apply))
   (defconst own-descriptor (get globalThis.Reflect :getOwnPropertyDescriptor))
   (defconst object-intrinsics
-    (js-call (js-array "freeze" "hasOwn" "defineProperty") :map (lambda (name)
+    (let ((methods (js-call (js-array "freeze" "isFrozen" "hasOwn" "getOwnPropertyDescriptor" "defineProperty" "defineProperties" "create" "getPrototypeOf") :map (lambda (name)
       (let* ((entry (Object/getOwnPropertyDescriptor ObjectConstructor name)) (method (get entry :value)))
-        ;; A caller replacement or Proxy around a native function is not the
-        ;; captured native method. In uncertain host formats keep the ordinary
-        ;; capability path instead of claiming an intrinsic implementation.
+        ;; Modern hosts format native-function whitespace differently. Match
+        ;; the complete named native syntax, not one engine's pretty printing.
+        ;; User bodies and anonymous Proxy source still fail authentication.
         (when (and (= (value-type method) "function")
-                   (= (funcall apply-function function-source method (js-array))
-                      (+ "function " name "() { [native code] }")))
-          (js-object :name name :method method))))))
+                   (js-call (new globalThis.RegExp
+                     (+ "^function\\s+" name "\\s*\\(\\s*\\)\\s*\\{\\s*\\[native code\\]\\s*\\}$"))
+                     :test (funcall apply-function function-source method (js-array))))
+          (js-object :name name :method method)))))))
+      (when (authentic-native-method ObjectConstructor "Object")
+        (js-call methods :push (js-object :name "object-constructor" :method ObjectConstructor
+          :runtime "value-native-constructor-call" :operation 76 :constructObject t)))
+      methods))
+  (defun authentic-native-method (method name)
+    (and (= (value-type method) "function")
+      (js-call (new globalThis.RegExp
+        (+ "^function\\s+" name "\\s*\\(\\s*\\)\\s*\\{\\s*\\[native code\\]\\s*\\}$"))
+        :test (funcall apply-function function-source method (js-array)))))
+  (defconst array-intrinsics
+    (let ((methods (js-array)) (values undefined))
+      (when (authentic-native-method ArrayConstructor "Array")
+        (js-call methods :push (js-object :name "array-constructor" :method ArrayConstructor
+          :runtime "value-native-constructor-call" :operation 75 :constructArray t)))
+      (let* ((entry (Object/getOwnPropertyDescriptor ArrayConstructor "isArray"))
+             (method (when entry (get entry :value))))
+        (when (authentic-native-method method "isArray")
+          (js-call methods :push (js-object :name "array-isArray" :method method
+            :runtime "value-builtin-primitive" :operation 5))))
+      (js-call (js-array (js-array "slice" 202) (js-array "values" 225)
+                        (js-array "keys" 224) (js-array "entries" 223)) :forEach
+        (lambda (specification)
+          (let* ((name (aref specification 0))
+                 (entry (Object/getOwnPropertyDescriptor ArrayPrototype name))
+                 (method (when entry (get entry :value))))
+            (when (authentic-native-method method name)
+              (js-call methods :push (js-object :name (+ "array-" name) :method method
+                :runtime "value-array-prototype-call" :operation (aref specification 1)))
+              (when (= name "values") (setq values method))))))
+      ;; Never invoke an unverified replacement merely to discover an iterator.
+      (when values
+        (let* ((iterator (funcall apply-function values (js-array) (js-array)))
+               (prototype (Object/getPrototypeOf iterator))
+               (entry (Object/getOwnPropertyDescriptor prototype "next"))
+               (method (when entry (get entry :value))))
+          (when (authentic-native-method method "next")
+            (js-call methods :push (js-object :name "array-iterator-next" :method method
+              :runtime "value-collection-prototype-iterator-builtin" :operation 328)))))
+      methods))
+  (defconst reflect-intrinsics
+    (let ((methods (js-array)))
+      ;; Use the same operation order as value-reflect-builtin. Capturing the
+      ;; real function does not replace the public Reflect namespace or accept
+      ;; user replacements and callable Proxies as native implementations.
+      (js-call (js-array (js-array "get" 2) (js-array "set" 3)
+        (js-array "getPrototypeOf" 1) (js-array "setPrototypeOf" 2)
+        (js-array "ownKeys" 1) (js-array "getOwnPropertyDescriptor" 2)
+        (js-array "defineProperty" 3) (js-array "deleteProperty" 2)
+        (js-array "has" 2) (js-array "isExtensible" 1)
+        (js-array "preventExtensions" 1) (js-array "apply" 3) (js-array "construct" 2))
+        :forEach (lambda (specification operation)
+          (let* ((name (aref specification 0))
+                 (entry (Object/getOwnPropertyDescriptor globalThis.Reflect name))
+                 (method (when entry (get entry :value))))
+            (when (authentic-native-method method name)
+              (js-call methods :push (js-object :name (str "reflect-" name) :method method
+                :runtime "value-reflect-builtin" :operation operation :minimumArity (aref specification 1)))))))
+      methods))
   (defun readHostObjectConstructor () ObjectConstructor)
   (defun readHostObjectPrototype () ObjectPrototype)
+  (defun readHostArrayConstructor () ArrayConstructor)
+  (defun readHostArrayPrototype () ArrayPrototype)
   (defun readHostObjectIntrinsics () object-intrinsics)
+  (defun readHostArrayIntrinsics () array-intrinsics)
+  (defun readHostReflectIntrinsics () reflect-intrinsics)
   (defun hostObjectDescriptorPrototypeClear ()
     (js-call (js-array "enumerable" "configurable" "value" "writable" "get" "set") :every
       (lambda (name) (undefined? (funcall own-descriptor ObjectPrototype name)))))
   (export ObjectConstructor ObjectPrototype readHostObjectConstructor readHostObjectPrototype readHostObjectIntrinsics
-    hostObjectDescriptorPrototypeClear))
+    hostObjectDescriptorPrototypeClear readHostArrayConstructor readHostArrayPrototype readHostArrayIntrinsics
+    readHostReflectIntrinsics))

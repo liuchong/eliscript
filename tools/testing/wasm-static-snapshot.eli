@@ -1,0 +1,29 @@
+(module tools.testing.wasm-static-snapshot
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "../backends/build.mjs" root)
+  (import "../compiler/controlled-baseline.mjs" definition)
+  (defconst original-names (js-array "require-memory-data-copy" "require-wasm-expression-node" "copy-wasm-expression-node"
+    "same-wasm-expression-snapshot" "intern-wasm-expression" "copy-wasm-expression"
+    "make-wasm-validation-workspace" "validate-fresh-wasm-expression" "validate-fresh-typed-wasm-program"))
+  (defun staticSnapshotSource (source numeric-url dependencies)
+    (let* ((names (if dependencies (js-call original-names :concat
+                     (js-array "memory-f64-unary-opcode" "require-memory-f64-unary")) original-names))
+           (forms (js-call names :map (lambda (name) (definition source (str name " "))))))
+      (str "(module wasm.snapshot\n(import " (JSON/stringify numeric-url) " backend-fail)\n"
+        (js-call forms :join "\n")
+        "\n(export copy-wasm-expression make-wasm-validation-workspace validate-fresh-wasm-expression validate-fresh-typed-wasm-program))")))
+  (defun adaptStaticSnapshotCompiler (compiler directory)
+    (let* ((source (readFileSync (resolve root "bootstrap/backends/wasm.eli") "utf8"))
+           (numeric-url (get (pathToFileURL (resolve directory "backends/numeric.mjs")) :href)))
+      (Object/assign (js-object) compiler (js-object :compile_string
+        (lambda (&rest arguments)
+          (when (= (aref arguments 1) "wasm-snapshot.eli")
+            ;; Authenticate the original whole fixture before adding only its
+            ;; actual production dependencies. No JS source is rewritten.
+            (js-call assert :strictEqual (aref arguments 0) (staticSnapshotSource source numeric-url false))
+            (put arguments 0 (staticSnapshotSource source numeric-url t)))
+          (Reflect/apply (get compiler :compile_string) compiler arguments))))))
+  (export staticSnapshotSource adaptStaticSnapshotCompiler))

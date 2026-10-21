@@ -1,0 +1,1 @@
+(defun hooked (kind) (let ((key (if (= kind 0) (new (js* "Map")) (if (= kind 1) (new (js* "Set")) (js-call (js-array) :values))))) (put key :toString (lambda () "x")) (Object/hasOwn (js-object :x 1) key))) (export hooked)

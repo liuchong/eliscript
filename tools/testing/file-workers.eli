@@ -2,11 +2,13 @@
   (import "node:path" basename resolve)
   (import "node:fs/promises" mkdir writeFile)
   (import "./resource-supervisor.mjs" startResourceSupervisor)
+  (import "./fixture-environment.mjs" fixtureChildArguments)
 
   ;; Each original file still runs in a fresh process under the same real RSS
   ;; supervisor. Only two confirmed Bun loader failures opt out of smol mode.
   (defconst FILE_WORKERS 2)
   (defconst exclusive-files (new globalThis.Set (js-array
+    "docs-site.test.mjs" "pages-assembly.test.mjs"
     "wasm-compiler-ir-lower.test.mjs" "wasm-managed-array-sort.test.mjs"
     "native-compiler-modules.test.mjs" "bootstrap-compiler.test.mjs"
     "wasm-compiler-analyzer.test.mjs" "wasm-compiler-emitter.test.mjs"
@@ -26,8 +28,18 @@
       (or (js-call exclusive-files :has name) (js-call exclusive-pattern :test name)
           (js-call prefix-pattern :test name))))
   (defun worker-test-arguments (file)
-    (if (js-call standard-bun-files :has (basename file)) (js-array "test" file)
-      (js-array "--smol" "test" file)))
+    (if (js-call standard-bun-files :has (basename file)) (js-array "test" "--timeout" "300000" file)
+      (js-array "--smol" "test" "--timeout" "300000" file)))
+  (defun node-test-plan (file source-root)
+    (let ((actual (resolve source-root file)))
+      (cond
+        ((= actual (resolve source-root "tests/wasm-managed-number-text.test.mjs"))
+          (js-object :install "tests/helpers/number-text-node-install.mjs" :entry file))
+        ((= actual (resolve source-root "tests/wasm-memory-static-data.test.mjs"))
+          (js-object :install "tests/helpers/portable-node-install.mjs" :entry "./tests/wasm-memory-static-data-test-legacy.mjs"))
+        ((= actual (resolve source-root "tests/compiler-portable-guards.test.mjs"))
+          (js-object :install "tests/helpers/portable-node-install.mjs" :entry file))
+        (t nil))))
   (defun validate-files (files)
     (unless (and (Array/isArray files) (> (js-length files) 0)
                  (not (js-call files :some (lambda (file)
@@ -69,9 +81,12 @@
           (js-object :files files :shard (js-object
             :index (js-call options :get "--shard-index") :count (js-call options :get "--shard-count")))))))
 
-  (defasync scheduleTestFiles (files supervisor)
+  (defasync scheduleTestFiles (files supervisor &rest configuration)
     (validate-files files)
-    (let* ((results (js-array)) (cursor 0) (signal-code 0)
+    (let* ((options (if (> (js-length configuration) 0) (aref configuration 0) (js-object)))
+           (environment (get options :environment (get globalThis.process :env)))
+           (source-root (get options :sourceRoot (js-call globalThis.process :cwd)))
+           (results (js-array)) (cursor 0) (signal-code 0)
            (cancel (lambda (code)
              (setq signal-code code) (js-call supervisor :cancel (if (= code 130) "SIGINT" "SIGTERM"))))
            (interrupt (lambda () (funcall cancel 130)))
@@ -80,12 +95,17 @@
       (js-call globalThis.process :on "SIGTERM" terminate)
       (try
         (let ((run-file (async (index)
-          (let ((file (aref files index)))
+          (let* ((file (aref files index)) (node-plan (node-test-plan file source-root)))
             (try
               (let* ((result (await (js-call supervisor :run (js-object
-                        :id (funcall globalThis.String index) :file file :command (get globalThis.process :execPath)
-                        :args (worker-test-arguments file) :cwd (js-call globalThis.process :cwd)
-                        :env (get globalThis.process :env)))))
+                        :id (funcall globalThis.String index) :file file
+                        :command (if node-plan
+                                   (get environment :NODE "node") (get globalThis.process :execPath))
+                        :args (if node-plan
+                                (js-array "--import" (resolve source-root "tools/testing/fixture-environment.mjs")
+                                  "--import" (resolve source-root (get node-plan :install)) "--test" (get node-plan :entry))
+                                (fixtureChildArguments (worker-test-arguments file) environment)) :cwd source-root
+                        :env environment))))
                      (row (js-object :file file :exitCode (get result :exitCode))))
                 (when (and (worker-truth (get result :failure)) (/= (get result :failure) "cancelled"))
                   (put row :failure (get result :failure)))
@@ -113,14 +133,15 @@
           (if (or (worker-truth (get supervisor :failure))
                   (js-call results :some (lambda (row) (/= (get row :exitCode) 0)))) 1 0)))))
 
-  (defasync runTestFiles (files)
+  (defasync runTestFiles (files &rest configuration)
     (validate-files files)
     (let ((archive (resolve ".eliscript-cache" "test-results"
                     (str "file-workers-" (Date/now) "-" (get globalThis.process :pid) ".json")))
           (supervisor undefined) (result undefined))
       (try
         (setq supervisor (await (startResourceSupervisor)))
-        (setq result (await (scheduleTestFiles files supervisor)))
+        (setq result (await (Reflect/apply scheduleTestFiles undefined
+          (js-call (js-array files supervisor) :concat configuration))))
         (catch error (setq result (js-object :results (js-array) :exitCode 1
           :failure "resource-supervisor-unavailable" :message (get error :message))))
         (finally (when (worker-truth supervisor) (await (js-call supervisor :close)))))

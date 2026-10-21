@@ -1,0 +1,36 @@
+(module tests.managed-primitive-own-repairs
+  (import "node:test" test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/testing/managed-primitive-own-repairs.mjs" transformOriginalPrimitiveRuntimeSuite)
+  (test "primitive runtime projections preserve complete suites and refuse changed source identity"
+    (lambda ()
+      (js-call (js-array "tests/wasm-managed-primitive-own-runtime.test.mjs"
+                        "tests/wasm-managed-operand-conversion.test.mjs") :forEach
+        (lambda (relative)
+          (let* ((source (readFileSync (resolve root relative) "utf8"))
+                 (projected (transformOriginalPrimitiveRuntimeSuite source relative)))
+            (js-call assert :strictEqual (js-length (js-call projected :split "test("))
+              (js-length (js-call source :split "test(")))
+            (js-call assert :throws (lambda () (transformOriginalPrimitiveRuntimeSuite (str source "\n") relative)))
+            (js-call assert :strictEqual (transformOriginalPrimitiveRuntimeSuite source relative) projected)
+            (if (= relative "tests/wasm-managed-primitive-own-runtime.test.mjs")
+              (progn
+                (js-call assert :ok (js-call projected :includes "(when (= value 2) (load-u32 4294967295))"))
+                (js-call assert :strictEqual (js-call projected :includes "(store-u32 20 1)") false)
+                (js-call assert :ok (js-call projected :includes "[0xffffffff, 3, 1]"))
+                (js-call assert :ok (js-call projected :includes "WebAssembly.RuntimeError")))
+              (progn
+                (js-call assert :ok (js-call projected :includes "Symbol.split"))
+                (js-call assert :ok (js-call projected :includes "toHostValue"))
+                (js-call assert :ok (js-call projected :includes "ELI-RT0003"))
+                (js-call assert :ok (js-call projected :includes "maxSlots:128,initialBytes:8192,maxBytes:65536"))
+                (js-call assert :ok (js-call projected :includes "operand setup byte budget"))
+                (js-call assert :ok (js-call projected :includes "8192"))
+                (js-call assert :ok (js-call projected :includes "frameDepth"))
+                (js-call assert :ok (js-call projected :includes "closeModule"))
+                (js-call assert :ok (js-call projected :includes "assert(held.length>0&&held.length<256)"))
+                (js-call assert :ok (js-call projected :includes "assert.equal(get(a,trace,'events'),'lvrv')")))))))
+      (js-call assert :throws (lambda () (transformOriginalPrimitiveRuntimeSuite "" "tests/unrelated.mjs"))))))

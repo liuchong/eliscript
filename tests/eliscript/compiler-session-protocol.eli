@@ -1,9 +1,15 @@
 (module tests.compiler-session-protocol
   (import "node:test" test)
   (import "node:assert/strict" :default assert)
-  (import "node:fs/promises" mkdtemp rm)
+  (import "node:fs/promises" mkdtemp rm readFile mkdir writeFile symlink)
+  (import "node:child_process" spawnSync)
+  (import "node:module" createRequire)
   (import "node:os" tmpdir)
   (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/backends/compiler-corpus-execution.mjs" executeCompilerCorpusRecord)
+  (import "../tools/backends/compiler-matrix.mjs" archiveProduct)
+  (import "../dist/bootstrap/compiler.mjs" compile-string)
   (import "../tools/backends/compiler-build.mjs" buildIndependentCompiler)
   (import "../tools/backends/compiler-bootstrap.mjs" openCompilerArtifact)
   (import "../dist/bootstrap/compiler.mjs" serialize-ir-program)
@@ -44,4 +50,147 @@
               (setq index (1+ index))))
           (finally
             (try (when session (await (js-call session :close)))
-              (finally (await (rm directory (js-object :recursive t :force t)))))))))))
+              (finally (await (rm directory (js-object :recursive t :force t))))))))))
+  (test "FIX31 declared host providers remain external plan dependencies and unknown relative imports still reject"
+    (async ()
+      (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-provider-plan-")))) (session nil))
+        (try
+          (setq session (await (openCompilerArtifact (await (buildIndependentCompiler
+            (js-object :host "javascript" :profile "full-compiler" :outputRoot directory))))))
+          (let* ((provider (js-object :id "runtime/core/vector.mjs" :filename "runtime/core/vector.eli"
+                   :source (compile-string "(defun identity (value) value) (export identity)" "provider.eli")))
+                 (request (js-object :operation "project-plan" :entry "main.mjs" :entries (js-array "main.mjs")
+                   :resolveImports t :hostSources (js-array provider)
+                   :modules (js-array (js-object :id "main.mjs" :filename "main.eli"
+                     :source "(import \"./runtime/core/vector.mjs\" identity) (defun main (value) (identity value)) (export main)"))))
+                 (before (JSON/stringify request))
+                 (plan (await (js-call session :request request))))
+            (js-call assert :deepStrictEqual (js-call (get plan :modules) :map (lambda (item) (get item :id)))
+              (js-array "main.mjs"))
+            (js-call assert :ok (js-call (get plan :external) :includes "runtime/core/vector.mjs"))
+            (js-call assert :strictEqual (JSON/stringify request) before)
+            (let ((missing (globalThis.structuredClone request)))
+              (put missing :hostSources (js-array))
+              (js-call assert :throws (lambda () (js-call session :request missing))))
+            (let ((collision (globalThis.structuredClone request)))
+              (put (aref (get collision :hostSources) 0) :id "main.mjs")
+              (js-call assert :throws (lambda () (js-call session :request collision))))
+            (let ((escape (globalThis.structuredClone request)))
+              (put (aref (get escape :modules) 0) :source "(import \"../runtime/core/vector.mjs\" identity)")
+              (js-call assert :throws (lambda () (js-call session :request escape))))
+            (js-call assert :deepStrictEqual (await (js-call session :request request)) plan))
+          (finally
+            (try (when session (await (js-call session :close)))
+              (finally (await (rm directory (js-object :recursive t :force t))))))))))
+
+  (test "FIX32 portable emission prunes build roots while ordinary selected-entry execution agrees with the Emacs compiler"
+    (async ()
+      (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-pruned-roots-")))) (session nil))
+        (try
+          (setq session (await (openCompilerArtifact (await (buildIndependentCompiler
+            (js-object :host "javascript" :profile "full-compiler" :outputRoot directory))))))
+          (await (js-call session :request (js-object :operation "runtime"
+            :source (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8"))
+            :filename "bootstrap/runtime/memory.eli")))
+          (let* ((modules (js-array
+                   (js-object :id "main.mjs" :filename "main.eli"
+                     :source "(defportable main (x) (+ x 1)) (export main)")
+                   (js-object :id "unused.mjs" :filename "unused.eli"
+                     :source "(defconst initialized 7) (export initialized)")))
+                 (request (js-object :operation "project" :entry "main.mjs"
+                   :entries (js-array "unused.mjs" "main.mjs") :portableEntries (js-array "main")
+                   :modules modules :resolveImports t :phased t))
+                 (plan (await (js-call session :request
+                   (Object/assign (js-object) request (js-object :operation "project-plan")))))
+                 (before (JSON/stringify request)))
+            (js-call assert :strictEqual (get plan :mode) "portable")
+            (js-call assert :deepStrictEqual (js-call (get plan :modules) :map (lambda (item) (get item :id)))
+              (js-array "main.mjs"))
+            (let ((targets (js-array "wasm" "native")) (index 0))
+              (while (< index (js-length targets))
+                (let* ((target (aref targets index))
+                       (product (await (js-call session :request (Object/assign (js-object) request
+                         (js-object :target target :nativeTarget "arm64-macos" :nativeFormat "library"))))))
+                  (js-call assert :strictEqual (get product :target) target)
+                  (js-call assert :ok (get product :descriptor)))
+                (setq index (1+ index))))
+            (js-call assert :strictEqual (JSON/stringify request) before)
+            (let ((ordinary (Object/assign (js-object) request
+                    (js-object :operation "project-plan" :portableEntries (js-array)))))
+              (let ((standard (await (js-call session :request ordinary))))
+                (js-call assert :strictEqual (get standard :mode) "standard")
+                ;; project-plan is a canonical graph manifest: its entries
+                ;; and module inventory are sorted, not an execution schedule.
+                ;; Execution starts at the selected entry and its imports.
+                ;; An unrelated build root is not an additional side effect.
+                (js-call assert :deepStrictEqual (get standard :entries) (js-array "main.mjs" "unused.mjs"))
+                (js-call assert :deepStrictEqual (js-call (get standard :modules) :map (lambda (item) (get item :id)))
+                  (js-array "main.mjs" "unused.mjs")))
+
+              (let* ((effects (js-array
+                       (js-object :id "state.mjs" :filename "state.eli" :source
+                         "(defvar count 0) (defun mark (n) (setq count (+ (* count 10) n))) (defun read () count) (export mark read)")
+                       (js-object :id "unused.mjs" :filename "unused.eli" :source
+                         "(import \"./state.mjs\" mark) (mark 1)")
+                       (js-object :id "main.mjs" :filename "main.eli" :source
+                         "(import \"./state.mjs\" mark read) (mark 2) (defun result () (read)) (export result)")))
+                     (orders (js-array
+                       (js-object :entries (js-array "unused.mjs" "main.mjs"))
+                       (js-object :entries (js-array "main.mjs" "unused.mjs"))))
+                     (seed-directory (resolve directory "seed-oracle"))
+                     (seed-index 0) (oracle-value undefined)
+                     (order-index 0))
+                ;; This independent maintained compiler establishes the original
+                ;; selected-entry behavior, rather than deriving a golden from
+                ;; any one of the three backends under test.
+                (await (mkdir (resolve seed-directory "node_modules") (js-object :recursive t)))
+                (await (symlink root (resolve seed-directory "node_modules/eliscript") "dir"))
+                (while (< seed-index (js-length effects))
+                  (let* ((item (aref effects seed-index))
+                         (source (resolve seed-directory (get item :filename)))
+                         (output (resolve seed-directory (get item :id))))
+                    (await (writeFile source (get item :source)))
+                    (let ((compiled (spawnSync (resolve root "bin/eliscript-seed")
+                            (js-array "--output" output source)
+                            (js-object :cwd root :encoding "utf8"))))
+                      (when (get compiled :error) (throw (get compiled :error)))
+                      (js-call assert :strictEqual (get compiled :status) 0 (get compiled :stderr))))
+                  (setq seed-index (1+ seed-index)))
+                (let* ((load (createRequire (resolve seed-directory "oracle.cjs")))
+                       (namespace (funcall load (resolve seed-directory "main.mjs"))))
+                  (setq oracle-value (js-call namespace :result)))
+                (js-call assert :strictEqual oracle-value 2)
+                (while (< order-index (js-length orders))
+                  (let* ((order (aref orders order-index))
+                         (effect-request (js-object :operation "project" :entry "main.mjs" :resolveImports t :phased t
+                           :entries (get order :entries) :modules effects))
+                         (effect-record (js-object :id "ordinary-explicit-root-effects" :kind "sequence"
+                           :steps (js-array (js-object :id "effects" :request effect-request
+                             :artifact (js-object :kind "exports" :calls (js-array
+                               (js-object :name "result" :args (js-array) :expected oracle-value)))))))
+                         (javascript (await (js-call session :request
+                           (Object/assign (js-object) effect-request (js-object :target "javascript")))))
+                         (targets (js-array "javascript" "wasm" "native")) (index 0))
+                    (js-call assert :strictEqual (get javascript :entry) "main.mjs")
+                    (js-call assert :deepStrictEqual
+                      (js-call (get javascript :modules) :map (lambda (item) (get item :id)))
+                      (js-array "main.mjs" "state.mjs" "unused.mjs"))
+                    (while (< index (js-length targets))
+                      (let* ((target (aref targets index))
+                             (actual (await (executeCompilerCorpusRecord (js-object :record effect-record
+                               :target target :sourceRoot root :directory directory :session session :options (js-object)
+                               :archiveProduct (async (product name actual-target)
+                                 (await (archiveProduct product actual-target
+                                   (resolve directory (str "ordinary-effects-" order-index "-" target "-" name))))))))))
+                        (js-call assert :strictEqual (get actual :expectedSatisfied) t
+                          (str "selected-entry initialization: " order-index " target: " target
+                            " observation: " (JSON/stringify (get actual :identity)))))
+                      (setq index (1+ index))))
+                  (setq order-index (1+ order-index))))
+              (put ordinary :entries (js-array "absent.mjs" "main.mjs"))
+              (js-call assert :throws (lambda () (js-call session :request ordinary)))))
+          (finally
+            (try (when session (await (js-call session :close)))
+              (finally (await (rm directory (js-object :recursive t :force t))))))))))
+
+)
