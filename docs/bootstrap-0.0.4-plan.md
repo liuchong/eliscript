@@ -457,7 +457,7 @@ flowchart TD
 - [x] `A21` Normalized 4-dimension benchmark framework and `.agents/skills/release-benchmark/SKILL.md` committed with GPG signature (`git commit -S`) and pushed to `origin/master`
 - [x] `A22` `bun test tests/version-comparison-benchmark.test.mjs tests/package-surface.test.mjs` passes 100% with the new `AGENTS.md`, `mergeReleaseNotesWithSummary`, and `.github/workflows/release.yml` assertions
 - [x] `A23` `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 make check-contracts` passes 100%
-- [ ] `A24` Signed commit (`git commit -S`) pushed to `origin/master`, signed tag `v0.0.4` created and pushed, and GitHub Release `v0.0.4` created with `eliscript-0.0.4.tgz`
-- [ ] `A25` GitHub Actions `release.yml` dispatched for `0.0.4`, automatically executing the 4-dimension benchmark, uploading `eliscript-0.0.4-benchmark-report.md` and `eliscript-0.0.4-benchmark-report.json` to GitHub Release `v0.0.4`, updating the Release main page summary, and publishing/staging `eliscript@0.0.4` on npm
+- [x] `A24` Signed commit (`git commit -S`) pushed to `origin/master`, signed tag `v0.0.4` created and pushed, and GitHub Release `v0.0.4` created with `eliscript-0.0.4.tgz`
+- [x] `A25` GitHub Actions `release.yml` dispatched for `0.0.4` (run `39801008318`), automatically executing the 4-dimension benchmark, uploading `eliscript-0.0.4-benchmark-report.md` and `eliscript-0.0.4-benchmark-report.json` to GitHub Release `v0.0.4`, updating the Release main page summary, and staging `eliscript@0.0.4` with OIDC provenance on npm (`46fa8fd3-007c-49cf-a08d-2d749ada09f7`)
 - [ ] `A26` `npm view eliscript@0.0.4 version` confirms `0.0.4` is live on npm
 - [ ] `A27` Pages and documentation (`docs/index.html`, `docs/pages/*.html`, `docs/pages/site.eli`, `tools/surface/generate-api.eli`, `README.md`, `docs/getting-started.md`) updated to `0.0.4` / `v0.0.4`, verified by `make check-contracts` and Pages tests, committed with GPG signature, and pushed to `origin/master`
