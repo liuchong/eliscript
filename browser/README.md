@@ -15,7 +15,7 @@ hot-reload `<script type="text/eliscript">` tags (inline or `src="..."`) or
 `data-eliscript` entry points directly in the browser without a backend server:
 
 ```html
-<script defer src="https://unpkg.com/eliscript@0.0.4/dist/browser/loader.js"></script>
+<script defer src="https://unpkg.com/eliscript@0.1.0/dist/browser/loader.js"></script>
 <script type="text/eliscript">
 (module app.live
   (import "eliscript/runtime/core/order" sort)

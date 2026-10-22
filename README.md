@@ -56,7 +56,7 @@ without a build server or repository files. Include `dist/browser/loader.js`
 and use either `data-eliscript` or `<script type="text/eliscript">` tags:
 
 ```html
-<script defer src="https://unpkg.com/eliscript@0.0.4/dist/browser/loader.js"></script>
+<script defer src="https://unpkg.com/eliscript@0.1.0/dist/browser/loader.js"></script>
 <script type="text/eliscript">
 (module app.live
   (print "Hello from in-browser Eliscript!"))
@@ -88,7 +88,7 @@ in the [backend runtime reference](tools/backends/README.md). The current delive
 uses a JavaScript-hosted stage0–stage3 compiler chain that emits JavaScript,
 WASM and native programs, with 12,000-depth persistent zipper traversal and
 edited ascent verified across all three output targets:
-[active plan](docs/bootstrap-0.0.4-plan.md).
+[active plan](docs/bootstrap-0.1.0-plan.md).
 
 ## Project Status
 
