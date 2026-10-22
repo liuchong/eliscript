@@ -73,6 +73,26 @@
         (conjBang builder (get (js-nth index values) :value))
         (setq index (1+ index)))
       (persistentBang builder)))
+  (defun collect-values
+    (collection)
+    (reduce
+      collection
+      (lambda
+        (result value)
+        (js-call result :push value)
+        result)
+      (js-array)))
+  (defun sort-values
+    (values comparison)
+    (js-call values :sort comparison)
+    (let ((from-fn (get (get EMPTY_VECTOR :constructor) :from)))
+      (if (not (undefined? from-fn))
+        (js-call (get EMPTY_VECTOR :constructor) :from values)
+        (let ((builder (transient EMPTY_VECTOR)) (index 0) (limit (js-length values)))
+          (while (< index limit)
+            (conjBang builder (js-nth index values))
+            (setq index (1+ index)))
+          (persistentBang builder)))))
   (defun sort
     (&rest arguments)
     (let ((length (js-length arguments)))
@@ -84,8 +104,8 @@
         (let
           ((comparison (if (= length 1) compare-values (js-nth 0 arguments)))
             (collection (js-nth (1- length) arguments)))
-          (sort-decorated
-            (collect-decorated collection (lambda (value) value))
+          (sort-values
+            (collect-values collection)
             (comparator comparison))))))
   (defun sort-by
     (key-function &rest arguments)

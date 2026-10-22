@@ -345,20 +345,21 @@
   (defun take-last
     (limit collection)
     (require-non-negative-safe-integer limit "take-last limit")
-    (cond
-      ((= limit 0) EMPTY_VECTOR)
-      ((isPersistentVector collection)
+    (if (= limit 0)
+      EMPTY_VECTOR
+      (if (isPersistentVector collection)
         (let ((total (get collection :count)))
-          (cond
-            ((= total 0) EMPTY_VECTOR)
-            ((>= limit total) collection)
-            (t
-              (let ((builder (transient EMPTY_VECTOR)) (index (- total limit)))
-                (while (< index total)
-                  (conjBang builder (js-call collection :nth index))
-                  (setq index (1+ index)))
-                (persistentBang builder))))))
-      (t
+          (if (= total 0)
+            EMPTY_VECTOR
+            (if (>= limit total)
+              collection
+              (if (not (undefined? (get collection :sliceVector)))
+                (js-call collection :sliceVector (- total limit) total)
+                (let ((builder (transient EMPTY_VECTOR)) (index (- total limit)))
+                  (while (< index total)
+                    (conjBang builder (js-call collection :nth index))
+                    (setq index (1+ index)))
+                  (persistentBang builder))))))
         (let ((ring (funcall sequence-ring limit)) (count 0) (start 0))
           (reduce
             collection
@@ -377,19 +378,20 @@
   (defun drop-last
     (limit collection)
     (require-non-negative-safe-integer limit "drop-last limit")
-    (cond
-      ((= limit 0)
-        (if (isPersistentVector collection) collection (into EMPTY_VECTOR collection)))
-      ((isPersistentVector collection)
+    (if (= limit 0)
+      (if (isPersistentVector collection) collection (into EMPTY_VECTOR collection))
+      (if (isPersistentVector collection)
         (let ((total (get collection :count)))
           (if (>= limit total)
             EMPTY_VECTOR
-            (let ((builder (transient EMPTY_VECTOR)) (keep (- total limit)) (index 0))
-              (while (< index keep)
-                (conjBang builder (js-call collection :nth index))
-                (setq index (1+ index)))
-              (persistentBang builder)))))
-      (t
+            (let ((keep (- total limit)))
+              (if (not (undefined? (get collection :sliceVector)))
+                (js-call collection :sliceVector 0 keep)
+                (let ((builder (transient EMPTY_VECTOR)) (index 0))
+                  (while (< index keep)
+                    (conjBang builder (js-call collection :nth index))
+                    (setq index (1+ index)))
+                  (persistentBang builder))))))
         (let
           ((ring (funcall sequence-ring limit))
             (builder (transient EMPTY_VECTOR))

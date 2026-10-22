@@ -22,29 +22,45 @@
   (defconst zipper-freeze Object/freeze)
   (defconst zipper-is-array Array/isArray)
   (defconst zipper-is-integer Number/isInteger)
+  (defconst zipper-identity (lambda (value) value))
+  (defconst zipper-has-raw-slot (not (undefined? (get PersistentVector :rawSlot))))
   (defun zipper-private-array
     (&rest values)
-    (js-call zipper-private-tuples :add values)
-    (funcall zipper-freeze values))
+    (if zipper-has-raw-slot
+      values
+      (funcall zipper-freeze values)))
   (defun zipper-require-function
     (value label)
     (if (= (value-type value) "function")
       value
       (throw (new globalThis/TypeError (str label " must be a function")))))
+  (defun zipper-compact-array?
+    (value)
+    (if (funcall zipper-is-array value)
+      (if (= (js-length value) 6)
+        (eq (aref value zipper-single-parent-index) t)
+        false)
+      false))
   (defun zipper-slot
     (values target-index)
     ;; Registered work arrays need no structural probe. Compact copies retain
     ;; their format marker without a public persistent wrapper or traversal.
     ;; Original Vector/List paths retain their existing indexed/reducible path.
-    (if (or (js-call zipper-private-tuples :has values) (zipper-compact-array? values))
-      (if (and (>= target-index 0) (< target-index (js-length values)))
+    (if (zipper-compact-array? values)
+      (if (if (>= target-index 0) (< target-index (js-length values)) false)
         (aref values target-index)
         (throw (new globalThis/TypeError "invalid zipper internal slot")))
       (if (Collection/isVector values)
-        (let ((value (js-call values :nth target-index zipper-missing)))
-          (if (eq value zipper-missing)
-            (throw (new globalThis/TypeError "invalid zipper internal slot"))
-            value))
+        (if (if zipper-has-raw-slot
+              (if (<= (get values :count) 32)
+                (if (>= target-index 0) (< target-index (get values :count)) false)
+                false)
+              false)
+          (js-call PersistentVector :rawSlot values target-index)
+          (let ((value (Collection/nth values target-index zipper-missing)))
+            (if (eq value zipper-missing)
+              (throw (new globalThis/TypeError "invalid zipper internal slot"))
+              value)))
         (let ((index 0) (box zipper-missing))
           (Collection/reduce
             values
@@ -69,21 +85,19 @@
         (Collection/get configuration key))))
   (defun zipper-location
     (node-value path-value configuration)
-    (withMeta (persistentVector node-value path-value) configuration))
+    (if zipper-has-raw-slot
+      (js-call PersistentVector :pairWithMeta node-value path-value configuration)
+      (withMeta (persistentVector node-value path-value) configuration)))
   (defun zipper-path
     (left-values right-values parent-path parent-nodes changed)
     ;; These frozen work arrays stay lazy at a host boundary. A persistent
     ;; wrapper here would materialize the entire private parent graph there.
     (zipper-private-array left-values right-values parent-path parent-nodes changed t))
-  (defun zipper-compact-array?
-    (value)
-    (and (funcall zipper-is-array value) (= (js-length value) 6)
-      (eq (aref value zipper-single-parent-index) t)))
   (defun zipper-path-assoc
     (path-value target-index value)
-    (if (or (js-call zipper-private-tuples :has path-value) (zipper-compact-array? path-value))
+    (if (zipper-compact-array? path-value)
       (progn
-        (unless (and (funcall zipper-is-integer target-index) (>= target-index 0) (<= target-index 4))
+        (unless (if (funcall zipper-is-integer target-index) (if (>= target-index 0) (<= target-index 4) false) false)
           (throw (new globalThis/TypeError "invalid zipper internal slot")))
         ;; Copy the five state slots and retain the shared parent holder.
         ;; Do not route private work through public persistent-vector assoc.
@@ -96,10 +110,13 @@
       (Collection/assoc path-value target-index value)))
   (defun zipper-single-parent?
     (path-value)
-    (or (zipper-compact-array? path-value)
-      (and (Collection/isVector path-value)
-        (= (Collection/count path-value) 6)
-        (eq (zipper-slot path-value zipper-single-parent-index) t))))
+    (if (zipper-compact-array? path-value)
+      t
+      (if (Collection/isVector path-value)
+        (if (= (Collection/count path-value) 6)
+          (eq (zipper-slot path-value zipper-single-parent-index) t)
+          false)
+        false)))
   (defun zipper-parent-node
     (path-value)
     (let ((parents (zipper-slot path-value zipper-parent-nodes-index)))
@@ -113,42 +130,74 @@
     (values)
     (if (nullish? values)
       EMPTY_VECTOR
-      (if (and (Collection/isVector values) (nil? (meta values)))
-        values
+      (if (Collection/isVector values)
+        (if (nil? (meta values))
+          values
+          (Collection/reduce
+            values
+            (lambda (result value) (Collection/conj result value))
+            EMPTY_VECTOR))
         (Collection/reduce
           values
           (lambda (result value) (Collection/conj result value))
           EMPTY_VECTOR))))
   (defun zipper-right-list
     (values start-index)
-    (let* ((count (if (Collection/isVector values) (get values :count) (Collection/count values)))
+    (let* ((count (Collection/count values))
            (result EMPTY_LIST)
            (index (1- count)))
       (while (>= index start-index)
         (setq result (Collection/conj result (zipper-slot values index)))
         (setq index (1- index)))
       result))
-  (defun zipper-children-vector
-    (location)
-    (zipper-materialize
-      (funcall (zipper-config-value location zipper-children-key) (node location))))
-  (defun zipper-rebuild-children
-    (left-values node-value right-values)
-    (if (and (Collection/isVector left-values) (= (get left-values :count) 0)
-             (Collection/isList right-values) (= (get right-values :count) 0))
-      (persistentVector node-value)
-      (let
-        (
-          (result
-            (Collection/reduce
-              left-values
-              (lambda (values value) (Collection/conj values value))
-              EMPTY_VECTOR)))
-        (setq result (Collection/conj result node-value))
-        (Collection/reduce
-          right-values
-          (lambda (values value) (Collection/conj values value))
-          result))))
+  (defun zipper-vector-node
+    (original children-values)
+    (let ((m (meta original)))
+      (if (if (nil? m) (if (Collection/isVector children-values) (nil? (meta children-values)) false) false)
+        children-values
+        (withMeta children-values m))))
+  (defun zipper-list-node
+    (original children-values)
+    (let ((values (js-array)))
+      (Collection/reduce
+        children-values
+        (lambda (result value) (js-call result :push value) result)
+        values)
+      (withMeta (apply persistentList values) (meta original))))
+  (defconst zipper-vector-config
+    (let ((cfg (persistentHashMap
+                 (js-array zipper-branch-key Collection/isVector)
+                 (js-array zipper-children-key zipper-identity)
+                 (js-array zipper-make-node-key zipper-vector-node))))
+      (js-call zipper-valid-configs :add cfg)
+      (js-call zipper-config-callbacks :set cfg
+        (js-object
+          "eliscript.zipper/branch" Collection/isVector
+          "eliscript.zipper/children" zipper-identity
+          "eliscript.zipper/make-node" zipper-vector-node
+          :fastVector t))
+      cfg))
+  (defun zipper?
+    (value)
+    (if (if (Collection/isVector value) (= (Collection/count value) 2) false)
+      (let ((configuration (meta value)))
+        (if (if (eq configuration zipper-vector-config)
+              t
+              (if (not (nullish? configuration)) (js-call zipper-valid-configs :has configuration) false))
+          t
+          (let
+            (
+              (valid
+                (and
+                  (Collection/isMap configuration)
+                  (= (value-type (Collection/get configuration zipper-branch-key)) "function")
+                  (= (value-type (Collection/get configuration zipper-children-key)) "function")
+                  (=
+                    (value-type (Collection/get configuration zipper-make-node-key))
+                    "function"))))
+            (when valid (js-call zipper-valid-configs :add configuration))
+            valid)))
+      false))
   (defun zipper-mark-changed
     (path-value)
     (if (nil? path-value) nil (zipper-path-assoc path-value zipper-changed-index t)))
@@ -166,65 +215,70 @@
     (if (zipper-active? location)
       location
       (throw (new globalThis/TypeError (str label " cannot modify the end location")))))
-  (defun zipper-vector-node
-    (original children-values)
-    (withMeta children-values (meta original)))
-  (defun zipper-list-node
-    (original children-values)
-    (let ((values (js-array)))
-      (Collection/reduce
-        children-values
-        (lambda (result value) (js-call result :push value) result)
-        values)
-      (withMeta (apply persistentList values) (meta original))))
+  (defun node
+    (location)
+    (zipper-require-location location "node")
+    (zipper-slot location 0))
+  (defun zipper-children-vector
+    (location)
+    (zipper-materialize
+      (funcall (zipper-config-value location zipper-children-key) (node location))))
+  (defun zipper-rebuild-children
+    (left-values node-value right-values)
+    (if (if (eq left-values EMPTY_VECTOR)
+          (eq right-values EMPTY_LIST)
+          (if (Collection/isVector left-values)
+            (if (= (Collection/count left-values) 0)
+              (if (Collection/isList right-values) (= (Collection/count right-values) 0) false)
+              false)
+            false))
+      (if zipper-has-raw-slot
+        (js-call PersistentVector :single node-value)
+        (persistentVector node-value))
+      (let
+        (
+          (result
+            (Collection/reduce
+              left-values
+              (lambda (values value) (Collection/conj values value))
+              EMPTY_VECTOR)))
+        (setq result (Collection/conj result node-value))
+        (Collection/reduce
+          right-values
+          (lambda (values value) (Collection/conj values value))
+          result))))
   (defun zipper
     (branch-predicate child-reader node-builder root-node)
     (zipper-require-function branch-predicate "zipper branch predicate")
     (zipper-require-function child-reader "zipper child reader")
     (zipper-require-function node-builder "zipper node builder")
-    (let
-      (
-        (configuration
-          (persistentHashMap
-            (js-array zipper-branch-key branch-predicate)
-            (js-array zipper-children-key child-reader)
-            (js-array zipper-make-node-key node-builder))))
-      (js-call zipper-valid-configs :add configuration)
-      (js-call zipper-config-callbacks :set configuration
-        (js-object
-          "eliscript.zipper/branch" branch-predicate
-          "eliscript.zipper/children" child-reader
-          "eliscript.zipper/make-node" node-builder))
-      (zipper-location root-node nil configuration)))
+    (if (if (eq branch-predicate Collection/isVector)
+          (if (eq child-reader zipper-identity)
+            (eq node-builder zipper-vector-node)
+            false)
+          false)
+      (zipper-location root-node nil zipper-vector-config)
+      (let
+        (
+          (configuration
+            (persistentHashMap
+              (js-array zipper-branch-key branch-predicate)
+              (js-array zipper-children-key child-reader)
+              (js-array zipper-make-node-key node-builder))))
+        (js-call zipper-valid-configs :add configuration)
+        (js-call zipper-config-callbacks :set configuration
+          (js-object
+            "eliscript.zipper/branch" branch-predicate
+            "eliscript.zipper/children" child-reader
+            "eliscript.zipper/make-node" node-builder
+            :fastVector false))
+        (zipper-location root-node nil configuration))))
   (defun vector-zipper
     (root-node)
-    (zipper Collection/isVector (lambda (value) value) zipper-vector-node root-node))
+    (zipper-location root-node nil zipper-vector-config))
   (defun list-zipper
     (root-node)
-    (zipper Collection/isList (lambda (value) value) zipper-list-node root-node))
-  (defun zipper?
-    (value)
-    (if (and (Collection/isVector value) (= (get value :count) 2))
-      (let ((configuration (meta value)))
-        (if (and (not (nullish? configuration)) (js-call zipper-valid-configs :has configuration))
-          t
-          (let
-            (
-              (valid
-                (and
-                  (Collection/isMap configuration)
-                  (= (value-type (Collection/get configuration zipper-branch-key)) "function")
-                  (= (value-type (Collection/get configuration zipper-children-key)) "function")
-                  (=
-                    (value-type (Collection/get configuration zipper-make-node-key))
-                    "function"))))
-            (when valid (js-call zipper-valid-configs :add configuration))
-            valid)))
-      false))
-  (defun node
-    (location)
-    (zipper-require-location location "node")
-    (zipper-slot location 0))
+    (zipper Collection/isList zipper-identity zipper-list-node root-node))
   (defun end?
     (location)
     (zipper-require-location location "end?")
@@ -257,7 +311,7 @@
     (location)
     (zipper-require-location location "path")
     (let ((path-value (zipper-path-value location)))
-      (if (or (nil? path-value) (= path-value zipper-end-path))
+      (if (if (nil? path-value) t (= path-value zipper-end-path))
         nil
         (if (not (zipper-single-parent? path-value))
           (zipper-slot path-value zipper-parent-nodes-index)
@@ -265,13 +319,27 @@
             (if (js-call zipper-public-path-cache :has holder)
               (js-call zipper-public-path-cache :get holder)
               (let ((pending (js-array)) (current path-value) (result EMPTY_VECTOR))
-                (while (and (not (nil? current)) (zipper-single-parent? current))
-                  (js-call pending :push (zipper-parent-node current))
-                  (setq current (zipper-slot current zipper-parent-path-index)))
+                (while (if (not (nil? current)) (zipper-single-parent? current) false)
+                  (if (zipper-compact-array? current)
+                    (let ((parents (aref current 3)))
+                      (js-call pending :push
+                        (if (funcall zipper-is-array parents)
+                          (if (> (js-length parents) 0)
+                            (aref parents 0)
+                            (throw (new globalThis/TypeError "invalid zipper internal slot")))
+                          (zipper-slot parents 0)))
+                      (setq current (aref current 2)))
+                    (progn
+                      (js-call pending :push (zipper-parent-node current))
+                      (setq current (zipper-slot current zipper-parent-path-index)))))
                 ;; A caller-created original path keeps its original ancestry;
                 ;; new descents may use it as an unchanged prefix.
                 (if (nil? current)
-                  (setq result (js-call PersistentVector :from (js-call pending :reverse)))
+                  (if zipper-has-raw-slot
+                    (setq result (js-call PersistentVector :from (js-call pending :reverse)))
+                    (let ((index (js-length pending)))
+                      (while (> index 0)
+                        (setq index (1- index) result (Collection/conj result (aref pending index))))))
                   (progn
                     (setq result (zipper-materialize (zipper-slot current zipper-parent-nodes-index)))
                     (let ((index (js-length pending)))
@@ -293,14 +361,14 @@
       (if (or (nil? path-value) (= path-value zipper-end-path))
         nil
         (zipper-slot path-value zipper-rights-index))))
-  (defun down
+  (defun down-slow
     (location)
     (zipper-require-location location "down")
-    (if (or (not (zipper-active? location)) (not (zipper-branch-value location)))
+    (if (if (not (zipper-active? location)) t (not (zipper-branch-value location)))
       nil
       (let*
         ((child-values (zipper-children-vector location))
-          (child-count (if (Collection/isVector child-values) (get child-values :count) (Collection/count child-values))))
+          (child-count (Collection/count child-values)))
         (if (= child-count 0)
           nil
           (let*
@@ -315,6 +383,34 @@
                 next-parent-nodes
                 false)
               (meta location)))))))
+  (defun down
+    (location)
+    (if (if zipper-has-raw-slot
+          (if (Collection/isVector location) (= (get location :count) 2) false)
+          false)
+      (let ((configuration (meta location)))
+        (if (eq configuration zipper-vector-config)
+          (let ((path-value (js-call PersistentVector :rawSlot location 1)))
+            (if (= path-value zipper-end-path)
+              nil
+              (let ((node-value (js-call PersistentVector :rawSlot location 0)))
+                (if (if (Collection/isVector node-value) (nil? (meta node-value)) false)
+                  (let ((child-count (get node-value :count)))
+                    (if (= child-count 0)
+                      nil
+                      (js-call PersistentVector :pairWithMeta
+                        (js-call PersistentVector :rawSlot node-value 0)
+                        (js-array
+                          EMPTY_VECTOR
+                          (if (= child-count 1) EMPTY_LIST (zipper-right-list node-value 1))
+                          path-value
+                          (js-array node-value)
+                          false
+                          t)
+                        configuration)))
+                  (down-slow location)))))
+          (down-slow location)))
+      (down-slow location)))
   (defun up
     (location)
     (zipper-require-location location "up")
@@ -447,27 +543,50 @@
     (zipper-require-location location "root")
     (if (end? location)
       (node location)
-      (let ((cur-node (zipper-slot location 0))
-            (cur-path (zipper-path-value location))
-            (changed false))
+      (let* ((configuration (meta location))
+             (fast-vec (if (eq configuration zipper-vector-config)
+                         t
+                         (let ((callbacks (if (not (nullish? configuration))
+                                            (js-call zipper-config-callbacks :get configuration)
+                                            undefined)))
+                           (if (not (undefined? callbacks)) (get callbacks :fastVector) false))))
+             (cur-node (zipper-slot location 0))
+             (cur-path (zipper-path-value location))
+             (changed false))
         (while (not (nil? cur-path))
-          (let ((parent-path (zipper-slot cur-path zipper-parent-path-index))
-                (parent-node (zipper-parent-node cur-path))
-                (step-changed (or changed (zipper-slot cur-path zipper-changed-index))))
-            (if step-changed
-              (setq
-                cur-node
-                (make-node
-                  location
-                  parent-node
-                  (zipper-rebuild-children
-                    (zipper-slot cur-path zipper-lefts-index)
-                    cur-node
-                    (zipper-slot cur-path zipper-rights-index)))
-                changed
-                t)
-              (setq cur-node parent-node))
-            (setq cur-path parent-path)))
+          (if (if fast-vec (zipper-compact-array? cur-path) false)
+            (let* ((parent-path (aref cur-path 2))
+                   (parents (aref cur-path 3))
+                   (parent-node (if (funcall zipper-is-array parents)
+                                  (if (> (js-length parents) 0)
+                                    (aref parents 0)
+                                    (throw (new globalThis/TypeError "invalid zipper internal slot")))
+                                  (zipper-slot parents 0)))
+                   (step-changed (if changed t (aref cur-path 4))))
+              (if step-changed
+                (let (( rebuilt (zipper-rebuild-children (aref cur-path 0) cur-node (aref cur-path 1)))
+                      (m (meta parent-node)))
+                  (setq cur-node (if (nil? m) rebuilt (withMeta rebuilt m))
+                        changed t))
+                (setq cur-node parent-node))
+              (setq cur-path parent-path))
+            (let ((parent-path (zipper-slot cur-path zipper-parent-path-index))
+                  (parent-node (zipper-parent-node cur-path))
+                  (step-changed (if changed t (zipper-slot cur-path zipper-changed-index))))
+              (if step-changed
+                (setq
+                  cur-node
+                  (make-node
+                    location
+                    parent-node
+                    (zipper-rebuild-children
+                      (zipper-slot cur-path zipper-lefts-index)
+                      cur-node
+                      (zipper-slot cur-path zipper-rights-index)))
+                  changed
+                  t)
+                (setq cur-node parent-node))
+              (setq cur-path parent-path))))
         cur-node)))
   (defun insert-left
     (location item)
