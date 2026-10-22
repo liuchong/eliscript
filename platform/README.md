@@ -8,7 +8,29 @@ them to the portable language core. They never select a browser or worker
 global implicitly. Applications pass a host object and an explicit grant list,
 then pass the resulting frozen token only to code that needs that authority.
 
+All platform modules in this directory (`browser.eli`, `http.eli`, and
+`worker.eli`, alongside the host runtime adapters `bun.mjs`, `node.mjs`, and
+`deno.mjs`) are maintained as `.eli` sources in Git and materialized/compiled to
+`.mjs` during `make bootstrap-backends` (with zero tracked `.mjs` files in the
+repository). Both extensionless package subpath imports
+(`(import "eliscript/platform/browser" ...)`) and explicit `.mjs` specifiers are
+supported.
+
 ## Browser
+
+From Eliscript (extensionless or `.mjs` subpath):
+
+```elisp
+(import "eliscript/platform/browser"
+        browserCapabilities browserDocument browserFetch)
+
+(let* ((capabilities (browserCapabilities globalThis ["document" "network"]))
+       (root (js-call (browserDocument capabilities) :querySelector "#app"))
+       (response (await (browserFetch capabilities "/articles.json"))))
+  response)
+```
+
+Or from JavaScript ESM:
 
 ```js
 import {
@@ -30,19 +52,18 @@ Available grants are `clock`, `document`, `network`, `randomness`, and
 The reference Emacs compute worker appends a request context whose
 `capabilities` field grants only `progress` and `cancellation`:
 
-```js
-import {
-  workerCancelled,
-  workerProgress,
-} from "eliscript/platform/worker.mjs";
+```elisp
+(import "eliscript/platform/worker" workerCancelled workerProgress)
 
-export function index(values, context) {
-  if (workerCancelled(context.capabilities)) return null;
-  workerProgress(context.capabilities, { stage: "indexing" });
-  return values.length;
-}
+(defun index (values context)
+  (if (workerCancelled (get context :capabilities))
+    nil
+    (progn
+      (workerProgress (get context :capabilities) {:stage "indexing"})
+      (length values))))
+(export index)
 ```
 
 The same package re-exports the canonical worker value-codec and chunk-stream
-APIs. Exact semantics and limitations are specified in
+APIs (`worker.eli`). Exact semantics and limitations are specified in
 [0126](../specs/0126-explicit-host-capability-packages.md).

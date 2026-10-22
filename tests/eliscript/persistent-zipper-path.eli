@@ -226,10 +226,16 @@
 
   (test "zero tracked mjs files and clojurescript-style collection sequence order and data fast-paths"
     (lambda ()
-      (let ((git (spawnSync "git" (js-array "ls-files" "--" "*.mjs")
-                   (js-object :cwd root :encoding "utf8"))))
+      (let ((git (spawnSync "git" (js-array "ls-files" "--" "*.mjs" "tools/capsules/*")
+                   (js-object :cwd root :encoding "utf8")))
+            (in-place (spawnSync "git" (js-array "ls-files" "--" "platform/browser.eli" "runtime/core/vector.eli" "browser/host.eli")
+                        (js-object :cwd root :encoding "utf8"))))
         (js-call assert :strictEqual (get git :status) 0)
-        (js-call assert :strictEqual (js-call (get git :stdout) :trim) ""))
+        (js-call assert :strictEqual (js-call (get git :stdout) :trim) "")
+        (js-call assert :strictEqual (get in-place :status) 0)
+        (js-call assert :deepStrictEqual
+          (js-call (js-call (get in-place :stdout) :trim) :split "\n")
+          (js-array "browser/host.eli" "platform/browser.eli" "runtime/core/vector.eli")))
       (let ((vec (persistentVector 10 20 30 40))
             (lst (persistentList 10 20 30 40))
             (arr (js-array 10 20 30 40)))

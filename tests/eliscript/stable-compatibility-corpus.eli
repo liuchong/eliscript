@@ -17,18 +17,19 @@
   (test "stable compatibility corpus covers every frozen core behavior"
     (async ()
       (let* ((value (await (contract)))
-             (git (spawnSync "git" (js-array "ls-files" "-z" "--" "tests/fixtures" "tools/capsules/tests/fixtures")
+             (git (spawnSync "git" (js-array "ls-files" "-z" "--" "tests/fixtures")
                     (js-object :cwd root :encoding "utf8")))
+             (raw-fixtures (js-call (js-call (get git :stdout) :split "\u0000") :filter globalThis.Boolean))
              (tracked-fixtures
                (Array/from
                  (new globalThis.Set
-                   (js-call
-                     (js-call (js-call (get git :stdout) :split "\u0000") :filter globalThis.Boolean)
-                     :map (lambda (entry)
-                            (if (and (js-call entry :startsWith "tools/capsules/tests/fixtures/")
-                                     (js-call entry :endsWith ".eli"))
-                              (str (js-call entry :slice (js-length "tools/capsules/") -4) ".mjs")
-                              entry))))))
+                   (await (Promise/all
+                     (js-call raw-fixtures :map
+                       (async (entry)
+                         (if (and (js-call entry :endsWith ".eli")
+                                  (js-call (await (readFile (resolve root entry) "utf8")) :startsWith "(module capsules."))
+                           (str (js-call entry :slice 0 -4) ".mjs")
+                           entry))))))))
              (manifest (JSON/parse (await (readFile (resolve root "tests/conformance/manifest.json") "utf8"))))
              (index (JSON/parse (await (readFile (resolve root "specs/index.json") "utf8"))))
              (rehearsal (JSON/parse (await (readFile (resolve root "contracts/compatibility-rehearsal.json") "utf8"))))

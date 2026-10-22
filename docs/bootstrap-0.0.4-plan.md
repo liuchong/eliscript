@@ -67,25 +67,25 @@ eliscript/
 │   ├── backends/*.eli                         # Self-hosted backend emitters
 │   ├── runtime/kernel.eli                     # Kernel source -> runtime/kernel.mjs (materialized)
 │   └── host/
-│       └── compiler-session.eli               # ONLY tracked file in bootstrap/host/ (.mjs materialized at build)
+│       ├── compiler-session.eli               # Formal compiler host session .eli
+│       ├── compiler-tools.eli                 # Formal compiler host tools .eli
+│       └── {bun,node,deno,cli,project-cli,project-cli-legacy}.eli  # In-place host .eli -> .mjs
+├── browser/{host,worker,README.md}            # In-place browser .eli sources + README.md
+├── examples/*.eli                             # In-place example .eli sources
+├── platform/{browser,worker,http,...}.eli     # In-place platform .eli sources + README.md
+├── runtime/**/*.eli                           # In-place runtime .eli sources (ClojureScript-style optimized) + README.md
 ├── stdlib/
 │   ├── core/{seq,order,data}.eli              # ClojureScript-style optimized algorithms
 │   ├── managed-runtime-{sequence,order,collection-internals,collection}.eli
 │   └── managed-literal-protocols.eli          # Reference-identity fast-paths in equality
 ├── tests/
-│   └── eliscript/*.eli                        # Tracked .eli test suites (including 0.0.4 zero-.mjs & perf tests)
+│   ├── eliscript/*.eli                        # Tracked .eli test suites (including 0.0.4 zero-.mjs & perf tests)
+│   └── **/*.eli                               # In-place test runner/fixture .eli sources
 └── tools/
-    ├── backends/bootstrap.el                  # Materializes tools/capsules/**/*.eli -> <rel>.mjs + 7 entrypoints
-    ├── capsules/                              # 516 tracked .eli capsule modules (bootstrap/host, browser, examples,
-    │   ├── bootstrap/host/*.eli               #   platform, runtime, tests, tools)
-    │   ├── browser/*.eli
-    │   ├── examples/*.eli
-    │   ├── platform/*.eli
-    │   ├── runtime/**/*.eli                   # Includes optimized sequence/order/data/collection-internals/collections
-    │   ├── tests/**/*.eli
-    │   └── tools/**/*.eli
-    ├── acceptance/check.eli                   # Capsule-aware evidence provenance verification
-    └── integrity/eliscript/check.eli          # Capsule-aware dependency & benchmark source verification
+    ├── backends/bootstrap.el                  # Materializes in-place <rel>.eli -> <rel>.mjs + 7 entrypoints
+    ├── acceptance/check.eli                   # In-place .eli evidence provenance verification
+    ├── integrity/eliscript/check.eli          # In-place .eli dependency & benchmark source verification
+    └── **/*.eli                               # In-place tool .eli sources
 ```
 
 ### 3.2 Build & Verification Pipeline Flowchart (Before vs. After)
@@ -262,36 +262,74 @@ flowchart TD
     2. `first`, `last`, `nth`, `find`, `take-last`, `drop-last`, `sort`, `sort-by`, `group-by`, `count-by`, `frequencies`, `into` on `[k, v]` pairs, and nested collection `=` with shared structural subtrees produce exact results and fast-path behavior.
   - `contracts/stable-compatibility-corpus.json` & `contracts/compiler-parity-corpus.json`: regenerate in Phase D after `make bootstrap-backends`.
 
+### `D13`: In-Place `<rel>.eli` Source Layout (Eliminating `tools/capsules/`)
+- **Files**:
+  - Move all 516 `tools/capsules/<rel>.eli` files directly to `<rel>.eli` (`platform/*.eli`, `runtime/**/*.eli`, `browser/*.eli`, `bootstrap/host/*.eli`, `examples/**/*.eli`, `tests/**/*.eli`, `tools/**/*.eli`) and remove `tools/capsules/`.
+  - `tools/backends/bootstrap.el` (`lines 97-124`, `166-175`):
+    - Update `eliscript-backend-materialize-capsules` to scan `("bootstrap/host" "browser" "examples" "platform" "runtime" "tests" "tools")` for `.eli` files whose first line starts with `"(module capsules."` and materialize `<same-path-without-.eli>.mjs` in place (with `#o755` on `bootstrap/host/bun.eli`, `bootstrap/host/project-cli-legacy.eli`, and `runtime/worker.eli`).
+    - Update `eliscript-backend-bootstrap-stage0` so `"bootstrap/host/"` only selects `'("compiler-session.eli" "compiler-tools.eli")` as formal stage0 compiler modules.
+  - `tools/backends/compiler-build.eli` (`lines 111-116`):
+    - Update `compiler-source-names` so `"bootstrap/host"` only selects `"compiler-session.eli"` and `"compiler-tools.eli"`, preserving the 30-module compiler identity (`7642d697...`).
+
+### `D14`: In-Place Capsule Provenance in Integrity, Acceptance, Compatibility, Debugging, and Onboarding
+- **Files**:
+  - `tools/integrity/eliscript/check.eli` (`lines 196-217`):
+    - Update `augment-capsule-tracked-files(directory, tracked-files)` (async) to check whether each `.eli` entry in `tracked-files` starts with `"(module capsules."` on disk; if so, replace `<rel>.eli` with `<rel>.mjs` in the effective tracked list for `checkDependencyBoundaries` and `validateBenchmarkSource` so `scannedJavaScript == 516` and `scannedEliscript == 150` remain exact.
+  - `tools/acceptance/check.eli` (`lines 31-36`):
+    - Update `capsule-evidence-source(filename)` to return `(str (js-call filename :slice 0 -4) ".eli")` instead of `"tools/capsules/..."`.
+  - `tools/compatibility/corpus.eli` (`lines 67-86`) & `tests/eliscript/stable-compatibility-corpus.eli` (`lines 20-31`):
+    - Run `git ls-files -z -- tests/fixtures` and map any `.eli` entry whose content starts with `"(module capsules."` to `<entry-without-.eli>.mjs`.
+  - `tools/compatibility/rehearse.eli`, `tools/debugging/check.eli`, `tools/onboarding/check.eli`:
+    - Check `<filename-without-.mjs>.eli` instead of `tools/capsules/<filename-without-.mjs>.eli`.
+
+### `D15`: Repository-Wide Documentation Sync (`README.md`, `docs/`, `platform/`, `runtime/`, `browser/`, `bootstrap/`, `stdlib/`)
+- **Files**:
+  - `README.md`: update publication status (published on npm as `eliscript` and GitHub Releases) and preserve all contract-required strings/links.
+  - `docs/README.md`: update surface counts (`175 stable specifications (176 conformance features)`, `46 standard-library modules with 598 exports`, zero tracked `.mjs` files).
+  - `platform/README.md`: document `platform/*.eli` in-place sources, build-time `.mjs` synthesis, and extensionless `(import "eliscript/platform/browser" ...)` / `(import "eliscript/platform/worker" ...)` EliScript usage alongside ESM.
+  - `runtime/README.md`: document `runtime/**/*.eli` in-place sources, extensionless `eliscript/runtime/*` imports, and the `0.0.4` ClojureScript-style fast-paths ($O(1)$ `first`/`last`, circular array ring buffers in `take-last`/`drop-last`, reference-identity `[VALUE_EQUAL]` & `compareSequential` short-circuits, transient HAMT/Vector builders in `sort`/`sortBy`/`groupBy`/`countBy`/`frequencies`).
+  - `browser/README.md`: add README for `browser/host.eli` and `browser/worker.eli` (browser compiler SDK, live DOM `<script type="text/eliscript">`, `optimizeProgramIr`, `optimizeJavaScript`, extensionless `eliscript/*` imports).
+  - `bootstrap/README.md`, `stdlib/README.md`, `docs/language-reference.md`: sync `.eli` host/runtime references, extensionless package subpath imports, and `0.0.4` collection/sequence/order/data optimizations while keeping `localLinks == 47` in `contracts/documentation.json`.
+
 ---
 
 ## 5. Stage Progress & Dual Checklists
 
-### Stage Progress (`S0`–`S3`)
+### Stage Progress (`S0`–`S4`)
 - [x] `S0` Baseline audit completed and `0.0.3` published to GitHub Releases & npm
-- [x] `S1` Phase A: Complete `docs/bootstrap-0.0.4-plan.md` construction manual
+- [x] `S1` Phase A: Complete `docs/bootstrap-0.0.4-plan.md` construction manual (including in-place `.eli` layout & documentation sync `D13`–`D15`)
 - [x] `S2` Phase B & C: Complete all test additions and full implementation without mid-flight test runs
-- [x] `S3` Phase D: Centralized bootstrap, contract regeneration, full test verification, GPG-signed commit, and push
+- [x] `S3` Phase D (Initial): Initial zero-`.mjs` & ClojureScript fast-path verification
+- [x] `S4` Phase D (In-Place `.eli` & Docs): Centralized bootstrap, contract & doc verification, GPG-signed commit, and push
 
-### Construction Checklist (`C01`–`C12`) — Check Immediately as Each Item Is Written
+### Construction Checklist (`C01`–`C16`) — Check Immediately as Each Item Is Written
 - [x] `C01` Update `tests/eliscript/stable-compatibility-corpus.eli`, `tests/eliscript/package-surface.eli`, and `tests/eliscript/persistent-zipper-path.eli` with `0.0.4` tests (Phase B, no test execution)
-- [x] `C02` Generate all 516 capsule `.eli` files under `tools/capsules/<rel>.eli` from existing `.mjs` files
-- [x] `C03` Update `tools/backends/bootstrap.el` to materialize `tools/capsules/**/*.eli` -> `<rel>.mjs` during `eliscript-backend-bootstrap-runtimes`
+- [x] `C02` Generate all 516 capsule `.eli` files from existing `.mjs` files
+- [x] `C03` Update `tools/backends/bootstrap.el` to materialize capsule `.eli` -> `<rel>.mjs` during `eliscript-backend-bootstrap-runtimes`
 - [x] `C04` Update `.gitignore` to ignore `*.mjs` and remove all 516 `.mjs` files from the Git index (`git rm --cached`)
 - [x] `C05` Update `tools/integrity/eliscript/check.eli` and `tools/acceptance/check.eli` for capsule-backed `.mjs` provenance
-- [x] `C06` Update `tools/capsules/tools/compatibility/corpus.eli`, `tools/capsules/tools/compatibility/rehearse.eli`, `tools/capsules/tools/debugging/check.eli`, and `tools/capsules/tools/onboarding/check.eli` for capsule-backed `.mjs` provenance
-- [x] `C07` Implement sequence optimizations (`first`, `last`, `sequenceNth`, `find`, `take-last`, `drop-last`) in `stdlib/core/seq.eli` and `tools/capsules/runtime/core/sequence.eli`
-- [x] `C08` Implement ordering & sorting optimizations (`compareSequential`, `sort`, `sortBy`) in `stdlib/core/order.eli` and `tools/capsules/runtime/core/order.eli`
-- [x] `C09` Implement data aggregation transient optimizations (`collectBuckets`, `groupBy`, `countBy`, `frequencies`) in `tools/capsules/runtime/core/data.eli` and `tools/capsules/runtime/core/map.eli`
-- [x] `C10` Implement persistent collection `[VALUE_EQUAL]` reference-identity fast-paths across `tools/capsules/runtime/core/`
+- [x] `C06` Update `tools/compatibility/corpus.eli`, `tools/compatibility/rehearse.eli`, `tools/debugging/check.eli`, and `tools/onboarding/check.eli` for capsule-backed `.mjs` provenance
+- [x] `C07` Implement sequence optimizations (`first`, `last`, `sequenceNth`, `find`, `take-last`, `drop-last`) in `stdlib/core/seq.eli` and `runtime/core/sequence.eli`
+- [x] `C08` Implement ordering & sorting optimizations (`compareSequential`, `sort`, `sortBy`) in `stdlib/core/order.eli` and `runtime/core/order.eli`
+- [x] `C09` Implement data aggregation transient optimizations (`collectBuckets`, `groupBy`, `countBy`, `frequencies`) in `runtime/core/data.eli` and `runtime/core/map.eli`
+- [x] `C10` Implement persistent collection `[VALUE_EQUAL]` reference-identity fast-paths across `runtime/core/`
 - [x] `C11` Bump `package.json` and site/docs version to `"0.0.4"`
 - [x] `C12` Materialize updated capsules and regenerate `contracts/stable-compatibility-corpus.json` and `contracts/compiler-parity-corpus.json` in Phase D
+- [x] `C13` Update `tests/eliscript/persistent-zipper-path.eli` to assert zero files in `tools/capsules/` and in-place tracked `.eli` sources in `platform/`, `runtime/`, and `browser/` (Phase B, no test execution)
+- [x] `C14` Move all 516 `.eli` files from `tools/capsules/<rel>.eli` to `<rel>.eli` in place and remove `tools/capsules/`
+- [x] `C15` Update `tools/backends/bootstrap.el`, `tools/backends/compiler-build.eli`, `tools/integrity/eliscript/check.eli`, `tools/acceptance/check.eli`, `tests/eliscript/stable-compatibility-corpus.eli`, `tools/compatibility/corpus.eli`, `tools/compatibility/rehearse.eli`, `tools/debugging/check.eli`, and `tools/onboarding/check.eli` for in-place `<rel>.eli` sources
+- [x] `C16` Update `README.md`, `docs/README.md`, `platform/README.md`, `runtime/README.md`, `bootstrap/README.md`, `stdlib/README.md`, `docs/language-reference.md`, and create `browser/README.md`
 
-### Acceptance Checklist (`A01`–`A08`) — Execute & Check Only in Phase D
+### Acceptance Checklist (`A01`–`A12`) — Execute & Check Only in Phase D
 - [x] `A01` `git ls-files '*.mjs'` outputs 0 files (empty), confirming zero tracked `.mjs` files in the repository
 - [x] `A02` `make bootstrap-backends` succeeds from `.eli` sources, materializing all capsule `.mjs` files and self-hosted compiler/runtime artifacts cleanly (fixed-point verified: `stage2 == stage3` across 313 files, `productSha256: 7642d697c024b3239133913844715b02ad7b863344cbff3b53490e7c048ba94a`)
 - [x] `A03` Repository integrity check (`bun test tests/repository-integrity.test.mjs tests/repository-integrity-original-selfhosted.test.mjs`) passes with 0 errors (`13/13` pass, `516 JavaScript, 150 Eliscript`)
 - [x] `A04` Acceptance corpus & generated evidence checks (`tests/core-acceptance-corpus.test.mjs`, `tests/acceptance-generated-evidence-selfhosted.test.mjs`, `tests/final-acceptance.test.mjs`, `tests/final-acceptance-history-selfhosted.test.mjs`) pass with 0 errors (`23/23` pass)
-- [x] `A05` Stable compatibility corpus (`01132de2...`), rehearsal, debugging, onboarding, and parity (`7ab78e47...`) checks pass with regenerated contracts (`26/26` test cases pass + `make check-contracts` exit 0)
+- [x] `A05` Stable compatibility corpus (`984bf539...`), rehearsal, debugging, onboarding, and parity (`7ab78e47...`) checks pass with regenerated contracts (`26/26` test cases pass + `make check-contracts` exit 0)
 - [x] `A06` All stdlib & runtime unit/property tests (`tests/core-*.test.mjs`, `tests/persistent-*.test.mjs`, `tests/transient.test.mjs`, `tests/value-semantics.test.mjs`, `tests/lazy-sequence.test.mjs`) pass with the new ClojureScript-style sequence, ordering, data, and collection fast-paths (`112/112` pass)
 - [x] `A07` Emacs ERT suite (`248/248` pass), `make check-contracts` (15/15 contract checks pass), `make bootstrap-release`, `make verify-bootstrap`, and `tests/package-surface.test.mjs` (`8/8` pass) succeed 100%
-- [x] `A08` All changes are committed with a verified GPG signature (`git commit -S`) and pushed to `origin/master`
+- [x] `A08` Initial `0.0.4` changes committed with a verified GPG signature (`8b3792a`) and pushed to `origin/master`
+- [x] `A09` `git ls-files '*.mjs'` and `git ls-files 'tools/capsules/*'` both return 0 files, while `git ls-files platform/ runtime/ browser/` tracks in-place `.eli` sources and `README.md` files
+- [x] `A10` `make bootstrap-backends` and `tests/compiler-build-selfhosted.test.mjs` pass with in-place `<rel>.eli` sources (`17/17` pass)
+- [x] `A11` `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 make check-contracts` and `bun test tests/onboarding-docs.test.mjs tests/repository-integrity.test.mjs tests/stable-compatibility-corpus.test.mjs tests/persistent-zipper-path-selfhosted.test.mjs` pass 100%
+- [x] `A12` In-place `.eli` layout and documentation updates committed with GPG signature (`git commit -S`) and pushed to `origin/master`

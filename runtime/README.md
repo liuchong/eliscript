@@ -10,9 +10,17 @@ represented by ordinary host values alone. Ordinary JavaScript values and APIs
 should still be emitted directly; helpers need a concrete semantic reason to
 exist.
 
+All runtime modules in this directory (`literals.eli`, `worker.eli`,
+`math.eli`, `unicode-case.eli`, `core/*.eli`, `testing/*.eli`, and `wire/*.eli`)
+are maintained as `.eli` sources in Git and materialized or compiled to `.mjs`
+during `make bootstrap-backends` (zero tracked `.mjs` files in the repository).
+Eliscript modules may import `eliscript/runtime/*` either without the `.mjs`
+extension (for example `(import "eliscript/runtime/core/order" sort)`) or with
+an explicit `.mjs` suffix.
+
 The compiler still emits a local Lisp-truthiness helper for standalone
-generated forms. `core/truth.mjs` exposes the same semantics to shared runtime
-algorithms: only `false`, `null`, and `undefined` are false.
+generated forms. `core/truth.eli` (`core/truth.mjs`) exposes the same semantics
+to shared runtime algorithms: only `false`, `null`, and `undefined` are false.
 
 Host libraries are imported explicitly by application modules. The runtime
 contains no UI-framework wrapper, element constructor, or bundler adapter.
@@ -236,26 +244,38 @@ is exposed only through `testing/vector.mjs`, `testing/map.mjs`, and
 
 ### Core Algorithms
 
-`core/sequence.mjs` implements replayable range, repetition, iteration, cycle,
+`core/sequence.eli` (`core/sequence.mjs`) implements replayable range,
+repetition, iteration, cycle,
 and indexed generation sources plus eager indexed/keep, prefix, sampling,
 interposition, dedupe/distinct, flattening, partitioning, reduction-history,
 boundary lookup, bounded tail selection, one-pass splitting, and search
 operations against `IReduce`. Results are persistent Vectors, reduced values
-stop bounded traversal exactly, and tail selection uses fixed-position ring
-storage. Source callbacks are lazy, finite sources expose exact counts, and
+stop bounded traversal exactly, and tail selection (`takeLast`, `dropLast`) uses
+fixed-size `Array(limit)` circular ring buffers without integer-key hash-table
+boxing. `first` dispatches in $O(1)$ on `PersistentList`, `PersistentVector`,
+and `Array`; `last` dispatches in $O(1)$ on `PersistentVector` (via `.peek()`)
+and `Array`; generic `first`, `last`, `sequenceNth`, and `find` reduction loops
+use stack-local state without allocating temporary `{ value }` wrapper objects.
+Source callbacks are lazy, finite sources expose exact counts, and
 unbounded sources compose with every reduced-value bounded consumer.
-`core/data.mjs` implements
+`core/data.eli` (`core/data.mjs`) implements
 value-semantic indexing, grouping, counting, frequencies, nested associative
-reads and updates, key selection, merging, and key/value zipping. Bulk result
-construction uses persistent Maps and transient builders where prior-value
-lookup is not required. Native and persistent collections, null, and external
-protocol extensions all use the same algorithm path.
+reads and updates, key selection, merging, and key/value zipping. `groupBy`,
+`countBy`, and `frequencies` accumulate bucket indices via transient HAMT
+builders (`transient(EMPTY_MAP)` + `TransientHashMap.get` + `assocBang` +
+`persistentBang`) and build group Vectors via `transient(EMPTY_VECTOR)` +
+`conjBang` + `persistentBang`. Native and persistent collections, null, and
+external protocol extensions all use the same algorithm path.
 
-`core/order.mjs` defines the open `IComparable` protocol, deterministic
-natural comparison for scalar, identifier, List, and Vector values, comparator
+`core/order.eli` (`core/order.mjs`) defines the open `IComparable` protocol,
+deterministic
+natural comparison for scalar, identifier, List, and Vector values (with $O(1)$
+reference-identity short-circuiting in `compareSequential` and `[VALUE_EQUAL]`
+across all persistent collections), comparator
 adaptation, stable `sort` and `sortBy`, and keyed extrema. Sorting consumes any
 `IReduce` source, caches each sort key once, preserves equal-value source order,
-and returns a persistent Vector without mutating its input.
+and constructs the resulting persistent Vector in a single `transient` +
+`conjBang` + `persistentBang` pass without intermediate array `.map()` copies.
 
 `core/text-impl.mjs` and `core/object-impl.mjs` are generated from
 `stdlib/core/text.eli` and `stdlib/core/object.eli`. Their public modules are

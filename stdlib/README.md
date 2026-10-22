@@ -374,8 +374,8 @@ protocols to ordinary Eliscript source:
 ```elisp
 (import "../../stdlib/core/metadata.eli"
         meta supports-metadata? vary-meta with-meta)
-(import "../../runtime/core/map.mjs" persistentHashMap)
-(import "../../runtime/core/vector.mjs" persistentVector)
+(import "eliscript/runtime/core/map" persistentHashMap)
+(import "eliscript/runtime/core/vector" persistentVector)
 
 (let ((value (with-meta
               (persistentVector 1 2 3)

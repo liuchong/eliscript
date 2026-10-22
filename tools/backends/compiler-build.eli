@@ -111,7 +111,11 @@
   (defasync compiler-source-names (source-root directory)
     (js-call
       (js-call (await (readdir (resolve source-root directory))) :filter
-        (lambda (name) (js-call (new globalThis.RegExp "^[a-z][a-z0-9-]*[.]eli$") :test name)))
+        (lambda (name)
+          (and (js-call (new globalThis.RegExp "^[a-z][a-z0-9-]*[.]eli$") :test name)
+               (or (/= directory "bootstrap/host")
+                   (= name "compiler-session.eli")
+                   (= name "compiler-tools.eli")))))
       :sort))
 
   (defasync loadCompilerSources (&rest arguments)

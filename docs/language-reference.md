@@ -214,9 +214,11 @@ tail-call optimization is future work tracked by
 
 Every maintained source file declares a module. `import` supports named,
 default, namespace, side-effect, and combined ECMAScript imports. Local
-`.eli` imports participate in project graph construction; external `.mjs` or
-package imports remain ordinary host dependencies. `export` names public
-bindings and `export-default` emits one default binding.
+`.eli` imports participate in project graph construction; package subpath
+imports under `eliscript/*` may omit the `.mjs` extension (for example
+`(import "eliscript/runtime/core/order" sort)`) or specify `.mjs` explicitly,
+while external package imports remain ordinary host dependencies. `export` names
+public bindings and `export-default` emits one default binding.
 
 Project-wide compilation, source containment, and cache behavior are covered
 by [Project configuration](project-configuration.md).

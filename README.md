@@ -25,8 +25,8 @@ modules, and bootstraps a compiler written in Eliscript itself.
 
 Building from source needs Emacs 29 or newer and Bun 1.4 or newer. The
 compiled compiler ships in the release tarball, so a consumer needs only Node
-24 or Bun; the package is prepared and rehearsed, and the first publication is
-pending.
+24 or Bun; releases are published to GitHub Releases and the npm registry
+(`eliscript`).
 
 ```sh
 bun install --frozen-lockfile
@@ -107,8 +107,8 @@ Known gaps, stated rather than implied:
 - The proving-ground specifications are marked `In progress`: the application is
   exercised by its tests and published, and its own acceptance set is not
   complete.
-- Publication is prepared and not performed: no tag, no registry release, and no
-  Marketplace listing exists yet.
+- Releases are published to GitHub Releases and the npm registry (`eliscript`);
+  a dedicated editor Marketplace listing is not published yet.
 
 ## Contracts
 

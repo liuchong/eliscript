@@ -29,7 +29,7 @@
       (t undefined)))
   (defun capsule-evidence-source (filename)
     (if (and (= (value-type filename) "string") (js-call filename :endsWith ".mjs"))
-      (str "tools/capsules/" (js-call filename :slice 0 -4) ".eli")
+      (str (js-call filename :slice 0 -4) ".eli")
       undefined))
   (defconst run-results (new globalThis.Set (js-array "pass" "incomplete" "fail")))
   (defun field (object key &rest defaults)
@@ -196,21 +196,21 @@
                             ((not (safe-relative filename))
                               (js-call errors :push (str label " has unsafe evidence path " (JSON/stringify filename))))
                             ((not (js-call files :has filename))
-                              (if (and (not (undefined? (capsule-evidence-source filename)))
-                                       (js-call files :has (capsule-evidence-source filename)))
-                                (try
-                                  (unless (js-call (await (stat (js-call path :join root filename))) :isFile)
-                                    (js-call errors :push (str label " evidence is not a file: " filename)))
-                                  (catch error (js-call errors :push (str label " evidence is missing: " filename))))
-                                (if (undefined? (maintained-evidence-source filename))
-                                  (js-call errors :push (str label " evidence is not tracked: " filename))
-                                  (progn
-                                    (unless (js-call generated :has filename)
-                                      (try
-                                        (await (authenticate-generated root filename files)) (js-call generated :set filename nil)
-                                        (catch error (js-call generated :set filename (get error :message)))))
-                                    (let ((failure (js-call generated :get filename)))
-                                      (when failure (js-call errors :push (str label " generated acceptance evidence authentication failed: " filename ": " failure))))))))
+                              (if (not (undefined? (maintained-evidence-source filename)))
+                                (progn
+                                  (unless (js-call generated :has filename)
+                                    (try
+                                      (await (authenticate-generated root filename files)) (js-call generated :set filename nil)
+                                      (catch error (js-call generated :set filename (get error :message)))))
+                                  (let ((failure (js-call generated :get filename)))
+                                    (when failure (js-call errors :push (str label " generated acceptance evidence authentication failed: " filename ": " failure)))))
+                                (if (and (not (undefined? (capsule-evidence-source filename)))
+                                         (js-call files :has (capsule-evidence-source filename)))
+                                  (try
+                                    (unless (js-call (await (stat (js-call path :join root filename))) :isFile)
+                                      (js-call errors :push (str label " evidence is not a file: " filename)))
+                                    (catch error (js-call errors :push (str label " evidence is missing: " filename))))
+                                  (js-call errors :push (str label " evidence is not tracked: " filename)))))
                             (t (try
                               (unless (js-call (await (stat (js-call path :join root filename))) :isFile)
                                 (js-call errors :push (str label " evidence is not a file: " filename)))

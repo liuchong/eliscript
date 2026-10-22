@@ -50,21 +50,26 @@ formatting behavior.
 boundary, single-entry and multi-entry request identity, cycle-safe dependency
 traversal, portable-name fixed points, and versioned build-report normalization
 and cache-status policy.
-`host/build.mjs` dispatches normalized operations without defining compiler
-semantics.
-`host/project.mjs` supplies the replaceable filesystem, path, artifact, and
+`host/build.eli` (`host/build.mjs`) dispatches normalized operations without
+defining compiler semantics.
+`host/project-legacy.eli` and `tools/project/project.eli` (`host/project.mjs`)
+supply the replaceable filesystem, path, artifact, and
 timing boundary while using those generated operations for real multi-module
 builds.
-`host/evaluation.mjs` owns one persistent temporary namespace, canonical value
+`host/evaluation.eli` (`host/evaluation.mjs`) owns one persistent temporary
+namespace, canonical value
 printing, output framing, Source Map failure normalization, revision commits,
-and cleanup. `host/evaluation-cli.mjs` exposes one-shot, NDJSON, and persistent
+and cleanup. `host/evaluation-cli.eli` (`host/evaluation-cli.mjs`) exposes
+one-shot, NDJSON, and persistent
 terminal REPL modes through the public `eliscript-eval` command. Terminal
 commands and presentation remain host behavior; multiline completeness remains
 compiler-owned reader behavior.
-`host/watch.mjs` owns canonical content snapshots, sorted project invalidation
+`host/watch.eli` (`host/watch.mjs`) owns canonical content snapshots, sorted
+project invalidation
 events, polling lifecycle, and the versioned `eliscript-watch-event` boundary.
-`host/watch-cli.mjs` exposes that boundary without a framework, bundler, or
-development server.
+`host/watch-cli.eli` (`host/watch-cli.mjs`) exposes that boundary without a
+framework, bundler, or development server. All `.mjs` host artifacts are
+materialized or compiled from `.eli` sources during `make bootstrap-backends`.
 
 ## Build
 

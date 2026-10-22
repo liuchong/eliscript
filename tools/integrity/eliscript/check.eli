@@ -193,27 +193,35 @@
     (let ((value (get options :compiler)))
       (if (or (eq value undefined) (eq value nil)) (await (load-compiler directory)) value)))
 
-  (defun augment-capsule-tracked-files (tracked-files)
+  (defasync augment-capsule-tracked-files (directory tracked-files)
     (if (not (Array/isArray tracked-files))
       tracked-files
-      (let ((expanded (new globalThis.Set tracked-files)))
-        (js-call tracked-files :forEach (lambda (file)
-          (when (and (= (value-type file) "string")
-                     (js-call file :startsWith "tools/capsules/")
-                     (js-call file :endsWith ".eli"))
-            (js-call expanded :add (+ (js-call file :slice (js-length "tools/capsules/") -4) ".mjs")))))
+      (let ((expanded (new globalThis.Set)) (index 0))
+        (while (< index (js-length tracked-files))
+          (let ((file (aref tracked-files index)))
+            (if (and (= (value-type file) "string") (js-call file :endsWith ".eli"))
+              (let ((is-capsule false))
+                (try
+                  (let ((text (await (readFile (js-call path :join directory file) "utf8"))))
+                    (setq is-capsule (js-call text :startsWith "(module capsules.")))
+                  (catch error (setq is-capsule false)))
+                (if is-capsule
+                  (js-call expanded :add (+ (js-call file :slice 0 -4) ".mjs"))
+                  (js-call expanded :add file)))
+              (js-call expanded :add file)))
+          (setq index (1+ index)))
         (js-call (Array/from expanded) :sort))))
 
   (defasync checkDependencyBoundaries (&rest arguments)
     (let* ((options (call-options arguments))
            (directory (js-call path :resolve (nullish (get options :root) DEFAULT_ROOT)))
-           (tracked (augment-capsule-tracked-files (await (read-tracked options directory)))))
+           (tracked (await (augment-capsule-tracked-files directory (await (read-tracked options directory))))))
       (await (legacyCheckDependencyBoundaries
         (Object/assign (js-object) options (js-object :root directory :trackedFiles tracked))))))
 
   (defasync validateBenchmarkSource (directory tracked-files filename report)
     (await (legacyValidateBenchmarkSource
-      directory (augment-capsule-tracked-files tracked-files) filename report)))
+      directory (await (augment-capsule-tracked-files directory tracked-files)) filename report)))
 
   (defasync checkRepositoryIntegrity (&rest arguments)
     (let* ((options (call-options arguments))

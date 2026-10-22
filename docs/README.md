@@ -7,10 +7,11 @@ This index is the maintained entry point for the Eliscript language, compiler,
 runtime, toolchain, and Emacs integration. Application adapters and publishing
 examples have their own documentation and do not contribute to the core gate.
 
-The current checked surface contains 175 stable specifications and conformance
-features, 43 standard-library modules with 584 exports, and a retained 35/35
-passing core acceptance audit. Compatibility reports remain bound to the exact
-source identity that produced them.
+The current checked surface contains 175 stable specifications (176 conformance
+features), 46 standard-library modules with 598 exports, zero tracked JavaScript
+(`.mjs`) source files in Git, and a retained 35/35 passing core acceptance
+audit. Compatibility reports remain bound to the exact source identity that
+produced them.
 
 ## Start Here
 
