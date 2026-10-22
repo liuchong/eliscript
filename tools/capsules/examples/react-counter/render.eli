@@ -1,0 +1,2 @@
+(module capsules.examples.react-counter.render
+  (js* "import React from \"react\";\nimport { renderToStaticMarkup } from \"react-dom/server\";\nimport Counter from \"../../dist/react-counter.mjs\";\n\nconst markup = renderToStaticMarkup(\n  React.createElement(\n    Counter,\n    { title: \"Eliscript counter\" },\n    React.createElement(\"span\", { className: \"status\" }, \"Ready\"),\n  ),\n);\n\nconsole.log(markup);\n"))

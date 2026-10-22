@@ -1,0 +1,2 @@
+(module capsules.tests.fixtures.language-equality-host
+  (js* "import { pathToFileURL } from \"node:url\";\n\nconst modulePath = process.argv[2];\nif (modulePath === undefined) {\n  throw new TypeError(\"language equality host requires a generated module path\");\n}\n\nconst generated = await import(pathToFileURL(modulePath).href);\nconsole.log(JSON.stringify(generated.report()));\n"))

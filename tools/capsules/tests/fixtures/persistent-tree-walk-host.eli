@@ -1,0 +1,2 @@
+(module capsules.tests.fixtures.persistent-tree-walk-host
+  (js* "import { pathToFileURL } from \"node:url\";\n\nconst modulePath = process.argv[2];\nif (!modulePath) throw new TypeError(\"expected compiled module path\");\n\nconst compiled = await import(pathToFileURL(modulePath).href);\nconst report = compiled.walk_report();\nprocess.stdout.write(JSON.stringify(report));\n"))

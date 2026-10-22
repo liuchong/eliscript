@@ -1,0 +1,2 @@
+(module capsules.tests.fixtures.regex-host
+  (js* "import process from \"node:process\";\nimport { pathToFileURL } from \"node:url\";\n\nconst modulePath = process.argv[2];\nif (modulePath === undefined) throw new TypeError(\"expected a compiled module path\");\nconst fixture = await import(pathToFileURL(modulePath).href);\nprocess.stdout.write(`${JSON.stringify(fixture.run())}\\n`);\n"))

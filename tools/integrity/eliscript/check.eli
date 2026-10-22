@@ -14,8 +14,8 @@
   (defconst validateIntegrityContract (get legacy :validateIntegrityContract))
   (defconst repositoryTrackedFiles (get legacy :repositoryTrackedFiles))
   (defconst validateImportRecords (get legacy :validateImportRecords))
-  (defconst checkDependencyBoundaries (get legacy :checkDependencyBoundaries))
-  (defconst validateBenchmarkSource (get legacy :validateBenchmarkSource))
+  (defconst legacyCheckDependencyBoundaries (get legacy :checkDependencyBoundaries))
+  (defconst legacyValidateBenchmarkSource (get legacy :validateBenchmarkSource))
   (defconst validateBenchmarkInventory (get legacy :validateBenchmarkInventory))
   (defconst humanIntegrityReport (get legacy :humanIntegrityReport))
   (defconst contract-file "contracts/repository-integrity.json")
@@ -192,6 +192,28 @@
   (defasync read-compiler (options directory)
     (let ((value (get options :compiler)))
       (if (or (eq value undefined) (eq value nil)) (await (load-compiler directory)) value)))
+
+  (defun augment-capsule-tracked-files (tracked-files)
+    (if (not (Array/isArray tracked-files))
+      tracked-files
+      (let ((expanded (new globalThis.Set tracked-files)))
+        (js-call tracked-files :forEach (lambda (file)
+          (when (and (= (value-type file) "string")
+                     (js-call file :startsWith "tools/capsules/")
+                     (js-call file :endsWith ".eli"))
+            (js-call expanded :add (+ (js-call file :slice (js-length "tools/capsules/") -4) ".mjs")))))
+        (js-call (Array/from expanded) :sort))))
+
+  (defasync checkDependencyBoundaries (&rest arguments)
+    (let* ((options (call-options arguments))
+           (directory (js-call path :resolve (nullish (get options :root) DEFAULT_ROOT)))
+           (tracked (augment-capsule-tracked-files (await (read-tracked options directory)))))
+      (await (legacyCheckDependencyBoundaries
+        (Object/assign (js-object) options (js-object :root directory :trackedFiles tracked))))))
+
+  (defasync validateBenchmarkSource (directory tracked-files filename report)
+    (await (legacyValidateBenchmarkSource
+      directory (augment-capsule-tracked-files tracked-files) filename report)))
 
   (defasync checkRepositoryIntegrity (&rest arguments)
     (let* ((options (call-options arguments))

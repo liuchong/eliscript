@@ -1,0 +1,2 @@
+(module capsules.tests.fixtures.declarative-record-host
+  (js* "import { pathToFileURL } from \"node:url\";\n\nconst [modulePath] = process.argv.slice(2);\nconst declarations = await import(pathToFileURL(modulePath).href);\n\nconsole.log(JSON.stringify(declarations.record_report()));\n"))

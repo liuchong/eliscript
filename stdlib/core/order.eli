@@ -1,7 +1,7 @@
 (module eliscript.core.order
   (import "../../runtime/core/collection.mjs" reduce)
   (import "../../runtime/core/order.mjs" :as Runtime)
-  (import "../../runtime/core/transducer.mjs" into)
+  (import "../../runtime/core/transient.mjs" conjBang persistentBang transient)
   (import "../../runtime/core/truth.mjs" isTruthy)
   (import "../../runtime/core/vector.mjs" EMPTY_VECTOR)
   (defconst IComparable Runtime/IComparable)
@@ -66,7 +66,11 @@
         (left right)
         (let ((result (funcall comparison (get left :key) (get right :key))))
           (if (= result 0) (- (get left :index) (get right :index)) result))))
-    (into EMPTY_VECTOR (js-call values :map (lambda (entry) (get entry :value)))))
+    (let ((builder (transient EMPTY_VECTOR)) (index 0) (limit (js-length values)))
+      (while (< index limit)
+        (conjBang builder (get (js-nth index values) :value))
+        (setq index (1+ index)))
+      (persistentBang builder)))
   (defun sort
     (&rest arguments)
     (let ((length (js-length arguments)))

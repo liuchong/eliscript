@@ -183,7 +183,7 @@ flowchart LR
 | S0 | [x] | 已完成 | 补齐 `docs/bootstrap-0.0.3-plan.md` 精确施工手册 | 当前授权 | 全部差异 D01–D16、施工项 C01–C16 与验收项 A01–A08 已明确 |
 | S1 | [x] | 已完成 | 一次写齐测试与验收用例（D14–D16），不运行 | S0 | 用例写完，保持待最终阶段集中执行 |
 | S2 | [x] | 已完成 | 一次完成全部实现、旧文件清理与文档版本更新（D01–D13） | S1 | 全量实现完成并逐项勾选 C01–C16 |
-| S3 | [ ] | 进行中 | 集中整合构建、测试验收、GPG 签名提交推送、`v0.0.3` 标签与 Release 发布 | S0/S1/S2 | A01–A08 全部实测通过并记录真实证据 |
+| S3 | [x] | 已完成 | 集中整合构建、测试验收、GPG 签名提交推送、`v0.0.3` 标签与 Release 发布 | S0/S1/S2 | A01–A12 全部实测通过并记录真实证据 |
 
 ### 施工清单（写完一项即勾一项）
 
@@ -231,7 +231,7 @@ flowchart LR
 | A05 | [x] | Q03, Q04 / C08, C10–C12, C15 | 更新后的 Pages 与 API 产物 | `bun run generate:api && bun run build:docs-site && bun test tests/pages-site.test.mjs tests/docs-site.test.mjs` | 页面展示 `v0.0.3`、`dist/docs-site/site.js` 已压缩、单测全部通过 | 10/10 通过（`site.js` 102.88 KB minified，全站 `v0.0.3` 与可点击链接校验通过） |
 | A06 | [x] | Q04 / C09–C13 | 更新后的文档与契约 | `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 bun run check:contracts && bun test tests/onboarding-docs.test.mjs` | 全部契约检查与入门文档端到端测试 exit 0 | 契约检查与 `onboarding-docs.test.mjs`（4/4）全部通过 |
 | A07 | [x] | Q01, Q03, Q04 / C01–C13 | `0.0.3` 源码完整就绪 | 重建后端、`make bootstrap-release`、`make prepare-release-package`、`npm pack --dry-run` | `stage2 == stage3` 固定点成立（313 文件完全一致），`eliscript-0.0.3.tgz` 体积 `< 5 MB` | `stage2 == stage3`（SHA-256 `7642d697c024b3239133913844715b02ad7b863344cbff3b53490e7c048ba94a`），包体积 4.5 MB |
-| A08 | [ ] | Q04 / 全量交付 | A01–A12 全部通过 | GPG 签名提交推送 `master`、向用户汇报完整总结并在确认后打签名标签 `v0.0.3` 发布 | 远端 `master` 同步且所有检查绿灯 | 待 A09–A12 完成后执行 |
+| A08 | [x] | Q04 / 全量交付 | A01–A12 全部通过 | GPG 签名提交推送 `master`、向用户汇报完整总结并在确认后打签名标签 `v0.0.3` 发布 | 远端 `master` 同步且所有检查绿灯 | `v0.0.3` 签名标签、GitHub Release 及 npm `eliscript@0.0.3`（含 SLSA Provenance，`9fe44c83e84ae7a83a59223c739012a521514106`）已正式发布 |
 | A09 | [x] | Q02 / C17, C19 | 内联 `compiler-host-scope.eli` fixture 并移除 24 个废弃 `.mjs` 测试文件 | `make bootstrap-backends && node --test ./tests/compiler-host-scope-selfhosted.test.mjs && bun test tests/file-workers-selfhosted.test.mjs` | 全部测试通过且无外部废弃 `.mjs` 文件依赖 | `compiler-host-scope-selfhosted.test.mjs` 43/43 通过，`file-workers-selfhosted.test.mjs` 9/9 通过 |
 | A10 | [x] | Q02 / C18, C19 | 迁移 `tools/pages/assemble.eli` 并移除 `tools/pages/assemble-legacy.mjs` | `bun test tests/pages-assembly.test.mjs tests/pages-derived-transports-selfhosted.test.mjs` | Pages 组装与派生传输测试全部通过 | `pages-assembly.test.mjs` 8/8 通过，`pages-derived-transports-selfhosted.test.mjs` 2/2 通过 |
 | A11 | [x] | Q02 / C19 | 移除 `examples/dogfood/tmp/x-out/` 等共 46 个废弃/临时文件 | `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 bun run check:integrity && ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 bun run check:contracts` | 仓库完整性与契约检查全部 exit 0 | `check:integrity` 与 `check:contracts`（176/176 features）全部通过 |

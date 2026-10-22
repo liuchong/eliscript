@@ -1,0 +1,2 @@
+(module capsules.tests.fixtures.compiled-eli-bun-preload
+  (js* "import { plugin } from \"bun\";\n\nplugin({\n  name: \"compiled-eliscript-module\",\n  setup(build) {\n    build.onLoad({ filter: /\\.eli$/ }, async ({ path }) => ({\n      contents: await Bun.file(path).text(),\n      loader: \"js\",\n    }));\n  },\n});\n"))

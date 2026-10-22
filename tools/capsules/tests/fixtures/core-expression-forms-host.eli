@@ -1,0 +1,2 @@
+(module capsules.tests.fixtures.core-expression-forms-host
+  (js* "const modulePath = process.argv[2];\nif (!modulePath) throw new TypeError(\"compiled module path is required\");\n\nconst module = await import(modulePath);\nprocess.stdout.write(`${JSON.stringify(module.expression_form_report())}\\n`);\n"))

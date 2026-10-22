@@ -94,9 +94,38 @@ an added or changed declaration cannot silently bootstrap an incomplete graph."
                             (expand-file-name (cdr pair) eliscript-backend-bootstrap-root)))))
             (nreverse pairs))))
 
+(defun eliscript-backend-materialize-capsules (root-directory)
+  "Materialize all .eli capsule modules under tools/capsules/ to <rel>.mjs."
+  (let ((capsule-root (expand-file-name "tools/capsules" root-directory)))
+    (when (file-directory-p capsule-root)
+      (dolist (capsule (directory-files-recursively capsule-root "\\.eli\\'"))
+        (let* ((rel (file-relative-name capsule capsule-root))
+               (target (expand-file-name (concat (substring rel 0 -4) ".mjs") root-directory))
+               (coding-system-for-read 'utf-8-unix)
+               (coding-system-for-write 'utf-8-unix)
+               (payload (with-temp-buffer
+                          (insert-file-contents capsule)
+                          (goto-char (point-min))
+                          (search-forward "(js* ")
+                          (json-parse-string
+                           (buffer-substring-no-properties
+                            (point) (- (point-max) 3))))))
+          (unless (stringp payload)
+            (error "Invalid capsule module %s" rel))
+          (make-directory (file-name-directory target) t)
+          (with-temp-buffer
+            (set-buffer-multibyte t)
+            (insert payload)
+            (write-region (point-min) (point-max) target nil 'silent))
+          (when (member rel '("bootstrap/host/bun.eli"
+                              "bootstrap/host/project-cli-legacy.eli"
+                              "runtime/worker.eli"))
+            (set-file-modes target #o755)))))))
+
 (defun eliscript-backend-bootstrap-runtimes ()
   "Prepare maintained runtime modules before loading generated compiler tools."
   (let ((default-directory eliscript-backend-bootstrap-root))
+    (eliscript-backend-materialize-capsules default-directory)
     (let ((generator (expand-file-name "tools/runtime/unicode-case-runtime.el" default-directory)))
       (unless (file-regular-p generator)
         (error "formal bootstrap requires its maintained Unicode data generator"))

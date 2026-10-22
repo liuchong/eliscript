@@ -1,0 +1,2 @@
+(module capsules.tests.fixtures.worker-value-stream-probe
+  (js* "export async function echo_text(value, context) {\n  if (typeof value !== \"string\") {\n    throw new TypeError(\"echo_text requires one string\");\n  }\n  await context.progress(value.length);\n  await new Promise((resolve) => setTimeout(resolve, 100));\n  return value;\n}\n"))

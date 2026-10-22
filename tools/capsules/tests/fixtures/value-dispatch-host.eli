@@ -1,0 +1,2 @@
+(module capsules.tests.fixtures.value-dispatch-host
+  (js* "import { pathToFileURL } from \"node:url\";\n\nconst [modulePath] = process.argv.slice(2);\nconst declarations = await import(pathToFileURL(modulePath).href);\n\nlet failure;\ntry {\n  declarations.no_condp_match();\n} catch (error) {\n  failure = { name: error.name, message: error.message };\n}\n\nconsole.log(JSON.stringify({\n  report: declarations.dispatch_report(),\n  failure,\n}));\n"))

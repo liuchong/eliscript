@@ -17,8 +17,18 @@
   (test "stable compatibility corpus covers every frozen core behavior"
     (async ()
       (let* ((value (await (contract)))
-             (git (spawnSync "git" (js-array "ls-files" "-z" "--" "tests/fixtures")
+             (git (spawnSync "git" (js-array "ls-files" "-z" "--" "tests/fixtures" "tools/capsules/tests/fixtures")
                     (js-object :cwd root :encoding "utf8")))
+             (tracked-fixtures
+               (Array/from
+                 (new globalThis.Set
+                   (js-call
+                     (js-call (js-call (get git :stdout) :split "\u0000") :filter globalThis.Boolean)
+                     :map (lambda (entry)
+                            (if (and (js-call entry :startsWith "tools/capsules/tests/fixtures/")
+                                     (js-call entry :endsWith ".eli"))
+                              (str (js-call entry :slice (js-length "tools/capsules/") -4) ".mjs")
+                              entry))))))
              (manifest (JSON/parse (await (readFile (resolve root "tests/conformance/manifest.json") "utf8"))))
              (index (JSON/parse (await (readFile (resolve root "specs/index.json") "utf8"))))
              (rehearsal (JSON/parse (await (readFile (resolve root "contracts/compatibility-rehearsal.json") "utf8"))))
@@ -35,7 +45,7 @@
         ;; corpus generator. Staged migrations change paths, never coverage.
         (js-call (expect (get value :deferredFixtures)) :toEqual (js-array))
         (js-call (expect (get value :fixtureFiles)) :toEqual
-          (js-call (js-call (js-call (get git :stdout) :split "\u0000") :filter globalThis.Boolean) :sort))
+          (js-call tracked-fixtures :sort))
         (js-call (get value :fixtureFiles) :forEach (lambda (file) (js-call source-files :add file)))
         (js-call (get rehearsal :sourceFiles) :forEach (lambda (file) (js-call source-files :add file)))
         (js-call (get index :specifications) :forEach (lambda (specification)

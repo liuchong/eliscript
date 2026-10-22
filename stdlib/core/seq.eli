@@ -43,7 +43,7 @@
     persistentVector)
   (defconst not-found (js-object))
   (defconst sequence-no-partition-pad (js-object))
-  (defconst sequence-ring (lambda () (new globalThis/Map)))
+  (defconst sequence-ring (lambda (limit) (new globalThis/Array limit)))
   (defconst sequence-array? (js* "Array.isArray"))
   (defconst sequence-safe-integer? (js* "Number.isSafeInteger"))
   (defconst sequence-finite? (js* "Number.isFinite"))
@@ -276,14 +276,20 @@
       limit))
   (defun first
     (collection &optional not-found-value)
-    (let
-      (
-        (result
+    (cond
+      ((isPersistentList collection)
+        (if (get collection :isEmpty) not-found-value (js-call collection :first not-found-value)))
+      ((isPersistentVector collection)
+        (if (= (get collection :count) 0) not-found-value (js-call collection :nth 0)))
+      (t
+        (let ((found false) (found-value nil))
           (reduce
             collection
-            (lambda (missing value) (reduced (js-object :value value)))
-            not-found)))
-      (if (eq result not-found) not-found-value (get result :value))))
+            (lambda (missing value)
+              (setq found t found-value value)
+              (reduced missing))
+            nil)
+          (if found found-value not-found-value)))))
   (defun nth-rest
     (limit collection)
     (require-non-negative-safe-integer limit "nth-rest limit")
@@ -312,48 +318,48 @@
   (defun sequence-nth
     (index collection &optional not-found-value)
     (require-non-negative-safe-integer index "sequence-nth index")
-    (let*
-      ((position 0)
-        (result
-          (reduce
-            collection
-            (lambda
-              (missing value)
-              (if (= position index)
-                (reduced (js-object :value value))
-                (progn (setq position (1+ position)) missing)))
-            not-found)))
-      (if (eq result not-found) not-found-value (get result :value))))
+    (let ((position 0) (found false) (found-value nil))
+      (reduce
+        collection
+        (lambda
+          (missing value)
+          (if (= position index)
+            (progn (setq found t found-value value) (reduced missing))
+            (progn (setq position (1+ position)) missing)))
+        nil)
+      (if found found-value not-found-value)))
   (defun last
     (collection &optional not-found-value)
-    (if (implementsProtocolOperation IReversible "rseq" collection)
-      (first (rseq collection) not-found-value)
-      (let
-        (
-          (result
-            (reduce
-              collection
-              (lambda (missing value) (js-object :value value))
-              not-found)))
-        (if (eq result not-found) not-found-value (get result :value)))))
+    (cond
+      ((isPersistentVector collection)
+        (js-call collection :peek not-found-value))
+      ((implementsProtocolOperation IReversible "rseq" collection)
+        (first (rseq collection) not-found-value))
+      (t
+        (let ((found false) (last-value nil))
+          (reduce
+            collection
+            (lambda (missing value) (setq found t last-value value) missing)
+            nil)
+          (if found last-value not-found-value)))))
   (defun take-last
     (limit collection)
     (require-non-negative-safe-integer limit "take-last limit")
     (if (= limit 0)
       EMPTY_VECTOR
-      (let ((ring (funcall sequence-ring)) (count 0) (start 0))
+      (let ((ring (funcall sequence-ring limit)) (count 0) (start 0))
         (reduce
           collection
           (lambda
             (state value)
             (if (< count limit)
-              (progn (js-call ring :set count value) (setq count (1+ count)))
-              (progn (js-call ring :set start value) (setq start (% (1+ start) limit))))
+              (progn (put ring count value) (setq count (1+ count)))
+              (progn (put ring start value) (setq start (% (1+ start) limit))))
             state)
           nil)
         (let ((builder (transient EMPTY_VECTOR)) (index 0))
           (while (< index count)
-            (conjBang builder (js-call ring :get (% (+ start index) limit)))
+            (conjBang builder (js-nth (% (+ start index) limit) ring))
             (setq index (1+ index)))
           (persistentBang builder)))))
   (defun drop-last
@@ -362,7 +368,7 @@
     (if (= limit 0)
       (into EMPTY_VECTOR collection)
       (let
-        ((ring (funcall sequence-ring))
+        ((ring (funcall sequence-ring limit))
           (builder (transient EMPTY_VECTOR))
           (count 0)
           (start 0))
@@ -371,10 +377,10 @@
           (lambda
             (state value)
             (if (< count limit)
-              (progn (js-call ring :set count value) (setq count (1+ count)))
+              (progn (put ring count value) (setq count (1+ count)))
               (progn
-                (conjBang builder (js-call ring :get start))
-                (js-call ring :set start value)
+                (conjBang builder (js-nth start ring))
+                (put ring start value)
                 (setq start (% (1+ start) limit))))
             state)
           nil)
@@ -589,18 +595,16 @@
   (defun find
     (predicate collection &optional not-found-value)
     (require-function predicate "find predicate")
-    (let
-      (
-        (result
-          (reduce
-            collection
-            (lambda
-              (missing value)
-              (if (isTruthy (funcall predicate value))
-                (reduced (js-object :value value))
-                missing))
-            not-found)))
-      (if (eq result not-found) not-found-value (get result :value))))
+    (let ((found false) (found-value nil))
+      (reduce
+        collection
+        (lambda
+          (missing value)
+          (if (isTruthy (funcall predicate value))
+            (progn (setq found t found-value value) (reduced missing))
+            missing))
+        nil)
+      (if found found-value not-found-value)))
   (defun reductions
     (step initial collection)
     (require-function step "reductions step")

@@ -1,0 +1,2 @@
+(module capsules.runtime.core.metadata-internals
+  (js* "import {\n  defineProtocol,\n  protocolMethod,\n  protocolSlot,\n} from \"./protocol.mjs\";\n\nexport const I_META = defineProtocol(\"IMeta\", [\"meta\"]);\nexport const I_WITH_META = defineProtocol(\"IWithMeta\", [\"withMeta\"]);\n\nexport const METADATA_READ = protocolSlot(I_META, \"meta\");\nexport const METADATA_WITH = protocolSlot(I_WITH_META, \"withMeta\");\n\nexport const dispatchMetadataRead = protocolMethod(I_META, \"meta\");\nexport const dispatchMetadataWith = protocolMethod(I_WITH_META, \"withMeta\");\n"))

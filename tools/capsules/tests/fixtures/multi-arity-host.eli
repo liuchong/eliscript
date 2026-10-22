@@ -1,0 +1,2 @@
+(module capsules.tests.fixtures.multi-arity-host
+  (js* "import { pathToFileURL } from \"node:url\";\n\nconst modulePath = process.argv[2];\nif (!modulePath) throw new TypeError(\"expected compiled module path\");\n\nconst compiled = await import(pathToFileURL(modulePath).href);\nlet failure;\ntry {\n  compiled.countdown();\n} catch (error) {\n  failure = { name: error.name, message: error.message };\n}\n\nprocess.stdout.write(JSON.stringify({\n  report: compiled.report(),\n  asyncReport: await compiled.async_report(),\n  failure,\n}));\n"))
