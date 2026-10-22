@@ -83,6 +83,7 @@ test-core: check-contracts
 		-l tests/eliscript-service-tests.el \
 		-l tests/eliscript-analysis-tests.el \
 		-l tests/bootstrap-tests.el \
+		-l tests/eliscript-compat-syntax-tests.el \
 		-f ert-run-tests-batch-and-exit
 	$(BUN) $(BUN_TEST_RUNNER) ./tests/conformance.test.mjs ./tests/compiler-parity-corpus.test.mjs \
 		./tests/stable-compatibility-corpus.test.mjs \
@@ -366,7 +367,8 @@ test-core: check-contracts
 		./tests/core-stdlib.test.mjs \
 		./tests/persistent-list.test.mjs ./tests/persistent-queue.test.mjs ./tests/persistent-vector.test.mjs ./tests/value-semantics.test.mjs \
 		./tests/persistent-map.test.mjs ./tests/persistent-set.test.mjs \
-		./tests/record.test.mjs ./tests/type.test.mjs
+		./tests/record.test.mjs ./tests/type.test.mjs \
+		./tests/emacs-compatible-syntax.test.mjs
 	$(NODE) --test --test-concurrency=1 ./tests/compiler-session-protocol-selfhosted.test.mjs ./tests/compiler-matrix-selfhosted.test.mjs ./tests/managed-module-graph-selfhosted.test.mjs ./tests/compiler-corpus-managed-adapters-selfhosted.test.mjs \
 		./tests/number-text-node-bridge-selfhosted.test.mjs \
 		./tests/compiler-host-scope-selfhosted.test.mjs \

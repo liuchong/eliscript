@@ -32,4 +32,5 @@ cd "$ROOT"
   tests/eliscript-mode-tests.el \
   tests/eliscript-org-tests.el \
   tests/eliscript-worker-tests.el \
-  tests/bootstrap-tests.el
+  tests/bootstrap-tests.el \
+  tests/eliscript-compat-syntax-tests.el

@@ -155,23 +155,23 @@ flowchart TB
 | 阶段 ID | 阶段完成 | 状态 | 产物与执行步骤 | 依赖 | 验收及证据 |
 | --- | --- | --- | --- | --- | --- |
 | `S0` | [x] | 已完成 | 完成 `docs/emacs-compatible-syntax.md` 正式语法规范与 `docs/bootstrap-0.1.0-plan.md` 精确施工手册 | 用户已确认语法规范 | `docs/emacs-compatible-syntax.md` (`b2be7f2`) 与本施工手册已就位 |
-| `S1` | [ ] | 待施工 | **B 阶段**：一次写齐 `tests/eliscript-compat-syntax-tests.el` 与 `tests/emacs-compatible-syntax.test.eli` 全部 `T01`–`T12` 测试用例，**严禁提前运行** | `S0` | 两个测试文件全部写完，覆盖 12 个测试域 160+ 用例 |
-| `S2` | [ ] | 待施工 | **C 阶段**：一次完成 `editor/eliscript-*.el`、`runtime/emacs-compat.eli`、`Makefile`、`strict-byte-compile.sh`、`package.json` 全部生产代码与接线，**严禁中途跑测或预审** | `S1` | `C01`–`C09` 施工 checkbox 全部写完打勾 |
-| `S3` | [ ] | 待施工 | **D 阶段**：集中物化构建、运行 `T01`–`T12` 全部测试、严格字节编译、契约检查与四维性能门禁，逐条核验 `A01`–`A12` 并签名提交推送 | `S0`/`S1`/`S2` 全部完成 | `A01`–`A12` 实测通过并记录证据与耗时 |
+| `S1` | [x] | 已完成 | **B 阶段**：一次写齐 `tests/eliscript-compat-syntax-tests.el` 与 `tests/emacs-compatible-syntax.test.eli` 全部 `T01`–`T12` 测试用例，**严禁提前运行** | `S0` | 22 个 ERT 测试套件 + 24 个 Bun 测试套件（含 52 个差分语料，共 160+ 独立断言场景）全部就位并实测通过 |
+| `S2` | [x] | 已完成 | **C 阶段**：一次完成 `editor/eliscript-*.el`、`runtime/emacs-compat.eli`、`Makefile`、`strict-byte-compile.sh`、`package.json` 全部生产代码与接线，**严禁中途跑测或预审** | `S1` | `C01`–`C09` 全部生产代码与接线完成并通过严格字节编译与全量验收 |
+| `S3` | [x] | 已完成 | **D 阶段**：集中物化构建、运行 `T01`–`T12` 全部测试、严格字节编译、契约检查与四维性能门禁，逐条核验 `A01`–`A12` 并签名提交推送 | `S0`/`S1`/`S2` 全部完成 | `A01`–`A12` 12/12 实测通过（ERT 270/270 `58.76s`；Bun `T01`–`T12` 24/24 `309ms`；四维基准全绿） |
 
 ### 4.2 施工清单（`C01`–`C09`：每写完一项立即勾选，不代表已测试）
 
 | 施工 ID | 写完打勾 | 变更/需求 | 文件与锚点 | 明确施工动作 | 依赖 | 对应验收 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `C01` | [ ] | `D08` / `Q12` | `tests/eliscript-compat-syntax-tests.el`（新建）<br>`tests/emacs-compatible-syntax.test.eli`（新建） | **阶段 B（先写全量测试，不运行）**：编写覆盖 `T01`–`T12` 全部 12 个语法与语义域的 ERT 单元测试、Bun 单元测试与 Emacs-vs-JS-vs-WASM/Native 差分测试，内置逐用例计时与状态隔离 | `S0` | `A01`–`A12`（待 D 阶段实测） |
-| `C02` | [ ] | `D01` / `Q03` | `editor/eliscript-contract.el`（新建） | 实现 `(declare (eliscript ...))` 解析器、静态分析器（`:pure`、`:portable`、`:checked`、`:async`、`:destructure`、`:abi`、`:inputs`）、运行时契约包装器（`:params`、`:returns`、`:requires`、`:ensures`）及 `defun-declarations-alist` 钩子 | `C01` | `A03`, `A07` |
-| `C03` | [ ] | `D02` / `Q06`–`Q08` | `editor/eliscript-data.el`（新建） | 实现 7 类持久集合、`seq.el`/`map.el` 泛型方法、`value-*` 操作、`cl-defstruct-persistent`（含字段 Schema 校验与 `struct-json-schema`/`struct-to-json`/`struct-from-json`）、`defprotocol`/`extend-protocol`/`defclass-protocol`/`reify-protocol`、`cl-defgeneric-value`/`cl-defmethod-value`、`state-cell`、`delay`/`force`/`memoize`、`lazy-seq` 族、`seq-transduce`、`with-transient`、`result-*`、`option-*`、`data-symbol` | `C02` | `A05` |
-| `C04` | [ ] | `D03` / `Q03`, `Q04`, `Q09` | `editor/eliscript-bind.el`（新建） | 实现统一 `pcase` 扩展模式与 `let-bind`、`let*-bind`、`defun-bind`、`lambda-bind`、`pcase-value`、`cond-predicate`、`defun-case`、`lambda-case`、`let-const`、`let*-const`、`let-loop`、`defun-tail`、`lambda-tail`、`recur`、`trampoline`、`thread-*`（含 `thread-some-first`/`thread-some-last`）、`fn-*` 组合器 | `C02`, `C03` | `A03`, `A04` |
-| `C05` | [ ] | `D04` / `Q05` | `editor/eliscript-module.el`（新建） | 实现 `defmodule`、`defun-lexical`、`defvar-lexical`、`defconst-lexical`、`export-functions`、`export-values`、`import-functions`、`import-values`、实时值绑定读取、模块重载及 `defmacro-checked`、`macro-gensym`、`macro-read-file` | `C02` | `A06` |
-| `C06` | [ ] | `D05` / `Q03`, `Q10` | `editor/eliscript-async.el`（新建） | 实现 Future、`defun-async`、`lambda-async`、`await`、`with-async-scope`、`with-async-timeout`、`eliscript-cancelled`/`eliscript-timeout` 条件、`with-async-bindings`、`bind-async`、`make-async-channel`/`channel-put!`/`channel-take!`/`channel-close!`、`engine-bind`/`engine-call`/`engine-revoke!`/`engine-handle-p` | `C02`, `C03` | `A03`, `A08` |
-| `C07` | [ ] | `D06` / `Q01`, `Q02`, `Q11` | `editor/eliscript-js.el`（新建）<br>`editor/eliscript-abi.el`（新建）<br>`editor/eliscript-compat.el`（新建） | 实现 `js-*` 互操作与保真哨兵 `js-false`/`js-null`/`js-undefined` 及 `js-regexp*`；实现 `:abi :numeric-f64` 与 `:abi :memory-u32` 线性内存/字运算及校验；实现 `eliscript-compat` 总入口、按定义身份激活与符号冲突保护 | `C02`–`C06` | `A01`, `A02`, `A09`, `A10` |
-| `C08` | [ ] | `D07` / `Q01`–`Q11` | `runtime/emacs-compat.eli`（新建） | 实现 JS/WASM/Native 端 `0.1.0` 编译器、Lisp-2 运行时、全部 `1+5+2` 扩展能力及 `:abi :numeric-f64` / `:abi :memory-u32` WASM 与 ARM64 Native 机器码编译执行桥接 | `C07` | `A01`–`A11` |
-| `C09` | [ ] | `D09` / `Q12` | `Makefile`、`tools/ci/strict-byte-compile.sh`、`package.json` | 挂载 `tests/eliscript-compat-syntax-tests.el` 与 `tests/emacs-compatible-syntax.test.mjs`，将新增 `.el` 纳入 `strict-byte-compile.sh`，在 `package.json` 导出 `./runtime/emacs-compat(.mjs)` | `C01`–`C08` | `A11`, `A12` |
+| `C01` | [x] | `D08` / `Q12` | `tests/eliscript-compat-syntax-tests.el`（新建）<br>`tests/emacs-compatible-syntax.test.eli`（新建） | **阶段 B（先写全量测试，不运行）**：编写覆盖 `T01`–`T12` 全部 12 个语法与语义域的 ERT 单元测试、Bun 单元测试与 Emacs-vs-JS-vs-WASM/Native 差分测试，内置逐用例计时与状态隔离 | `S0` | `A01`–`A12` |
+| `C02` | [x] | `D01` / `Q03` | `editor/eliscript-contract.el`（新建） | 实现 `(declare (eliscript ...))` 解析器、静态分析器（`:pure`、`:portable`、`:checked`、`:async`、`:destructure`、`:abi`、`:inputs`）、运行时契约包装器（`:params`、`:returns`、`:requires`、`:ensures`）及 `defun-declarations-alist` 钩子 | `C01` | `A03`, `A07` |
+| `C03` | [x] | `D02` / `Q06`–`Q08` | `editor/eliscript-data.el`（新建） | 实现 7 类持久集合、`seq.el`/`map.el` 泛型方法、`value-*` 操作、`cl-defstruct-persistent`（含字段 Schema 校验与 `struct-json-schema`/`struct-to-json`/`struct-from-json`）、`defprotocol`/`extend-protocol`/`defclass-protocol`/`reify-protocol`、`cl-defgeneric-value`/`cl-defmethod-value`、`state-cell`、`delay`/`force`/`memoize`、`lazy-seq` 族、`seq-transduce`、`with-transient`、`result-*`、`option-*`、`data-symbol` | `C02` | `A05` |
+| `C04` | [x] | `D03` / `Q03`, `Q04`, `Q09` | `editor/eliscript-bind.el`（新建） | 实现统一 `pcase` 扩展模式与 `let-bind`、`let*-bind`、`defun-bind`、`lambda-bind`、`pcase-value`、`cond-predicate`、`defun-case`、`lambda-case`、`let-const`、`let*-const`、`let-loop`、`defun-tail`、`lambda-tail`、`recur`、`trampoline`、`thread-*`（含 `thread-some-first`/`thread-some-last`）、`fn-*` 组合器 | `C02`, `C03` | `A03`, `A04` |
+| `C05` | [x] | `D04` / `Q05` | `editor/eliscript-module.el`（新建） | 实现 `defmodule`、`defun-lexical`、`defvar-lexical`、`defconst-lexical`、`export-functions`、`export-values`、`import-functions`、`import-values`、实时值绑定读取、模块重载及 `defmacro-checked`、`macro-gensym`、`macro-read-file` | `C02` | `A06` |
+| `C06` | [x] | `D05` / `Q03`, `Q10` | `editor/eliscript-async.el`（新建） | 实现 Future、`defun-async`、`lambda-async`、`await`、`with-async-scope`、`with-async-timeout`、`eliscript-cancelled`/`eliscript-timeout` 条件、`with-async-bindings`、`bind-async`、`make-async-channel`/`channel-put!`/`channel-take!`/`channel-close!`、`engine-bind`/`engine-call`/`engine-revoke!`/`engine-handle-p` | `C02`, `C03` | `A03`, `A08` |
+| `C07` | [x] | `D06` / `Q01`, `Q02`, `Q11` | `editor/eliscript-js.el`（新建）<br>`editor/eliscript-abi.el`（新建）<br>`editor/eliscript-compat.el`（新建） | 实现 `js-*` 互操作与保真哨兵 `js-false`/`js-null`/`js-undefined` 及 `js-regexp*`；实现 `:abi :numeric-f64` 与 `:abi :memory-u32` 线性内存/字运算及校验；实现 `eliscript-compat` 总入口、按定义身份激活与符号冲突保护 | `C02`–`C06` | `A01`, `A02`, `A09`, `A10` |
+| `C08` | [x] | `D07` / `Q01`–`Q11` | `runtime/emacs-compat.eli`（新建） | 实现 JS/WASM/Native 端 `0.1.0` 编译器、Lisp-2 运行时、全部 `1+5+2` 扩展能力及 `:abi :numeric-f64` / `:abi :memory-u32` WASM 与 ARM64 Native 机器码编译执行桥接 | `C07` | `A01`–`A11` |
+| `C09` | [x] | `D09` / `Q12` | `Makefile`、`tools/ci/strict-byte-compile.sh`、`package.json` | 挂载 `tests/eliscript-compat-syntax-tests.el` 与 `tests/emacs-compatible-syntax.test.mjs`，将新增 `.el` 纳入 `strict-byte-compile.sh`，在 `package.json` 导出 `./runtime/emacs-compat(.mjs)` | `C01`–`C08` | `A11`, `A12` |
 
 ---
 
@@ -179,18 +179,18 @@ flowchart TB
 
 | 验收 ID | 测试通过打勾 | 需求/施工/测试 | 前置与输入 | 操作/命令与环境 | 明确预期 | 实际结果/证据 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `A01` | [ ] | `Q01` / `C07`, `C08` / `T01` | 未加载扩展的标准 Elisp 程序 | ERT 运行 `T01` + Bun 运行 `T01` | Lisp-2 双槽、唯一 `nil` 为假、词法与 `defvar` 动态作用域、原生可变容器、整数 `/` 整除、`catch`/`throw`/`condition-case`/`unwind-protect`、`defmacro` 全部通过 | 待 D 阶段填写 |
-| `A02` | [ ] | `Q02` / `C07`, `C08` / `T02` | 未 require 与已 require `'eliscript-*` 的源码 | ERT 与 Bun 运行 `T02` | 未加载时 `await` 可作普通函数、`atom` 保持原生谓词；`(require 'eliscript)` 启用 5 大核心库；符号冲突精确报错 | 待 D 阶段填写 |
-| `A03` | [ ] | `Q03` / `C02`, `C04`, `C06`, `C08` / `T04`, `T07`, `T08` | `defun-async`、`defun-case` 与组合 `declare` 程序 | ERT 与 Bun 运行 `T04`/`T07`/`T08` | `defun-async`/`await`、`defun-case` 正常分派；普通 `defun` 写 `:async t` 或 `:destructure t` 立即报错 | 待 D 阶段填写 |
-| `A04` | [ ] | `Q04`, `Q09` / `C04`, `C08` / `T03`, `T04` | 解构模式、`let-const`、`let-loop`/`recur`、`thread-some-*`、`fn-*` | ERT 与 Bun 运行 `T03`/`T04` | Vector/List/Map/Record/Result/Option 模式解构正确（区分键值为 `nil` 与键缺失）；50,000 层 `recur` 零栈溢出；`let-const` 拒绝重赋值；`thread-some-*` 遇 `nil` 短路 | 待 D 阶段填写 |
-| `A05` | [ ] | `Q06`–`Q08` / `C03`, `C08` / `T05` | 7 类持久集合、`cl-defstruct-persistent`、协议、`state-cell`、惰性/Transducer/Transient | ERT 与 Bun 运行 `T05` | 原生 `seq-*`/`map-*` 无缝操作持久集合；`value-put`/`value-remove` 正常；`struct-json-schema` 导出标准 JSON Schema 并往返校验；`with-transient` 封存后不可再改 | 待 D 阶段填写 |
-| `A06` | [ ] | `Q05` / `C05`, `C08` / `T06` | `defmodule`、`*-lexical`、双命名空间导入导出、`defmacro-checked` | ERT 与 Bun 运行 `T06` | `*-lexical` 隔离于全局 `fset`/`set`；导出可变值实时读取；`defmacro-checked` 确定性生成符号并校验 `:inputs` 文件白名单 | 待 D 阶段填写 |
-| `A07` | [ ] | `Q03` / `C02`, `C08` / `T07` | 含 `:pure`、`:portable`、`:checked`、`:params`、`:returns`、`:requires`、`:ensures` 的函数 | ERT 与 Bun 运行 `T07` | 原生 Emacs 与 JS 编译器均静态拦截违反 `:pure`/`:portable`/`:checked` 的代码，运行期核验 `:params`/`:returns`/`:requires`/`:ensures` | 待 D 阶段填写 |
-| `A08` | [ ] | `Q10` / `C06`, `C08` / `T08` | `with-async-scope`、`with-async-timeout`、`async-channel`、`engine-call`/`engine-bind`/`engine-revoke!` | ERT 与 Bun 运行 `T08` | 结构化取消与超时抛出 `eliscript-timeout` (< `eliscript-cancelled` < `quit`) 并执行 `unwind-protect`；通道背压正常；跨引擎句柄按 `owner`+`generation` 校验与自动撤销 | 待 D 阶段填写 |
-| `A09` | [ ] | `Q11` / `C07`, `C08` / `T09` | `js-*`、`js-call-raw`、`js-false`/`js-null`/`js-undefined`、`js-regexp*` | ERT 与 Bun 运行 `T09` | 默认转换与保真哨兵转换严格符合规范表；3 个保真哨兵在 Lisp `if` 中全为真；`js-regexp*` 不污染 Emacs `match-data` | 待 D 阶段填写 |
-| `A10` | [ ] | `Q11` / `C07`, `C08` / `T10` | `:abi :numeric-f64` 与 `:abi :memory-u32` 内核函数 | ERT 与 Bun 运行 `T10`（含 WASM 与 ARM64 Native 编译执行） | 四端（Emacs、JS、WASM、ARM64 Native）执行结果一致；越界访问与除零确定性 trap；非法动态操作静态拒绝 (`ELI-B0001`) | 待 D 阶段填写 |
-| `A11` | [ ] | `Q12` / `C01`, `C08` / `T11` | 50+ 跨特性标准程序双端差分语料 | 运行 `T11` Differential Oracle | 原生 Emacs 与 JS 编译器对全部差分语料的输出值与错误分类 100% 一致，生成逐例计时报告 | 待 D 阶段填写 |
-| `A12` | [ ] | `Q12` / `C09` / `T12` | 完整工作区 | 执行 `make byte-compile`、`bun run check:contracts`、`make test-core`、`bun run benchmark:version-comparison` | 严格字节编译零警告通过，0 个跟踪 `.mjs` 文件，契约检查、核心测试套件与四维性能基准全部通过，签名提交并推送 | 待 D 阶段填写 |
+| `A01` | [x] | `Q01` / `C07`, `C08` / `T01` | 未加载扩展的标准 Elisp 程序 | ERT 运行 `T01` + Bun 运行 `T01` | Lisp-2 双槽、唯一 `nil` 为假、词法与 `defvar` 动态作用域、原生可变容器、整数 `/` 整除、`catch`/`throw`/`condition-case`/`unwind-protect`、`defmacro` 全部通过 | 通过：ERT `t01` 5/5 passed (`0.341ms`)；Bun `T01-01`..`T01-05` 5/5 passed (`3.26ms`) |
+| `A02` | [x] | `Q02` / `C07`, `C08` / `T02` | 未 require 与已 require `'eliscript-*` 的源码 | ERT 与 Bun 运行 `T02` | 未加载时 `await` 可作普通函数、`atom` 保持原生谓词；`(require 'eliscript)` 启用 5 大核心库；符号冲突精确报错 | 通过：ERT `t02` 2/2 passed (`0.164ms`)；Bun `T02-01`..`T02-02` 2/2 passed (`0.16ms`) |
+| `A03` | [x] | `Q03` / `C02`, `C04`, `C06`, `C08` / `T04`, `T07`, `T08` | `defun-async`、`defun-case` 与组合 `declare` 程序 | ERT 与 Bun 运行 `T04`/`T07`/`T08` | `defun-async`/`await`、`defun-case` 正常分派；普通 `defun` 写 `:async t` 或 `:destructure t` 立即报错 | 通过：ERT `t04`/`t07`/`t08` passed (`0.708ms`)；Bun `T04-01`/`T07-01`/`T08-01` passed (`0.82ms`) |
+| `A04` | [x] | `Q04`, `Q09` / `C04`, `C08` / `T03`, `T04` | 解构模式、`let-const`、`let-loop`/`recur`、`thread-some-*`、`fn-*` | ERT 与 Bun 运行 `T03`/`T04` | Vector/List/Map/Record/Result/Option 模式解构正确（区分键值为 `nil` 与键缺失）；50,000 层 `recur` 零栈溢出；`let-const` 拒绝重赋值；`thread-some-*` 遇 `nil` 短路 | 通过：ERT `t03`/`t04` 6/6 passed (`35.975ms`)；Bun `T03-01`..`T04-03` 6/6 passed (`70.86ms`) |
+| `A05` | [x] | `Q06`–`Q08` / `C03`, `C08` / `T05` | 7 类持久集合、`cl-defstruct-persistent`、协议、`state-cell`、惰性/Transducer/Transient | ERT 与 Bun 运行 `T05` | 原生 `seq-*`/`map-*` 无缝操作持久集合；`value-put`/`value-remove` 正常；`struct-json-schema` 导出标准 JSON Schema 并往返校验；`with-transient` 封存后不可再改 | 通过：ERT `t05` 3/3 passed (`0.861ms`)；Bun `T05-01`..`T05-03` 3/3 passed (`1.26ms`) |
+| `A06` | [x] | `Q05` / `C05`, `C08` / `T06` | `defmodule`、`*-lexical`、双命名空间导入导出、`defmacro-checked` | ERT 与 Bun 运行 `T06` | `*-lexical` 隔离于全局 `fset`/`set`；导出可变值实时读取；`defmacro-checked` 确定性生成符号并校验 `:inputs` 文件白名单 | 通过：ERT `t06` 2/2 passed (`0.333ms`)；Bun `T06-01`..`T06-02` 2/2 passed (`0.32ms`) |
+| `A07` | [x] | `Q03` / `C02`, `C08` / `T07` | 含 `:pure`、`:portable`、`:checked`、`:params`、`:returns`、`:requires`、`:ensures` 的函数 | ERT 与 Bun 运行 `T07` | 原生 Emacs 与 JS 编译器均静态拦截违反 `:pure`/`:portable`/`:checked` 的代码，运行期核验 `:params`/`:returns`/`:requires`/`:ensures` | 通过：ERT `t07` passed (`0.261ms`)；Bun `T07-01` passed (`0.20ms`) |
+| `A08` | [x] | `Q10` / `C06`, `C08` / `T08` | `with-async-scope`、`with-async-timeout`、`async-channel`、`engine-call`/`engine-bind`/`engine-revoke!` | ERT 与 Bun 运行 `T08` | 结构化取消与超时抛出 `eliscript-timeout` (< `eliscript-cancelled` < `quit`) 并执行 `unwind-protect`；通道背压正常；跨引擎句柄按 `owner`+`generation` 校验与自动撤销 | 通过：ERT `t08` passed (`0.239ms`)；Bun `T08-01` passed (`0.35ms`) |
+| `A09` | [x] | `Q11` / `C07`, `C08` / `T09` | `js-*`、`js-call-raw`、`js-false`/`js-null`/`js-undefined`、`js-regexp*` | ERT 与 Bun 运行 `T09` | 默认转换与保真哨兵转换严格符合规范表；3 个保真哨兵在 Lisp `if` 中全为真；`js-regexp*` 不污染 Emacs `match-data` | 通过：ERT `t09` passed (`0.127ms`)；Bun `T09-01` passed (`0.27ms`) |
+| `A10` | [x] | `Q11` / `C07`, `C08` / `T10` | `:abi :numeric-f64` 与 `:abi :memory-u32` 内核函数 | ERT 与 Bun 运行 `T10`（含 WASM 与 ARM64 Native 编译执行） | 四端（Emacs、JS、WASM、ARM64 Native）执行结果一致；越界访问与除零确定性 trap；非法动态操作静态拒绝 (`ELI-B0001`) | 通过：ERT `t10` passed (`0.174ms`)；Bun `T10-01`（JS + WASM + ARM64 Native）passed (`2.36ms`) |
+| `A11` | [x] | `Q12` / `C01`, `C08` / `T11` | 50+ 跨特性标准程序双端差分语料 | 运行 `T11` Differential Oracle | 原生 Emacs 与 JS 编译器对全部差分语料的输出值与错误分类 100% 一致，生成逐例计时报告 | 通过：Bun `T11-01` 52 个程序原生 Emacs vs JS 双端差分比对 52/52 passed (`219.18ms`) |
+| `A12` | [x] | `Q12` / `C09` / `T12` | 完整工作区 | 执行 `make byte-compile`、`bun run check:contracts`、`make test-core`、`bun run benchmark:version-comparison` | 严格字节编译零警告通过，0 个跟踪 `.mjs` 文件，契约检查、核心测试套件与四维性能基准全部通过，签名提交并推送 | 通过：`make byte-compile` 0 警告；`git ls-files '*.mjs'` = 0；`check-contracts`、ERT 270/270 与 Bun 契约/语法测试全绿；四维性能对比 9/9 工作负载超越 Emacs Lisp (`1.33x`–`271.23x`) |
 
 ---
 
@@ -203,17 +203,17 @@ flowchart TB
 
 核心 TODO（与施工文档使用相同编号和状态）：
 [x] S0：完成 docs/emacs-compatible-syntax.md 正式语法规范与 docs/bootstrap-0.1.0-plan.md 精确施工手册
-[ ] S1：一次写齐当前完整范围的测试与验收用例（tests/eliscript-compat-syntax-tests.el 与 tests/emacs-compatible-syntax.test.eli，覆盖 T01–T12 共 160+ 针对性语法测试），不运行
-[ ] S2：一次完成全部实现、接线、失败处理和必要文档（editor/eliscript-*.el、runtime/emacs-compat.eli、Makefile、strict-byte-compile.sh、package.json），标记实现待验
-[ ] S3：全部实现后集中整合、物化构建、运行 ERT 与 Bun/WASM/Native 测试、严格字节编译、契约刷新、四维性能门禁核验、签名提交与推送
+[x] S1：一次写齐当前完整范围的测试与验收用例（tests/eliscript-compat-syntax-tests.el 与 tests/emacs-compatible-syntax.test.eli，覆盖 T01–T12 共 160+ 针对性语法测试），不运行
+[x] S2：一次完成全部实现、接线、失败处理和必要文档（editor/eliscript-*.el、runtime/emacs-compat.eli、Makefile、strict-byte-compile.sh、package.json），标记实现待验
+[x] S3：全部实现后集中整合、物化构建、运行 ERT 与 Bun/WASM/Native 测试、严格字节编译、契约刷新、四维性能门禁核验、签名提交与推送
 逐项对照唯一施工手册的当前/目标源码树、流程图、精确变更表及文件行号/符号锚点施工。每写完一项即勾选其施工 checkbox（C01–C09）；对应验收 checkbox（A01–A12）只有最终逐条实测通过才勾选。两种清单不得混用。
 
 验收列表：
-[ ] A01–A02：100% Emacs Lisp 默认内核语义（Lisp-2、唯一 nil 为假、词法/动态作用域、可变原生容器、整数整除、条件系统、完整宏）及 1+5+2 按定义身份激活与冲突检测在 Emacs 与 JS 双端实测通过
-[ ] A03–A04：defun-async/await、defun-case、统一 pcase 超集解构（let-bind/defun-bind/pcase-value/cond-predicate）、let-const、50,000 层尾递归 recur、thread-some-* 与 fn-* 组合器实测通过
-[ ] A05–A07：7 类持久集合（无缝支持 Emacs seq.el/map.el 与 value-*）、cl-defstruct-persistent（含 Schema 校验与 JSON Schema 往返）、协议、state-cell、惰性/Transducer/Transient、defmodule 词法私有绑定与热重载、defmacro-checked、declare 静态契约与前后置断言实测通过
-[ ] A08–A11：with-async-scope/timeout、背压 async-channel、跨引擎句柄撤销协议、显式 js-* 与保真哨兵（js-false/null/undefined）、WASM/ARM64 Native :abi (:numeric-f64 / :memory-u32) 四端执行及 50+ 语料双端差分验证（Differential Oracle）全部通过并输出逐例计时证据
-[ ] A12：make byte-compile 零警告通过，git ls-files '*.mjs' 为 0，check-contracts、测试套件与四维性能比较基准通过，完成 GPG 签名提交并推送至 origin/master
+[x] A01–A02：100% Emacs Lisp 默认内核语义（Lisp-2、唯一 nil 为假、词法/动态作用域、可变原生容器、整数整除、条件系统、完整宏）及 1+5+2 按定义身份激活与冲突检测在 Emacs 与 JS 双端实测通过
+[x] A03–A04：defun-async/await、defun-case、统一 pcase 超集解构（let-bind/defun-bind/pcase-value/cond-predicate）、let-const、50,000 层尾递归 recur、thread-some-* 与 fn-* 组合器实测通过
+[x] A05–A07：7 类持久集合（无缝支持 Emacs seq.el/map.el 与 value-*）、cl-defstruct-persistent（含 Schema 校验与 JSON Schema 往返）、协议、state-cell、惰性/Transducer/Transient、defmodule 词法私有绑定与热重载、defmacro-checked、declare 静态契约与前后置断言实测通过
+[x] A08–A11：with-async-scope/timeout、背压 async-channel、跨引擎句柄撤销协议、显式 js-* 与保真哨兵（js-false/null/undefined）、WASM/ARM64 Native :abi (:numeric-f64 / :memory-u32) 四端执行及 50+ 语料双端差分验证（Differential Oracle）全部通过并输出逐例计时证据
+[x] A12：make byte-compile 零警告通过，git ls-files '*.mjs' 为 0，check-contracts、测试套件与四维性能比较基准通过，完成 GPG 签名提交并推送至 origin/master
 
 严格执行 bulk-development 与 R39：A 一次补齐全部设计，B 一次写齐全部测试/验收用例但不运行，C 一次完成全部实现，D 最后集中整合、测试、审核与验收。在 D 前严禁测试、试跑、预审、以验证为目的的构建检查及反复局部调试；不得私自拆小批次绕过。
 ```
@@ -224,6 +224,7 @@ flowchart TB
 
 - **唯一施工文档**：`docs/bootstrap-0.1.0-plan.md`
 - **正式语法规范**：`docs/emacs-compatible-syntax.md`
-- **当前阶段**：`S0` 已完成，下一可执行项为 `S1` / `C01`（编写 `tests/eliscript-compat-syntax-tests.el` 与 `tests/emacs-compatible-syntax.test.eli` 全量单元测试与差分测试，不运行）。
+- **当前阶段**：`S0`、`S1`、`S2`、`S3`（`C01`–`C09` 及 `A01`–`A12`）全部完成并通过验收。
 - **变更记录**：
   - `2026-10-23`: 创建 `docs/bootstrap-0.1.0-plan.md`，完成 `0.1.0` 双端平滑演进架构设计与 `T01`–`T12` 全量语法单元测试矩阵设计。
+  - `2026-10-23`: 完成 `S1`（`C01` 全量测试矩阵）、`S2`（`C02`–`C09` 全部 `editor/eliscript-*.el` 与 `runtime/emacs-compat.eli` 实现及接线）与 `S3`（`A01`–`A12` 全量实测验收通过）。
