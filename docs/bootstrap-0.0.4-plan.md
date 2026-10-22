@@ -291,18 +291,38 @@ flowchart TD
   - `browser/README.md`: add README for `browser/host.eli` and `browser/worker.eli` (browser compiler SDK, live DOM `<script type="text/eliscript">`, `optimizeProgramIr`, `optimizeJavaScript`, extensionless `eliscript/*` imports).
   - `bootstrap/README.md`, `stdlib/README.md`, `docs/language-reference.md`: sync `.eli` host/runtime references, extensionless package subpath imports, and `0.0.4` collection/sequence/order/data optimizations while keeping `localLinks == 47` in `contracts/documentation.json`.
 
+### `D16`: Complete Pages Content Update & Pre-Release `0.0.3` Engine/Version Pinning
+- **Files**:
+  - `docs/index.html`:
+    - Update `checked library exports` count from `584` to `598`.
+    - Keep live release/npm links (`v0.0.3`, `https://github.com/liuchong/eliscript/releases/tag/v0.0.3`, `https://www.npmjs.com/package/eliscript/v/0.0.3`) pinned to `0.0.3` until `0.0.4` is published.
+  - `docs/pages/getting-started.html`, `README.md`, `docs/getting-started.md`:
+    - Keep CDN browser loader script URL (`https://unpkg.com/eliscript@0.0.3/dist/browser/loader.js`) pinned to `0.0.3` until `0.0.4` is published to npm.
+    - Update `docs/pages/getting-started.html` `#bootstrap` and `#persistent` sections for the 13-module compiler graph, 4-stage self-hosted chain, zero tracked `.mjs` sources, and extensionless `eliscript/*` imports.
+  - `docs/pages/language.html`:
+    - Update `#modules`, `#collections`, `#sequences`, and `#objects` for extensionless `eliscript/*` package subpath imports, zero tracked `.mjs` source files (all `.mjs` synthesized from `.eli`), structural reference-identity (`===`) short-circuiting, compact $O(1)$-step Zipper paths, and ClojureScript-style sequence/ordering/data fast-paths.
+  - `docs/pages/roadmap.html`:
+    - Update `M11` from `43 standard-library modules with 584 checked exports` to `46 standard-library modules with 598 checked exports`, and update `#bootstrap` for the 13-module compiler / 4-stage fixed point with zero tracked `.mjs` files.
+  - `docs/pages/specifications.html`:
+    - Update `#snapshot` `All specifications` from `180` to `181` (`175` stable specifications, `176` conformance features).
+  - `docs/pages/site.eli`, `tools/surface/generate-api.eli`, `docs/pages/api.html`, `docs/pages/playground.html`, `docs/pages/publishing.html`:
+    - Keep `site-semver` and footer release/npm links at `0.0.3` / `v0.0.3` until `0.0.4` is published; use extensionless `(import "eliscript/platform/browser" ...)` in `docs/pages/site.eli`.
+  - `examples/browser-playground/README.md`:
+    - Sync extensionless `eliscript/runtime/core/sequence` import example, `browser/host.eli` & `browser/worker.eli` source references, and Closure-style IR/JS optimization options.
+
 ---
 
 ## 5. Stage Progress & Dual Checklists
 
-### Stage Progress (`S0`–`S4`)
+### Stage Progress (`S0`–`S5`)
 - [x] `S0` Baseline audit completed and `0.0.3` published to GitHub Releases & npm
-- [x] `S1` Phase A: Complete `docs/bootstrap-0.0.4-plan.md` construction manual (including in-place `.eli` layout & documentation sync `D13`–`D15`)
+- [x] `S1` Phase A: Complete `docs/bootstrap-0.0.4-plan.md` construction manual (including in-place `.eli` layout & documentation sync `D13`–`D16`)
 - [x] `S2` Phase B & C: Complete all test additions and full implementation without mid-flight test runs
 - [x] `S3` Phase D (Initial): Initial zero-`.mjs` & ClojureScript fast-path verification
 - [x] `S4` Phase D (In-Place `.eli` & Docs): Centralized bootstrap, contract & doc verification, GPG-signed commit, and push
+- [x] `S5` Phase D (Pages Content Sync & Pre-Release `0.0.3` Engine/Version Pin): Verify Pages & doc contracts, commit, and push
 
-### Construction Checklist (`C01`–`C16`) — Check Immediately as Each Item Is Written
+### Construction Checklist (`C01`–`C19`) — Check Immediately as Each Item Is Written
 - [x] `C01` Update `tests/eliscript/stable-compatibility-corpus.eli`, `tests/eliscript/package-surface.eli`, and `tests/eliscript/persistent-zipper-path.eli` with `0.0.4` tests (Phase B, no test execution)
 - [x] `C02` Generate all 516 capsule `.eli` files from existing `.mjs` files
 - [x] `C03` Update `tools/backends/bootstrap.el` to materialize capsule `.eli` -> `<rel>.mjs` during `eliscript-backend-bootstrap-runtimes`
@@ -313,14 +333,17 @@ flowchart TD
 - [x] `C08` Implement ordering & sorting optimizations (`compareSequential`, `sort`, `sortBy`) in `stdlib/core/order.eli` and `runtime/core/order.eli`
 - [x] `C09` Implement data aggregation transient optimizations (`collectBuckets`, `groupBy`, `countBy`, `frequencies`) in `runtime/core/data.eli` and `runtime/core/map.eli`
 - [x] `C10` Implement persistent collection `[VALUE_EQUAL]` reference-identity fast-paths across `runtime/core/`
-- [x] `C11` Bump `package.json` and site/docs version to `"0.0.4"`
+- [x] `C11` Bump `package.json` version to `"0.0.4"`
 - [x] `C12` Materialize updated capsules and regenerate `contracts/stable-compatibility-corpus.json` and `contracts/compiler-parity-corpus.json` in Phase D
 - [x] `C13` Update `tests/eliscript/persistent-zipper-path.eli` to assert zero files in `tools/capsules/` and in-place tracked `.eli` sources in `platform/`, `runtime/`, and `browser/` (Phase B, no test execution)
 - [x] `C14` Move all 516 `.eli` files from `tools/capsules/<rel>.eli` to `<rel>.eli` in place and remove `tools/capsules/`
 - [x] `C15` Update `tools/backends/bootstrap.el`, `tools/backends/compiler-build.eli`, `tools/integrity/eliscript/check.eli`, `tools/acceptance/check.eli`, `tests/eliscript/stable-compatibility-corpus.eli`, `tools/compatibility/corpus.eli`, `tools/compatibility/rehearse.eli`, `tools/debugging/check.eli`, and `tools/onboarding/check.eli` for in-place `<rel>.eli` sources
 - [x] `C16` Update `README.md`, `docs/README.md`, `platform/README.md`, `runtime/README.md`, `bootstrap/README.md`, `stdlib/README.md`, `docs/language-reference.md`, and create `browser/README.md`
+- [x] `C17` Update `tests/pages-site.test.eli` and `tests/docs-site.test.eli` for `598` library exports and pre-release `0.0.3` / `v0.0.3` Pages version links (Phase B, no test execution)
+- [x] `C18` Update `docs/index.html`, `docs/pages/*.html`, `docs/pages/site.eli`, `tools/surface/generate-api.eli`, `README.md`, `docs/getting-started.md`, and `examples/browser-playground/README.md` with complete `0.0.4` content while keeping Pages engine/version links at `0.0.3` until release
+- [x] `C19` Regenerate `docs/pages/api.html` and `contracts/stable-compatibility-corpus.json` in Phase D
 
-### Acceptance Checklist (`A01`–`A12`) — Execute & Check Only in Phase D
+### Acceptance Checklist (`A01`–`A15`) — Execute & Check Only in Phase D
 - [x] `A01` `git ls-files '*.mjs'` outputs 0 files (empty), confirming zero tracked `.mjs` files in the repository
 - [x] `A02` `make bootstrap-backends` succeeds from `.eli` sources, materializing all capsule `.mjs` files and self-hosted compiler/runtime artifacts cleanly (fixed-point verified: `stage2 == stage3` across 313 files, `productSha256: 7642d697c024b3239133913844715b02ad7b863344cbff3b53490e7c048ba94a`)
 - [x] `A03` Repository integrity check (`bun test tests/repository-integrity.test.mjs tests/repository-integrity-original-selfhosted.test.mjs`) passes with 0 errors (`13/13` pass, `516 JavaScript, 150 Eliscript`)
@@ -332,4 +355,7 @@ flowchart TD
 - [x] `A09` `git ls-files '*.mjs'` and `git ls-files 'tools/capsules/*'` both return 0 files, while `git ls-files platform/ runtime/ browser/` tracks in-place `.eli` sources and `README.md` files
 - [x] `A10` `make bootstrap-backends` and `tests/compiler-build-selfhosted.test.mjs` pass with in-place `<rel>.eli` sources (`17/17` pass)
 - [x] `A11` `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 make check-contracts` and `bun test tests/onboarding-docs.test.mjs tests/repository-integrity.test.mjs tests/stable-compatibility-corpus.test.mjs tests/persistent-zipper-path-selfhosted.test.mjs` pass 100%
-- [x] `A12` In-place `.eli` layout and documentation updates committed with GPG signature (`git commit -S`) and pushed to `origin/master`
+- [x] `A12` In-place `.eli` layout and documentation updates committed with GPG signature (`git commit -S`) and pushed to `origin/master` (`61336ae`)
+- [x] `A13` `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 make check-contracts` (including `tools/surface/generate-api.mjs --check` and `tools/documentation/check.mjs`) passes 100%
+- [x] `A14` `bun test tests/pages-site.test.mjs tests/api-index.test.mjs tests/docs-site.test.mjs tests/pages-assembly.test.mjs tests/onboarding-docs.test.mjs` passes 100%
+- [x] `A15` Updated Pages and documentation committed with GPG signature (`git commit -S`) and pushed to `origin/master`

@@ -68,7 +68,7 @@
               <article class="milestone"><span class="milestone-id">M8</span><div><h3>Language closure</h3><p>Persistent values, stable ESM imports, explicit host interop, stack-safe loop/recur, deterministic generated names, and declared digest-tracked macro file inputs complete the language contract.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M9</span><div><h3>Compiler convergence</h3><p>Self-hosted graph planning, canonical IR and reports, deterministic incremental cache, Bun plus Node hosts, and versioned multi-entry public operations complete compiler convergence.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M10</span><div><h3>Daily development</h3><p>The formatter, Emacs mode, project diagnostics, persistent evaluation, terminal REPL, host-neutral watch, and verified onboarding workflow are complete.</p></div><span class="status status-done">Complete</span></article>
-              <article class="milestone"><span class="milestone-id">M11</span><div><h3>Data and libraries</h3><p>Persistent collections, protocols, transducers, 43 standard-library modules with 584 checked exports, and explicit platform capabilities are complete and stabilized.</p></div><span class="status status-done">Complete</span></article>
+              <article class="milestone"><span class="milestone-id">M11</span><div><h3>Data and libraries</h3><p>Persistent collections, protocols, transducers, 46 standard-library modules with 598 checked exports, and explicit platform capabilities are complete and stabilized.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M12</span><div><h3>Reliability</h3><p>The 100,000-input fuzz corpus, 1,000-module scale suite, 100,000-request Emacs worker soak, security matrix, performance budgets, and repository-integrity audit are complete.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M13</span><div><h3>Core acceptance</h3><p>All 42 implementation units, 35 mandatory verification criteria, and 173 compatibility stabilization units are complete in the retained evidence.</p></div><span class="status status-done">35/35 pass</span></article>
             </div>
@@ -98,8 +98,8 @@ Emacs Lisp seed + compiler.eli → compiler.js
 
 Generation 2
 compiler.js + compiler.eli → next-compiler.js</code></pre>
-            <p>Both compiler generations pass the same conformance suite, and the generated compiler reproduces itself without semantic drift.</p>
-            <div class="callout"><p>Generation 1 builds Generation 2, and Generation 2 builds the same Generation 3. All ten ESM modules and all ten Source Maps match byte-for-byte.</p></div>
+            <p>Both compiler generations pass the same conformance suite, and the generated compiler reproduces itself without semantic drift across a zero-tracked-<code>.mjs</code> repository where all JavaScript modules are synthesized from <code>.eli</code> sources.</p>
+            <div class="callout"><p>Generation 1 builds Generation 2, and Generation 2 builds the same Generation 3. All thirteen compiler ESM modules, their Source Maps, and the 313-file self-hosted stage2/stage3 closure match byte-for-byte.</p></div>
           </section>
 
           <section id="acceleration">
@@ -139,6 +139,6 @@ compiler.js + compiler.eli → next-compiler.js</code></pre>
       </div>
     </main>
 
-    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Roadmap</p><div class="footer-links"><a href="language.html">Language</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.0.4" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.0.4" data-version data-version-github>v0.0.4</a><span>© <span data-year>2026</span></span></div></div></footer>
+    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Roadmap</p><div class="footer-links"><a href="language.html">Language</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.0.3" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.0.3" data-version data-version-github>v0.0.3</a><span>© <span data-year>2026</span></span></div></div></footer>
   </body>
 </html>

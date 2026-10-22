@@ -39,17 +39,24 @@ The runtime core is host-free in the same way. Only `runtime/worker.mjs` and the
 ## Compilation runs in a worker
 
 The page never loads the compiler itself. It starts
-`browser/worker.mjs`, which imports the compile host, and sends it the editor
-contents. A large edit therefore cannot block the editor, and the compiler is
-bundled to one file (`dist/browser/compiler.js`) rather than fetched as thirteen
-modules.
+`browser/worker.mjs` (synthesized from `browser/worker.eli`), which imports the
+compile host (`browser/host.eli`), and sends it the editor contents. A large
+edit therefore cannot block the editor, and the compiler is bundled to one file
+(`dist/browser/compiler.js`) rather than fetched as thirteen modules.
 
 The worker is imported by a relative path, because a worker realm has no
 document and therefore no import map.
 
 ## Compiled code needs no import map
 
-Compiled output normally carries a runtime specifier:
+Compiled output normally carries a runtime specifier (extensionless or with
+`.mjs`):
+
+```elisp
+(import "eliscript/runtime/core/sequence" map)
+```
+
+Which lowers to:
 
 ```javascript
 import { map } from "eliscript/runtime/core/sequence.mjs";

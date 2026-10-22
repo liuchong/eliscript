@@ -103,7 +103,7 @@ bun run dist/project/examples/stdlib-cli/main.mjs</code></pre>
           <section id="browser-hot-reload">
             <h2>Compile live in the browser</h2>
             <p>Any web page can compile and hot-reload Eliscript directly in the browser without a server or repository checkout. Load the standalone browser loader and declare either a <code>data-eliscript</code> entry or inline/external <code>&lt;script type="text/eliscript"&gt;</code> tags:</p>
-            <pre><code>&lt;script defer src="https://unpkg.com/eliscript@0.0.4/dist/browser/loader.js"&gt;&lt;/script&gt;
+            <pre><code>&lt;script defer src="https://unpkg.com/eliscript@0.0.3/dist/browser/loader.js"&gt;&lt;/script&gt;
 
 &lt;script type="text/eliscript"&gt;
 (module web.hello
@@ -122,14 +122,14 @@ console.log(module.double(21)); // 42</code></pre>
           <section id="persistent">
             <h2>Use persistent values</h2>
             <pre><code>(module collections
-  (import "../stdlib/core/collection.eli" assoc lookup)
+  (import "eliscript/runtime/core/collection" assoc get)
 
   (defconst original {:name "Eliscript" :tags #{:lisp :esm}})
   (defconst updated (assoc original :status :stable))
 
-  (print (lookup original :status :missing))
-  (print (lookup updated :status)))</code></pre>
-            <p>Vector, Map, Set, List, Queue, Record, and sorted collection values are immutable. Updates return a new root while sharing unchanged internal structure. Generic collection operations dispatch through open protocols, and Transient builders provide an isolated high-throughput construction path for Vector, Map, and Set.</p>
+  (print (get original :status :missing))
+  (print (get updated :status)))</code></pre>
+            <p>Vector, Map, Set, List, Queue, Record, and sorted collection values are immutable. Updates return a new root while sharing unchanged internal structure. Generic collection operations dispatch through open protocols with reference-identity equality short-circuiting and compact O(1)-step Zipper navigation, and Transient builders provide an isolated high-throughput construction path for Vector, Map, Set, sorting, and data aggregation.</p>
             <p><a class="button" href="language.html#collections">Inspect collection semantics</a></p>
           </section>
 
@@ -157,7 +157,7 @@ bun run build:org-site</code></pre>
           <section id="bootstrap">
             <h2>Build the bootstrap modules</h2>
             <pre><code>bun run build:bootstrap</code></pre>
-            <p>The Emacs Lisp seed compiler writes ten source-mapped modules below <code>dist/bootstrap/</code>, including the complete portable compiler driver. Compile through that generated compiler with:</p>
+            <p>The Emacs Lisp seed compiler writes thirteen source-mapped compiler modules below <code>dist/bootstrap/</code>, including the complete portable compiler driver, while <code>make bootstrap-backends</code> materializes all runtime, platform, browser, host, and tool <code>.mjs</code> artifacts from in-place <code>.eli</code> sources (leaving zero tracked <code>.mjs</code> files in Git). Compile through the generated compiler with:</p>
             <pre><code>./bin/eliscript-portable --output dist/program.mjs source/program.eli</code></pre>
             <p>The conformance suite uses Generation 1 to build Generation 2, then Generation 2 to build Generation 3. Every compiler module and Source Map remains byte-identical.</p>
           </section>
@@ -191,6 +191,6 @@ bun run build:org-site</code></pre>
       </div>
     </main>
 
-    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Getting started</p><div class="footer-links"><a href="language.html">Language</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.0.4" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.0.4" data-version data-version-github>v0.0.4</a><span>© <span data-year>2026</span></span></div></div></footer>
+    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Getting started</p><div class="footer-links"><a href="language.html">Language</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.0.3" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.0.3" data-version data-version-github>v0.0.3</a><span>© <span data-year>2026</span></span></div></div></footer>
   </body>
 </html>
