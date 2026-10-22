@@ -117,23 +117,185 @@ function isPlainLiteralNode(node) {
   );
 }
 
-function literalTruthiness(node) {
+function isConstantLiteralNode(node) {
   if (node === null || typeof node !== "object" || node.kind !== "literal") {
+    return false;
+  }
+  const literalKind = node.properties?.literalKind;
+  return (
+    literalKind === undefined ||
+    literalKind === "undefined" ||
+    literalKind === "keyword"
+  );
+}
+
+function cloneLiteralNode(literal, span) {
+  return {
+    kind: "literal",
+    span: span ?? literal.span,
+    value: literal.value,
+    children: [],
+    ...(literal.properties ? { properties: { ...literal.properties } } : {}),
+  };
+}
+
+function literalRuntimeValue(node) {
+  const literalKind = node.properties?.literalKind;
+  if (literalKind === "undefined") return undefined;
+  if (literalKind === "keyword") return `:${node.value}`;
+  return node.value;
+}
+
+function literalTruthiness(node) {
+  if (!isConstantLiteralNode(node)) {
     return null;
   }
   const literalKind = node.properties?.literalKind;
   if (literalKind === "undefined") return false;
   if (literalKind === "keyword") return true;
-  if (literalKind !== undefined) return null;
   return node.value !== false && node.value !== null && node.value !== undefined;
 }
 
-function foldIrNode(node) {
+function collectMutatedNames(program) {
+  const mutated = new Set();
+  walkProgram(program, (node) => {
+    if (node.kind === "assignment") {
+      for (const pair of node.children ?? []) {
+        if (typeof pair?.value === "string") mutated.add(pair.value);
+      }
+    } else if (
+      node.kind === "variable-declaration" &&
+      node.properties?.mutable === true &&
+      typeof node.value === "string"
+    ) {
+      mutated.add(node.value);
+    }
+  });
+  return mutated;
+}
+
+function foldIrNode(node, env = new Map(), mutated = new Set()) {
   if (node === null || typeof node !== "object") return node;
+  if (node.kind === "export-declaration" || node.kind === "import-declaration") {
+    return node;
+  }
+
+  if (node.kind === "reference" && typeof node.value === "string") {
+    if (!mutated.has(node.value) && env.has(node.value)) {
+      return cloneLiteralNode(env.get(node.value), node.span);
+    }
+    return node;
+  }
+
+  if (node.kind === "module-declaration" && Array.isArray(node.children)) {
+    const scope = new Map(env);
+    let changed = false;
+    const nextChildren = node.children.map((child) => {
+      const next = foldIrNode(child, scope, mutated);
+      if (next !== child) changed = true;
+      if (
+        next.kind === "variable-declaration" &&
+        next.properties?.mutable !== true &&
+        typeof next.value === "string" &&
+        !mutated.has(next.value) &&
+        Array.isArray(next.children) &&
+        next.children.length === 1 &&
+        isConstantLiteralNode(next.children[0])
+      ) {
+        scope.set(next.value, next.children[0]);
+      }
+      return next;
+    });
+    return changed ? { ...node, children: nextChildren } : node;
+  }
+
+  if (
+    (node.kind === "function-declaration" || node.kind === "function-expression") &&
+    Array.isArray(node.children)
+  ) {
+    const paramCount = node.properties?.parameterCount ?? 0;
+    const scope = new Map(env);
+    for (let index = 0; index < paramCount; index += 1) {
+      const param = node.children[index];
+      if (typeof param?.value === "string") scope.delete(param.value);
+    }
+    let changed = false;
+    const nextChildren = node.children.map((child, index) => {
+      if (index < paramCount) return child;
+      const next = foldIrNode(child, scope, mutated);
+      if (next !== child) changed = true;
+      return next;
+    });
+    return changed ? { ...node, children: nextChildren } : node;
+  }
+
+  if (node.kind === "lexical-bindings" && Array.isArray(node.children)) {
+    const bindingCount = node.properties?.bindingCount ?? 0;
+    const sequential = node.properties?.sequential === true;
+    const outerScope = new Map(env);
+    const bodyScope = new Map(env);
+    let changed = false;
+    const nextChildren = node.children.map((child, index) => {
+      if (index < bindingCount && child.kind === "lexical-binding") {
+        const initScope = sequential ? bodyScope : outerScope;
+        let nextBinding = child;
+        if (Array.isArray(child.children) && child.children.length > 0) {
+          let bindingChanged = false;
+          const nextBindingChildren = child.children.map((expr) => {
+            const folded = foldIrNode(expr, initScope, mutated);
+            if (folded !== expr) bindingChanged = true;
+            return folded;
+          });
+          if (bindingChanged) {
+            changed = true;
+            nextBinding = { ...child, children: nextBindingChildren };
+          }
+        }
+        if (
+          typeof nextBinding.value === "string" &&
+          nextBinding.properties?.pattern !== true
+        ) {
+          if (
+            !mutated.has(nextBinding.value) &&
+            Array.isArray(nextBinding.children) &&
+            nextBinding.children.length === 1 &&
+            isConstantLiteralNode(nextBinding.children[0])
+          ) {
+            bodyScope.set(nextBinding.value, nextBinding.children[0]);
+          } else {
+            bodyScope.delete(nextBinding.value);
+          }
+        }
+        return nextBinding;
+      }
+      const next = foldIrNode(child, bodyScope, mutated);
+      if (next !== child) changed = true;
+      return next;
+    });
+    const updated = changed ? { ...node, children: nextChildren } : node;
+    const bodyNodes = updated.children.slice(bindingCount);
+    if (bodyNodes.length === 1 && isConstantLiteralNode(bodyNodes[0])) {
+      const allBindingsPureConstants = updated.children
+        .slice(0, bindingCount)
+        .every(
+          (binding) =>
+            binding.kind === "lexical-binding" &&
+            binding.properties?.pattern !== true &&
+            Array.isArray(binding.children) &&
+            binding.children.length === 1 &&
+            isConstantLiteralNode(binding.children[0]),
+        );
+      if (allBindingsPureConstants) {
+        return bodyNodes[0];
+      }
+    }
+    return updated;
+  }
+
   if (Array.isArray(node.children) && node.children.length > 0) {
     let changed = false;
     const optimizedChildren = node.children.map((child) => {
-      const next = foldIrNode(child);
+      const next = foldIrNode(child, env, mutated);
       if (next !== child) changed = true;
       return next;
     });
@@ -158,43 +320,197 @@ function foldIrNode(node) {
     }
   }
 
-  if (
-    node.kind === "intrinsic" &&
-    children.every(
-      (child) => isPlainLiteralNode(child) && typeof child.value === "number",
-    )
-  ) {
-    const values = children.map((child) => child.value);
-    let folded;
-    switch (node.value) {
-      case "+":
-        folded = values.reduce((sum, item) => sum + item, 0);
-        break;
-      case "*":
-        folded = values.reduce((product, item) => product * item, 1);
-        break;
-      case "-":
-        if (values.length === 1) folded = -values[0];
-        else if (values.length >= 2) {
-          folded = values.slice(1).reduce((acc, item) => acc - item, values[0]);
+  if (node.kind === "short-circuit" && children.length > 0) {
+    if (node.value === "and") {
+      const remaining = [];
+      for (let index = 0; index < children.length; index += 1) {
+        const child = children[index];
+        const truthy = literalTruthiness(child);
+        if (truthy === false && remaining.length === 0) {
+          return child;
         }
-        break;
-      case "1+":
-        if (values.length === 1) folded = values[0] + 1;
-        break;
-      case "1-":
-        if (values.length === 1) folded = values[0] - 1;
-        break;
-      default:
-        break;
+        if (truthy === true && index < children.length - 1) {
+          continue;
+        }
+        remaining.push(child);
+      }
+      if (remaining.length === 1) return remaining[0];
+      if (remaining.length !== children.length) {
+        return { ...node, children: remaining };
+      }
+    } else if (node.value === "or") {
+      const remaining = [];
+      for (let index = 0; index < children.length; index += 1) {
+        const child = children[index];
+        const truthy = literalTruthiness(child);
+        if (truthy === true && remaining.length === 0) {
+          return child;
+        }
+        if (truthy === false && index < children.length - 1) {
+          continue;
+        }
+        remaining.push(child);
+      }
+      if (remaining.length === 1) return remaining[0];
+      if (remaining.length !== children.length) {
+        return { ...node, children: remaining };
+      }
     }
-    if (typeof folded === "number" && Number.isFinite(folded)) {
+  }
+
+  if (node.kind === "intrinsic") {
+    if (node.value === "not" && children.length === 1) {
+      const truthy = literalTruthiness(children[0]);
+      if (truthy !== null) {
+        return {
+          kind: "literal",
+          span: node.span,
+          value: !truthy,
+          children: [],
+        };
+      }
+    }
+
+    if (
+      (node.value === "null" ||
+        node.value === "nil?" ||
+        node.value === "undefined?" ||
+        node.value === "nullish?") &&
+      children.length === 1 &&
+      isConstantLiteralNode(children[0])
+    ) {
+      const raw = literalRuntimeValue(children[0]);
+      const result =
+        node.value === "undefined?"
+          ? raw === undefined
+          : node.value === "nullish?"
+            ? raw === null || raw === undefined
+            : raw === null;
       return {
         kind: "literal",
         span: node.span,
-        value: folded,
+        value: result,
         children: [],
       };
+    }
+
+    if (
+      (node.value === "=" ||
+        node.value === "/=" ||
+        node.value === "not=" ||
+        node.value === "eq" ||
+        node.value === "equal") &&
+      children.length === 2 &&
+      isConstantLiteralNode(children[0]) &&
+      isConstantLiteralNode(children[1])
+    ) {
+      const left = literalRuntimeValue(children[0]);
+      const right = literalRuntimeValue(children[1]);
+      const same = left === right;
+      return {
+        kind: "literal",
+        span: node.span,
+        value: node.value === "/=" || node.value === "not=" ? !same : same,
+        children: [],
+      };
+    }
+
+    if (
+      (node.value === "<" ||
+        node.value === "<=" ||
+        node.value === ">" ||
+        node.value === ">=") &&
+      children.length === 2 &&
+      isPlainLiteralNode(children[0]) &&
+      isPlainLiteralNode(children[1]) &&
+      typeof children[0].value === "number" &&
+      typeof children[1].value === "number"
+    ) {
+      const left = children[0].value;
+      const right = children[1].value;
+      const compared =
+        node.value === "<"
+          ? left < right
+          : node.value === "<="
+            ? left <= right
+            : node.value === ">"
+              ? left > right
+              : left >= right;
+      return {
+        kind: "literal",
+        span: node.span,
+        value: compared,
+        children: [],
+      };
+    }
+
+    if (
+      children.every(
+        (child) => isPlainLiteralNode(child) && typeof child.value === "number",
+      )
+    ) {
+      const values = children.map((child) => child.value);
+      let folded;
+      switch (node.value) {
+        case "+":
+          folded = values.reduce((sum, item) => sum + item, 0);
+          break;
+        case "*":
+          folded = values.reduce((product, item) => product * item, 1);
+          break;
+        case "-":
+          if (values.length === 1) folded = -values[0];
+          else if (values.length >= 2) {
+            folded = values.slice(1).reduce((acc, item) => acc - item, values[0]);
+          }
+          break;
+        case "/":
+          if (values.length === 2 && values[1] !== 0) {
+            folded = values[0] / values[1];
+          }
+          break;
+        case "%":
+          if (values.length === 2 && values[1] !== 0) {
+            folded = values[0] % values[1];
+          }
+          break;
+        case "1+":
+          if (values.length === 1) folded = values[0] + 1;
+          break;
+        case "1-":
+          if (values.length === 1) folded = values[0] - 1;
+          break;
+        default:
+          break;
+      }
+      if (typeof folded === "number" && Number.isFinite(folded)) {
+        return {
+          kind: "literal",
+          span: node.span,
+          value: folded,
+          children: [],
+        };
+      }
+    }
+
+    if (node.value === "+" && children.length >= 2) {
+      const nonZero = children.filter(
+        (child) => !(isPlainLiteralNode(child) && child.value === 0),
+      );
+      if (nonZero.length > 0 && nonZero.length < children.length) {
+        return nonZero.length === 1
+          ? nonZero[0]
+          : { ...node, children: nonZero };
+      }
+    }
+
+    if (node.value === "*" && children.length >= 2) {
+      const nonOne = children.filter(
+        (child) => !(isPlainLiteralNode(child) && child.value === 1),
+      );
+      if (nonOne.length > 0 && nonOne.length < children.length) {
+        return nonOne.length === 1 ? nonOne[0] : { ...node, children: nonOne };
+      }
     }
   }
 
@@ -223,15 +539,91 @@ function foldIrNode(node) {
 }
 
 /**
- * Performs a Closure-style IR optimization pass (constant folding and dead
- * conditional branch elimination) over a compiled Eliscript IR program.
+ * Performs a Closure-style IR optimization pass (constant propagation,
+ * constant folding, algebraic identity simplification, and dead conditional
+ * branch elimination) over a compiled Eliscript IR program.
  */
 export function optimizeProgramIr(program) {
   if (program === null || typeof program !== "object" || !Array.isArray(program.body)) {
     return program;
   }
-  program.body = program.body.map((node) => foldIrNode(node));
+  const mutated = collectMutatedNames(program);
+  const topScope = new Map();
+  program.body = program.body.map((node) => {
+    const next = foldIrNode(node, topScope, mutated);
+    if (
+      next.kind === "variable-declaration" &&
+      next.properties?.mutable !== true &&
+      typeof next.value === "string" &&
+      !mutated.has(next.value) &&
+      Array.isArray(next.children) &&
+      next.children.length === 1 &&
+      isConstantLiteralNode(next.children[0])
+    ) {
+      topScope.set(next.value, next.children[0]);
+    }
+    return next;
+  });
   return program;
+}
+
+function isIdentifierChar(ch) {
+  if (!ch) return false;
+  const code = ch.charCodeAt(0);
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122) ||
+    code === 36 ||
+    code === 95 ||
+    code > 127
+  );
+}
+
+function compactLineWhitespace(line) {
+  if (line.startsWith("//# sourceMappingURL=")) return line;
+  let result = "";
+  let index = 0;
+  const length = line.length;
+  while (index < length) {
+    const ch = line[index];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      result += ch;
+      index += 1;
+      while (index < length) {
+        const cur = line[index];
+        result += cur;
+        index += 1;
+        if (cur === "\\" && index < length) {
+          result += line[index];
+          index += 1;
+          continue;
+        }
+        if (cur === quote) break;
+      }
+      continue;
+    }
+    if (ch === " " || ch === "\t") {
+      while (index < length && (line[index] === " " || line[index] === "\t")) {
+        index += 1;
+      }
+      const prev = result[result.length - 1] ?? "";
+      const next = line[index] ?? "";
+      if (
+        (isIdentifierChar(prev) && isIdentifierChar(next)) ||
+        (prev === "+" && next === "+") ||
+        (prev === "-" && next === "-") ||
+        (prev === "/" && (next === "/" || next === "*"))
+      ) {
+        result += " ";
+      }
+      continue;
+    }
+    result += ch;
+    index += 1;
+  }
+  return result;
 }
 
 /**
@@ -291,9 +683,30 @@ export function optimizeJavaScript(code) {
 
   const lines = out
     .split("\n")
-    .map((line) => line.trim())
+    .map((line) => compactLineWhitespace(line.trim()))
     .filter((line) => line.length > 0);
   return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
+}
+
+function applyPostCompileOptimization(javascript, sourceMap, meta, options = {}) {
+  let code =
+    options.minify === true || options.optimize === "compact"
+      ? optimizeJavaScript(javascript)
+      : javascript;
+  let map = sourceMap;
+  if (typeof options.closureCompiler === "function") {
+    const transformed = options.closureCompiler(code, {
+      ...meta,
+      sourceMap: map,
+    });
+    if (typeof transformed === "string") {
+      code = transformed;
+    } else if (transformed !== null && typeof transformed === "object") {
+      if (typeof transformed.javascript === "string") code = transformed.javascript;
+      if (typeof transformed.sourceMap === "string") map = transformed.sourceMap;
+    }
+  }
+  return { javascript: code, sourceMap: map };
 }
 
 function localSourceSpecifier(specifier) {
@@ -432,13 +845,12 @@ export function compileSource(
     filename,
     options.resolveExternal,
   );
-  return {
-    javascript:
-      options.minify === true || options.optimize === "compact"
-        ? optimizeJavaScript(rewritten)
-        : rewritten,
-    sourceMap: emission.sourceMap,
-  };
+  return applyPostCompileOptimization(
+    rewritten,
+    emission.sourceMap,
+    { filename, output },
+    options,
+  );
 }
 
 /**
@@ -456,6 +868,7 @@ export function compileProject({
   resolveExternal,
   optimize = true,
   minify = false,
+  closureCompiler,
 }) {
   for (const path of Object.keys(files)) outputPathFor(path);
   if (files[entry] === undefined) {
@@ -497,14 +910,17 @@ export function compileProject({
       mapSourcePath(output, id),
     );
     const rewritten = rewriteEmittedExternals(emission.javascript, id, resolveExternal);
+    const optimized = applyPostCompileOptimization(
+      rewritten,
+      emission.sourceMap,
+      { filename: id, output },
+      { optimize, minify, closureCompiler },
+    );
     modules[output] = {
       id,
       source: files[id],
-      javascript:
-        minify === true || optimize === "compact"
-          ? optimizeJavaScript(rewritten)
-          : rewritten,
-      sourceMap: emission.sourceMap,
+      javascript: optimized.javascript,
+      sourceMap: optimized.sourceMap,
     };
   }
   return { plan, modules };

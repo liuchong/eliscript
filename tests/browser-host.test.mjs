@@ -240,12 +240,31 @@ test("optimizeProgramIr folds constant expressions and eliminates dead condition
   expect(typeof optimizeProgramIr).toBe("function");
 });
 
+test("optimizeProgramIr propagates immutable let and defconst constants and folds comparisons, predicates, and algebraic identities", async () => {
+  const source = `(module opt.advanced
+    (defconst base-factor 6)
+    (defun compute (x)
+      (let ((step (+ base-factor 1))
+            (enabled (and (< 2 3) (not (nil? :ready)))))
+        (if enabled
+          (+ (* x 1) (* base-factor step) 0)
+          (throw "unreachable-branch"))))
+    (export compute))`;
+  const compiled = compileSource(source, "opt-advanced.eli");
+  expect(compiled.javascript).toContain("42");
+  expect(compiled.javascript).not.toContain("unreachable-branch");
+
+  const executed = await runSource(source, "opt-advanced.eli");
+  expect(executed.module.compute(8)).toBe(50);
+});
+
 test("optimizeJavaScript and compileSource minify option strip comments and compact whitespace while preserving string literals", async () => {
   const sample = `// leading comment\nexport const greeting = "hello // not a comment /* either */";\n/* block comment */\nexport const answer = 40 + 2;\n`;
   const compacted = optimizeJavaScript(sample);
   expect(compacted).not.toContain("leading comment");
   expect(compacted).not.toContain("block comment");
   expect(compacted).toContain('"hello // not a comment /* either */"');
+  expect(compacted).toContain("export const answer=40+2;");
   expect(compacted.length).toBeLessThan(sample.length);
 
   const executed = await runSource(
@@ -254,6 +273,32 @@ test("optimizeJavaScript and compileSource minify option strip comments and comp
     { minify: true },
   );
   expect(executed.module.message()).toBe("url: https://example.test/a//b 42");
+});
+
+test("compileSource and compileProject support an external or custom closureCompiler hook", () => {
+  const calls = [];
+  const closureCompiler = (javascript, meta) => {
+    calls.push(meta.filename);
+    return `${ optimizeJavaScript(javascript) }// closure-optimized:${meta.filename}\n`;
+  };
+  const single = compileSource(
+    "(module hook.demo (defun value () (+ 20 22)) (export value))",
+    "hook-demo.eli",
+    { closureCompiler },
+  );
+  expect(calls).toEqual(["hook-demo.eli"]);
+  expect(single.javascript).toContain("// closure-optimized:hook-demo.eli");
+
+  const project = compileProject({
+    files: {
+      "main.eli": '(module p.main (import "./sub.eli" v) (export v))',
+      "sub.eli": "(module p.sub (defconst v (+ 10 32)) (export v))",
+    },
+    entry: "main.eli",
+    closureCompiler,
+  });
+  expect(project.modules["sub.mjs"].javascript).toContain("// closure-optimized:sub.eli");
+  expect(project.modules["main.mjs"].javascript).toContain("// closure-optimized:main.eli");
 });
 
 test("compileSource and runSource support both extensionless and .mjs eliscript package imports", async () => {

@@ -263,8 +263,10 @@ the browser without a backend server or checkout files. Load the standalone
 </script>
 ```
 
-For programmatic compilation, IR optimization, optional JS minification,
-extensionless package subpath imports (such as
+For programmatic compilation, Closure-style IR optimization (constant
+propagation, constant folding, algebraic identity simplification, and dead
+branch elimination), optional JS minification or custom `closureCompiler`
+transforms, extensionless package subpath imports (such as
 `(import "eliscript/runtime/core/order" sort)` or with explicit `.mjs`), and
 hot-reload inside browser applications or Web Workers, import
 `eliscript/browser`:

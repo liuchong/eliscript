@@ -109,7 +109,7 @@ bun run dist/project/examples/stdlib-cli/main.mjs</code></pre>
 (module web.hello
   (print "Compiled live in the browser!"))
 &lt;/script&gt;</code></pre>
-            <p>For programmatic in-memory compilation, IR/JS optimization (<code>{ optimize: true, minify: true }</code>), extensionless package imports (such as <code>(import "eliscript/runtime/core/order" sort)</code> alongside explicit <code>.mjs</code>), and multi-module execution, import <code>eliscript/browser</code> directly:</p>
+            <p>For programmatic in-memory compilation, Closure-style IR/JS optimization (<code>{ optimize: true, minify: true, closureCompiler }</code>), extensionless package imports (such as <code>(import "eliscript/runtime/core/order" sort)</code> alongside explicit <code>.mjs</code>), and multi-module execution, import <code>eliscript/browser</code> directly:</p>
             <pre><code>import { compileSource, compileProject, moduleGraphUrls, runSource, mountEliscriptScripts } from "eliscript/browser";
 
 const { module } = await runSource(

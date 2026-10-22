@@ -1,19 +1,37 @@
 (module tools.pages.assemble
-  (import "node:fs/promises" mkdir copyFile writeFile readFile)
+  (import "node:fs/promises" cp mkdir copyFile writeFile readFile readdir rm stat)
   (import "node:crypto" createHash)
   (import "node:path" resolve dirname)
   (import "node:url" fileURLToPath)
-  (import "./assemble-legacy.mjs" :as legacy)
   (import "../backends/compiler-package.mjs" bundleCompilerBrowserTransport)
 
-  (defconst SITE_SOURCE (get legacy :SITE_SOURCE))
-  (defconst PUBLISHED_TREES (get legacy :PUBLISHED_TREES))
-  (defconst ROOT_REFERENCES (get legacy :ROOT_REFERENCES))
-  (defconst SITE_SCRIPT (get legacy :SITE_SCRIPT))
-  (defconst PREVIOUS_PREFIX (get legacy :PREVIOUS_PREFIX))
-  (defconst rebasePage (get legacy :rebasePage))
-  (defconst assetVersions (get legacy :assetVersions))
-  (defconst redirectDocument (get legacy :redirectDocument))
+  (defconst SITE_SOURCE "docs")
+  (defconst PUBLISHED_TREES (Object/freeze (js-array
+    "runtime"
+    "platform"
+    "browser"
+    "dist/browser"
+    "dist/browser-playground"
+    "examples/dogfood/_site")))
+  (defconst ROOT_REFERENCES (Object/freeze (js-array
+    (js-array "\"eliscript/\": \"../../\"" "\"eliscript/\": \"../\"")
+    (js-array "src=\"../../" "src=\"../")
+    (js-array "href=\"../../" "href=\"../")
+    (js-array "import(\"../../" "import(\"../"))))
+  (defconst SITE_SCRIPT "dist/docs-site/site.js")
+  (defconst PREVIOUS_PREFIX "docs")
+  (defconst base-published-files (Object/freeze (js-array
+    "LICENSE"
+    "examples/browser-playground/README.md"
+    "tools/backends/compiler-browser.mjs"
+    "tools/backends/compiler-debug.mjs"
+    "tools/backends/compiler-session.mjs"
+    "tools/backends/compiler-sha256.mjs"
+    "tools/backends/compiler-worker.mjs"
+    "tools/backends/managed-runtime.mjs"
+    "tools/backends/managed-host.mjs"
+    "tools/backends/managed-source-view.mjs"
+    "tools/backends/managed-module-graph.mjs")))
   (defconst runtime-transports (Object/freeze (js-call (js-array
     "tools/backends/managed-host-object-provider.mjs"
     "tools/backends/managed-host-object-realm.mjs"
@@ -37,7 +55,135 @@
         "dist/runtime/unicode-case.mjs" "dist/runtime/unicode-case.mjs.map"
         "dist/runtime/unicode-case-data.mjs" "dist/runtime/unicode-case-data.mjs.map"))))
   (defconst PUBLISHED_FILES (Object/freeze
-    (js-call (get legacy :PUBLISHED_FILES) :concat runtime-transports (js-array "package.json"))))
+    (js-call base-published-files :concat runtime-transports (js-array "package.json"))))
+
+  (defun rebasePage (html &optional versions-input)
+    (let ((result html)
+          (versions (if (undefined? versions-input) (new globalThis.Map) versions-input))
+          (index 0))
+      (while (< index (js-length ROOT_REFERENCES))
+        (let ((pair (aref ROOT_REFERENCES index)))
+          (setq result (js-call (js-call result :split (aref pair 0)) :join (aref pair 1))))
+        (setq index (1+ index)))
+      (js-call (Array/from (js-call versions :entries)) :forEach
+        (lambda (entry)
+          (let ((asset (aref entry 0)) (version (aref entry 1)))
+            (setq result (js-call (js-call result :split (+ "assets/" asset))
+                           :join (+ "assets/" asset "?v=" version))))))
+      result))
+
+  (defasync assetVersions (options)
+    (let ((root (get options :root))
+          (site-directory (get options :siteDirectory))
+          (digest (lambda (bytes)
+            (js-call (js-call (js-call (createHash "sha256") :update bytes) :digest "hex") :slice 0 12)))
+          (versions (new globalThis.Map)))
+      (js-call versions :set "site.css"
+        (funcall digest (await (readFile (resolve site-directory "pages/assets/site.css")))))
+      (js-call versions :set "eliscript-loader.js"
+        (funcall digest (await (readFile (resolve root SITE_SCRIPT)))))
+      versions))
+
+  (defun redirectDocument (target)
+    (+ "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
+       "<meta http-equiv=\"refresh\" content=\"0; url=" target "\">\n"
+       "<link rel=\"canonical\" href=\"" target "\">\n"
+       "<title>Moved</title>\n</head>\n<body>\n"
+       "<p>This page moved to <a href=\"" target "\">" target "</a>.</p>\n"
+       "</body>\n</html>\n"))
+
+  (defasync path-exists (path)
+    (try (progn (await (stat path)) t) (catch error false)))
+
+  (defasync copy-site (from to versions)
+    (await (mkdir to (js-object :recursive t)))
+    (let ((entries (await (readdir from (js-object :withFileTypes t)))) (index 0))
+      (while (< index (js-length entries))
+        (let* ((entry (aref entries index))
+               (name (get entry :name))
+               (child (resolve from name))
+               (destination (resolve to name)))
+          (cond
+            ((js-call entry :isDirectory) (await (copy-site child destination versions)))
+            ((js-call name :endsWith ".html")
+              (await (writeFile destination (rebasePage (await (readFile child "utf8")) versions))))
+            (t (await (cp child destination (js-object :recursive t))))))
+        (setq index (1+ index)))))
+
+  (defasync write-previous-addresses (artifact site-directory)
+    (let ((walk nil))
+      (setq walk (async (from relative)
+        (let ((entries (await (readdir from (js-object :withFileTypes t)))) (index 0))
+          (while (< index (js-length entries))
+            (let* ((entry (aref entries index))
+                   (entry-name (get entry :name))
+                   (child (resolve from entry-name))
+                   (name (if (= relative "") entry-name (+ relative "/" entry-name))))
+              (if (js-call entry :isDirectory)
+                (await (funcall walk child name))
+                (when (js-call entry-name :endsWith ".html")
+                  (let ((target (if (= name "index.html") "/" (+ "/" name)))
+                        (stub (resolve artifact PREVIOUS_PREFIX name)))
+                    (await (mkdir (dirname stub) (js-object :recursive t)))
+                    (await (writeFile stub (redirectDocument target)))))))
+            (setq index (1+ index))))))
+      (await (funcall walk site-directory ""))))
+
+  (defasync assemble-base-pages (options)
+    (let* ((source (resolve (get options :root)))
+           (target (resolve (get options :outDir)))
+           (compiler-artifacts (if (undefined? (get options :compilerArtifacts))
+                                 (js-array) (get options :compilerArtifacts))))
+      (when (or (= target source) (js-call source :startsWith (+ target "/")))
+        (throw (new globalThis.Error (+ "refusing to assemble into the source tree: " (get options :outDir)))))
+      (await (rm target (js-object :recursive t :force t)))
+      (await (mkdir target (js-object :recursive t)))
+      (let ((script (resolve source SITE_SCRIPT)))
+        (unless (await (path-exists script))
+          (throw (new globalThis.Error
+            (+ "the site script is not built: run `bun run build:docs-site` (" SITE_SCRIPT ")"))))
+        (let ((versions (await (assetVersions (js-object :root source :siteDirectory (resolve source SITE_SOURCE))))))
+          (await (copy-site (resolve source SITE_SOURCE) target versions))
+          (await (mkdir (resolve target "pages/assets") (js-object :recursive t)))
+          (await (writeFile (resolve target "pages/assets/eliscript-loader.js") (await (readFile script))))
+          (await (write-previous-addresses target (resolve source SITE_SOURCE)))))
+      (let ((index 0))
+        (while (< index (js-length PUBLISHED_TREES))
+          (let ((entry (aref PUBLISHED_TREES index)))
+            (when (await (path-exists (resolve target entry)))
+              (throw (new globalThis.Error (+ "site entry collides with published tree: " entry)))))
+          (setq index (1+ index)))
+        (setq index 0)
+        (while (< index (js-length PUBLISHED_TREES))
+          (let* ((entry (aref PUBLISHED_TREES index))
+                 (destination (resolve target entry)))
+            (await (mkdir (dirname destination) (js-object :recursive t)))
+            (await (cp (resolve source entry) destination (js-object :recursive t))))
+          (setq index (1+ index)))
+        (setq index 0)
+        (while (< index (js-length base-published-files))
+          (let ((entry (aref base-published-files index)))
+            (await (mkdir (dirname (resolve target entry)) (js-object :recursive t)))
+            (await (cp (resolve source entry) (resolve target entry))))
+          (setq index (1+ index))))
+      (let ((compiler-trees (js-array)) (index 0))
+        (while (< index (js-length compiler-artifacts))
+          (let ((entry (aref compiler-artifacts index)))
+            (when (or (/= (value-type entry) "string")
+                      (not (js-call entry :startsWith "dist/"))
+                      (js-call (js-call entry :split "/") :some (lambda (part) (or (= part "..") (= part ""))))
+                      (js-call entry :includes "\\"))
+              (throw (new globalThis.Error "compiler artifact must be a relative directory inside dist")))
+            (let ((destination (resolve target entry)))
+              (when (await (path-exists destination))
+                (throw (new globalThis.Error (+ "compiler artifact collides with published tree: " entry))))
+              (await (mkdir (dirname destination) (js-object :recursive t)))
+              (await (cp (resolve source entry) destination (js-object :recursive t)))
+              (js-call compiler-trees :push entry)))
+          (setq index (1+ index)))
+        (js-object
+          :trees (js-call (js-array SITE_SOURCE) :concat PUBLISHED_TREES compiler-trees)
+          :files (Array/from base-published-files)))))
 
   (defasync pages-file-identity (directory path)
     (let ((bytes (await (readFile (resolve directory path)))))
@@ -47,7 +193,7 @@
   (defasync assemblePages (options)
     ;; Preserve the existing source-tree guard, compiler packages, pages and
     ;; asset stamps. Complete the real imports of the generated Eli adapters.
-    (let* ((result (await (js-call legacy :assemblePages options)))
+    (let* ((result (await (assemble-base-pages options)))
            (source (resolve (get options :root))) (target (resolve (get options :outDir)))
            (index 0))
       (while (< index (js-length runtime-transports))

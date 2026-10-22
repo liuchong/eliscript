@@ -96,14 +96,28 @@
       (try (js-call assert :deepStrictEqual (read-value a out)
              (Reflect/apply reference undefined args))
         (finally (release a (js-call inputs :concat (js-array out)))))))
-  (defasync original-template (file title marker)
-    (let* ((text (await (readFile (resolve root file) "utf8")))
-           (start (js-call text :indexOf title))
-           (begin (js-call text :indexOf marker start)))
-      (js-call assert :ok (and (>= start 0) (>= begin start)) (+ file " original fixture locator"))
-      (let* ((offset (+ begin (js-length marker))) (end (js-call text :indexOf "`;" offset)))
-        (js-call assert :ok (> end offset))
-        (js-call text :slice offset end))))
+  (defconst retained-prefix-source
+    "(defconst prefix (js* \"(head, tail) => [head, ...tail]\"))\n (defun invoke-prefix (&rest args) (apply prefix args))\n (defun safe-prefix (&rest args) (try (JSON/stringify (apply prefix args)) (catch error (aref error \"name\"))))\n (defun recover-prefix () 7)\n (defun prototype-prefix ()\n  (let ((prototype globalThis.Array.prototype) (tail (js-array false)))\n   (put tail :length 2) (put prototype \"1\" 9) (Object/freeze prototype)\n   (let ((result (prefix t tail))) (JSON/stringify (js-array result (Object/keys result) (Object/hasOwn result \"1\"))))))\n (defun protocol-prefix (mode)\n  (let ((trace (js-array)) (marker (js-object)) (iterator nil) (source (js-object)) (n 0))\n   (setq iterator (js-object :next (lambda ()\n    (js-call trace :push (str \"next\" n))\n    (when (or (= mode 1) (and (= mode 2) (= n 1))) (throw marker))\n    (when (= mode 7) (put iterator :next false))\n    (setq n (1+ n))\n    (if (= mode 3) false (js-object :done (> n 1) :value n)))\n    :return (lambda () (js-call trace :push \"return\") (js-object))))\n   (put source (js* \"Symbol.iterator\") (if (= mode 5) false\n    (lambda () (js-call trace :push \"iterator\") (if (= mode 4) false iterator))))\n   (let ((out (try (prefix (progn (js-call trace :push \"head\") t)\n                    (progn (js-call trace :push \"tail\") (if (= mode 6) nil source))\n                    (progn (js-call trace :push \"extra\") false))\n               (catch error (if (Object/is error marker) \"marker\" (aref error \"name\"))))))\n    (JSON/stringify (js-array out trace)))))\n (export prefix invoke-prefix safe-prefix recover-prefix prototype-prefix protocol-prefix)")
+  (defconst retained-reader-string-literal
+    "  (defun read-string-literal\n    (state start)\n    (advance state)\n    (let ((done false))\n      (while (not done)\n        (let ((code (peek-code state)))\n          (cond ((eq code undefined) (fail-at state start \"unexpected end of input\"))\n            ((= code 92)\n              (advance state)\n              (when (eq (peek-code state) undefined)\n                (fail-at state start \"unexpected end of input\"))\n              (advance state))\n            ((= code 34) (advance state) (setq done t))\n            (t (advance state)))))\n      (let* ((raw (js-call (get state :source) :slice (get start :index) (get state :index)))\n             (value (js-call (js* \"JSON\") :parse raw)))\n        (literal-node value (span-from state start)))))\n")
+  (defconst retained-emitter-corpus
+    (js-array
+      "(defconst x 1) (export x)"
+      "(defconst zero -0.0)"
+      "(defun run (x) (if (js* \"!!x\") 1 2))"
+      "(defun run (x) (if x (+ x 1) 0)) (export run)"))
+  (defconst retained-lower-sources
+    (js-object
+      "Object reflection observes actual own data descriptors, array length ordering, freezing and Symbol keys against independent JS"
+      "\n (defun run ()\n  (let ((object (js-object :b 2 \"10\" 10 \"2\" 2 :a 1)) (array (js-array 1 undefined)) (symbol (js-call (js* \"Symbol\") :for \"ir-key\")))\n   (put array :extra 7) (put object symbol false)\n   (js-array (JSON/stringify (Object/getOwnPropertyNames object))\n    (JSON/stringify (Object/getOwnPropertyNames array))\n    (JSON/stringify (Object/getOwnPropertyDescriptor object \"a\"))\n    (JSON/stringify (Object/getOwnPropertyDescriptor array \"length\"))\n    (JSON/stringify (Object/getOwnPropertyDescriptor \"A😀\" \"1\"))\n    (JSON/stringify (Object/getOwnPropertyDescriptor (Object/freeze object) \"a\"))\n    (Object/is (aref (Object/getOwnPropertyDescriptor object symbol) \"value\") false)\n    (undefined? (Object/getOwnPropertyDescriptor object \"missing\")))))\n (defun extra-order () (let ((trace (js-object :n \"\")))\n  (Object/getOwnPropertyDescriptor\n   (progn (put trace :n (+ (aref trace \"n\") \"r\")) (js-object :x 1))\n   (js-object :toString (lambda () (put trace :n (+ (aref trace \"n\") \"k\")) \"x\"))\n   (put trace :n (+ (aref trace \"n\") \"e\"))) (aref trace \"n\")))\n (export run extra-order)"
+      "materialized standard prototypes preserve inherited array holes and named data without turning them into own properties"
+      "(defun run () (let ((prototype globalThis.Array.prototype) (root globalThis.Object.prototype) (value (js-array)))\n  (put value :length 2) (put prototype \"1\" 7) (put prototype \"__ir_array_data\" 9) (put root \"__ir_object_data\" 11)\n  (js-array (aref value \"1\") (aref value \"__ir_array_data\") (aref value \"__ir_object_data\")\n   (Object/hasOwn value \"1\") (undefined? (Object/getOwnPropertyDescriptor value \"1\"))\n   (JSON/stringify (Object/getOwnPropertyNames value))))) (export run)"
+      "reflection aliases and shadowed ordinary methods preserve missing arguments, ignored extras and source evaluation order"
+      "(defun run ()\n  (let ((trace (js-object :n \"\")) (value (js-object :x 1)))\n   (let ((names Object/getOwnPropertyNames) (descriptor Object/getOwnPropertyDescriptor)\n         (Object (js-object :getPrototypeOf (lambda (x) (str \"shadow:\" x))\n                           :getOwnPropertyNames (lambda (x) (js-array (str \"own:\" x)))\n                           :getOwnPropertyDescriptor (lambda (x key) (str x \":\" key)))))\n    (js-array (JSON/stringify (funcall names value (put trace :n \"e\")))\n      (aref (funcall descriptor value \"x\") \"value\")\n      (Object/getPrototypeOf \"p\") (JSON/stringify (Object/getOwnPropertyNames \"n\"))\n      (Object/getOwnPropertyDescriptor \"d\" \"k\")\n      (try (funcall names) (catch error (aref error \"name\"))) (aref trace \"n\"))))) (export run)"
+      "the canonical Object prototype retains its immutable null parent and ordinary objects still permit a real prototype change"
+      "(defun run () (let ((root globalThis.Object.prototype) (ordinary (js-object)) (parent (js-object \"__proto__\" nil :inherited 7)))\n  (js-array (try (put root \"__proto__\" parent) \"accepted\" (catch error (aref error \"name\")))\n   (nil? (Object/getPrototypeOf root)) (progn (put root \"__proto__\" nil) (nil? (Object/getPrototypeOf root)))\n   (progn (put ordinary \"__proto__\" parent) (aref ordinary \"inherited\"))))) (export run)"
+      "actual Array prototype callbacks participate in inherited conversion, sorting and Symbol iterator lookup"
+      "(defun run () (let ((prototype globalThis.Array.prototype))\n  (put prototype \"join\" (lambda () \"joined\"))\n  (let ((joined (funcall (js* \"String\") (js-array 1 2))))\n   (put prototype \"toString\" (lambda () \"text\"))\n   (let ((text (funcall (js* \"String\") (js-array 1))))\n    (put prototype (js* \"Symbol.toPrimitive\") (lambda (hint) (str \"hint:\" hint)))\n    (let ((primitive (funcall (js* \"String\") (js-array))))\n     (put prototype \"sort\" (lambda () \"sorted\"))\n     (let ((sorted (js-call (js-array 2 1) :sort)))\n      (put prototype (js* \"Symbol.iterator\") (lambda () (let ((count 0)) (js-object :next (lambda () (if (= count 0) (progn (setq count 1) (js-object :done false :value 7)) (js-object :done t)))))))\n      (str joined \"/\" text \"/\" primitive \"/\" sorted \"/\" (JSON/stringify (Array/from (js-array 1 2)))))))))) (export run)"))
   (defun expose-source (source names filename)
     (let* ((program (js-call (compiler) :compile_ir_string source filename))
            (exported (new globalThis.Set)))
@@ -221,8 +235,7 @@
     (await (expose "ir" (js-array "schema-fail" "dense-json-array-p" "plain-record-keys" "parse-json" "serialize-program")))
     (await (expose "source-map" (js-array "collect-generated-marks" "reference-collect-generated-marks"
       "source-locations" "reference-source-locations")))
-    (let ((source (await (original-template "tests/wasm-compiler-emitter.test.mjs"
-                    "const prefixSource=" "const prefixSource=`"))))
+    (let ((source retained-prefix-source))
       (setq prefix-program (js-call (compiler) :compile_ir_string source "array-prefix.eli"))
       (setq prefix-bytes (emit prefix-program))
       (setq prefix-reference (await (loadReference (resolve directory "prefix-reference.mjs")
@@ -549,8 +562,7 @@
     (test "local string scanning preserves the independent original Reader AST cursor and errors for long Unicode escaped and incomplete literals"
       (async ()
         (let* ((text (await (readFile (resolve root "bootstrap/compiler/reader.eli") "utf8")))
-               (body (await (original-template "tests/wasm-compiler-reader.test.mjs"
-                       "const originalStringLiteral=" "const originalStringLiteral=`")))
+               (body retained-reader-string-literal)
                (start (js-call text :indexOf "  (defun read-string-literal\n"))
                (end (js-call text :indexOf "  (defun read-prefix\n" start))
                (original nil) (local nil))
@@ -896,12 +908,8 @@
 
     (test "Seed-produced JavaScript emitter and the original helper oracle retain the same small-program output"
       (async ()
-        (let* ((legacy (await (readFile (resolve root "tests/wasm-compiler-emitter.test.mjs") "utf8")))
-               (marker "const corpus=[") (start (js-call legacy :indexOf marker))
-               (cases (js-call (js-call (js-call legacy :slice (+ start (js-length marker))) :split "','") :slice 0 4))
+        (let* ((cases (js-call retained-emitter-corpus :slice))
                (input (resolve directory "seed-programs.json")) (output (resolve directory "seed-emissions.json")))
-          (js-call assert :ok (>= start 0))
-          (put cases 0 (js-call (aref cases 0) :slice 1))
           (js-call assert :strictEqual (js-length cases) 4)
           (await (writeFile input (JSON/stringify cases)))
           (let* ((script (js-call (js-array
@@ -1048,7 +1056,7 @@
       "actual Array prototype callbacks participate in inherited conversion, sorting and Symbol iterator lookup")
       (lambda (title)
         (test title (async ()
-          (let* ((source (await (original-template "tests/wasm-compiler-ir-lower.test.mjs" title "const source=`")))
+          (let* ((source (get retained-lower-sources title))
                  (fixture (await (user-fixture source (+ "retained-" (js-call title :slice 0 12) ".eli"))))
                  (a (instance (get fixture :bytes))) (expected (node-oracle "run" (get fixture :path)))
                  (out (js-call a :invoke "run")))
