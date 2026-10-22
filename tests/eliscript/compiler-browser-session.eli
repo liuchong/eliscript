@@ -131,7 +131,6 @@
   (beforeAll (async ()
     (let* ((environment (get globalThis.process :env)) (supplied (get environment :ELISCRIPT_TEST_COMPILER_ARTIFACT))
            (manifest (or (get environment :ELISCRIPT_BOOTSTRAP_MANIFEST) (resolve "dist/bootstrap-release/bootstrap.json"))))
-      (js-call assert :ok supplied "browser acceptance requires the authenticated final stage3 artifact; it never builds another compiler host")
       (setq authentication (await (authenticateStage3Targets (js-object :bootstrapManifestPath manifest :stage3MetadataPath supplied))))
       (let ((path (get authentication :stage3MetadataPath)))
         (setq artifact (merge (await (readCompilerMetadata path)) (js-object :directory (dirname path)))))

@@ -108,6 +108,194 @@ function walkProgram(program, visit) {
   }
 }
 
+function isPlainLiteralNode(node) {
+  return (
+    node !== null &&
+    typeof node === "object" &&
+    node.kind === "literal" &&
+    node.properties?.literalKind === undefined
+  );
+}
+
+function literalTruthiness(node) {
+  if (node === null || typeof node !== "object" || node.kind !== "literal") {
+    return null;
+  }
+  const literalKind = node.properties?.literalKind;
+  if (literalKind === "undefined") return false;
+  if (literalKind === "keyword") return true;
+  if (literalKind !== undefined) return null;
+  return node.value !== false && node.value !== null && node.value !== undefined;
+}
+
+function foldIrNode(node) {
+  if (node === null || typeof node !== "object") return node;
+  if (Array.isArray(node.children) && node.children.length > 0) {
+    let changed = false;
+    const optimizedChildren = node.children.map((child) => {
+      const next = foldIrNode(child);
+      if (next !== child) changed = true;
+      return next;
+    });
+    if (changed) {
+      node = { ...node, children: optimizedChildren };
+    }
+  }
+
+  const children = node.children ?? [];
+  if (node.kind === "conditional" && children.length >= 2) {
+    const truthy = literalTruthiness(children[0]);
+    if (truthy === true) return children[1];
+    if (truthy === false) {
+      return (
+        children[2] ?? {
+          kind: "literal",
+          span: node.span,
+          value: null,
+          children: [],
+        }
+      );
+    }
+  }
+
+  if (
+    node.kind === "intrinsic" &&
+    children.every(
+      (child) => isPlainLiteralNode(child) && typeof child.value === "number",
+    )
+  ) {
+    const values = children.map((child) => child.value);
+    let folded;
+    switch (node.value) {
+      case "+":
+        folded = values.reduce((sum, item) => sum + item, 0);
+        break;
+      case "*":
+        folded = values.reduce((product, item) => product * item, 1);
+        break;
+      case "-":
+        if (values.length === 1) folded = -values[0];
+        else if (values.length >= 2) {
+          folded = values.slice(1).reduce((acc, item) => acc - item, values[0]);
+        }
+        break;
+      case "1+":
+        if (values.length === 1) folded = values[0] + 1;
+        break;
+      case "1-":
+        if (values.length === 1) folded = values[0] - 1;
+        break;
+      default:
+        break;
+    }
+    if (typeof folded === "number" && Number.isFinite(folded)) {
+      return {
+        kind: "literal",
+        span: node.span,
+        value: folded,
+        children: [],
+      };
+    }
+  }
+
+  if (
+    node.kind === "string-concat" &&
+    children.every(
+      (child) =>
+        isPlainLiteralNode(child) &&
+        (typeof child.value === "string" ||
+          typeof child.value === "number" ||
+          typeof child.value === "boolean" ||
+          child.value === null),
+    )
+  ) {
+    return {
+      kind: "literal",
+      span: node.span,
+      value: children
+        .map((child) => (child.value === null ? "" : String(child.value)))
+        .join(""),
+      children: [],
+    };
+  }
+
+  return node;
+}
+
+/**
+ * Performs a Closure-style IR optimization pass (constant folding and dead
+ * conditional branch elimination) over a compiled Eliscript IR program.
+ */
+export function optimizeProgramIr(program) {
+  if (program === null || typeof program !== "object" || !Array.isArray(program.body)) {
+    return program;
+  }
+  program.body = program.body.map((node) => foldIrNode(node));
+  return program;
+}
+
+/**
+ * Strips comments and compacts whitespace in emitted JavaScript while
+ * preserving string/template literals and sourceMappingURL directives.
+ */
+export function optimizeJavaScript(code) {
+  if (typeof code !== "string" || code.length === 0) return code;
+  let out = "";
+  let index = 0;
+  const length = code.length;
+
+  while (index < length) {
+    const ch = code[index];
+    const next = code[index + 1];
+
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      out += ch;
+      index += 1;
+      while (index < length) {
+        const current = code[index];
+        out += current;
+        index += 1;
+        if (current === "\\" && index < length) {
+          out += code[index];
+          index += 1;
+          continue;
+        }
+        if (current === quote) break;
+      }
+      continue;
+    }
+
+    if (ch === "/" && next === "/") {
+      const lineEnd = code.indexOf("\n", index + 2);
+      const comment = lineEnd < 0 ? code.slice(index) : code.slice(index, lineEnd);
+      if (comment.startsWith("//# sourceMappingURL=")) {
+        out += comment;
+      }
+      index = lineEnd < 0 ? length : lineEnd;
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      const closeIndex = code.indexOf("*/", index + 2);
+      if (closeIndex < 0) break;
+      const block = code.slice(index + 2, closeIndex);
+      out += block.includes("\n") ? "\n" : " ";
+      index = closeIndex + 2;
+      continue;
+    }
+
+    out += ch;
+    index += 1;
+  }
+
+  const lines = out
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
+}
+
 function localSourceSpecifier(specifier) {
   return specifier.startsWith(".") && specifier.endsWith(SOURCE_EXTENSION);
 }
@@ -189,6 +377,16 @@ function failure(code, message, filename) {
 //     point the runtime at a served directory without an import map;
 //   - anything `resolveExternal` declines stays as written, which is what a
 //     third-party package import needs.
+function normalizePackageSubpath(specifier) {
+  if (
+    /^eliscript\/(?:runtime|platform|dist\/stdlib|stdlib)\//u.test(specifier) &&
+    !/\.[a-z0-9]+$/iu.test(specifier)
+  ) {
+    return `${specifier}${OUTPUT_EXTENSION}`;
+  }
+  return specifier;
+}
+
 function rewriteSpecifiers(program, source, resolveExternal) {
   for (const node of importSpecifiers(program)) {
     const specifier = node.value;
@@ -200,7 +398,9 @@ function rewriteSpecifiers(program, source, resolveExternal) {
       continue;
     }
     if (specifier.startsWith(".") || specifier.startsWith("/")) continue;
-    const external = resolveExternal?.(specifier, source);
+    const normalized = normalizePackageSubpath(specifier);
+    node.value = normalized;
+    const external = resolveExternal?.(normalized, source);
     if (typeof external === "string" && external.length > 0) node.value = external;
   }
 }
@@ -216,6 +416,9 @@ export function compileSource(
   options = {},
 ) {
   const program = compile_ir_string(source, filename, options.macroContext ?? null);
+  if (options.optimize !== false) {
+    optimizeProgramIr(program);
+  }
   rewriteSpecifiers(program, filename, options.resolveExternal);
   const output = outputPathFor(filename);
   const emission = emit_ir_string_with_source_map(
@@ -224,12 +427,16 @@ export function compileSource(
     output,
     mapSourcePath(output, filename),
   );
+  const rewritten = rewriteEmittedExternals(
+    emission.javascript,
+    filename,
+    options.resolveExternal,
+  );
   return {
-    javascript: rewriteEmittedExternals(
-      emission.javascript,
-      filename,
-      options.resolveExternal,
-    ),
+    javascript:
+      options.minify === true || options.optimize === "compact"
+        ? optimizeJavaScript(rewritten)
+        : rewritten,
     sourceMap: emission.sourceMap,
   };
 }
@@ -247,6 +454,8 @@ export function compileProject({
   entry,
   macroContext = null,
   resolveExternal,
+  optimize = true,
+  minify = false,
 }) {
   for (const path of Object.keys(files)) outputPathFor(path);
   if (files[entry] === undefined) {
@@ -262,6 +471,9 @@ export function compileProject({
     let program;
     try {
       program = compile_ir_string(files[id], id, macroContext);
+      if (optimize !== false) {
+        optimizeProgramIr(program);
+      }
     } catch (error) {
       throw new BrowserCompileError([diagnosticOf(error, id)]);
     }
@@ -284,10 +496,14 @@ export function compileProject({
       output,
       mapSourcePath(output, id),
     );
+    const rewritten = rewriteEmittedExternals(emission.javascript, id, resolveExternal);
     modules[output] = {
       id,
       source: files[id],
-      javascript: rewriteEmittedExternals(emission.javascript, id, resolveExternal),
+      javascript:
+        minify === true || optimize === "compact"
+          ? optimizeJavaScript(rewritten)
+          : rewritten,
       sourceMap: emission.sourceMap,
     };
   }

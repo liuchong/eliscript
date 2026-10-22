@@ -266,7 +266,7 @@ ${sections.join("\n")}
       </div>
     </main>
 
-    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Library API</p><div class="footer-links"><a href="language.html">Language</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.0.2" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.0.2" data-version data-version-github>v0.0.2</a><span>© <span data-year>2026</span></span></div></div></footer>
+    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Library API</p><div class="footer-links"><a href="language.html">Language</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.0.3" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.0.3" data-version data-version-github>v0.0.3</a><span>© <span data-year>2026</span></span></div></div></footer>
   </body>
 </html>
 `;

@@ -256,15 +256,18 @@ the browser without a backend server or checkout files. Load the standalone
 (inline or with `src="..."`), or point `data-eliscript` at an entry `.eli` file:
 
 ```html
-<script defer src="https://unpkg.com/eliscript@0.0.2/dist/browser/loader.js"></script>
+<script defer src="https://unpkg.com/eliscript@0.0.3/dist/browser/loader.js"></script>
 <script type="text/eliscript">
 (module browser.greeting
   (print "Compiled live in the browser"))
 </script>
 ```
 
-For programmatic compilation and hot-reload inside browser applications or Web
-Workers, import `eliscript/browser`:
+For programmatic compilation, IR optimization, optional JS minification,
+extensionless package subpath imports (such as
+`(import "eliscript/runtime/core/order" sort)` or with explicit `.mjs`), and
+hot-reload inside browser applications or Web Workers, import
+`eliscript/browser`:
 
 ```js
 import {
@@ -278,6 +281,7 @@ import {
 const { module } = await runSource(
   "(module math.demo (defun square (n) (* n n)) (export square))",
   "demo.eli",
+  { minify: true },
 );
 console.log(module.square(9));
 ```

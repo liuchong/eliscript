@@ -1,10 +1,15 @@
 (module eliscript.managed-runtime-vector
   (import "../../stdlib/managed-literals.eli"
-    PersistentVector literal-vector literal-subvec literal-instance? literal-type literal-export-value)
+    PersistentVector literal-vector literal-vector-from-array-values literal-subvec literal-instance? literal-type literal-export-value)
 
   (defconst EMPTY_VECTOR (literal-vector))
   (defconst view-states (new globalThis/WeakMap))
-  (defun persistentVector (&rest values) (js-call PersistentVector :from values))
+  (defconst freeze Object/freeze)
+  (defun persistentVector (&rest values)
+    (if (= (js-length values) 0) EMPTY_VECTOR
+      (progn
+        (when (<= (js-length values) 32) (funcall freeze values))
+        (literal-vector-from-array-values values))))
   (defun isPersistentVector (value) (literal-instance? value PersistentVector))
   (defun subvec (vector start &optional end) (literal-subvec vector start end))
   (defun readPersistentVectorView (value)

@@ -1,8 +1,10 @@
 (module tools.testing.file-workers
   (import "node:path" basename resolve)
+  (import "node:fs" existsSync)
   (import "node:fs/promises" mkdir writeFile)
   (import "./resource-supervisor.mjs" startResourceSupervisor)
   (import "./fixture-environment.mjs" fixtureChildArguments)
+  (import "./final-functional-scope.mjs" runFinalFunctionalScope)
 
   ;; Each original file still runs in a fresh process under the same real RSS
   ;; supervisor. Only two confirmed Bun loader failures opt out of smol mode.
@@ -163,15 +165,24 @@
 
   (defasync main ()
     (try
-      (let* ((parsed (parseTestFileArgs (js-call (get globalThis.process :argv) :slice 2)))
+      (let* ((arguments (js-call (get globalThis.process :argv) :slice 2))
+             (parsed (parseTestFileArgs arguments))
              (inventory (get parsed :files)) (shard (get parsed :shard))
              (files (if shard (partitionTestFiles inventory (get shard :index) (get shard :count)) inventory)))
-        (when shard (console/log (str "Test file shard " (get shard :index) "/" (get shard :count)
-          ": " (js-length files) "/" (js-length inventory) " selected")))
-        (let ((result (if (> (js-length files) 0) (await (runTestFiles files)) (js-object :results (js-array) :exitCode 0))))
-          (console/log (str "Test files: " (js-length (get result :results)) "/" (js-length files) " completed; "
-            (js-length (js-call (get result :results) :filter (lambda (row) (/= (get row :exitCode) 0)))) " failed"))
-          (put globalThis.process :exitCode (get result :exitCode))))
+        (if (existsSync (resolve (js-call globalThis.process :cwd) "contracts/compatibility-matrix.json"))
+          (let ((result (await (runFinalFunctionalScope arguments))))
+            (console/log (str "Test files: " (js-length (js-call (get result :results) :filter
+              (lambda (item) (not (eq (get item :started) false))))) "/" (js-length (get result :inventory)) " completed; "
+              (js-length (js-call (get result :results) :filter (lambda (item) (/= (get item :exitCode) 0)))) " failed; "
+              (js-length (get result :cancelled)) " compiler-host cases cancelled (not passed); scope: " (get result :archive)))
+            (put globalThis.process :exitCode (get result :exitCode)))
+          (progn
+            (when shard (console/log (str "Test file shard " (get shard :index) "/" (get shard :count)
+              ": " (js-length files) "/" (js-length inventory) " selected")))
+            (let ((result (if (> (js-length files) 0) (await (runTestFiles files)) (js-object :results (js-array) :exitCode 0))))
+              (console/log (str "Test files: " (js-length (get result :results)) "/" (js-length files) " completed; "
+                (js-length (js-call (get result :results) :filter (lambda (row) (/= (get row :exitCode) 0)))) " failed"))
+              (put globalThis.process :exitCode (get result :exitCode))))))
       (catch error
         (console/error (+ "Invalid test-file arguments: " (get error :message)))
         (put globalThis.process :exitCode 1))))

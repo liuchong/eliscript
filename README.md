@@ -56,7 +56,7 @@ without a build server or repository files. Include `dist/browser/loader.js`
 and use either `data-eliscript` or `<script type="text/eliscript">` tags:
 
 ```html
-<script defer src="https://unpkg.com/eliscript@0.0.2/dist/browser/loader.js"></script>
+<script defer src="https://unpkg.com/eliscript@0.0.3/dist/browser/loader.js"></script>
 <script type="text/eliscript">
 (module app.live
   (print "Hello from in-browser Eliscript!"))
@@ -65,7 +65,11 @@ and use either `data-eliscript` or `<script type="text/eliscript">` tags:
 
 Or import the programmatic browser SDK (`eliscript/browser`) to compile single
 modules (`compileSource`, `runSource`), multi-file projects (`compileProject`,
-`moduleGraphUrls`), or DOM script tags (`mountEliscriptScripts`) in memory.
+`moduleGraphUrls`), or DOM script tags (`mountEliscriptScripts`) in memory, with
+built-in IR constant-folding/dead-branch optimization (`optimizeProgramIr`),
+optional JavaScript compaction (`optimizeJavaScript` / `{ minify: true }`), and
+extensionless package subpath imports (`(import "eliscript/runtime/core/order" sort)`
+alongside explicit `.mjs`).
 
 ## What Works Today
 
@@ -82,11 +86,9 @@ modules (`compileSource`, `runSource`), multi-file projects (`compileProject`,
 Experimental direct backends and the zero-import managed WASM heap are described
 in the [backend runtime reference](tools/backends/README.md). The current delivery
 uses a JavaScript-hosted stage0–stage3 compiler chain that emits JavaScript,
-WASM and native programs. WASM/native compiler hosts are outside this release.
-Deep zipper stress on binary outputs remains performance-unqualified; the
-[active plan](docs/bootstrap-0.0.2-plan.md) retains the original cases and results.
-Explicit functional-profile acceptance reports deferred stress cases separately
-and does not certify full-corpus or performance acceptance.
+WASM and native programs, with 12,000-depth persistent zipper traversal and
+edited ascent verified across all three output targets:
+[active plan](docs/bootstrap-0.0.3-plan.md).
 
 ## Project Status
 

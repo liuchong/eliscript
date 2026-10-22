@@ -187,6 +187,8 @@
                    :stage2ProductIdentity (get certified :stage2ProductIdentity)
                    :stage3ProductIdentity (get certified :productIdentity)
                    :packagedProductIdentity packaged-product-identity)))
+            (Reflect/deleteProperty packaged-metadata "frontendIR")
+            (Reflect/deleteProperty packaged-metadata "literalIR")
             (await (saveCompilerMetadata (resolve root "dist/compiler-artifact.json") packaged-metadata))
             (await (saveCompilerMetadata (resolve root "dist/stage3-release.json") release-receipt)))))
       certified))

@@ -14,9 +14,12 @@ import { compileProject, compileSource, outputPathFor } from "./host.mjs";
 function externalResolver(runtimeBase) {
   if (typeof runtimeBase !== "string" || runtimeBase.length === 0) return undefined;
   const base = new URL(runtimeBase);
-  return (specifier) => specifier.startsWith("eliscript/")
-    ? new URL(specifier.slice("eliscript/".length), base).href
-    : undefined;
+  return (specifier) => {
+    if (!specifier.startsWith("eliscript/")) return undefined;
+    const subpath = specifier.slice("eliscript/".length);
+    const normalized = /\.[a-z0-9]+$/iu.test(subpath) ? subpath : `${subpath}.mjs`;
+    return new URL(normalized, base).href;
+  };
 }
 
 function compile(request) {

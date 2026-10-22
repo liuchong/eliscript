@@ -16,6 +16,9 @@
   (defconst wire-runtime-file "tests/wasm-managed-wire-selfhosted.test.mjs")
   (defconst ingress-file "tests/compiler-ir-session-ingress.test.mjs")
   (defconst artifact-archive-file "tests/compiler-artifact-archive-selfhosted.test.mjs")
+  (defconst package-execution-file "tests/compiler-package-execution-selfhosted.test.mjs")
+  (defconst browser-session-file "tests/compiler-browser-session.test.mjs")
+  (defconst archive-debug-file "tests/compiler-matrix-archive-debug-selfhosted.test.mjs")
   (defconst persistent-literals-file "tests/wasm-managed-persistent-literals.test.mjs")
   (defconst direct-wasm-file "tests/direct-wasm-backend.test.mjs")
   (defconst ingress-sha "510213d89769be93ce574f11de72061e2f7ff5605cfb792d79388aa419807183")
@@ -92,6 +95,7 @@
       (js-object :file file :kind (cond ((or (= name ingress-file) (= name package-file)) "sequence") (mixed "mixed")
           ((or (= name sequence-file) (= name record-grid-file) (= name response-events-file)
                (= name literal-runtime-file) (= name wire-runtime-file) (= name artifact-archive-file)
+               (= name package-execution-file) (= name browser-session-file) (= name archive-debug-file)
                (= name persistent-literals-file) (= name direct-wasm-file)) "sequence") (t "ordinary"))
         :cancelled cancelled :pattern (functionalScopePattern cancelled))))
 

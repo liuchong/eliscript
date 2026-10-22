@@ -1,5 +1,6 @@
 (module tools.backends.stage3-targets
   (import "node:fs/promises" readFile writeFile mkdir realpath)
+  (import "node:fs" existsSync)
   (import "node:path" resolve dirname relative)
   (import "node:util" isDeepStrictEqual)
   (import "./build.mjs" root)
@@ -38,7 +39,14 @@
 
   (defasync authenticateStage3Targets (input)
     (let* ((options (snapshot (object-options input)))
-           (manifest-path (await (realpath (required-path (get options :bootstrapManifestPath) "bootstrapManifestPath"))))
+           (requested-path (required-path (get options :bootstrapManifestPath) "bootstrapManifestPath"))
+           (default-bootstrap (resolve root "dist/bootstrap-release/bootstrap.json"))
+           (default-release (resolve root "dist/stage3-release.json"))
+           (manifest-path (await (realpath (if (and (= requested-path default-bootstrap)
+                                                    (not (existsSync default-bootstrap))
+                                                    (existsSync default-release))
+                                             default-release
+                                             requested-path))))
            (base (dirname manifest-path))
            (manifest (await (readCompilerMetadata manifest-path)))
            (stages (get manifest :stages)))

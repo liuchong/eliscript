@@ -13,7 +13,7 @@ verifiable, and nothing is published until a release is explicitly authorized.
 package, so the repository cannot publish by accident. Removing that field is
 the release step, and it is the only edit a release requires in the manifest.
 
-The version is `0.0.2` and is not bumped by ordinary work.
+The version is `0.0.3` and is not bumped by ordinary work.
 
 ## What Ships
 
@@ -74,7 +74,7 @@ Then install that artifact and use it the way a consumer would:
 ```sh
 npm pack --pack-destination /tmp
 mkdir /tmp/consumer && cd /tmp/consumer && npm init -y
-npm install /tmp/eliscript-0.0.2.tgz
+npm install /tmp/eliscript-0.0.3.tgz
 ./node_modules/.bin/eliscript --help
 ```
 

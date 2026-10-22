@@ -10,6 +10,8 @@ import {
   moduleGraphUrls,
   mountEliscriptScripts,
   normalizePath,
+  optimizeJavaScript,
+  optimizeProgramIr,
   outputPathFor,
   relativePath,
   resolvePath,
@@ -220,3 +222,54 @@ test("mountEliscriptScripts compiles and executes inline and external text/elisc
   const secondPass = await mountEliscriptScripts(root);
   expect(secondPass).toEqual([]);
 });
+
+test("optimizeProgramIr folds constant expressions and eliminates dead conditional branches", () => {
+  const optimized = compileSource(
+    '(module opt.demo (defun calc () (if t (+ 20 22) (throw "dead"))) (export calc))',
+    "opt-demo.eli",
+  );
+  expect(optimized.javascript).toContain("42");
+  expect(optimized.javascript).not.toContain("dead");
+
+  const unoptimized = compileSource(
+    '(module opt.demo (defun calc () (if t (+ 20 22) (throw "dead"))) (export calc))',
+    "opt-demo.eli",
+    { optimize: false },
+  );
+  expect(unoptimized.javascript).toContain("dead");
+  expect(typeof optimizeProgramIr).toBe("function");
+});
+
+test("optimizeJavaScript and compileSource minify option strip comments and compact whitespace while preserving string literals", async () => {
+  const sample = `// leading comment\nexport const greeting = "hello // not a comment /* either */";\n/* block comment */\nexport const answer = 40 + 2;\n`;
+  const compacted = optimizeJavaScript(sample);
+  expect(compacted).not.toContain("leading comment");
+  expect(compacted).not.toContain("block comment");
+  expect(compacted).toContain('"hello // not a comment /* either */"');
+  expect(compacted.length).toBeLessThan(sample.length);
+
+  const executed = await runSource(
+    '(module compact.demo (defun message () (str "url: https://example.test/a//b " (+ 19 23))) (export message))',
+    "compact-demo.eli",
+    { minify: true },
+  );
+  expect(executed.module.message()).toBe("url: https://example.test/a//b 42");
+});
+
+test("compileSource and runSource support both extensionless and .mjs eliscript package imports", async () => {
+  const withoutExtension = compileSource(
+    '(module ext.demo (import "eliscript/runtime/core/order" sort) (import "eliscript/runtime/core/sequence" map) (export sort map))',
+    "ext-demo.eli",
+    { resolveExternal },
+  );
+  expect(withoutExtension.javascript).toContain(`from "${RUNTIME_BASE}runtime/core/order.mjs"`);
+  expect(withoutExtension.javascript).toContain(`from "${RUNTIME_BASE}runtime/core/sequence.mjs"`);
+
+  const executed = await runSource(
+    '(module ext.run (import "eliscript/runtime/core/order" sort) (defun ordered () (sort [3 1 2])) (export ordered))',
+    "ext-run.eli",
+  );
+  expect([...executed.module.ordered()]).toEqual([1, 2, 3]);
+});
+
+
