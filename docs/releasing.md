@@ -64,12 +64,22 @@ executes the four-dimension performance and verification comparison (`Emacs
 Lisp` current latest, `previousMajor`, `previousMinor`, and `latest`) and
 writes:
 
-- `dist/release-report/release-summary.md` — concise summary for the main
-  GitHub Release page body (`gh release create --notes-file`).
+- `dist/release-report/release-summary.md` and
+  `dist/release-report/release-notes-merged.md` — concise summary and
+  idempotently merged release body for the main GitHub Release page
+  (`gh release create --notes-file` / `gh release edit --notes-file`).
 - `dist/release-report/eliscript-0.0.4-benchmark-report.md` and
   `dist/release-report/eliscript-0.0.4-benchmark-report.json` — detailed
   benchmark, artifact-size, and verification report files uploaded as GitHub
   Release assets alongside `eliscript-0.0.4.tgz`.
+
+When `.github/workflows/release.yml` is dispatched (`gh workflow run release.yml
+-f version=0.0.4 -f publish=true`), GitHub Actions automatically verifies the
+signed tag and release tarball, runs the four-dimension benchmark against the
+full tag history, uploads `eliscript-0.0.4-benchmark-report.md` and
+`eliscript-0.0.4-benchmark-report.json` to the GitHub Release page, updates the
+Release main page summary, and publishes (or stages with OIDC provenance) the
+package to npm.
 
 See [`.agents/skills/release-benchmark/SKILL.md`](../.agents/skills/release-benchmark/SKILL.md)
 for the complete normalized release and Pages version-switching workflow.

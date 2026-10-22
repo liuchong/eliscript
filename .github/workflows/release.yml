@@ -1,11 +1,13 @@
-# Publishing is manual, and a run stages a release rather than publishing it.
+# Publishing is manual, and a run stages or publishes a release while automatically
+# executing the four-dimension performance comparison and uploading the summary
+# and detailed report files to the GitHub Release page.
 #
 # Nothing here runs on a push: a person dispatches this workflow and names the
 # version. The default path is `npm stage publish`, which puts the package in
 # the registry's staging area; a maintainer then reviews and approves it with
 # two-factor authentication before anyone can install it. Direct publishing is
 # the explicit alternative, for the case where the staged package was already
-# reviewed.
+# reviewed or direct OIDC publishing is enabled.
 #
 # What is staged is the tarball attached to the release, not a fresh build.
 # Publishing the reviewed bytes is the point: the artifact a consumer downloads
@@ -17,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version to release, matching the tag without its `v` (for example 0.0.1).
+        description: Version to release, matching the tag without its `v` (for example 0.0.4).
         required: true
         type: string
       publish:
@@ -27,13 +29,13 @@ on:
         default: false
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Check the version names a signed release
         env:
@@ -61,6 +63,12 @@ jobs:
             }
           echo "v$VERSION is a signed release"
 
+      - name: Checkout repository with full tag history for 4-dimension benchmark
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: "v${{ inputs.version }}"
+          fetch-depth: 0
+
       - name: Download the released package
         env:
           GH_TOKEN: ${{ github.token }}
@@ -68,7 +76,7 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -eu
-          gh release download "v$VERSION" --pattern "eliscript-$VERSION.tgz"
+          gh release download "v$VERSION" --pattern "eliscript-$VERSION.tgz" --clobber
           # A release whose tag was re-cut without repacking would attach the
           # wrong bytes, so the version inside the package has to match the
           # version being released.
@@ -80,11 +88,41 @@ jobs:
           fi
           sha256sum "eliscript-$VERSION.tgz"
 
+      - name: Set up Emacs
+        uses: purcell/setup-emacs@83efbeabbb0ade2bfceecdfebe3fb8ef6fb5bf7f
+        with:
+          version: "30.2"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: "1.4.0"
+
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
+
+      - name: Run 4-dimension performance benchmark and upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          make bootstrap-backends
+          bun test tests/version-comparison-benchmark.test.mjs
+          gh release view "v$VERSION" --json body --jq '.body // ""' > existing-release-notes.md
+          bun tools/performance/version-comparison.mjs \
+            --release-dir dist/release-report \
+            --merge-notes existing-release-notes.md
+          gh release upload "v$VERSION" \
+            "dist/release-report/eliscript-$VERSION-benchmark-report.md" \
+            "dist/release-report/eliscript-$VERSION-benchmark-report.json" \
+            --clobber
+          gh release edit "v$VERSION" \
+            --notes-file dist/release-report/release-notes-merged.md
 
       # The default path. The package waits in the registry's staging area and
       # a maintainer approves it, so an accidental dispatch publishes nothing.
@@ -103,4 +141,8 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -eu
-          npm publish "eliscript-$VERSION.tgz" --access public --provenance --loglevel verbose
+          if ! npm publish "eliscript-$VERSION.tgz" --access public --provenance --loglevel verbose; then
+            echo "::warning::direct OIDC publish returned 403; falling back to 'npm stage publish' with provenance"
+            npm stage publish "eliscript-$VERSION.tgz" --access public --provenance --loglevel verbose
+            echo "::notice::staged $VERSION; review it with 'npm stage list' and approve it with 'npm stage approve <stage-id>' and two-factor authentication"
+          fi

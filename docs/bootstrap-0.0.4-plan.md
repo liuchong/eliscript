@@ -349,20 +349,58 @@ flowchart TD
   - `docs/releasing.md` & `benchmarks/README.md`:
     - Document `--release-dir` and the GitHub Release summary + detailed asset workflow.
 
+### `D19`: Performance Optimization Agent Rules (`AGENTS.md`)
+- **File**: `AGENTS.md` (`lines 17-35`, `205-222`)
+- **Changes**:
+  - Update `## Current Delivery Target` (`line 19`) from `docs/bootstrap-0.0.2-plan.md` to `docs/bootstrap-0.0.4-plan.md`.
+  - Add `## Performance Optimization` section defining:
+    - **`PERF-01` (Development Goal)**: Design and implement compiler, runtime, persistent data structures, and standard-library algorithms for ClojureScript-level algorithmic optimality and JavaScript engine (V8/JSC) specialization: $O(1)$ tail/chunk/indexed fast-paths, transient batching (`transient` / `conj!` / `assoc!` / `persistent!`), monomorphic protocol/symbol dispatch, reference-identity (`===`) equality/comparison short-circuits, compact $O(1)$-step zipper path chains, and zero redundant wrapper/metadata cloning in hot loops.
+    - **`PERF-02` (Acceptance Gate)**: Every release and performance-sensitive change must execute the 4-dimension version & native Emacs Lisp benchmark (`tools/performance/version-comparison.eli` / `bun run benchmark:version-comparison`). Generated JavaScript runtime/stdlib workloads must outperform the current latest native Emacs Lisp baseline and must not introduce unexplained regressions against `previousMajor` or `previousMinor`.
+    - **`PERF-03` (Long-Term Continuous Optimization)**: Treat runtime speed, algorithmic complexity, memory allocation density, and compiled artifact size (`.mjs` / browser bundle / WASM / native) as a standing long-term optimization objective across all future milestones and releases, publishing transparent 4-dimension benchmark summaries on every GitHub Release main page alongside detailed `.md` and `.json` report attachments.
+
+### `D20`: CI-Ready 4-Dimension Benchmark & Idempotent Release Notes Merger (`tools/performance/version-comparison.eli`, `tests/version-comparison-benchmark.test.eli`)
+- **Files**:
+  - `tools/performance/version-comparison.eli` (`lines 240-260`, `460-535`)
+  - `tests/version-comparison-benchmark.test.eli` (`lines 150-220`)
+- **Changes**:
+  - In `measureEliscriptDirectory(targetRoot, compilerRoot = projectDirectory)`:
+    - Before importing `dist/bootstrap/compiler.mjs` from `compilerRoot`, check `await pathExists(compilerModulePath)`; if absent (e.g. on a fresh CI checkout), run `await capture(["make", "bootstrap-backends"], { cwd: compilerRoot })`.
+  - Add exported function `mergeReleaseNotesWithSummary(existingNotes, summaryMarkdown)`:
+    - Preserves any release highlights before `## 测试与四维性能基准摘要` and appends or replaces the `## 测试与四维性能基准摘要` section idempotently.
+  - Extend `writeReleaseComparisonBundle(report, releaseDir, options = {})` and CLI `--merge-notes <path>` to write `release-notes-merged.md` inside `releaseDir`.
+  - Extend `tests/version-comparison-benchmark.test.eli` with unit tests for `mergeReleaseNotesWithSummary`, `AGENTS.md` (`PERF-01`–`PERF-03`), and `.github/workflows/release.yml` automated benchmark/upload integration.
+
+### `D21`: Automated Benchmark, Release Page Upload & NPM Publish Action (`.github/workflows/release.yml`, `.agents/skills/release-benchmark/SKILL.md`, `docs/releasing.md`)
+- **Files**:
+  - `.github/workflows/release.yml` (`lines 1-106`)
+  - `.agents/skills/release-benchmark/SKILL.md` (`lines 26-60`)
+  - `docs/releasing.md` (`lines 54-90`)
+- **Changes**:
+  - Upgrade `.github/workflows/release.yml` while preserving all 9 contract assertions in `tests/eliscript/package-surface.eli`:
+    - Set `permissions.contents: write` and `permissions.id-token: write`.
+    - After verifying the signed release tag and downloading `eliscript-$VERSION.tgz`, check out `v$VERSION` with `fetch-depth: 0`, set up Emacs `30.2`, Bun `1.4.0`, and Node `24`, materialize `.mjs` artifacts (`make bootstrap-backends`), run `bun test tests/version-comparison-benchmark.test.mjs`, execute `bun tools/performance/version-comparison.mjs --release-dir dist/release-report --merge-notes existing-release-notes.md`, upload `eliscript-$VERSION-benchmark-report.md` and `eliscript-$VERSION-benchmark-report.json` to GitHub Release `v$VERSION` (`--clobber`), and update the Release page summary via `gh release edit "v$VERSION" --notes-file dist/release-report/release-notes-merged.md`.
+    - Keep `Stage the release for review` (`if: ${{ !inputs.publish }}`) and `Publish the release` (`if: ${{ inputs.publish }}`), adding automatic fallback to `npm stage publish` in `Publish the release` if npmjs OIDC policy returns `403` on direct publish.
+  - Sync `.agents/skills/release-benchmark/SKILL.md` and `docs/releasing.md` with the automated GitHub Actions release & benchmark upload workflow.
+
+### `D22`: Formal `0.0.4` Release & Post-Release Pages/Docs Version Switch
+- **Files** (updated immediately after `0.0.4` is published to GitHub Releases & npm):
+  - `docs/pages/site.eli`, `tools/surface/generate-api.eli`, `docs/index.html`, `docs/pages/*.html`, `README.md`, `docs/getting-started.md`, `tests/pages-site.test.eli`, `tests/docs-site.test.eli`: switch live engine and version links from `0.0.3` / `v0.0.3` to `0.0.4` / `v0.0.4`.
+
 ---
 
 ## 5. Stage Progress & Dual Checklists
 
-### Stage Progress (`S0`–`S6`)
+### Stage Progress (`S0`–`S7`)
 - [x] `S0` Baseline audit completed and `0.0.3` published to GitHub Releases & npm
-- [x] `S1` Phase A: Complete `docs/bootstrap-0.0.4-plan.md` construction manual (including in-place `.eli` layout & documentation sync `D13`–`D18`)
+- [x] `S1` Phase A: Complete `docs/bootstrap-0.0.4-plan.md` construction manual (including in-place `.eli` layout & documentation sync `D13`–`D22`)
 - [x] `S2` Phase B & C: Complete all test additions and full implementation without mid-flight test runs
 - [x] `S3` Phase D (Initial): Initial zero-`.mjs` & ClojureScript fast-path verification
 - [x] `S4` Phase D (In-Place `.eli` & Docs): Centralized bootstrap, contract & doc verification, GPG-signed commit, and push
 - [x] `S5` Phase D (Pages Content Sync & Pre-Release `0.0.3` Engine/Version Pin): Verify Pages & doc contracts, commit, and push
 - [x] `S6` Phase D (Normalized 4-Dimension Version & Emacs Lisp Performance Comparison + Release Skill): Verify matrix boundary cases, release bundle, project skill, commit, and push
+- [ ] `S7` Phase D (Performance Agent Rules, Automated Release Benchmark Action, `0.0.4` Release & Post-Release Pages Switch): Verify all contracts/tests, sign commit & push, tag `v0.0.4`, run Release Action + npm publish, and switch Pages to `0.0.4`
 
-### Construction Checklist (`C01`–`C26`) — Check Immediately as Each Item Is Written
+### Construction Checklist (`C01`–`C31`) — Check Immediately as Each Item Is Written
 - [x] `C01` Update `tests/eliscript/stable-compatibility-corpus.eli`, `tests/eliscript/package-surface.eli`, and `tests/eliscript/persistent-zipper-path.eli` with `0.0.4` tests (Phase B, no test execution)
 - [x] `C02` Generate all 516 capsule `.eli` files from existing `.mjs` files
 - [x] `C03` Update `tools/backends/bootstrap.el` to materialize capsule `.eli` -> `<rel>.mjs` during `eliscript-backend-bootstrap-runtimes`
@@ -389,8 +427,13 @@ flowchart TD
 - [x] `C24` Extend `tests/version-comparison-benchmark.test.eli` with tests for `renderReleaseNotesSummary`, `writeReleaseComparisonBundle`, and `.agents/skills/release-benchmark/SKILL.md` (Phase B, no test execution)
 - [x] `C25` Update `tools/performance/version-comparison.eli` with `renderReleaseNotesSummary`, `writeReleaseComparisonBundle`, artifact size & verification summary, and `--release-dir` / `--release-summary` CLI support
 - [x] `C26` Create `.agents/skills/release-benchmark/SKILL.md` and update `docs/releasing.md` and `benchmarks/README.md`
+- [x] `C27` Extend `tests/version-comparison-benchmark.test.eli` with tests for `mergeReleaseNotesWithSummary`, `AGENTS.md` (`PERF-01`–`PERF-03`), and `.github/workflows/release.yml` automated benchmark & release upload (Phase B, no test execution)
+- [x] `C28` Update `AGENTS.md` with `PERF-01`, `PERF-02`, and `PERF-03` performance optimization rules (development, acceptance, and long-term goals)
+- [x] `C29` Update `tools/performance/version-comparison.eli` with CI compiler bootstrap guard, `mergeReleaseNotesWithSummary`, and `--merge-notes` support
+- [x] `C30` Upgrade `.github/workflows/release.yml`, `.agents/skills/release-benchmark/SKILL.md`, and `docs/releasing.md` for automated GitHub Actions 4-dimension benchmark, Release page summary/asset upload, and NPM publish/stage
+- [ ] `C31` After `0.0.4` is published to GitHub Releases and npm, update Pages & docs engine/version links to `0.0.4` / `v0.0.4`
 
-### Acceptance Checklist (`A01`–`A21`) — Execute & Check Only in Phase D
+### Acceptance Checklist (`A01`–`A27`) — Execute & Check Only in Phase D
 - [x] `A01` `git ls-files '*.mjs'` outputs 0 files (empty), confirming zero tracked `.mjs` files in the repository
 - [x] `A02` `make bootstrap-backends` succeeds from `.eli` sources, materializing all capsule `.mjs` files and self-hosted compiler/runtime artifacts cleanly (fixed-point verified: `stage2 == stage3` across 313 files, `productSha256: 7642d697c024b3239133913844715b02ad7b863344cbff3b53490e7c048ba94a`)
 - [x] `A03` Repository integrity check (`bun test tests/repository-integrity.test.mjs tests/repository-integrity-original-selfhosted.test.mjs`) passes with 0 errors (`13/13` pass, `516 JavaScript, 150 Eliscript`)
@@ -412,3 +455,9 @@ flowchart TD
 - [x] `A19` `bun tools/performance/version-comparison.mjs --release-dir dist/release-report` generates `release-summary.md`, `eliscript-0.0.4-benchmark-report.md`, and `eliscript-0.0.4-benchmark-report.json` cleanly
 - [x] `A20` `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 make check-contracts` passes 100% (15/15 contract gates pass)
 - [x] `A21` Normalized 4-dimension benchmark framework and `.agents/skills/release-benchmark/SKILL.md` committed with GPG signature (`git commit -S`) and pushed to `origin/master`
+- [x] `A22` `bun test tests/version-comparison-benchmark.test.mjs tests/package-surface.test.mjs` passes 100% with the new `AGENTS.md`, `mergeReleaseNotesWithSummary`, and `.github/workflows/release.yml` assertions
+- [x] `A23` `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 make check-contracts` passes 100%
+- [ ] `A24` Signed commit (`git commit -S`) pushed to `origin/master`, signed tag `v0.0.4` created and pushed, and GitHub Release `v0.0.4` created with `eliscript-0.0.4.tgz`
+- [ ] `A25` GitHub Actions `release.yml` dispatched for `0.0.4`, automatically executing the 4-dimension benchmark, uploading `eliscript-0.0.4-benchmark-report.md` and `eliscript-0.0.4-benchmark-report.json` to GitHub Release `v0.0.4`, updating the Release main page summary, and publishing/staging `eliscript@0.0.4` on npm
+- [ ] `A26` `npm view eliscript@0.0.4 version` confirms `0.0.4` is live on npm
+- [ ] `A27` Pages and documentation (`docs/index.html`, `docs/pages/*.html`, `docs/pages/site.eli`, `tools/surface/generate-api.eli`, `README.md`, `docs/getting-started.md`) updated to `0.0.4` / `v0.0.4`, verified by `make check-contracts` and Pages tests, committed with GPG signature, and pushed to `origin/master`

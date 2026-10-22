@@ -16,7 +16,7 @@
 
 ## Current Delivery Target
 
-- The active delivery plan is `docs/bootstrap-0.0.2-plan.md`.
+- The active delivery plan is `docs/bootstrap-0.0.4-plan.md`.
 - The maintained Emacs Lisp compiler emits JavaScript stage0. The same frozen
   Eliscript compiler sources then produce JavaScript stage1, stage2 and stage3.
   Require exact stage2/stage3 compiler-product equality.
@@ -24,7 +24,7 @@
   output acceptance. Do not add binary-output acceptance for stage1 or stage2.
 - WASM/native compiler hosts and the previous 3-by-3 bootstrap goal are
   cancelled for this delivery. Preserve their historical evidence; do not
-  restart that work or require it for 0.0.2. The WASM/native output backends
+  restart that work or require it for 0.0.4. The WASM/native output backends
   and actual generated-program execution remain required.
 - `docs/native-wasm-feasibility.md` is historical context, not the active
   construction checklist. The new plan controls scope and acceptance.
@@ -201,6 +201,38 @@ precedence over parent rules when they address the same decision.
   Refresh generated contracts and run the broad local gate once at the batch
   boundary. Refresh the full compatibility matrix only at a milestone gate or
   when its evidence is the capability being delivered.
+
+## Performance Optimization
+
+- **PERF-01** - **Development Goal**: Design and implement the compiler,
+  runtime, persistent data structures, and standard library for ClojureScript-level
+  algorithmic optimality and JavaScript engine (V8/JavaScriptCore) specialization.
+  Prefer $O(1)$ tail/chunk/indexed fast-paths, transient collection builders
+  (`transient` / `conj!` / `assoc!` / `persistent!`), monomorphic protocol and
+  symbol-property dispatch, reference-identity (`===`) short-circuits in value
+  equality and ordering, compact $O(1)$-step zipper path chains, and structural
+  sharing without redundant array or metadata cloning in hot loops.
+- **PERF-02** - **Acceptance Gate**: Every release and every performance-sensitive
+  change to `compiler/`, `runtime/`, or `stdlib/` must execute the normalized
+  four-dimension version and native Emacs Lisp benchmark
+  (`tools/performance/version-comparison.eli`, invoked via
+  `bun run benchmark:version-comparison`) across all four canonical dimensions:
+  1. `emacsLisp` (current latest host Emacs Lisp only),
+  2. `previousMajor` (highest release of the prior major version, or `absent` in `0.x`),
+  3. `previousMinor` (immediately preceding release `< latest`, deduplicating execution when identical to `previousMajor`),
+  4. `latest` (current workspace version).
+  Generated JavaScript runtime and standard-library workloads must outperform
+  native Emacs Lisp across core collection, sequence, ordering, aggregation, and
+  deep zipper workloads, and must not introduce unexplained regressions against
+  `previousMajor` or `previousMinor`.
+- **PERF-03** - **Long-Term Continuous Optimization**: Treat algorithmic time
+  and space complexity, JavaScript JIT friendliness, allocation density, and
+  compiled artifact sizes (`.mjs`, browser bundles, WASM, and native binaries)
+  as a standing long-term optimization objective across all future deliveries.
+  Every release must publish the concise four-dimension benchmark summary on the
+  main GitHub Release page (`release-summary.md`) and attach the full detailed
+  benchmark reports (`eliscript-<version>-benchmark-report.md` and
+  `eliscript-<version>-benchmark-report.json`) as release assets.
 
 ## Commit Messages
 
