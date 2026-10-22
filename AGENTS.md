@@ -16,7 +16,7 @@
 
 ## Current Delivery Target
 
-- The active delivery plan is `docs/bootstrap-0.0.4-plan.md`.
+- The active delivery plan is `docs/bootstrap-0.1.0-plan.md`.
 - The maintained Emacs Lisp compiler emits JavaScript stage0. The same frozen
   Eliscript compiler sources then produce JavaScript stage1, stage2 and stage3.
   Require exact stage2/stage3 compiler-product equality.

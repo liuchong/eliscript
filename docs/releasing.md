@@ -13,7 +13,7 @@ verifiable, and nothing is published until a release is explicitly authorized.
 package, so the repository cannot publish by accident. Removing that field is
 the release step, and it is the only edit a release requires in the manifest.
 
-The version is `0.0.4` and is not bumped by ordinary work.
+The version is `0.1.0` and is not bumped by ordinary work.
 
 ## What Ships
 
