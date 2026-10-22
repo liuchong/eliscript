@@ -256,7 +256,7 @@ the browser without a backend server or checkout files. Load the standalone
 (inline or with `src="..."`), or point `data-eliscript` at an entry `.eli` file:
 
 ```html
-<script defer src="https://unpkg.com/eliscript@0.0.3/dist/browser/loader.js"></script>
+<script defer src="https://unpkg.com/eliscript@0.0.4/dist/browser/loader.js"></script>
 <script type="text/eliscript">
 (module browser.greeting
   (print "Compiled live in the browser"))

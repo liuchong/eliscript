@@ -398,7 +398,7 @@ flowchart TD
 - [x] `S4` Phase D (In-Place `.eli` & Docs): Centralized bootstrap, contract & doc verification, GPG-signed commit, and push
 - [x] `S5` Phase D (Pages Content Sync & Pre-Release `0.0.3` Engine/Version Pin): Verify Pages & doc contracts, commit, and push
 - [x] `S6` Phase D (Normalized 4-Dimension Version & Emacs Lisp Performance Comparison + Release Skill): Verify matrix boundary cases, release bundle, project skill, commit, and push
-- [ ] `S7` Phase D (Performance Agent Rules, Automated Release Benchmark Action, `0.0.4` Release & Post-Release Pages Switch): Verify all contracts/tests, sign commit & push, tag `v0.0.4`, run Release Action + npm publish, and switch Pages to `0.0.4`
+- [x] `S7` Phase D (Performance Agent Rules, Automated Release Benchmark Action, `0.0.4` Release & Post-Release Pages Switch): Verify all contracts/tests, sign commit & push, tag `v0.0.4`, run Release Action + npm publish, and switch Pages to `0.0.4`
 
 ### Construction Checklist (`C01`–`C31`) — Check Immediately as Each Item Is Written
 - [x] `C01` Update `tests/eliscript/stable-compatibility-corpus.eli`, `tests/eliscript/package-surface.eli`, and `tests/eliscript/persistent-zipper-path.eli` with `0.0.4` tests (Phase B, no test execution)
@@ -431,7 +431,7 @@ flowchart TD
 - [x] `C28` Update `AGENTS.md` with `PERF-01`, `PERF-02`, and `PERF-03` performance optimization rules (development, acceptance, and long-term goals)
 - [x] `C29` Update `tools/performance/version-comparison.eli` with CI compiler bootstrap guard, `mergeReleaseNotesWithSummary`, and `--merge-notes` support
 - [x] `C30` Upgrade `.github/workflows/release.yml`, `.agents/skills/release-benchmark/SKILL.md`, and `docs/releasing.md` for automated GitHub Actions 4-dimension benchmark, Release page summary/asset upload, and NPM publish/stage
-- [ ] `C31` After `0.0.4` is published to GitHub Releases and npm, update Pages & docs engine/version links to `0.0.4` / `v0.0.4`
+- [x] `C31` After `0.0.4` is published to GitHub Releases and npm, update Pages & docs engine/version links to `0.0.4` / `v0.0.4`
 
 ### Acceptance Checklist (`A01`–`A27`) — Execute & Check Only in Phase D
 - [x] `A01` `git ls-files '*.mjs'` outputs 0 files (empty), confirming zero tracked `.mjs` files in the repository
@@ -459,5 +459,5 @@ flowchart TD
 - [x] `A23` `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 make check-contracts` passes 100%
 - [x] `A24` Signed commit (`git commit -S`) pushed to `origin/master`, signed tag `v0.0.4` created and pushed, and GitHub Release `v0.0.4` created with `eliscript-0.0.4.tgz`
 - [x] `A25` GitHub Actions `release.yml` dispatched for `0.0.4` (run `39801008318`), automatically executing the 4-dimension benchmark, uploading `eliscript-0.0.4-benchmark-report.md` and `eliscript-0.0.4-benchmark-report.json` to GitHub Release `v0.0.4`, updating the Release main page summary, and staging `eliscript@0.0.4` with OIDC provenance on npm (`46fa8fd3-007c-49cf-a08d-2d749ada09f7`)
-- [ ] `A26` `npm view eliscript@0.0.4 version` confirms `0.0.4` is live on npm
-- [ ] `A27` Pages and documentation (`docs/index.html`, `docs/pages/*.html`, `docs/pages/site.eli`, `tools/surface/generate-api.eli`, `README.md`, `docs/getting-started.md`) updated to `0.0.4` / `v0.0.4`, verified by `make check-contracts` and Pages tests, committed with GPG signature, and pushed to `origin/master`
+- [x] `A26` `npm view eliscript@0.0.4 version` confirms `0.0.4` is live on npm
+- [x] `A27` Pages and documentation (`docs/index.html`, `docs/pages/*.html`, `docs/pages/site.eli`, `tools/surface/generate-api.eli`, `README.md`, `docs/getting-started.md`) updated to `0.0.4` / `v0.0.4`, verified by `make check-contracts` and Pages tests, committed with GPG signature, and pushed to `origin/master`

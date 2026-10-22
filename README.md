@@ -56,7 +56,7 @@ without a build server or repository files. Include `dist/browser/loader.js`
 and use either `data-eliscript` or `<script type="text/eliscript">` tags:
 
 ```html
-<script defer src="https://unpkg.com/eliscript@0.0.3/dist/browser/loader.js"></script>
+<script defer src="https://unpkg.com/eliscript@0.0.4/dist/browser/loader.js"></script>
 <script type="text/eliscript">
 (module app.live
   (print "Hello from in-browser Eliscript!"))
