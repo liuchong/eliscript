@@ -46,8 +46,9 @@
           <p class="eyebrow"><span>Emacs-first · standard ECMAScript · <a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.0" data-version data-version-github>v0.1.0</a> · <a href="https://www.npmjs.com/package/eliscript/v/0.1.0" data-version-npm>npm</a> · <a href="https://github.com/liuchong/eliscript">GitHub</a></span></p>
           <h1 id="hero-title">Eliscript</h1>
           <p class="hero-copy">
-            A functional Lisp with persistent values, a compiler written in
-            itself, and direct access to the modern JavaScript ecosystem.
+            A 100% Emacs Lisp-compatible core with 1+5+2 explicit extensions,
+            persistent values, a self-hosted compiler, and four-target execution
+            across Emacs, JavaScript, WASM, and ARM64 Native.
           </p>
           <div class="hero-actions">
             <a class="button button-light" href="pages/getting-started.html">Get started</a>
@@ -68,33 +69,34 @@
       <section class="band band-white" aria-labelledby="pipeline-title">
         <div class="section-shell">
           <div class="section-heading">
-            <h2 id="pipeline-title">One language, two compiler generations.</h2>
+            <h2 id="pipeline-title">One language, two compiler generations, four execution targets.</h2>
             <p>
-              Plain Emacs builds the seed. The seed builds the compiler written
-              in Eliscript. Both lower the same checked program through explicit
-              IR into readable, source-mapped ESM.
+              Plain Emacs runs the 100% compatible core and builds the seed. The
+              seed builds the self-hosted Eliscript compiler across stage0–stage3,
+              emitting readable, source-mapped ESM alongside zero-glue WASM and
+              ARM64 native binaries.
             </p>
           </div>
           <div class="pipeline" aria-label="Compilation pipeline">
             <article class="pipeline-step">
               <span class="step-number">01</span>
               <h3>Read Lisp</h3>
-              <p>Parse located forms, persistent literals, modules, macros, and explicit host boundaries.</p>
+              <p>Parse Emacs Lisp forms, 1+5+2 extension packs, persistent literals, modules, macros, and explicit host boundaries.</p>
             </article>
             <article class="pipeline-step">
               <span class="step-number">02</span>
               <h3>Prove semantics</h3>
-              <p>Expand deterministically, resolve lexical identities, validate ownership, and reject invalid control flow.</p>
+              <p>Expand deterministically, check static contracts and pre/post assertions, validate transient ownership, and verify tail recursion.</p>
             </article>
             <article class="pipeline-step">
               <span class="step-number">03</span>
               <h3>Lower explicit IR</h3>
-              <p>Both generations produce the same versioned representation, diagnostics, and Source Map locations.</p>
+              <p>Seed and self-hosted stage1–stage3 compilers produce identical versioned IR, diagnostics, and Source Map v3 locations.</p>
             </article>
             <article class="pipeline-step">
               <span class="step-number">04</span>
-              <h3>Run standard ESM</h3>
-              <p>Generated modules use ordinary JavaScript imports and execute under Bun, Node, browsers, and compatible tools.</p>
+              <h3>Run across targets</h3>
+              <p>Execute identically in Emacs Lisp, standard ESM (Bun, Node, browser), and zero-glue WASM / ARM64 native `:abi` targets.</p>
             </article>
           </div>
         </div>
@@ -106,7 +108,7 @@
             <h2 id="semantics-title">Small forms, strong guarantees.</h2>
             <p>
               Switch between language mechanisms. The right pane describes the
-              behavior the compiler and runtime preserve across both hosts.
+              behavior the compiler and runtime preserve across Emacs and JS hosts.
             </p>
           </div>
           <div class="code-lab">
@@ -116,6 +118,7 @@
                 <button class="segment" type="button" role="tab" aria-selected="true" data-example="recur">recur</button>
                 <button class="segment" type="button" role="tab" aria-selected="false" data-example="data">persistent data</button>
                 <button class="segment" type="button" role="tab" aria-selected="false" data-example="interop">interop</button>
+                <button class="segment" type="button" role="tab" aria-selected="false" data-example="compat">1+5+2 compat</button>
               </div>
             </div>
             <div class="code-grid">
@@ -141,43 +144,44 @@ constant JavaScript stack</code></pre>
       <section class="band" aria-labelledby="core-title">
         <div class="section-shell">
           <div class="section-heading">
-            <h2 id="core-title">A language core built around values.</h2>
+            <h2 id="core-title">100% Emacs Lisp core + 1+5+2 explicit extensions.</h2>
             <p>
-              Immutable data, open abstractions, deterministic tooling, and
-              explicit host access form one coherent system. Frameworks remain
-              consumers, never compiler architecture.
+              Standard Emacs Lisp works unchanged by default, while seven modular
+              extension packs add static contracts, persistent data, unified
+              destructuring, lexical modules, structured async, explicit JS
+              sentinels, and multi-backend native ABI lowering.
             </p>
           </div>
           <div class="feature-grid">
             <article class="feature">
-              <span class="feature-kicker">Persistent data</span>
+              <span class="feature-kicker">Emacs Lisp Core + Contracts</span>
+              <h3>Lisp-2 &amp; static declarations</h3>
+              <p>100% Emacs Lisp default semantics (Lisp-2, nil-only falsiness, integer division, condition-case, pcase) plus opt-in <code>declare</code> type, purity, and pre/post contracts.</p>
+            </article>
+            <article class="feature">
+              <span class="feature-kicker">Persistent data (Pack 2)</span>
               <h3>Share structure, not mutation</h3>
-              <p>Linked Lists, 32-way Vectors, HAMT Maps and Sets, Queues, AVL-sorted collections, Records, metadata, and value hashing.</p>
+              <p>7 persistent collections (List, Vector, HAMT Map/Set, Queue, AVL Sorted Map/Set), <code>cl-defstruct-persistent</code> with JSON Schema round-trip, <code>state-cell</code>, Transducers, and Transients.</p>
             </article>
             <article class="feature">
-              <span class="feature-kicker">Construction</span>
-              <h3>Transient when isolated</h3>
-              <p>Owner-token Vector, Map, and Set builders reduce allocation while the compiler rejects lifecycle escape and reuse.</p>
+              <span class="feature-kicker">Destructuring &amp; Control (Pack 3)</span>
+              <h3>Unified pcase superset</h3>
+              <p><code>defun-case</code> multi-arity dispatch, <code>let-bind</code> / <code>defun-bind</code> / <code>pcase-value</code> destructuring, <code>let-const</code>, 50,000-depth <code>recur</code>, <code>thread-some-&gt;</code>, and <code>fn-*</code> combinators.</p>
             </article>
             <article class="feature">
-              <span class="feature-kicker">Abstraction</span>
-              <h3>Protocols stay open</h3>
-              <p>Collection protocols, transducers, lazy sequences, multimethods, and external type extensions compose without hidden framework rules.</p>
+              <span class="feature-kicker">Modules &amp; Macros (Pack 4)</span>
+              <h3>Lexical privacy &amp; pure macros</h3>
+              <p><code>defmodule</code> with lexical-private bindings, explicit <code>:export</code> / <code>:import</code>, and <code>defvar-once</code> hot-reload state, plus sandboxed <code>defmacro-checked</code>.</p>
             </article>
             <article class="feature">
-              <span class="feature-kicker">Compiler</span>
-              <h3>Self-hosted and reproducible</h3>
-              <p>Reader, expansion, analysis, IR, emission, project planning, formatting, and evaluation converge across seed and self-hosted builds.</p>
+              <span class="feature-kicker">Async &amp; JS Interop (Packs 5–6)</span>
+              <h3>Structured concurrency &amp; sentinels</h3>
+              <p><code>defun-async</code> / <code>await</code>, <code>with-async-scope</code> cancellation, backpressure <code>async-channel</code>, handle revocation, and lossless <code>js-false</code> / <code>js-null</code> / <code>js-undefined</code> sentinels.</p>
             </article>
             <article class="feature">
-              <span class="feature-kicker">Emacs</span>
-              <h3>Editor and execution loop</h3>
-              <p>A major mode, Flymake diagnostics, persistent REPL, project watch, and a resilient worker return JavaScript performance to Emacs workflows.</p>
-            </article>
-            <article class="feature">
-              <span class="feature-kicker">Host boundary</span>
-              <h3>JavaScript remains visible</h3>
-              <p>Standard ESM, packages, promises, native containers, browser capabilities, and host calls are explicit and directly interoperable.</p>
+              <span class="feature-kicker">Multi-Backend ABI (Pack 7)</span>
+              <h3>Emacs · JS · WASM · Native</h3>
+              <p>Explicit <code>:abi (:numeric-f64 / :memory-u32)</code> declarations and linear-memory operators execute with identical results across Emacs, ESM, WASM, and ARM64 native binaries.</p>
             </article>
           </div>
         </div>

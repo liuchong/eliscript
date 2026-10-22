@@ -54,4 +54,7 @@ access, and application framework APIs are unavailable in the macro evaluator.
 Macros may build language forms and application-specific helper syntax, but
 framework syntax does not become compiler privilege. A macro intended for
 worker execution must also respect the portable dependency boundary described
-by the [worker documentation](../tools/worker/README.md).
+by the [worker documentation](../tools/worker/README.md). In the `0.1.0`
+Emacs-compatible extension layer (`eliscript-module`), `defmacro-checked`
+additionally enforces a pure compile-time sandbox that rejects ambient file,
+process, or network side effects during macro expansion.

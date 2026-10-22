@@ -68,16 +68,16 @@ writes:
   `dist/release-report/release-notes-merged.md` — concise summary and
   idempotently merged release body for the main GitHub Release page
   (`gh release create --notes-file` / `gh release edit --notes-file`).
-- `dist/release-report/eliscript-0.0.4-benchmark-report.md` and
-  `dist/release-report/eliscript-0.0.4-benchmark-report.json` — detailed
+- `dist/release-report/eliscript-0.1.0-benchmark-report.md` and
+  `dist/release-report/eliscript-0.1.0-benchmark-report.json` — detailed
   benchmark, artifact-size, and verification report files uploaded as GitHub
-  Release assets alongside `eliscript-0.0.4.tgz`.
+  Release assets alongside `eliscript-0.1.0.tgz`.
 
 When `.github/workflows/release.yml` is dispatched (`gh workflow run release.yml
--f version=0.0.4 -f publish=true`), GitHub Actions automatically verifies the
+-f version=0.1.0 -f publish=true`), GitHub Actions automatically verifies the
 signed tag and release tarball, runs the four-dimension benchmark against the
-full tag history, uploads `eliscript-0.0.4-benchmark-report.md` and
-`eliscript-0.0.4-benchmark-report.json` to the GitHub Release page, updates the
+full tag history, uploads `eliscript-0.1.0-benchmark-report.md` and
+`eliscript-0.1.0-benchmark-report.json` to the GitHub Release page, updates the
 Release main page summary, and publishes (or stages with OIDC provenance) the
 package to npm.
 
@@ -100,7 +100,7 @@ Then install that artifact and use it the way a consumer would:
 ```sh
 npm pack --pack-destination /tmp
 mkdir /tmp/consumer && cd /tmp/consumer && npm init -y
-npm install /tmp/eliscript-0.0.4.tgz
+npm install /tmp/eliscript-0.1.0.tgz
 ./node_modules/.bin/eliscript --help
 ```
 

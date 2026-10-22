@@ -15,6 +15,7 @@ modules, and bootstraps a compiler written in Eliscript itself.
 [Core documentation](docs/README.md) ·
 [Getting started](docs/getting-started.md) ·
 [Language reference](docs/language-reference.md) ·
+[Emacs-compatible syntax (0.1.0)](docs/emacs-compatible-syntax.md) ·
 [Library API](https://liuchong.org/eliscript/pages/api.html) ·
 [Playground](https://liuchong.org/eliscript/pages/playground.html) ·
 [Roadmap](specs/0040-maturity-roadmap.md) ·
@@ -75,12 +76,12 @@ alongside explicit `.mjs`).
 
 | Area | State |
 | --- | --- |
-| Compiler | Emacs Lisp seed, reproducible self-hosted compiler, deterministic formatter, versioned canonical IR, Source Maps that name `.eli` files |
-| Language | Tail calls, macros, modules, protocols, records, `deftype`/`reify`, `case`/`condp`, multi-arity named, anonymous, async, and portable functions |
-| Data | Persistent List, Vector, Map, Set, and Queue with value equality; transients; lazy sequences; transducers |
-| Runtime | Host-free runtime semantics, frozen regular expressions, a long-lived Emacs-to-JavaScript worker |
-| Browser | An in-memory multi-file compile host, a module worker, and a compiler bundled for the browser — the [playground](https://liuchong.org/eliscript/pages/playground.html) compiles and runs Eliscript in the page |
-| Editor | [`eliscript-mode`](editor/README.md) and an evaluation REPL |
+| Compiler | Emacs Lisp seed, reproducible stage0–stage3 self-hosted compiler, deterministic formatter, versioned canonical IR, Source Maps that name `.eli` files, plus zero-glue WASM and ARM64 Native `:abi` backends |
+| Language | 100% Emacs Lisp-compatible core (`eliscript-compat`) + `1+5+2` extension packs (`defun-case`, `let-bind`/`defun-bind`/`pcase-value`, `let-const`, `defmodule`, `defmacro-checked`, `with-async-scope`, `async-channel`), tail-safe `loop`/`recur` (50,000+ depth), protocols, records, `deftype`/`reify`, `case`/`condp`, and portable functions |
+| Data | 7 persistent collection types (List, Vector, HAMT Map/Set, Queue, AVL Sorted Map/Set), `cl-defstruct-persistent` with Schema validation and JSON Schema round-trip, `state-cell`, transients, lazy sequences, and transducers |
+| Runtime | Host-free runtime semantics, `eliscript/runtime/emacs-compat` dual-host compatibility runtime, lossless JS sentinels (`js-false`/`js-null`/`js-undefined`), cross-engine handle revocation, and a long-lived Emacs-to-JavaScript worker |
+| Browser | An in-memory multi-file compile host, a module worker, standalone `dist/browser/loader.js`, and a compiler bundled for the browser — the [playground](https://liuchong.org/eliscript/pages/playground.html) compiles and runs Eliscript in the page |
+| Editor | [`eliscript-mode`](editor/README.md), an evaluation REPL, and the `editor/eliscript-{compat,contract,data,bind,module,async,js,abi}.el` Emacs Lisp libraries |
 | Applications | The [proving-ground site](https://liuchong.org/eliscript/examples/dogfood/_site/) and the packaged Action built from it, plus React, Org, and Vite probes as replaceable application evidence |
 
 Experimental direct backends and the zero-import managed WASM heap are described

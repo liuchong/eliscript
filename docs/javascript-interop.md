@@ -58,4 +58,9 @@ for exact semantics.
 Browser and worker operations require explicit capability packages. Core
 modules do not read ambient browser or worker globals. Applications choose and
 grant concrete authority at their boundary; these adapters cannot define core
-language maturity.
+language maturity. In the `0.1.0` Emacs-compatible interop pack (`eliscript-js`
+and `eliscript/runtime/emacs-compat`), explicit tri-state sentinels (`js-false`,
+`js-null`, `js-undefined`), recursive `eliscript->js` / `js->eliscript`
+conversion with cycle detection, and revocable cross-engine handles
+(`eliscript-make-handle`, `eliscript-revoke-handle!`, `with-eliscript-handle`)
+preserve exact host distinctions across Emacs and JavaScript.

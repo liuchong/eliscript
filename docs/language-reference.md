@@ -238,3 +238,18 @@ compatibility promise. `Accepted` planning documents govern ongoing direction,
 while `Draft` work contributes no implementation or maturity credit. Consult the
 [compatibility baseline](../specs/0046-m7-compatibility-baseline.md) instead of
 inferring stability from this overview.
+
+In `0.1.0`, Eliscript also ships the formal **100% Emacs Lisp-compatible core +
+`1+5+2` explicit extension packs** (`editor/eliscript-compat.el` in Emacs and
+`eliscript/runtime/emacs-compat` in JavaScript), covering `eliscript-contract`
+(`declare` static type/purity/pre/post contracts), `eliscript-data` (7
+persistent collections, `cl-defstruct-persistent` with JSON Schema round-trip,
+`state-cell`, lazy sequences, Transducers, and Transients), `eliscript-bind`
+(`defun-case`, unified `pcase`-superset `let-bind`/`defun-bind`/`pcase-value`,
+`let-const`, 50,000-depth `eliscript-loop`/`recur`, `thread-some->`, and `fn-*`
+combinators), `eliscript-module` (`defmodule` lexical privacy and
+`defmacro-checked` pure macro sandbox), `eliscript-async` (`defun-async`/`await`,
+`with-async-scope`, and backpressure `async-channel`), `eliscript-js`
+(`js-false`/`js-null`/`js-undefined` sentinels and handle revocation), and
+`eliscript-abi` (`:numeric-f64` and `:memory-u32` across Emacs, JS, WASM, and
+ARM64 Native). See `docs/emacs-compatible-syntax.md` for full syntax rules.

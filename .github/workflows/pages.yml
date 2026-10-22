@@ -45,9 +45,12 @@ concurrency:
 
 jobs:
   build:
-    name: Assemble the site artifact
+    name: Assemble and deploy the site artifact
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -73,17 +76,7 @@ jobs:
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b
         with:
           path: dist/pages
-
-  deploy:
-    name: Deploy to GitHub Pages
-    needs: build
-    if: vars.ELISCRIPT_PAGES == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
       - name: Deploy the uploaded artifact
+        if: vars.ELISCRIPT_PAGES == 'true'
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e

@@ -34,9 +34,9 @@
     <main id="main">
       <header class="doc-hero">
         <div class="doc-hero-inner">
-          <p class="eyebrow">Stable language core</p>
-          <h1>Lisp-shaped, value-oriented, ECMAScript-bound.</h1>
-          <p class="doc-lede">Eliscript keeps the programmable shape of Emacs Lisp while adding persistent data, explicit modules, open protocols, and semantics designed for modern JavaScript runtimes.</p>
+          <p class="eyebrow">Stable language core · 0.1.0 Emacs-compatible syntax</p>
+          <h1>100% Emacs Lisp core, 1+5+2 extensions, four-target reach.</h1>
+          <p class="doc-lede">Eliscript 0.1.0 combines a 100% Emacs Lisp-compatible default core with seven explicit extension packs (contracts, persistent data, pcase-superset destructuring, lexical modules, structured async, lossless JS interop, and multi-backend WASM/Native ABI).</p>
         </div>
       </header>
 
@@ -50,101 +50,106 @@
           <a href="#collections">Collections</a>
           <a href="#sequences">Sequences</a>
           <a href="#recursion">Recursion</a>
-          <a href="#differences">Differences</a>
+          <a href="#differences">Architecture</a>
         </nav>
 
         <article class="doc-content">
           <section id="values">
             <h2>Value model</h2>
             <table class="fact-table">
-              <thead><tr><th>Eliscript</th><th>ECMAScript</th></tr></thead>
+              <thead><tr><th>Eliscript</th><th>ECMAScript / Emacs Compat</th></tr></thead>
               <tbody>
-                <tr><td><code>nil</code></td><td><code>null</code></td></tr>
-                <tr><td><code>undefined</code></td><td><code>undefined</code></td></tr>
+                <tr><td><code>nil</code></td><td><code>null</code> (only falsy value in <code>eliscript-compat</code> core)</td></tr>
+                <tr><td><code>js-false / js-null / js-undefined</code></td><td>explicit high-fidelity JS tri-state sentinels</td></tr>
                 <tr><td><code>t</code> / <code>false</code></td><td><code>true</code> / <code>false</code></td></tr>
-                <tr><td>numbers and strings</td><td>ECMAScript numbers and strings</td></tr>
+                <tr><td>numbers and strings</td><td>Emacs integer division <code>(/ 7 2) =&gt; 3</code> in compat core; IEEE-754 in ESM</td></tr>
                 <tr><td>evaluated keywords</td><td>interned immutable Keyword values</td></tr>
-                <tr><td>vector expressions</td><td>persistent immutable Vectors</td></tr>
-                <tr><td>list expressions and quoted lists</td><td>persistent linked Lists</td></tr>
-                <tr><td>map and set literals</td><td>persistent HAMT Maps and Sets</td></tr>
-                <tr><td><code>#queue [...]</code></td><td>persistent FIFO Queue</td></tr>
-                <tr><td><code>(js-array ...)</code> / <code>(js-object ...)</code></td><td>explicit native containers</td></tr>
+                <tr><td>vector expressions &amp; <code>persistent-vector</code></td><td>32-way persistent immutable Vectors (plus mutable <code>'[]</code> in compat core)</td></tr>
+                <tr><td>list expressions &amp; <code>persistent-list</code></td><td>persistent linked Lists and Emacs cons cells</td></tr>
+                <tr><td>map and set literals &amp; <code>persistent-map</code> / <code>persistent-set</code></td><td>persistent HAMT Maps and Sets (plus AVL <code>persistent-sorted-map</code> / <code>persistent-sorted-set</code>)</td></tr>
+                <tr><td><code>#queue [...]</code> / <code>persistent-queue</code></td><td>persistent FIFO Queue</td></tr>
+                <tr><td><code>cl-defstruct-persistent</code></td><td>immutable structural records with Schema validation &amp; JSON Schema round-trip</td></tr>
+                <tr><td><code>(js-array ...)</code> / <code>(js-object ...)</code></td><td>explicit native JavaScript containers</td></tr>
               </tbody>
             </table>
-            <div class="callout"><p>Truthiness is Lisp-like: only <code>false</code>, <code>null</code>, and <code>undefined</code> are false. Zero and empty strings remain true.</p></div>
+            <div class="callout"><p>In the 0.1.0 Emacs-compatible core (<code>eliscript-compat</code>), only <code>nil</code> is false—<code>0</code>, <code>""</code>, <code>'[]</code>, and <code>js-false</code> are truthy, matching GNU Emacs Lisp 100%. In standalone <code>.eli</code> ESM modules, <code>false</code>, <code>nil</code>, and <code>undefined</code> are false while <code>0</code> and <code>""</code> remain true.</p></div>
           </section>
 
           <section id="forms">
-            <h2>Implemented forms</h2>
+            <h2>Implemented forms &amp; 1+5+2 extensions</h2>
             <div class="language-tabs">
               <div class="segments" role="tablist" aria-label="Language form categories">
                 <button class="segment" type="button" role="tab" aria-selected="true" data-language-tab="bindings">Bindings</button>
                 <button class="segment" type="button" role="tab" aria-selected="false" data-language-tab="control">Control</button>
                 <button class="segment" type="button" role="tab" aria-selected="false" data-language-tab="data">Data</button>
-                <button class="segment" type="button" role="tab" aria-selected="false" data-language-tab="interop">Interop</button>
+                <button class="segment" type="button" role="tab" aria-selected="false" data-language-tab="interop">Interop &amp; ABI</button>
               </div>
 
               <div class="language-panel" data-language-panel="bindings">
                 <div class="form-list">
-                  <article class="form-item"><code>defvar / defconst</code><p>Top-level mutable and immutable bindings.</p></article>
-                  <article class="form-item"><code>defun / defn</code><p>Named functions with single or argument-count-dispatched multi-arity bodies.</p></article>
+                  <article class="form-item"><code>defvar / defconst / defvar-once</code><p>Top-level dynamic/mutable, immutable, and hot-reload-preserving bindings.</p></article>
+                  <article class="form-item"><code>defun / defn / defun-case</code><p>Named functions and explicit multi-arity argument-count dispatch (<code>defun-case</code> / <code>lambda-case</code>).</p></article>
+                  <article class="form-item"><code>defun-bind / let-bind / let*-bind</code><p>Unified <code>pcase</code>-superset structural destructuring (<code>:keys</code>, <code>:strs</code>, <code>:syms</code>, <code>:or</code>, <code>:as</code>, <code>&amp;rest</code>).</p></article>
+                  <article class="form-item"><code>let-const / let*-const</code><p>Immutable local bindings that reject <code>setq</code> / <code>setf</code> mutation at expansion time.</p></article>
+                  <article class="form-item"><code>declare (eliscript-*)</code><p>Zero-overhead <code>eliscript-type</code>, <code>eliscript-pure</code>, <code>eliscript-pre</code>, and <code>eliscript-post</code> contracts.</p></article>
                   <article class="form-item"><code>defportable</code><p>Worker entries with a statically checked immutable dependency closure.</p></article>
                   <article class="form-item"><code>defmulti / defmethod</code><p>Named multimethods and source-ordered method definitions over the portable multimethod library.</p></article>
-                  <article class="form-item"><code>defprotocol / extend-*</code><p>Open protocols with exact-type, host-category, and default implementations over the canonical protocol library.</p></article>
-                  <article class="form-item"><code>lambda / fn</code><p>First-class anonymous functions with fixed and variadic multi-arity clauses.</p></article>
-                  <article class="form-item"><code>letfn</code><p>Lexically scoped local functions with direct, mutual, multi-arity, portable, and async recursion.</p></article>
-                  <article class="form-item"><code>let / let*</code><p>Parallel and sequential lexical bindings.</p></article>
+                  <article class="form-item"><code>defprotocol / eliscript-defprotocol</code><p>Open protocols with exact-type, host-category, and default implementations.</p></article>
+                  <article class="form-item"><code>lambda / fn / letfn</code><p>First-class anonymous and mutually recursive local functions.</p></article>
+                  <article class="form-item"><code>let / let*</code><p>Parallel and sequential lexical bindings (plus dynamic <code>defvar</code> binding in compat core).</p></article>
                 </div>
               </div>
               <div class="language-panel" data-language-panel="control" hidden>
                 <div class="form-list">
-                  <article class="form-item"><code>if / when / unless</code><p>Value-producing conditional forms.</p></article>
-                  <article class="form-item"><code>if-let / when-let / if-some / when-some</code><p>Single-evaluation conditional bindings with explicit truthy or nil-only matching.</p></article>
-                  <article class="form-item"><code>cond</code><p>Ordered condition branches with a final value.</p></article>
+                  <article class="form-item"><code>if / when / unless / cond</code><p>Value-producing conditional forms.</p></article>
+                  <article class="form-item"><code>pcase-value / cond-predicate</code><p>Unified structural value pattern matching with <code>(guard ...)</code> and predicate dispatch with <code>:&gt;&gt;</code>.</p></article>
+                  <article class="form-item"><code>if-let / when-let / if-some / when-some</code><p>Single-evaluation conditional bindings with truthy or non-nil matching.</p></article>
                   <article class="form-item"><code>case / condp</code><p>Single-evaluation constant or predicate dispatch with lazy selected results.</p></article>
-                  <article class="form-item"><code>-&gt; / -&gt;&gt; / as-&gt;</code><p>First-position, last-position, and named expression threading.</p></article>
-                  <article class="form-item"><code>cond-&gt; / cond-&gt;&gt;</code><p>Ordered test and step pairs over one accumulated value.</p></article>
-                  <article class="form-item"><code>some-&gt; / some-&gt;&gt;</code><p>Nil-short-circuiting pipelines that preserve false and undefined values.</p></article>
-                  <article class="form-item"><code>while</code><p>Loop with Lisp truthiness and explicit mutation.</p></article>
-                  <article class="form-item"><code>loop / recur</code><p>Stack-safe function and binding iteration with checked tail positions and simultaneous rebinding.</p></article>
-                  <article class="form-item"><code>and / or / not</code><p>Short-circuit operators that return operand values.</p></article>
+                  <article class="form-item"><code>-&gt; / -&gt;&gt; / as-&gt; / cond-&gt; / cond-&gt;&gt;</code><p>First-position, last-position, named, and conditional expression threading.</p></article>
+                  <article class="form-item"><code>thread-some-&gt; / thread-some-&gt;&gt;</code><p>Nil-short-circuiting pipelines that preserve <code>js-false</code> and falsy host values.</p></article>
+                  <article class="form-item"><code>eliscript-loop / loop / recur</code><p>50,000+ depth stack-safe iteration with checked tail positions and simultaneous rebinding.</p></article>
+                  <article class="form-item"><code>defun-async / await / with-async-scope</code><p>Async functions, structured task scopes with automatic sibling cancellation, timeouts, and bounded <code>async-channel</code>.</p></article>
+                  <article class="form-item"><code>fn-comp / fn-partial / fn-juxt / fn-memoize</code><p>Functional composition, partial application, juxtaposition, complement, and structural memoization.</p></article>
+                  <article class="form-item"><code>condition-case / unwind-protect / catch / throw</code><p>Full Emacs Lisp condition hierarchy (<code>define-error</code>) and non-local exit semantics.</p></article>
                 </div>
               </div>
               <div class="language-panel" data-language-panel="data" hidden>
                 <div class="form-list">
-                  <article class="form-item"><code>list / vector / hash-map / hash-set</code><p>Canonical immutable persistent collection constructors.</p></article>
-                  <article class="form-item"><code>[...] / {...} / #{...} / #queue [...]</code><p>Persistent Vector, Map, Set, and Queue literals.</p></article>
-                  <article class="form-item"><code>car / cdr / cons / nth</code><p>Protocol-backed List and indexed collection operations.</p></article>
-                  <article class="form-item"><code>nil? / undefined? / nullish?</code><p>Strict null and undefined checks, plus an explicit combined nullish check. <code>null</code> remains a compatibility alias.</p></article>
-                  <article class="form-item"><code>js-array / js-object</code><p>Explicit native JavaScript container construction.</p></article>
-                  <article class="form-item"><code>get / put</code><p>Explicit host property access, fallback, and assignment.</p></article>
-                  <article class="form-item"><code>object-keys / object-has? / object-assoc</code><p>Portable own-key discovery, own-property checks, and shallow immutable association.</p></article>
+                  <article class="form-item"><code>7 Persistent Collections</code><p><code>persistent-list</code>, <code>persistent-vector</code>, <code>persistent-map</code>, <code>persistent-set</code>, <code>persistent-queue</code>, <code>persistent-sorted-map</code>, <code>persistent-sorted-set</code>.</p></article>
+                  <article class="form-item"><code>cl-defstruct-persistent</code><p>Immutable records with field <code>:type</code> Schema validation, copy-on-write <code>-with</code> updaters, and JSON Schema round-trip.</p></article>
+                  <article class="form-item"><code>state-cell / state-swap!</code><p>Observable atomic state containers with validator predicates and cycle-guarded watch notifications.</p></article>
+                  <article class="form-item"><code>lazy-seq / xf-* / transduce</code><p>Memoized lazy sequences and allocation-free composable Transducers (<code>xf-map</code>, <code>xf-filter</code>, <code>xf-take</code>).</p></article>
+                  <article class="form-item"><code>transient / conj! / assoc! / persistent!</code><p>Owner-isolated batch mutation builders with one-shot freeze enforcement.</p></article>
+                  <article class="form-item"><code>[...] / {...} / #{...} / #queue [...]</code><p>Persistent Vector, Map, Set, and Queue literals plus Emacs <code>seq.el</code> / <code>map.el</code> integration.</p></article>
+                  <article class="form-item"><code>value-equal? / value-hash</code><p>Recursive structural equality and deterministic hashing across all persistent collections.</p></article>
                 </div>
               </div>
               <div class="language-panel" data-language-panel="interop" hidden>
                 <div class="form-list">
-                  <article class="form-item"><code>js-call</code><p>Method invocation that preserves its receiver.</p></article>
-                  <article class="form-item"><code>new</code><p>Construct native JavaScript values.</p></article>
-                  <article class="form-item"><code>funcall / apply</code><p>Call first-class functions directly or from arrays.</p></article>
-                  <article class="form-item"><code>js*</code><p>A narrow, explicit raw JavaScript escape hatch.</p></article>
+                  <article class="form-item"><code>js-obj / js-arr / js-get / js-set!</code><p>Explicit JavaScript object and array construction and property mutation.</p></article>
+                  <article class="form-item"><code>js-false / js-null / js-undefined</code><p>Distinct tri-state JS sentinels preserved losslessly by <code>eliscript-&gt;js</code> and <code>js-&gt;eliscript</code>.</p></article>
+                  <article class="form-item"><code>js-call / js-new / js*</code><p>Receiver-preserving method invocation, constructor calls, and explicit raw JS escape hatch.</p></article>
+                  <article class="form-item"><code>with-eliscript-handle</code><p>Cross-engine opaque object handles with deterministic lifecycle revocation (<code>eliscript-revoke-handle!</code>).</p></article>
+                  <article class="form-item"><code>:abi (:numeric-f64 / :memory-u32)</code><p>Zero-glue typed numeric and linear-memory ABI lowered across Emacs, JS, WASM, and ARM64 Native.</p></article>
+                  <article class="form-item"><code>mem-load-* / mem-store-*!</code><p>Bounds-checked <code>u32</code> and <code>f64</code> linear-memory load/store operators.</p></article>
                 </div>
               </div>
             </div>
           </section>
 
           <section id="macros">
-            <h2>Compile-time macros</h2>
-            <pre><code>(defmacro once (form)
+            <h2>Compile-time &amp; checked macros</h2>
+            <pre><code>(defmacro-checked once (form)
   `(let ((value$ ,form)) value$))
 
 (defun load-once (value)
   (once (+ value 1)))</code></pre>
-            <p><code>defmacro</code> definitions are processed in source order and removed before emission. Backquote, comma, <code>&amp;rest</code>, and <code>&amp;body</code> are supported. <code>gensym</code> and trailing-<code>$</code> template symbols create deterministic private bindings, while ordinary template symbols deliberately resolve at the call site. Every expanded form is checked by the lexical analyzer.</p>
+            <p><code>defmacro</code> and <code>cl-defmacro</code> definitions are processed in source order and removed before emission. Backquote, comma, <code>,@</code>, <code>&amp;optional</code>, <code>&amp;rest</code>, and <code>&amp;body</code> are supported. <code>defmacro-checked</code> enforces a pure compile-time sandbox that statically rejects side-effecting IO, process, network, or file mutations during macro expansion.</p>
             <div class="callout callout-coral"><p>Both compiler generations interpret the same deterministic macro subset. Unlisted host functions, editor state, files, environment variables, and processes are unavailable unless a future explicit compiler capability exposes them.</p></div>
           </section>
 
           <section id="modules">
-            <h2>ECMAScript modules</h2>
+            <h2>ECMAScript modules &amp; lexical <code>defmodule</code></h2>
             <pre><code>(import "eliscript/runtime/core/order" sort)
 (import "react" :default React useState)
 (import "library" :as Library)
@@ -152,7 +157,7 @@
 
 (export Component helper)
 (export-default Component)</code></pre>
-            <p>One Eliscript source file emits one ESM file. The project builder recursively resolves root-contained relative source imports, preserves their directory tree, rewrites them to <code>.mjs</code>, emits Source Maps, and records deterministic graph identity. Package subpath imports under <code>eliscript/*</code> support both extensionless specifiers (such as <code>"eliscript/runtime/core/order"</code> or <code>"eliscript/platform/browser"</code>) and explicit <code>.mjs</code> specifiers across Node, Bun, and the browser compiler. The repository itself tracks zero <code>.mjs</code> source files in Git; all JavaScript modules are synthesized from <code>.eli</code> sources during bootstrap.</p>
+            <p>One Eliscript source file emits one ESM file. Alongside file-level <code>(module ...)</code>, the <code>eliscript-module</code> extension provides <code>(defmodule name (:export ...) (:import ...) ...)</code> with lexical-private internal bindings (inaccessible externally while exposed to exported functions) and <code>defvar-once</code> hot-reload state preservation. Package subpath imports under <code>eliscript/*</code> support both extensionless specifiers (such as <code>"eliscript/runtime/core/order"</code> or <code>"eliscript/runtime/emacs-compat"</code>) and explicit <code>.mjs</code> specifiers across Node, Bun, and the browser compiler. The repository itself tracks zero <code>.mjs</code> source files in Git; all JavaScript modules are synthesized from <code>.eli</code> sources during bootstrap.</p>
           </section>
 
           <section id="collections">
@@ -210,15 +215,14 @@
           </section>
 
           <section id="differences">
-            <h2>Intentional differences</h2>
+            <h2>100% Emacs Lisp core &amp; 1+5+2 architecture</h2>
             <ul>
-              <li>Lexical scope is mandatory; dynamic scope is not inherited.</li>
-              <li>Numbers follow ECMAScript behavior rather than Emacs integer semantics.</li>
-              <li>Lists, Vectors, Maps, Sets, Queues, and Records are distinct persistent value categories.</li>
-              <li><code>false</code> is distinct from <code>nil</code>.</li>
-              <li>Modules, objects, promises, and browser APIs are explicit language concerns.</li>
+              <li><strong>100% Emacs Lisp default core (<code>eliscript-compat</code>)</strong>: Preserves Lisp-2 dual function/value namespaces, <code>nil</code>-only falsiness, lexical and dynamic <code>defvar</code> scope, mutable native containers alongside 7 persistent collection types, integer division <code>(/ 7 2) =&gt; 3</code>, <code>condition-case</code> / <code>define-error</code>, and full <code>defmacro</code> / <code>cl-defmacro</code> / <code>pcase</code> compatibility.</li>
+              <li><strong>7 explicit extension packs (<code>1+5+2</code>)</strong>: Activated by definition form without polluting standard Emacs Lisp — <code>eliscript-contract</code>, <code>eliscript-data</code>, <code>eliscript-bind</code>, <code>eliscript-module</code>, <code>eliscript-async</code>, <code>eliscript-js</code>, and <code>eliscript-abi</code>.</li>
+              <li><strong>Four-target ABI execution</strong>: Functions annotated with <code>(declare (eliscript-abi :numeric-f64 ...))</code> or <code>(declare (eliscript-abi :memory-u32 ...))</code> execute with identical semantics across Emacs Lisp, JavaScript ESM, WASM, and ARM64 Native binaries.</li>
+              <li><strong>Standalone <code>.eli</code> ESM modules</strong>: Keep lexical Lisp-1 resolution, immutable persistent literals <code>[...]</code> / <code>{...}</code> / <code>#{...}</code>, and explicit ECMAScript module boundaries.</li>
             </ul>
-            <div class="callout callout-coral"><p>Compatibility is a starting point, not a ceiling. Later versions may add more expressive forms when Emacs Lisp syntax or semantics would hold the language back.</p></div>
+            <div class="callout callout-coral"><p>See <a href="https://github.com/liuchong/eliscript/blob/master/docs/emacs-compatible-syntax.md">Emacs-Compatible Syntax Specification (0.1.0)</a> for the complete 1+5+2 specification and 50-case Emacs/JS Differential Oracle.</p></div>
           </section>
         </article>
       </div>

@@ -120,7 +120,7 @@ console.log(module.double(21)); // 42</code></pre>
           </section>
 
           <section id="persistent">
-            <h2>Use persistent values</h2>
+            <h2>Use persistent values &amp; 1+5+2 Emacs-compatible extensions</h2>
             <pre><code>(module collections
   (import "eliscript/runtime/core/collection" assoc get)
 
@@ -130,7 +130,8 @@ console.log(module.double(21)); // 42</code></pre>
   (print (get original :status :missing))
   (print (get updated :status)))</code></pre>
             <p>Vector, Map, Set, List, Queue, Record, and sorted collection values are immutable. Updates return a new root while sharing unchanged internal structure. Generic collection operations dispatch through open protocols with reference-identity equality short-circuiting and compact O(1)-step Zipper navigation, and Transient builders provide an isolated high-throughput construction path for Vector, Map, Set, sorting, and data aggregation.</p>
-            <p><a class="button" href="language.html#collections">Inspect collection semantics</a></p>
+            <p>In Emacs 29+ or JavaScript, load the 0.1.0 <code>1+5+2</code> unified entry (<code>(require 'eliscript-compat)</code> in Emacs or <code>import "eliscript/runtime/emacs-compat"</code> in JS) to combine 100% Emacs Lisp default semantics with <code>defun-case</code>, <code>let-bind</code> / <code>defun-bind</code>, <code>cl-defstruct-persistent</code>, <code>defmodule</code>, <code>with-async-scope</code>, <code>js-false</code> / <code>js-null</code> / <code>js-undefined</code> sentinels, and <code>:abi (:numeric-f64 / :memory-u32)</code> multi-target compilation.</p>
+            <p><a class="button" href="language.html#collections">Inspect collection &amp; 1+5+2 semantics</a></p>
           </section>
 
           <section id="applications">

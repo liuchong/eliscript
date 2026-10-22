@@ -64,7 +64,7 @@
   (defun set-hidden (element hidden)
     (set-field element "hidden" (if hidden t false)))
 
-  ;; The three examples the landing page's buttons name.
+  ;; The examples the landing page's buttons name.
   (defun example-table ()
     (js-object
       "recur" (js-object
@@ -75,7 +75,10 @@
                "output" "before remains unchanged\nafter shares the unchanged HAMT path\nkeys use Eliscript value equality\nhashes are cached on immutable roots")
       "interop" (js-object
                   "source" "(js-call (js-array 1 2 3)\n  :map\n  (lambda (value)\n    (* value 2)))"
-                  "output" "native container requested explicitly\nreceiver-preserving method call\nordinary JavaScript callback boundary\nstandard ESM host behavior")))
+                  "output" "native container requested explicitly\nreceiver-preserving method call\nordinary JavaScript callback boundary\nstandard ESM host behavior")
+      "compat" (js-object
+                 "source" "(require 'eliscript-compat)\n\n(defun-case scale\n  ((x) (scale x 2))\n  ((x factor)\n   (let-bind (((:keys a b :or ((b 10))) x))\n     (* (+ a b) factor))))"
+                 "output" "100% Emacs Lisp compatible core\nmulti-arity dispatch + pcase destructuring\nruns in plain Emacs and JS runtime\nzero-conflict 1+5+2 extension packs")))
 
   ;; ---------------------------------------------------------- example switcher
 
