@@ -19,22 +19,25 @@
   (defconst record-grid-file "tests/record-grid-selfhosted.test.mjs")
   (defconst artifact-archive-file "tests/compiler-artifact-archive-selfhosted.test.mjs")
   (defconst persistent-literals-file "tests/wasm-managed-persistent-literals.test.mjs")
+  (defconst direct-wasm-file "tests/direct-wasm-backend.test.mjs")
   (defun sha (source) (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
   (defasync cases (file) (cancelledCompilerHostCases file (await (readFile (resolve root file) "utf8"))))
 
-  (test "the measured complete artifact archive and persistent literal files run serially under the outer guard while neighboring files retain their original supervisor"
+  (test "the measured complete artifact archive, persistent literal and direct WASM files run serially under the outer guard while neighboring files retain their original supervisor"
     (async ()
       (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-artifact-archive-scope-"))))
              (file (str "./" artifact-archive-file))
              (literals (str "./" persistent-literals-file))
+             (direct-wasm (str "./" direct-wasm-file))
              (before "./tests/plain-before.test.mjs")
              (after (js-array "./tests/compiler-artifact-archive-copy-selfhosted.test.mjs"
                "./tests/compiler-source-archive-streaming.test.mjs"
                "./tests/wasm-managed-persistent-literals-copy.test.mjs"))
-             (inventory (js-call (js-array before file literals) :concat after))
+             (inventory (js-call (js-array before file literals direct-wasm) :concat after))
              (trace (js-array)) (active false)
              (failure (js-object :file file :exitCode 7))
              (literal-failure (js-object :file literals :exitCode 9))
+             (direct-wasm-failure (js-object :file direct-wasm :exitCode 11))
              (environment (Object/assign (js-object) (get globalThis.process :env)
                (js-object :ORIGINAL_ARCHIVE_SCOPE_MARKER "complete😀")))
              (executors (js-object
@@ -46,11 +49,11 @@
                  (js-call trace :push (js-array "ordinary-end" files))
                  (setq active false)
                  (js-object :results (js-call files :map (lambda (name) (js-object :file name :exitCode 0))) :exitCode 0))
-               :mixed (async () (js-call assert :fail "artifact archive and persistent literals have no cancelled compiler hosts"))
+               :mixed (async () (js-call assert :fail "artifact archive, persistent literals and direct WASM have no cancelled compiler hosts"))
                :sequence (async (plan env)
                  (js-call assert :strictEqual active false)
                  (setq active t)
-                 (js-call assert :strictEqual (js-call (js-array file literals) :includes (get plan :file)) t)
+                 (js-call assert :strictEqual (js-call (js-array file literals direct-wasm) :includes (get plan :file)) t)
                  (js-call assert :strictEqual (get plan :pattern) undefined)
                  (js-call assert :deepStrictEqual (get plan :cancelled) (js-array))
                  (js-call assert :strictEqual (get env :ORIGINAL_ARCHIVE_SCOPE_MARKER) "complete😀")
@@ -58,7 +61,10 @@
                  (js-call trace :push (js-array "sequence-start" (get plan :file)))
                  (await (Promise/resolve undefined))
                  (js-call trace :push (js-array "sequence-end" (get plan :file)))
-                 (setq active false) (if (= (get plan :file) file) failure literal-failure)))))
+                 (setq active false)
+                 (cond ((= (get plan :file) file) failure)
+                       ((= (get plan :file) literals) literal-failure)
+                       (t direct-wasm-failure))))))
         (try
           (let* ((result (await (runFinalFunctionalScope inventory (js-object :sourceRoot root
                    :outputDirectory directory :environment environment :executors executors))))
@@ -67,21 +73,23 @@
               (js-array "ordinary-start" (js-array before)) (js-array "ordinary-end" (js-array before))
               (js-array "sequence-start" file) (js-array "sequence-end" file)
               (js-array "sequence-start" literals) (js-array "sequence-end" literals)
+              (js-array "sequence-start" direct-wasm) (js-array "sequence-end" direct-wasm)
               (js-array "ordinary-start" after) (js-array "ordinary-end" after)))
             (js-call assert :deepStrictEqual (get result :inventory) inventory)
             (js-call assert :strictEqual (aref (get result :results) 1) failure)
             (js-call assert :strictEqual (aref (get result :results) 2) literal-failure)
-            (js-call assert :strictEqual (get result :exitCode) 9)
+            (js-call assert :strictEqual (aref (get result :results) 3) direct-wasm-failure)
+            (js-call assert :strictEqual (get result :exitCode) 11)
             (js-call assert :deepStrictEqual (get result :cancelled) (js-array))
             (js-call assert :deepStrictEqual (get result :unstarted) (js-array))
             (js-call assert :deepStrictEqual (get saved :results) (get result :results)))
           (let ((count (js-length trace))
-                (cancelled (await (runFinalFunctionalScope (js-array file literals) (js-object :sourceRoot root
+                (cancelled (await (runFinalFunctionalScope (js-array file literals direct-wasm) (js-object :sourceRoot root
                   :outputDirectory directory :environment environment :executors executors :cancellation (js-object :code 143))))))
             (js-call assert :strictEqual (js-length trace) count)
             (js-call assert :strictEqual (get cancelled :exitCode) 143)
             (js-call assert :deepStrictEqual (get cancelled :results) (js-array))
-            (js-call assert :deepStrictEqual (get cancelled :unstarted) (js-array file literals)))
+            (js-call assert :deepStrictEqual (get cancelled :unstarted) (js-array file literals direct-wasm)))
           (finally (await (rm directory (js-object :recursive t :force t))))))))
 
   (test "complete package sessions retain every active case and exact cancellation pattern under the existing outer guard"

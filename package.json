@@ -1,6 +1,6 @@
 {
   "name": "eliscript",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "An Emacs Lisp-flavored language that compiles to modern JavaScript.",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -30,6 +30,7 @@
     "./browser/compiler-session": "./tools/backends/compiler-browser.mjs",
     "./browser": "./browser/host.mjs",
     "./browser/host.mjs": "./browser/host.mjs",
+    "./browser/loader": "./dist/browser/loader.js",
     "./browser/worker.mjs": "./browser/worker.mjs",
     "./browser/compiler": "./dist/browser/compiler.js",
     "./runtime/literals": "./runtime/literals.mjs",
@@ -48,7 +49,7 @@
   },
   "scripts": {
     "prepack": "make prepare-release-package",
-    "build:browser": "bun build dist/bootstrap/compiler.mjs --target=browser --format=esm --outfile dist/browser/compiler.js",
+    "build:browser": "bun build dist/bootstrap/compiler.mjs --target=browser --format=esm --minify --outfile dist/browser/compiler.js && ./bin/eliscript --output dist/browser/loader.mjs docs/pages/loader.eli && bun build dist/browser/loader.mjs --target=browser --format=iife --minify --outfile dist/browser/loader.js && cp browser/worker.mjs dist/browser/worker.mjs && sed 's|../dist/browser/compiler.js|./compiler.js|g' browser/host.mjs > dist/browser/host.mjs",
     "test": "make test",
     "test:core": "make test-core",
     "test:applications": "make test-applications",
@@ -157,15 +158,20 @@
     "browser/",
     "compiler/",
     "dist/bootstrap/",
-    "dist/bootstrap-release/",
     "dist/backends/",
     "dist/host/",
+    "dist/runtime/",
+    "dist/literal-sources/",
+    "dist/stage3-release.json",
+    "dist/compiler-artifact.json",
+    "dist/runtime.eli",
+    "dist/package.json",
     "dist/browser/",
     "editor/",
     "platform/",
     "runtime/",
     "stdlib/",
-    "tools/backends/",
+    "tools/backends/*.mjs",
     "tools/backends/build.mjs",
     "tools/backends/managed-host.mjs",
     "tools/backends/managed-source-view.mjs",
@@ -235,10 +241,10 @@
     "tools/runtime/unicode-case-runtime.el"
   ],
   "devDependencies": {
-    "@vitejs/plugin-react": "6.1.0",
-    "playwright-core": "1.63.0",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "vite": "8.2.2"
+    "@vitejs/plugin-react": "6.1.2",
+    "playwright-core": "1.64.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "vite": "8.3.5"
   }
 }

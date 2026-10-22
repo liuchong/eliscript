@@ -8,10 +8,12 @@ import {
   dependencyOrder,
   dirname,
   moduleGraphUrls,
+  mountEliscriptScripts,
   normalizePath,
   outputPathFor,
   relativePath,
   resolvePath,
+  runSource,
 } from "../browser/host.mjs";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -159,4 +161,62 @@ test("the host stays importable without a document", async () => {
   for (const match of worker.matchAll(/from\s+"([^"]+)"/gu)) {
     expect(match[1].startsWith(".")).toBe(true);
   }
+});
+
+test("runSource compiles and executes an in-memory Eliscript module via a Blob URL", async () => {
+  const result = await runSource(
+    "(module live.demo (defun double (x) (* x 2)) (export double))",
+    "live-demo.eli",
+  );
+  expect(typeof result.javascript).toBe("string");
+  expect(typeof result.sourceMap).toBe("string");
+  expect(result.module.double(21)).toBe(42);
+});
+
+test("mountEliscriptScripts compiles and executes inline and external text/eliscript scripts in order", async () => {
+  const inlineScript = {
+    src: "",
+    textContent: "(module inline.demo (defun greet () \"inline-ok\") (export greet))",
+    dataset: {},
+    getAttribute(name) {
+      return name === "data-filename" ? "inline-demo.eli" : null;
+    },
+  };
+  const externalScript = {
+    src: "https://example.test/scripts/remote.eli",
+    textContent: "",
+    dataset: {},
+    getAttribute() {
+      return null;
+    },
+  };
+  const root = {
+    querySelectorAll(selector) {
+      expect(selector).toBe('script[type="text/eliscript"]');
+      return [inlineScript, externalScript];
+    },
+  };
+  const mounted = await mountEliscriptScripts(root, {
+    async fetch(url) {
+      expect(url).toBe("https://example.test/scripts/remote.eli");
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return "(module remote.demo (defun compute () (+ 40 2)) (export compute))";
+        },
+      };
+    },
+  });
+  expect(mounted.length).toBe(2);
+  expect(mounted[0].filename).toBe("inline-demo.eli");
+  expect(mounted[0].module.greet()).toBe("inline-ok");
+  expect(inlineScript.dataset.eliscriptMounted).toBe("true");
+  expect(mounted[1].filename).toBe("remote.eli");
+  expect(mounted[1].module.compute()).toBe(42);
+  expect(externalScript.dataset.eliscriptMounted).toBe("true");
+
+  // Re-running mountEliscriptScripts skips already mounted script tags.
+  const secondPass = await mountEliscriptScripts(root);
+  expect(secondPass).toEqual([]);
 });

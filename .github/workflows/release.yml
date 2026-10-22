@@ -38,6 +38,7 @@ jobs:
       - name: Check the version names a signed release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
         run: |
           set -eu
@@ -63,6 +64,7 @@ jobs:
       - name: Download the released package
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
         run: |
           set -eu
@@ -92,7 +94,7 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -eu
-          npm stage publish "eliscript-$VERSION.tgz" --access public --provenance
+          npm stage publish "eliscript-$VERSION.tgz" --access public --provenance --loglevel verbose
           echo "::notice::staged $VERSION; review it with 'npm stage list' and approve it with 'npm stage approve <stage-id>' and two-factor authentication"
 
       - name: Publish the release
@@ -101,4 +103,4 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -eu
-          npm publish "eliscript-$VERSION.tgz" --access public --provenance
+          npm publish "eliscript-$VERSION.tgz" --access public --provenance --loglevel verbose

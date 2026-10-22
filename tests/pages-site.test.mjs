@@ -40,6 +40,12 @@ test("Pages site has complete local navigation and assets", async () => {
     expect(source).toContain("<meta name=\"viewport\"");
     expect(source).toContain("specifications.html");
     expect(source).toContain("data-year");
+    expect(source).toContain("data-version");
+    expect(source).toContain("data-version-github");
+    expect(source).toContain("data-version-npm");
+    expect(source).toContain("https://github.com/liuchong/eliscript/releases/tag/v0.0.2");
+    expect(source).toContain("https://www.npmjs.com/package/eliscript/v/0.0.2");
+    expect(source).toContain("v0.0.2");
 
     for (const reference of [
       ...attributes(source, "href"),

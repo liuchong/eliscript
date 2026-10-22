@@ -26,10 +26,15 @@
   ;; beside the loader is the fallback for a page that does not.
   (defconst declared-source
     (js* "((script) => (script && script.dataset && script.dataset.eliscript) || '')"))
+  (defconst has-inline-tags
+    (js* "(() => Boolean(globalThis.document && globalThis.document.querySelector('script[type=\"text/eliscript\"]')))"))
+  (defconst current-declared
+    (funcall declared-source (js* "document.currentScript")))
   (defconst source-url
-    (let ((declared (funcall declared-source (js* "document.currentScript"))))
-      (if (= declared "") (funcall relative-to (js* "document.baseURI") "site.eli")
-        (funcall relative-to (js* "document.baseURI") declared))))
+    (if (= current-declared "")
+        (if (funcall has-inline-tags) ""
+          (funcall relative-to (js* "document.baseURI") "site.eli"))
+      (funcall relative-to (js* "document.baseURI") current-declared)))
   (defconst start-worker (js* "(url) => new Worker(url, { type: 'module' })"))
   (defconst blob-url-of
     (js* "(code) => URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))"))
@@ -37,6 +42,8 @@
   (defconst fetch-text (js* "((url) => fetch(url).then((response) => { if (!response.ok) throw new Error(String(response.status)); return response.text(); }))"))
   (defconst compile-once
     (js* "((worker, request) => new Promise((resolve, reject) => { const id = 'docs-site-' + String(Math.floor(Math.random() * 1e9)); const onMessage = (event) => { const data = event.data; if (!data || data.id !== id) return; worker.removeEventListener('message', onMessage); if (data.ok) resolve(data); else reject(new Error(data.message || 'compilation failed')); }; worker.addEventListener('message', onMessage); worker.postMessage({ id, request }); }))"))
+  (defconst inline-scripts
+    (js* "(() => Array.from((globalThis.document && globalThis.document.querySelectorAll('script[type=\"text/eliscript\"]')) || []))"))
 
   (defun field (object name) (get object name))
 
@@ -45,27 +52,41 @@
   (defun report (message)
     (js-call (js* "globalThis.console") :error message))
 
+  (defasync run-compiled-source (worker source filename output-name)
+    (let* ((reply (await (funcall compile-once
+                                  worker
+                                  (js-object
+                                    "mode" "single"
+                                    "source" source
+                                    "filename" filename
+                                    "runtimeBase" package-base))))
+           (module (field (field reply "modules") output-name))
+           (url (funcall blob-url-of (field module "javascript"))))
+      (try
+        (await (funcall load url))
+        (catch error
+          (report (str "site script failed at run time: "
+                       (field error "message"))))
+        (finally (funcall release-blob-url url)))))
+
   ;; A page whose script cannot be compiled stays readable: the failure is
   ;; reported where the playground reports its own, and nothing else changes.
   (defasync start ()
     (try
-      (let* ((source (await (funcall fetch-text source-url)))
-             (worker (funcall start-worker worker-url))
-             (reply (await (funcall compile-once
-                                    worker
-                                    (js-object
-                                      "mode" "single"
-                                      "source" source
-                                      "filename" "site.eli"
-                                      "runtimeBase" package-base))))
-             (module (field (field reply "modules") "site.mjs"))
-             (url (funcall blob-url-of (field module "javascript"))))
-        (try
-          (await (funcall load url))
-          (catch error
-            (report (str "site script failed at run time: "
-                         (field error "message"))))
-          (finally (funcall release-blob-url url))))
+      (let ((worker (funcall start-worker worker-url)))
+        (when (not (= source-url ""))
+          (let ((source (await (funcall fetch-text source-url))))
+            (await (run-compiled-source worker source "site.eli" "site.mjs"))))
+        (let ((scripts (funcall inline-scripts))
+              (index 0))
+          (while (< index (js-length scripts))
+            (let* ((tag (aref scripts index))
+                   (src (field tag "src"))
+                   (source (if (and (= (value-type src) "string") (> (js-length src) 0))
+                               (await (funcall fetch-text src))
+                             (field tag "textContent"))))
+              (await (run-compiled-source worker source "site.eli" "site.mjs")))
+            (setq index (1+ index)))))
       (catch error
         (report (str "site script did not compile: " (field error "message"))))))
 

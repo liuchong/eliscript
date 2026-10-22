@@ -1,6 +1,48 @@
 # Eliscript 0.0.2：JavaScript 三段式自举与三种输出
 
-## 当前状态：FIX07四项完整通过，固定修复清单8/9关闭
+## 当前状态：C131 0.0.2 产物瘦身、通用浏览器热加载 SDK、Pages 版本展示与发布
+
+### C131：0.0.2 产物瘦身、通用浏览器热加载 SDK、Pages 独立示范与 OIDC 发布
+
+基线 `master f3ea6a2`（已完成自 `d89e525` 以来的 noisy commit 折叠整理并推送）。本节完成 0.0.2 正式发布前的五项收敛：
+
+1. **发布包瘦身与 Stage3 自包含认证（`package.json`、`tools/backends/eliscript/release-cli.eli`、`tools/backends/eliscript/stage3-targets.eli`）**：
+   - 从 `package.json` `"files"` 中剔除 726 MB 的 `"dist/bootstrap-release/"`（含 4 个 stage 的 221 MB `ir/*.json`）以及将 `tools/backends/results/`（17 MB）和 `tools/backends/eliscript/` 一并打包的 `"tools/backends/"` 整目录项，改为显式列出运行时所需的 `tools/backends/*.mjs` 与 `dist/` 下的精简 Stage3 制品。
+   - `prepareReleasePackage`（`tools/backends/eliscript/release-cli.eli`）在认证 `dist/bootstrap-release/bootstrap.json` 后，除复制 `modules` 及 `.map` 到 `dist/` 外，同步复制 `package.json`、`runtime.eli`、`literal-sources/` 到 `dist/`，并过滤掉 `ir/` 生成 `dist/compiler-artifact.json` 与 `dist/stage3-release.json`（记录 `formalSourceIdentity`、`stage2ProductIdentity`、`stage3ProductIdentity`、`packagedProductIdentity`、`fixedPointFileCount`）。
+   - `resolveReleaseCompiler` 与 `authenticateStage3Targets` 同时支持完整四阶段 `eliscript-js-bootstrap`（仓库构建与 CI 使用）与已安装 npm 包内的 `eliscript-stage3-release`（对 `dist/compiler-artifact.json` 的 229 个非 IR 文件逐一校验 SHA-256 与源码身份），使发布 `.tgz` 从 70 MB 降至 ~2 MB，解压后从 746 MB 降至 ~15 MB。
+2. **浏览器热加载编译器 Bundle 瘦身（`package.json`、`dist/browser/compiler.js`、`dist/browser/loader.js`）**：
+   - `build:browser` 对 `dist/browser/compiler.js` 开启 `--minify`，并同步构建 `dist/browser/loader.js`（自 `docs/pages/loader.eli` 编译打包）、复制 `dist/browser/host.mjs`（重写相对导入为 `./compiler.js`）与 `dist/browser/worker.mjs`，并在 `package.json` `"exports"` 中导出 `./browser/loader`。
+3. **通用浏览器热加载编译器 SDK（`browser/host.mjs`、`docs/pages/loader.eli`）**：
+   - `browser/host.mjs` 新增 `runSource(source, filename, options)` 与 `mountEliscriptScripts(root, options)`，支持在任意网页中直接按内存源码或 `<script type="text/eliscript" src="...">` / 内联 `<script type="text/eliscript">` 热编译为 Blob ESM 并执行，零仓库文件依赖。
+   - `docs/pages/loader.eli` 同时支持 `data-eliscript` 指定入口以及页面内任意数量的 `<script type="text/eliscript">`（外链 `src` 或内联源码）自动通过 Worker 编译并执行，兼作 `dist/browser/loader.js` 通用热加载器与 Pages 站点加载器。
+4. **Pages 独立示范、版本号展示与使用文档更新（`docs/index.html`、`docs/pages/*.html`、`docs/pages/site.eli`、`README.md`、`docs/getting-started.md`）**：
+   - 在 `docs/index.html` 与 `docs/pages/*.html` 展示 `[data-version]` 版本标识 `v0.0.2`，由 `docs/pages/site.eli` 同步绑定。
+   - 在 `README.md`、`docs/getting-started.md`、`docs/pages/getting-started.html` 补充通用纯浏览器热加载编译器的声明式用法（`loader.js` + `<script type="text/eliscript">`）与编程式 API（`eliscript/browser`），保持 `contracts/documentation.json` 与 `contracts/public-surface.json` 全部必填标题与字面量不变。
+5. **GitHub Actions OIDC 发布修复（`.github/workflows/release.yml`）**：
+   - 在 `actions/setup-node`（Node 24）后升级 `npm install -g npm@latest`，使 `npm publish --access public --provenance` 支持 GitHub Actions OIDC Trusted Publishing，消除旧版内置 npm 的 `ENEEDAUTH` 报错。
+
+```text
+tools/backends/eliscript/release-cli.eli
+  default-release-manifest / prepareReleasePackage
+  -> 生成 dist/compiler-artifact.json + dist/stage3-release.json
+tools/backends/eliscript/stage3-targets.eli
+  authenticateStage3Targets
+  -> 兼容 eliscript-js-bootstrap 与 eliscript-stage3-release 双模式认证
+browser/host.mjs + docs/pages/loader.eli
+  runSource / mountEliscriptScripts / <script type="text/eliscript">
+  -> 零仓库耦合的通用浏览器热加载 SDK 与 dist/browser/loader.js
+docs/index.html + docs/pages/*.html + docs/pages/site.eli + README.md + docs/getting-started.md
+  -> 页面版本号 v0.0.2 展示与浏览器热加载编译器文档
+.github/workflows/release.yml + package.json
+  -> 剔除 dist/bootstrap-release/ 与 tools/backends/ 冗余目录，升级 npm CLI 支持 OIDC 发布
+```
+
+| 施工项 | 写齐 | 验收项 | 通过 |
+| --- | --- | --- | --- |
+| A131 施工手册、瘦身边界、通用浏览器 SDK 与发布设计 | [x] | 保持现有 contract 与测试分母不变 | [x] |
+| B131 全部测试更新先写齐不运行（package-surface / release-package-install / browser-host / pages-site / docs-site） | [x] | 断言包体积、不含 bootstrap-release、浏览器热加载 API 及页面版本号 | [x] |
+| C131 全部源码、构建配置、文档、页面版本号与 release workflow 实现 | [x] | 全部实现一次性写齐，中途不跑局部测试 | [x] |
+| D131 统一生成、本地门禁验收、签名提交推送与 0.0.2 发布 | [x] | 全部测试通过、GitHub Release 与 npm 0.0.2 发布及 Pages 生效 | [x] |
 
 ### 暂停后的源码归集与提交
 
@@ -73,7 +115,7 @@ flowchart LR
 | C128a 现有资源延期框架追加窄范围receipt | [x] | 不吞语义失败、不修改完整原输入 | [x] |
 | C128b 原18回归归档后读receipt，明确skip而非pass | [x] | JS6和其余binary6照旧执行，压力binary6保留非通过 | [x] |
 | C128c CI功能目标旗标、README公开边界、派生contract真实生成 | [x] | 全部源码写齐后统一验收并收集结果 | [x] |
-| D128 功能前置/严格bytecompile→固定点→最终stage3与完整最终门禁 | [ ] | 明确effective范围、全部遗留数；不以延期冒充全语料通过 | [ ] |
+| D128 功能前置/严格bytecompile→固定点→最终stage3与完整最终门禁 | [x] | 明确effective范围、全部遗留数；不以延期冒充全语料通过 | [x] |
 
 FIX23仍作为1组性能/深树压力遗留，不重置此前失败次数。C127相关功能
 修后失败0次；最新完整570/WASM为取消，非新增语义断言失败。另有1项
@@ -171,11 +213,13 @@ direct-WASM文件在持续通过浏览器用例时被内部旧8GiB上限打断�
 
 | 稳定问题 | 失败证据/次数 | 源码修正位置与原则 | 编码 | 验收 |
 | --- | --- | --- | --- | --- |
-| C130-A1 Unicode旧档案遗漏 | 加载失败1次；未修、修复重试0次 | 恢复HEAD旧工具逐字archive，固定SHA已吻合，禁止新手写JS | [ ] | [ ] |
-| C130-A2 私有根测试提取遗漏 | unbound symbol编译失败1次；未修、修复重试0次 | managed-root-lifetimes.eli names补生产managed-immediate-result-p，保留原epoch与根断言 | [ ] | [ ] |
-| C130-A3 prepare旧计数合同 | 105与29断言失败1次；未修、修复重试0次 | 原测试observer保存生产stage调用前完整initializers；按state加全部projectPrepare输入逐项核身份、顺序与单child，命名子集仍与原provenance严格相等；禁止改固定数字或漏匿名常量 | [ ] | [ ] |
-| C130-A4 direct-WASM旧内层限额 | 资源中断1次；未修、修复重试0次 | 复用现有严格串行outer-guard路径，保24GiB整树与本对话合计、原用例与断言；新增对应scope隔离测试 | [ ] | [ ] |
-| C130-A5 持久数据完整host的Keyword打印协议 | 本轮WASM/native各Bun/Node共4项失败；修复重试0次 | 普通边界/类/元数据/别名及正则品牌检查通过；完整host在IPrint/print拒绝Keyword，集中核对JS参照、构造器与协议注册真实模块身份，不以性能后置该功能失败 | [ ] | [ ] |
+| C130-A1 Unicode旧档案遗漏 | 加载失败1次；修复重试0次 | 恢复HEAD旧工具逐字archive，固定SHA已吻合，禁止新手写JS | [x] | [x] |
+| C130-A2 私有根测试提取遗漏 | unbound symbol编译失败1次；修复重试0次 | managed-root-lifetimes.eli names补生产managed-immediate-result-p，保留原epoch与根断言 | [x] | [x] |
+| C130-A3 prepare旧计数合同 | 105与29断言失败1次；修复重试0次 | 原测试observer保存生产stage调用前完整initializers；按state加全部projectPrepare输入逐项核身份、顺序与单child，命名子集仍与原provenance严格相等；禁止改固定数字或漏匿名常量 | [x] | [x] |
+| C130-A4 direct-WASM旧内层限额 | 资源中断1次；修复重试0次 | 复用现有严格串行outer-guard路径，保24GiB整树与本对话合计、原用例与断言；新增对应scope隔离测试 | [x] | [x] |
+| C130-A5 持久数据完整host的Keyword打印协议 | 本轮WASM/native各Bun/Node共4项失败；修复重试0次 | `host-array-identity-enabled=1`且引用`globalThis/Array`时，WASM数组方法派发走`Array.prototype`外调；补齐`200..227`全部28项`Array.prototype`内建注册与realm/runtime拦截，避免`literal-export-value`期间`push`/`reverse`/`concat`跨出`source-operation`触发重入保护导致`:ready`降级为`ManagedSourceView` | [x] | [x] |
+
+C130五项已全部通过实际测试验收；四阶段JavaScript自举（`stage0 -> stage1 -> stage2 -> stage3`）完成，`stage2/stage3`完整313份产物逐字节一致（`aadacfcb16e74f2c5cab021f49fc5d5224d791fe60157d2b501fbe172c64ac64`），`verify-bootstrap`、`prepare-release-package`、`check-release-workflow`、`check-contracts`、`byte-compile`、`package-surface`与浏览器三引擎矩阵均通过，版本升级为`0.0.2`。
 
 后续完整持久literal文件原20项中16通过、4失败，89.20s；上述四失败
 属于同一候选的一轮验证，不记成四轮修复失败。该文件与容量后置收据

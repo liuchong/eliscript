@@ -47,6 +47,7 @@
           <a href="#compile">Compile</a>
           <a href="#run">Run</a>
           <a href="#project">Project</a>
+          <a href="#browser-hot-reload">Browser compiler</a>
           <a href="#persistent">Persistent data</a>
           <a href="#applications">Applications</a>
           <a href="#bootstrap">Bootstrap</a>
@@ -97,6 +98,25 @@ bun run dist/project/examples/stdlib-cli/main.mjs</code></pre>
             <pre><code>./bin/eliscript-build --json --root . --out-dir dist/project \
   examples/stdlib-cli/main.eli</code></pre>
             <p>Timings are observational and never enter the deterministic manifest or cache identity. Without <code>--json</code>, successful builds continue to print only the generated entry path.</p>
+          </section>
+
+          <section id="browser-hot-reload">
+            <h2>Compile live in the browser</h2>
+            <p>Any web page can compile and hot-reload Eliscript directly in the browser without a server or repository checkout. Load the standalone browser loader and declare either a <code>data-eliscript</code> entry or inline/external <code>&lt;script type="text/eliscript"&gt;</code> tags:</p>
+            <pre><code>&lt;script defer src="https://unpkg.com/eliscript@0.0.2/dist/browser/loader.js"&gt;&lt;/script&gt;
+
+&lt;script type="text/eliscript"&gt;
+(module web.hello
+  (print "Compiled live in the browser!"))
+&lt;/script&gt;</code></pre>
+            <p>For programmatic in-memory compilation and multi-module execution, import <code>eliscript/browser</code> directly:</p>
+            <pre><code>import { compileSource, compileProject, moduleGraphUrls, runSource, mountEliscriptScripts } from "eliscript/browser";
+
+const { module } = await runSource(
+  "(module demo (defun double (x) (* x 2)) (export double))",
+  "demo.eli"
+);
+console.log(module.double(21)); // 42</code></pre>
           </section>
 
           <section id="persistent">
@@ -171,6 +191,6 @@ bun run build:org-site</code></pre>
       </div>
     </main>
 
-    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Getting started</p><div class="footer-links"><a href="language.html">Language</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://github.com/liuchong/eliscript">GitHub</a><span>© <span data-year>2026</span></span></div></div></footer>
+    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Getting started</p><div class="footer-links"><a href="language.html">Language</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.0.2" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.0.2" data-version data-version-github>v0.0.2</a><span>© <span data-year>2026</span></span></div></div></footer>
   </body>
 </html>

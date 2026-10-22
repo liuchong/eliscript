@@ -1080,11 +1080,16 @@
     "         (called (funcall apply (lambda (a b) (+ a b)) nil (js-array 5 6)))"
     "         (box (funcall (get native :construct) makeBoundaryBox (js-array 12)))"
     "         (slice (funcall apply (get native :slice) array (js-array 1)))"
+    "         (pushed (funcall apply (get native :push) (js-call array :slice 0) (js-array 9)))"
+    "         (popped (funcall apply (get native :pop) (js-call array :slice 0) (js-array)))"
+    "         (concatenated (funcall apply (get native :concat) array (js-array (js-array 8))))"
+    "         (reversed (funcall apply (get native :reverse) (js-call array :slice 0) (js-array)))"
     "         (entries (funcall apply (get native :entries) array (js-array)))"
     "         (indices (funcall apply (get native :keys) array (js-array)))"
     "         (values (funcall apply (get native :values) array (js-array))))"
     "   (JSON/stringify (js-array identity (funcall (get native :ownKeys) nullish) (funcall (get native :ownKeys) omitted) array-test not-array missing-array"
     "    read trace written parent-set parent keys (get descriptor :value) defined present empty deleted extensible prevented closed called (get box :value) slice"
+    "    pushed popped concatenated reversed"
     "    (funcall apply next entries (js-array)) (funcall apply next indices (js-array)) (funcall apply next values (js-array)))))))"
     "(defun intrinsicBoundaryThrow (get first)"
     " (let ((object (js-object))) (Object/defineProperty object \"x\" (js-object :get (lambda () (throw first))))"
@@ -1140,7 +1145,9 @@
   (defun intrinsic-boundary-hosts ()
     (let* ((iterator (js-call (js-array) :values))
            (native (js-object :object globalThis.Object :isArray globalThis.Array.isArray
-        :slice globalThis.Array.prototype.slice :entries globalThis.Array.prototype.entries
+        :push globalThis.Array.prototype.push :pop globalThis.Array.prototype.pop
+        :slice globalThis.Array.prototype.slice :concat globalThis.Array.prototype.concat
+        :reverse globalThis.Array.prototype.reverse :entries globalThis.Array.prototype.entries
         :keys globalThis.Array.prototype.keys :values globalThis.Array.prototype.values
         :next (get (Object/getPrototypeOf iterator) :next))))
       (js-call (js-array "get" "set" "getPrototypeOf" "setPrototypeOf" "ownKeys" "getOwnPropertyDescriptor"
@@ -1341,7 +1348,8 @@
                   (let* ((raw (get observed :raw)) (owner (get observed :owner))
                          (registered (js-call (get observed :registrations) :filter (lambda (row) (/= (aref row 1) 0))))
                          (operations (new globalThis.Set (js-call registered :map (lambda (row) (aref row 1))))))
-                    (js-call (js-array 76 5 181 182 183 184 185 186 187 188 189 190 191 192 193 202 223 224 225 328
+                    (js-call (js-array 76 5 181 182 183 184 185 186 187 188 189 190 191 192 193
+                      200 201 202 203 204 205 206 207 208 209 210 211 212 213 214 215 216 217 218 219 220 221 222 223 224 225 226 227 328
                       401 402 403 404 405 406 407)
                       :forEach (lambda (operation) (js-call assert :ok (js-call operations :has operation) (str operation))))
                     (let ((function (aref (aref registered 0) 0)))

@@ -17,6 +17,7 @@
   (defconst ingress-file "tests/compiler-ir-session-ingress.test.mjs")
   (defconst artifact-archive-file "tests/compiler-artifact-archive-selfhosted.test.mjs")
   (defconst persistent-literals-file "tests/wasm-managed-persistent-literals.test.mjs")
+  (defconst direct-wasm-file "tests/direct-wasm-backend.test.mjs")
   (defconst ingress-sha "510213d89769be93ce574f11de72061e2f7ff5605cfb792d79388aa419807183")
   (defconst package-sha "cabaee3897e99a1c920dc4d3ba16459351a6d4864b327a03839c0c8d7d7d2b4c")
   (defconst tools-sha "4668c61b9956b5501e496fc6246300667cf3fb85d5ebdd414d86269c5a56acd0")
@@ -91,7 +92,7 @@
       (js-object :file file :kind (cond ((or (= name ingress-file) (= name package-file)) "sequence") (mixed "mixed")
           ((or (= name sequence-file) (= name record-grid-file) (= name response-events-file)
                (= name literal-runtime-file) (= name wire-runtime-file) (= name artifact-archive-file)
-               (= name persistent-literals-file)) "sequence") (t "ordinary"))
+               (= name persistent-literals-file) (= name direct-wasm-file)) "sequence") (t "ordinary"))
         :cancelled cancelled :pattern (functionalScopePattern cancelled))))
 
   ;; Complete artifact-archive, package, sequence, record-grid and measured large-runtime files retain every original case and

@@ -155,6 +155,21 @@
 
   ;; ---------------------------------------------------------------- footer
 
+  (defconst site-semver "0.0.2")
+  (defconst site-version (str "v" site-semver))
+
+  (defun bind-version ()
+    (each (nodes "[data-version]")
+          (lambda (element) (set-text element site-version)))
+    (each (nodes "[data-version-github]")
+          (lambda (element)
+            (js-call element :setAttribute "href"
+                     (str "https://github.com/liuchong/eliscript/releases/tag/" site-version))))
+    (each (nodes "[data-version-npm]")
+          (lambda (element)
+            (js-call element :setAttribute "href"
+                     (str "https://www.npmjs.com/package/eliscript/v/" site-semver)))))
+
   (defun bind-year ()
     (let ((year (js-call (new (js* "Date")) :getFullYear)))
       (each (nodes "[data-year]")
@@ -166,6 +181,7 @@
     (bind-examples)
     (bind-language-tabs)
     (bind-api-search)
+    (bind-version)
     (bind-year))
 
   (if (= (get (js* "globalThis.document") "readyState") "loading")

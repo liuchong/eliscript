@@ -38,8 +38,16 @@
         (when (authentic-native-method method "isArray")
           (js-call methods :push (js-object :name "array-isArray" :method method
             :runtime "value-builtin-primitive" :operation 5))))
-      (js-call (js-array (js-array "slice" 202) (js-array "values" 225)
-                        (js-array "keys" 224) (js-array "entries" 223)) :forEach
+      (js-call (js-array (js-array "push" 200) (js-array "pop" 201) (js-array "slice" 202)
+                        (js-array "map" 203) (js-array "filter" 204) (js-array "forEach" 205)
+                        (js-array "some" 206) (js-array "every" 207) (js-array "find" 208)
+                        (js-array "findIndex" 209) (js-array "findLast" 210) (js-array "findLastIndex" 211)
+                        (js-array "reduce" 212) (js-array "reduceRight" 213)
+                        (js-array "sort" 214) (js-array "toSorted" 215) (js-array "splice" 216)
+                        (js-array "join" 217) (js-array "toString" 218) (js-array "concat" 219)
+                        (js-array "includes" 220) (js-array "indexOf" 221) (js-array "lastIndexOf" 222)
+                        (js-array "entries" 223) (js-array "keys" 224) (js-array "values" 225)
+                        (js-array "at" 226) (js-array "reverse" 227)) :forEach
         (lambda (specification)
           (let* ((name (aref specification 0))
                  (entry (Object/getOwnPropertyDescriptor ArrayPrototype name))

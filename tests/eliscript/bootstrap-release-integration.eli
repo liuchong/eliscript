@@ -130,5 +130,7 @@
   (test "release package declares generated final compiler assets and its prepack preparation"
     (async ()
       (let ((manifest (JSON/parse (await (readFile (resolve root "package.json") "utf8")))))
-        (js-call assert :ok (js-call (get manifest :files) :includes "dist/bootstrap-release/"))
+        (js-call assert :ok (js-call (get manifest :files) :includes "dist/stage3-release.json"))
+        (js-call assert :ok (js-call (get manifest :files) :includes "dist/compiler-artifact.json"))
+        (js-call assert :ok (not (js-call (get manifest :files) :includes "dist/bootstrap-release/")))
         (js-call assert :match (get (get manifest :scripts) :prepack) (pattern "prepare-release-package"))))))

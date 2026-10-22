@@ -182,5 +182,10 @@ test("the footer year is stamped from the clock", async () => {
   await withPage("index.html", async (page) => {
     const year = await page.evaluate(() => new Date().getFullYear());
     expect(await page.locator("[data-year]").first().innerText()).toContain(String(year));
+    expect(await page.locator("[data-version]").first().textContent()).toBe("v0.0.2");
+    expect(await page.locator("[data-version-github]").first().getAttribute("href"))
+      .toBe("https://github.com/liuchong/eliscript/releases/tag/v0.0.2");
+    expect(await page.locator("[data-version-npm]").first().getAttribute("href"))
+      .toBe("https://www.npmjs.com/package/eliscript/v/0.0.2");
   });
 });

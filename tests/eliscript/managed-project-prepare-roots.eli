@@ -106,7 +106,9 @@
            (provenance (js-call (get (get linked :program) :body) :filter (lambda (node)
              (and (= (get node :kind) "variable-declaration") (get node :projectPrepare false)))))
            (lowered (js-call observer :lower_managed_project (get sources :modules) "main.mjs" runtime-ir configuration))
-           (project (js-call observer :take_project)) (descriptor (get lowered :descriptor))
+           (project (js-call observer :take_project))
+           (prepare-initializers (js-call observer :take_prepare_initializers))
+           (descriptor (get lowered :descriptor))
            (bytes (globalThis.Uint8Array.from
              (js-call (get backend :wasm) :append_metadata_section
                (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed)
@@ -118,7 +120,7 @@
         (setq path (resolve directory (str name (if (= native-target "arm64-macos") ".dylib" ".so"))))
         (await (writeFile path (globalThis.Uint8Array.from
           (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target)))))
-      (js-object :sources sources :saved saved :provenance provenance :lowered lowered
+      (js-object :sources sources :saved saved :provenance provenance :prepareInitializers prepare-initializers :lowered lowered
         :project project :descriptor descriptor :bytes bytes :nativePath path)))
 
   (beforeAll (async ()
@@ -134,10 +136,15 @@
            (renamed (js-call source :replace signature replacement))
            (observed-source (str (js-call renamed :slice 0 (js-call renamed :lastIndexOf ")"))
              "\n(defvar observed-project nil)\n"
+             "(defvar observed-initializers nil)\n"
              "(defun managed-project-stage-functions (initializers globals functions runtime modules entry)\n"
+             " (setq observed-initializers (js-call initializers :filter (lambda (node)\n"
+             "   (let* ((binding (get node :globalEntry nil)) (source (if binding (get binding :source) node)))\n"
+             "     (and source (get source :projectPrepare nil))))))\n"
              " (setq observed-project (observed-stage-functions initializers globals functions runtime modules entry)))\n"
              "(defun take-project () (let ((value observed-project)) (setq observed-project nil) value))\n"
-             "(export take-project))\n"))
+             "(defun take-prepare-initializers () (let ((value observed-initializers)) (setq observed-initializers nil) value))\n"
+             "(export take-project take-prepare-initializers))\n"))
            (path (resolve (get backend :directory) "managed-prepare-observer.mjs")))
       (js-call assert :strictEqual (js-length (js-call source :split signature)) 2)
       (await (writeFile path (js-call (get backend :compiler) :compile_string observed-source "managed-prepare-observer.eli")))
@@ -148,7 +155,7 @@
              (_namespace (js-call assert :strictEqual (get namespace globalThis.Symbol.toStringTag) "Module"))
              (modules (await (loadManagedHostModules (js-object :hostModules
                (js-array (js-object :id "observer" :specifier (get (pathToFileURL path) :href)
-                 :referrer "prepare-roots.mjs" :allowedExports (js-array "lower_managed_project" "take_project") :namespace t)))
+                 :referrer "prepare-roots.mjs" :allowedExports (js-array "lower_managed_project" "take_project" "take_prepare_initializers") :namespace t)))
                (js-object :hostModules (new globalThis.Map (js-array (js-array "observer" namespace))))))))
         (js-call assert :strictEqual (js-call modules :get "observer") namespace)
         (setq observer (js-call modules :get "observer"))))
@@ -191,10 +198,29 @@
     (lambda ()
       (js-call (js-array successful abrupt) :forEach (lambda (artifact)
         (let* ((project (get artifact :project)) (body (get project :prepareBody))
-               (parts (get body :initializerParts)) (seen (new globalThis.Set)))
+               (parts (get body :initializerParts)) (seen (new globalThis.Set))
+               (prepare-initializers (get artifact :prepareInitializers))
+               (named-prepare-initializers (js-call prepare-initializers :filter (lambda (node)
+                 (let* ((binding (get node :globalEntry nil)) (source (if binding (get binding :source) node)))
+                   (and source (= (get source :kind) "variable-declaration")))))))
           (js-call assert :ok (Array/isArray parts))
-          (js-call assert :strictEqual (js-length parts) (1+ (js-length (get artifact :provenance))))
+          (js-call assert :ok (> (js-length prepare-initializers) (js-length (get artifact :provenance))))
+          (js-call assert :strictEqual (js-length named-prepare-initializers) (js-length (get artifact :provenance)))
+          (js-call assert :strictEqual (js-length parts) (1+ (js-length prepare-initializers)))
           (js-call assert :strictEqual (js-length (get (get body :source) :children)) 0)
+          (js-call assert :strictEqual (get (aref (get (get (aref parts 0) :source) :children) 0) :globalEntry) (get project :stateEntry))
+          (let ((index 0))
+            (while (< index (js-length named-prepare-initializers))
+              (let* ((node (aref named-prepare-initializers index))
+                     (binding (get node :globalEntry nil))
+                     (source (if binding (get binding :source) node)))
+                (js-call assert :strictEqual (get source :value) (get (aref (get artifact :provenance) index) :value)))
+              (setq index (1+ index))))
+          (let ((index 0))
+            (while (< index (js-length prepare-initializers))
+              (js-call assert :strictEqual (aref (get (get (aref parts (1+ index)) :source) :children) 0)
+                (aref prepare-initializers index))
+              (setq index (1+ index))))
           (js-call parts :forEach (lambda (part)
             (let ((children (get (get part :source) :children)))
               (js-call assert :strictEqual (js-length children) 1)

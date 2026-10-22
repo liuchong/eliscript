@@ -49,6 +49,24 @@ evaluation, `./bin/eliscript-watch` for rebuilds, and `./bin/eliscript-org` for
 Org sources. Each has a documented page in the
 [documentation](docs/getting-started.md).
 
+### Pure Browser Live Hot-Reload Compiler
+
+Any website can compile and hot-reload `.eli` source directly in the browser
+without a build server or repository files. Include `dist/browser/loader.js`
+and use either `data-eliscript` or `<script type="text/eliscript">` tags:
+
+```html
+<script defer src="https://unpkg.com/eliscript@0.0.2/dist/browser/loader.js"></script>
+<script type="text/eliscript">
+(module app.live
+  (print "Hello from in-browser Eliscript!"))
+</script>
+```
+
+Or import the programmatic browser SDK (`eliscript/browser`) to compile single
+modules (`compileSource`, `runSource`), multi-file projects (`compileProject`,
+`moduleGraphUrls`), or DOM script tags (`mountEliscriptScripts`) in memory.
+
 ## What Works Today
 
 | Area | State |

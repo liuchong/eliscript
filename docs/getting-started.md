@@ -248,6 +248,40 @@ Inside Emacs, `M-x eliscript-mode-watch-project` shares one watcher per project
 and refreshes matching Flymake buffers after validated changes. Use
 `M-x eliscript-mode-stop-watch` when the project no longer needs observation.
 
+### Pure Browser Hot-Reload Compiler
+
+Any static page or external website can compile and execute Eliscript live in
+the browser without a backend server or checkout files. Load the standalone
+`dist/browser/loader.js` script and write `<script type="text/eliscript">`
+(inline or with `src="..."`), or point `data-eliscript` at an entry `.eli` file:
+
+```html
+<script defer src="https://unpkg.com/eliscript@0.0.2/dist/browser/loader.js"></script>
+<script type="text/eliscript">
+(module browser.greeting
+  (print "Compiled live in the browser"))
+</script>
+```
+
+For programmatic compilation and hot-reload inside browser applications or Web
+Workers, import `eliscript/browser`:
+
+```js
+import {
+  compileSource,
+  compileProject,
+  moduleGraphUrls,
+  runSource,
+  mountEliscriptScripts,
+} from "eliscript/browser";
+
+const { module } = await runSource(
+  "(module math.demo (defun square (n) (* n n)) (export square))",
+  "demo.eli",
+);
+console.log(module.square(9));
+```
+
 ## Troubleshooting
 
 | Symptom | Check and recovery |

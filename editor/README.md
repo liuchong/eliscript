@@ -9,7 +9,7 @@ mode for `.eli` source. Add this directory to `load-path` and require the mode:
 ## Installation
 
 The mode and its evaluation library are ordinary Emacs packages. Both carry
-`Version: 0.0.1`, `Package-Requires: ((emacs "29.1"))`, and the standard
+`Version: 0.0.2`, `Package-Requires: ((emacs "29.1"))`, and the standard
 `Author`, `Keywords`, and `URL` fields, so `package-buffer-info` reads them and
 an archive or a source checkout can install them.
 

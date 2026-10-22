@@ -351,6 +351,95 @@ export function moduleGraphUrls(modules, entry) {
   return { entryUrl, urls, release };
 }
 
+/**
+ * Compiles one Eliscript module in memory and executes it immediately via a
+ * temporary Blob URL.
+ *
+ * @param {string} source Eliscript source text
+ * @param {string} [filename="module.eli"] virtual filename for diagnostics/maps
+ * @param {object} [options={}] compilation options (e.g., resolveExternal)
+ * @returns {Promise<{ module: object, javascript: string, sourceMap: string }>}
+ */
+export async function runSource(
+  source,
+  filename = `module${SOURCE_EXTENSION}`,
+  options = {},
+) {
+  const compiled = compileSource(source, filename, options);
+  const url = URL.createObjectURL(
+    new Blob([compiled.javascript], { type: "text/javascript" }),
+  );
+  try {
+    const module = await import(url);
+    return {
+      module,
+      javascript: compiled.javascript,
+      sourceMap: compiled.sourceMap,
+    };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function scriptFilename(script, index) {
+  const explicit = script?.getAttribute?.("data-filename") || script?.dataset?.filename;
+  if (typeof explicit === "string" && explicit.trim().length > 0) {
+    const name = explicit.trim();
+    return name.endsWith(SOURCE_EXTENSION) ? name : `${name}${SOURCE_EXTENSION}`;
+  }
+  if (typeof script?.src === "string" && script.src.length > 0) {
+    try {
+      const url = new URL(script.src, globalThis.location?.href ?? "http://localhost/");
+      const tail = url.pathname.split("/").filter(Boolean).pop();
+      if (tail && tail.endsWith(SOURCE_EXTENSION)) return tail;
+    } catch {}
+  }
+  return `inline-${index + 1}${SOURCE_EXTENSION}`;
+}
+
+/**
+ * Scans a DOM root for `<script type="text/eliscript">` elements (both inline
+ * and external `src="..."`) and compiles + executes each one in document order.
+ *
+ * @param {ParentNode} [root=globalThis.document]
+ * @param {object} [options={}]
+ * @returns {Promise<Array<{ script: Element, filename: string, module: object, javascript: string, sourceMap: string }>>}
+ */
+export async function mountEliscriptScripts(
+  root = globalThis.document,
+  options = {},
+) {
+  if (!root || typeof root.querySelectorAll !== "function") return [];
+  const fetchImpl = options.fetch ?? globalThis.fetch;
+  const scripts = Array.from(root.querySelectorAll('script[type="text/eliscript"]'));
+  const mounted = [];
+  for (let index = 0; index < scripts.length; index += 1) {
+    const script = scripts[index];
+    if (script.dataset?.eliscriptMounted === "true") continue;
+    if (script.dataset) script.dataset.eliscriptMounted = "true";
+    const filename = scriptFilename(script, index);
+    let source = script.textContent ?? "";
+    if (typeof script.src === "string" && script.src.length > 0) {
+      const response = await fetchImpl(script.src);
+      if (!response.ok) {
+        throw failure(
+          "ELI-BROWSER-0005",
+          `failed to fetch ${script.src}: ${response.status}`,
+          filename,
+        );
+      }
+      source = await response.text();
+    }
+    const executed = await runSource(source, filename, options);
+    mounted.push({
+      script,
+      filename,
+      ...executed,
+    });
+  }
+  return mounted;
+}
+
 export const browserHostSurface = Object.freeze({
   sourceExtension: SOURCE_EXTENSION,
   outputExtension: OUTPUT_EXTENSION,

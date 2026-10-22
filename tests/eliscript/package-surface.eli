@@ -58,6 +58,7 @@
     (let ((exports (get manifest :exports)))
       (js-call (expect (get exports "./compiler")) :toBe "./dist/bootstrap/compiler.mjs")
       (js-call (expect (get exports "./browser")) :toBe "./browser/host.mjs")
+      (js-call (expect (get exports "./browser/loader")) :toBe "./dist/browser/loader.js")
       (js-call (expect (get exports "./browser/worker.mjs")) :toBe "./browser/worker.mjs")
       (js-call (expect (get exports "./browser/compiler")) :toBe "./dist/browser/compiler.js")
       (js-call (expect (get exports "./compiler-session")) :toBe "./tools/backends/compiler-session.mjs")
@@ -67,12 +68,15 @@
     (each (js-array "browser/" "dist/browser/") (lambda (entry)
       (js-call (expect (get manifest :files)) :toContain entry)))
     (await (access (resolve root "browser/host.mjs")))
-    (await (access (resolve root "browser/worker.mjs")))))
+    (await (access (resolve root "browser/worker.mjs")))
+    (await (access (resolve root "dist/browser/loader.js")))
+    (await (access (resolve root "dist/browser/host.mjs")))
+    (await (access (resolve root "dist/browser/worker.mjs")))))
 
   (test "the browser bundle is one file and needs no Node built-in" (async ()
     (let ((result (await (package-command
                     (js-array "bun" "build" "dist/bootstrap/compiler.mjs"
-                      "--target=browser" "--format=esm" "--outfile" "dist/browser/compiler.js")))))
+                      "--target=browser" "--format=esm" "--minify" "--outfile" "dist/browser/compiler.js")))))
       (js-call (expect (js-call (get result :exitCode) :toString) (get result :stderr)) :toBe "0")
       (let ((bundle (await (readFile (resolve root "dist/browser/compiler.js") "utf8"))))
         ;; Diagnostics can contain node: prose; only actual imports are rejected.
@@ -81,14 +85,18 @@
         (js-call (does-not bundle) :toContain "require(")
         (each (Array/from (js-call bundle :matchAll (pattern "^\\s*import\\s" "gmu")))
           (lambda (match) (js-call (expect match) :toBeNull)))
-        (js-call (expect (js-length bundle)) :toBeGreaterThan 100000)))))
+        (js-call (expect (js-length bundle)) :toBeGreaterThan 100000)
+        (js-call (expect (js-length bundle)) :toBeLessThan 900000)))))
 
   (test "the published file list carries the compiler and the runtime" (async ()
     (each (js-array "bin/" "bootstrap/" "compiler/" "dist/bootstrap/"
+                   "dist/stage3-release.json" "dist/compiler-artifact.json"
                    "editor/" "platform/" "runtime/" "stdlib/")
       (lambda (entry) (js-call (expect (get manifest :files)) :toContain entry)))
     ;; Published consumers run the compiler without Emacs or Bun.
-    (await (access (resolve root "dist/bootstrap/compiler.mjs")))))
+    (await (access (resolve root "dist/bootstrap/compiler.mjs")))
+    (await (access (resolve root "dist/stage3-release.json")))
+    (await (access (resolve root "dist/compiler-artifact.json")))))
 
   (test "the published transport includes native Node execution and the complete corpus adapter graph" (async ()
     (let ((names (js-array "native-node-memory.mjs" "native-node-worker.mjs"
@@ -104,11 +112,12 @@
         (setq index (1+ index))))))
 
   (test "the package keeps development trees out of the tarball" (lambda ()
-    (each (js-array "acceptance/" "docs/" "examples/" "node_modules/" "specs/" "tests/" "tools/")
+    (each (js-array "acceptance/" "docs/" "examples/" "node_modules/" "specs/" "tests/" "tools/"
+                   "dist/bootstrap-release/" "tools/backends/")
       (lambda (excluded) (js-call (does-not (get manifest :files)) :toContain excluded)))))
 
   (test "the released package keeps its metadata and manual publication gates" (async ()
-    (js-call (expect (get manifest :version)) :toBe "0.0.1")
+    (js-call (expect (get manifest :version)) :toBe "0.0.2")
     (js-call (expect (get manifest :description)) :toBeString)
     (js-call (expect (get (get manifest :repository) :url)) :toContain "github.com/liuchong/eliscript")
     (js-call (expect (get manifest :license)) :toBe "GPL-3.0-or-later")

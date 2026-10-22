@@ -71,7 +71,7 @@
     "       (when (get runtime :close) (js-call runtime :close)))))"
     "    (setq index (1+ index))))"
     "  (js-call (get globalThis.process :stdout) :write (str (JSON/stringify (js-object :targets results :rootsReleased t :node (get globalThis.process :version) :sourceIdentity (get certificate :sourceIdentity) :producerIdentity (get certificate :productIdentity))) \"\\n\")))"
-    " (await (main)))") :join "\n"))
+    " (main))") :join "\n"))
 
   (defun clean-environment ()
     (let ((env (Object/assign (js-object) (get globalThis.process :env))))
@@ -111,7 +111,7 @@
   (defasync prepared-input ()
     (let* ((environment (get globalThis.process :env))
            (manifest-path (resolve (get environment :ELISCRIPT_RELEASE_PACKAGE_BOOTSTRAP_MANIFEST
-                                  (resolve root "dist/bootstrap-release/bootstrap.json"))))
+                                  (resolve root "dist/stage3-release.json"))))
            (manifest-relative (relative root manifest-path))
            (manifest (JSON/parse (await (readFile (resolve root "package.json") "utf8")))))
       (if (or (isAbsolute manifest-relative) (= manifest-relative "..")
@@ -177,6 +177,7 @@
                   (put receipt :tarball (get pack-result :filename))
                   (put receipt :npmIntegrity (get pack-result :integrity))
                   (put receipt :tarballSha256 (await (file-sha tarball)))
+                  (js-call assert :ok (< (get pack-result :size) 5000000) "release tarball must remain compact (< 5 MB)")
                   (child "install" "npm" (js-array "install" "--ignore-scripts" "--no-audit" "--no-fund" "--package-lock=false" tarball) consumer env receipt))
                 (let* ((installed (resolve consumer "node_modules/eliscript"))
                        (installed-manifest (resolve installed (get prepared :manifestRelative)))

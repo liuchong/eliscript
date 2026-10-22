@@ -18,12 +18,12 @@
       ;; Namespace own descriptors can read a live binding/TDZ. Keep their
       ;; public host trap route; only ordinary records and arrays qualify.
       (or (= kind 14)
-        (/= (js-call (js-call (get context :memory) :view) :getUint32
-          (- (funcall (get context :checked) "value-data" heap value 13) 12) t) 1))))
+        (/= (js-call (js-call (aref context "memory") :view) :getUint32
+          (- (funcall (aref context "checked") "value-data" heap value 13) 12) t) 1))))
 
   (defun native-data-definition-p (context heap target key definition)
-    (let* ((checked (get context :checked))
-           (parent (js-call (js-call (get context :memory) :view) :getUint32
+    (let* ((checked (aref context "checked"))
+           (parent (js-call (js-call (aref context "memory") :view) :getUint32
              (+ (funcall checked "value-data" heap definition 13) 4) t))
            (canonical (funcall checked "value-standard-prototype-existing" heap 0)))
       ;; The original raw DefineProperty owns existing-property compatibility,
@@ -31,39 +31,39 @@
       ;; existing configurable property on a nonextensible target as well.
       (when (and (or (= parent 0) (= parent 3) (and (> canonical 3) (= parent canonical)))
                  (or (= parent 0) (hostObjectDescriptorPrototypeClear))
-                 (get context :dataDefinition))
+                 (aref context "dataDefinition"))
         (= (funcall checked "value-source-data-definition-p" heap definition) 1))))
 
   (defun native-constructor-method-p (method)
-    (or (and (Object/hasOwn method "constructArray") (eq (get method :constructArray) t))
-        (and (Object/hasOwn method "constructObject") (eq (get method :constructObject) t))))
+    (or (and (Object/hasOwn method "constructArray") (eq (aref method "constructArray") t))
+        (and (Object/hasOwn method "constructObject") (eq (aref method "constructObject") t))))
   (defun native-intrinsic-operation (context heap arguments count opcode)
     ;; Authenticate the actual function, rather than a property name. Borrowed
     ;; native methods keep their identities; replacements and host Proxies do
     ;; not qualify. Existing source algorithms own iteration, species and holes.
     (when (>= count (if (= opcode 9) 2 3))
-      (let* ((checked (get context :checked)) (tokens (get context :nativeTokens))
+      (let* ((checked (aref context "checked")) (tokens (aref context "nativeTokens"))
              (target (funcall checked "value-get" heap arguments 1)))
         (when (and tokens (> target 3)
                    (= (funcall checked "value-kind" heap target) 35))
           (let ((method (js-call tokens :get (funcall checked "value-foreign-token" heap target))))
-            (when (and method (get method :runtime))
+            (when (and method (aref method "runtime"))
               (cond
-                ((= (get method :runtime) "value-reflect-builtin")
-                  (when (and (= opcode 8) (>= (- count 3) (get method :minimumArity)))
+                ((= (aref method "runtime") "value-reflect-builtin")
+                  (when (and (= opcode 8) (>= (- count 3) (aref method "minimumArity")))
                     (let* ((value (funcall checked "value-get" heap arguments 3))
                            (kind (if (> value 3) (funcall checked "value-kind" heap value) 0)))
                       ;; The original foreign path owns host Proxies and their
                       ;; native exception identities. Only represented source
                       ;; targets enter the existing owned Reflect algorithms.
                       (when (or (= kind 18) (ordinary-native-object-p context heap value kind))
-                        (js-object :name (get method :name) :arity (- count 3)
-                          :runtime (get method :runtime) :operation (get method :operation))))))
-                ((= (get method :runtime) "value-builtin-primitive")
+                        (js-object :name (aref method "name") :arity (- count 3)
+                          :runtime (aref method "runtime") :operation (aref method "operation"))))))
+                ((= (aref method "runtime") "value-builtin-primitive")
                   (when (= opcode 8)
-                    (js-object :name (get method :name) :arity (if (> count 3) 1 0)
+                    (js-object :name (aref method "name") :arity (if (> count 3) 1 0)
                       :value (if (> count 3) (funcall checked "value-get" heap arguments 3) 3)
-                      :runtime (get method :runtime) :operation (get method :operation))))
+                      :runtime (aref method "runtime") :operation (aref method "operation"))))
                 ((native-constructor-method-p method)
                 (when (or (/= opcode 19) (= (funcall checked "value-get" heap arguments 2) target))
                   (let* ((offset (if (= opcode 9) 2 3))
@@ -71,29 +71,29 @@
                     ;; Object's identity/nullish cases consume no source
                     ;; properties. Primitive boxing retains the host route;
                     ;; a different newTarget retains its allocation semantics.
-                    (when (or (= (get method :operation) 75) (= input 0) (= input 3)
+                    (when (or (= (aref method "operation") 75) (= input 0) (= input 3)
                       (and (> input 3) (js-call (js-array 13 14 15 16 17 18 21 23 24 26 35 36)
                         :includes (funcall checked "value-kind" heap input))))
-                      (js-object :name (get method :name) :arity (- count offset) :value target
+                      (js-object :name (aref method "name") :arity (- count offset) :value target
                         :argumentOffset offset :nativeConstructor t :construct (if (= opcode 8) 0 1)
-                        :runtime (get method :runtime) :operation (get method :operation))))))
+                        :runtime (aref method "runtime") :operation (aref method "operation"))))))
                 (t (when (= opcode 8)
                   (let ((receiver (funcall checked "value-get" heap arguments 2)))
                     (when (and (> receiver 3)
                       (= (funcall checked "value-kind" heap receiver)
-                         (if (= (get method :runtime) "value-array-prototype-call") 14 17)))
-                      (js-object :name (get method :name) :arity (- count 3) :value receiver
-                        :runtime (get method :runtime) :operation (get method :operation)))))))))))))
+                         (if (= (aref method "runtime") "value-array-prototype-call") 14 17)))
+                      (js-object :name (aref method "name") :arity (- count 3) :value receiver
+                        :runtime (aref method "runtime") :operation (aref method "operation")))))))))))))
 
   (defun native-object-operation (context heap arguments count)
     ;; Return a routing decision, not an ABI result (nil/false/zero are valid
     ;; results). Reading these raw tuples does not decode or publish a view.
-    (let* ((checked (get context :checked)) (tokens (get context :nativeTokens))
+    (let* ((checked (aref context "checked")) (tokens (aref context "nativeTokens"))
            (target (if (>= count 3) (funcall checked "value-get" heap arguments 1) 0)))
       (when (and tokens (> target 3) (= (funcall checked "value-kind" heap target) 35))
         (let ((method (js-call tokens :get (funcall checked "value-foreign-token" heap target))))
-          (when (and method (not (get method :runtime)))
-            (let* ((name (get method :name)) (arity (if (or (= name "freeze") (= name "isFrozen") (= name "create") (= name "getPrototypeOf")) 1
+          (when (and method (not (aref method "runtime")))
+            (let* ((name (aref method "name")) (arity (if (or (= name "freeze") (= name "isFrozen") (= name "create") (= name "getPrototypeOf")) 1
                       (if (or (= name "hasOwn") (= name "getOwnPropertyDescriptor") (= name "defineProperties")) 2 3)))
                    (value (if (= count (+ arity 3)) (funcall checked "value-get" heap arguments 3) 0))
                    (kind (if (> value 3) (funcall checked "value-kind" heap value) 0)))
@@ -120,9 +120,10 @@
                     (js-object :name name :arity arity :value value))))))))))
 
   (defun call-native-object-operation (context heap arguments operation)
-    (let ((raw (get context :raw)) (checked (get context :checked))
-          (arity (get operation :arity)) (offset (get operation :argumentOffset 3)) (frame 0) (result 0)
-          (status 0) (source-class 0))
+    (let ((raw (aref context "raw")) (checked (aref context "checked"))
+          (arity (aref operation "arity"))
+          (offset (let ((v (aref operation "argumentOffset"))) (if (undefined? v) 3 v)))
+          (frame 0) (result 0) (status 0) (source-class 0))
       (try
         (progn
           (setq frame (funcall checked "frame-new" heap 1))
@@ -135,43 +136,43 @@
             ;; zero-import Object builtin. No source value crosses the host
             ;; codec solely because the real native intrinsic consumed it.
             (setq result (cond
-              ((and (Object/hasOwn operation "nativeConstructor") (eq (get operation :nativeConstructor) t))
-                (funcall raw "value-native-constructor-call" heap (get operation :value) tuple arity
-                  (get operation :operation) (get operation :construct)))
-              ((= (get operation :runtime) "value-builtin-primitive")
-                (funcall raw "value-builtin-primitive" heap (get operation :value) arity (get operation :operation)))
-              ((= (get operation :runtime) "value-reflect-builtin")
-                (funcall raw "value-reflect-builtin" heap tuple arity (get operation :operation)))
-              ((get operation :runtime)
-                (funcall raw (get operation :runtime) heap (get operation :value) tuple arity (get operation :operation)))
-              ((= (get operation :name) "create")
+              ((and (Object/hasOwn operation "nativeConstructor") (eq (aref operation "nativeConstructor") t))
+                (funcall raw "value-native-constructor-call" heap (aref operation "value") tuple arity
+                  (aref operation "operation") (aref operation "construct")))
+              ((= (aref operation "runtime") "value-builtin-primitive")
+                (funcall raw "value-builtin-primitive" heap (aref operation "value") arity (aref operation "operation")))
+              ((= (aref operation "runtime") "value-reflect-builtin")
+                (funcall raw "value-reflect-builtin" heap tuple arity (aref operation "operation")))
+              ((aref operation "runtime")
+                (funcall raw (aref operation "runtime") heap (aref operation "value") tuple arity (aref operation "operation")))
+              ((= (aref operation "name") "create")
                 ;; A null or owned ordinary prototype starts an owned object
                 ;; with that exact source chain. Creating a foreign host object
                 ;; instead would leave a source WeakMap's foreign iterator key
                 ;; unrooted between native iterator callbacks. Actual foreign
                 ;; prototypes and two-argument Create retain their host route.
-                (funcall raw "value-object-new" heap (get operation :value)))
-              ((= (get operation :name) "getPrototypeOf")
+                (funcall raw "value-object-new" heap (aref operation "value")))
+              ((= (aref operation "name") "getPrototypeOf")
                 ;; The native intrinsic observes the source object itself.
                 ;; Decoding a persistent value first would substitute its host
                 ;; materializer prototype for the registered source prototype.
                 (funcall raw "value-object-reflection" heap tuple arity 0))
-              ((= (get operation :name) "getOwnPropertyDescriptor")
+              ((= (aref operation "name") "getOwnPropertyDescriptor")
                 ;; Read the source descriptor before a transport predicate can
                 ;; publish its target as an ordinary host view. This raw ABI
                 ;; retains descriptor presence and original value/accessor
                 ;; identities without decoding the object being inspected.
                 (funcall raw "value-object-reflection" heap tuple arity 2))
-              ((= (get operation :name) "freeze")
-                (funcall raw "value-object-integrity" heap (get operation :value) 0))
-              ((= (get operation :name) "isFrozen")
+              ((= (aref operation "name") "freeze")
+                (funcall raw "value-object-integrity" heap (aref operation "value") 0))
+              ((= (aref operation "name") "isFrozen")
                 ;; Observe the source descriptors before a literal predicate
                 ;; finishes branding; decoding here would publish an ordinary
                 ;; view during that same predicate's automatic brand probe.
-                (funcall raw "value-object-integrity" heap (get operation :value) 1))
-              ((= (get operation :name) "hasOwn")
+                (funcall raw "value-object-integrity" heap (aref operation "value") 1))
+              ((= (aref operation "name") "hasOwn")
                 (funcall raw "value-object-properties" heap tuple arity 1))
-              ((= (get operation :name) "defineProperties")
+              ((= (aref operation "name") "defineProperties")
                 ;; The existing raw algorithm collects and normalizes every
                 ;; descriptor before applying any of them, including accessors
                 ;; and their first source throw. No constructor is decoded
@@ -194,7 +195,7 @@
         ((and (= runtime "value-builtin-primitive") (= operation 5)) 5)
         ((and (= runtime "value-reflect-builtin") (>= operation 0) (<= operation 12)) (+ operation 181))
         ((and (= runtime "value-array-prototype-call")
-              (js-call (js-array 202 223 224 225) :includes operation)) operation)
+              (>= operation 200) (<= operation 227)) operation)
         ((and (= runtime "value-collection-prototype-iterator-builtin") (= operation 328)) 328)
         ((not runtime)
           (let ((name (get method :name)))
@@ -262,15 +263,15 @@
           (throw error)))))
 
   (defun dispatch-host-object-identity (context handler name heap arguments)
-    (if (not (and (= name "source-operation") (= heap (get context :owner))))
+    (if (not (and (= name "source-operation") (= heap (aref context "owner"))))
       (funcall handler name heap arguments)
-      (let ((raw (get context :raw)) (checked (get context :checked)))
+      (let ((raw (aref context "raw")) (checked (aref context "checked")))
         (if (/= (funcall raw "last-error") 0) 0
           (let* ((kind (funcall checked "value-kind" heap arguments))
                  (count (if (= kind 7) (funcall checked "value-length" heap arguments) 0))
                  (opcode (if (> count 0) (funcall checked "value-get" heap arguments 0) 0))
                  (operation (if (and (> opcode 3) (= (funcall checked "value-kind" heap opcode) 4))
-                   (js-call (js-call (get context :memory) :view) :getFloat64
+                   (js-call (js-call (aref context "memory") :view) :getFloat64
                      (funcall checked "value-data" heap opcode 4) t) -1)))
             (if (/= operation 35)
               (let ((native (when (or (= operation 8) (= operation 9) (= operation 19))
@@ -281,7 +282,7 @@
               (progn
                 (unless (and (= kind 7) (= count 2)) (failManagedRuntime 3))
                 (let* ((member (funcall checked "value-get" heap arguments 1))
-                       (runtime (get context :runtime))
+                       (runtime (aref context "runtime"))
                        (frame undefined) (callee undefined) (result 0) (primary false)
                        (status 0) (source-class 0) (cleanup undefined) (cleanup-failed false))
                   (unless (and (not (undefined? runtime)) (or (= member 0) (= member 1) (= member 2) (= member 3)))
@@ -347,25 +348,33 @@
                (receiver (if (undefined? options) original-options options))
                (option-descriptors (Object/getOwnPropertyDescriptors original-options))
                (initialize t) (runtime undefined)
+               (functions (let ((table (Object/create nil)))
+                 (js-call (Object/keys descriptors) :forEach (lambda (name)
+                   (let ((fn (data-function descriptors name)))
+                     (when fn (put table name fn)))))
+                 table))
+               (last-error-fn (aref functions "last-error"))
+               (exception-class-fn (aref functions "value-exception-class"))
                (context (js-object :owner 0 :runtime undefined :memory memory
-                         :dataDefinition (data-function descriptors "value-source-data-definition-p")
-                         :foreignIntrinsic (data-function descriptors "value-foreign-intrinsic-register")
-                         :nativeConstructor (data-function descriptors "value-native-constructor-call")
-                         :primitivePredicate (data-function descriptors "value-builtin-primitive")
-                         :reflectBuiltin (data-function descriptors "value-reflect-builtin")
-                         :arraySlice (data-function descriptors "value-array-prototype-call")
-                         :arrayIterator (data-function descriptors "value-collection-prototype-iterator-builtin")))
+                         :dataDefinition (aref functions "value-source-data-definition-p")
+                         :foreignIntrinsic (aref functions "value-foreign-intrinsic-register")
+                         :nativeConstructor (aref functions "value-native-constructor-call")
+                         :primitivePredicate (aref functions "value-builtin-primitive")
+                         :reflectBuiltin (aref functions "value-reflect-builtin")
+                         :arraySlice (aref functions "value-array-prototype-call")
+                         :arrayIterator (aref functions "value-collection-prototype-iterator-builtin")))
                (raw (lambda (name &rest arguments)
                  ;; All exports used by this bridge return u32 ABI words.
                  ;; Normalize both inspected handles and capability results.
                  (unsigned-bit-shift-right
-                   (Reflect/apply (data-function descriptors name) exports arguments) 0)))
+                   (Reflect/apply (aref functions name) exports arguments) 0)))
                (checked (lambda (name &rest arguments)
-                 (let* ((value (Reflect/apply raw undefined (js-call (js-array name) :concat arguments)))
-                        (code (funcall raw "last-error")))
+                 (let* ((value (unsigned-bit-shift-right
+                                 (Reflect/apply (aref functions name) exports arguments) 0))
+                        (code (unsigned-bit-shift-right (funcall last-error-fn) 0)))
                    (when (/= code 0) (failManagedRuntime code
-                     (funcall raw "value-exception-class" (get context :owner)))) value)))
-               (new-heap (data-function descriptors "heap-new")))
+                     (unsigned-bit-shift-right (funcall exception-class-fn (aref context "owner")) 0))) value)))
+               (new-heap (aref functions "heap-new")))
           (put context :raw raw) (put context :checked checked)
           ;; Preserve accessor receivers and the original destructuring order.
           ;; Invalid initialize values pass through to the original validator.

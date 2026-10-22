@@ -13,7 +13,7 @@ verifiable, and nothing is published until a release is explicitly authorized.
 package, so the repository cannot publish by accident. Removing that field is
 the release step, and it is the only edit a release requires in the manifest.
 
-The version is `0.0.1` and is not bumped by ordinary work.
+The version is `0.0.2` and is not bumped by ordinary work.
 
 ## What Ships
 
@@ -25,7 +25,7 @@ The version is `0.0.1` and is not bumped by ordinary work.
 | `runtime/` | Host-free runtime semantics linked by generated code. |
 | `platform/` | The browser and worker capability packages. |
 | `browser/` | The in-memory compile host and its module worker. |
-| `dist/browser/` | The compiler bundled into one browser file. |
+| `dist/browser/` | The compiler and standalone hot-reload loader (`compiler.js` and `loader.js`) bundled for a browser. |
 | `stdlib/` | Standard-library sources that project builds import. |
 | `compiler/` | The Emacs Lisp seed compiler, so the package remains rebuildable from source. |
 | `editor/` | The Emacs major mode and its evaluation library. |
@@ -63,16 +63,18 @@ entry per command with a Node shebang, every exported entry resolving inside
 the package, the compiler and runtime present in the `files` allowlist,
 development trees absent, and the release latch still set.
 
-The dry run reports the exact artifact. The maintained state is 195 files,
-about 630 KB packed and 3.5 MB unpacked, including
-`dist/bootstrap/compiler.mjs`.
+The dry run reports the exact artifact. The maintained state ships the stage-3
+self-hosted compiler, browser compiler and hot-reload loader bundles, runtime,
+standard library, and multi-target backend adapters (~4.5 MB packed, ~32 MB
+unpacked), including `dist/bootstrap/compiler.mjs` and
+`dist/browser/loader.js`.
 
 Then install that artifact and use it the way a consumer would:
 
 ```sh
 npm pack --pack-destination /tmp
 mkdir /tmp/consumer && cd /tmp/consumer && npm init -y
-npm install /tmp/eliscript-0.0.1.tgz
+npm install /tmp/eliscript-0.0.2.tgz
 ./node_modules/.bin/eliscript --help
 ```
 
@@ -88,7 +90,9 @@ node --input-type=module -e \
 ## Public Entries
 
 `exports` defines what a consumer may name. `./compiler` is the compiler,
-`./browser` is the in-memory compile host, `./browser/worker.mjs` is the module
+`./browser` is the in-memory compile host (`createEliscriptHost`, `runSource`,
+and `mountEliscriptScripts`), `./browser/loader` is the standalone hot-reload
+browser loader (`dist/browser/loader.js`), `./browser/worker.mjs` is the module
 worker, and `./browser/compiler` is the compiler bundled for a browser. The
 runtime and platform packages are exported with and without their `.mjs`
 suffix.
