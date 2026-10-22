@@ -300,3 +300,36 @@ HAMT timing values are never normal test gates. Default tests validate report
 shape, lookup checksums, host coverage, source digest, and the stated threshold
 decision. A threshold change requires a new measured report and specification
 review.
+
+## Four-Dimension Release & Native Emacs Lisp Comparison
+
+Run the normalized four-dimension comparison across **Native Emacs Lisp
+(current latest)**, **Previous Major Release**, **Previous Minor/Patch
+Release**, and **Current Latest Workspace** with:
+
+```sh
+bun run benchmark:version-comparison
+```
+
+Pass `--json` for structured JSON output, `--release-summary` for a concise
+GitHub Release main-page summary, `--output <path>` to save a single output, or
+`--release-dir <dir>` to emit the full release bundle (`release-summary.md`,
+`eliscript-<version>-benchmark-report.md`, and
+`eliscript-<version>-benchmark-report.json`; see
+[`.agents/skills/release-benchmark/SKILL.md`](../.agents/skills/release-benchmark/SKILL.md)).
+`tools/performance/version-comparison.eli` resolves the four comparison
+dimensions and handles all four boundary conditions automatically:
+
+1. **Previous major does not exist** (for example `0.x.y` releases):
+   `previousMajor` is recorded with `status: "absent"` and
+   `reason: "no-prior-major-release"`.
+2. **Previous minor/patch only absent on the very first release** (`0.0.1`):
+   `previousMinor` is recorded with `status: "absent"` and
+   `reason: "initial-release"`.
+3. **Previous major equals previous minor/patch** (for example `1.0.0` when the
+   latest `0.x` tag is `v0.0.4`): both resolve to `v0.0.4` with
+   `sameAsPreviousMinor: true` / `sameAsPreviousMajor: true`, and the benchmark
+   executes the `v0.0.4` worktree only once (`deduplicatedFrom: "previousMinor"`).
+4. **Emacs Lisp only considers the current latest version**: `emacsLisp` always
+   executes against the current host Emacs (`mode: "current-latest-only"`).
+

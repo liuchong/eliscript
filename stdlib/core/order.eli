@@ -22,12 +22,14 @@
   (defun comparator
     (comparison)
     (require-function comparison "comparator comparison")
-    (lambda
-      (left right)
-      (let ((result (funcall comparison left right)))
-        (if (= (value-type result) "number")
-          (normalize-comparison-result result "comparator comparison")
-          (if (isTruthy result) -1 (if (isTruthy (funcall comparison right left)) 1 0))))))
+    (if (or (eq comparison compare-values) (eq comparison Runtime/compareValues))
+      Runtime/compareValues
+      (lambda
+        (left right)
+        (let ((result (funcall comparison left right)))
+          (if (= (value-type result) "number")
+            (normalize-comparison-result result "comparator comparison")
+            (if (isTruthy result) -1 (if (isTruthy (funcall comparison right left)) 1 0)))))))
   (defun reverse-comparator
     (&rest arguments)
     (let ((length (js-length arguments)))

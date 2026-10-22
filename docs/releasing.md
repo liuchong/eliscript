@@ -55,8 +55,24 @@ Run the whole sequence from a clean checkout:
 
 ```sh
 bun test tests/package-surface.test.mjs
+bun run benchmark:version-comparison -- --release-dir dist/release-report
 npm pack --dry-run --json       # prepack rebuilds the compiler first
 ```
+
+`bun run benchmark:version-comparison -- --release-dir dist/release-report`
+executes the four-dimension performance and verification comparison (`Emacs
+Lisp` current latest, `previousMajor`, `previousMinor`, and `latest`) and
+writes:
+
+- `dist/release-report/release-summary.md` — concise summary for the main
+  GitHub Release page body (`gh release create --notes-file`).
+- `dist/release-report/eliscript-0.0.4-benchmark-report.md` and
+  `dist/release-report/eliscript-0.0.4-benchmark-report.json` — detailed
+  benchmark, artifact-size, and verification report files uploaded as GitHub
+  Release assets alongside `eliscript-0.0.4.tgz`.
+
+See [`.agents/skills/release-benchmark/SKILL.md`](../.agents/skills/release-benchmark/SKILL.md)
+for the complete normalized release and Pages version-switching workflow.
 
 `tests/package-surface.test.mjs` checks the manifest itself: one executable
 entry per command with a Node shebang, every exported entry resolving inside

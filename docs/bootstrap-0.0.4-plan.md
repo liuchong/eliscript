@@ -310,19 +310,59 @@ flowchart TD
   - `examples/browser-playground/README.md`:
     - Sync extensionless `eliscript/runtime/core/sequence` import example, `browser/host.eli` & `browser/worker.eli` source references, and Closure-style IR/JS optimization options.
 
+### `D17`: Normalized 4-Dimension Version & Native Emacs Lisp Performance Comparison Framework
+- **Files**:
+  - `tools/performance/version-comparison.eli` (compiled to `tools/performance/version-comparison.mjs`)
+  - `tests/version-comparison-benchmark.test.eli` (compiled to `tests/version-comparison-benchmark.test.mjs`)
+  - `package.json`: add `"benchmark:version-comparison": "bun tools/performance/version-comparison.mjs"`
+  - `benchmarks/README.md` & `docs/releasing.md`: document the normalized 4-dimension comparison workflow
+- **Four Comparison Dimensions (`VERSION_COMPARISON_DIMENSIONS`)**:
+  1. `emacsLisp`: Native Emacs Lisp (`emacs --batch -Q`), always evaluated on the current latest host Emacs Lisp (`mode: "current-latest-only"`).
+  2. `previousMajor`: Highest released version with `major < latest.major` (e.g., when `latest` is `1.2.0`, resolves to highest `0.x.y`).
+  3. `previousMinor`: Highest released version strictly less than `latest` (`version < latest`, i.e., the immediately preceding release such as `0.0.3` when `latest` is `0.0.4`, or `0.0.4` when `latest` is `1.0.0`).
+  4. `latest`: Current workspace version (`package.json` `version`, e.g., `0.0.4`).
+- **Four Boundary Cases Enforced by `resolveVersionComparisonMatrix({ currentVersion, releasedTags, emacsVersion })`**:
+  1. **`previousMajor` does not exist**: When `currentVersion.major === 0` or no released tag has `major < currentVersion.major`, `previousMajor` resolves to `{ id: "previousMajor", status: "absent", version: null, tag: null, reason: "no-prior-major-release", sameAsPreviousMinor: false }`.
+  2. **`previousMinor` only absent on initial release**: When no released tag is `< currentVersion` (the very first release, e.g., `0.0.1`), `previousMinor` resolves to `{ id: "previousMinor", status: "absent", version: null, tag: null, reason: "initial-release", sameAsPreviousMajor: false }`. For every version after the first release, `previousMinor` resolves to `{ status: "active", version, tag, reason: "resolved" }`.
+  3. **`previousMajor` equals `previousMinor`**: When `currentVersion` is e.g. `1.0.0` and released tags are `["v0.0.1", "v0.0.2", "v0.0.3", "v0.0.4"]`, both `previousMajor` and `previousMinor` resolve to `0.0.4` (`v0.0.4`). Both entries set `sameAsPreviousMinor: true` / `sameAsPreviousMajor: true`, and `runVersionComparisonBenchmark` executes the `v0.0.4` worktree benchmark **only once** and shares the sample (`deduplicatedFrom: "previousMinor"`).
+  4. **`emacsLisp` only considers current latest**: `emacsLisp` always has `{ id: "emacsLisp", status: "active", version: emacsVersion, mode: "current-latest-only" }` and never checks out historical Git revisions for Emacs Lisp.
+- **Measured Workloads (`VERSION_COMPARISON_WORKLOADS`)**:
+  - `sequence.first10k` ($N = 10,000$ persistent vector head lookup)
+  - `sequence.last10k` ($N = 10,000$ persistent vector tail lookup)
+  - `sequence.takeLast10k` ($N = 10,000, k = 64$ sliding window tail slice)
+  - `value.equalSameRef10k` ($N = 10,000$ shared persistent vector equality / comparison)
+  - `order.sort10k` ($N = 10,000$ deterministic shuffled persistent vector sort)
+  - `data.groupBy10k` ($N = 10,000, 100$ buckets persistent `groupBy`)
+  - `data.frequencies100k` ($N = 100,000, 1,000$ keys persistent `frequencies`)
+  - `tree.zipper12k` ($12,000$-depth persistent vector tree `down` $\times 12,000$ + `path` + `replace` + `root`)
+  - `worker.scoreValues` ($N = 10,000 \times 10$ rounds modular arithmetic loop)
+
+### `D18`: Release Page Summary, Detailed Report Asset & Project-Internal Skill (`.agents/skills/release-benchmark/SKILL.md`)
+- **Files**:
+  - `.agents/skills/release-benchmark/SKILL.md`: project-internal skill codifying the 4-dimension performance comparison (`Emacs Lisp`, `上一个大版本`, `上一个最近的小版本`, `最新版`), its 4 boundary rules, the GitHub Release main-page concise summary (`release-summary.md`) + detailed report asset attachment (`eliscript-<version>-benchmark-report.md` / `.json`), and post-release Pages engine/version update.
+  - `tools/performance/version-comparison.eli`:
+    - Add `renderReleaseNotesSummary(report)` producing a concise Markdown summary block for the main GitHub Release page body, referencing `eliscript-<version>-benchmark-report.md`.
+    - Enhance `renderVersionComparisonMarkdown(report)` with compiled artifact size summary and contract/test verification summary for the standalone detailed report asset.
+    - Add `writeReleaseComparisonBundle(report, releaseDir)` and `--release-dir <dir>` / `--release-summary` CLI flags writing `release-summary.md`, `eliscript-<version>-benchmark-report.md`, and `eliscript-<version>-benchmark-report.json`.
+  - `tests/version-comparison-benchmark.test.eli`:
+    - Add tests for `renderReleaseNotesSummary`, `writeReleaseComparisonBundle` (`--release-dir`), and `.agents/skills/release-benchmark/SKILL.md`.
+  - `docs/releasing.md` & `benchmarks/README.md`:
+    - Document `--release-dir` and the GitHub Release summary + detailed asset workflow.
+
 ---
 
 ## 5. Stage Progress & Dual Checklists
 
-### Stage Progress (`S0`–`S5`)
+### Stage Progress (`S0`–`S6`)
 - [x] `S0` Baseline audit completed and `0.0.3` published to GitHub Releases & npm
-- [x] `S1` Phase A: Complete `docs/bootstrap-0.0.4-plan.md` construction manual (including in-place `.eli` layout & documentation sync `D13`–`D16`)
+- [x] `S1` Phase A: Complete `docs/bootstrap-0.0.4-plan.md` construction manual (including in-place `.eli` layout & documentation sync `D13`–`D18`)
 - [x] `S2` Phase B & C: Complete all test additions and full implementation without mid-flight test runs
 - [x] `S3` Phase D (Initial): Initial zero-`.mjs` & ClojureScript fast-path verification
 - [x] `S4` Phase D (In-Place `.eli` & Docs): Centralized bootstrap, contract & doc verification, GPG-signed commit, and push
 - [x] `S5` Phase D (Pages Content Sync & Pre-Release `0.0.3` Engine/Version Pin): Verify Pages & doc contracts, commit, and push
+- [x] `S6` Phase D (Normalized 4-Dimension Version & Emacs Lisp Performance Comparison + Release Skill): Verify matrix boundary cases, release bundle, project skill, commit, and push
 
-### Construction Checklist (`C01`–`C19`) — Check Immediately as Each Item Is Written
+### Construction Checklist (`C01`–`C26`) — Check Immediately as Each Item Is Written
 - [x] `C01` Update `tests/eliscript/stable-compatibility-corpus.eli`, `tests/eliscript/package-surface.eli`, and `tests/eliscript/persistent-zipper-path.eli` with `0.0.4` tests (Phase B, no test execution)
 - [x] `C02` Generate all 516 capsule `.eli` files from existing `.mjs` files
 - [x] `C03` Update `tools/backends/bootstrap.el` to materialize capsule `.eli` -> `<rel>.mjs` during `eliscript-backend-bootstrap-runtimes`
@@ -342,8 +382,15 @@ flowchart TD
 - [x] `C17` Update `tests/pages-site.test.eli` and `tests/docs-site.test.eli` for `598` library exports and pre-release `0.0.3` / `v0.0.3` Pages version links (Phase B, no test execution)
 - [x] `C18` Update `docs/index.html`, `docs/pages/*.html`, `docs/pages/site.eli`, `tools/surface/generate-api.eli`, `README.md`, `docs/getting-started.md`, and `examples/browser-playground/README.md` with complete `0.0.4` content while keeping Pages engine/version links at `0.0.3` until release
 - [x] `C19` Regenerate `docs/pages/api.html` and `contracts/stable-compatibility-corpus.json` in Phase D
+- [x] `C20` Create `tests/version-comparison-benchmark.test.eli` covering all 4 comparison dimensions and all 4 boundary cases (Phase B, no test execution)
+- [x] `C21` Create `tools/performance/version-comparison.eli` implementing 4-dimension matrix resolution, worktree/Emacs benchmark execution, deduplication, validation, and Markdown table rendering
+- [x] `C22` Add `"benchmark:version-comparison"` script to `package.json` and document the normalized 4-dimension comparison workflow in `benchmarks/README.md` and `docs/releasing.md`
+- [x] `C23` Materialize `tools/performance/version-comparison.mjs` and `tests/version-comparison-benchmark.test.mjs` and regenerate `contracts/stable-compatibility-corpus.json` in Phase D
+- [x] `C24` Extend `tests/version-comparison-benchmark.test.eli` with tests for `renderReleaseNotesSummary`, `writeReleaseComparisonBundle`, and `.agents/skills/release-benchmark/SKILL.md` (Phase B, no test execution)
+- [x] `C25` Update `tools/performance/version-comparison.eli` with `renderReleaseNotesSummary`, `writeReleaseComparisonBundle`, artifact size & verification summary, and `--release-dir` / `--release-summary` CLI support
+- [x] `C26` Create `.agents/skills/release-benchmark/SKILL.md` and update `docs/releasing.md` and `benchmarks/README.md`
 
-### Acceptance Checklist (`A01`–`A15`) — Execute & Check Only in Phase D
+### Acceptance Checklist (`A01`–`A21`) — Execute & Check Only in Phase D
 - [x] `A01` `git ls-files '*.mjs'` outputs 0 files (empty), confirming zero tracked `.mjs` files in the repository
 - [x] `A02` `make bootstrap-backends` succeeds from `.eli` sources, materializing all capsule `.mjs` files and self-hosted compiler/runtime artifacts cleanly (fixed-point verified: `stage2 == stage3` across 313 files, `productSha256: 7642d697c024b3239133913844715b02ad7b863344cbff3b53490e7c048ba94a`)
 - [x] `A03` Repository integrity check (`bun test tests/repository-integrity.test.mjs tests/repository-integrity-original-selfhosted.test.mjs`) passes with 0 errors (`13/13` pass, `516 JavaScript, 150 Eliscript`)
@@ -358,4 +405,10 @@ flowchart TD
 - [x] `A12` In-place `.eli` layout and documentation updates committed with GPG signature (`git commit -S`) and pushed to `origin/master` (`61336ae`)
 - [x] `A13` `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 make check-contracts` (including `tools/surface/generate-api.mjs --check` and `tools/documentation/check.mjs`) passes 100%
 - [x] `A14` `bun test tests/pages-site.test.mjs tests/api-index.test.mjs tests/docs-site.test.mjs tests/pages-assembly.test.mjs tests/onboarding-docs.test.mjs` passes 100%
-- [x] `A15` Updated Pages and documentation committed with GPG signature (`git commit -S`) and pushed to `origin/master`
+- [x] `A15` Updated Pages and documentation committed with GPG signature (`git commit -S`) and pushed to `origin/master` (`282600a`)
+- [x] `A16` `bun test tests/version-comparison-benchmark.test.mjs` passes 100%, verifying all 4 dimensions and all 4 boundary cases
+- [x] `A17` `bun run benchmark:version-comparison` executes the real 4-dimension comparison (`Emacs Lisp 31.1` vs `Previous Major (Absent)` vs `Previous Minor v0.0.3` vs `Latest 0.0.4`) and `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 make check-contracts` passes 100%
+- [x] `A18` Extended `tests/version-comparison-benchmark.test.mjs` (including release bundle & project skill assertions) passes 100% (`7/7` pass)
+- [x] `A19` `bun tools/performance/version-comparison.mjs --release-dir dist/release-report` generates `release-summary.md`, `eliscript-0.0.4-benchmark-report.md`, and `eliscript-0.0.4-benchmark-report.json` cleanly
+- [x] `A20` `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 make check-contracts` passes 100% (15/15 contract gates pass)
+- [x] `A21` Normalized 4-dimension benchmark framework and `.agents/skills/release-benchmark/SKILL.md` committed with GPG signature (`git commit -S`) and pushed to `origin/master`

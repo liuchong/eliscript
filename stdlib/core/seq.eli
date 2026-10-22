@@ -345,46 +345,69 @@
   (defun take-last
     (limit collection)
     (require-non-negative-safe-integer limit "take-last limit")
-    (if (= limit 0)
-      EMPTY_VECTOR
-      (let ((ring (funcall sequence-ring limit)) (count 0) (start 0))
-        (reduce
-          collection
-          (lambda
-            (state value)
-            (if (< count limit)
-              (progn (put ring count value) (setq count (1+ count)))
-              (progn (put ring start value) (setq start (% (1+ start) limit))))
-            state)
-          nil)
-        (let ((builder (transient EMPTY_VECTOR)) (index 0))
-          (while (< index count)
-            (conjBang builder (js-nth (% (+ start index) limit) ring))
-            (setq index (1+ index)))
-          (persistentBang builder)))))
+    (cond
+      ((= limit 0) EMPTY_VECTOR)
+      ((isPersistentVector collection)
+        (let ((total (get collection :count)))
+          (cond
+            ((= total 0) EMPTY_VECTOR)
+            ((>= limit total) collection)
+            (t
+              (let ((builder (transient EMPTY_VECTOR)) (index (- total limit)))
+                (while (< index total)
+                  (conjBang builder (js-call collection :nth index))
+                  (setq index (1+ index)))
+                (persistentBang builder))))))
+      (t
+        (let ((ring (funcall sequence-ring limit)) (count 0) (start 0))
+          (reduce
+            collection
+            (lambda
+              (state value)
+              (if (< count limit)
+                (progn (put ring count value) (setq count (1+ count)))
+                (progn (put ring start value) (setq start (% (1+ start) limit))))
+              state)
+            nil)
+          (let ((builder (transient EMPTY_VECTOR)) (index 0))
+            (while (< index count)
+              (conjBang builder (js-nth (% (+ start index) limit) ring))
+              (setq index (1+ index)))
+            (persistentBang builder))))))
   (defun drop-last
     (limit collection)
     (require-non-negative-safe-integer limit "drop-last limit")
-    (if (= limit 0)
-      (into EMPTY_VECTOR collection)
-      (let
-        ((ring (funcall sequence-ring limit))
-          (builder (transient EMPTY_VECTOR))
-          (count 0)
-          (start 0))
-        (reduce
-          collection
-          (lambda
-            (state value)
-            (if (< count limit)
-              (progn (put ring count value) (setq count (1+ count)))
-              (progn
-                (conjBang builder (js-nth start ring))
-                (put ring start value)
-                (setq start (% (1+ start) limit))))
-            state)
-          nil)
-        (persistentBang builder))))
+    (cond
+      ((= limit 0)
+        (if (isPersistentVector collection) collection (into EMPTY_VECTOR collection)))
+      ((isPersistentVector collection)
+        (let ((total (get collection :count)))
+          (if (>= limit total)
+            EMPTY_VECTOR
+            (let ((builder (transient EMPTY_VECTOR)) (keep (- total limit)) (index 0))
+              (while (< index keep)
+                (conjBang builder (js-call collection :nth index))
+                (setq index (1+ index)))
+              (persistentBang builder)))))
+      (t
+        (let
+          ((ring (funcall sequence-ring limit))
+            (builder (transient EMPTY_VECTOR))
+            (count 0)
+            (start 0))
+          (reduce
+            collection
+            (lambda
+              (state value)
+              (if (< count limit)
+                (progn (put ring count value) (setq count (1+ count)))
+                (progn
+                  (conjBang builder (js-nth start ring))
+                  (put ring start value)
+                  (setq start (% (1+ start) limit))))
+              state)
+            nil)
+          (persistentBang builder)))))
   (defun butlast (collection) (drop-last 1 collection))
   (defun split-at
     (limit collection)

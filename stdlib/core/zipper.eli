@@ -121,7 +121,9 @@
           EMPTY_VECTOR))))
   (defun zipper-right-list
     (values start-index)
-    (let ((result EMPTY_LIST) (index (1- (Collection/count values))))
+    (let* ((count (if (Collection/isVector values) (get values :count) (Collection/count values)))
+           (result EMPTY_LIST)
+           (index (1- count)))
       (while (>= index start-index)
         (setq result (Collection/conj result (zipper-slot values index)))
         (setq index (1- index)))
@@ -298,7 +300,7 @@
       nil
       (let*
         ((child-values (zipper-children-vector location))
-          (child-count (Collection/count child-values)))
+          (child-count (if (Collection/isVector child-values) (get child-values :count) (Collection/count child-values))))
         (if (= child-count 0)
           nil
           (let*
@@ -308,7 +310,7 @@
               (zipper-slot child-values 0)
               (zipper-path
                 EMPTY_VECTOR
-                (zipper-right-list child-values 1)
+                (if (<= child-count 1) EMPTY_LIST (zipper-right-list child-values 1))
                 path-value
                 next-parent-nodes
                 false)
@@ -445,9 +447,28 @@
     (zipper-require-location location "root")
     (if (end? location)
       (node location)
-      (let ((current location) (parent (up location)))
-        (while (not (nil? parent)) (setq current parent parent (up current)))
-        (node current))))
+      (let ((cur-node (zipper-slot location 0))
+            (cur-path (zipper-path-value location))
+            (changed false))
+        (while (not (nil? cur-path))
+          (let ((parent-path (zipper-slot cur-path zipper-parent-path-index))
+                (parent-node (zipper-parent-node cur-path))
+                (step-changed (or changed (zipper-slot cur-path zipper-changed-index))))
+            (if step-changed
+              (setq
+                cur-node
+                (make-node
+                  location
+                  parent-node
+                  (zipper-rebuild-children
+                    (zipper-slot cur-path zipper-lefts-index)
+                    cur-node
+                    (zipper-slot cur-path zipper-rights-index)))
+                changed
+                t)
+              (setq cur-node parent-node))
+            (setq cur-path parent-path)))
+        cur-node)))
   (defun insert-left
     (location item)
     (zipper-require-active-location location "insert-left")
