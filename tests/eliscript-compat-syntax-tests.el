@@ -23,6 +23,7 @@
 (require 'eliscript-js)
 (require 'eliscript-abi)
 (require 'eliscript-compat)
+(require 'eliscript-worker)
 
 (defvar eliscript-compat-tests--timings nil
   "Recorded per-test execution timings in milliseconds.")
@@ -852,6 +853,238 @@
           (declare (eliscript :abi :numeric-f64))
           (list x))")
       :type 'eliscript-compile-error))))
+
+;; ============================================================================
+;; T13: Industrial-Grade Emacs Lisp Syntax & Standard Library Parity
+;; ============================================================================
+
+(ert-deftest eliscript-0-1-0-t13-industrial-elisp-syntax-and-stdlib ()
+  "Verify ?char literals, &optional/&rest/&key, cl-defstruct, setf places, pcase, cl-labels, cl-loop, rx, UTF-8/SHA-256, and with-temp-buffer."
+  (eliscript-compat-tests--run-isolated
+   "T13-01" "T13"
+   (lambda ()
+     (should
+      (equal
+       (eliscript-compat-eval-string
+        "(progn
+           (cl-defstruct (sample-node (:constructor sample-node-create)
+                                      (:copier nil))
+             (kind 'leaf)
+             (count 0)
+             (table (make-hash-table :test 'equal)))
+           (cl-defun compute-opt (a &optional (b 10) &key (scale 2) (bonus 0))
+             (+ (* (+ a b) scale) bonus))
+           (let* ((n1 (sample-node-create :kind 'branch))
+                  (n2 (sample-node-create))
+                  (lst (list 10 20 30))
+                  (vec (vector 'a 'b 'c))
+                  (bytes (make-string 4 0))
+                  (al (list (cons 'k1 1) (cons 'k2 2)))
+                  (pl (list :p1 100 :p2 200))
+                  (ht (sample-node-table n1))
+                  (dotted `((alpha . ,(+ 1 2)) (beta . ,(* 2 3)))))
+             (puthash \"init\" 1 ht)
+             (setf (sample-node-count n1) 7
+                   (nth 1 lst) 99
+                   (aref vec 2) 'z
+                   (aref bytes 1) 65
+                   (gethash \"k\" ht) 42
+                   (alist-get 'k1 al) 11
+                   (plist-get pl :p2) 222)
+             (cl-incf (sample-node-count n1) 3)
+             (cl-decf (nth 0 lst) 4)
+             (push 'head lst)
+             (let ((popped (pop lst))
+                   (matched
+                    (pcase (cons \"key\" 15)
+                      (`(,(and (pred stringp) k) . ,(and (pred integerp) (app 1+ v)))
+                       (list k v))
+                      (_ 'miss)))
+                   (looped
+                    (cl-loop for (k v) on '(:a 1 :b 2 :c 3) by #'cddr
+                             collect (cons (symbol-name k) (* v 10))))
+                   (mut-rec
+                    (cl-labels ((even-lp (n) (if (= n 0) t (odd-lp (1- n))))
+                                (odd-lp (n) (if (= n 0) nil (even-lp (1- n)))))
+                      (list (even-lp 6) (odd-lp 6))))
+                   (buf-out
+                    (with-temp-buffer
+                      (insert \"alpha=10\\nbeta=25\\n\")
+                      (goto-char (point-min))
+                      (let ((found nil))
+                        (while (re-search-forward \"\\\\([a-z]+\\\\)=\\\\([0-9]+\\\\)\" nil t)
+                          (push (cons (match-string 1) (string-to-number (match-string 2))) found))
+                        (nreverse found))))
+                   (w-cjk (string-width \"中文abc\"))
+                   (utf8-rt (decode-coding-string (encode-coding-string \"λ-test\" 'utf-8-unix) 'utf-8-unix))
+                   (sha (secure-hash 'sha256 \"eliscript-dual-host\")))
+               (list (list ?a ?\\s ?\\n ?\\t ?\\\" ?\\\\)
+                     (compute-opt 5)
+                     (compute-opt 5 3 :scale 4)
+                     (sample-node-p n1)
+                     (sample-node-kind n1)
+                     (sample-node-kind n2)
+                     (sample-node-count n1)
+                     (hash-table-count (sample-node-table n2))
+                     popped
+                     lst
+                     (aref vec 2)
+                     (aref bytes 1)
+                     (gethash \"k\" ht)
+                     (alist-get 'k1 al)
+                     (plist-get pl :p2)
+                     (alist-get 'alpha dotted)
+                     (alist-get 'beta dotted)
+                     matched
+                     looped
+                     mut-rec
+                     buf-out
+                     w-cjk
+                     utf8-rt
+                     (length sha)))))")
+       (list (list ?a ?\s ?\n ?\t ?\" ?\\)
+             30
+             32
+             t
+             'branch
+             'leaf
+             10
+             0
+             'head
+             '(6 99 30)
+             'z
+             65
+             42
+             11
+             222
+             3
+             6
+             '("key" 16)
+             '((":a" . 10) (":b" . 20) (":c" . 30))
+             '(t nil)
+             '(("alpha" . 10) ("beta" . 25))
+             7
+             "λ-test"
+             64))))))
+
+;; ============================================================================
+;; T14 & T15: Unmodified .el Dual-Host Execution & Differential Verification
+;; ============================================================================
+
+(ert-deftest eliscript-0-1-0-t14-t15-unmodified-elisp-dual-host-execution ()
+  "Verify eliscript-compat-eval-file loads unmodified .el modules and matches native Emacs."
+  (eliscript-compat-tests--run-isolated
+   "T14-01" "T14"
+   (lambda ()
+     (let ((temp-el (make-temp-file "eliscript-dual-host-" nil ".el")))
+       (unwind-protect
+           (progn
+             (with-temp-file temp-el
+               (insert ";;; dual-host-sample.el --- Sample unmodified Elisp module -*- lexical-binding: t; -*-\n"
+                       "(require 'cl-lib)\n"
+                       "(require 'seq)\n"
+                       "(require 'subr-x)\n"
+                       "(defun dual-host-table-layout (rows)\n"
+                       "  (let ((widths nil))\n"
+                       "    (dolist (row rows)\n"
+                       "      (let ((idx 0))\n"
+                       "        (dolist (cell row)\n"
+                       "          (let ((w (string-width (or cell \"\"))))\n"
+                       "            (if (< idx (length widths))\n"
+                       "                (setf (nth idx widths) (max (nth idx widths) w))\n"
+                       "              (setq widths (append widths (list w)))))\n"
+                       "          (setq idx (1+ idx)))))\n"
+                       "    (mapcar (lambda (row)\n"
+                       "              (let ((i -1))\n"
+                       "                (mapconcat (lambda (c)\n"
+                       "                             (setq i (1+ i))\n"
+                       "                             (let ((pad (- (nth i widths) (string-width c))))\n"
+                       "                               (concat c (make-string (max 0 pad) ?\\s))))\n"
+                       "                           row \" | \")))\n"
+                       "            rows)))\n"
+                       "(provide 'dual-host-sample)\n"))
+             (eliscript-compat-eval-file temp-el)
+             (should
+              (equal
+               (eliscript-compat-eval-string
+                "(dual-host-table-layout '((\"字段\" \"值\") (\"status\" \"正常\")))")
+               '("字段   | 值  " "status | 正常"))))
+         (when (file-exists-p temp-el)
+           (delete-file temp-el)))))))
+
+;; ============================================================================
+;; T16: Dual-Host .el -> .mjs Module Compiler & Long-Lived Worker Acceleration
+;; ============================================================================
+
+(ert-deftest eliscript-0-1-0-t16-compile-elisp-module-and-worker-acceleration ()
+  "Verify compiling unmodified .el into .mjs and offloading calls to eliscript-worker with fallback."
+  (eliscript-compat-tests--run-isolated
+   "T16-01" "T16"
+   (lambda ()
+     (let* ((out-dir (expand-file-name "dist/emacs-compat-tests/"
+                                       eliscript-compat--project-directory))
+            (temp-el (progn (make-directory out-dir t)
+                            (make-temp-file (expand-file-name "accel-src-" out-dir) nil ".el")))
+            ;; Generated modules import the `eliscript' package, so they must
+            ;; live inside the project rather than in the system temp directory.
+            (temp-mjs (concat (file-name-sans-extension temp-el) ".mjs"))
+            (temp-eli (concat (file-name-sans-extension temp-el) ".eli"))
+            (worker nil))
+       (unwind-protect
+           (progn
+             (with-temp-file temp-el
+               (insert ";;; accel-sample.el --- Dual-host accelerated module -*- lexical-binding: t; -*-\n"
+                       "(require 'cl-lib)\n"
+                       "(defun eliscript-test-heavy-align (rows)\n"
+                       "  (let ((widths nil))\n"
+                       "    (dolist (row rows)\n"
+                       "      (let ((index 0))\n"
+                       "        (dolist (cell row)\n"
+                       "          (let ((w (string-width (or cell \"\"))))\n"
+                       "            (if (< index (length widths))\n"
+                       "                (setf (nth index widths) (max (nth index widths) w))\n"
+                       "              (setq widths (append widths (list w)))))\n"
+                       "          (setq index (1+ index)))))\n"
+                       "    (list :widths widths :rows (length rows))))\n"
+                       "(provide 'accel-sample)\n"))
+             (load temp-el nil t)
+             (eliscript-compat-compile-elisp-module (list temp-el) temp-mjs)
+             (should (file-exists-p temp-mjs))
+             (should (file-exists-p temp-eli))
+             ;; The intermediate module is real Eliscript, never JavaScript.
+             (should (with-temp-buffer
+                       (insert-file-contents temp-eli)
+                       (goto-char (point-min))
+                       (and (looking-at-p "(module ")
+                            (not (search-forward "(js*" nil t)))))
+             (setq worker (eliscript-worker-start))
+             (let* ((sample-rows '(("名称" "耗时") ("parser" "12ms") ("渲染器" "4ms")))
+                    (native-res (funcall (intern "eliscript-test-heavy-align") sample-rows))
+                    (direct-reply (eliscript-worker-call-sync
+                                   worker temp-mjs "callElisp"
+                                   (list "eliscript-test-heavy-align"
+                                         (prin1-to-string (list sample-rows)))))
+                    (worker-res (eliscript-compat-offload-call
+                                 worker temp-mjs 'eliscript-test-heavy-align sample-rows))
+                    (fallback-res (eliscript-compat-offload-call
+                                   nil temp-mjs 'eliscript-test-heavy-align sample-rows)))
+               ;; The worker itself executed the module function.
+               (should (equal (car (read-from-string direct-reply)) native-res))
+               (should (equal worker-res native-res))
+               (should (equal fallback-res native-res))
+               (eliscript-compat-accelerate-function
+                'eliscript-test-heavy-align temp-mjs (lambda () worker))
+               (should (equal (funcall (intern "eliscript-test-heavy-align") sample-rows)
+                              native-res))
+               (eliscript-worker-stop worker)
+               (setq worker nil)
+               ;; After stopping worker, accelerated function must seamlessly fall back to native Elisp
+               (should (equal (funcall (intern "eliscript-test-heavy-align") sample-rows)
+                              native-res))))
+         (when worker
+           (ignore-errors (eliscript-worker-stop worker)))
+         (dolist (file (list temp-el temp-eli temp-mjs (concat temp-mjs ".map")))
+           (when (file-exists-p file) (delete-file file))))))))
 
 (provide 'eliscript-compat-syntax-tests)
 

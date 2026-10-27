@@ -1,0 +1,302 @@
+(module tests.emacs-compatible-syntax
+  ;; 0.1.0 Emacs-compatible syntax acceptance for the JavaScript runtime.
+  ;; Elisp programs and expectations live in tests/fixtures/emacs-compat/*.el;
+  ;; this module isolates and times each case, compares "oracle" cases with
+  ;; native Emacs, and adds the WASM, package, che and Dual-Host checks.
+  (import "bun:test" test expect)
+  (import "node:child_process" spawnSync)
+  (import "node:fs" existsSync mkdirSync readFileSync readdirSync rmSync writeFileSync)
+  (import "node:module" createRequire)
+  (import "node:path" resolve)
+  (import "node:perf_hooks" performance)
+  (import "node:url" pathToFileURL)
+  (import "../dist/bootstrap/compiler.mjs" compile-string)
+  (import "../runtime/emacs-compat.mjs"
+          callCompatElisp compileCompatElispModule createCompatSession evalCompatProgram
+          getCompatTimingReport invokeCompatFunction resetCompatState
+          runCompatAbiNative runCompatAbiWasm serializeCompatValue)
+
+  (defconst project-root (js-call globalThis.process :cwd))
+  (defconst fixture-directory (resolve project-root "tests/fixtures/emacs-compat"))
+  (defconst emacs-program (or (get (get globalThis.process :env) :EMACS) "emacs"))
+  (defconst che-root (resolve project-root "../termini-platform/che"))
+  (defconst che-files
+    (js-array "lisp/core/che-align.el" "lisp/core/che-session-delta.el"
+              "lisp/core/che-session-restore-codec.el" "lisp/core/che-session-restore-value.el"
+              "lisp/core/che-session-publication-capture.el" "lisp/core/che-session-publication-json.el"
+              "lisp/core/che-mdp.el" "lisp/core/che-context-budget.el" "lisp/cli/che-cli.el"))
+  (defconst che-stub-features
+    (js-array "che-session" "che-context" "che-event" "che-model-capabilities" "che-agent" "che-ui"))
+  (defconst timings (js-array))
+
+  ;; ------------------------------------------------------------------
+  ;; Fixture parsing and isolated, timed execution
+  ;; ------------------------------------------------------------------
+
+  (defun parse-fixture (file)
+    (let ((lines (js-call (readFileSync file "utf8") :split "\n"))
+          (cases (js-array))
+          (current nil)
+          (index 0))
+      (while (< index (js-length lines))
+        (let ((line (js-nth index lines)))
+          (cond
+            ((js-call line :startsWith ";;;; case ")
+              (setq current (js-object :id (js-call (js-call line :slice 10) :trim)
+                                       :code "" :expect undefined :error nil :oracle false
+                                       :file file))
+              (js-call cases :push current))
+            ((nil? current) nil)
+            ((js-call line :startsWith ";;;; expect ")
+              (put current :expect (JSON/parse (js-call line :slice 12))))
+            ((js-call line :startsWith ";;;; error ")
+              (put current :error (js-call (js-call line :slice 11) :trim)))
+            ((= (js-call line :trim) ";;;; oracle")
+              (put current :oracle t))
+            (t (put current :code (str (get current :code) line "\n")))))
+        (setq index (1+ index)))
+      cases))
+
+  (defun fixture-files ()
+    (let ((names (js-call (js-call (readdirSync fixture-directory) :filter
+                                   (lambda (name) (and (js-call name :startsWith "t")
+                                                       (js-call name :endsWith ".el"))))
+                          :sort)))
+      (js-call names :map (lambda (name) (resolve fixture-directory name)))))
+
+  (defun record-timing (id domain started status)
+    (js-call timings :push
+             (js-object :id id :domain domain :status status
+                        :elapsedMs (/ (Math/round (* (- (js-call performance :now) started) 10000)) 10000))))
+
+  (defun run-timed (id domain thunk)
+    (resetCompatState)
+    (let ((started (js-call performance :now))
+          (status "failed"))
+      (try
+        (let ((value (funcall thunk)))
+          (setq status "passed")
+          value)
+        (finally
+          (record-timing id domain started status)
+          (resetCompatState)))))
+
+  (defun error-text (error)
+    (str (get error :message) " " (or (get error :conditionSymbol) "")))
+
+  (defun evaluate-case (entry session)
+    ;; Return {ok, value} or {ok: false, message} without throwing.
+    (try
+      (js-object :ok t
+                 :value (serializeCompatValue
+                         (evalCompatProgram (get entry :code) (js-object :session session))))
+      (catch error (js-object :ok false :message (error-text error)))))
+
+  ;; ------------------------------------------------------------------
+  ;; Native Emacs oracle
+  ;; ------------------------------------------------------------------
+
+  (defun run-emacs-oracle (entries mode provide load)
+    (let* ((payload (JSON/stringify
+                     (js-call entries :map
+                              (lambda (entry) (js-object :id (get entry :id) :code (get entry :code))))))
+           (environment (Object/assign (js-object) (get globalThis.process :env)
+                                       (js-object :ELISCRIPT_ORACLE_CASES payload
+                                                  :ELISCRIPT_ORACLE_MODE mode
+                                                  :ELISCRIPT_ORACLE_PROVIDE (JSON/stringify provide)
+                                                  :ELISCRIPT_ORACLE_LOAD (JSON/stringify load))))
+           (child (spawnSync emacs-program
+                             (js-array "--batch" "-Q" "-L" "editor" "-L" "compiler"
+                                       "-l" "tests/fixtures/emacs-compat/oracle-driver.el")
+                             (js-object :cwd project-root :env environment :encoding "utf8"
+                                        :maxBuffer 67108864))))
+      (unless (= (get child :status) 0)
+        (throw (new globalThis.Error (str "native Emacs oracle failed: "
+                                          (get child :stderr) (get child :stdout)))))
+      (let ((results (new globalThis.Map))
+            (parsed (JSON/parse (js-call (get child :stdout) :trim))))
+        (js-call parsed :forEach (lambda (item) (js-call results :set (get item :id) item)))
+        results)))
+
+  (defvar compat-oracle nil)
+
+  (defun compat-oracle-results ()
+    (when (nil? compat-oracle)
+      (let ((entries (js-array)))
+        (js-call (fixture-files) :forEach
+                 (lambda (file)
+                   (js-call (parse-fixture file) :forEach
+                            (lambda (entry) (when (get entry :oracle) (js-call entries :push entry))))))
+        (setq compat-oracle (run-emacs-oracle entries "compat" (js-array) (js-array)))))
+    compat-oracle)
+
+  (defun check-case (entry)
+    (let* ((domain (js-call (get entry :id) :slice 0 3))
+           (outcome (run-timed (get entry :id) domain
+                               (lambda () (evaluate-case entry (createCompatSession))))))
+      (if (get entry :error)
+          (progn
+            (js-call (expect (get outcome :ok)) :toBe false)
+            (js-call (expect (get outcome :message)) :toMatch
+                     (new globalThis.RegExp (get entry :error) "i")))
+        (progn
+          (unless (get outcome :ok)
+            (throw (new globalThis.Error (str (get entry :id) " failed: " (get outcome :message)))))
+          (unless (undefined? (get entry :expect))
+            (js-call (expect (get outcome :value)) :toEqual (get entry :expect)))))
+      (when (get entry :oracle)
+        (let ((native (js-call (compat-oracle-results) :get (get entry :id))))
+          (js-call (expect (get native :ok)) :toBe (get outcome :ok))
+          (when (get outcome :ok)
+            (js-call (expect (get outcome :value)) :toEqual (get native :value)))))))
+
+  ;; One Bun test per fixture case: T01-T11 and T13.
+  (js-call (fixture-files) :forEach
+           (lambda (file)
+             (js-call (parse-fixture file) :forEach
+                      (lambda (entry)
+                        (test (str (get entry :id) ": " (js-call (get entry :file) :slice
+                                                                 (1+ (js-length fixture-directory))))
+                              (lambda () (check-case entry)))))))
+
+  ;; ------------------------------------------------------------------
+  ;; T10: WebAssembly and ARM64 Native ABI kernels
+  ;; ------------------------------------------------------------------
+
+  (defconst abi-source
+    (str "(require 'eliscript) (require 'eliscript-abi)\n"
+         "(defun hyp-sq (a b) (declare (eliscript :abi :numeric-f64 :export \"hyp_sq\"\n"
+         "  :params ((a :f64) (b :f64)) :returns :f64)) (+ (* a a) (* b b)))\n"
+         "(defun mem-checksum (offset) (declare (eliscript :abi :memory-u32 :export \"mem_checksum\"\n"
+         "  :params ((offset :u32)) :returns :u32)) (mem-store-u32 offset 305419896)\n"
+         "  (word-add (mem-load-u32 offset) 1))\n"))
+
+  (test "T10-02: :abi kernels execute on WebAssembly and ARM64 Native"
+        (async ()
+          (resetCompatState)
+          (let ((started (js-call performance :now)))
+            (js-call (expect (await (runCompatAbiWasm abi-source "hyp_sq" (js-array 3.0 4.0)))) :toBe 25)
+            (js-call (expect (unsigned-bit-shift-right
+                              (await (runCompatAbiWasm abi-source "mem_checksum" (js-array 64))) 0))
+                     :toBe 305419897)
+            (js-call (expect (await (runCompatAbiNative abi-source "hyp_sq" (js-array 3.0 4.0)))) :toBe 25)
+            (record-timing "T10-02" "T10" started "passed"))))
+
+  ;; ------------------------------------------------------------------
+  ;; T14/T15: unmodified che modules and native Emacs differential oracle
+  ;; ------------------------------------------------------------------
+
+  (defun che-available ()
+    (existsSync (resolve che-root "lisp/core/che-align.el")))
+
+  (defun che-absolute-files ()
+    (js-call che-files :map (lambda (relative) (resolve che-root relative))))
+
+  (defun che-session ()
+    (let ((session (createCompatSession)))
+      (js-call (che-absolute-files) :forEach
+               (lambda (file) (evalCompatProgram (readFileSync file "utf8") (js-object :session session))))
+      session))
+
+  (test "T14-01 & T15-01: unmodified che modules load and match native Emacs"
+        (lambda ()
+          (when (che-available)
+            (run-timed "T15-01" "T15"
+                       (lambda ()
+                         (let* ((probes (parse-fixture (resolve fixture-directory "che-probes.el")))
+                                (native (run-emacs-oracle probes "native" che-stub-features
+                                                          (che-absolute-files)))
+                                (session (che-session)))
+                           (js-call probes :forEach
+                                    (lambda (probe)
+                                      (let ((actual (evaluate-case probe session))
+                                            (expected (js-call native :get (get probe :id))))
+                                        (unless (get expected :ok)
+                                          (throw (new globalThis.Error
+                                                      (str (get probe :id) " native failure: "
+                                                           (get expected :error)))))
+                                        (unless (get actual :ok)
+                                          (throw (new globalThis.Error
+                                                      (str (get probe :id) " failed: " (get actual :message)))))
+                                        (js-call (expect (js-array (get probe :id) (get actual :value))) :toEqual
+                                                 (js-array (get probe :id) (get expected :value))))))))))))
+
+  ;; ------------------------------------------------------------------
+  ;; T16: Dual-Host .el -> Eliscript module -> .mjs, and Worker entry points
+  ;; ------------------------------------------------------------------
+
+  (defconst fallback-align-source
+    (str "(defun che-align-column-widths (rows)\n"
+         "  (let ((widths nil))\n"
+         "    (dolist (row rows)\n"
+         "      (let ((index 0))\n"
+         "        (dolist (cell row)\n"
+         "          (let ((w (string-width (or cell \"\"))))\n"
+         "            (if (< index (length widths))\n"
+         "                (setf (nth index widths) (max (nth index widths) w))\n"
+         "              (setq widths (append widths (list w)))))\n"
+         "          (setq index (1+ index)))))\n"
+         "    widths))\n"))
+
+  (test "T16-01: compileCompatElispModule emits an Eliscript module that compiles and runs"
+        (lambda ()
+          (run-timed "T16-01" "T16"
+                     (lambda ()
+                       (let* ((source (if (che-available)
+                                          (str (readFileSync (resolve che-root "lisp/core/che-align.el") "utf8") "\n"
+                                               (readFileSync (resolve che-root "lisp/core/che-mdp.el") "utf8"))
+                                        fallback-align-source))
+                              (module-source (compileCompatElispModule source
+                                                                       (js-object :moduleName "tests.generated.che-accelerated")))
+                              (directory (resolve project-root "dist/emacs-compat-tests"))
+                              (output (resolve directory "che-accelerated.mjs")))
+                         (js-call (expect (js-call module-source :startsWith "(module ")) :toBe t)
+                         (js-call (expect (js-call module-source :includes (str "(js" "*"))) :toBe false)
+                         (js-call (expect (js-call module-source :includes "callElisp")) :toBe t)
+                         (mkdirSync directory (js-object :recursive t))
+                         (try
+                           (progn
+                             (writeFileSync output (compile-string module-source "che-accelerated.eli") "utf8")
+                             (let* ((loaded (funcall (createRequire (get (pathToFileURL output) :href)) output))
+                                    (rows (js-array (js-array "模块名称" "编译状态" "双端一致性")
+                                                    (js-array "che-align.el" "direct-mjs" "100% 通过")
+                                                    (js-array "che-session-restore-codec.el" "direct-mjs" "SHA-256 链一致"))))
+                               (js-call (expect (js-call (funcall (get loaded :elispFunctions)) :includes
+                                                         "che-align-column-widths"))
+                                        :toBe t)
+                               (js-call (expect (serializeCompatValue
+                                                 (funcall (get loaded :invokeElisp) "che-align-column-widths" rows)))
+                                        :toEqual (js-array 28 10 14))
+                               (js-call (expect (funcall (get loaded :callElisp) "che-align-column-widths"
+                                                         "(((\"中文\" \"abc\") (\"a\" \"测试值\")))"))
+                                        :toBe "(4 6)")))
+                           (finally
+                             (rmSync output (js-object :force t))))
+                         ;; The same entry points work directly on a session.
+                         (let ((session (createCompatSession)))
+                           (evalCompatProgram fallback-align-source (js-object :session session))
+                           (js-call (expect (callCompatElisp session "che-align-column-widths" "(((\"ab\" \"中\")))"))
+                                    :toBe "(2 2)")
+                           (js-call (expect (serializeCompatValue
+                                             (invokeCompatFunction session "che-align-column-widths"
+                                                                   (js-array (js-array (js-array "x" "yy"))))))
+                                    :toEqual (js-array 1 2))))))))
+
+  ;; ------------------------------------------------------------------
+  ;; T12: package surface and per-case timing telemetry (runs last)
+  ;; ------------------------------------------------------------------
+
+  (test "T12-01: package exports the runtime and every case recorded a passing timing"
+        (lambda ()
+          (let ((manifest (JSON/parse (readFileSync (resolve project-root "package.json") "utf8")))
+                (report (getCompatTimingReport timings)))
+            (js-call (expect (get (get manifest :exports) "./runtime/emacs-compat")) :toBe "./runtime/emacs-compat.mjs")
+            (js-call (expect (get (get manifest :exports) "./runtime/emacs-compat.mjs")) :toBe "./runtime/emacs-compat.mjs")
+            (js-call (expect (>= (js-length timings) 100)) :toBe t)
+            (js-call timings :forEach
+                     (lambda (entry)
+                       (js-call (expect (= (value-type (get entry :elapsedMs)) "number")) :toBe t)
+                       (js-call (expect (get entry :status)) :toBe "passed")))
+            (js-call (expect (get report :totalTests)) :toBe (js-length timings))
+            (js-call globalThis.console :log
+                     (JSON/stringify (js-object :timingReport report)))))))

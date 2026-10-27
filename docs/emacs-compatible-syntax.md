@@ -496,7 +496,53 @@
 
 ---
 
-## 十三、 关联技术规格参考
+## 十三、 原装 `.el` 双端共用（Dual-Host）与常驻 Worker 加速
+
+同一份未经修改的 Emacs Lisp 源文件，可以同时在原生 Emacs 与 Eliscript JavaScript 运行时中执行，并可交给常驻 Worker 加速。兼容运行时 `eliscript/runtime/emacs-compat` 本身是 Eliscript 源码（`runtime/emacs-compat.eli`）编译的产物，不含手写 JavaScript。
+
+### 13.1 JavaScript 端直接执行
+
+```js
+import { createCompatSession, evalCompatProgram, invokeCompatFunction,
+         callCompatElisp, serializeCompatValue } from "eliscript/runtime/emacs-compat";
+
+const session = createCompatSession();
+evalCompatProgram(sourceOfUnmodifiedEl, { session });          // 按依赖顺序加载 .el
+serializeCompatValue(invokeCompatFunction(session, "che-align-column-widths", [rows]));
+callCompatElisp(session, "che-align-column-widths", '((("中文" "abc")))');  // => "(4 2)" 之类的打印文本
+```
+
+- 覆盖范围：完整 Emacs 读取器（`?` 字符、八/十六进制与 `\u` 转义、`#x/#o/#b/#NrN`、`#s(...)`、点对与反引号嵌套）、Lisp-2 与动态/词法作用域、`&optional/&rest/&key/&aux` 参数、`setf/cl-incf/cl-decf/push/pop/cl-pushnew` 广义位置（变量、`car/cdr/c[ad]+r`、`nth`、`aref`（含字符串变量原位替换）、`gethash`、`alist-get`、`plist-get`、`get`、结构体槽位）、`cl-defstruct`（关键字与 BOA 构造器、`:include`、`:copier`、`:predicate`、`:conc-name`、逐实例默认值）、`pcase` 全模式、`cl-loop`、`cl-labels/cl-flet`、`condition-case`/`define-error`、`with-temp-buffer` 虚拟 Buffer、Emacs 正则（`string-match`、`replace-regexp-in-string`、`split-string`、`re-search-forward`、`rx`）、CJK 显示宽度、UTF-8 字节串、`secure-hash 'sha256`、`json-parse-string`/`json-serialize`/`json-encode`。
+- 值表示：`nil`→`null`、`t`→`true`、整值浮点装箱以保留 `1.0` 与 `1` 的区别；`serializeCompatValue` 把点对 `(a . b)` 序列化为 `[a, b]`，与差分预言机的规范化一致。
+- 已知限制：没有文件系统与子进程（`insert-file-contents`、`call-process` 不可用）；超出 Unicode 的 Emacs 内部字符（`#x110000` 以上）映射为 U+FFFF；文本属性被忽略；仅支持 `sha256`。
+
+### 13.2 `.el` → Eliscript 模块 → `.mjs`
+
+`compileCompatElispModule(source, { moduleName })`（JS）与 `eliscript-compat-compile-elisp-module`（Emacs）产出同一形态的 **Eliscript 模块源码**：内嵌原装 Elisp 文本，加载时在独立会话中求值，并导出：
+
+| 导出 | 含义 |
+| --- | --- |
+| `callElisp(name, argsText)` | 参数与返回值均为 Elisp 打印文本，供 Worker 无损往返 |
+| `invokeElisp(name, ...args)` | 直接以 JS 值调用（数组视为列表） |
+| `elispFunctions()` | 源码顶层定义的函数名 |
+
+该模块再由 Eliscript 编译器生成 `.mjs`（Emacs 端用 `eliscript-compile-file`，JS 端用 `eliscript/compiler` 的 `compile_string`）。生成物会导入 `eliscript` 包，因此必须放在能解析该包的项目目录内。
+
+### 13.3 Emacs 端 Worker 加速与回退
+
+```elisp
+(eliscript-compat-compile-elisp-module '("che-align.el") "build/che-align.mjs")
+(eliscript-compat-offload-call worker "build/che-align.mjs" 'che-align-column-widths rows)
+(eliscript-compat-accelerate-function 'che-align-column-widths "build/che-align.mjs"
+                                      (lambda () my-worker))
+```
+
+- `eliscript-compat-offload-call` 经 `eliscript-worker-call-sync` 调用导出 `callElisp`；Worker 不存在、已停止或调用失败时，自动执行原生 Emacs 定义。
+- `eliscript-compat-accelerate-function` 为现有函数安装透明包装，可选谓词决定哪些调用值得卸载；`eliscript-compat-reset-state!` 会恢复原始定义。
+
+---
+
+## 十四、 关联技术规格参考
 
 本规范建立在仓库现有编译器、运行时与持久数据结构的工程积累之上，并将公开语法统一收敛到 100% Emacs 兼容内核与显式扩展体系：
 

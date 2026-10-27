@@ -270,6 +270,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
          (process-environment (copy-sequence process-environment))
          (runtime (or (getenv "ELISCRIPT_JS_RUNTIME") "node"))
          (tools '(("runtime/math.eli" . "runtime/math.mjs")
+                  ("runtime/emacs-compat.eli" . "runtime/emacs-compat.mjs")
                   ("runtime/unicode-case-data.eli" . "runtime/unicode-case-data.mjs")
                   ("runtime/unicode-case.eli" . "runtime/unicode-case.mjs")
                   ("tools/project/project.eli" . "bootstrap/host/project.mjs")
@@ -384,6 +385,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
     (when include-tests
       (setq tools (append tools
                           '(("tests/eliscript/bootstrap-compiler.eli" . "tests/bootstrap-compiler.test.mjs")
+                            ("tests/eliscript/emacs-compatible-syntax.eli" . "tests/emacs-compatible-syntax.test.mjs")
                             ("tests/eliscript/bootstrap-seed-batch.eli" . "tests/bootstrap-seed-batch.test.mjs")
                             ("tests/eliscript/bootstrap-seed-proxy.eli" . "tests/helpers/bootstrap-seed-proxy.mjs")
                             ("tests/eliscript/bootstrap-published-probe.eli" . "tests/helpers/bootstrap-published-probe.mjs")
