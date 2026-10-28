@@ -1,2 +1,86 @@
-(module capsules.tests.pages-site.test
-  (js* "import { expect, test } from \"bun:test\";\nimport { access, readFile } from \"node:fs/promises\";\nimport path from \"node:path\";\nimport { fileURLToPath } from \"node:url\";\n\nconst ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), \"..\");\n\n// The site's script is a build artifact rather than a source file.\nconst GENERATED_ASSETS = Object.freeze([\"assets/eliscript-loader.js\", \"pages/assets/eliscript-loader.js\"]);\nconst SITE_FILES = [\n  \"docs/index.html\",\n  \"docs/pages/api.html\",\n  \"docs/pages/getting-started.html\",\n  \"docs/pages/language.html\",\n  \"docs/pages/playground.html\",\n  \"docs/pages/publishing.html\",\n  \"docs/pages/roadmap.html\",\n  \"docs/pages/specifications.html\",\n];\n\nfunction attributes(source, name) {\n  const pattern = new RegExp(`\\\\s${name}=\"([^\"]+)\"`, \"gu\");\n  return [...source.matchAll(pattern)].map((match) => match[1]);\n}\n\nfunction localReference(value) {\n  return !value.startsWith(\"#\") &&\n    !value.startsWith(\"data:\") &&\n    !/^[a-z][a-z0-9+.-]*:/iu.test(value);\n}\n\ntest(\"Pages site has complete local navigation and assets\", async () => {\n  const sources = new Map();\n  for (const file of SITE_FILES) {\n    sources.set(file, await readFile(path.join(ROOT, file), \"utf8\"));\n  }\n\n  for (const [file, source] of sources) {\n    const ids = new Set(attributes(source, \"id\"));\n    expect(source).toContain(\"<meta name=\\\"viewport\\\"\");\n    expect(source).toContain(\"specifications.html\");\n    expect(source).toContain(\"data-year\");\n    expect(source).toContain(\"data-version\");\n    expect(source).toContain(\"data-version-github\");\n    expect(source).toContain(\"data-version-npm\");\n    expect(source).toContain(\"https://github.com/liuchong/eliscript/releases/tag/v0.1.0\");\n    expect(source).toContain(\"https://www.npmjs.com/package/eliscript/v/0.1.0\");\n    expect(source).toContain(\"v0.1.0\");\n\n    for (const reference of [\n      ...attributes(source, \"href\"),\n      ...attributes(source, \"src\"),\n    ]) {\n      if (reference.startsWith(\"#\")) {\n        expect(ids.has(reference.slice(1))).toBe(true);\n        continue;\n      }\n      if (!localReference(reference)) continue;\n      const target = reference.split(/[?#]/u, 1)[0];\n      if (GENERATED_ASSETS.includes(target)) {\n        // The loader is compiled from Eliscript by `bun run build:docs-site`\n        // and published by the assembler, so it is not a file in the source\n        // tree. The page names the source it compiles, and that file is\n        // checked below.\n        const declared = attributes(source, \"data-eliscript\");\n        expect(declared.length).toBeGreaterThan(0);\n        for (const candidate of declared) {\n          await access(path.resolve(ROOT, path.dirname(file), candidate));\n        }\n        continue;\n      }\n      await access(path.resolve(ROOT, path.dirname(file), target));\n    }\n  }\n});\n\ntest(\"Pages site presents the current core status\", async () => {\n  const combined = (await Promise.all(SITE_FILES.map((file) =>\n    readFile(path.join(ROOT, file), \"utf8\")))).join(\"\\n\");\n\n  expect(combined).toContain(\"35/35\");\n  expect(combined).toContain(\"598\");\n  expect(combined).toContain(\"Persistent collections\");\n  expect(combined).toContain(\"General automatic tail-call optimization\");\n  expect(combined).not.toContain(\"M0 through M5 are complete\");\n  expect(combined).not.toContain(\"Lists and vectors currently share an array representation\");\n  expect(combined).not.toContain(\"29-module API index\");\n  expect(combined).not.toContain(\"M13</span><div><h3>Real-world proof</h3>\");\n});\n"))
+(module tests.pages-site.test
+  (import "bun:test" expect test)
+  (import "node:fs/promises" access readFile)
+  (import "node:path" dirname join resolve)
+
+  (defconst ROOT (resolve (js-call globalThis.process :cwd)))
+  (defconst GENERATED_ASSETS
+    (Object/freeze (js-array "assets/eliscript-loader.js" "pages/assets/eliscript-loader.js")))
+  (defconst SITE_FILES (js-array
+    "docs/index.html"
+    "docs/pages/api.html"
+    "docs/pages/getting-started.html"
+    "docs/pages/language.html"
+    "docs/pages/playground.html"
+    "docs/pages/publishing.html"
+    "docs/pages/roadmap.html"
+    "docs/pages/specifications.html"))
+
+  (defun attributes (source name)
+    (let ((pattern (new globalThis.RegExp (+ "\\s" name "=\"([^\"]+)\"") "gu")))
+      (js-call (Array/from (js-call source :matchAll pattern))
+               :map (lambda (m) (aref m 1)))))
+
+  (defun localReference (value)
+    (let ((scheme-re (new globalThis.RegExp "^[a-z][a-z0-9+.-]*:" "iu")))
+      (and (not (js-call value :startsWith "#"))
+           (not (js-call value :startsWith "data:"))
+           (not (js-call scheme-re :test value)))))
+
+  (test "Pages site has complete local navigation and assets"
+    (async ()
+      (let ((sources (new globalThis.Map))
+            (file-idx 0))
+        (while (< file-idx (js-length SITE_FILES))
+          (let ((file (aref SITE_FILES file-idx)))
+            (js-call sources :set file (await (readFile (join ROOT file) "utf8"))))
+          (setq file-idx (1+ file-idx)))
+        (let ((entries (Array/from (js-call sources :entries)))
+              (entry-idx 0))
+          (while (< entry-idx (js-length entries))
+            (let* ((entry (aref entries entry-idx))
+                   (file (aref entry 0))
+                   (source (aref entry 1))
+                   (ids (new globalThis.Set (attributes source "id"))))
+              (js-call (expect source) :toContain "<meta name=\"viewport\"")
+              (js-call (expect source) :toContain "specifications.html")
+              (js-call (expect source) :toContain "data-year")
+              (js-call (expect source) :toContain "data-version")
+              (js-call (expect source) :toContain "data-version-github")
+              (js-call (expect source) :toContain "data-version-npm")
+              (js-call (expect source) :toContain "https://github.com/liuchong/eliscript/releases/tag/v0.1.1")
+              (js-call (expect source) :toContain "https://www.npmjs.com/package/eliscript/v/0.1.1")
+              (js-call (expect source) :toContain "v0.1.1")
+              (let ((references (js-call (attributes source "href") :concat (attributes source "src")))
+                    (ref-idx 0))
+                (while (< ref-idx (js-length references))
+                  (let ((reference (aref references ref-idx)))
+                    (if (js-call reference :startsWith "#")
+                        (js-call (expect (js-call ids :has (js-call reference :slice 1))) :toBe t)
+                      (when (localReference reference)
+                        (let ((target (aref (js-call reference :split (new globalThis.RegExp "[?#]" "u") 1) 0)))
+                          (if (js-call GENERATED_ASSETS :includes target)
+                              (let ((declared (attributes source "data-eliscript"))
+                                    (cand-idx 0))
+                                (js-call (expect (js-length declared)) :toBeGreaterThan 0)
+                                (while (< cand-idx (js-length declared))
+                                  (await (access (resolve ROOT (dirname file) (aref declared cand-idx))))
+                                  (setq cand-idx (1+ cand-idx))))
+                            (await (access (resolve ROOT (dirname file) target))))))))
+                  (setq ref-idx (1+ ref-idx)))))
+            (setq entry-idx (1+ entry-idx)))))))
+
+  (test "Pages site presents the current core status"
+    (async ()
+      (let* ((contents (await (Promise/all
+                                (js-call SITE_FILES :map
+                                  (lambda (file) (readFile (join ROOT file) "utf8"))))))
+             (combined (js-call contents :join "\n")))
+        (js-call (expect combined) :toContain "35/35")
+        (js-call (expect combined) :toContain "598")
+        (js-call (expect combined) :toContain "Persistent collections")
+        (js-call (expect combined) :toContain "General automatic tail-call optimization")
+        (js-call (get (expect combined) :not) :toContain "M0 through M5 are complete")
+        (js-call (get (expect combined) :not) :toContain "Lists and vectors currently share an array representation")
+        (js-call (get (expect combined) :not) :toContain "29-module API index")
+        (js-call (get (expect combined) :not) :toContain "M13</span><div><h3>Real-world proof</h3>")))))

@@ -1,2 +1,167 @@
-(module capsules.tests.docs-site.test
-  (js* "import { afterAll, beforeAll, expect, test } from \"bun:test\";\nimport { chromium } from \"playwright-core\";\nimport { mkdtemp, readFile, rm } from \"node:fs/promises\";\nimport { resolve } from \"node:path\";\n\nimport { assemblePages } from \"../tools/pages/assemble.mjs\";\nimport { buildPagesInputs } from \"./helpers/pages-build.mjs\";\nimport { serveTree } from \"../tools/browser/matrix.mjs\";\n\n// The documentation site's script is compiled from Eliscript. Its source is a\n// program, so the checks that matter are the behaviours the pages declare:\n// switching an example, choosing a language tab, filtering the API index, and\n// stamping the year. A script that loads but does nothing passes none of them.\n\nconst ROOT = resolve(import.meta.dir, \"..\");\nconst PORT = 8903;\n\nlet staging;\nlet artifact;\nlet server;\nlet available = true;\n\nbeforeAll(async () => {\n  await buildPagesInputs();\n\n  staging = await mkdtemp(resolve(ROOT, \".eliscript-docs-site-\"));\n  artifact = resolve(staging, \"site\");\n  await assemblePages({ root: ROOT, outDir: artifact });\n  server = await serveTree(artifact, PORT);\n  try {\n    const browser = await chromium.launch();\n    await browser.close();\n  } catch {\n    available = false;\n  }\n});\n\nafterAll(async () => {\n  if (server) server.stop();\n  if (staging) await rm(staging, { recursive: true, force: true });\n});\n\ntest(\"the site publishes a loader and the source it compiles\", async () => {\n  const loader = await readFile(resolve(artifact, \"pages/assets/eliscript-loader.js\"), \"utf8\");\n  // The pages load it with `defer`, so it must be a classic script with\n  // nothing left to resolve. It is compiled from Eliscript like everything\n  // else: the repository has no handwritten JavaScript beside the site.\n  expect(loader).not.toMatch(/^\\s*import\\s/mu);\n  expect(loader.startsWith(\"(\")).toBe(true);\n  await expect(readFile(resolve(ROOT, \"docs/pages/assets/site.js\"), \"utf8\"))\n    .rejects.toThrow();\n\n  // The behaviours ship as source where the pages live, and the loader is what\n  // compiles them in the browser.\n  const source = await readFile(resolve(artifact, \"pages/site.eli\"), \"utf8\");\n  expect(source).toContain(\"(module docs.site\");\n\n  // A reader looking at the page's source sees the Eliscript it runs, not only\n  // a script file: every page names the source it asks the loader to compile.\n  for (const path of [\"index.html\", \"pages/language.html\", \"pages/api.html\"]) {\n    const html = await readFile(resolve(artifact, path), \"utf8\");\n    expect(html).toMatch(/data-eliscript=\"[^\"]*site\\.eli\"/u);\n    expect(html).toContain(\"eliscript-loader.js\");\n    expect(html).not.toContain(\"assets/site.js\");\n  }\n  expect(await readFile(resolve(ROOT, \"docs/pages/loader.eli\"), \"utf8\"))\n    .toContain(\"(module docs.loader\");\n});\n\ntest(\"the served pages stamp the script with its digest\", async () => {\n  const page = await readFile(resolve(artifact, \"index.html\"), \"utf8\");\n  expect(page).toMatch(/assets\\/eliscript-loader\\.js\\?v=[0-9a-f]{12}/u);\n  expect(page).toMatch(/assets\\/site\\.css\\?v=[0-9a-f]{12}/u);\n});\n\n/** Opens one page of the deployed site with a fresh browser context. */\nasync function withPage(path, verify) {\n  if (!available) return;\n  const browser = await chromium.launch();\n  try {\n    const page = await browser.newPage();\n    const failed = [];\n    const requests = [];\n    page.on(\"pageerror\", (error) => failed.push(String(error).slice(0, 160)));\n    page.on(\"request\", (request) => requests.push(request.url()));\n    await page.goto(`${server.origin}${path}`, { waitUntil: \"networkidle\" });\n    await verify(page, requests);\n    expect(failed).toEqual([]);\n  } finally {\n    await browser.close();\n  }\n}\n\ntest(\"the page compiles the source in the browser\", async () => {\n  await withPage(\"index.html\", async (page, requests) => {\n    // The loader fetches the Eliscript source and the compiler the site\n    // already serves for its playground, rather than shipping the behaviours\n    // compiled.\n    expect(requests.some((url) => url.endsWith(\"/site.eli\"))).toBe(true);\n    expect(requests.some((url) => url.includes(\"browser/worker.mjs\"))).toBe(true);\n    expect(requests.some((url) => url.includes(\"dist/browser/compiler.js\"))).toBe(true);\n  });\n});\n\ntest(\"every page opens with the same band as the home page\", async () => {\n  // The band is what tells a reader a page finished loading. It is the same\n  // photograph, darkened once, with the heading in white.\n  for (const path of [\"index.html\", \"pages/language.html\", \"pages/api.html\",\n                      \"pages/getting-started.html\"]) {\n    await withPage(path, async (page) => {\n      const band = await page.evaluate(() => {\n        const hero = document.querySelector(\".hero, .doc-hero\");\n        if (!hero) return null;\n        const heading = hero.querySelector(\"h1\");\n        return {\n          image: getComputedStyle(hero).backgroundImage.includes(\"eliscript-hero.jpg\"),\n          overlay: getComputedStyle(hero, \"::before\").backgroundColor,\n          heading: getComputedStyle(heading).color,\n          height: Math.round(hero.getBoundingClientRect().height),\n        };\n      });\n      expect(band).not.toBeNull();\n      expect(band.image).toBe(true);\n      expect(band.height).toBeGreaterThan(200);\n      expect(band.heading).toBe(\"rgb(255, 255, 255)\");\n      // A dark overlay, so the photograph never decides whether the heading is\n      // readable.\n      expect(band.overlay).toMatch(/rgba\\(8, 9, 8, [0-9.]+\\)/u);\n    });\n  }\n});\n\ntest(\"the example switcher replaces the source and the output\", async () => {\n  await withPage(\"index.html\", async (page) => {\n    const before = await page.locator(\"[data-source-code]\").innerText();\n    await page.locator('[data-example=\"interop\"]').click();\n    await page.waitForTimeout(120);\n    const after = await page.locator(\"[data-source-code]\").innerText();\n    expect(after).not.toBe(before);\n    expect(after).toContain(\"js-call\");\n    expect(await page.locator(\"[data-output-code]\").innerText()).toContain(\"native container\");\n    expect(await page.locator('[data-example=\"interop\"]').getAttribute(\"aria-selected\"))\n      .toBe(\"true\");\n  });\n});\n\ntest(\"the language tabs switch the visible panel\", async () => {\n  await withPage(\"pages/language.html\", async (page) => {\n    const tabs = page.locator(\"[data-language-tab]\");\n    const count = await tabs.count();\n    expect(count).toBeGreaterThan(1);\n    const second = tabs.nth(1);\n    const target = await second.getAttribute(\"data-language-tab\");\n    await second.click();\n    await page.waitForTimeout(120);\n    const panel = page.locator(`[data-language-panel=\"${target}\"]`);\n    expect(await panel.isVisible()).toBe(true);\n    expect(await second.getAttribute(\"aria-selected\")).toBe(\"true\");\n  });\n});\n\ntest(\"the API filter hides modules and updates its count\", async () => {\n  await withPage(\"pages/api.html\", async (page) => {\n    const input = page.locator(\"[data-api-search]\");\n    const count = page.locator(\"[data-api-count]\");\n    expect(await count.innerText()).toMatch(/\\d+ modules?/u);\n\n    await input.fill(\"map\");\n    await page.waitForTimeout(150);\n    const filtered = await count.innerText();\n    const visible = await page.locator(\"[data-api-module]:not([hidden])\").count();\n    expect(visible).toBeGreaterThan(0);\n    expect(filtered).toContain(String(visible));\n\n    await input.fill(\"zzz-nothing-matches\");\n    await page.waitForTimeout(150);\n    expect(await page.locator(\"[data-api-module]:not([hidden])\").count()).toBe(0);\n  });\n});\n\ntest(\"the footer year is stamped from the clock\", async () => {\n  await withPage(\"index.html\", async (page) => {\n    const year = await page.evaluate(() => new Date().getFullYear());\n    expect(await page.locator(\"[data-year]\").first().innerText()).toContain(String(year));\n    expect(await page.locator(\"[data-version]\").first().textContent()).toBe(\"v0.1.0\");\n    expect(await page.locator(\"[data-version-github]\").first().getAttribute(\"href\"))\n      .toBe(\"https://github.com/liuchong/eliscript/releases/tag/v0.1.0\");\n    expect(await page.locator(\"[data-version-npm]\").first().getAttribute(\"href\"))\n      .toBe(\"https://www.npmjs.com/package/eliscript/v/0.1.0\");\n  });\n});\n"))
+(module tests.docs-site.test
+  (import "bun:test" afterAll beforeAll expect test)
+  (import "playwright-core" chromium)
+  (import "node:fs/promises" mkdtemp readFile rm)
+  (import "node:path" resolve)
+  (import "../tools/pages/assemble.mjs" assemblePages)
+  (import "./helpers/pages-build.mjs" buildPagesInputs)
+  (import "../tools/browser/matrix.mjs" serveTree)
+
+  (defconst ROOT (resolve (js-call globalThis.process :cwd)))
+  (defconst PORT 8903)
+
+  (defvar staging nil)
+  (defvar artifact nil)
+  (defvar server nil)
+  (defvar available t)
+
+  (beforeAll
+    (async ()
+      (await (buildPagesInputs))
+      (setq staging (await (mkdtemp (resolve ROOT ".eliscript-docs-site-"))))
+      (setq artifact (resolve staging "site"))
+      (await (assemblePages (js-object :root ROOT :outDir artifact)))
+      (setq server (await (serveTree artifact PORT)))
+      (try
+        (let ((browser (await (js-call chromium :launch))))
+          (await (js-call browser :close)))
+        (catch err
+          (setq available false)))))
+
+  (afterAll
+    (async ()
+      (when server
+        (js-call server :stop))
+      (when staging
+        (await (rm staging (js-object :recursive t :force t))))))
+
+  (test "the site publishes a loader and the source it compiles"
+    (async ()
+      (let ((loader (await (readFile (resolve artifact "pages/assets/eliscript-loader.js") "utf8"))))
+        (js-call (get (expect loader) :not) :toMatch (new globalThis.RegExp "^\\s*import\\s" "mu"))
+        (js-call (expect (js-call loader :startsWith "(")) :toBe t)
+        (await (js-call (get (expect (readFile (resolve ROOT "docs/pages/assets/site.js") "utf8")) :rejects)
+                        :toThrow))
+        (let ((source (await (readFile (resolve artifact "pages/site.eli") "utf8"))))
+          (js-call (expect source) :toContain "(module docs.site"))
+        (let ((paths (js-array "index.html" "pages/language.html" "pages/api.html"))
+              (idx 0))
+          (while (< idx (js-length paths))
+            (let ((html (await (readFile (resolve artifact (aref paths idx)) "utf8"))))
+              (js-call (expect html) :toMatch (new globalThis.RegExp "data-eliscript=\"[^\"]*site\\.eli\"" "u"))
+              (js-call (expect html) :toContain "eliscript-loader.js")
+              (js-call (get (expect html) :not) :toContain "assets/site.js"))
+            (setq idx (1+ idx))))
+        (js-call (expect (await (readFile (resolve ROOT "docs/pages/loader.eli") "utf8")))
+                 :toContain "(module docs.loader"))))
+
+  (test "the served pages stamp the script with its digest"
+    (async ()
+      (let ((page (await (readFile (resolve artifact "index.html") "utf8"))))
+        (js-call (expect page) :toMatch (new globalThis.RegExp "assets/eliscript-loader\\.js\\?v=[0-9a-f]{12}" "u"))
+        (js-call (expect page) :toMatch (new globalThis.RegExp "assets/site\\.css\\?v=[0-9a-f]{12}" "u")))))
+
+  (defasync withPage (path verify)
+    (when available
+      (let ((browser (await (js-call chromium :launch))))
+        (try
+          (let ((page (await (js-call browser :newPage)))
+                (failed (js-array))
+                (requests (js-array)))
+            (js-call page :on "pageerror"
+              (lambda (error)
+                (js-call failed :push (js-call (str error) :slice 0 160))))
+            (js-call page :on "request"
+              (lambda (request)
+                (js-call requests :push (js-call request :url))))
+            (await (js-call page :goto (+ (get server :origin) path) (js-object :waitUntil "networkidle")))
+            (await (funcall verify page requests))
+            (js-call (expect failed) :toEqual (js-array)))
+          (finally
+            (await (js-call browser :close)))))))
+
+  (test "the page compiles the source in the browser"
+    (async ()
+      (await (withPage "index.html"
+        (async (page requests)
+          (js-call (expect (js-call requests :some (lambda (url) (js-call url :endsWith "/site.eli")))) :toBe t)
+          (js-call (expect (js-call requests :some (lambda (url) (js-call url :includes "browser/worker.mjs")))) :toBe t)
+          (js-call (expect (js-call requests :some (lambda (url) (js-call url :includes "dist/browser/compiler.js")))) :toBe t))))))
+
+  (test "every page opens with the same band as the home page"
+    (async ()
+      (let ((paths (js-array "index.html" "pages/language.html" "pages/api.html" "pages/getting-started.html"))
+            (idx 0))
+        (while (< idx (js-length paths))
+          (let ((path (aref paths idx)))
+            (await (withPage path
+              (async (page requests)
+                (let ((band (await (js-call page :evaluate
+                                     "(() => { const hero = document.querySelector('.hero, .doc-hero'); if (!hero) return null; const heading = hero.querySelector('h1'); return { image: getComputedStyle(hero).backgroundImage.includes('eliscript-hero.jpg'), overlay: getComputedStyle(hero, '::before').backgroundColor, heading: getComputedStyle(heading).color, height: Math.round(hero.getBoundingClientRect().height) }; })()"))))
+                  (js-call (get (expect band) :not) :toBeNull)
+                  (js-call (expect (get band :image)) :toBe t)
+                  (js-call (expect (get band :height)) :toBeGreaterThan 200)
+                  (js-call (expect (get band :heading)) :toBe "rgb(255, 255, 255)")
+                  (js-call (expect (get band :overlay)) :toMatch (new globalThis.RegExp "rgba\\(8, 9, 8, [0-9.]+\\)" "u")))))))
+          (setq idx (1+ idx))))))
+
+  (test "the example switcher replaces the source and the output"
+    (async ()
+      (await (withPage "index.html"
+        (async (page requests)
+          (let ((before (await (js-call (js-call page :locator "[data-source-code]") :innerText))))
+            (await (js-call (js-call page :locator "[data-example=\"interop\"]") :click))
+            (await (js-call page :waitForTimeout 120))
+            (let ((after (await (js-call (js-call page :locator "[data-source-code]") :innerText))))
+              (js-call (get (expect after) :not) :toBe before)
+              (js-call (expect after) :toContain "js-call")
+              (js-call (expect (await (js-call (js-call page :locator "[data-output-code]") :innerText)))
+                       :toContain "native container")
+              (js-call (expect (await (js-call (js-call page :locator "[data-example=\"interop\"]") :getAttribute "aria-selected")))
+                       :toBe "true"))))))))
+
+  (test "the language tabs switch the visible panel"
+    (async ()
+      (await (withPage "pages/language.html"
+        (async (page requests)
+          (let* ((tabs (js-call page :locator "[data-language-tab]"))
+                 (count (await (js-call tabs :count))))
+            (js-call (expect count) :toBeGreaterThan 1)
+            (let* ((second (js-call tabs :nth 1))
+                   (target (await (js-call second :getAttribute "data-language-tab"))))
+              (await (js-call second :click))
+              (await (js-call page :waitForTimeout 120))
+              (let ((panel (js-call page :locator (+ "[data-language-panel=\"" target "\"]"))))
+                (js-call (expect (await (js-call panel :isVisible))) :toBe t)
+                (js-call (expect (await (js-call second :getAttribute "aria-selected"))) :toBe "true")))))))))
+
+  (test "the API filter hides modules and updates its count"
+    (async ()
+      (await (withPage "pages/api.html"
+        (async (page requests)
+          (let ((input (js-call page :locator "[data-api-search]"))
+                (count (js-call page :locator "[data-api-count]")))
+            (js-call (expect (await (js-call count :innerText))) :toMatch (new globalThis.RegExp "\\d+ modules?" "u"))
+            (await (js-call input :fill "map"))
+            (await (js-call page :waitForTimeout 150))
+            (let ((filtered (await (js-call count :innerText)))
+                  (visible (await (js-call (js-call page :locator "[data-api-module]:not([hidden])") :count))))
+              (js-call (expect visible) :toBeGreaterThan 0)
+              (js-call (expect filtered) :toContain (str visible)))
+            (await (js-call input :fill "zzz-nothing-matches"))
+            (await (js-call page :waitForTimeout 150))
+            (js-call (expect (await (js-call (js-call page :locator "[data-api-module]:not([hidden])") :count))) :toBe 0)))))))
+
+  (test "the footer year is stamped from the clock"
+    (async ()
+      (await (withPage "index.html"
+        (async (page requests)
+          (let ((year (await (js-call page :evaluate "new Date().getFullYear()"))))
+            (js-call (expect (await (js-call (js-call (js-call page :locator "[data-year]") :first) :innerText)))
+                     :toContain (str year))
+            (js-call (expect (await (js-call (js-call (js-call page :locator "[data-version]") :first) :textContent)))
+                     :toBe "v0.1.1")
+            (js-call (expect (await (js-call (js-call (js-call page :locator "[data-version-github]") :first) :getAttribute "href")))
+                     :toBe "https://github.com/liuchong/eliscript/releases/tag/v0.1.1")
+            (js-call (expect (await (js-call (js-call (js-call page :locator "[data-version-npm]") :first) :getAttribute "href")))
+                     :toBe "https://www.npmjs.com/package/eliscript/v/0.1.1"))))))))

@@ -18,7 +18,7 @@
   ;; The document capability is a grant, not an ambient permission: the script
   ;; names what it reaches through the host before it reaches it.
   (defconst capabilities
-    (browserCapabilities (js* "globalThis") (js-array "document")))
+    (browserCapabilities globalThis.globalThis (js-array "document")))
   (defconst page (browserDocument capabilities))
 
   ;; ------------------------------------------------------------- host helpers
@@ -29,14 +29,14 @@
   (defun field (object name) (get object name))
 
   (defun set-field (object name value)
-    (funcall (js* "((target, key, value) => { target[key] = value; })") object name value))
+    (Reflect/set object name value))
 
   (defun text-of (element) (field element "textContent"))
 
   (defun set-text (element value) (set-field element "textContent" (str value)))
 
   (defun array-from (values)
-    (funcall (js* "((list) => Array.from(list))") values))
+    (Array/from values))
 
   (defun nodes (selector) (array-from (js-call page :querySelectorAll selector)))
 
@@ -45,7 +45,7 @@
   (defun present? (value) (not (nil? value)))
 
   (defun same? (left right)
-    (funcall (js* "((a, b) => a === b)") left right))
+    (Object/is left right))
 
   (defun each (values handler)
     (let ((index 0)
@@ -158,7 +158,7 @@
 
   ;; ---------------------------------------------------------------- footer
 
-  (defconst site-semver "0.1.0")
+  (defconst site-semver "0.1.1")
   (defconst site-version (str "v" site-semver))
 
   (defun bind-version ()
@@ -174,7 +174,7 @@
                      (str "https://www.npmjs.com/package/eliscript/v/" site-semver)))))
 
   (defun bind-year ()
-    (let ((year (js-call (new (js* "Date")) :getFullYear)))
+    (let ((year (js-call (new globalThis.Date) :getFullYear)))
       (each (nodes "[data-year]")
             (lambda (element) (set-text element year)))))
 
@@ -187,7 +187,7 @@
     (bind-version)
     (bind-year))
 
-  (if (= (get (js* "globalThis.document") "readyState") "loading")
-      (js-call (js* "globalThis.document") :addEventListener
+  (if (= (get page "readyState") "loading")
+      (js-call page :addEventListener
                "DOMContentLoaded" (lambda (event) (start)))
     (start)))
