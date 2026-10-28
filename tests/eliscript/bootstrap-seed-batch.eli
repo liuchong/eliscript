@@ -11,7 +11,7 @@
   (defconst environment (get globalThis.process :env))
   (defconst modules (js-array "symbol" "syntax" "reader" "formatter" "expander" "transient-analysis"
     "analyzer" "ir" "lower" "source-map" "emitter" "project" "compiler"))
-  (defconst support-names (js-array "math" "unicode-case" "unicode-case-data"))
+  (defconst support-names (js-array "math" "prelude" "unicode-case" "unicode-case-data"))
   (defun child-env (changes) (Object/assign (js-object) environment changes))
   (defun original-emacs () (if (undefined? (get environment :EMACS)) "emacs" (get environment :EMACS)))
   (defasync install-proxy (directory name)

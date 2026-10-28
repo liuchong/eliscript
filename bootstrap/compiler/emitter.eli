@@ -28,8 +28,6 @@
     "import { get as __eliscript_get } from \"eliscript/runtime/core/collection.mjs\";\nconst __eliscript_binding_missing = Symbol(\"eliscript.binding.missing\");\nconst __eliscript_binding_get = (value, key, notFound) => { if (value == null) return notFound; const prototype = typeof value === \"object\" ? Object.getPrototypeOf(value) : undefined; if (prototype === Object.prototype || prototype === null) { const type = key && Object.getOwnPropertyDescriptor(key, Symbol.for(\"eliscript.value.type\")); if (type?.value === \"keyword\" || type?.value === \"symbol\") key = key.qualifiedName; } return __eliscript_get(value, key, notFound); };\n")
   (defconst number-conversion-intrinsics
     "const __eliscript_number_intrinsic = globalThis.Number;\nconst __eliscript_bigint_intrinsic = globalThis.BigInt;\nconst __eliscript_numeric_apply = globalThis.Reflect.apply;\nconst __eliscript_numeric_symbol = globalThis.Symbol.toPrimitive;\nconst __eliscript_numeric_error = globalThis.TypeError;\nconst __eliscript_numeric_trim = globalThis.String.prototype.trim;\nconst __eliscript_numeric_slice = globalThis.String.prototype.slice;\nconst __eliscript_numeric_exec = globalThis.RegExp.prototype.exec;\n")
-  (defconst number-conversion-capsule
-    "import { __eliscript_number_intrinsic, __eliscript_bigint_intrinsic, __eliscript_numeric_apply, __eliscript_numeric_symbol, __eliscript_numeric_error, __eliscript_numeric_trim, __eliscript_numeric_slice, __eliscript_numeric_exec } from \"data:text/javascript;base64,ZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X251bWJlcl9pbnRyaW5zaWMgPSBnbG9iYWxUaGlzLk51bWJlcjsKZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X2JpZ2ludF9pbnRyaW5zaWMgPSBnbG9iYWxUaGlzLkJpZ0ludDsKZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X251bWVyaWNfYXBwbHkgPSBnbG9iYWxUaGlzLlJlZmxlY3QuYXBwbHk7CmV4cG9ydCBjb25zdCBfX2VsaXNjcmlwdF9udW1lcmljX3N5bWJvbCA9IGdsb2JhbFRoaXMuU3ltYm9sLnRvUHJpbWl0aXZlOwpleHBvcnQgY29uc3QgX19lbGlzY3JpcHRfbnVtZXJpY19lcnJvciA9IGdsb2JhbFRoaXMuVHlwZUVycm9yOwpleHBvcnQgY29uc3QgX19lbGlzY3JpcHRfbnVtZXJpY190cmltID0gZ2xvYmFsVGhpcy5TdHJpbmcucHJvdG90eXBlLnRyaW07CmV4cG9ydCBjb25zdCBfX2VsaXNjcmlwdF9udW1lcmljX3NsaWNlID0gZ2xvYmFsVGhpcy5TdHJpbmcucHJvdG90eXBlLnNsaWNlOwpleHBvcnQgY29uc3QgX19lbGlzY3JpcHRfbnVtZXJpY19leGVjID0gZ2xvYmFsVGhpcy5SZWdFeHAucHJvdG90eXBlLmV4ZWM7Cg==\";\n")
   (defconst number-conversion-body
     "const __eliscript_numeric_radix = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;\nconst __eliscript_numeric_object = (value) => value !== null && (typeof value === \"object\" || typeof value === \"function\" || (typeof value === \"undefined\" && value !== void 0));\nconst __eliscript_numeric_primitive = (value) => {\n  if (!__eliscript_numeric_object(value)) return value;\n  const exotic = value[__eliscript_numeric_symbol];\n  if (exotic !== void 0 && exotic !== null) {\n    const result = __eliscript_numeric_apply(exotic, value, [\"number\"]);\n    if (!__eliscript_numeric_object(result)) return result;\n    throw new __eliscript_numeric_error(\"Cannot convert object to primitive value\");\n  }\n  for (let index = 0; index < 2; index++) {\n    const method = value[index === 0 ? \"valueOf\" : \"toString\"];\n    if (typeof method === \"function\" || (typeof method === \"undefined\" && method !== void 0)) {\n      const result = __eliscript_numeric_apply(method, value, []);\n      if (!__eliscript_numeric_object(result)) return result;\n    }\n  }\n  throw new __eliscript_numeric_error(\"Cannot convert object to primitive value\");\n};\nconst __eliscript_to_number = (value) => {\n  const primitive = __eliscript_numeric_primitive(value);\n  if (typeof primitive === \"string\") {\n    const text = __eliscript_numeric_apply(__eliscript_numeric_trim, primitive, []);\n    if (__eliscript_numeric_apply(__eliscript_numeric_exec, __eliscript_numeric_radix, [text]) !== null) {\n      let first = 2;\n      while (first < text.length && text[first] === \"0\") first++;\n      if (first === text.length) return 0;\n      const prefix = text[1];\n      const limit = prefix === \"x\" || prefix === \"X\" ? 256 : prefix === \"b\" || prefix === \"B\" ? 1024 : 342;\n      if (text.length - first > limit) return 1 / 0;\n      const token = __eliscript_numeric_apply(__eliscript_numeric_slice, text, [0, 2]) + __eliscript_numeric_apply(__eliscript_numeric_slice, text, [first]);\n      return __eliscript_number_intrinsic(__eliscript_bigint_intrinsic(token));\n    }\n  }\n  return __eliscript_number_intrinsic(primitive);\n};\n")
   (defconst number-conversion-helper
@@ -38,10 +36,36 @@
     "const __eliscript_numeric = (value) => {\n  if (typeof value === \"number\" || typeof value === \"bigint\") return value;\n  const primitive = __eliscript_numeric_primitive(value);\n  if (typeof primitive === \"number\" || typeof primitive === \"bigint\") return primitive;\n  return typeof primitive === \"string\" ? __eliscript_to_number(primitive) : +primitive;\n};\nconst __eliscript_implicit_number = (value) => {\n  if (typeof value === \"number\") return value;\n  const primitive = __eliscript_numeric_primitive(value);\n  if (typeof primitive === \"bigint\") throw new __eliscript_numeric_error(\"Cannot convert a BigInt value to a number\");\n  return typeof primitive === \"string\" ? __eliscript_to_number(primitive) : +primitive;\n};\nconst __eliscript_numeric_decrement = (value) => __eliscript_implicit_number(value) - 1;\nconst __eliscript_numeric_sub = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a - b; return __eliscript_numeric(a) - __eliscript_numeric(b); };\nconst __eliscript_numeric_mul = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a * b; return __eliscript_numeric(a) * __eliscript_numeric(b); };\nconst __eliscript_numeric_div = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a / b; return __eliscript_numeric(a) / __eliscript_numeric(b); };\nconst __eliscript_numeric_rem = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a % b; return __eliscript_numeric(a) % __eliscript_numeric(b); };\nconst __eliscript_numeric_and = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a & b; return __eliscript_numeric(a) & __eliscript_numeric(b); };\nconst __eliscript_numeric_or = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a | b; return __eliscript_numeric(a) | __eliscript_numeric(b); };\nconst __eliscript_numeric_xor = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a ^ b; return __eliscript_numeric(a) ^ __eliscript_numeric(b); };\nconst __eliscript_numeric_shl = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a << b; return __eliscript_numeric(a) << __eliscript_numeric(b); };\nconst __eliscript_numeric_shr = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a >> b; return __eliscript_numeric(a) >> __eliscript_numeric(b); };\nconst __eliscript_numeric_ushr = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a >>> b; return __eliscript_numeric(a) >>> __eliscript_numeric(b); };\nconst __eliscript_numeric_neg = (a) => typeof a === \"number\" ? -a : -__eliscript_numeric(a);\nconst __eliscript_numeric_int32 = (a) => typeof a === \"number\" ? a | 0 : __eliscript_numeric(a) | 0;\nconst __eliscript_numeric_uint32 = (a) => typeof a === \"number\" ? a >>> 0 : __eliscript_numeric(a) >>> 0;\nconst __eliscript_numeric_not = (a) => typeof a === \"number\" ? ~a : ~__eliscript_numeric(a);\nconst __eliscript_numeric_relation = (operator, left, right) => {\n  if (typeof left === \"number\" && typeof right === \"number\") {\n    if (operator === \"<\") return left < right;\n    if (operator === \"<=\") return left <= right;\n    if (operator === \">\") return left > right;\n    return left >= right;\n  }\n  let a = __eliscript_numeric_primitive(left);\n  let b = __eliscript_numeric_primitive(right);\n  const x = typeof a, y = typeof b;\n  if (!((x === \"string\" && y === \"string\") || (x === \"bigint\" && y === \"string\") || (x === \"string\" && y === \"bigint\"))) {\n    a = __eliscript_numeric(a);\n    b = __eliscript_numeric(b);\n  }\n  if (operator === \"<\") return a < b;\n  if (operator === \"<=\") return a <= b;\n  if (operator === \">\") return a > b;\n  return a >= b;\n};\n")
   (defconst imul-intrinsic
     "const __eliscript_numeric_imul_intrinsic = globalThis.Math.imul;\n")
-  (defconst imul-capsule
-    "import { __eliscript_numeric_imul_intrinsic } from \"data:text/javascript;base64,ZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X251bWVyaWNfaW11bF9pbnRyaW5zaWMgPSBnbG9iYWxUaGlzLk1hdGguaW11bDsK\";\n")
   (defconst imul-operator-helper
     "const __eliscript_numeric_imul = (a, b) => __eliscript_numeric_imul_intrinsic(__eliscript_implicit_number(a), __eliscript_implicit_number(b));\n")
+  ;; One compiled runtime module owns every shared helper. Its own module scope
+  ;; never binds globalThis, so captured intrinsics need no separate capsule.
+  (defconst prelude-array-text-names (js-array "__eliscript_at" "__eliscript_at_direct"))
+  (defconst prelude-number-conversion-names (js-array "__eliscript_to_number"))
+  (defconst prelude-numeric-coercion-names
+    (js-array "__eliscript_numeric_decrement" "__eliscript_numeric_relation"
+      "__eliscript_numeric_sub" "__eliscript_numeric_mul" "__eliscript_numeric_div"
+      "__eliscript_numeric_rem" "__eliscript_numeric_and" "__eliscript_numeric_or"
+      "__eliscript_numeric_xor" "__eliscript_numeric_shl" "__eliscript_numeric_shr"
+      "__eliscript_numeric_ushr" "__eliscript_numeric_neg" "__eliscript_numeric_int32"
+      "__eliscript_numeric_uint32" "__eliscript_numeric_not"))
+  (defconst prelude-imul-names (js-array "__eliscript_numeric_imul"))
+  (defconst prelude-module
+    (str "// Generated by Eliscript. Do not edit.\n"
+      "export" (js-call array-text-import :slice 6)
+      number-conversion-helper numeric-operator-helper imul-intrinsic imul-operator-helper
+      "export { "
+      (js-call (js-call prelude-number-conversion-names :concat
+                 prelude-numeric-coercion-names prelude-imul-names) :join ", ")
+      " };\n"))
+  (defun prelude-import (array-text number-conversion numeric-coercion imul)
+    (let ((names (js-call (js-array) :concat
+                   (if array-text prelude-array-text-names (js-array))
+                   (if number-conversion prelude-number-conversion-names (js-array))
+                   (if numeric-coercion prelude-numeric-coercion-names (js-array))
+                   (if imul prelude-imul-names (js-array)))))
+      (if (= (js-length names) 0) ""
+        (str "import { " (js-call names :join ", ") " } from \"eliscript/runtime/prelude.mjs\";\n"))))
   (defvar numeric-emission-profile false)
   (defconst host-identity-token-helper
     "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n")
@@ -107,29 +131,96 @@
   (defun tdz-defaults (node scope state)
     (when (ir-property node "pattern")
       (tdz-pattern-defaults (js-nth 0 (children node)) scope state)))
-  (defun tdz-predeclare (nodes scope state)
+  (defun tdz-statements (nodes statements)
     (js-call nodes :forEach
       (lambda (node)
-        (let ((kind (ir-kind node)))
+        (if (= (ir-kind node) "module-declaration")
+            (tdz-statements (children node) statements)
+          (js-call statements :push node))))
+    statements)
+  (defun tdz-predeclare (statements scope state)
+    (js-call statements :forEach
+      (lambda (node)
+        (let ((kind (ir-kind node)) (name (ir-value node)))
           (cond
-            ((= kind "module-declaration") (tdz-predeclare (children node) scope state))
             ((= kind "variable-declaration")
-             (let ((record (js-object :name (ir-value node) :index (js-length (get state :variables)) :mutable (ir-property node "mutable"))))
+             (let ((record (js-object :name name :index (js-length (get state :variables))
+                             :mutable (ir-property node "mutable") :statement (get state :position)
+                             :read false :write false)))
                (js-call (get state :variables) :push record)
                (js-call (get state :declarations) :set node record)
-               (js-call (get scope :names) :set (binding-name (ir-value node)) record)))
-            ((= kind "function-declaration") (js-call (get scope :names) :set (binding-name (ir-value node)) nil))
-            ((= kind "import-declaration")
+               (js-call (get scope :names) :set (binding-name name) record)))
+            ((= kind "function-declaration")
+             (let ((key (binding-name name)))
+               (js-call (get state :functions) :add key)
+               (js-call (get scope :names) :set key (js-object :function key))
+               (when (ir-property node "portable") (js-call (get state :exported) :push key))))
+            ((= kind "export-declaration")
              (js-call (children node) :forEach
-               (lambda (child) (js-call (get scope :names) :set (binding-name (ir-value child)) nil)))))))))
+               (lambda (reference) (js-call (get state :exported) :push (binding-name (ir-value reference))))))
+            ((= kind "import-declaration")
+             (put state :imports t)
+             (js-call (children node) :forEach
+               (lambda (child) (js-call (get scope :names) :set (binding-name (ir-value child)) nil))))))
+        (put state :position (1+ (get state :position))))))
+  (defun tdz-variable-p (record)
+    (and record (= (value-type (get record :index)) "number")))
+  (defun tdz-guarded-p (record)
+    (and record (or (get record :read) (get record :write))))
+  (defun tdz-reference (state record)
+    (let ((owner (get state :owner)) (references (get state :references)))
+      (unless (js-call references :has owner) (js-call references :set owner (js-array)))
+      (js-call (js-call references :get owner) :push (get record :function))))
+  (defun tdz-site (state kind record node)
+    (js-call (get state :sites) :push
+      (js-object :kind kind :record record :owner (get state :owner) :node node)))
+  ;; A top-level statement runs at its own position. A function can first run
+  ;; when a statement or earlier function references it; with imports an
+  ;; exported function can run through a cycle before this module, and raw
+  ;; JavaScript can call any function. Only accesses that can run before their
+  ;; declaration completes are guarded.
+  (defun tdz-finalize (state)
+    (let ((functions (get state :functions)) (references (get state :references))
+          (raw (get state :raw)) (early (new globalThis.Map)) (pending (js-array))
+          (never (get state :position)) (all (get state :position)))
+      (let ((lower
+              (lambda (key index)
+                (when (and (js-call functions :has key)
+                           (< index (if (js-call early :has key) (js-call early :get key) never)))
+                  (js-call early :set key index)
+                  (js-call pending :push key)))))
+        (when (get state :imports)
+          (js-call (get state :exported) :forEach (lambda (key) (funcall lower key -1))))
+        (js-call references :forEach
+          (lambda (keys owner)
+            (when (= (value-type owner) "number")
+              (js-call keys :forEach (lambda (key) (funcall lower key owner))))))
+        (js-call raw :forEach
+          (lambda (owner) (when (and (= (value-type owner) "number") (< owner all)) (setq all owner))))
+        (while (> (js-length pending) 0)
+          (let* ((key (js-call pending :pop)) (index (js-call early :get key)))
+            (when (and (js-call raw :has key) (< index all)) (setq all index))
+            (when (js-call references :has key)
+              (js-call (js-call references :get key) :forEach (lambda (callee) (funcall lower callee index)))))))
+      (js-call (get state :sites) :forEach
+        (lambda (site)
+          (let* ((record (get site :record)) (owner (get site :owner)) (read (= (get site :kind) "read"))
+                 (start (if (js-call early :has owner) (js-call early :get owner) never))
+                 (time (if (= (value-type owner) "number") owner (if (< all start) all start))))
+            (when (or (and (not read) (not (get record :mutable))) (<= time (get record :statement)))
+              (if read
+                  (progn (put record :read t) (js-call (get state :reads) :set (get site :node) record))
+                (progn (put record :write t) (js-call (get state :writes) :set (get site :node) record)))))))))
   (defun tdz-walk (node scope state)
     (let ((kind (ir-kind node)) (nodes (children node)))
       (cond
         ((or (= kind "reference") (= kind "assignment-pair"))
          (let ((record (tdz-find scope (tdz-root-name (ir-value node)))))
-           (when record
-             (js-call (get state (if (= kind "reference") "reads" "writes")) :set node record)))
+           (cond ((tdz-variable-p record)
+                  (tdz-site state (if (= kind "reference") "read" "write") record node))
+                 ((and record (= kind "reference")) (tdz-reference state record))))
          (js-call nodes :forEach (lambda (child) (tdz-walk child scope state))))
+        ((= kind "raw-javascript") (js-call (get state :raw) :add (get state :owner)))
         ((or (= kind "function-declaration") (= kind "function-expression"))
          (let ((child (tdz-scope scope)) (count (ir-property node "parameterCount")) (index 0))
            (while (< index count) (tdz-defaults (js-nth index nodes) scope state) (setq index (1+ index)))
@@ -154,32 +245,46 @@
          (let ((child (tdz-scope scope)) (binding (js-nth 0 nodes)) (index 1))
            (tdz-defaults binding scope state) (tdz-bind binding child)
            (while (< index (js-length nodes)) (tdz-walk (js-nth index nodes) child state) (setq index (1+ index)))))
-        ((or (= kind "quoted-literal") (= kind "raw-javascript") (= kind "import-declaration")) nil)
+        ((or (= kind "quoted-literal") (= kind "import-declaration") (= kind "export-declaration")) nil)
         (t (js-call nodes :forEach (lambda (child) (tdz-walk child scope state)))))))
   (defun tdz-prepare (program)
-    (let ((state (js-object :variables (js-array) :declarations (new globalThis.Map)
-                   :reads (new globalThis.Map) :writes (new globalThis.Map)))
-          (scope (tdz-scope nil)))
-      (tdz-predeclare (program-body program) scope state)
+    (let* ((state (js-object :variables (js-array) :declarations (new globalThis.Map)
+                    :reads (new globalThis.Map) :writes (new globalThis.Map)
+                    :functions (new globalThis.Set) :references (new globalThis.Map) :raw (new globalThis.Set)
+                    :exported (js-array) :imports false :sites (js-array) :position 0 :owner nil))
+           (scope (tdz-scope nil))
+           (statements (tdz-statements (program-body program) (js-array))))
+      (tdz-predeclare statements scope state)
       ;; With no tracked module variable, every possible lookup is absent.
       ;; Function-only modules therefore need no TDZ traversal of their bodies.
       (when (> (js-length (get state :variables)) 0)
-        (js-call (program-body program) :forEach (lambda (node) (tdz-walk node scope state)))) state))
+        (js-call statements :forEach
+          (lambda (node position)
+            (put state :owner
+              (if (= (ir-kind node) "function-declaration") (binding-name (ir-value node)) position))
+            (tdz-walk node scope state)))
+        (tdz-finalize state))
+      state))
   (defun tdz-reader-name (record) (str "__eliscript_tdz_read_" (get record :index)))
   (defun tdz-writer-name (record) (str "__eliscript_tdz_write_" (get record :index)))
   (defun tdz-prologue ()
-    (if (or (nil? tdz-state) (= (js-length (get tdz-state :variables)) 0)) ""
-      (str tdz-import
-        (js-call (js-call (get tdz-state :variables) :map
-          (lambda (record)
-            (let ((ready (tdz-ready-name record)) (name (binding-name (get record :name)))
-                  (argument (str "__eliscript_tdz_value_" (get record :index))))
-              (str "var " ready ";\n"
-                "function " (tdz-reader-name record) "() { if (" ready
-                " !== true) __eliscript_tdz_error(" (json-string name) "); return " name "; }\n"
-                "function " (tdz-writer-name record) "(" argument ") { if (" ready
-                " !== true) __eliscript_tdz_error(" (json-string name) "); "
-                (if (get record :mutable) (str "return (" name " = " argument ");") "return __eliscript_const_error();") " }\n")))) :join ""))))
+    (let ((records (if (nil? tdz-state) (js-array) (js-call (get tdz-state :variables) :filter tdz-guarded-p))))
+      (if (= (js-length records) 0) ""
+        (str tdz-import
+          (js-call (js-call records :map
+            (lambda (record)
+              (let ((ready (tdz-ready-name record)) (name (binding-name (get record :name)))
+                    (argument (str "__eliscript_tdz_value_" (get record :index))))
+                (str "var " ready ";\n"
+                  (if (get record :read)
+                      (str "function " (tdz-reader-name record) "() { if (" ready
+                        " !== true) __eliscript_tdz_error(" (json-string name) "); return " name "; }\n")
+                    "")
+                  (if (get record :write)
+                      (str "function " (tdz-writer-name record) "(" argument ") { if (" ready
+                        " !== true) __eliscript_tdz_error(" (json-string name) "); "
+                        (if (get record :mutable) (str "return (" name " = " argument ");") "return __eliscript_const_error();") " }\n")
+                    ""))))) :join "")))))
   (defun tdz-read (node)
     (let ((record (and tdz-state (js-call (get tdz-state :reads) :get node))))
       (if (not record) (text-fragment (reference-name (ir-value node)))
@@ -1844,7 +1949,7 @@
                 "null")
               ";"
               (let ((record (and tdz-state (js-call (get tdz-state :declarations) :get node))))
-                (if record (str "\n" (tdz-ready-name record) " = true;") "")))))
+                (if (tdz-guarded-p record) (str "\n" (tdz-ready-name record) " = true;") "")))))
           ((= kind "function-declaration")
            (let* ((parts (split-counted-children node "parameterCount"))
                   (parameters (js-nth 0 parts))
@@ -2216,42 +2321,35 @@
                ", ")
              "]));"))))))
 
-  ;; An embedded module gives captured intrinsics their own lexical scope when
-  ;; user source binds globalThis. It requires no host package or dynamic eval.
-  (defun node-names-global-root-p (node)
-    (or (and (= (ir-value node) "globalThis")
-             (not (= (ir-kind node) "literal"))
-             (not (= (ir-kind node) "raw-javascript")))
-        (js-call (children node) :some node-names-global-root-p)))
-
-  (defun number-conversion-prologue (program)
-    (if (js-call (program-body program) :some node-names-global-root-p)
-        (str number-conversion-capsule number-conversion-body)
-      number-conversion-helper))
-
-  (defun imul-prologue (program)
-    (str (if (js-call (program-body program) :some node-names-global-root-p)
-             imul-capsule imul-intrinsic) imul-operator-helper))
-
   (defun emit-module-artifact-in-profile (program)
-    (let ((previous tdz-state))
-      (setq tdz-state (tdz-prepare program))
-      (try (emit-module-artifact-in-profile-ready program)
-        (finally (setq tdz-state previous)))))
+    (if (prelude-capsule-p program)
+        (text-fragment prelude-module)
+      (let ((previous tdz-state))
+        (setq tdz-state (tdz-prepare program))
+        (try (emit-module-artifact-in-profile-ready program)
+          (finally (setq tdz-state previous))))))
 
-  (defun unicode-bootstrap-capsule-p (program)
+  (defun runtime-capsule-p (program entries)
     (let* ((filename (program-filename program)) (body (program-body program))
            (module (if (= (js-length body) 1) (aref body 0) nil)))
       (and module (= (ir-kind module) "module-declaration")
         (= (value-type filename) "string")
-        (js-call (js-array
-          (js-array "runtime/unicode-case.eli" "eliscript.runtime.unicode-case")
-          (js-array "runtime/unicode-case-data.eli" "eliscript.runtime.unicode-case-data"))
+        (js-call entries
           :some (lambda (entry)
             (and (= (ir-value module) (aref entry 1))
               (or (= filename (aref entry 0))
                 (and (js-call filename :startsWith "/")
                      (js-call filename :endsWith (+ "/" (aref entry 0)))))))))))
+
+  (defun unicode-bootstrap-capsule-p (program)
+    (runtime-capsule-p program
+      (js-array
+        (js-array "runtime/unicode-case.eli" "eliscript.runtime.unicode-case")
+        (js-array "runtime/unicode-case-data.eli" "eliscript.runtime.unicode-case-data"))))
+
+  (defun prelude-capsule-p (program)
+    (and (runtime-capsule-p program (js-array (js-array "runtime/prelude.eli" "eliscript.runtime.prelude")))
+         (= (js-length (children (aref (program-body program) 0))) 0)))
 
   (defun emit-module-artifact-in-profile-ready (program)
     (setq temporary-counter 0)
@@ -2267,7 +2365,11 @@
          (tdz-prologue)
          (if (unicode-bootstrap-capsule-p program) "" "import \"eliscript/runtime/unicode-case.mjs\";\n")
          (if (get requirements :math) "import \"eliscript/runtime/math.mjs\";\n" "")
-         (if (get requirements :arrayText) array-text-import "")
+         (let ((numeric-coercion (and (not numeric-emission-profile) (get requirements :numericCoercion))))
+           (prelude-import (get requirements :arrayText)
+             (or (get requirements :numberConversion) numeric-coercion)
+             numeric-coercion
+             (and (not numeric-emission-profile) (get requirements :imul))))
          (if (get requirements :literal)
              literal-runtime-import
            "")
@@ -2284,10 +2386,6 @@
              value-runtime-import
            "")
          "const __eliscript_truthy = (value) => value !== false && value != null;\n"
-         (if (or (get requirements :numberConversion)
-                 (and (not numeric-emission-profile) (get requirements :numericCoercion))) (number-conversion-prologue program) "")
-         (if (and (not numeric-emission-profile) (get requirements :numericCoercion)) numeric-operator-helper "")
-         (if (and (not numeric-emission-profile) (get requirements :imul)) (imul-prologue program) "")
          (if (get requirements :hostIdentityToken)
              host-identity-token-helper
            "")

@@ -191,17 +191,17 @@
                        "__eliscript_keyword" "__eliscript_list" "__eliscript_symbol") :forEach
               (lambda (needle) (js-call (get (expect seed) :not) :toContain needle)))
             (js-call (expect seed) :toContain "const values = [1, 2]")
-            (js-call (expect seed) :toContain
-              (+ "const first = ((((" "(__eliscript_tdz_read_0())" ") ?? [])[0]) ?? null)"))
-            (js-call (expect seed) :toContain
-              (+ "const count = ((" "(__eliscript_tdz_read_0())" ") ?? []).length"))
+            ;; Every read follows its declaration, so no TDZ guard is emitted.
+            (js-call (get (expect seed) :not) :toContain "__eliscript_tdz_")
+            (js-call (expect seed) :toContain "const first = ((((values) ?? [])[0]) ?? null)")
+            (js-call (expect seed) :toContain "const count = ((values) ?? []).length")
             (js-call (expect seed) :toContain "const options = ({\"ready\": true})")
-            (js-call (expect seed) :toContain (+ "const ready = (" "(__eliscript_tdz_read_3())" ")[\"ready\"]"))
+            (js-call (expect seed) :toContain "const ready = (options)[\"ready\"]")
             (js-call (expect seed) :toContain
-              (+ "Object.prototype.hasOwnProperty.call((" "(__eliscript_tdz_read_3())" ") ?? {}, \"ready\")"))
+              "Object.prototype.hasOwnProperty.call((options) ?? {}, \"ready\")")
             (js-call (expect seed) :toContain "[\"count\"]: 3"))
           ;; Both compiler outputs are real executed modules, in addition to
-          ;; the complete source/map byte checks and exact TDZ read snippets.
+          ;; the complete source/map byte checks and exact read snippets.
           (js-call (js-array seed-output self-output) :forEach (lambda (path)
             (let ((module (funcall require-module path)))
               (js-call (expect (get module :values)) :toEqual (js-array 1 2))

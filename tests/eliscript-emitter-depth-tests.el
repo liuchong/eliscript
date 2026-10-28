@@ -137,10 +137,16 @@
                                                  (list (eliscript-ir-make-node 'reference span 'unit)
                                                        (eliscript-ir-make-node 'literal span index) node)))
                     '(:binding-count 1 :sequential nil))))
-      (let* ((forms (list '(defvar tracked 0) (list 'defun 'walk '(value) form)))
+      ;; The leading call can run walk before tracked is initialized.
+      (let* ((forms (list '(walk 0) '(defvar tracked 0) (list 'defun 'walk '(value) form)))
              (program (eliscript-ir-make-program
                        filename
-                       (list (eliscript-ir-make-node 'variable-declaration span 'tracked
+                       (list (eliscript-ir-make-node
+                              'expression-statement span nil
+                              (list (eliscript-ir-make-node 'call span nil
+                                                           (list (eliscript-ir-make-node 'reference span 'walk)
+                                                                 (eliscript-ir-make-node 'literal span 0)))))
+                             (eliscript-ir-make-node 'variable-declaration span 'tracked
                                                     (list (eliscript-ir-make-node 'literal span 0))
                                                     '(:mutable t :source-operator defvar))
                              (eliscript-ir-make-node 'function-declaration span 'walk
@@ -153,7 +159,8 @@
         (should (equal compatibility direct))
         (should (equal direct (eliscript-emission-javascript mapped)))
         (should (string-match-p (regexp-quote "deep-public.eli") (eliscript-emission-source-map mapped)))
-        (should (string-match-p (regexp-quote "__eliscript_tdz_ready_0 = true;") direct))
+        (should (eq (eq leaf 'tracked)
+                    (and (string-match-p (regexp-quote "__eliscript_tdz_ready_0 = true;") direct) t)))
         (should (string-match-p
                  (regexp-quote (if (eq leaf 'tracked) "return (__eliscript_tdz_read_0());" "return value;")) direct))
         (should-not (string-match-p (regexp-quote "eliscript/runtime/literals.mjs") direct))
@@ -163,7 +170,7 @@
   "Helper discovery reaches deep leaves while function/quote pruning survives."
   (let ((plain '(progn (string-to-number "1") (imul32 1 2) (nth 0 value)
                        (cons 1 nil) (equal 1 1) (host-identity-token value)
-                       (js-call value :join) :keyword globalThis))
+                       (js-call value :join) :keyword))
         (await-form '(await value))
         (await-node (eliscript-ir-make-node 'await-expression nil nil
                                             (list (eliscript-ir-make-node 'reference nil 'value)))))
@@ -178,7 +185,7 @@
                        eliscript-emitter--uses-imul-p eliscript-emitter--uses-collection-runtime-p
                        eliscript-emitter--uses-list-runtime-p eliscript-emitter--uses-value-runtime-p
                        eliscript-emitter--uses-host-identity-token-p eliscript-emitter--uses-array-text-p
-                       eliscript-emitter--uses-literal-runtime-p eliscript-emitter--forms-name-global-root-p))
+                       eliscript-emitter--uses-literal-runtime-p))
       (should (funcall scanner (list plain))))
     (should (eliscript-emitter--contains-await-p await-form))
     (should (eliscript-ir-emitter--contains-await-p await-node))
@@ -186,7 +193,6 @@
     (should-not (eliscript-ir-emitter--contains-await-p
                  (eliscript-ir-make-node 'function-expression nil nil (list await-node) '(:parameter-count 0))))
     (should-not (eliscript-emitter--uses-number-conversion-p (list (list 'quote plain))))
-    (should-not (eliscript-emitter--forms-name-global-root-p (list (list 'quote plain))))
     ;; The host-token prepass historically visits quoted forms too.
     (should (eliscript-emitter--uses-host-identity-token-p (list (list 'quote plain))))
     (should-not (eliscript-emitter--uses-literal-runtime-p '((get value :key))))

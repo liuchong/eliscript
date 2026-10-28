@@ -30,6 +30,13 @@
       :source "(defun read-early () base-12l4)\n(defconst first (read-early))\n(defconst base-12l4 42)\n(export first)\n")
     (js-object :name "early-reserved-read" :early "arguments$"
       :source "(defun read-early () arguments)\n(defconst first (read-early))\n(defvar arguments 42)\n(export first)\n")
+    ;; Guards are emitted only where an access can run before initialization.
+    (js-object :name "early-transitive-read" :early "_U4F60__U597D_" :guarded t
+      :source "(defun leaf () 你好)\n(defun walk () (leaf))\n(defconst first (walk))\n(defvar 你好 42)\n(export first)\n")
+    (js-object :name "raw-reachable-read" :guarded t
+      :source "(defun read-early () base-12l4)\n(js* \"void read_early\")\n(defconst base-12l4 42)\n(defun read-values () (js-array (read-early)))\n(export read-values)\n")
+    (js-object :name "declared-before-use" :guarded false
+      :source "(defvar 你好 1)\n(defun replace-value (value) (setq 你好 value))\n(defun read-values () (js-array 你好))\n(export read-values replace-value)\n")
     ;; Source analysis correctly rejects writes to defconst. This additional IR
     ;; fixture exercises the existing immutable writer, without accepting a new
     ;; source assignment or modifying either emitter's input during emission.
@@ -125,6 +132,12 @@
        (js-call assert :deepStrictEqual (js-call namespace :read_values) (js-array (js-array 2 3) 90 91 92)))
       ((= name "function-import-names")
        (js-call assert :deepStrictEqual (js-call namespace :read_values) (js-array 10 8)))
+      ((= name "raw-reachable-read")
+       (js-call assert :deepStrictEqual (js-call namespace :read_values) (js-array 42)))
+      ((= name "declared-before-use")
+       (js-call assert :deepStrictEqual (js-call namespace :read_values) (js-array 1))
+       (js-call assert :strictEqual (js-call namespace :replace_value 17) 17)
+       (js-call assert :deepStrictEqual (js-call namespace :read_values) (js-array 17)))
       ((= name "immutable-ir-writer")
        (js-call assert :strictEqual (Object/is (js-call namespace :read_value) -0) t)
        (js-call assert :throws (lambda () (js-call namespace :write_value 17))
@@ -159,6 +172,8 @@
         (js-call assert :strictEqual (serialize-ir-program program) before)
         (js-call assert :strictEqual (get seed :irUnchanged) t)
         (unless (get item :readonly) (js-call assert :strictEqual javascript string-js))
+        (unless (undefined? (get item :guarded))
+          (js-call assert :strictEqual (js-call javascript :includes "__eliscript_tdz_") (get item :guarded)))
         (let ((roles (js-array "seed" "selfhost")) (at 0))
           (while (< at (js-length roles))
             (let* ((role (aref roles at)) (text (if (= role "seed") (get seed :irJavascript) javascript)))

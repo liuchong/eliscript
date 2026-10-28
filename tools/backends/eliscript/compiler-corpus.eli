@@ -1076,6 +1076,7 @@
            (reader (createOriginalCorpusSourceReader options)) (proofs (js-array))
            (files (js-array "tools/backends/eliscript/compiler-corpus-tools-reference.eli"
                     "tools/backends/compiler-corpus-tools-reference.mjs"
+                    "runtime/prelude.eli" "runtime/prelude.mjs"
                     "runtime/unicode-case.eli" "runtime/unicode-case.mjs"
                     "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs")) (index 0))
       (when (> (js-length records) 0)
@@ -1108,7 +1109,7 @@
              "bootstrap/host/project-cli.mjs" "bootstrap/host/project-cli.mjs.map"
              "bootstrap/host/project-cli-legacy.mjs" "tools/project/project-cli.eli")))
       (when (> (js-length records) 0)
-        (js-call (js-array "math" "unicode-case" "unicode-case-data") :forEach (lambda (name)
+        (js-call (js-array "math" "prelude" "unicode-case" "unicode-case-data") :forEach (lambda (name)
           (js-call files :push (str "runtime/" name ".eli")
             (str "runtime/" name ".mjs") (str "runtime/" name ".mjs.map"))))
         (let* ((reader (createOriginalCorpusSourceReader (js-object :sourceRoot

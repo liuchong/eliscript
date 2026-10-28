@@ -6,10 +6,8 @@
   (defconst view-states (new globalThis/WeakMap))
   (defconst freeze Object/freeze)
   (defun persistentVector (&rest values)
-    (if (= (js-length values) 0) EMPTY_VECTOR
-      (progn
-        (when (<= (js-length values) 32) (funcall freeze values))
-        (literal-vector-from-array-values values))))
+    (when (<= (js-length values) 32) (funcall freeze values))
+    (js-call PersistentVector :from values))
   (defun isPersistentVector (value) (literal-instance? value PersistentVector))
   (defun subvec (vector start &optional end) (literal-subvec vector start end))
   (defun readPersistentVectorView (value)

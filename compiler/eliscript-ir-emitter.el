@@ -49,25 +49,40 @@
 (defun eliscript-ir-emitter--tdz-defaults (node scope state)
   (when (eliscript-ir-property node :pattern)
     (eliscript-ir-emitter--tdz-pattern-defaults (car (eliscript-ir-node-children node)) scope state)))
-(defun eliscript-ir-emitter--tdz-predeclare (nodes scope state)
-  (let ((pending (list nodes)))
+(defun eliscript-ir-emitter--tdz-statements (nodes)
+  "Return top-level statement NODES with module declarations flattened."
+  (let ((pending (list nodes)) statements)
     (while pending
       (let ((siblings (pop pending)))
         (when siblings
           (let ((node (car siblings)))
             (push (cdr siblings) pending)
-            (pcase (eliscript-ir-node-kind node)
-              ('module-declaration (push (eliscript-ir-node-children node) pending))
-              ('variable-declaration
-               (let ((record (list :index (length (plist-get state :variables)) :name (eliscript-ir-node-value node)
-                                   :mutable (eliscript-ir-property node :mutable))))
-                 (setf (plist-get state :variables) (append (plist-get state :variables) (list record)))
-                 (puthash node record (plist-get state :declarations))
-                 (puthash (eliscript-emitter--binding-name (eliscript-ir-node-value node)) record (car scope))))
-              ('function-declaration (puthash (eliscript-emitter--binding-name (eliscript-ir-node-value node)) nil (car scope)))
-              ('import-declaration
-               (dolist (child (eliscript-ir-node-children node))
-                 (puthash (eliscript-emitter--binding-name (eliscript-ir-node-value child)) nil (car scope)))))))))))
+            (if (eq (eliscript-ir-node-kind node) 'module-declaration)
+                (push (eliscript-ir-node-children node) pending)
+              (push node statements))))))
+    (nreverse statements)))
+
+(defun eliscript-ir-emitter--tdz-predeclare (statements scope state)
+  (dolist (node statements)
+    (let ((name (eliscript-ir-node-value node)))
+      (pcase (eliscript-ir-node-kind node)
+        ('variable-declaration
+         (let ((record (eliscript-emitter--tdz-declare state name (eliscript-ir-property node :mutable))))
+           (puthash node record (plist-get state :declarations))
+           (puthash (eliscript-emitter--binding-name name) record (car scope))))
+        ('function-declaration
+         (let ((key (eliscript-emitter--binding-name name)))
+           (puthash key (eliscript-emitter--tdz-function state key) (car scope))
+           (when (eliscript-ir-property node :portable)
+             (push key (plist-get state :exported)))))
+        ('export-declaration
+         (dolist (reference (eliscript-ir-node-children node))
+           (push (eliscript-emitter--binding-name (eliscript-ir-node-value reference)) (plist-get state :exported))))
+        ('import-declaration
+         (setf (plist-get state :imports) t)
+         (dolist (child (eliscript-ir-node-children node))
+           (puthash (eliscript-emitter--binding-name (eliscript-ir-node-value child)) nil (car scope))))))
+    (setf (plist-get state :position) (1+ (plist-get state :position)))))
 
 (defun eliscript-ir-emitter--tdz-walk (node scope state &optional jobs)
   "Resolve TDZ references in source order with explicit scope actions."
@@ -91,8 +106,12 @@
            (pcase kind
              ((or 'reference 'assignment-pair)
               (let ((record (eliscript-ir-emitter--tdz-find current (eliscript-emitter--tdz-root (eliscript-ir-node-value item)))))
-                (when record (puthash item record (plist-get state (if (eq kind 'reference) :reads :writes)))))
+                (cond ((eliscript-emitter--tdz-variable-p record)
+                       (eliscript-emitter--tdz-site state (if (eq kind 'reference) :read :write) record item))
+                      ((and record (eq kind 'reference))
+                       (eliscript-emitter--tdz-reference state record))))
               (setq tasks (mapcar (lambda (child) (list :walk child current)) children)))
+             ('raw-javascript (eliscript-emitter--tdz-raw state))
              ((or 'function-declaration 'function-expression)
               (let* ((count (eliscript-ir-property item :parameter-count)) (parameters (seq-take children count))
                      (child (eliscript-ir-emitter--tdz-scope current)))
@@ -117,20 +136,27 @@
               (let ((child (eliscript-ir-emitter--tdz-scope current)))
                 (setq tasks (append (list (list :defaults (car children) current) (list :bind (car children) child))
                                     (mapcar (lambda (body) (list :walk body child)) (cdr children))))))
-             ((or 'quoted-literal 'raw-javascript 'import-declaration) nil)
+             ((or 'quoted-literal 'import-declaration 'export-declaration) nil)
              (_ (setq tasks (mapcar (lambda (child) (list :walk child current)) children))))))
         (dolist (task (reverse tasks)) (push task pending))))))
 
 (defun eliscript-ir-emitter--tdz-prepare (program)
-  (let ((state (list :variables nil :declarations (make-hash-table :test #'eq)
-                     :reads (make-hash-table :test #'eq) :writes (make-hash-table :test #'eq)))
-        (scope (eliscript-ir-emitter--tdz-scope nil)))
-    (eliscript-ir-emitter--tdz-predeclare (eliscript-ir-program-body program) scope state)
+  (let ((state (eliscript-emitter--tdz-state-create))
+        (scope (eliscript-ir-emitter--tdz-scope nil))
+        (statements (eliscript-ir-emitter--tdz-statements (eliscript-ir-program-body program))))
+    (eliscript-ir-emitter--tdz-predeclare statements scope state)
     ;; No lookup can resolve to a tracked module variable in this case. In
     ;; particular a function-only runtime needs no second walk of every body.
     (when (plist-get state :variables)
-      (dolist (node (eliscript-ir-program-body program))
-        (eliscript-ir-emitter--tdz-walk node scope state)))
+      (let ((position 0))
+        (dolist (node statements)
+          (setf (plist-get state :owner)
+                (if (eq (eliscript-ir-node-kind node) 'function-declaration)
+                    (eliscript-emitter--binding-name (eliscript-ir-node-value node))
+                  position))
+          (setq position (1+ position))
+          (eliscript-ir-emitter--tdz-walk node scope state)))
+      (eliscript-emitter--tdz-finalize state))
     state))
 
 
@@ -1732,7 +1758,8 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
                 (if children (eliscript-ir-emitter-emit-expression (car children)) "null"))
         (let ((record (and eliscript-ir-emitter--tdz-state
                        (gethash node (plist-get eliscript-ir-emitter--tdz-state :declarations)))))
-          (when record (concat "\n" (eliscript-emitter--tdz-ready-name record) " = true;")))))
+          (when (eliscript-emitter--tdz-guarded-p record)
+            (concat "\n" (eliscript-emitter--tdz-ready-name record) " = true;")))))
       ('function-declaration
        (pcase-let ((`(,parameters ,body)
                     (eliscript-ir-emitter--split-counted-children
@@ -1811,6 +1838,17 @@ JavaScript property or tag string rather than an Eliscript value."
   "Emit IR PROGRAM, retaining source marks when recording is active."
   (unless (eliscript-ir-program-p program)
     (eliscript-emitter--fail "expected an IR program: %S" program))
+  (if (let ((body (eliscript-ir-program-body program)))
+        (and (equal (length body) 1)
+             (eq (eliscript-ir-node-kind (car body)) 'module-declaration)
+             (null (eliscript-ir-node-children (car body)))
+             (eliscript-emitter--prelude-capsule-p
+              (eliscript-ir-program-filename program) (eliscript-ir-node-value (car body)))))
+      eliscript-emitter--prelude-module
+    (eliscript-ir-emitter--emit-ordinary-module program)))
+
+(defun eliscript-ir-emitter--emit-ordinary-module (program)
+  "Emit every IR PROGRAM except the shared helper module."
   (let ((eliscript-emitter--temporary-counter 0)
         (eliscript-ir-emitter--binding-temporaries nil)
         ;; IR is immutable during emission. Rechecking each synchronous if/let
@@ -1828,7 +1866,6 @@ JavaScript property or tag string rather than an Eliscript value."
         uses-imul
         uses-array-text
         uses-math-runtime
-        names-global-root
         portable-functions
         exported-bindings)
     (eliscript-ir-emitter--walk-program
@@ -1840,10 +1877,6 @@ JavaScript property or tag string rather than an Eliscript value."
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (eq (eliscript-ir-node-value node) 'imul32))
          (setq uses-imul t))
-       (when (and (eq (eliscript-ir-node-value node) 'globalThis)
-                  (not (memq (eliscript-ir-node-kind node)
-                             '(literal raw-javascript))))
-         (setq names-global-root t))
        (when (eq (eliscript-ir-node-kind node) 'map-binding-pattern)
          (setq uses-binding-runtime t))
        (when (or (and (eq (eliscript-ir-node-kind node) 'method-call)
@@ -1896,7 +1929,9 @@ JavaScript property or tag string rather than an Eliscript value."
                  (eliscript-ir-program-filename program) (eliscript-ir-node-value (car body)))))
          "" eliscript-emitter--unicode-runtime-import)
      (if uses-math-runtime eliscript-emitter--math-runtime-import "")
-     (if uses-array-text eliscript-emitter--array-text-import "")
+     (eliscript-emitter--prelude-import
+      uses-array-text (or uses-number-conversion uses-numeric-coercion)
+      uses-numeric-coercion uses-imul)
      (if uses-literal-runtime
          eliscript-ir-emitter--literal-runtime-import
        "")
@@ -1913,11 +1948,6 @@ JavaScript property or tag string rather than an Eliscript value."
          eliscript-ir-emitter--value-runtime-import
        "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
-     (if (or uses-number-conversion uses-numeric-coercion)
-         (eliscript-emitter--number-conversion-prologue names-global-root)
-       "")
-     (if uses-numeric-coercion eliscript-emitter--numeric-operator-helper "")
-     (if uses-imul (eliscript-emitter--imul-prologue names-global-root) "")
      (if uses-host-identity-token
          eliscript-emitter--host-identity-token-helper
        "")

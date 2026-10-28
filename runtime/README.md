@@ -11,7 +11,7 @@ should still be emitted directly; helpers need a concrete semantic reason to
 exist.
 
 All runtime modules in this directory (`literals.eli`, `worker.eli`,
-`math.eli`, `unicode-case.eli`, `core/*.eli`, `testing/*.eli`, and `wire/*.eli`)
+`math.eli`, `prelude.eli`, `unicode-case.eli`, `core/*.eli`, `testing/*.eli`, and `wire/*.eli`)
 are maintained as `.eli` sources in Git and materialized or compiled to `.mjs`
 during `make bootstrap-backends` (zero tracked `.mjs` files in the repository).
 Eliscript modules may import `eliscript/runtime/*` either without the `.mjs`
@@ -21,6 +21,12 @@ an explicit `.mjs` suffix.
 The compiler still emits a local Lisp-truthiness helper for standalone
 generated forms. `core/truth.eli` (`core/truth.mjs`) exposes the same semantics
 to shared runtime algorithms: only `false`, `null`, and `undefined` are false.
+
+`prelude.eli` (`prelude.mjs`) holds the operation helpers that would otherwise
+repeat in every generated module: array text access, number conversion,
+numeric operator coercion, and 32-bit integer multiplication. The compiler
+recognizes this exact empty module and emits the complete helper set; other
+modules import only the `__eliscript_*` helpers their operations use.
 
 Host libraries are imported explicitly by application modules. The runtime
 contains no UI-framework wrapper, element constructor, or bundler adapter.

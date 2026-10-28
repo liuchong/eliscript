@@ -35,7 +35,7 @@
               (await (mkdir (resolve output "..") (js-object :recursive t))) (await (writeFile output (get record :source)))))))
           (await (writeFile (resolve directory "bootstrap/host/compiler-session.eli") "(export)"))
           (await (writeFile (resolve directory "bootstrap/runtime/memory.eli") "; unit fixture runtime\n"))
-          (await (each-await (js-array "runtime/math.eli" "runtime/unicode-case.eli" "runtime/unicode-case-data.eli") (async (path)
+          (await (each-await (js-array "runtime/math.eli" "runtime/prelude.eli" "runtime/unicode-case.eli" "runtime/unicode-case-data.eli") (async (path)
             (let ((bytes (await (readFile (resolve root path)))))
               (await (writeFile (resolve directory path) bytes)) (deep (await (readFile (resolve directory path))) bytes)))))
           (await (writeFile (resolve directory "Makefile") (+ "test-core:\n" (js-call (js-call recipe :map (lambda (line) (+ "\t@" line "\n"))) :join ""))))

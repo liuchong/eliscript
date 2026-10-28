@@ -1,9 +1,10 @@
 (module tools.testing.wire-project-fixture
-  (import "node:fs/promises" mkdtemp mkdir writeFile rm)
+  (import "node:fs/promises" mkdtemp mkdir writeFile rm symlink)
   (import "node:path" resolve dirname)
   (import "node:os" tmpdir)
   (import "node:assert/strict" :default assert)
   (import "node:url" pathToFileURL)
+  (import "../backends/build.mjs" root)
   (import "../backends/compiler-build.mjs" independentCompilerResources)
   (import "../backends/managed-runtime.mjs" createManagedProjectFacades createManagedModuleGraph readManagedModuleMetadata)
   (defun wireFixtureFunctionalProfile (sourceSha environment)
@@ -105,6 +106,18 @@
       (Object/defineProperties wrapped (js-object
         :name (Object/getOwnPropertyDescriptor invoke "name") :length (Object/getOwnPropertyDescriptor invoke "length")))
       (put entry :value wrapped)
+      (when (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
+        (let* ((auto-entry (get descriptors :auto))
+               (original-auto (when auto-entry (get auto-entry :value))))
+          (when (= (value-type original-auto) "function")
+            (let ((auto (lambda (threshold &rest rest)
+                    (Reflect/apply original-auto runtime
+                      (js-call (js-array (if (and (= (value-type threshold) "number") (> threshold 0) (<= threshold 65536)) 2097152 threshold))
+                               :concat rest)))))
+              (Object/defineProperties auto (js-object
+                :name (Object/getOwnPropertyDescriptor original-auto "name")
+                :length (Object/getOwnPropertyDescriptor original-auto "length")))
+              (put auto-entry :value auto)))))
       (Object/defineProperties facade descriptors)
       (unless (Reflect/isExtensible runtime) (Object/preventExtensions facade)) facade))
   (defun createWireProjectFixture ()
@@ -125,6 +138,11 @@
                   (await (mkdir (dirname path) (js-object :recursive t)))
                   (await (writeFile path (get file :source))))
                 (setq index (1+ index)))
+              ;; Facades live outside the checkout, but host imports use the
+              ;; package name. Point that name at this checkout so
+              ;; eliscript/platform/http.mjs resolves through package exports.
+              (await (mkdir (resolve directory "node_modules") (js-object :recursive t)))
+              (await (symlink root (resolve directory "node_modules/eliscript") "dir"))
               (Object/assign (js-object) settings
                 (js-object :projectModuleBaseURL (get (pathToFileURL (+ directory "/")) :href)
                   :moduleGraph (createManagedModuleGraph descriptor))))))

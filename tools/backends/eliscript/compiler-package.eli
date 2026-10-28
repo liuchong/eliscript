@@ -98,7 +98,7 @@
     (let ((prefixes (js-array "dist/" "" "artifact/" "transport/")) (index 0)
           (files (get (get result :manifest) :files)))
       (while (< index (js-length prefixes))
-        (let ((capsules (js-array "math" "unicode-case" "unicode-case-data")) (offset 0))
+        (let ((capsules (js-array "math" "prelude" "unicode-case" "unicode-case-data")) (offset 0))
           (while (< offset (js-length capsules))
             (let* ((suffix (str "runtime/" (aref capsules offset) ".mjs"))
                    (path (str (aref prefixes index) suffix)) (map-path (str path ".map"))
@@ -120,9 +120,11 @@
           (await (publish-runtime-scope result path
             (if (= path "runtime/package.json")
               (js-object "./runtime/math.mjs" "./math.mjs"
+                "./runtime/prelude.mjs" "./prelude.mjs"
                 "./runtime/unicode-case.mjs" "./unicode-case.mjs"
                 "./runtime/unicode-case-data.mjs" "./unicode-case-data.mjs")
               (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+                "./runtime/prelude.mjs" "./runtime/prelude.mjs"
                 "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
                 "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs")))))
         (setq index (1+ index))))

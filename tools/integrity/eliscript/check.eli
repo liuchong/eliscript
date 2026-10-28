@@ -220,8 +220,19 @@
         (Object/assign (js-object) options (js-object :root directory :trackedFiles tracked))))))
 
   (defasync validateBenchmarkSource (directory tracked-files filename report)
-    (await (legacyValidateBenchmarkSource
-      directory (await (augment-capsule-tracked-files directory tracked-files)) filename report)))
+    (let ((augmented (await (augment-capsule-tracked-files directory tracked-files))))
+      (when (Array/isArray augmented)
+        (let ((known (new globalThis.Set augmented)))
+          (js-call (js-array
+            (js-array "tools/project/project.eli" "bootstrap/host/project.mjs")
+            (js-array "stdlib/core/object.eli" "runtime/core/object-impl.mjs")
+            (js-array "stdlib/core/protocol.eli" "runtime/core/protocol-impl.mjs")
+            (js-array "stdlib/core/text.eli" "runtime/core/text-impl.mjs")) :forEach
+            (lambda (pair)
+              (when (js-call known :has (aref pair 0))
+                (js-call known :add (aref pair 1)))))
+          (setq augmented (js-call (Array/from known) :sort))))
+      (await (legacyValidateBenchmarkSource directory augmented filename report))))
 
   (defasync checkRepositoryIntegrity (&rest arguments)
     (let* ((options (call-options arguments))

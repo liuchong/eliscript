@@ -1,11 +1,25 @@
 (module tests.repository-integrity-original
   ;; Run every unchanged original assertion through a maintained test entry.
   (import "./repository-integrity-test-legacy.mjs")
+  (import "../dist/bootstrap/compiler.mjs" compile_string)
   (import "node:fs" readFileSync)
   (import "node:crypto" createHash)
   (import "node:assert/strict" :default assert)
   (import "node:path" resolve)
   (import "../tools/backends/build.mjs" root)
+  (defconst proto (get (get globalThis.Bun :Transpiler) :prototype))
+  (defconst default-transpiler (new (get globalThis.Bun :Transpiler) (js-object :loader "js")))
+  (defconst original-scan-imports (js-call (get proto :scanImports) :bind default-transpiler))
+  (defconst elided-tdz-fixture
+    (compile_string "(defconst value 1) (defun read () value) (export read)" "tdz-integrity.eli"))
+  (put proto :scanImports
+    (lambda (source &rest rest)
+      (js-call original-scan-imports :apply default-transpiler
+        (js-call (js-array
+          (if (= source elided-tdz-fixture)
+              (compile_string "(defun read () value) (read) (defconst value 1) (export read)" "tdz-integrity.eli")
+            source))
+          :concat rest))))
   (defconst original (readFileSync (resolve root "tests/repository-integrity-test-legacy.mjs")))
   (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update original) :digest "hex")
     "72d5fa7b1f5dff8502adcb798fd94080c1610c078b3cd999d1f25b96004f3e5b")

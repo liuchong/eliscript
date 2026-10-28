@@ -1,1 +1,670 @@
-{"schemaVersion":1,"format":"eliscript-worker-lifecycle-soak","version":1,"verified":true,"acceptanceQualified":true,"limits":{"runTimeoutSeconds":180,"requestTimeoutMs":5000,"blockingTimeoutMs":25},"workload":{"successfulRequests":100000,"responseCount":100000,"uniqueResponses":100000,"duplicateResponses":0,"lostResponses":0,"batchSize":64,"peakInFlight":64,"checkpointEvery":2500,"resultChecksum":2409405,"expectedChecksum":2409405},"recovery":{"events":[{"name":"cooperative-cancellation","errorCode":"cancelled","callbackCount":1,"pendingAfter":0},{"name":"explicit-restart","fromGeneration":1,"toGeneration":2,"pendingAfter":0},{"name":"module-replacement","fromGeneration":2,"toGeneration":3,"revision":2,"pendingAfter":0},{"name":"blocking-timeout","fromGeneration":3,"errorCode":"timeout","callbackCount":1,"workerStopped":true,"pendingAfter":0},{"fromGeneration":4,"name":"process-death","errorCode":"worker-exit","callbackCount":1,"pendingAfter":0}],"faultCallbacks":3,"initialGeneration":1,"finalGeneration":5,"restartCount":4},"memory":{"unit":"KiB","withinBudget":true,"boundedTrend":true,"sampleCount":1651,"peakKiB":{"emacs":79264,"worker":80528,"combined":157200},"budgetKiB":{"emacs":524288,"worker":524288,"combined":786432},"steadyState":{"fromGeneration":1,"toGeneration":5,"initialMedianKiB":{"emacs":76616.0,"worker":80296.0},"finalMedianKiB":{"emacs":78256.0,"worker":77400.0},"deltaKiB":{"emacs":1640.0,"worker":-2896.0},"allowanceKiB":16384,"bounded":true},"generations":[{"generation":1,"pid":62070,"checkpointCount":8,"steadyState":{"checkpoints":8,"warmupCheckpoints":4,"initialMedianKiB":{"emacs":76216.0,"worker":78264.0},"finalMedianKiB":{"emacs":76616.0,"worker":80296.0},"deltaKiB":{"emacs":400.0,"worker":2032.0},"allowanceKiB":16384,"bounded":true}},{"generation":2,"pid":62082,"checkpointCount":8,"steadyState":{"checkpoints":8,"warmupCheckpoints":4,"initialMedianKiB":{"emacs":76960.0,"worker":75648.0},"finalMedianKiB":{"emacs":76960.0,"worker":77688.0},"deltaKiB":{"emacs":0.0,"worker":2040.0},"allowanceKiB":16384,"bounded":true}},{"generation":3,"pid":62088,"checkpointCount":8,"steadyState":{"checkpoints":8,"warmupCheckpoints":4,"initialMedianKiB":{"emacs":77024.0,"worker":75528.0},"finalMedianKiB":{"emacs":77088.0,"worker":77576.0},"deltaKiB":{"emacs":64.0,"worker":2048.0},"allowanceKiB":16384,"bounded":true}},{"generation":4,"pid":62096,"checkpointCount":8,"steadyState":{"checkpoints":8,"warmupCheckpoints":4,"initialMedianKiB":{"emacs":77192.0,"worker":74008.0},"finalMedianKiB":{"emacs":77232.0,"worker":76072.0},"deltaKiB":{"emacs":40.0,"worker":2064.0},"allowanceKiB":16384,"bounded":true}},{"generation":5,"pid":62097,"checkpointCount":8,"steadyState":{"checkpoints":8,"warmupCheckpoints":4,"initialMedianKiB":{"emacs":77232.0,"worker":75256.0},"finalMedianKiB":{"emacs":78256.0,"worker":77400.0},"deltaKiB":{"emacs":1024.0,"worker":2144.0},"allowanceKiB":16384,"bounded":true}}],"checkpoints":[{"request":2500,"phase":"generation-1-a","generation":1,"pid":62070,"emacsKiB":72496,"workerKiB":66736},{"request":5000,"phase":"generation-1-a","generation":1,"pid":62070,"emacsKiB":72624,"workerKiB":72720},{"request":7500,"phase":"generation-1-a","generation":1,"pid":62070,"emacsKiB":74176,"workerKiB":74240},{"request":10000,"phase":"generation-1-a","generation":1,"pid":62070,"emacsKiB":75728,"workerKiB":75200},{"request":12500,"phase":"generation-1-b","generation":1,"pid":62070,"emacsKiB":75872,"workerKiB":77488},{"request":15000,"phase":"generation-1-b","generation":1,"pid":62070,"emacsKiB":76560,"workerKiB":79040},{"request":17500,"phase":"generation-1-b","generation":1,"pid":62070,"emacsKiB":76560,"workerKiB":80064},{"request":20000,"phase":"generation-1-b","generation":1,"pid":62070,"emacsKiB":76672,"workerKiB":80528},{"request":22500,"phase":"generation-2","generation":2,"pid":62082,"emacsKiB":76784,"workerKiB":65520},{"request":25000,"phase":"generation-2","generation":2,"pid":62082,"emacsKiB":76784,"workerKiB":70064},{"request":27500,"phase":"generation-2","generation":2,"pid":62082,"emacsKiB":76912,"workerKiB":71696},{"request":30000,"phase":"generation-2","generation":2,"pid":62082,"emacsKiB":76960,"workerKiB":72896},{"request":32500,"phase":"generation-2","generation":2,"pid":62082,"emacsKiB":76960,"workerKiB":74608},{"request":35000,"phase":"generation-2","generation":2,"pid":62082,"emacsKiB":76960,"workerKiB":76688},{"request":37500,"phase":"generation-2","generation":2,"pid":62082,"emacsKiB":76960,"workerKiB":77072},{"request":40000,"phase":"generation-2","generation":2,"pid":62082,"emacsKiB":76960,"workerKiB":78304},{"request":42500,"phase":"generation-3-module-replacement","generation":3,"pid":62088,"emacsKiB":77024,"workerKiB":64560},{"request":45000,"phase":"generation-3-module-replacement","generation":3,"pid":62088,"emacsKiB":77024,"workerKiB":69408},{"request":47500,"phase":"generation-3-module-replacement","generation":3,"pid":62088,"emacsKiB":77024,"workerKiB":70880},{"request":50000,"phase":"generation-3-module-replacement","generation":3,"pid":62088,"emacsKiB":77024,"workerKiB":72368},{"request":52500,"phase":"generation-3-module-replacement","generation":3,"pid":62088,"emacsKiB":77024,"workerKiB":74560},{"request":55000,"phase":"generation-3-module-replacement","generation":3,"pid":62088,"emacsKiB":77024,"workerKiB":76496},{"request":57500,"phase":"generation-3-module-replacement","generation":3,"pid":62088,"emacsKiB":77024,"workerKiB":77424},{"request":60000,"phase":"generation-3-module-replacement","generation":3,"pid":62088,"emacsKiB":77152,"workerKiB":77728},{"request":62500,"phase":"generation-4-timeout-recovery","generation":4,"pid":62096,"emacsKiB":77152,"workerKiB":63648},{"request":65000,"phase":"generation-4-timeout-recovery","generation":4,"pid":62096,"emacsKiB":77152,"workerKiB":68432},{"request":67500,"phase":"generation-4-timeout-recovery","generation":4,"pid":62096,"emacsKiB":77152,"workerKiB":70512},{"request":70000,"phase":"generation-4-timeout-recovery","generation":4,"pid":62096,"emacsKiB":77152,"workerKiB":71680},{"request":72500,"phase":"generation-4-timeout-recovery","generation":4,"pid":62096,"emacsKiB":77152,"workerKiB":72928},{"request":75000,"phase":"generation-4-timeout-recovery","generation":4,"pid":62096,"emacsKiB":77232,"workerKiB":75088},{"request":77500,"phase":"generation-4-timeout-recovery","generation":4,"pid":62096,"emacsKiB":77232,"workerKiB":75904},{"request":80000,"phase":"generation-4-timeout-recovery","generation":4,"pid":62096,"emacsKiB":77232,"workerKiB":76240},{"request":82500,"phase":"generation-5-death-recovery","generation":5,"pid":62097,"emacsKiB":77232,"workerKiB":64416},{"request":85000,"phase":"generation-5-death-recovery","generation":5,"pid":62097,"emacsKiB":77232,"workerKiB":69312},{"request":87500,"phase":"generation-5-death-recovery","generation":5,"pid":62097,"emacsKiB":77232,"workerKiB":71408},{"request":90000,"phase":"generation-5-death-recovery","generation":5,"pid":62097,"emacsKiB":77232,"workerKiB":72576},{"request":92500,"phase":"generation-5-death-recovery","generation":5,"pid":62097,"emacsKiB":77232,"workerKiB":73968},{"request":95000,"phase":"generation-5-death-recovery","generation":5,"pid":62097,"emacsKiB":77232,"workerKiB":76544},{"request":97500,"phase":"generation-5-death-recovery","generation":5,"pid":62097,"emacsKiB":77248,"workerKiB":77184},{"request":100000,"phase":"generation-5-death-recovery","generation":5,"pid":62097,"emacsKiB":79264,"workerKiB":77616}]},"lifecycle":{"cleanShutdown":true,"temporaryDirectoryRemoved":true,"reclaimedProcessCount":5,"pendingAfterCorpus":0,"ownedProcessCount":5,"ownedPids":[62070,62082,62088,62096,62097]},"elapsedMs":8208.016157150269,"host":{"systemType":"darwin","systemConfiguration":"aarch64-apple-darwin25.6.0","emacsVersion":"31.1","javascriptProgram":"bun","javascriptVersion":"1.4.0"},"source":{"digest":"ee35ba1faca82014c426f4132154be6e9d377a969f774a10b35cc7eec0bef5ed","files":[{"file":"compiler/eliscript-analyzer.el","sha256":"5f4a44aae8fc5501278c2b23d5cffcbd01339c67395a88b7a856c961ff3d051a"},{"file":"compiler/eliscript-cli.el","sha256":"01082444fae9e45be51ccefe1b65331e7d96b223be2e4f624f1336f0158fd428"},{"file":"compiler/eliscript-diagnostic.el","sha256":"6e720411abd3f2f10e86203edd659adf669ca4dfbb97cce120b79e559c5a0802"},{"file":"compiler/eliscript-emitter.el","sha256":"8b4d2c371ea965a091a71013b029a6b9634220dda1a0ab090ae2b31d8fa65c56"},{"file":"compiler/eliscript-evaluation.el","sha256":"9d9a1b9aac1449c452a22cc3e77d35c3e16163fef26971978494864a4552f93c"},{"file":"compiler/eliscript-expander.el","sha256":"2c30ae084404c6396b74822da92a268b6b0e952b69b91482f85398779327c1f9"},{"file":"compiler/eliscript-form.el","sha256":"4c63862e7cddae7f19d91f56b1e804bddccc2ad1d1d1d11fe0ee77ae2382d317"},{"file":"compiler/eliscript-ir-emitter.el","sha256":"aa55a0e013b5660755fb1ca3a675136564d94a35de0f174e4e6ee8929f318fcb"},{"file":"compiler/eliscript-ir.el","sha256":"f567a3a6300630a2427df35fbe93521cf87f24bed4fb8ab3c0fa6d2088188641"},{"file":"compiler/eliscript-lower.el","sha256":"1b288bd7abbb5d7655fae8b44549d62f3b11b9ae522e03dad683452b89c07160"},{"file":"compiler/eliscript-macro-eval.el","sha256":"5d0266c6466eecf54792ff1a27ca34e2dae0b1aae87e30bcfe2fe7cd1dc5ec6e"},{"file":"compiler/eliscript-parameters.el","sha256":"b493b7696447e96a01252b03279c6b56d82cdac4377698f9f4e10a5dbe28baab"},{"file":"compiler/eliscript-portable.el","sha256":"6aa69b7fefa9477c9ebe7221105204bdbfd8798909bf4b3f43d44149f700d4d3"},{"file":"compiler/eliscript-project-cli.el","sha256":"eccf30ceb6c4f53d1d56263e81b475ed5d67e73db540bb63acedb5941ab2c3c1"},{"file":"compiler/eliscript-project.el","sha256":"813d28a51158bc5f96e7b5e5bca080b7af2f59e0ab19e6c3232a4c171665c343"},{"file":"compiler/eliscript-reader.el","sha256":"096dd635465dc166ca2cf0b0a7a57802158a2759857d342e1ffc03bf936b1a0e"},{"file":"compiler/eliscript-source-map.el","sha256":"ff4dde7fd4487fd8466bd864d9c2c05c29b5e02875352f7313ce5f4a2cbaa793"},{"file":"compiler/eliscript-symbol.el","sha256":"05b4dc7e703c92efb4d71e0f5d2a9b10f4bda5ef4373eea7df2be6b5f4c2516f"},{"file":"compiler/eliscript-transient-analysis.el","sha256":"e9c97a6dff1d3c455c255b4090f7218749b4c9a2a521d380afa889c564364066"},{"file":"compiler/eliscript.el","sha256":"e07d31e6c4cb4574200e3f37f3ee05a1bc1bd940ceff213e180f444190806416"},{"file":"platform/worker.mjs","sha256":"76de32c429aed767bea76fb4825e77955a852b720c7fb365bc5c1569d94377b7"},{"file":"runtime/worker.mjs","sha256":"730de98861c46b43f8f7c330875712dcb0c4657ef4f92ba20ce224831989bdee"},{"file":"tools/worker/eliscript-value-codec.el","sha256":"8e62c7247f089a37fedc84b085c45491e9931a3066ceaa3ba48cb79aa8b21339"},{"file":"tools/worker/eliscript-value-stream.el","sha256":"18d4430d49997c30a9eecd3744045f487193a5c65cfe7f6e8c94399cb703c91d"},{"file":"tools/worker/eliscript-worker.el","sha256":"e63c195a7ddcda45846aeaff5073dd173bfae39491670d1e94c601ec4abadf03"},{"file":"tools/worker/lifecycle-soak.el","sha256":"6fb8858d9b4651ea6bd1f77422cef1728ea2874f012f467447eb71683ebe0ab5"}]}}
+{
+  "schemaVersion": 1,
+  "format": "eliscript-worker-lifecycle-soak",
+  "version": 1,
+  "verified": true,
+  "acceptanceQualified": true,
+  "limits": {
+    "runTimeoutSeconds": 180,
+    "requestTimeoutMs": 5000,
+    "blockingTimeoutMs": 25
+  },
+  "workload": {
+    "successfulRequests": 100000,
+    "responseCount": 100000,
+    "uniqueResponses": 100000,
+    "duplicateResponses": 0,
+    "lostResponses": 0,
+    "batchSize": 64,
+    "peakInFlight": 64,
+    "checkpointEvery": 2500,
+    "resultChecksum": 2409405,
+    "expectedChecksum": 2409405
+  },
+  "recovery": {
+    "events": [
+      {
+        "name": "cooperative-cancellation",
+        "errorCode": "cancelled",
+        "callbackCount": 1,
+        "pendingAfter": 0
+      },
+      {
+        "name": "explicit-restart",
+        "fromGeneration": 1,
+        "toGeneration": 2,
+        "pendingAfter": 0
+      },
+      {
+        "name": "module-replacement",
+        "fromGeneration": 2,
+        "toGeneration": 3,
+        "revision": 2,
+        "pendingAfter": 0
+      },
+      {
+        "name": "blocking-timeout",
+        "fromGeneration": 3,
+        "errorCode": "timeout",
+        "callbackCount": 1,
+        "workerStopped": true,
+        "pendingAfter": 0
+      },
+      {
+        "fromGeneration": 4,
+        "name": "process-death",
+        "errorCode": "worker-exit",
+        "callbackCount": 1,
+        "pendingAfter": 0
+      }
+    ],
+    "faultCallbacks": 3,
+    "initialGeneration": 1,
+    "finalGeneration": 5,
+    "restartCount": 4
+  },
+  "memory": {
+    "unit": "KiB",
+    "withinBudget": true,
+    "boundedTrend": true,
+    "sampleCount": 1628,
+    "peakKiB": {
+      "emacs": 75376,
+      "worker": 78592,
+      "combined": 153872
+    },
+    "budgetKiB": {
+      "emacs": 524288,
+      "worker": 524288,
+      "combined": 786432
+    },
+    "steadyState": {
+      "fromGeneration": 1,
+      "toGeneration": 5,
+      "initialMedianKiB": {
+        "emacs": 74496,
+        "worker": 77944
+      },
+      "finalMedianKiB": {
+        "emacs": 75352,
+        "worker": 77024
+      },
+      "deltaKiB": {
+        "emacs": 856,
+        "worker": -920
+      },
+      "allowanceKiB": 16384,
+      "bounded": true
+    },
+    "generations": [
+      {
+        "generation": 1,
+        "pid": 44122,
+        "checkpointCount": 8,
+        "steadyState": {
+          "checkpoints": 8,
+          "warmupCheckpoints": 4,
+          "initialMedianKiB": {
+            "emacs": 74408,
+            "worker": 75928
+          },
+          "finalMedianKiB": {
+            "emacs": 74496,
+            "worker": 77944
+          },
+          "deltaKiB": {
+            "emacs": 88,
+            "worker": 2016
+          },
+          "allowanceKiB": 16384,
+          "bounded": true
+        }
+      },
+      {
+        "generation": 2,
+        "pid": 44128,
+        "checkpointCount": 8,
+        "steadyState": {
+          "checkpoints": 8,
+          "warmupCheckpoints": 4,
+          "initialMedianKiB": {
+            "emacs": 74656,
+            "worker": 75432
+          },
+          "finalMedianKiB": {
+            "emacs": 74656,
+            "worker": 77072
+          },
+          "deltaKiB": {
+            "emacs": 0,
+            "worker": 1640
+          },
+          "allowanceKiB": 16384,
+          "bounded": true
+        }
+      },
+      {
+        "generation": 3,
+        "pid": 44154,
+        "checkpointCount": 8,
+        "steadyState": {
+          "checkpoints": 8,
+          "warmupCheckpoints": 4,
+          "initialMedianKiB": {
+            "emacs": 75264,
+            "worker": 75400
+          },
+          "finalMedianKiB": {
+            "emacs": 75264,
+            "worker": 76752
+          },
+          "deltaKiB": {
+            "emacs": 0,
+            "worker": 1352
+          },
+          "allowanceKiB": 16384,
+          "bounded": true
+        }
+      },
+      {
+        "generation": 4,
+        "pid": 44194,
+        "checkpointCount": 8,
+        "steadyState": {
+          "checkpoints": 8,
+          "warmupCheckpoints": 4,
+          "initialMedianKiB": {
+            "emacs": 75280,
+            "worker": 76504
+          },
+          "finalMedianKiB": {
+            "emacs": 75280,
+            "worker": 78424
+          },
+          "deltaKiB": {
+            "emacs": 0,
+            "worker": 1920
+          },
+          "allowanceKiB": 16384,
+          "bounded": true
+        }
+      },
+      {
+        "generation": 5,
+        "pid": 44205,
+        "checkpointCount": 8,
+        "steadyState": {
+          "checkpoints": 8,
+          "warmupCheckpoints": 4,
+          "initialMedianKiB": {
+            "emacs": 75296,
+            "worker": 75240
+          },
+          "finalMedianKiB": {
+            "emacs": 75352,
+            "worker": 77024
+          },
+          "deltaKiB": {
+            "emacs": 56,
+            "worker": 1784
+          },
+          "allowanceKiB": 16384,
+          "bounded": true
+        }
+      }
+    ],
+    "checkpoints": [
+      {
+        "request": 2500,
+        "phase": "generation-1-a",
+        "generation": 1,
+        "pid": 44122,
+        "emacsKiB": 72576,
+        "workerKiB": 65616
+      },
+      {
+        "request": 5000,
+        "phase": "generation-1-a",
+        "generation": 1,
+        "pid": 44122,
+        "emacsKiB": 74144,
+        "workerKiB": 70448
+      },
+      {
+        "request": 7500,
+        "phase": "generation-1-a",
+        "generation": 1,
+        "pid": 44122,
+        "emacsKiB": 74208,
+        "workerKiB": 71648
+      },
+      {
+        "request": 10000,
+        "phase": "generation-1-a",
+        "generation": 1,
+        "pid": 44122,
+        "emacsKiB": 74256,
+        "workerKiB": 73136
+      },
+      {
+        "request": 12500,
+        "phase": "generation-1-b",
+        "generation": 1,
+        "pid": 44122,
+        "emacsKiB": 74352,
+        "workerKiB": 75280
+      },
+      {
+        "request": 15000,
+        "phase": "generation-1-b",
+        "generation": 1,
+        "pid": 44122,
+        "emacsKiB": 74464,
+        "workerKiB": 76576
+      },
+      {
+        "request": 17500,
+        "phase": "generation-1-b",
+        "generation": 1,
+        "pid": 44122,
+        "emacsKiB": 74464,
+        "workerKiB": 77712
+      },
+      {
+        "request": 20000,
+        "phase": "generation-1-b",
+        "generation": 1,
+        "pid": 44122,
+        "emacsKiB": 74528,
+        "workerKiB": 78176
+      },
+      {
+        "request": 22500,
+        "phase": "generation-2",
+        "generation": 2,
+        "pid": 44128,
+        "emacsKiB": 74656,
+        "workerKiB": 64480
+      },
+      {
+        "request": 25000,
+        "phase": "generation-2",
+        "generation": 2,
+        "pid": 44128,
+        "emacsKiB": 74656,
+        "workerKiB": 69104
+      },
+      {
+        "request": 27500,
+        "phase": "generation-2",
+        "generation": 2,
+        "pid": 44128,
+        "emacsKiB": 74656,
+        "workerKiB": 70576
+      },
+      {
+        "request": 30000,
+        "phase": "generation-2",
+        "generation": 2,
+        "pid": 44128,
+        "emacsKiB": 74656,
+        "workerKiB": 72160
+      },
+      {
+        "request": 32500,
+        "phase": "generation-2",
+        "generation": 2,
+        "pid": 44128,
+        "emacsKiB": 74656,
+        "workerKiB": 74688
+      },
+      {
+        "request": 35000,
+        "phase": "generation-2",
+        "generation": 2,
+        "pid": 44128,
+        "emacsKiB": 74656,
+        "workerKiB": 76176
+      },
+      {
+        "request": 37500,
+        "phase": "generation-2",
+        "generation": 2,
+        "pid": 44128,
+        "emacsKiB": 74656,
+        "workerKiB": 76960
+      },
+      {
+        "request": 40000,
+        "phase": "generation-2",
+        "generation": 2,
+        "pid": 44128,
+        "emacsKiB": 74656,
+        "workerKiB": 77184
+      },
+      {
+        "request": 42500,
+        "phase": "generation-3-module-replacement",
+        "generation": 3,
+        "pid": 44154,
+        "emacsKiB": 74720,
+        "workerKiB": 65376
+      },
+      {
+        "request": 45000,
+        "phase": "generation-3-module-replacement",
+        "generation": 3,
+        "pid": 44154,
+        "emacsKiB": 74720,
+        "workerKiB": 69968
+      },
+      {
+        "request": 47500,
+        "phase": "generation-3-module-replacement",
+        "generation": 3,
+        "pid": 44154,
+        "emacsKiB": 74720,
+        "workerKiB": 71968
+      },
+      {
+        "request": 50000,
+        "phase": "generation-3-module-replacement",
+        "generation": 3,
+        "pid": 44154,
+        "emacsKiB": 75264,
+        "workerKiB": 73216
+      },
+      {
+        "request": 52500,
+        "phase": "generation-3-module-replacement",
+        "generation": 3,
+        "pid": 44154,
+        "emacsKiB": 75264,
+        "workerKiB": 74992
+      },
+      {
+        "request": 55000,
+        "phase": "generation-3-module-replacement",
+        "generation": 3,
+        "pid": 44154,
+        "emacsKiB": 75264,
+        "workerKiB": 75808
+      },
+      {
+        "request": 57500,
+        "phase": "generation-3-module-replacement",
+        "generation": 3,
+        "pid": 44154,
+        "emacsKiB": 75264,
+        "workerKiB": 76512
+      },
+      {
+        "request": 60000,
+        "phase": "generation-3-module-replacement",
+        "generation": 3,
+        "pid": 44154,
+        "emacsKiB": 75264,
+        "workerKiB": 76992
+      },
+      {
+        "request": 62500,
+        "phase": "generation-4-timeout-recovery",
+        "generation": 4,
+        "pid": 44194,
+        "emacsKiB": 75280,
+        "workerKiB": 65376
+      },
+      {
+        "request": 65000,
+        "phase": "generation-4-timeout-recovery",
+        "generation": 4,
+        "pid": 44194,
+        "emacsKiB": 75280,
+        "workerKiB": 70480
+      },
+      {
+        "request": 67500,
+        "phase": "generation-4-timeout-recovery",
+        "generation": 4,
+        "pid": 44194,
+        "emacsKiB": 75280,
+        "workerKiB": 71936
+      },
+      {
+        "request": 70000,
+        "phase": "generation-4-timeout-recovery",
+        "generation": 4,
+        "pid": 44194,
+        "emacsKiB": 75280,
+        "workerKiB": 73712
+      },
+      {
+        "request": 72500,
+        "phase": "generation-4-timeout-recovery",
+        "generation": 4,
+        "pid": 44194,
+        "emacsKiB": 75280,
+        "workerKiB": 75584
+      },
+      {
+        "request": 75000,
+        "phase": "generation-4-timeout-recovery",
+        "generation": 4,
+        "pid": 44194,
+        "emacsKiB": 75280,
+        "workerKiB": 77424
+      },
+      {
+        "request": 77500,
+        "phase": "generation-4-timeout-recovery",
+        "generation": 4,
+        "pid": 44194,
+        "emacsKiB": 75280,
+        "workerKiB": 78256
+      },
+      {
+        "request": 80000,
+        "phase": "generation-4-timeout-recovery",
+        "generation": 4,
+        "pid": 44194,
+        "emacsKiB": 75280,
+        "workerKiB": 78592
+      },
+      {
+        "request": 82500,
+        "phase": "generation-5-death-recovery",
+        "generation": 5,
+        "pid": 44205,
+        "emacsKiB": 75296,
+        "workerKiB": 65136
+      },
+      {
+        "request": 85000,
+        "phase": "generation-5-death-recovery",
+        "generation": 5,
+        "pid": 44205,
+        "emacsKiB": 75296,
+        "workerKiB": 69920
+      },
+      {
+        "request": 87500,
+        "phase": "generation-5-death-recovery",
+        "generation": 5,
+        "pid": 44205,
+        "emacsKiB": 75296,
+        "workerKiB": 71808
+      },
+      {
+        "request": 90000,
+        "phase": "generation-5-death-recovery",
+        "generation": 5,
+        "pid": 44205,
+        "emacsKiB": 75296,
+        "workerKiB": 73008
+      },
+      {
+        "request": 92500,
+        "phase": "generation-5-death-recovery",
+        "generation": 5,
+        "pid": 44205,
+        "emacsKiB": 75296,
+        "workerKiB": 74432
+      },
+      {
+        "request": 95000,
+        "phase": "generation-5-death-recovery",
+        "generation": 5,
+        "pid": 44205,
+        "emacsKiB": 75296,
+        "workerKiB": 76048
+      },
+      {
+        "request": 97500,
+        "phase": "generation-5-death-recovery",
+        "generation": 5,
+        "pid": 44205,
+        "emacsKiB": 75328,
+        "workerKiB": 76864
+      },
+      {
+        "request": 100000,
+        "phase": "generation-5-death-recovery",
+        "generation": 5,
+        "pid": 44205,
+        "emacsKiB": 75376,
+        "workerKiB": 77184
+      }
+    ]
+  },
+  "lifecycle": {
+    "cleanShutdown": true,
+    "temporaryDirectoryRemoved": true,
+    "reclaimedProcessCount": 5,
+    "pendingAfterCorpus": 0,
+    "ownedProcessCount": 5,
+    "ownedPids": [
+      44122,
+      44128,
+      44154,
+      44194,
+      44205
+    ]
+  },
+  "elapsedMs": 8013.289928436279,
+  "host": {
+    "systemType": "darwin",
+    "systemConfiguration": "aarch64-apple-darwin25.6.0",
+    "emacsVersion": "31.1",
+    "javascriptProgram": "bun",
+    "javascriptVersion": "1.4.0"
+  },
+  "source": {
+    "digest": "21911ad910e1282c97488da1db85cb7f87e780dfd8200a87bdcc79479bfe6b24",
+    "files": [
+      {
+        "file": "compiler/eliscript-analyzer.el",
+        "sha256": "5f4a44aae8fc5501278c2b23d5cffcbd01339c67395a88b7a856c961ff3d051a"
+      },
+      {
+        "file": "compiler/eliscript-cli.el",
+        "sha256": "01082444fae9e45be51ccefe1b65331e7d96b223be2e4f624f1336f0158fd428"
+      },
+      {
+        "file": "compiler/eliscript-diagnostic.el",
+        "sha256": "6e720411abd3f2f10e86203edd659adf669ca4dfbb97cce120b79e559c5a0802"
+      },
+      {
+        "file": "compiler/eliscript-emitter.el",
+        "sha256": "b12b3e48b121944af0f3a37c9064840e64d50c5ae1f3319af1ba0dc1304f1d43"
+      },
+      {
+        "file": "compiler/eliscript-evaluation.el",
+        "sha256": "9d9a1b9aac1449c452a22cc3e77d35c3e16163fef26971978494864a4552f93c"
+      },
+      {
+        "file": "compiler/eliscript-expander.el",
+        "sha256": "2c30ae084404c6396b74822da92a268b6b0e952b69b91482f85398779327c1f9"
+      },
+      {
+        "file": "compiler/eliscript-form.el",
+        "sha256": "4c63862e7cddae7f19d91f56b1e804bddccc2ad1d1d1d11fe0ee77ae2382d317"
+      },
+      {
+        "file": "compiler/eliscript-ir-emitter.el",
+        "sha256": "cf7af2954839da310a3e2e0cbda5463c64979ea5c555945b207042c966c0606b"
+      },
+      {
+        "file": "compiler/eliscript-ir.el",
+        "sha256": "f567a3a6300630a2427df35fbe93521cf87f24bed4fb8ab3c0fa6d2088188641"
+      },
+      {
+        "file": "compiler/eliscript-lower.el",
+        "sha256": "1b288bd7abbb5d7655fae8b44549d62f3b11b9ae522e03dad683452b89c07160"
+      },
+      {
+        "file": "compiler/eliscript-macro-eval.el",
+        "sha256": "5d0266c6466eecf54792ff1a27ca34e2dae0b1aae87e30bcfe2fe7cd1dc5ec6e"
+      },
+      {
+        "file": "compiler/eliscript-parameters.el",
+        "sha256": "b493b7696447e96a01252b03279c6b56d82cdac4377698f9f4e10a5dbe28baab"
+      },
+      {
+        "file": "compiler/eliscript-portable.el",
+        "sha256": "6aa69b7fefa9477c9ebe7221105204bdbfd8798909bf4b3f43d44149f700d4d3"
+      },
+      {
+        "file": "compiler/eliscript-project-cli.el",
+        "sha256": "eccf30ceb6c4f53d1d56263e81b475ed5d67e73db540bb63acedb5941ab2c3c1"
+      },
+      {
+        "file": "compiler/eliscript-project.el",
+        "sha256": "813d28a51158bc5f96e7b5e5bca080b7af2f59e0ab19e6c3232a4c171665c343"
+      },
+      {
+        "file": "compiler/eliscript-reader.el",
+        "sha256": "096dd635465dc166ca2cf0b0a7a57802158a2759857d342e1ffc03bf936b1a0e"
+      },
+      {
+        "file": "compiler/eliscript-source-map.el",
+        "sha256": "ff4dde7fd4487fd8466bd864d9c2c05c29b5e02875352f7313ce5f4a2cbaa793"
+      },
+      {
+        "file": "compiler/eliscript-symbol.el",
+        "sha256": "05b4dc7e703c92efb4d71e0f5d2a9b10f4bda5ef4373eea7df2be6b5f4c2516f"
+      },
+      {
+        "file": "compiler/eliscript-transient-analysis.el",
+        "sha256": "e9c97a6dff1d3c455c255b4090f7218749b4c9a2a521d380afa889c564364066"
+      },
+      {
+        "file": "compiler/eliscript.el",
+        "sha256": "e07d31e6c4cb4574200e3f37f3ee05a1bc1bd940ceff213e180f444190806416"
+      },
+      {
+        "file": "platform/worker.mjs",
+        "sha256": "76de32c429aed767bea76fb4825e77955a852b720c7fb365bc5c1569d94377b7"
+      },
+      {
+        "file": "runtime/worker.mjs",
+        "sha256": "730de98861c46b43f8f7c330875712dcb0c4657ef4f92ba20ce224831989bdee"
+      },
+      {
+        "file": "tools/worker/eliscript-value-codec.el",
+        "sha256": "8e62c7247f089a37fedc84b085c45491e9931a3066ceaa3ba48cb79aa8b21339"
+      },
+      {
+        "file": "tools/worker/eliscript-value-stream.el",
+        "sha256": "18d4430d49997c30a9eecd3744045f487193a5c65cfe7f6e8c94399cb703c91d"
+      },
+      {
+        "file": "tools/worker/eliscript-worker.el",
+        "sha256": "e63c195a7ddcda45846aeaff5073dd173bfae39491670d1e94c601ec4abadf03"
+      },
+      {
+        "file": "tools/worker/lifecycle-soak.el",
+        "sha256": "6fb8858d9b4651ea6bd1f77422cef1728ea2874f012f467447eb71683ebe0ab5"
+      }
+    ]
+  }
+}

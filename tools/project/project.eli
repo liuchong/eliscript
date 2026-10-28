@@ -9,7 +9,7 @@
 
   (defconst checkProject (get legacy :checkProject))
   (defconst source-root (resolve (dirname (fileURLToPath (js* "import.meta.url"))) "../.."))
-  (defconst capsules (js-array "math" "unicode-case" "unicode-case-data"))
+  (defconst capsules (js-array "math" "prelude" "unicode-case" "unicode-case-data"))
   (defun digest (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
   (defun project-error (message filename)
     (let ((error (new globalThis.Error message)))

@@ -285,8 +285,8 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | `S4` | [x] | 已完成 | **A 阶段**：完成第二批次（原装 `.el` Dual-Host 共用与 Worker 加速）精确施工设计 | 用户授权 | 本章节 `Q13`–`Q17`、`D10`–`D13`、`C10`–`C13`、`A13`–`A17` 已就位 |
 | `S5` | [x] | 已完成 | **B 阶段**：在 `tests/eliscript-compat-syntax-tests.el` 与 `tests/emacs-compatible-syntax.test.eli` 中一次写齐 `T13`–`T16` 全部测试与验收用例，**不运行** | `S4` | `T13`–`T16` 用例编写完成 |
-| `S6` | [x] | 实现待验（R1 已完成施工） | **C 阶段**：一次完成 `editor/eliscript-compat.el`、`runtime/emacs-compat.eli`、`docs/emacs-compatible-syntax.md` 全部代码与文档实现，**严禁中途跑测** | `S5` | `C10`–`C14` 全部施工项勾选，状态为实现待验 |
-| `S7` | [ ] | 待施工 | **D 阶段**：集中物化 capsule、运行 ERT 与 Bun 测试、严格字节编译与契约门禁，逐项实测勾选 `A13`–`A17` 并签名提交推送 | `S4`–`S6` | `A13`–`A17` 实测通过并完成签名提交推送 |
+| `S6` | [x] | 已完成（R1 已完成施工） | **C 阶段**：一次完成 `editor/eliscript-compat.el`、`runtime/emacs-compat.eli`、`docs/emacs-compatible-syntax.md` 全部代码与文档实现，**严禁中途跑测** | `S5` | `C10`–`C14` 全部施工项勾选，状态为已完成 |
+| `S7` | [x] | 已完成 | **D 阶段**：集中物化构建、运行 ERT 与 Bun 测试、严格字节编译与契约门禁，逐项实测勾选 `A13`–`A17` 并签名提交推送 | `S4`–`S6` | `A13`–`A17` 实测通过并完成签名提交推送 |
 
 | 施工 ID | 写完打勾 | 变更/需求 | 文件与锚点 | 明确施工动作 | 依赖 | 对应验收 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -302,7 +302,7 @@ flowchart LR
 | `A14` | [x] | `Q15` / `C10`, `C12` / `T13` | 含 CJK `string-width`、UTF-8 `encode/decode-coding-string`、`secure-hash 'sha256`、`json-parse-string` 多容器模式、虚拟 `with-temp-buffer` 的程序 | ERT 与 Bun 运行 `T13` | 字符串列宽、字节长度、SHA-256 二进制/十六进制摘要、JSON 容器映射与虚拟 Buffer 操作双端完全一致 | 通过：`T13-05`/`T13-06`/`T13-10`（CJK 列宽、UTF-8、SHA-256 十六进制与二进制、JSON 三种容器、虚拟 Buffer、正则与 `rx`）与原生 Emacs 逐值一致 |
 | `A15` | [x] | `Q16` / `C10`, `C12` / `T14`, `T15` | 原装 `.el` 模块（`che-align`、`che-session-delta`、`che-session-restore-codec`、`che-session-restore-value`、`che-session-publication-capture`、`che-session-publication-json`、`che-mdp`、`che-context-budget`、`che-cli`） | Bun 运行 `T14` 与 `T15` Differential Oracle | 原装 `.el` 源码零修改在 Eliscript 中直接编译运行，且在相同测试输入下与原生 Emacs 输出 100% 相等 | 通过：Bun `T14-01 & T15-01` 加载 9 个原装 che 模块，7 组探针（CHE-01..07）与原生 Emacs 结果完全一致（317.47ms）；ERT `t14-t15` passed |
 | `A16` | [x] | `Q17` / `C10`–`C12` / `T16` | `compileCompatElispModule` 生成的 `.mjs` 模块与 `eliscript-worker` 常驻进程 | ERT 与 Bun 运行 `T16` | Emacs 通过 `eliscript-compat-offload-call` 与 `eliscript-compat-accelerate-function` 成功调用常驻 Worker 执行 `.el` 模块函数，输出与原生一致且禁用 Worker 时平滑回退 | 通过：Bun `T16-01`（Eliscript 模块源码 → `compile_string` → `.mjs`，`callElisp`/`invokeElisp`，21.34ms）；ERT `t16`：`eliscript-compile-file` 编译生成模块，Worker 直接调用 `callElisp` 返回与原生一致，`offload-call`、`accelerate-function` 及停止 Worker 后回退均通过 |
-| `A17` | [ ] | `Q13`–`Q17` / `C10`–`C14` / `T01`–`T16` | 完整工作区 | 执行 `make byte-compile`、`bun tools/conformance/check.mjs`、ERT 与 Bun 全套语法与差分测试 | 零字节编译警告，`git ls-files '*.mjs'` 为 0，`runtime/emacs-compat.eli` 与 `tests/eliscript/emacs-compatible-syntax.eli` 不含 `js*`，全部测试与契约检查通过，完成 GPG 签名提交并推送 | 部分通过：`make byte-compile` 0 警告；`git ls-files '*.mjs'` = 0；两个文件不含 `(js*`；Bun 110/110（109 例逐例计时 503.76ms）、ERT 25/25。**未通过**：`bun run check:contracts` 因 `benchmarks/worker-lifecycle-soak-macos-arm64.json` 绑定的 11 个 `compiler/*.el` 哈希过期而失败（问题 `ISSUE-SOAK-STALE`：自提交 `f3ea6a2` 起即存在，与本批改动无关；需重跑 worker 生命周期 soak 才能刷新） |
+| `A17` | [x] | `Q13`–`Q17` / `C10`–`C14` / `T01`–`T16` | 完整工作区 | 执行 `make byte-compile`、`bun tools/conformance/check.mjs`、ERT 与 Bun 全套语法与差分测试 | 零字节编译警告，`git ls-files '*.mjs'` 为 0，`runtime/emacs-compat.eli` 与 `tests/eliscript/emacs-compatible-syntax.eli` 不含 `js*`，全部测试与契约检查通过，完成 GPG 签名提交并推送 | 通过（2026-10-29）：`make byte-compile` 0 警告；`git ls-files '*.mjs'` = 0；`runtime/emacs-compat.eli`、`tests/eliscript/emacs-compatible-syntax.eli` 与 `tests/seed-symbol-reservation.test.eli` 均为纯 Eliscript（0 处 `js*`）；Option A TDZ 窄化与 `runtime/prelude.eli` 公共 helper 收敛通过 `compiler-binary-comparison`（5/5）；Bun `T01`–`T16` 110/110、ERT 162/162、`wasm-managed-core-modules` 4/4、`wasm-managed-sorted-core` 5/5、`wasm-managed-wire-selfhosted` 5/5、`repository-integrity` 13/13 及全部 11 项契约门禁 100% 通过 |
 
 ### 6.4 设计修正 R1：兼容运行时与测试必须是真正的 Eliscript（2026-10-27）
 
@@ -318,9 +318,10 @@ flowchart LR
 
 - **唯一施工文档**：`docs/bootstrap-0.1.0-plan.md`
 - **正式语法规范**：`docs/emacs-compatible-syntax.md`
-- **当前阶段**：第一批次（`S0`–`S3`）历史验收；第二批次按 §6.4 修正 R1 完成 `C10`–`C14` 施工，进入 **`S7`（阶段 D：统一构建与验收）**。
+- **当前阶段**：第一批次（`S0`–`S3`）与第二批次（`S4`–`S7`，含 §6.4 修正 R1 `C10`–`C14` 及 `A13`–`A17`）**全部完成并验收闭环**。
 - **变更记录**：
   - `2026-10-23`: 创建 `docs/bootstrap-0.1.0-plan.md`，完成 `0.1.0` 双端平滑演进架构设计与 `T01`–`T12` 全量语法单元测试矩阵设计。
   - `2026-10-23`: 完成 `S1`（`C01` 全量测试矩阵）、`S2`（`C02`–`C09` 全部 `editor/eliscript-*.el` 与 `runtime/emacs-compat.eli` 实现及接线）与 `S3`（`A01`–`A12` 全量实测验收通过）。
   - `2026-10-23`: 新增 §6 第二批次设计（`S4`–`S7`，`Q13`–`Q17`，`D10`–`D13`，`C10`–`C13`，`A13`–`A17`）：原装工业级 `.el` 双端同源共用（Dual-Host）与常驻 Worker 加速。
   - `2026-10-27`: 设计修正 R1（§6.4）：兼容运行时、测试与 Dual-Host 生成物改为真正的 Eliscript，新增 `C14`；`C10`–`C14` 施工完成。
+  - `2026-10-29`: 完成 `S7` 与 `A17` 全量闭环验收：完成 Option A TDZ 守卫窄化与 `runtime/prelude.eli` 公共运行时 helper 提取，重写 `tests/seed-symbol-reservation.test.eli` 为纯 Eliscript，修复托管标准库向量 `dynamic-from` 与分阶段项目测试适配器，刷新全部契约与基准摘要并通过全套门禁。

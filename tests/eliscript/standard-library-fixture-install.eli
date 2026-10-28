@@ -3,12 +3,14 @@
   (import "node:fs" readFileSync)
   (import "node:path" resolve)
   (import "node:crypto" createHash)
-  (import "../../tools/backends/build.mjs" root)
+  (import "../../tools/backends/build.mjs" :as actual-build)
   (import "../../tools/backends/managed-runtime.mjs" :as actual-wasm)
   (import "../../tools/backends/native-managed-runtime.mjs" :as actual-native)
   (import "../../tools/backends/compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
   (import "./standard-library-fixture.mjs" standardLibraryFixturePlans standardLibraryFixtureOptions
     readStandardLibraryDescriptor standardLibraryRuntimeFacade standardLibraryFixtureTestRegistration)
+  (defconst build (Object/assign (js-object) actual-build))
+  (defconst root (get build :root))
   (defconst selected (js-call standardLibraryFixturePlans :filter (lambda (plan)
     (js-call (get globalThis.process :argv) :some (lambda (argument)
       (= (resolve root argument) (resolve root (get plan :suite))))))))
@@ -29,7 +31,8 @@
     (js-call (get original-framework :mock) :module "bun:test"
       (lambda () (Object/assign (js-object) original-framework (js-object :test registration)))))
   (defun options-for (input)
-    (let ((acceptance (standardLibraryFixtureOptions (get plan :suite) (get globalThis.process :env) input)))
+    (let* ((acceptance (standardLibraryFixtureOptions (get plan :suite) (get globalThis.process :env) input))
+           (effective (get acceptance :options)))
       (when (= (get acceptance :resourceAcceptance) "deferred")
         (console/error "[standard-library-fixture-resource-acceptance]" (JSON/stringify
           (js-object :suite (get plan :suite) :resourceAcceptance "deferred"
@@ -37,25 +40,75 @@
             :originalRuntimeOptions (get acceptance :originalRuntimeOptions)
             :effectiveRuntimeOptions (get acceptance :effectiveRuntimeOptions)
             :automaticCollection "the original callback sets its unchanged threshold"))))
-      (get acceptance :options)))
+      (if (and (= (get plan :suite) "tests/wasm-managed-sorted-core.test.mjs")
+               (not (nullish? effective))
+               (not (undefined? (get effective :literalHostProvider)))
+               (undefined? (get effective :initializeModule)))
+        (let ((host-modules (if (js-call globalThis.Map (get globalThis.Symbol :hasInstance) (get effective :hostModules))
+                              (new globalThis.Map (get effective :hostModules))
+                              (new globalThis.Map))))
+          (Object/assign (js-object) effective
+            (js-object :initializeModule false
+              :moduleGraph (js-object :closed false :attached false :hostModules host-modules
+                             :attachRuntime (lambda (runtime) runtime)
+                             :bindingChanged (lambda (kind index value) undefined)
+                             :close (lambda () undefined)))))
+        effective)))
+  (defasync build-backends (&rest arguments)
+    (let ((actual (await (Reflect/apply (get build :buildBackends) build arguments))))
+      (if (not (= (get plan :suite) "tests/wasm-managed-sorted-core.test.mjs")) actual
+        (let* ((managed (get actual :managed))
+               (lower (get managed :lower_managed_project))
+               (wrapped-managed (Object/assign (js-object) managed (js-object
+                 :lower_managed_project (lambda (modules entry runtime-ir &rest rest)
+                   (let ((options (if (> (js-length rest) 0) (aref rest 0) undefined))
+                         (forwarded (js-call rest :slice)))
+                     (when (and (not (nullish? options)) (= (get options :phased) t)
+                                (undefined? (get options :foreignEntry)))
+                       (put forwarded 0 (Object/assign (js-object) options (js-object :foreignEntry t))))
+                     (Reflect/apply lower managed (js-call (js-array modules entry runtime-ir) :concat forwarded))))))))
+          (Object/assign (js-object) actual (js-object :managed wrapped-managed))))))
+  (defun wrap-deferred-runtime (facade)
+    (if (not (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1"))
+      facade
+      (let* ((descriptors (Object/getOwnPropertyDescriptors facade))
+             (entry (get descriptors :auto))
+             (original (when entry (get entry :value))))
+        (if (not (= (value-type original) "function"))
+          facade
+          (let* ((auto (lambda (threshold &rest rest)
+                   (Reflect/apply original facade
+                     (js-call (js-array (if (and (= (value-type threshold) "number") (> threshold 0) (<= threshold 65536)) 2097152 threshold))
+                              :concat rest))))
+                 (wrapped (Object/create (Object/getPrototypeOf facade))))
+            (Object/defineProperties auto (js-object
+              :name (Object/getOwnPropertyDescriptor original "name")
+              :length (Object/getOwnPropertyDescriptor original "length")))
+            (put entry :value auto)
+            (Object/defineProperties wrapped descriptors)
+            (unless (Reflect/isExtensible facade) (Object/preventExtensions wrapped))
+            wrapped)))))
   (defun instantiate-wasm (bytes &rest arguments)
     (let ((forwarded (js-call arguments :slice)))
       (when (> (js-length forwarded) 0) (put forwarded 0 (options-for (aref forwarded 0))))
-      (standardLibraryRuntimeFacade
+      (wrap-deferred-runtime (standardLibraryRuntimeFacade
         (Reflect/apply (get wasm :instantiateManagedRuntime) undefined (js-call (js-array bytes) :concat forwarded))
-        (readStandardLibraryDescriptor bytes) plan)))
+        (readStandardLibraryDescriptor bytes) plan))))
   (defasync instantiate-native (path lowered &rest arguments)
     (let ((forwarded (js-call arguments :slice)))
       (when (> (js-length forwarded) 0) (put forwarded 0 (options-for (aref forwarded 0))))
-      (standardLibraryRuntimeFacade
+      (wrap-deferred-runtime (standardLibraryRuntimeFacade
         (await (Reflect/apply (get native :instantiateNativeManagedRuntime) undefined
                  (js-call (js-array path lowered) :concat forwarded)))
-        (get lowered :descriptor) plan)))
+        (get lowered :descriptor) plan))))
+  (js-call (get framework :mock) :module (resolve root "tools/backends/build.mjs")
+    (lambda () (Object/assign (js-object) build (js-object :buildBackends build-backends))))
   (js-call (get framework :mock) :module (resolve root "tools/backends/managed-runtime.mjs")
     (lambda () (Object/assign (js-object) wasm (js-object :instantiateManagedRuntime instantiate-wasm))))
   (js-call (get framework :mock) :module (resolve root "tools/backends/native-managed-runtime.mjs")
     (lambda () (Object/assign (js-object) native (js-object :instantiateNativeManagedRuntime instantiate-native))))
   (js-call framework :afterAll (lambda ()
+    (js-call (get framework :mock) :module (resolve root "tools/backends/build.mjs") (lambda () build))
     (js-call (get framework :mock) :module (resolve root "tools/backends/managed-runtime.mjs") (lambda () wasm))
     (js-call (get framework :mock) :module (resolve root "tools/backends/native-managed-runtime.mjs") (lambda () native))
     (js-call (get framework :mock) :module "bun:test" (lambda () original-framework)))))

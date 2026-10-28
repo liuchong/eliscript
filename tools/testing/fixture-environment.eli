@@ -5,12 +5,13 @@
   (import "./initializer-array-fixture.mjs" prepareInitializerFixtureArguments)
 
   (defconst fixture-origin "http://eliscript-fixture.invalid")
-  (defconst runtime-files (js-array "unicode-case.mjs" "unicode-case-data.mjs" "math.mjs"))
+  (defconst runtime-files (js-array "prelude.mjs" "unicode-case.mjs" "unicode-case-data.mjs" "math.mjs"))
   (defun fixture-root (source-root)
     (let* ((root (realpathSync (resolve source-root)))
            (package (JSON/parse (readFileSync (resolve root "package.json") "utf8")))
            (exports (get package :exports)))
       (unless (and (= (get package :name) "eliscript") exports
+                   (= (get exports "./runtime/prelude.mjs") "./runtime/prelude.mjs")
                    (= (get exports "./runtime/unicode-case.mjs") "./runtime/unicode-case.mjs")
                    (= (get exports "./runtime/math.mjs") "./runtime/math.mjs"))
         (throw (new globalThis.TypeError "fixture environment requires the actual Eliscript runtime package")))
@@ -167,6 +168,7 @@
   (defun installFixtureBrowserEnvironment (types source-root)
     (let ((restorations (js-array)) (browsers (new globalThis.WeakSet))
           (configuration (js-object :imports (js-object
+            "eliscript/runtime/prelude.mjs" (+ fixture-origin "/runtime/prelude.mjs")
             "eliscript/runtime/unicode-case" (+ fixture-origin "/runtime/unicode-case.mjs")
             "eliscript/runtime/unicode-case.mjs" (+ fixture-origin "/runtime/unicode-case.mjs")
             "eliscript/runtime/math.mjs" (+ fixture-origin "/runtime/math.mjs")))))

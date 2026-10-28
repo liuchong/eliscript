@@ -41,6 +41,14 @@
                (substring output declaration)))
       (format "(%s())" reader))))
 
+(defun eliscript-tests--plain-module-read (output binding)
+  "Assert OUTPUT reads module BINDING without a guard, returning its read text."
+  (should-not
+   (string-match-p
+    (regexp-quote (format "__eliscript_tdz_error(%S)" binding))
+    output))
+  binding)
+
 (defun eliscript-tests--decode-vlq-segment (segment)
   "Decode Base64 VLQ values from source-map SEGMENT."
   (let ((index 0)
@@ -321,9 +329,9 @@
 (defconst host-has (object-has? host :ready))
 (defconst host-copy (object-assoc host :count 1))")
          (output (eliscript-compile-string source "keywords.eli"))
-         (host-read (eliscript-tests--guarded-module-read output "host"))
+         (host-read (eliscript-tests--plain-module-read output "host"))
          (keyword-read
-          (eliscript-tests--guarded-module-read output "keyword_value")))
+          (eliscript-tests--plain-module-read output "keyword_value")))
     (should (equal output
                    (eliscript-tests--legacy-compile-string
                     source "keywords.eli")))
@@ -1190,7 +1198,7 @@ already nested suffix, or use either production emitter to build the oracle."
     (should (string-match-p
              (regexp-quote
               (format "__eliscript_rest(%s)"
-                      (eliscript-tests--guarded-module-read output "values")))
+                      (eliscript-tests--plain-module-read output "values")))
              output))
     (should
      (string-match-p
@@ -1396,7 +1404,8 @@ already nested suffix, or use either production emitter to build the oracle."
    (eliscript-compile-string "(defconst answer 42) (setq answer 43)")
    :type 'eliscript-analyze-error)
   (let* ((output
-          (eliscript-compile-string "(defvar answer 42) (setq answer 43)"))
+          (eliscript-compile-string
+           "(defun peek () answer) (defun update () (setq answer 43)) (peek) (update) (defvar answer 42)"))
          (reader (eliscript-tests--guarded-module-read output "answer"))
          (writer (replace-regexp-in-string "_read_" "_write_" (substring reader 1 -3)))
          (ready (replace-regexp-in-string "_write_" "_ready_" writer))
@@ -1409,7 +1418,8 @@ already nested suffix, or use either production emitter to build the oracle."
     (should (string-match-p (regexp-quote (format "(%s(43))" writer)) output))))
 
 (ert-deftest eliscript-tdz-writer-does-not-shadow-value-module-binding ()
-  (let ((source "(defvar value -0.0) (defun replace-value (next) (setq value next)) (export value replace-value)"))
+  ;; With an import, a cycle can call the exported writer before value exists.
+  (let ((source "(import \"./peer.mjs\" peer) (defvar value -0.0) (defun replace-value (next) (setq value next)) (export value replace-value)"))
     (dolist (output (list (eliscript-compile-string source "tdz-value.eli")
                           (eliscript-tests--legacy-compile-string source "tdz-value.eli")))
       (should (string-match-p
@@ -1661,7 +1671,7 @@ already nested suffix, or use either production emitter to build the oracle."
            "(defmethod render \"text\" (kind value) (str value))\n"
            "(export render)")
           "declarative.eli"))
-         (render-read (eliscript-tests--guarded-module-read output "render")))
+         (render-read (eliscript-tests--plain-module-read output "render")))
     (should (string-match-p
              (regexp-quote
               "const render = multi_fn(\"render\", ((kind, value) =>")
@@ -1710,7 +1720,7 @@ already nested suffix, or use either production emitter to build the oracle."
            "(export IDescribe describe measure)")
           "declarative-protocol.eli"))
          (protocol-read
-          (eliscript-tests--guarded-module-read output "IDescribe")))
+          (eliscript-tests--plain-module-read output "IDescribe")))
     (should (string-match-p
              (regexp-quote
               "const IDescribe = define_protocol(\"IDescribe\", [\"describe\", \"measure\"]);")
@@ -1765,7 +1775,7 @@ already nested suffix, or use either production emitter to build the oracle."
            "(defrecord Person [name age])\n"
            "(export Person ->Person map->Person Person?)")
           "declarative-record.eli"))
-         (record-read (eliscript-tests--guarded-module-read output "Person")))
+         (record-read (eliscript-tests--plain-module-read output "Person")))
     (should (string-match-p
              (regexp-quote
               "const Person = define_record_type(\"Person\", [\"name\", \"age\"]);")
@@ -1823,10 +1833,10 @@ already nested suffix, or use either production emitter to build the oracle."
            "(export Box ->Box Box? captured)")
           "declarative-type.eli"))
          (protocol-read (eliscript-tests--guarded-module-read output "IRead"))
-         (type-read (eliscript-tests--guarded-module-read output "Box")))
+         (type-read (eliscript-tests--plain-module-read output "Box")))
     (should (string-match-p
              (regexp-quote
-              (format "const Box = define_type(\"Box\", [\"value\"], [[%s" protocol-read))
+              "const Box = define_type(\"Box\", [\"value\"], [[IRead, ")
              output))
     (should (string-match-p
              (regexp-quote "const __GT_Box = ((value) =>") output))
@@ -1839,6 +1849,36 @@ already nested suffix, or use either production emitter to build the oracle."
     (should (string-match-p
              (regexp-quote (format "return reify_protocols([[%s" protocol-read)) output))
     (should-not (string-match-p "deftype\|reify " output))))
+
+(ert-deftest eliscript-guards-only-accesses-that-can-precede-initialization ()
+  (dolist (case
+           '(("(defvar total 1) (defun bump () (setq total (+ total 1))) (bump) (export total)"
+              nil)
+             ("(defun peek () total) (peek) (defvar total 1)"
+              ("total"))
+             ("(defun leaf () total) (defun walk () (leaf)) (walk) (defvar total 1)"
+              ("total"))
+             ("(defun walk () (leaf)) (defun leaf () total) (defvar total 1) (walk)"
+              nil)
+             ("(import \"./peer.mjs\" peer) (defvar total 1) (defun peek () total) (export peek)"
+              ("total"))
+             ("(import \"./peer.mjs\" peer) (defvar total 1) (defun peek () total) (peek)"
+              nil)
+             ("(defun peek () total) (js* \"globalThis.hook = peek\") (defvar total 1)"
+              ("total"))
+             ("(defun peek () total) (defvar total 1) (js* \"globalThis.hook = peek\")"
+              nil)))
+    (let* ((source (car case))
+           (output (eliscript-compile-string source "narrowing.eli"))
+           (start 0)
+           guarded)
+      (while (string-match "__eliscript_tdz_error(\"\\([^\"]+\\)\")" output start)
+        (push (match-string 1 output) guarded)
+        (setq start (match-end 0)))
+      (should (equal (delete-dups (nreverse guarded)) (cadr case)))
+      (should (eq (and (cadr case) t)
+                  (and (string-match-p (regexp-quote "__eliscript_tdz_error") output) t)))
+      (should (equal output (eliscript-tests--legacy-compile-string source "narrowing.eli"))))))
 
 (ert-deftest eliscript-expander-validates-type-and-reify-forms ()
   (dolist (case

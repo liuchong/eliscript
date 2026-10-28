@@ -26,8 +26,6 @@
 
 (defconst eliscript-emitter--number-conversion-intrinsics
     "const __eliscript_number_intrinsic = globalThis.Number;\nconst __eliscript_bigint_intrinsic = globalThis.BigInt;\nconst __eliscript_numeric_apply = globalThis.Reflect.apply;\nconst __eliscript_numeric_symbol = globalThis.Symbol.toPrimitive;\nconst __eliscript_numeric_error = globalThis.TypeError;\nconst __eliscript_numeric_trim = globalThis.String.prototype.trim;\nconst __eliscript_numeric_slice = globalThis.String.prototype.slice;\nconst __eliscript_numeric_exec = globalThis.RegExp.prototype.exec;\n")
-  (defconst eliscript-emitter--number-conversion-capsule
-    "import { __eliscript_number_intrinsic, __eliscript_bigint_intrinsic, __eliscript_numeric_apply, __eliscript_numeric_symbol, __eliscript_numeric_error, __eliscript_numeric_trim, __eliscript_numeric_slice, __eliscript_numeric_exec } from \"data:text/javascript;base64,ZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X251bWJlcl9pbnRyaW5zaWMgPSBnbG9iYWxUaGlzLk51bWJlcjsKZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X2JpZ2ludF9pbnRyaW5zaWMgPSBnbG9iYWxUaGlzLkJpZ0ludDsKZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X251bWVyaWNfYXBwbHkgPSBnbG9iYWxUaGlzLlJlZmxlY3QuYXBwbHk7CmV4cG9ydCBjb25zdCBfX2VsaXNjcmlwdF9udW1lcmljX3N5bWJvbCA9IGdsb2JhbFRoaXMuU3ltYm9sLnRvUHJpbWl0aXZlOwpleHBvcnQgY29uc3QgX19lbGlzY3JpcHRfbnVtZXJpY19lcnJvciA9IGdsb2JhbFRoaXMuVHlwZUVycm9yOwpleHBvcnQgY29uc3QgX19lbGlzY3JpcHRfbnVtZXJpY190cmltID0gZ2xvYmFsVGhpcy5TdHJpbmcucHJvdG90eXBlLnRyaW07CmV4cG9ydCBjb25zdCBfX2VsaXNjcmlwdF9udW1lcmljX3NsaWNlID0gZ2xvYmFsVGhpcy5TdHJpbmcucHJvdG90eXBlLnNsaWNlOwpleHBvcnQgY29uc3QgX19lbGlzY3JpcHRfbnVtZXJpY19leGVjID0gZ2xvYmFsVGhpcy5SZWdFeHAucHJvdG90eXBlLmV4ZWM7Cg==\";\n")
   (defconst eliscript-emitter--number-conversion-body
     "const __eliscript_numeric_radix = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;\nconst __eliscript_numeric_object = (value) => value !== null && (typeof value === \"object\" || typeof value === \"function\" || (typeof value === \"undefined\" && value !== void 0));\nconst __eliscript_numeric_primitive = (value) => {\n  if (!__eliscript_numeric_object(value)) return value;\n  const exotic = value[__eliscript_numeric_symbol];\n  if (exotic !== void 0 && exotic !== null) {\n    const result = __eliscript_numeric_apply(exotic, value, [\"number\"]);\n    if (!__eliscript_numeric_object(result)) return result;\n    throw new __eliscript_numeric_error(\"Cannot convert object to primitive value\");\n  }\n  for (let index = 0; index < 2; index++) {\n    const method = value[index === 0 ? \"valueOf\" : \"toString\"];\n    if (typeof method === \"function\" || (typeof method === \"undefined\" && method !== void 0)) {\n      const result = __eliscript_numeric_apply(method, value, []);\n      if (!__eliscript_numeric_object(result)) return result;\n    }\n  }\n  throw new __eliscript_numeric_error(\"Cannot convert object to primitive value\");\n};\nconst __eliscript_to_number = (value) => {\n  const primitive = __eliscript_numeric_primitive(value);\n  if (typeof primitive === \"string\") {\n    const text = __eliscript_numeric_apply(__eliscript_numeric_trim, primitive, []);\n    if (__eliscript_numeric_apply(__eliscript_numeric_exec, __eliscript_numeric_radix, [text]) !== null) {\n      let first = 2;\n      while (first < text.length && text[first] === \"0\") first++;\n      if (first === text.length) return 0;\n      const prefix = text[1];\n      const limit = prefix === \"x\" || prefix === \"X\" ? 256 : prefix === \"b\" || prefix === \"B\" ? 1024 : 342;\n      if (text.length - first > limit) return 1 / 0;\n      const token = __eliscript_numeric_apply(__eliscript_numeric_slice, text, [0, 2]) + __eliscript_numeric_apply(__eliscript_numeric_slice, text, [first]);\n      return __eliscript_number_intrinsic(__eliscript_bigint_intrinsic(token));\n    }\n  }\n  return __eliscript_number_intrinsic(primitive);\n};\n")
   (defconst eliscript-emitter--number-conversion-helper
@@ -38,10 +36,46 @@
   "Generated primitive numeric operators with exact coercion ordering.")
   (defconst eliscript-emitter--imul-intrinsic
     "const __eliscript_numeric_imul_intrinsic = globalThis.Math.imul;\n")
-  (defconst eliscript-emitter--imul-capsule
-    "import { __eliscript_numeric_imul_intrinsic } from \"data:text/javascript;base64,ZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X251bWVyaWNfaW11bF9pbnRyaW5zaWMgPSBnbG9iYWxUaGlzLk1hdGguaW11bDsK\";\n")
   (defconst eliscript-emitter--imul-operator-helper
     "const __eliscript_numeric_imul = (a, b) => __eliscript_numeric_imul_intrinsic(__eliscript_implicit_number(a), __eliscript_implicit_number(b));\n")
+;; One compiled runtime module owns every shared helper. Its own module scope
+;; never binds globalThis, so captured intrinsics need no separate capsule.
+(defconst eliscript-emitter--prelude-array-text-names
+  '("__eliscript_at" "__eliscript_at_direct"))
+(defconst eliscript-emitter--prelude-number-conversion-names
+  '("__eliscript_to_number"))
+(defconst eliscript-emitter--prelude-numeric-coercion-names
+  '("__eliscript_numeric_decrement" "__eliscript_numeric_relation"
+    "__eliscript_numeric_sub" "__eliscript_numeric_mul" "__eliscript_numeric_div"
+    "__eliscript_numeric_rem" "__eliscript_numeric_and" "__eliscript_numeric_or"
+    "__eliscript_numeric_xor" "__eliscript_numeric_shl" "__eliscript_numeric_shr"
+    "__eliscript_numeric_ushr" "__eliscript_numeric_neg" "__eliscript_numeric_int32"
+    "__eliscript_numeric_uint32" "__eliscript_numeric_not"))
+(defconst eliscript-emitter--prelude-imul-names
+  '("__eliscript_numeric_imul"))
+(defconst eliscript-emitter--prelude-module
+  (concat
+   "// Generated by Eliscript. Do not edit.\n"
+   "export" (substring eliscript-emitter--array-text-import (length "import"))
+   eliscript-emitter--number-conversion-helper
+   eliscript-emitter--numeric-operator-helper
+   eliscript-emitter--imul-intrinsic
+   eliscript-emitter--imul-operator-helper
+   "export { "
+   (string-join (append eliscript-emitter--prelude-number-conversion-names
+                        eliscript-emitter--prelude-numeric-coercion-names
+                        eliscript-emitter--prelude-imul-names) ", ")
+   " };\n")
+  "Complete generated module for runtime/prelude.eli.")
+(defun eliscript-emitter--prelude-import (array-text number-conversion numeric-coercion imul)
+  "Import the shared helpers selected by each runtime requirement."
+  (let ((names (append (and array-text eliscript-emitter--prelude-array-text-names)
+                       (and number-conversion eliscript-emitter--prelude-number-conversion-names)
+                       (and numeric-coercion eliscript-emitter--prelude-numeric-coercion-names)
+                       (and imul eliscript-emitter--prelude-imul-names))))
+    (if names
+        (concat "import { " (string-join names ", ") " } from \"eliscript/runtime/prelude.mjs\";\n")
+      "")))
 (defconst eliscript-emitter--host-identity-token-helper
   "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n"
   "Generated module helper for process-local opaque host identities.")
@@ -93,22 +127,97 @@
 (defun eliscript-emitter--tdz-write-text (record name value)
   (if record (concat (eliscript-emitter--tdz-writer-name record) "(" value ")")
     (format "(%s = %s)" (eliscript-emitter--binding-name name) value)))
+(defun eliscript-emitter--tdz-state-create ()
+  "Return empty module-variable initialization analysis state."
+  (list :variables nil :declarations (make-hash-table :test #'eq)
+        :reads (make-hash-table :test #'eq) :writes (make-hash-table :test #'eq)
+        :functions (make-hash-table :test #'equal) :references (make-hash-table :test #'equal)
+        :raw (make-hash-table :test #'equal) :exported nil :imports nil
+        :sites nil :decisions nil :cursor 0 :position 0 :owner nil))
+(defun eliscript-emitter--tdz-declare (state name mutable)
+  "Record module variable NAME declared at the current top-level position."
+  (let ((record (list :index (length (plist-get state :variables)) :name name :mutable mutable
+                      :statement (plist-get state :position) :read nil :write nil)))
+    (setf (plist-get state :variables) (append (plist-get state :variables) (list record)))
+    record))
+(defun eliscript-emitter--tdz-function (state key)
+  "Record module function KEY and return its scope entry."
+  (puthash key t (plist-get state :functions))
+  (list :function key))
+(defun eliscript-emitter--tdz-variable-p (record)
+  (and record (plist-get record :index) t))
+(defun eliscript-emitter--tdz-guarded-p (record)
+  (and record (or (plist-get record :read) (plist-get record :write))))
+(defun eliscript-emitter--tdz-reference (state record)
+  "Record that the current owner can call the function scope entry RECORD."
+  (push (plist-get record :function) (gethash (plist-get state :owner) (plist-get state :references))))
+(defun eliscript-emitter--tdz-raw (state)
+  "Record raw JavaScript, which may call any module function."
+  (puthash (plist-get state :owner) t (plist-get state :raw)))
+(defun eliscript-emitter--tdz-site (state kind record &optional object)
+  "Record access KIND to RECORD, or replay its finalized guard decision.
+Form rewriting cannot identify interned symbols, so it walks twice in the
+same order; IR walks pass the accessing OBJECT and finalize only once."
+  (let ((decisions (plist-get state :decisions)))
+    (if decisions
+        (let ((cursor (plist-get state :cursor)))
+          (setf (plist-get state :cursor) (1+ cursor))
+          (aref decisions cursor))
+      (push (list kind record (plist-get state :owner) object) (plist-get state :sites))
+      t)))
+(defun eliscript-emitter--tdz-finalize (state)
+  "Guard only accesses that can run before their declaration completes.
+A top-level statement runs at its own position. A function can first run
+when a statement or earlier function references it; with imports an exported
+function can run through a cycle before this module, and raw JavaScript can
+call any function. Return the decision of each recorded access in order."
+  (let ((functions (plist-get state :functions)) (references (plist-get state :references))
+        (raw (plist-get state :raw)) (early (make-hash-table :test #'equal))
+        (all most-positive-fixnum) pending)
+    (cl-flet ((lower (key index)
+                (when (and (gethash key functions)
+                           (< index (gethash key early most-positive-fixnum)))
+                  (puthash key index early)
+                  (push key pending))))
+      (when (plist-get state :imports)
+        (dolist (key (plist-get state :exported)) (lower key -1)))
+      (maphash (lambda (owner keys) (when (integerp owner) (dolist (key keys) (lower key owner)))) references)
+      (maphash (lambda (owner _) (when (integerp owner) (setq all (min all owner)))) raw)
+      (while pending
+        (let* ((key (pop pending)) (index (gethash key early)))
+          (when (gethash key raw) (setq all (min all index)))
+          (dolist (callee (gethash key references)) (lower callee index)))))
+    (mapcar
+     (lambda (site)
+       (let* ((kind (nth 0 site)) (record (nth 1 site)) (owner (nth 2 site)) (object (nth 3 site))
+              (time (if (integerp owner) owner (min all (gethash owner early most-positive-fixnum))))
+              (guarded (or (and (eq kind :write) (not (plist-get record :mutable)))
+                           (<= time (plist-get record :statement)))))
+         (when guarded
+           (plist-put record kind t)
+           (when object
+             (puthash object record (plist-get state (if (eq kind :read) :reads :writes)))))
+         guarded))
+     (reverse (plist-get state :sites)))))
 (defun eliscript-emitter--tdz-prologue (state)
-  (when (plist-get state :variables)
-    (concat eliscript-emitter--tdz-import
-      (mapconcat
-        (lambda (record)
-          (let* ((ready (eliscript-emitter--tdz-ready-name record))
-                 (name (eliscript-emitter--binding-name (plist-get record :name)))
-                 (argument (format "__eliscript_tdz_value_%d" (plist-get record :index)))
-                 (quoted (eliscript-emitter--json-string name)))
-            (concat "var " ready ";\n"
-              "function " (eliscript-emitter--tdz-reader-name record) "() { if (" ready
-              " !== true) __eliscript_tdz_error(" quoted "); return " name "; }\n"
-              "function " (eliscript-emitter--tdz-writer-name record) "(" argument ") { if (" ready
-              " !== true) __eliscript_tdz_error(" quoted "); "
-              (if (plist-get record :mutable) (concat "return (" name " = " argument ");") "return __eliscript_const_error();") " }\n")))
-        (plist-get state :variables) ""))))
+  (let ((records (cl-remove-if-not #'eliscript-emitter--tdz-guarded-p (plist-get state :variables))))
+    (when records
+      (concat eliscript-emitter--tdz-import
+        (mapconcat
+          (lambda (record)
+            (let* ((ready (eliscript-emitter--tdz-ready-name record))
+                   (name (eliscript-emitter--binding-name (plist-get record :name)))
+                   (argument (format "__eliscript_tdz_value_%d" (plist-get record :index)))
+                   (quoted (eliscript-emitter--json-string name)))
+              (concat "var " ready ";\n"
+                (when (plist-get record :read)
+                  (concat "function " (eliscript-emitter--tdz-reader-name record) "() { if (" ready
+                          " !== true) __eliscript_tdz_error(" quoted "); return " name "; }\n"))
+                (when (plist-get record :write)
+                  (concat "function " (eliscript-emitter--tdz-writer-name record) "(" argument ") { if (" ready
+                          " !== true) __eliscript_tdz_error(" quoted "); "
+                          (if (plist-get record :mutable) (concat "return (" name " = " argument ");") "return __eliscript_const_error();") " }\n")))))
+          records "")))))
 
 
 
@@ -127,19 +236,26 @@
   (dolist (parameter parameters) (eliscript-emitter--tdz-legacy-shadow parameter scope)))
 (defun eliscript-emitter--tdz-legacy-predeclare (forms scope state)
   (dolist (form forms)
-    (when (consp form)
-      (pcase (car form)
-        ('module (eliscript-emitter--tdz-legacy-predeclare (cddr form) scope state))
-        ((or 'defvar 'defconst)
-         (let ((record (list :index (length (plist-get state :variables)) :name (cadr form) :mutable (eq (car form) 'defvar))))
-           (setf (plist-get state :variables) (append (plist-get state :variables) (list record)))
-           (puthash form record (plist-get state :declarations))
-           (puthash (eliscript-emitter--binding-name (cadr form)) record scope)))
-        ((or 'defun 'defn 'defasync) (puthash (eliscript-emitter--binding-name (cadr form)) nil scope))
-        ((or 'import 'import-portable)
-         (dolist (name (cddr form))
-           (when (and name (symbolp name) (not (keywordp name)))
-             (puthash (eliscript-emitter--binding-name name) nil scope))))))))
+    (if (and (consp form) (eq (car form) 'module))
+        (eliscript-emitter--tdz-legacy-predeclare (cddr form) scope state)
+      (when (consp form)
+        (pcase (car form)
+          ((or 'defvar 'defconst)
+           (let ((record (eliscript-emitter--tdz-declare state (cadr form) (eq (car form) 'defvar))))
+             (puthash form record (plist-get state :declarations))
+             (puthash (eliscript-emitter--binding-name (cadr form)) record scope)))
+          ((or 'defun 'defn 'defasync)
+           (let ((key (eliscript-emitter--binding-name (cadr form))))
+             (puthash key (eliscript-emitter--tdz-function state key) scope)))
+          ('export
+           (dolist (name (cdr form))
+             (push (eliscript-emitter--binding-name name) (plist-get state :exported))))
+          ((or 'import 'import-portable)
+           (setf (plist-get state :imports) t)
+           (dolist (name (cddr form))
+             (when (and name (symbolp name) (not (keywordp name)))
+               (puthash (eliscript-emitter--binding-name name) nil scope))))))
+      (setf (plist-get state :position) (1+ (plist-get state :position))))))
 (defun eliscript-emitter--tdz-legacy-sequence (forms scope)
   (mapcar (lambda (form) (eliscript-emitter--tdz-legacy-expression form scope)) forms))
 (defun eliscript-emitter--tdz-legacy-expression (form scope)
@@ -202,13 +318,20 @@
 (defun eliscript-emitter--tdz-legacy-expression-recursive (form scope)
   (cond
    ((and form (symbolp form) (not (keywordp form)))
-    (let ((record (gethash (eliscript-emitter--tdz-root form) scope)))
-      (if record (list eliscript-emitter--tdz-read-tag record form) form)))
+    (let ((record (gethash (eliscript-emitter--tdz-root form) scope))
+          (state eliscript-emitter--tdz-state))
+      (cond
+       ((and record (not (eliscript-emitter--tdz-variable-p record)))
+        (eliscript-emitter--tdz-reference state record) form)
+       ((and record (eliscript-emitter--tdz-site state :read record))
+        (list eliscript-emitter--tdz-read-tag record form))
+       (t form))))
    ((vectorp form) (vconcat (eliscript-emitter--tdz-legacy-sequence (append form nil) scope)))
    ((consp form)
     (let ((operator (car form)) (arguments (cdr form)))
       (pcase operator
-        ((or 'quote 'js*) form)
+        ('quote form)
+        ('js* (eliscript-emitter--tdz-raw eliscript-emitter--tdz-state) form)
         ((or 'lambda 'fn 'async)
          (let ((child (copy-hash-table scope)))
            (eliscript-emitter--tdz-legacy-parameters (car arguments) child)
@@ -232,8 +355,11 @@
          (let ((pending arguments) pairs original-pairs guarded)
            (while pending
              (let* ((name (pop pending)) (value (pop pending))
-                    (record (and (symbolp name) (gethash (eliscript-emitter--tdz-root name) scope)))
-                    (rewritten (eliscript-emitter--tdz-legacy-expression value scope)))
+                    (rewritten (eliscript-emitter--tdz-legacy-expression value scope))
+                    (entry (and (symbolp name) (gethash (eliscript-emitter--tdz-root name) scope)))
+                    (record (and (eliscript-emitter--tdz-variable-p entry)
+                                 (eliscript-emitter--tdz-site eliscript-emitter--tdz-state :write entry)
+                                 entry)))
                (when record (setq guarded t))
                (push (list name rewritten) original-pairs)
                (push (list eliscript-emitter--tdz-write-tag record name rewritten) pairs)))
@@ -272,19 +398,35 @@
           (eliscript-emitter--tdz-legacy-sequence arguments scope))))))
    (t form)))
 (defun eliscript-emitter--tdz-legacy-top (form scope state)
-  (if (not (consp form)) (eliscript-emitter--tdz-legacy-expression form scope)
-    (pcase (car form)
-      ('module (cons 'module (cons (cadr form) (mapcar (lambda (child) (eliscript-emitter--tdz-legacy-top child scope state)) (cddr form)))))
-      ((or 'import 'import-portable 'export) form)
-      ((or 'defvar 'defconst)
-       (let ((copy (cons (car form) (cons (cadr form) (eliscript-emitter--tdz-legacy-sequence (cddr form) scope)))))
-         (puthash copy (gethash form (plist-get state :declarations)) (plist-get state :declarations)) copy))
-      ((or 'defun 'defn 'defasync)
-       (let ((child (copy-hash-table scope)))
-         (eliscript-emitter--tdz-legacy-parameters (nth 2 form) child)
-         (append (list (car form) (cadr form) (nth 2 form)) (eliscript-emitter--tdz-legacy-sequence (nthcdr 3 form) child))))
-      ('export-default (cons 'export-default (eliscript-emitter--tdz-legacy-sequence (cdr form) scope)))
-      (_ (eliscript-emitter--tdz-legacy-expression form scope)))))
+  (if (and (consp form) (eq (car form) 'module))
+      (cons 'module (cons (cadr form) (mapcar (lambda (child) (eliscript-emitter--tdz-legacy-top child scope state)) (cddr form))))
+    (let ((position (plist-get state :position)))
+      (setf (plist-get state :position) (1+ position))
+      (setf (plist-get state :owner)
+            (if (and (consp form) (memq (car form) '(defun defn defasync)))
+                (eliscript-emitter--binding-name (cadr form))
+              position))
+      (if (not (consp form)) (eliscript-emitter--tdz-legacy-expression form scope)
+        (pcase (car form)
+          ((or 'import 'import-portable 'export) form)
+          ((or 'defvar 'defconst)
+           (let ((copy (cons (car form) (cons (cadr form) (eliscript-emitter--tdz-legacy-sequence (cddr form) scope)))))
+             (puthash copy (gethash form (plist-get state :declarations)) (plist-get state :declarations)) copy))
+          ((or 'defun 'defn 'defasync)
+           (let ((child (copy-hash-table scope)))
+             (eliscript-emitter--tdz-legacy-parameters (nth 2 form) child)
+             (append (list (car form) (cadr form) (nth 2 form)) (eliscript-emitter--tdz-legacy-sequence (nthcdr 3 form) child))))
+          ('export-default (cons 'export-default (eliscript-emitter--tdz-legacy-sequence (cdr form) scope)))
+          (_ (eliscript-emitter--tdz-legacy-expression form scope)))))))
+
+(defun eliscript-emitter--tdz-legacy-rewrite (forms scope state)
+  "Rewrite FORMS with only the TDZ guards their accesses require."
+  (let ((rewrite (lambda ()
+                   (setf (plist-get state :position) 0)
+                   (mapcar (lambda (form) (eliscript-emitter--tdz-legacy-top form scope state)) forms))))
+    (funcall rewrite)
+    (setf (plist-get state :decisions) (vconcat (eliscript-emitter--tdz-finalize state)))
+    (funcall rewrite)))
 
 (defun eliscript-emitter--fail (format-string &rest arguments)
   "Signal a compiler error using FORMAT-STRING and ARGUMENTS."
@@ -2061,7 +2203,8 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
                   (eliscript-emitter-emit-expression (cadr arguments)))
           (let ((record (and eliscript-emitter--tdz-state
                          (gethash form (plist-get eliscript-emitter--tdz-state :declarations)))))
-            (when record (concat "\n" (eliscript-emitter--tdz-ready-name record) " = true;")))))
+            (when (eliscript-emitter--tdz-guarded-p record)
+              (concat "\n" (eliscript-emitter--tdz-ready-name record) " = true;")))))
         ((or 'defun 'defn 'defasync)
          (eliscript-emitter--require-arity (symbol-name operator) arguments 2)
          (let ((name (nth 0 arguments))
@@ -2157,32 +2300,16 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
   (eliscript-emitter--some-form forms
     (lambda (node) (and (consp node) (memq (car node) '(equal)) t)) '(quote)))
 
-(defun eliscript-emitter--forms-name-global-root-p (forms)
-  "Find the unquoted global root binding without host recursion."
-  (eliscript-emitter--some-form forms (lambda (node) (eq node 'globalThis)) '(quote)))
-
-(defun eliscript-emitter--number-conversion-prologue (shadowed)
-  "Capture intrinsics independently of a SHADOWED global root binding."
-  (if shadowed
-      (concat eliscript-emitter--number-conversion-capsule
-              eliscript-emitter--number-conversion-body)
-    eliscript-emitter--number-conversion-helper))
-
 (defun eliscript-emitter--uses-imul-p (forms)
   "Find the corresponding unquoted runtime operation without host recursion."
   (eliscript-emitter--some-form forms
     (lambda (node) (and (consp node) (memq (car node) '(imul32)) t)) '(quote)))
 
-(defun eliscript-emitter--imul-prologue (shadowed)
-  "Capture Math.imul only when required, outside SHADOWED global bindings."
-  (concat (if shadowed eliscript-emitter--imul-capsule eliscript-emitter--imul-intrinsic)
-          eliscript-emitter--imul-operator-helper))
-
 (defconst eliscript-emitter--unicode-runtime-import
   "import \"eliscript/runtime/unicode-case.mjs\";\n")
 
-(defun eliscript-emitter--unicode-capsule-p (filename module-name)
-  "Recognize bootstrap capsules by full source and module identity."
+(defun eliscript-emitter--runtime-capsule-p (filename module-name entries)
+  "Recognize one of ENTRIES by full source and module identity."
   (let ((name (if (symbolp module-name) (symbol-name module-name) module-name)))
     (and (stringp filename)
          (cl-some
@@ -2191,14 +2318,31 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
                  (or (equal filename (car entry))
                      (and (file-name-absolute-p filename)
                           (string-suffix-p (concat "/" (car entry)) filename)))))
-          '(("runtime/unicode-case.eli" . "eliscript.runtime.unicode-case")
-            ("runtime/unicode-case-data.eli" . "eliscript.runtime.unicode-case-data"))))))
+          entries))))
+
+(defun eliscript-emitter--unicode-capsule-p (filename module-name)
+  "Recognize bootstrap capsules by full source and module identity."
+  (eliscript-emitter--runtime-capsule-p
+   filename module-name
+   '(("runtime/unicode-case.eli" . "eliscript.runtime.unicode-case")
+     ("runtime/unicode-case-data.eli" . "eliscript.runtime.unicode-case-data"))))
+
+(defun eliscript-emitter--prelude-capsule-p (filename module-name)
+  "Recognize the shared helper module by full source and module identity."
+  (eliscript-emitter--runtime-capsule-p
+   filename module-name '(("runtime/prelude.eli" . "eliscript.runtime.prelude"))))
 
 (defun eliscript-emitter--forms-unicode-capsule-p (forms filename)
   "Require a single exact module as well as its compilation source context."
   (and (= (length forms) 1) (consp (car forms))
        (eq (caar forms) 'module)
        (eliscript-emitter--unicode-capsule-p filename (cadar forms))))
+
+(defun eliscript-emitter--forms-prelude-p (forms filename)
+  "Require the exact empty prelude module and its compilation source context."
+  (and (equal (length forms) 1) (consp (car forms))
+       (eq (caar forms) 'module) (null (cddar forms))
+       (eliscript-emitter--prelude-capsule-p filename (cadar forms))))
 
 (defconst eliscript-emitter--math-runtime-import
   "import \"eliscript/runtime/math.mjs\";\n")
@@ -2233,11 +2377,16 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
 
 (defun eliscript-emit-module (forms &optional filename)
   "Emit FORMS as one ECMAScript module."
-  (let* ((eliscript-emitter--tdz-state (list :variables nil :declarations (make-hash-table :test #'eq)))
+  (let* ((eliscript-emitter--tdz-state (eliscript-emitter--tdz-state-create))
          (scope (make-hash-table :test #'equal)))
     (eliscript-emitter--tdz-legacy-predeclare forms scope eliscript-emitter--tdz-state)
-    (eliscript-emitter--emit-module-ready
-      (mapcar (lambda (form) (eliscript-emitter--tdz-legacy-top form scope eliscript-emitter--tdz-state)) forms) forms filename)))
+    (if (eliscript-emitter--forms-prelude-p forms filename)
+        eliscript-emitter--prelude-module
+      (eliscript-emitter--emit-module-ready
+       (if (plist-get eliscript-emitter--tdz-state :variables)
+           (eliscript-emitter--tdz-legacy-rewrite forms scope eliscript-emitter--tdz-state)
+         forms)
+       forms filename))))
 
 (defun eliscript-emitter--emit-module-ready (forms &optional source-forms filename)
   (let ((eliscript-emitter--temporary-counter 0)
@@ -2248,7 +2397,12 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
      (if (eliscript-emitter--forms-unicode-capsule-p prologue-forms filename)
          "" eliscript-emitter--unicode-runtime-import)
      (if (eliscript-emitter--uses-math-runtime-p prologue-forms) eliscript-emitter--math-runtime-import "")
-     (if (eliscript-emitter--uses-array-text-p prologue-forms) eliscript-emitter--array-text-import "")
+     (let ((numeric-coercion (eliscript-emitter--uses-numeric-coercion-p prologue-forms)))
+       (eliscript-emitter--prelude-import
+        (eliscript-emitter--uses-array-text-p prologue-forms)
+        (or numeric-coercion (eliscript-emitter--uses-number-conversion-p prologue-forms))
+        numeric-coercion
+        (eliscript-emitter--uses-imul-p prologue-forms)))
      (if (eliscript-emitter--uses-literal-runtime-p prologue-forms)
          eliscript-emitter--literal-runtime-import
        "")
@@ -2262,16 +2416,6 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
          eliscript-emitter--value-runtime-import
        "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
-     (if (or (eliscript-emitter--uses-number-conversion-p prologue-forms)
-             (eliscript-emitter--uses-numeric-coercion-p prologue-forms))
-         (eliscript-emitter--number-conversion-prologue
-          (eliscript-emitter--forms-name-global-root-p prologue-forms))
-       "")
-     (if (eliscript-emitter--uses-numeric-coercion-p prologue-forms)
-         eliscript-emitter--numeric-operator-helper "")
-     (if (eliscript-emitter--uses-imul-p prologue-forms)
-         (eliscript-emitter--imul-prologue
-          (eliscript-emitter--forms-name-global-root-p prologue-forms)) "")
      (if (eliscript-emitter--uses-host-identity-token-p prologue-forms)
          eliscript-emitter--host-identity-token-helper
        "")

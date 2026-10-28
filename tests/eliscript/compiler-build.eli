@@ -1187,7 +1187,7 @@
             (setq index (1+ index)))
           (finally (await (rm directory (js-object :recursive t :force t))))))))
 
-  (test "complete JavaScript compiler build retains all 30 modules and 53 literals and executes its own IR source"
+  (test "complete JavaScript compiler build retains all 31 modules and 53 literals and executes its own IR source"
     (js-object :timeout 180000)
     (async ()
       (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-build-complete-"))))
@@ -1205,11 +1205,11 @@
                "backends/native.mjs" "backends/numeric.mjs" "backends/optimize.mjs"
                "backends/regexp.mjs" "backends/sha256.mjs" "backends/wasm.mjs"
                "host/compiler-session.mjs" "host/compiler-tools.mjs" "runtime/math.mjs"
-               "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs"))
+               "runtime/prelude.mjs" "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs"))
              (sorted-module-ids (js-call (js-call module-ids :slice) :sort)))
         (try
           (progn
-            (js-call assert :strictEqual (js-length module-ids) 30)
+            (js-call assert :strictEqual (js-length module-ids) 31)
             (js-call assert :deepStrictEqual
               (js-call (js-call (get sources :modules) :map (lambda (record) (get record :id))) :sort) sorted-module-ids)
             (js-call assert :strictEqual (js-length (get sources :literalSources)) 53)
@@ -1239,6 +1239,7 @@
                     (js-array (js-object
                       :product (js-object :name "eliscript" :type "module" :private t
                         :exports (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+                          "./runtime/prelude.mjs" "./runtime/prelude.mjs"
                           "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
                           "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs"))
                       :seed (js-object :type "module" :private t))))
@@ -1265,6 +1266,7 @@
                     (js-call assert :deepStrictEqual scope
                       (js-object :name "eliscript" :type "module" :private t
                         :exports (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+                          "./runtime/prelude.mjs" "./runtime/prelude.mjs"
                           "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
                           "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs")))
                     (js-call assert :strictEqual

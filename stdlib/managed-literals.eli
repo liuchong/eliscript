@@ -309,7 +309,7 @@
   (defun literal-vector (&rest values)
     (literal-initialize-prototype 2)
     (when (<= (js-length values) 32) (funcall literal-object-freeze values))
-    (literal-vector-from-array-values values))
+    (js-call PersistentVector :from values))
   (defun literal-map (&rest values)
     (when (/= (% (js-length values) 2) 0) (literal-fail "hash-map expects complete key/value pairs"))
     (let ((entries (js-array)) (index 0) (pair 0))

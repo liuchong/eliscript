@@ -13,7 +13,7 @@
   (import "../tools/backends/build.mjs" root)
   (import "../tools/backends/compiler-matrix.mjs" loadCompilerMatrixCorpus)
 
-  (defconst capsules (js-array "math" "unicode-case" "unicode-case-data"))
+  (defconst capsules (js-array "math" "prelude" "unicode-case" "unicode-case-data"))
   (defun digest (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
   (defun deployment-temp-root ()
     ;; These cases exercise deployment into a consumer outside the provider
@@ -68,9 +68,10 @@
       (js-call assert :strictEqual (get scope :private) t)
       (js-call assert :deepStrictEqual (get scope :exports)
         (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+          "./runtime/prelude.mjs" "./runtime/prelude.mjs"
           "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
           "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs"))
-      (js-call assert :strictEqual (js-length (get metadata :capsules)) 3)
+      (js-call assert :strictEqual (js-length (get metadata :capsules)) 4)
       (let ((index 0))
         (while (< index 3)
           (let* ((name (aref capsules index)) (record (aref (get metadata :capsules) index))

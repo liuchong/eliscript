@@ -15,7 +15,7 @@
         (error "Unicode bootstrap requires its maintained generator or derived Eli data"))
       (load generator nil t)
       (eliscript-generate-unicode-case-runtime-data root)))
-  (dolist (name '("unicode-case-data" "unicode-case" "math"))
+  (dolist (name '("prelude" "unicode-case-data" "unicode-case" "math"))
     (let ((runtime (expand-file-name (concat "runtime/" name ".mjs") output)))
       (make-directory (file-name-directory runtime) t)
       (eliscript-compile-file-with-source-map
@@ -27,6 +27,7 @@
       (insert (json-serialize
                '((name . "eliscript") (type . "module") (private . t)
                  (exports . ((./runtime/math.mjs . "./runtime/math.mjs")
+                             (./runtime/prelude.mjs . "./runtime/prelude.mjs")
                              (./runtime/unicode-case.mjs . "./runtime/unicode-case.mjs")
                              (./runtime/unicode-case-data.mjs . "./runtime/unicode-case-data.mjs")))))
               "\n"))))
@@ -39,7 +40,7 @@
     (when (file-exists-p (expand-file-name (caar entries) root))
       ;; The generated host lives in ROOT, outside the private compiler output
       ;; scope. Its bare runtime imports must resolve in this same source tree.
-      (dolist (name '("unicode-case-data" "unicode-case" "math"))
+      (dolist (name '("prelude" "unicode-case-data" "unicode-case" "math"))
         (let ((module (expand-file-name (concat "runtime/" name ".mjs") root)))
           (unless (and preserve-existing (file-exists-p module)
                        (file-exists-p (concat module ".map")))

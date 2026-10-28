@@ -78,7 +78,7 @@
     (let* ((metadata-path (get certified :stage3MetadataPath))
            (metadata (await (readCompilerMetadata metadata-path)))
            (supports (js-call (get metadata :modules) :filter
-             (lambda (record) (js-call (js-array "runtime/math.mjs" "runtime/unicode-case.mjs"
+             (lambda (record) (js-call (js-array "runtime/math.mjs" "runtime/prelude.mjs" "runtime/unicode-case.mjs"
                "runtime/unicode-case-data.mjs") :includes (get record :id))))) (index 0))
       (while (< index (js-length supports))
         (let* ((support (aref supports index))
@@ -142,11 +142,11 @@
             (when (or (isAbsolute part) (= part "..") (js-call part :startsWith (+ ".." sep)))
               (release-type-error "stage3 package source escapes its artifact"))
             (await (copy-if-different source destination))
-            (when (js-call (js-array "runtime/math.mjs" "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs") :includes id)
+            (when (js-call (js-array "runtime/math.mjs" "runtime/prelude.mjs" "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs") :includes id)
               (await (copy-if-different source (resolve root id))))
             (when (= (value-type (get record :sourceMapPath)) "string")
               (await (copy-if-different (resolve directory (get record :sourceMapPath)) (+ destination ".map")))
-              (when (js-call (js-array "runtime/math.mjs" "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs") :includes id)
+              (when (js-call (js-array "runtime/math.mjs" "runtime/prelude.mjs" "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs") :includes id)
                 (await (copy-if-different (resolve directory (get record :sourceMapPath))
                   (resolve root (+ id ".map"))))))))
         (setq index (1+ index)))

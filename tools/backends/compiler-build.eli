@@ -141,6 +141,7 @@
             (setq index (1+ index))))
         (setq group-index (1+ group-index)))
       (js-call records :push (js-object :id "runtime/math.mjs" :filename "runtime/math.eli"))
+      (js-call records :push (js-object :id "runtime/prelude.mjs" :filename "runtime/prelude.eli"))
       (js-call records :push (js-object :id "runtime/unicode-case.mjs" :filename "runtime/unicode-case.eli"))
       (js-call records :push (js-object :id "runtime/unicode-case-data.mjs" :filename "runtime/unicode-case-data.eli"))
       (setq index 0)
@@ -209,6 +210,7 @@
     (let* ((path (resolve directory "package.json"))
            (text (str (JSON/stringify (js-object :name "eliscript" :type "module" :private t
              :exports (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+               "./runtime/prelude.mjs" "./runtime/prelude.mjs"
                "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
                "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs")) nil 2) "\n")))
       (try (await (writeFile path text (js-object :flag "wx")))

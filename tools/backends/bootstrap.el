@@ -134,11 +134,13 @@ an added or changed declaration cannot silently bootstrap an incomplete graph."
         (error "formal bootstrap requires its maintained Unicode data generator"))
       (load generator nil t)
       (eliscript-generate-unicode-case-runtime-data default-directory))
-    ;; The exact two Unicode capsules have no default-import dependency.
-    ;; Prepare them before any ordinary generated ESM, including Math.
-    (dolist (entry '(("runtime/unicode-case-data.eli" . "runtime/unicode-case-data.mjs")
+    ;; The prelude and the exact two Unicode capsules have no default-import
+    ;; dependency. Prepare them before any ordinary generated ESM, including Math.
+    (dolist (entry '(("runtime/prelude.eli" . "runtime/prelude.mjs")
+                     ("runtime/unicode-case-data.eli" . "runtime/unicode-case-data.mjs")
                      ("runtime/unicode-case.eli" . "runtime/unicode-case.mjs")
                      ("runtime/math.eli" . "runtime/math.mjs")
+                     ("runtime/prelude.eli" . "dist/runtime/prelude.mjs")
                      ("runtime/unicode-case-data.eli" . "dist/runtime/unicode-case-data.mjs")
                      ("runtime/unicode-case.eli" . "dist/runtime/unicode-case.mjs")
                      ("runtime/math.eli" . "dist/runtime/math.mjs")
@@ -184,6 +186,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
                                       (source . ,(eliscript-backend-stage0-read
                                                   (expand-file-name (cdr entry) eliscript-backend-bootstrap-root)))))
                                   '(("runtime/math.mjs" . "runtime/math.eli")
+                                    ("runtime/prelude.mjs" . "runtime/prelude.eli")
                                     ("runtime/unicode-case.mjs" . "runtime/unicode-case.eli")
                                     ("runtime/unicode-case-data.mjs" . "runtime/unicode-case-data.eli"))))
                 literals (eliscript-backend-stage0-literal-records)
@@ -269,7 +272,8 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
          (source-directory (expand-file-name "bootstrap/compiler" default-directory))
          (process-environment (copy-sequence process-environment))
          (runtime (or (getenv "ELISCRIPT_JS_RUNTIME") "node"))
-         (tools '(("runtime/math.eli" . "runtime/math.mjs")
+         (tools '(("runtime/prelude.eli" . "runtime/prelude.mjs")
+                  ("runtime/math.eli" . "runtime/math.mjs")
                   ("runtime/emacs-compat.eli" . "runtime/emacs-compat.mjs")
                   ("runtime/unicode-case-data.eli" . "runtime/unicode-case-data.mjs")
                   ("runtime/unicode-case.eli" . "runtime/unicode-case.mjs")
@@ -386,6 +390,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
       (setq tools (append tools
                           '(("tests/eliscript/bootstrap-compiler.eli" . "tests/bootstrap-compiler.test.mjs")
                             ("tests/eliscript/emacs-compatible-syntax.eli" . "tests/emacs-compatible-syntax.test.mjs")
+                            ("tests/seed-symbol-reservation.test.eli" . "tests/seed-symbol-reservation.test.mjs")
                             ("tests/eliscript/bootstrap-seed-batch.eli" . "tests/bootstrap-seed-batch.test.mjs")
                             ("tests/eliscript/bootstrap-seed-proxy.eli" . "tests/helpers/bootstrap-seed-proxy.mjs")
                             ("tests/eliscript/bootstrap-published-probe.eli" . "tests/helpers/bootstrap-published-probe.mjs")
