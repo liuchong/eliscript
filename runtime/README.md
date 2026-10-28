@@ -11,7 +11,8 @@ should still be emitted directly; helpers need a concrete semantic reason to
 exist.
 
 All runtime modules in this directory (`literals.eli`, `worker.eli`,
-`math.eli`, `prelude.eli`, `unicode-case.eli`, `core/*.eli`, `testing/*.eli`, and `wire/*.eli`)
+`math.eli`, `prelude.eli`, `emacs-compat.eli`, `unicode-case.eli`,
+`core/*.eli`, `testing/*.eli`, and `wire/*.eli`)
 are maintained as `.eli` sources in Git and materialized or compiled to `.mjs`
 during `make bootstrap-backends` (zero tracked `.mjs` files in the repository).
 Eliscript modules may import `eliscript/runtime/*` either without the `.mjs`
@@ -320,3 +321,16 @@ Request contexts now include a frozen `capabilities` token from
 `platform/worker.mjs`, granting only progress and cancellation. The same
 confined resolver accepts package-owned `eliscript/platform/` imports and
 rejects traversal outside that directory.
+
+### Dual-Host Emacs Lisp Compatibility Runtime
+
+`emacs-compat.eli` (`emacs-compat.mjs`) is a 100% pure Eliscript module (zero
+`js*` capsules) that provides the `0.1.0`/`0.1.1` 100% Emacs Lisp-compatible
+kernel, the explicit `1+5+2` extension libraries (`eliscript-contract`,
+`eliscript-data`, `eliscript-bind`, `eliscript-module`, `eliscript-async`,
+`eliscript-js`, `eliscript-abi`), industrial Emacs Lisp standard-library
+primitives (`cl-defstruct`, `setf`/`cl-incf`/`cl-decf`/`push`/`pop`, `pcase`,
+`cl-labels`/`cl-flet`/`cl-loop`, `rx`, pure Eliscript UTF-8 and SHA-256
+`secure-hash`, virtual `with-temp-buffer`, and Emacs regular-expression
+translation), and `compileCompatElispModule` / `callCompatElisp` for compiling
+unmodified `.el` modules into ES modules accelerated by `eliscript-worker`.

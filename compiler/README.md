@@ -22,8 +22,8 @@ This directory contains the first Emacs Lisp seed compiler:
   backend and supplies shared formatting helpers.
 - `eliscript.el` exposes the public string and file compilation API.
 - `eliscript-cli.el` implements the batch command used by `bin/eliscript`.
-- `eliscript-project.el` discovers expanded local imports and writes complete
-  source-mapped ESM trees.
+- `eliscript-project.el` discovers expanded local imports (supporting both
+  `.eli` and `.el` source files) and writes complete source-mapped ESM trees.
 - `eliscript-project-cli.el` implements the batch command used by
   `bin/eliscript-build`.
 

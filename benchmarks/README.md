@@ -104,11 +104,13 @@ git worktree remove /tmp/eliscript-comparison-baseline
 ```
 
 The benchmark refuses a different baseline revision. Both generated compilers
-compile the same current eleven-module corpus with Source Maps in alternating
+compile the same current thirteen-module corpus with Source Maps in alternating
 order. [`compiler-binary-comparison-macos-arm64.json`](compiler-binary-comparison-macos-arm64.json)
-records source-bound byte counts, checksums, raw samples, medians, and the
-complete-compiler threshold decision. Default tests separately execute binary
-and n-ary side-effect ordering and validate the report digest.
+records source-bound byte counts (`747,647` optimized bytes vs `800,209`
+baseline bytes, `-6.57%`), checksums, raw samples, medians (`720.620 ms` vs
+`1,495.501 ms`, `2.075x` speedup), and the complete-compiler threshold decision.
+Default tests separately execute binary and n-ary side-effect ordering and
+validate the report digest.
 
 ## Compiler Ordered Source-mark Location
 
@@ -332,4 +334,19 @@ dimensions and handles all four boundary conditions automatically:
    executes the `v0.0.4` worktree only once (`deduplicatedFrom: "previousMinor"`).
 4. **Emacs Lisp only considers the current latest version**: `emacsLisp` always
    executes against the current host Emacs (`mode: "current-latest-only"`).
+
+### Latest `v0.1.1` Four-Dimension Snapshot (`macOS arm64`, `Bun 1.4.0`, `Emacs 31.1`)
+
+| Workload | 1. Emacs Lisp (`31.1`, current latest) | 2. Previous Major (`N/A`) | 3. Previous Minor (`v0.1.0`) | 4. Latest (`v0.1.1`) | Latest vs Emacs Lisp | Latest vs Previous Major | Latest vs Previous Minor |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **first(Vector, N=10,000)** | 0.11 µs (0.00011 ms) | N/A | 0.05 µs (0.00005 ms) | **0.04 µs (0.00004 ms)** | **2.39x** | N/A | **1.06x** |
+| **last(Vector, N=10,000)** | 0.018 ms | N/A | 0.19 µs (0.00019 ms) | **0.25 µs (0.00025 ms)** | **71.42x** | N/A | **0.74x** |
+| **take-last(64, N=10,000)** | 0.015 ms | N/A | 1.34 µs (0.00134 ms) | **1.71 µs (0.00171 ms)** | **9.02x** | N/A | **0.78x** |
+| **[VALUE_EQUAL] / compare(sameVec, N=10,000)** | 0.016 ms | N/A | 0.07 µs (0.00007 ms) | **0.08 µs (0.00008 ms)** | **198.54x** | N/A | **0.92x** |
+| **sort(Vector, N=10,000)** | 1.078 ms | N/A | 0.877 ms | **0.896 ms** | **1.20x** | N/A | **0.98x** |
+| **group-by(x % 100, N=10,000)** | 2.430 ms | N/A | 0.770 ms | **0.730 ms** | **3.33x** | N/A | **1.05x** |
+| **frequencies(1,000 keys, N=100,000)** | 13.993 ms | N/A | 6.960 ms | **6.597 ms** | **2.12x** | N/A | **1.06x** |
+| **12,000-depth Zipper (down\*12k + path + replace + root)** | 3.270 ms | N/A | 1.933 ms | **1.654 ms** | **1.98x** | N/A | **1.17x** |
+| **score-values(N=10,000 x 10 rounds)** | 17.115 ms | N/A | 1.614 ms | **1.651 ms** | **10.36x** | N/A | **0.98x** |
+
 

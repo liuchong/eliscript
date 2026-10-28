@@ -352,6 +352,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
                   ("tools/backends/eliscript/compiler-cli-entry.eli" . "tools/backends/compiler-cli.mjs")
                   ("tools/backends/eliscript/package-cli-entry.eli" . "bootstrap/host/eliscript-cli.mjs")
                   ("tools/pages/assemble.eli" . "tools/pages/assemble.mjs")
+                  ("tools/performance/version-comparison.eli" . "tools/performance/version-comparison.mjs")
                   ("tools/backends/eliscript/compiler-unicode-profile-host.eli" . "tools/backends/compiler-unicode-profile-host.mjs")
                   ("tools/backends/eliscript/managed-source-view.eli" . "tools/backends/managed-source-view.mjs")
                   ("tools/backends/eliscript/compiler-corpus-matchers.eli" . "tools/backends/compiler-corpus-matchers.mjs")

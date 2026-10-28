@@ -2,7 +2,7 @@
 
 ;; Author: 刘冲 <mail@liuchong.dev>
 ;; Maintainer: 刘冲 <mail@liuchong.dev>
-;; Version: 0.1.0
+;; Version: 0.1.1
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: languages, lisp
 ;; URL: https://github.com/liuchong/eliscript

@@ -1,2 +1,812 @@
-(module capsules.tools.performance.version-comparison
-  (js* "import { mkdtemp, readFile, rm, stat, symlink, writeFile, mkdir } from \"node:fs/promises\";\nimport os from \"node:os\";\nimport path from \"node:path\";\nimport process from \"node:process\";\nimport { fileURLToPath, pathToFileURL } from \"node:url\";\n\nexport const VERSION_COMPARISON_FORMAT = \"eliscript-version-comparison-benchmark\";\nexport const VERSION_COMPARISON_VERSION = 1;\n\nexport const VERSION_COMPARISON_DIMENSIONS = Object.freeze([\n  \"emacsLisp\",\n  \"previousMajor\",\n  \"previousMinor\",\n  \"latest\",\n]);\n\nexport const VERSION_COMPARISON_WORKLOADS = Object.freeze([\n  Object.freeze({\n    id: \"sequence.first10k\",\n    label: \"first(Vector, N=10,000)\",\n    category: \"sequence\",\n    unit: \"ms\",\n  }),\n  Object.freeze({\n    id: \"sequence.last10k\",\n    label: \"last(Vector, N=10,000)\",\n    category: \"sequence\",\n    unit: \"ms\",\n  }),\n  Object.freeze({\n    id: \"sequence.takeLast10k\",\n    label: \"take-last(64, N=10,000)\",\n    category: \"sequence\",\n    unit: \"ms\",\n  }),\n  Object.freeze({\n    id: \"value.equalSameRef10k\",\n    label: \"[VALUE_EQUAL] / compare(sameVec, N=10,000)\",\n    category: \"equality\",\n    unit: \"ms\",\n  }),\n  Object.freeze({\n    id: \"order.sort10k\",\n    label: \"sort(Vector, N=10,000)\",\n    category: \"ordering\",\n    unit: \"ms\",\n  }),\n  Object.freeze({\n    id: \"data.groupBy10k\",\n    label: \"group-by(x % 100, N=10,000)\",\n    category: \"aggregation\",\n    unit: \"ms\",\n  }),\n  Object.freeze({\n    id: \"data.frequencies100k\",\n    label: \"frequencies(1,000 keys, N=100,000)\",\n    category: \"aggregation\",\n    unit: \"ms\",\n  }),\n  Object.freeze({\n    id: \"tree.zipper12k\",\n    label: \"12,000-depth Zipper (down*12k + path + replace + root)\",\n    category: \"tree\",\n    unit: \"ms\",\n  }),\n  Object.freeze({\n    id: \"worker.scoreValues\",\n    label: \"score-values(N=10,000 x 10 rounds)\",\n    category: \"numeric\",\n    unit: \"ms\",\n  }),\n]);\n\nconst toolPath = fileURLToPath(import.meta.url);\nconst projectDirectory = path.resolve(path.dirname(toolPath), \"../..\");\n\nexport function parseSemver(input) {\n  if (typeof input !== \"string\") return null;\n  const trimmed = input.trim();\n  const match = /^v?(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$/u.exec(trimmed);\n  if (!match) return null;\n  const major = Number(match[1]);\n  const minor = Number(match[2]);\n  const patch = Number(match[3]);\n  const version = `${major}.${minor}.${patch}`;\n  return {\n    major,\n    minor,\n    patch,\n    version,\n    tag: `v${version}`,\n  };\n}\n\nexport function compareSemver(left, right) {\n  if (left.major !== right.major) return left.major - right.major;\n  if (left.minor !== right.minor) return left.minor - right.minor;\n  return left.patch - right.patch;\n}\n\nexport function resolveVersionComparisonMatrix({\n  currentVersion,\n  releasedTags = [],\n  emacsVersion = \"unknown\",\n} = {}) {\n  const current = parseSemver(currentVersion);\n  if (!current) {\n    throw new TypeError(`invalid current semantic version: ${String(currentVersion)}`);\n  }\n  const parsedReleases = [];\n  const seenVersions = new Set();\n  for (const rawTag of releasedTags) {\n    const parsed = parseSemver(rawTag);\n    if (!parsed || seenVersions.has(parsed.version)) continue;\n    seenVersions.add(parsed.version);\n    parsedReleases.push({\n      ...parsed,\n      tag: typeof rawTag === \"string\" && rawTag.startsWith(\"v\") ? rawTag : parsed.tag,\n    });\n  }\n  parsedReleases.sort(compareSemver);\n\n  const priorReleases = parsedReleases.filter((entry) => compareSemver(entry, current) < 0);\n  const priorMajorReleases = priorReleases.filter((entry) => entry.major < current.major);\n\n  const bestMinor = priorReleases.at(-1) ?? null;\n  const bestMajor = priorMajorReleases.at(-1) ?? null;\n  const sameMajorAndMinor = Boolean(\n    bestMajor && bestMinor && bestMajor.version === bestMinor.version,\n  );\n\n  const emacsDimension = Object.freeze({\n    id: \"emacsLisp\",\n    label: \"Emacs Lisp\",\n    status: \"active\",\n    version: String(emacsVersion),\n    tag: null,\n    mode: \"current-latest-only\",\n    reason: \"current-host-emacs\",\n  });\n\n  const previousMajorDimension = bestMajor\n    ? Object.freeze({\n        id: \"previousMajor\",\n        label: \"上一个大版本\",\n        status: \"active\",\n        version: bestMajor.version,\n        tag: bestMajor.tag,\n        reason: sameMajorAndMinor ? \"same-as-previous-minor\" : \"resolved\",\n        sameAsPreviousMinor: sameMajorAndMinor,\n      })\n    : Object.freeze({\n        id: \"previousMajor\",\n        label: \"上一个大版本\",\n        status: \"absent\",\n        version: null,\n        tag: null,\n        reason: \"no-prior-major-release\",\n        sameAsPreviousMinor: false,\n      });\n\n  const previousMinorDimension = bestMinor\n    ? Object.freeze({\n        id: \"previousMinor\",\n        label: \"上一个最近的小版本\",\n        status: \"active\",\n        version: bestMinor.version,\n        tag: bestMinor.tag,\n        reason: \"resolved\",\n        sameAsPreviousMajor: sameMajorAndMinor,\n      })\n    : Object.freeze({\n        id: \"previousMinor\",\n        label: \"上一个最近的小版本\",\n        status: \"absent\",\n        version: null,\n        tag: null,\n        reason: \"initial-release\",\n        sameAsPreviousMajor: false,\n      });\n\n  const latestDimension = Object.freeze({\n    id: \"latest\",\n    label: \"最新版\",\n    status: \"active\",\n    version: current.version,\n    tag: current.tag,\n    reason: \"current-workspace\",\n  });\n\n  return Object.freeze({\n    emacsLisp: emacsDimension,\n    previousMajor: previousMajorDimension,\n    previousMinor: previousMinorDimension,\n    latest: latestDimension,\n  });\n}\n\nasync function capture(command, options = {}) {\n  const child = Bun.spawn(command, {\n    cwd: projectDirectory,\n    stdout: \"pipe\",\n    stderr: \"pipe\",\n    ...options,\n  });\n  const [exitCode, stdout, stderr] = await Promise.all([\n    child.exited,\n    new Response(child.stdout).text(),\n    new Response(child.stderr).text(),\n  ]);\n  if (exitCode !== 0) {\n    throw new Error(\n      stderr.trim() || stdout.trim() || `${command[0]} exited with ${exitCode}`,\n    );\n  }\n  return { stdout, stderr };\n}\n\nexport async function discoverReleasedTags(root = projectDirectory) {\n  const result = await capture([\"git\", \"tag\", \"--list\", \"v*\"], { cwd: root });\n  return result.stdout\n    .split(/\\r?\\n/u)\n    .map((line) => line.trim())\n    .filter((line) => parseSemver(line) !== null);\n}\n\nexport async function detectEmacsVersion() {\n  const result = await capture([\n    process.env.EMACS ?? \"emacs\",\n    \"--batch\",\n    \"-Q\",\n    \"--eval\",\n    \"(princ emacs-version)\",\n  ]);\n  return result.stdout.trim();\n}\n\nexport async function defaultMeasureEmacsLisp() {\n  const elispScript = [\n    \"(progn\",\n    \"  (require (quote json))\",\n    \"  (require (quote cl-lib))\",\n    \"  (defun ms-since (t0) (* 1000.0 (- (float-time) t0)))\",\n    \"  (defun bench-el (iters fn)\",\n    \"    (funcall fn)\",\n    \"    (garbage-collect)\",\n    \"    (let ((t0 (float-time)))\",\n    \"      (dotimes (_ iters) (funcall fn))\",\n    \"      (/ (ms-since t0) (float iters))))\",\n    \"  (let* ((n 10000)\",\n    \"         (lst (number-sequence 0 (1- n)))\",\n    \"         (vec (vconcat lst))\",\n    \"         (shuffled-lst (mapcar (lambda (i) (% (* i 7919) n)) lst))\",\n    \"         (mod-100k (let (r) (dotimes (i 100000) (push (% i 1000) r)) (nreverse r)))\",\n    \"         (t-first (bench-el 20000 (lambda () (aref vec 0))))\",\n    \"         (t-last (bench-el 200 (lambda () (car (last lst)))))\",\n    \"         (t-take-last (bench-el 200 (lambda () (last lst 64))))\",\n    \"         (vec-copy (copy-sequence vec))\",\n    \"         (t-equal (bench-el 1000 (lambda () (equal vec vec-copy))))\",\n    \"         (t-sort (bench-el 30 (lambda () (vconcat (sort (copy-sequence shuffled-lst) (function <))))))\",\n    \"         (t-group-by (bench-el 30 (lambda ()\",\n    \"                                    (let ((ht (make-hash-table :test (quote eql))))\",\n    \"                                      (dolist (x lst)\",\n    \"                                        (let ((k (% x 100)))\",\n    \"                                          (puthash k (cons x (gethash k ht)) ht)))\",\n    \"                                      ht))))\",\n    \"         (t-freq-100k (bench-el 7 (lambda ()\",\n    \"                                    (let ((ht (make-hash-table :test (quote eql))))\",\n    \"                                      (dolist (x mod-100k)\",\n    \"                                        (puthash x (1+ (gethash x ht 0)) ht))\",\n    \"                                      ht))))\",\n    \"         (score-vec (let ((v (make-vector 10000 0))) (dotimes (i 10000) (aset v i (% i 997))) v))\",\n    \"         (t-score (bench-el 7 (lambda ()\",\n    \"                                (let ((total 0))\",\n    \"                                  (dotimes (round 10)\",\n    \"                                    (dotimes (idx 10000)\",\n    \"                                      (setq total (% (+ (* total 33) (aref score-vec idx) round) 1000000007))))\",\n    \"                                  total))))\",\n    \"         (t-zipper (let ((nested (vector 0)))\",\n    \"                     (dotimes (_ 12000) (setq nested (vector nested)))\",\n    \"                     (bench-el 3 (lambda ()\",\n    \"                                   (let ((cur nested)\",\n    \"                                         (p nil))\",\n    \"                                     (dotimes (_ 12000)\",\n    \"                                       (push cur p)\",\n    \"                                       (setq cur (aref cur 0)))\",\n    \"                                     (let ((rebuilt 42))\",\n    \"                                       (dolist (parent p)\",\n    \"                                         (let ((cp (copy-sequence parent)))\",\n    \"                                           (aset cp 0 rebuilt)\",\n    \"                                           (setq rebuilt cp)))\",\n    \"                                       rebuilt)))))))\",\n    \"    (princ (json-encode\",\n    \"            (list (cons (quote sequence.first10k) t-first)\",\n    \"                  (cons (quote sequence.last10k) t-last)\",\n    \"                  (cons (quote sequence.takeLast10k) t-take-last)\",\n    \"                  (cons (quote value.equalSameRef10k) t-equal)\",\n    \"                  (cons (quote order.sort10k) t-sort)\",\n    \"                  (cons (quote data.groupBy10k) t-group-by)\",\n    \"                  (cons (quote data.frequencies100k) t-freq-100k)\",\n    \"                  (cons (quote tree.zipper12k) t-zipper)\",\n    \"                  (cons (quote worker.scoreValues) t-score))))))\",\n  ].join(\"\\n\");\n  const result = await capture([\n    process.env.EMACS ?? \"emacs\",\n    \"--batch\",\n    \"-Q\",\n    \"--eval\",\n    elispScript,\n  ]);\n  return JSON.parse(result.stdout.trim());\n}\n\nasync function pathExists(targetPath) {\n  try {\n    await stat(targetPath);\n    return true;\n  } catch {\n    return false;\n  }\n}\n\nexport async function measureEliscriptDirectory(targetRoot, compilerRoot = projectDirectory) {\n  const compilerModulePath = path.join(compilerRoot, \"dist/bootstrap/compiler.mjs\");\n  if (!(await pathExists(compilerModulePath))) {\n    await capture([\"make\", \"bootstrap-backends\"], { cwd: compilerRoot });\n  }\n  const compiler = await import(pathToFileURL(compilerModulePath).href);\n  const literalsMjs = path.join(targetRoot, \"runtime/literals.mjs\");\n  if (!(await pathExists(literalsMjs))) {\n    await capture([\"make\", \"bootstrap-backends\"], { cwd: targetRoot });\n  }\n  const generatedPairs = [\n    [\"stdlib/core/protocol.eli\", \"runtime/core/protocol-impl.mjs\"],\n    [\"stdlib/core/text.eli\", \"runtime/core/text-impl.mjs\"],\n    [\"stdlib/core/object.eli\", \"runtime/core/object-impl.mjs\"],\n    [\"runtime/unicode-case-data.eli\", \"runtime/unicode-case-data.mjs\"],\n    [\"runtime/unicode-case.eli\", \"runtime/unicode-case.mjs\"],\n    [\"runtime/math.eli\", \"runtime/math.mjs\"],\n  ];\n  for (const [srcRel, outRel] of generatedPairs) {\n    const outPath = path.join(targetRoot, outRel);\n    if (!(await pathExists(outPath))) {\n      const srcPath = path.join(targetRoot, srcRel);\n      if (await pathExists(srcPath)) {\n        const srcText = await readFile(srcPath, \"utf8\");\n        await writeFile(outPath, compiler.compile_string(srcText, srcRel));\n      } else {\n        await writeFile(outPath, await readFile(path.join(compilerRoot, outRel)));\n      }\n    }\n  }\n  const zipperSource = await readFile(\n    path.join(targetRoot, \"stdlib/core/zipper.eli\"),\n    \"utf8\",\n  );\n  const compiledZipper = compiler.compile_string(\n    zipperSource,\n    \"stdlib/core/zipper.eli\",\n  );\n  const seqSource = await readFile(\n    path.join(targetRoot, \"stdlib/core/seq.eli\"),\n    \"utf8\",\n  );\n  const compiledSeq = compiler.compile_string(\n    seqSource,\n    \"stdlib/core/seq.eli\",\n  );\n\n  const tempDir = await mkdtemp(path.join(os.tmpdir(), \"eliscript-version-bench-\"));\n  try {\n    const stdlibCoreDir = path.join(tempDir, \"stdlib/core\");\n    await mkdir(stdlibCoreDir, { recursive: true });\n    await symlink(\n      path.join(targetRoot, \"runtime\"),\n      path.join(tempDir, \"runtime\"),\n      \"dir\",\n    );\n    const nodeModulesEliscript = path.join(tempDir, \"node_modules/eliscript\");\n    await mkdir(path.dirname(nodeModulesEliscript), { recursive: true });\n    await symlink(targetRoot, nodeModulesEliscript, \"dir\");\n\n    const zipperMjsPath = path.join(stdlibCoreDir, \"zipper.mjs\");\n    await writeFile(zipperMjsPath, compiledZipper);\n    const seqMjsPath = path.join(stdlibCoreDir, \"seq.mjs\");\n    await writeFile(seqMjsPath, compiledSeq);\n\n    const runnerPath = path.join(tempDir, \"run-bench.mjs\");\n    const runnerScript = [\n      \"import { performance } from \\\"node:perf_hooks\\\";\",\n      \"import { vector } from \\\"./runtime/literals.mjs\\\";\",\n      \"import { first, last } from \\\"./runtime/core/sequence.mjs\\\";\",\n      \"import { count } from \\\"./runtime/core/collection.mjs\\\";\",\n      \"import { sort, compareValues } from \\\"./runtime/core/order.mjs\\\";\",\n      \"import { groupBy, frequencies } from \\\"./runtime/core/data.mjs\\\";\",\n      \"import { equalValues } from \\\"./runtime/core/value.mjs\\\";\",\n      \"import { VALUE_EQUAL } from \\\"./runtime/core/value-internals.mjs\\\";\",\n      \"import { take_last } from \\\"./stdlib/core/seq.mjs\\\";\",\n      \"import { vector_zipper, down, path as zipPath, replace as zipReplace, root as zipRoot } from \\\"./stdlib/core/zipper.mjs\\\";\",\n      \"function bench(iters, fn) {\",\n      \"  for (let i = 0; i < Math.min(5, iters); i += 1) fn();\",\n      \"  const t0 = performance.now();\",\n      \"  for (let i = 0; i < iters; i += 1) fn();\",\n      \"  return (performance.now() - t0) / iters;\",\n      \"}\",\n      \"const N = 10000;\",\n      \"const arr = Array.from({ length: N }, (_, i) => i);\",\n      \"const vec = vector(...arr);\",\n      \"const shuffledVec = vector(...Array.from({ length: N }, (_, i) => (i * 7919) % N));\",\n      \"const modVec100k = vector(...Array.from({ length: 100000 }, (_, i) => i % 1000));\",\n      \"const scoreArr = Int32Array.from({ length: 10000 }, (_, i) => i % 997);\",\n      \"const takeLastFn = (n, col) => count(take_last(n, col));\",\n      \"let nested = vector(0);\",\n      \"for (let i = 0; i < 12000; i += 1) nested = vector(nested);\",\n      \"const metrics = {\",\n      \"  \\\"sequence.first10k\\\": bench(20000, () => first(vec)),\",\n      \"  \\\"sequence.last10k\\\": bench(200, () => last(vec)),\",\n      \"  \\\"sequence.takeLast10k\\\": bench(200, () => takeLastFn(64, vec)),\",\n      \"  \\\"value.equalSameRef10k\\\": bench(1000, () => vec[VALUE_EQUAL](vec, equalValues) && compareValues(vec, vec) === 0),\",\n      \"  \\\"order.sort10k\\\": bench(30, () => sort(shuffledVec)),\",\n      \"  \\\"data.groupBy10k\\\": bench(30, () => groupBy((x) => x % 100, vec)),\",\n      \"  \\\"data.frequencies100k\\\": bench(7, () => frequencies(modVec100k)),\",\n      \"  \\\"tree.zipper12k\\\": bench(3, () => {\",\n      \"    let loc = vector_zipper(nested);\",\n      \"    for (let i = 0; i < 12000; i += 1) loc = down(loc);\",\n      \"    zipPath(loc);\",\n      \"    return zipRoot(zipReplace(loc, 42));\",\n      \"  }),\",\n      \"  \\\"worker.scoreValues\\\": bench(7, () => {\",\n      \"    let total = 0;\",\n      \"    for (let round = 0; round < 10; round += 1) {\",\n      \"      for (let idx = 0; idx < 10000; idx += 1) {\",\n      \"        total = (total * 33 + scoreArr[idx] + round) % 1000000007;\",\n      \"      }\",\n      \"    }\",\n      \"    return total;\",\n      \"  }),\",\n      \"};\",\n      \"process.stdout.write(JSON.stringify(metrics) + \\\"\\\\n\\\");\",\n    ].join(\"\\n\");\n    await writeFile(runnerPath, runnerScript);\n    const result = await capture([process.execPath, runnerPath], { cwd: tempDir });\n    return JSON.parse(result.stdout.trim());\n  } finally {\n    await rm(tempDir, { recursive: true, force: true });\n  }\n}\n\nexport async function defaultMeasureEliscriptTarget(target, root = projectDirectory) {\n  if (target.id === \"latest\" || !target.tag) {\n    return measureEliscriptDirectory(root, root);\n  }\n  const worktreeDir = await mkdtemp(path.join(os.tmpdir(), `eliscript-wt-${target.version}-`));\n  try {\n    await rm(worktreeDir, { recursive: true, force: true });\n    await capture([\"git\", \"worktree\", \"add\", \"--detach\", worktreeDir, target.tag], {\n      cwd: root,\n    });\n    return await measureEliscriptDirectory(worktreeDir, root);\n  } finally {\n    try {\n      await capture([\"git\", \"worktree\", \"remove\", \"--force\", worktreeDir], {\n        cwd: root,\n      });\n    } catch {\n      await rm(worktreeDir, { recursive: true, force: true });\n    }\n  }\n}\n\nfunction buildSpeedupComparisons(results) {\n  const comparisons = {};\n  const latestMetrics = results.latest?.metricsMs;\n  if (!latestMetrics) return comparisons;\n\n  for (const workload of VERSION_COMPARISON_WORKLOADS) {\n    const id = workload.id;\n    const latestMs = latestMetrics[id];\n    const emacsMs = results.emacsLisp?.metricsMs?.[id] ?? null;\n    const majorMs = results.previousMajor?.metricsMs?.[id] ?? null;\n    const minorMs = results.previousMinor?.metricsMs?.[id] ?? null;\n    comparisons[id] = {\n      latestVsEmacsLisp:\n        emacsMs !== null && latestMs > 0 ? +(emacsMs / latestMs).toFixed(2) : null,\n      latestVsPreviousMajor:\n        majorMs !== null && latestMs > 0 ? +(majorMs / latestMs).toFixed(2) : null,\n      latestVsPreviousMinor:\n        minorMs !== null && latestMs > 0 ? +(minorMs / latestMs).toFixed(2) : null,\n    };\n  }\n  return comparisons;\n}\n\nexport function validateVersionComparisonReport(report) {\n  if (\n    report?.format !== VERSION_COMPARISON_FORMAT ||\n    report?.version !== VERSION_COMPARISON_VERSION\n  ) {\n    throw new TypeError(\"invalid version comparison benchmark report identity\");\n  }\n  for (const dimensionId of VERSION_COMPARISON_DIMENSIONS) {\n    const dim = report.matrix?.[dimensionId];\n    const res = report.results?.[dimensionId];\n    if (!dim || !res || dim.id !== dimensionId) {\n      throw new TypeError(`missing dimension ${dimensionId} in version comparison report`);\n    }\n    if (dim.status === \"active\") {\n      for (const workload of VERSION_COMPARISON_WORKLOADS) {\n        const value = res.metricsMs?.[workload.id];\n        if (typeof value !== \"number\" || !Number.isFinite(value) || value <= 0) {\n          throw new TypeError(\n            `invalid metric ${workload.id} for active dimension ${dimensionId}`,\n          );\n        }\n      }\n    } else if (dim.status === \"absent\") {\n      if (res.metricsMs !== null) {\n        throw new TypeError(`absent dimension ${dimensionId} must have null metricsMs`);\n      }\n    } else {\n      throw new TypeError(`unsupported dimension status ${String(dim.status)}`);\n    }\n  }\n  return report;\n}\n\nexport async function runVersionComparisonBenchmark(options = {}) {\n  const root = path.resolve(options.root ?? projectDirectory);\n  const pkg = JSON.parse(await readFile(path.join(root, \"package.json\"), \"utf8\"));\n  const currentVersion = options.currentVersion ?? pkg.version;\n  const releasedTags = options.releasedTags ?? (await discoverReleasedTags(root));\n  const emacsVersion = options.emacsVersion ?? (await detectEmacsVersion());\n\n  const matrix = resolveVersionComparisonMatrix({\n    currentVersion,\n    releasedTags,\n    emacsVersion,\n  });\n\n  const measureEmacs = options.measureEmacsLisp ?? defaultMeasureEmacsLisp;\n  const measureTarget =\n    options.measureEliscriptTarget ??\n    ((target) => defaultMeasureEliscriptTarget(target, root));\n\n  const results = {};\n\n  results.emacsLisp = {\n    ...matrix.emacsLisp,\n    deduplicatedFrom: null,\n    metricsMs: await measureEmacs(matrix.emacsLisp),\n  };\n\n  if (matrix.previousMinor.status === \"active\") {\n    results.previousMinor = {\n      ...matrix.previousMinor,\n      deduplicatedFrom: null,\n      metricsMs: await measureTarget(matrix.previousMinor),\n    };\n  } else {\n    results.previousMinor = {\n      ...matrix.previousMinor,\n      deduplicatedFrom: null,\n      metricsMs: null,\n    };\n  }\n\n  if (matrix.previousMajor.status === \"active\") {\n    if (matrix.previousMajor.sameAsPreviousMinor && results.previousMinor?.metricsMs) {\n      results.previousMajor = {\n        ...matrix.previousMajor,\n        deduplicatedFrom: \"previousMinor\",\n        metricsMs: { ...results.previousMinor.metricsMs },\n      };\n    } else {\n      results.previousMajor = {\n        ...matrix.previousMajor,\n        deduplicatedFrom: null,\n        metricsMs: await measureTarget(matrix.previousMajor),\n      };\n    }\n  } else {\n    results.previousMajor = {\n      ...matrix.previousMajor,\n      deduplicatedFrom: null,\n      metricsMs: null,\n    };\n  }\n\n  results.latest = {\n    ...matrix.latest,\n    deduplicatedFrom: null,\n    metricsMs: await measureTarget(matrix.latest),\n  };\n\n  const report = {\n    format: VERSION_COMPARISON_FORMAT,\n    version: VERSION_COMPARISON_VERSION,\n    generatedAt: new Date().toISOString(),\n    host: {\n      platform: process.platform,\n      architecture: process.arch,\n      operatingSystem: `${os.type()} ${os.release()}`,\n      bunVersion: Bun.version,\n      emacsVersion,\n    },\n    matrix,\n    workloads: VERSION_COMPARISON_WORKLOADS,\n    results,\n    comparisons: buildSpeedupComparisons(results),\n  };\n\n  return validateVersionComparisonReport(report);\n}\n\nfunction formatMs(value) {\n  if (value === null || value === undefined) return \"N/A\";\n  if (value < 0.01) return `${(value * 1000).toFixed(2)} µs (${value.toFixed(5)} ms)`;\n  return `${value.toFixed(3)} ms`;\n}\n\nfunction formatRatio(ratio) {\n  if (ratio === null || ratio === undefined) return \"N/A\";\n  return `${ratio.toFixed(2)}x`;\n}\n\nfunction dimensionHeader(dim) {\n  if (dim.id === \"emacsLisp\") {\n    return `1. Emacs Lisp (${dim.version}, 当前最新版)`;\n  }\n  if (dim.id === \"previousMajor\") {\n    if (dim.status === \"absent\") return \"2. 上一个大版本 (不存在 / N/A)\";\n    if (dim.sameAsPreviousMinor) return `2. 上一个大版本 (${dim.tag}, 同上一小版本)`;\n    return `2. 上一个大版本 (${dim.tag})`;\n  }\n  if (dim.id === \"previousMinor\") {\n    if (dim.status === \"absent\") return \"3. 上一个最近的小版本 (首个版本 / N/A)\";\n    return `3. 上一个最近的小版本 (${dim.tag})`;\n  }\n  return `4. 最新版 (${dim.tag})`;\n}\n\nexport function renderVersionComparisonMarkdown(report) {\n  validateVersionComparisonReport(report);\n  const { matrix, results, comparisons } = report;\n  const lines = [\n    \"# Eliscript 四维版本与原生 Emacs Lisp 性能对比报告\",\n    \"\",\n    `- **生成时间**: \\`${report.generatedAt}\\``,\n    `- **运行环境**: \\`${report.host.operatingSystem} (${report.host.platform}/${report.host.architecture})\\`, Bun \\`${report.host.bunVersion}\\`, Emacs \\`${report.host.emacsVersion}\\``,\n    \"\",\n    \"## 对比维度状态\",\n    \"\",\n    \"| 维度 | 状态 | 版本 / 标签 | 边界说明 |\",\n    \"| --- | --- | --- | --- |\",\n    `| **1. Emacs Lisp** | \\`${matrix.emacsLisp.status}\\` | \\`Emacs ${matrix.emacsLisp.version}\\` | 仅考虑当前宿主最新版 Emacs Lisp (\\`${matrix.emacsLisp.mode}\\`) |`,\n    `| **2. 上一个大版本** | \\`${matrix.previousMajor.status}\\` | \\`${matrix.previousMajor.tag ?? \"N/A\"}\\` | ${\n      matrix.previousMajor.status === \"absent\"\n        ? \"当前尚无上一大版本 (\\`no-prior-major-release\\`)\"\n        : matrix.previousMajor.sameAsPreviousMinor\n          ? \"与上一个最近的小版本相同，复用采样结果 (\\`same-as-previous-minor\\`)\"\n          : \"已解析上一大版本最新标签\"\n    } |`,\n    `| **3. 上一个最近的小版本** | \\`${matrix.previousMinor.status}\\` | \\`${matrix.previousMinor.tag ?? \"N/A\"}\\` | ${\n      matrix.previousMinor.status === \"absent\"\n        ? \"当前为首个版本，无上一小版本 (\\`initial-release\\`)\"\n        : \"已解析最近上一发布版本\"\n    } |`,\n    `| **4. 最新版** | \\`${matrix.latest.status}\\` | \\`${matrix.latest.tag}\\` | 当前工作区最新版本 |`,\n    \"\",\n    \"## 基准工作负载四维耗时与加速比\",\n    \"\",\n    `| 工作负载 | ${dimensionHeader(matrix.emacsLisp)} | ${dimensionHeader(matrix.previousMajor)} | ${dimensionHeader(matrix.previousMinor)} | ${dimensionHeader(matrix.latest)} | 最新版 vs Emacs Lisp | 最新版 vs 上一大版本 | 最新版 vs 上一小版本 |`,\n    \"| --- | --- | --- | --- | --- | --- | --- | --- |\",\n  ];\n\n  for (const workload of VERSION_COMPARISON_WORKLOADS) {\n    const id = workload.id;\n    const elMs = results.emacsLisp.metricsMs?.[id] ?? null;\n    const majMs = results.previousMajor.metricsMs?.[id] ?? null;\n    const minMs = results.previousMinor.metricsMs?.[id] ?? null;\n    const latMs = results.latest.metricsMs?.[id] ?? null;\n    const cmp = comparisons[id] ?? {};\n    lines.push(\n      `| **${workload.label}** | ${formatMs(elMs)} | ${formatMs(majMs)} | ${formatMs(minMs)} | **${formatMs(latMs)}** | **${formatRatio(cmp.latestVsEmacsLisp)}** | ${formatRatio(cmp.latestVsPreviousMajor)} | **${formatRatio(cmp.latestVsPreviousMinor)}** |`,\n    );\n  }\n  lines.push(\"\");\n  return lines.join(\"\\n\");\n}\n\nexport function renderReleaseNotesSummary(report) {\n  validateVersionComparisonReport(report);\n  const { matrix, results, comparisons } = report;\n  const version = matrix.latest.version;\n  const mdFile = `eliscript-${version}-benchmark-report.md`;\n  const jsonFile = `eliscript-${version}-benchmark-report.json`;\n  const lines = [\n    \"## 测试与四维性能基准摘要\",\n    \"\",\n    `- **对比维度**: \\`Emacs ${matrix.emacsLisp.version}\\` (当前最新版) | 上一个大版本: \\`${matrix.previousMajor.tag ?? \"N/A (尚无上一大版本)\"}\\` | 上一个最近的小版本: \\`${matrix.previousMinor.tag ?? \"N/A (首个版本)\"}\\` | 最新版: \\`${matrix.latest.tag}\\``,\n    `- **完整测试与基准报告附件**: 详见 Release 附件 \\`${mdFile}\\` 与 \\`${jsonFile}\\``,\n    \"\",\n    \"| 基准工作负载 | 最新版耗时 | vs Emacs Lisp | vs 上一大版本 | vs 上一小版本 |\",\n    \"| --- | --- | --- | --- | --- |\",\n  ];\n  for (const workload of VERSION_COMPARISON_WORKLOADS) {\n    const id = workload.id;\n    const latMs = results.latest.metricsMs?.[id] ?? null;\n    const cmp = comparisons[id] ?? {};\n    lines.push(\n      `| **${workload.label}** | **${formatMs(latMs)}** | **${formatRatio(cmp.latestVsEmacsLisp)}** | ${formatRatio(cmp.latestVsPreviousMajor)} | **${formatRatio(cmp.latestVsPreviousMinor)}** |`,\n    );\n  }\n  lines.push(\"\");\n  return lines.join(\"\\n\");\n}\n\nexport function mergeReleaseNotesWithSummary(existingNotes, summaryMarkdown) {\n  const cleanSummary = String(summaryMarkdown ?? \"\").trim();\n  const rawNotes = String(existingNotes ?? \"\").trim();\n  if (!rawNotes) {\n    return `${cleanSummary}\\n`;\n  }\n  const heading = \"## 测试与四维性能基准摘要\";\n  const idx = rawNotes.indexOf(heading);\n  if (idx === -1) {\n    return `${rawNotes}\\n\\n${cleanSummary}\\n`;\n  }\n  const prefix = rawNotes.slice(0, idx).trim();\n  const remainder = rawNotes.slice(idx + heading.length);\n  const nextSectionMatch = /\\n##\\s+/u.exec(remainder);\n  const suffix = nextSectionMatch\n    ? remainder.slice(nextSectionMatch.index).trim()\n    : \"\";\n  const parts = [];\n  if (prefix) parts.push(prefix);\n  if (cleanSummary) parts.push(cleanSummary);\n  if (suffix) parts.push(suffix);\n  return `${parts.join(\"\\n\\n\")}\\n`;\n}\n\nexport async function writeReleaseComparisonBundle(report, releaseDir, options = {}) {\n  validateVersionComparisonReport(report);\n  const resolvedDir = path.resolve(releaseDir);\n  await mkdir(resolvedDir, { recursive: true });\n  const version = report.matrix.latest.version;\n  const summaryPath = path.join(resolvedDir, \"release-summary.md\");\n  const mergedNotesPath = path.join(resolvedDir, \"release-notes-merged.md\");\n  const markdownPath = path.join(\n    resolvedDir,\n    `eliscript-${version}-benchmark-report.md`,\n  );\n  const jsonPath = path.join(\n    resolvedDir,\n    `eliscript-${version}-benchmark-report.json`,\n  );\n  const summaryMarkdown = renderReleaseNotesSummary(report);\n  const existingNotes =\n    options.existingNotes !== undefined\n      ? options.existingNotes\n      : options.mergeNotesPath\n        ? await readFile(path.resolve(options.mergeNotesPath), \"utf8\").catch(() => \"\")\n        : \"\";\n  const mergedNotes = mergeReleaseNotesWithSummary(existingNotes, summaryMarkdown);\n  await writeFile(summaryPath, summaryMarkdown);\n  await writeFile(mergedNotesPath, mergedNotes);\n  await writeFile(markdownPath, renderVersionComparisonMarkdown(report));\n  await writeFile(jsonPath, `${JSON.stringify(report, null, 2)}\\n`);\n  return {\n    summaryPath,\n    mergedNotesPath,\n    markdownPath,\n    jsonPath,\n  };\n}\n\nfunction parseCliArgs(argv) {\n  let format = \"markdown\";\n  let output = null;\n  let releaseDir = null;\n  let mergeNotesPath = null;\n  for (let i = 0; i < argv.length; i += 1) {\n    const arg = argv[i];\n    if (arg === \"--format\") {\n      format = argv[++i] ?? \"markdown\";\n    } else if (arg === \"--json\") {\n      format = \"json\";\n    } else if (arg === \"--markdown\") {\n      format = \"markdown\";\n    } else if (arg === \"--release-summary\") {\n      format = \"release-summary\";\n    } else if (arg === \"--output\") {\n      output = argv[++i];\n      if (!output) throw new TypeError(\"--output requires a file path\");\n    } else if (arg === \"--release-dir\") {\n      releaseDir = argv[++i];\n      if (!releaseDir) throw new TypeError(\"--release-dir requires a directory path\");\n    } else if (arg === \"--merge-notes\") {\n      mergeNotesPath = argv[++i];\n      if (!mergeNotesPath) throw new TypeError(\"--merge-notes requires a file path\");\n    } else {\n      throw new TypeError(`unknown argument: ${arg}`);\n    }\n  }\n  return { format, output, releaseDir, mergeNotesPath };\n}\n\nif (import.meta.main) {\n  const { format, output, releaseDir, mergeNotesPath } = parseCliArgs(process.argv.slice(2));\n  const report = await runVersionComparisonBenchmark();\n  if (releaseDir) {\n    await writeReleaseComparisonBundle(report, releaseDir, { mergeNotesPath });\n  }\n  const rendered =\n    format === \"json\"\n      ? `${JSON.stringify(report, null, 2)}\\n`\n      : format === \"release-summary\"\n        ? renderReleaseNotesSummary(report)\n        : renderVersionComparisonMarkdown(report);\n  if (output) {\n    await writeFile(path.resolve(output), rendered);\n  } else {\n    process.stdout.write(rendered);\n  }\n}\n"))
+(module tools.performance.version-comparison
+  (import "node:fs/promises" mkdir mkdtemp readFile rm stat symlink writeFile)
+  (import "node:module" createRequire)
+  (import "node:os" :default os)
+  (import "node:path" :default path)
+  (import "node:process" :default process)
+  (import "../backends/build.mjs" root)
+
+  (defconst projectDirectory root)
+  (defconst VERSION_COMPARISON_FORMAT "eliscript-version-comparison-benchmark")
+  (defconst VERSION_COMPARISON_VERSION 1)
+
+  (defconst VERSION_COMPARISON_DIMENSIONS
+    (Object/freeze (js-array "emacsLisp" "previousMajor" "previousMinor" "latest")))
+
+  (defconst VERSION_COMPARISON_WORKLOADS
+    (Object/freeze
+      (js-array
+        (Object/freeze (js-object :id "sequence.first10k" :label "first(Vector, N=10,000)" :category "sequence" :unit "ms"))
+        (Object/freeze (js-object :id "sequence.last10k" :label "last(Vector, N=10,000)" :category "sequence" :unit "ms"))
+        (Object/freeze (js-object :id "sequence.takeLast10k" :label "take-last(64, N=10,000)" :category "sequence" :unit "ms"))
+        (Object/freeze (js-object :id "value.equalSameRef10k" :label "[VALUE_EQUAL] / compare(sameVec, N=10,000)" :category "equality" :unit "ms"))
+        (Object/freeze (js-object :id "order.sort10k" :label "sort(Vector, N=10,000)" :category "ordering" :unit "ms"))
+        (Object/freeze (js-object :id "data.groupBy10k" :label "group-by(x % 100, N=10,000)" :category "aggregation" :unit "ms"))
+        (Object/freeze (js-object :id "data.frequencies100k" :label "frequencies(1,000 keys, N=100,000)" :category "aggregation" :unit "ms"))
+        (Object/freeze (js-object :id "tree.zipper12k" :label "12,000-depth Zipper (down*12k + path + replace + root)" :category "tree" :unit "ms"))
+        (Object/freeze (js-object :id "worker.scoreValues" :label "score-values(N=10,000 x 10 rounds)" :category "numeric" :unit "ms")))))
+
+  (defun nullish (value fallback)
+    (if (or (eq value undefined) (eq value nil)) fallback value))
+
+  (defun parseSemver (input)
+    (if (/= (value-type input) "string")
+      nil
+      (let* ((trimmed (js-call input :trim))
+             (re (new globalThis.RegExp "^v?(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$" "u"))
+             (match (js-call re :exec trimmed)))
+        (if (not match)
+          nil
+          (let* ((major (globalThis.Number (aref match 1)))
+                 (minor (globalThis.Number (aref match 2)))
+                 (patch (globalThis.Number (aref match 3)))
+                 (version (str major "." minor "." patch)))
+            (js-object
+              :major major
+              :minor minor
+              :patch patch
+              :version version
+              :tag (str "v" version)))))))
+
+  (defun compareSemver (left right)
+    (if (/= (get left :major) (get right :major))
+      (- (get left :major) (get right :major))
+      (if (/= (get left :minor) (get right :minor))
+        (- (get left :minor) (get right :minor))
+        (- (get left :patch) (get right :patch)))))
+
+  (defun resolveVersionComparisonMatrix (&optional rawOptions)
+    (let* ((options (nullish rawOptions (js-object)))
+           (currentVersion (get options :currentVersion))
+           (releasedTags (nullish (get options :releasedTags) (js-array)))
+           (emacsVersion (nullish (get options :emacsVersion) "unknown"))
+           (current (parseSemver currentVersion)))
+      (unless current
+        (throw (new globalThis.TypeError (str "invalid current semantic version: " (globalThis.String currentVersion)))))
+      (let ((parsedReleases (js-array))
+            (seenVersions (new globalThis.Set))
+            (idx 0))
+        (while (< idx (js-length releasedTags))
+          (let* ((rawTag (aref releasedTags idx))
+                 (parsed (parseSemver rawTag)))
+            (when (and parsed (not (js-call seenVersions :has (get parsed :version))))
+              (js-call seenVersions :add (get parsed :version))
+              (js-call parsedReleases :push
+                (Object/assign (js-object) parsed
+                  (js-object :tag (if (and (= (value-type rawTag) "string")
+                                           (js-call rawTag :startsWith "v"))
+                                    rawTag
+                                    (get parsed :tag)))))))
+          (setq idx (1+ idx)))
+        (js-call parsedReleases :sort compareSemver)
+        (let* ((priorReleases (js-call parsedReleases :filter (lambda (entry) (< (compareSemver entry current) 0))))
+               (priorMajorReleases (js-call priorReleases :filter (lambda (entry) (< (get entry :major) (get current :major)))))
+               (bestMinor (nullish (js-call priorReleases :at -1) nil))
+               (bestMajor (nullish (js-call priorMajorReleases :at -1) nil))
+               (sameMajorAndMinor (globalThis.Boolean (and bestMajor bestMinor (= (get bestMajor :version) (get bestMinor :version)))))
+               (emacsDimension
+                 (Object/freeze
+                   (js-object
+                     :id "emacsLisp"
+                     :label "Emacs Lisp"
+                     :status "active"
+                     :version (globalThis.String emacsVersion)
+                     :tag nil
+                     :mode "current-latest-only"
+                     :reason "current-host-emacs")))
+               (previousMajorDimension
+                 (if bestMajor
+                   (Object/freeze
+                     (js-object
+                       :id "previousMajor"
+                       :label "上一个大版本"
+                       :status "active"
+                       :version (get bestMajor :version)
+                       :tag (get bestMajor :tag)
+                       :reason (if sameMajorAndMinor "same-as-previous-minor" "resolved")
+                       :sameAsPreviousMinor sameMajorAndMinor))
+                   (Object/freeze
+                     (js-object
+                       :id "previousMajor"
+                       :label "上一个大版本"
+                       :status "absent"
+                       :version nil
+                       :tag nil
+                       :reason "no-prior-major-release"
+                       :sameAsPreviousMinor false))))
+               (previousMinorDimension
+                 (if bestMinor
+                   (Object/freeze
+                     (js-object
+                       :id "previousMinor"
+                       :label "上一个最近的小版本"
+                       :status "active"
+                       :version (get bestMinor :version)
+                       :tag (get bestMinor :tag)
+                       :reason "resolved"
+                       :sameAsPreviousMajor sameMajorAndMinor))
+                   (Object/freeze
+                     (js-object
+                       :id "previousMinor"
+                       :label "上一个最近的小版本"
+                       :status "absent"
+                       :version nil
+                       :tag nil
+                       :reason "initial-release"
+                       :sameAsPreviousMajor false))))
+               (latestDimension
+                 (Object/freeze
+                   (js-object
+                     :id "latest"
+                     :label "最新版"
+                     :status "active"
+                     :version (get current :version)
+                     :tag (get current :tag)
+                     :reason "current-workspace"))))
+          (Object/freeze
+            (js-object
+              :emacsLisp emacsDimension
+              :previousMajor previousMajorDimension
+              :previousMinor previousMinorDimension
+              :latest latestDimension))))))
+
+  (defasync capture (command &optional rawOptions)
+    (let* ((options (nullish rawOptions (js-object)))
+           (spawnOpts (Object/assign (js-object :cwd projectDirectory :stdout "pipe" :stderr "pipe") options))
+           (child (Bun/spawn command spawnOpts))
+           (results (await (Promise/all
+                             (js-array
+                               (get child :exited)
+                               (js-call (new globalThis.Response (get child :stdout)) :text)
+                               (js-call (new globalThis.Response (get child :stderr)) :text)))))
+           (exitCode (aref results 0))
+           (stdout (aref results 1))
+           (stderr (aref results 2)))
+      (when (/= exitCode 0)
+        (let ((trimmedErr (js-call stderr :trim))
+              (trimmedOut (js-call stdout :trim)))
+          (throw (new globalThis.Error
+                   (if (> (js-length trimmedErr) 0)
+                     trimmedErr
+                     (if (> (js-length trimmedOut) 0)
+                       trimmedOut
+                       (str (aref command 0) " exited with " exitCode)))))))
+      (js-object :stdout stdout :stderr stderr)))
+
+  (defasync discoverReleasedTags (&optional rawRoot)
+    (let* ((targetRoot (nullish rawRoot projectDirectory))
+           (result (await (capture (js-array "git" "tag" "--list" "v*") (js-object :cwd targetRoot))))
+           (lines (js-call (get result :stdout) :split (new globalThis.RegExp "\\r?\\n" "u"))))
+      (js-call
+        (js-call lines :map (lambda (line) (js-call line :trim)))
+        :filter (lambda (line) (not (eq (parseSemver line) nil))))))
+
+  (defasync detectEmacsVersion ()
+    (let* ((emacsBin (nullish (get (get process :env) :EMACS) "emacs"))
+           (result (await (capture (js-array emacsBin "--batch" "-Q" "--eval" "(princ emacs-version)")))))
+      (js-call (get result :stdout) :trim)))
+
+  (defasync defaultMeasureEmacsLisp ()
+    (let* ((elispScript
+             (js-call
+               (js-array
+                 "(progn"
+                 "  (require (quote json))"
+                 "  (require (quote cl-lib))"
+                 "  (defun ms-since (t0) (* 1000.0 (- (float-time) t0)))"
+                 "  (defun bench-el (iters fn)"
+                 "    (funcall fn)"
+                 "    (garbage-collect)"
+                 "    (let ((t0 (float-time)))"
+                 "      (dotimes (_ iters) (funcall fn))"
+                 "      (/ (ms-since t0) (float iters))))"
+                 "  (let* ((n 10000)"
+                 "         (lst (number-sequence 0 (1- n)))"
+                 "         (vec (vconcat lst))"
+                 "         (shuffled-lst (mapcar (lambda (i) (% (* i 7919) n)) lst))"
+                 "         (mod-100k (let (r) (dotimes (i 100000) (push (% i 1000) r)) (nreverse r)))"
+                 "         (t-first (bench-el 20000 (lambda () (aref vec 0))))"
+                 "         (t-last (bench-el 200 (lambda () (car (last lst)))))"
+                 "         (t-take-last (bench-el 200 (lambda () (last lst 64))))"
+                 "         (vec-copy (copy-sequence vec))"
+                 "         (t-equal (bench-el 1000 (lambda () (equal vec vec-copy))))"
+                 "         (t-sort (bench-el 30 (lambda () (vconcat (sort (copy-sequence shuffled-lst) (function <))))))"
+                 "         (t-group-by (bench-el 30 (lambda ()"
+                 "                                    (let ((ht (make-hash-table :test (quote eql))))"
+                 "                                      (dolist (x lst)"
+                 "                                        (let ((k (% x 100)))"
+                 "                                          (puthash k (cons x (gethash k ht)) ht)))"
+                 "                                      ht))))"
+                 "         (t-freq-100k (bench-el 7 (lambda ()"
+                 "                                    (let ((ht (make-hash-table :test (quote eql))))"
+                 "                                      (dolist (x mod-100k)"
+                 "                                        (puthash x (1+ (gethash x ht 0)) ht))"
+                 "                                      ht))))"
+                 "         (score-vec (let ((v (make-vector 10000 0))) (dotimes (i 10000) (aset v i (% i 997))) v))"
+                 "         (t-score (bench-el 7 (lambda ()"
+                 "                                (let ((total 0))"
+                 "                                  (dotimes (round 10)"
+                 "                                    (dotimes (idx 10000)"
+                 "                                      (setq total (% (+ (* total 33) (aref score-vec idx) round) 1000000007))))"
+                 "                                  total))))"
+                 "         (t-zipper (let ((nested (vector 0)))"
+                 "                     (dotimes (_ 12000) (setq nested (vector nested)))"
+                 "                     (bench-el 3 (lambda ()"
+                 "                                   (let ((cur nested)"
+                 "                                         (p nil))"
+                 "                                     (dotimes (_ 12000)"
+                 "                                       (push cur p)"
+                 "                                       (setq cur (aref cur 0)))"
+                 "                                     (let ((rebuilt 42))"
+                 "                                       (dolist (parent p)"
+                 "                                         (let ((cp (copy-sequence parent)))"
+                 "                                           (aset cp 0 rebuilt)"
+                 "                                           (setq rebuilt cp)))"
+                 "                                       rebuilt)))))))"
+                 "    (princ (json-encode"
+                 "            (list (cons (quote sequence.first10k) t-first)"
+                 "                  (cons (quote sequence.last10k) t-last)"
+                 "                  (cons (quote sequence.takeLast10k) t-take-last)"
+                 "                  (cons (quote value.equalSameRef10k) t-equal)"
+                 "                  (cons (quote order.sort10k) t-sort)"
+                 "                  (cons (quote data.groupBy10k) t-group-by)"
+                 "                  (cons (quote data.frequencies100k) t-freq-100k)"
+                 "                  (cons (quote tree.zipper12k) t-zipper)"
+                 "                  (cons (quote worker.scoreValues) t-score))))))")
+               :join "\n"))
+           (emacsBin (nullish (get (get process :env) :EMACS) "emacs"))
+           (result (await (capture (js-array emacsBin "--batch" "-Q" "--eval" elispScript)))))
+      (JSON/parse (js-call (get result :stdout) :trim))))
+
+  (defasync pathExists (targetPath)
+    (try
+      (progn (await (stat targetPath)) t)
+      (catch error false)))
+
+  (defasync measureEliscriptDirectory (targetRoot &optional rawCompilerRoot)
+    (let* ((compilerRoot (nullish rawCompilerRoot projectDirectory))
+           (literalsMjs (js-call path :join targetRoot "runtime/literals.mjs")))
+      (unless (await (pathExists literalsMjs))
+        (await (capture (js-array "make" "bootstrap-backends") (js-object :cwd targetRoot))))
+      (let* ((targetCompilerPath (js-call path :join targetRoot "dist/bootstrap/compiler.mjs"))
+             (fallbackCompilerPath (js-call path :join compilerRoot "dist/bootstrap/compiler.mjs"))
+             (activeCompilerPath
+               (if (await (pathExists targetCompilerPath))
+                 targetCompilerPath
+                 (progn
+                   (unless (await (pathExists fallbackCompilerPath))
+                     (await (capture (js-array "make" "bootstrap-backends") (js-object :cwd compilerRoot))))
+                   fallbackCompilerPath)))
+             (compiler (funcall (createRequire activeCompilerPath) activeCompilerPath))
+             (generatedPairs
+               (js-array
+                 (js-array "runtime/prelude.eli" "runtime/prelude.mjs")
+                 (js-array "stdlib/core/protocol.eli" "runtime/core/protocol-impl.mjs")
+                 (js-array "stdlib/core/text.eli" "runtime/core/text-impl.mjs")
+                 (js-array "stdlib/core/object.eli" "runtime/core/object-impl.mjs")
+                 (js-array "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs")
+                 (js-array "runtime/unicode-case.eli" "runtime/unicode-case.mjs")
+                 (js-array "runtime/math.eli" "runtime/math.mjs")))
+             (pairIdx 0))
+        (while (< pairIdx (js-length generatedPairs))
+          (let* ((pair (aref generatedPairs pairIdx))
+                 (srcRel (aref pair 0))
+                 (outRel (aref pair 1))
+                 (outPath (js-call path :join targetRoot outRel)))
+            (unless (await (pathExists outPath))
+              (let ((srcPath (js-call path :join targetRoot srcRel)))
+                (if (await (pathExists srcPath))
+                  (let ((srcText (await (readFile srcPath "utf8"))))
+                    (await (writeFile outPath (js-call compiler :compile_string srcText srcRel))))
+                  (let ((fallbackOutPath (js-call path :join compilerRoot outRel)))
+                    (when (await (pathExists fallbackOutPath))
+                      (await (writeFile outPath (await (readFile fallbackOutPath))))))))))
+          (setq pairIdx (1+ pairIdx)))
+        (let* ((zipperSource (await (readFile (js-call path :join targetRoot "stdlib/core/zipper.eli") "utf8")))
+               (compiledZipper
+                 (js-call
+                   (js-call (js-call compiler :compile_string zipperSource "stdlib/core/zipper.eli")
+                     :split "\"eliscript/runtime/prelude.mjs\"")
+                   :join "\"../../runtime/prelude.mjs\""))
+               (seqSource (await (readFile (js-call path :join targetRoot "stdlib/core/seq.eli") "utf8")))
+               (compiledSeq
+                 (js-call
+                   (js-call (js-call compiler :compile_string seqSource "stdlib/core/seq.eli")
+                     :split "\"eliscript/runtime/prelude.mjs\"")
+                   :join "\"../../runtime/prelude.mjs\""))
+               (tempDir (await (mkdtemp (js-call path :join (js-call os :tmpdir) "eliscript-version-bench-")))))
+          (try
+            (let* ((stdlibCoreDir (js-call path :join tempDir "stdlib/core"))
+                   (nodeModulesEliscript (js-call path :join tempDir "node_modules/eliscript"))
+                   (zipperMjsPath (js-call path :join stdlibCoreDir "zipper.mjs"))
+                   (seqMjsPath (js-call path :join stdlibCoreDir "seq.mjs"))
+                   (runnerPath (js-call path :join tempDir "run-bench.mjs"))
+                   (runnerScript
+                     (js-call
+                       (js-array
+                         "import { performance } from \"node:perf_hooks\";"
+                         "import { vector } from \"./runtime/literals.mjs\";"
+                         "import { first, last } from \"./runtime/core/sequence.mjs\";"
+                         "import { count } from \"./runtime/core/collection.mjs\";"
+                         "import { sort, compareValues } from \"./runtime/core/order.mjs\";"
+                         "import { groupBy, frequencies } from \"./runtime/core/data.mjs\";"
+                         "import { equalValues } from \"./runtime/core/value.mjs\";"
+                         "import { VALUE_EQUAL } from \"./runtime/core/value-internals.mjs\";"
+                         "import { take_last } from \"./stdlib/core/seq.mjs\";"
+                         "import { vector_zipper, down, path as zipPath, replace as zipReplace, root as zipRoot } from \"./stdlib/core/zipper.mjs\";"
+                         "function bench(iters, fn) {"
+                         "  for (let i = 0; i < Math.min(5, iters); i += 1) fn();"
+                         "  const t0 = performance.now();"
+                         "  for (let i = 0; i < iters; i += 1) fn();"
+                         "  return (performance.now() - t0) / iters;"
+                         "}"
+                         "const N = 10000;"
+                         "const arr = Array.from({ length: N }, (_, i) => i);"
+                         "const vec = vector(...arr);"
+                         "const shuffledVec = vector(...Array.from({ length: N }, (_, i) => (i * 7919) % N));"
+                         "const modVec100k = vector(...Array.from({ length: 100000 }, (_, i) => i % 1000));"
+                         "const scoreArr = Int32Array.from({ length: 10000 }, (_, i) => i % 997);"
+                         "const takeLastFn = (n, col) => count(take_last(n, col));"
+                         "let nested = vector(0);"
+                         "for (let i = 0; i < 12000; i += 1) nested = vector(nested);"
+                         "const metrics = {"
+                         "  \"sequence.first10k\": bench(20000, () => first(vec)),"
+                         "  \"sequence.last10k\": bench(200, () => last(vec)),"
+                         "  \"sequence.takeLast10k\": bench(200, () => takeLastFn(64, vec)),"
+                         "  \"value.equalSameRef10k\": bench(1000, () => vec[VALUE_EQUAL](vec, equalValues) && compareValues(vec, vec) === 0),"
+                         "  \"order.sort10k\": bench(30, () => sort(shuffledVec)),"
+                         "  \"data.groupBy10k\": bench(30, () => groupBy((x) => x % 100, vec)),"
+                         "  \"data.frequencies100k\": bench(7, () => frequencies(modVec100k)),"
+                         "  \"tree.zipper12k\": bench(3, () => {"
+                         "    let loc = vector_zipper(nested);"
+                         "    for (let i = 0; i < 12000; i += 1) loc = down(loc);"
+                         "    zipPath(loc);"
+                         "    return zipRoot(zipReplace(loc, 42));"
+                         "  }),"
+                         "  \"worker.scoreValues\": bench(7, () => {"
+                         "    let total = 0;"
+                         "    for (let round = 0; round < 10; round += 1) {"
+                         "      for (let idx = 0; idx < 10000; idx += 1) {"
+                         "        total = (total * 33 + scoreArr[idx] + round) % 1000000007;"
+                         "      }"
+                         "    }"
+                         "    return total;"
+                         "  }),"
+                         "};"
+                         "process.stdout.write(JSON.stringify(metrics) + \"\\n\");")
+                       :join "\n")))
+              (await (mkdir stdlibCoreDir (js-object :recursive t)))
+              (await (symlink (js-call path :join targetRoot "runtime") (js-call path :join tempDir "runtime") "dir"))
+              (await (mkdir (js-call path :dirname nodeModulesEliscript) (js-object :recursive t)))
+              (await (symlink targetRoot nodeModulesEliscript "dir"))
+              (await (writeFile zipperMjsPath compiledZipper))
+              (await (writeFile seqMjsPath compiledSeq))
+              (await (writeFile runnerPath runnerScript))
+              (let ((result (await (capture (js-array (get process :execPath) runnerPath) (js-object :cwd tempDir)))))
+                (JSON/parse (js-call (get result :stdout) :trim))))
+            (finally
+              (await (rm tempDir (js-object :recursive t :force t)))))))))
+
+  (defasync defaultMeasureEliscriptTarget (target &optional rawRoot)
+    (let ((targetRoot (nullish rawRoot projectDirectory)))
+      (if (or (= (get target :id) "latest") (not (get target :tag)))
+        (await (measureEliscriptDirectory targetRoot targetRoot))
+        (let ((worktreeDir (await (mkdtemp (js-call path :join (js-call os :tmpdir) (str "eliscript-wt-" (get target :version) "-"))))))
+          (try
+            (progn
+              (await (rm worktreeDir (js-object :recursive t :force t)))
+              (await (capture (js-array "git" "worktree" "add" "--detach" worktreeDir (get target :tag))
+                       (js-object :cwd targetRoot)))
+              (await (measureEliscriptDirectory worktreeDir targetRoot)))
+            (finally
+              (try
+                (await (capture (js-array "git" "worktree" "remove" "--force" worktreeDir)
+                         (js-object :cwd targetRoot)))
+                (catch error
+                  (await (rm worktreeDir (js-object :recursive t :force t)))))))))))
+
+  (defun roundRatio (numerator denominator)
+    (if (and (not (eq numerator nil)) (not (eq numerator undefined)) (> denominator 0))
+      (globalThis.Number (js-call (/ numerator denominator) :toFixed 2))
+      nil))
+
+  (defun buildSpeedupComparisons (results)
+    (let* ((comparisons (js-object))
+           (latestRes (get results :latest))
+           (latestMetrics (if latestRes (get latestRes :metricsMs) nil)))
+      (if (not latestMetrics)
+        comparisons
+        (let ((idx 0))
+          (while (< idx (js-length VERSION_COMPARISON_WORKLOADS))
+            (let* ((workload (aref VERSION_COMPARISON_WORKLOADS idx))
+                   (id (get workload :id))
+                   (latestMs (get latestMetrics id))
+                   (emacsRes (get results :emacsLisp))
+                   (emacsMetrics (if emacsRes (get emacsRes :metricsMs) nil))
+                   (emacsMs (if emacsMetrics (nullish (get emacsMetrics id) nil) nil))
+                   (majorRes (get results :previousMajor))
+                   (majorMetrics (if majorRes (get majorRes :metricsMs) nil))
+                   (majorMs (if majorMetrics (nullish (get majorMetrics id) nil) nil))
+                   (minorRes (get results :previousMinor))
+                   (minorMetrics (if minorRes (get minorRes :metricsMs) nil))
+                   (minorMs (if minorMetrics (nullish (get minorMetrics id) nil) nil)))
+              (put comparisons id
+                (js-object
+                  :latestVsEmacsLisp (roundRatio emacsMs latestMs)
+                  :latestVsPreviousMajor (roundRatio majorMs latestMs)
+                  :latestVsPreviousMinor (roundRatio minorMs latestMs))))
+            (setq idx (1+ idx)))
+          comparisons))))
+
+  (defun validateVersionComparisonReport (report)
+    (when (or (not report)
+              (/= (get report :format) VERSION_COMPARISON_FORMAT)
+              (/= (get report :version) VERSION_COMPARISON_VERSION))
+      (throw (new globalThis.TypeError "invalid version comparison benchmark report identity")))
+    (let ((dimIdx 0))
+      (while (< dimIdx (js-length VERSION_COMPARISON_DIMENSIONS))
+        (let* ((dimensionId (aref VERSION_COMPARISON_DIMENSIONS dimIdx))
+               (matrixObj (get report :matrix))
+               (resultsObj (get report :results))
+               (dim (if matrixObj (get matrixObj dimensionId) nil))
+               (res (if resultsObj (get resultsObj dimensionId) nil)))
+          (when (or (not dim) (not res) (/= (get dim :id) dimensionId))
+            (throw (new globalThis.TypeError (str "missing dimension " dimensionId " in version comparison report"))))
+          (let ((status (get dim :status)))
+            (cond
+              ((= status "active")
+               (let ((wIdx 0))
+                 (while (< wIdx (js-length VERSION_COMPARISON_WORKLOADS))
+                   (let* ((workload (aref VERSION_COMPARISON_WORKLOADS wIdx))
+                          (wId (get workload :id))
+                          (metrics (get res :metricsMs))
+                          (val (if metrics (get metrics wId) undefined)))
+                     (when (or (/= (value-type val) "number")
+                               (not (Number/isFinite val))
+                               (<= val 0))
+                       (throw (new globalThis.TypeError
+                                (str "invalid metric " wId " for active dimension " dimensionId)))))
+                   (setq wIdx (1+ wIdx)))))
+              ((= status "absent")
+               (when (not (eq (get res :metricsMs) nil))
+                 (throw (new globalThis.TypeError (str "absent dimension " dimensionId " must have null metricsMs")))))
+              (t
+               (throw (new globalThis.TypeError (str "unsupported dimension status " (globalThis.String status))))))))
+        (setq dimIdx (1+ dimIdx))))
+    report)
+
+  (defasync runVersionComparisonBenchmark (&optional rawOptions)
+    (let* ((options (nullish rawOptions (js-object)))
+           (targetRoot (js-call path :resolve (nullish (get options :root) projectDirectory)))
+           (pkg (JSON/parse (await (readFile (js-call path :join targetRoot "package.json") "utf8"))))
+           (currentVersion (nullish (get options :currentVersion) (get pkg :version)))
+           (releasedTags
+             (if (not (eq (get options :releasedTags) undefined))
+               (get options :releasedTags)
+               (await (discoverReleasedTags targetRoot))))
+           (emacsVersion
+             (if (not (eq (get options :emacsVersion) undefined))
+               (get options :emacsVersion)
+               (await (detectEmacsVersion))))
+           (matrix (resolveVersionComparisonMatrix
+                     (js-object
+                       :currentVersion currentVersion
+                       :releasedTags releasedTags
+                       :emacsVersion emacsVersion)))
+           (measureEmacs (nullish (get options :measureEmacsLisp) defaultMeasureEmacsLisp))
+           (measureTarget
+             (nullish (get options :measureEliscriptTarget)
+               (lambda (target) (defaultMeasureEliscriptTarget target targetRoot))))
+           (results (js-object)))
+      (put results :emacsLisp
+        (Object/assign (js-object) (get matrix :emacsLisp)
+          (js-object :deduplicatedFrom nil :metricsMs (await (funcall measureEmacs (get matrix :emacsLisp))))))
+      (if (= (get (get matrix :previousMinor) :status) "active")
+        (put results :previousMinor
+          (Object/assign (js-object) (get matrix :previousMinor)
+            (js-object :deduplicatedFrom nil :metricsMs (await (funcall measureTarget (get matrix :previousMinor))))))
+        (put results :previousMinor
+          (Object/assign (js-object) (get matrix :previousMinor)
+            (js-object :deduplicatedFrom nil :metricsMs nil))))
+      (if (= (get (get matrix :previousMajor) :status) "active")
+        (if (and (get (get matrix :previousMajor) :sameAsPreviousMinor)
+                 (get (get results :previousMinor) :metricsMs))
+          (put results :previousMajor
+            (Object/assign (js-object) (get matrix :previousMajor)
+              (js-object
+                :deduplicatedFrom "previousMinor"
+                :metricsMs (Object/assign (js-object) (get (get results :previousMinor) :metricsMs)))))
+          (put results :previousMajor
+            (Object/assign (js-object) (get matrix :previousMajor)
+              (js-object :deduplicatedFrom nil :metricsMs (await (funcall measureTarget (get matrix :previousMajor)))))))
+        (put results :previousMajor
+          (Object/assign (js-object) (get matrix :previousMajor)
+            (js-object :deduplicatedFrom nil :metricsMs nil))))
+      (put results :latest
+        (Object/assign (js-object) (get matrix :latest)
+          (js-object :deduplicatedFrom nil :metricsMs (await (funcall measureTarget (get matrix :latest))))))
+      (let ((report
+              (js-object
+                :format VERSION_COMPARISON_FORMAT
+                :version VERSION_COMPARISON_VERSION
+                :generatedAt (js-call (new globalThis.Date) :toISOString)
+                :host (js-object
+                        :platform (get process :platform)
+                        :architecture (get process :arch)
+                        :operatingSystem (str (js-call os :type) " " (js-call os :release))
+                        :bunVersion (get globalThis.Bun :version)
+                        :emacsVersion emacsVersion)
+                :matrix matrix
+                :workloads VERSION_COMPARISON_WORKLOADS
+                :results results
+                :comparisons (buildSpeedupComparisons results))))
+        (validateVersionComparisonReport report))))
+
+  (defun formatMs (value)
+    (if (or (eq value nil) (eq value undefined))
+      "N/A"
+      (if (< value 0.01)
+        (str (js-call (* value 1000) :toFixed 2) " µs (" (js-call value :toFixed 5) " ms)")
+        (str (js-call value :toFixed 3) " ms"))))
+
+  (defun formatRatio (ratio)
+    (if (or (eq ratio nil) (eq ratio undefined))
+      "N/A"
+      (str (js-call ratio :toFixed 2) "x")))
+
+  (defun dimensionHeader (dim)
+    (let ((id (get dim :id))
+          (status (get dim :status))
+          (tag (get dim :tag)))
+      (cond
+        ((= id "emacsLisp")
+         (str "1. Emacs Lisp (" (get dim :version) ", 当前最新版)"))
+        ((= id "previousMajor")
+         (if (= status "absent")
+           "2. 上一个大版本 (不存在 / N/A)"
+           (if (get dim :sameAsPreviousMinor)
+             (str "2. 上一个大版本 (" tag ", 同上一小版本)")
+             (str "2. 上一个大版本 (" tag ")"))))
+        ((= id "previousMinor")
+         (if (= status "absent")
+           "3. 上一个最近的小版本 (首个版本 / N/A)"
+           (str "3. 上一个最近的小版本 (" tag ")")))
+        (t
+         (str "4. 最新版 (" tag ")")))))
+
+  (defun renderVersionComparisonMarkdown (report)
+    (validateVersionComparisonReport report)
+    (let* ((matrix (get report :matrix))
+           (results (get report :results))
+           (comparisons (get report :comparisons))
+           (host (get report :host))
+           (emacsDim (get matrix :emacsLisp))
+           (majorDim (get matrix :previousMajor))
+           (minorDim (get matrix :previousMinor))
+           (latestDim (get matrix :latest))
+           (majorReasonText
+             (if (= (get majorDim :status) "absent")
+               "当前尚无上一大版本 (`no-prior-major-release`)"
+               (if (get majorDim :sameAsPreviousMinor)
+                 "与上一个最近的小版本相同，复用采样结果 (`same-as-previous-minor`)"
+                 "已解析上一大版本最新标签")))
+           (minorReasonText
+             (if (= (get minorDim :status) "absent")
+               "当前为首个版本，无上一小版本 (`initial-release`)"
+               "已解析最近上一发布版本"))
+           (lines
+             (js-array
+               "# Eliscript 四维版本与原生 Emacs Lisp 性能对比报告"
+               ""
+               (str "- **生成时间**: `" (get report :generatedAt) "`")
+               (str "- **运行环境**: `" (get host :operatingSystem) " (" (get host :platform) "/" (get host :architecture) ")`, Bun `" (get host :bunVersion) "`, Emacs `" (get host :emacsVersion) "`")
+               ""
+               "## 对比维度状态"
+               ""
+               "| 维度 | 状态 | 版本 / 标签 | 边界说明 |"
+               "| --- | --- | --- | --- |"
+               (str "| **1. Emacs Lisp** | `" (get emacsDim :status) "` | `Emacs " (get emacsDim :version) "` | 仅考虑当前宿主最新版 Emacs Lisp (`" (get emacsDim :mode) "`) |")
+               (str "| **2. 上一个大版本** | `" (get majorDim :status) "` | `" (nullish (get majorDim :tag) "N/A") "` | " majorReasonText " |")
+               (str "| **3. 上一个最近的小版本** | `" (get minorDim :status) "` | `" (nullish (get minorDim :tag) "N/A") "` | " minorReasonText " |")
+               (str "| **4. 最新版** | `" (get latestDim :status) "` | `" (get latestDim :tag) "` | 当前工作区最新版本 |")
+               ""
+               "## 基准工作负载四维耗时与加速比"
+               ""
+               (str "| 工作负载 | " (dimensionHeader emacsDim) " | " (dimensionHeader majorDim) " | " (dimensionHeader minorDim) " | " (dimensionHeader latestDim) " | 最新版 vs Emacs Lisp | 最新版 vs 上一大版本 | 最新版 vs 上一小版本 |")
+               "| --- | --- | --- | --- | --- | --- | --- | --- |"))
+           (wIdx 0))
+      (while (< wIdx (js-length VERSION_COMPARISON_WORKLOADS))
+        (let* ((workload (aref VERSION_COMPARISON_WORKLOADS wIdx))
+               (id (get workload :id))
+               (elMetrics (get (get results :emacsLisp) :metricsMs))
+               (majMetrics (get (get results :previousMajor) :metricsMs))
+               (minMetrics (get (get results :previousMinor) :metricsMs))
+               (latMetrics (get (get results :latest) :metricsMs))
+               (elMs (if elMetrics (nullish (get elMetrics id) nil) nil))
+               (majMs (if majMetrics (nullish (get majMetrics id) nil) nil))
+               (minMs (if minMetrics (nullish (get minMetrics id) nil) nil))
+               (latMs (if latMetrics (nullish (get latMetrics id) nil) nil))
+               (cmp (nullish (get comparisons id) (js-object))))
+          (js-call lines :push
+            (str "| **" (get workload :label) "** | "
+                 (formatMs elMs) " | "
+                 (formatMs majMs) " | "
+                 (formatMs minMs) " | **"
+                 (formatMs latMs) "** | **"
+                 (formatRatio (get cmp :latestVsEmacsLisp)) "** | "
+                 (formatRatio (get cmp :latestVsPreviousMajor)) " | **"
+                 (formatRatio (get cmp :latestVsPreviousMinor)) "** |")))
+        (setq wIdx (1+ wIdx)))
+      (js-call lines :push "")
+      (js-call lines :join "\n")))
+
+  (defun renderReleaseNotesSummary (report)
+    (validateVersionComparisonReport report)
+    (let* ((matrix (get report :matrix))
+           (results (get report :results))
+           (comparisons (get report :comparisons))
+           (version (get (get matrix :latest) :version))
+           (mdFile (str "eliscript-" version "-benchmark-report.md"))
+           (jsonFile (str "eliscript-" version "-benchmark-report.json"))
+           (lines
+             (js-array
+               "## 测试与四维性能基准摘要"
+               ""
+               (str "- **对比维度**: `Emacs " (get (get matrix :emacsLisp) :version) "` (当前最新版) | 上一个大版本: `" (nullish (get (get matrix :previousMajor) :tag) "N/A (尚无上一大版本)") "` | 上一个最近的小版本: `" (nullish (get (get matrix :previousMinor) :tag) "N/A (首个版本)") "` | 最新版: `" (get (get matrix :latest) :tag) "`")
+               (str "- **完整测试与基准报告附件**: 详见 Release 附件 `" mdFile "` 与 `" jsonFile "`")
+               ""
+               "| 基准工作负载 | 最新版耗时 | vs Emacs Lisp | vs 上一大版本 | vs 上一小版本 |"
+               "| --- | --- | --- | --- | --- |"))
+           (wIdx 0))
+      (while (< wIdx (js-length VERSION_COMPARISON_WORKLOADS))
+        (let* ((workload (aref VERSION_COMPARISON_WORKLOADS wIdx))
+               (id (get workload :id))
+               (latMetrics (get (get results :latest) :metricsMs))
+               (latMs (if latMetrics (nullish (get latMetrics id) nil) nil))
+               (cmp (nullish (get comparisons id) (js-object))))
+          (js-call lines :push
+            (str "| **" (get workload :label) "** | **"
+                 (formatMs latMs) "** | **"
+                 (formatRatio (get cmp :latestVsEmacsLisp)) "** | "
+                 (formatRatio (get cmp :latestVsPreviousMajor)) " | **"
+                 (formatRatio (get cmp :latestVsPreviousMinor)) "** |")))
+        (setq wIdx (1+ wIdx)))
+      (js-call lines :push "")
+      (js-call lines :join "\n")))
+
+  (defun mergeReleaseNotesWithSummary (existingNotes summaryMarkdown)
+    (let ((cleanSummary (js-call (globalThis.String (nullish summaryMarkdown "")) :trim))
+          (rawNotes (js-call (globalThis.String (nullish existingNotes "")) :trim)))
+      (if (= (js-length rawNotes) 0)
+        (str cleanSummary "\n")
+        (let* ((heading "## 测试与四维性能基准摘要")
+               (idx (js-call rawNotes :indexOf heading)))
+          (if (= idx -1)
+            (str rawNotes "\n\n" cleanSummary "\n")
+            (let* ((prefix (js-call (js-call rawNotes :slice 0 idx) :trim))
+                   (remainder (js-call rawNotes :slice (+ idx (js-length heading))))
+                   (nextSectionMatch (js-call (new globalThis.RegExp "\\n##\\s+" "u") :exec remainder))
+                   (suffix (if nextSectionMatch
+                             (js-call (js-call remainder :slice (get nextSectionMatch :index)) :trim)
+                             ""))
+                   (parts (js-array)))
+              (when (> (js-length prefix) 0) (js-call parts :push prefix))
+              (when (> (js-length cleanSummary) 0) (js-call parts :push cleanSummary))
+              (when (> (js-length suffix) 0) (js-call parts :push suffix))
+              (str (js-call parts :join "\n\n") "\n")))))))
+
+  (defasync writeReleaseComparisonBundle (report releaseDir &optional rawOptions)
+    (validateVersionComparisonReport report)
+    (let* ((options (nullish rawOptions (js-object)))
+           (resolvedDir (js-call path :resolve releaseDir))
+           (version (get (get (get report :matrix) :latest) :version))
+           (summaryPath (js-call path :join resolvedDir "release-summary.md"))
+           (mergedNotesPath (js-call path :join resolvedDir "release-notes-merged.md"))
+           (markdownPath (js-call path :join resolvedDir (str "eliscript-" version "-benchmark-report.md")))
+           (jsonPath (js-call path :join resolvedDir (str "eliscript-" version "-benchmark-report.json")))
+           (summaryMarkdown (renderReleaseNotesSummary report))
+           (existingNotes
+             (if (not (eq (get options :existingNotes) undefined))
+               (get options :existingNotes)
+               (if (get options :mergeNotesPath)
+                 (try
+                   (await (readFile (js-call path :resolve (get options :mergeNotesPath)) "utf8"))
+                   (catch error ""))
+                 "")))
+           (mergedNotes (mergeReleaseNotesWithSummary existingNotes summaryMarkdown)))
+      (await (mkdir resolvedDir (js-object :recursive t)))
+      (await (writeFile summaryPath summaryMarkdown))
+      (await (writeFile mergedNotesPath mergedNotes))
+      (await (writeFile markdownPath (renderVersionComparisonMarkdown report)))
+      (await (writeFile jsonPath (str (JSON/stringify report nil 2) "\n")))
+      (js-object
+        :summaryPath summaryPath
+        :mergedNotesPath mergedNotesPath
+        :markdownPath markdownPath
+        :jsonPath jsonPath)))
+
+  (defun parseCliArgs (argv)
+    (let ((format "markdown")
+          (output nil)
+          (releaseDir nil)
+          (mergeNotesPath nil)
+          (i 0))
+      (while (< i (js-length argv))
+        (let ((arg (aref argv i)))
+          (cond
+            ((= arg "--format")
+             (setq i (1+ i))
+             (setq format (nullish (aref argv i) "markdown")))
+            ((= arg "--json")
+             (setq format "json"))
+            ((= arg "--markdown")
+             (setq format "markdown"))
+            ((= arg "--release-summary")
+             (setq format "release-summary"))
+            ((= arg "--output")
+             (setq i (1+ i))
+             (setq output (aref argv i))
+             (unless output
+               (throw (new globalThis.TypeError "--output requires a file path"))))
+            ((= arg "--release-dir")
+             (setq i (1+ i))
+             (setq releaseDir (aref argv i))
+             (unless releaseDir
+               (throw (new globalThis.TypeError "--release-dir requires a directory path"))))
+            ((= arg "--merge-notes")
+             (setq i (1+ i))
+             (setq mergeNotesPath (aref argv i))
+             (unless mergeNotesPath
+               (throw (new globalThis.TypeError "--merge-notes requires a file path"))))
+            (t
+             (throw (new globalThis.TypeError (str "unknown argument: " arg))))))
+        (setq i (1+ i)))
+      (js-object
+        :format format
+        :output output
+        :releaseDir releaseDir
+        :mergeNotesPath mergeNotesPath)))
+
+  (defasync main ()
+    (let* ((parsed (parseCliArgs (js-call (get process :argv) :slice 2)))
+           (format (get parsed :format))
+           (output (get parsed :output))
+           (releaseDir (get parsed :releaseDir))
+           (mergeNotesPath (get parsed :mergeNotesPath))
+           (report (await (runVersionComparisonBenchmark))))
+      (when releaseDir
+        (await (writeReleaseComparisonBundle report releaseDir (js-object :mergeNotesPath mergeNotesPath))))
+      (let ((rendered
+              (if (= format "json")
+                (str (JSON/stringify report nil 2) "\n")
+                (if (= format "release-summary")
+                  (renderReleaseNotesSummary report)
+                  (renderVersionComparisonMarkdown report)))))
+        (if output
+          (await (writeFile (js-call path :resolve output) rendered))
+          (js-call (get process :stdout) :write rendered)))))
+
+  (when (and (> (js-length (get process :argv)) 1)
+             (= (js-call path :resolve (aref (get process :argv) 1))
+                (js-call path :join projectDirectory "tools/performance/version-comparison.mjs")))
+    (main))
+
+  (export
+    VERSION_COMPARISON_FORMAT
+    VERSION_COMPARISON_VERSION
+    VERSION_COMPARISON_DIMENSIONS
+    VERSION_COMPARISON_WORKLOADS
+    parseSemver
+    compareSemver
+    resolveVersionComparisonMatrix
+    discoverReleasedTags
+    detectEmacsVersion
+    defaultMeasureEmacsLisp
+    measureEliscriptDirectory
+    defaultMeasureEliscriptTarget
+    validateVersionComparisonReport
+    runVersionComparisonBenchmark
+    renderVersionComparisonMarkdown
+    renderReleaseNotesSummary
+    mergeReleaseNotesWithSummary
+    writeReleaseComparisonBundle))

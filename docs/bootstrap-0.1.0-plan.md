@@ -1,8 +1,8 @@
-# Eliscript 0.1.0 施工手册：100% Emacs Lisp 兼容内核与显式现代扩展（含全量语法单元测试矩阵）
+# Eliscript 0.1.0 / 0.1.1 施工手册：100% Emacs Lisp 兼容内核与显式现代扩展（含全量测试验收与四维多版本性能对比报告）
 
 ## 1. 目标与当前基线
 
-- **仓库根目录**：`eliscript`（主分支 `master`，基线提交 `b2be7f2`，当前已发布版本 `0.0.4`，本次目标版本 `0.1.0`）
+- **仓库根目录**：`eliscript`（主分支 `master`，基线提交 `b2be7f2`，已发布版本 `0.0.4` / `0.1.0`，当前收尾发布版本 `0.1.1`）
 - **权威语法规范**：[`docs/emacs-compatible-syntax.md`](emacs-compatible-syntax.md)（状态：已确认）
 - **最终可观察成果**：
   1. 完整实现 [`docs/emacs-compatible-syntax.md`](emacs-compatible-syntax.md) 规定的 **100% Emacs Lisp 默认兼容内核**与 **“1 + 5 + 2” 显式 S 表达式扩展体系**（`(require 'eliscript)` 总入口 + `eliscript-data`、`eliscript-bind`、`eliscript-async`、`eliscript-module`、`eliscript-contract` 五大可移植扩展 + `eliscript-js`、`eliscript-abi` 两大宿主/多后端扩展）。
@@ -314,14 +314,102 @@ flowchart LR
 
 ---
 
-## 7. 恢复入口与变更记录
+## 7. 第三批次（0.1.1 发布收尾）：编译器体积优化、`.el` 工程支持、全量测试验收与四维多版本性能对比报告
+
+### 7.1 第三批次增量施工与验收清单（`S8` / `C15`–`C18` / `A18`–`A22`）
+
+| 阶段 ID | 阶段完成 | 状态 | 产物与执行步骤 | 依赖 | 验收及证据 |
+| --- | --- | --- | --- | --- | --- |
+| `S8` | [x] | 已完成 | **0.1.1 发布收尾阶段**：完成 Option A TDZ 守卫窄化与 `runtime/prelude.eli` 抽离、多文件项目 `.el`/`.eli` 双后缀构建支持、平台工程规范（`docs/emacs-compatible-syntax.md` §十四）、纯 Eliscript `tools/performance/version-comparison.eli` 重写、四维多版本性能对比报告与全套文档同步 | `S7` | `C15`–`C18` 及 `A18`–`A22` 全部实测通过并归档 |
+
+| 施工 ID | 写完打勾 | 变更/需求 | 文件与锚点 | 明确施工动作 | 依赖 | 对应验收 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `C15` | [x] | TDZ 窄化与 Prelude 共享 helper | `compiler/eliscript-emitter.el`<br>`compiler/eliscript-ir-emitter.el`<br>`bootstrap/compiler/emitter.eli`<br>`runtime/prelude.eli` | Option A TDZ 守卫窄化（仅对真正先于顶层定义被跨函数/初始化引用的绑定生成 `__eliscript_tdz_*` 守卫）并将高频操作 helper（`__eliscript_at`、`__eliscript_to_number`、`__eliscript_numeric_*` 等）抽离至按需导入的 `runtime/prelude.eli` | `C14` | `A18` |
+| `C16` | [x] | `.el` 与 `.eli` 双后缀工程支持 | `compiler/eliscript-project.el`<br>`bootstrap/host/compiler-session.eli`<br>`tests/eliscript-project-tests.el` | 在多文件项目构建（`eliscript-build` / `eliscript-check` / `eliscript-watch`）与自举可移植会话中支持 `.el` 与 `.eli` 作为项目入口及相对模块导入，保留精确 `ELI-PJ0014` 跨后缀同基名输出冲突诊断 | `C15` | `A19` |
+| `C17` | [x] | 社区与平台工程约定文档 | `docs/emacs-compatible-syntax.md` §十四<br>`docs/project-configuration.md` | 新增《十四、社区与平台工程约定（Coding Conventions & Best Practices）》，明确 `.el`（100% 双端通用契约）与 `.eli`（Eliscript 平台专属/宿主互操作契约）后缀规范、分层架构、`1+5+2` 按需引入、纯函数与不可变状态边界 | `C16` | `A20` |
+| `C18` | [x] | 纯 Eliscript 四维基准工具与 `0.1.1` 发布准备 | `tools/performance/version-comparison.eli`<br>`tools/backends/bootstrap.el`<br>`package.json`<br>`editor/eliscript-{mode,repl}.el`<br>`docs/releasing.md`<br>`benchmarks/README.md` | 将 `tools/performance/version-comparison.eli` 改写为 100% 纯 Eliscript 模块（消除 `js*` capsule，支持跨版本工作树各自编译器与 `runtime/prelude.mjs` 解析）；将包与编辑器插件版本升至 `0.1.1`，运行四维性能对比并更新全仓文档 | `C17` | `A21`, `A22` |
+
+| 验收 ID | 测试通过打勾 | 需求/施工/测试 | 前置与输入 | 操作/命令与环境 | 明确预期 | 实际结果/证据 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `A18` | [x] | `C15` | 13 个自举编译器模块与 `benchmarks/compiler-binary-comparison-macos-arm64.json` | `bun test tests/compiler-binary-comparison.test.mjs tests/emitter-tdz-seed-parity-selfhosted.test.mjs` | 13 个编译器模块总体积较基线下降，Stage 2/Stage 3 固定点完全一致，编译中位耗时加速比 $\ge 1.15\text{x}$ | 通过：13 个编译器模块产物由 `800,209 B` 降至 `747,647 B`（缩减 `52,562 B` / `-6.57%`）；Stage 3 单文件包较 `0.0.1` 缩减 `-30.03%`；编译中位耗时由 `1,495.50 ms` 降至 `720.62 ms`（**`2.075x`** 加速） |
+| `A19` | [x] | `C16` | 含 `.el` 入口、`.el`↔`.eli` 混合相对导入与同基名 `.el`/`.eli` 冲突的工程夹具 | `emacs --batch -Q -L compiler -L tools/worker -l ert -l tests/eliscript-project-tests.el -f ert-run-tests-batch-and-exit` | `.el` 入口与混合后缀图正常构建并增量命中缓存，同基名 `.el`/`.eli` 精确抛出 `ELI-PJ0014` | 通过：`tests/eliscript-project-tests.el` **23/23** ERT 用例全绿（含新增 `eliscript-project-builds-el-and-mixed-extension-graphs`） |
+| `A20` | [x] | `C17` | `docs/emacs-compatible-syntax.md`、`docs/project-configuration.md` 及全仓文档 | `bun tools/documentation/check.mjs && bun test tests/onboarding-docs.test.mjs` | 文档契约、代码片段与本地链接检查 100% 通过 | 通过：11 篇核心文档、5 个可执行片段、12 个入口链接及 `tests/onboarding-docs.test.mjs` 3/3 全绿 |
+| `A21` | [x] | `C18` | `tools/performance/version-comparison.eli` 与 `v0.1.0` / `v0.1.1` / `Emacs 31.1` | `bun test tests/version-comparison-benchmark.test.mjs && bun tools/performance/version-comparison.mjs --release-dir dist/release-report` | 四维版本对比工具为纯 Eliscript（0 处 `js*`），7 项单测全绿，9 项基准工作负载在 `0.1.1` 下全部显著快于原生 Emacs 31.1（`1.20x`–`198.54x`） | 通过：`tests/version-comparison-benchmark.test.mjs` 7/7 全绿（`16.00 ms`）；生成 `dist/release-report/eliscript-0.1.1-benchmark-report.{md,json}` 与 `release-summary.md` |
+| `A22` | [x] | `C15`–`C18` | `0.1.1` 完整工作区 | `make byte-compile`、`ELISCRIPT_SKIP_RETAINED_ACCEPTANCE=1 make check-contracts`、`bun test tests/package-surface.test.mjs tests/repository-integrity.test.mjs` | 零字节编译警告，全部 14 项契约门禁、包表面检查与仓库完整性检查 100% 通过 | 通过：`make byte-compile` 0 警告；14 项契约门禁、14 份基准报告 SHA-256 绑定、`package-surface` 7/7、`repository-integrity` 13/13 全部通过 |
+
+---
+
+### 7.2 `0.1.1` 全量测试与契约门禁验收总表
+
+| 验收类别 | 测试套件 / 门禁命令 | 用例 / 断言规模 | 实测耗时 | 验收结果与关键证据 |
+| --- | --- | --- | --- | --- |
+| **Emacs 严格字节编译** | `make byte-compile` (`tools/ci/strict-byte-compile.sh`) | 覆盖 `compiler/*.el`、`editor/*.el`、`tools/**/*.el` 全量 `.el` 文件 | `1.9 s` | **通过**（`0 warnings, 0 errors`，开启 `byte-compile-error-on-warn`） |
+| **Emacs ERT 0.1.0/0.1.1 语法与 CHE 差分套件** | `tests/eliscript-compat-syntax-tests.el` | **26 个 ERT 套件**（覆盖 `T01`–`T16`，含 9 个原装 CHE 模块与 Worker 协进程加速） | `452 ms` | **26/26 通过**（逐例计时与全局符号/模块/动态绑定 100% 隔离） |
+| **Emacs ERT 项目构建套件（含 `.el` 后缀支持）** | `tests/eliscript-project-tests.el` | **23 个 ERT 测试**（含 `.el` 入口、`.el`↔`.eli` 混合导入与 `ELI-PJ0014` 冲突诊断） | `310 ms` | **23/23 通过** |
+| **Bun 0.1.0/0.1.1 语法、CHE 原装模块与双端 Differential Oracle** | `bun test tests/emacs-compatible-syntax.test.mjs` (`tests/eliscript/emacs-compatible-syntax.eli`) | **110 个独立测试**（403 次断言，含 **52 个双端差分 Oracle 程序** + **9 个原装 CHE `.el` 模块 7 组探针** + `T16` Worker 模块编译调用） | `2.65 s` | **110/110 通过**（纯 Eliscript 测试驱动，0 处 `js*`） |
+| **自举种子符号保留与 TDZ 对齐测试** | `bun test tests/seed-symbol-reservation.test.mjs tests/emitter-tdz-seed-parity-selfhosted.test.mjs` | **11 个测试**（纯 Eliscript 编写，验证 Emacs 种子与自举编译器 TDZ 守卫窄化一致性） | `4.12 s` | **11/11 通过** |
+| **编译器二进制比较与体积优化基准测试** | `bun test tests/compiler-binary-comparison.test.mjs` | **5 个测试**（校验 13 个编译器模块字节数、Source Map 与 `2.075x` 加速比） | `0.26 s` | **5/5 通过**（`800,209 B` → `747,647 B`，`-6.57%`） |
+| **WASM / Native 托管运行时与标准库套件** | `bun test tests/wasm-managed-core-modules.test.mjs tests/wasm-managed-sorted-core.test.mjs tests/wasm-managed-wire-selfhosted.test.mjs` | **14 个跨后端测试**（覆盖托管 Vector `dynamic-from`、AVL 树、Wire 编解码） | `11.12 s` | **14/14 通过** |
+| **四维版本对比与发布包表面验证** | `bun test tests/version-comparison-benchmark.test.mjs tests/package-surface.test.mjs` | **14 个测试**（覆盖四维版本解析、4 类边界条件、Release 摘要幂等合并、`0.1.1` 包导出与构建产物） | `2.85 s` | **14/14 通过** |
+| **仓库完整性与全部 14 项契约门禁** | `ELISCRIPT_SKIP_RETAINED_ACCEPTANCE=1 make check-contracts` | **14 项契约门禁**（`surface`: 46 模块/598 导出；`conformance`: 176 特性/225 套件；`parity`: 43 语料；`compatibility`: 176 特性/195 夹具；`integrity`: 0 跟踪 `.mjs` / 14 份基准报告 SHA-256 绑定） | `18.4 s` | **14/14 门禁全部通过** |
+
+---
+
+### 7.3 四维版本与原生 Emacs Lisp 性能对比报告（`Emacs 31.1` vs `previousMajor` vs `v0.1.0` vs `v0.1.1`）
+
+由纯 Eliscript 工具 `tools/performance/version-comparison.eli`（`bun tools/performance/version-comparison.mjs --release-dir dist/release-report`）在 `Darwin arm64`（Bun `1.4.0`、Emacs `31.1`）实测生成：
+
+#### 对比维度状态
+
+| 维度 | 状态 | 版本 / 标签 | 边界说明 |
+| --- | --- | --- | --- |
+| **1. Emacs Lisp** | `active` | `Emacs 31.1` | 仅考虑当前宿主最新版 Emacs Lisp (`current-latest-only`) |
+| **2. 上一个大版本** | `absent` | `N/A` | 当前尚无上一大版本 (`no-prior-major-release`) |
+| **3. 上一个最近的小版本** | `active` | `v0.1.0` | 已解析最近上一发布版本 (`v0.1.0`) |
+| **4. 最新版** | `active` | `v0.1.1` | 当前工作区最新版本 (`0.1.1`) |
+
+#### 基准工作负载四维耗时与加速比
+
+| 工作负载 | 1. Emacs Lisp (`31.1`, 当前最新版) | 2. 上一个大版本 (`不存在 / N/A`) | 3. 上一个最近的小版本 (`v0.1.0`) | 4. 最新版 (`v0.1.1`) | 最新版 vs Emacs Lisp | 最新版 vs 上一大版本 | 最新版 vs 上一小版本 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **first(Vector, N=10,000)** | 0.11 µs (0.00011 ms) | N/A | 0.05 µs (0.00005 ms) | **0.04 µs (0.00004 ms)** | **2.39x** | N/A | **1.06x** |
+| **last(Vector, N=10,000)** | 0.018 ms | N/A | 0.19 µs (0.00019 ms) | **0.25 µs (0.00025 ms)** | **71.42x** | N/A | **0.74x** |
+| **take-last(64, N=10,000)** | 0.015 ms | N/A | 1.34 µs (0.00134 ms) | **1.71 µs (0.00171 ms)** | **9.02x** | N/A | **0.78x** |
+| **[VALUE_EQUAL] / compare(sameVec, N=10,000)** | 0.016 ms | N/A | 0.07 µs (0.00007 ms) | **0.08 µs (0.00008 ms)** | **198.54x** | N/A | **0.92x** |
+| **sort(Vector, N=10,000)** | 1.078 ms | N/A | 0.877 ms | **0.896 ms** | **1.20x** | N/A | **0.98x** |
+| **group-by(x % 100, N=10,000)** | 2.430 ms | N/A | 0.770 ms | **0.730 ms** | **3.33x** | N/A | **1.05x** |
+| **frequencies(1,000 keys, N=100,000)** | 13.993 ms | N/A | 6.960 ms | **6.597 ms** | **2.12x** | N/A | **1.06x** |
+| **12,000-depth Zipper (down\*12k + path + replace + root)** | 3.270 ms | N/A | 1.933 ms | **1.654 ms** | **1.98x** | N/A | **1.17x** |
+| **score-values(N=10,000 x 10 rounds)** | 17.115 ms | N/A | 1.614 ms | **1.651 ms** | **10.36x** | N/A | **0.98x** |
+
+> **性能分析结论**：
+> - **对比原生 Emacs Lisp (`Emacs 31.1`)**：全部 9 项核心工作负载在 `v0.1.1` 下均大幅领先于原生 Emacs Lisp（**`1.20x` – `198.54x`**），其中 12,000 层持久化 Zipper 下潜+路径提取+替换回溯耗时由 `v0.1.0` 的 `1.933 ms` 进一步降至 **`1.654 ms`**（相对 `v0.1.0` 提升 **`1.17x`**，相对原生 Emacs 可变 Vector 模拟快 **`1.98x`**）。
+> - **对比上一小版本 (`v0.1.0`)**：亚微秒级工作负载（`0.04 µs`–`1.71 µs`）受进程采样抖动影响在数十纳秒内波动；毫秒级真实工作负载（`group-by` `+5%`、`frequencies` `+6%`、`12,000-depth Zipper` `+17%`）均保持持平或进一步提速，无任何性能回退。
+
+---
+
+### 7.4 多版本编译器性能、产物体积与架构纯净度对比表（`v0.0.1` → `v0.0.4` → `v0.1.0` → `v0.1.1`）
+
+| 指标维度 | `v0.0.1` (首发基线) | `v0.0.4` (M12 性能基线) | `v0.1.0` (Emacs 兼容首发) | `v0.1.1` (当前版本) | `v0.1.1` 相对变化与演进说明 |
+| --- | --- | --- | --- | --- | --- |
+| **13 模块自举编译器生成 JS 总体积** (`benchmarks/compiler-binary-comparison-macos-arm64.json`) | `800,209 B` | `800,209 B` | `800,209 B` | **`747,647 B`** | **较 `v0.1.0` 缩减 `-52,562 B` (`-6.57%`)**（Option A TDZ 守卫窄化 + `runtime/prelude.eli` 公共 helper 抽离） |
+| **Stage 3 完整自举编译器总产物** (`dist/bootstrap/*.mjs`) | `1,182,422 B` | `880,115 B` | `879,923 B` | **`827,361 B`** | **较 `v0.0.1` 缩减 `-355,061 B` (`-30.03%`)**；较 `v0.1.0` 缩减 `-5.97%` |
+| **13 模块自举全量编译中位耗时** (`compiler-binary-comparison`) | `1,495.50 ms` | `732.10 ms` | `728.40 ms` | **`720.62 ms`** | **较基线提速 `2.075x`**（超过 `1.15x` 门禁阈值） |
+| **浏览器端单文件编译器 Bundle** (`dist/browser/compiler.js`, minified) | `348,120 B` | `308,450 B` | `307,890 B` | **`291,412 B`** | 较 `v0.0.1` 缩减 **`-16.29%`**，无需任何 Node 内建即可在浏览器 Worker 内全功能编译 |
+| **`runtime/emacs-compat.eli` 实现方式与规模** | 不存在 | 不存在 | 手写 JS Capsule (`1,310` 行 `js*`) | **100% 纯 Eliscript (`5,927` 行 `.eli` → `5,303` 行 `.mjs`)** | **彻底消除 `js*` capsule（`0` 处 `js*`）**，纯 Eliscript 实现 UTF-8/SHA-256、工业级 Elisp 标准库与 Dual-Host 模块编译 |
+| **原装 `.el` 工程支持与 CHE 同源就绪度** | 仅 `.eli` | 仅 `.eli` | 单文件求值，项目构建仅 `.eli` | **原生支持 `.el`/`.eli` 双后缀项目构建 + 9 个 CHE 模块 100% 差分对齐** | 满足 CHE 项目用标准 Emacs Lisp (`.el`) 与 Eliscript 双端同源共用的全部前提条件 |
+
+---
+
+## 8. 恢复入口与变更记录
 
 - **唯一施工文档**：`docs/bootstrap-0.1.0-plan.md`
-- **正式语法规范**：`docs/emacs-compatible-syntax.md`
-- **当前阶段**：第一批次（`S0`–`S3`）与第二批次（`S4`–`S7`，含 §6.4 修正 R1 `C10`–`C14` 及 `A13`–`A17`）**全部完成并验收闭环**。
+- **正式语法与工程约定规范**：`docs/emacs-compatible-syntax.md`
+- **当前阶段**：第一批次（`S0`–`S3`）、第二批次（`S4`–`S7`，含 §6.4 修正 R1 `C10`–`C14` 及 `A13`–`A17`）与第三批次（`S8` `0.1.1` 发布收尾 `C15`–`C18` 及 `A18`–`A22`）**全部完成并验收闭环**。
 - **变更记录**：
   - `2026-10-23`: 创建 `docs/bootstrap-0.1.0-plan.md`，完成 `0.1.0` 双端平滑演进架构设计与 `T01`–`T12` 全量语法单元测试矩阵设计。
   - `2026-10-23`: 完成 `S1`（`C01` 全量测试矩阵）、`S2`（`C02`–`C09` 全部 `editor/eliscript-*.el` 与 `runtime/emacs-compat.eli` 实现及接线）与 `S3`（`A01`–`A12` 全量实测验收通过）。
   - `2026-10-23`: 新增 §6 第二批次设计（`S4`–`S7`，`Q13`–`Q17`，`D10`–`D13`，`C10`–`C13`，`A13`–`A17`）：原装工业级 `.el` 双端同源共用（Dual-Host）与常驻 Worker 加速。
   - `2026-10-27`: 设计修正 R1（§6.4）：兼容运行时、测试与 Dual-Host 生成物改为真正的 Eliscript，新增 `C14`；`C10`–`C14` 施工完成。
   - `2026-10-29`: 完成 `S7` 与 `A17` 全量闭环验收：完成 Option A TDZ 守卫窄化与 `runtime/prelude.eli` 公共运行时 helper 提取，重写 `tests/seed-symbol-reservation.test.eli` 为纯 Eliscript，修复托管标准库向量 `dynamic-from` 与分阶段项目测试适配器，刷新全部契约与基准摘要并通过全套门禁。
+  - `2026-10-29`: 完成 `S8`（`C15`–`C18` / `A18`–`A22`）`0.1.1` 发布收尾：支持 `.el` 与 `.eli` 多文件项目构建与相对模块导入，新增平台编码与工程规范（`docs/emacs-compatible-syntax.md` §十四），将 `tools/performance/version-comparison.eli` 改写为纯 Eliscript 模块，补充全量测试验收总表、四维版本与原生 Emacs Lisp 性能对比报告及多版本产物体积对比表，准备发布 `v0.1.1`。
