@@ -132,7 +132,7 @@ choice.
 ## Documentation Site
 
 The documentation site is published from the assembled tree, and it is the
-deployment root: `https://liuchong.org/eliscript/` serves `docs/index.html`.
+deployment root: `https://eliscript.com/` serves `docs/index.html`.
 The browser playground in it loads the compiler, the runtime, and the compile
 host from the published root, so publishing only `docs/` would ship a page
 whose imports cannot resolve. `tools/pages/assemble.mjs` copies the site's
