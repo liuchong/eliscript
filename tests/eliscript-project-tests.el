@@ -836,6 +836,47 @@
                    "macro file dependency is not valid UTF-8"
                    (error-message-string error-data))))))))
 
+(ert-deftest eliscript-project-builds-el-and-mixed-extension-graphs ()
+  (eliscript-project-tests--with-directory root
+    (let* ((entry (expand-file-name "main.el" root))
+           (helper (expand-file-name "sub/helper.el" root))
+           (bridge (expand-file-name "sub/bridge.eli" root))
+           (out-dir (expand-file-name "build" root))
+           (portable-out (expand-file-name "portable-build" root)))
+      (eliscript-project-tests--write
+       bridge
+       "(export scale)\n(defportable scale (n) (* n 2))\n")
+      (eliscript-project-tests--write
+       helper
+       "(import-portable \"./bridge.eli\" scale)\n(export compute)\n(defportable compute (x) (+ (scale x) 1))\n")
+      (eliscript-project-tests--write
+       entry
+       "(import-portable \"./sub/helper.el\" compute)\n(export run-entry)\n(defportable run-entry (v) (compute v))\n")
+      (let* ((result (eliscript-project-build entry out-dir root))
+             (entry-output (expand-file-name "main.mjs" out-dir))
+             (helper-output (expand-file-name "sub/helper.mjs" out-dir))
+             (bridge-output (expand-file-name "sub/bridge.mjs" out-dir)))
+        (should (= (length (eliscript-project-build-result-modules result)) 3))
+        (should (equal (eliscript-project-build-result-entry-output result)
+                       (file-truename entry-output)))
+        (dolist (artifact (list entry-output helper-output bridge-output))
+          (should (file-exists-p artifact))
+          (should (file-exists-p (concat artifact ".map"))))
+        (should (string-match-p
+                 "from \"\\./sub/helper\\.mjs\""
+                 (eliscript-project-tests--read entry-output))))
+      (let* ((portable-result
+              (eliscript-project-build-portable
+               entry '(run-entry) portable-out root))
+             (portable-entry (expand-file-name "main.mjs" portable-out))
+             (portable-helper (expand-file-name "sub/helper.mjs" portable-out)))
+        (should (= (length (eliscript-project-build-result-modules portable-result)) 3))
+        (should (file-exists-p portable-entry))
+        (should (file-exists-p portable-helper))
+        (should (string-match-p
+                 "from \"\\./sub/helper\\.mjs\""
+                 (eliscript-project-tests--read portable-entry)))))))
+
 (provide 'eliscript-project-tests)
 
 ;;; eliscript-project-tests.el ends here

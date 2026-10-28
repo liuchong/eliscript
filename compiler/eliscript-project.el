@@ -555,11 +555,26 @@ FILENAME and SPAN identify the import responsible for PATH."
         (digest . ,(eliscript-project-macro-dependency-digest dependency))))
     dependencies)))
 
+(defun eliscript-project--source-file-p (path)
+  "Return non-nil when PATH uses a `.eli' or `.el' source extension."
+  (and (stringp path)
+       (or (string-suffix-p ".eli" path)
+           (string-suffix-p ".el" path))))
+
+(defun eliscript-project--strip-source-extension (path)
+  "Remove a trailing `.eli' or `.el' suffix from PATH."
+  (cond
+   ((string-suffix-p ".eli" path)
+    (string-remove-suffix ".eli" path))
+   ((string-suffix-p ".el" path)
+    (string-remove-suffix ".el" path))
+   (t path)))
+
 (defun eliscript-project--source-output (source root out-dir)
   "Map Eliscript SOURCE below ROOT into its ESM path below OUT-DIR."
   (let ((relative (file-relative-name source root)))
     (expand-file-name
-     (concat (string-remove-suffix ".eli" relative) ".mjs")
+     (concat (eliscript-project--strip-source-extension relative) ".mjs")
      out-dir)))
 
 (defun eliscript-project--same-file-path-p (left right)
@@ -645,7 +660,7 @@ artifacts onto an input, another artifact, or outside OUT-DIR."
 
 (defun eliscript-project--local-import-p (specifier)
   "Return non-nil when SPECIFIER is a relative Eliscript source import."
-  (and (string-suffix-p ".eli" specifier)
+  (and (eliscript-project--source-file-p specifier)
        (or (string-prefix-p "./" specifier)
            (string-prefix-p "../" specifier))))
 
@@ -1393,7 +1408,7 @@ unchanged."
        (car canonical-entries) nil
        "project entries resolve to duplicate sources"))
     (dolist (entry canonical-entries)
-      (unless (string-suffix-p ".eli" entry)
+      (unless (eliscript-project--source-file-p entry)
         (eliscript-project--fail
          entry nil "entry file must use the .eli extension")))
     (when (file-exists-p resolved-out-dir)
@@ -1452,7 +1467,7 @@ unchanged."
                                (setf (eliscript-ir-node-value node)
                                      (eliscript-project--relative-import
                                       dependency-output output-path))))
-                            ((string-suffix-p ".eli" specifier)
+                            ((eliscript-project--source-file-p specifier)
                              (eliscript-project--fail
                               source (eliscript-ir-node-span node)
                               "Eliscript source import must be relative: %s"
@@ -1555,7 +1570,7 @@ only the requested declarations, immutable constants, and portable imports."
          (requests (make-hash-table :test #'equal))
          queue
          modules)
-    (unless (string-suffix-p ".eli" canonical-entry)
+    (unless (eliscript-project--source-file-p canonical-entry)
       (eliscript-project--fail
        canonical-entry nil "entry file must use the .eli extension"))
     (when (file-exists-p resolved-out-dir)

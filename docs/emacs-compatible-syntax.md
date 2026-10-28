@@ -508,8 +508,8 @@ import { createCompatSession, evalCompatProgram, invokeCompatFunction,
 
 const session = createCompatSession();
 evalCompatProgram(sourceOfUnmodifiedEl, { session });          // 按依赖顺序加载 .el
-serializeCompatValue(invokeCompatFunction(session, "che-align-column-widths", [rows]));
-callCompatElisp(session, "che-align-column-widths", '((("中文" "abc")))');  // => "(4 2)" 之类的打印文本
+serializeCompatValue(invokeCompatFunction(session, "table-align-column-widths", [rows]));
+callCompatElisp(session, "table-align-column-widths", '((("中文" "abc")))');  // => "(4 2)" 之类的打印文本
 ```
 
 - 覆盖范围：完整 Emacs 读取器（`?` 字符、八/十六进制与 `\u` 转义、`#x/#o/#b/#NrN`、`#s(...)`、点对与反引号嵌套）、Lisp-2 与动态/词法作用域、`&optional/&rest/&key/&aux` 参数、`setf/cl-incf/cl-decf/push/pop/cl-pushnew` 广义位置（变量、`car/cdr/c[ad]+r`、`nth`、`aref`（含字符串变量原位替换）、`gethash`、`alist-get`、`plist-get`、`get`、结构体槽位）、`cl-defstruct`（关键字与 BOA 构造器、`:include`、`:copier`、`:predicate`、`:conc-name`、逐实例默认值）、`pcase` 全模式、`cl-loop`、`cl-labels/cl-flet`、`condition-case`/`define-error`、`with-temp-buffer` 虚拟 Buffer、Emacs 正则（`string-match`、`replace-regexp-in-string`、`split-string`、`re-search-forward`、`rx`）、CJK 显示宽度、UTF-8 字节串、`secure-hash 'sha256`、`json-parse-string`/`json-serialize`/`json-encode`。
@@ -531,9 +531,9 @@ callCompatElisp(session, "che-align-column-widths", '((("中文" "abc")))');  //
 ### 13.3 Emacs 端 Worker 加速与回退
 
 ```elisp
-(eliscript-compat-compile-elisp-module '("che-align.el") "build/che-align.mjs")
-(eliscript-compat-offload-call worker "build/che-align.mjs" 'che-align-column-widths rows)
-(eliscript-compat-accelerate-function 'che-align-column-widths "build/che-align.mjs"
+(eliscript-compat-compile-elisp-module '("table-align.el") "build/table-align.mjs")
+(eliscript-compat-offload-call worker "build/table-align.mjs" 'table-align-column-widths rows)
+(eliscript-compat-accelerate-function 'table-align-column-widths "build/table-align.mjs"
                                       (lambda () my-worker))
 ```
 
@@ -542,7 +542,98 @@ callCompatElisp(session, "che-align-column-widths", '((("中文" "abc")))');  //
 
 ---
 
-## 十四、 关联技术规格参考
+## 十四、 社区与平台工程约定（Coding Conventions & Best Practices）
+
+随着 Eliscript 作为开源双宿主（Emacs + JS/WASM/Native）平台生态的发展，为了保证社区代码库在可读性、工具链协作、双宿主可移植性与静态分析方面的一致性，平台推荐遵循以下工程约定。
+
+### 14.1 文件后缀名规范：`.el` vs `.eli`
+
+Eliscript 编译器、多文件工程构建器（`eliscript-project-build` / `eliscript-project-build-portable`）与自举编译会话同时支持 `.el` 和 `.eli` 两种源码后缀。社区按**代码的宿主定位与语法边界**区分使用：
+
+| 维度 | `.el`（标准兼容与双宿主共享源码） | `.eli`（Eliscript 平台专用源码） |
+| :--- | :--- | :--- |
+| **核心定位** | **100% 标准 Emacs Lisp**，或仅通过 `(require 'eliscript-*)` 启用双宿主可移植扩展的代码 | **仅面向 Eliscript 编译目标运行**，或使用平台专用顶层语法与多后端底层特性的代码 |
+| **运行宿主** | 原生 Emacs（解释/字节码/Native Comp）**与** Eliscript（ESM / Browser / Worker / WASM）双宿主共源运行 | Eliscript 编译目标（Node / Bun / Browser / WASM / Native） |
+| **典型语法特征** | 标准 `defun` / `defmacro` / `cl-lib` / `pcase`，以及 `(require 'eliscript)` 下的 `1+5+2` 双宿主扩展包 | 顶层 `(module ...)` 声明、`(export ...)`、底层线性内存 ABI（`wasm-memory-*` / `native-*`）、宿主专属互操作 |
+| **Emacs 编辑器模式** | 默认开启原生 `emacs-lisp-mode`；检测到 `(require 'eliscript...)` 时自动挂载轻量 `eliscript-compat-mode` 次模式 | 自动开启 `eliscript-mode` 主模式 |
+| **适用模块类型** | 领域模型、纯算法、数据结构、协议解析、双宿主共享核心库、Emacs 编辑器插件与 UI 适配层 | Web/Browser 应用、JS/Node 服务、WASM/Native 独立后端模块、编译器/运行时内部实现 |
+
+**选型原则（Rule of Thumb）**：
+1. **能在原生 Emacs 中直接 `load` / `require` 运行的模块，一律使用 `.el`**：这样既能无缝复用 Emacs 原生生态（ERT 测试、Byte-Compile、Flymake、Xref），又能直接被 Eliscript 编译器或 Worker 编译加速。
+2. **专为 Eliscript 平台编写、使用平台专属模块头 `(module ...)` 或潜在平台专用语法的模块，一律使用 `.eli`**：让开发者、编辑器和构建工具一眼识别其平台专属属性，避免误将其作为普通 Emacs 包直接加载。
+3. **混合工程互联**：在多文件工程构建中，`.eli` 与 `.el` 模块可以通过相对路径互相导入（例如 `(import "./core.el" ...)` 或 `(import-portable "./algo.el" ...)`），输出路径统一映射为对应的 `.mjs` 模块。
+
+### 14.2 双宿主分层架构规范（Core vs Host Adapter）
+
+在构建同时服务于 Emacs 与现代运行时（或利用 JS Worker 为 Emacs 提速）的项目时，推荐采用**“纯核心层 + 宿主适配层”**的分层架构：
+
+1. **Core 纯核心层（使用 `.el`）**
+   - 承载领域数据结构、状态机、语法/协议解析、排版与布局计算、差异比对（Diff/Patch）及业务规则；
+   - **零宿主 I/O 耦合**：不直接调用 Emacs 专属 UI 原语（如 `switch-to-buffer`、`make-overlay`、`define-derived-mode`），也不直接调用浏览器 DOM API；
+   - 仅依赖 `eliscript-compat` 保证的双宿主公共子集与 `eliscript-data` 持久数据结构，确保同一份 `.el` 文件在 Emacs 与 Eliscript Worker 中语义 100% 一致。
+2. **Emacs 宿主适配层（使用 `.el`）**
+   - 承载 `interactive` 交互命令、`buffer` / `window` / `frame` / `overlay` / `keymap` 管理、Minor/Major Mode 定义以及进程生命周期管理；
+   - 调用 Core 层纯函数或通过 `eliscript-worker` 异步调度重计算任务，将返回的数据结构渲染到 Emacs 界面。
+3. **Web / JS / Native 宿主适配层（使用 `.eli`）**
+   - 承载浏览器 DOM/Canvas 挂载、Web Worker / Node / Bun 网络与文件系统 I/O，以及跨语言 ABI 导出。
+
+### 14.3 模块头部与特性启用规范
+
+1. **`.el` 文件的标准头部与尾部**
+   - 首行必须显式声明 `lexical-binding: t`，确保闭包与词法作用域在 Emacs 与 Eliscript 之间完全一致；
+   - 使用到了哪个扩展包就显式 `require` 哪个包（或统一 `(require 'eliscript)`），不依赖隐式全局加载：
+     ```elisp
+     ;;; my-project-core.el --- Core domain logic -*- lexical-binding: t; -*-
+
+     (require 'cl-lib)
+     (require 'eliscript)
+
+     ;; 核心实现...
+
+     (provide 'my-project-core)
+     ;;; my-project-core.el ends here
+     ```
+2. **`.eli` 文件的模块声明**
+   - 使用顶层 `(module <namespace> ...)` 显式声明导出符号（`export`）与依赖导入（`import`），不依赖全局符号表副作用：
+     ```elisp
+     (module my-app.worker
+       (export run-pipeline)
+       (import "./my-project-core.el" compute-layout)
+       ...)
+     ```
+
+### 14.4 命名与符号风格规范
+
+1. **命名空间与私有符号**
+   - `.el` 文件遵循 Emacs 社区规范：公开函数/变量以 `<package>-` 为前缀，模块内部私有函数/变量以 `<package>--`（双横线）为前缀；
+   - `.eli` 文件处于独立模块作用域内：内部辅助函数无需重复模块名前缀，仅通过 `(export ...)` 暴露公开 API。
+2. **语义后缀与前缀约定**
+   - **谓词函数（Predicates）**：返回布尔值的判定函数统一使用 `-p` 后缀（如 `persistent-map-p`、`state-cell-p`、`valid-node-p`），保持与标准 Elisp 一致；
+   - **原地变更与副作用（Mutation）**：凡原地修改可变容器、瞬态构建器或原子状态引用的函数，统一以 `!` 结尾（如 `state-cell-swap!`、`state-cell-reset!`、`transient-conj!`、`transient-assoc!`、`persistent!`）；
+   - **泛值与持久集合前缀**：跨类型多态集合操作使用 `value-*`（`value-get`、`value-put`、`value-update`、`value-count`），不可变持久集合构造使用 `persistent-*`，函数式组合子使用 `fn-*`（`fn-pipe`、`fn-thread`、`fn-comp`、`fn-partial`）。
+
+### 14.5 状态、尾递归与契约声明规范
+
+1. **优先不可变数据，受控使用瞬态与原子引用**
+   - 默认使用 `persistent-vector`、`persistent-map`、`persistent-set` 与 `cl-defstruct-persistent` 表达业务数据；
+   - 紧密循环内需要高频组装集合时，使用 `(transient ...)` 配合 `transient-conj!` / `transient-assoc!` 并在出口调用 `(persistent! ...)` 封存；
+   - 跨回调或模块共享的可变状态统一封装在 `(make-state-cell ...)` 中，通过 `state-cell-deref` 读取、`state-cell-swap!` 原子更新。
+2. **深层递归统一使用 `loop` / `recur`**
+   - 凡递归深度随输入数据规模增长的函数，必须使用 `(loop ((...)) ... (recur ...))` 替代普通自递归，确保在编译为 JS/WASM 及在 Emacs 中运行时均以常数栈空间执行，彻底消除栈溢出风险。
+3. **关键公开接口声明静态契约（`declare (eliscript ...)`）**
+   - 对外公开的核心纯函数、跨模块边界函数及拟交由 Worker 加速的函数，推荐附带 `(declare (eliscript ...))` 契约：
+     ```elisp
+     (defun my-project-score-items (items weight)
+       (declare (eliscript :pure t :portable t
+                           :params ((items vector) (weight number))
+                           :returns vector))
+       ...)
+     ```
+   - 标记 `:pure t :portable t` 的函数由静态分析器检验无宿主副作用，可安全用于可移植图裁剪（`eliscript-project-build-portable`）与双宿主协同计算。
+
+---
+
+## 十五、 关联技术规格参考
 
 本规范建立在仓库现有编译器、运行时与持久数据结构的工程积累之上，并将公开语法统一收敛到 100% Emacs 兼容内核与显式扩展体系：
 

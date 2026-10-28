@@ -25,9 +25,12 @@ rejected, and the union graph owns one versioned manifest identity.
 
 ## Paths And Containment
 
-All local source imports must resolve to regular files below `sourceRoot`.
-Direct traversal, symlink escape, output aliasing, and duplicate source aliases
-are rejected before writes. Output directories must not overwrite source files.
+Entry files and relative local source imports support both `.eli` (Eliscript
+platform modules) and `.el` (Emacs Lisp compatible / dual-host modules)
+extensions, emitting corresponding `.mjs` modules under `outDir`. All local
+source imports must resolve to regular files below `sourceRoot`. Direct
+traversal, symlink escape, output aliasing, and duplicate source aliases are
+rejected before writes. Output directories must not overwrite source files.
 
 ## Check And Build
 
