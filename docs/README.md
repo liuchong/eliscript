@@ -1,5 +1,7 @@
 # Core Documentation
 
+<img src="pages/assets/eliscript-logo-avocado.png" width="72" align="right" alt="Eliscript avocado edition logo">
+
 [Project README](../README.md) | [Specifications](../specs/README.md) |
 [Library API](pages/api.html)
 

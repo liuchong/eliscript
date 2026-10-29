@@ -93,6 +93,8 @@ edited ascent verified across all three output targets:
 
 ## Project Status
 
+<img src="docs/pages/assets/eliscript-avocado-badge.png" width="76" align="right" alt="Eliscript lambda badge">
+
 The retained core acceptance audit records **35 of 35 mandatory criteria
 passing, 0 incomplete, 0 failed**, with all five evidence groups complete and no
 blocking defects: [`acceptance/report.md`](acceptance/report.md). Implementation
