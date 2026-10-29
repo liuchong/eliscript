@@ -247,7 +247,8 @@
                                                (readFileSync (resolve che-root "lisp/core/che-mdp.el") "utf8"))
                                         fallback-align-source))
                               (module-source (compileCompatElispModule source
-                                                                       (js-object :moduleName "tests.generated.che-accelerated")))
+                                                                       (js-object :moduleName "tests.generated.che-accelerated"
+                                                                                  :runtime "../../runtime/emacs-compat.mjs")))
                               (directory (resolve project-root "dist/emacs-compat-tests"))
                               (output (resolve directory "che-accelerated.mjs")))
                          (js-call (expect (js-call module-source :startsWith "(module ")) :toBe t)

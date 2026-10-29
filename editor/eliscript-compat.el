@@ -188,26 +188,25 @@
 (defun eliscript-compat--collect-defined-functions (source)
   "Return a list of function symbol names defined at top level in SOURCE."
   (let ((names nil))
-    (with-temp-buffer
-      (insert source)
-      (goto-char (point-min))
-      (condition-case nil
-          (while t
-            (let ((form (read (current-buffer))))
-              (when (consp form)
-                (let ((head (car form))
-                      (second (nth 1 form)))
-                  (cond
-                   ((and (memq head '(defun cl-defun defun-case defun-bind defun-tail defun-async))
-                         (symbolp second))
-                    (cl-pushnew (symbol-name second) names :test #'equal))
-                   ((eq head 'progn)
-                    (dolist (sub (cdr form))
-                      (when (and (consp sub)
-                                 (memq (car sub) '(defun cl-defun defun-case defun-bind defun-tail defun-async))
-                                 (symbolp (nth 1 sub)))
-                        (cl-pushnew (symbol-name (nth 1 sub)) names :test #'equal)))))))))
-        (end-of-file nil)))
+    (cl-labels
+        ((walk (form)
+           (when (consp form)
+             (let ((head (car form))
+                   (second (nth 1 form)))
+               (cond
+                ((and (memq head '(defun cl-defun defsubst defun-case defun-bind defun-tail defun-async))
+                      (symbolp second))
+                 (cl-pushnew (symbol-name second) names :test #'equal))
+                ((memq head '(progn eval-and-compile eval-when-compile))
+                 (dolist (sub (cdr form))
+                   (walk sub))))))))
+      (with-temp-buffer
+        (insert source)
+        (goto-char (point-min))
+        (condition-case nil
+            (while t
+              (walk (read (current-buffer))))
+          (end-of-file nil))))
     (nreverse names)))
 
 (progn
@@ -251,7 +250,7 @@ the generated module.  The result is Eliscript, compiled like any other module."
       (concat
        "(module " (symbol-name (intern module-name)) "\n"
        "  (import \"eliscript/runtime/emacs-compat\""
-       " createCompatSession evalCompatProgram callCompatElisp invokeCompatFunction)\n"
+       " createCompatSession evalCompatProgram callCompatElisp evalCompatElisp invokeCompatFunction)\n"
        "  (defconst elisp-source " (eliscript-compat--eliscript-string source) ")\n"
        "  (defconst elisp-function-names (js-array"
        (mapconcat (lambda (name) (concat " " (eliscript-compat--eliscript-string name))) function-names "")
@@ -259,27 +258,56 @@ the generated module.  The result is Eliscript, compiled like any other module."
        "  (defconst session (createCompatSession))\n"
        "  (defconst loaded (evalCompatProgram elisp-source (js-object :session session)))\n"
        "  (defun callElisp (name arguments) (callCompatElisp session name arguments))\n"
+       "  (defun evalElisp (program) (evalCompatElisp session program))\n"
        "  (defun invokeElisp (name &rest arguments) (invokeCompatFunction session name arguments))\n"
        "  (defun elispFunctions () (js-call elisp-function-names :slice))\n"
-       "  (export callElisp invokeElisp elispFunctions))\n")))
+       "  (export callElisp evalElisp invokeElisp elispFunctions))\n")))
+
+  (defun eliscript-compat--rewrite-external-runtime-imports (out-mjs)
+    "Rewrite bare runtime imports in OUT-MJS to relative paths."
+    (let ((out-dir (file-name-as-directory
+                    (file-truename (file-name-directory (expand-file-name out-mjs)))))
+          (proj-dir (file-name-as-directory
+                     (file-truename eliscript-compat--project-directory))))
+      (unless (locate-dominating-file out-dir "node_modules/eliscript")
+        (let ((coding-system-for-read 'utf-8)
+              (coding-system-for-write 'utf-8-unix))
+          (with-temp-buffer
+            (insert-file-contents out-mjs)
+            (goto-char (point-min))
+            (while (re-search-forward "\"eliscript/runtime/\\([^\"]+\\)\"" nil t)
+              (let* ((sub (match-string 1))
+                     (sub-mjs (if (string-suffix-p ".mjs" sub) sub (concat sub ".mjs")))
+                     (target (expand-file-name (concat "runtime/" sub-mjs) proj-dir))
+                     (rel (file-relative-name target out-dir))
+                     (spec (if (string-prefix-p "." rel) rel (concat "./" rel))))
+                (replace-match (concat "\"" spec "\"") t t)))
+            (write-region (point-min) (point-max) out-mjs nil 'silent))))))
 
   (defun eliscript-compat-compile-elisp-module (el-files out-mjs-file)
     "Compile one or more unmodified EL-FILES into a Worker-ready OUT-MJS-FILE.
 The intermediate Eliscript module is written next to OUT-MJS-FILE with the
-extension .eli and compiled by the maintained Emacs Lisp Eliscript compiler.
-OUT-MJS-FILE must be inside a project that resolves the `eliscript' package.
+extension .eli (or .bundle.eli when an input file shares the same base name)
+and compiled by the maintained Emacs Lisp Eliscript compiler.
+When OUT-MJS-FILE is in an external project without `node_modules/eliscript',
+runtime imports are automatically rewritten to relative paths.
 Return the absolute path of OUT-MJS-FILE."
-    (let* ((files (if (listp el-files) el-files (list el-files)))
+    (let* ((files (mapcar #'expand-file-name
+                          (if (listp el-files) el-files (list el-files))))
            (combined
             (mapconcat
              (lambda (f)
                (with-temp-buffer
-                 (insert-file-contents (expand-file-name f))
+                 (insert-file-contents f)
                  (buffer-string)))
              files
              "\n"))
            (out-mjs (expand-file-name out-mjs-file))
-           (out-eli (concat (file-name-sans-extension out-mjs) ".eli"))
+           (default-eli (concat (file-name-sans-extension out-mjs) ".eli"))
+           (collision-p (member default-eli files))
+           (out-eli (if collision-p
+                        (concat (file-name-sans-extension out-mjs) ".bundle.eli")
+                      default-eli))
            (module-name (concat "eliscript.generated."
                                 (replace-regexp-in-string
                                  "[^A-Za-z0-9-]" "-" (file-name-base out-mjs)))))
@@ -287,13 +315,18 @@ Return the absolute path of OUT-MJS-FILE."
         (add-to-list 'load-path (expand-file-name "compiler" eliscript-compat--project-directory))
         (require 'eliscript))
       (make-directory (file-name-directory out-mjs) t)
-      (let ((coding-system-for-write 'utf-8-unix))
-        (with-temp-file out-eli
-          (insert (eliscript-compat--elisp-module-source
-                   combined
-                   (eliscript-compat--collect-defined-functions combined)
-                   module-name))))
-      (eliscript-compile-file out-eli out-mjs)
+      (unwind-protect
+          (progn
+            (let ((coding-system-for-write 'utf-8-unix))
+              (with-temp-file out-eli
+                (insert (eliscript-compat--elisp-module-source
+                         combined
+                         (eliscript-compat--collect-defined-functions combined)
+                         module-name))))
+            (eliscript-compile-file out-eli out-mjs)
+            (eliscript-compat--rewrite-external-runtime-imports out-mjs))
+        (when (and collision-p (file-exists-p out-eli))
+          (delete-file out-eli)))
       out-mjs))
 
   (defun eliscript-compat--native-function (fn-sym)
@@ -322,6 +355,31 @@ Worker call fails, the native definition of FN-SYM runs instead."
               (car (read-from-string reply)))
           (error (apply (eliscript-compat--native-function fn-sym) args)))
       (apply (eliscript-compat--native-function fn-sym) args)))
+
+  (defun eliscript-compat-offload-eval (worker mjs-file form)
+    "Evaluate Elisp FORM in MJS-FILE on WORKER, falling back to native `eval'."
+    (let ((program (if (stringp form)
+                       form
+                     (let ((print-length nil) (print-level nil)
+                           (print-circle nil) (print-escape-newlines nil))
+                       (prin1-to-string form)))))
+      (if (and worker
+               (fboundp 'eliscript-worker-live-p)
+               (eliscript-worker-live-p worker)
+               (fboundp 'eliscript-worker-call-sync))
+          (condition-case nil
+              (let ((reply (eliscript-worker-call-sync
+                            worker (expand-file-name mjs-file) "evalElisp"
+                            (list program))))
+                (unless (stringp reply)
+                  (error "Invalid Eliscript Worker eval reply"))
+                (car (read-from-string reply)))
+            (error (if (stringp form)
+                       (eliscript-compat-eval-string form)
+                     (eval form t))))
+        (if (stringp form)
+            (eliscript-compat-eval-string form)
+          (eval form t)))))
 
   (defun eliscript-compat-accelerate-function (fn-sym mjs-file &optional worker-getter predicate)
     "Install transparent Eliscript Worker acceleration on FN-SYM using MJS-FILE."

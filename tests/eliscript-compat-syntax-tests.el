@@ -1086,6 +1086,55 @@
          (dolist (file (list temp-el temp-eli temp-mjs (concat temp-mjs ".map")))
            (when (file-exists-p file) (delete-file file))))))))
 
+(ert-deftest eliscript-0-1-0-t16-external-project-compile-and-mixed-eli-el ()
+  "Verify compiling mixed .eli + .el into an external directory."
+  (eliscript-compat-tests--run-isolated
+   "T16-02" "T16"
+   (lambda ()
+     (let* ((ext-dir (make-temp-file "eliscript-ext-proj-" t))
+            (src-eli (expand-file-name "ext-bundle.eli" ext-dir))
+            (src-el (expand-file-name "ext-mod.el" ext-dir))
+            (out-mjs (expand-file-name "ext-bundle.mjs" ext-dir))
+            (worker nil))
+       (unwind-protect
+           (progn
+             (with-temp-file src-eli
+               (insert ";;; ext-bundle.eli --- Mixed Eliscript kernel -*- lexical-binding: t; -*-\n"
+                       "(require 'eliscript)\n"
+                       "(defun-bind ext-eli-sum ([a b])\n"
+                       "  (+ a b))\n"))
+             (with-temp-file src-el
+               (insert ";;; ext-mod.el --- Unmodified Elisp module -*- lexical-binding: t; -*-\n"
+                       "(require 'url-parse)\n"
+                       "(defun ext-elisp-host-and-sum (url-str pair)\n"
+                       "  (let ((u (url-generic-parse-url url-str)))\n"
+                       "    (list (url-host u) (url-port u) (ext-eli-sum pair))))\n"))
+             (let ((eli-before (with-temp-buffer
+                                 (insert-file-contents src-eli)
+                                 (buffer-string))))
+               (eliscript-compat-compile-elisp-module (list src-eli src-el) out-mjs)
+               (should (file-exists-p out-mjs))
+               ;; Input src-eli with matching base name must NOT be overwritten!
+               (should (equal (with-temp-buffer
+                                (insert-file-contents src-eli)
+                                (buffer-string))
+                              eli-before)))
+             (setq worker (eliscript-worker-start))
+             (should
+              (equal (eliscript-compat-offload-call
+                      worker out-mjs 'ext-elisp-host-and-sum
+                      "https://open.example.org:9443/path" [19 23])
+                     '("open.example.org" 9443 42)))
+             (should
+              (equal (eliscript-compat-offload-eval
+                      worker out-mjs
+                      '(ext-elisp-host-and-sum "http://example.com/a" [10 5]))
+                     '("example.com" 80 15))))
+         (when worker
+           (ignore-errors (eliscript-worker-stop worker)))
+         (when (file-directory-p ext-dir)
+           (delete-directory ext-dir t)))))))
+
 (provide 'eliscript-compat-syntax-tests)
 
 ;;; eliscript-compat-syntax-tests.el ends here

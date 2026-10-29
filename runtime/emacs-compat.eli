@@ -2676,6 +2676,74 @@
   (defun sf-interactive (session form env) nil)
   (defun sf-condition-case-unless-debug (session form env) (sf-condition-case session form env))
 
+  (defun sf-defvar-keymap (session form env)
+    (let ((sym (el-second form)))
+      (when (el-symobj? sym)
+        (js-call (get session :specials) :add sym)
+        (unless (js-call (get session :values) :has sym)
+          (js-call (get session :values) :set sym (el-list (el-intern "keymap")))))
+      sym))
+
+  (defun sf-define-derived-mode (session form env)
+    (let* ((mode (el-second form))
+           (mode-name (el-symbol-name mode))
+           (map-sym (el-intern (str mode-name "-map")))
+           (hook-sym (el-intern (str mode-name "-hook")))
+           (syntax-sym (el-intern (str mode-name "-syntax-table")))
+           (abbrev-sym (el-intern (str mode-name "-abbrev-table"))))
+      (js-call (get session :specials) :add map-sym)
+      (unless (js-call (get session :values) :has map-sym)
+        (js-call (get session :values) :set map-sym (el-list (el-intern "keymap"))))
+      (js-call (get session :specials) :add hook-sym)
+      (unless (js-call (get session :values) :has hook-sym)
+        (js-call (get session :values) :set hook-sym nil))
+      (js-call (get session :specials) :add syntax-sym)
+      (unless (js-call (get session :values) :has syntax-sym)
+        (js-call (get session :values) :set syntax-sym nil))
+      (js-call (get session :specials) :add abbrev-sym)
+      (unless (js-call (get session :values) :has abbrev-sym)
+        (js-call (get session :values) :set abbrev-sym nil))
+      (el-define-function session mode (lambda (&rest ignored) mode))
+      mode))
+
+  (defun sf-define-minor-mode (session form env)
+    (let* ((mode (el-second form))
+           (mode-name (el-symbol-name mode))
+           (map-sym (el-intern (str mode-name "-map")))
+           (hook-sym (el-intern (str mode-name "-hook"))))
+      (js-call (get session :specials) :add mode)
+      (unless (js-call (get session :values) :has mode)
+        (js-call (get session :values) :set mode nil))
+      (js-call (get session :specials) :add map-sym)
+      (unless (js-call (get session :values) :has map-sym)
+        (js-call (get session :values) :set map-sym (el-list (el-intern "keymap"))))
+      (js-call (get session :specials) :add hook-sym)
+      (unless (js-call (get session :values) :has hook-sym)
+        (js-call (get session :values) :set hook-sym nil))
+      (el-define-function session mode
+        (lambda (&optional arg)
+          (let ((next (if (or (nullish? arg) (eq arg (el-intern "toggle")))
+                          (el-bool (nil? (js-call (get session :values) :get mode)))
+                        (el-bool (or (not (el-number? arg)) (> (el-num arg) 0))))))
+            (js-call (get session :values) :set mode next)
+            next)))
+      mode))
+
+  (defun sf-gv-define-simple-setter (session form env)
+    (let ((name (el-second form))
+          (setter (el-third form)))
+      (js-call (get session :gvSetters) :set name (js-object :kind "simple" :setter setter))
+      name))
+
+  (defun sf-gv-define-setter (session form env)
+    (let ((name (el-second form))
+          (arglist (el-third form))
+          (body (el-rest-after form 2)))
+      (js-call (get session :gvSetters) :set name
+               (js-object :kind "expander"
+                          :fn (el-make-macro session arglist (el-list-to-array body) env (el-symbol-name name))))
+      name))
+
   (defun sf-defalias (session form env)
     (let ((name (el-eval session (el-second form) env))
           (definition (el-eval session (el-third form) env)))
@@ -2825,6 +2893,16 @@
                 (el-check-struct session record (get info :type))
                 (js-object :get (lambda () (aref (get record :items) (get info :index)))
                            :set (lambda (v) (put (get record :items) (get info :index) v) v))))
+            ((js-call (get session :gvSetters) :has head)
+              (let* ((info (js-call (get session :gvSetters) :get head))
+                     (evaled-args (js-call args :map (lambda (a) (el-eval session a env)))))
+                (if (= (get info :kind) "simple")
+                    (js-object :get (lambda () (el-call session head evaled-args))
+                               :set (lambda (v) (el-call session (get info :setter) (js-call evaled-args :concat (js-array v))) v))
+                  (js-object :get (lambda () (el-call session head evaled-args))
+                             :set (lambda (v)
+                                    (let ((expanded (funcall (get info :fn) (el-cons (el-list s-quote v) (get place :cdr)) env)))
+                                      (el-eval session expanded env)))))))
             ((js-call (get session :macros) :has head)
               (el-place session (el-macroexpand-1 session place env) env))
             (t (el-signal "error" (str "Unknown place form: " name))))))))
@@ -3950,6 +4028,141 @@
                    (when (> (+ width w) end) (setq width (+ end 1000000))))))
       (js-call out :join "")))
 
+  (defun el-regexp-opt (strings paren)
+    (let* ((items (el-list-to-array strings))
+           (unique (js-array)))
+      (js-call items :forEach
+               (lambda (s)
+                 (unless (el-string? s) (el-signal "wrong-type-argument" (el-intern "stringp") s))
+                 (unless (js-call unique :includes s) (js-call unique :push s))))
+      (js-call unique :sort
+               (lambda (a b)
+                 (if (/= (js-length b) (js-length a))
+                     (- (js-length b) (js-length a))
+                   (if (< a b) -1 (if (> a b) 1 0)))))
+      (let ((body (if (= (js-length unique) 0)
+                      "\\`a\\`"
+                    (js-call (js-call unique :map (lambda (s) (el-regexp-quote s))) :join "\\|"))))
+        (cond
+          ((or (nullish? paren) (nil? paren)) (str "\\(?:" body "\\)"))
+          ((el-sym-is paren "words") (str "\\<\\(" body "\\)\\>"))
+          ((el-sym-is paren "symbols") (str "\\_<\\(" body "\\)\\_>"))
+          ((el-string? paren) (str paren body "\\)"))
+          (t (str "\\(" body "\\)"))))))
+
+  (defun el-home-directory ()
+    (let ((p globalThis.process))
+      (if (or (nullish? p) (nullish? (get p :env)) (nullish? (get (get p :env) :HOME)))
+          "/root"
+        (get (get p :env) :HOME))))
+
+  (defun el-expand-tilde (path)
+    (cond
+      ((= path "~") (el-home-directory))
+      ((js-call path :startsWith "~/")
+        (str (js-call (el-home-directory) :replace (new globalThis.RegExp "/+$") "") (js-call path :slice 1)))
+      (t path)))
+
+  (defun el-normalize-file-path (path)
+    (let* ((abs (js-call path :startsWith "/"))
+           (trailing (and (> (js-length path) 1) (js-call path :endsWith "/")))
+           (parts (js-call path :split "/"))
+           (stack (js-array)))
+      (js-call parts :forEach
+               (lambda (part)
+                 (cond
+                   ((or (= part "") (= part ".")) nil)
+                   ((= part "..")
+                     (if (and (> (js-length stack) 0) (not (= (aref stack (1- (js-length stack))) "..")))
+                         (js-call stack :pop)
+                       (unless abs (js-call stack :push ".."))))
+                   (t (js-call stack :push part)))))
+      (let ((joined (js-call stack :join "/")))
+        (cond
+          (abs (str "/" joined (if (and trailing (> (js-length joined) 0)) "/" "")))
+          ((= joined "") (if trailing "./" "."))
+          (t (str joined (if trailing "/" "")))))))
+
+  (defun el-expand-file-name (session name dir)
+    (unless (el-string? name) (el-signal "wrong-type-argument" (el-intern "stringp") name))
+    (let* ((base-raw (if (or (nullish? dir) (nil? dir))
+                         (or (js-call (get session :values) :get (el-intern "default-directory")) "/")
+                       dir)))
+      (unless (el-string? base-raw) (el-signal "wrong-type-argument" (el-intern "stringp") base-raw))
+      (let ((expanded-name (el-expand-tilde name))
+            (expanded-base (el-expand-tilde base-raw)))
+        (if (js-call expanded-name :startsWith "/")
+            (el-normalize-file-path expanded-name)
+          (let ((abs-base (if (js-call expanded-base :startsWith "/")
+                              expanded-base
+                            (str "/" expanded-base))))
+            (el-normalize-file-path
+             (str (js-call abs-base :replace (new globalThis.RegExp "/?$") "/") expanded-name)))))))
+
+  (defun el-file-relative-name (session filename directory)
+    (let* ((target (js-call (el-expand-file-name session filename nil) :replace (new globalThis.RegExp "/+$") ""))
+           (base (js-call (el-expand-file-name session (if (or (nullish? directory) (nil? directory))
+                                                           (or (js-call (get session :values) :get (el-intern "default-directory")) "/")
+                                                         directory)
+                                               nil)
+                          :replace (new globalThis.RegExp "/+$") ""))
+           (t-parts (js-call (js-call target :split "/") :filter (lambda (s) (> (js-length s) 0))))
+           (b-parts (js-call (js-call base :split "/") :filter (lambda (s) (> (js-length s) 0))))
+           (common 0))
+      (while (and (< common (js-length t-parts))
+                  (< common (js-length b-parts))
+                  (= (aref t-parts common) (aref b-parts common)))
+        (setq common (1+ common)))
+      (let ((ups (js-array))
+            (i common))
+        (while (< i (js-length b-parts))
+          (js-call ups :push "..")
+          (setq i (1+ i)))
+        (let ((rel (js-call (js-call ups :concat (js-call t-parts :slice common)) :join "/")))
+          (if (= rel "") "." rel)))))
+
+  (defun el-file-name-sans-extension (f)
+    (unless (el-string? f) (el-signal "wrong-type-argument" (el-intern "stringp") f))
+    (let* ((slash (js-call f :lastIndexOf "/"))
+           (dir (if (< slash 0) "" (js-call f :slice 0 (1+ slash))))
+           (base (if (< slash 0) f (js-call f :slice (1+ slash))))
+           (dot (js-call base :lastIndexOf ".")))
+      (if (<= dot 0) f (str dir (js-call base :slice 0 dot)))))
+
+  (defun el-file-name-extension (f period)
+    (unless (el-string? f) (el-signal "wrong-type-argument" (el-intern "stringp") f))
+    (let* ((slash (js-call f :lastIndexOf "/"))
+           (base (if (< slash 0) f (js-call f :slice (1+ slash))))
+           (dot (js-call base :lastIndexOf ".")))
+      (if (or (<= dot 0) (= dot (1- (js-length base))))
+          nil
+        (js-call base :slice (if (and (not (nullish? period)) (not (nil? period))) dot (1+ dot))))))
+
+  (defun el-url-generic-parse-url (session url-str)
+    (if (not (el-string? url-str))
+        (el-call session (el-intern "make-url") (js-array))
+      (let ((m (js-call (new globalThis.RegExp "^(?:([A-Za-z][A-Za-z0-9+.-]*):)?(//(?:([^/:@#?]+)(?::([^/@#?]*))?@)?(\\[[^\\]]+\\]|[^/:?#]*)(?::([0-9]+))?)?([^#]*)(?:#(.*))?$")
+                        :exec url-str)))
+        (if (nil? m)
+            (el-call session (el-intern "make-url") (js-array (el-intern ":filename") url-str))
+          (let ((scheme (if (undefined? (aref m 1)) nil (js-call (aref m 1) :toLowerCase)))
+                (full (el-bool (not (undefined? (aref m 2)))))
+                (user (if (undefined? (aref m 3)) nil (aref m 3)))
+                (pass (if (undefined? (aref m 4)) nil (aref m 4)))
+                (host (if (undefined? (aref m 2)) nil (if (undefined? (aref m 5)) "" (aref m 5))))
+                (port (if (undefined? (aref m 6)) nil (Number/parseInt (aref m 6) 10)))
+                (file (if (undefined? (aref m 7)) "" (aref m 7)))
+                (targ (if (undefined? (aref m 8)) nil (aref m 8))))
+            (el-call session (el-intern "make-url")
+                     (js-array (el-intern ":type") scheme
+                               (el-intern ":user") user
+                               (el-intern ":password") pass
+                               (el-intern ":host") host
+                               (el-intern ":portsitory") port
+                               (el-intern ":filename") file
+                               (el-intern ":target") targ
+                               (el-intern ":fullness") full)))))))
+
   (defun el-install-kernel (session)
     (let ((d (lambda (name fn) (el-def session name fn))))
       ;; Arithmetic
@@ -4098,6 +4311,15 @@
       (funcall d "member" (lambda (x l) (el-member-with x l el-equal-test)))
       (funcall d "assq" (lambda (k l) (el-assoc-with k l el-eq-test)))
       (funcall d "assoc" (lambda (k l &optional testfn) (el-assoc-with k l (el-test-function session (el-opt testfn) el-equal-test))))
+      (funcall d "assq-delete-all"
+               (lambda (key alist)
+                 (el-list-from (js-call (el-list-to-array alist) :filter
+                                        (lambda (c) (not (and (el-cons? c) (el-eq-test (get c :car) key))))))))
+      (funcall d "assoc-delete-all"
+               (lambda (key alist &optional testfn)
+                 (let ((test (el-test-function session (el-opt testfn) el-equal-test)))
+                   (el-list-from (js-call (el-list-to-array alist) :filter
+                                          (lambda (c) (not (and (el-cons? c) (funcall test (get c :car) key)))))))))
       (funcall d "assoc-default" (lambda (k l) (let ((c (el-assoc-with k l el-equal-test))) (if (nil? c) nil (get c :cdr)))))
       (funcall d "assoc-string" (lambda (k l &optional fold)
                                   (el-assoc-with (el-symbol-name-or-string k) l
@@ -4231,6 +4453,7 @@
       (funcall d "prin1-to-string" (lambda (x &optional noescape) (el-prin1-string x (or (nullish? noescape) (nil? noescape)))))
       (funcall d "char-equal" (lambda (a b) (el-bool (= (el-downcase a) (el-downcase b)))))
       (funcall d "regexp-quote" (lambda (s) (el-regexp-quote s)))
+      (funcall d "regexp-opt" (lambda (strings &optional paren) (el-regexp-opt strings (el-opt paren))))
       (funcall d "string-match" (lambda (re s &optional start inhibit) (el-string-match session re s (el-opt start) t)))
       (funcall d "string-match-p" (lambda (re s &optional start) (el-string-match session re s (el-opt start) false)))
       (funcall d "match-beginning" (lambda (n) (el-match-position session n false)))
@@ -4433,14 +4656,85 @@
       (funcall d "insert-file-contents" (lambda (&rest ignored) (el-signal "file-error" "File access is not available in the JS runtime")))
       (el-def-alias session "insert-file-contents-literally" "insert-file-contents")
       (funcall d "file-exists-p" (lambda (f) nil))
-      (funcall d "expand-file-name" (lambda (name &optional dir)
-                                      (if (or (js-call name :startsWith "/") (nullish? dir) (nil? dir)) name
-                                        (str (js-call dir :replace (new globalThis.RegExp "/?$") "/") name))))
-      (funcall d "file-name-as-directory" (lambda (d) (if (js-call d :endsWith "/") d (str d "/"))))
-      (funcall d "file-name-nondirectory" (lambda (f) (js-call f :slice (1+ (js-call f :lastIndexOf "/")))))
-      (funcall d "file-name-directory" (lambda (f) (let ((i (js-call f :lastIndexOf "/"))) (if (< i 0) nil (js-call f :slice 0 (1+ i))))))
+      (funcall d "file-directory-p" (lambda (f) nil))
+      (funcall d "file-regular-p" (lambda (f) nil))
+      (funcall d "file-readable-p" (lambda (f) nil))
+      (funcall d "file-writable-p" (lambda (f) nil))
+      (funcall d "file-symlink-p" (lambda (f) nil))
+      (funcall d "file-accessible-directory-p" (lambda (f) nil))
+      (funcall d "directory-files" (lambda (&rest ignored) nil))
+      (funcall d "locate-library" (lambda (&rest ignored) nil))
+      (funcall d "executable-find" (lambda (&rest ignored) nil))
+      (funcall d "expand-file-name" (lambda (name &optional dir) (el-expand-file-name session name (el-opt dir))))
+      (funcall d "directory-file-name"
+               (lambda (dir)
+                 (unless (el-string? dir) (el-signal "wrong-type-argument" (el-intern "stringp") dir))
+                 (if (and (> (js-length dir) 1) (js-call dir :endsWith "/"))
+                     (js-call dir :replace (new globalThis.RegExp "/+$") "")
+                   dir)))
+      (funcall d "file-name-as-directory"
+               (lambda (dir)
+                 (unless (el-string? dir) (el-signal "wrong-type-argument" (el-intern "stringp") dir))
+                 (if (= dir "") "./" (if (js-call dir :endsWith "/") dir (str dir "/")))))
+      (funcall d "file-name-nondirectory"
+               (lambda (f)
+                 (unless (el-string? f) (el-signal "wrong-type-argument" (el-intern "stringp") f))
+                 (js-call f :slice (1+ (js-call f :lastIndexOf "/")))))
+      (funcall d "file-name-directory"
+               (lambda (f)
+                 (unless (el-string? f) (el-signal "wrong-type-argument" (el-intern "stringp") f))
+                 (let ((i (js-call f :lastIndexOf "/"))) (if (< i 0) nil (js-call f :slice 0 (1+ i))))))
+      (funcall d "file-name-sans-extension" (lambda (f) (el-file-name-sans-extension f)))
+      (funcall d "file-name-extension" (lambda (f &optional period) (el-file-name-extension f (el-opt period))))
+      (funcall d "file-name-base"
+               (lambda (f)
+                 (unless (el-string? f) (el-signal "wrong-type-argument" (el-intern "stringp") f))
+                 (el-file-name-sans-extension (js-call f :slice (1+ (js-call f :lastIndexOf "/"))))))
+      (funcall d "file-name-absolute-p"
+               (lambda (f)
+                 (unless (el-string? f) (el-signal "wrong-type-argument" (el-intern "stringp") f))
+                 (el-bool (or (js-call f :startsWith "/") (js-call f :startsWith "~")))))
+      (funcall d "file-relative-name" (lambda (filename &optional directory) (el-file-relative-name session filename (el-opt directory))))
+      (funcall d "file-truename" (lambda (filename &rest ignored) (el-expand-file-name session filename nil)))
+      (funcall d "temporary-file-directory"
+               (lambda ()
+                 (or (js-call (get session :values) :get (el-intern "temporary-file-directory")) "/tmp/")))
       (funcall d "getenv" (lambda (name) (let ((process globalThis.process))
                                            (if (nullish? process) nil (let ((v (get (get process :env) name))) (if (nullish? v) nil v))))))
+      (funcall d "emacs-pid" (lambda () (let ((p globalThis.process)) (if (and (not (nullish? p)) (el-integer? (get p :pid))) (get p :pid) 1))))
+      (funcall d "system-name" (lambda () "localhost"))
+      (funcall d "user-uid" (lambda () 1000))
+      (funcall d "user-real-uid" (lambda () 1000))
+      (funcall d "user-login-name" (lambda (&optional uid) "user"))
+      (funcall d "user-full-name" (lambda (&optional uid) "user"))
+      (funcall d "kbd" (lambda (keys) keys))
+      (funcall d "make-sparse-keymap" (lambda (&optional prompt) (el-list (el-intern "keymap"))))
+      (funcall d "make-keymap" (lambda (&optional prompt) (el-list (el-intern "keymap"))))
+      (funcall d "copy-keymap" (lambda (km) (el-copy-tree km t)))
+      (funcall d "keymapp" (lambda (x) (el-bool (and (el-cons? x) (el-sym-is (get x :car) "keymap")))))
+      (funcall d "set-keymap-parent" (lambda (km parent) parent))
+      (funcall d "keymap-parent" (lambda (km) nil))
+      (funcall d "define-key" (lambda (keymap key def &optional remove) def))
+      (funcall d "keymap-set" (lambda (keymap key definition) definition))
+      (funcall d "keymap-unset" (lambda (keymap key &optional remove) nil))
+      (funcall d "lookup-key" (lambda (keymap key &optional accept-default) nil))
+      (funcall d "keymap-lookup" (lambda (keymap key &rest ignored) nil))
+      (funcall d "autoload" (lambda (fn file &rest ignored) fn))
+      (funcall d "custom-autoload" (lambda (&rest ignored) nil))
+      (funcall d "display-graphic-p" (lambda (&optional display) nil))
+      (funcall d "called-interactively-p" (lambda (&optional kind) nil))
+      (funcall d "url-generic-parse-url" (lambda (url) (el-url-generic-parse-url session url)))
+      (funcall d "url-port"
+               (lambda (u)
+                 (let ((explicit (el-call session (el-intern "url-portsitory") (js-array u))))
+                   (if (el-integer? explicit)
+                       explicit
+                     (let ((scheme (el-call session (el-intern "url-type") (js-array u))))
+                       (cond ((= scheme "http") 80)
+                             ((= scheme "https") 443)
+                             ((= scheme "ftp") 21)
+                             ((= scheme "ssh") 22)
+                             (t 0)))))))
       (funcall d "call-process" (lambda (&rest ignored) 1))
       (funcall d "accept-process-output" (lambda (&rest ignored) nil))
       (funcall d "kill-emacs" (lambda (&rest ignored) (el-signal "error" "kill-emacs is not available in the JS runtime")))
@@ -4789,6 +5083,16 @@
   (defun el-require (session feature)
     (let ((name (el-symbol-name feature)))
       (el-activate-extension session name)
+      (when (and (not (js-call (get session :features) :has name))
+                 (not (js-call (get session :loadingFeatures) :has name))
+                 (js-call (get session :moduleSources) :has name))
+        (let ((entry (js-call (get session :moduleSources) :get name)))
+          (js-call (get session :loadingFeatures) :add name)
+          (try
+            (evalCompatProgram (get entry :source)
+                               (js-object :session session :filename (get entry :filename)))
+            (finally
+              (js-call (get session :loadingFeatures) :delete name)))))
       (js-call (get session :features) :add name)
       feature))
 
@@ -5697,7 +6001,12 @@
     (el-register (js-array "cl-assert") sf-cl-assert)
     (el-register (js-array "rx") sf-rx)
     (el-register (js-array "cl-the") sf-cl-the)
-    (el-register (js-array "declare" "declare-function" "cl-declaim" "cl-declare" "defvar-keymap") sf-declare)
+    (el-register (js-array "declare" "declare-function" "cl-declaim" "cl-declare" "gv-define-expander") sf-declare)
+    (el-register (js-array "defvar-keymap") sf-defvar-keymap)
+    (el-register (js-array "define-derived-mode") sf-define-derived-mode)
+    (el-register (js-array "define-minor-mode" "define-globalized-minor-mode") sf-define-minor-mode)
+    (el-register (js-array "gv-define-simple-setter") sf-gv-define-simple-setter)
+    (el-register (js-array "gv-define-setter") sf-gv-define-setter)
     (el-register (js-array "interactive") sf-interactive)
     (el-register (js-array "thread-first" "thread-last") sf-thread)
     (el-register (js-array "named-let") sf-named-let)
@@ -5756,7 +6065,8 @@
                               :specials (new globalThis.Set) :plists (new globalThis.Map) :features (new globalThis.Set)
                               :conditionParents (new globalThis.Map) :conditionMessages (new globalThis.Map)
                               :matchData nil :buffers (new globalThis.Map) :currentBuffer nil
-                              :structs (new globalThis.Map) :accessors (new globalThis.Map)
+                              :structs (new globalThis.Map) :accessors (new globalThis.Map) :gvSetters (new globalThis.Map)
+                              :moduleSources (new globalThis.Map) :loadingFeatures (new globalThis.Set)
                               :userDefinedFns (new globalThis.Set) :activeLibs (new globalThis.Set)
                               :structSchemas (new globalThis.Map) :protocols (new globalThis.Map) :multimethods (new globalThis.Map)
                               :modules (new globalThis.Map) :liveValueGetters (new globalThis.Map) :engineSlots (new globalThis.Map)
@@ -5772,8 +6082,16 @@
                          (js-array "most-positive-fixnum" 2305843009213693951) (js-array "most-negative-fixnum" -2305843009213693952)
                          (js-array "print-length" nil) (js-array "print-level" nil) (js-array "print-escape-newlines" nil)
                          (js-array "emacs-major-version" 31) (js-array "emacs-minor-version" 1) (js-array "system-type" (el-intern "gnu/linux"))
-                         (js-array "default-directory" "/") (js-array "kill-emacs-hook" nil) (js-array "lexical-binding" t)
-                         (js-array "buffer-file-name" nil) (js-array "load-file-name" nil) (js-array "standard-output" t))
+                         (js-array "default-directory" "/") (js-array "temporary-file-directory" "/tmp/")
+                         (js-array "command-line-args-left" nil) (js-array "process-environment" nil) (js-array "exec-path" nil)
+                         (js-array "kill-emacs-hook" nil) (js-array "lexical-binding" t)
+                         (js-array "buffer-file-name" nil) (js-array "load-file-name" nil) (js-array "standard-output" t)
+                         (js-array "global-map" (el-list (el-intern "keymap")))
+                         (js-array "special-mode-map" (el-list (el-intern "keymap")))
+                         (js-array "text-mode-map" (el-list (el-intern "keymap")))
+                         (js-array "prog-mode-map" (el-list (el-intern "keymap")))
+                         (js-array "diff-mode-map" (el-list (el-intern "keymap")))
+                         (js-array "minibuffer-local-map" (el-list (el-intern "keymap"))))
                :forEach
                (lambda (pair)
                  (js-call (get session :specials) :add (el-intern (aref pair 0)))
@@ -5781,9 +6099,13 @@
       (js-call (get session :values) :set (el-intern "json-special-chars")
                (el-list (el-cons 34 34) (el-cons 92 92) (el-cons 98 8) (el-cons 102 12) (el-cons 110 10) (el-cons 114 13) (el-cons 116 9)))
       (js-call (get session :specials) :add (el-intern "json-special-chars"))
-      (js-call (js-array "cl-lib" "seq" "subr-x" "json" "rx" "pcase" "map" "gv" "cl-macs" "macroexp" "nadvice") :forEach
+      (js-call (js-array "cl-lib" "seq" "subr-x" "json" "rx" "pcase" "map" "gv" "cl-macs" "macroexp" "nadvice" "url-parse" "url-util" "url-vars") :forEach
                (lambda (feature) (js-call (get session :features) :add feature)))
       (el-install-kernel session)
+      (el-eval-body session
+                    (el-read-all "(cl-defstruct (url (:constructor make-url) (:constructor url-create)) type user password host portsitory filename target attributes fullness silentness (use-cookies t))")
+                    (el-root-env))
+      (js-call (get session :userDefinedFns) :clear)
       session))
 
   (defvar default-session nil)
@@ -5803,9 +6125,26 @@
 
   (defun readAllForms (source) (el-read-all source))
 
+  (defun registerCompatModule (session feature source &optional filename)
+    (let ((target (if (nullish? session) (el-default-session) session))
+          (name (el-symbol-name-or-string feature)))
+      (js-call (get target :moduleSources) :set name
+               (js-object :source source :filename (el-opt filename)))
+      feature))
+
   (defun evalCompatProgram (source &optional options)
-    (let ((session (el-session-option options)) (env (el-root-env)))
-      (el-eval-body session (el-read-all source) env)))
+    (let* ((session (el-session-option options))
+           (env (el-root-env))
+           (filename (if (nullish? options) nil (el-opt (get options :filename))))
+           (load-sym (el-intern "load-file-name"))
+           (prev-load (js-call (get session :values) :get load-sym)))
+      (when (el-string? filename)
+        (js-call (get session :values) :set load-sym filename))
+      (try
+        (el-eval-body session (el-read-all source) env)
+        (finally
+          (when (el-string? filename)
+            (js-call (get session :values) :set load-sym prev-load))))))
 
   (defasync evalCompatProgramAsync (source &optional options)
     (evalCompatProgram source options))
@@ -5867,6 +6206,10 @@
     (let ((args (el-list-to-array (el-car (el-read-from-string arguments 0)))))
       (el-prin1-string (el-call session (el-intern name) args) t)))
 
+  (defun evalCompatElisp (session program)
+    ;; PROGRAM is an Elisp source string; evaluates it in SESSION and returns the printed result.
+    (el-prin1-string (evalCompatProgram program (js-object :session session)) t))
+
   (defun el-defined-function-names (forms)
     (let ((names (js-array)))
       (letfn ((walk (form)
@@ -5877,7 +6220,8 @@
                             (el-symobj? (el-second form)))
                         (let ((name (get (el-second form) :name)))
                           (unless (js-call names :includes name) (js-call names :push name))))
-                      ((= head "progn") (js-call (el-list-to-array (get form :cdr)) :forEach (lambda (f) (walk f)))))))))
+                      ((js-call (js-array "progn" "eval-and-compile" "eval-when-compile") :includes head)
+                        (js-call (el-list-to-array (get form :cdr)) :forEach (lambda (f) (walk f)))))))))
         (js-call forms :forEach (lambda (f) (walk f))))
       names))
 
@@ -5900,7 +6244,7 @@
 
   (defun compileCompatElispModule (source &optional options)
     ;; Return Eliscript module source evaluating SOURCE in its own session; the
-    ;; Eliscript compiler turns it into an ES module with callElisp/invokeElisp.
+    ;; Eliscript compiler turns it into an ES module with callElisp/invokeElisp/evalElisp.
     (let* ((module-name (if (or (nullish? options) (nullish? (get options :moduleName)))
                             "eliscript.generated.elisp-module" (get options :moduleName)))
            (runtime (if (or (nullish? options) (nullish? (get options :runtime)))
@@ -5908,16 +6252,17 @@
            (names (el-defined-function-names (el-read-all source))))
       (str "(module " module-name "\n"
            "  (import " (el-eliscript-string-literal runtime)
-           " createCompatSession evalCompatProgram callCompatElisp invokeCompatFunction)\n"
+           " createCompatSession evalCompatProgram callCompatElisp evalCompatElisp invokeCompatFunction)\n"
            "  (defconst elisp-source " (el-eliscript-string-literal source) ")\n"
            "  (defconst elisp-function-names (js-array"
            (js-call (js-call names :map (lambda (n) (str " " (el-eliscript-string-literal n)))) :join "") "))\n"
            "  (defconst session (createCompatSession))\n"
            "  (defconst loaded (evalCompatProgram elisp-source (js-object :session session)))\n"
            "  (defun callElisp (name arguments) (callCompatElisp session name arguments))\n"
+           "  (defun evalElisp (program) (evalCompatElisp session program))\n"
            "  (defun invokeElisp (name &rest arguments) (invokeCompatFunction session name arguments))\n"
            "  (defun elispFunctions () (js-call elisp-function-names :slice))\n"
-           "  (export callElisp invokeElisp elispFunctions))\n")))
+           "  (export callElisp evalElisp invokeElisp elispFunctions))\n")))
 
   ;; ------------------------------------------------------------------
   ;; WASM / ARM64 Native ABI kernels (canonical module bytes are data)
@@ -5952,6 +6297,8 @@
 
   (export JS_FALSE JS_NULL JS_UNDEFINED OPTION_NONE
           sym kw readAllForms valueEqual valueCompare
-          createCompatSession resetCompatState evalCompatProgram evalCompatProgramAsync compileCompatProgram
-          printCompatValue serializeCompatValue invokeCompatFunction callCompatElisp compileCompatElispModule
+          createCompatSession resetCompatState registerCompatModule
+          evalCompatProgram evalCompatProgramAsync compileCompatProgram
+          printCompatValue serializeCompatValue invokeCompatFunction
+          callCompatElisp evalCompatElisp compileCompatElispModule
           compileCompatAbiWasm runCompatAbiWasm runCompatAbiNative getCompatTimingReport))
