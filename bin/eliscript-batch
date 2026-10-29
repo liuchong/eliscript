@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+set -eu
+
+SOURCE="$0"
+while [ -L "$SOURCE" ]; do
+  DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)
+  SOURCE=$(readlink "$SOURCE")
+  case "$SOURCE" in
+    /*) ;;
+    *) SOURCE="$DIR/$SOURCE" ;;
+  esac
+done
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)
+PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
+: "${ELISCRIPT_BATCH_RUNTIME:=node}"
+
+COMPAT_ELI="$PROJECT_DIR/runtime/emacs-compat.eli"
+COMPAT_MJS="$PROJECT_DIR/runtime/emacs-compat.mjs"
+if [ ! -f "$COMPAT_MJS" ] || [ "$COMPAT_ELI" -nt "$COMPAT_MJS" ]; then
+  "$PROJECT_DIR/bin/eliscript" --source-map --output "$COMPAT_MJS" "$COMPAT_ELI" >/dev/null
+fi
+
+export ELISCRIPT_COMMAND_NAME=eliscript-batch
+export ELISCRIPT_INVOCATION_DIR="$SCRIPT_DIR/"
+exec "$ELISCRIPT_BATCH_RUNTIME" "$COMPAT_MJS" "$@"
