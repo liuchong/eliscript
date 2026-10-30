@@ -117,7 +117,7 @@
       (lambda (excluded) (js-call (does-not (get manifest :files)) :toContain excluded)))))
 
   (test "the released package keeps its metadata and manual publication gates" (async ()
-    (js-call (expect (get manifest :version)) :toBe "0.1.1")
+    (js-call (expect (get manifest :version)) :toBe "0.1.2")
     (js-call (expect (get manifest :description)) :toBeString)
     (js-call (expect (get (get manifest :repository) :url)) :toContain "github.com/liuchong/eliscript")
     (js-call (expect (get manifest :license)) :toBe "GPL-3.0-or-later")

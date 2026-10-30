@@ -8,11 +8,11 @@ mode for `.eli` source. Add this directory to `load-path` and require the mode:
 
 ## Installation
 
-The mode, its evaluation library, and the `0.1.0`/`0.1.1` `1+5+2` Emacs-compatible
+The mode, its evaluation library, and the `0.1.0`/`0.1.2` `1+5+2` Emacs-compatible
 extension libraries (`eliscript-compat.el`, `eliscript-contract.el`,
 `eliscript-data.el`, `eliscript-bind.el`, `eliscript-module.el`,
 `eliscript-async.el`, `eliscript-js.el`, and `eliscript-abi.el`) are ordinary
-Emacs packages. All carry `Version: 0.1.1`, `Package-Requires: ((emacs "29.1"))`,
+Emacs packages. All carry `Version: 0.1.2`, `Package-Requires: ((emacs "29.1"))`,
 and the standard `Author`, `Keywords`, and `URL` fields, so
 `package-buffer-info` reads them and an archive or a source checkout can
 install them.

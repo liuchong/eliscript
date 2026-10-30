@@ -260,6 +260,8 @@ continued" "esc\e"
           (file-name-absolute-p "/opt/app")
           (file-name-absolute-p "rel/path")
           (file-relative-name "/opt/app/lisp/core/a.el" "/opt/app/tests")
+          (abbreviate-file-name (expand-file-name "~/projects/demo"))
+          (abbreviate-file-name "rel/path")
           (condition-case nil (file-name-directory nil) (wrong-type-argument 'wta-ok))
           (keymapp t13-sample-keymap)
           (keymapp t13-sample-major-mode-map)

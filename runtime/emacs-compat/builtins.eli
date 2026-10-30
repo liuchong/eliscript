@@ -1230,6 +1230,15 @@
                            (setq i (1+ i)))
                          found))))))
       (funcall d "expand-file-name" (lambda (name &optional dir) (el-expand-file-name session name (el-opt dir))))
+      (funcall d "abbreviate-file-name"
+               (lambda (filename)
+                 (unless (el-string? filename) (el-signal "wrong-type-argument" (el-intern "stringp") filename))
+                 (let ((home (let ((h (el-call session (el-intern "getenv") (js-array "HOME"))))
+                               (if (el-string? h) (js-call h :replace (new globalThis.RegExp "/+$") "") ""))))
+                   (if (and (> (js-length home) 0)
+                            (or (= filename home) (js-call filename :startsWith (str home "/"))))
+                       (str "~" (js-call filename :slice (js-length home)))
+                     filename))))
       (funcall d "directory-file-name"
                (lambda (dir)
                  (unless (el-string? dir) (el-signal "wrong-type-argument" (el-intern "stringp") dir))
