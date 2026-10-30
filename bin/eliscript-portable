@@ -1,7 +1,16 @@
 #!/usr/bin/env sh
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SOURCE="$0"
+while [ -L "$SOURCE" ]; do
+  DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)
+  SOURCE=$(readlink "$SOURCE")
+  case "$SOURCE" in
+    /*) ;;
+    *) SOURCE="$DIR/$SOURCE" ;;
+  esac
+done
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)
 PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
 : "${BUN:=bun}"
 : "${ELISCRIPT_BOOTSTRAP_MODULE_DIR:=$PROJECT_DIR/dist/bootstrap}"
@@ -13,5 +22,10 @@ if [ ! -f "$ELISCRIPT_BOOTSTRAP_MODULE_DIR/compiler.mjs" ]; then
   exit 1
 fi
 
+HOST_DIR="$PROJECT_DIR/dist/host-cli"
+if [ -f "$PROJECT_DIR/bootstrap/host/bun.mjs" ]; then
+  HOST_DIR="$PROJECT_DIR/bootstrap/host"
+fi
+
 export ELISCRIPT_BOOTSTRAP_MODULE_DIR
-exec "$BUN" "$PROJECT_DIR/bootstrap/host/bun.mjs" "$@"
+exec "$BUN" "$HOST_DIR/bun.mjs" "$@"

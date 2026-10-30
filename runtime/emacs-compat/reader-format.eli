@@ -1,0 +1,1093 @@
+(module eliscript.runtime.emacs-compat.reader-format
+  ;;; reader-format.eli --- S-expression reader, format, JSON, SHA-256, path, and time utilities
+
+  (import "./core.eli" el-astral? el-bytes-string el-car el-char-string el-char-to-unit el-char-width el-cons el-cons? el-encode-utf8 el-equal-p el-format-g el-global-value el-hash-key el-hash-table-literal el-hash-table? el-integer-string el-integer? el-intern el-keyword? el-list el-list-from el-list-to-array el-make-float el-make-hash-table el-make-signal el-make-symbol el-mod-int el-num el-number-string el-number? el-opt el-pad-exponent el-prin1-string el-puthash el-seq-items el-signal el-string-bytes-array el-string-codes el-string-from-codes el-string-length el-string? el-substring el-sym-is el-symbol-name el-symbol? el-symobj? el-unit-to-char el-upcase el-vector el-vector? s-backquote s-comma s-comma-at s-function s-quote)
+  (import "./regexp-buffer.eli" el-buffer-substring el-point-max el-regexp-quote)
+
+
+  ;; ------------------------------------------------------------------
+  ;; Reader (Emacs Lisp syntax)
+  ;; ------------------------------------------------------------------
+
+  (defconst delimiter-pattern (new globalThis.RegExp "[\\s()\\[\\]\";'`,]" "u"))
+
+  (defconst integer-token (new globalThis.RegExp "^[+-]?[0-9]+\\.?$"))
+
+  (defconst float-token
+    (new globalThis.RegExp "^[+-]?(?:[0-9]+\\.[0-9]+|[0-9]*\\.[0-9]+|[0-9]+)(?:e[+-]?[0-9]+)?$"))
+
+  (defconst special-float-token (new globalThis.RegExp "^([+-]?[0-9.]+)e\\+(INF|NaN)$"))
+
+
+  (defconst whitespace-char (new globalThis.RegExp "\\s" "u"))
+
+  (defconst hex-digit-char (new globalThis.RegExp "^[0-9a-fA-F]$"))
+
+  (defconst octal-digit-char (new globalThis.RegExp "^[0-7]$"))
+
+
+  (defun el-read-error (message) (throw (el-make-signal "invalid-read-syntax" (js-array message))))
+
+
+  (defun el-reader (source)
+    (js-object :source source :pos 0 :length (js-length source)))
+
+
+  (defun el-reader-peek (reader)
+    (if (>= (get reader :pos) (get reader :length)) nil
+      (String/fromCodePoint (js-call (get reader :source) :codePointAt (get reader :pos)))))
+
+
+  (defun el-reader-next (reader)
+    (let ((ch (el-reader-peek reader)))
+      (unless (nil? ch) (put reader :pos (+ (get reader :pos) (js-length ch))))
+      ch))
+
+
+  (defun el-skip-blank (reader)
+    (let ((done false))
+      (while (not done)
+        (let ((ch (el-reader-peek reader)))
+          (cond
+            ((nil? ch) (setq done t))
+            ((js-call whitespace-char :test ch) (el-reader-next reader))
+            ((or (= ch ";")
+                 (and (= ch "#") (= (js-call (get reader :source) :charAt (1+ (get reader :pos))) "!")))
+              (while (and (not (nil? (el-reader-peek reader))) (/= (el-reader-peek reader) "\n"))
+                (el-reader-next reader)))
+            (t (setq done t)))))))
+
+
+  (defun el-hex-value (text) (Number/parseInt text 16))
+
+
+  (defun el-read-escape (reader in-string)
+    ;; After a backslash.  Return a code point, or -1 for an ignored escape.
+    (let ((ch (el-reader-next reader)))
+      (cond
+        ((nil? ch) (throw (el-make-signal "end-of-file" (js-array))))
+        ((= ch "a") 7) ((= ch "b") 8) ((= ch "t") 9) ((= ch "n") 10) ((= ch "v") 11)
+        ((= ch "f") 12) ((= ch "r") 13) ((= ch "e") 27) ((= ch "d") 127)
+        ((= ch "s") (if (= (el-reader-peek reader) "-")
+                        (progn (el-reader-next reader) (bit-or (el-read-char-body reader) 8388608))
+                      32))
+        ((and in-string (or (= ch "\n") (= ch " "))) -1)
+        ((= ch "x")
+          (let ((digits ""))
+            (while (and (not (nil? (el-reader-peek reader)))
+                        (js-call hex-digit-char :test (el-reader-peek reader)))
+              (setq digits (str digits (el-reader-next reader))))
+            (when (and in-string (= (el-reader-peek reader) "\\")
+                       (= (js-call (get reader :source) :charAt (1+ (get reader :pos))) " "))
+              (put reader :pos (+ (get reader :pos) 2)))
+            (if (= digits "") 0 (el-hex-value digits))))
+        ((or (= ch "u") (= ch "U"))
+          (let ((count (if (= ch "u") 4 8)) (digits "") (index 0))
+            (while (< index count)
+              (setq digits (str digits (el-reader-next reader)))
+              (setq index (1+ index)))
+            (el-hex-value digits)))
+        ((= ch "N")
+          (el-reader-next reader)
+          (let ((name ""))
+            (while (and (not (nil? (el-reader-peek reader))) (/= (el-reader-peek reader) "}"))
+              (setq name (str name (el-reader-next reader))))
+            (el-reader-next reader)
+            (if (js-call name :startsWith "U+") (el-hex-value (js-call name :slice 2)) 65533)))
+        ((js-call octal-digit-char :test ch)
+          (let ((digits ch))
+            (while (and (< (js-length digits) 3) (not (nil? (el-reader-peek reader)))
+                        (js-call octal-digit-char :test (el-reader-peek reader)))
+              (setq digits (str digits (el-reader-next reader))))
+            (Number/parseInt digits 8)))
+        ((and (= ch "C") (= (el-reader-peek reader) "-"))
+          (el-reader-next reader)
+          (el-control-char (el-read-char-body reader)))
+        ((= ch "^") (el-control-char (el-read-char-body reader)))
+        ((and (= ch "M") (= (el-reader-peek reader) "-"))
+          (el-reader-next reader)
+          (bit-or (el-read-char-body reader) 134217728))
+        ((and (or (= ch "S") (= ch "H") (= ch "A")) (= (el-reader-peek reader) "-"))
+          (el-reader-next reader)
+          (el-read-char-body reader))
+        (t (js-call ch :codePointAt 0)))))
+
+
+  (defun el-control-char (code)
+    (cond ((= code 63) 127)
+          ((and (>= code 97) (<= code 122)) (- code 96))
+          ((and (>= code 64) (<= code 95)) (- code 64))
+          (t (bit-or code 67108864))))
+
+
+  (defun el-read-char-body (reader)
+    (let ((ch (el-reader-next reader)))
+      (cond ((nil? ch) (throw (el-make-signal "end-of-file" (js-array))))
+            ((= ch "\\") (el-read-escape reader false))
+            (t (js-call ch :codePointAt 0)))))
+
+
+  (defun el-read-string (reader)
+    (let ((parts (js-array)) (done false))
+      (while (not done)
+        (let ((ch (el-reader-next reader)))
+          (cond
+            ((nil? ch) (throw (el-make-signal "end-of-file" (js-array))))
+            ((= ch "\"") (setq done t))
+            ((= ch "\\")
+              (let ((code (el-read-escape reader t)))
+                (when (>= code 0)
+                  (js-call parts :push (el-char-string (if (> code 4194303) (bit-and code 4194303) code))))))
+            (t (js-call parts :push ch)))))
+      (js-call parts :join "")))
+
+
+  (defun el-read-token (reader)
+    ;; Return {text, escaped}
+    (let ((text "") (escaped false) (done false))
+      (while (not done)
+        (let ((ch (el-reader-peek reader)))
+          (cond
+            ((nil? ch) (setq done t))
+            ((= ch "\\")
+              (el-reader-next reader)
+              (setq escaped t)
+              (let ((next (el-reader-next reader)))
+                (unless (nil? next) (setq text (str text next)))))
+            ((js-call delimiter-pattern :test ch) (setq done t))
+            (t (setq text (str text (el-reader-next reader)))))))
+      (js-object :text text :escaped escaped)))
+
+
+  (defun el-parse-atom (token)
+    (let ((text (get token :text)))
+      (cond
+        ((get token :escaped) (el-intern text))
+        ((js-call integer-token :test text)
+          (Number/parseInt (js-call text :replace "." "") 10))
+        ((js-call float-token :test text)
+          (el-make-float (Number/parseFloat text)))
+        ((js-call special-float-token :test text)
+          (let ((match (js-call special-float-token :exec text)))
+            (if (= (aref match 2) "NaN") globalThis.NaN
+              (if (js-call (aref match 1) :startsWith "-") (- 0 globalThis.Infinity) globalThis.Infinity))))
+        (t (el-intern text)))))
+
+
+  (defun el-read-radix (reader radix)
+    (let ((token (get (el-read-token reader) :text)))
+      (let ((value (Number/parseInt token radix)))
+        (when (Number/isNaN value) (el-read-error (str "integer, radix " radix)))
+        value)))
+
+
+  (defun el-read-sequence (reader close)
+    ;; Read forms up to CLOSE; return {items, tail}
+    (let ((items (js-array)) (tail nil) (done false))
+      (while (not done)
+        (el-skip-blank reader)
+        (let ((ch (el-reader-peek reader)))
+          (cond
+            ((nil? ch) (throw (el-make-signal "end-of-file" (js-array))))
+            ((= ch close) (el-reader-next reader) (setq done t))
+            ((and (= close ")") (= ch ".")
+                  (let ((after (js-call (get reader :source) :charAt (1+ (get reader :pos)))))
+                    (or (= after "") (js-call delimiter-pattern :test after))))
+              (el-reader-next reader)
+              (setq tail (el-read-form reader))
+              (el-skip-blank reader)
+              (unless (= (el-reader-next reader) ")") (el-read-error ". in wrong context"))
+              (setq done t))
+            (t (js-call items :push (el-read-form reader))))))
+      (js-object :items items :tail tail)))
+
+
+  (defun el-read-form (reader)
+    (el-skip-blank reader)
+    (let ((ch (el-reader-next reader)))
+      (cond
+        ((nil? ch) (throw (el-make-signal "end-of-file" (js-array))))
+        ((= ch "(")
+          (let ((parts (el-read-sequence reader ")")))
+            (el-list-from (get parts :items) (get parts :tail))))
+        ((= ch "[") (el-vector (get (el-read-sequence reader "]") :items)))
+        ((or (= ch ")") (= ch "]")) (el-read-error ch))
+        ((= ch "\"") (el-read-string reader))
+        ((= ch "?") (el-read-char-body reader))
+        ((= ch "'") (el-list s-quote (el-read-form reader)))
+        ((= ch "`") (el-list s-backquote (el-read-form reader)))
+        ((= ch ",")
+          (if (= (el-reader-peek reader) "@")
+              (progn (el-reader-next reader) (el-list s-comma-at (el-read-form reader)))
+            (el-list s-comma (el-read-form reader))))
+        ((= ch "#") (el-read-dispatch reader))
+        (t
+          (put reader :pos (- (get reader :pos) (js-length ch)))
+          (el-parse-atom (el-read-token reader))))))
+
+
+  (defun el-read-dispatch (reader)
+    (let ((ch (el-reader-peek reader)))
+      (cond
+        ((= ch "'") (el-reader-next reader) (el-list s-function (el-read-form reader)))
+        ((or (= ch "x") (= ch "X")) (el-reader-next reader) (el-read-radix reader 16))
+        ((or (= ch "o") (= ch "O")) (el-reader-next reader) (el-read-radix reader 8))
+        ((or (= ch "b") (= ch "B")) (el-reader-next reader) (el-read-radix reader 2))
+        ((= ch "#") (el-reader-next reader) (el-intern ""))
+        ((= ch ":") (el-reader-next reader) (el-make-symbol (get (el-read-token reader) :text)))
+        ((= ch "s")
+          (el-reader-next reader)
+          (unless (= (el-reader-next reader) "(") (el-read-error "#s"))
+          (let ((items (get (el-read-sequence reader ")") :items)))
+            (if (and (> (js-length items) 0) (el-sym-is (aref items 0) "hash-table"))
+                (el-hash-table-literal items)
+              (js-object :kind "record" :items items))))
+        ((= ch "&")
+          (el-reader-next reader)
+          (el-read-token reader)
+          (el-read-string reader))
+        ((js-call (new globalThis.RegExp "^[0-9]$") :test ch)
+          (let ((digits ""))
+            (while (js-call (new globalThis.RegExp "^[0-9]$") :test (or (el-reader-peek reader) ""))
+              (setq digits (str digits (el-reader-next reader))))
+            (let ((marker (el-reader-next reader)))
+              (cond
+                ((or (= marker "r") (= marker "R")) (el-read-radix reader (Number/parseInt digits 10)))
+                ((= marker "=") (el-read-form reader))
+                ((= marker "#") nil)
+                (t (el-read-error (str "#" digits marker)))))))
+        ((= ch "@")
+          (el-reader-next reader)
+          (let ((count (get (el-read-token reader) :text)))
+            (put reader :pos (+ (get reader :pos) 1 (Number/parseInt count 10))))
+          (el-read-form reader))
+        ((= ch "[") (el-read-error "#[ byte-code objects are not supported"))
+        (t (el-read-error (str "#" ch))))))
+
+
+  (defun el-read-all (source)
+    (let ((reader (el-reader source)) (forms (js-array)) (done false))
+      (while (not done)
+        (el-skip-blank reader)
+        (if (>= (get reader :pos) (get reader :length))
+            (setq done t)
+          (js-call forms :push (el-read-form reader))))
+      forms))
+
+
+  (defun el-read-from-string (source start)
+    (let ((reader (el-reader source)))
+      (put reader :pos (el-char-to-unit source (if (nullish? start) 0 start)))
+      (let ((form (el-read-form reader)))
+        (el-cons form (el-unit-to-char source (get reader :pos))))))
+
+
+  ;; ------------------------------------------------------------------
+  ;; format
+  ;; ------------------------------------------------------------------
+
+  (defconst format-directive
+    (new globalThis.RegExp "%(?:([0-9]+)\\$)?([-+ #0]*)([0-9]*)(?:\\.([0-9]+))?([sSdoxXcefg%])" "g"))
+
+
+  (defun el-pad (text width left zero)
+    (let ((length (el-string-length text)))
+      (if (or (nil? width) (>= length width)) text
+        (let ((padding (js-call (if zero "0" " ") :repeat (- width length))))
+          (cond
+            (left (str text (js-call " " :repeat (- width length))))
+            ((and zero (or (js-call text :startsWith "-") (js-call text :startsWith "+")))
+              (str (js-call text :slice 0 1) padding (js-call text :slice 1)))
+            (t (str padding text)))))))
+
+
+  (defun el-format-exponent (x precision)
+    (el-pad-exponent (js-call x :toExponential precision)))
+
+
+  (defun el-format (session template args)
+    (let ((index 0))
+      (js-call template :replace format-directive
+               (lambda (whole field flags width precision spec)
+                 (if (= spec "%") "%"
+                   (let* ((position (if (undefined? field) index (1- (Number/parseInt field 10))))
+                          (value (if (< position (js-length args)) (aref args position)
+                                   (el-signal "error" "Not enough arguments for format string")))
+                          (left (>= (js-call flags :indexOf "-") 0))
+                          (zero (and (>= (js-call flags :indexOf "0") 0) (not left)))
+                          (plus (>= (js-call flags :indexOf "+") 0))
+                          (space (>= (js-call flags :indexOf " ") 0))
+                          (alternate (>= (js-call flags :indexOf "#") 0))
+                          (w (if (= width "") nil (Number/parseInt width 10)))
+                          (p (if (or (undefined? precision) (= precision "")) nil (Number/parseInt precision 10))))
+                     (setq index (1+ position))
+                     (let ((sign (lambda (text number)
+                                   (cond ((and plus (>= number 0) (not (js-call text :startsWith "-"))) (str "+" text))
+                                         ((and space (>= number 0) (not (js-call text :startsWith "-"))) (str " " text))
+                                         (t text)))))
+                       (cond
+                         ((or (= spec "s") (= spec "S"))
+                           (let ((text (el-prin1-string value (= spec "S"))))
+                             (el-pad (if (nil? p) text (el-substring text 0 (Math/min p (el-string-length text)))) w left false)))
+                         ((= spec "c") (el-pad (el-char-string (el-num value)) w left false))
+                         ((= spec "d")
+                           (let ((n (Math/trunc (el-num value))))
+                             (el-pad (funcall sign (el-integer-string n) n) w left zero)))
+                         ((or (= spec "o") (= spec "x") (= spec "X"))
+                           (let* ((n (Math/trunc (el-num value)))
+                                  (digits (js-call (Math/abs n) :toString (if (= spec "o") 8 16)))
+                                  (text (str (if (< n 0) "-" "") (if (= spec "X") (js-call digits :toUpperCase) digits))))
+                             (el-pad (if (and p (< (js-length text) p)) (js-call text :padStart p "0") text) w left zero)))
+                         ((= spec "f")
+                           (let ((n (el-num value)))
+                             (el-pad (funcall sign (js-call n :toFixed (if (nil? p) 6 p)) n) w left zero)))
+                         ((= spec "e")
+                           (let ((n (el-num value)))
+                             (el-pad (funcall sign (el-format-exponent n (if (nil? p) 6 p)) n) w left zero)))
+                         ((= spec "g")
+                           (let ((n (el-num value)))
+                             (el-pad (funcall sign (el-format-g n (if (nil? p) 6 p) alternate) n) w left zero)))
+                         (t whole)))))))))
+
+
+  ;; ------------------------------------------------------------------
+  ;; JSON (native json-parse-string/json-serialize and json.el json-encode)
+  ;; ------------------------------------------------------------------
+
+  (defun el-json-options (session args start)
+    (let ((options (js-object :objectType "hash-table" :arrayType "array" :keyType nil
+                              :nullObject (el-intern ":null") :falseObject (el-intern ":false")))
+          (index start))
+      (while (< index (js-length args))
+        (let ((key (el-symbol-name (aref args index))) (value (aref args (1+ index))))
+          (cond ((= key ":object-type") (put options :objectType (el-symbol-name value)))
+                ((= key ":array-type") (put options :arrayType (el-symbol-name value)))
+                ((= key ":null-object") (put options :nullObject value))
+                ((= key ":false-object") (put options :falseObject value))))
+        (setq index (+ index 2)))
+      options))
+
+
+  (defun el-json-read-options (session)
+    (let* ((obj-type (let ((v (el-global-value session (el-intern "json-object-type"))))
+                       (if (el-symobj? v) (get v :name) "alist")))
+           (arr-type (let ((v (el-global-value session (el-intern "json-array-type"))))
+                       (if (and (el-symobj? v) (= (get v :name) "list")) "list" "array")))
+           (key-type (let ((v (el-global-value session (el-intern "json-key-type"))))
+                       (if (and (el-symobj? v) (not (nil? v))) (get v :name) nil)))
+           (null-obj (el-global-value session (el-intern "json-null")))
+           (false-obj (el-global-value session (el-intern "json-false"))))
+      (js-object :objectType obj-type :arrayType arr-type :keyType key-type
+                 :nullObject null-obj :falseObject false-obj)))
+
+
+  (defun el-json-error (message position)
+    (throw (el-make-signal "json-parse-error" (js-array message position))))
+
+
+  (defun el-json-parse (session text options)
+    ;; Recursive descent parser that keeps integer/float distinction.
+    (let ((state (js-object :pos 0)) (n (js-length text)))
+      (letfn ((skip ()
+                (while (and (< (get state :pos) n)
+                            (>= (js-call " \t\n\r" :indexOf (js-call text :charAt (get state :pos))) 0))
+                  (put state :pos (1+ (get state :pos)))))
+              (expect-char (ch)
+                (skip)
+                (unless (= (js-call text :charAt (get state :pos)) ch)
+                  (el-json-error (str "expected " ch) (get state :pos)))
+                (put state :pos (1+ (get state :pos))))
+              (parse-string ()
+                (put state :pos (1+ (get state :pos)))
+                (let ((parts (js-array)) (done false))
+                  (while (not done)
+                    (when (>= (get state :pos) n) (el-json-error "unterminated string" (get state :pos)))
+                    (let ((ch (js-call text :charAt (get state :pos))))
+                      (put state :pos (1+ (get state :pos)))
+                      (cond
+                        ((= ch "\"") (setq done t))
+                        ((= ch "\\")
+                          (let ((e (js-call text :charAt (get state :pos))))
+                            (put state :pos (1+ (get state :pos)))
+                            (cond
+                              ((= e "n") (js-call parts :push "\n")) ((= e "t") (js-call parts :push "\t"))
+                              ((= e "r") (js-call parts :push "\r")) ((= e "b") (js-call parts :push "\b"))
+                              ((= e "f") (js-call parts :push "\f")) ((= e "/") (js-call parts :push "/"))
+                              ((= e "\\") (js-call parts :push "\\")) ((= e "\"") (js-call parts :push "\""))
+                              ((= e "u")
+                                (js-call parts :push
+                                         (String/fromCharCode (Number/parseInt (js-call text :slice (get state :pos) (+ (get state :pos) 4)) 16)))
+                                (put state :pos (+ (get state :pos) 4)))
+                              (t (el-json-error "bad escape" (get state :pos))))))
+                        ((< (js-call ch :charCodeAt 0) 32) (el-json-error "control character in string" (get state :pos)))
+                        (t (js-call parts :push ch)))))
+                  (js-call parts :join "")))
+              (parse-value ()
+                (skip)
+                (when (>= (get state :pos) n) (throw (el-make-signal "json-end-of-file" (js-array))))
+                (let ((ch (js-call text :charAt (get state :pos))))
+                  (cond
+                    ((= ch "{")
+                      (put state :pos (1+ (get state :pos)))
+                      (let ((entries (js-array)))
+                        (skip)
+                        (if (= (js-call text :charAt (get state :pos)) "}")
+                            (put state :pos (1+ (get state :pos)))
+                          (let ((more t))
+                            (while more
+                              (skip)
+                              (unless (= (js-call text :charAt (get state :pos)) "\"") (el-json-error "expected key" (get state :pos)))
+                              (let ((key (parse-string)))
+                                (expect-char ":")
+                                (js-call entries :push (js-array key (parse-value))))
+                              (skip)
+                              (let ((sep (js-call text :charAt (get state :pos))))
+                                (put state :pos (1+ (get state :pos)))
+                                (cond ((= sep "}") (setq more false))
+                                      ((not (= sep ",")) (el-json-error "expected , or }" (get state :pos))))))))
+                        (el-json-object options entries)))
+                    ((= ch "[")
+                      (put state :pos (1+ (get state :pos)))
+                      (let ((items (js-array)))
+                        (skip)
+                        (if (= (js-call text :charAt (get state :pos)) "]")
+                            (put state :pos (1+ (get state :pos)))
+                          (let ((more t))
+                            (while more
+                              (js-call items :push (parse-value))
+                              (skip)
+                              (let ((sep (js-call text :charAt (get state :pos))))
+                                (put state :pos (1+ (get state :pos)))
+                                (cond ((= sep "]") (setq more false))
+                                      ((not (= sep ",")) (el-json-error "expected , or ]" (get state :pos))))))))
+                        (if (= (get options :arrayType) "list") (el-list-from items) (el-vector items))))
+                    ((= ch "\"") (parse-string))
+                    ((js-call text :startsWith "true" (get state :pos)) (put state :pos (+ (get state :pos) 4)) t)
+                    ((js-call text :startsWith "false" (get state :pos)) (put state :pos (+ (get state :pos) 5)) (get options :falseObject))
+                    ((js-call text :startsWith "null" (get state :pos)) (put state :pos (+ (get state :pos) 4)) (get options :nullObject))
+                    (t
+                      (let* ((pattern (new globalThis.RegExp "-?(?:0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?" "y")))
+                        (put pattern :lastIndex (get state :pos))
+                        (let ((match (js-call pattern :exec text)))
+                          (when (nil? match) (el-json-error "unexpected token" (get state :pos)))
+                          (put state :pos (+ (get state :pos) (js-length (aref match 0))))
+                          (let ((number (Number/parseFloat (aref match 0))))
+                            (if (or (not (undefined? (aref match 1))) (not (undefined? (aref match 2))))
+                                (el-make-float number)
+                              number)))))))))
+        (let ((value (parse-value)))
+          (if (get options :allowTrailing)
+              (put options :endPos (get state :pos))
+            (progn
+              (skip)
+              (when (< (get state :pos) n) (throw (el-make-signal "json-trailing-content" (js-array (get state :pos)))))))
+          value))))
+
+
+  (defun el-json-object (options entries)
+    (let ((type (get options :objectType))
+          (ktype (get options :keyType)))
+      (cond
+        ((= type "alist")
+          (el-list-from
+           (js-call entries :map
+                    (lambda (e)
+                      (let ((k (cond ((= ktype "string") (aref e 0))
+                                     ((= ktype "keyword") (el-intern (str ":" (aref e 0))))
+                                     (t (el-intern (aref e 0))))))
+                        (el-cons k (aref e 1)))))))
+        ((= type "plist")
+          (let ((items (js-array)))
+            (js-call entries :forEach
+                     (lambda (e)
+                       (let ((k (cond ((= ktype "string") (aref e 0))
+                                      ((= ktype "symbol") (el-intern (aref e 0)))
+                                      (t (el-intern (str ":" (aref e 0)))))))
+                         (js-call items :push k)
+                         (js-call items :push (aref e 1)))))
+            (el-list-from items)))
+        (t (let ((table (el-make-hash-table "equal")))
+             (js-call entries :forEach
+                      (lambda (e) (when (undefined? (js-call (get table :entries) :get (el-hash-key table (aref e 0))))
+                                    (el-puthash (aref e 0) (aref e 1) table))))
+             table)))))
+
+
+  (defconst json-short-escapes
+    (new globalThis.Map (js-array (js-array 34 "\"") (js-array 92 "\\") (js-array 8 "b") (js-array 12 "f")
+                                  (js-array 10 "n") (js-array 13 "r") (js-array 9 "t"))))
+
+  (defconst default-json-special-chars
+    (el-list (el-cons 34 34) (el-cons 92 92) (el-cons 98 8) (el-cons 102 12)
+             (el-cons 110 10) (el-cons 114 13) (el-cons 116 9)))
+
+  (defconst json-escape-check-pattern (new globalThis.RegExp "[\"\\\\\\x00-\\x1f]"))
+
+  (defconst json-escape-replace-pattern (new globalThis.RegExp "[\"\\\\\\x00-\\x1f]" "g"))
+
+
+  (defun el-json-escape (text short-map)
+    ;; SHORT-MAP: host Map from code point to escape letter.
+    (if (= short-map json-short-escapes)
+        (if (not (js-call json-escape-check-pattern :test text))
+            (str "\"" text "\"")
+          (str "\""
+               (js-call text :replace json-escape-replace-pattern
+                        (lambda (ch)
+                          (let ((code (js-call ch :charCodeAt 0)))
+                            (if (js-call json-short-escapes :has code)
+                                (str "\\" (js-call json-short-escapes :get code))
+                              (str "\\u" (js-call (js-call code :toString 16) :padStart 4 "0"))))))
+               "\""))
+      (let ((out (js-array "\"")))
+        (js-call (Array/from text) :forEach
+                 (lambda (ch)
+                   (let ((code (js-call ch :codePointAt 0)))
+                     (cond
+                       ((js-call short-map :has code) (js-call out :push (str "\\" (js-call short-map :get code))))
+                       ((< code 32) (js-call out :push (str "\\u" (js-call (js-call code :toString 16) :padStart 4 "0"))))
+                       (t (js-call out :push ch))))))
+        (js-call out :push "\"")
+        (js-call out :join ""))))
+
+
+  (defun el-json-key (key)
+    (cond ((el-string? key) key)
+          ((el-keyword? key) (js-call (get key :name) :slice 1))
+          ((el-symobj? key) (get key :name))
+          (t (el-signal "wrong-type-argument" (el-intern "stringp") key))))
+
+
+  (defun el-alist? (value)
+    (if (not (el-cons? value)) false
+      (let ((cursor value) (ok t))
+        (while (and ok (el-cons? cursor))
+          (let ((cell (get cursor :car)))
+            (if (and (el-cons? cell) (or (el-symbol? (get cell :car)) (el-string? (get cell :car))))
+                (setq cursor (get cursor :cdr))
+              (setq ok false))))
+        ok)))
+
+  (defun el-plist-of-keywords? (value)
+    (if (not (el-cons? value)) false
+      (let ((cursor value) (ok t))
+        (while (and ok (el-cons? cursor))
+          (let ((next (get cursor :cdr)))
+            (if (and (el-keyword? (get cursor :car)) (el-cons? next))
+                (setq cursor (get next :cdr))
+              (setq ok false))))
+        (and ok (nil? cursor)))))
+
+
+  (defun el-json-serialize (session value options)
+    (letfn ((emit (v)
+              (cond
+                ((eq v t) "true")
+                ((eq v (get options :nullObject)) "null")
+                ((eq v (get options :falseObject)) "false")
+                ((nil? v) "{}")
+                ((el-string? v) (el-json-escape v json-short-escapes))
+                ((el-number? v) (el-number-string v))
+                ((el-hash-table? v)
+                  (let ((parts (js-array)))
+                    (js-call (get v :entries) :forEach
+                             (lambda (entry) (js-call parts :push (str (el-json-escape (el-json-key (aref entry 0)) json-short-escapes) ":" (emit (aref entry 1))))))
+                    (str "{" (js-call parts :join ",") "}")))
+                ((el-vector? v) (str "[" (js-call (js-call (get v :items) :map (lambda (x) (emit x))) :join ",") "]"))
+                ((el-plist-of-keywords? v)
+                  (let ((cursor v) (parts (js-array)) (seen (new globalThis.Set)))
+                    (while (el-cons? cursor)
+                      (let ((key (el-json-key (get cursor :car)))
+                            (next (get cursor :cdr)))
+                        (unless (js-call seen :has key)
+                          (js-call seen :add key)
+                          (js-call parts :push (str (el-json-escape key json-short-escapes) ":" (emit (get next :car)))))
+                        (setq cursor (get next :cdr))))
+                    (str "{" (js-call parts :join ",") "}")))
+                ((el-alist? v)
+                  (let ((cursor v) (parts (js-array)) (seen (new globalThis.Set)))
+                    (while (el-cons? cursor)
+                      (let* ((cell (get cursor :car))
+                             (key (el-json-key (get cell :car))))
+                        (unless (js-call seen :has key)
+                          (js-call seen :add key)
+                          (js-call parts :push (str (el-json-escape key json-short-escapes) ":" (emit (get cell :cdr)))))
+                        (setq cursor (get cursor :cdr))))
+                    (str "{" (js-call parts :join ",") "}")))
+                (t (el-signal "wrong-type-argument" (el-intern "json-value-p") v)))))
+      (el-encode-utf8 (emit value))))
+
+
+  (defun el-json-encode (session value)
+    ;; json.el semantics, honoring json-null, json-false and json-special-chars.
+    (cond
+      ((el-number? value) (el-number-string value))
+      ((eq value t) "true")
+      (t
+        (let* ((values (get session :values))
+               (json-null (js-call values :get (el-intern "json-null")))
+               (json-false (js-call values :get (el-intern "json-false"))))
+          (cond
+            ((and (not (undefined? json-false)) (eq value json-false)) "false")
+            ((or (nil? value) (and (not (undefined? json-null)) (eq value json-null))) "null")
+            (t
+              (let* ((special (js-call values :get (el-intern "json-special-chars")))
+                     (short (if (or (undefined? special)
+                                    (eq special default-json-special-chars)
+                                    (el-equal-p special default-json-special-chars 0))
+                                json-short-escapes
+                              (let ((m (new globalThis.Map)))
+                                (js-call (el-list-to-array special) :forEach
+                                         (lambda (cell) (js-call m :set (el-num (get cell :cdr)) (el-char-string (el-num (get cell :car))))))
+                                m))))
+                (if (el-string? value)
+                    (el-json-escape value short)
+                  (letfn ((emit (v)
+                            (cond
+                              ((eq v t) "true")
+                              ((and (not (undefined? json-false)) (eq v json-false)) "false")
+                              ((and (not (undefined? json-null)) (eq v json-null)) "null")
+                              ((nil? v) "null")
+                              ((el-string? v) (el-json-escape v short))
+                              ((el-number? v) (el-number-string v))
+                              ((el-symobj? v) (el-json-escape (get v :name) short))
+                              ((el-hash-table? v)
+                                (let ((parts (js-array)))
+                                  (js-call (get v :entries) :forEach
+                                           (lambda (entry) (js-call parts :push (str (el-json-escape (el-json-key (aref entry 0)) short) ":" (emit (aref entry 1))))))
+                                  (str "{" (js-call parts :join ",") "}")))
+                              ((el-vector? v) (str "[" (js-call (js-call (get v :items) :map (lambda (x) (emit x))) :join ",") "]"))
+                              ((el-alist? v)
+                                (let ((cursor v) (parts (js-array)))
+                                  (while (el-cons? cursor)
+                                    (let ((cell (get cursor :car)))
+                                      (js-call parts :push (str (el-json-escape (el-json-key (get cell :car)) short) ":" (emit (get cell :cdr))))
+                                      (setq cursor (get cursor :cdr))))
+                                  (str "{" (js-call parts :join ",") "}")))
+                              ((el-plist-of-keywords? v)
+                                (let ((cursor v) (parts (js-array)))
+                                  (while (el-cons? cursor)
+                                    (let ((next (get cursor :cdr)))
+                                      (js-call parts :push (str (el-json-escape (el-json-key (get cursor :car)) short) ":" (emit (get next :car))))
+                                      (setq cursor (get next :cdr))))
+                                  (str "{" (js-call parts :join ",") "}")))
+                              ((el-cons? v)
+                                (let ((cursor v) (parts (js-array)))
+                                  (while (el-cons? cursor)
+                                    (js-call parts :push (emit (get cursor :car)))
+                                    (setq cursor (get cursor :cdr)))
+                                  (str "[" (js-call parts :join ",") "]")))
+                              (t (el-signal "json-error" v)))))
+                    (emit value))))))))))
+
+
+  ;; ------------------------------------------------------------------
+  ;; SHA-256 (FIPS 180-4) over bytes, written with Eliscript word operations
+  ;; ------------------------------------------------------------------
+
+  (defconst sha256-k
+    (js-array 1116352408 1899447441 3049323471 3921009573 961987163 1508970993 2453635748 2870763221
+              3624381080 310598401 607225278 1426881987 1925078388 2162078206 2614888103 3248222580
+              3835390401 4022224774 264347078 604807628 770255983 1249150122 1555081692 1996064986
+              2554220882 2821834349 2952996808 3210313671 3336571891 3584528711 113926993 338241895
+              666307205 773529912 1294757372 1396182291 1695183700 1986661051 2177026350 2456956037
+              2730485921 2820302411 3259730800 3345764771 3516065817 3600352804 4094571909 275423344
+              430227734 506948616 659060556 883997877 958139571 1322822218 1537002063 1747873779
+              1955562222 2024104815 2227730452 2361852424 2428436474 2756734187 3204031479 3329325298))
+
+
+  (defun el-xor3 (a b c) (bit-xor (bit-xor a b) c))
+
+  (defun el-rotr (x n) (uint32 (bit-or (unsigned-bit-shift-right x n) (bit-shift-left x (- 32 n)))))
+
+
+  (defun el-sha256 (bytes)
+    (let* ((length (js-length bytes))
+           (data (js-call bytes :slice))
+           (bit-length (* length 8))
+           (h (js-array 1779033703 3144134277 1013904242 2773480762 1359893119 2600822924 528734635 1541459225))
+           (w (js-array)))
+      (js-call data :push 128)
+      (while (/= (% (js-length data) 64) 56) (js-call data :push 0))
+      (let ((high (Math/floor (/ bit-length 4294967296))) (low (uint32 bit-length)))
+        (js-call data :push (bit-and (unsigned-bit-shift-right high 24) 255) (bit-and (unsigned-bit-shift-right high 16) 255)
+                 (bit-and (unsigned-bit-shift-right high 8) 255) (bit-and high 255)
+                 (bit-and (unsigned-bit-shift-right low 24) 255) (bit-and (unsigned-bit-shift-right low 16) 255)
+                 (bit-and (unsigned-bit-shift-right low 8) 255) (bit-and low 255)))
+      (let ((offset 0))
+        (while (< offset (js-length data))
+          (let ((t-index 0))
+            (while (< t-index 64)
+              (if (< t-index 16)
+                  (let ((base (+ offset (* t-index 4))))
+                    (put w t-index (uint32 (+ (* (aref data base) 16777216) (* (aref data (+ base 1)) 65536)
+                                               (* (aref data (+ base 2)) 256) (aref data (+ base 3))))))
+                (let* ((w15 (aref w (- t-index 15))) (w2 (aref w (- t-index 2)))
+                       (s0 (el-xor3 (el-rotr w15 7) (el-rotr w15 18) (unsigned-bit-shift-right w15 3)))
+                       (s1 (el-xor3 (el-rotr w2 17) (el-rotr w2 19) (unsigned-bit-shift-right w2 10))))
+                  (put w t-index (uint32 (+ (aref w (- t-index 16)) s0 (aref w (- t-index 7)) s1)))))
+              (setq t-index (1+ t-index))))
+          (let ((a (aref h 0)) (b (aref h 1)) (c (aref h 2)) (d (aref h 3))
+                (e (aref h 4)) (f (aref h 5)) (g (aref h 6)) (hh (aref h 7)) (i 0))
+            (while (< i 64)
+              (let* ((s1 (el-xor3 (el-rotr e 6) (el-rotr e 11) (el-rotr e 25)))
+                     (ch (bit-xor (bit-and e f) (bit-and (bit-not e) g)))
+                     (temp1 (uint32 (+ hh s1 ch (aref sha256-k i) (aref w i))))
+                     (s0 (el-xor3 (el-rotr a 2) (el-rotr a 13) (el-rotr a 22)))
+                     (maj (el-xor3 (bit-and a b) (bit-and a c) (bit-and b c)))
+                     (temp2 (uint32 (+ s0 maj))))
+                (setq hh g) (setq g f) (setq f e)
+                (setq e (uint32 (+ d temp1)))
+                (setq d c) (setq c b) (setq b a)
+                (setq a (uint32 (+ temp1 temp2))))
+              (setq i (1+ i)))
+            (put h 0 (uint32 (+ (aref h 0) a))) (put h 1 (uint32 (+ (aref h 1) b)))
+            (put h 2 (uint32 (+ (aref h 2) c))) (put h 3 (uint32 (+ (aref h 3) d)))
+            (put h 4 (uint32 (+ (aref h 4) e))) (put h 5 (uint32 (+ (aref h 5) f)))
+            (put h 6 (uint32 (+ (aref h 6) g))) (put h 7 (uint32 (+ (aref h 7) hh))))
+          (setq offset (+ offset 64))))
+      (let ((digest (js-array)))
+        (js-call h :forEach
+                 (lambda (word)
+                   (js-call digest :push (bit-and (unsigned-bit-shift-right word 24) 255)
+                            (bit-and (unsigned-bit-shift-right word 16) 255)
+                            (bit-and (unsigned-bit-shift-right word 8) 255) (bit-and word 255))))
+        digest)))
+
+
+  (defun el-secure-hash (algorithm object start end binary)
+    (let ((name (el-symbol-name algorithm)))
+      (unless (= name "sha256") (el-signal "error" (str "Unsupported hash algorithm " name)))
+      (let* ((text (if (el-string? object) (el-substring object start end)
+                     (el-buffer-substring object (if (nullish? start) 1 start)
+                                          (if (nullish? end) (el-point-max object) end))))
+             (digest (el-sha256 (el-string-bytes-array text))))
+        (if (and (not (nullish? binary)) (not (nil? binary)))
+            (el-bytes-string digest)
+          (js-call (js-call digest :map (lambda (b) (js-call (js-call b :toString 16) :padStart 2 "0"))) :join "")))))
+
+
+  (defun el-number-from-string (string base)
+    (let* ((radix (if (nullish? base) 10 base))
+           (text (js-call string :replace (new globalThis.RegExp "^[ \\t]+") "")))
+      (if (= radix 10)
+          (let ((match (js-call (new globalThis.RegExp "^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?") :exec text)))
+            (if (nil? match) 0
+              (let ((token (aref match 0)))
+                (if (js-call (new globalThis.RegExp "^[+-]?[0-9]+\\.?$") :test token)
+                    (Number/parseInt token 10)
+                  (el-make-float (Number/parseFloat token))))))
+        (let ((value (Number/parseInt text radix))) (if (Number/isNaN value) 0 value)))))
+
+
+  (defun el-concat-pieces (args)
+    (js-call (js-call args :map (lambda (arg) (if (el-string? arg) arg (el-string-from-codes (el-seq-items arg))))) :join ""))
+
+
+  (defun el-compare-strings (s1 start1 end1 s2 start2 end2 ignore-case)
+    (if (and (or (nullish? ignore-case) (nil? ignore-case))
+             (not (el-astral? s1))
+             (not (el-astral? s2)))
+        (let* ((n1 (js-length s1))
+               (n2 (js-length s2))
+               (b1 (if (or (nullish? start1) (nil? start1)) 0 (Math/max 0 (Math/min n1 (el-num start1)))))
+               (e1 (if (or (nullish? end1) (nil? end1)) n1 (Math/max b1 (Math/min n1 (el-num end1)))))
+               (b2 (if (or (nullish? start2) (nil? start2)) 0 (Math/max 0 (Math/min n2 (el-num start2)))))
+               (e2 (if (or (nullish? end2) (nil? end2)) n2 (Math/max b2 (Math/min n2 (el-num end2)))))
+               (sub1 (js-call s1 :slice b1 e1))
+               (sub2 (js-call s2 :slice b2 e2)))
+          (if (= sub1 sub2)
+              t
+            (let ((len1 (js-length sub1)) (len2 (js-length sub2)) (idx 0) (res t))
+              (while (and (eq res t) (< idx (Math/max len1 len2)))
+                (cond
+                  ((>= idx len1) (setq res (- 0 (1+ idx))))
+                  ((>= idx len2) (setq res (1+ idx)))
+                  (t (let ((x (js-call sub1 :charCodeAt idx)) (y (js-call sub2 :charCodeAt idx)))
+                       (cond ((< x y) (setq res (- 0 (1+ idx))))
+                             ((> x y) (setq res (1+ idx)))))))
+                (setq idx (1+ idx)))
+              res)))
+      (let* ((a (el-string-codes (el-substring s1 (el-opt start1) (if (nullish? end1) nil (Math/min end1 (el-string-length s1))))))
+             (b (el-string-codes (el-substring s2 (el-opt start2) (if (nullish? end2) nil (Math/min end2 (el-string-length s2))))))
+             (index 0) (result t))
+        (while (and (eq result t) (< index (Math/max (js-length a) (js-length b))))
+          (cond
+            ((>= index (js-length a)) (setq result (- 0 (1+ index))))
+            ((>= index (js-length b)) (setq result (1+ index)))
+            (t (let ((x (aref a index)) (y (aref b index)))
+                 (when (and ignore-case (not (nil? ignore-case)))
+                   (setq x (el-upcase x)) (setq y (el-upcase y)))
+                 (cond ((< x y) (setq result (- 0 (1+ index))))
+                       ((> x y) (setq result (1+ index)))))))
+          (setq index (1+ index)))
+        result)))
+
+
+  (defun el-truncate-string-to-width (string end start padding ellipsis)
+    (let ((width 0) (out (js-array)) (start-column (if (nullish? start) 0 start)))
+      (js-call (Array/from string) :forEach
+               (lambda (ch)
+                 (let ((w (el-char-width (js-call ch :codePointAt 0))))
+                   (when (<= (+ width w) end)
+                     (when (>= width start-column) (js-call out :push ch))
+                     (setq width (+ width w)))
+                   (when (> (+ width w) end) (setq width (+ end 1000000))))))
+      (js-call out :join "")))
+
+
+  (defun el-regexp-opt (strings paren)
+    (let* ((items (el-list-to-array strings))
+           (unique (js-array)))
+      (js-call items :forEach
+               (lambda (s)
+                 (unless (el-string? s) (el-signal "wrong-type-argument" (el-intern "stringp") s))
+                 (unless (js-call unique :includes s) (js-call unique :push s))))
+      (js-call unique :sort
+               (lambda (a b)
+                 (if (/= (js-length b) (js-length a))
+                     (- (js-length b) (js-length a))
+                   (if (< a b) -1 (if (> a b) 1 0)))))
+      (let ((body (if (= (js-length unique) 0)
+                      "\\`a\\`"
+                    (js-call (js-call unique :map (lambda (s) (el-regexp-quote s))) :join "\\|"))))
+        (cond
+          ((or (nullish? paren) (nil? paren)) (str "\\(?:" body "\\)"))
+          ((el-sym-is paren "words") (str "\\<\\(" body "\\)\\>"))
+          ((el-sym-is paren "symbols") (str "\\_<\\(" body "\\)\\_>"))
+          ((el-string? paren) (str paren body "\\)"))
+          (t (str "\\(" body "\\)"))))))
+
+
+  (defun el-home-directory ()
+    (let ((p globalThis.process))
+      (if (or (nullish? p) (nullish? (get p :env)) (nullish? (get (get p :env) :HOME)))
+          "/root"
+        (get (get p :env) :HOME))))
+
+
+  (defun el-expand-tilde (path)
+    (cond
+      ((= path "~") (el-home-directory))
+      ((js-call path :startsWith "~/")
+        (str (js-call (el-home-directory) :replace (new globalThis.RegExp "/+$") "") (js-call path :slice 1)))
+      (t path)))
+
+
+  (defun el-normalize-file-path (path)
+    (let* ((abs (js-call path :startsWith "/"))
+           (trailing (and (> (js-length path) 1) (js-call path :endsWith "/")))
+           (parts (js-call path :split "/"))
+           (stack (js-array)))
+      (js-call parts :forEach
+               (lambda (part)
+                 (cond
+                   ((or (= part "") (= part ".")) nil)
+                   ((= part "..")
+                     (if (and (> (js-length stack) 0) (not (= (aref stack (1- (js-length stack))) "..")))
+                         (js-call stack :pop)
+                       (unless abs (js-call stack :push ".."))))
+                   (t (js-call stack :push part)))))
+      (let ((joined (js-call stack :join "/")))
+        (cond
+          (abs (str "/" joined (if (and trailing (> (js-length joined) 0)) "/" "")))
+          ((= joined "") (if trailing "./" "."))
+          (t (str joined (if trailing "/" "")))))))
+
+
+  (defun el-expand-file-name (session name dir)
+    (unless (el-string? name) (el-signal "wrong-type-argument" (el-intern "stringp") name))
+    (let* ((base-raw (if (or (nullish? dir) (nil? dir))
+                         (or (js-call (get session :values) :get (el-intern "default-directory")) "/")
+                       dir)))
+      (unless (el-string? base-raw) (el-signal "wrong-type-argument" (el-intern "stringp") base-raw))
+      (let ((expanded-name (el-expand-tilde name))
+            (expanded-base (el-expand-tilde base-raw)))
+        (if (js-call expanded-name :startsWith "/")
+            (el-normalize-file-path expanded-name)
+          (let ((abs-base (if (js-call expanded-base :startsWith "/")
+                              expanded-base
+                            (str "/" expanded-base))))
+            (el-normalize-file-path
+             (str (js-call abs-base :replace (new globalThis.RegExp "/?$") "/") expanded-name)))))))
+
+
+  (defun el-file-relative-name (session filename directory)
+    (let* ((target (js-call (el-expand-file-name session filename nil) :replace (new globalThis.RegExp "/+$") ""))
+           (base (js-call (el-expand-file-name session (if (or (nullish? directory) (nil? directory))
+                                                           (or (js-call (get session :values) :get (el-intern "default-directory")) "/")
+                                                         directory)
+                                               nil)
+                          :replace (new globalThis.RegExp "/+$") ""))
+           (t-parts (js-call (js-call target :split "/") :filter (lambda (s) (> (js-length s) 0))))
+           (b-parts (js-call (js-call base :split "/") :filter (lambda (s) (> (js-length s) 0))))
+           (common 0))
+      (while (and (< common (js-length t-parts))
+                  (< common (js-length b-parts))
+                  (= (aref t-parts common) (aref b-parts common)))
+        (setq common (1+ common)))
+      (let ((ups (js-array))
+            (i common))
+        (while (< i (js-length b-parts))
+          (js-call ups :push "..")
+          (setq i (1+ i)))
+        (let ((rel (js-call (js-call ups :concat (js-call t-parts :slice common)) :join "/")))
+          (if (= rel "") "." rel)))))
+
+
+  (defun el-file-name-sans-extension (f)
+    (unless (el-string? f) (el-signal "wrong-type-argument" (el-intern "stringp") f))
+    (let* ((slash (js-call f :lastIndexOf "/"))
+           (dir (if (< slash 0) "" (js-call f :slice 0 (1+ slash))))
+           (base (if (< slash 0) f (js-call f :slice (1+ slash))))
+           (dot (js-call base :lastIndexOf ".")))
+      (if (<= dot 0) f (str dir (js-call base :slice 0 dot)))))
+
+
+  (defun el-file-name-extension (f period)
+    (unless (el-string? f) (el-signal "wrong-type-argument" (el-intern "stringp") f))
+    (let* ((slash (js-call f :lastIndexOf "/"))
+           (base (if (< slash 0) f (js-call f :slice (1+ slash))))
+           (dot (js-call base :lastIndexOf ".")))
+      (if (or (<= dot 0) (= dot (1- (js-length base))))
+          nil
+        (js-call base :slice (if (and (not (nullish? period)) (not (nil? period))) dot (1+ dot))))))
+
+
+  ;; Time helpers
+  (defun el-time-to-ms (time)
+    (cond
+      ((or (nullish? time) (nil? time)) (js-call globalThis.Date :now))
+      ((el-number? time) (* (el-num time) 1000))
+      ((el-cons? time)
+        (let ((items (el-list-to-array time)))
+          (if (and (= (js-length items) 1) (not (nil? (get time :cdr))) (el-number? (get time :cdr)))
+              ;; (TICKS . HZ)
+              (* (/ (el-num (get time :car)) (el-num (get time :cdr))) 1000)
+            (let ((high (el-num (or (aref items 0) 0)))
+                  (low (el-num (or (aref items 1) 0)))
+                  (usec (el-num (or (aref items 2) 0))))
+              (+ (* (+ (* high 65536) low) 1000) (/ usec 1000))))))
+      (t (js-call globalThis.Date :now))))
+
+
+  (defun el-ms-to-time (ms)
+    (let* ((sec (Math/floor (/ ms 1000)))
+           (usec (* (- ms (* sec 1000)) 1000)))
+      (el-list (Math/floor (/ sec 65536)) (el-mod-int sec 65536) (Math/round usec) 0)))
+
+
+  (defun el-utc-zone? (zone)
+    (or (eq zone t) (= zone 0) (= zone "UTC") (= zone "UTC0") (= zone "Z")
+        (and (el-cons? zone) (= (el-car zone) 0))))
+
+
+  (defun el-format-time-string (fmt &optional time zone)
+    (let* ((ms (el-time-to-ms time))
+           (d (new globalThis.Date ms))
+           (utc (el-utc-zone? zone))
+           (pad2 (lambda (n) (js-call (str n) :padStart 2 "0")))
+           (year (if utc (js-call d :getUTCFullYear) (js-call d :getFullYear)))
+           (mon (1+ (if utc (js-call d :getUTCMonth) (js-call d :getMonth))))
+           (day (if utc (js-call d :getUTCDate) (js-call d :getDate)))
+           (hr (if utc (js-call d :getUTCHours) (js-call d :getHours)))
+           (mn (if utc (js-call d :getUTCMinutes) (js-call d :getMinutes)))
+           (sc (if utc (js-call d :getUTCSeconds) (js-call d :getSeconds)))
+           (dow (if utc (js-call d :getUTCDay) (js-call d :getDay)))
+           (days (js-array "Sun" "Mon" "Tue" "Wed" "Thu" "Fri" "Sat"))
+           (months (js-array "Jan" "Feb" "Mar" "Apr" "May" "Jun" "Jul" "Aug" "Sep" "Oct" "Nov" "Dec")))
+      (js-call fmt :replace (new globalThis.RegExp "%[YmdHMSzZsFTRabN%]" "g")
+               (lambda (spec)
+                 (cond
+                   ((= spec "%%") "%")
+                   ((= spec "%Y") (str year))
+                   ((= spec "%m") (funcall pad2 mon))
+                   ((= spec "%d") (funcall pad2 day))
+                   ((= spec "%H") (funcall pad2 hr))
+                   ((= spec "%M") (funcall pad2 mn))
+                   ((= spec "%S") (funcall pad2 sc))
+                   ((= spec "%F") (str year "-" (funcall pad2 mon) "-" (funcall pad2 day)))
+                   ((= spec "%T") (str (funcall pad2 hr) ":" (funcall pad2 mn) ":" (funcall pad2 sc)))
+                   ((= spec "%R") (str (funcall pad2 hr) ":" (funcall pad2 mn)))
+                   ((= spec "%s") (str (Math/floor (/ ms 1000))))
+                   ((= spec "%N") (str (js-call (str (el-mod-int (Math/floor ms) 1000)) :padStart 3 "0") "000000"))
+                   ((= spec "%a") (aref days dow))
+                   ((= spec "%b") (aref months (1- mon)))
+                   ((= spec "%Z") (if utc "UTC" "LOCAL"))
+                   ((= spec "%z")
+                     (if utc "+0000"
+                       (let* ((off (- 0 (js-call d :getTimezoneOffset)))
+                              (sign (if (>= off 0) "+" "-"))
+                              (abs-off (Math/abs off)))
+                         (str sign (funcall pad2 (Math/floor (/ abs-off 60))) (funcall pad2 (% abs-off 60))))))
+                   (t spec))))))
+
+
+  (defun el-parse-time-string (s)
+    (let ((m (js-call (new globalThis.RegExp "^\\s*(\\d{4})-(\\d{2})-(\\d{2})(?:[T\\s](\\d{2}):(\\d{2}):(\\d{2})(?:\\.\\d+)?(Z|[+-]\\d{2}:?\\d{2})?)?\\s*$")
+                      :exec (str s))))
+      (if (not (nil? m))
+          (let* ((year (Number/parseInt (aref m 1) 10))
+                 (mon (Number/parseInt (aref m 2) 10))
+                 (day (Number/parseInt (aref m 3) 10))
+                 (hr (if (undefined? (aref m 4)) 0 (Number/parseInt (aref m 4) 10)))
+                 (mn (if (undefined? (aref m 5)) 0 (Number/parseInt (aref m 5) 10)))
+                 (sc (if (undefined? (aref m 6)) 0 (Number/parseInt (aref m 6) 10)))
+                 (tz-raw (aref m 7))
+                 (tz (cond
+                       ((undefined? tz-raw) nil)
+                       ((= tz-raw "Z") 0)
+                       (t (let* ((clean (js-call tz-raw :replace ":" ""))
+                                 (sign (if (= (js-call clean :charAt 0) "-") -1 1))
+                                 (zh (Number/parseInt (js-call clean :slice 1 3) 10))
+                                 (zm (Number/parseInt (js-call clean :slice 3 5) 10)))
+                            (* sign (+ (* zh 3600) (* zm 60)))))))
+                 (dow (js-call (new globalThis.Date (Date/UTC year (1- mon) day)) :getUTCDay)))
+            (el-list sc mn hr day mon year dow nil tz))
+        (let ((parsed (Date/parse s)))
+          (if (Number/isNaN parsed)
+              (el-list nil nil nil nil nil nil nil -1 nil)
+            (let ((d (new globalThis.Date parsed)))
+              (el-list (js-call d :getUTCSeconds) (js-call d :getUTCMinutes) (js-call d :getUTCHours)
+                       (js-call d :getUTCDate) (1+ (js-call d :getUTCMonth)) (js-call d :getUTCFullYear)
+                       (js-call d :getUTCDay) nil 0)))))))
+
+
+  (defun el-encode-time (args)
+    (let* ((items (if (and (= (js-length args) 1) (el-cons? (aref args 0)))
+                      (el-list-to-array (aref args 0))
+                    args))
+           (sc (el-num (or (aref items 0) 0)))
+           (mn (el-num (or (aref items 1) 0)))
+           (hr (el-num (or (aref items 2) 0)))
+           (day (el-num (or (aref items 3) 1)))
+           (mon (el-num (or (aref items 4) 1)))
+           (year (el-num (or (aref items 5) 1970)))
+           (zone (if (>= (js-length items) 9) (aref items 8) (if (>= (js-length items) 7) (aref items 6) nil)))
+           (ms (cond
+                 ((el-utc-zone? zone) (Date/UTC year (1- mon) day hr mn sc))
+                 ((el-integer? zone) (- (Date/UTC year (1- mon) day hr mn sc) (* zone 1000)))
+                 (t (js-call (new globalThis.Date year (1- mon) day hr mn sc) :getTime)))))
+      (el-ms-to-time ms)))
+
+
+  (defun el-decode-time (&optional time zone form)
+    (let* ((ms (el-time-to-ms time))
+           (d (new globalThis.Date ms))
+           (utc (el-utc-zone? zone)))
+      (if utc
+          (el-list (js-call d :getUTCSeconds) (js-call d :getUTCMinutes) (js-call d :getUTCHours)
+                   (js-call d :getUTCDate) (1+ (js-call d :getUTCMonth)) (js-call d :getUTCFullYear)
+                   (js-call d :getUTCDay) nil 0)
+        (el-list (js-call d :getSeconds) (js-call d :getMinutes) (js-call d :getHours)
+                 (js-call d :getDate) (1+ (js-call d :getMonth)) (js-call d :getFullYear)
+                 (js-call d :getDay) nil (* (- 0 (js-call d :getTimezoneOffset)) 60)))))
+
+
+  ;; ------------------------------------------------------------------
+  ;; Public entry points
+  ;; ------------------------------------------------------------------
+
+  (defun readAllForms (source) (el-read-all source))
+
+  (export default-json-special-chars el-alist? el-compare-strings el-concat-pieces el-decode-time el-encode-time el-expand-file-name el-file-name-extension el-file-name-sans-extension el-file-relative-name el-format el-format-time-string el-json-encode el-json-options el-json-parse el-json-read-options el-json-serialize el-ms-to-time el-number-from-string el-parse-time-string el-plist-of-keywords? el-read-all el-read-from-string el-regexp-opt el-secure-hash el-time-to-ms el-truncate-string-to-width el-utc-zone? readAllForms))

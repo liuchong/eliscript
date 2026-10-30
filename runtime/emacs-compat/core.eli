@@ -1,0 +1,1532 @@
+(module eliscript.runtime.emacs-compat.core
+  ;;; core.eli --- Emacs Lisp core types, symbols, numbers, strings, equality, sequences, and printer
+
+  ;;   buffer -> {kind "buffer"}; functions are host functions.
+  ;; Elisp values never contain JavaScript false or undefined.
+
+  ;; ------------------------------------------------------------------
+  ;; Symbols
+  ;; ------------------------------------------------------------------
+
+  (defconst symbol-table (new globalThis.Map))
+
+
+  (defun el-intern (name)
+    (cond
+      ((= name "nil") nil)
+      ((= name "t") t)
+      (t (let ((existing (js-call symbol-table :get name)))
+           (if (undefined? existing)
+               (let ((created (js-object :kind (if (and (js-call name :startsWith ":") (> (js-length name) 1))
+                                                   "keyword" "symbol")
+                                         :name name)))
+                 (js-call symbol-table :set name created)
+                 created)
+             existing)))))
+
+
+  (defun el-make-symbol (name) (js-object :kind "symbol" :name name :uninterned t))
+
+
+  (defun el-typeof (x) (js* "typeof x"))
+
+  (defun el-symbol? (x)
+    (or (nil? x) (eq x t)
+        (and (not (nullish? x)) (let ((k (get x :kind))) (or (= k "symbol") (= k "keyword"))))))
+
+  (defun el-symobj? (x)
+    (and (not (nullish? x)) (let ((k (get x :kind))) (or (= k "symbol") (= k "keyword")))))
+
+  (defun el-keyword? (x) (and (not (nullish? x)) (= (get x :kind) "keyword")))
+
+  (defun el-symbol-name (x)
+    (cond ((nil? x) "nil") ((eq x t) "t") (t (get x :name))))
+
+  (defun el-sym-is (x name) (and (el-symobj? x) (= (get x :name) name)))
+
+
+  (defconst s-quote (el-intern "quote"))
+
+  (defconst s-function (el-intern "function"))
+
+  (defconst s-lambda (el-intern "lambda"))
+
+  (defconst s-closure (el-intern "closure"))
+
+  (defconst s-macro (el-intern "macro"))
+
+  (defconst s-backquote (el-intern "`"))
+
+  (defconst s-comma (el-intern ","))
+
+  (defconst s-comma-at (el-intern ",@"))
+
+  (defconst s-rest (el-intern "&rest"))
+
+  (defconst s-body (el-intern "&body"))
+
+  (defconst s-optional (el-intern "&optional"))
+
+  (defconst s-key (el-intern "&key"))
+
+  (defconst s-aux (el-intern "&aux"))
+
+  (defconst s-allow-other-keys (el-intern "&allow-other-keys"))
+
+  (defconst s-underscore (el-intern "_"))
+
+  (defconst s-declare (el-intern "declare"))
+
+  (defconst s-interactive (el-intern "interactive"))
+
+  (defconst s-eliscript (el-intern "eliscript"))
+
+  (defconst s-otherwise (el-intern "otherwise"))
+
+  (defconst s-error (el-intern "error"))
+
+  (defconst s-and (el-intern "and"))
+
+  (defconst s-or (el-intern "or"))
+
+  (defconst s-not (el-intern "not"))
+
+  (defconst s-pred (el-intern "pred"))
+
+  (defconst s-guard (el-intern "guard"))
+
+  (defconst s-app (el-intern "app"))
+
+  (defconst s-let (el-intern "let"))
+
+  (defconst s-progn (el-intern "progn"))
+
+  (defconst s-setq (el-intern "setq"))
+
+  (defconst s-setf (el-intern "setf"))
+
+  (defconst s-default (el-intern "default"))
+
+  (defconst s-recur (el-intern "recur"))
+
+  (defconst s-if (el-intern "if"))
+
+  (defconst s-await (el-intern "await"))
+
+
+  ;; ------------------------------------------------------------------
+  ;; Core containers
+  ;; ------------------------------------------------------------------
+
+  (defun el-cons (a b) (js-object :kind "cons" :car a :cdr b))
+
+  (defun el-cons? (x) (and (not (nullish? x)) (= (get x :kind) "cons")))
+
+  (defun el-car (x)
+    (cond ((nil? x) nil)
+          ((el-cons? x) (get x :car))
+          (t (el-signal "wrong-type-argument" (el-intern "listp") x))))
+
+  (defun el-cdr (x)
+    (cond ((nil? x) nil)
+          ((el-cons? x) (get x :cdr))
+          (t (el-signal "wrong-type-argument" (el-intern "listp") x))))
+
+  (defun el-car-safe (x) (if (el-cons? x) (get x :car) nil))
+
+  (defun el-cdr-safe (x) (if (el-cons? x) (get x :cdr) nil))
+
+
+  (defun el-list-from (items &optional tail)
+    (let ((out (if (nullish? tail) nil tail))
+          (index (1- (js-length items))))
+      (while (>= index 0)
+        (setq out (el-cons (aref items index) out))
+        (setq index (1- index)))
+      out))
+
+  (defun el-list (&rest items) (el-list-from items))
+
+
+  (defun el-list-to-array (list)
+    (let ((out (js-array)) (cursor list))
+      (while (el-cons? cursor)
+        (js-call out :push (get cursor :car))
+        (setq cursor (get cursor :cdr)))
+      out))
+
+
+  (defun el-list-length (list)
+    (let ((count 0) (cursor list))
+      (while (el-cons? cursor)
+        (setq count (1+ count))
+        (setq cursor (get cursor :cdr)))
+      count))
+
+
+  (defun el-nth (n list)
+    (let ((cursor list) (index 0))
+      (while (and (< index n) (el-cons? cursor))
+        (setq cursor (get cursor :cdr))
+        (setq index (1+ index)))
+      (el-car-safe cursor)))
+
+
+  (defun el-nthcdr (n list)
+    (let ((cursor list) (index 0))
+      (while (and (< index n) (not (nil? cursor)))
+        (setq cursor (el-cdr cursor))
+        (setq index (1+ index)))
+      cursor))
+
+
+  (defun el-vector (items) (js-object :kind "vector" :items items))
+
+  (defun el-vector? (x) (and (not (nullish? x)) (= (get x :kind) "vector")))
+
+  (defun el-record? (x) (and (not (nullish? x)) (= (get x :kind) "record")))
+
+  (defun el-string? (x) (= (js* "typeof x") "string"))
+
+  (defun el-function? (x) (= (js* "typeof x") "function"))
+
+  (defun el-hash-table? (x) (and (not (nullish? x)) (= (get x :kind) "hash-table")))
+
+  (defun el-bool (x) (if x t nil))
+
+  (defun el-kind (x)
+    (cond ((nil? x) "nil")
+          ((eq x t) "t")
+          ((= (js* "typeof x") "object") (or (get x :kind) "object"))
+          (t (js* "typeof x"))))
+
+
+  ;; ------------------------------------------------------------------
+  ;; Conditions, catch/throw and control transfer
+  ;; ------------------------------------------------------------------
+
+  (defconst base-condition-parents
+    (js-array (js-array "eliscript-timeout" "eliscript-cancelled")
+              (js-array "eliscript-cancelled" "quit")
+              (js-array "eliscript-compile-error" "error")
+              (js-array "eliscript-declaration-error" "eliscript-compile-error")
+              (js-array "eliscript-contract-error" "eliscript-compile-error")
+              (js-array "eliscript-runtime-contract-error" "error")
+              (js-array "eliscript-channel-closed" "error")
+              (js-array "eliscript-engine-handle-error" "error")
+              (js-array "js-error" "error")
+              (js-array "arith-error" "error")
+              (js-array "overflow-error" "arith-error")
+              (js-array "range-error" "arith-error")
+              (js-array "void-function" "error")
+              (js-array "void-variable" "error")
+              (js-array "invalid-function" "error")
+              (js-array "wrong-type-argument" "error")
+              (js-array "args-out-of-range" "error")
+              (js-array "wrong-number-of-arguments" "error")
+              (js-array "setting-constant" "error")
+              (js-array "cyclic-function-indirection" "error")
+              (js-array "no-catch" "error")
+              (js-array "end-of-file" "error")
+              (js-array "invalid-read-syntax" "error")
+              (js-array "invalid-regexp" "error")
+              (js-array "search-failed" "error")
+              (js-array "user-error" "error")
+              (js-array "file-error" "error")
+              (js-array "file-missing" "file-error")
+              (js-array "json-error" "error")
+              (js-array "json-parse-error" "json-error")
+              (js-array "json-end-of-file" "json-parse-error")
+              (js-array "json-trailing-content" "json-parse-error")
+              (js-array "json-unavailable" "json-error")
+              (js-array "cl-assertion-failed" "error")
+              (js-array "cl-no-applicable-method" "error")
+              (js-array "text-read-only" "error")
+              (js-array "buffer-read-only" "error")
+              (js-array "beginning-of-buffer" "error")
+              (js-array "end-of-buffer" "error")
+              (js-array "coding-system-error" "error")
+              (js-array "ert-test-failed" "error")
+              (js-array "ert-test-skipped" "error")))
+
+
+  (defconst base-condition-messages
+    (js-array (js-array "error" "error")
+              (js-array "quit" "Quit")
+              (js-array "arith-error" "Arithmetic error")
+              (js-array "void-function" "Symbol's function definition is void")
+              (js-array "void-variable" "Symbol's value as variable is void")
+              (js-array "invalid-function" "Invalid function")
+              (js-array "wrong-type-argument" "Wrong type argument")
+              (js-array "args-out-of-range" "Args out of range")
+              (js-array "wrong-number-of-arguments" "Wrong number of arguments")
+              (js-array "setting-constant" "Attempt to set a constant symbol")
+              (js-array "no-catch" "No catch for tag")
+              (js-array "end-of-file" "End of file during parsing")
+              (js-array "invalid-read-syntax" "Invalid read syntax")
+              (js-array "search-failed" "Search failed")
+              (js-array "json-parse-error" "could not parse JSON stream")
+              (js-array "cl-assertion-failed" "Assertion failed")))
+
+
+  (defun el-make-signal (condition data)
+    ;; CONDITION is a condition name string, DATA a host array of Elisp values.
+    (let ((error (new globalThis.Error
+                      (str condition ": "
+                           (js-call (js-call data :map (lambda (item) (el-prin1-string item false))) :join " ")))))
+      (put error :eliscriptSignal t)
+      (put error :conditionSymbol condition)
+      (put error :data data)
+      error))
+
+
+  (defun el-signal (condition &rest data) (throw (el-make-signal condition data)))
+
+
+  (defun el-signal-error (message) (throw (el-make-signal "error" (js-array message))))
+
+
+  (defun el-compile-error (message) (throw (el-make-signal "eliscript-compile-error" (js-array message))))
+
+
+  (defun el-error-from-host (error)
+    ;; Normalize a host exception into an Elisp signal object.
+    (cond
+      ((and (not (nullish? error)) (= (el-typeof error) "object") (get error :eliscriptSignal)) error)
+      (t (let ((signal (el-make-signal "error"
+                                       (js-array (if (and (not (nullish? error)) (= (el-typeof error) "object"))
+                                                     (str (or (get error :message) error))
+                                                   (str error))))))
+           (put signal :hostError error)
+           signal))))
+
+
+  (defun el-control-transfer? (error)
+    (and (not (nullish? error)) (= (el-typeof error) "object")
+         (or (get error :eliscriptThrow) (get error :eliscriptRecur)
+             (get error :eliscriptBatchExit) (get error :eliscriptTimeout))))
+
+
+  (defun el-condition-matches (session thrown handler)
+    (cond
+      ((= handler "t") t)
+      (t (let ((pending (js-array thrown)) (seen (new globalThis.Set)) (found false))
+           (while (and (not found) (> (js-length pending) 0))
+             (let ((current (js-call pending :pop)))
+               (cond
+                 ((= current handler) (setq found t))
+                 ((js-call seen :has current) nil)
+                 (t (js-call seen :add current)
+                    (let ((parents (js-call (get session :conditionParents) :get current)))
+                      (unless (undefined? parents)
+                        (js-call parents :forEach (lambda (parent) (js-call pending :push parent)))))))))
+           found))))
+
+
+  (defun el-signal-message (session signal)
+    (let* ((condition (get signal :conditionSymbol))
+           (data (get signal :data))
+           (base (js-call (get session :conditionMessages) :get condition)))
+      (cond
+        ((and (or (= condition "error") (= condition "user-error"))
+              (> (js-length data) 0) (el-string? (aref data 0)))
+          (aref data 0))
+        (t (let ((prefix (if (undefined? base) (str "peculiar error " condition) base)))
+             (if (= (js-length data) 0) prefix
+               (str prefix ": " (js-call (js-call data :map (lambda (item) (el-prin1-string item t))) :join ", "))))))))
+
+
+  ;; ------------------------------------------------------------------
+  ;; Numbers
+  ;; ------------------------------------------------------------------
+
+  (defconst float-tag "float")
+
+  (defun el-float-box? (x) (and (not (nullish? x)) (= (get x :kind) float-tag)))
+
+  (defun el-number? (x) (or (= (js* "typeof x") "number") (el-float-box? x)))
+
+  (defun el-num (x)
+    (cond ((= (js* "typeof x") "number") x)
+          ((el-float-box? x) (get x :value))
+          (t (el-signal "wrong-type-argument" (el-intern "number-or-marker-p") x))))
+
+  (defun el-float? (x)
+    (or (el-float-box? x) (and (= (js* "typeof x") "number") (not (Number/isInteger x)))))
+
+  (defun el-integer? (x) (and (= (js* "typeof x") "number") (Number/isInteger x)))
+
+  (defun el-make-float (n)
+    (if (Number/isInteger n) (js-object :kind float-tag :value n) n))
+
+  (defun el-int-check (x)
+    (if (el-integer? x) x (el-signal "wrong-type-argument" (el-intern "integerp") x)))
+
+
+  (defun el-arith-2 (name a b)
+    (if (and (= (js* "typeof a") "number") (= (js* "typeof b") "number"))
+        (let ((r (cond ((= name "+") (+ a b)) ((= name "-") (- a b)) (t (* a b)))))
+          (if (and (or (not (Number/isInteger a)) (not (Number/isInteger b)))
+                   (Number/isInteger r))
+              (el-make-float r)
+            r))
+      (let* ((fl (or (el-float? a) (el-float? b)))
+             (va (el-num a))
+             (vb (el-num b))
+             (r (cond ((= name "+") (+ va vb)) ((= name "-") (- va vb)) (t (* va vb)))))
+        (if fl (el-make-float r) r))))
+
+
+  (defun el-arith (name items)
+    ;; Generic + - * with Emacs integer/float contagion.
+    (let ((n (js-length items)))
+      (if (= n 2)
+          (el-arith-2 name (aref items 0) (aref items 1))
+        (let ((any-float false) (values (js-array)) (index 0))
+          (while (< index n)
+            (let ((item (aref items index)))
+              (when (el-float? item) (setq any-float t))
+              (js-call values :push (el-num item)))
+            (setq index (1+ index)))
+          (let ((result (cond
+                          ((= name "+") (js-call values :reduce (lambda (a b) (+ a b)) 0))
+                          ((= name "*") (js-call values :reduce (lambda (a b) (* a b)) 1))
+                          ((= (js-length values) 0) 0)
+                          ((= (js-length values) 1) (- 0 (aref values 0)))
+                          (t (js-call (js-call values :slice 1) :reduce (lambda (a b) (- a b)) (aref values 0))))))
+            (if any-float (el-make-float result) result))))))
+
+
+  (defun el-divide (items)
+    (let ((any-float false) (values (js-array)) (index 0))
+      (while (< index (js-length items))
+        (let ((item (aref items index)))
+          (when (el-float? item) (setq any-float t))
+          (js-call values :push (el-num item)))
+        (setq index (1+ index)))
+      (when (= (js-length values) 1) (js-call values :unshift 1))
+      (let ((acc (aref values 0)) (position 1))
+        (while (< position (js-length values))
+          (let ((divisor (aref values position)))
+            (if any-float
+                (setq acc (/ acc divisor))
+              (progn
+                (when (= divisor 0) (el-signal "arith-error"))
+                (setq acc (Math/trunc (/ acc divisor))))))
+          (setq position (1+ position)))
+        (if any-float (el-make-float acc) acc))))
+
+
+  (defun el-mod (a b)
+    (let ((x (el-num a)) (y (el-num b)))
+      (if (or (el-float? a) (el-float? b))
+          (let ((r (- x (* y (Math/floor (/ x y)))))) (el-make-float r))
+        (progn
+          (when (= y 0) (el-signal "arith-error"))
+          (let ((r (% x y)))
+            (if (and (/= r 0) (/= (< r 0) (< y 0))) (+ r y) r))))))
+
+
+  (defun el-rem (a b)
+    (let ((x (el-int-check a)) (y (el-int-check b)))
+      (when (= y 0) (el-signal "arith-error"))
+      (let ((r (% x y))) (if (= r 0) 0 r))))
+
+
+  (defun el-compare-chain (op items)
+    (if (= (js-length items) 2)
+        (let ((a (el-num (aref items 0))) (b (el-num (aref items 1))))
+          (el-bool (cond ((= op "<") (< a b)) ((= op ">") (> a b)) ((= op "<=") (<= a b))
+                         ((= op ">=") (>= a b)) (t (= a b)))))
+      (let ((ok t) (index 0))
+        (while (and ok (< index (1- (js-length items))))
+          (let ((a (el-num (aref items index))) (b (el-num (aref items (1+ index)))))
+            (unless (cond ((= op "<") (< a b)) ((= op ">") (> a b)) ((= op "<=") (<= a b))
+                          ((= op ">=") (>= a b)) (t (= a b)))
+              (setq ok false)))
+          (setq index (1+ index)))
+        (el-bool ok))))
+
+
+  (defun el-round-half-even (x)
+    (let ((f (Math/floor x)) (d (- x (Math/floor x))))
+      (cond ((< d 0.5) f) ((> d 0.5) (+ f 1)) ((= (el-mod-int f 2) 0) f) (t (+ f 1)))))
+
+  (defun el-mod-int (a b) (let ((r (% a b))) (if (and (/= r 0) (/= (< r 0) (< b 0))) (+ r b) r)))
+
+
+  (defun el-rounding (kind x divisor)
+    (let* ((value (if (nullish? divisor) (el-num x)
+                    (progn
+                      (when (and (= (el-num divisor) 0) (not (el-float? x)) (not (el-float? divisor)))
+                        (el-signal "arith-error"))
+                      (/ (el-num x) (el-num divisor))))))
+      (when (not (Number/isFinite value)) (el-signal "overflow-error" x))
+      (cond ((= kind "floor") (Math/floor value))
+            ((= kind "ceiling") (Math/ceil value))
+            ((= kind "truncate") (Math/trunc value))
+            (t (el-round-half-even value)))))
+
+
+  ;; Bit operations on integers beyond 32 bits use exact high/low splitting.
+  (defconst two-32 4294967296)
+
+  (defun el-split-high (x) (Math/floor (/ x two-32)))
+
+  (defun el-split-low (x) (- x (* (Math/floor (/ x two-32)) two-32)))
+
+  (defun el-bitwise (op a b)
+    (let* ((ha (int32 (el-split-high a))) (la (uint32 (el-split-low a)))
+           (hb (int32 (el-split-high b))) (lb (uint32 (el-split-low b)))
+           (high (cond ((= op "and") (bit-and ha hb)) ((= op "or") (bit-or ha hb)) (t (bit-xor ha hb))))
+           (low (cond ((= op "and") (bit-and la lb)) ((= op "or") (bit-or la lb)) (t (bit-xor la lb)))))
+      (+ (* high two-32) (uint32 low))))
+
+  (defun el-ash (value count)
+    (let ((v (el-int-check value)) (c (el-int-check count)))
+      (cond ((>= c 0) (* v (Math/pow 2 (Math/min c 1023))))
+            (t (Math/floor (/ v (Math/pow 2 (Math/min (- 0 c) 1100))))))))
+
+
+  ;; ------------------------------------------------------------------
+  ;; Strings and characters (Emacs character positions = code points)
+  ;; ------------------------------------------------------------------
+
+  (defconst surrogate-pattern (new globalThis.RegExp "[\\uD800-\\uDFFF]"))
+
+  (defconst beyond-unicode-char 65535)
+
+  (defconst astral-cache (new globalThis.Map))
+
+  (defconst ascii-cache (new globalThis.Map))
+
+
+  (defun el-astral? (s)
+    (let ((n (js-length s)))
+      (cond
+        ((= n 0) false)
+        ((= n 1) (let ((c (js-call s :charCodeAt 0))) (and (>= c 55296) (<= c 57343))))
+        ((< n 64)
+          (let ((i 0) (found false))
+            (while (and (not found) (< i n))
+              (let ((c (js-call s :charCodeAt i)))
+                (if (and (>= c 55296) (<= c 57343))
+                    (setq found t)
+                  (setq i (1+ i)))))
+            found))
+        (t (let ((cached (js-call astral-cache :get s)))
+             (if (not (undefined? cached))
+                 (not (eq cached false))
+               (let ((res (if (js-call surrogate-pattern :test s) (js-length (Array/from s)) false)))
+                 (when (> (get astral-cache :size) 4096) (js-call astral-cache :clear))
+                 (js-call astral-cache :set s res)
+                 (not (eq res false)))))))))
+
+  (defun el-chars (s) (Array/from s))
+
+  (defun el-string-length (s)
+    (let ((n (js-length s)))
+      (cond
+        ((<= n 1) n)
+        ((< n 64) (if (el-astral? s) (js-length (Array/from s)) n))
+        (t (let ((cached (js-call astral-cache :get s)))
+             (if (not (undefined? cached))
+                 (if (eq cached false) n cached)
+               (let ((res (if (js-call surrogate-pattern :test s) (js-length (Array/from s)) false)))
+                 (when (> (get astral-cache :size) 4096) (js-call astral-cache :clear))
+                 (js-call astral-cache :set s res)
+                 (if (eq res false) n res))))))))
+
+  (defun el-char-string (code)
+    (cond ((or (< code 0) (not (Number/isInteger code))) (el-signal "wrong-type-argument" (el-intern "characterp") code))
+          ((> code 1114111) (String/fromCodePoint beyond-unicode-char))
+          ((and (>= code 55296) (<= code 57343)) (String/fromCharCode code))
+          (t (String/fromCodePoint code))))
+
+  (defun el-string-from-codes (codes)
+    (js-call (js-call codes :map (lambda (code) (el-char-string code))) :join ""))
+
+  (defun el-string-codes (s)
+    (js-call (Array/from s) :map (lambda (ch) (js-call ch :codePointAt 0))))
+
+  (defun el-string-ref (s index)
+    (if (el-astral? s)
+        (let ((chars (Array/from s)))
+          (when (or (< index 0) (>= index (js-length chars))) (el-signal "args-out-of-range" s index))
+          (js-call (aref chars index) :codePointAt 0))
+      (progn
+        (when (or (< index 0) (>= index (js-length s))) (el-signal "args-out-of-range" s index))
+        (js-call s :charCodeAt index))))
+
+  (defun el-char-to-unit (s index)
+    (if (el-astral? s)
+        (let ((chars (Array/from s)) (units 0) (position 0))
+          (while (and (< position index) (< position (js-length chars)))
+            (setq units (+ units (js-length (aref chars position))))
+            (setq position (1+ position)))
+          units)
+      index))
+
+  (defun el-unit-to-char (s unit)
+    (if (el-astral? s) (js-length (Array/from (js-call s :slice 0 unit))) unit))
+
+  (defconst unibyte-strings (new globalThis.Set))
+
+  (defun el-mark-unibyte (s)
+    (when (el-string? s)
+      (let ((index 0) (n (js-length s)) (high false) (multi false))
+        (while (and (not multi) (< index n))
+          (let ((code (js-call s :charCodeAt index)))
+            (when (> code 255) (setq multi t))
+            (when (and (>= code 128) (<= code 255)) (setq high t)))
+          (setq index (1+ index)))
+        (when (and high (not multi)) (js-call unibyte-strings :add s))))
+    s)
+
+  (defun el-substring (s from to)
+    (let* ((astral (el-astral? s))
+           (length (if astral (el-string-length s) (js-length s)))
+           (start (if (nullish? from) 0 (el-num from)))
+           (end (if (nullish? to) length (el-num to))))
+      (when (< start 0) (setq start (+ length start)))
+      (when (< end 0) (setq end (+ length end)))
+      (when (or (< start 0) (> end length) (> start end)) (el-signal "args-out-of-range" s from to))
+      (let ((sub (if astral
+                     (js-call (js-call (Array/from s) :slice start end) :join "")
+                   (js-call s :slice start end))))
+        (if (and (> (get unibyte-strings :size) 0) (js-call unibyte-strings :has s))
+            (el-mark-unibyte sub)
+          sub))))
+
+  (defun el-string-set (s index code)
+    (let ((chars (Array/from s)))
+      (when (or (< index 0) (>= index (js-length chars))) (el-signal "args-out-of-range" s index))
+      (put chars index (el-char-string code))
+      (js-call chars :join "")))
+
+
+  ;; UTF-8: a unibyte string holds one byte per character (0-255).
+  (defun el-utf8-bytes (s)
+    (let ((bytes (js-array)))
+      (js-call (Array/from s) :forEach
+               (lambda (ch)
+                 (let ((code (js-call ch :codePointAt 0)))
+                   (cond
+                     ((< code 128) (js-call bytes :push code))
+                     ((< code 2048)
+                       (js-call bytes :push (bit-or 192 (unsigned-bit-shift-right code 6)))
+                       (js-call bytes :push (bit-or 128 (bit-and code 63))))
+                     ((< code 65536)
+                       (js-call bytes :push (bit-or 224 (unsigned-bit-shift-right code 12)))
+                       (js-call bytes :push (bit-or 128 (bit-and (unsigned-bit-shift-right code 6) 63)))
+                       (js-call bytes :push (bit-or 128 (bit-and code 63))))
+                     (t
+                       (js-call bytes :push (bit-or 240 (unsigned-bit-shift-right code 18)))
+                       (js-call bytes :push (bit-or 128 (bit-and (unsigned-bit-shift-right code 12) 63)))
+                       (js-call bytes :push (bit-or 128 (bit-and (unsigned-bit-shift-right code 6) 63)))
+                       (js-call bytes :push (bit-or 128 (bit-and code 63))))))))
+      bytes))
+
+  (defun el-bytes-string (bytes)
+    (let ((parts (js-array)) (index 0) (high false))
+      (while (< index (js-length bytes))
+        (let ((b (bit-and (aref bytes index) 255)))
+          (when (>= b 128) (setq high t))
+          (js-call parts :push (String/fromCharCode b)))
+        (setq index (1+ index)))
+      (let ((s (js-call parts :join "")))
+        (when high (js-call unibyte-strings :add s))
+        s)))
+
+  (defconst non-ascii-pattern (new globalThis.RegExp "[^\\x00-\\x7F]"))
+
+  (defun el-ascii? (s)
+    (let ((n (js-length s)))
+      (cond
+        ((= n 0) t)
+        ((= n 1) (< (js-call s :charCodeAt 0) 128))
+        ((< n 64)
+          (let ((i 0) (ok t))
+            (while (and ok (< i n))
+              (if (< (js-call s :charCodeAt i) 128)
+                  (setq i (1+ i))
+                (setq ok false)))
+            ok))
+        (t (let ((cached (js-call ascii-cache :get s)))
+             (if (not (undefined? cached))
+                 cached
+               (let ((res (not (js-call non-ascii-pattern :test s))))
+                 (when (> (get ascii-cache :size) 4096) (js-call ascii-cache :clear))
+                 (js-call ascii-cache :set s res)
+                 res)))))))
+
+  (defun el-string-bytes-array (s)
+    ;; Bytes of S: unibyte strings are bytes already, multibyte strings use UTF-8.
+    (if (el-multibyte? s) (el-utf8-bytes s) (el-string-codes s)))
+
+  (defun el-multibyte? (s)
+    (if (or (el-ascii? s) (js-call unibyte-strings :has s))
+        false
+      (let ((multi false) (index 0) (n (js-length s)))
+        (while (and (not multi) (< index n))
+          (when (> (js-call s :charCodeAt index) 255) (setq multi t))
+          (setq index (1+ index)))
+        multi)))
+
+  (defun el-encode-utf8 (s)
+    (if (or (el-ascii? s) (and (not (el-multibyte? s)) (js-call unibyte-strings :has s)))
+        s
+      (el-bytes-string (el-utf8-bytes s))))
+
+  (defun el-decode-utf8 (s)
+    (if (or (el-ascii? s) (el-multibyte? s))
+        s
+      (let ((bytes (el-string-codes s)) (codes (js-array)) (index 0) (n 0))
+        (setq n (js-length bytes))
+        (while (< index n)
+          (let ((b (aref bytes index)))
+            (cond
+              ((< b 128) (js-call codes :push b) (setq index (1+ index)))
+              ((and (>= b 194) (< b 224) (< (1+ index) n) (= (bit-and (aref bytes (1+ index)) 192) 128))
+                (js-call codes :push (bit-or (bit-shift-left (bit-and b 31) 6) (bit-and (aref bytes (1+ index)) 63)))
+                (setq index (+ index 2)))
+              ((and (>= b 224) (< b 240) (< (+ index 2) n)
+                    (= (bit-and (aref bytes (1+ index)) 192) 128) (= (bit-and (aref bytes (+ index 2)) 192) 128))
+                (js-call codes :push (+ (* (bit-and b 15) 4096)
+                                        (* (bit-and (aref bytes (1+ index)) 63) 64)
+                                        (bit-and (aref bytes (+ index 2)) 63)))
+                (setq index (+ index 3)))
+              ((and (>= b 240) (< b 245) (< (+ index 3) n)
+                    (= (bit-and (aref bytes (1+ index)) 192) 128) (= (bit-and (aref bytes (+ index 2)) 192) 128)
+                    (= (bit-and (aref bytes (+ index 3)) 192) 128))
+                (js-call codes :push (+ (* (bit-and b 7) 262144)
+                                        (* (bit-and (aref bytes (1+ index)) 63) 4096)
+                                        (* (bit-and (aref bytes (+ index 2)) 63) 64)
+                                        (bit-and (aref bytes (+ index 3)) 63)))
+                (setq index (+ index 4)))
+              (t (js-call codes :push 65533) (setq index (1+ index))))))
+        (el-string-from-codes codes))))
+
+
+  ;; East Asian Wide/Fullwidth characters occupy two columns; combining marks none.
+  (defconst wide-ranges
+    (js-array 4352 4447 8986 8987 9001 9002 9193 9196 9200 9200 9203 9203 9725 9726 9748 9749
+              9800 9811 9855 9855 9875 9875 9889 9889 9898 9899 9917 9918 9924 9925 9934 9934
+              9940 9940 9962 9962 9970 9971 9973 9973 9978 9978 9981 9981 9989 9989 9994 9995
+              10024 10024 10060 10060 10062 10062 10067 10069 10071 10071 10133 10135 10160 10160
+              10175 10175 11035 11036 11088 11088 11093 11093 11904 12350 12353 13311 13312 19903
+              19968 42191 43360 43391 44032 55203 63744 64255 65040 65049 65072 65135 65280 65376
+              65504 65510 94176 101640 110592 110959 126980 126980 127183 127183 127374 127374
+              127377 127386 127488 127569 127584 127589 127744 128591 128640 128767 129280 129535
+              129648 129791 131072 196605 196608 262141))
+
+  (defconst zero-width-ranges
+    (js-array 768 879 1155 1161 1425 1469 1471 1471 1473 1474 1476 1477 1479 1479 1552 1562
+              1611 1631 1648 1648 1750 1756 1759 1764 1767 1768 1770 1773 2304 2306 6832 6911
+              7616 7679 8203 8207 8288 8292 8400 8432 65024 65039 65056 65071 917760 917999))
+
+  (defun el-in-ranges (code ranges)
+    (let ((found false) (index 0))
+      (while (and (not found) (< index (js-length ranges)))
+        (when (and (>= code (aref ranges index)) (<= code (aref ranges (1+ index)))) (setq found t))
+        (setq index (+ index 2)))
+      found))
+
+  (defun el-char-width (code)
+    (cond ((= code 9) 8)
+          ((< code 32) 2)
+          ((= code 127) 2)
+          ((< code 768) 1)
+          ((el-in-ranges code zero-width-ranges) 0)
+          ((el-in-ranges code wide-ranges) 2)
+          (t 1)))
+
+  (defun el-string-width (s)
+    (let ((width 0))
+      (js-call (Array/from s) :forEach
+               (lambda (ch) (setq width (+ width (el-char-width (js-call ch :codePointAt 0))))))
+      width))
+
+
+  (defun el-upcase (x) (if (el-string? x) (js-call x :toUpperCase)
+                         (js-call (js-call (el-char-string x) :toUpperCase) :codePointAt 0)))
+
+  (defun el-downcase (x) (if (el-string? x) (js-call x :toLowerCase)
+                           (js-call (js-call (el-char-string x) :toLowerCase) :codePointAt 0)))
+
+
+  ;; ------------------------------------------------------------------
+  ;; Number printing (Emacs float_to_string with dtoastr precision search)
+  ;; ------------------------------------------------------------------
+
+  (defun el-pad-exponent (text)
+    ;; "1.5e-7" -> "1.5e-07", "1e+21" -> "1e+21"
+    (let ((at (js-call text :indexOf "e")))
+      (if (< at 0) text
+        (let* ((mantissa (js-call text :slice 0 at))
+               (rest (js-call text :slice (1+ at)))
+               (sign (if (or (js-call rest :startsWith "-") (js-call rest :startsWith "+")) (js-call rest :slice 0 1) "+"))
+               (digits (if (or (js-call rest :startsWith "-") (js-call rest :startsWith "+")) (js-call rest :slice 1) rest)))
+          (str mantissa "e" sign (if (< (js-length digits) 2) (str "0" digits) digits))))))
+
+
+  (defun el-strip-fraction-zeros (text)
+    (if (< (js-call text :indexOf ".") 0) text
+      (let ((stripped (js-call (js-call text :replace (new globalThis.RegExp "0+$") "") :replace (new globalThis.RegExp "\\.$") "")))
+        stripped)))
+
+
+  (defun el-format-g (x precision alternate)
+    ;; C printf %.Pg
+    (let* ((p (if (= precision 0) 1 precision))
+           (exp-text (js-call x :toExponential (1- p)))
+           (exponent (Number/parseInt (js-call exp-text :slice (1+ (js-call exp-text :indexOf "e"))) 10)))
+      (if (and (>= exponent -4) (< exponent p))
+          (let ((fixed (js-call x :toFixed (Math/max 0 (- p 1 exponent)))))
+            (if alternate fixed (el-strip-fraction-zeros fixed)))
+        (let* ((mantissa (js-call exp-text :slice 0 (js-call exp-text :indexOf "e")))
+               (clean (if alternate mantissa (el-strip-fraction-zeros mantissa))))
+          (el-pad-exponent (str clean "e" (if (< exponent 0) "-" "+") (Math/abs exponent)))))))
+
+
+  (defun el-float-string (x)
+    (cond
+      ((Number/isNaN x) "0.0e+NaN")
+      ((= x globalThis.Infinity) "1.0e+INF")
+      ((= x (- 0 globalThis.Infinity)) "-1.0e+INF")
+      ((and (= x 0) (< (/ 1 x) 0)) "-0.0")
+      (t (let ((precision 15) (text nil))
+           (while (nil? text)
+             (let ((candidate (el-format-g x precision false)))
+               (when (or (>= precision 17) (= (Number/parseFloat candidate) x))
+                 (setq text candidate)))
+             (setq precision (1+ precision)))
+           (if (or (>= (js-call text :indexOf ".") 0) (>= (js-call text :indexOf "e") 0))
+               text
+             (str text ".0"))))))
+
+
+  (defun el-integer-string (n)
+    (if (<= (Math/abs n) 9007199254740991) (str n)
+      (js-call (funcall globalThis.BigInt n) :toString)))
+
+
+  (defun el-number-string (x)
+    (if (el-float? x) (el-float-string (el-num x)) (el-integer-string x)))
+
+
+  ;; ------------------------------------------------------------------
+  ;; Printer (prin1 / princ)
+  ;; ------------------------------------------------------------------
+
+  (defconst symbol-escape-pattern (new globalThis.RegExp "[\\s()\\[\\]\"';`,#?\\\\.]" "u"))
+
+  (defconst numeric-token-pattern
+    (new globalThis.RegExp "^[+-]?(?:[0-9]+\\.?[0-9]*(?:e[+-]?[0-9]+)?|\\.[0-9]+(?:e[+-]?[0-9]+)?)$"))
+
+
+  (defun el-print-symbol-name (name)
+    (cond
+      ((= name "") "##")
+      (t (let ((out (js-array)) (chars (Array/from name)) (index 0))
+           (while (< index (js-length chars))
+             (let ((ch (aref chars index)))
+               (when (or (and (js-call symbol-escape-pattern :test ch)
+                              (not (and (= ch ".") (> index 0)))
+                              (not (and (= ch "?") (> index 0)))
+                              (not (and (= ch "#") (> index 0))))
+                         (and (= index 0) (= ch "?")))
+                 (js-call out :push "\\"))
+               (js-call out :push ch))
+             (setq index (1+ index)))
+           (let ((text (js-call out :join "")))
+             (if (js-call numeric-token-pattern :test name) (str "\\" text) text))))))
+
+
+  (defun el-print-string-literal (s)
+    (str "\"" (js-call (js-call s :replace (new globalThis.RegExp "\\\\" "g") "\\\\")
+                       :replace (new globalThis.RegExp "\"" "g") "\\\"")
+         "\""))
+
+
+  (defun el-prin1-string (value escape)
+    (let ((out (js-array)))
+      (el-print-into out value (if escape t false) 0)
+      (js-call out :join "")))
+
+
+  (defun el-print-into (out value escape depth)
+    (when (> depth 2000) (el-signal "error" "Apparently circular structure being printed"))
+    (cond
+      ((nil? value) (js-call out :push "nil"))
+      ((eq value t) (js-call out :push "t"))
+      ((undefined? value) (js-call out :push "nil"))
+      ((= (el-typeof value) "number") (js-call out :push (el-number-string value)))
+      ((= (el-typeof value) "string") (js-call out :push (if escape (el-print-string-literal value) value)))
+      ((= (el-typeof value) "function")
+        (js-call out :push (if (get value :elispName) (str "#<subr " (get value :elispName) ">") "#<subr lambda>")))
+      ((= (el-typeof value) "boolean") (js-call out :push (if value "t" "nil")))
+      (t
+        (let ((kind (get value :kind)))
+          (cond
+            ((= kind float-tag) (js-call out :push (el-float-string (get value :value))))
+            ((or (= kind "symbol") (= kind "keyword"))
+              (js-call out :push (if escape (el-print-symbol-name (get value :name)) (get value :name))))
+            ((= kind "cons") (el-print-list out value escape depth))
+            ((= kind "vector") (el-print-items out "[" (get value :items) "]" escape depth))
+            ((= kind "record") (el-print-items out "#s(" (get value :items) ")" escape depth))
+            ((= kind "hash-table") (el-print-hash-table out value escape depth))
+            ((= kind "buffer")
+              (js-call out :push (if (get value :live) (str "#<buffer " (get value :name) ">") "#<killed buffer>")))
+            ((= kind "marker") (js-call out :push "#<marker>"))
+            ((= kind "timer") (js-call out :push "#<timer>"))
+            ((= kind "js-sentinel") (js-call out :push (str "js-" (get value :sentinel))))
+            (t (el-print-extension out value escape depth)))))))
+
+
+  (defun el-print-items (out open items close escape depth)
+    (js-call out :push open)
+    (let ((index 0))
+      (while (< index (js-length items))
+        (when (> index 0) (js-call out :push " "))
+        (el-print-into out (aref items index) escape (1+ depth))
+        (setq index (1+ index))))
+    (js-call out :push close))
+
+
+  (defun el-print-list (out value escape depth)
+    (let ((head (get value :car)) (tail (get value :cdr)))
+      (if (and (el-cons? tail) (nil? (get tail :cdr))
+               (or (eq head s-quote) (eq head s-function) (eq head s-backquote)
+                   (eq head s-comma) (eq head s-comma-at)))
+          (progn
+            (js-call out :push (cond ((eq head s-quote) "'") ((eq head s-function) "#'")
+                                     ((eq head s-backquote) "`") ((eq head s-comma) ",") (t ",@")))
+            (el-print-into out (get tail :car) escape (1+ depth)))
+        (progn
+          (js-call out :push "(")
+          (let ((cursor value) (first t) (count 0))
+            (while (el-cons? cursor)
+              (unless first (js-call out :push " "))
+              (setq first false)
+              (el-print-into out (get cursor :car) escape (1+ depth))
+              (setq cursor (get cursor :cdr))
+              (setq count (1+ count))
+              (when (> count 1000000) (el-signal "error" "Apparently circular list being printed")))
+            (unless (nil? cursor)
+              (js-call out :push " . ")
+              (el-print-into out cursor escape (1+ depth))))
+          (js-call out :push ")")))))
+
+
+  (defun el-print-hash-table (out table escape depth)
+    (js-call out :push "#s(hash-table")
+    (unless (= (get table :test) "eql") (js-call out :push (str " test " (get table :test))))
+    (when (> (get (get table :entries) :size) 0)
+      (js-call out :push " data (")
+      (let ((first t))
+        (js-call (get table :entries) :forEach
+                 (lambda (entry)
+                   (unless first (js-call out :push " "))
+                   (setq first false)
+                   (el-print-into out (aref entry 0) escape (1+ depth))
+                   (js-call out :push " ")
+                   (el-print-into out (aref entry 1) escape (1+ depth)))))
+      (js-call out :push ")"))
+    (js-call out :push ")"))
+
+
+  ;; ------------------------------------------------------------------
+  ;; Equality
+  ;; ------------------------------------------------------------------
+
+  (defun el-eq (a b)
+    (cond ((eq a b) t)
+          ((and (= (js* "typeof a") "number") (= (js* "typeof b") "number")) (el-bool (= a b)))
+          (t nil)))
+
+
+  (defun el-eql (a b)
+    (cond ((eq a b) t)
+          ((and (el-number? a) (el-number? b))
+            (el-bool (and (eq (el-float? a) (el-float? b)) (Object/is (el-num a) (el-num b)))))
+          (t nil)))
+
+
+  (defun el-equal (a b)
+    (el-bool (el-equal-p a b 0)))
+
+
+  (defun el-equal-p (a b depth)
+    (cond
+      ((eq a b) t)
+      ((> depth 100000) false)
+      ((or (nil? a) (nil? b)) false)
+      ((and (el-number? a) (el-number? b)) (and (eq (el-float? a) (el-float? b)) (= (el-num a) (el-num b))))
+      ((or (not (= (js* "typeof a") "object")) (not (= (js* "typeof b") "object"))) false)
+      (t
+        (let ((kind (get a :kind)))
+          (cond
+            ((not (= kind (get b :kind)))
+              (and (el-persistent? a) (el-persistent? b) (el-value-equal a b)))
+            ((= kind "cons")
+              (let ((x a) (y b) (same t))
+                (while (and same (el-cons? x) (el-cons? y))
+                  (unless (el-equal-p (get x :car) (get y :car) (1+ depth)) (setq same false))
+                  (setq x (get x :cdr))
+                  (setq y (get y :cdr)))
+                (and same (el-equal-p x y (1+ depth)))))
+            ((or (= kind "vector") (= kind "record"))
+              (let ((xs (get a :items)) (ys (get b :items)))
+                (and (= (js-length xs) (js-length ys))
+                     (js-call xs :every (lambda (item index) (el-equal-p item (aref ys index) (1+ depth)))))))
+            ((or (= kind "symbol") (= kind "keyword") (= kind "hash-table") (= kind "buffer")) false)
+            (t (el-value-equal a b)))))))
+
+
+  ;; ------------------------------------------------------------------
+  ;; Hash tables
+  ;; ------------------------------------------------------------------
+
+  (defun el-make-hash-table (test)
+    (js-object :kind "hash-table" :test test :entries (new globalThis.Map)))
+
+
+  (defun el-hash-key (table key)
+    (let ((test (get table :test)))
+      (cond
+        ((nil? key) "n:")
+        ((eq key t) "t:")
+        ((= (js* "typeof key") "number") key)
+        ((el-float-box? key) (str "f:" (get key :value)))
+        ((= (js* "typeof key") "string") (if (= test "eq") (str "s:" key) (str "s:" key)))
+        ((= test "equal")
+          (let ((kind (get key :kind)))
+            (if (or (= kind "cons") (= kind "vector") (= kind "record"))
+                (str "c:" (el-prin1-string key t))
+              (if (or (= kind "symbol") (= kind "keyword") (= kind "hash-table") (= kind "buffer")
+                      (= (js* "typeof key") "function"))
+                  key
+                (el-value-hash-key key)))))
+        (t key))))
+
+
+  (defun el-gethash (key table default)
+    (let ((entry (js-call (get table :entries) :get
+                          (if (= (get table :test) "eq") key (el-hash-key table key)))))
+      (if (undefined? entry) (if (nullish? default) nil default) (aref entry 1))))
+
+
+  (defun el-puthash (key value table)
+    (let* ((hash-key (if (= (get table :test) "eq") key (el-hash-key table key)))
+           (entry (js-call (get table :entries) :get hash-key)))
+      (if (undefined? entry)
+          (js-call (get table :entries) :set hash-key (js-array key value))
+        (put entry 1 value))
+      value))
+
+
+  (defun el-remhash (key table)
+    (js-call (get table :entries) :delete
+             (if (= (get table :test) "eq") key (el-hash-key table key)))
+    nil)
+
+
+  (defun el-hash-table-literal (items)
+    (let ((test "eql") (data nil) (index 1))
+      (while (< index (js-length items))
+        (let ((key (el-symbol-name (aref items index))))
+          (cond ((= key "test") (setq test (el-symbol-name (aref items (1+ index)))))
+                ((= key "data") (setq data (aref items (1+ index))))))
+        (setq index (+ index 2)))
+      (let ((table (el-make-hash-table test)) (cursor data))
+        (while (el-cons? cursor)
+          (el-puthash (get cursor :car) (el-car (get cursor :cdr)) table)
+          (setq cursor (el-cdr (get cursor :cdr))))
+        table)))
+
+
+  ;; ------------------------------------------------------------------
+  ;; Sequences
+  ;; ------------------------------------------------------------------
+
+  (defun el-seq-items (seq)
+    ;; Host array view of an Elisp sequence (lists, vectors, strings, records,
+    ;; bool vectors and the persistent collections).
+    (cond
+      ((nil? seq) (js-array))
+      ((= (js* "typeof seq") "string") (el-string-codes seq))
+      ((= (js* "typeof seq") "object")
+        (let ((kind (get seq :kind)))
+          (cond
+            ((= kind "cons") (el-list-to-array seq))
+            ((or (= kind "vector") (= kind "record")) (js-call (get seq :items) :slice))
+            (t (el-persistent-items seq)))))
+      (t (el-signal "wrong-type-argument" (el-intern "sequencep") seq))))
+
+
+  (defun el-seq-like (template items)
+    (cond
+      ((el-vector? template) (el-vector items))
+      ((el-string? template) (el-string-from-codes items))
+      (t (el-list-from items))))
+
+
+  (defun el-length (seq)
+    (cond
+      ((nil? seq) 0)
+      ((= (js* "typeof seq") "string") (el-string-length seq))
+      ((el-cons? seq)
+        (let ((count 0) (cursor seq))
+          (while (el-cons? cursor) (setq count (1+ count)) (setq cursor (get cursor :cdr)))
+          (unless (nil? cursor) (el-signal "wrong-type-argument" (el-intern "listp") seq))
+          count))
+      ((or (el-vector? seq) (el-record? seq)) (js-length (get seq :items)))
+      ((el-hash-table? seq) (get (get seq :entries) :size))
+      (t (el-value-count seq))))
+
+
+  (defun el-aref (array index)
+    (let ((i (el-int-check index)))
+      (cond
+        ((= (js* "typeof array") "string") (el-string-ref array i))
+        ((or (el-vector? array) (el-record? array))
+          (let ((items (get array :items)))
+            (when (or (< i 0) (>= i (js-length items))) (el-signal "args-out-of-range" array index))
+            (aref items i)))
+        (t (el-signal "wrong-type-argument" (el-intern "arrayp") array)))))
+
+
+  (defun el-aset-container (array index value)
+    (let ((i (el-int-check index)))
+      (cond
+        ((or (el-vector? array) (el-record? array))
+          (let ((items (get array :items)))
+            (when (or (< i 0) (>= i (js-length items))) (el-signal "args-out-of-range" array index))
+            (put items i value)
+            value))
+        (t (el-signal "wrong-type-argument" (el-intern "arrayp") array)))))
+
+
+  (defun el-copy-sequence (seq)
+    (cond
+      ((nil? seq) nil)
+      ((= (js* "typeof seq") "string") seq)
+      ((el-cons? seq) (el-list-from (el-list-to-array seq)))
+      ((el-vector? seq) (el-vector (js-call (get seq :items) :slice)))
+      ((el-record? seq) (js-object :kind "record" :items (js-call (get seq :items) :slice)))
+      (t seq)))
+
+
+  (defun el-reverse (seq)
+    (cond
+      ((el-string? seq) (el-string-from-codes (js-call (el-string-codes seq) :reverse)))
+      ((el-vector? seq) (el-vector (js-call (js-call (get seq :items) :slice) :reverse)))
+      (t (el-list-from (js-call (el-list-to-array seq) :reverse)))))
+
+
+  (defun el-append (lists)
+    (if (= (js-length lists) 0) nil
+      (let ((last (aref lists (1- (js-length lists))))
+            (items (js-array))
+            (index 0))
+        (while (< index (1- (js-length lists)))
+          (js-call (el-seq-items (aref lists index)) :forEach (lambda (item) (js-call items :push item)))
+          (setq index (1+ index)))
+        (el-list-from items last))))
+
+
+  (defun el-nconc (lists)
+    (let ((result nil) (tail nil) (index 0))
+      (while (< index (js-length lists))
+        (let ((item (aref lists index)))
+          (cond
+            ((nil? item) nil)
+            ((nil? result) (setq result item) (setq tail item))
+            (t (let ((cursor tail))
+                 (while (el-cons? (get cursor :cdr)) (setq cursor (get cursor :cdr)))
+                 (put cursor :cdr item)
+                 (setq tail item)))))
+        (setq index (1+ index)))
+      result))
+
+
+  (defun el-last-cell (list n)
+    (let ((count (if (nullish? n) 1 n)) (cells (js-array)) (cursor list))
+      (while (el-cons? cursor) (js-call cells :push cursor) (setq cursor (get cursor :cdr)))
+      (if (= count 0) cursor
+        (if (>= count (js-length cells)) list (aref cells (- (js-length cells) count))))))
+
+
+  (defun el-member-with (item list test)
+    (let ((cursor list) (found nil))
+      (while (and (nil? found) (el-cons? cursor))
+        (when (funcall test item (get cursor :car)) (setq found cursor))
+        (setq cursor (get cursor :cdr)))
+      found))
+
+
+  (defun el-assoc-with (key alist test)
+    (let ((cursor alist) (found nil))
+      (while (and (nil? found) (el-cons? cursor))
+        (let ((cell (get cursor :car)))
+          (when (and (el-cons? cell) (funcall test key (get cell :car))) (setq found cell)))
+        (setq cursor (get cursor :cdr)))
+      found))
+
+
+  (defun el-rassoc-with (key alist test)
+    (let ((cursor alist) (found nil))
+      (while (and (nil? found) (el-cons? cursor))
+        (let ((cell (get cursor :car)))
+          (when (and (el-cons? cell) (funcall test key (get cell :cdr))) (setq found cell)))
+        (setq cursor (get cursor :cdr)))
+      found))
+
+
+  (defun el-delete-with (item seq test)
+    (let ((kept (js-call (el-seq-items seq) :filter (lambda (x) (not (funcall test item x))))))
+      (el-seq-like seq kept)))
+
+
+  (defun el-plist-get (plist prop test)
+    (let ((cursor plist) (found nil) (done false))
+      (while (and (not done) (el-cons? cursor) (el-cons? (get cursor :cdr)))
+        (if (funcall test (get cursor :car) prop)
+            (progn (setq found (get (get cursor :cdr) :car)) (setq done t))
+          (setq cursor (get (get cursor :cdr) :cdr))))
+      found))
+
+
+  (defun el-plist-put (plist prop value test)
+    (let ((cursor plist) (done false))
+      (while (and (not done) (el-cons? cursor) (el-cons? (get cursor :cdr)))
+        (if (funcall test (get cursor :car) prop)
+            (progn (put (get cursor :cdr) :car value) (setq done t))
+          (setq cursor (get (get cursor :cdr) :cdr))))
+      (if done plist
+        (if (nil? plist) (el-list prop value)
+          (let ((tail plist))
+            (while (el-cons? (get (get tail :cdr) :cdr)) (setq tail (get (get tail :cdr) :cdr)))
+            (put (get tail :cdr) :cdr (el-list prop value))
+            plist)))))
+
+
+  (defun el-plist-member (plist prop test)
+    (let ((cursor plist) (found nil))
+      (while (and (nil? found) (el-cons? cursor))
+        (if (funcall test (get cursor :car) prop) (setq found cursor)
+          (setq cursor (el-cdr-safe (get cursor :cdr)))))
+      found))
+
+
+  (defun el-proper-list-length (x)
+    (let ((count 0) (cursor x) (seen (new globalThis.Set)))
+      (while (and (el-cons? cursor) (not (js-call seen :has cursor)))
+        (js-call seen :add cursor)
+        (setq count (1+ count))
+        (setq cursor (get cursor :cdr)))
+      (if (nil? cursor) count nil)))
+
+
+  (defun el-copy-tree (tree vectors)
+    (cond
+      ((el-cons? tree) (el-cons (el-copy-tree (get tree :car) vectors) (el-copy-tree (get tree :cdr) vectors)))
+      ((and vectors (el-vector? tree)) (el-vector (js-call (get tree :items) :map (lambda (x) (el-copy-tree x vectors)))))
+      (t tree)))
+
+
+  (defun el-add-special-var (session symbol)
+    (when (el-symobj? symbol)
+      (put symbol :_everSpecial t)
+      (js-call (get session :specials) :add symbol)))
+
+
+  (defun el-default-value (session symbol)
+    (let ((values (get session :values)))
+      (if (js-call values :has symbol) (js-call values :get symbol)
+        (let ((getter (js-call (get session :liveValueGetters) :get symbol)))
+          (if (undefined? getter) (el-signal "void-variable" symbol) (funcall getter))))))
+
+
+  (defun el-global-value (session symbol)
+    (let ((buf (get session :currentBuffer)))
+      (if (and (not (nullish? buf)) (get buf :live) (not (nullish? (get buf :locals)))
+               (js-call (get buf :locals) :has symbol))
+          (js-call (get buf :locals) :get symbol)
+        (el-default-value session symbol))))
+
+
+  (defun el-symbol-name-or-string (x) (if (el-string? x) x (el-symbol-name x)))
+
+
+  (defun el-type-of (value)
+    (cond
+      ((or (nil? value) (eq value t)) "symbol")
+      ((el-integer? value) "integer")
+      ((el-float? value) "float")
+      ((el-string? value) "string")
+      ((el-function? value) "subr")
+      (t (let ((kind (get value :kind)))
+           (cond ((= kind "keyword") "symbol")
+                 ((= kind "record") (el-symbol-name (aref (get value :items) 0)))
+                 (t kind))))))
+
+
+  (defun el-opt (x) (if (undefined? x) nil x))
+
+
+  ;; ------------------------------------------------------------------
+  ;; eliscript-data: persistent collections and value protocol
+  ;; ------------------------------------------------------------------
+
+  (defconst JS_FALSE (Object/freeze (js-object :kind "js-sentinel" :sentinel "false")))
+
+  (defconst JS_NULL (Object/freeze (js-object :kind "js-sentinel" :sentinel "null")))
+
+  (defconst JS_UNDEFINED (Object/freeze (js-object :kind "js-sentinel" :sentinel "undefined")))
+
+  (defconst OPTION_NONE (Object/freeze (js-object :kind "option" :some false :value nil)))
+
+
+  (defconst sequence-kinds (js-array "persistent-list" "persistent-vector" "persistent-queue" "persistent-set" "persistent-sorted-set"))
+
+  (defconst map-kinds (js-array "persistent-map" "persistent-sorted-map" "persistent-record"))
+
+
+  (defun el-persistent? (x)
+    (and (not (nullish? x)) (= (js* "typeof x") "object")
+         (or (js-call sequence-kinds :includes (get x :kind)) (js-call map-kinds :includes (get x :kind))
+             (= (get x :kind) "lazy-seq"))))
+
+
+  (defun el-value-equal (a b)
+    (cond
+      ((eq a b) t)
+      ((or (nil? a) (nil? b)) false)
+      ((and (el-number? a) (el-number? b)) (= (el-num a) (el-num b)))
+      ((or (not (= (js* "typeof a") "object")) (not (= (js* "typeof b") "object"))) (and (= a b) t))
+      (t
+        (let ((ka (get a :kind)) (kb (get b :kind)))
+          (cond
+            ((and (js-call (js-array "persistent-list" "persistent-vector" "persistent-queue") :includes ka)
+                  (js-call (js-array "persistent-list" "persistent-vector" "persistent-queue") :includes kb))
+              (and (= (js-length (get a :items)) (js-length (get b :items)))
+                   (js-call (get a :items) :every (lambda (x i) (el-value-equal x (aref (get b :items) i))))))
+            ((and (js-call (js-array "persistent-map" "persistent-sorted-map") :includes ka)
+                  (js-call (js-array "persistent-map" "persistent-sorted-map") :includes kb))
+              (and (= (js-length (get a :entries)) (js-length (get b :entries)))
+                   (js-call (get a :entries) :every
+                            (lambda (entry)
+                              (let ((found (js-call (get b :entries) :find (lambda (other) (el-value-equal (aref entry 0) (aref other 0))))))
+                                (and (not (undefined? found)) (el-value-equal (aref entry 1) (aref found 1))))))))
+            ((and (js-call (js-array "persistent-set" "persistent-sorted-set") :includes ka)
+                  (js-call (js-array "persistent-set" "persistent-sorted-set") :includes kb))
+              (and (= (js-length (get a :items)) (js-length (get b :items)))
+                   (js-call (get a :items) :every (lambda (x) (js-call (get b :items) :some (lambda (y) (el-value-equal x y)))))))
+            ((and (= ka "persistent-record") (= kb "persistent-record"))
+              (and (= (get a :typeName) (get b :typeName)) (= (js-length (get a :entries)) (js-length (get b :entries)))
+                   (js-call (get a :entries) :every
+                            (lambda (entry)
+                              (let ((found (js-call (get b :entries) :find (lambda (other) (= (aref other 0) (aref entry 0))))))
+                                (and (not (undefined? found)) (el-value-equal (aref entry 1) (aref found 1))))))))
+            ((and (= ka kb) (or (= ka "option") (= ka "result")))
+              (and (= (get a :some) (get b :some)) (= (get a :ok) (get b :ok)) (el-value-equal (get a :value) (get b :value))))
+            (t (el-equal-p a b 0)))))))
+
+
+  (defun el-value-hash-key (x) (str "v:" (el-prin1-string x t)))
+
+
+  (defun el-value-compare (a b)
+    (cond
+      ((el-value-equal a b) 0)
+      ((nil? a) -1)
+      ((nil? b) 1)
+      ((and (el-number? a) (el-number? b)) (if (< (el-num a) (el-num b)) -1 1))
+      ((and (el-string? a) (el-string? b)) (if (< a b) -1 1))
+      (t (let ((sa (if (el-symobj? a) (get a :name) (el-prin1-string a t)))
+               (sb (if (el-symobj? b) (get b :name) (el-prin1-string b t))))
+           (if (< sa sb) -1 1)))))
+
+
+  (defun el-assoc-entries (entries key value)
+    (let* ((found false)
+           (next (js-call entries :map (lambda (entry)
+                                        (if (and (not found) (el-value-equal (aref entry 0) key))
+                                            (progn (setq found t) (js-array key value))
+                                          entry)))))
+      (unless found (js-call next :push (js-array key value)))
+      next))
+
+
+  (defun el-make-pcoll (kind items) (js-object :kind kind :items (js-call items :slice) :meta nil))
+
+  (defun el-make-pmap (kvs)
+    (let ((entries (js-array)) (i 0))
+      (while (< i (js-length kvs))
+        (setq entries (el-assoc-entries entries (aref kvs i) (el-opt (aref kvs (1+ i)))))
+        (setq i (+ i 2)))
+      (js-object :kind "persistent-map" :entries entries :meta nil)))
+
+  (defun el-make-pset (items)
+    (let ((unique (js-array)))
+      (js-call items :forEach (lambda (x) (unless (js-call unique :some (lambda (y) (el-value-equal x y))) (js-call unique :push x))))
+      (js-object :kind "persistent-set" :items unique :meta nil)))
+
+
+  (defun el-lazy-items (seq)
+    (let ((out (js-array)) (cursor seq) (guard 0))
+      (while (and (not (nil? cursor)) (< guard 10000000))
+        (setq guard (1+ guard))
+        (cond
+          ((= (el-kind cursor) "lazy-seq") (setq cursor (funcall (get cursor :step))))
+          ((el-cons? cursor) (js-call out :push (get cursor :car)) (setq cursor (get cursor :cdr)))
+          (t (setq cursor nil))))
+      out))
+
+
+  (defun el-persistent-items (coll)
+    (let ((kind (get coll :kind)))
+      (cond
+        ((js-call sequence-kinds :includes kind) (js-call (get coll :items) :slice))
+        ((js-call map-kinds :includes kind) (js-call (get coll :entries) :map (lambda (e) (el-list (aref e 0) (aref e 1)))))
+        ((= kind "lazy-seq") (el-lazy-items coll))
+        (t (el-signal "wrong-type-argument" (el-intern "sequencep") coll)))))
+
+
+  (defun el-value-count (coll)
+    (cond
+      ((nil? coll) 0)
+      ((el-string? coll) (el-string-length coll))
+      ((el-hash-table? coll) (get (get coll :entries) :size))
+      ((js-call map-kinds :includes (get coll :kind)) (js-length (get coll :entries)))
+      (t (js-length (el-seq-items coll)))))
+
+
+  (defun el-record-field-name (key) (if (el-symobj? key) (let ((n (get key :name))) (if (js-call n :startsWith ":") (js-call n :slice 1) n)) (str key)))
+
+
+  (defun el-value-contains (coll key)
+    (cond
+      ((nil? coll) false)
+      ((js-call (js-array "persistent-map" "persistent-sorted-map") :includes (get coll :kind))
+        (js-call (get coll :entries) :some (lambda (e) (el-value-equal (aref e 0) key))))
+      ((= (get coll :kind) "persistent-record")
+        (js-call (get coll :entries) :some (lambda (e) (= (aref e 0) (el-record-field-name key)))))
+      ((el-hash-table? coll) (js-call (get coll :entries) :has (el-hash-key coll key)))
+      (t false)))
+
+
+  (defun el-value-get (coll key not-found)
+    (cond
+      ((nil? coll) not-found)
+      ((js-call (js-array "persistent-map" "persistent-sorted-map") :includes (get coll :kind))
+        (let ((cell (js-call (get coll :entries) :find (lambda (e) (el-value-equal (aref e 0) key)))))
+          (if (undefined? cell) not-found (aref cell 1))))
+      ((= (get coll :kind) "persistent-record")
+        (let ((cell (js-call (get coll :entries) :find (lambda (e) (= (aref e 0) (el-record-field-name key))))))
+          (if (undefined? cell) not-found (aref cell 1))))
+      ((el-hash-table? coll) (el-gethash key coll not-found))
+      ((or (= (get coll :kind) "persistent-vector") (el-vector? coll))
+        (if (and (el-integer? key) (>= key 0) (< key (js-length (get coll :items)))) (aref (get coll :items) key) not-found))
+      (t not-found)))
+
+
+  (defun el-print-extension (out value escape depth)
+    (let ((kind (get value :kind)))
+      (cond
+        ((js-call sequence-kinds :includes kind)
+          (el-print-items out (str "#<" kind " ") (get value :items) ">" escape depth))
+        ((js-call map-kinds :includes kind)
+          (js-call out :push (str "#<" kind))
+          (js-call (get value :entries) :forEach
+                   (lambda (e)
+                     (js-call out :push " ")
+                     (el-print-into out (aref e 0) escape (1+ depth))
+                     (js-call out :push " ")
+                     (el-print-into out (aref e 1) escape (1+ depth))))
+          (js-call out :push ">"))
+        (t (js-call out :push (str "#<" (or kind "object") ">"))))))
+
+
+  (defun el-json-to-persistent (value)
+    (cond
+      ((Array/isArray value) (el-make-pcoll "persistent-vector" (js-call value :map (lambda (x) (el-json-to-persistent x)))))
+      ((nil? value) nil)
+      ((= (el-typeof value) "object")
+        (let ((kvs (js-array)))
+          (js-call (Object/entries value) :forEach
+                   (lambda (pair) (js-call kvs :push (el-intern (str ":" (aref pair 0)))) (js-call kvs :push (el-json-to-persistent (aref pair 1)))))
+          (el-make-pmap kvs)))
+      ((eq value t) t)
+      ((eq value false) nil)
+      (t value)))
+
+
+  (defun el-validate-struct-field (struct-name field value)
+    (let ((type (get field :type)) (label (str struct-name "." (get field :name))))
+      (when (and (= type "string") (not (el-string? value)))
+        (el-signal "error" (str "Schema type mismatch on " label ": expected string")))
+      (when (and (= type "integer") (not (el-integer? value)))
+        (el-signal "error" (str "Schema type mismatch on " label ": expected integer")))
+      (when (and (not (nil? (get field :min))) (el-number? value) (< (el-num value) (get field :min)))
+        (el-signal "error" (str "Schema min violation on " label ": " (el-num value) " < " (get field :min))))
+      (when (and (not (nil? (get field :max))) (el-number? value) (> (el-num value) (get field :max)))
+        (el-signal "error" (str "Schema max violation on " label ": " (el-num value) " > " (get field :max))))))
+
+
+  (defun el-make-float-if-fractional (n) (el-make-float n))
+
+
+  (defun el-lazy-force (s)
+    (let ((cursor s))
+      (while (= (el-kind cursor) "lazy-seq") (setq cursor (funcall (get cursor :step))))
+      (if (el-cons? cursor) cursor nil)))
+
+
+  (defun printCompatValue (value &optional escape)
+    (el-prin1-string value (if (undefined? escape) t escape)))
+
+
+  (defun sym (name) (el-intern name))
+
+  (defun kw (name) (el-intern (if (js-call name :startsWith ":") name (str ":" name))))
+
+  (defun valueEqual (a b) (el-bool (el-value-equal a b)))
+
+  (defun valueCompare (a b) (el-value-compare a b))
+
+
+  (defun serializeCompatValue (value)
+    (cond
+      ((nullish? value) nil)
+      ((eq value t) t)
+      ((eq value false) false)
+      ((= (el-typeof value) "number") value)
+      ((= (el-typeof value) "string") value)
+      ((= (el-typeof value) "function") "#<function>")
+      (t
+        (let ((kind (get value :kind)))
+          (cond
+            ((= kind float-tag) (get value :value))
+            ((or (= kind "symbol") (= kind "keyword")) (get value :name))
+            ((= kind "cons")
+              (let ((out (js-array)) (cursor value))
+                (while (el-cons? cursor)
+                  (js-call out :push (serializeCompatValue (get cursor :car)))
+                  (setq cursor (get cursor :cdr)))
+                (unless (nil? cursor) (js-call out :push (serializeCompatValue cursor)))
+                out))
+            ((= kind "vector") (js-call (get value :items) :map (lambda (x) (serializeCompatValue x))))
+            ((js-call sequence-kinds :includes kind) (js-call (get value :items) :map (lambda (x) (serializeCompatValue x))))
+            ((js-call map-kinds :includes kind)
+              (let ((out (js-object)))
+                (js-call (get value :entries) :forEach
+                         (lambda (entry)
+                           (let ((key (aref entry 0)))
+                             (put out (if (el-symobj? key) (el-record-field-name key) (str key)) (serializeCompatValue (aref entry 1))))))
+                out))
+            (t (el-prin1-string value t)))))))
+
+  (export JS_FALSE JS_NULL JS_UNDEFINED OPTION_NONE base-condition-messages base-condition-parents beyond-unicode-char el-add-special-var el-append el-aref el-arith el-arith-2 el-ascii? el-aset-container el-ash el-assoc-entries el-assoc-with el-astral? el-bitwise el-bool el-bytes-string el-car el-car-safe el-cdr el-cdr-safe el-char-string el-char-to-unit el-char-width el-compare-chain el-compile-error el-condition-matches el-cons el-cons? el-control-transfer? el-copy-sequence el-copy-tree el-decode-utf8 el-default-value el-delete-with el-divide el-downcase el-encode-utf8 el-eq el-eql el-equal el-equal-p el-error-from-host el-float? el-format-g el-function? el-gethash el-global-value el-hash-key el-hash-table-literal el-hash-table? el-integer-string el-integer? el-intern el-json-to-persistent el-keyword? el-kind el-last-cell el-lazy-force el-length el-list el-list-from el-list-length el-list-to-array el-make-float el-make-float-if-fractional el-make-hash-table el-make-pcoll el-make-pmap el-make-pset el-make-signal el-make-symbol el-mark-unibyte el-member-with el-mod el-mod-int el-multibyte? el-nconc el-nth el-nthcdr el-num el-number-string el-number? el-opt el-pad-exponent el-plist-get el-plist-member el-plist-put el-prin1-string el-proper-list-length el-puthash el-rassoc-with el-record-field-name el-record? el-rem el-remhash el-reverse el-round-half-even el-rounding el-seq-items el-seq-like el-signal el-signal-message el-string-bytes-array el-string-codes el-string-from-codes el-string-length el-string-ref el-string-set el-string-width el-string? el-substring el-sym-is el-symbol-name el-symbol-name-or-string el-symbol? el-symobj? el-type-of el-typeof el-unit-to-char el-upcase el-validate-struct-field el-value-compare el-value-contains el-value-count el-value-equal el-value-get el-vector el-vector? kw printCompatValue s-allow-other-keys s-and s-app s-aux s-backquote s-body s-closure s-comma s-comma-at s-declare s-default s-eliscript s-function s-guard s-if s-interactive s-key s-lambda s-let s-macro s-not s-optional s-or s-otherwise s-pred s-progn s-quote s-recur s-rest s-setf s-setq s-underscore serializeCompatValue sym symbol-table unibyte-strings valueCompare valueEqual))

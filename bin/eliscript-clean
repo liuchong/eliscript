@@ -1,0 +1,102 @@
+#!/usr/bin/env sh
+set -eu
+
+SOURCE="$0"
+while [ -L "$SOURCE" ]; do
+  DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)
+  SOURCE=$(readlink "$SOURCE")
+  case "$SOURCE" in
+    /*) ;;
+    *) SOURCE="$DIR/$SOURCE" ;;
+  esac
+done
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)
+PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
+
+CLEAN_ALL=0
+QUIET=0
+for arg in "$@"; do
+  case "$arg" in
+    --all|-a) CLEAN_ALL=1 ;;
+    --quiet|-q) QUIET=1 ;;
+    --help|-h)
+      printf '%s\n' "Usage: eliscript-clean [--all|-a] [--quiet|-q]"
+      printf '%s\n' ""
+      printf '%s\n' "Remove generated .mjs and .mjs.map files lying next to .eli sources."
+      printf '%s\n' "  (default)   Clean source directories while preserving dist/ CLI outputs"
+      printf '%s\n' "  --all, -a   Also remove dist/, .eliscript-cache/, and *.elc artifacts"
+      printf '%s\n' "  --quiet, -q Suppress summary output"
+      exit 0
+      ;;
+    *)
+      printf 'eliscript-clean: unknown option: %s\n' "$arg" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [ "$CLEAN_ALL" -eq 0 ]; then
+  # Preserve host CLI and runtime modules inside dist/ so CLI commands work immediately
+  mkdir -p "$PROJECT_DIR/dist/host-cli" "$PROJECT_DIR/dist/runtime"
+  for name in bun build project-legacy project-cli-legacy check-cli-legacy evaluation evaluation-cli format-cli watch watch-cli project-cli check-cli eliscript-cli; do
+    if [ -f "$PROJECT_DIR/bootstrap/host/$name.mjs" ] && [ ! -f "$PROJECT_DIR/dist/host-cli/$name.mjs" ]; then
+      cp "$PROJECT_DIR/bootstrap/host/$name.mjs" "$PROJECT_DIR/dist/host-cli/$name.mjs"
+      if [ -f "$PROJECT_DIR/bootstrap/host/$name.mjs.map" ]; then
+        cp "$PROJECT_DIR/bootstrap/host/$name.mjs.map" "$PROJECT_DIR/dist/host-cli/$name.mjs.map"
+      fi
+    fi
+  done
+  if [ -f "$PROJECT_DIR/dist/host-cli/project-legacy.mjs" ]; then
+    cp "$PROJECT_DIR/dist/host-cli/project-legacy.mjs" "$PROJECT_DIR/dist/host-cli/project.mjs"
+  fi
+  for name in prelude math unicode-case unicode-case-data; do
+    if [ -f "$PROJECT_DIR/runtime/$name.mjs" ] && [ ! -f "$PROJECT_DIR/dist/runtime/$name.mjs" ]; then
+      cp "$PROJECT_DIR/runtime/$name.mjs" "$PROJECT_DIR/dist/runtime/$name.mjs"
+      if [ -f "$PROJECT_DIR/runtime/$name.mjs.map" ]; then
+        cp "$PROJECT_DIR/runtime/$name.mjs.map" "$PROJECT_DIR/dist/runtime/$name.mjs.map"
+      fi
+    fi
+  done
+  if [ ! -f "$PROJECT_DIR/dist/package.json" ] && [ -f "$PROJECT_DIR/dist/bootstrap/package.json" ]; then
+    cp "$PROJECT_DIR/dist/bootstrap/package.json" "$PROJECT_DIR/dist/package.json"
+  fi
+fi
+
+COUNT=$(find "$PROJECT_DIR/bootstrap" "$PROJECT_DIR/browser" "$PROJECT_DIR/compiler" \
+             "$PROJECT_DIR/editor" "$PROJECT_DIR/examples" "$PROJECT_DIR/platform" \
+             "$PROJECT_DIR/runtime" "$PROJECT_DIR/stdlib" "$PROJECT_DIR/tests" \
+             "$PROJECT_DIR/tools" \
+             \( -name '*.mjs' -o -name '*.mjs.map' \) -type f 2>/dev/null | wc -l | tr -d ' ')
+
+find "$PROJECT_DIR/bootstrap" "$PROJECT_DIR/browser" "$PROJECT_DIR/compiler" \
+     "$PROJECT_DIR/editor" "$PROJECT_DIR/examples" "$PROJECT_DIR/platform" \
+     "$PROJECT_DIR/runtime" "$PROJECT_DIR/stdlib" "$PROJECT_DIR/tests" \
+     "$PROJECT_DIR/tools" \
+     \( -name '*.mjs' -o -name '*.mjs.map' \) -type f -delete 2>/dev/null || true
+
+rm -rf "$PROJECT_DIR"/.eliscript-test.* \
+       "$PROJECT_DIR"/.eliscript-literal-nth-* \
+       "$PROJECT_DIR"/.eliscript-dogfood-source-* \
+       "$PROJECT_DIR"/.eliscript-fuzz-* \
+       "$PROJECT_DIR"/.eliscript-array-* \
+       "$PROJECT_DIR"/.eliscript-host-completion-* \
+       "$PROJECT_DIR"/.eliscript-object-properties-* \
+       "$PROJECT_DIR"/.eliscript-exception-browser-*
+
+if [ "$CLEAN_ALL" -eq 1 ]; then
+  rm -rf "$PROJECT_DIR/dist" \
+         "$PROJECT_DIR/.eliscript-cache" \
+         "$PROJECT_DIR/tools/backends/dist" \
+         "$PROJECT_DIR/tools/ci/dist" \
+         "$PROJECT_DIR/examples/dogfood/dist" \
+         "$PROJECT_DIR/examples/dogfood/_site" \
+         "$PROJECT_DIR/examples/dogfood/tmp"
+  find "$PROJECT_DIR" -path "$PROJECT_DIR/node_modules" -prune -o -name '*.elc' -type f -delete 2>/dev/null || true
+  if [ "$QUIET" -eq 0 ]; then
+    printf 'eliscript-clean: removed %s in-place .mjs/.mjs.map files plus dist/, caches, and *.elc\n' "$COUNT"
+  fi
+else
+  if [ "$QUIET" -eq 0 ]; then
+    printf 'eliscript-clean: removed %s in-place .mjs/.mjs.map files from source directories (dist/ preserved)\n' "$COUNT"
+  fi
+fi

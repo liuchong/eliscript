@@ -1,15 +1,29 @@
 #!/usr/bin/env sh
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SOURCE="$0"
+while [ -L "$SOURCE" ]; do
+  DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)
+  SOURCE=$(readlink "$SOURCE")
+  case "$SOURCE" in
+    /*) ;;
+    *) SOURCE="$DIR/$SOURCE" ;;
+  esac
+done
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)
 PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
 MODULE_DIR=${ELISCRIPT_BOOTSTRAP_MODULE_DIR:-"$PROJECT_DIR/dist/bootstrap"}
 : "${ELISCRIPT_JS_RUNTIME:=bun}"
 
-if [ ! -f "$MODULE_DIR/compiler.mjs" ]; then
-  ELISCRIPT_BOOTSTRAP_OUT_DIR="$MODULE_DIR" \
+HOST_DIR="$PROJECT_DIR/dist/host-cli"
+if [ -f "$PROJECT_DIR/bootstrap/host/format-cli.mjs" ]; then
+  HOST_DIR="$PROJECT_DIR/bootstrap/host"
+fi
+
+if [ ! -f "$MODULE_DIR/compiler.mjs" ] || [ ! -f "$HOST_DIR/format-cli.mjs" ]; then
+  ELISCRIPT_DIST_ONLY=1 ELISCRIPT_BOOTSTRAP_OUT_DIR="$MODULE_DIR" \
     "$PROJECT_DIR/bin/eliscript-bootstrap"
 fi
 
 export ELISCRIPT_BOOTSTRAP_MODULE_DIR="$MODULE_DIR"
-exec "$ELISCRIPT_JS_RUNTIME" "$PROJECT_DIR/bootstrap/host/format-cli.mjs" "$@"
+exec "$ELISCRIPT_JS_RUNTIME" "$HOST_DIR/format-cli.mjs" "$@"

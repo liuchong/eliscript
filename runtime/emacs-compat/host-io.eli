@@ -1,0 +1,826 @@
+(module eliscript.runtime.emacs-compat.host-io
+  ;;; host-io.eli --- Host OS, file system, async process/HTTP worker hub, timers, loader, and ERT
+
+  (import "./core.eli" el-bool el-bytes-string el-car el-condition-matches el-cons el-cons? el-control-transfer? el-decode-utf8 el-error-from-host el-global-value el-intern el-keyword? el-kind el-list el-list-from el-list-to-array el-make-signal el-member-with el-num el-number? el-plist-get el-prin1-string el-seq-items el-signal el-string-bytes-array el-string? el-sym-is el-symbol-name el-symbol-name-or-string el-symobj?)
+  (import "./regexp-buffer.eli" el-append-to-buffer el-buffer-delete el-buffer-insert el-buffer-substring el-current-buffer el-generate-new-buffer el-get-buffer-create el-point-max el-string-match)
+  (import "./reader-format.eli" el-expand-file-name)
+  (import "./evaluator.eli" el-call el-emit-output el-eq-test el-eval el-eval-body el-eval-source el-rest-after el-second)
+
+
+  (defun el-url-generic-parse-url (session url-str)
+    (if (not (el-string? url-str))
+        (el-call session (el-intern "make-url") (js-array))
+      (let ((m (js-call (new globalThis.RegExp "^(?:([A-Za-z][A-Za-z0-9+.-]*):)?(//(?:([^/:@#?]+)(?::([^/@#?]*))?@)?(\\[[^\\]]+\\]|[^/:?#]*)(?::([0-9]+))?)?([^#]*)(?:#(.*))?$")
+                        :exec url-str)))
+        (if (nil? m)
+            (el-call session (el-intern "make-url") (js-array (el-intern ":filename") url-str))
+          (let ((scheme (if (undefined? (aref m 1)) nil (js-call (aref m 1) :toLowerCase)))
+                (full (el-bool (not (undefined? (aref m 2)))))
+                (user (if (undefined? (aref m 3)) nil (aref m 3)))
+                (pass (if (undefined? (aref m 4)) nil (aref m 4)))
+                (host (if (undefined? (aref m 2)) nil (if (undefined? (aref m 5)) "" (aref m 5))))
+                (port (if (undefined? (aref m 6)) nil (Number/parseInt (aref m 6) 10)))
+                (file (if (undefined? (aref m 7)) "" (aref m 7)))
+                (targ (if (undefined? (aref m 8)) nil (aref m 8))))
+            (el-call session (el-intern "make-url")
+                     (js-array (el-intern ":type") scheme
+                               (el-intern ":user") user
+                               (el-intern ":password") pass
+                               (el-intern ":host") host
+                               (el-intern ":portsitory") port
+                               (el-intern ":filename") file
+                               (el-intern ":target") targ
+                               (el-intern ":fullness") full)))))))
+
+
+  ;; ------------------------------------------------------------------
+  ;; Host OS, File System, Subprocess, HTTP & ERT Primitives
+  ;; ------------------------------------------------------------------
+
+  (defconst host-builtins (new globalThis.Map))
+
+
+  (defun el-node-builtin (name)
+    (if (js-call host-builtins :has name)
+        (js-call host-builtins :get name)
+      (let* ((proc globalThis.process)
+             (getter (if (nullish? proc) nil (get proc :getBuiltinModule)))
+             (mod (if (nullish? getter) nil
+                    (try (or (js-call proc :getBuiltinModule name)
+                             (js-call proc :getBuiltinModule (str "node:" name)))
+                      (catch e nil)))))
+        (js-call host-builtins :set name mod)
+        mod)))
+
+
+  (defun el-fs () (el-node-builtin "fs"))
+
+  (defun el-path () (el-node-builtin "path"))
+
+  (defun el-os () (el-node-builtin "os"))
+
+  (defun el-child-process () (el-node-builtin "child_process"))
+
+  (defun el-worker-threads () (el-node-builtin "worker_threads"))
+
+
+  (defconst io-worker-code
+    (str
+      "const { parentPort, workerData } = require('worker_threads');\n"
+      "const { spawn } = require('child_process');\n"
+      "const signal = new Int32Array(workerData.signal);\n"
+      "const outPort = workerData.port;\n"
+      "const children = new Map();\n"
+      "function send(msg) {\n"
+      "  outPort.postMessage(msg);\n"
+      "  Atomics.add(signal, 0, 1);\n"
+      "  Atomics.notify(signal, 0);\n"
+      "}\n"
+      "parentPort.on('message', async (msg) => {\n"
+      "  if (msg.type === 'spawn') {\n"
+      "    try {\n"
+      "      const child = spawn(msg.file, msg.args, {\n"
+      "        cwd: msg.cwd || undefined,\n"
+      "        env: msg.env || process.env,\n"
+      "        stdio: ['pipe', 'pipe', 'pipe'],\n"
+      "        detached: false\n"
+      "      });\n"
+      "      children.set(msg.id, child);\n"
+      "      let spawnedSent = false;\n"
+      "      child.on('spawn', () => {\n"
+      "        if (!spawnedSent) {\n"
+      "          spawnedSent = true;\n"
+      "          send({ type: 'spawned', id: msg.id, pid: child.pid || 0 });\n"
+      "        }\n"
+      "      });\n"
+      "      if (child.pid && !spawnedSent) {\n"
+      "        spawnedSent = true;\n"
+      "        send({ type: 'spawned', id: msg.id, pid: child.pid });\n"
+      "      }\n"
+      "      child.stdout.on('data', (chunk) => {\n"
+      "        send({ type: 'stdout', id: msg.id, bytes: Array.from(chunk) });\n"
+      "      });\n"
+      "      child.stderr.on('data', (chunk) => {\n"
+      "        send({ type: 'stderr', id: msg.id, bytes: Array.from(chunk) });\n"
+      "      });\n"
+      "      child.on('error', (err) => {\n"
+      "        send({ type: 'spawn-error', id: msg.id, message: String(err && err.message ? err.message : err) });\n"
+      "      });\n"
+      "      child.on('close', (code, sig) => {\n"
+      "        children.delete(msg.id);\n"
+      "        send({ type: 'exit', id: msg.id, code: typeof code === 'number' ? code : (sig ? 128 : 0), signal: sig || null });\n"
+      "      });\n"
+      "    } catch (err) {\n"
+      "      send({ type: 'spawn-error', id: msg.id, message: String(err && err.message ? err.message : err) });\n"
+      "    }\n"
+      "  } else if (msg.type === 'stdin') {\n"
+      "    const child = children.get(msg.id);\n"
+      "    if (child && child.stdin && !child.stdin.destroyed) {\n"
+      "      try { child.stdin.write(Buffer.from(msg.bytes)); } catch (_) {}\n"
+      "    }\n"
+      "  } else if (msg.type === 'eof') {\n"
+      "    const child = children.get(msg.id);\n"
+      "    if (child && child.stdin && !child.stdin.destroyed) {\n"
+      "      try { child.stdin.end(); } catch (_) {}\n"
+      "    }\n"
+      "  } else if (msg.type === 'kill') {\n"
+      "    const child = children.get(msg.id);\n"
+      "    if (child) {\n"
+      "      try { child.kill(msg.sig || 'SIGTERM'); } catch (_) {}\n"
+      "    }\n"
+      "  } else if (msg.type === 'http') {\n"
+      "    try {\n"
+      "      const opts = { method: msg.method || 'GET', headers: msg.headers || {} };\n"
+      "      if (msg.bodyBytes && msg.bodyBytes.length > 0 && opts.method !== 'GET' && opts.method !== 'HEAD') {\n"
+      "        opts.body = Buffer.from(msg.bodyBytes);\n"
+      "      }\n"
+      "      const res = await fetch(msg.url, opts);\n"
+      "      const hdrLines = [`HTTP/1.1 ${res.status} ${res.statusText || 'OK'}`];\n"
+      "      res.headers.forEach((v, k) => hdrLines.push(`${k}: ${v}`));\n"
+      "      const headerStr = hdrLines.join('\\n') + '\\n\\n';\n"
+      "      const headerBytes = Array.from(Buffer.from(headerStr, 'utf8'));\n"
+      "      send({ type: 'http-headers', id: msg.id, status: res.status, headerBytes, headerLength: headerStr.length });\n"
+      "      if (res.body && typeof res.body.getReader === 'function') {\n"
+      "        const reader = res.body.getReader();\n"
+      "        while (true) {\n"
+      "          const { done, value } = await reader.read();\n"
+      "          if (done) break;\n"
+      "          if (value && value.length > 0) {\n"
+      "            send({ type: 'http-chunk', id: msg.id, bytes: Array.from(value) });\n"
+      "          }\n"
+      "        }\n"
+      "      } else {\n"
+      "        const ab = await res.arrayBuffer();\n"
+      "        const arr = Array.from(new Uint8Array(ab));\n"
+      "        if (arr.length > 0) send({ type: 'http-chunk', id: msg.id, bytes: arr });\n"
+      "      }\n"
+      "      send({ type: 'http-end', id: msg.id, status: res.status });\n"
+      "    } catch (err) {\n"
+      "      send({ type: 'http-error', id: msg.id, message: String(err && err.message ? err.message : err) });\n"
+      "    }\n"
+      "  }\n"
+      "});\n"))
+
+
+  (defvar io-hub nil)
+
+
+  (defun el-ensure-io-hub ()
+    (when (nil? io-hub)
+      (let ((wt (el-worker-threads)))
+        (when (not (nullish? wt))
+          (let* ((sab (new globalThis.SharedArrayBuffer 4))
+                 (sig (new globalThis.Int32Array sab))
+                 (ChannelCtor (get wt :MessageChannel))
+                 (ch (new ChannelCtor))
+                 (port1 (get ch :port1))
+                 (port2 (get ch :port2))
+                 (WorkerCtor (get wt :Worker))
+                 (worker (new WorkerCtor io-worker-code
+                              (js-object :eval t
+                                         :workerData (js-object :signal sab :port port2)
+                                         :transferList (js-array port2)))))
+            (when (not (nullish? (get worker :unref)))
+              (js-call worker :unref))
+            (when (not (nullish? (get port1 :unref)))
+              (js-call port1 :unref))
+            (setq io-hub (js-object :worker worker :port port1 :signal sig :wt wt
+                                    :procs (new globalThis.Map) :httpReqs (new globalThis.Map)
+                                    :nextId 1))))))
+    io-hub)
+
+
+  (defun el-drain-io-events (session &optional wait-for-spawn-id)
+    (let ((hub io-hub)
+          (got-any false))
+      (when (not (nil? hub))
+        (let ((wt (get hub :wt))
+              (port (get hub :port))
+              (more t))
+          (while more
+            (let ((packet (js-call wt :receiveMessageOnPort port)))
+              (if (or (nullish? packet) (nullish? (get packet :message)))
+                  (setq more false)
+                (let* ((msg (get packet :message))
+                       (mtype (get msg :type))
+                       (id (get msg :id)))
+                  (setq got-any t)
+                  (cond
+                    ((= mtype "spawned")
+                      (let ((proc (js-call (get hub :procs) :get id)))
+                        (when (not (undefined? proc))
+                          (put proc :pid (get msg :pid))
+                          (put proc :spawned t))))
+                    ((= mtype "spawn-error")
+                      (let ((proc (js-call (get hub :procs) :get id)))
+                        (when (not (undefined? proc))
+                          (put proc :spawnError (get msg :message))
+                          (put proc :spawned t)
+                          (put proc :live false)
+                          (put proc :status (el-intern "failed"))
+                          (put proc :exitStatus 127)
+                          (js-call (get hub :procs) :delete id))))
+                    ((= mtype "stdout")
+                      (let ((proc (js-call (get hub :procs) :get id)))
+                        (when (not (undefined? proc))
+                          (let ((chunk (el-decode-utf8 (el-bytes-string (get msg :bytes)))))
+                            (el-deliver-process-output session proc chunk)))))
+                    ((= mtype "stderr")
+                      (let ((proc (js-call (get hub :procs) :get id)))
+                        (when (not (undefined? proc))
+                          (let ((chunk (el-decode-utf8 (el-bytes-string (get msg :bytes))))
+                                (err-target (get proc :stderrTarget)))
+                            (cond
+                              ((= (el-kind err-target) "process")
+                                (el-deliver-process-output session err-target chunk))
+                              ((= (el-kind err-target) "buffer")
+                                (el-append-to-buffer err-target chunk))
+                              (t
+                                (el-deliver-process-output session proc chunk)))))))
+                    ((= mtype "exit")
+                      (let ((proc (js-call (get hub :procs) :get id)))
+                        (when (not (undefined? proc))
+                          (js-call (get hub :procs) :delete id)
+                          (put proc :live false)
+                          (put proc :status (if (nullish? (get msg :signal)) (el-intern "exit") (el-intern "signal")))
+                          (put proc :exitStatus (get msg :code))
+                          (let ((err-target (get proc :stderrTarget)))
+                            (when (= (el-kind err-target) "process")
+                              (put err-target :live false)
+                              (put err-target :status (el-intern "exit"))
+                              (put err-target :exitStatus 0)
+                              (when (not (nil? (get err-target :sentinel)))
+                                (el-call session (get err-target :sentinel) (js-array err-target "finished\n")))))
+                          (when (not (nil? (get proc :sentinel)))
+                            (let ((event-str (if (= (get msg :code) 0)
+                                                 "finished\n"
+                                               (str "exited abnormally with code " (get msg :code) "\n"))))
+                              (el-call session (get proc :sentinel) (js-array proc event-str)))))))
+                    ((= mtype "http-headers")
+                      (let ((req (js-call (get hub :httpReqs) :get id)))
+                        (when (not (undefined? req))
+                          (let ((buf (get req :buffer))
+                                (hdr-str (el-bytes-string (get msg :headerBytes))))
+                            (put req :status (get msg :status))
+                            (el-append-to-buffer buf hdr-str)
+                            (js-call (get buf :locals) :set (el-intern "url-http-end-of-headers") (get msg :headerLength))
+                            (js-call (get buf :locals) :set (el-intern "url-http-response-status") (get msg :status))))))
+                    ((= mtype "http-chunk")
+                      (let ((req (js-call (get hub :httpReqs) :get id)))
+                        (when (not (undefined? req))
+                          (let ((buf (get req :buffer))
+                                (proc (get req :proc))
+                                (chunk (el-bytes-string (get msg :bytes))))
+                            (el-append-to-buffer buf chunk)
+                            (when (not (nil? (get proc :filter)))
+                              (el-call session (get proc :filter) (js-array proc chunk)))))))
+                    ((= mtype "http-end")
+                      (let ((req (js-call (get hub :httpReqs) :get id)))
+                        (when (not (undefined? req))
+                          (js-call (get hub :httpReqs) :delete id)
+                          (let ((buf (get req :buffer))
+                                (proc (get req :proc))
+                                (cb (get req :callback))
+                                (cbargs (get req :cbargs))
+                                (status (get msg :status))
+                                (prev-buf (get session :currentBuffer)))
+                            (put proc :live false)
+                            (put proc :status (el-intern "exit"))
+                            (put proc :exitStatus 0)
+                            (when (not (nil? cb))
+                              (put session :currentBuffer buf)
+                              (put buf :point 1)
+                              (try
+                                (let ((status-plist (if (>= status 400)
+                                                        (el-list (el-intern ":error") (el-list (el-intern "error") (el-intern "http") status))
+                                                      nil)))
+                                  (el-call session cb (js-call (js-array status-plist) :concat (el-seq-items cbargs))))
+                                (finally
+                                  (put session :currentBuffer prev-buf))))))))
+                    ((= mtype "http-error")
+                      (let ((req (js-call (get hub :httpReqs) :get id)))
+                        (when (not (undefined? req))
+                          (js-call (get hub :httpReqs) :delete id)
+                          (let ((buf (get req :buffer))
+                                (proc (get req :proc))
+                                (cb (get req :callback))
+                                (cbargs (get req :cbargs))
+                                (prev-buf (get session :currentBuffer)))
+                            (put proc :live false)
+                            (put proc :status (el-intern "failed"))
+                            (put proc :exitStatus 1)
+                            (when (not (nil? cb))
+                              (put session :currentBuffer buf)
+                              (put buf :point 1)
+                              (try
+                                (let ((status-plist (el-list (el-intern ":error") (el-list (el-intern "error") (get msg :message)))))
+                                  (el-call session cb (js-call (js-array status-plist) :concat (el-seq-items cbargs))))
+                                (finally
+                                  (put session :currentBuffer prev-buf)))))))))))))))
+      got-any))
+
+
+  (defun el-deliver-process-output (session proc chunk)
+    (let ((filter (get proc :filter))
+          (buf (get proc :buffer)))
+      (cond
+        ((and (not (nil? filter)) (not (eq filter t)))
+          (el-call session filter (js-array proc chunk)))
+        ((= (el-kind buf) "buffer")
+          (el-append-to-buffer buf chunk)))))
+
+
+  (defun el-run-due-timers (session &optional horizon-sec)
+    (let ((timers (get session :timers))
+          (now (+ (/ (js-call globalThis.Date :now) 1000)
+                  (if (or (nullish? horizon-sec) (nil? horizon-sec)) 0 (el-num horizon-sec))))
+          (ran false))
+      (when (and (not (nullish? timers)) (> (js-length timers) 0))
+        (js-call (js-call timers :slice) :forEach
+                 (lambda (timer)
+                   (when (and (not (get timer :cancelled)) (<= (get timer :nextFire) now))
+                     (setq ran t)
+                     (let ((repeat (get timer :repeat)))
+                       (if (and (el-number? repeat) (> (el-num repeat) 0))
+                           (put timer :nextFire (+ now (el-num repeat)))
+                         (put timer :cancelled t)))
+                     (el-call session (get timer :fn) (get timer :fnArgs)))))
+        (let ((live (js-call (get session :timers) :filter (lambda (tm) (not (get tm :cancelled))))))
+          (put session :timers live)))
+      ran))
+
+
+  (defun el-next-timer-wait-ms (session max-ms)
+    (let ((timers (get session :timers))
+          (now (/ (js-call globalThis.Date :now) 1000))
+          (best max-ms))
+      (when (and (not (nullish? timers)) (> (js-length timers) 0))
+        (js-call timers :forEach
+                 (lambda (timer)
+                   (unless (get timer :cancelled)
+                     (let ((rem (Math/max 1 (Math/ceil (* (- (get timer :nextFire) now) 1000)))))
+                       (when (< rem best) (setq best rem)))))))
+      best))
+
+
+  (defun el-check-timeout-deadline (session)
+    (let ((deadline (get session :timeoutDeadline)))
+      (when (and (not (nullish? deadline)) (>= (/ (js-call globalThis.Date :now) 1000) deadline))
+        (throw (js-object :eliscriptTimeout t :deadline deadline)))))
+
+
+  (defun el-accept-process-output (session &optional proc seconds millisec just-this-one)
+    (el-check-timeout-deadline session)
+    (let* ((sec (if (or (nullish? seconds) (nil? seconds)) 0.05 (el-num seconds)))
+           (ms-extra (if (or (nullish? millisec) (nil? millisec)) 0 (el-num millisec)))
+           (wait-ms (Math/max 0 (Math/round (+ (* sec 1000) ms-extra))))
+           (d1 (el-drain-io-events session))
+           (t1 (el-run-due-timers session (if (>= wait-ms 1) 0.001 0)))
+           (got (or d1 t1)))
+      (when (and (not got) (> wait-ms 0))
+        (let ((hub (el-ensure-io-hub))
+              (slice-ms (el-next-timer-wait-ms session (Math/min wait-ms 50))))
+          (if (not (nil? hub))
+              (let* ((sig (get hub :signal))
+                     (cur (js-call globalThis.Atomics :load sig 0)))
+                (js-call globalThis.Atomics :wait sig 0 cur slice-ms)
+                (let ((d2 (el-drain-io-events session))
+                      (t2 (el-run-due-timers session)))
+                  (setq got (or d2 t2))))
+            (let ((sab (new globalThis.SharedArrayBuffer 4)))
+              (js-call globalThis.Atomics :wait (new globalThis.Int32Array sab) 0 0 slice-ms)
+              (setq got (el-run-due-timers session))))))
+      (el-check-timeout-deadline session)
+      (el-bool got)))
+
+
+  (defun el-sleep-for (session seconds &optional millisec)
+    (el-check-timeout-deadline session)
+    (let* ((sec (if (or (nullish? seconds) (nil? seconds)) 0 (el-num seconds)))
+           (ms-extra (if (or (nullish? millisec) (nil? millisec)) 0 (el-num millisec)))
+           (total-ms (Math/max 0 (Math/round (+ (* sec 1000) ms-extra))))
+           (end-ms (+ (js-call globalThis.Date :now) total-ms)))
+      (el-drain-io-events session)
+      (el-run-due-timers session)
+      (while (< (js-call globalThis.Date :now) end-ms)
+        (el-check-timeout-deadline session)
+        (let ((rem (Math/max 1 (Math/min 50 (- end-ms (js-call globalThis.Date :now)))))
+              (hub (el-ensure-io-hub)))
+          (if (not (nil? hub))
+              (let* ((sig (get hub :signal))
+                     (cur (js-call globalThis.Atomics :load sig 0)))
+                (js-call globalThis.Atomics :wait sig 0 cur rem)
+                (el-drain-io-events session)
+                (el-run-due-timers session))
+            (let ((sab (new globalThis.SharedArrayBuffer 4)))
+              (js-call globalThis.Atomics :wait (new globalThis.Int32Array sab) 0 0 rem)))))
+      nil))
+
+
+  (defun el-process-env-object (session)
+    (let* ((p globalThis.process)
+           (base (if (or (nullish? p) (nullish? (get p :env))) (js-object) (Object/assign (js-object) (get p :env))))
+           (pe (el-global-value session (el-intern "process-environment"))))
+      (when (el-cons? pe)
+        ;; Process list from back to front so earlier entries in process-environment win.
+        (let ((items (js-call (el-list-to-array pe) :slice)))
+          (js-call items :reverse)
+          (js-call items :forEach
+                   (lambda (entry)
+                     (when (el-string? entry)
+                       (let ((eq-idx (js-call entry :indexOf "=")))
+                         (if (< eq-idx 0)
+                             (Reflect/deleteProperty base entry)
+                           (put base (js-call entry :slice 0 eq-idx) (js-call entry :slice (1+ eq-idx))))))))))
+      base))
+
+
+  (defun el-call-process (session program &optional infile destination display &rest args)
+    (let ((cp (el-child-process))
+          (fs (el-fs)))
+      (when (nullish? cp) (el-signal "file-error" "Subprocesses not available"))
+      (let* ((cwd (el-expand-file-name session (or (el-global-value session (el-intern "default-directory")) "/") nil))
+             (env (el-process-env-object session))
+             (input-bytes (if (and (el-string? infile) (not (nullish? fs)))
+                              (js-call fs :readFileSync (el-expand-file-name session infile nil))
+                            undefined))
+             (res (js-call cp :spawnSync program (js-call args :map (lambda (a) (str a)))
+                           (js-object :cwd cwd :env env :input input-bytes :maxBuffer 104857600))))
+        (when (not (nullish? (get res :error)))
+          (el-signal "file-error" (str "Searching for program: " (get (get res :error) :message) ", " program)))
+        (let* ((stdout-buf (get res :stdout))
+               (stderr-buf (get res :stderr))
+               (stdout-str (if (nullish? stdout-buf) "" (js-call stdout-buf :toString "utf8")))
+               (stderr-str (if (nullish? stderr-buf) "" (js-call stderr-buf :toString "utf8")))
+               (target (if (el-cons? destination) (get destination :car) destination))
+               (err-dest (if (and (el-cons? destination) (el-cons? (get destination :cdr)))
+                             (el-car (get destination :cdr))
+                           (if (el-cons? destination) (get destination :cdr) t)))
+               (write-to (lambda (dest text)
+                           (cond
+                             ((eq dest t) (el-buffer-insert (el-current-buffer session) text))
+                             ((el-string? dest) (el-buffer-insert (el-get-buffer-create session dest) text))
+                             ((= (el-kind dest) "buffer") (el-buffer-insert dest text))))))
+          (when (and (not (nullish? target)) (not (nil? target)) (not (= target 0)))
+            (funcall write-to target stdout-str)
+            (when (= stderr-str "") nil)
+            (cond
+              ((eq err-dest t) (funcall write-to target stderr-str))
+              ((and (el-string? err-dest) (not (nullish? fs)))
+                (js-call fs :writeFileSync (el-expand-file-name session err-dest nil) stderr-str))))
+          (if (not (nullish? (get res :status)))
+              (get res :status)
+            (if (not (nullish? (get res :signal))) (str (get res :signal)) 0))))))
+
+
+  (defun el-call-process-region (session start end program &optional delete destination display &rest args)
+    (let ((cp (el-child-process))
+          (fs (el-fs))
+          (buf (el-current-buffer session)))
+      (when (nullish? cp) (el-signal "file-error" "Subprocesses not available"))
+      (let* ((input-str (if (el-string? start) start
+                          (el-buffer-substring buf (if (nil? start) 1 start) (if (nil? end) (el-point-max buf) end))))
+             (cwd (el-expand-file-name session (or (el-global-value session (el-intern "default-directory")) "/") nil))
+             (env (el-process-env-object session))
+             (res (js-call cp :spawnSync program (js-call args :map (lambda (a) (str a)))
+                           (js-object :cwd cwd :env env :input input-str :maxBuffer 104857600))))
+        (when (and (not (nullish? delete)) (not (nil? delete)) (not (el-string? start)))
+          (el-buffer-delete buf (if (nil? start) 1 start) (if (nil? end) (el-point-max buf) end)))
+        (when (not (nullish? (get res :error)))
+          (el-signal "file-error" (str "Searching for program: " (get (get res :error) :message) ", " program)))
+        (let* ((stdout-buf (get res :stdout))
+               (stderr-buf (get res :stderr))
+               (stdout-str (if (nullish? stdout-buf) "" (js-call stdout-buf :toString "utf8")))
+               (stderr-str (if (nullish? stderr-buf) "" (js-call stderr-buf :toString "utf8")))
+               (target (if (el-cons? destination) (get destination :car) destination))
+               (err-dest (if (and (el-cons? destination) (el-cons? (get destination :cdr)))
+                             (el-car (get destination :cdr))
+                           (if (el-cons? destination) (get destination :cdr) t)))
+               (write-to (lambda (dest text)
+                           (cond
+                             ((eq dest t) (el-buffer-insert (el-current-buffer session) text))
+                             ((el-string? dest) (el-buffer-insert (el-get-buffer-create session dest) text))
+                             ((= (el-kind dest) "buffer") (el-buffer-insert dest text))))))
+          (when (and (not (nullish? target)) (not (nil? target)) (not (= target 0)))
+            (funcall write-to target stdout-str)
+            (cond
+              ((eq err-dest t) (funcall write-to target stderr-str))
+              ((and (el-string? err-dest) (not (nullish? fs)))
+                (js-call fs :writeFileSync (el-expand-file-name session err-dest nil) stderr-str))))
+          (if (not (nullish? (get res :status)))
+              (get res :status)
+            (if (not (nullish? (get res :signal))) (str (get res :signal)) 0))))))
+
+
+  (defun el-make-pipe-process (session args)
+    (let* ((plist (el-list-from args))
+           (name (or (el-plist-get plist (el-intern ":name") el-eq-test) "pipe"))
+           (buf-arg (el-plist-get plist (el-intern ":buffer") el-eq-test))
+           (buf (if (el-string? buf-arg) (el-get-buffer-create session buf-arg) buf-arg))
+           (filter (el-plist-get plist (el-intern ":filter") el-eq-test))
+           (sentinel (el-plist-get plist (el-intern ":sentinel") el-eq-test))
+           (noquery (el-plist-get plist (el-intern ":noquery") el-eq-test))
+           (proc (js-object :kind "process" :id 0 :pid nil :name name :buffer buf
+                            :filter filter :sentinel sentinel :noquery (el-bool (not (nil? noquery)))
+                            :live t :status (el-intern "open") :exitStatus 0
+                            :plist (new globalThis.Map))))
+      (js-call (get session :processes) :push proc)
+      proc))
+
+
+  (defun el-make-process (session args)
+    (let* ((plist (el-list-from args))
+           (name (or (el-plist-get plist (el-intern ":name") el-eq-test) "process"))
+           (buf-arg (el-plist-get plist (el-intern ":buffer") el-eq-test))
+           (buf (if (el-string? buf-arg) (el-get-buffer-create session buf-arg) buf-arg))
+           (cmd-list (el-seq-items (el-plist-get plist (el-intern ":command") el-eq-test)))
+           (filter (el-plist-get plist (el-intern ":filter") el-eq-test))
+           (sentinel (el-plist-get plist (el-intern ":sentinel") el-eq-test))
+           (stderr-arg (el-plist-get plist (el-intern ":stderr") el-eq-test))
+           (stderr-target (if (el-string? stderr-arg) (el-get-buffer-create session stderr-arg) stderr-arg))
+           (noquery (el-plist-get plist (el-intern ":noquery") el-eq-test))
+           (hub (el-ensure-io-hub)))
+      (when (or (nil? hub) (= (js-length cmd-list) 0))
+        (el-signal "file-error" "Cannot spawn process"))
+      (let* ((id (get hub :nextId))
+             (cwd (el-expand-file-name session (or (el-global-value session (el-intern "default-directory")) "/") nil))
+             (env (el-process-env-object session))
+             (proc (js-object :kind "process" :id id :pid nil :name name :buffer buf
+                              :filter filter :sentinel sentinel :stderrTarget stderr-target
+                              :noquery (el-bool (not (nil? noquery)))
+                              :live t :status (el-intern "run") :exitStatus 0
+                              :spawned false :spawnError nil
+                              :plist (new globalThis.Map))))
+        (put hub :nextId (1+ id))
+        (js-call (get hub :procs) :set id proc)
+        (js-call (get session :processes) :push proc)
+        (js-call (get hub :worker) :postMessage
+                 (js-object :type "spawn" :id id
+                            :file (str (aref cmd-list 0))
+                            :args (js-call (js-call cmd-list :slice 1) :map (lambda (a) (str a)))
+                            :cwd cwd :env env :noquery (not (nil? noquery))))
+        ;; Wait briefly for spawn confirmation so process-id is populated immediately.
+        (let ((attempts 0))
+          (while (and (not (get proc :spawned)) (< attempts 25))
+            (el-drain-io-events session id)
+            (unless (get proc :spawned)
+              (let* ((sig (get hub :signal))
+                     (cur (js-call globalThis.Atomics :load sig 0)))
+                (js-call globalThis.Atomics :wait sig 0 cur 2)))
+            (setq attempts (1+ attempts))))
+        (when (not (nil? (get proc :spawnError)))
+          (el-signal "file-error" (str "Spawning child process: " (get proc :spawnError))))
+        proc)))
+
+
+  (defun el-url-retrieve (session url callback &optional cbargs silent inhibit-cookies)
+    (let* ((hub (el-ensure-io-hub))
+           (id (get hub :nextId))
+           (buf (el-generate-new-buffer session " *http*"))
+           (method (or (el-global-value session (el-intern "url-request-method")) "GET"))
+           (extra-headers (el-global-value session (el-intern "url-request-extra-headers")))
+           (req-data (el-global-value session (el-intern "url-request-data")))
+           (headers (js-object))
+           (body-bytes (if (el-string? req-data) (el-string-bytes-array req-data) (js-array)))
+           (proc (js-object :kind "process" :id id :pid id :name "url-retrieve" :buffer buf
+                            :filter nil :sentinel nil :live t :status (el-intern "run") :exitStatus 0
+                            :plist (new globalThis.Map))))
+      (put hub :nextId (1+ id))
+      (put buf :multibyte false)
+      (js-call (el-list-to-array extra-headers) :forEach
+               (lambda (cell)
+                 (when (el-cons? cell)
+                   (put headers (el-symbol-name-or-string (get cell :car)) (el-symbol-name-or-string (get cell :cdr))))))
+      (js-call (get hub :httpReqs) :set id
+               (js-object :id id :buffer buf :proc proc :callback callback :cbargs (or cbargs nil)))
+      (js-call (get session :processes) :push proc)
+      (js-call (get hub :worker) :postMessage
+               (js-object :type "http" :id id :url (str url) :method (str method)
+                          :headers headers :bodyBytes body-bytes))
+      buf))
+
+
+  (defun el-url-retrieve-synchronously (session url &optional silent inhibit-cookies timeout)
+    (let* ((done false)
+           (buf (el-url-retrieve session url (lambda (&rest ignored) (setq done t)) nil silent inhibit-cookies))
+           (deadline (if (el-number? timeout) (+ (/ (js-call globalThis.Date :now) 1000) (el-num timeout)) nil)))
+      (while (and (not done) (or (nil? deadline) (< (/ (js-call globalThis.Date :now) 1000) deadline)))
+        (el-accept-process-output session nil 0.05))
+      buf))
+
+
+  ;; File system & library resolution helpers
+  (defun el-file-truename (session filename)
+    (unless (el-string? filename) (el-signal "wrong-type-argument" (el-intern "stringp") filename))
+    (let* ((expanded (el-expand-file-name session filename nil))
+           (trailing (and (> (js-length expanded) 1) (js-call expanded :endsWith "/")))
+           (fs (el-fs))
+           (path-mod (el-path)))
+      (if (nullish? fs)
+          expanded
+        (try
+          (let ((real (js-call fs :realpathSync expanded)))
+            (if (and trailing (not (js-call real :endsWith "/"))) (str real "/") real))
+          (catch e
+            (if (nullish? path-mod)
+                expanded
+              (let* ((clean (js-call expanded :replace (new globalThis.RegExp "/+$") ""))
+                     (dir (js-call path-mod :dirname clean))
+                     (base (js-call path-mod :basename clean)))
+                (if (or (= dir clean) (= base ""))
+                    expanded
+                  (let ((real-dir (js-call (el-file-truename session dir) :replace (new globalThis.RegExp "/+$") "")))
+                    (str real-dir "/" base (if trailing "/" "")))))))))))
+
+
+  (defun el-locate-library (session library &optional nosuffix path)
+    (let ((fs (el-fs)))
+      (if (nullish? fs)
+          nil
+        (let* ((lib-name (el-symbol-name-or-string library))
+               (suffixes (if (and (not (nullish? nosuffix)) (not (nil? nosuffix)))
+                             (js-array "")
+                           (if (or (js-call lib-name :endsWith ".el") (js-call lib-name :endsWith ".eli"))
+                               (js-array "")
+                             (js-array ".el" ".eli" ""))))
+               (dirs (if (or (js-call lib-name :startsWith "/") (js-call lib-name :startsWith "./") (js-call lib-name :startsWith "../") (js-call lib-name :startsWith "~"))
+                         (js-array (or (el-global-value session (el-intern "default-directory")) "/"))
+                       (el-seq-items (if (or (nullish? path) (nil? path))
+                                         (el-global-value session (el-intern "load-path"))
+                                       path))))
+               (found nil)
+               (d-idx 0))
+          (while (and (nil? found) (< d-idx (js-length dirs)))
+            (let ((dir (aref dirs d-idx)) (s-idx 0))
+              (when (el-string? dir)
+                (while (and (nil? found) (< s-idx (js-length suffixes)))
+                  (let ((candidate (el-expand-file-name session (str lib-name (aref suffixes s-idx)) dir)))
+                    (when (try (js-call (js-call fs :statSync candidate) :isFile) (catch e false))
+                      (setq found candidate)))
+                  (setq s-idx (1+ s-idx)))))
+            (setq d-idx (1+ d-idx)))
+          found))))
+
+
+  (defun el-load-file (session file &optional noerror nomessage nosuffix must-suffix)
+    (let* ((fs (el-fs))
+           (resolved (or (el-locate-library session file nosuffix nil)
+                         (let ((direct (el-expand-file-name session (el-symbol-name-or-string file) nil)))
+                           (if (and (not (nullish? fs))
+                                    (try (js-call (js-call fs :statSync direct) :isFile) (catch e false)))
+                               direct
+                             nil)))))
+      (if (or (nullish? fs) (nil? resolved))
+          (if (js-call (get session :features) :has (el-symbol-name-or-string file))
+              t
+            (if (and (not (nullish? noerror)) (not (nil? noerror)))
+                nil
+              (el-signal "file-missing" "Cannot open load file" "No such file or directory" file)))
+        (let ((source (js-call fs :readFileSync resolved "utf8")))
+          (el-eval-source session source resolved)
+          t))))
+
+
+  ;; ERT special forms and runner
+  (defun sf-ert-deftest (session form env)
+    (let* ((name (el-second form))
+           (rest (el-list-to-array (el-rest-after form 2)))
+           (idx 0)
+           (tags nil)
+           (expected (el-intern ":passed")))
+      (when (and (< idx (js-length rest)) (el-string? (aref rest idx)))
+        (setq idx (1+ idx)))
+      (while (and (< (1+ idx) (js-length rest)) (el-keyword? (aref rest idx)))
+        (let ((kw-name (el-symbol-name (aref rest idx)))
+              (val (el-eval session (aref rest (1+ idx)) env)))
+          (cond
+            ((= kw-name ":tags") (setq tags val))
+            ((= kw-name ":expected-result") (setq expected val))))
+        (setq idx (+ idx 2)))
+      (let* ((body (js-call rest :slice idx))
+             (test-obj (js-object :kind "ert-test" :name name :tags tags :expectedResult expected
+                                  :mostRecentResult nil
+                                  :bodyFn (lambda () (el-eval-body session body env)))))
+        (js-call (get session :ertTests) :set name test-obj)
+        (js-call (get session :ertTestOrder) :push name)
+        name)))
+
+
+  (defun sf-should (session form env)
+    (let* ((expr (el-second form))
+           (val (el-eval session expr env)))
+      (when (nil? val)
+        (throw (el-make-signal "ert-test-failed" (js-array (el-list (el-intern "should") expr)))))
+      val))
+
+
+  (defun sf-should-not (session form env)
+    (let* ((expr (el-second form))
+           (val (el-eval session expr env)))
+      (unless (nil? val)
+        (throw (el-make-signal "ert-test-failed" (js-array (el-list (el-intern "should-not") expr) (el-intern ":value") val))))
+      nil))
+
+
+  (defun sf-should-error (session form env)
+    (let* ((expr (el-second form))
+           (keys (el-list-to-array (el-rest-after form 1)))
+           (ti (js-call keys :findIndex (lambda (k) (el-sym-is k ":type"))))
+           (expected-type (if (< ti 0) "error" (el-symbol-name (el-eval session (aref keys (1+ ti)) env))))
+           (caught nil))
+      (try
+        (el-eval session expr env)
+        (catch raw
+          (when (el-control-transfer? raw) (throw raw))
+          (setq caught (el-error-from-host raw))))
+      (when (nil? caught)
+        (throw (el-make-signal "ert-test-failed" (js-array (el-list (el-intern "should-error") expr)))))
+      (unless (el-condition-matches session (get caught :conditionSymbol) expected-type)
+        (throw (el-make-signal "ert-test-failed"
+                               (js-array (el-list (el-intern "should-error") expr)
+                                         (el-intern ":condition") (el-cons (el-intern (get caught :conditionSymbol))
+                                                                           (el-list-from (get caught :data)))))))
+      (el-cons (el-intern (get caught :conditionSymbol)) (el-list-from (get caught :data)))))
+
+
+  (defun el-ert-select-tests (session selector)
+    (let ((order (get session :ertTestOrder))
+          (tests (get session :ertTests))
+          (seen (new globalThis.Set))
+          (out (js-array)))
+      (letfn ((matches? (test sel)
+                (cond
+                  ((or (nullish? sel) (eq sel t) (el-sym-is sel ":new")) t)
+                  ((nil? sel) false)
+                  ((el-string? sel) (not (nil? (el-string-match session sel (el-symbol-name (get test :name)) 0 false))))
+                  ((el-symobj? sel) (eq (get test :name) sel))
+                  ((= (el-kind sel) "ert-test") (eq test sel))
+                  ((el-cons? sel)
+                    (let ((op (el-symbol-name (get sel :car)))
+                          (args (el-list-to-array (get sel :cdr))))
+                      (cond
+                        ((= op "not") (not (matches? test (aref args 0))))
+                        ((= op "and") (js-call args :every (lambda (s) (matches? test s))))
+                        ((= op "or") (js-call args :some (lambda (s) (matches? test s))))
+                        ((= op "tag") (not (nil? (el-member-with (aref args 0) (get test :tags) el-eq-test))))
+                        ((= op "member") (js-call args :some (lambda (s) (matches? test s))))
+                        (t t))))
+                  (t t))))
+        (js-call order :forEach
+                 (lambda (sym)
+                   (when (and (not (js-call seen :has sym)) (js-call tests :has sym))
+                     (js-call seen :add sym)
+                     (let ((test (js-call tests :get sym)))
+                       (when (matches? test selector)
+                         (js-call out :push test)))))))
+      out))
+
+
+  (defun el-ert-run-single-test (session test)
+    (let ((result nil))
+      (try
+        (progn
+          (funcall (get test :bodyFn))
+          (setq result (js-object :kind "ert-test-result" :status "passed" :condition nil)))
+        (catch raw
+          (when (and (not (nullish? raw))
+                     (or (get raw :eliscriptBatchExit)
+                         (get raw :eliscriptTimeout)))
+            (throw raw))
+          (let ((sig (el-error-from-host raw)))
+            (if (= (get sig :conditionSymbol) "ert-test-skipped")
+                (setq result (js-object :kind "ert-test-result" :status "skipped"
+                                        :condition (el-cons (el-intern (get sig :conditionSymbol)) (el-list-from (get sig :data)))))
+              (setq result (js-object :kind "ert-test-result" :status "failed"
+                                      :condition (el-cons (el-intern (get sig :conditionSymbol)) (el-list-from (get sig :data)))))))))
+      (put test :mostRecentResult result)
+      result))
+
+
+  (defun el-ert-run-tests-batch (session &optional selector)
+    (let* ((selected (el-ert-select-tests session selector))
+           (total (js-length selected))
+           (passed 0)
+           (failed 0)
+           (skipped 0))
+      (js-call selected :forEach
+               (lambda (test idx)
+                 (let ((res (el-ert-run-single-test session test))
+                       (name (el-symbol-name (get test :name))))
+                   (cond
+                     ((= (get res :status) "passed")
+                       (setq passed (1+ passed))
+                       (el-emit-output session (str "   passed  " (1+ idx) "/" total "  " name "\n") t))
+                     ((= (get res :status) "skipped")
+                       (setq skipped (1+ skipped))
+                       (el-emit-output session (str "  skipped  " (1+ idx) "/" total "  " name "\n") t))
+                     (t
+                       (setq failed (1+ failed))
+                       (el-emit-output session
+                                       (str "   FAILED  " (1+ idx) "/" total "  " name " ("
+                                            (el-prin1-string (get res :condition) t) ")\n")
+                                       t))))))
+      (el-emit-output session (str "Ran " total " tests, " passed " results as expected, " failed " unexpected, " skipped " skipped\n") t)
+      (js-object :kind "ert-stats" :total total :passed passed :failed failed :skipped skipped)))
+
+  (export el-accept-process-output el-call-process el-call-process-region el-drain-io-events el-ert-run-single-test el-ert-run-tests-batch el-ert-select-tests el-file-truename el-fs el-load-file el-locate-library el-make-pipe-process el-make-process el-os el-path el-sleep-for el-url-generic-parse-url el-url-retrieve el-url-retrieve-synchronously io-hub sf-ert-deftest sf-should sf-should-error sf-should-not))

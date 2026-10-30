@@ -14,10 +14,22 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)
 PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
 : "${ELISCRIPT_BATCH_RUNTIME:=node}"
 
-COMPAT_ELI="$PROJECT_DIR/runtime/emacs-compat.eli"
-COMPAT_MJS="$PROJECT_DIR/runtime/emacs-compat.mjs"
-if [ ! -f "$COMPAT_MJS" ] || [ "$COMPAT_ELI" -nt "$COMPAT_MJS" ]; then
-  "$PROJECT_DIR/bin/eliscript" --source-map --output "$COMPAT_MJS" "$COMPAT_ELI" >/dev/null
+COMPAT_OUT_DIR="$PROJECT_DIR/dist/emacs-compat"
+COMPAT_MJS="$COMPAT_OUT_DIR/emacs-compat.mjs"
+NEEDS_BUILD=0
+if [ ! -f "$COMPAT_MJS" ]; then
+  NEEDS_BUILD=1
+else
+  for f in "$PROJECT_DIR/runtime/emacs-compat.eli" "$PROJECT_DIR"/runtime/emacs-compat/*.eli; do
+    if [ -f "$f" ] && [ "$f" -nt "$COMPAT_MJS" ]; then
+      NEEDS_BUILD=1
+      break
+    fi
+  done
+fi
+
+if [ "$NEEDS_BUILD" -eq 1 ]; then
+  "$PROJECT_DIR/bin/eliscript-build" --root "$PROJECT_DIR/runtime" --out-dir "$COMPAT_OUT_DIR" "$PROJECT_DIR/runtime/emacs-compat.eli" >/dev/null
 fi
 
 export ELISCRIPT_COMMAND_NAME=eliscript-batch

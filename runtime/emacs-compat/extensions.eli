@@ -1,0 +1,1094 @@
+(module eliscript.runtime.emacs-compat.extensions
+  ;;; extensions.eli --- Eliscript 1+5+2 extensions, feature loader (require), and special form installer
+
+  (import "./core.eli" JS_FALSE JS_NULL JS_UNDEFINED OPTION_NONE el-append el-assoc-entries el-bool el-car el-cdr el-compile-error el-cons el-cons? el-control-transfer? el-global-value el-intern el-json-to-persistent el-keyword? el-kind el-lazy-force el-list el-list-from el-list-to-array el-make-float-if-fractional el-make-pcoll el-make-pmap el-make-pset el-make-signal el-nth el-num el-opt el-prin1-string el-record-field-name el-record? el-seq-items el-signal el-string? el-sym-is el-symbol-name el-symbol-name-or-string el-symobj? el-validate-struct-field el-value-compare el-value-contains el-value-count el-value-equal el-value-get el-vector el-vector? s-default s-if s-let s-optional s-progn s-quote s-recur s-rest s-setf s-setq s-underscore serializeCompatValue sym)
+  (import "./evaluator.eli" el-call el-comparator el-def el-def-alias el-define-function el-eval el-eval-args el-eval-list-body el-eval-source el-extract-declarations el-make-lambda el-make-macro el-make-sorted-map el-make-sorted-set el-new-env el-normalize-result el-rest-after el-second el-set-fn el-set-macro el-symbol-function el-third sf-and sf-and-let sf-backquote sf-bound-and-true-p sf-catch sf-cl-assert sf-cl-block sf-cl-case sf-cl-defun sf-cl-destructuring-bind sf-cl-dolist sf-cl-flet sf-cl-labels sf-cl-return sf-cl-return-from sf-cl-the sf-cond sf-condition-case sf-condition-case-unless-debug sf-declare sf-defalias sf-defconst sf-defcustom sf-defface sf-defgroup sf-define-derived-mode sf-define-minor-mode sf-defmacro sf-defsubst sf-defun sf-defvar sf-defvar-keymap sf-defvar-local sf-dolist sf-dotimes sf-function sf-gv-define-setter sf-gv-define-simple-setter sf-if sf-if-let sf-ignore-error sf-ignore-errors sf-interactive sf-lambda sf-let sf-let* sf-let*-const sf-let-const sf-letrec sf-named-let sf-or sf-prog1 sf-prog2 sf-progn sf-quote sf-rx sf-save-current-buffer sf-save-excursion sf-save-match-data sf-seq-doseq sf-setq sf-setq-default sf-setq-local sf-thread sf-unless sf-unwind-protect sf-when sf-when-let sf-while sf-while-let sf-with-current-buffer sf-with-eval-after-load sf-with-output-to-string sf-with-temp-buffer sf-with-temp-file sf-with-timeout special-forms)
+  (import "./macros-forms.eli" sf-aset sf-cl-callf sf-cl-defstruct sf-cl-letf sf-cl-loop sf-cl-remf sf-incf sf-pcase sf-pcase-dolist sf-pcase-let sf-pcase-setq sf-pop sf-push sf-pushnew sf-setf)
+  (import "./host-io.eli" el-fs el-load-file el-locate-library sf-ert-deftest sf-should sf-should-error sf-should-not)
+
+
+  (defconst extension-exports
+    (new globalThis.Map
+     (js-array
+     (js-array "eliscript-data" (js-array "persistent-list" "persistent-list-p" "persistent-vector" "persistent-vector-p"
+                               "persistent-map" "persistent-map-p" "persistent-set" "persistent-set-p"
+                               "persistent-queue" "persistent-queue-p" "persistent-sorted-map" "persistent-sorted-map-p"
+                               "persistent-sorted-set" "persistent-sorted-set-p"
+                               "value-get" "value-nth" "value-put" "value-assoc" "value-remove" "value-dissoc"
+                               "value-conj" "value-count" "value-empty-p" "value-into" "value-equal-p" "value-hash"
+                               "value-compare" "value-meta" "value-with-meta"
+                               "cl-defstruct-persistent" "struct-validate" "struct-json-schema" "struct-to-json" "struct-from-json"
+                               "defprotocol" "extend-protocol" "cl-defgeneric-value" "cl-defmethod-value"
+                               "state-cell" "state-cell-p" "cell-value" "cell-update!" "cell-reset!" "cell-watch"
+                               "delay" "force" "realized-p" "lazy-map" "lazy-filter" "lazy-take" "lazy-range"
+                               "map-transducer" "filter-transducer" "take-transducer" "seq-transduce"
+                               "with-transient" "conj!"
+                               "result-ok" "result-error" "result-ok-p" "result-error-p" "result-value" "result-error-value"
+                               "option-some" "option-none" "option-some-p" "option-none-p" "option-value"))
+     (js-array "eliscript-bind" (js-array "let-bind" "let*-bind" "defun-bind" "lambda-bind" "pcase-value" "cond-predicate"
+                               "defun-case" "lambda-case" "let-const" "let*-const" "let-loop" "defun-tail" "recur"
+                               "thread-as" "thread-cond-first" "thread-some-first" "thread-some-last"
+                               "fn-compose" "fn-partial" "fn-juxt" "fn-complement"))
+     (js-array "eliscript-async" (js-array "defun-async" "await" "future-p" "with-async-scope"
+                                "make-async-channel" "channel-put!" "channel-take!" "channel-close!"
+                                "engine-bind" "engine-revoke!" "engine-handle-p" "engine-call" "eliscript-async-wait"))
+     (js-array "eliscript-module" (js-array "defmodule" "defun-lexical" "defvar-lexical" "defconst-lexical"
+                                 "export-functions" "export-values" "import-functions" "import-values"
+                                 "defmacro-checked" "macro-gensym" "macro-read-file"))
+     (js-array "eliscript-contract" (js-array "eliscript-contract-check-value"))
+     (js-array "eliscript-js" (js-array "js-false" "js-null" "js-undefined" "js-false-p" "js-null-p" "js-undefined-p" "js-nullish-p"
+                             "js-object" "js-get" "js-get-raw" "js-divide" "js-remainder" "js-length" "js-substring"
+                             "js-regexp" "js-regexp-find"))
+     (js-array "eliscript-abi" (js-array "with-abi-memory" "mem-load-u32" "mem-store-u32" "word-add" "word-sub" "word-mul" "word-div")))))
+
+
+  (defun el-require (session feature &optional filename noerror)
+    (let ((name (el-symbol-name feature)))
+      (el-activate-extension session name)
+      (when (and (not (js-call (get session :features) :has name))
+                 (not (js-call (get session :loadingFeatures) :has name)))
+        (cond
+          ((js-call (get session :moduleSources) :has name)
+            (let ((entry (js-call (get session :moduleSources) :get name)))
+              (js-call (get session :loadingFeatures) :add name)
+              (try
+                (el-eval-source session (get entry :source) (get entry :filename))
+                (finally
+                  (js-call (get session :loadingFeatures) :delete name)))))
+          ((not (nullish? (el-fs)))
+            (let ((resolved (el-locate-library session (if (el-string? filename) filename name) nil nil)))
+              (if (not (nil? resolved))
+                  (progn
+                    (js-call (get session :loadingFeatures) :add name)
+                    (try
+                      (el-load-file session resolved noerror t t nil)
+                      (finally
+                        (js-call (get session :loadingFeatures) :delete name))))
+                (when (and (not (js-call extension-exports :has name))
+                           (/= name "eliscript")
+                           (el-cons? (el-global-value session (el-intern "load-path"))))
+                  (if (and (not (nullish? noerror)) (not (nil? noerror)))
+                      (setq feature nil)
+                    (el-signal "file-missing" "Cannot open load file" "No such file or directory" (or filename name)))))))))
+      (unless (nil? feature)
+        (js-call (get session :features) :add name))
+      feature))
+
+
+  (defun el-activate-extension (session name)
+    (if (= name "eliscript")
+        (js-call (js-array "eliscript-data" "eliscript-bind" "eliscript-async" "eliscript-module" "eliscript-contract") :forEach
+                 (lambda (lib) (el-activate-extension session lib)))
+      (let ((exports (js-call extension-exports :get name)))
+        (unless (or (undefined? exports) (js-call (get session :activeLibs) :has name))
+          (js-call exports :forEach
+                   (lambda (symbol)
+                     (when (js-call (get session :userDefinedFns) :has symbol)
+                       (el-compile-error (str "ELI-M0001: extension " name " symbol " symbol
+                                              " conflicts with existing user definition")))))
+          (js-call (get session :activeLibs) :add name)
+          (el-install-extension session name)))))
+
+
+  (defun el-future (state value error) (js-object :kind "future" :state state :value value :error error))
+
+
+  (defun el-install-extension (session lib)
+    (let ((d (lambda (name fn) (el-def session name fn)))
+          (values (get session :values)))
+      (cond
+        ((= lib "eliscript-data")
+          (js-call values :set (el-intern "option-none") OPTION_NONE)
+          (funcall d "persistent-list" (lambda (&rest xs) (el-make-pcoll "persistent-list" xs)))
+          (funcall d "persistent-vector" (lambda (&rest xs) (el-make-pcoll "persistent-vector" xs)))
+          (funcall d "persistent-queue" (lambda (&rest xs) (el-make-pcoll "persistent-queue" xs)))
+          (funcall d "persistent-map" (lambda (&rest xs) (el-make-pmap xs)))
+          (funcall d "persistent-set" (lambda (&rest xs) (el-make-pset xs)))
+          (funcall d "persistent-sorted-map" (lambda (&rest xs) (el-make-sorted-map session xs)))
+          (funcall d "persistent-sorted-set" (lambda (&rest xs) (el-make-sorted-set session xs)))
+          (js-call (js-array "persistent-list" "persistent-vector" "persistent-queue" "persistent-map" "persistent-set"
+                             "persistent-sorted-map" "persistent-sorted-set")
+                   :forEach (lambda (kind) (funcall d (str kind "-p") (lambda (x) (el-bool (= (el-kind x) kind))))))
+          (funcall d "value-get" (lambda (c k &optional nf) (el-value-get c k (el-opt nf))))
+          (funcall d "value-nth" (lambda (c i &optional nf) (let ((items (el-seq-items c))) (if (and (>= i 0) (< i (js-length items))) (aref items i) (el-opt nf)))))
+          (funcall d "value-put" (lambda (c k v)
+                                   (cond
+                                     ((= (el-kind c) "persistent-map") (js-object :kind "persistent-map" :entries (el-assoc-entries (get c :entries) k v) :meta (get c :meta)))
+                                     ((= (el-kind c) "persistent-sorted-map")
+                                       (let ((entries (el-assoc-entries (get c :entries) k v)) (order (el-comparator session (get c :comparator))))
+                                         (js-call entries :sort (lambda (x y) (funcall order (aref x 0) (aref y 0))))
+                                         (js-object :kind "persistent-sorted-map" :comparator (get c :comparator) :entries entries :meta (get c :meta))))
+                                     (t (el-signal "error" "value-put unsupported collection")))))
+          (el-def-alias session "value-assoc" "value-put")
+          (funcall d "value-remove" (lambda (c k)
+                                      (js-object :kind (get c :kind) :comparator (get c :comparator) :meta (get c :meta)
+                                                 :entries (js-call (get c :entries) :filter (lambda (e) (not (el-value-equal (aref e 0) k)))))))
+          (el-def-alias session "value-dissoc" "value-remove")
+          (funcall d "value-conj" (lambda (c &rest items)
+                                    (let ((current c))
+                                      (js-call items :forEach
+                                               (lambda (item)
+                                                 (let ((kind (get current :kind)))
+                                                   (setq current
+                                                         (cond
+                                                           ((= kind "persistent-list") (js-object :kind kind :items (js-call (js-array item) :concat (get current :items)) :meta (get current :meta)))
+                                                           ((or (= kind "persistent-vector") (= kind "persistent-queue"))
+                                                             (js-object :kind kind :items (js-call (get current :items) :concat (js-array item)) :meta (get current :meta)))
+                                                           ((= kind "persistent-set")
+                                                             (if (js-call (get current :items) :some (lambda (x) (el-value-equal x item))) current
+                                                               (js-object :kind kind :items (js-call (get current :items) :concat (js-array item)) :meta (get current :meta))))
+                                                           (t current))))))
+                                      current)))
+          (funcall d "value-count" (lambda (c) (el-value-count c)))
+          (funcall d "value-empty-p" (lambda (c) (el-bool (= (el-value-count c) 0))))
+          (funcall d "value-equal-p" (lambda (a b) (el-bool (el-value-equal a b))))
+          (funcall d "value-compare" (lambda (a b) (el-value-compare a b)))
+          (funcall d "value-meta" (lambda (x) (let ((m (get x :meta))) (if (nullish? m) nil m))))
+          (funcall d "value-with-meta" (lambda (x m) (Object/assign (js-object) x (js-object :meta m))))
+          (funcall d "seq-length" (lambda (s) (el-value-count s)))
+          (funcall d "map-elt" (lambda (m k &optional default) (el-value-get m k (el-opt default))))
+          (funcall d "map-contains-key" (lambda (m k) (el-bool (el-value-contains m k))))
+          (funcall d "map-keys" (lambda (m) (el-list-from (js-call (get m :entries) :map (lambda (e) (aref e 0))))))
+          (funcall d "map-values" (lambda (m) (el-list-from (js-call (get m :entries) :map (lambda (e) (aref e 1))))))
+          (funcall d "result-ok" (lambda (v) (js-object :kind "result" :ok t :value v)))
+          (funcall d "result-error" (lambda (e) (js-object :kind "result" :ok false :value e)))
+          (funcall d "result-ok-p" (lambda (x) (el-bool (and (= (el-kind x) "result") (get x :ok)))))
+          (funcall d "result-error-p" (lambda (x) (el-bool (and (= (el-kind x) "result") (not (get x :ok))))))
+          (funcall d "result-value" (lambda (x) (get x :value)))
+          (funcall d "result-error-value" (lambda (x) (get x :value)))
+          (funcall d "option-some" (lambda (v) (js-object :kind "option" :some t :value v)))
+          (funcall d "option-some-p" (lambda (x) (el-bool (and (= (el-kind x) "option") (get x :some)))))
+          (funcall d "option-none-p" (lambda (x) (el-bool (and (= (el-kind x) "option") (not (get x :some))))))
+          (funcall d "option-value" (lambda (x)
+                                      (unless (and (= (el-kind x) "option") (get x :some)) (el-signal "error" "option-value on option-none"))
+                                      (get x :value)))
+          (funcall d "state-cell" (lambda (init &rest opts)
+                                    (let ((i (js-call opts :findIndex (lambda (o) (el-sym-is o ":validator")))))
+                                      (let ((validator (if (< i 0) nil (aref opts (1+ i)))))
+                                        (when (and (not (nil? validator)) (nil? (el-call session validator (js-array init))))
+                                          (el-signal "error" "state-cell validator rejected initial value"))
+                                        (js-object :kind "state-cell" :val init :validator validator :watches (js-array))))))
+          (funcall d "state-cell-p" (lambda (x) (el-bool (= (el-kind x) "state-cell"))))
+          (funcall d "cell-value" (lambda (c) (get c :val)))
+          (funcall d "cell-reset!" (lambda (c value)
+                                     (when (and (not (nil? (get c :validator))) (nil? (el-call session (get c :validator) (js-array value))))
+                                       (el-signal "error" "state-cell validator rejected new value"))
+                                     (let ((old (get c :val)))
+                                       (put c :val value)
+                                       (js-call (get c :watches) :forEach (lambda (w) (el-call session (aref w 1) (js-array (aref w 0) c old value))))
+                                       value)))
+          (funcall d "cell-update!" (lambda (c fn &rest args)
+                                      (el-call session (el-intern "cell-reset!")
+                                               (js-array c (el-call session fn (js-call (js-array (get c :val)) :concat args))))))
+          (funcall d "cell-watch" (lambda (c k cb) (js-call (get c :watches) :push (js-array k cb)) c))
+          (funcall d "realized-p" (lambda (x) (el-bool (and (= (el-kind x) "delay") (get x :realized)))))
+          (funcall d "force" (lambda (x)
+                               (if (= (el-kind x) "delay")
+                                   (progn (unless (get x :realized) (put x :value (funcall (get x :thunk))) (put x :realized t))
+                                          (get x :value))
+                                 x)))
+          (funcall d "lazy-range" (lambda (&optional start end step)
+                                    (let ((from (if (nullish? start) 0 start)) (to (el-opt end)) (by (if (nullish? step) 1 step)))
+                                      (letfn ((make (current)
+                                                (js-object :kind "lazy-seq"
+                                                           :step (lambda ()
+                                                                   (if (and (not (nil? to)) (if (> by 0) (>= current to) (<= current to))) nil
+                                                                     (el-cons current (make (+ current by))))))))
+                                        (make from)))))
+          (funcall d "lazy-map" (lambda (fn seq)
+                                  (letfn ((make (s)
+                                            (js-object :kind "lazy-seq"
+                                                       :step (lambda ()
+                                                               (let ((cell (el-lazy-force s)))
+                                                                 (if (nil? cell) nil
+                                                                   (el-cons (el-call session fn (js-array (get cell :car))) (make (get cell :cdr)))))))))
+                                    (make seq))))
+          (funcall d "lazy-filter" (lambda (pred seq)
+                                     (letfn ((make (s)
+                                               (js-object :kind "lazy-seq"
+                                                          :step (lambda ()
+                                                                  (let ((cursor s) (result nil) (done false))
+                                                                    (while (not done)
+                                                                      (let ((cell (el-lazy-force cursor)))
+                                                                        (cond
+                                                                          ((nil? cell) (setq done t))
+                                                                          ((not (nil? (el-call session pred (js-array (get cell :car)))))
+                                                                            (setq result (el-cons (get cell :car) (make (get cell :cdr))))
+                                                                            (setq done t))
+                                                                          (t (setq cursor (get cell :cdr))))))
+                                                                    result)))))
+                                       (make seq))))
+          (funcall d "lazy-take" (lambda (n seq)
+                                   (letfn ((make (remaining s)
+                                             (js-object :kind "lazy-seq"
+                                                        :step (lambda ()
+                                                                (if (<= remaining 0) nil
+                                                                  (let ((cell (el-lazy-force s)))
+                                                                    (if (nil? cell) nil
+                                                                      (el-cons (get cell :car) (make (1- remaining) (get cell :cdr))))))))))
+                                     (make n seq))))
+          (funcall d "map-transducer" (lambda (fn) (lambda (rf) (lambda (acc input) (el-call session rf (js-array acc (el-call session fn (js-array input))))))))
+          (funcall d "filter-transducer" (lambda (pred) (lambda (rf) (lambda (acc input)
+                                                                       (if (nil? (el-call session pred (js-array input))) acc
+                                                                         (el-call session rf (js-array acc input)))))))
+          (funcall d "seq-transduce" (lambda (xform f init coll)
+                                       (let ((rf (el-call session xform (js-array f))) (acc init))
+                                         (js-call (el-seq-items coll) :forEach (lambda (item) (setq acc (el-call session rf (js-array acc item)))))
+                                         acc)))
+          (funcall d "conj!" (lambda (builder &rest items)
+                               (unless (and (= (el-kind builder) "transient") (get builder :active))
+                                 (el-signal "error" "conj! called on expired or sealed transient builder"))
+                               (js-call items :forEach (lambda (x) (js-call (get builder :items) :push x)))
+                               builder))
+          (funcall d "struct-validate" (lambda (name instance)
+                                         (let ((schema (js-call (get session :structSchemas) :get (el-symbol-name name))))
+                                           (when (undefined? schema) (el-signal "error" (str "Unknown struct " (el-symbol-name name))))
+                                           (js-call (get schema :fields) :forEach
+                                                    (lambda (field) (el-validate-struct-field (el-symbol-name name) field
+                                                                                               (el-value-get instance (el-intern (str ":" (get field :name))) nil))))
+                                           t)))
+          (funcall d "struct-json-schema" (lambda (name)
+                                            (el-make-pmap (js-array (el-intern ":type") "object" (el-intern ":title") (el-symbol-name name)))))
+          (funcall d "struct-to-json" (lambda (name instance)
+                                        (el-call session (el-intern "struct-validate") (js-array name instance))
+                                        (JSON/stringify (serializeCompatValue instance))))
+          (funcall d "struct-from-json" (lambda (name text)
+                                          (let ((raw (JSON/parse text)) (kvs (js-array)))
+                                            (js-call (Object/entries raw) :forEach
+                                                     (lambda (pair) (js-call kvs :push (el-intern (str ":" (aref pair 0))))
+                                                       (js-call kvs :push (el-json-to-persistent (aref pair 1)))))
+                                            (el-call session (el-intern (str "make-" (el-symbol-name name))) kvs)))))
+        ((= lib "eliscript-bind")
+          (funcall d "fn-compose" (lambda (&rest fns)
+                                    (lambda (&rest args)
+                                      (let* ((reversed (js-call (js-call fns :slice) :reverse))
+                                             (result (el-call session (aref reversed 0) args)))
+                                        (js-call (js-call reversed :slice 1) :forEach (lambda (f) (setq result (el-call session f (js-array result)))))
+                                        result))))
+          (funcall d "fn-partial" (lambda (fn &rest bound) (lambda (&rest more) (el-call session fn (js-call bound :concat more)))))
+          (funcall d "fn-juxt" (lambda (&rest fns) (lambda (&rest args) (el-list-from (js-call fns :map (lambda (f) (el-call session f args)))))))
+          (funcall d "fn-complement" (lambda (pred) (lambda (&rest args) (if (nil? (el-call session pred args)) t nil)))))
+        ((= lib "eliscript-async")
+          (funcall d "future-p" (lambda (x) (el-bool (= (el-kind x) "future"))))
+          (funcall d "eliscript-async-wait" (lambda (future)
+                                              (unless (= (el-kind future) "future") (el-signal "wrong-type-argument" (el-intern "future-p") future))
+                                              (when (= (get future :state) "rejected") (throw (get future :error)))
+                                              (get future :value)))
+          (funcall d "await" (lambda (future)
+                               (unless (get session :inAsyncContext) (el-compile-error "ELI-A0001: await outside async function"))
+                               (el-call session (el-intern "eliscript-async-wait") (js-array future))))
+          (funcall d "make-async-channel" (lambda (&optional capacity)
+                                            (js-object :kind "async-channel" :capacity (Math/max 1 (if (nullish? capacity) 0 capacity))
+                                                       :buffer (js-array) :closed false)))
+          (funcall d "channel-put!" (lambda (channel value)
+                                      (if (get channel :closed)
+                                          (el-future "rejected" nil (el-make-signal "eliscript-channel-closed" (js-array "Channel closed")))
+                                        (progn (js-call (get channel :buffer) :push value) (el-future "fulfilled" t nil)))))
+          (funcall d "channel-take!" (lambda (channel)
+                                       (if (> (js-length (get channel :buffer)) 0)
+                                           (el-future "fulfilled" (js-object :kind "option" :some t :value (js-call (get channel :buffer) :shift)) nil)
+                                         (el-future "fulfilled" OPTION_NONE nil))))
+          (funcall d "channel-close!" (lambda (channel) (put channel :closed t) nil))
+          (funcall d "engine-handle-p" (lambda (x) (el-bool (= (el-kind x) "engine-handle"))))
+          (funcall d "engine-bind" (lambda (fn &optional scope owner)
+                                     (put session :nextSlotId (1+ (get session :nextSlotId)))
+                                     (let* ((slot (get session :nextSlotId))
+                                            (owner-name (if (nullish? owner) "local" (el-symbol-name owner)))
+                                            (handle (js-object :kind "engine-handle" :owner owner-name :generation 1 :slot slot)))
+                                       (js-call (get session :engineSlots) :set slot (js-object :owner owner-name :generation 1 :active t :fn fn))
+                                       (when (and (not (nullish? scope)) (= (el-kind scope) "async-scope")) (js-call (get scope :handles) :push handle))
+                                       handle)))
+          (funcall d "engine-revoke!" (lambda (handle)
+                                        (let ((entry (js-call (get session :engineSlots) :get (get handle :slot))))
+                                          (unless (undefined? entry) (put entry :active false) (put entry :generation (1+ (get entry :generation))))
+                                          t)))
+          (funcall d "engine-call" (lambda (engine target &rest args)
+                                     (let ((entry (if (= (el-kind target) "engine-handle") (js-call (get session :engineSlots) :get (get target :slot)) undefined)))
+                                       (if (or (undefined? entry) (not (get entry :active)) (/= (get entry :owner) (get target :owner))
+                                               (/= (get target :owner) (el-symbol-name engine)) (/= (get entry :generation) (get target :generation)))
+                                           (el-future "rejected" nil (el-make-signal "eliscript-engine-handle-error" (js-array "Revoked or invalid engine handle")))
+                                         (try (el-future "fulfilled" (el-call session (get entry :fn) args) nil)
+                                           (catch error (el-future "rejected" nil error))))))))
+        ((= lib "eliscript-js")
+          (js-call values :set (el-intern "js-false") JS_FALSE)
+          (js-call values :set (el-intern "js-null") JS_NULL)
+          (js-call values :set (el-intern "js-undefined") JS_UNDEFINED)
+          (funcall d "js-false-p" (lambda (x) (el-bool (eq x JS_FALSE))))
+          (funcall d "js-null-p" (lambda (x) (el-bool (eq x JS_NULL))))
+          (funcall d "js-undefined-p" (lambda (x) (el-bool (eq x JS_UNDEFINED))))
+          (funcall d "js-nullish-p" (lambda (x) (el-bool (or (eq x JS_NULL) (eq x JS_UNDEFINED)))))
+          (funcall d "js-object" (lambda (&rest kvs)
+                                   (let ((props (new globalThis.Map)) (i 0))
+                                     (while (< i (js-length kvs))
+                                       (js-call props :set (el-record-field-name (aref kvs i)) (aref kvs (1+ i)))
+                                       (setq i (+ i 2)))
+                                     (js-object :kind "js-object" :props props))))
+          (funcall d "js-get-raw" (lambda (obj key)
+                                    (let ((name (el-record-field-name key)))
+                                      (if (and (= (el-kind obj) "js-object") (js-call (get obj :props) :has name))
+                                          (js-call (get obj :props) :get name)
+                                        JS_UNDEFINED))))
+          (funcall d "js-get" (lambda (obj key)
+                                (let ((raw (el-call session (el-intern "js-get-raw") (js-array obj key))))
+                                  (if (or (eq raw JS_FALSE) (eq raw JS_NULL) (eq raw JS_UNDEFINED)) nil raw))))
+          (funcall d "js-divide" (lambda (a b) (el-make-float-if-fractional (/ (el-num a) (el-num b)))))
+          (funcall d "js-remainder" (lambda (a b) (% (el-num a) (el-num b))))
+          (funcall d "js-length" (lambda (s) (js-length s)))
+          (funcall d "js-substring" (lambda (s start &optional end) (js-call s :slice start (el-opt end))))
+          (funcall d "js-regexp" (lambda (pattern &optional flags) (js-object :kind "js-regexp" :regexp (new globalThis.RegExp pattern (if (nullish? flags) "" flags)))))
+          (funcall d "js-regexp-p" (lambda (x) (el-bool (= (el-kind x) "js-regexp"))))
+          (funcall d "js-regexp-find" (lambda (rx string)
+                                        (let ((match (js-call (get rx :regexp) :exec string)))
+                                          (if (nil? match) nil
+                                            (el-make-pmap (js-array (el-intern ":match") (aref match 0) (el-intern ":start") (get match :index)
+                                                                    (el-intern ":end") (+ (get match :index) (js-length (aref match 0))))))))))
+        ((= lib "eliscript-abi")
+          (funcall d "mem-store-u32" (lambda (offset value)
+                                       (el-abi-check session offset)
+                                       (js-call (new globalThis.DataView (get session :abiMemory)) :setUint32 offset (unsigned-bit-shift-right (el-num value) 0) t)
+                                       nil))
+          (funcall d "mem-load-u32" (lambda (offset)
+                                      (el-abi-check session offset)
+                                      (js-call (new globalThis.DataView (get session :abiMemory)) :getUint32 offset t)))
+          (funcall d "word-add" (lambda (a b) (uint32 (+ (uint32 (el-num a)) (uint32 (el-num b))))))
+          (funcall d "word-sub" (lambda (a b) (uint32 (- (uint32 (el-num a)) (uint32 (el-num b))))))
+          (funcall d "word-mul" (lambda (a b) (uint32 (imul32 (uint32 (el-num a)) (uint32 (el-num b))))))
+          (funcall d "word-div" (lambda (a b)
+                                  (when (= (uint32 (el-num b)) 0) (el-signal "arith-error" "word-div by zero"))
+                                  (uint32 (Math/trunc (/ (uint32 (el-num a)) (uint32 (el-num b))))))))
+        (t nil))))
+
+
+  (defun el-abi-check (session offset)
+    (let ((memory (get session :abiMemory)))
+      (when (or (nil? memory) (< offset 0) (> (+ offset 4) (get memory :byteLength)))
+        (el-signal "error" "ABI linear memory out of bounds"))))
+
+
+  ;; ------------------------------------------------------------------
+  ;; eliscript-bind: unified destructuring, multi-arity, recur, threading
+  ;; ------------------------------------------------------------------
+
+  (defun el-collect-pattern-vars (pattern seen)
+    (cond
+      ((or (nil? pattern) (eq pattern s-underscore) (el-keyword? pattern)) seen)
+      ((el-symobj? pattern)
+        (when (js-call seen :has pattern)
+          (el-compile-error (str "ELI-B0010: duplicate variable " (get pattern :name) " in pattern")))
+        (js-call seen :add pattern)
+        seen)
+      ((el-vector? pattern)
+        (let ((items (get pattern :items)) (i 0) (done false))
+          (while (and (not done) (< i (js-length items)))
+            (if (eq (aref items i) s-rest)
+                (progn (el-collect-pattern-vars (aref items (1+ i)) seen) (setq done t))
+              (el-collect-pattern-vars (aref items i) seen))
+            (setq i (1+ i))))
+        seen)
+      ((el-cons? pattern)
+        (let* ((items (el-list-to-array pattern)) (head (el-symbol-name (aref items 0))))
+          (cond
+            ((= head ":list")
+              (let ((i 1) (done false))
+                (while (and (not done) (< i (js-length items)))
+                  (if (eq (aref items i) s-rest)
+                      (progn (el-collect-pattern-vars (aref items (1+ i)) seen) (setq done t))
+                    (el-collect-pattern-vars (aref items i) seen))
+                  (setq i (1+ i)))))
+            ((= head ":map")
+              (js-call (js-call items :slice 1) :forEach
+                       (lambda (entry)
+                         (let ((sub (el-nth 1 entry)))
+                           (el-collect-pattern-vars (if (and (el-cons? sub) (eq (get sub :car) s-default)) (el-nth 1 sub) sub) seen)))))
+            ((= head ":record")
+              (js-call (js-call items :slice 2) :forEach (lambda (entry) (el-collect-pattern-vars (el-nth 1 entry) seen))))
+            ((or (= head ":ok") (= head ":error") (= head ":some")) (el-collect-pattern-vars (aref items 1) seen))))
+        seen)
+      (t seen)))
+
+
+  (defun el-match-binding (session pattern value frame)
+    (cond
+      ((eq pattern s-underscore) nil)
+      ((el-sym-is pattern ":none") (unless (eq value OPTION_NONE) (el-signal "error" "Destructuring expected option-none")))
+      ((el-symobj? pattern) (js-call (get frame :vars) :set pattern value))
+      ((el-vector? pattern)
+        (unless (or (el-vector? value) (= (el-kind value) "persistent-vector"))
+          (el-signal "error" "Destructuring vector pattern requires a vector or persistent-vector"))
+        (let* ((items (get pattern :items)) (values (get value :items))
+               (rest-index (js-call items :findIndex (lambda (x) (eq x s-rest)))))
+          (if (>= rest-index 0)
+              (progn
+                (when (< (js-length values) rest-index) (el-signal "error" "Destructuring vector length mismatch"))
+                (let ((i 0)) (while (< i rest-index) (el-match-binding session (aref items i) (aref values i) frame) (setq i (1+ i))))
+                (el-match-binding session (aref items (1+ rest-index))
+                                  (if (= (el-kind value) "persistent-vector")
+                                      (el-make-pcoll "persistent-vector" (js-call values :slice rest-index))
+                                    (el-vector (js-call values :slice rest-index)))
+                                  frame))
+            (progn
+              (unless (= (js-length values) (js-length items)) (el-signal "error" "Destructuring vector length mismatch"))
+              (let ((i 0)) (while (< i (js-length items)) (el-match-binding session (aref items i) (aref values i) frame) (setq i (1+ i))))))))
+      ((el-cons? pattern)
+        (let* ((items (el-list-to-array pattern)) (head (el-symbol-name (aref items 0))))
+          (cond
+            ((= head ":list")
+              (unless (or (nil? value) (el-cons? value) (= (el-kind value) "persistent-list"))
+                (el-signal "error" "Destructuring :list requires list or persistent-list"))
+              (let* ((elements (if (= (el-kind value) "persistent-list") (get value :items) (el-list-to-array value)))
+                     (subs (js-call items :slice 1))
+                     (rest-index (js-call subs :findIndex (lambda (x) (eq x s-rest)))))
+                (if (>= rest-index 0)
+                    (progn
+                      (when (< (js-length elements) rest-index) (el-signal "error" "Destructuring :list length mismatch"))
+                      (let ((i 0)) (while (< i rest-index) (el-match-binding session (aref subs i) (aref elements i) frame) (setq i (1+ i))))
+                      (el-match-binding session (aref subs (1+ rest-index))
+                                        (if (= (el-kind value) "persistent-list")
+                                            (el-make-pcoll "persistent-list" (js-call elements :slice rest-index))
+                                          (el-list-from (js-call elements :slice rest-index)))
+                                        frame))
+                  (progn
+                    (unless (= (js-length elements) (js-length subs)) (el-signal "error" "Destructuring :list length mismatch"))
+                    (let ((i 0)) (while (< i (js-length subs)) (el-match-binding session (aref subs i) (aref elements i) frame) (setq i (1+ i))))))))
+            ((= head ":map")
+              (js-call (js-call items :slice 1) :forEach
+                       (lambda (entry)
+                         (let ((key (el-car entry)) (sub (el-nth 1 entry)))
+                           (if (and (el-cons? sub) (eq (get sub :car) s-default))
+                               (el-match-binding session (el-nth 1 sub)
+                                                 (if (el-value-contains value key) (el-value-get value key nil)
+                                                   (el-eval session (el-nth 2 sub) frame))
+                                                 frame)
+                             (progn
+                               (unless (el-value-contains value key)
+                                 (el-signal "error" (str "Destructuring :map missing required key " (el-symbol-name key))))
+                               (el-match-binding session sub (el-value-get value key nil) frame)))))))
+            ((= head ":record")
+              (let ((type-name (el-symbol-name (aref items 1))))
+                (unless (and (= (el-kind value) "persistent-record") (= (get value :typeName) type-name))
+                  (el-signal "error" (str "Destructuring :record expected " type-name)))
+                (js-call (js-call items :slice 2) :forEach
+                         (lambda (entry) (el-match-binding session (el-nth 1 entry) (el-value-get value (el-car entry) nil) frame)))))
+            ((= head ":ok")
+              (unless (and (= (el-kind value) "result") (get value :ok)) (el-signal "error" "Destructuring :ok mismatch"))
+              (el-match-binding session (aref items 1) (get value :value) frame))
+            ((= head ":error")
+              (unless (and (= (el-kind value) "result") (not (get value :ok))) (el-signal "error" "Destructuring :error mismatch"))
+              (el-match-binding session (aref items 1) (get value :value) frame))
+            ((= head ":some")
+              (unless (and (= (el-kind value) "option") (get value :some)) (el-signal "error" "Destructuring :some mismatch"))
+              (el-match-binding session (aref items 1) (get value :value) frame))
+            (t (unless (el-value-equal pattern value) (el-signal "error" "Destructuring literal mismatch"))))))
+      (t (unless (el-value-equal pattern value) (el-signal "error" "Destructuring literal mismatch")))))
+
+
+  (defun sf-let-bind (session form env)
+    (let ((frame (el-new-env env)) (seen (new globalThis.Set)) (sequential (el-sym-is (get form :car) "let*-bind")))
+      (js-call (el-list-to-array (el-second form)) :forEach
+               (lambda (binding)
+                 (el-collect-pattern-vars (el-car binding) seen)
+                 (el-match-binding session (el-car binding) (el-eval session (el-nth 1 binding) (if sequential frame env)) frame)))
+      (el-eval-list-body session (el-rest-after form 1) frame)))
+
+
+  (defun el-make-bind-function (session specs body env name)
+    (let ((required (js-array)) (optional (js-array)) (mode "required") (seen (new globalThis.Set)))
+      (js-call (el-list-to-array specs) :forEach
+               (lambda (spec)
+                 (cond
+                   ((eq spec s-optional) (setq mode "optional"))
+                   ((= mode "required") (el-collect-pattern-vars spec seen) (js-call required :push spec))
+                   (t (let ((pair (if (el-cons? spec) (el-list-to-array spec) (js-array spec nil))))
+                        (el-collect-pattern-vars (aref pair 0) seen)
+                        (js-call optional :push pair))))))
+      (lambda (&rest args)
+        (let ((frame (el-new-env env)))
+          (js-call required :forEach (lambda (pattern index) (el-match-binding session pattern (el-opt (aref args index)) frame)))
+          (js-call optional :forEach
+                   (lambda (pair index)
+                     (let ((position (+ (js-length required) index)))
+                       (el-match-binding session (aref pair 0)
+                                         (if (> (js-length args) position) (aref args position) (el-eval session (el-opt (aref pair 1)) frame))
+                                         frame))))
+          (el-eval-list-body session body frame)))))
+
+
+  (defun sf-defun-bind (session form env)
+    (let ((name (el-second form)))
+      (el-define-function session name (el-make-bind-function session (el-third form) (el-rest-after form 2) env (el-symbol-name name)))))
+
+  (defun sf-lambda-bind (session form env)
+    (el-make-bind-function session (el-second form) (el-rest-after form 1) env "lambda-bind"))
+
+
+  (defun sf-pcase-value (session form env)
+    (let ((target (el-eval session (el-second form) env)) (cursor (el-rest-after form 1)) (result nil) (done false))
+      (while (and (not done) (el-cons? cursor))
+        (let ((clause (get cursor :car)))
+          (when (or (eq (el-car clause) s-underscore) (el-value-equal target (el-eval session (el-car clause) env)))
+            (setq done t)
+            (setq result (el-eval-list-body session (el-cdr clause) env))))
+        (setq cursor (get cursor :cdr)))
+      result))
+
+
+  (defun sf-cond-predicate (session form env)
+    (let* ((pred (el-eval session (el-second form) env))
+           (value (el-eval session (el-third form) env))
+           (clauses (el-list-to-array (el-rest-after form 2)))
+           (i 0) (result nil) (done false))
+      (while (and (not done) (< i (js-length clauses)))
+        (cond
+          ((= i (1- (js-length clauses))) (setq result (el-eval session (aref clauses i) env)) (setq done t))
+          ((el-sym-is (aref clauses (1+ i)) ":>>")
+            (let ((matched (el-call session pred (js-array (el-eval session (aref clauses i) env) value))))
+              (if (not (nil? matched))
+                  (progn (setq result (el-call session (el-eval session (aref clauses (+ i 2)) env) (js-array matched))) (setq done t))
+                (setq i (+ i 3)))))
+          (t (if (not (nil? (el-call session pred (js-array (el-eval session (aref clauses i) env) value))))
+                 (progn (setq result (el-eval session (aref clauses (1+ i)) env)) (setq done t))
+               (setq i (+ i 2))))))
+      result))
+
+
+  (defun el-make-case-function (session clauses env name)
+    (let ((fixed (new globalThis.Map)) (rest-clause nil))
+      (js-call clauses :forEach
+               (lambda (clause)
+                 (let* ((params (el-list-to-array (el-car clause))) (body (el-cdr clause))
+                        (rest-index (js-call params :findIndex (lambda (p) (eq p s-rest)))))
+                   (when (js-call params :some (lambda (p) (eq p s-optional)))
+                     (el-compile-error (str "ELI-A0010: &optional forbidden in " name)))
+                   (if (>= rest-index 0)
+                       (progn
+                         (unless (nil? rest-clause) (el-compile-error "ELI-A0012: multiple &rest clauses"))
+                         (setq rest-clause (js-object :min rest-index :names (js-call params :slice 0 rest-index)
+                                                      :rest (aref params (1+ rest-index)) :body body)))
+                     (progn
+                       (when (js-call fixed :has (js-length params))
+                         (el-compile-error (str "ELI-A0011: duplicate arity " (js-length params))))
+                       (js-call fixed :set (js-length params) (js-object :names params :body body)))))))
+      (unless (nil? rest-clause)
+        (js-call fixed :forEach (lambda (v arity) (when (>= arity (get rest-clause :min))
+                                                    (el-compile-error "ELI-A0012: fixed arity overlaps &rest")))))
+      (lambda (&rest args)
+        (let ((frame (el-new-env env)))
+          (cond
+            ((js-call fixed :has (js-length args))
+              (let ((branch (js-call fixed :get (js-length args))))
+                (js-call (get branch :names) :forEach (lambda (n i) (js-call (get frame :vars) :set n (aref args i))))
+                (el-eval-list-body session (get branch :body) frame)))
+            ((and (not (nil? rest-clause)) (>= (js-length args) (get rest-clause :min)))
+              (js-call (get rest-clause :names) :forEach (lambda (n i) (js-call (get frame :vars) :set n (aref args i))))
+              (js-call (get frame :vars) :set (get rest-clause :rest) (el-list-from (js-call args :slice (get rest-clause :min))))
+              (el-eval-list-body session (get rest-clause :body) frame))
+            (t (el-signal "wrong-number-of-arguments" (el-intern name) (js-length args))))))))
+
+
+  (defun sf-defun-case (session form env)
+    (let ((name (el-second form)))
+      (el-define-function session name
+        (el-make-case-function session (get (el-extract-declarations (el-list-to-array (el-rest-after form 1))) :body) env (el-symbol-name name)))))
+
+  (defun sf-lambda-case (session form env)
+    (el-make-case-function session (el-list-to-array (get form :cdr)) env "lambda-case"))
+
+
+  (defun el-verify-recur-tail (forms tail)
+    (js-call forms :forEach
+             (lambda (form index)
+               (let ((last (and tail (= index (1- (js-length forms))))))
+                 (when (el-cons? form)
+                   (let ((head (get form :car)) (args (el-list-to-array (get form :cdr))))
+                     (cond
+                       ((eq head s-quote) nil)
+                       ((eq head s-recur)
+                         (unless last (el-compile-error "ELI-R0001: recur must be in tail position"))
+                         (el-verify-recur-tail args false))
+                       ((eq head s-if)
+                         (el-verify-recur-tail (js-array (aref args 0)) false)
+                         (el-verify-recur-tail (js-array (el-opt (aref args 1))) last)
+                         (el-verify-recur-tail (js-call args :slice 2) last))
+                       ((eq head s-progn) (el-verify-recur-tail args last))
+                       ((or (eq head s-let) (el-sym-is head "let*") (el-sym-is head "let-const"))
+                         (el-verify-recur-tail (js-call args :slice 1) last))
+                       ((or (el-sym-is head "let-loop") (el-sym-is head "defun-tail")) nil)
+                       (t (el-verify-recur-tail args false)))))))))
+
+
+  (defun el-run-recur-loop (session names body frame)
+    (let ((result nil) (running t))
+      (while running
+        (try
+          (progn (setq result (el-eval-list-body session body frame)) (setq running false))
+          (catch signal
+            (if (and (not (nullish? signal)) (get signal :eliscriptRecur))
+                (js-call names :forEach (lambda (n i) (js-call (get frame :vars) :set n (el-opt (aref (get signal :args) i)))))
+              (throw signal)))))
+      result))
+
+
+  (defun sf-let-loop (session form env)
+    (let* ((bindings (el-list-to-array (el-second form)))
+           (names (js-call bindings :map (lambda (b) (el-car b))))
+           (body (el-rest-after form 1))
+           (frame (el-new-env env)))
+      (el-verify-recur-tail (el-list-to-array body) t)
+      (js-call bindings :forEach (lambda (b) (js-call (get frame :vars) :set (el-car b) (el-eval session (el-nth 1 b) frame))))
+      (el-run-recur-loop session names body frame)))
+
+
+  (defun sf-defun-tail (session form env)
+    (let* ((name (el-second form))
+           (names (el-list-to-array (el-third form)))
+           (body (el-rest-after form 2)))
+      (el-verify-recur-tail (el-list-to-array body) t)
+      (el-define-function session name
+        (lambda (&rest args)
+          (let ((frame (el-new-env env)))
+            (js-call names :forEach (lambda (n i) (js-call (get frame :vars) :set n (el-opt (aref args i)))))
+            (el-run-recur-loop session names body frame))))))
+
+
+  (defun sf-recur (session form env)
+    (throw (js-object :eliscriptRecur t :args (el-eval-args session (get form :cdr) env))))
+
+
+  (defun sf-thread-as (session form env)
+    (let ((value (el-eval session (el-second form) env)) (name (el-third form)) (frame (el-new-env env)))
+      (js-call (el-list-to-array (el-rest-after form 2)) :forEach
+               (lambda (step) (js-call (get frame :vars) :set name value) (setq value (el-eval session step frame))))
+      value))
+
+
+  (defun sf-thread-cond (session form env)
+    (let ((value (el-eval session (el-second form) env)) (items (el-list-to-array (el-rest-after form 1))) (i 0)
+          (last (el-sym-is (get form :car) "thread-cond-last")))
+      (while (< i (js-length items))
+        (unless (nil? (el-eval session (aref items i) env))
+          (let ((step (aref items (1+ i))))
+            (setq value (el-eval session (el-thread-step step (el-list s-quote value) last) env))))
+        (setq i (+ i 2)))
+      value))
+
+
+  (defun el-thread-step (step value last)
+    (if (el-cons? step)
+        (if last (el-append (js-array step (el-list value))) (el-cons (get step :car) (el-cons value (get step :cdr))))
+      (el-list step value)))
+
+
+  (defun sf-thread-some (session form env)
+    (let ((value (el-eval session (el-second form) env)) (cursor (el-rest-after form 1))
+          (last (el-sym-is (get form :car) "thread-some-last")))
+      (while (and (el-cons? cursor) (not (nil? value)))
+        (setq value (el-eval session (el-thread-step (get cursor :car) (el-list s-quote value) last) env))
+        (setq cursor (get cursor :cdr)))
+      value))
+
+
+  ;; ------------------------------------------------------------------
+  ;; eliscript-data forms
+  ;; ------------------------------------------------------------------
+
+  (defun sf-cl-defstruct-persistent (session form env)
+    (let* ((name (el-symbol-name (el-second form)))
+           (fields (js-call (js-call (el-list-to-array (el-rest-after form 1)) :filter (lambda (f) (not (el-string? f))))
+                            :map (lambda (f)
+                                   (if (el-symobj? f)
+                                       (js-object :name (get f :name) :type "any" :min nil :max nil :hasDefault false :default nil)
+                                     (let ((items (el-list-to-array f))
+                                           (field (js-object :name (el-symbol-name (el-car f)) :type "any" :min nil :max nil :hasDefault false :default nil))
+                                           (i 1))
+                                       (while (< i (js-length items))
+                                         (let ((key (el-symbol-name (aref items i))) (value (aref items (1+ i))))
+                                           (cond ((= key ":type") (put field :type (el-symbol-name-or-string value)))
+                                                 ((= key ":min") (put field :min (el-num value)))
+                                                 ((= key ":max") (put field :max (el-num value)))
+                                                 ((= key ":default") (put field :hasDefault t) (put field :default value))))
+                                         (setq i (+ i 2)))
+                                       field))))))
+      (js-call (get session :structSchemas) :set name (js-object :name name :fields fields))
+      (el-def session (str "make-" name)
+              (lambda (&rest kvs)
+                (let ((given (new globalThis.Map)) (i 0) (entries (js-array)))
+                  (while (< i (js-length kvs))
+                    (js-call given :set (el-record-field-name (aref kvs i)) (aref kvs (1+ i)))
+                    (setq i (+ i 2)))
+                  (js-call fields :forEach
+                           (lambda (field)
+                             (let ((value (if (js-call given :has (get field :name)) (js-call given :get (get field :name))
+                                            (if (get field :hasDefault) (el-eval session (get field :default) env) nil))))
+                               (el-validate-struct-field name field value)
+                               (js-call entries :push (js-array (get field :name) value)))))
+                  (js-object :kind "persistent-record" :typeName name :entries entries :meta nil))))
+      (el-def session (str name "-p") (lambda (x) (el-bool (and (= (el-kind x) "persistent-record") (= (get x :typeName) name)))))
+      (el-def session (str name "-with")
+              (lambda (instance &rest kvs)
+                (let ((merged (js-array)))
+                  (js-call (get instance :entries) :forEach (lambda (e) (js-call merged :push (el-intern (str ":" (aref e 0)))) (js-call merged :push (aref e 1))))
+                  (el-call session (el-intern (str "make-" name)) (js-call merged :concat kvs)))))
+      (js-call fields :forEach
+               (lambda (field)
+                 (el-def session (str name "-" (get field :name))
+                         (lambda (instance) (el-value-get instance (el-intern (str ":" (get field :name))) nil)))))
+      (el-second form)))
+
+
+  (defun el-dispatch-tag (value)
+    (cond ((= (el-kind value) "persistent-record") (get value :typeName))
+          ((el-record? value) (el-symbol-name (aref (get value :items) 0)))
+          (t (el-kind value))))
+
+
+  (defun sf-defprotocol (session form env)
+    (let ((name (el-symbol-name (el-second form))) (table (new globalThis.Map)))
+      (js-call (get session :protocols) :set name table)
+      (js-call (el-list-to-array (el-rest-after form 1)) :forEach
+               (lambda (signature)
+                 (let ((method (el-symbol-name (el-car signature))))
+                   (el-def session method
+                           (lambda (target &rest rest)
+                             (let* ((tag (el-dispatch-tag target))
+                                    (impls (js-call table :get tag))
+                                    (impl (if (undefined? impls) undefined (js-call impls :get method))))
+                               (when (undefined? impl) (el-signal "error" (str "No protocol impl " name "." method " for " tag)))
+                               (Reflect/apply impl nil (js-call (js-array target) :concat rest))))))))
+      (el-second form)))
+
+
+  (defun sf-extend-protocol (session form env)
+    (let* ((name (el-symbol-name (el-second form)))
+           (type (el-symbol-name (el-third form)))
+           (table (js-call (get session :protocols) :get name)))
+      (when (undefined? table) (el-signal "error" (str "Unknown protocol " name)))
+      (unless (js-call table :has type) (js-call table :set type (new globalThis.Map)))
+      (js-call (el-list-to-array (el-rest-after form 2)) :forEach
+               (lambda (impl)
+                 (js-call (js-call table :get type) :set (el-symbol-name (el-car impl))
+                          (el-make-lambda session (get impl :cdr) env (el-symbol-name (el-car impl))))))
+      (el-second form)))
+
+
+  (defun sf-cl-defgeneric-value (session form env)
+    (let* ((name (el-second form))
+           (dispatcher (el-make-lambda session (el-rest-after form 1) env (el-symbol-name name)))
+           (methods (new globalThis.Map)))
+      (js-call (get session :multimethods) :set (el-symbol-name name) methods)
+      (el-define-function session name
+        (lambda (&rest args)
+          (let* ((key (el-call session dispatcher args))
+                 (method (js-call methods :get key)))
+            (when (undefined? method) (el-signal "error" (str "No multimethod " (el-symbol-name name) " for " (el-prin1-string key t))))
+            (el-call session method args))))))
+
+
+  (defun sf-cl-defmethod-value (session form env)
+    (let* ((name (el-symbol-name (el-second form)))
+           (key (el-eval session (el-third form) env))
+           (methods (js-call (get session :multimethods) :get name)))
+      (js-call methods :set key (el-make-lambda session (el-rest-after form 2) env name))
+      (el-second form)))
+
+
+  (defun sf-delay (session form env)
+    (js-object :kind "delay" :realized false :value nil
+               :thunk (lambda () (el-eval-list-body session (get form :cdr) env))))
+
+
+  (defun sf-with-transient (session form env)
+    (let* ((spec (el-second form))
+           (source (el-eval session (el-nth 1 spec) env))
+           (builder (js-object :kind "transient" :active t :items (js-call (or (get source :items) (js-array)) :slice)))
+           (frame (el-new-env env)))
+      (js-call (get frame :vars) :set (el-car spec) builder)
+      (try (progn (el-eval-list-body session (el-rest-after form 1) frame)
+                  (put builder :active false)
+                  (el-make-pcoll "persistent-vector" (get builder :items)))
+        (finally (put builder :active false)))))
+
+
+  ;; ------------------------------------------------------------------
+  ;; eliscript-module
+  ;; ------------------------------------------------------------------
+
+  (defun el-check-const-mutation (forms consts module-name)
+    (js-call forms :forEach
+             (lambda (form)
+               (when (el-cons? form)
+                 (let ((items (el-list-to-array form)))
+                   (unless (eq (aref items 0) s-quote)
+                     (when (or (eq (aref items 0) s-setq) (eq (aref items 0) s-setf))
+                       (let ((i 1))
+                         (while (< i (js-length items))
+                           (when (and (el-symobj? (aref items i)) (js-call consts :has (aref items i)))
+                             (el-compile-error (str "ELI-M0002: cannot reassign defconst-lexical " (get (aref items i) :name)
+                                                    " in module " module-name)))
+                           (setq i (+ i 2)))))
+                     (el-check-const-mutation (js-call items :slice 1) consts module-name)))))))
+
+
+  (defun sf-defmodule (session form env)
+    (let* ((name (el-symbol-name (el-second form)))
+           (forms (el-list-to-array (el-rest-after form 1)))
+           (module-env (el-new-env env))
+           (exported-fns (new globalThis.Map))
+           (exported-values (new globalThis.Map))
+           (consts (new globalThis.Set)))
+      (put module-env :fns (new globalThis.Map))
+      (put module-env :consts (new globalThis.Set))
+      (js-call forms :forEach (lambda (f) (when (and (el-cons? f) (el-sym-is (get f :car) "defconst-lexical")) (js-call consts :add (el-second f)))))
+      (when (> (get consts :size) 0) (el-check-const-mutation forms consts name))
+      (js-call forms :forEach
+               (lambda (sub)
+                 (when (el-cons? sub)
+                   (let ((head (el-symbol-name (get sub :car))))
+                     (cond
+                       ((or (= head "defconst-lexical") (= head "defvar-lexical"))
+                         (js-call (get module-env :vars) :set (el-second sub) (el-eval session (el-third sub) module-env))
+                         (when (= head "defconst-lexical") (js-call (get module-env :consts) :add (el-second sub))))
+                       ((= head "defun-lexical")
+                         (put module-env :hasFns t)
+                         (put (el-second sub) :_everLocalFn t)
+                         (js-call (get module-env :fns) :set (el-second sub)
+                                  (el-make-lambda session (el-rest-after sub 1) module-env (el-symbol-name (el-second sub)))))
+                       ((= head "export-functions")
+                         (js-call (el-list-to-array (get sub :cdr)) :forEach
+                                  (lambda (s) (js-call exported-fns :set s (js-call (get session :functions) :get s)))))
+                       ((= head "export-values")
+                         (js-call (el-list-to-array (get sub :cdr)) :forEach
+                                  (lambda (s) (js-call exported-values :set s (lambda () (js-call (get module-env :vars) :get s))))))
+                       (t (el-eval session sub module-env)))))))
+      (js-call (get session :modules) :set name (js-object :fns exported-fns :values exported-values))
+      (el-second form)))
+
+
+  (defun sf-import-functions (session form env)
+    (let ((module (js-call (get session :modules) :get (el-symbol-name (el-second form)))))
+      (js-call (el-list-to-array (el-nth 3 form)) :forEach
+               (lambda (s) (el-set-fn session s (js-call (get module :fns) :get s))))
+      nil))
+
+
+  (defun sf-import-values (session form env)
+    (let ((module (js-call (get session :modules) :get (el-symbol-name (el-second form)))))
+      (js-call (el-list-to-array (el-nth 3 form)) :forEach
+               (lambda (s) (js-call (get session :liveValueGetters) :set s (js-call (get module :values) :get s))))
+      nil))
+
+
+  (defun sf-defmacro-checked (session form env)
+    (let* ((name (el-second form))
+           (extracted (el-extract-declarations (el-list-to-array (el-rest-after form 2))))
+           (props (get extracted :props))
+           (inputs (if (js-call props :has ":inputs") (el-list-to-array (js-call props :get ":inputs")) (js-array))))
+      (js-call (get extracted :body) :forEach
+               (lambda (f)
+                 (when (and (el-cons? f) (el-sym-is (get f :car) "macro-read-file"))
+                   (let ((path (el-second f)))
+                     (unless (js-call inputs :includes path)
+                       (el-compile-error (str "ELI-M0011: undeclared file " path " in " (el-symbol-name name) " (:inputs)")))))))
+      (let ((macro-env (el-new-env env))
+            (mg-sym (el-intern "macro-gensym")))
+        (put macro-env :fns (new globalThis.Map))
+        (put macro-env :hasFns t)
+        (put mg-sym :_everLocalFn t)
+        (js-call (get macro-env :fns) :set mg-sym
+                 (lambda (&optional prefix)
+                   (put session :gensymCounter (1+ (get session :gensymCounter)))
+                   (el-intern (str "__eli_hygienic_" (if (nullish? prefix) "g" prefix) "_" (get session :gensymCounter)))))
+        (el-set-macro session name (el-make-macro session (el-third form) (get extracted :body) macro-env (el-symbol-name name))))
+      name))
+
+
+  ;; ------------------------------------------------------------------
+  ;; eliscript-async and eliscript-abi forms
+  ;; ------------------------------------------------------------------
+
+  (defun el-make-async-function (session spec-and-body env name)
+    (let ((inner (el-make-lambda session spec-and-body env name)))
+      (lambda (&rest args)
+        (let ((previous (get session :inAsyncContext)))
+          (put session :inAsyncContext t)
+          (try
+            (let ((value (Reflect/apply inner nil args)))
+              (if (= (el-kind value) "future") value (el-future "fulfilled" (el-normalize-result value) nil)))
+            (catch error
+              (when (el-control-transfer? error) (throw error))
+              (el-future "rejected" nil error))
+            (finally (put session :inAsyncContext previous)))))))
+
+
+  (defun sf-defun-async (session form env)
+    (let ((name (el-second form)))
+      (el-define-function session name (el-make-async-function session (el-rest-after form 1) env (el-symbol-name name)))))
+
+  (defun sf-lambda-async (session form env)
+    (el-make-async-function session (get form :cdr) env "lambda-async"))
+
+
+  (defun sf-with-async-scope (session form env)
+    (let ((scope (js-object :kind "async-scope" :handles (js-array))) (frame (el-new-env env)))
+      (js-call (get frame :vars) :set (el-car (el-second form)) scope)
+      (try (el-eval-list-body session (el-rest-after form 1) frame)
+        (finally
+          (js-call (get scope :handles) :forEach
+                   (lambda (handle)
+                     (let ((revoke (el-symbol-function session (el-intern "engine-revoke!"))))
+                       (unless (nil? revoke) (funcall revoke handle)))))))))
+
+
+  (defun sf-with-abi-memory (session form env)
+    (let* ((options (el-list-to-array (el-second form)))
+           (index (js-call options :findIndex (lambda (o) (el-sym-is o ":initial-pages"))))
+           (pages (if (< index 0) 1 (aref options (1+ index))))
+           (previous (get session :abiMemory)))
+      (put session :abiMemory (new globalThis.ArrayBuffer (* pages 65536)))
+      (try (el-eval-list-body session (el-rest-after form 1) env)
+        (finally (put session :abiMemory previous)))))
+
+
+  ;; ------------------------------------------------------------------
+  ;; Special-form registry
+  ;; ------------------------------------------------------------------
+
+  (defun el-register (names handler)
+    (js-call names :forEach
+             (lambda (name)
+               (let ((sym (el-intern name)))
+                 (put sym :specialForm handler)
+                 (js-call special-forms :set sym handler)))))
+
+
+  (defun el-install-special-forms ()
+    (el-register (js-array "quote") sf-quote)
+    (el-register (js-array "function") sf-function)
+    (el-register (js-array "`") sf-backquote)
+    (el-register (js-array "progn" "eval-when-compile" "eval-and-compile" "with-no-warnings" "save-restriction"
+                           "with-demoted-errors" "inline" "with-local-quit" "with-syntax-table" "combine-after-change-calls"
+                           "with-silent-modifications" "save-mark-and-excursion")
+                 sf-progn)
+    (el-register (js-array "with-suppressed-warnings" "with-eval-after-load") sf-with-eval-after-load)
+    (el-register (js-array "prog1") sf-prog1)
+    (el-register (js-array "prog2") sf-prog2)
+    (el-register (js-array "if") sf-if)
+    (el-register (js-array "when") sf-when)
+    (el-register (js-array "unless") sf-unless)
+    (el-register (js-array "and") sf-and)
+    (el-register (js-array "or") sf-or)
+    (el-register (js-array "cond") sf-cond)
+    (el-register (js-array "while") sf-while)
+    (el-register (js-array "let") sf-let)
+    (el-register (js-array "let*" "dlet") sf-let*)
+    (el-register (js-array "let-const") sf-let-const)
+    (el-register (js-array "let*-const") sf-let*-const)
+    (el-register (js-array "setq") sf-setq)
+    (el-register (js-array "setq-local") sf-setq-local)
+    (el-register (js-array "setq-default") sf-setq-default)
+    (el-register (js-array "defvar") sf-defvar)
+    (el-register (js-array "defvar-local") sf-defvar-local)
+    (el-register (js-array "defconst") sf-defconst)
+    (el-register (js-array "defcustom") sf-defcustom)
+    (el-register (js-array "defgroup") sf-defgroup)
+    (el-register (js-array "defface") sf-defface)
+    (el-register (js-array "defun") sf-defun)
+    (el-register (js-array "defsubst" "define-inline") sf-defsubst)
+    (el-register (js-array "cl-defun" "cl-defsubst" "cl-iter-defun") sf-cl-defun)
+    (el-register (js-array "lambda") sf-lambda)
+    (el-register (js-array "defmacro" "cl-defmacro") sf-defmacro)
+    (el-register (js-array "defalias" "defvaralias") sf-defalias)
+    (el-register (js-array "catch") sf-catch)
+    (el-register (js-array "unwind-protect") sf-unwind-protect)
+    (el-register (js-array "condition-case") sf-condition-case)
+    (el-register (js-array "condition-case-unless-debug") sf-condition-case-unless-debug)
+    (el-register (js-array "ignore-errors") sf-ignore-errors)
+    (el-register (js-array "ignore-error") sf-ignore-error)
+    (el-register (js-array "save-match-data") sf-save-match-data)
+    (el-register (js-array "save-excursion") sf-save-excursion)
+    (el-register (js-array "save-current-buffer") sf-save-current-buffer)
+    (el-register (js-array "with-temp-buffer") sf-with-temp-buffer)
+    (el-register (js-array "with-temp-file") sf-with-temp-file)
+    (el-register (js-array "with-timeout") sf-with-timeout)
+    (el-register (js-array "with-current-buffer") sf-with-current-buffer)
+    (el-register (js-array "with-output-to-string") sf-with-output-to-string)
+    (el-register (js-array "dolist") sf-dolist)
+    (el-register (js-array "cl-dolist") sf-cl-dolist)
+    (el-register (js-array "dotimes" "cl-dotimes") sf-dotimes)
+    (el-register (js-array "seq-doseq") sf-seq-doseq)
+    (el-register (js-array "when-let" "when-let*") sf-when-let)
+    (el-register (js-array "if-let" "if-let*") sf-if-let)
+    (el-register (js-array "and-let*") sf-and-let)
+    (el-register (js-array "while-let") sf-while-let)
+    (el-register (js-array "cl-case" "cl-ecase") sf-cl-case)
+    (el-register (js-array "cl-block") sf-cl-block)
+    (el-register (js-array "cl-return-from") sf-cl-return-from)
+    (el-register (js-array "cl-return") sf-cl-return)
+    (el-register (js-array "cl-flet" "cl-flet*") sf-cl-flet)
+    (el-register (js-array "cl-labels" "cl-letf-functions") sf-cl-labels)
+    (el-register (js-array "cl-letf" "cl-letf*") sf-cl-letf)
+    (el-register (js-array "ert-deftest") sf-ert-deftest)
+    (el-register (js-array "should") sf-should)
+    (el-register (js-array "should-not") sf-should-not)
+    (el-register (js-array "should-error") sf-should-error)
+    (el-register (js-array "cl-destructuring-bind") sf-cl-destructuring-bind)
+    (el-register (js-array "bound-and-true-p") sf-bound-and-true-p)
+    (el-register (js-array "cl-assert") sf-cl-assert)
+    (el-register (js-array "rx") sf-rx)
+    (el-register (js-array "cl-the") sf-cl-the)
+    (el-register (js-array "declare" "declare-function" "cl-declaim" "cl-declare" "gv-define-expander") sf-declare)
+    (el-register (js-array "defvar-keymap") sf-defvar-keymap)
+    (el-register (js-array "define-derived-mode") sf-define-derived-mode)
+    (el-register (js-array "define-minor-mode" "define-globalized-minor-mode") sf-define-minor-mode)
+    (el-register (js-array "gv-define-simple-setter") sf-gv-define-simple-setter)
+    (el-register (js-array "gv-define-setter") sf-gv-define-setter)
+    (el-register (js-array "interactive") sf-interactive)
+    (el-register (js-array "thread-first" "thread-last") sf-thread)
+    (el-register (js-array "named-let") sf-named-let)
+    (el-register (js-array "letrec") sf-letrec)
+    (el-register (js-array "setf") sf-setf)
+    (el-register (js-array "cl-incf" "cl-decf" "incf" "decf") sf-incf)
+    (el-register (js-array "push") sf-push)
+    (el-register (js-array "pop") sf-pop)
+    (el-register (js-array "cl-pushnew") sf-pushnew)
+    (el-register (js-array "cl-remf" "remf") sf-cl-remf)
+    (el-register (js-array "aset") sf-aset)
+    (el-register (js-array "cl-callf") sf-cl-callf)
+    (el-register (js-array "cl-defstruct") sf-cl-defstruct)
+    (el-register (js-array "pcase" "pcase-exhaustive") sf-pcase)
+    (el-register (js-array "pcase-let" "pcase-let*") sf-pcase-let)
+    (el-register (js-array "pcase-dolist") sf-pcase-dolist)
+    (el-register (js-array "pcase-setq") sf-pcase-setq)
+    (el-register (js-array "cl-loop") sf-cl-loop)
+    ;; Extension forms
+    (el-register (js-array "let-bind" "let*-bind") sf-let-bind)
+    (el-register (js-array "defun-bind") sf-defun-bind)
+    (el-register (js-array "lambda-bind") sf-lambda-bind)
+    (el-register (js-array "pcase-value") sf-pcase-value)
+    (el-register (js-array "cond-predicate") sf-cond-predicate)
+    (el-register (js-array "defun-case") sf-defun-case)
+    (el-register (js-array "lambda-case") sf-lambda-case)
+    (el-register (js-array "let-loop") sf-let-loop)
+    (el-register (js-array "defun-tail") sf-defun-tail)
+    (el-register (js-array "recur") sf-recur)
+    (el-register (js-array "thread-as") sf-thread-as)
+    (el-register (js-array "thread-cond-first" "thread-cond-last") sf-thread-cond)
+    (el-register (js-array "thread-some-first" "thread-some-last") sf-thread-some)
+    (el-register (js-array "cl-defstruct-persistent") sf-cl-defstruct-persistent)
+    (el-register (js-array "defprotocol") sf-defprotocol)
+    (el-register (js-array "extend-protocol") sf-extend-protocol)
+    (el-register (js-array "cl-defgeneric-value") sf-cl-defgeneric-value)
+    (el-register (js-array "cl-defmethod-value") sf-cl-defmethod-value)
+    (el-register (js-array "delay") sf-delay)
+    (el-register (js-array "with-transient") sf-with-transient)
+    (el-register (js-array "defmodule") sf-defmodule)
+    (el-register (js-array "import-functions") sf-import-functions)
+    (el-register (js-array "import-values") sf-import-values)
+    (el-register (js-array "defmacro-checked") sf-defmacro-checked)
+    (el-register (js-array "defun-async") sf-defun-async)
+    (el-register (js-array "lambda-async") sf-lambda-async)
+    (el-register (js-array "with-async-scope") sf-with-async-scope)
+    (el-register (js-array "with-abi-memory") sf-with-abi-memory))
+
+  (el-install-special-forms)
+
+  (export el-require))

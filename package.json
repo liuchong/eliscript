@@ -21,8 +21,8 @@
   "exports": {
     "./runtime/math.mjs": "./runtime/math.mjs",
     "./runtime/prelude.mjs": "./runtime/prelude.mjs",
-    "./runtime/emacs-compat": "./runtime/emacs-compat.mjs",
-    "./runtime/emacs-compat.mjs": "./runtime/emacs-compat.mjs",
+    "./runtime/emacs-compat": "./dist/emacs-compat/emacs-compat.mjs",
+    "./runtime/emacs-compat.mjs": "./dist/emacs-compat/emacs-compat.mjs",
     "./runtime/unicode-case": "./runtime/unicode-case.mjs",
     "./runtime/unicode-case.mjs": "./runtime/unicode-case.mjs",
     "./compiler": "./dist/bootstrap/compiler.mjs",
@@ -60,6 +60,8 @@
   },
   "scripts": {
     "prepack": "make prepare-release-package",
+    "clean": "./bin/eliscript-clean",
+    "clean:all": "./bin/eliscript-clean --all",
     "build:browser": "bun build dist/bootstrap/compiler.mjs --target=browser --format=esm --minify --outfile dist/browser/compiler.js && ./bin/eliscript --output dist/browser/loader.mjs docs/pages/loader.eli && bun build dist/browser/loader.mjs --target=browser --format=iife --minify --outfile dist/browser/loader.js && cp browser/worker.mjs dist/browser/worker.mjs && sed 's|../dist/browser/compiler.js|./compiler.js|g' browser/host.mjs > dist/browser/host.mjs",
     "test": "make test",
     "test:core": "make test-core",
@@ -171,6 +173,7 @@
     "compiler/",
     "dist/bootstrap/",
     "dist/backends/",
+    "dist/emacs-compat/",
     "dist/host/",
     "dist/runtime/",
     "dist/literal-sources/",

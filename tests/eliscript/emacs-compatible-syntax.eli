@@ -11,7 +11,7 @@
   (import "node:perf_hooks" performance)
   (import "node:url" pathToFileURL)
   (import "../dist/bootstrap/compiler.mjs" compile-string)
-  (import "../runtime/emacs-compat.mjs"
+  (import "../dist/emacs-compat/emacs-compat.mjs"
           callCompatElisp compileCompatElispModule createCompatSession evalCompatProgram
           getCompatTimingReport invokeCompatFunction resetCompatState
           runCompatAbiNative runCompatAbiWasm serializeCompatValue)
@@ -248,7 +248,7 @@
                                         fallback-align-source))
                               (module-source (compileCompatElispModule source
                                                                        (js-object :moduleName "tests.generated.che-accelerated"
-                                                                                  :runtime "../../runtime/emacs-compat.mjs")))
+                                                                                  :runtime "../emacs-compat/emacs-compat.mjs")))
                               (directory (resolve project-root "dist/emacs-compat-tests"))
                               (output (resolve directory "che-accelerated.mjs")))
                          (js-call (expect (js-call module-source :startsWith "(module ")) :toBe t)
@@ -291,8 +291,8 @@
         (lambda ()
           (let ((manifest (JSON/parse (readFileSync (resolve project-root "package.json") "utf8")))
                 (report (getCompatTimingReport timings)))
-            (js-call (expect (get (get manifest :exports) "./runtime/emacs-compat")) :toBe "./runtime/emacs-compat.mjs")
-            (js-call (expect (get (get manifest :exports) "./runtime/emacs-compat.mjs")) :toBe "./runtime/emacs-compat.mjs")
+            (js-call (expect (get (get manifest :exports) "./runtime/emacs-compat")) :toBe "./dist/emacs-compat/emacs-compat.mjs")
+            (js-call (expect (get (get manifest :exports) "./runtime/emacs-compat.mjs")) :toBe "./dist/emacs-compat/emacs-compat.mjs")
             (js-call (expect (>= (js-length timings) 100)) :toBe t)
             (js-call timings :forEach
                      (lambda (entry)

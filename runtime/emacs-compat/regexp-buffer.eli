@@ -1,0 +1,665 @@
+(module eliscript.runtime.emacs-compat.regexp-buffer
+  ;;; regexp-buffer.eli --- Emacs regular expressions, rx compiler, match data, and in-memory buffers
+
+  (import "./core.eli" beyond-unicode-char el-char-string el-char-to-unit el-cons el-cons? el-function? el-intern el-kind el-list-from el-list-to-array el-mark-unibyte el-multibyte? el-num el-signal el-string-length el-string? el-substring el-sym-is el-symbol-name el-symobj? el-typeof el-unit-to-char)
+
+
+  ;; ------------------------------------------------------------------
+  ;; Emacs regular expressions -> host RegExp
+  ;; ------------------------------------------------------------------
+
+  (defconst regexp-cache (new globalThis.Map))
+
+  (defconst regexp-cache-i (new globalThis.Map))
+
+  (defconst regexp-fast-cache (new globalThis.Map))
+
+  (defconst regexp-fast-cache-i (new globalThis.Map))
+
+  (defconst word-class "\\p{L}\\p{N}")
+
+  (defconst symbol-class "\\p{L}\\p{N}_\\-+*/&|<>=$%!?~^:")
+
+
+  (defun el-class-char (code)
+    (if (or (and (>= code 48) (<= code 57)) (and (>= code 65) (<= code 90)) (and (>= code 97) (<= code 122)))
+        (String/fromCodePoint code)
+      (str "\\u{" (js-call (if (> code 1114111) beyond-unicode-char code) :toString 16) "}")))
+
+
+  (defun el-posix-class (name)
+    (cond ((= name "alpha") "\\p{L}")
+          ((= name "alnum") "\\p{L}\\p{N}")
+          ((= name "digit") "0-9")
+          ((= name "xdigit") "0-9A-Fa-f")
+          ((= name "space") "\\s")
+          ((= name "blank") " \\t\\p{Zs}")
+          ((= name "upper") "\\p{Lu}")
+          ((= name "lower") "\\p{Ll}")
+          ((= name "punct") "!-\\/:-@\\[-`{-~\\p{P}\\p{S}")
+          ((= name "cntrl") "\\u{0}-\\u{1f}")
+          ((= name "word") word-class)
+          ((= name "graph") "\\u{21}-\\u{7e}\\u{a1}-\\u{10ffff}")
+          ((= name "print") "\\u{20}-\\u{7e}\\u{a0}-\\u{10ffff}")
+          ((= name "ascii") "\\u{0}-\\u{7f}")
+          ((= name "nonascii") "\\u{80}-\\u{10ffff}")
+          ((= name "multibyte") "\\u{100}-\\u{10ffff}")
+          ((= name "unibyte") "\\u{0}-\\u{ff}")
+          (t (el-signal "invalid-regexp" (str "Invalid character class name: " name)))))
+
+
+  (defun el-translate-bracket (chars start)
+    ;; CHARS is an array of single-character strings; START points after "[".
+    ;; Return {source, next}.
+    (let ((index start) (negated false) (parts (js-array)) (first t) (done false))
+      (when (= (aref chars index) "^") (setq negated t) (setq index (1+ index)))
+      (while (not done)
+        (when (>= index (js-length chars)) (el-signal "invalid-regexp" "Unmatched [ or [^"))
+        (let ((ch (aref chars index)))
+          (cond
+            ((and (= ch "]") (not first)) (setq done t) (setq index (1+ index)))
+            ((and (= ch "[") (= (aref chars (1+ index)) ":"))
+              (let ((close (js-call (js-call chars :join "") :indexOf ":]" index)))
+                (if (< close 0)
+                    (progn (js-call parts :push (el-class-char 91)) (setq index (1+ index)))
+                  (progn
+                    (js-call parts :push (el-posix-class (js-call (js-call chars :slice (+ index 2) close) :join "")))
+                    (setq index (+ close 2))))))
+            ((and (< (+ index 2) (js-length chars)) (= (aref chars (1+ index)) "-") (/= (aref chars (+ index 2)) "]"))
+              (let ((low (js-call ch :codePointAt 0)) (high (js-call (aref chars (+ index 2)) :codePointAt 0)))
+                (when (<= low high)
+                  (js-call parts :push (str (el-class-char low) "-" (el-class-char high))))
+                (setq index (+ index 3))))
+            (t (js-call parts :push (el-class-char (js-call ch :codePointAt 0))) (setq index (1+ index)))))
+        (setq first false))
+      (js-object :source (if (= (js-length parts) 0)
+                             (if negated "[\\s\\S]" "[^\\s\\S]")
+                           (str "[" (if negated "^" "") (js-call parts :join "") "]"))
+                 :next index)))
+
+
+  (defun el-regexp-literal (ch)
+    (if (js-call (new globalThis.RegExp "^[\\\\^$.*+?()\\[\\]{}|/]$") :test ch) (str "\\" ch) ch))
+
+
+  (defun el-translate-regexp (pattern)
+    (let ((chars (Array/from pattern)) (out (js-array)) (index 0) (at-start t))
+      (while (< index (js-length chars))
+        (let ((ch (aref chars index)) (next-start false))
+          (cond
+            ((= ch "\\")
+              (let ((next (aref chars (1+ index))))
+                (setq index (+ index 2))
+                (cond
+                  ((undefined? next) (el-signal "invalid-regexp" "Trailing backslash"))
+                  ((= next "(")
+                    (if (= (aref chars index) "?")
+                        (let ((colon (js-call (js-call chars :join "") :indexOf ":" index)))
+                          (js-call out :push "(?:")
+                          (setq index (1+ colon)))
+                      (js-call out :push "("))
+                    (setq next-start t))
+                  ((= next ")") (js-call out :push ")"))
+                  ((= next "|") (js-call out :push "|") (setq next-start t))
+                  ((= next "{")
+                    (let ((close (js-call (js-call chars :join "") :indexOf "\\}" index)))
+                      (let ((body (js-call (js-call chars :slice index close) :join "")))
+                        (js-call out :push (str "{" (if (js-call body :startsWith ",") (str "0" body) body) "}"))
+                        (setq index (+ close 2)))))
+                  ((= next "`") (js-call out :push "(?<![\\s\\S])"))
+                  ((= next "'") (js-call out :push "(?![\\s\\S])"))
+                  ((= next "=") nil)
+                  ((= next "w") (js-call out :push (str "[" word-class "]")))
+                  ((= next "W") (js-call out :push (str "[^" word-class "]")))
+                  ((or (= next "s") (= next "S"))
+                    (let ((code (aref chars index)) (negate (= next "S")))
+                      (setq index (1+ index))
+                      (js-call out :push
+                               (cond ((or (= code "-") (= code " ")) (if negate "\\S" "\\s"))
+                                     ((= code "w") (str "[" (if negate "^" "") word-class "]"))
+                                     ((= code "_") (str "[" (if negate "^" "") symbol-class "]"))
+                                     ((= code ".") (if negate "[^\\p{P}]" "\\p{P}"))
+                                     ((= code "(") (if negate "[^(\\[{]" "[(\\[{]"))
+                                     ((= code ")") (if negate "[^)\\]}]" "[)\\]}]"))
+                                     ((= code "\"") (if negate "[^\"]" "\""))
+                                     (t "[\\s\\S]")))))
+                  ((= next "b")
+                    (js-call out :push (str "(?:(?<=[" word-class "])(?![" word-class "])|(?<![" word-class "])(?=[" word-class "]))")))
+                  ((= next "B") (js-call out :push (str "(?:(?<=[" word-class "])(?=[" word-class "])|(?<![" word-class "])(?![" word-class "]))")))
+                  ((= next "<") (js-call out :push (str "(?<![" word-class "])(?=[" word-class "])")))
+                  ((= next ">") (js-call out :push (str "(?<=[" word-class "])(?![" word-class "])")))
+                  ((= next "_")
+                    (let ((which (aref chars index)))
+                      (setq index (1+ index))
+                      (js-call out :push (if (= which "<")
+                                             (str "(?<![" symbol-class "])(?=[" symbol-class "])")
+                                           (str "(?<=[" symbol-class "])(?![" symbol-class "])")))))
+                  ((js-call (new globalThis.RegExp "^[1-9]$") :test next) (js-call out :push (str "\\" next)))
+                  ((or (= next "c") (= next "C")) (setq index (1+ index)) (js-call out :push "[\\s\\S]"))
+                  (t (js-call out :push (el-regexp-literal next))))))
+            ((= ch "[")
+              (let ((translated (el-translate-bracket chars (1+ index))))
+                (js-call out :push (get translated :source))
+                (setq index (get translated :next))))
+            ((= ch "^")
+              (js-call out :push (if at-start "^" "\\^"))
+              (setq index (1+ index))
+              (setq next-start at-start))
+            ((= ch "$")
+              (let ((following (aref chars (1+ index))))
+                (js-call out :push (if (or (undefined? following)
+                                           (and (= following "\\")
+                                                (or (= (aref chars (+ index 2)) ")") (= (aref chars (+ index 2)) "|"))))
+                                       "$" "\\$")))
+              (setq index (1+ index)))
+            ((= ch ".") (js-call out :push "[^\\n]") (setq index (1+ index)))
+            ((and (or (= ch "*") (= ch "+") (= ch "?")) at-start)
+              (js-call out :push (str "\\" ch)) (setq index (1+ index)))
+            ((or (= ch "*") (= ch "+") (= ch "?")) (js-call out :push ch) (setq index (1+ index)))
+            (t (js-call out :push (el-regexp-literal ch)) (setq index (1+ index))))
+          (setq at-start next-start)))
+      (js-call out :join "")))
+
+
+  (defun el-compile-regexp (pattern fold)
+    (let* ((cache (if fold regexp-cache-i regexp-cache))
+           (cached (js-call cache :get pattern)))
+      (if (not (undefined? cached)) cached
+        (let ((compiled (try (new globalThis.RegExp (el-translate-regexp pattern) (if fold "gmuid" "gmud"))
+                          (catch error
+                            (if (get error :eliscriptSignal) (throw error)
+                              (el-signal "invalid-regexp" (str (get error :message))))))))
+          (js-call cache :set pattern compiled)
+          compiled))))
+
+
+  (defun el-compile-regexp-fast (pattern fold)
+    (let* ((cache (if fold regexp-fast-cache-i regexp-fast-cache))
+           (cached (js-call cache :get pattern)))
+      (if (not (undefined? cached)) cached
+        (let ((compiled (try (new globalThis.RegExp (el-translate-regexp pattern) (if fold "gmui" "gmu"))
+                          (catch error
+                            (if (get error :eliscriptSignal) (throw error)
+                              (el-signal "invalid-regexp" (str (get error :message))))))))
+          (js-call cache :set pattern compiled)
+          compiled))))
+
+
+  (defun el-case-fold (session)
+    (let ((value (js-call (get session :values) :get (el-intern "case-fold-search"))))
+      (and (not (undefined? value)) (not (nil? value)))))
+
+
+  (defun el-set-match-data (session match subject offset buffer)
+    ;; Record MATCH (a host RegExp result on SUBJECT) as Emacs positions.
+    (if (= (js-length match) 1)
+        (let* ((u0 (get match :index))
+               (u1 (+ u0 (js-length (aref match 0))))
+               (c0 (+ offset (el-unit-to-char subject u0)))
+               (c1 (+ offset (el-unit-to-char subject u1))))
+          (put session :matchData (js-object :groups (js-array c0 c1) :subject subject :buffer buffer :offset offset)))
+      (let ((groups (js-array)) (index 0) (indices (get match :indices)))
+        (while (< index (js-length match))
+          (let ((span (if (undefined? indices) nil (aref indices index))))
+            (if (or (nullish? span) (undefined? (aref match index)))
+                (progn (js-call groups :push nil) (js-call groups :push nil))
+              (progn
+                (js-call groups :push (+ offset (el-unit-to-char subject (aref span 0))))
+                (js-call groups :push (+ offset (el-unit-to-char subject (aref span 1)))))))
+          (setq index (1+ index)))
+        (put session :matchData (js-object :groups groups :subject subject :buffer buffer :offset offset)))))
+
+
+  (defun el-regexp-exec (session pattern subject start)
+    ;; Search SUBJECT from character START; return the host match or nil.
+    (let ((regexp (el-compile-regexp pattern (el-case-fold session))))
+      (put regexp :lastIndex (if (= start 0) 0 (el-char-to-unit subject start)))
+      (let ((match (js-call regexp :exec subject)))
+        (if (nil? match) nil match))))
+
+
+  (defun el-regexp-exec-fast (session pattern subject start)
+    (let ((regexp (el-compile-regexp-fast pattern (el-case-fold session))))
+      (put regexp :lastIndex (if (= start 0) 0 (el-char-to-unit subject start)))
+      (let ((match (js-call regexp :exec subject)))
+        (if (nil? match) nil match))))
+
+
+  (defun el-string-match (session pattern string start set-data)
+    (if (and (not set-data) (or (nullish? start) (= start 0)))
+        (let ((match (el-regexp-exec-fast session pattern string 0)))
+          (if (nil? match) nil (el-unit-to-char string (get match :index))))
+      (let* ((length (el-string-length string))
+             (from (if (nullish? start) 0 (if (< start 0) (+ length start) start))))
+        (when (or (< from 0) (> from length)) (el-signal "args-out-of-range" string start))
+        (let ((match (if set-data
+                         (el-regexp-exec session pattern string from)
+                       (el-regexp-exec-fast session pattern string from))))
+          (if (nil? match) nil
+            (progn
+              (when set-data (el-set-match-data session match string 0 nil))
+              (el-unit-to-char string (get match :index))))))))
+
+
+  (defun el-match-position (session n end)
+    (let ((data (get session :matchData)))
+      (if (nullish? data) nil
+        (let ((value (aref (get data :groups) (+ (* n 2) (if end 1 0)))))
+          (if (undefined? value) nil value)))))
+
+
+  (defun el-match-string (session n string)
+    (let ((start (el-match-position session n false))
+          (end (el-match-position session n t))
+          (data (get session :matchData)))
+      (if (or (nil? start) (nil? end)) nil
+        (cond
+          ((not (nullish? string)) (el-substring string start end))
+          ((and (not (nullish? data)) (not (nullish? (get data :buffer))))
+            (el-buffer-substring (get data :buffer) start end))
+          ((not (nullish? data)) (el-substring (get data :subject) start end))
+          (t nil)))))
+
+
+  (defun el-expand-replacement (session replacement matched string)
+    (let ((out (js-array)) (chars (Array/from replacement)) (index 0))
+      (while (< index (js-length chars))
+        (let ((ch (aref chars index)))
+          (if (and (= ch "\\") (< (1+ index) (js-length chars)))
+              (let ((next (aref chars (1+ index))))
+                (cond
+                  ((= next "&") (js-call out :push matched))
+                  ((js-call (new globalThis.RegExp "^[0-9]$") :test next)
+                    (js-call out :push (or (el-match-string session (Number/parseInt next 10) string) "")))
+                  ((= next "\\") (js-call out :push "\\"))
+                  (t (el-signal "error" "Invalid use of `\\' in replacement text")))
+                (setq index (+ index 2)))
+            (progn (js-call out :push ch) (setq index (1+ index))))))
+      (js-call out :join "")))
+
+
+  (defun el-replace-regexp-in-string (session pattern rep string fixedcase literal subexp start)
+    (let ((position (if (nullish? start) 0 start)))
+      (if (and (= position 0) (nil? (el-regexp-exec-fast session pattern string 0)))
+          string
+        (let ((out (js-array))
+              (length (el-string-length string))
+              (done false))
+          (when (> position 0) (js-call out :push (el-substring string 0 position)))
+          (while (and (not done) (<= position length))
+            (let ((match (el-regexp-exec session pattern string position)))
+              (if (nil? match)
+                  (setq done t)
+                (let* ((mstart (el-unit-to-char string (get match :index)))
+                       (matched (aref match 0))
+                       (mlen (el-string-length matched))
+                       (mend (+ mstart mlen)))
+                  (js-call out :push (el-substring string position mstart))
+                  (let ((replacement
+                         (if (el-function? rep)
+                             (progn
+                               (if (= (js-length match) 1)
+                                   (put session :matchData (js-object :groups (js-array 0 mlen) :subject matched :buffer nil :offset 0))
+                                 (el-string-match session pattern matched 0 t))
+                               (let ((value (funcall rep matched)))
+                                 (if literal
+                                     value
+                                   (progn
+                                     (el-set-match-data session match string 0 nil)
+                                     (el-expand-replacement session value matched string)))))
+                           (if literal
+                               rep
+                             (progn
+                               (el-set-match-data session match string 0 nil)
+                               (el-expand-replacement session rep matched string))))))
+                    (js-call out :push replacement))
+                  (if (= mend mstart)
+                      (progn
+                        (when (< mstart length) (js-call out :push (el-substring string mstart (1+ mstart))))
+                        (setq position (1+ mend)))
+                    (setq position mend))))))
+          (when (<= position length) (js-call out :push (el-substring string position length)))
+          (js-call out :join "")))))
+
+
+  (defun el-split-string (session string separators omit-nulls trim)
+    (let* ((default (nullish? separators))
+           (pattern (if default "[ \f\t\n\r\u000b]+" separators))
+           (omit (if default t (not (nullish? omit-nulls))))
+           (pieces (js-array))
+           (position 0)
+           (length (el-string-length string))
+           (done false))
+      (while (not done)
+        (let ((match (if (> position length) nil (el-regexp-exec session pattern string position))))
+          (if (or (nil? match)
+                  (and (= (js-length (aref match 0)) 0) (>= (el-unit-to-char string (get match :index)) length)))
+              (progn (js-call pieces :push (el-substring string position length)) (setq done t))
+            (let* ((mstart (el-unit-to-char string (get match :index)))
+                   (mend (+ mstart (el-string-length (aref match 0)))))
+              (if (= mend mstart)
+                  (progn
+                    (js-call pieces :push (el-substring string position (1+ mstart)))
+                    (setq position (1+ mstart)))
+                (progn
+                  (js-call pieces :push (el-substring string position mstart))
+                  (setq position mend)))))))
+      (let ((result (js-array)))
+        (js-call pieces :forEach
+                 (lambda (piece)
+                   (let ((value (if (nullish? trim) piece (el-string-trim session piece trim trim))))
+                     (unless (and omit (= value "")) (js-call result :push value)))))
+        (el-list-from result))))
+
+
+  (defun el-string-trim (session string left right)
+    (let ((text string))
+      (let ((left-pattern (if (nullish? left) "[ \t\n\r]+" left))
+            (right-pattern (if (nullish? right) "[ \t\n\r]+" right)))
+        (let ((match (el-regexp-exec session (str "\\`\\(?:" left-pattern "\\)") text 0)))
+          (unless (nil? match) (setq text (el-substring text (el-string-length (aref match 0)) nil))))
+        (let ((match (el-regexp-exec session (str "\\(?:" right-pattern "\\)\\'") text 0)))
+          (unless (nil? match) (setq text (el-substring text 0 (el-unit-to-char text (get match :index))))))
+        text)))
+
+
+  (defun el-regexp-quote (string)
+    (js-call string :replace (new globalThis.RegExp "[\\[*.\\\\?+^$]" "g") (lambda (m) (str "\\" m))))
+
+
+  ;; rx: the subset used by real packages, translated to Emacs regexp text.
+  (defun el-rx-charset (items)
+    (let ((parts (js-array)) (classes (js-array)))
+      (js-call items :forEach
+               (lambda (item)
+                 (cond
+                   ((= (el-typeof item) "number") (js-call parts :push (el-char-string item)))
+                   ((el-string? item)
+                     (js-call parts :push item))
+                   ((el-cons? item)
+                     (js-call parts :push (str (el-char-string (get item :car)) "-" (el-char-string (get item :cdr)))))
+                   ((el-symobj? item) (js-call classes :push (str "[:" (get item :name) ":]"))))))
+      (let ((body (js-call parts :join "")))
+        ;; Keep ] first and - last so the class stays literal.
+        (let ((has-bracket (>= (js-call body :indexOf "]") 0))
+              (has-dash (and (js-call body :endsWith "-") false)))
+          (str (if has-bracket "]" "") (js-call body :replace (new globalThis.RegExp "\\]" "g") "")
+               (js-call classes :join "") (if has-dash "-" ""))))))
+
+
+  (defun el-rx (form)
+    (cond
+      ((el-string? form) (el-regexp-quote form))
+      ((= (el-typeof form) "number") (el-regexp-quote (el-char-string form)))
+      ((el-symobj? form)
+        (let ((name (get form :name)))
+          (cond ((or (= name "bol") (= name "line-start")) "^")
+                ((or (= name "eol") (= name "line-end")) "$")
+                ((or (= name "bos") (= name "string-start") (= name "buffer-start") (= name "bot")) "\\`")
+                ((or (= name "eos") (= name "string-end") (= name "buffer-end") (= name "eot")) "\\'")
+                ((or (= name "digit") (= name "numeric") (= name "num")) "[[:digit:]]")
+                ((or (= name "space") (= name "whitespace") (= name "white")) "[[:space:]]")
+                ((or (= name "alpha") (= name "alphabetic") (= name "letter")) "[[:alpha:]]")
+                ((or (= name "alnum") (= name "alphanumeric")) "[[:alnum:]]")
+                ((= name "word") "[[:word:]]")
+                ((or (= name "upper") (= name "upper-case")) "[[:upper:]]")
+                ((or (= name "lower") (= name "lower-case")) "[[:lower:]]")
+                ((or (= name "punct") (= name "punctuation")) "[[:punct:]]")
+                ((or (= name "cntrl") (= name "control")) "[[:cntrl:]]")
+                ((or (= name "xdigit") (= name "hex-digit") (= name "hex")) "[[:xdigit:]]")
+                ((or (= name "blank")) "[[:blank:]]")
+                ((or (= name "nonl") (= name "not-newline")) ".")
+                ((or (= name "anything") (= name "anychar")) "[^z-a]")
+                ((= name "word-boundary") "\\b")
+                ((= name "word-start") "\\<")
+                ((= name "word-end") "\\>")
+                ((= name "symbol-start") "\\_<")
+                ((= name "symbol-end") "\\_>")
+                (t (el-signal "error" (str "Unknown rx form " name))))))
+      ((el-cons? form)
+        (let* ((head (get form :car)) (name (if (el-symobj? head) (el-symbol-name head) "")) (args (el-list-to-array (get form :cdr))))
+          (cond
+            ((or (= name "seq") (= name "sequence") (= name ":") (= name "and"))
+              (el-rx-seq args))
+            ((or (= name "or") (= name "|"))
+              (str "\\(?:" (js-call (js-call args :map (lambda (x) (el-rx x))) :join "\\|") "\\)"))
+            ((or (= name "in") (= name "any") (= name "char"))
+              (str "[" (el-rx-charset (el-rx-expand-ranges args)) "]"))
+            ((= name "not")
+              (let ((inner (aref args 0)))
+                (if (and (el-cons? inner) (or (el-sym-is (get inner :car) "in") (el-sym-is (get inner :car) "any")))
+                    (str "[^" (el-rx-charset (el-rx-expand-ranges (el-list-to-array (get inner :cdr)))) "]")
+                  (let ((text (el-rx inner)))
+                    (if (js-call text :startsWith "[[:") (str "[^" (js-call text :slice 1)) (str "[^" text "]"))))))
+            ((or (= name "group") (= name "submatch"))
+              (str "\\(" (js-call (js-call args :map (lambda (x) (el-rx x))) :join "") "\\)"))
+            ((or (= name "*") (= name "zero-or-more") (= name "0+"))
+              (str (el-rx-atom args) "*"))
+            ((or (= name "+") (= name "one-or-more") (= name "1+"))
+              (str (el-rx-atom args) "+"))
+            ((or (= name "?") (= name "opt") (= name "optional") (= name "zero-or-one"))
+              (str (el-rx-atom args) "?"))
+            ((or (= name "*?") (= name "+?") (= name "??"))
+              (str (el-rx-atom args) name))
+            ((or (= name "=") (= name "repeat") (= name ">=") (= name "**"))
+              (cond
+                ((= name "=") (str (el-rx-atom (js-call args :slice 1)) "\\{" (aref args 0) "\\}"))
+                ((= name ">=") (str (el-rx-atom (js-call args :slice 1)) "\\{" (aref args 0) ",\\}"))
+                ((and (= name "repeat") (= (js-length args) 2)) (str (el-rx-atom (js-call args :slice 1)) "\\{" (aref args 0) "\\}"))
+                (t (str (el-rx-atom (js-call args :slice 2)) "\\{" (aref args 0) "," (aref args 1) "\\}"))))
+            ((or (= name "literal") (= name "regexp") (= name "regex"))
+              (if (= name "literal") (el-regexp-quote (aref args 0)) (aref args 0)))
+            (t (el-signal "error" (str "Unknown rx form " name))))))
+      (t (el-signal "error" "Invalid rx form"))))
+
+
+  (defun el-rx-expand-ranges (args)
+    (let ((out (js-array)))
+      (js-call args :forEach
+               (lambda (item)
+                 (if (and (el-string? item) (= (js-length item) 3) (= (js-call item :charAt 1) "-"))
+                     (js-call out :push (el-cons (js-call item :codePointAt 0) (js-call item :codePointAt 2)))
+                   (js-call out :push item))))
+      out))
+
+
+  (defun el-rx-group-if-needed (form) (el-rx form))
+
+
+  (defun el-rx-seq (args)
+    ;; Like rx.el: a "^" after other items and a "$" before other items are
+    ;; bracketed so they stay anchors.
+    (let ((text "") (index 0))
+      (while (< index (js-length args))
+        (let ((piece (el-rx (aref args index))) (last (= index (1- (js-length args)))))
+          (cond
+            ((and (= piece "^") (/= text "")) (setq text (str text "\\(?:^\\)")))
+            ((and (= piece "$") (not last)) (setq text (str "\\(?:" text "$\\)")))
+            (t (setq text (str text piece)))))
+        (setq index (1+ index)))
+      text))
+
+  (defun el-rx-atom (args)
+    (let ((text (js-call (js-call args :map (lambda (x) (el-rx x))) :join "")))
+      (if (or (= (el-string-length text) 1)
+              (and (= (js-length args) 1)
+                   (or (el-symobj? (aref args 0))
+                       (and (el-cons? (aref args 0))
+                            (js-call (js-array "in" "any" "char" "not" "group" "submatch" "or" "|")
+                                     :includes (el-symbol-name (get (aref args 0) :car)))))))
+          text
+        (str "\\(?:" text "\\)"))))
+
+
+  ;; ------------------------------------------------------------------
+  ;; Buffers (in-memory, positions start at 1)
+  ;; ------------------------------------------------------------------
+
+  (defun el-make-buffer (name)
+    (js-object :kind "buffer" :name name :text "" :point 1 :live t :mark nil
+               :multibyte t :modified false :locals (new globalThis.Map)))
+
+
+  (defun el-current-buffer (session)
+    (let ((buffer (get session :currentBuffer)))
+      (if (nullish? buffer)
+          (let ((scratch (el-get-buffer-create session "*scratch*")))
+            (put session :currentBuffer scratch)
+            scratch)
+        buffer)))
+
+
+  (defun el-get-buffer-create (session name)
+    (let ((existing (js-call (get session :buffers) :get name)))
+      (if (and (not (undefined? existing)) (get existing :live)) existing
+        (let ((buffer (el-make-buffer name)))
+          (js-call (get session :buffers) :set name buffer)
+          buffer))))
+
+
+  (defun el-generate-new-buffer (session name)
+    (let ((candidate name) (counter 2))
+      (while (let ((existing (js-call (get session :buffers) :get candidate)))
+               (and (not (undefined? existing)) (get existing :live)))
+        (setq candidate (str name "<" counter ">"))
+        (setq counter (1+ counter)))
+      (el-get-buffer-create session candidate)))
+
+
+  (defun el-kill-buffer (session buffer)
+    (put buffer :live false)
+    (js-call (get session :buffers) :delete (get buffer :name))
+    (when (eq (get session :currentBuffer) buffer) (put session :currentBuffer nil))
+    t)
+
+
+  (defun el-buffer-size (buffer) (el-string-length (get buffer :text)))
+
+  (defun el-point-max (buffer) (1+ (el-buffer-size buffer)))
+
+  (defun el-clamp-position (buffer position)
+    (Math/max 1 (Math/min (el-point-max buffer) (el-num position))))
+
+
+  (defun el-buffer-substring (buffer start end)
+    (let ((a (el-clamp-position buffer (Math/min start end)))
+          (b (el-clamp-position buffer (Math/max start end))))
+      (el-substring (get buffer :text) (1- a) (1- b))))
+
+
+  (defun el-buffer-insert (buffer text)
+    (let* ((content (get buffer :text))
+           (at (1- (get buffer :point)))
+           (before (el-substring content 0 at))
+           (after (el-substring content at nil)))
+      (put buffer :text (str before text after))
+      (put buffer :point (+ (get buffer :point) (el-string-length text)))
+      nil))
+
+
+  (defun el-buffer-delete (buffer start end)
+    (let* ((a (el-clamp-position buffer (Math/min start end)))
+           (b (el-clamp-position buffer (Math/max start end)))
+           (content (get buffer :text))
+           (point (get buffer :point)))
+      (put buffer :text (str (el-substring content 0 (1- a)) (el-substring content (1- b) nil)))
+      (cond ((>= point b) (put buffer :point (- point (- b a))))
+            ((> point a) (put buffer :point a)))
+      nil))
+
+
+  (defun el-line-beginning (buffer position)
+    (let* ((text (get buffer :text)) (chars (Array/from text)) (index (1- position)))
+      (while (and (> index 0) (/= (aref chars (1- index)) "\n")) (setq index (1- index)))
+      (1+ index)))
+
+
+  (defun el-line-end (buffer position)
+    (let* ((text (get buffer :text)) (chars (Array/from text)) (index (1- position)))
+      (while (and (< index (js-length chars)) (/= (aref chars index) "\n")) (setq index (1+ index)))
+      (1+ index)))
+
+
+  (defun el-forward-line (buffer count)
+    (let ((n (if (nullish? count) 1 count)) (shortage 0))
+      (if (> n 0)
+          (let ((remaining n))
+            (while (> remaining 0)
+              (let ((end (el-line-end buffer (get buffer :point))))
+                (if (>= end (el-point-max buffer))
+                    (progn (put buffer :point end) (setq shortage remaining) (setq remaining 0))
+                  (progn (put buffer :point (1+ end)) (setq remaining (1- remaining)))))))
+        (let ((remaining (- 0 n)))
+          (put buffer :point (el-line-beginning buffer (get buffer :point)))
+          (while (> remaining 0)
+            (if (<= (get buffer :point) 1)
+                (progn (setq shortage remaining) (setq remaining 0))
+              (progn
+                (put buffer :point (el-line-beginning buffer (1- (get buffer :point))))
+                (setq remaining (1- remaining)))))))
+      shortage))
+
+
+  (defun el-search-buffer (session buffer pattern bound noerror count forward literal)
+    (let* ((regexp (if literal (el-regexp-quote pattern) pattern))
+           (text (get buffer :text))
+           (repeat (if (nullish? count) 1 count))
+           (limit (if (nullish? bound) (if forward (el-point-max buffer) 1) bound))
+           (found nil)
+           (position (get buffer :point)))
+      (while (> repeat 0)
+        (if forward
+            (let ((match (el-regexp-exec session regexp text (1- position))))
+              (if (or (nil? match)
+                      (> (+ 1 (el-unit-to-char text (get match :index)) (el-string-length (aref match 0))) limit))
+                  (progn (setq found nil) (setq repeat 0))
+                (progn
+                  (el-set-match-data session match text 1 buffer)
+                  (setq position (+ 1 (el-unit-to-char text (get match :index)) (el-string-length (aref match 0))))
+                  (when (= (el-string-length (aref match 0)) 0) (setq position position))
+                  (setq found position)
+                  (setq repeat (1- repeat)))))
+          (let ((best nil) (scan (1- limit)) (searching t))
+            (while searching
+              (let ((match (el-regexp-exec session regexp text scan)))
+                (if (or (nil? match) (>= (el-unit-to-char text (get match :index)) (1- position)))
+                    (setq searching false)
+                  (progn
+                    (setq best match)
+                    (setq scan (1+ (el-unit-to-char text (get match :index))))))))
+            (if (nil? best)
+                (progn (setq found nil) (setq repeat 0))
+              (progn
+                (el-set-match-data session best text 1 buffer)
+                (setq position (1+ (el-unit-to-char text (get best :index))))
+                (setq found position)
+                (setq repeat (1- repeat)))))))
+      (if (nil? found)
+          (cond ((nullish? noerror) (el-signal "search-failed" pattern))
+                ((eq noerror t) nil)
+                (t (put buffer :point limit) nil))
+        (progn (put buffer :point found) found))))
+
+
+  (defun el-looking-at (session buffer pattern set-data)
+    (let* ((text (get buffer :text))
+           (source (el-compile-regexp pattern (el-case-fold session)))
+           (regexp (new globalThis.RegExp (get source :source) (str (js-call (get source :flags) :replace (new globalThis.RegExp "[gyd]" "g") "") "yd"))))
+      (put regexp :lastIndex (el-char-to-unit text (1- (get buffer :point))))
+      (let ((match (js-call regexp :exec text)))
+        (if (nil? match) nil
+          (progn (when set-data (el-set-match-data session match text 1 buffer)) t)))))
+
+
+  (defun el-append-to-buffer (buffer chunk)
+    (when (and (= (el-kind buffer) "buffer") (get buffer :live))
+      (let* ((old-text (get buffer :text))
+             (was-at-end (= (get buffer :point) (1+ (el-string-length old-text))))
+             (new-text (str old-text chunk)))
+        (when (not (el-multibyte? chunk))
+          (el-mark-unibyte new-text))
+        (put buffer :text new-text)
+        (when was-at-end
+          (put buffer :point (1+ (el-string-length new-text)))))))
+
+  (export el-append-to-buffer el-buffer-delete el-buffer-insert el-buffer-size el-buffer-substring el-clamp-position el-current-buffer el-expand-replacement el-forward-line el-generate-new-buffer el-get-buffer-create el-kill-buffer el-line-beginning el-line-end el-looking-at el-match-position el-match-string el-point-max el-regexp-exec el-regexp-quote el-replace-regexp-in-string el-rx el-search-buffer el-split-string el-string-match el-string-trim))

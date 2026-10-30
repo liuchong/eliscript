@@ -274,7 +274,6 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
          (runtime (or (getenv "ELISCRIPT_JS_RUNTIME") "node"))
          (tools '(("runtime/prelude.eli" . "runtime/prelude.mjs")
                   ("runtime/math.eli" . "runtime/math.mjs")
-                  ("runtime/emacs-compat.eli" . "runtime/emacs-compat.mjs")
                   ("runtime/unicode-case-data.eli" . "runtime/unicode-case-data.mjs")
                   ("runtime/unicode-case.eli" . "runtime/unicode-case.mjs")
                   ("tools/project/project.eli" . "bootstrap/host/project.mjs")
@@ -637,6 +636,16 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
        source (expand-file-name (concat (file-name-base source) ".mjs") output)))
     (setenv "ELISCRIPT_BOOTSTRAP_MODULE_DIR" output)
     (let ((failures nil))
+      (with-temp-buffer
+        (let ((status (call-process
+                       runtime nil t nil "bootstrap/host/project-cli.mjs"
+                       "--root" "runtime"
+                       "--out-dir" "dist/emacs-compat"
+                       "runtime/emacs-compat.eli")))
+          (unless (and (integerp status) (zerop status))
+            (push (format "Self-hosted emacs-compat build failed (%s): %s"
+                          status (buffer-string))
+                  failures))))
       (dolist (tool tools)
         (make-directory (file-name-directory (expand-file-name (cdr tool) default-directory)) t)
         (with-temp-buffer

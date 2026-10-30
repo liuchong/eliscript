@@ -278,7 +278,15 @@ the generated module.  The result is Eliscript, compiled like any other module."
             (while (re-search-forward "\"eliscript/runtime/\\([^\"]+\\)\"" nil t)
               (let* ((sub (match-string 1))
                      (sub-mjs (if (string-suffix-p ".mjs" sub) sub (concat sub ".mjs")))
-                     (target (expand-file-name (concat "runtime/" sub-mjs) proj-dir))
+                     (target (cond
+                              ((equal sub-mjs "emacs-compat.mjs")
+                               (let ((dist-compat (expand-file-name "dist/emacs-compat/emacs-compat.mjs" proj-dir))
+                                     (root-compat (expand-file-name "runtime/emacs-compat.mjs" proj-dir)))
+                                 (if (file-exists-p dist-compat) dist-compat root-compat)))
+                              (t
+                               (let ((root-target (expand-file-name (concat "runtime/" sub-mjs) proj-dir))
+                                     (dist-target (expand-file-name (concat "dist/runtime/" sub-mjs) proj-dir)))
+                                 (if (file-exists-p root-target) root-target dist-target)))))
                      (rel (file-relative-name target out-dir))
                      (spec (if (string-prefix-p "." rel) rel (concat "./" rel))))
                 (replace-match (concat "\"" spec "\"") t t)))

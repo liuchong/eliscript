@@ -90,7 +90,20 @@
 
 (defun eliscript-worker--script ()
   "Return the absolute worker runtime path."
-  (expand-file-name "runtime/worker.mjs" eliscript-worker--project-directory))
+  (let ((root-script (expand-file-name "runtime/worker.mjs" eliscript-worker--project-directory))
+        (dist-script (expand-file-name "dist/runtime/worker.mjs" eliscript-worker--project-directory)))
+    (cond
+     ((file-exists-p root-script) root-script)
+     ((file-exists-p dist-script) dist-script)
+     (t
+      (let ((boot-rt (expand-file-name "tools/bootstrap-runtime.el" eliscript-worker--project-directory))
+            (comp-dir (expand-file-name "compiler" eliscript-worker--project-directory)))
+        (when (file-exists-p boot-rt)
+          (add-to-list 'load-path comp-dir)
+          (load boot-rt nil t)
+          (when (fboundp 'eliscript-bootstrap-prepare-dist-host)
+            (funcall 'eliscript-bootstrap-prepare-dist-host eliscript-worker--project-directory))))
+      dist-script))))
 
 (defun eliscript-worker-live-p (worker)
   "Return non-nil when WORKER has a live process."

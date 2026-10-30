@@ -324,13 +324,18 @@ rejects traversal outside that directory.
 
 ### Dual-Host Emacs Lisp Compatibility Runtime
 
-`emacs-compat.eli` (`emacs-compat.mjs`) is a 100% pure Eliscript module (zero
-`js*` capsules) that provides the `0.1.0`/`0.1.1` 100% Emacs Lisp-compatible
-kernel, the explicit `1+5+2` extension libraries (`eliscript-contract`,
-`eliscript-data`, `eliscript-bind`, `eliscript-module`, `eliscript-async`,
-`eliscript-js`, `eliscript-abi`), industrial Emacs Lisp standard-library
-primitives (`cl-defstruct`, `setf`/`cl-incf`/`cl-decf`/`push`/`pop`, `pcase`,
-`cl-labels`/`cl-flet`/`cl-loop`, `rx`, pure Eliscript UTF-8 and SHA-256
-`secure-hash`, virtual `with-temp-buffer`, and Emacs regular-expression
-translation), and `compileCompatElispModule` / `callCompatElisp` for compiling
-unmodified `.el` modules into ES modules accelerated by `eliscript-worker`.
+`emacs-compat.eli` and its modular layers under `emacs-compat/` (`core.eli`,
+`regexp-buffer.eli`, `reader-format.eli`, `evaluator.eli`, `macros-forms.eli`,
+`host-io.eli`, `extensions.eli`, `builtins.eli`, and `session-cli.eli`) form a
+100% pure Eliscript subsystem (zero `js*` capsules) compiled into
+`dist/emacs-compat/` (`dist/emacs-compat/emacs-compat.mjs` +
+`dist/emacs-compat/emacs-compat/*.mjs`). It provides the `0.1.0`/`0.1.1` 100%
+Emacs Lisp-compatible kernel, the explicit `1+5+2` extension libraries
+(`eliscript-contract`, `eliscript-data`, `eliscript-bind`, `eliscript-module`,
+`eliscript-async`, `eliscript-js`, `eliscript-abi`), industrial Emacs Lisp
+standard-library primitives (`cl-defstruct`, `setf`/`cl-incf`/`cl-decf`/`push`/`pop`,
+`pcase`, `cl-labels`/`cl-flet`/`cl-loop`, `rx`, pure Eliscript UTF-8 and SHA-256
+`secure-hash`, virtual `with-temp-buffer`, async subprocess/pipe/HTTP event loop
+`io-hub`, and Emacs regular-expression translation), and
+`compileCompatElispModule` / `callCompatElisp` for compiling unmodified `.el`
+modules into ES modules accelerated by `eliscript-worker`.

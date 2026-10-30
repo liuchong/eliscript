@@ -489,3 +489,10 @@ endif
 
 byte-compile:
 	EMACS="$(EMACS)" ./tools/ci/strict-byte-compile.sh
+
+.PHONY: clean clean-all
+clean:
+	./bin/eliscript-clean
+
+clean-all:
+	./bin/eliscript-clean --all
