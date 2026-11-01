@@ -1337,6 +1337,24 @@
       (funcall d "autoload" (lambda (fn file &rest ignored) fn))
       (funcall d "custom-autoload" (lambda (&rest ignored) nil))
       (funcall d "display-graphic-p" (lambda (&optional display) nil))
+      (funcall d "frame-width"
+               (lambda (&optional frame)
+                 (let* ((env-cols (el-call session (el-intern "getenv") (js-array "COLUMNS")))
+                        (parsed (if (el-string? env-cols) (Number/parseInt env-cols 10) 0)))
+                   (if (and (Number/isInteger parsed) (> parsed 0))
+                       parsed
+                     (let* ((p globalThis.process)
+                            (cols (and (not (nullish? p)) (not (nullish? (get p :stdout))) (get (get p :stdout) :columns))))
+                       (if (and (el-integer? cols) (> cols 0)) cols 80))))))
+      (funcall d "frame-height"
+               (lambda (&optional frame)
+                 (let* ((env-rows (el-call session (el-intern "getenv") (js-array "LINES")))
+                        (parsed (if (el-string? env-rows) (Number/parseInt env-rows 10) 0)))
+                   (if (and (Number/isInteger parsed) (> parsed 0))
+                       parsed
+                     (let* ((p globalThis.process)
+                            (rows (and (not (nullish? p)) (not (nullish? (get p :stdout))) (get (get p :stdout) :rows))))
+                       (if (and (el-integer? rows) (> rows 0)) rows 24))))))
       (funcall d "called-interactively-p" (lambda (&optional kind) nil))
       (funcall d "url-generic-parse-url" (lambda (url) (el-url-generic-parse-url session url)))
       (funcall d "url-portspec" (lambda (u) (el-call session (el-intern "url-portsitory") (js-array u))))
