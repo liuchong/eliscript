@@ -519,8 +519,12 @@
             (el-list-from items)))
         (t (let ((table (el-make-hash-table "equal")))
              (js-call entries :forEach
-                      (lambda (e) (when (undefined? (js-call (get table :entries) :get (el-hash-key table (aref e 0))))
-                                    (el-puthash (aref e 0) (aref e 1) table))))
+                      (lambda (e)
+                        (let ((k (cond ((= ktype "symbol") (el-intern (aref e 0)))
+                                       ((= ktype "keyword") (el-intern (str ":" (aref e 0))))
+                                       (t (aref e 0)))))
+                          (when (undefined? (js-call (get table :entries) :get (el-hash-key table k)))
+                            (el-puthash k (aref e 1) table)))))
              table)))))
 
 
