@@ -1,9 +1,9 @@
-;;; eliscript-compat-syntax-tests.el --- Comprehensive 0.1.0 syntax & semantics unit tests -*- lexical-binding: t; -*-
+;;; eliscript-syntax-tests.el --- Comprehensive 0.1.0 syntax & semantics unit tests -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
 ;; Targeted unit, integration, and boundary tests for the Eliscript 0.1.0
-;; Emacs-compatible syntax specification (docs/emacs-compatible-syntax.md).
+;; Emacs-compatible syntax specification (docs/core-syntax.md).
 ;; Covers T01 through T11 with per-test high-resolution timing and strict
 ;; state isolation.
 
@@ -22,21 +22,21 @@
 (require 'eliscript-async)
 (require 'eliscript-js)
 (require 'eliscript-abi)
-(require 'eliscript-compat)
+(require 'eliscript-runtime)
 (require 'eliscript-worker)
 
-(defvar eliscript-compat-tests--timings nil
+(defvar eliscript-syntax-tests--timings nil
   "Recorded per-test execution timings in milliseconds.")
 
-(defvar eliscript-compat-tests--dynamic-var 100
+(defvar eliscript-syntax-tests--dynamic-var 100
   "Special variable used to test dynamic binding semantics.")
 
-(defvar eliscript-compat-tests--async-var "initial-req"
+(defvar eliscript-syntax-tests--async-var "initial-req"
   "Special variable used to test explicit async binding propagation.")
 
-(defun eliscript-compat-tests--run-isolated (test-id domain thunk)
+(defun eliscript-syntax-tests--run-isolated (test-id domain thunk)
   "Execute THUNK with isolated 0.1.0 state and record timing for TEST-ID in DOMAIN."
-  (eliscript-compat-reset-state!)
+  (eliscript-runtime-reset-state!)
   (let ((start (float-time))
         (status 'passed))
     (unwind-protect
@@ -46,8 +46,8 @@
                     :domain domain
                     :elapsed-ms elapsed-ms
                     :status status)
-              eliscript-compat-tests--timings)
-        (eliscript-compat-reset-state!)))))
+              eliscript-syntax-tests--timings)
+        (eliscript-runtime-reset-state!)))))
 
 ;; ============================================================================
 ;; T01: 100% Emacs Lisp Default Kernel Semantics (Unextended Forms)
@@ -55,12 +55,12 @@
 
 (ert-deftest eliscript-0-1-0-t01-lisp2-dual-namespace-and-plist ()
   "Verify Lisp-2 separate function/value slots and symbol property lists."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T01-01" "T01"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(progn
            (defvar dual-sym 21)
            (defun dual-sym (x) (* x 2))
@@ -73,19 +73,19 @@
        '(42 18 30 21 kernel-ok)))
      ;; Calling a lexical variable without funcall must signal void-function.
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(let ((local-fn (lambda (x) (+ x 1))))
           (local-fn 10))")
       :type 'void-function))))
 
 (ert-deftest eliscript-0-1-0-t01-unique-nil-falsy-and-empty-list-identity ()
   "Verify only nil is falsy and all non-nil values (including 0, \"\", [], sentinels) are truthy."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T01-02" "T01"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (require 'eliscript-js)
          (list
@@ -115,12 +115,12 @@
 
 (ert-deftest eliscript-0-1-0-t01-lexical-and-special-variables ()
   "Verify lexical closures coexist with dynamic defvar special bindings."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T01-03" "T01"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(progn
            (defvar *dyn-rate* 10)
            ;; Re-evaluating defvar must NOT overwrite existing value
@@ -139,12 +139,12 @@
 
 (ert-deftest eliscript-0-1-0-t01-mutable-native-collections-and-arithmetic ()
   "Verify native cons/list/vector/hash-table mutability and Emacs arithmetic."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T01-04" "T01"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(let ((pair (cons 1 2))
                (vec [10 20 30])
                (ht (make-hash-table :test 'equal)))
@@ -161,17 +161,17 @@
                  (substring \"a😀b\" 1 2)))")
        '(11 22 t 99 42 1 3 -3 3.5 4 2 -1 3 "😀")))
      (should-error
-      (eliscript-compat-eval-string "(/ 10 0)")
+      (eliscript-runtime-eval-string "(/ 10 0)")
       :type 'arith-error))))
 
 (ert-deftest eliscript-0-1-0-t01-control-flow-conditions-and-defmacro ()
   "Verify catch/throw, condition-case, unwind-protect, and full defmacro."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T01-05" "T01"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(progn
            (defmacro with-double-add (a b)
              `(+ (* 2 ,a) (* 2 ,b)))
@@ -196,22 +196,22 @@
 
 (ert-deftest eliscript-0-1-0-t02-unextended-symbol-freedom-and-atom-predicate ()
   "Verify unimported extension names remain user-definable and atom stays native."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T02-01" "T02"
    (lambda ()
      ;; Without (require 'eliscript-async), user can define and call `await` as a normal function!
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(progn
            (defun await (x) (+ x 100))
            (await 23))")
        123))
      ;; Even with (require 'eliscript), `(atom ...)` is still the standard Emacs predicate!
-     (eliscript-compat-reset-state!)
+     (eliscript-runtime-reset-state!)
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (list (atom 'sym)
                (atom 42)
@@ -222,11 +222,11 @@
 
 (ert-deftest eliscript-0-1-0-t02-extension-conflict-detection ()
   "Verify loading an extension over a conflicting user definition signals an error."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T02-02" "T02"
    (lambda ()
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(progn
           (defun persistent-vector (x) x)
           (require 'eliscript-data))")
@@ -238,12 +238,12 @@
 
 (ert-deftest eliscript-0-1-0-t03-unified-destructuring-positive-and-boundary ()
   "Verify vector, list, map, record, result, and option patterns across let-bind/defun-bind/pcase."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T03-01" "T03"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (cl-defstruct-persistent account
            (owner :type string)
@@ -274,12 +274,12 @@
 
 (ert-deftest eliscript-0-1-0-t03-defun-bind-optional-and-pcase-value ()
   "Verify defun-bind optional defaults, pcase-value structural matching, and cond-predicate."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T03-02" "T03"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (defun-bind format-pair ([x y] &optional ((:map (:sep sep)) (persistent-map :sep \":\")))
            (format \"%s%s%s\" x sep y))
@@ -298,30 +298,30 @@
 
 (ert-deftest eliscript-0-1-0-t03-destructuring-negative-diagnostics ()
   "Verify missing map keys, nil passed to optional pattern, duplicate vars, and length mismatch."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T03-03" "T03"
    (lambda ()
      ;; Missing required map key must signal error
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (let-bind (((:map (:required-key k)) (persistent-map :other 1)))
           k)"))
      ;; Passing explicit nil to optional destructuring parameter must NOT coerce nil to empty vector
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (defun-bind take-opt (&optional ([a b] [1 2])) (+ a b))
         (take-opt nil)"))
      ;; Duplicate variable names in pattern must fail
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (let-bind (([dup dup] [1 2])) dup)")
       :type 'eliscript-compile-error)
      ;; Vector length mismatch must fail
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (let-bind (([a b c] [1 2])) a)")))))
 
@@ -331,12 +331,12 @@
 
 (ert-deftest eliscript-0-1-0-t04-defun-case-and-lambda-case ()
   "Verify multi-arity dispatch, Lisp-2 compliance, and invalid clause rejection."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T04-01" "T04"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (defun-case calc
            (() 0)
@@ -351,31 +351,31 @@
        '(0 50 7 15 (one p) (two p q))))
      ;; Duplicate arity must fail
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (defun-case bad-dup ((x) x) ((y) y))")
       :type 'eliscript-compile-error)
      ;; &optional inside defun-case must fail
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (defun-case bad-opt ((x &optional y) x))")
       :type 'eliscript-compile-error)
      ;; Fixed arity overlapping &rest minimum arity must fail
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (defun-case bad-overlap ((x &rest r) x) ((a b) a))")
       :type 'eliscript-compile-error))))
 
 (ert-deftest eliscript-0-1-0-t04-let-const-and-50k-tail-recursion ()
   "Verify let-const binding protection and 50,000-depth stack-safe recur with dynamic vars."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T04-02" "T04"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (defun-tail sum-to (n acc)
            (if (<= n 0)
@@ -394,14 +394,14 @@
        '(t 1250025000 (2 1))))
      ;; Reassigning let-const binding must fail at compile time
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (let-const ((x 10))
           (setq x 20))")
       :type 'eliscript-compile-error)
      ;; recur in non-tail position must fail at compile time
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (defun-tail bad-recur (n)
           (if (<= n 0) 0 (+ 1 (recur (1- n)))))")
@@ -409,12 +409,12 @@
 
 (ert-deftest eliscript-0-1-0-t04-threading-and-fn-combinators ()
   "Verify thread-as, thread-cond-*, thread-some-*, and fn-* combinators."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T04-03" "T04"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (let ((side-effects 0))
            (let ((res-some-nil
@@ -450,12 +450,12 @@
 
 (ert-deftest eliscript-0-1-0-t05-persistent-collections-and-seq-map-generics ()
   "Verify all 7 persistent collections, value-* APIs, and Emacs seq.el/map.el generics."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T05-01" "T05"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (let* ((pl (persistent-list 1 2 3))
                 (pv (persistent-vector 10 20 30))
@@ -500,12 +500,12 @@
 
 (ert-deftest eliscript-0-1-0-t05-struct-schema-and-json-schema-roundtrip ()
   "Verify cl-defstruct-persistent field contracts, immutability, and JSON Schema export."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T05-02" "T05"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (cl-defstruct-persistent tool-spec
            \"Tool invocation record.\"
@@ -527,12 +527,12 @@
        '(t "search" 1 3 t "object" t)))
      ;; Violating :type or :min/:max must fail validation on construction or -with update
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (cl-defstruct-persistent item (score :type integer :min 0 :max 10))
         (make-item :score -1)"))
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (cl-defstruct-persistent item (score :type integer :min 0 :max 10))
         (let ((it (make-item :score 5)))
@@ -540,12 +540,12 @@
 
 (ert-deftest eliscript-0-1-0-t05-protocols-cells-lazy-transducers-and-transients ()
   "Verify protocols, value generics, state-cell, delay/lazy-seq, transducers, and with-transient."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T05-03" "T05"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (defprotocol IDescribe
            (describe-val (self)))
@@ -579,13 +579,13 @@
        '("pt(3,4)" 42 15 ((10 15)) nil 42 t (2 4 6 8) 14 t (10 20 30))))
      ;; state-cell validator failure must preserve old state
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (let ((c (state-cell 10 :validator (lambda (v) (>= v 0)))))
           (cell-reset! c -5))"))
      ;; Using transient builder after with-transient scope exits must fail
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (let ((escaped nil))
           (with-transient (b (persistent-vector))
@@ -599,12 +599,12 @@
 
 (ert-deftest eliscript-0-1-0-t06-module-lexical-privacy-and-live-exports ()
   "Verify defmodule lexical isolation from global fset/set, live value exports, and reload."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T06-01" "T06"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (defmodule sample.counter
            (defconst-lexical step 5)
@@ -627,7 +627,7 @@
        '(0 5 5)))
      ;; Reassigning defconst-lexical must fail at compile time
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (defmodule bad.const
           (defconst-lexical fixed 1)
@@ -636,12 +636,12 @@
 
 (ert-deftest eliscript-0-1-0-t06-defmacro-checked-hygiene-and-inputs ()
   "Verify defmacro-checked deterministic gensym and declared file input checks."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T06-02" "T06"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (defmacro-checked eval-once-double (form)
            (declare (eliscript :pure t :portable t))
@@ -654,7 +654,7 @@
        '(2 1)))
      ;; Undeclared file read in defmacro-checked must fail
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (defmacro-checked bad-reader ()
           (macro-read-file \"package.json\"))
@@ -667,12 +667,12 @@
 
 (ert-deftest eliscript-0-1-0-t07-declare-contracts-and-restrictions ()
   "Verify :pure, :portable, :checked, :params, :returns, :requires, :ensures, and ordinary defun restrictions."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T07-01" "T07"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (defun clamp-pct (x)
            (declare (eliscript :pure t :portable t
@@ -685,7 +685,7 @@
        '(0 45 100)))
      ;; Ordinary defun with :async t must fail!
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (defun sneaky-async (x)
           (declare (eliscript :async t))
@@ -693,7 +693,7 @@
       :type 'eliscript-compile-error)
      ;; Ordinary defun with :destructure t must fail!
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (defun sneaky-bind ([x y])
           (declare (eliscript :destructure t))
@@ -701,7 +701,7 @@
       :type 'eliscript-compile-error)
      ;; :portable t calling host buffer API must fail static check!
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (defun non-portable-fn ()
           (declare (eliscript :portable t))
@@ -709,7 +709,7 @@
       :type 'eliscript-compile-error)
      ;; Runtime violation of :requires or :ensures must signal contract error
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (defun positive-only (x)
           (declare (eliscript :requires ((> x 0)) :ensures ((> result 0))))
@@ -722,12 +722,12 @@
 
 (ert-deftest eliscript-0-1-0-t08-async-scope-timeout-channel-and-engine-handles ()
   "Verify defun-async/await, with-async-scope/timeout, async-channel, and engine-bind revocation."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T08-01" "T08"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (defun-async compute-step (x)
            (+ x 10))
@@ -752,20 +752,20 @@
        '(42 t t t)))
      ;; await outside async function or inside nested sync lambda must fail at compile time
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (defun sync-caller (f)
           (await f))")
       :type 'eliscript-compile-error)
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (defun-async outer-async (f)
           (mapcar (lambda (x) (await x)) (list f)))")
       :type 'eliscript-compile-error)
      ;; Calling revoked engine handle must fail with eliscript-engine-handle-error
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (let ((h (engine-bind (lambda (x) x))))
           (engine-revoke! h)
@@ -778,12 +778,12 @@
 
 (ert-deftest eliscript-0-1-0-t09-js-interop-sentinels-and-regexp ()
   "Verify js-false/js-null/js-undefined sentinels, UTF-16 helpers, and match-data preservation."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T09-01" "T09"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (require 'eliscript-js)
          (let ((obj (js-object :flag js-false :empty js-undefined :num 42)))
@@ -819,12 +819,12 @@
 
 (ert-deftest eliscript-0-1-0-t10-numeric-f64-and-memory-u32-abi ()
   "Verify :abi :numeric-f64 and :abi :memory-u32 execution and static validation."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T10-01" "T10"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(require 'eliscript)
          (require 'eliscript-abi)
          (defun hyp-sq (a b)
@@ -846,7 +846,7 @@
        '(25.0 305419897 0)))
      ;; Unsupported string/list allocation in :numeric-f64 must fail static check
      (should-error
-      (eliscript-compat-eval-string
+      (eliscript-runtime-eval-string
        "(require 'eliscript)
         (require 'eliscript-abi)
         (defun bad-abi (x)
@@ -860,12 +860,12 @@
 
 (ert-deftest eliscript-0-1-0-t13-industrial-elisp-syntax-and-stdlib ()
   "Verify ?char literals, &optional/&rest/&key, cl-defstruct, setf places, pcase, cl-labels, cl-loop, rx, UTF-8/SHA-256, and with-temp-buffer."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T13-01" "T13"
    (lambda ()
      (should
       (equal
-       (eliscript-compat-eval-string
+       (eliscript-runtime-eval-string
         "(progn
            (cl-defstruct (sample-node (:constructor sample-node-create)
                                       (:copier nil))
@@ -972,8 +972,8 @@
 ;; ============================================================================
 
 (ert-deftest eliscript-0-1-0-t14-t15-unmodified-elisp-dual-host-execution ()
-  "Verify eliscript-compat-eval-file loads unmodified .el modules and matches native Emacs."
-  (eliscript-compat-tests--run-isolated
+  "Verify eliscript-runtime-eval-file loads unmodified .el modules and matches native Emacs."
+  (eliscript-syntax-tests--run-isolated
    "T14-01" "T14"
    (lambda ()
      (let ((temp-el (make-temp-file "eliscript-dual-host-" nil ".el")))
@@ -1003,10 +1003,10 @@
                        "                           row \" | \")))\n"
                        "            rows)))\n"
                        "(provide 'dual-host-sample)\n"))
-             (eliscript-compat-eval-file temp-el)
+             (eliscript-runtime-eval-file temp-el)
              (should
               (equal
-               (eliscript-compat-eval-string
+               (eliscript-runtime-eval-string
                 "(dual-host-table-layout '((\"字段\" \"值\") (\"status\" \"正常\")))")
                '("字段   | 值  " "status | 正常"))))
          (when (file-exists-p temp-el)
@@ -1018,11 +1018,11 @@
 
 (ert-deftest eliscript-0-1-0-t16-compile-elisp-module-and-worker-acceleration ()
   "Verify compiling unmodified .el into .mjs and offloading calls to eliscript-worker with fallback."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T16-01" "T16"
    (lambda ()
-     (let* ((out-dir (expand-file-name "dist/emacs-compat-tests/"
-                                       eliscript-compat--project-directory))
+     (let* ((out-dir (expand-file-name "dist/session-tests/"
+                                       eliscript-runtime--project-directory))
             (temp-el (progn (make-directory out-dir t)
                             (make-temp-file (expand-file-name "accel-src-" out-dir) nil ".el")))
             ;; Generated modules import the `eliscript' package, so they must
@@ -1048,15 +1048,20 @@
                        "    (list :widths widths :rows (length rows))))\n"
                        "(provide 'accel-sample)\n"))
              (load temp-el nil t)
-             (eliscript-compat-compile-elisp-module (list temp-el) temp-mjs)
+             (eliscript-runtime-compile-elisp-module (list temp-el) temp-mjs)
              (should (file-exists-p temp-mjs))
              (should (file-exists-p temp-eli))
-             ;; The intermediate module is real Eliscript, never JavaScript.
+             ;; The intermediate module is real Eliscript, never JavaScript or embedded source strings.
              (should (with-temp-buffer
                        (insert-file-contents temp-eli)
                        (goto-char (point-min))
                        (and (looking-at-p "(module ")
-                            (not (search-forward "(js*" nil t)))))
+                            (not (search-forward "(js*" nil t))
+                            (not (search-forward "elisp-source" nil t)))))
+             (should (with-temp-buffer
+                       (insert-file-contents temp-mjs)
+                       (goto-char (point-min))
+                       (not (search-forward "elisp_source" nil t))))
              (setq worker (eliscript-worker-start))
              (let* ((sample-rows '(("名称" "耗时") ("parser" "12ms") ("渲染器" "4ms")))
                     (native-res (funcall (intern "eliscript-test-heavy-align") sample-rows))
@@ -1064,15 +1069,15 @@
                                    worker temp-mjs "callElisp"
                                    (list "eliscript-test-heavy-align"
                                          (prin1-to-string (list sample-rows)))))
-                    (worker-res (eliscript-compat-offload-call
+                    (worker-res (eliscript-runtime-offload-call
                                  worker temp-mjs 'eliscript-test-heavy-align sample-rows))
-                    (fallback-res (eliscript-compat-offload-call
+                    (fallback-res (eliscript-runtime-offload-call
                                    nil temp-mjs 'eliscript-test-heavy-align sample-rows)))
                ;; The worker itself executed the module function.
                (should (equal (car (read-from-string direct-reply)) native-res))
                (should (equal worker-res native-res))
                (should (equal fallback-res native-res))
-               (eliscript-compat-accelerate-function
+               (eliscript-runtime-accelerate-function
                 'eliscript-test-heavy-align temp-mjs (lambda () worker))
                (should (equal (funcall (intern "eliscript-test-heavy-align") sample-rows)
                               native-res))
@@ -1084,11 +1089,13 @@
          (when worker
            (ignore-errors (eliscript-worker-stop worker)))
          (dolist (file (list temp-el temp-eli temp-mjs (concat temp-mjs ".map")))
-           (when (file-exists-p file) (delete-file file))))))))
+           (when (file-exists-p file) (delete-file file)))
+         (when (file-directory-p out-dir)
+           (ignore-errors (delete-directory out-dir))))))))
 
 (ert-deftest eliscript-0-1-0-t16-external-project-compile-and-mixed-eli-el ()
   "Verify compiling mixed .eli + .el into an external directory."
-  (eliscript-compat-tests--run-isolated
+  (eliscript-syntax-tests--run-isolated
    "T16-02" "T16"
    (lambda ()
      (let* ((ext-dir (make-temp-file "eliscript-ext-proj-" t))
@@ -1112,7 +1119,7 @@
              (let ((eli-before (with-temp-buffer
                                  (insert-file-contents src-eli)
                                  (buffer-string))))
-               (eliscript-compat-compile-elisp-module (list src-eli src-el) out-mjs)
+               (eliscript-runtime-compile-elisp-module (list src-eli src-el) out-mjs)
                (should (file-exists-p out-mjs))
                ;; Input src-eli with matching base name must NOT be overwritten!
                (should (equal (with-temp-buffer
@@ -1121,12 +1128,12 @@
                               eli-before)))
              (setq worker (eliscript-worker-start))
              (should
-              (equal (eliscript-compat-offload-call
+              (equal (eliscript-runtime-offload-call
                       worker out-mjs 'ext-elisp-host-and-sum
                       "https://open.example.org:9443/path" [19 23])
                      '("open.example.org" 9443 42)))
              (should
-              (equal (eliscript-compat-offload-eval
+              (equal (eliscript-runtime-offload-eval
                       worker out-mjs
                       '(ext-elisp-host-and-sum "http://example.com/a" [10 5]))
                      '("example.com" 80 15))))
@@ -1135,6 +1142,6 @@
          (when (file-directory-p ext-dir)
            (delete-directory ext-dir t)))))))
 
-(provide 'eliscript-compat-syntax-tests)
+(provide 'eliscript-syntax-tests)
 
-;;; eliscript-compat-syntax-tests.el ends here
+;;; eliscript-syntax-tests.el ends here

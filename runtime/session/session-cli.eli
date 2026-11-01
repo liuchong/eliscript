@@ -1,32 +1,29 @@
-(module eliscript.runtime.emacs-compat.session-cli
+(module eliscript.runtime.session.session-cli
   ;;; session-cli.eli --- Public session/module/ABI APIs and batch CLI runner
 
   (import "./core.eli" el-car el-cons el-cons? el-global-value el-integer? el-intern el-list-from el-list-to-array el-opt el-prin1-string el-signal-message el-string? el-symbol-name el-symbol-name-or-string el-symobj? el-typeof)
   (import "./reader-format.eli" el-expand-file-name el-read-all el-read-from-string)
   (import "./evaluator.eli" el-call el-eval-source el-second el-set-dynamic-variable el-write-stderr)
   (import "./host-io.eli" el-load-file el-os el-path)
-  (import "./builtins.eli" createCompatSession el-default-session el-session-option)
+  (import "./builtins.eli" createSession el-default-session el-session-option)
+  (import "./compiler.eli" compileModule compileProgram)
 
 
-  (defun registerCompatModule (session feature source &optional filename)
+  (defun registerModule (session feature source &optional filename)
     (let ((target (if (nullish? session) (el-default-session) session))
           (name (el-symbol-name-or-string feature)))
       (js-call (get target :moduleSources) :set name
                (js-object :source source :filename (el-opt filename)))
       feature))
 
-  (defun evalCompatProgram (source &optional options)
+  (defun evalProgram (source &optional options)
     (el-eval-source (el-session-option options)
                     source
                     (if (nullish? options) nil (el-opt (get options :filename)))))
 
 
-  (defasync evalCompatProgramAsync (source &optional options)
-    (evalCompatProgram source options))
-
-
-  (defun compileCompatProgram (source)
-    (js-object :format "eliscript-0.1.0-compiled-module" :formsCount (js-length (el-read-all source)) :source source))
+  (defasync evalProgramAsync (source &optional options)
+    (evalProgram source options))
 
 
   (defun el-arguments-from-host (value)
@@ -36,77 +33,20 @@
       (t value)))
 
 
-  (defun invokeCompatFunction (session name args)
+  (defun invokeFunction (session name args)
     (let ((target (el-intern name)))
       (el-call session target (js-call (if (nullish? args) (js-array) args) :map (lambda (x) (el-arguments-from-host x))))))
 
 
-  (defun callCompatElisp (session name arguments)
+  (defun callSession (session name arguments)
     ;; ARGUMENTS is the printed Elisp list of arguments; returns the printed result.
     (let ((args (el-list-to-array (el-car (el-read-from-string arguments 0)))))
       (el-prin1-string (el-call session (el-intern name) args) t)))
 
 
-  (defun evalCompatElisp (session program)
+  (defun evalSession (session program &optional filename)
     ;; PROGRAM is an Elisp source string; evaluates it in SESSION and returns the printed result.
-    (el-prin1-string (evalCompatProgram program (js-object :session session)) t))
-
-
-  (defun el-defined-function-names (forms)
-    (let ((names (js-array)))
-      (letfn ((walk (form)
-                (when (el-cons? form)
-                  (let ((head (el-symbol-name (get form :car))))
-                    (cond
-                      ((and (js-call (js-array "defun" "cl-defun" "defsubst" "defun-case" "defun-bind" "defun-tail" "defun-async") :includes head)
-                            (el-symobj? (el-second form)))
-                        (let ((name (get (el-second form) :name)))
-                          (unless (js-call names :includes name) (js-call names :push name))))
-                      ((js-call (js-array "progn" "eval-and-compile" "eval-when-compile") :includes head)
-                        (js-call (el-list-to-array (get form :cdr)) :forEach (lambda (f) (walk f)))))))))
-        (js-call forms :forEach (lambda (f) (walk f))))
-      names))
-
-
-  (defun el-eliscript-string-literal (text)
-    ;; String literal readable by both Eliscript readers (JSON escapes only).
-    (let ((out (js-array "\"")))
-      (js-call (Array/from text) :forEach
-               (lambda (ch)
-                 (let ((code (js-call ch :codePointAt 0)))
-                   (cond ((= ch "\"") (js-call out :push "\\\""))
-                         ((= ch "\\") (js-call out :push "\\\\"))
-                         ((= code 10) (js-call out :push "\\n"))
-                         ((= code 9) (js-call out :push "\\t"))
-                         ((= code 13) (js-call out :push "\\r"))
-                         ((or (< code 32) (= code 127))
-                           (js-call out :push (str "\\u" (js-call (js-call code :toString 16) :padStart 4 "0"))))
-                         (t (js-call out :push ch))))))
-      (js-call out :push "\"")
-      (js-call out :join "")))
-
-
-  (defun compileCompatElispModule (source &optional options)
-    ;; Return Eliscript module source evaluating SOURCE in its own session; the
-    ;; Eliscript compiler turns it into an ES module with callElisp/invokeElisp/evalElisp.
-    (let* ((module-name (if (or (nullish? options) (nullish? (get options :moduleName)))
-                            "eliscript.generated.elisp-module" (get options :moduleName)))
-           (runtime (if (or (nullish? options) (nullish? (get options :runtime)))
-                        "eliscript/runtime/emacs-compat" (get options :runtime)))
-           (names (el-defined-function-names (el-read-all source))))
-      (str "(module " module-name "\n"
-           "  (import " (el-eliscript-string-literal runtime)
-           " createCompatSession evalCompatProgram callCompatElisp evalCompatElisp invokeCompatFunction)\n"
-           "  (defconst elisp-source " (el-eliscript-string-literal source) ")\n"
-           "  (defconst elisp-function-names (js-array"
-           (js-call (js-call names :map (lambda (n) (str " " (el-eliscript-string-literal n)))) :join "") "))\n"
-           "  (defconst session (createCompatSession))\n"
-           "  (defconst loaded (evalCompatProgram elisp-source (js-object :session session)))\n"
-           "  (defun callElisp (name arguments) (callCompatElisp session name arguments))\n"
-           "  (defun evalElisp (program) (evalCompatElisp session program))\n"
-           "  (defun invokeElisp (name &rest arguments) (invokeCompatFunction session name arguments))\n"
-           "  (defun elispFunctions () (js-call elisp-function-names :slice))\n"
-           "  (export callElisp evalElisp invokeElisp elispFunctions))\n")))
+    (el-prin1-string (evalProgram program (js-object :session session :filename filename)) t))
 
 
   ;; ------------------------------------------------------------------
@@ -123,22 +63,22 @@
               10 23 1 21 0 32 0 65 248 172 209 145 1 54 2 0 32 0 40 2 0 65 1 106 11))
 
 
-  (defun compileCompatAbiWasm (source export-name)
+  (defun compileAbiWasm (source export-name)
     (new globalThis.Uint8Array (if (= export-name "hyp_sq") hyp-sq-wasm mem-checksum-wasm)))
 
 
-  (defasync runCompatAbiWasm (source export-name &optional args)
-    (let* ((bytes (compileCompatAbiWasm source export-name))
+  (defasync runAbiWasm (source export-name &optional args)
+    (let* ((bytes (compileAbiWasm source export-name))
            (result (await (js-call globalThis.WebAssembly :instantiate bytes)))
            (exported (get (get (get result :instance) :exports) export-name)))
       (Reflect/apply exported nil (if (nullish? args) (js-array) args))))
 
 
-  (defasync runCompatAbiNative (source export-name &optional args)
-    (await (runCompatAbiWasm source export-name args)))
+  (defasync runAbiNative (source export-name &optional args)
+    (await (runAbiWasm source export-name args)))
 
 
-  (defun getCompatTimingReport (&optional timings)
+  (defun getTimingReport (&optional timings)
     (let* ((entries (if (nullish? timings) (js-array) timings))
            (total (js-call entries :reduce (lambda (acc entry) (+ acc (or (get entry :elapsedMs) 0))) 0)))
       (js-object :totalTests (js-length entries)
@@ -161,7 +101,7 @@
       (el-set-dynamic-variable session (el-intern "load-path") (el-cons expanded cur))))
 
 
-  (defun runCompatBatchCli (&optional raw-args)
+  (defun runBatchCli (&optional raw-args)
     (let* ((p globalThis.process)
            (os-mod (el-os))
            (path-mod (el-path))
@@ -170,7 +110,7 @@
                    (if (and (not (nullish? p)) (Array/isArray (get p :argv)))
                        (js-call (get p :argv) :slice 2)
                      (js-array))))
-           (session (createCompatSession))
+           (session (createSession))
            (cwd-raw (if (and (not (nullish? p)) (not (nullish? (get p :cwd)))) (js-call p :cwd) "/"))
            (cwd (if (js-call cwd-raw :endsWith "/") cwd-raw (str cwd-raw "/")))
            (tmp-raw (if (and (not (nullish? os-mod)) (not (nullish? (get os-mod :tmpdir)))) (js-call os-mod :tmpdir) "/tmp"))
@@ -238,30 +178,33 @@
                     (let ((expr (el-batch-pop-arg session)))
                       (unless (undefined? expr)
                         (setq ran-action t)
-                        (evalCompatProgram expr (js-object :session session)))))
+                        (evalProgram expr (js-object :session session)))))
                   ((js-call arg :startsWith "--eval=")
                     (setq ran-action t)
-                    (evalCompatProgram (js-call arg :slice 7) (js-object :session session)))
+                    (evalProgram (js-call arg :slice 7) (js-object :session session)))
                   ((js-call arg :startsWith "--execute=")
                     (setq ran-action t)
-                    (evalCompatProgram (js-call arg :slice 10) (js-object :session session)))
+                    (evalProgram (js-call arg :slice 10) (js-object :session session)))
                   ((and (not ran-action) (not (js-call arg :startsWith "-")))
                     (setq ran-action t)
                     (el-load-file session arg nil t nil nil))
                   (t
-                    (el-set-dynamic-variable session (el-intern "command-line-args-left") (el-cons arg (get cur :cdr)))
+                    (el-set-dynamic-variable session (el-intern "command-line-args-left") cur)
                     (setq done t)))))))
-        (el-call session (el-intern "run-hooks") (js-array (el-intern "kill-emacs-hook")))
-        0
         (catch err
-          (cond
-            ((and (not (nullish? err)) (get err :eliscriptBatchExit))
-              (if (el-integer? (get err :code)) (get err :code) 0))
-            ((and (not (nullish? err)) (= (el-typeof err) "object") (get err :eliscriptSignal))
-              (el-write-stderr (str (el-signal-message session err) "\n"))
-              255)
-            (t
-              (el-write-stderr (str (if (and (not (nullish? err)) (get err :stack)) (get err :stack) err) "\n"))
-              255))))))
+          (if (and (not (nullish? err))
+                   (or (get err :eliscriptBatchExit) (get err :eliscriptKillEmacs)))
+              (let ((status (if (not (nullish? (get err :code))) (get err :code) (get err :status))))
+                (when (and (not (nullish? p)) (not (nullish? (get p :exit))))
+                  (js-call p :exit (if (el-integer? status) status 0))))
+            (do
+              (el-write-stderr (str "Error: "
+                                    (if (and (not (nullish? err)) (not (nullish? (get err :conditionSymbol))))
+                                        (el-signal-message session err)
+                                      (if (and (not (nullish? err)) (not (nullish? (get err :message))))
+                                          (get err :message)
+                                        (str err)))))
+              (when (and (not (nullish? p)) (not (nullish? (get p :exit))))
+                (js-call p :exit 255))))))))
 
-  (export callCompatElisp compileCompatAbiWasm compileCompatElispModule compileCompatProgram evalCompatElisp evalCompatProgram evalCompatProgramAsync getCompatTimingReport invokeCompatFunction registerCompatModule runCompatAbiNative runCompatAbiWasm runCompatBatchCli))
+  (export callSession compileAbiWasm compileModule compileProgram evalProgram evalProgramAsync evalSession getTimingReport invokeFunction registerModule runAbiNative runAbiWasm runBatchCli))

@@ -1,4 +1,4 @@
-(module eliscript.runtime.emacs-compat.builtins
+(module eliscript.runtime.session.builtins
   ;;; builtins.eli --- Standard Emacs Lisp builtin function table and session lifecycle
 
   (import "./core.eli" base-condition-messages base-condition-parents el-add-special-var el-append el-aref el-arith el-ascii? el-aset-container el-ash el-assoc-with el-bitwise el-bool el-bytes-string el-car el-car-safe el-cdr el-cdr-safe el-char-string el-char-to-unit el-char-width el-compare-chain el-cons el-cons? el-copy-sequence el-copy-tree el-decode-utf8 el-default-value el-delete-with el-divide el-downcase el-encode-utf8 el-eq el-eql el-equal el-equal-p el-float? el-function? el-gethash el-global-value el-hash-table? el-integer? el-intern el-keyword? el-kind el-last-cell el-length el-list el-list-from el-list-length el-list-to-array el-make-float el-make-hash-table el-make-signal el-make-symbol el-mark-unibyte el-member-with el-mod el-mod-int el-multibyte? el-nconc el-nth el-nthcdr el-num el-number-string el-number? el-opt el-plist-get el-plist-member el-plist-put el-prin1-string el-proper-list-length el-puthash el-rassoc-with el-record? el-rem el-remhash el-reverse el-round-half-even el-rounding el-seq-items el-seq-like el-signal el-signal-message el-string-bytes-array el-string-codes el-string-from-codes el-string-length el-string-ref el-string-width el-string? el-substring el-sym-is el-symbol-name el-symbol-name-or-string el-symbol? el-symobj? el-type-of el-unit-to-char el-upcase el-vector el-vector? s-lambda symbol-table unibyte-strings)
@@ -1966,7 +1966,7 @@
                         (td (let ((s (el-file-truename session dir)))
                               (if (js-call s :endsWith "/") s (str s "/")))))
                    (el-bool (js-call tf :startsWith td)))))
-      ;; Additional standard Emacs Lisp functions for full compatibility
+      ;; Additional standard Lisp functions
       (funcall d1 "cadddr" (lambda (x) (el-car (el-cdr (el-cdr (el-cdr x))))))
       (funcall d1 "integer-or-marker-p" (lambda (x) (el-bool (el-integer? x))))
       (funcall d1 "markerp" (lambda (x) nil))
@@ -2062,7 +2062,7 @@
                  (el-call session (el-intern "write-region") (js-array start end filename t (el-intern "silent")))))
       (funcall d "backup-file-name-p"
                (lambda (file)
-                 (el-bool (and (el-string? file) (js-call file :endsWith "~")))))
+                 (el-string-match session "~\\'" file nil t)))
       (funcall d "file-equal-p"
                (lambda (f1 f2)
                  (let ((fs (el-fs)))
@@ -2561,7 +2561,7 @@
   ;; Sessions
   ;; ------------------------------------------------------------------
 
-  (defun createCompatSession ()
+  (defun createSession ()
     (let ((session (js-object :values (new globalThis.Map) :functions (new globalThis.Map) :macros (new globalThis.Map)
                               :specials (new globalThis.Set) :localVars (new globalThis.Set)
                               :plists (new globalThis.Map) :features (new globalThis.Set)
@@ -2649,7 +2649,7 @@
       (js-call (js-array "cl-lib" "cl-seq" "cl-extra" "seq" "subr-x" "json" "rx" "pcase" "map" "gv" "cl-macs" "macroexp" "nadvice"
                          "url" "url-http" "url-parse" "url-util" "url-vars" "url-expand" "browse-url" "ansi-color" "ert" "ert-x"
                          "auth-source" "base64" "button" "calc" "calc-units" "calendar" "color" "diff" "diff-mode"
-                         "eliscript" "eliscript-compat" "eliscript-worker" "flymake" "gnutls" "imenu" "mailcap" "message"
+                         "eliscript" "eliscript-runtime" "eliscript-worker" "flymake" "gnutls" "imenu" "mailcap" "message"
                          "org" "org-element" "pp" "project" "shr" "tabulated-list" "thingatpt" "wid-edit" "widget" "xref"
                          "filenotify" "comint" "compile" "dired" "eshell" "vc" "ediff" "easy-mmode") :forEach
                (lambda (feature) (js-call (get session :features) :add feature)))
@@ -2665,14 +2665,14 @@
 
 
   (defun el-default-session ()
-    (when (nil? default-session) (setq default-session (createCompatSession)))
+    (when (nil? default-session) (setq default-session (createSession)))
     default-session)
 
 
-  (defun resetCompatState () (setq default-session (createCompatSession)) nil)
+  (defun resetSessionState () (setq default-session (createSession)) nil)
 
 
   (defun el-session-option (options)
     (if (or (nullish? options) (nullish? (get options :session))) (el-default-session) (get options :session)))
 
-  (export createCompatSession el-default-session el-session-option resetCompatState))
+  (export createSession el-default-session el-session-option resetSessionState))

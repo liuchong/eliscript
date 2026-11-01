@@ -12,6 +12,13 @@ while [ -L "$SOURCE" ]; do
 done
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)
 PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
+
+case "${1:-}" in
+  --batch|-batch|-Q|-q|--quick|-l|--load|--eval|-f|--funcall|-L|--directory|--version|--che-session-worker)
+    exec "$SCRIPT_DIR/eliscript-batch" "$@"
+    ;;
+esac
+
 MODULE_DIR=${ELISCRIPT_BOOTSTRAP_MODULE_DIR:-"$PROJECT_DIR/dist/bootstrap"}
 : "${ELISCRIPT_JS_RUNTIME:=bun}"
 

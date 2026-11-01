@@ -1,4 +1,4 @@
-(module eliscript.runtime.emacs-compat.macros-forms
+(module eliscript.runtime.session.macros-forms
   ;;; macros-forms.eli --- Generalized variables (setf/cl-letf), cl-defstruct, pcase, and cl-loop
 
   (import "./core.eli" el-add-special-var el-append el-aref el-arith el-arith-2 el-aset-container el-assoc-with el-bool el-car el-car-safe el-cdr el-cdr-safe el-cons el-cons? el-copy-sequence el-default-value el-equal-p el-gethash el-global-value el-intern el-keyword? el-list el-list-from el-list-to-array el-member-with el-nth el-nthcdr el-num el-plist-get el-plist-member el-plist-put el-prin1-string el-puthash el-seq-items el-signal el-string-set el-string? el-sym-is el-symbol-name el-symbol-name-or-string el-symobj? el-vector el-vector? s-and s-app s-aux s-backquote s-body s-comma s-function s-guard s-key s-lambda s-let s-not s-optional s-or s-pred s-quote s-rest s-underscore)
@@ -984,4 +984,4 @@
             (progn (put driver :remaining (1- (get driver :remaining))) t)))
         (t t))))
 
-  (export sf-aset sf-cl-callf sf-cl-defstruct sf-cl-letf sf-cl-loop sf-cl-remf sf-incf sf-pcase sf-pcase-dolist sf-pcase-let sf-pcase-setq sf-pop sf-push sf-pushnew sf-setf))
+  (export cadr-place-pattern el-boa-arglist el-loop-final el-loop-initial el-loop-keyword? el-loop-normalize sf-aset sf-cl-callf sf-cl-defstruct sf-cl-letf sf-cl-loop sf-cl-remf sf-incf sf-pcase sf-pcase-dolist sf-pcase-let sf-pcase-setq sf-pop sf-push sf-pushnew sf-setf))

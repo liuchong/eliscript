@@ -498,27 +498,27 @@
 
 ## 十三、 原装 `.el` 双端共用（Dual-Host）与常驻 Worker 加速
 
-同一份未经修改的 Emacs Lisp 源文件，可以同时在原生 Emacs 与 Eliscript JavaScript 运行时中执行，并可交给常驻 Worker 加速。兼容运行时 `eliscript/runtime/emacs-compat` 本身是 Eliscript 源码（`runtime/emacs-compat.eli`）编译的产物，不含手写 JavaScript。
+同一份未经修改的 Emacs Lisp 源文件，可以同时在原生 Emacs 与 Eliscript JavaScript 运行时中执行，并可交给常驻 Worker 加速。兼容运行时 `eliscript/runtime/session` 本身是 Eliscript 源码（`runtime/session.eli`）编译的产物，不含手写 JavaScript。
 
 ### 13.1 JavaScript 端直接执行
 
 ```js
-import { createCompatSession, evalCompatProgram, invokeCompatFunction,
-         callCompatElisp, serializeCompatValue } from "eliscript/runtime/emacs-compat";
+import { createSession, evalProgram, invokeFunction,
+         callElisp, serializeValue } from "eliscript/runtime/session";
 
-const session = createCompatSession();
-evalCompatProgram(sourceOfUnmodifiedEl, { session });          // 按依赖顺序加载 .el
-serializeCompatValue(invokeCompatFunction(session, "table-align-column-widths", [rows]));
-callCompatElisp(session, "table-align-column-widths", '((("中文" "abc")))');  // => "(4 2)" 之类的打印文本
+const session = createSession();
+evalProgram(sourceOfUnmodifiedEl, { session });          // 按依赖顺序加载 .el
+serializeValue(invokeFunction(session, "table-align-column-widths", [rows]));
+callElisp(session, "table-align-column-widths", '((("中文" "abc")))');  // => "(4 2)" 之类的打印文本
 ```
 
 - 覆盖范围：完整 Emacs 读取器（`?` 字符、八/十六进制与 `\u` 转义、`#x/#o/#b/#NrN`、`#s(...)`、点对与反引号嵌套）、Lisp-2 与动态/词法作用域、`&optional/&rest/&key/&aux` 参数、`setf/cl-incf/cl-decf/push/pop/cl-pushnew` 广义位置（变量、`car/cdr/c[ad]+r`、`nth`、`aref`（含字符串变量原位替换）、`gethash`、`alist-get`、`plist-get`、`get`、结构体槽位）、`cl-defstruct`（关键字与 BOA 构造器、`:include`、`:copier`、`:predicate`、`:conc-name`、逐实例默认值）、`pcase` 全模式、`cl-loop`、`cl-labels/cl-flet`、`condition-case`/`define-error`、`with-temp-buffer` 虚拟 Buffer、Emacs 正则（`string-match`、`replace-regexp-in-string`、`split-string`、`re-search-forward`、`rx`）、CJK 显示宽度、UTF-8 字节串、`secure-hash 'sha256`、`json-parse-string`/`json-serialize`/`json-encode`。
-- 值表示：`nil`→`null`、`t`→`true`、整值浮点装箱以保留 `1.0` 与 `1` 的区别；`serializeCompatValue` 把点对 `(a . b)` 序列化为 `[a, b]`，与差分预言机的规范化一致。
+- 值表示：`nil`→`null`、`t`→`true`、整值浮点装箱以保留 `1.0` 与 `1` 的区别；`serializeValue` 把点对 `(a . b)` 序列化为 `[a, b]`，与差分预言机的规范化一致。
 - 已知限制：没有文件系统与子进程（`insert-file-contents`、`call-process` 不可用）；超出 Unicode 的 Emacs 内部字符（`#x110000` 以上）映射为 U+FFFF；文本属性被忽略；仅支持 `sha256`。
 
 ### 13.2 `.el` → Eliscript 模块 → `.mjs`
 
-`compileCompatElispModule(source, { moduleName })`（JS）与 `eliscript-compat-compile-elisp-module`（Emacs）产出同一形态的 **Eliscript 模块源码**：内嵌原装 Elisp 文本，加载时在独立会话中求值，并导出：
+`compileModule(source, { moduleName })`（JS）与 `eliscript-runtime-compile-elisp-module`（Emacs）产出同一形态的 **Eliscript 模块源码**：内嵌原装 Elisp 文本，加载时在独立会话中求值，并导出：
 
 | 导出 | 含义 |
 | --- | --- |
@@ -531,14 +531,14 @@ callCompatElisp(session, "table-align-column-widths", '((("中文" "abc")))');  
 ### 13.3 Emacs 端 Worker 加速与回退
 
 ```elisp
-(eliscript-compat-compile-elisp-module '("table-align.el") "build/table-align.mjs")
-(eliscript-compat-offload-call worker "build/table-align.mjs" 'table-align-column-widths rows)
-(eliscript-compat-accelerate-function 'table-align-column-widths "build/table-align.mjs"
+(eliscript-runtime-compile-elisp-module '("table-align.el") "build/table-align.mjs")
+(eliscript-runtime-offload-call worker "build/table-align.mjs" 'table-align-column-widths rows)
+(eliscript-runtime-accelerate-function 'table-align-column-widths "build/table-align.mjs"
                                       (lambda () my-worker))
 ```
 
-- `eliscript-compat-offload-call` 经 `eliscript-worker-call-sync` 调用导出 `callElisp`；Worker 不存在、已停止或调用失败时，自动执行原生 Emacs 定义。
-- `eliscript-compat-accelerate-function` 为现有函数安装透明包装，可选谓词决定哪些调用值得卸载；`eliscript-compat-reset-state!` 会恢复原始定义。
+- `eliscript-runtime-offload-call` 经 `eliscript-worker-call-sync` 调用导出 `callElisp`；Worker 不存在、已停止或调用失败时，自动执行原生 Emacs 定义。
+- `eliscript-runtime-accelerate-function` 为现有函数安装透明包装，可选谓词决定哪些调用值得卸载；`eliscript-runtime-reset-state!` 会恢复原始定义。
 
 ---
 
@@ -555,7 +555,7 @@ Eliscript 编译器、多文件工程构建器（`eliscript-project-build` / `el
 | **核心定位** | **100% 标准 Emacs Lisp**，或仅通过 `(require 'eliscript-*)` 启用双宿主可移植扩展的代码 | **仅面向 Eliscript 编译目标运行**，或使用平台专用顶层语法与多后端底层特性的代码 |
 | **运行宿主** | 原生 Emacs（解释/字节码/Native Comp）**与** Eliscript（ESM / Browser / Worker / WASM）双宿主共源运行 | Eliscript 编译目标（Node / Bun / Browser / WASM / Native） |
 | **典型语法特征** | 标准 `defun` / `defmacro` / `cl-lib` / `pcase`，以及 `(require 'eliscript)` 下的 `1+5+2` 双宿主扩展包 | 顶层 `(module ...)` 声明、`(export ...)`、底层线性内存 ABI（`wasm-memory-*` / `native-*`）、宿主专属互操作 |
-| **Emacs 编辑器模式** | 默认开启原生 `emacs-lisp-mode`；检测到 `(require 'eliscript...)` 时自动挂载轻量 `eliscript-compat-mode` 次模式 | 自动开启 `eliscript-mode` 主模式 |
+| **Emacs 编辑器模式** | 默认开启原生 `emacs-lisp-mode`；检测到 `(require 'eliscript...)` 时自动挂载轻量 `eliscript-runtime-mode` 次模式 | 自动开启 `eliscript-mode` 主模式 |
 | **适用模块类型** | 领域模型、纯算法、数据结构、协议解析、双宿主共享核心库、Emacs 编辑器插件与 UI 适配层 | Web/Browser 应用、JS/Node 服务、WASM/Native 独立后端模块、编译器/运行时内部实现 |
 
 **选型原则（Rule of Thumb）**：
@@ -570,7 +570,7 @@ Eliscript 编译器、多文件工程构建器（`eliscript-project-build` / `el
 1. **Core 纯核心层（使用 `.el`）**
    - 承载领域数据结构、状态机、语法/协议解析、排版与布局计算、差异比对（Diff/Patch）及业务规则；
    - **零宿主 I/O 耦合**：不直接调用 Emacs 专属 UI 原语（如 `switch-to-buffer`、`make-overlay`、`define-derived-mode`），也不直接调用浏览器 DOM API；
-   - 仅依赖 `eliscript-compat` 保证的双宿主公共子集与 `eliscript-data` 持久数据结构，确保同一份 `.el` 文件在 Emacs 与 Eliscript Worker 中语义 100% 一致。
+   - 仅依赖 `eliscript-runtime` 保证的双宿主公共子集与 `eliscript-data` 持久数据结构，确保同一份 `.el` 文件在 Emacs 与 Eliscript Worker 中语义 100% 一致。
 2. **Emacs 宿主适配层（使用 `.el`）**
    - 承载 `interactive` 交互命令、`buffer` / `window` / `frame` / `overlay` / `keymap` 管理、Minor/Major Mode 定义以及进程生命周期管理；
    - 调用 Core 层纯函数或通过 `eliscript-worker` 异步调度重计算任务，将返回的数据结构渲染到 Emacs 界面。

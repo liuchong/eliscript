@@ -8,8 +8,8 @@ mode for `.eli` source. Add this directory to `load-path` and require the mode:
 
 ## Installation
 
-The mode, its evaluation library, and the `0.1.0`/`0.1.2` `1+5+2` Emacs-compatible
-extension libraries (`eliscript-compat.el`, `eliscript-contract.el`,
+The mode, its evaluation library, and the `0.1.0`/`0.1.2` `1+5+2`
+extension libraries (`eliscript-runtime.el`, `eliscript-contract.el`,
 `eliscript-data.el`, `eliscript-bind.el`, `eliscript-module.el`,
 `eliscript-async.el`, `eliscript-js.el`, and `eliscript-abi.el`) are ordinary
 Emacs packages. All carry `Version: 0.1.2`, `Package-Requires: ((emacs "29.1"))`,
@@ -22,7 +22,7 @@ From a checkout, without installing anything:
 ```elisp
 (add-to-list 'load-path "/path/to/eliscript/editor")
 (require 'eliscript-mode)
-(require 'eliscript-compat) ; loads the 0.1.0 1+5+2 extension packs in Emacs
+(require 'eliscript-runtime) ; loads the 0.1.0 1+5+2 extension packs in Emacs
 ```
 
 From the repository itself, using Emacs 29 or newer, which fetches the sources

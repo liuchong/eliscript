@@ -390,7 +390,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
     (when include-tests
       (setq tools (append tools
                           '(("tests/eliscript/bootstrap-compiler.eli" . "tests/bootstrap-compiler.test.mjs")
-                            ("tests/eliscript/emacs-compatible-syntax.eli" . "tests/emacs-compatible-syntax.test.mjs")
+                            ("tests/eliscript/core-syntax.eli" . "tests/core-syntax.test.mjs")
                             ("tests/seed-symbol-reservation.test.eli" . "tests/seed-symbol-reservation.test.mjs")
                             ("tests/pages-site.test.eli" . "tests/pages-site.test.mjs")
                             ("tests/docs-site.test.eli" . "tests/docs-site.test.mjs")
@@ -640,10 +640,10 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
         (let ((status (call-process
                        runtime nil t nil "bootstrap/host/project-cli.mjs"
                        "--root" "runtime"
-                       "--out-dir" "dist/emacs-compat"
-                       "runtime/emacs-compat.eli")))
+                       "--out-dir" "dist/session"
+                       "runtime/session.eli")))
           (unless (and (integerp status) (zerop status))
-            (push (format "Self-hosted emacs-compat build failed (%s): %s"
+            (push (format "Self-hosted session runtime build failed (%s): %s"
                           status (buffer-string))
                   failures))))
       (dolist (tool tools)

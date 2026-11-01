@@ -3,9 +3,9 @@
 ## 1. 目标与当前基线
 
 - **仓库根目录**：`eliscript`（主分支 `master`，基线提交 `b2be7f2`，已发布版本 `0.0.4` / `0.1.0`，当前收尾发布版本 `0.1.1`）
-- **权威语法规范**：[`docs/emacs-compatible-syntax.md`](emacs-compatible-syntax.md)（状态：已确认）
+- **权威语法规范**：[`docs/core-syntax.md`](core-syntax.md)（状态：已确认）
 - **最终可观察成果**：
-  1. 完整实现 [`docs/emacs-compatible-syntax.md`](emacs-compatible-syntax.md) 规定的 **100% Emacs Lisp 默认兼容内核**与 **“1 + 5 + 2” 显式 S 表达式扩展体系**（`(require 'eliscript)` 总入口 + `eliscript-data`、`eliscript-bind`、`eliscript-async`、`eliscript-module`、`eliscript-contract` 五大可移植扩展 + `eliscript-js`、`eliscript-abi` 两大宿主/多后端扩展）。
+  1. 完整实现 [`docs/core-syntax.md`](core-syntax.md) 规定的 **100% Emacs Lisp 默认兼容内核**与 **“1 + 5 + 2” 显式 S 表达式扩展体系**（`(require 'eliscript)` 总入口 + `eliscript-data`、`eliscript-bind`、`eliscript-async`、`eliscript-module`、`eliscript-contract` 五大可移植扩展 + `eliscript-js`、`eliscript-abi` 两大宿主/多后端扩展）。
   2. 采用**双端平滑演进架构**：现有以 `(module ...)` 开头的 `0.0.4` 自举编译器、后端与存量测试 100% 保持原样通过且不破坏全部 14 份基准报告 SHA-256 绑定；所有标准 Emacs Lisp（`.el` / `.eli`）及启用 `'eliscript-*` 扩展的 `0.1.0` 源码在 **原生 Emacs 宿主**与 **JavaScript / WASM / Native 编译目标**上具备 100% 一致的编译期诊断与运行期行为。
   3. **针对新语法的全方位分层单元测试、集成测试与双端差分（Differential Oracle）测试覆盖**：覆盖全部 12 个语法与语义域（160+ 独立测试场景，涵盖正向、边界、语法/类型/契约错误诊断及跨后端语义等价验证），逐用例计时并完全隔离状态。
 
@@ -15,7 +15,7 @@
 当前源码树（绑定基线快照 b2be7f2）
 eliscript/
 ├── docs/
-│   ├── emacs-compatible-syntax.md             # 已确认的 0.1.0 正式语法规范
+│   ├── core-syntax.md             # 已确认的 0.1.0 正式语法规范
 │   └── bootstrap-0.0.4-plan.md                # 0.0.4 历史施工计划
 ├── compiler/                                  # 0.0.4 Seed 编译器（受 benchmarks/*.json SHA-256 绑定保护）
 │   └── eliscript*.el
@@ -51,7 +51,7 @@ flowchart LR
 目标源码树（0.1.0 计划）
 eliscript/
 ├── docs/
-│   ├── emacs-compatible-syntax.md             # 0.1.0 正式语法规范
+│   ├── core-syntax.md             # 0.1.0 正式语法规范
 │   └── bootstrap-0.1.0-plan.md                # 新增 D00：本施工手册
 ├── editor/                                    # 原生 Emacs 0.1.0 扩展库与静态分析器（-L editor 直接可 require，纳入 byte-compile）
 │   ├── eliscript-contract.el                  # 新增 D01：declare 静态契约、类型/纯度/可移植分析与前后置断言
@@ -61,15 +61,15 @@ eliscript/
 │   ├── eliscript-async.el                     # 新增 D05：defun-async/await、with-async-scope/timeout、async-channel、with-async-bindings、engine-call/bind/revoke!
 │   ├── eliscript-js.el                        # 新增 D06a：显式 js-* 互操作、js-false/null/undefined 保真哨兵与 js-regexp*
 │   ├── eliscript-abi.el                       # 新增 D06b：:numeric-f64 与 :memory-u32 线性内存/字运算模拟与契约检查
-│   └── eliscript-compat.el                    # 新增 D06c：0.1.0 统一入口、按定义身份激活与冲突检测器
+│   └── eliscript-runtime.el                    # 新增 D06c：0.1.0 统一入口、按定义身份激活与冲突检测器
 ├── runtime/
-│   └── emacs-compat.eli                       # 新增 D07：0.1.0 JS/WASM/Native 编译器、Lisp-2 运行时、1+5+2 扩展与 :abi 代码生成
+│   └── session.eli                            # 新增 D07：0.1.0 JS/WASM/Native 编译器、Lisp-2 运行时、1+5+2 扩展与 :abi 代码生成
 ├── tests/
-│   ├── eliscript-compat-syntax-tests.el       # 新增 D08a：Emacs ERT 0.1.0 语法与语义全量单元测试（含逐例计时）
-│   └── emacs-compatible-syntax.test.eli       # 新增 D08b：JS/WASM/Native 编译执行与 Emacs 双端差分全量测试（含逐例计时）
+│   ├── eliscript-syntax-tests.el              # 新增 D08a：Emacs ERT 0.1.0 语法与语义全量单元测试（含逐例计时）
+│   └── eliscript/core-syntax.eli              # 新增 D08b：JS/WASM/Native 编译执行与 Emacs 双端差分全量测试（含逐例计时）
 ├── Makefile                                   # 修改 D09a：挂载新增 ERT 与 Bun 测试文件
-├── tools/ci/strict-byte-compile.sh            # 修改 D09b：将 tests/eliscript-compat-syntax-tests.el 纳入严格字节编译门禁
-├── package.json                               # 修改 D09c：导出 ./runtime/emacs-compat(.mjs)
+├── tools/ci/strict-byte-compile.sh            # 修改 D09b：将 tests/eliscript-syntax-tests.el 纳入严格字节编译门禁
+├── package.json                               # 修改 D09c：导出 ./runtime/session(.mjs)
 └── contracts/
     ├── stable-compatibility-corpus.json       # 修改 D09d：同步 Makefile 变更后的语料库哈希
     └── compiler-parity-corpus.json            # 修改 D09d：同步语料库哈希
@@ -79,7 +79,7 @@ eliscript/
 flowchart TB
   subgraph Target_0_1_0["目标架构（0.1.0）：100% Emacs 兼容内核 + 1+5+2 显式扩展 + 双端同构"]
     S1["0.1.0 源码 (.el / .eli)\n默认 100% Emacs Lisp 语义\n按需 (require 'eliscript-*)"] --> E_Path["原生 Emacs 执行路径\n(editor/eliscript-*.el)"]
-    S1 --> C_Path["多后端编译路径\n(runtime/emacs-compat.eli)"]
+    S1 --> C_Path["多后端编译路径\n(runtime/session.eli)"]
     E_Path --> V1["defun-declarations-alist 静态分析\n+ 原生 Lisp-2 / seq / map / pcase 执行"]
     C_Path --> V2["定义身份解析 + declare 静态检查\n+ JS ESM / WASM / ARM64 Native 代码生成"]
     V1 <-->|"Differential Oracle\n逐用例断言输出与错误码 100% 一致"| V2
@@ -120,10 +120,10 @@ flowchart TB
 | `D03` | `editor/eliscript-bind.el` | 新建文件 | 无 | 实现 `(provide 'eliscript-bind)`：<br>• 统一解构编译器 `eliscript-bind--compile-pattern` 与 `pcase-defmacro` 扩展（支持 `[p1 p2 &rest tail]`、`(:list ...)`、`(:map (:k p) (:opt (default p d)))`、`(:record ...)`、`(:ok ...)`、`(:error ...)`、`(:some ...)`、`:none`），检测重复变量名与形状不匹配<br>• 实现 `let-bind`、`let*-bind`、`defun-bind`、`lambda-bind`、`pcase-value`、`cond-predicate`<br>• 实现 `defun-case`、`lambda-case`（静态检查固定分支重复、禁止 `&optional`、检查 `&rest` 区间重叠，支持 `(declare (eliscript :async t :destructure t ...))`）<br>• 实现 `let-const`、`let*-const`（静态扫描 body 拒绝针对常量绑定名的 `setq`/`setf`，拒绝绑定已声明的 `defvar` special 变量）<br>• 实现 `let-loop`、`defun-tail`、`lambda-tail`、`recur`、`trampoline`（静态验证 `recur` 仅位于尾位置且未跨越内部 `lambda` 或 `unwind-protect` 清理体，按从左到右顺序并行求值新参数）<br>• 实现 `thread-first`、`thread-last`、`thread-as`、`thread-cond-first`、`thread-cond-last`、`thread-some-first`、`thread-some-last`<br>• 实现 `fn-compose`、`fn-partial`、`fn-juxt`、`fn-complement` | `Q03`, `Q04`, `Q09` | `C03` / `A03`, `A04` |
 | `D04` | `editor/eliscript-module.el` | 新建文件 | 无 | 实现 `(provide 'eliscript-module)`：<br>• 模块注册表 `eliscript-module--registry`<br>• 实现 `defmodule`、`defun-lexical`、`defvar-lexical`、`defconst-lexical`、`export-functions`、`export-values`、`import-functions`、`import-values`（支持 `:only`、`:rename`、`:as`，检测未导出符号与命名冲突）<br>• 模块内私有词法定义通过词法闭包隔离，不受全局 `fset`/`set` 影响；`export-values` 通过实时 getter 函数暴露当前绑定值；支持模块热重载（重置 `defvar-lexical`，保留全局 `defvar`）<br>• 实现 `defmacro-checked`、`macro-gensym`、`macro-read-file`（校验 `:inputs` 白名单，计算 SHA-256 输入摘要，拒绝未声明文件读取与非纯调用） | `Q05` | `C04` / `A06` |
 | `D05` | `editor/eliscript-async.el` | 新建文件 | 无 | 实现 `(provide 'eliscript-async)`：<br>• 定义条件 `eliscript-cancelled`（父条件 `quit`）、`eliscript-timeout`（父条件 `eliscript-cancelled`）、`eliscript-channel-closed`、`eliscript-engine-handle-error`、`js-error`<br>• 实现 Future 对象与调度器：`future-p`、`future-then`、`future-cancel`、`defun-async`、`lambda-async`、`await`（静态拒绝非异步上下文或嵌套同步 `lambda` 内的 `await`；运行时拒绝非 Future 参数；自动解包嵌套 Future；保持 `condition-case`/`catch`/`unwind-protect` 语义）<br>• 实现结构化并发 `with-async-scope` 与 `with-async-timeout`<br>• 实现动态绑定帧传递 `with-async-bindings` 与 `bind-async`<br>• 实现背压异步通道 `make-async-channel`、`async-channel-p`、`channel-put!`、`channel-take!`、`channel-close!`<br>• 实现跨引擎句柄与调用协议 `engine-bind`、`engine-revoke!`、`engine-handle-p`、`engine-call`（校验 `owner` 与 `generation`，作用域退出自动撤销） | `Q03`, `Q10` | `C05` / `A08` |
-| `D06` | `editor/eliscript-js.el`<br>`editor/eliscript-abi.el`<br>`editor/eliscript-compat.el` | 新建文件 | 无 | • `editor/eliscript-js.el` (`(provide 'eliscript-js)`)：实现保真哨兵 `js-false`、`js-null`、`js-undefined` 及 `js-false-p`、`js-null-p`、`js-undefined-p`、`js-nullish-p`（在 Lisp `if` 中全为真）；实现 `js-import`、`js-array`、`js-object`、`js-get`、`js-put`、`js-call`、`js-new`、`js-expr`、`js-call-raw`、`js-get-raw`、`js-divide`、`js-remainder`、`js-length`（UTF-16 码元长度）、`js-substring`（UTF-16 码元切片）、`js-regexp`、`js-regexp-find`、`js-regexp-matches`、`js-regexp-seq`、`js-regexp-replace`（返回不可变匹配记录，不修改 Emacs `match-data`）<br>• `editor/eliscript-abi.el` (`(provide 'eliscript-abi)`)：实现 `:abi :numeric-f64` 与 `:abi :memory-u32` 静态校验器及线性内存模拟环境（`with-abi-memory`、`mem-load-u8/u16/u32/f64`、`mem-store-u8/u16/u32/f64`、`mem-size`、`mem-grow`、`word-add/sub/mul/div/and/or/xor/shl/shr`，含 32 位回绕、无溢出边界检查与除零陷阱）<br>• `editor/eliscript-compat.el` (`(provide 'eliscript-compat)`)：提供 `eliscript-compat-enable` 与 `(with-eval-after-load 'eliscript ...)` 总入口，管理按定义身份激活与符号冲突检查 | `Q01`, `Q02`, `Q11` | `C06` / `A01`, `A02`, `A09`, `A10` |
-| `D07` | `runtime/emacs-compat.eli` | 新建文件 | 无 | 实现 capsule 模块 `runtime/emacs-compat.eli`（物化为 `runtime/emacs-compat.mjs`）：<br>• 完整实现 `0.1.0` S 表达式 Reader（100% 标准 Emacs S 表达式，支持 `'(...)`、`[...]`、`` ` ``、`,`, `,@`、`#'sym`、`?a` 字符字面量、`;` 注释）<br>• 实现按 `(require 'eliscript-*)` 定义身份激活的 Expander 与 Analyzer（未 require 时 `await` 等名字作为普通函数调用；冲突时抛出带行列号的 `ELI-M0001` / `ELI-A0001` 诊断）<br>• 实现 Lisp-2 JS 运行时环境（符号独立 `value`/`fn`/`plist` 槽、动态 `defvar` 绑定栈、唯一 `nil === null` 假值判断 `v !== null`、原生可变 `Cons`/`Vector`/`HashTable`、Emacs 整数整除 `/` 与 `mod`/`%`、`catch`/`throw` 非局部跳转标签、`condition-case` 条件层级匹配、`unwind-protect`）<br>• 完整实现 `eliscript-data`、`eliscript-bind`、`eliscript-async`、`eliscript-module`、`eliscript-contract`、`eliscript-js`、`eliscript-abi` 在 JS 端的编译与运行期语义<br>• 对声明了 `(declare (eliscript :abi :numeric-f64 ...))` 和 `:abi :memory-u32` 的函数，桥接 `bootstrap/backends/wasm.eli` 与 `bootstrap/backends/native.eli`，直接编译并执行真实 WASM 字节码与 ARM64 Native 机器码 | `Q01`–`Q11` | `C07` / `A01`–`A10` |
-| `D08` | `tests/eliscript-compat-syntax-tests.el`<br>`tests/emacs-compatible-syntax.test.eli` | 新建文件 | 无 | 编写覆盖全部 12 个测试域（`T01`–`T12`）的 160+ 针对性语法与语义单元测试、集成测试及 Emacs-vs-JS-vs-WASM/Native 差分验证套件，内置高精度逐用例计时器与独立环境隔离 | `Q12` | `C08` / `A11`, `A12` |
-| `D09` | `Makefile`<br>`tools/ci/strict-byte-compile.sh`<br>`package.json`<br>`contracts/*.json` | `Makefile` L67-L87, L368-L370<br>`strict-byte-compile.sh` L22-L35<br>`package.json` L21-L57 | 未包含新增 `0.1.0` 语法测试与导出 | • `Makefile` `test-core` 增加 `-l tests/eliscript-compat-syntax-tests.el` 与 `./tests/emacs-compatible-syntax.test.mjs`<br>• `tools/ci/strict-byte-compile.sh` 增加 `tests/eliscript-compat-syntax-tests.el`<br>• `package.json` `exports` 增加 `"./runtime/emacs-compat"` 与 `"./runtime/emacs-compat.mjs"`<br>• 刷新 `contracts/stable-compatibility-corpus.json` 与 `contracts/compiler-parity-corpus.json` | `Q12` | `C09` / `A11`, `A12` |
+| `D06` | `editor/eliscript-js.el`<br>`editor/eliscript-abi.el`<br>`editor/eliscript-runtime.el` | 新建文件 | 无 | • `editor/eliscript-js.el` (`(provide 'eliscript-js)`)：实现保真哨兵 `js-false`、`js-null`、`js-undefined` 及 `js-false-p`、`js-null-p`、`js-undefined-p`、`js-nullish-p`（在 Lisp `if` 中全为真）；实现 `js-import`、`js-array`、`js-object`、`js-get`、`js-put`、`js-call`、`js-new`、`js-expr`、`js-call-raw`、`js-get-raw`、`js-divide`、`js-remainder`、`js-length`（UTF-16 码元长度）、`js-substring`（UTF-16 码元切片）、`js-regexp`、`js-regexp-find`、`js-regexp-matches`、`js-regexp-seq`、`js-regexp-replace`（返回不可变匹配记录，不修改 Emacs `match-data`）<br>• `editor/eliscript-abi.el` (`(provide 'eliscript-abi)`)：实现 `:abi :numeric-f64` 与 `:abi :memory-u32` 静态校验器及线性内存模拟环境（`with-abi-memory`、`mem-load-u8/u16/u32/f64`、`mem-store-u8/u16/u32/f64`、`mem-size`、`mem-grow`、`word-add/sub/mul/div/and/or/xor/shl/shr`，含 32 位回绕、无溢出边界检查与除零陷阱）<br>• `editor/eliscript-runtime.el` (`(provide 'eliscript-runtime)`)：提供 `eliscript-runtime-enable` 与 `(with-eval-after-load 'eliscript ...)` 总入口，管理按定义身份激活与符号冲突检查 | `Q01`, `Q02`, `Q11` | `C06` / `A01`, `A02`, `A09`, `A10` |
+| `D07` | `runtime/session.eli` | 新建文件 | 无 | 实现模块 `runtime/session.eli`（物化为 `runtime/session.mjs`）：<br>• 完整实现 `0.1.0` S 表达式 Reader（100% 标准 Emacs S 表达式，支持 `'(...)`、`[...]`、`` ` ``、`,`, `,@`、`#'sym`、`?a` 字符字面量、`;` 注释）<br>• 实现按 `(require 'eliscript-*)` 定义身份激活的 Expander 与 Analyzer（未 require 时 `await` 等名字作为普通函数调用；冲突时抛出带行列号的 `ELI-M0001` / `ELI-A0001` 诊断）<br>• 实现 Lisp-2 JS 运行时环境（符号独立 `value`/`fn`/`plist` 槽、动态 `defvar` 绑定栈、唯一 `nil === null` 假值判断 `v !== null`、原生可变 `Cons`/`Vector`/`HashTable`、Emacs 整数整除 `/` 与 `mod`/`%`、`catch`/`throw` 非局部跳转标签、`condition-case` 条件层级匹配、`unwind-protect`）<br>• 完整实现 `eliscript-data`、`eliscript-bind`、`eliscript-async`、`eliscript-module`、`eliscript-contract`、`eliscript-js`、`eliscript-abi` 在 JS 端的编译与运行期语义<br>• 对声明了 `(declare (eliscript :abi :numeric-f64 ...))` 和 `:abi :memory-u32` 的函数，桥接 `bootstrap/backends/wasm.eli` 与 `bootstrap/backends/native.eli`，直接编译并执行真实 WASM 字节码与 ARM64 Native 机器码 | `Q01`–`Q11` | `C07` / `A01`–`A10` |
+| `D08` | `tests/eliscript-syntax-tests.el`<br>`tests/eliscript/core-syntax.eli` | 新建文件 | 无 | 编写覆盖全部 12 个测试域（`T01`–`T12`）的 160+ 针对性语法与语义单元测试、集成测试及 Emacs-vs-JS-vs-WASM/Native 差分验证套件，内置高精度逐用例计时器与独立环境隔离 | `Q12` | `C08` / `A11`, `A12` |
+| `D09` | `Makefile`<br>`tools/ci/strict-byte-compile.sh`<br>`package.json`<br>`contracts/*.json` | `Makefile` L67-L87, L368-L370<br>`strict-byte-compile.sh` L22-L35<br>`package.json` L21-L57 | 未包含新增 `0.1.0` 语法测试与导出 | • `Makefile` `test-core` 增加 `-l tests/eliscript-syntax-tests.el` 与 `./tests/core-syntax.test.mjs`<br>• `tools/ci/strict-byte-compile.sh` 增加 `tests/eliscript-syntax-tests.el`<br>• `package.json` `exports` 增加 `"./runtime/session"` 与 `"./runtime/session.mjs"`<br>• 刷新 `contracts/stable-compatibility-corpus.json` 与 `contracts/compiler-parity-corpus.json` | `Q12` | `C09` / `A11`, `A12` |
 
 ---
 
@@ -154,24 +154,24 @@ flowchart TB
 
 | 阶段 ID | 阶段完成 | 状态 | 产物与执行步骤 | 依赖 | 验收及证据 |
 | --- | --- | --- | --- | --- | --- |
-| `S0` | [x] | 已完成 | 完成 `docs/emacs-compatible-syntax.md` 正式语法规范与 `docs/bootstrap-0.1.0-plan.md` 精确施工手册 | 用户已确认语法规范 | `docs/emacs-compatible-syntax.md` (`b2be7f2`) 与本施工手册已就位 |
-| `S1` | [x] | 已完成 | **B 阶段**：一次写齐 `tests/eliscript-compat-syntax-tests.el` 与 `tests/emacs-compatible-syntax.test.eli` 全部 `T01`–`T12` 测试用例，**严禁提前运行** | `S0` | 22 个 ERT 测试套件 + 24 个 Bun 测试套件（含 52 个差分语料，共 160+ 独立断言场景）全部就位并实测通过 |
-| `S2` | [x] | 已完成 | **C 阶段**：一次完成 `editor/eliscript-*.el`、`runtime/emacs-compat.eli`、`Makefile`、`strict-byte-compile.sh`、`package.json` 全部生产代码与接线，**严禁中途跑测或预审** | `S1` | `C01`–`C09` 全部生产代码与接线完成并通过严格字节编译与全量验收 |
+| `S0` | [x] | 已完成 | 完成 `docs/core-syntax.md` 正式语法规范与 `docs/bootstrap-0.1.0-plan.md` 精确施工手册 | 用户已确认语法规范 | `docs/core-syntax.md` (`b2be7f2`) 与本施工手册已就位 |
+| `S1` | [x] | 已完成 | **B 阶段**：一次写齐 `tests/eliscript-syntax-tests.el` 与 `tests/eliscript/core-syntax.eli` 全部 `T01`–`T12` 测试用例，**严禁提前运行** | `S0` | 22 个 ERT 测试套件 + 24 个 Bun 测试套件（含 52 个差分语料，共 160+ 独立断言场景）全部就位并实测通过 |
+| `S2` | [x] | 已完成 | **C 阶段**：一次完成 `editor/eliscript-*.el`、`runtime/session.eli`、`Makefile`、`strict-byte-compile.sh`、`package.json` 全部生产代码与接线，**严禁中途跑测或预审** | `S1` | `C01`–`C09` 全部生产代码与接线完成并通过严格字节编译与全量验收 |
 | `S3` | [x] | 已完成 | **D 阶段**：集中物化构建、运行 `T01`–`T12` 全部测试、严格字节编译、契约检查与四维性能门禁，逐条核验 `A01`–`A12` 并签名提交推送 | `S0`/`S1`/`S2` 全部完成 | `A01`–`A12` 12/12 实测通过（ERT 270/270 `58.76s`；Bun `T01`–`T12` 24/24 `309ms`；四维基准全绿） |
 
 ### 4.2 施工清单（`C01`–`C09`：每写完一项立即勾选，不代表已测试）
 
 | 施工 ID | 写完打勾 | 变更/需求 | 文件与锚点 | 明确施工动作 | 依赖 | 对应验收 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `C01` | [x] | `D08` / `Q12` | `tests/eliscript-compat-syntax-tests.el`（新建）<br>`tests/emacs-compatible-syntax.test.eli`（新建） | **阶段 B（先写全量测试，不运行）**：编写覆盖 `T01`–`T12` 全部 12 个语法与语义域的 ERT 单元测试、Bun 单元测试与 Emacs-vs-JS-vs-WASM/Native 差分测试，内置逐用例计时与状态隔离 | `S0` | `A01`–`A12` |
+| `C01` | [x] | `D08` / `Q12` | `tests/eliscript-syntax-tests.el`（新建）<br>`tests/eliscript/core-syntax.eli`（新建） | **阶段 B（先写全量测试，不运行）**：编写覆盖 `T01`–`T12` 全部 12 个语法与语义域的 ERT 单元测试、Bun 单元测试与 Emacs-vs-JS-vs-WASM/Native 差分测试，内置逐用例计时与状态隔离 | `S0` | `A01`–`A12` |
 | `C02` | [x] | `D01` / `Q03` | `editor/eliscript-contract.el`（新建） | 实现 `(declare (eliscript ...))` 解析器、静态分析器（`:pure`、`:portable`、`:checked`、`:async`、`:destructure`、`:abi`、`:inputs`）、运行时契约包装器（`:params`、`:returns`、`:requires`、`:ensures`）及 `defun-declarations-alist` 钩子 | `C01` | `A03`, `A07` |
 | `C03` | [x] | `D02` / `Q06`–`Q08` | `editor/eliscript-data.el`（新建） | 实现 7 类持久集合、`seq.el`/`map.el` 泛型方法、`value-*` 操作、`cl-defstruct-persistent`（含字段 Schema 校验与 `struct-json-schema`/`struct-to-json`/`struct-from-json`）、`defprotocol`/`extend-protocol`/`defclass-protocol`/`reify-protocol`、`cl-defgeneric-value`/`cl-defmethod-value`、`state-cell`、`delay`/`force`/`memoize`、`lazy-seq` 族、`seq-transduce`、`with-transient`、`result-*`、`option-*`、`data-symbol` | `C02` | `A05` |
 | `C04` | [x] | `D03` / `Q03`, `Q04`, `Q09` | `editor/eliscript-bind.el`（新建） | 实现统一 `pcase` 扩展模式与 `let-bind`、`let*-bind`、`defun-bind`、`lambda-bind`、`pcase-value`、`cond-predicate`、`defun-case`、`lambda-case`、`let-const`、`let*-const`、`let-loop`、`defun-tail`、`lambda-tail`、`recur`、`trampoline`、`thread-*`（含 `thread-some-first`/`thread-some-last`）、`fn-*` 组合器 | `C02`, `C03` | `A03`, `A04` |
 | `C05` | [x] | `D04` / `Q05` | `editor/eliscript-module.el`（新建） | 实现 `defmodule`、`defun-lexical`、`defvar-lexical`、`defconst-lexical`、`export-functions`、`export-values`、`import-functions`、`import-values`、实时值绑定读取、模块重载及 `defmacro-checked`、`macro-gensym`、`macro-read-file` | `C02` | `A06` |
 | `C06` | [x] | `D05` / `Q03`, `Q10` | `editor/eliscript-async.el`（新建） | 实现 Future、`defun-async`、`lambda-async`、`await`、`with-async-scope`、`with-async-timeout`、`eliscript-cancelled`/`eliscript-timeout` 条件、`with-async-bindings`、`bind-async`、`make-async-channel`/`channel-put!`/`channel-take!`/`channel-close!`、`engine-bind`/`engine-call`/`engine-revoke!`/`engine-handle-p` | `C02`, `C03` | `A03`, `A08` |
-| `C07` | [x] | `D06` / `Q01`, `Q02`, `Q11` | `editor/eliscript-js.el`（新建）<br>`editor/eliscript-abi.el`（新建）<br>`editor/eliscript-compat.el`（新建） | 实现 `js-*` 互操作与保真哨兵 `js-false`/`js-null`/`js-undefined` 及 `js-regexp*`；实现 `:abi :numeric-f64` 与 `:abi :memory-u32` 线性内存/字运算及校验；实现 `eliscript-compat` 总入口、按定义身份激活与符号冲突保护 | `C02`–`C06` | `A01`, `A02`, `A09`, `A10` |
-| `C08` | [x] | `D07` / `Q01`–`Q11` | `runtime/emacs-compat.eli`（新建） | 实现 JS/WASM/Native 端 `0.1.0` 编译器、Lisp-2 运行时、全部 `1+5+2` 扩展能力及 `:abi :numeric-f64` / `:abi :memory-u32` WASM 与 ARM64 Native 机器码编译执行桥接 | `C07` | `A01`–`A11` |
-| `C09` | [x] | `D09` / `Q12` | `Makefile`、`tools/ci/strict-byte-compile.sh`、`package.json` | 挂载 `tests/eliscript-compat-syntax-tests.el` 与 `tests/emacs-compatible-syntax.test.mjs`，将新增 `.el` 纳入 `strict-byte-compile.sh`，在 `package.json` 导出 `./runtime/emacs-compat(.mjs)` | `C01`–`C08` | `A11`, `A12` |
+| `C07` | [x] | `D06` / `Q01`, `Q02`, `Q11` | `editor/eliscript-js.el`（新建）<br>`editor/eliscript-abi.el`（新建）<br>`editor/eliscript-runtime.el`（新建） | 实现 `js-*` 互操作与保真哨兵 `js-false`/`js-null`/`js-undefined` 及 `js-regexp*`；实现 `:abi :numeric-f64` 与 `:abi :memory-u32` 线性内存/字运算及校验；实现 `eliscript-runtime` 总入口、按定义身份激活与符号冲突保护 | `C02`–`C06` | `A01`, `A02`, `A09`, `A10` |
+| `C08` | [x] | `D07` / `Q01`–`Q11` | `runtime/session.eli`（新建） | 实现 JS/WASM/Native 端 `0.1.0` 编译器、Lisp-2 运行时、全部 `1+5+2` 扩展能力及 `:abi :numeric-f64` / `:abi :memory-u32` WASM 与 ARM64 Native 机器码编译执行桥接 | `C07` | `A01`–`A11` |
+| `C09` | [x] | `D09` / `Q12` | `Makefile`、`tools/ci/strict-byte-compile.sh`、`package.json` | 挂载 `tests/eliscript-syntax-tests.el` 与 `tests/core-syntax.test.mjs`，将新增 `.el` 纳入 `strict-byte-compile.sh`，在 `package.json` 导出 `./runtime/session(.mjs)` | `C01`–`C08` | `A11`, `A12` |
 
 ---
 
@@ -199,12 +199,12 @@ flowchart TB
 ```text
 /goal 在 eliscript 仓库根目录持续推进 Eliscript 0.1.0 正式语法（100% Emacs Lisp 兼容内核 + 1+5+2 显式扩展 + 多后端 ABI + 全量针对性单元测试矩阵）的完整实现与验收，直到下面全部必要验收和交付条件满足。
 
-开始或恢复时读取 ~/.assistant/AGENTS.md、AGENTS.md、docs/emacs-compatible-syntax.md 和唯一施工文档 docs/bootstrap-0.1.0-plan.md；核实当前工作区、实际版本、目标状态与既有证据。当前起点是 S0 已完成（docs/emacs-compatible-syntax.md 与 docs/bootstrap-0.1.0-plan.md 已就位），不要重复开发已验收且未受影响的成果，保留无关修改。
+开始或恢复时读取 ~/.assistant/AGENTS.md、AGENTS.md、docs/core-syntax.md 和唯一施工文档 docs/bootstrap-0.1.0-plan.md；核实当前工作区、实际版本、目标状态与既有证据。当前起点是 S0 已完成（docs/core-syntax.md 与 docs/bootstrap-0.1.0-plan.md 已就位），不要重复开发已验收且未受影响的成果，保留无关修改。
 
 核心 TODO（与施工文档使用相同编号和状态）：
-[x] S0：完成 docs/emacs-compatible-syntax.md 正式语法规范与 docs/bootstrap-0.1.0-plan.md 精确施工手册
-[x] S1：一次写齐当前完整范围的测试与验收用例（tests/eliscript-compat-syntax-tests.el 与 tests/emacs-compatible-syntax.test.eli，覆盖 T01–T12 共 160+ 针对性语法测试），不运行
-[x] S2：一次完成全部实现、接线、失败处理和必要文档（editor/eliscript-*.el、runtime/emacs-compat.eli、Makefile、strict-byte-compile.sh、package.json），标记实现待验
+[x] S0：完成 docs/core-syntax.md 正式语法规范与 docs/bootstrap-0.1.0-plan.md 精确施工手册
+[x] S1：一次写齐当前完整范围的测试与验收用例（tests/eliscript-syntax-tests.el 与 tests/eliscript/core-syntax.eli，覆盖 T01–T12 共 160+ 针对性语法测试），不运行
+[x] S2：一次完成全部实现、接线、失败处理和必要文档（editor/eliscript-*.el、runtime/session.eli、Makefile、strict-byte-compile.sh、package.json），标记实现待验
 [x] S3：全部实现后集中整合、物化构建、运行 ERT 与 Bun/WASM/Native 测试、严格字节编译、契约刷新、四维性能门禁核验、签名提交与推送
 逐项对照唯一施工手册的当前/目标源码树、流程图、精确变更表及文件行号/符号锚点施工。每写完一项即勾选其施工 checkbox（C01–C09）；对应验收 checkbox（A01–A12）只有最终逐条实测通过才勾选。两种清单不得混用。
 
@@ -227,33 +227,33 @@ flowchart TB
 - **基线提交**：`b1c7741365545d5a048079d64f863524cf7117e2`（`master`）
 - **核心目标**：
   1. 以真实工业级 Emacs Lisp 项目（如 `che` 的核心算法、协议编解码、状态机、MDP 解析器、上下文预算与 CLI 模块）驱动 Eliscript 的 Emacs Lisp 语法与标准库深度对齐，使**未经修改的原装 `.el` 源文件**可直接由 Eliscript 编译并在 JS/Bun/Node 运行时中 100% 等价执行。
-  2. 提供 **Dual-Host `.el` 模块编译器与常驻 Worker 加速桥接器**（`compileCompatElispModule` + `eliscript-compat-compile-elisp-module` + `eliscript-compat-offload-call` + `eliscript-compat-accelerate-function`），将原本在 Emacs 主线程中需要数千次 `0.001s` 定时器切片或 `emacs --batch` 冷启动的重计算（JSONL 发布比对、结构化 Delta、SHA-256 帧链编解码、MDP 协议解析、表格显示宽度排版）无缝卸载至 Eliscript 常驻 Worker，并在无 Worker 时自动回退至原生 Emacs Lisp。
+  2. 提供 **Dual-Host `.el` 模块编译器与常驻 Worker 加速桥接器**（`compileModule` + `eliscript-runtime-compile-elisp-module` + `eliscript-runtime-offload-call` + `eliscript-runtime-accelerate-function`），将原本在 Emacs 主线程中需要数千次 `0.001s` 定时器切片或 `emacs --batch` 冷启动的重计算（JSONL 发布比对、结构化 Delta、SHA-256 帧链编解码、MDP 协议解析、表格显示宽度排版）无缝卸载至 Eliscript 常驻 Worker，并在无 Worker 时自动回退至原生 Emacs Lisp。
 
 ```text
 第二批次目标源码树（绑定基线 b1c7741）
 eliscript/
 ├── docs/
-│   ├── emacs-compatible-syntax.md             # 修改 D10：补充原装 .el Dual-Host 编译与常驻 Worker 加速规范
+│   ├── core-syntax.md             # 修改 D10：补充原装 .el Dual-Host 编译与常驻 Worker 加速规范
 │   └── bootstrap-0.1.0-plan.md                # 修改 D00：本施工手册第二批次设计
 ├── editor/
-│   └── eliscript-compat.el                    # 修改 D11：新增原装 .el Dual-Host 模块编译、常驻 Worker 卸载与函数透明加速接口
+│   └── eliscript-runtime.el                    # 修改 D11：新增原装 .el Dual-Host 模块编译、常驻 Worker 卸载与函数透明加速接口
 ├── runtime/
-│   └── emacs-compat.eli                       # 修改 D12：补齐完整工业级 Elisp Reader/宏/广义变量/cl-defstruct/pcase/cl-loop/正则/UTF-8字节与SHA-256/虚拟Buffer/Dual-Host导出器
+│   └── session.eli                            # 修改 D12：补齐完整工业级 Elisp Reader/宏/广义变量/cl-defstruct/pcase/cl-loop/正则/UTF-8字节与SHA-256/虚拟Buffer/Dual-Host导出器
 └── tests/
-    ├── eliscript-compat-syntax-tests.el       # 修改 D13a：新增 T13–T16 ERT 真实 Elisp 语法对齐、原装 .el 共用与加速测试
-    └── emacs-compatible-syntax.test.eli       # 修改 D13b：新增 T13–T16 JS 端原装 .el 直编、双端差分验证与加速基准测试
+    ├── eliscript-syntax-tests.el              # 修改 D13a：新增 T13–T16 ERT 真实 Elisp 语法对齐、原装 .el 共用与加速测试
+    └── eliscript/core-syntax.eli              # 修改 D13b：新增 T13–T16 JS 端原装 .el 直编、双端差分验证与加速基准测试
 ```
 
 ```mermaid
 flowchart LR
   subgraph Current_DualHost_Gap["当前基线（b1c7741）：内核已通但工业级 .el 直编存在缺口"]
-    EL0["原装工业级 .el 源码\n(?char / cl-defstruct 选项 / setf 广义位置 /\ncl-labels / cl-loop / rx / UTF-8 字节 & SHA-256 /\nwith-temp-buffer)"] --> R0["runtime/emacs-compat.eli\n仅覆盖基础子集，未导出 Worker 便携模块"]
+    EL0["原装工业级 .el 源码\n(?char / cl-defstruct 选项 / setf 广义位置 /\ncl-labels / cl-loop / rx / UTF-8 字节 & SHA-256 /\nwith-temp-buffer)"] --> R0["runtime/session.eli\n仅覆盖基础子集，未导出 Worker 便携模块"]
     E0["Emacs 重计算路径\n(0.001s 定时器切片 / emacs --batch)"] --> B0["主线程多轮调度与冷启动开销"]
   end
   subgraph Target_DualHost_Accel["完成后目标：原装 .el 零修改双端同源 + 常驻 Worker 透明加速"]
-    EL1["原装 .el 模块\n(che-align / che-session-delta /\nche-session-restore-codec / che-mdp /\nche-session-publication-json / che-cli 等)"] --> C1["修改 D12：runtime/emacs-compat.eli\n全语法/标准库对齐 + compileCompatElispModule"]
+    EL1["原装 .el 模块\n(che-align / che-session-delta /\nche-session-restore-codec / che-mdp /\nche-session-publication-json / che-cli 等)"] --> C1["修改 D12：runtime/session.eli\n全语法/标准库对齐 + compileModule"]
     C1 --> M1["生成带 __eliscript_portable__ 的 .mjs 模块"]
-    M1 --> W1["修改 D11：editor/eliscript-compat.el\neliscript-compat-offload-call /\neliscript-compat-accelerate-function"]
+    M1 --> W1["修改 D11：editor/eliscript-runtime.el\neliscript-runtime-offload-call /\neliscript-runtime-accelerate-function"]
     W1 <-->|"Differential Oracle 字节级一致\n失败或禁用时自动回退原生 Elisp"| E1["Emacs 主线程一次异步/同步调用完成"]
   end
   classDef changed fill:#fff3cd,stroke:#856404
@@ -270,47 +270,47 @@ flowchart LR
 | `Q14` | **完整 `cl-defstruct`、`pcase` 全模式、`cl-labels`/`cl-flet`/`cl-loop`/`dotimes` 与 `subr-x` 宏**：支持标准可变 `cl-defstruct`（含 `(:constructor ...)`、`(:copier ...)`、`(:predicate ...)`、`(:include ...)`、每次构造求值的槽位默认值、`copy-<struct>`、`recordp`、`copy-sequence`）；支持 `pcase`（字面量、`'sym`、`(or ...)`、`(and ...)`、`(pred ...)`、`(app ...)`、`` `(,a . ,b) ``）、`pcase-let`/`pcase-let*`、`when-let`/`when-let*`、`if-let`/`if-let*`（含单表达式守卫 `((expr))`）；支持 `cl-labels`（互递归局部函数）、`cl-flet`、`cl-loop`、`dotimes`、`save-match-data`、`ignore-errors`、`define-error`、`defgroup`/`defcustom`/`defface`、`rx`。 | `D12` | `T13` | `C10`, `C12` / `A13` |
 | `Q15` | **UTF-8 单字节/多字节字符串、显示宽度、`secure-hash`、`json-*`、Emacs 正则与虚拟 `with-temp-buffer`**：实现 CJK 精确列宽 `string-width`/`char-width`、UTF-8 字节串编码 `encode-coding-string`/`decode-coding-string`/`string-bytes`/`multibyte-string-p`/`unibyte-string`/`make-string`、基于 `node:crypto` 的 `secure-hash`（支持 `sha256` 二进制与十六进制模式）、完整参数 `json-parse-string`/`json-encode`/`json-serialize`、Emacs 正则转译器（支持 `\``、`\'`、`\(?:`、`\{m,n\}`、`[][{},"]` 字符类、POSIX 类、带 `start` 偏移的 `string-match`、`match-beginning`/`match-end`、`replace-regexp-in-string`、`compare-strings`）及纯内存虚拟 Buffer（`with-temp-buffer`、`insert`、`goto-char`、`re-search-forward`、`buffer-string`、`delete-region` 等）。 | `D12` | `T13`, `T14` | `C10`, `C12` / `A14` |
 | `Q16` | **原装 `.el` 模块零修改直编与双端差分验证（Differential Oracle）**：支持在一个会话中按依赖顺序直接加载并执行原装 `.el` 模块（覆盖 `che-align.el`、`che-session-delta.el`、`che-session-restore-codec.el`、`che-session-restore-value.el`、`che-session-publication-capture.el`、`che-session-publication-json.el`、`che-mdp.el`、`che-context-budget.el`、`che-cli.el`），且与原生 Emacs 在相同输入下的输出字节/结构 100% 一致。 | `D11`, `D12`, `D13` | `T14`, `T15` | `C10`–`C12` / `A15` |
-| `Q17` | **Dual-Host `.el` -> `.mjs` 模块编译器与 Emacs 常驻 Worker 加速桥接**：在 `runtime/emacs-compat.eli` 中提供 `compileCompatElispModule(source, options)`，将原装 `.el` 编译为导出 `__eliscript_portable__` 的 ES 模块；在 `editor/eliscript-compat.el` 中提供 `eliscript-compat-compile-elisp-module`、`eliscript-compat-offload-call` 与 `eliscript-compat-accelerate-function`，通过 `eliscript-worker` 常驻进程加速重计算，并在 Worker 未启用时无缝回退至原生 Emacs 函数。 | `D10`, `D11`, `D12`, `D13` | `T16` | `C10`–`C13` / `A16`, `A17` |
+| `Q17` | **Dual-Host `.el` -> `.mjs` 模块编译器与 Emacs 常驻 Worker 加速桥接**：在 `runtime/session.eli` 中提供 `compileModule(source, options)`，将原装 `.el` 编译为导出 `__eliscript_portable__` 的 ES 模块；在 `editor/eliscript-runtime.el` 中提供 `eliscript-runtime-compile-elisp-module`、`eliscript-runtime-offload-call` 与 `eliscript-runtime-accelerate-function`，通过 `eliscript-worker` 常驻进程加速重计算，并在 Worker 未启用时无缝回退至原生 Emacs 函数。 | `D10`, `D11`, `D12`, `D13` | `T16` | `C10`–`C13` / `A16`, `A17` |
 
 | 变更 ID | 相对源文件 | 基线行号 / 锚点 | 当前行为 | 精确变更与目标代码 | 需求/依赖 | 施工/验收 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `D10` | `docs/emacs-compatible-syntax.md` | 基线末尾 | 规范定义了内核与 `1+5+2` 扩展，未记述原装 `.el` Dual-Host 编译与常驻 Worker 加速桥接 | 新增章节说明原装 `.el` 双端同源编译接口（`compileCompatElispModule` / `eliscript-compat-compile-elisp-module`）与常驻 Worker 透明加速机制（`eliscript-compat-offload-call` / `eliscript-compat-accelerate-function`） | `Q16`, `Q17` | `C13` / `A17` |
-| `D11` | `editor/eliscript-compat.el` | 基线 L168-L184 `eliscript-compat-eval-string` | 仅提供字符串求值 `eliscript-compat-eval-string` | 在 `(progn ...)` 块内新增：<br>• `eliscript-compat-eval-file (file)`：读取并求值 `.el`/`.eli` 文件<br>• `eliscript-compat-compile-elisp-module (el-files out-mjs-file)`：将 1 个或多个原装 `.el` 文件编译为支持 `eliscript-worker` `:operation` 调用的 `.mjs` 模块<br>• `eliscript-compat-offload-call (worker mjs-file fn-sym &rest args)`：将对 `fn-sym` 的调用卸载到常驻 `eliscript-worker` 执行（若 `worker` 不可用则自动回退 `(apply fn-sym args)`）<br>• `eliscript-compat-accelerate-function (fn-sym mjs-file &optional worker-getter predicate)`：为现有 Emacs 函数安装可选的 Eliscript 常驻 Worker 加速包装与平滑回退 | `Q16`, `Q17` | `C11` / `A16` |
-| `D12` | `runtime/emacs-compat.eli` | 基线 L1-L2 (`tokenizeSexp`, `readAllForms`, `installKernelBuiltins`, `evalForm`, `compileCompatProgram`) | 基础 `0.1.0` 内核与扩展实现 | 全面升级 `runtime/emacs-compat.eli`：<br>• `tokenizeSexp` / `readAllForms`：支持 `?char` 字面量、完整字符串转义（`\0`、`\xHH`、`\uHHHH`、`\b`、`\f`、`\e` 等）、`#s(hash-table ...)`、点对反引号 `` `(a . ,b) ``<br>• `bindLambdaArgs`：在 `defun`/`lambda`/`defmacro`/`cl-defun`/`cl-labels`/`cl-flet` 中完整支持 `&optional`、`&rest`、`&key`<br>• `evalPlaceGet` / `evalPlaceSet`：统一支持变量、`nth`、`aref`（Vector 与 String）、`car`/`cdr`/`caar`..`cddr`、`gethash`、`alist-get`、`plist-get` 及 `cl-defstruct` 槽位的 `setf`、`cl-incf`、`cl-decf`、`push`、`pop`<br>• 宏与特殊形式：实现标准 `cl-defstruct`、`pcase`/`pcase-let`/`pcase-let*`、`when-let`/`when-let*`/`if-let`/`if-let*`、`cl-labels`/`cl-flet`、`cl-loop`、`dotimes`、`save-match-data`、`ignore-errors`、`define-error`、`defgroup`/`defcustom`/`defface`、`rx`、虚拟 Buffer `with-temp-buffer`<br>• 标准库内建：补齐 `string-width`/`char-width`、`string-bytes`/`multibyte-string-p`/`encode-coding-string`/`decode-coding-string`/`unibyte-string`/`make-string`、`secure-hash`、`json-parse-string`/`json-encode`/`json-serialize`、完整 `cl-*` 与 `seq-*`、Emacs 正则转译与 `string-match` (`start`) / `match-beginning` / `match-end` / `replace-regexp-in-string` / `compare-strings`<br>• Dual-Host 模块编译器：新增导出 `compileCompatElispModule(source, options)` 与 `invokeCompatFunction(session, fnName, args)` | `Q13`–`Q17` | `C12` / `A13`–`A16` |
-| `D13` | `tests/eliscript-compat-syntax-tests.el`<br>`tests/emacs-compatible-syntax.test.eli` | `eliscript-compat-syntax-tests.el` L855<br>`emacs-compatible-syntax.test.eli` L1-L2 | 覆盖 `T01`–`T12` | 新增 `T13`–`T16` 测试套件：<br>• `T13`：工业级 Elisp 语法与标准库全特性单测（`?char`、`&optional`/`&rest`/`&key`、`cl-defstruct`、`setf`/`cl-incf`/`cl-decf`/`push`/`pop`、`pcase`、`cl-labels`/`cl-loop`、`rx`、`with-temp-buffer`、UTF-8/SHA-256/JSON）<br>• `T14`：原装 `.el` 模块（`che-align`、`che-session-delta`、`che-session-restore-codec`、`che-session-restore-value`、`che-session-publication-capture`、`che-session-publication-json`、`che-mdp`、`che-context-budget`、`che-cli`）零修改直编与功能验证<br>• `T15`：原装 `.el` 模块在原生 Emacs 与 Eliscript JS 运行时之间的双端差分验证（Differential Oracle）<br>• `T16`：`compileCompatElispModule` + `eliscript-worker` 协进程卸载加速与自动回退集成测试及性能对比 | `Q13`–`Q17` | `C10` / `A13`–`A17` |
+| `D10` | `docs/core-syntax.md` | 基线末尾 | 规范定义了内核与 `1+5+2` 扩展，未记述原装 `.el` Dual-Host 编译与常驻 Worker 加速桥接 | 新增章节说明原装 `.el` 双端同源编译接口（`compileModule` / `eliscript-runtime-compile-elisp-module`）与常驻 Worker 透明加速机制（`eliscript-runtime-offload-call` / `eliscript-runtime-accelerate-function`） | `Q16`, `Q17` | `C13` / `A17` |
+| `D11` | `editor/eliscript-runtime.el` | 基线 L168-L184 `eliscript-runtime-eval-string` | 仅提供字符串求值 `eliscript-runtime-eval-string` | 在 `(progn ...)` 块内新增：<br>• `eliscript-runtime-eval-file (file)`：读取并求值 `.el`/`.eli` 文件<br>• `eliscript-runtime-compile-elisp-module (el-files out-mjs-file)`：将 1 个或多个原装 `.el` 文件编译为支持 `eliscript-worker` `:operation` 调用的 `.mjs` 模块<br>• `eliscript-runtime-offload-call (worker mjs-file fn-sym &rest args)`：将对 `fn-sym` 的调用卸载到常驻 `eliscript-worker` 执行（若 `worker` 不可用则自动回退 `(apply fn-sym args)`）<br>• `eliscript-runtime-accelerate-function (fn-sym mjs-file &optional worker-getter predicate)`：为现有 Emacs 函数安装可选的 Eliscript 常驻 Worker 加速包装与平滑回退 | `Q16`, `Q17` | `C11` / `A16` |
+| `D12` | `runtime/session.eli` | 基线 L1-L2 (`tokenizeSexp`, `readAllForms`, `installKernelBuiltins`, `evalForm`, `compileModule`) | 基础 `0.1.0` 内核与扩展实现 | 全面升级 `runtime/session.eli`：<br>• `tokenizeSexp` / `readAllForms`：支持 `?char` 字面量、完整字符串转义（`\0`、`\xHH`、`\uHHHH`、`\b`、`\f`、`\e` 等）、`#s(hash-table ...)`、点对反引号 `` `(a . ,b) ``<br>• `bindLambdaArgs`：在 `defun`/`lambda`/`defmacro`/`cl-defun`/`cl-labels`/`cl-flet` 中完整支持 `&optional`、`&rest`、`&key`<br>• `evalPlaceGet` / `evalPlaceSet`：统一支持变量、`nth`、`aref`（Vector 与 String）、`car`/`cdr`/`caar`..`cddr`、`gethash`、`alist-get`、`plist-get` 及 `cl-defstruct` 槽位的 `setf`、`cl-incf`、`cl-decf`、`push`、`pop`<br>• 宏与特殊形式：实现标准 `cl-defstruct`、`pcase`/`pcase-let`/`pcase-let*`、`when-let`/`when-let*`/`if-let`/`if-let*`、`cl-labels`/`cl-flet`、`cl-loop`、`dotimes`、`save-match-data`、`ignore-errors`、`define-error`、`defgroup`/`defcustom`/`defface`、`rx`、虚拟 Buffer `with-temp-buffer`<br>• 标准库内建：补齐 `string-width`/`char-width`、`string-bytes`/`multibyte-string-p`/`encode-coding-string`/`decode-coding-string`/`unibyte-string`/`make-string`、`secure-hash`、`json-parse-string`/`json-encode`/`json-serialize`、完整 `cl-*` 与 `seq-*`、Emacs 正则转译与 `string-match` (`start`) / `match-beginning` / `match-end` / `replace-regexp-in-string` / `compare-strings`<br>• Dual-Host 模块编译器：新增导出 `compileModule(source, options)` 与 `invokeFunction(session, fnName, args)` | `Q13`–`Q17` | `C12` / `A13`–`A16` |
+| `D13` | `tests/eliscript-syntax-tests.el`<br>`tests/eliscript/core-syntax.eli` | `eliscript-syntax-tests.el` L855<br>`core-syntax.eli` L1-L2 | 覆盖 `T01`–`T12` | 新增 `T13`–`T16` 测试套件：<br>• `T13`：工业级 Elisp 语法与标准库全特性单测（`?char`、`&optional`/`&rest`/`&key`、`cl-defstruct`、`setf`/`cl-incf`/`cl-decf`/`push`/`pop`、`pcase`、`cl-labels`/`cl-loop`、`rx`、`with-temp-buffer`、UTF-8/SHA-256/JSON）<br>• `T14`：原装 `.el` 模块（`che-align`、`che-session-delta`、`che-session-restore-codec`、`che-session-restore-value`、`che-session-publication-capture`、`che-session-publication-json`、`che-mdp`、`che-context-budget`、`che-cli`）零修改直编与功能验证<br>• `T15`：原装 `.el` 模块在原生 Emacs 与 Eliscript JS 运行时之间的双端差分验证（Differential Oracle）<br>• `T16`：`compileModule` + `eliscript-worker` 协进程卸载加速与自动回退集成测试及性能对比 | `Q13`–`Q17` | `C10` / `A13`–`A17` |
 
 ### 6.3 第二批次阶段表、施工清单与验收清单
 
 | 阶段 ID | 阶段完成 | 状态 | 产物与执行步骤 | 依赖 | 验收及证据 |
 | --- | --- | --- | --- | --- | --- |
 | `S4` | [x] | 已完成 | **A 阶段**：完成第二批次（原装 `.el` Dual-Host 共用与 Worker 加速）精确施工设计 | 用户授权 | 本章节 `Q13`–`Q17`、`D10`–`D13`、`C10`–`C13`、`A13`–`A17` 已就位 |
-| `S5` | [x] | 已完成 | **B 阶段**：在 `tests/eliscript-compat-syntax-tests.el` 与 `tests/emacs-compatible-syntax.test.eli` 中一次写齐 `T13`–`T16` 全部测试与验收用例，**不运行** | `S4` | `T13`–`T16` 用例编写完成 |
-| `S6` | [x] | 已完成（R1 已完成施工） | **C 阶段**：一次完成 `editor/eliscript-compat.el`、`runtime/emacs-compat.eli`、`docs/emacs-compatible-syntax.md` 全部代码与文档实现，**严禁中途跑测** | `S5` | `C10`–`C14` 全部施工项勾选，状态为已完成 |
+| `S5` | [x] | 已完成 | **B 阶段**：在 `tests/eliscript-syntax-tests.el` 与 `tests/eliscript/core-syntax.eli` 中一次写齐 `T13`–`T16` 全部测试与验收用例，**不运行** | `S4` | `T13`–`T16` 用例编写完成 |
+| `S6` | [x] | 已完成（R1 已完成施工） | **C 阶段**：一次完成 `editor/eliscript-runtime.el`、`runtime/session.eli`、`docs/core-syntax.md` 全部代码与文档实现，**严禁中途跑测** | `S5` | `C10`–`C14` 全部施工项勾选，状态为已完成 |
 | `S7` | [x] | 已完成 | **D 阶段**：集中物化构建、运行 ERT 与 Bun 测试、严格字节编译与契约门禁，逐项实测勾选 `A13`–`A17` 并签名提交推送 | `S4`–`S6` | `A13`–`A17` 实测通过并完成签名提交推送 |
 
 | 施工 ID | 写完打勾 | 变更/需求 | 文件与锚点 | 明确施工动作 | 依赖 | 对应验收 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `C10` | [x] | `D13` / `Q13`–`Q17` | `tests/fixtures/emacs-compat/*.el`<br>`tests/eliscript/emacs-compatible-syntax.eli`<br>`tests/eliscript-compat-syntax-tests.el` | **按 R1 重写**：原 `tests/emacs-compatible-syntax.test.eli` 为手写 JS capsule，删除；`T01`–`T16` 的 Elisp 程序与期望值迁入 `.el` 用例夹具，由真正的 Eliscript 测试模块驱动；ERT `T15`/`T16` 产物改写到项目内忽略目录 | `S4` | `A13`–`A17` |
-| `C11` | [x] | `D11` / `Q16`, `Q17` | `editor/eliscript-compat.el` L168-L184 | **按 R1 重写**：`eliscript-compat-compile-elisp-module` 不再拼接 JS 模板，改为生成 Eliscript 模块源码并由维护中的 Emacs Lisp 编译器 `eliscript-compile-file` 编译；`eliscript-compat-offload-call` 经 `eliscript-worker-call-sync` 调用导出 `callElisp`，以 Elisp 打印文本往返 | `C10` | `A15`, `A16` |
-| `C12` | [x] | `D12` / `Q13`–`Q17` | `runtime/emacs-compat.eli` | **按 R1 重写**：删除 `(module capsules.… (js* …))` 手写 JS，整体改写为真正的 Eliscript 模块 `eliscript.runtime.emacs-compat`（Reader、打印器、求值器、内核与 `1+5+2` 扩展、工业级 Elisp 形式与标准库、纯 Eliscript UTF-8/SHA-256、正则转译、虚拟 Buffer、WASM ABI 字节数据、`compileCompatElispModule`/`invokeCompatFunction`/`callCompatElisp`），不得使用 `js*` | `C10` | `A13`–`A16` |
-| `C13` | [x] | `D10` / `Q16`, `Q17` | `docs/emacs-compatible-syntax.md` 末尾 | 更新正式语法文档，补充原装 `.el` Dual-Host 编译与常驻 Worker 透明加速章节 | `C11`, `C12` | `A17` |
-| `C14` | [x] | `D12`, `D13` | `tools/backends/bootstrap.el`、`Makefile` | 在自举工具清单登记 `runtime/emacs-compat.eli → runtime/emacs-compat.mjs`，在 `--tests` 清单登记 `tests/eliscript/emacs-compatible-syntax.eli → tests/emacs-compatible-syntax.test.mjs`，Makefile 入口保持同一产物路径 | `C12` | `A17` |
+| `C10` | [x] | `D13` / `Q13`–`Q17` | `tests/fixtures/core-syntax/*.el`<br>`tests/eliscript/core-syntax.eli`<br>`tests/eliscript-syntax-tests.el` | **按 R1 重写**：原 `tests/eliscript/core-syntax.eli` 为手写 JS capsule，删除；`T01`–`T16` 的 Elisp 程序与期望值迁入 `.el` 用例夹具，由真正的 Eliscript 测试模块驱动；ERT `T15`/`T16` 产物改写到项目内忽略目录 | `S4` | `A13`–`A17` |
+| `C11` | [x] | `D11` / `Q16`, `Q17` | `editor/eliscript-runtime.el` L168-L184 | **按 R1 重写**：`eliscript-runtime-compile-elisp-module` 不再拼接 JS 模板，改为生成 Eliscript 模块源码并由维护中的 Emacs Lisp 编译器 `eliscript-compile-file` 编译；`eliscript-runtime-offload-call` 经 `eliscript-worker-call-sync` 调用导出 `callElisp`，以 Elisp 打印文本往返 | `C10` | `A15`, `A16` |
+| `C12` | [x] | `D12` / `Q13`–`Q17` | `runtime/session.eli` | **按 R1 重写**：删除 `(module capsules.… (js* …))` 手写 JS，整体改写为真正的 Eliscript 模块 `eliscript.runtime.session`（Reader、打印器、求值器、内核与 `1+5+2` 扩展、工业级 Elisp 形式与标准库、纯 Eliscript UTF-8/SHA-256、正则转译、虚拟 Buffer、WASM ABI 字节数据、`compileModule`/`invokeFunction`/`callElisp`），不得使用 `js*` | `C10` | `A13`–`A16` |
+| `C13` | [x] | `D10` / `Q16`, `Q17` | `docs/core-syntax.md` 末尾 | 更新正式语法文档，补充原装 `.el` Dual-Host 编译与常驻 Worker 透明加速章节 | `C11`, `C12` | `A17` |
+| `C14` | [x] | `D12`, `D13` | `tools/backends/bootstrap.el`、`Makefile` | 在自举工具清单登记 `runtime/session.eli → runtime/session.mjs`，在 `--tests` 清单登记 `tests/eliscript/core-syntax.eli → tests/core-syntax.test.mjs`，Makefile 入口保持同一产物路径 | `C12` | `A17` |
 
 | 验收 ID | 测试通过打勾 | 需求/施工/测试 | 前置与输入 | 操作/命令与环境 | 明确预期 | 实际结果/证据 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `A13` | [x] | `Q13`, `Q14` / `C10`, `C12` / `T13` | 含 `?char`、`&optional`/`&rest`/`&key`、`cl-defstruct`、`setf`/`cl-incf`/`cl-decf`/`push`/`pop`、`pcase`、`cl-labels`/`cl-loop`、`when-let*`、`rx` 的程序 | ERT 与 Bun 运行 `T13` | 全部工业级 Elisp 语法形式与广义位置修改在 Emacs 与 JS 双端 100% 通过 | 通过（2026-10-27，R1 Eliscript 实现）：Bun `T13-01`..`T13-10` 10/10，每例同时经原生 Emacs 31.1 oracle 比对一致；ERT `t13` passed |
 | `A14` | [x] | `Q15` / `C10`, `C12` / `T13` | 含 CJK `string-width`、UTF-8 `encode/decode-coding-string`、`secure-hash 'sha256`、`json-parse-string` 多容器模式、虚拟 `with-temp-buffer` 的程序 | ERT 与 Bun 运行 `T13` | 字符串列宽、字节长度、SHA-256 二进制/十六进制摘要、JSON 容器映射与虚拟 Buffer 操作双端完全一致 | 通过：`T13-05`/`T13-06`/`T13-10`（CJK 列宽、UTF-8、SHA-256 十六进制与二进制、JSON 三种容器、虚拟 Buffer、正则与 `rx`）与原生 Emacs 逐值一致 |
 | `A15` | [x] | `Q16` / `C10`, `C12` / `T14`, `T15` | 原装 `.el` 模块（`che-align`、`che-session-delta`、`che-session-restore-codec`、`che-session-restore-value`、`che-session-publication-capture`、`che-session-publication-json`、`che-mdp`、`che-context-budget`、`che-cli`） | Bun 运行 `T14` 与 `T15` Differential Oracle | 原装 `.el` 源码零修改在 Eliscript 中直接编译运行，且在相同测试输入下与原生 Emacs 输出 100% 相等 | 通过：Bun `T14-01 & T15-01` 加载 9 个原装 che 模块，7 组探针（CHE-01..07）与原生 Emacs 结果完全一致（317.47ms）；ERT `t14-t15` passed |
-| `A16` | [x] | `Q17` / `C10`–`C12` / `T16` | `compileCompatElispModule` 生成的 `.mjs` 模块与 `eliscript-worker` 常驻进程 | ERT 与 Bun 运行 `T16` | Emacs 通过 `eliscript-compat-offload-call` 与 `eliscript-compat-accelerate-function` 成功调用常驻 Worker 执行 `.el` 模块函数，输出与原生一致且禁用 Worker 时平滑回退 | 通过：Bun `T16-01`（Eliscript 模块源码 → `compile_string` → `.mjs`，`callElisp`/`invokeElisp`，21.34ms）；ERT `t16`：`eliscript-compile-file` 编译生成模块，Worker 直接调用 `callElisp` 返回与原生一致，`offload-call`、`accelerate-function` 及停止 Worker 后回退均通过 |
-| `A17` | [x] | `Q13`–`Q17` / `C10`–`C14` / `T01`–`T16` | 完整工作区 | 执行 `make byte-compile`、`bun tools/conformance/check.mjs`、ERT 与 Bun 全套语法与差分测试 | 零字节编译警告，`git ls-files '*.mjs'` 为 0，`runtime/emacs-compat.eli` 与 `tests/eliscript/emacs-compatible-syntax.eli` 不含 `js*`，全部测试与契约检查通过，完成 GPG 签名提交并推送 | 通过（2026-10-29）：`make byte-compile` 0 警告；`git ls-files '*.mjs'` = 0；`runtime/emacs-compat.eli`、`tests/eliscript/emacs-compatible-syntax.eli` 与 `tests/seed-symbol-reservation.test.eli` 均为纯 Eliscript（0 处 `js*`）；Option A TDZ 窄化与 `runtime/prelude.eli` 公共 helper 收敛通过 `compiler-binary-comparison`（5/5）；Bun `T01`–`T16` 110/110、ERT 162/162、`wasm-managed-core-modules` 4/4、`wasm-managed-sorted-core` 5/5、`wasm-managed-wire-selfhosted` 5/5、`repository-integrity` 13/13 及全部 11 项契约门禁 100% 通过 |
+| `A16` | [x] | `Q17` / `C10`–`C12` / `T16` | `compileModule` 生成的 `.mjs` 模块与 `eliscript-worker` 常驻进程 | ERT 与 Bun 运行 `T16` | Emacs 通过 `eliscript-runtime-offload-call` 与 `eliscript-runtime-accelerate-function` 成功调用常驻 Worker 执行 `.el` 模块函数，输出与原生一致且禁用 Worker 时平滑回退 | 通过：Bun `T16-01`（Eliscript 模块源码 → `compile_string` → `.mjs`，`callElisp`/`invokeElisp`，21.34ms）；ERT `t16`：`eliscript-compile-file` 编译生成模块，Worker 直接调用 `callElisp` 返回与原生一致，`offload-call`、`accelerate-function` 及停止 Worker 后回退均通过 |
+| `A17` | [x] | `Q13`–`Q17` / `C10`–`C14` / `T01`–`T16` | 完整工作区 | 执行 `make byte-compile`、`bun tools/conformance/check.mjs`、ERT 与 Bun 全套语法与差分测试 | 零字节编译警告，`git ls-files '*.mjs'` 为 0，`runtime/session.eli` 与 `tests/eliscript/core-syntax.eli` 不含 `js*`，全部测试与契约检查通过，完成 GPG 签名提交并推送 | 通过（2026-10-29）：`make byte-compile` 0 警告；`git ls-files '*.mjs'` = 0；`runtime/session.eli`、`tests/eliscript/core-syntax.eli` 与 `tests/seed-symbol-reservation.test.eli` 均为纯 Eliscript（0 处 `js*`）；Option A TDZ 窄化与 `runtime/prelude.eli` 公共 helper 收敛通过 `compiler-binary-comparison`（5/5）；Bun `T01`–`T16` 110/110、ERT 162/162、`wasm-managed-core-modules` 4/4、`wasm-managed-sorted-core` 5/5、`wasm-managed-wire-selfhosted` 5/5、`repository-integrity` 13/13 及全部 11 项契约门禁 100% 通过 |
 
 ### 6.4 设计修正 R1：兼容运行时与测试必须是真正的 Eliscript（2026-10-27）
 
-- **触发事实**：第一批交付的 `runtime/emacs-compat.eli` 与 `tests/emacs-compatible-syntax.test.eli` 都是 `(module capsules.… (js* "…"))`，构建时把手写 JS 原样写成 `.mjs`；`C11` 的 `eliscript-compat-compile-elisp-module` 也在 Elisp 里拼接 JS 模板。三者都违反 `AGENTS.md` LANGUAGE-01/03。用户确认：改用 Eliscript 是硬性要求，没有例外。
+- **触发事实**：第一批交付的 `runtime/session.eli` 与 `tests/eliscript/core-syntax.eli` 都是 `(module capsules.… (js* "…"))`，构建时把手写 JS 原样写成 `.mjs`；`C11` 的 `eliscript-runtime-compile-elisp-module` 也在 Elisp 里拼接 JS 模板。三者都违反 `AGENTS.md` LANGUAGE-01/03。用户确认：改用 Eliscript 是硬性要求，没有例外。
 - **影响**：`A01`–`A12` 的既有证据是在 capsule 实现上取得的，只作历史记录；`R1` 完成后由 `A17` 在新实现上重新取得全部 `T01`–`T16` 证据。`C10`、`C11` 重开，`C12` 重新定义，新增 `C14`。
-- **运行时（`C12`）**：`runtime/emacs-compat.eli` 改为普通 `(module eliscript.runtime.emacs-compat …)`，由自举工具链编译；值表示为：`nil`→`null`、`t`→`true`、整数与非整数浮点为 JS number、整值浮点装箱 `{kind:"float"}`、符号/关键字全局驻留、cons/vector/record/hash-table/buffer 为带 `kind` 的可变对象。UTF-8 编解码与 SHA-256 用 Eliscript 位运算实现，不依赖 `node:*`，保持宿主中立。
-- **Dual-Host 模块（`C11`/`C12`）**：`compileCompatElispModule(source, options)` 与 Emacs 端 `eliscript-compat-compile-elisp-module` 产出同一形态的 **Eliscript 模块源码**（内嵌 Elisp 源文本，导出 `callElisp`/`invokeElisp`/`elispFunctions`），再交给 Eliscript 编译器（Emacs 端 `eliscript-compile-file`，JS 端 `eliscript/compiler` 的 `compile_string`）生成 `.mjs`。`__eliscript_portable__` 是编译器保留名且 `defportable` 不能依赖解释器，因此 Worker 走普通导出调用（`eliscript-worker-call-sync … "callElisp"`），参数与结果用 Elisp 打印文本往返。生成物必须位于能解析 `eliscript` 包的项目目录内（测试使用忽略目录 `dist/emacs-compat-tests/`）。
-- **测试（`C10`）**：Elisp 程序与期望值迁入 `tests/fixtures/emacs-compat/t01.el`…`t13.el`（`;;;; case`/`;;;; expect`/`;;;; error`/`;;;; oracle` 标记），由 `tests/eliscript/emacs-compatible-syntax.eli` 逐例隔离、计时执行；标记 `oracle` 的用例同时在原生 Emacs 求值并比对（覆盖原 `T11` 52 例语料）；`T10`、`T12`、`T15`、`T16` 为该模块内的专用测试。
+- **运行时（`C12`）**：`runtime/session.eli` 改为普通 `(module eliscript.runtime.session …)`，由自举工具链编译；值表示为：`nil`→`null`、`t`→`true`、整数与非整数浮点为 JS number、整值浮点装箱 `{kind:"float"}`、符号/关键字全局驻留、cons/vector/record/hash-table/buffer 为带 `kind` 的可变对象。UTF-8 编解码与 SHA-256 用 Eliscript 位运算实现，不依赖 `node:*`，保持宿主中立。
+- **Dual-Host 模块（`C11`/`C12`）**：`compileModule(source, options)` 与 Emacs 端 `eliscript-runtime-compile-elisp-module` 产出同一形态的 **Eliscript 模块源码**（内嵌 Elisp 源文本，导出 `callElisp`/`invokeElisp`/`elispFunctions`），再交给 Eliscript 编译器（Emacs 端 `eliscript-compile-file`，JS 端 `eliscript/compiler` 的 `compile_string`）生成 `.mjs`。`__eliscript_portable__` 是编译器保留名且 `defportable` 不能依赖解释器，因此 Worker 走普通导出调用（`eliscript-worker-call-sync … "callElisp"`），参数与结果用 Elisp 打印文本往返。生成物必须位于能解析 `eliscript` 包的项目目录内（测试使用忽略目录 `dist/session-tests/`）。
+- **测试（`C10`）**：Elisp 程序与期望值迁入 `tests/fixtures/core-syntax/t01.el`…`t13.el`（`;;;; case`/`;;;; expect`/`;;;; error`/`;;;; oracle` 标记），由 `tests/eliscript/core-syntax.eli` 逐例隔离、计时执行；标记 `oracle` 的用例同时在原生 Emacs 求值并比对（覆盖原 `T11` 52 例语料）；`T10`、`T12`、`T15`、`T16` 为该模块内的专用测试。
 
 ---
 
@@ -320,20 +320,20 @@ flowchart LR
 
 | 阶段 ID | 阶段完成 | 状态 | 产物与执行步骤 | 依赖 | 验收及证据 |
 | --- | --- | --- | --- | --- | --- |
-| `S8` | [x] | 已完成 | **0.1.1 发布收尾阶段**：完成 Option A TDZ 守卫窄化与 `runtime/prelude.eli` 抽离、多文件项目 `.el`/`.eli` 双后缀构建支持、平台工程规范（`docs/emacs-compatible-syntax.md` §十四）、纯 Eliscript `tools/performance/version-comparison.eli` 重写、四维多版本性能对比报告与全套文档同步 | `S7` | `C15`–`C18` 及 `A18`–`A22` 全部实测通过并归档 |
+| `S8` | [x] | 已完成 | **0.1.1 发布收尾阶段**：完成 Option A TDZ 守卫窄化与 `runtime/prelude.eli` 抽离、多文件项目 `.el`/`.eli` 双后缀构建支持、平台工程规范（`docs/core-syntax.md` §十四）、纯 Eliscript `tools/performance/version-comparison.eli` 重写、四维多版本性能对比报告与全套文档同步 | `S7` | `C15`–`C18` 及 `A18`–`A22` 全部实测通过并归档 |
 
 | 施工 ID | 写完打勾 | 变更/需求 | 文件与锚点 | 明确施工动作 | 依赖 | 对应验收 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `C15` | [x] | TDZ 窄化与 Prelude 共享 helper | `compiler/eliscript-emitter.el`<br>`compiler/eliscript-ir-emitter.el`<br>`bootstrap/compiler/emitter.eli`<br>`runtime/prelude.eli` | Option A TDZ 守卫窄化（仅对真正先于顶层定义被跨函数/初始化引用的绑定生成 `__eliscript_tdz_*` 守卫）并将高频操作 helper（`__eliscript_at`、`__eliscript_to_number`、`__eliscript_numeric_*` 等）抽离至按需导入的 `runtime/prelude.eli` | `C14` | `A18` |
 | `C16` | [x] | `.el` 与 `.eli` 双后缀工程支持 | `compiler/eliscript-project.el`<br>`bootstrap/host/compiler-session.eli`<br>`tests/eliscript-project-tests.el` | 在多文件项目构建（`eliscript-build` / `eliscript-check` / `eliscript-watch`）与自举可移植会话中支持 `.el` 与 `.eli` 作为项目入口及相对模块导入，保留精确 `ELI-PJ0014` 跨后缀同基名输出冲突诊断 | `C15` | `A19` |
-| `C17` | [x] | 社区与平台工程约定文档 | `docs/emacs-compatible-syntax.md` §十四<br>`docs/project-configuration.md` | 新增《十四、社区与平台工程约定（Coding Conventions & Best Practices）》，明确 `.el`（100% 双端通用契约）与 `.eli`（Eliscript 平台专属/宿主互操作契约）后缀规范、分层架构、`1+5+2` 按需引入、纯函数与不可变状态边界 | `C16` | `A20` |
+| `C17` | [x] | 社区与平台工程约定文档 | `docs/core-syntax.md` §十四<br>`docs/project-configuration.md` | 新增《十四、社区与平台工程约定（Coding Conventions & Best Practices）》，明确 `.el`（100% 双端通用契约）与 `.eli`（Eliscript 平台专属/宿主互操作契约）后缀规范、分层架构、`1+5+2` 按需引入、纯函数与不可变状态边界 | `C16` | `A20` |
 | `C18` | [x] | 纯 Eliscript 四维基准工具与 `0.1.1` 发布准备 | `tools/performance/version-comparison.eli`<br>`tools/backends/bootstrap.el`<br>`package.json`<br>`editor/eliscript-{mode,repl}.el`<br>`docs/releasing.md`<br>`benchmarks/README.md` | 将 `tools/performance/version-comparison.eli` 改写为 100% 纯 Eliscript 模块（消除 `js*` capsule，支持跨版本工作树各自编译器与 `runtime/prelude.mjs` 解析）；将包与编辑器插件版本升至 `0.1.1`，运行四维性能对比并更新全仓文档 | `C17` | `A21`, `A22` |
 
 | 验收 ID | 测试通过打勾 | 需求/施工/测试 | 前置与输入 | 操作/命令与环境 | 明确预期 | 实际结果/证据 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `A18` | [x] | `C15` | 13 个自举编译器模块与 `benchmarks/compiler-binary-comparison-macos-arm64.json` | `bun test tests/compiler-binary-comparison.test.mjs tests/emitter-tdz-seed-parity-selfhosted.test.mjs` | 13 个编译器模块总体积较基线下降，Stage 2/Stage 3 固定点完全一致，编译中位耗时加速比 $\ge 1.15\text{x}$ | 通过：13 个编译器模块产物由 `800,209 B` 降至 `747,647 B`（缩减 `52,562 B` / `-6.57%`）；Stage 3 单文件包较 `0.0.1` 缩减 `-30.03%`；编译中位耗时由 `1,495.50 ms` 降至 `720.62 ms`（**`2.075x`** 加速） |
 | `A19` | [x] | `C16` | 含 `.el` 入口、`.el`↔`.eli` 混合相对导入与同基名 `.el`/`.eli` 冲突的工程夹具 | `emacs --batch -Q -L compiler -L tools/worker -l ert -l tests/eliscript-project-tests.el -f ert-run-tests-batch-and-exit` | `.el` 入口与混合后缀图正常构建并增量命中缓存，同基名 `.el`/`.eli` 精确抛出 `ELI-PJ0014` | 通过：`tests/eliscript-project-tests.el` **23/23** ERT 用例全绿（含新增 `eliscript-project-builds-el-and-mixed-extension-graphs`） |
-| `A20` | [x] | `C17` | `docs/emacs-compatible-syntax.md`、`docs/project-configuration.md` 及全仓文档 | `bun tools/documentation/check.mjs && bun test tests/onboarding-docs.test.mjs` | 文档契约、代码片段与本地链接检查 100% 通过 | 通过：11 篇核心文档、5 个可执行片段、12 个入口链接及 `tests/onboarding-docs.test.mjs` 3/3 全绿 |
+| `A20` | [x] | `C17` | `docs/core-syntax.md`、`docs/project-configuration.md` 及全仓文档 | `bun tools/documentation/check.mjs && bun test tests/onboarding-docs.test.mjs` | 文档契约、代码片段与本地链接检查 100% 通过 | 通过：11 篇核心文档、5 个可执行片段、12 个入口链接及 `tests/onboarding-docs.test.mjs` 3/3 全绿 |
 | `A21` | [x] | `C18` | `tools/performance/version-comparison.eli` 与 `v0.1.0` / `v0.1.1` / `Emacs 31.1` | `bun test tests/version-comparison-benchmark.test.mjs && bun tools/performance/version-comparison.mjs --release-dir dist/release-report` | 四维版本对比工具为纯 Eliscript（0 处 `js*`），7 项单测全绿，9 项基准工作负载在 `0.1.1` 下全部显著快于原生 Emacs 31.1（`1.20x`–`198.54x`） | 通过：`tests/version-comparison-benchmark.test.mjs` 7/7 全绿（`16.00 ms`）；生成 `dist/release-report/eliscript-0.1.1-benchmark-report.{md,json}` 与 `release-summary.md` |
 | `A22` | [x] | `C15`–`C18` | `0.1.1` 完整工作区 | `make byte-compile`、`ELISCRIPT_SKIP_RETAINED_ACCEPTANCE=1 make check-contracts`、`bun test tests/package-surface.test.mjs tests/repository-integrity.test.mjs` | 零字节编译警告，全部 14 项契约门禁、包表面检查与仓库完整性检查 100% 通过 | 通过：`make byte-compile` 0 警告；14 项契约门禁、14 份基准报告 SHA-256 绑定、`package-surface` 7/7、`repository-integrity` 13/13 全部通过 |
 
@@ -344,9 +344,9 @@ flowchart LR
 | 验收类别 | 测试套件 / 门禁命令 | 用例 / 断言规模 | 实测耗时 | 验收结果与关键证据 |
 | --- | --- | --- | --- | --- |
 | **Emacs 严格字节编译** | `make byte-compile` (`tools/ci/strict-byte-compile.sh`) | 覆盖 `compiler/*.el`、`editor/*.el`、`tools/**/*.el` 全量 `.el` 文件 | `1.9 s` | **通过**（`0 warnings, 0 errors`，开启 `byte-compile-error-on-warn`） |
-| **Emacs ERT 0.1.0/0.1.1 语法与 CHE 差分套件** | `tests/eliscript-compat-syntax-tests.el` | **26 个 ERT 套件**（覆盖 `T01`–`T16`，含 9 个原装 CHE 模块与 Worker 协进程加速） | `452 ms` | **26/26 通过**（逐例计时与全局符号/模块/动态绑定 100% 隔离） |
+| **Emacs ERT 0.1.0/0.1.1 语法与 CHE 差分套件** | `tests/eliscript-syntax-tests.el` | **26 个 ERT 套件**（覆盖 `T01`–`T16`，含 9 个原装 CHE 模块与 Worker 协进程加速） | `452 ms` | **26/26 通过**（逐例计时与全局符号/模块/动态绑定 100% 隔离） |
 | **Emacs ERT 项目构建套件（含 `.el` 后缀支持）** | `tests/eliscript-project-tests.el` | **23 个 ERT 测试**（含 `.el` 入口、`.el`↔`.eli` 混合导入与 `ELI-PJ0014` 冲突诊断） | `310 ms` | **23/23 通过** |
-| **Bun 0.1.0/0.1.1 语法、CHE 原装模块与双端 Differential Oracle** | `bun test tests/emacs-compatible-syntax.test.mjs` (`tests/eliscript/emacs-compatible-syntax.eli`) | **110 个独立测试**（403 次断言，含 **52 个双端差分 Oracle 程序** + **9 个原装 CHE `.el` 模块 7 组探针** + `T16` Worker 模块编译调用） | `2.65 s` | **110/110 通过**（纯 Eliscript 测试驱动，0 处 `js*`） |
+| **Bun 0.1.0/0.1.1 语法、CHE 原装模块与双端 Differential Oracle** | `bun test tests/core-syntax.test.mjs` (`tests/eliscript/core-syntax.eli`) | **110 个独立测试**（403 次断言，含 **52 个双端差分 Oracle 程序** + **9 个原装 CHE `.el` 模块 7 组探针** + `T16` Worker 模块编译调用） | `2.65 s` | **110/110 通过**（纯 Eliscript 测试驱动，0 处 `js*`） |
 | **自举种子符号保留与 TDZ 对齐测试** | `bun test tests/seed-symbol-reservation.test.mjs tests/emitter-tdz-seed-parity-selfhosted.test.mjs` | **11 个测试**（纯 Eliscript 编写，验证 Emacs 种子与自举编译器 TDZ 守卫窄化一致性） | `4.12 s` | **11/11 通过** |
 | **编译器二进制比较与体积优化基准测试** | `bun test tests/compiler-binary-comparison.test.mjs` | **5 个测试**（校验 13 个编译器模块字节数、Source Map 与 `2.075x` 加速比） | `0.26 s` | **5/5 通过**（`800,209 B` → `747,647 B`，`-6.57%`） |
 | **WASM / Native 托管运行时与标准库套件** | `bun test tests/wasm-managed-core-modules.test.mjs tests/wasm-managed-sorted-core.test.mjs tests/wasm-managed-wire-selfhosted.test.mjs` | **14 个跨后端测试**（覆盖托管 Vector `dynamic-from`、AVL 树、Wire 编解码） | `11.12 s` | **14/14 通过** |
@@ -396,7 +396,7 @@ flowchart LR
 | **Stage 3 完整自举编译器总产物** (`dist/bootstrap/*.mjs`) | `1,182,422 B` | `880,115 B` | `879,923 B` | **`827,361 B`** | **较 `v0.0.1` 缩减 `-355,061 B` (`-30.03%`)**；较 `v0.1.0` 缩减 `-5.97%` |
 | **13 模块自举全量编译中位耗时** (`compiler-binary-comparison`) | `1,495.50 ms` | `732.10 ms` | `728.40 ms` | **`720.62 ms`** | **较基线提速 `2.075x`**（超过 `1.15x` 门禁阈值） |
 | **浏览器端单文件编译器 Bundle** (`dist/browser/compiler.js`, minified) | `348,120 B` | `308,450 B` | `307,890 B` | **`291,412 B`** | 较 `v0.0.1` 缩减 **`-16.29%`**，无需任何 Node 内建即可在浏览器 Worker 内全功能编译 |
-| **`runtime/emacs-compat.eli` 实现方式与规模** | 不存在 | 不存在 | 手写 JS Capsule (`1,310` 行 `js*`) | **100% 纯 Eliscript (`5,927` 行 `.eli` → `5,303` 行 `.mjs`)** | **彻底消除 `js*` capsule（`0` 处 `js*`）**，纯 Eliscript 实现 UTF-8/SHA-256、工业级 Elisp 标准库与 Dual-Host 模块编译 |
+| **`runtime/session.eli` 实现方式与规模** | 不存在 | 不存在 | 手写 JS Capsule (`1,310` 行 `js*`) | **100% 纯 Eliscript (`5,927` 行 `.eli` → `5,303` 行 `.mjs`)** | **彻底消除 `js*` capsule（`0` 处 `js*`）**，纯 Eliscript 实现 UTF-8/SHA-256、工业级 Elisp 标准库与 Dual-Host 模块编译 |
 | **原装 `.el` 工程支持与 CHE 同源就绪度** | 仅 `.eli` | 仅 `.eli` | 单文件求值，项目构建仅 `.eli` | **原生支持 `.el`/`.eli` 双后缀项目构建 + 9 个 CHE 模块 100% 差分对齐** | 满足 CHE 项目用标准 Emacs Lisp (`.el`) 与 Eliscript 双端同源共用的全部前提条件 |
 
 ---
@@ -404,12 +404,12 @@ flowchart LR
 ## 8. 恢复入口与变更记录
 
 - **唯一施工文档**：`docs/bootstrap-0.1.0-plan.md`
-- **正式语法与工程约定规范**：`docs/emacs-compatible-syntax.md`
+- **正式语法与工程约定规范**：`docs/core-syntax.md`
 - **当前阶段**：第一批次（`S0`–`S3`）、第二批次（`S4`–`S7`，含 §6.4 修正 R1 `C10`–`C14` 及 `A13`–`A17`）与第三批次（`S8` `0.1.1` 发布收尾 `C15`–`C18` 及 `A18`–`A22`）**全部完成并验收闭环**。
 - **变更记录**：
   - `2026-10-23`: 创建 `docs/bootstrap-0.1.0-plan.md`，完成 `0.1.0` 双端平滑演进架构设计与 `T01`–`T12` 全量语法单元测试矩阵设计。
-  - `2026-10-23`: 完成 `S1`（`C01` 全量测试矩阵）、`S2`（`C02`–`C09` 全部 `editor/eliscript-*.el` 与 `runtime/emacs-compat.eli` 实现及接线）与 `S3`（`A01`–`A12` 全量实测验收通过）。
+  - `2026-10-23`: 完成 `S1`（`C01` 全量测试矩阵）、`S2`（`C02`–`C09` 全部 `editor/eliscript-*.el` 与 `runtime/session.eli` 实现及接线）与 `S3`（`A01`–`A12` 全量实测验收通过）。
   - `2026-10-23`: 新增 §6 第二批次设计（`S4`–`S7`，`Q13`–`Q17`，`D10`–`D13`，`C10`–`C13`，`A13`–`A17`）：原装工业级 `.el` 双端同源共用（Dual-Host）与常驻 Worker 加速。
   - `2026-10-27`: 设计修正 R1（§6.4）：兼容运行时、测试与 Dual-Host 生成物改为真正的 Eliscript，新增 `C14`；`C10`–`C14` 施工完成。
   - `2026-10-29`: 完成 `S7` 与 `A17` 全量闭环验收：完成 Option A TDZ 守卫窄化与 `runtime/prelude.eli` 公共运行时 helper 提取，重写 `tests/seed-symbol-reservation.test.eli` 为纯 Eliscript，修复托管标准库向量 `dynamic-from` 与分阶段项目测试适配器，刷新全部契约与基准摘要并通过全套门禁。
-  - `2026-10-29`: 完成 `S8`（`C15`–`C18` / `A18`–`A22`）`0.1.1` 发布收尾：支持 `.el` 与 `.eli` 多文件项目构建与相对模块导入，新增平台编码与工程规范（`docs/emacs-compatible-syntax.md` §十四），将 `tools/performance/version-comparison.eli` 改写为纯 Eliscript 模块，补充全量测试验收总表、四维版本与原生 Emacs Lisp 性能对比报告及多版本产物体积对比表，准备发布 `v0.1.1`。
+  - `2026-10-29`: 完成 `S8`（`C15`–`C18` / `A18`–`A22`）`0.1.1` 发布收尾：支持 `.el` 与 `.eli` 多文件项目构建与相对模块导入，新增平台编码与工程规范（`docs/core-syntax.md` §十四），将 `tools/performance/version-comparison.eli` 改写为纯 Eliscript 模块，补充全量测试验收总表、四维版本与原生 Emacs Lisp 性能对比报告及多版本产物体积对比表，准备发布 `v0.1.1`。

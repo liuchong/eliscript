@@ -1,7 +1,7 @@
 ;;; t11.el --- T11 differential oracle corpus (native Emacs vs JS runtime) -*- lexical-binding: t; no-byte-compile: t; -*-
 
 ;; Every case is evaluated by the JS runtime and by native Emacs through
-;; `eliscript-compat-eval-string'; normalized results must be identical.
+;; `eliscript-runtime-eval-string'; normalized results must be identical.
 
 ;;;; case D01
 ;;;; oracle

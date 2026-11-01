@@ -19,7 +19,7 @@ produced them.
 
 - [Getting started](getting-started.md)
 - [Language reference](language-reference.md)
-- [Emacs-compatible syntax and 1+5+2 extensions (0.1.0)](emacs-compatible-syntax.md)
+- [Core syntax and 1+5+2 extensions (0.1.0)](core-syntax.md)
 - [Macros](macros.md)
 - [JavaScript interoperation](javascript-interop.md)
 - [Native and WASM memory ABI](native-memory-abi.md)

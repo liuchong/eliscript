@@ -1,7 +1,7 @@
-(module eliscript.runtime.emacs-compat.host-io
+(module eliscript.runtime.session.host-io
   ;;; host-io.eli --- Host OS, file system, async process/HTTP worker hub, timers, loader, and ERT
 
-  (import "./core.eli" el-bool el-bytes-string el-car el-condition-matches el-cons el-cons? el-control-transfer? el-decode-utf8 el-error-from-host el-global-value el-intern el-keyword? el-kind el-list el-list-from el-list-to-array el-make-signal el-member-with el-multibyte? el-num el-number? el-plist-get el-prin1-string el-seq-items el-signal el-string-bytes-array el-string? el-sym-is el-symbol-name el-symbol-name-or-string el-symobj?)
+  (import "./core.eli" el-bool el-bytes-string el-car el-condition-matches el-cons el-cons? el-control-transfer? el-decode-utf8 el-error-from-host el-function? el-global-value el-intern el-keyword? el-kind el-list el-list-from el-list-to-array el-make-signal el-member-with el-multibyte? el-num el-number? el-plist-get el-prin1-string el-seq-items el-signal el-string-bytes-array el-string? el-sym-is el-symbol-name el-symbol-name-or-string el-symobj?)
   (import "./regexp-buffer.eli" el-append-to-buffer el-buffer-delete el-buffer-insert el-buffer-substring el-current-buffer el-generate-new-buffer el-get-buffer-create el-point-max el-string-match)
   (import "./reader-format.eli" el-expand-file-name)
   (import "./evaluator.eli" el-call el-emit-output el-eq-test el-eval el-eval-body el-eval-source el-rest-after el-second)
@@ -937,9 +937,11 @@
         (let* ((lib-name (el-symbol-name-or-string library))
                (suffixes (if (and (not (nullish? nosuffix)) (not (nil? nosuffix)))
                              (js-array "")
-                           (if (or (js-call lib-name :endsWith ".el") (js-call lib-name :endsWith ".eli"))
+                           (if (or (js-call lib-name :endsWith ".el")
+                                   (js-call lib-name :endsWith ".eli")
+                                   (js-call lib-name :endsWith ".mjs"))
                                (js-array "")
-                             (js-array ".el" ".eli" ""))))
+                             (js-array ".el" ".eli" ".mjs" ""))))
                (dirs (if (or (js-call lib-name :startsWith "/") (js-call lib-name :startsWith "./") (js-call lib-name :startsWith "../") (js-call lib-name :startsWith "~"))
                          (js-array (or (el-global-value session (el-intern "default-directory")) "/"))
                        (el-seq-items (if (or (nullish? path) (nil? path))
@@ -973,9 +975,23 @@
             (if (and (not (nullish? noerror)) (not (nil? noerror)))
                 nil
               (el-signal "file-missing" "Cannot open load file" "No such file or directory" file)))
-        (let ((source (js-call fs :readFileSync resolved "utf8")))
-          (el-eval-source session source resolved)
-          t))))
+        (if (js-call resolved :endsWith ".mjs")
+            (let* ((mod-builtin (el-node-builtin "module"))
+                   (url-builtin (el-node-builtin "url"))
+                   (load-sym (el-intern "load-file-name"))
+                   (prev-load (js-call (get session :values) :get load-sym))
+                   (req (js-call mod-builtin :createRequire (get (js-call url-builtin :pathToFileURL resolved) :href)))
+                   (loaded (funcall req resolved)))
+              (js-call (get session :values) :set load-sym resolved)
+              (try
+                (when (and (not (nullish? loaded)) (el-function? (get loaded :loadWithSession)))
+                  (funcall (get loaded :loadWithSession) session))
+                (finally
+                  (js-call (get session :values) :set load-sym prev-load)))
+              t)
+          (let ((source (js-call fs :readFileSync resolved "utf8")))
+            (el-eval-source session source resolved)
+            t)))))
 
 
   ;; ERT special forms and runner
@@ -1120,4 +1136,4 @@
       (el-emit-output session (str "Ran " total " tests, " passed " results as expected, " failed " unexpected, " skipped " skipped\n") t)
       (js-object :kind "ert-stats" :total total :passed passed :failed failed :skipped skipped)))
 
-  (export el-accept-process-output el-binary-coding-arg? el-call-process el-call-process-region el-drain-io-events el-ert-run-single-test el-ert-run-tests-batch el-ert-select-tests el-file-truename el-fs el-load-file el-locate-library el-make-network-process el-make-pipe-process el-make-process el-os el-path el-sleep-for el-url-generic-parse-url el-url-retrieve el-url-retrieve-synchronously io-hub sf-ert-deftest sf-should sf-should-error sf-should-not))
+  (export el-accept-process-output el-binary-coding-arg? el-call-process el-call-process-region el-drain-io-events el-ert-run-single-test el-ert-run-tests-batch el-ert-select-tests el-file-truename el-fs el-load-file el-locate-library el-make-network-process el-make-pipe-process el-make-process el-node-builtin el-os el-path el-sleep-for el-url-generic-parse-url el-url-retrieve el-url-retrieve-synchronously io-hub sf-ert-deftest sf-should sf-should-error sf-should-not))

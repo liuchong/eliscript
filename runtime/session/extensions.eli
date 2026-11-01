@@ -1,7 +1,7 @@
-(module eliscript.runtime.emacs-compat.extensions
+(module eliscript.runtime.session.extensions
   ;;; extensions.eli --- Eliscript 1+5+2 extensions, feature loader (require), and special form installer
 
-  (import "./core.eli" JS_FALSE JS_NULL JS_UNDEFINED OPTION_NONE el-append el-assoc-entries el-bool el-car el-cdr el-compile-error el-cons el-cons? el-control-transfer? el-global-value el-intern el-json-to-persistent el-keyword? el-kind el-lazy-force el-list el-list-from el-list-to-array el-make-float-if-fractional el-make-pcoll el-make-pmap el-make-pset el-make-signal el-nth el-num el-opt el-prin1-string el-record-field-name el-record? el-seq-items el-signal el-string? el-sym-is el-symbol-name el-symbol-name-or-string el-symobj? el-validate-struct-field el-value-compare el-value-contains el-value-count el-value-equal el-value-get el-vector el-vector? s-default s-if s-let s-optional s-progn s-quote s-recur s-rest s-setf s-setq s-underscore serializeCompatValue sym)
+  (import "./core.eli" JS_FALSE JS_NULL JS_UNDEFINED OPTION_NONE el-append el-assoc-entries el-bool el-car el-cdr el-compile-error el-cons el-cons? el-control-transfer? el-global-value el-intern el-json-to-persistent el-keyword? el-kind el-lazy-force el-list el-list-from el-list-to-array el-make-float-if-fractional el-make-pcoll el-make-pmap el-make-pset el-make-signal el-nth el-num el-opt el-prin1-string el-record-field-name el-record? el-seq-items el-signal el-string? el-sym-is el-symbol-name el-symbol-name-or-string el-symobj? el-validate-struct-field el-value-compare el-value-contains el-value-count el-value-equal el-value-get el-vector el-vector? s-default s-if s-let s-optional s-progn s-quote s-recur s-rest s-setf s-setq s-underscore serializeValue sym)
   (import "./evaluator.eli" el-call el-comparator el-def el-def-alias el-define-function el-eval el-eval-args el-eval-list-body el-eval-source el-extract-declarations el-make-lambda el-make-macro el-make-sorted-map el-make-sorted-set el-new-env el-normalize-result el-rest-after el-second el-set-fn el-set-macro el-symbol-function el-third sf-and sf-and-let sf-backquote sf-bound-and-true-p sf-catch sf-cl-assert sf-cl-block sf-cl-case sf-cl-defun sf-cl-destructuring-bind sf-cl-dolist sf-cl-flet sf-cl-labels sf-cl-return sf-cl-return-from sf-cl-the sf-cond sf-condition-case sf-condition-case-unless-debug sf-declare sf-defalias sf-defconst sf-defcustom sf-defface sf-defgroup sf-define-derived-mode sf-define-minor-mode sf-defmacro sf-defsubst sf-defun sf-defvar sf-defvar-keymap sf-defvar-local sf-dolist sf-dotimes sf-function sf-gv-define-setter sf-gv-define-simple-setter sf-if sf-if-let sf-ignore-error sf-ignore-errors sf-interactive sf-lambda sf-let sf-let* sf-let*-const sf-let-const sf-letrec sf-named-let sf-or sf-prog1 sf-prog2 sf-progn sf-quote sf-rx sf-save-current-buffer sf-save-excursion sf-save-match-data sf-seq-doseq sf-setq sf-setq-default sf-setq-local sf-thread sf-unless sf-unwind-protect sf-when sf-when-let sf-while sf-while-let sf-with-current-buffer sf-with-eval-after-load sf-with-output-to-string sf-with-temp-buffer sf-with-temp-file sf-with-timeout special-forms)
   (import "./macros-forms.eli" sf-aset sf-cl-callf sf-cl-defstruct sf-cl-letf sf-cl-loop sf-cl-remf sf-incf sf-pcase sf-pcase-dolist sf-pcase-let sf-pcase-setq sf-pop sf-push sf-pushnew sf-setf)
   (import "./host-io.eli" el-fs el-load-file el-locate-library sf-ert-deftest sf-should sf-should-error sf-should-not)
@@ -251,7 +251,7 @@
                                             (el-make-pmap (js-array (el-intern ":type") "object" (el-intern ":title") (el-symbol-name name)))))
           (funcall d "struct-to-json" (lambda (name instance)
                                         (el-call session (el-intern "struct-validate") (js-array name instance))
-                                        (JSON/stringify (serializeCompatValue instance))))
+                                        (JSON/stringify (serializeValue instance))))
           (funcall d "struct-from-json" (lambda (name text)
                                           (let ((raw (JSON/parse text)) (kvs (js-array)))
                                             (js-call (Object/entries raw) :forEach
@@ -1091,4 +1091,4 @@
 
   (el-install-special-forms)
 
-  (export el-require))
+  (export el-activate-extension el-check-const-mutation el-collect-pattern-vars el-dispatch-tag el-future el-require el-verify-recur-tail))

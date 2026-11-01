@@ -1,8 +1,8 @@
-;;; oracle-driver.el --- Native Emacs side of the emacs-compat differential oracle -*- lexical-binding: t; no-byte-compile: t; -*-
+;;; oracle-driver.el --- Native Emacs side of the differential oracle -*- lexical-binding: t; no-byte-compile: t; -*-
 
 ;; Inputs (environment, all JSON):
 ;;   ELISCRIPT_ORACLE_CASES    array of {"id": ..., "code": ...}
-;;   ELISCRIPT_ORACLE_MODE     "compat" evaluates through `eliscript-compat-eval-string';
+;;   ELISCRIPT_ORACLE_MODE     "runtime" evaluates through `eliscript-runtime-eval-string';
 ;;                             "native" evaluates the forms with plain `eval'
 ;;   ELISCRIPT_ORACLE_PROVIDE  array of feature names to provide before loading
 ;;   ELISCRIPT_ORACLE_LOAD     array of absolute .el files loaded once, unmodified
@@ -21,7 +21,7 @@
          (json-parse-string raw :object-type 'alist :array-type 'list))))
 
 (defun eliscript-oracle--normalize (value)
-  "Return VALUE as JSON-serializable data matching `serializeCompatValue'."
+  "Return VALUE as JSON-serializable data matching `serializeValue'."
   (cond
    ((null value) :null)
    ((eq value t) t)
@@ -50,23 +50,23 @@
       (end-of-file nil))
     value))
 
-(let* ((mode (or (getenv "ELISCRIPT_ORACLE_MODE") "compat"))
+(let* ((mode (or (getenv "ELISCRIPT_ORACLE_MODE") "runtime"))
        (cases (eliscript-oracle--env "ELISCRIPT_ORACLE_CASES"))
        (results nil))
   (dolist (feature (eliscript-oracle--env "ELISCRIPT_ORACLE_PROVIDE"))
     (provide (intern feature)))
   (dolist (file (eliscript-oracle--env "ELISCRIPT_ORACLE_LOAD"))
     (load file nil t))
-  (when (equal mode "compat")
-    (require 'eliscript-compat))
+  (when (equal mode "runtime")
+    (require 'eliscript-runtime))
   (dolist (case cases)
     (let ((id (alist-get 'id case))
           (code (alist-get 'code case)))
-      (when (and (equal mode "compat") (fboundp 'eliscript-compat-reset-state!))
-        (eliscript-compat-reset-state!))
+      (when (and (equal mode "runtime") (fboundp 'eliscript-runtime-reset-state!))
+        (eliscript-runtime-reset-state!))
       (condition-case err
-          (let ((value (if (equal mode "compat")
-                           (eliscript-compat-eval-string code)
+          (let ((value (if (equal mode "runtime")
+                           (eliscript-runtime-eval-string code)
                          (eliscript-oracle--eval-native code))))
             (push `((id . ,id) (ok . t) (value . ,(eliscript-oracle--normalize value))) results))
         (error

@@ -11,7 +11,7 @@ should still be emitted directly; helpers need a concrete semantic reason to
 exist.
 
 All runtime modules in this directory (`literals.eli`, `worker.eli`,
-`math.eli`, `prelude.eli`, `emacs-compat.eli`, `unicode-case.eli`,
+`math.eli`, `prelude.eli`, `session.eli`, `unicode-case.eli`,
 `core/*.eli`, `testing/*.eli`, and `wire/*.eli`)
 are maintained as `.eli` sources in Git and materialized or compiled to `.mjs`
 during `make bootstrap-backends` (zero tracked `.mjs` files in the repository).
@@ -322,20 +322,20 @@ Request contexts now include a frozen `capabilities` token from
 confined resolver accepts package-owned `eliscript/platform/` imports and
 rejects traversal outside that directory.
 
-### Dual-Host Emacs Lisp Compatibility Runtime
+### Session Runtime and AOT Module Compiler
 
-`emacs-compat.eli` and its modular layers under `emacs-compat/` (`core.eli`,
+`session.eli` and its modular layers under `session/` (`core.eli`,
 `regexp-buffer.eli`, `reader-format.eli`, `evaluator.eli`, `macros-forms.eli`,
-`host-io.eli`, `extensions.eli`, `builtins.eli`, and `session-cli.eli`) form a
+`host-io.eli`, `extensions.eli`, `builtins.eli`, `compiler.eli`, and `session-cli.eli`) form a
 100% pure Eliscript subsystem (zero `js*` capsules) compiled into
-`dist/emacs-compat/` (`dist/emacs-compat/emacs-compat.mjs` +
-`dist/emacs-compat/emacs-compat/*.mjs`). It provides the `0.1.0`/`0.1.1` 100%
-Emacs Lisp-compatible kernel, the explicit `1+5+2` extension libraries
+`dist/session/` (`dist/session/session.mjs` +
+`dist/session/session/*.mjs`). It provides the `0.1.0`/`0.1.2`
+Emacs Lisp core kernel, the explicit `1+5+2` extension libraries
 (`eliscript-contract`, `eliscript-data`, `eliscript-bind`, `eliscript-module`,
 `eliscript-async`, `eliscript-js`, `eliscript-abi`), industrial Emacs Lisp
 standard-library primitives (`cl-defstruct`, `setf`/`cl-incf`/`cl-decf`/`push`/`pop`,
 `pcase`, `cl-labels`/`cl-flet`/`cl-loop`, `rx`, pure Eliscript UTF-8 and SHA-256
 `secure-hash`, virtual `with-temp-buffer`, async subprocess/pipe/HTTP event loop
 `io-hub`, and Emacs regular-expression translation), and
-`compileCompatElispModule` / `callCompatElisp` for compiling unmodified `.el`
+`compileModule` / `callElisp` for genuine AOT compilation of `.el`
 modules into ES modules accelerated by `eliscript-worker`.

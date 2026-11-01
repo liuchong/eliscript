@@ -60,7 +60,7 @@
             <table class="fact-table">
               <thead><tr><th>Eliscript</th><th>ECMAScript / Emacs Compat</th></tr></thead>
               <tbody>
-                <tr><td><code>nil</code></td><td><code>null</code> (only falsy value in <code>eliscript-compat</code> core)</td></tr>
+                <tr><td><code>nil</code></td><td><code>null</code> (only falsy value in <code>eliscript-runtime</code> core)</td></tr>
                 <tr><td><code>js-false / js-null / js-undefined</code></td><td>explicit high-fidelity JS tri-state sentinels</td></tr>
                 <tr><td><code>t</code> / <code>false</code></td><td><code>true</code> / <code>false</code></td></tr>
                 <tr><td>numbers and strings</td><td>Emacs integer division <code>(/ 7 2) =&gt; 3</code> in compat core; IEEE-754 in ESM</td></tr>
@@ -73,7 +73,7 @@
                 <tr><td><code>(js-array ...)</code> / <code>(js-object ...)</code></td><td>explicit native JavaScript containers</td></tr>
               </tbody>
             </table>
-            <div class="callout"><p>In the 0.1.0 Emacs-compatible core (<code>eliscript-compat</code>), only <code>nil</code> is false—<code>0</code>, <code>""</code>, <code>'[]</code>, and <code>js-false</code> are truthy, matching GNU Emacs Lisp 100%. In standalone <code>.eli</code> ESM modules, <code>false</code>, <code>nil</code>, and <code>undefined</code> are false while <code>0</code> and <code>""</code> remain true.</p></div>
+            <div class="callout"><p>In the 0.1.0 Emacs-compatible core (<code>eliscript-runtime</code>), only <code>nil</code> is false—<code>0</code>, <code>""</code>, <code>'[]</code>, and <code>js-false</code> are truthy, matching GNU Emacs Lisp 100%. In standalone <code>.eli</code> ESM modules, <code>false</code>, <code>nil</code>, and <code>undefined</code> are false while <code>0</code> and <code>""</code> remain true.</p></div>
           </section>
 
           <section id="forms">
@@ -158,7 +158,7 @@
 
 (export Component helper)
 (export-default Component)</code></pre>
-            <p>One Eliscript source file emits one ESM file. Alongside file-level <code>(module ...)</code>, the <code>eliscript-module</code> extension provides <code>(defmodule name (:export ...) (:import ...) ...)</code> with lexical-private internal bindings (inaccessible externally while exposed to exported functions) and <code>defvar-once</code> hot-reload state preservation. Package subpath imports under <code>eliscript/*</code> support both extensionless specifiers (such as <code>"eliscript/runtime/core/order"</code> or <code>"eliscript/runtime/emacs-compat"</code>) and explicit <code>.mjs</code> specifiers across Node, Bun, and the browser compiler. The repository itself tracks zero <code>.mjs</code> source files in Git; all JavaScript modules are synthesized from <code>.eli</code> sources during bootstrap.</p>
+            <p>One Eliscript source file emits one ESM file. Alongside file-level <code>(module ...)</code>, the <code>eliscript-module</code> extension provides <code>(defmodule name (:export ...) (:import ...) ...)</code> with lexical-private internal bindings (inaccessible externally while exposed to exported functions) and <code>defvar-once</code> hot-reload state preservation. Package subpath imports under <code>eliscript/*</code> support both extensionless specifiers (such as <code>"eliscript/runtime/core/order"</code> or <code>"eliscript/runtime/session"</code>) and explicit <code>.mjs</code> specifiers across Node, Bun, and the browser compiler. The repository itself tracks zero <code>.mjs</code> source files in Git; all JavaScript modules are synthesized from <code>.eli</code> sources during bootstrap.</p>
           </section>
 
           <section id="collections">
@@ -218,12 +218,12 @@
           <section id="differences">
             <h2>100% Emacs Lisp core &amp; 1+5+2 architecture</h2>
             <ul>
-              <li><strong>100% Emacs Lisp default core (<code>eliscript-compat</code>)</strong>: Preserves Lisp-2 dual function/value namespaces, <code>nil</code>-only falsiness, lexical and dynamic <code>defvar</code> scope, mutable native containers alongside 7 persistent collection types, integer division <code>(/ 7 2) =&gt; 3</code>, <code>condition-case</code> / <code>define-error</code>, and full <code>defmacro</code> / <code>cl-defmacro</code> / <code>pcase</code> compatibility.</li>
+              <li><strong>100% Emacs Lisp default core (<code>eliscript-runtime</code>)</strong>: Preserves Lisp-2 dual function/value namespaces, <code>nil</code>-only falsiness, lexical and dynamic <code>defvar</code> scope, mutable native containers alongside 7 persistent collection types, integer division <code>(/ 7 2) =&gt; 3</code>, <code>condition-case</code> / <code>define-error</code>, and full <code>defmacro</code> / <code>cl-defmacro</code> / <code>pcase</code> compatibility.</li>
               <li><strong>7 explicit extension packs (<code>1+5+2</code>)</strong>: Activated by definition form without polluting standard Emacs Lisp — <code>eliscript-contract</code>, <code>eliscript-data</code>, <code>eliscript-bind</code>, <code>eliscript-module</code>, <code>eliscript-async</code>, <code>eliscript-js</code>, and <code>eliscript-abi</code>.</li>
               <li><strong>Four-target ABI execution</strong>: Functions annotated with <code>(declare (eliscript-abi :numeric-f64 ...))</code> or <code>(declare (eliscript-abi :memory-u32 ...))</code> execute with identical semantics across Emacs Lisp, JavaScript ESM, WASM, and ARM64 Native binaries.</li>
               <li><strong>Standalone <code>.eli</code> ESM modules</strong>: Keep lexical Lisp-1 resolution, immutable persistent literals <code>[...]</code> / <code>{...}</code> / <code>#{...}</code>, and explicit ECMAScript module boundaries.</li>
             </ul>
-            <div class="callout callout-coral"><p>See <a href="https://github.com/liuchong/eliscript/blob/master/docs/emacs-compatible-syntax.md">Emacs-Compatible Syntax Specification (0.1.0)</a> for the complete 1+5+2 specification and 50-case Emacs/JS Differential Oracle.</p></div>
+            <div class="callout callout-coral"><p>See <a href="https://github.com/liuchong/eliscript/blob/master/docs/core-syntax.md">Emacs-Compatible Syntax Specification (0.1.0)</a> for the complete 1+5+2 specification and 50-case Emacs/JS Differential Oracle.</p></div>
           </section>
         </article>
       </div>
