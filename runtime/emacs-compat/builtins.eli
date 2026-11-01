@@ -367,7 +367,12 @@
       (funcall d "capitalize" (lambda (s) (js-call s :replace (new globalThis.RegExp "\\p{L}[\\p{L}\\p{N}]*" "gu")
                                                    (lambda (w) (str (js-call (js-call w :charAt 0) :toUpperCase) (js-call (js-call w :slice 1) :toLowerCase))))))
       (funcall d "compare-strings" (lambda (s1 b1 e1 s2 b2 e2 &optional fold) (el-compare-strings s1 b1 e1 s2 b2 e2 (el-opt fold))))
-      (funcall d "string-width" (lambda (s &optional from to) (el-string-width s)))
+      (funcall d "string-width"
+               (lambda (s &optional from to)
+                 (let ((sub (if (and (nullish? from) (nullish? to))
+                                s
+                              (el-substring s (el-opt from) (el-opt to)))))
+                   (el-string-width sub))))
       (funcall d "char-width" (lambda (c) (el-char-width c)))
       (funcall d "truncate-string-to-width" (lambda (s end &optional start padding ellipsis)
                                               (el-truncate-string-to-width s end (el-opt start) (el-opt padding) (el-opt ellipsis))))
@@ -1337,6 +1342,23 @@
       (funcall d "autoload" (lambda (fn file &rest ignored) fn))
       (funcall d "custom-autoload" (lambda (&rest ignored) nil))
       (funcall d "display-graphic-p" (lambda (&optional display) nil))
+      (funcall d "controlling-tty-p"
+               (lambda (&optional terminal)
+                 (let ((p globalThis.process))
+                   (el-bool (and (not (nullish? p))
+                                 (or (and (not (nullish? (get p :stdin))) (eq (get (get p :stdin) :isTTY) t))
+                                     (and (not (nullish? (get p :stdout))) (eq (get (get p :stdout) :isTTY) t))
+                                     (and (not (nullish? (get p :stderr))) (eq (get (get p :stderr) :isTTY) t))))))))
+      (funcall d "tty-type"
+               (lambda (&optional terminal)
+                 (if (nil? (el-call session (el-intern "controlling-tty-p") (js-array)))
+                     nil
+                   (or (el-call session (el-intern "getenv") (js-array "TERM")) "xterm-256color"))))
+      (funcall d "send-string-to-terminal"
+               (lambda (str-val &optional terminal)
+                 (when (el-string? str-val)
+                   (el-write-stdout str-val))
+                 nil))
       (funcall d "frame-width"
                (lambda (&optional frame)
                  (let* ((env-cols (el-call session (el-intern "getenv") (js-array "COLUMNS")))
@@ -1344,8 +1366,13 @@
                    (if (and (Number/isInteger parsed) (> parsed 0))
                        parsed
                      (let* ((p globalThis.process)
-                            (cols (and (not (nullish? p)) (not (nullish? (get p :stdout))) (get (get p :stdout) :columns))))
-                       (if (and (el-integer? cols) (> cols 0)) cols 80))))))
+                            (c1 (and (not (nullish? p)) (not (nullish? (get p :stdout))) (get (get p :stdout) :columns)))
+                            (c2 (and (not (nullish? p)) (not (nullish? (get p :stderr))) (get (get p :stderr) :columns)))
+                            (c3 (and (not (nullish? p)) (not (nullish? (get p :stdin))) (get (get p :stdin) :columns)))
+                            (cols (or (and (el-integer? c1) (> c1 0) c1)
+                                      (and (el-integer? c2) (> c2 0) c2)
+                                      (and (el-integer? c3) (> c3 0) c3))))
+                       (if cols cols 80))))))
       (funcall d "frame-height"
                (lambda (&optional frame)
                  (let* ((env-rows (el-call session (el-intern "getenv") (js-array "LINES")))
@@ -1353,8 +1380,13 @@
                    (if (and (Number/isInteger parsed) (> parsed 0))
                        parsed
                      (let* ((p globalThis.process)
-                            (rows (and (not (nullish? p)) (not (nullish? (get p :stdout))) (get (get p :stdout) :rows))))
-                       (if (and (el-integer? rows) (> rows 0)) rows 24))))))
+                            (r1 (and (not (nullish? p)) (not (nullish? (get p :stdout))) (get (get p :stdout) :rows)))
+                            (r2 (and (not (nullish? p)) (not (nullish? (get p :stderr))) (get (get p :stderr) :rows)))
+                            (r3 (and (not (nullish? p)) (not (nullish? (get p :stdin))) (get (get p :stdin) :rows)))
+                            (rows (or (and (el-integer? r1) (> r1 0) r1)
+                                      (and (el-integer? r2) (> r2 0) r2)
+                                      (and (el-integer? r3) (> r3 0) r3))))
+                       (if rows rows 24))))))
       (funcall d "called-interactively-p" (lambda (&optional kind) nil))
       (funcall d "url-generic-parse-url" (lambda (url) (el-url-generic-parse-url session url)))
       (funcall d "url-portspec" (lambda (u) (el-call session (el-intern "url-portsitory") (js-array u))))
