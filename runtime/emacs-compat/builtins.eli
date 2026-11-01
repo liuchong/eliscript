@@ -5,7 +5,7 @@
   (import "./regexp-buffer.eli" el-buffer-delete el-buffer-insert el-buffer-size el-buffer-substring el-clamp-position el-current-buffer el-expand-replacement el-forward-line el-generate-new-buffer el-get-buffer-create el-kill-buffer el-line-beginning el-line-end el-looking-at el-match-position el-match-string el-point-max el-regexp-exec el-regexp-quote el-replace-regexp-in-string el-rx el-search-buffer el-split-string el-string-match el-string-trim)
   (import "./reader-format.eli" default-json-special-chars el-alist? el-compare-strings el-concat-pieces el-decode-time el-encode-time el-expand-file-name el-file-name-extension el-file-name-sans-extension el-file-relative-name el-format el-format-time-string el-json-encode el-json-options el-json-parse el-json-read-options el-json-serialize el-ms-to-time el-number-from-string el-parse-time-string el-plist-of-keywords? el-read-all el-read-from-string el-regexp-opt el-secure-hash el-time-to-ms el-truncate-string-to-width el-utc-zone?)
   (import "./evaluator.eli" el-call el-check-struct el-cl-find el-cl-typep el-def el-def-alias el-emit-output el-eq-test el-eql-test el-equal-test el-eval el-eval-body el-eval-call-fn el-get-prop el-key-extractor el-key-test el-macroexpand el-macroexpand-1 el-mapconcat el-normalize-result el-put-prop el-root-env el-seq-into-extension el-set-dynamic-variable el-set-fn el-sort-items el-symbol-function el-test-function el-throw el-write-stderr el-write-stdout el-write-stream special-forms)
-  (import "./host-io.eli" el-accept-process-output el-call-process el-call-process-region el-drain-io-events el-ert-run-single-test el-ert-run-tests-batch el-ert-select-tests el-file-truename el-fs el-load-file el-locate-library el-make-pipe-process el-make-process el-os el-path el-sleep-for el-url-generic-parse-url el-url-retrieve el-url-retrieve-synchronously io-hub)
+  (import "./host-io.eli" el-accept-process-output el-binary-coding-arg? el-call-process el-call-process-region el-drain-io-events el-ert-run-single-test el-ert-run-tests-batch el-ert-select-tests el-file-truename el-fs el-load-file el-locate-library el-make-network-process el-make-pipe-process el-make-process el-os el-path el-sleep-for el-url-generic-parse-url el-url-retrieve el-url-retrieve-synchronously io-hub)
   (import "./extensions.eli" el-require)
 
 
@@ -751,6 +751,11 @@
                                 nil (js-call (js-array secs repeat fn) :concat args))))
       (funcall d "timerp" (lambda (x) (el-bool (= (el-kind x) "timer"))))
       (funcall d "cancel-timer" (lambda (timer) (when (= (el-kind timer) "timer") (put timer :cancelled t)) nil))
+      (funcall d "timer--function" (lambda (timer) (if (= (el-kind timer) "timer") (get timer :fn) nil)))
+      (funcall d "timer--args" (lambda (timer) (if (= (el-kind timer) "timer") (el-list-from (get timer :fnArgs)) nil)))
+      (js-call (get session :liveValueGetters) :set (el-intern "timer-list")
+               (lambda ()
+                 (el-list-from (js-call (get session :timers) :filter (lambda (tm) (not (get tm :cancelled)))))))
       ;; Output and minibuffer
       (funcall d "message" (lambda (template &rest args)
                              (if (nil? template) nil
@@ -1401,6 +1406,52 @@
                              ((= scheme "ftp") 21)
                              ((= scheme "ssh") 22)
                              (t 0)))))))
+      (funcall d "url-path-and-query"
+               (lambda (u)
+                 (let ((fn (el-call session (el-intern "url-filename") (js-array u))))
+                   (if (not (el-string? fn))
+                       (el-cons "" nil)
+                     (let ((q (js-call fn :indexOf "?")))
+                       (if (< q 0)
+                           (el-cons fn nil)
+                         (el-cons (js-call fn :slice 0 q) (js-call fn :slice (1+ q)))))))))
+      (funcall d "url-recreate-url"
+               (lambda (u)
+                 (let ((scheme (el-call session (el-intern "url-type") (js-array u)))
+                       (user (el-call session (el-intern "url-user") (js-array u)))
+                       (pass (el-call session (el-intern "url-password") (js-array u)))
+                       (host (el-call session (el-intern "url-host") (js-array u)))
+                       (port (el-call session (el-intern "url-portsitory") (js-array u)))
+                       (file (or (el-call session (el-intern "url-filename") (js-array u)) ""))
+                       (targ (el-call session (el-intern "url-target") (js-array u))))
+                   (str (if (el-string? scheme) (str scheme ":") "")
+                        (if (el-string? host)
+                            (str "//"
+                                 (if (el-string? user)
+                                     (str user (if (el-string? pass) (str ":" pass) "") "@")
+                                   "")
+                                 host
+                                 (if (el-integer? port) (str ":" port) ""))
+                          "")
+                        file
+                        (if (el-string? targ) (str "#" targ) "")))))
+      (funcall d "url-hexify-string"
+               (lambda (s &optional allowed-chars)
+                 (unless (el-string? s) (el-signal "wrong-type-argument" (el-intern "stringp") s))
+                 (js-call (globalThis.encodeURIComponent s)
+                          :replace (new globalThis.RegExp "[!'()*]" "g")
+                          (lambda (c) (str "%" (js-call (js-call (js-call c :charCodeAt 0) :toString 16) :toUpperCase))))))
+      (funcall d "url-unhex-string"
+               (lambda (s &optional allow-newlines)
+                 (if (not (el-string? s)) ""
+                   (try (globalThis.decodeURIComponent s) (catch e s)))))
+      (funcall d "url-expand-file-name"
+               (lambda (url &optional default-url)
+                 (if (and (el-string? default-url) (> (js-length default-url) 0))
+                     (try (js-call (new globalThis.URL (str url) (str default-url)) :toString)
+                       (catch e (str url)))
+                   (str url))))
+      (funcall d "url-setup-privacy-info" (lambda () nil))
       (funcall d "url-retrieve"
                (lambda (url callback &optional cbargs silent inhibit-cookies)
                  (el-url-retrieve session url callback (el-opt cbargs) (el-opt silent) (el-opt inhibit-cookies))))
@@ -1426,6 +1477,25 @@
                      (finally (el-kill-buffer session buf))))))
       (funcall d "make-process" (lambda (&rest args) (el-make-process session args)))
       (funcall d "make-pipe-process" (lambda (&rest args) (el-make-pipe-process session args)))
+      (funcall d "make-network-process" (lambda (&rest args) (el-make-network-process session args)))
+      (funcall d "open-network-stream"
+               (lambda (name buffer host service &rest parameters)
+                 (let ((args (js-call (js-array (el-intern ":name") name
+                                                (el-intern ":buffer") buffer
+                                                (el-intern ":host") host
+                                                (el-intern ":service") service)
+                                      :concat parameters)))
+                   (el-make-network-process session args))))
+      (funcall d "process-contact"
+               (lambda (proc &optional key no-block)
+                 (if (not (= (el-kind proc) "process"))
+                     nil
+                   (let ((contact (or (get proc :contact) (el-list "127.0.0.1" 0))))
+                     (cond
+                       ((or (nullish? key) (nil? key) (el-sym-is key ":local") (el-sym-is key ":remote")) contact)
+                       ((el-sym-is key ":host") (el-car contact))
+                       ((el-sym-is key ":service") (el-car (get contact :cdr)))
+                       (t contact))))))
       (funcall d "start-process"
                (lambda (name buffer program &rest program-args)
                  (if (nil? program)
@@ -1480,7 +1550,18 @@
                  plist))
       (funcall d "process-list" (lambda () (el-drain-io-events session) (el-list-from (js-call (get session :processes) :filter (lambda (p) (get p :live))))))
       (funcall d "set-process-query-on-exit-flag" (lambda (p flag) (when (= (el-kind p) "process") (put p :noquery (nil? flag))) flag))
-      (funcall d "set-process-coding-system" (lambda (&rest ignored) nil))
+      (funcall d "process-query-on-exit-flag" (lambda (p) (if (= (el-kind p) "process") (el-bool (not (get p :noquery))) nil)))
+      (funcall d "set-process-coding-system"
+               (lambda (p &optional decoding encoding)
+                 (when (= (el-kind p) "process")
+                   (put p :codingSystem (el-cons (el-opt decoding) (el-opt encoding)))
+                   (put p :binaryCoding (el-binary-coding-arg? (el-opt decoding))))
+                 nil))
+      (funcall d "process-coding-system"
+               (lambda (p)
+                 (if (= (el-kind p) "process")
+                     (or (get p :codingSystem) (el-cons (el-intern "utf-8") (el-intern "utf-8")))
+                   nil)))
       (funcall d "process-send-string"
                (lambda (p str-val)
                  (when (and (= (el-kind p) "process") (get p :live) (not (nil? io-hub)))
@@ -1499,12 +1580,15 @@
       (funcall d "delete-process"
                (lambda (&optional p)
                  (when (= (el-kind p) "process")
-                   (when (and (get p :live) (not (nil? io-hub)) (> (get p :id) 0))
-                     (js-call (get io-hub :worker) :postMessage (js-object :type "kill" :id (get p :id) :sig "SIGKILL"))
-                     (js-call (get io-hub :procs) :delete (get p :id))
-                     (js-call (get io-hub :httpReqs) :delete (get p :id)))
-                   (put p :live false)
-                   (put p :status (el-intern "exit")))
+                   (let ((was-live (get p :live)))
+                     (when (and was-live (not (nil? io-hub)) (> (get p :id) 0))
+                       (js-call (get io-hub :worker) :postMessage (js-object :type "kill" :id (get p :id) :sig "SIGKILL"))
+                       (js-call (get io-hub :procs) :delete (get p :id))
+                       (js-call (get io-hub :httpReqs) :delete (get p :id)))
+                     (put p :live false)
+                     (put p :status (el-intern "exit"))
+                     (when (and was-live (not (nil? (get p :sentinel))))
+                       (el-call session (get p :sentinel) (js-array p "deleted\n")))))
                  nil))
       (funcall d "kill-process"
                (lambda (&optional p current-group)
@@ -1883,6 +1967,7 @@
                          (js-array "url-proxy-services" nil) (js-array "url-user-agent" "Emacs")
                          (js-array "coding-system-for-read" nil) (js-array "coding-system-for-write" nil)
                          (js-array "inhibit-message" nil) (js-array "system-time-locale" nil)
+                         (js-array "gcs-done" 0) (js-array "gc-elapsed" (el-make-float 0))
                          (js-array "global-map" (el-list (el-intern "keymap")))
                          (js-array "special-mode-map" (el-list (el-intern "keymap")))
                          (js-array "text-mode-map" (el-list (el-intern "keymap")))

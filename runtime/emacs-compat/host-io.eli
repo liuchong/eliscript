@@ -68,9 +68,14 @@
     (str
       "const { parentPort, workerData } = require('worker_threads');\n"
       "const { spawn } = require('child_process');\n"
+      "const net = require('net');\n"
+      "const tls = require('tls');\n"
       "const signal = new Int32Array(workerData.signal);\n"
       "const outPort = workerData.port;\n"
       "const children = new Map();\n"
+      "const servers = new Map();\n"
+      "const sockets = new Map();\n"
+      "let nextServerClientId = 1000000;\n"
       "function send(msg) {\n"
       "  outPort.postMessage(msg);\n"
       "  Atomics.add(signal, 0, 1);\n"
@@ -113,20 +118,125 @@
       "    } catch (err) {\n"
       "      send({ type: 'spawn-error', id: msg.id, message: String(err && err.message ? err.message : err) });\n"
       "    }\n"
+      "  } else if (msg.type === 'net-server') {\n"
+      "    try {\n"
+      "      const server = net.createServer((sock) => {\n"
+      "        const cid = nextServerClientId++;\n"
+      "        sockets.set(cid, sock);\n"
+      "        send({\n"
+      "          type: 'net-accept',\n"
+      "          id: msg.id,\n"
+      "          clientId: cid,\n"
+      "          remoteAddress: sock.remoteAddress || '127.0.0.1',\n"
+      "          remotePort: sock.remotePort || 0\n"
+      "        });\n"
+      "        sock.on('data', (chunk) => {\n"
+      "          send({ type: 'stdout', id: cid, bytes: Array.from(chunk) });\n"
+      "        });\n"
+      "        sock.on('error', (err) => {\n"
+      "          const code = err && err.code ? String(err.code) : '';\n"
+      "          const detail = String(err && err.message ? err.message : err);\n"
+      "          send({ type: 'net-error', id: cid, event: `failed with code ${code || detail}\\n`, message: detail });\n"
+      "        });\n"
+      "        sock.on('close', (hadError) => {\n"
+      "          sockets.delete(cid);\n"
+      "          if (!hadError) {\n"
+      "            send({ type: 'net-close', id: cid, event: 'connection broken by remote peer\\n' });\n"
+      "          }\n"
+      "        });\n"
+      "      });\n"
+      "      server.on('error', (err) => {\n"
+      "        send({ type: 'net-server-error', id: msg.id, message: String(err && err.message ? err.message : err) });\n"
+      "      });\n"
+      "      server.listen(msg.port || 0, msg.host || '127.0.0.1', () => {\n"
+      "        const addr = server.address();\n"
+      "        servers.set(msg.id, server);\n"
+      "        send({\n"
+      "          type: 'net-listening',\n"
+      "          id: msg.id,\n"
+      "          host: (addr && addr.address) || msg.host || '127.0.0.1',\n"
+      "          port: (addr && typeof addr.port === 'number') ? addr.port : (msg.port || 0)\n"
+      "        });\n"
+      "      });\n"
+      "    } catch (err) {\n"
+      "      send({ type: 'net-server-error', id: msg.id, message: String(err && err.message ? err.message : err) });\n"
+      "    }\n"
+      "  } else if (msg.type === 'net-connect') {\n"
+      "    try {\n"
+      "      let opened = false;\n"
+      "      const onConnect = () => {\n"
+      "        if (!opened) {\n"
+      "          opened = true;\n"
+      "          send({ type: 'net-open', id: msg.id });\n"
+      "        }\n"
+      "      };\n"
+      "      const sock = msg.tls\n"
+      "        ? tls.connect({ host: msg.host, port: msg.port, servername: msg.host }, onConnect)\n"
+      "        : net.createConnection({ host: msg.host, port: msg.port }, onConnect);\n"
+      "      sockets.set(msg.id, sock);\n"
+      "      sock.on('data', (chunk) => {\n"
+      "        send({ type: 'stdout', id: msg.id, bytes: Array.from(chunk) });\n"
+      "      });\n"
+      "      sock.on('error', (err) => {\n"
+      "        const code = err && err.code ? String(err.code) : '';\n"
+      "        const detail = String(err && err.message ? err.message : err);\n"
+      "        let ev = `failed with code ${code || detail}\\n`;\n"
+      "        if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || /getaddrinfo|resolve|ENOTFOUND/i.test(detail)) {\n"
+      "          ev = `failed to resolve host: ${detail}\\n`;\n"
+      "        } else if (/tls|ssl|cert|handshake|gnutls/i.test(detail) || /^ERR_TLS/i.test(code)) {\n"
+      "          ev = `failed tls negotiation: ${detail}\\n`;\n"
+      "        }\n"
+      "        send({ type: 'net-error', id: msg.id, event: ev, message: detail });\n"
+      "      });\n"
+      "      sock.on('close', (hadError) => {\n"
+      "        sockets.delete(msg.id);\n"
+      "        if (!hadError) {\n"
+      "          send({ type: 'net-close', id: msg.id, event: 'connection broken by remote peer\\n' });\n"
+      "        }\n"
+      "      });\n"
+      "    } catch (err) {\n"
+      "      const detail = String(err && err.message ? err.message : err);\n"
+      "      send({ type: 'net-error', id: msg.id, event: `failed: ${detail}\\n`, message: detail });\n"
+      "    }\n"
       "  } else if (msg.type === 'stdin') {\n"
       "    const child = children.get(msg.id);\n"
       "    if (child && child.stdin && !child.stdin.destroyed) {\n"
       "      try { child.stdin.write(Buffer.from(msg.bytes)); } catch (_) {}\n"
+      "    } else if (sockets.has(msg.id)) {\n"
+      "      const sock = sockets.get(msg.id);\n"
+      "      if (sock && !sock.destroyed) {\n"
+      "        try { sock.write(Buffer.from(msg.bytes)); } catch (_) {}\n"
+      "      }\n"
       "    }\n"
       "  } else if (msg.type === 'eof') {\n"
       "    const child = children.get(msg.id);\n"
       "    if (child && child.stdin && !child.stdin.destroyed) {\n"
       "      try { child.stdin.end(); } catch (_) {}\n"
+      "    } else if (sockets.has(msg.id)) {\n"
+      "      const sock = sockets.get(msg.id);\n"
+      "      if (sock && !sock.destroyed) {\n"
+      "        try { sock.end(); } catch (_) {}\n"
+      "      }\n"
       "    }\n"
       "  } else if (msg.type === 'kill') {\n"
       "    const child = children.get(msg.id);\n"
       "    if (child) {\n"
       "      try { child.kill(msg.sig || 'SIGTERM'); } catch (_) {}\n"
+      "    } else if (sockets.has(msg.id)) {\n"
+      "      const sock = sockets.get(msg.id);\n"
+      "      sockets.delete(msg.id);\n"
+      "      if (sock && !sock.destroyed) {\n"
+      "        try {\n"
+      "          sock.end();\n"
+      "          setTimeout(() => { try { if (!sock.destroyed) sock.destroy(); } catch (_) {} }, 20);\n"
+      "        } catch (_) {}\n"
+      "      }\n"
+      "    } else if (servers.has(msg.id)) {\n"
+      "      const srv = servers.get(msg.id);\n"
+      "      servers.delete(msg.id);\n"
+      "      if (srv) {\n"
+      "        try { srv.close(); } catch (_) {}\n"
+      "      }\n"
       "    }\n"
       "  } else if (msg.type === 'http') {\n"
       "    try {\n"
@@ -223,8 +333,70 @@
                     ((= mtype "stdout")
                       (let ((proc (js-call (get hub :procs) :get id)))
                         (when (not (undefined? proc))
-                          (let ((chunk (el-decode-utf8 (el-bytes-string (get msg :bytes)))))
+                          (let* ((raw-str (el-bytes-string (get msg :bytes)))
+                                 (chunk (if (get proc :binaryCoding) raw-str (el-decode-utf8 raw-str))))
                             (el-deliver-process-output session proc chunk)))))
+                    ((= mtype "net-listening")
+                      (let ((proc (js-call (get hub :procs) :get id)))
+                        (when (not (undefined? proc))
+                          (put proc :contact (el-list (get msg :host) (get msg :port)))
+                          (put proc :spawned t)
+                          (put proc :status (el-intern "listen")))))
+                    ((= mtype "net-server-error")
+                      (let ((proc (js-call (get hub :procs) :get id)))
+                        (when (not (undefined? proc))
+                          (put proc :spawnError (get msg :message))
+                          (put proc :spawned t)
+                          (put proc :live false)
+                          (put proc :status (el-intern "failed")))))
+                    ((= mtype "net-accept")
+                      (let ((srv (js-call (get hub :procs) :get id)))
+                        (when (not (undefined? srv))
+                          (let* ((cid (get msg :clientId))
+                                 (cproc (js-object :kind "process" :id cid :pid nil
+                                                   :name (str (get srv :name) " <" (get msg :remoteAddress) ":" (get msg :remotePort) ">")
+                                                   :buffer nil
+                                                   :filter (get srv :filter)
+                                                   :sentinel (get srv :sentinel)
+                                                   :noquery (get srv :noquery)
+                                                   :binaryCoding (get srv :binaryCoding)
+                                                   :contact (el-list (get msg :remoteAddress) (get msg :remotePort))
+                                                   :live t :status (el-intern "open") :exitStatus 0
+                                                   :plist (new globalThis.Map))))
+                            (js-call (get hub :procs) :set cid cproc)
+                            (js-call (get session :processes) :push cproc)
+                            (when (not (nil? (get srv :sentinel)))
+                              (el-call session (get srv :sentinel)
+                                       (js-array cproc (str "open from " (get msg :remoteAddress) "\n"))))))))
+                    ((= mtype "net-open")
+                      (let ((proc (js-call (get hub :procs) :get id)))
+                        (when (not (undefined? proc))
+                          (put proc :spawned t)
+                          (put proc :status (el-intern "open"))
+                          (when (and (get proc :netNowait) (not (nil? (get proc :sentinel))))
+                            (el-call session (get proc :sentinel) (js-array proc "open\n"))))))
+                    ((= mtype "net-error")
+                      (let ((proc (js-call (get hub :procs) :get id)))
+                        (when (not (undefined? proc))
+                          (js-call (get hub :procs) :delete id)
+                          (put proc :spawnError (get msg :message))
+                          (put proc :spawned t)
+                          (put proc :live false)
+                          (put proc :status (el-intern "failed"))
+                          (put proc :exitStatus 1)
+                          (when (not (nil? (get proc :sentinel)))
+                            (el-call session (get proc :sentinel)
+                                     (js-array proc (or (get msg :event) "failed\n")))))))
+                    ((= mtype "net-close")
+                      (let ((proc (js-call (get hub :procs) :get id)))
+                        (when (not (undefined? proc))
+                          (js-call (get hub :procs) :delete id)
+                          (put proc :live false)
+                          (put proc :status (el-intern "closed"))
+                          (put proc :exitStatus 0)
+                          (when (not (nil? (get proc :sentinel)))
+                            (el-call session (get proc :sentinel)
+                                     (js-array proc (or (get msg :event) "connection broken by remote peer\n")))))))
                     ((= mtype "stderr")
                       (let ((proc (js-call (get hub :procs) :get id)))
                         (when (not (undefined? proc))
@@ -526,6 +698,15 @@
             (if (not (nullish? (get res :signal))) (str (get res :signal)) 0))))))
 
 
+  (defun el-binary-coding-arg? (coding)
+    (let ((c (if (el-cons? coding) (get coding :car) coding)))
+      (el-bool
+       (and (el-symobj? c)
+            (let ((n (el-symbol-name c)))
+              (or (= n "binary") (= n "no-conversion") (= n "raw-text")
+                  (= n "raw-text-unix") (= n "undecided")))))))
+
+
   (defun el-make-pipe-process (session args)
     (let* ((plist (el-list-from args))
            (name (or (el-plist-get plist (el-intern ":name") el-eq-test) "pipe"))
@@ -534,8 +715,10 @@
            (filter (el-plist-get plist (el-intern ":filter") el-eq-test))
            (sentinel (el-plist-get plist (el-intern ":sentinel") el-eq-test))
            (noquery (el-plist-get plist (el-intern ":noquery") el-eq-test))
+           (coding (el-plist-get plist (el-intern ":coding") el-eq-test))
            (proc (js-object :kind "process" :id 0 :pid nil :name name :buffer buf
                             :filter filter :sentinel sentinel :noquery (el-bool (not (nil? noquery)))
+                            :binaryCoding (el-binary-coding-arg? coding)
                             :live t :status (el-intern "open") :exitStatus 0
                             :plist (new globalThis.Map))))
       (js-call (get session :processes) :push proc)
@@ -553,6 +736,7 @@
            (stderr-arg (el-plist-get plist (el-intern ":stderr") el-eq-test))
            (stderr-target (if (el-string? stderr-arg) (el-get-buffer-create session stderr-arg) stderr-arg))
            (noquery (el-plist-get plist (el-intern ":noquery") el-eq-test))
+           (coding (el-plist-get plist (el-intern ":coding") el-eq-test))
            (hub (el-ensure-io-hub)))
       (when (or (nil? hub) (= (js-length cmd-list) 0))
         (el-signal "file-error" "Cannot spawn process"))
@@ -562,6 +746,7 @@
              (proc (js-object :kind "process" :id id :pid nil :name name :buffer buf
                               :filter filter :sentinel sentinel :stderrTarget stderr-target
                               :noquery (el-bool (not (nil? noquery)))
+                              :binaryCoding (el-binary-coding-arg? coding)
                               :live t :status (el-intern "run") :exitStatus 0
                               :spawned false :spawnError nil
                               :plist (new globalThis.Map))))
@@ -584,6 +769,85 @@
             (setq attempts (1+ attempts))))
         (when (not (nil? (get proc :spawnError)))
           (el-signal "file-error" (str "Spawning child process: " (get proc :spawnError))))
+        proc)))
+
+
+  (defun el-make-network-process (session args)
+    (let* ((plist (el-list-from args))
+           (name (or (el-plist-get plist (el-intern ":name") el-eq-test) "network"))
+           (buf-arg (el-plist-get plist (el-intern ":buffer") el-eq-test))
+           (buf (if (el-string? buf-arg) (el-get-buffer-create session buf-arg) buf-arg))
+           (host-arg (el-plist-get plist (el-intern ":host") el-eq-test))
+           (host (cond ((el-sym-is host-arg "local") "127.0.0.1")
+                       ((el-string? host-arg) host-arg)
+                       (t "127.0.0.1")))
+           (service (el-plist-get plist (el-intern ":service") el-eq-test))
+           (port (cond ((el-number? service) (Math/trunc (el-num service)))
+                       ((el-string? service) (or (Number/parseInt service 10) 0))
+                       ((eq service t) 0)
+                       (t 0)))
+           (type-arg (el-plist-get plist (el-intern ":type") el-eq-test))
+           (use-tls (or (el-sym-is type-arg "tls") (el-sym-is type-arg "ssl")))
+           (server-arg (el-plist-get plist (el-intern ":server") el-eq-test))
+           (is-server (not (nil? server-arg)))
+           (nowait-arg (el-plist-get plist (el-intern ":nowait") el-eq-test))
+           (nowait (not (nil? nowait-arg)))
+           (noquery (el-plist-get plist (el-intern ":noquery") el-eq-test))
+           (filter (el-plist-get plist (el-intern ":filter") el-eq-test))
+           (sentinel (el-plist-get plist (el-intern ":sentinel") el-eq-test))
+           (coding (el-plist-get plist (el-intern ":coding") el-eq-test))
+           (plist-arg (el-plist-get plist (el-intern ":plist") el-eq-test))
+           (hub (el-ensure-io-hub)))
+      (when (nil? hub)
+        (el-signal "file-error" "Network processes not available"))
+      (let* ((id (get hub :nextId))
+             (proc (js-object :kind "process" :id id :pid nil :name name :buffer buf
+                              :filter filter :sentinel sentinel
+                              :noquery (el-bool (not (nil? noquery)))
+                              :binaryCoding (el-binary-coding-arg? coding)
+                              :netNowait (el-bool nowait)
+                              :contact (el-list host port)
+                              :live t
+                              :status (el-intern (if is-server "listen" (if nowait "connect" "open")))
+                              :exitStatus 0
+                              :spawned false :spawnError nil
+                              :plist (new globalThis.Map))))
+        (when (el-cons? plist-arg)
+          (let ((arr (el-list-to-array plist-arg)) (i 0))
+            (while (< (1+ i) (js-length arr))
+              (js-call (get proc :plist) :set (aref arr i) (aref arr (1+ i)))
+              (setq i (+ i 2)))))
+        (put hub :nextId (1+ id))
+        (js-call (get hub :procs) :set id proc)
+        (js-call (get session :processes) :push proc)
+        (if is-server
+            (progn
+              (js-call (get hub :worker) :postMessage
+                       (js-object :type "net-server" :id id :host host :port port))
+              (let ((attempts 0))
+                (while (and (not (get proc :spawned)) (< attempts 50))
+                  (el-drain-io-events session id)
+                  (unless (get proc :spawned)
+                    (let* ((sig (get hub :signal))
+                           (cur (js-call globalThis.Atomics :load sig 0)))
+                      (js-call globalThis.Atomics :wait sig 0 cur 5)))
+                  (setq attempts (1+ attempts))))
+              (when (not (nil? (get proc :spawnError)))
+                (el-signal "file-error" (str "Cannot bind server socket: " (get proc :spawnError)))))
+          (progn
+            (js-call (get hub :worker) :postMessage
+                     (js-object :type "net-connect" :id id :host host :port port :tls use-tls))
+            (unless nowait
+              (let ((attempts 0))
+                (while (and (not (get proc :spawned)) (< attempts 200))
+                  (el-drain-io-events session id)
+                  (unless (get proc :spawned)
+                    (let* ((sig (get hub :signal))
+                           (cur (js-call globalThis.Atomics :load sig 0)))
+                      (js-call globalThis.Atomics :wait sig 0 cur 10)))
+                  (setq attempts (1+ attempts))))
+              (when (not (nil? (get proc :spawnError)))
+                (el-signal "file-error" (str "make client process failed: " (get proc :spawnError)))))))
         proc)))
 
 
@@ -837,4 +1101,4 @@
       (el-emit-output session (str "Ran " total " tests, " passed " results as expected, " failed " unexpected, " skipped " skipped\n") t)
       (js-object :kind "ert-stats" :total total :passed passed :failed failed :skipped skipped)))
 
-  (export el-accept-process-output el-call-process el-call-process-region el-drain-io-events el-ert-run-single-test el-ert-run-tests-batch el-ert-select-tests el-file-truename el-fs el-load-file el-locate-library el-make-pipe-process el-make-process el-os el-path el-sleep-for el-url-generic-parse-url el-url-retrieve el-url-retrieve-synchronously io-hub sf-ert-deftest sf-should sf-should-error sf-should-not))
+  (export el-accept-process-output el-binary-coding-arg? el-call-process el-call-process-region el-drain-io-events el-ert-run-single-test el-ert-run-tests-batch el-ert-select-tests el-file-truename el-fs el-load-file el-locate-library el-make-network-process el-make-pipe-process el-make-process el-os el-path el-sleep-for el-url-generic-parse-url el-url-retrieve el-url-retrieve-synchronously io-hub sf-ert-deftest sf-should sf-should-error sf-should-not))
