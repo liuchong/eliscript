@@ -1,7 +1,7 @@
 (module eliscript.runtime.emacs-compat.reader-format
   ;;; reader-format.eli --- S-expression reader, format, JSON, SHA-256, path, and time utilities
 
-  (import "./core.eli" el-astral? el-bytes-string el-car el-char-string el-char-to-unit el-char-width el-cons el-cons? el-encode-utf8 el-equal-p el-format-g el-global-value el-hash-key el-hash-table-literal el-hash-table? el-integer-string el-integer? el-intern el-keyword? el-list el-list-from el-list-to-array el-make-float el-make-hash-table el-make-signal el-make-symbol el-mod-int el-num el-number-string el-number? el-opt el-pad-exponent el-prin1-string el-puthash el-seq-items el-signal el-string-bytes-array el-string-codes el-string-from-codes el-string-length el-string? el-substring el-sym-is el-symbol-name el-symbol? el-symobj? el-unit-to-char el-upcase el-vector el-vector? s-backquote s-comma s-comma-at s-function s-quote)
+  (import "./core.eli" el-astral? el-bytes-string el-car el-char-string el-char-to-unit el-char-width el-cons el-cons? el-encode-utf8 el-equal-p el-format-g el-global-value el-hash-key el-hash-table-literal el-hash-table? el-integer-string el-integer? el-intern el-keyword? el-list el-list-from el-list-to-array el-make-float el-make-hash-table el-make-signal el-make-symbol el-mark-unibyte el-mod-int el-num el-number-string el-number? el-opt el-pad-exponent el-prin1-string el-puthash el-seq-items el-signal el-string-bytes-array el-string-codes el-string-from-codes el-string-length el-string? el-substring el-sym-is el-symbol-name el-symbol? el-symobj? el-unit-to-char el-upcase el-vector el-vector? s-backquote s-comma s-comma-at s-function s-quote unibyte-strings)
   (import "./regexp-buffer.eli" el-buffer-substring el-point-max el-regexp-quote)
 
 
@@ -128,18 +128,29 @@
 
 
   (defun el-read-string (reader)
-    (let ((parts (js-array)) (done false))
+    (let ((parts (js-array)) (done false) (raw-byte false) (multi-char false))
       (while (not done)
         (let ((ch (el-reader-next reader)))
           (cond
             ((nil? ch) (throw (el-make-signal "end-of-file" (js-array))))
             ((= ch "\"") (setq done t))
             ((= ch "\\")
-              (let ((code (el-read-escape reader t)))
+              (let* ((esc (el-reader-peek reader))
+                     (is-byte-esc (and (not (nil? esc))
+                                       (or (= esc "x") (js-call octal-digit-char :test esc))))
+                     (code (el-read-escape reader t)))
                 (when (>= code 0)
-                  (js-call parts :push (el-char-string (if (> code 4194303) (bit-and code 4194303) code))))))
-            (t (js-call parts :push ch)))))
-      (js-call parts :join "")))
+                  (let ((norm (if (> code 4194303) (bit-and code 4194303) code)))
+                    (if (and is-byte-esc (or (and (>= norm 128) (<= norm 255))
+                                             (and (>= norm 4194176) (<= norm 4194303))))
+                        (setq raw-byte t)
+                      (when (> norm 127) (setq multi-char t)))
+                    (js-call parts :push (el-char-string norm))))))
+            (t
+              (when (> (js-call ch :codePointAt 0) 127) (setq multi-char t))
+              (js-call parts :push ch)))))
+      (let ((res (js-call parts :join "")))
+        (if (and raw-byte (not multi-char)) (el-mark-unibyte res) res))))
 
 
   (defun el-read-token (reader)
@@ -781,7 +792,22 @@
 
 
   (defun el-concat-pieces (args)
-    (js-call (js-call args :map (lambda (arg) (if (el-string? arg) arg (el-string-from-codes (el-seq-items arg))))) :join ""))
+    (let* ((has-unibyte false)
+           (pieces (js-call args :map
+                            (lambda (arg)
+                              (if (el-string? arg)
+                                  (progn
+                                    (when (and (> (get unibyte-strings :size) 0)
+                                               (js-call unibyte-strings :has arg))
+                                      (setq has-unibyte t))
+                                    arg)
+                                (let ((s (el-string-from-codes (el-seq-items arg))))
+                                  (when (and (> (get unibyte-strings :size) 0)
+                                             (js-call unibyte-strings :has s))
+                                    (setq has-unibyte t))
+                                  s)))))
+           (joined (js-call pieces :join "")))
+      (if has-unibyte (el-mark-unibyte joined) joined)))
 
 
   (defun el-compare-strings (s1 start1 end1 s2 start2 end2 ignore-case)

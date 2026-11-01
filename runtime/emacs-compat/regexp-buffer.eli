@@ -1,7 +1,7 @@
 (module eliscript.runtime.emacs-compat.regexp-buffer
   ;;; regexp-buffer.eli --- Emacs regular expressions, rx compiler, match data, and in-memory buffers
 
-  (import "./core.eli" beyond-unicode-char el-char-string el-char-to-unit el-cons el-cons? el-function? el-intern el-kind el-list-from el-list-to-array el-mark-unibyte el-multibyte? el-num el-signal el-string-length el-string? el-substring el-sym-is el-symbol-name el-symobj? el-typeof el-unit-to-char)
+  (import "./core.eli" beyond-unicode-char el-char-string el-char-to-unit el-cons el-cons? el-function? el-intern el-kind el-list-from el-list-to-array el-mark-unibyte el-multibyte? el-num el-signal el-string-length el-string? el-substring el-sym-is el-symbol-name el-symobj? el-typeof el-unit-to-char unibyte-strings)
 
 
   ;; ------------------------------------------------------------------
@@ -319,7 +319,10 @@
                         (setq position (1+ mend)))
                     (setq position mend))))))
           (when (<= position length) (js-call out :push (el-substring string position length)))
-          (js-call out :join "")))))
+          (let ((res (js-call out :join "")))
+            (if (and (> (get unibyte-strings :size) 0) (js-call unibyte-strings :has string))
+                (el-mark-unibyte res)
+              res))))))
 
 
   (defun el-split-string (session string separators omit-nulls trim)
@@ -542,17 +545,24 @@
 
 
   (defun el-buffer-substring (buffer start end)
-    (let ((a (el-clamp-position buffer (Math/min start end)))
-          (b (el-clamp-position buffer (Math/max start end))))
-      (el-substring (get buffer :text) (1- a) (1- b))))
+    (let* ((a (el-clamp-position buffer (Math/min start end)))
+           (b (el-clamp-position buffer (Math/max start end)))
+           (sub (el-substring (get buffer :text) (1- a) (1- b))))
+      (if (get buffer :multibyte) sub (el-mark-unibyte sub))))
 
 
   (defun el-buffer-insert (buffer text)
     (let* ((content (get buffer :text))
            (at (1- (get buffer :point)))
            (before (el-substring content 0 at))
-           (after (el-substring content at nil)))
-      (put buffer :text (str before text after))
+           (after (el-substring content at nil))
+           (next (str before text after)))
+      (when (or (not (get buffer :multibyte))
+                (and (> (get unibyte-strings :size) 0)
+                     (or (js-call unibyte-strings :has content)
+                         (js-call unibyte-strings :has text))))
+        (el-mark-unibyte next))
+      (put buffer :text next)
       (put buffer :point (+ (get buffer :point) (el-string-length text)))
       nil))
 
@@ -561,8 +571,13 @@
     (let* ((a (el-clamp-position buffer (Math/min start end)))
            (b (el-clamp-position buffer (Math/max start end)))
            (content (get buffer :text))
-           (point (get buffer :point)))
-      (put buffer :text (str (el-substring content 0 (1- a)) (el-substring content (1- b) nil)))
+           (point (get buffer :point))
+           (next (str (el-substring content 0 (1- a)) (el-substring content (1- b) nil))))
+      (when (or (not (get buffer :multibyte))
+                (and (> (get unibyte-strings :size) 0)
+                     (js-call unibyte-strings :has content)))
+        (el-mark-unibyte next))
+      (put buffer :text next)
       (cond ((>= point b) (put buffer :point (- point (- b a))))
             ((> point a) (put buffer :point a)))
       nil))
@@ -656,7 +671,10 @@
       (let* ((old-text (get buffer :text))
              (was-at-end (= (get buffer :point) (1+ (el-string-length old-text))))
              (new-text (str old-text chunk)))
-        (when (not (el-multibyte? chunk))
+        (when (or (not (get buffer :multibyte))
+                  (not (el-multibyte? chunk))
+                  (and (> (get unibyte-strings :size) 0)
+                       (js-call unibyte-strings :has old-text)))
           (el-mark-unibyte new-text))
         (put buffer :text new-text)
         (when was-at-end

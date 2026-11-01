@@ -539,12 +539,20 @@
 
   (defun el-char-string (code)
     (cond ((or (< code 0) (not (Number/isInteger code))) (el-signal "wrong-type-argument" (el-intern "characterp") code))
+          ((and (>= code 4194176) (<= code 4194303)) (el-bytes-string (js-array (bit-and code 255))))
           ((> code 1114111) (String/fromCodePoint beyond-unicode-char))
           ((and (>= code 55296) (<= code 57343)) (String/fromCharCode code))
           (t (String/fromCodePoint code))))
 
   (defun el-string-from-codes (codes)
-    (js-call (js-call codes :map (lambda (code) (el-char-string code))) :join ""))
+    (let* ((has-raw-byte false)
+           (parts (js-call codes :map
+                           (lambda (code)
+                             (when (and (Number/isInteger code) (>= code 4194176) (<= code 4194303))
+                               (setq has-raw-byte t))
+                             (el-char-string code))))
+           (s (js-call parts :join "")))
+      (if has-raw-byte (el-mark-unibyte s) s)))
 
   (defun el-string-codes (s)
     (js-call (Array/from s) :map (lambda (ch) (js-call ch :codePointAt 0))))
@@ -602,7 +610,11 @@
     (let ((chars (Array/from s)))
       (when (or (< index 0) (>= index (js-length chars))) (el-signal "args-out-of-range" s index))
       (put chars index (el-char-string code))
-      (js-call chars :join "")))
+      (let ((res (js-call chars :join "")))
+        (if (or (and (>= code 4194176) (<= code 4194303))
+                (and (> (get unibyte-strings :size) 0) (js-call unibyte-strings :has s)))
+            (el-mark-unibyte res)
+          res))))
 
 
   ;; UTF-8: a unibyte string holds one byte per character (0-255).
@@ -667,14 +679,10 @@
   (defun el-multibyte? (s)
     (if (or (el-ascii? s) (js-call unibyte-strings :has s))
         false
-      (let ((multi false) (index 0) (n (js-length s)))
-        (while (and (not multi) (< index n))
-          (when (> (js-call s :charCodeAt index) 255) (setq multi t))
-          (setq index (1+ index)))
-        multi)))
+      t))
 
   (defun el-encode-utf8 (s)
-    (if (or (el-ascii? s) (and (not (el-multibyte? s)) (js-call unibyte-strings :has s)))
+    (if (not (el-multibyte? s))
         s
       (el-bytes-string (el-utf8-bytes s))))
 
