@@ -499,7 +499,7 @@
   ;; ------------------------------------------------------------------
 
   (defun el-make-buffer (name)
-    (js-object :kind "buffer" :name name :text "" :point 1 :live t :mark nil
+    (js-object :kind "buffer" :name name :text "" :point 1 :narrowMin 1 :narrowMax nil :live t :mark nil
                :multibyte t :modified false :locals (new globalThis.Map)))
 
 
@@ -536,12 +536,34 @@
     t)
 
 
-  (defun el-buffer-size (buffer) (el-string-length (get buffer :text)))
+  (defun el-point-min (buffer)
+    (let ((nm (get buffer :narrowMin)))
+      (if (nullish? nm) 1 nm)))
 
-  (defun el-point-max (buffer) (1+ (el-buffer-size buffer)))
+  (defun el-point-max (buffer)
+    (let ((full-max (1+ (el-string-length (get buffer :text))))
+          (nm (get buffer :narrowMax)))
+      (if (nullish? nm) full-max (Math/min full-max nm))))
+
+  (defun el-buffer-size (buffer)
+    (Math/max 0 (- (el-point-max buffer) (el-point-min buffer))))
 
   (defun el-clamp-position (buffer position)
-    (Math/max 1 (Math/min (el-point-max buffer) (el-num position))))
+    (Math/max (el-point-min buffer) (Math/min (el-point-max buffer) (el-num position))))
+
+  (defun el-narrow-to-region (buffer start end)
+    (let* ((full-max (1+ (el-string-length (get buffer :text))))
+           (a (Math/max 1 (Math/min full-max (Math/min (el-num start) (el-num end)))))
+           (b (Math/max 1 (Math/min full-max (Math/max (el-num start) (el-num end))))))
+      (put buffer :narrowMin a)
+      (put buffer :narrowMax b)
+      (put buffer :point (el-clamp-position buffer (get buffer :point)))
+      nil))
+
+  (defun el-widen (buffer)
+    (put buffer :narrowMin 1)
+    (put buffer :narrowMax nil)
+    nil)
 
 
   (defun el-buffer-substring (buffer start end)
@@ -554,6 +576,7 @@
   (defun el-buffer-insert (buffer text)
     (let* ((content (get buffer :text))
            (at (1- (get buffer :point)))
+           (len (el-string-length text))
            (next (if (= content "")
                      text
                    (str (el-substring content 0 at) text (el-substring content at nil)))))
@@ -563,7 +586,9 @@
                          (js-call unibyte-strings :has text))))
         (el-mark-unibyte next))
       (put buffer :text next)
-      (put buffer :point (+ (get buffer :point) (el-string-length text)))
+      (when (not (nullish? (get buffer :narrowMax)))
+        (put buffer :narrowMax (+ (get buffer :narrowMax) len)))
+      (put buffer :point (+ (get buffer :point) len))
       nil))
 
 
@@ -578,20 +603,28 @@
                      (js-call unibyte-strings :has content)))
         (el-mark-unibyte next))
       (put buffer :text next)
+      (when (not (nullish? (get buffer :narrowMax)))
+        (put buffer :narrowMax (Math/max (el-point-min buffer) (- (get buffer :narrowMax) (- b a)))))
       (cond ((>= point b) (put buffer :point (- point (- b a))))
             ((> point a) (put buffer :point a)))
       nil))
 
 
   (defun el-line-beginning (buffer position)
-    (let* ((text (get buffer :text)) (chars (Array/from text)) (index (1- position)))
-      (while (and (> index 0) (/= (aref chars (1- index)) "\n")) (setq index (1- index)))
+    (let* ((text (get buffer :text))
+           (chars (Array/from text))
+           (min-idx (1- (el-point-min buffer)))
+           (index (1- position)))
+      (while (and (> index min-idx) (/= (aref chars (1- index)) "\n")) (setq index (1- index)))
       (1+ index)))
 
 
   (defun el-line-end (buffer position)
-    (let* ((text (get buffer :text)) (chars (Array/from text)) (index (1- position)))
-      (while (and (< index (js-length chars)) (/= (aref chars index) "\n")) (setq index (1+ index)))
+    (let* ((text (get buffer :text))
+           (chars (Array/from text))
+           (max-idx (1- (el-point-max buffer)))
+           (index (1- position)))
+      (while (and (< index max-idx) (/= (aref chars index) "\n")) (setq index (1+ index)))
       (1+ index)))
 
 
@@ -607,7 +640,7 @@
         (let ((remaining (- 0 n)))
           (put buffer :point (el-line-beginning buffer (get buffer :point)))
           (while (> remaining 0)
-            (if (<= (get buffer :point) 1)
+            (if (<= (get buffer :point) (el-point-min buffer))
                 (progn (setq shortage remaining) (setq remaining 0))
               (progn
                 (put buffer :point (el-line-beginning buffer (1- (get buffer :point))))
@@ -619,7 +652,7 @@
     (let* ((regexp (if literal (el-regexp-quote pattern) pattern))
            (text (get buffer :text))
            (repeat (if (nullish? count) 1 count))
-           (limit (if (nullish? bound) (if forward (el-point-max buffer) 1) bound))
+           (limit (if (nullish? bound) (if forward (el-point-max buffer) (el-point-min buffer)) bound))
            (found nil)
            (position (get buffer :point)))
       (while (> repeat 0)
@@ -680,4 +713,4 @@
         (when was-at-end
           (put buffer :point (1+ (el-string-length new-text)))))))
 
-  (export el-append-to-buffer el-buffer-delete el-buffer-insert el-buffer-size el-buffer-substring el-clamp-position el-current-buffer el-expand-replacement el-forward-line el-generate-new-buffer el-get-buffer-create el-kill-buffer el-line-beginning el-line-end el-looking-at el-match-position el-match-string el-point-max el-regexp-exec el-regexp-quote el-replace-regexp-in-string el-rx el-search-buffer el-split-string el-string-match el-string-trim))
+  (export el-append-to-buffer el-buffer-delete el-buffer-insert el-buffer-size el-buffer-substring el-clamp-position el-current-buffer el-expand-replacement el-forward-line el-generate-new-buffer el-get-buffer-create el-kill-buffer el-line-beginning el-line-end el-looking-at el-match-position el-match-string el-narrow-to-region el-point-max el-point-min el-regexp-exec el-regexp-quote el-replace-regexp-in-string el-rx el-search-buffer el-split-string el-string-match el-string-trim el-widen))

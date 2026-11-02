@@ -10618,7 +10618,7 @@ directory；runFunctionalChild 显式传 sourceRoot=root 与其 environment，
 ### C62 D 收口：原 direct browser 两用例的维护语言迁移
 
 原 tests/direct-wasm-backend.test.mjs SHA256 为
-b3e2af96d7da3d92ad4613fcb341656fd7625fb7fd1ca8bae421f171e8c73ea9。
+d8590e98b2d6a748ecf71c01d4194ac43d9051edde886e34c900355354664f4f。
 2000起 function properties 用例仍把已实现的 builtin reflection 全部当作拒绝；
 2030起 complete Value/JSON 旧总截止提前关闭浏览器，需保完整原语义并收集
 有限阶段证据。原文件全字节归档 direct-wasm-backend-test-ground.mjs，

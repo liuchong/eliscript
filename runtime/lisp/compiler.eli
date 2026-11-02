@@ -1,10 +1,10 @@
 (module eliscript.runtime.lisp.compiler
   ;;; compiler.eli --- AOT Lisp-to-Eliscript-to-JavaScript compiler and compiled-module runtime helpers
 
-  (import "./core.eli" JS_FALSE JS_NULL JS_UNDEFINED OPTION_NONE el-add-special-var el-append el-aref el-arith el-arith-2 el-aset-container el-assoc-with el-bool el-car el-car-safe el-cdr el-cdr-safe el-compile-error el-condition-matches el-cons el-cons? el-control-transfer? el-copy-sequence el-default-value el-eq el-eql el-equal-p el-error-from-host el-float? el-function? el-gethash el-global-value el-hash-table? el-integer? el-intern el-is-dynamic-var el-keyword? el-kind el-list el-list-from el-list-to-array el-make-pcoll el-make-pmap el-make-pset el-make-signal el-member-with el-nth el-nthcdr el-num el-number? el-opt el-plist-get el-plist-member el-plist-put el-prin1-string el-puthash el-record-field-name el-record? el-seq-items el-signal el-signal-message el-string-set el-string? el-sym-is el-symbol-name el-symbol-name-or-string el-symbol? el-symobj? el-typeof el-validate-struct-field el-value-contains el-value-equal el-value-get el-vector el-vector? s-allow-other-keys s-and s-app s-aux s-backquote s-body s-comma s-comma-at s-declare s-default s-eliscript s-function s-guard s-if s-interactive s-key s-lambda s-let s-lexical-binding s-macro s-not s-optional s-or s-otherwise s-pred s-progn s-quote s-recur s-rest s-setf s-setq s-underscore)
-  (import "./reader-format.eli" el-expand-file-name el-read-all el-source-lexical-binding)
-  (import "./regexp-buffer.eli" el-clamp-position el-current-buffer el-generate-new-buffer el-get-buffer-create el-kill-buffer el-point-max el-rx el-string-match)
-  (import "./evaluator.eli" el-args el-bind-variable el-call el-callable el-catch-block el-check-struct el-cl-typep el-def el-define-function el-eq-test el-eql-test el-eval el-eval-after-load el-eval-body el-extract-declarations el-get-prop el-handler-conditions el-macroexpand el-macroexpand-1 el-new-env el-normalize-result el-parse-arglist el-put-prop el-rest-after el-restore-dynamic el-root-env el-second el-set-dynamic-variable el-set-fn el-set-macro el-simple-arglist? el-struct-instance? el-symbol-function el-test-function el-third el-throw el-validate-defun el-write-stderr)
+  (import "./core.eli" JS_FALSE JS_NULL JS_UNDEFINED OPTION_NONE el-add-special-var el-append el-aref el-arith el-arith-2 el-aset-container el-assoc-with el-bool el-car el-car-safe el-cdr el-cdr-safe el-compile-error el-condition-matches el-cons el-cons? el-control-transfer? el-copy-sequence el-default-value el-eq el-eql el-equal-p el-error-from-host el-float? el-function? el-gethash el-global-value el-hash-table? el-integer? el-intern el-is-dynamic-var el-is-special-var el-keyword? el-kind el-list el-list-from el-list-to-array el-make-pcoll el-make-pmap el-make-pset el-make-signal el-member-with el-nth el-nthcdr el-num el-number? el-opt el-plist-get el-plist-member el-plist-put el-prin1-string el-puthash el-record-field-name el-record? el-seq-items el-signal el-signal-message el-string-length el-string-set el-string? el-sym-is el-symbol-name el-symbol-name-or-string el-symbol? el-symobj? el-typeof el-validate-struct-field el-value-contains el-value-equal el-value-get el-vector el-vector? s-allow-other-keys s-and s-app s-aux s-backquote s-body s-comma s-comma-at s-declare s-default s-eliscript s-function s-guard s-if s-interactive s-key s-lambda s-let s-lexical-binding s-macro s-not s-optional s-or s-otherwise s-pred s-progn s-quote s-recur s-rest s-setf s-setq s-underscore)
+  (import "./reader-format.eli" el-expand-file-name el-format el-read-all el-source-lexical-binding)
+  (import "./regexp-buffer.eli" el-clamp-position el-current-buffer el-generate-new-buffer el-get-buffer-create el-kill-buffer el-point-max el-point-min el-rx el-string-match)
+  (import "./evaluator.eli" el-args el-bind-variable el-call el-callable el-catch-block el-check-struct el-cl-typep el-def el-define-function el-emit-output el-eq-test el-eql-test el-eval el-eval-after-load el-eval-body el-extract-declarations el-fire-after-load el-get-prop el-handler-conditions el-macroexpand el-macroexpand-1 el-new-env el-normalize-result el-parse-arglist el-put-prop el-rest-after el-restore-dynamic el-root-env el-second el-set-dynamic-variable el-set-fn el-set-macro el-simple-arglist? el-struct-instance? el-symbol-function el-test-function el-third el-throw el-validate-defun el-write-stderr)
   (import "./macros-forms.eli" cadr-place-pattern el-boa-arglist el-loop-final el-loop-initial el-loop-keyword? el-loop-normalize)
   (import "./host-io.eli" el-fs el-locate-library el-node-builtin el-path)
   (import "./extensions.eli" el-activate-extension el-check-const-mutation el-collect-pattern-vars el-dispatch-tag el-future el-require el-verify-recur-tail)
@@ -39,31 +39,35 @@
     (el-set-dynamic-variable session sym value))
 
   (defun rt-read-var (session sym lex-val)
-    (if (or (and (get sym :_everSpecial) (js-call (get session :specials) :has sym))
-            (and (get session :dynamicMode) (js-call (get session :values) :has sym)))
+    (if (el-is-special-var session sym)
         (rt-get-global session sym)
       lex-val))
 
   (defun rt-write-var (session sym val)
-    (when (el-is-dynamic-var session sym)
+    (when (el-is-special-var session sym)
       (el-set-dynamic-variable session sym val))
     val)
 
+  (defun rt-bind-dyn (session sym value dynamic)
+    (when (or (nil? sym) (eq sym t) (el-keyword? sym)) (el-signal "setting-constant" sym))
+    (let* ((values (get session :values))
+           (buf (get session :currentBuffer))
+           (locals (if (and (not (nullish? buf)) (get buf :live)) (get buf :locals) nil))
+           (has-local (and (not (nil? locals)) (js-call locals :has sym))))
+      (js-call dynamic :push
+               (js-array sym (js-call values :has sym) (js-call values :get sym)
+                         (if has-local locals nil) (if has-local (js-call locals :get sym) nil)))
+      (if has-local
+          (js-call locals :set sym value)
+        (js-call values :set sym value))
+      (when (eq sym s-lexical-binding)
+        (put session :dynamicMode (nil? value))))
+    value)
+
   (defun rt-bind-var (session sym value dynamic)
-    (when (or (nil? sym) (eq sym t)) (el-signal "setting-constant" sym))
-    (when (el-is-dynamic-var session sym)
-      (let* ((values (get session :values))
-              (buf (get session :currentBuffer))
-              (locals (if (and (not (nullish? buf)) (get buf :live)) (get buf :locals) nil))
-              (has-local (and (not (nil? locals)) (js-call locals :has sym))))
-        (js-call dynamic :push
-                 (js-array sym (js-call values :has sym) (js-call values :get sym)
-                           (if has-local locals nil) (if has-local (js-call locals :get sym) nil)))
-        (if has-local
-            (js-call locals :set sym value)
-          (js-call values :set sym value))
-        (when (eq sym s-lexical-binding)
-          (put session :dynamicMode (nil? value)))))
+    (when (or (nil? sym) (eq sym t) (el-keyword? sym)) (el-signal "setting-constant" sym))
+    (when (or (el-is-special-var session sym) (eq sym s-lexical-binding))
+      (rt-bind-dyn session sym value dynamic))
     value)
 
   (defun rt-bind-const-var (session sym value dynamic)
@@ -285,6 +289,40 @@
       (try (funcall thunk)
         (finally (when (get buffer :live) (put session :currentBuffer buffer))))))
 
+  (defun rt-save-restriction (session thunk)
+    (let* ((buffer (el-current-buffer session))
+           (saved-min (el-point-min buffer))
+           (saved-max (el-point-max buffer))
+           (was-narrowed (or (> saved-min 1) (not (nil? (get buffer :narrowMax)))))
+           (tail-offset (- (1+ (js-length (get buffer :text))) saved-max)))
+      (try (funcall thunk)
+        (finally
+          (when (get buffer :live)
+            (if was-narrowed
+                (let ((len (js-length (get buffer :text))))
+                  (put buffer :narrowMin (Math/max 1 (Math/min saved-min (1+ len))))
+                  (put buffer :narrowMax (Math/max (get buffer :narrowMin) (- (1+ len) tail-offset)))
+                  (put buffer :point (el-clamp-position buffer (get buffer :point))))
+              (progn
+                (put buffer :narrowMin 1)
+                (put buffer :narrowMax nil))))))))
+
+  (defun rt-with-demoted-errors (session fmt-val thunk)
+    (try (funcall thunk)
+      (catch raw
+        (when (el-control-transfer? raw) (throw raw))
+        (let* ((signal (el-error-from-host raw))
+               (condition (get signal :conditionSymbol)))
+          (if (el-condition-matches session condition "error")
+              (let* ((err-val (el-cons (el-intern condition)
+                                       (el-list-from (get signal :data))))
+                     (fmt-str (if (el-string? fmt-val) fmt-val "Error: %S"))
+                     (text (try (el-format session fmt-str (js-array err-val))
+                             (catch _ (str fmt-str " " (el-prin1-string err-val t))))))
+                (el-emit-output session (str text "\n") t)
+                nil)
+            (throw raw))))))
+
   (defun rt-with-temp-buffer (session thunk)
     (let ((previous (get session :currentBuffer))
           (buffer (el-generate-new-buffer session " *temp*")))
@@ -434,11 +472,13 @@
             (js-object :get (lambda () (el-call session (el-intern "getenv") (js-array env-name)))
                        :set (lambda (v) (el-call session (el-intern "setenv") (js-array env-name v)) v))))
         ((= name "buffer-string")
-          (js-object :get (lambda () (get (el-current-buffer session) :text))
+          (js-object :get (lambda () (el-call session (el-intern "buffer-string") (js-array)))
                      :set (lambda (v)
                             (let ((b (el-current-buffer session)))
                               (put b :text v)
                               (put b :point 1)
+                              (put b :narrowMin 1)
+                              (put b :narrowMax nil)
                               v))))
         ((= name "cl-struct-slot-value")
           (let* ((stype (el-symbol-name (aref evaled-args 0)))
@@ -1161,12 +1201,28 @@
 
   (defun make-compile-ctx (csession)
     (js-object :session csession
+               :dynamicMode (get csession :dynamicMode)
                :varCounter 0
                :symMap (new globalThis.Map)
                :symDefs (js-array)
                :quoteCounter 0
                :quoteDefs (js-array)
                :fnNames (js-array)))
+
+  (defun ctx-bind-fn (ctx &optional is-const force-dyn)
+    (if (or force-dyn (get ctx :dynamicMode))
+        "rt-bind-dyn"
+      (if is-const "rt-bind-const-var" "rt-bind-var")))
+
+  (defun cenv-set-var (ctx cenv name js-var sym-expr is-const &optional force-dyn)
+    (js-call (get cenv :vars) :set name
+             (js-object :jsVar js-var
+                        :symExpr sym-expr
+                        :isConst is-const
+                        :isDynamic (or force-dyn (get ctx :dynamicMode))))
+    (if is-const
+        (js-call (get cenv :consts) :add name)
+      (js-call (get cenv :consts) :delete name)))
 
   (defun make-cenv (&optional parent)
     (if (nullish? parent)
@@ -1356,7 +1412,9 @@
         ((el-keyword? sym) (ctx-sym ctx name))
         ((js-call (get cenv :vars) :has name)
           (let ((info (js-call (get cenv :vars) :get name)))
-            (str "(rt-read-var session " (get info :symExpr) " " (get info :jsVar) ")")))
+            (if (get info :isDynamic)
+                (str "(rt-get-global session " (get info :symExpr) ")")
+              (str "(rt-read-var session " (get info :symExpr) " " (get info :jsVar) ")"))))
         (t (str "(rt-get-global session " (ctx-sym ctx name) ")")))))
 
   (defun compile-var-write (ctx cenv sym val-expr)
@@ -1373,65 +1431,82 @@
           (let ((info (js-call (get cenv :vars) :get name)))
             (when (get info :isConst)
               (el-compile-error (str "ELI-C0010: cannot mutate immutable binding " name)))
-            (str "(setq " (get info :jsVar) " (rt-write-var session " (get info :symExpr) " " val-expr "))"))
+            (if (get info :isDynamic)
+                (str "(rt-set-global session " (get info :symExpr) " " val-expr ")")
+              (str "(setq " (get info :jsVar) " (rt-write-var session " (get info :symExpr) " " val-expr "))")))
         (str "(rt-set-global session " (ctx-sym ctx name) " " val-expr ")"))))
 
-  (defun compile-let (ctx cenv bindings-form body-list sequential is-const)
+  (defun extract-lex-mode-override (val-form)
+    (cond
+      ((or (nil? val-form)
+           (and (el-cons? val-form) (eq (get val-form :car) s-quote) (nil? (el-second val-form))))
+        "dynamic")
+      ((or (eq val-form t)
+           (and (el-cons? val-form) (eq (get val-form :car) s-quote) (not (nil? (el-second val-form)))))
+        "lexical")
+      (t nil)))
+
+  (defun compile-let (ctx cenv bindings-form body-list sequential is-const &optional force-dyn)
     (let ((raw-bindings (el-list-to-array bindings-form)))
       (if (= (js-length raw-bindings) 0)
           (compile-list-body ctx cenv body-list)
         (let ((dyn-var (ctx-gensym ctx "dyn"))
               (next-cenv (make-cenv cenv))
-              (bind-fn (if is-const "rt-bind-const-var" "rt-bind-var")))
-          (if sequential
-              (let ((decls (js-array (str "(" dyn-var " (js-array))")))
-                    (steps (js-array)))
+              (prev-dyn-mode (get ctx :dynamicMode))
+              (bind-fn (ctx-bind-fn ctx is-const force-dyn)))
+          (try
+            (if sequential
+                (let ((decls (js-array (str "(" dyn-var " (js-array))")))
+                      (steps (js-array)))
+                  (js-call raw-bindings :forEach
+                           (lambda (b)
+                             (let* ((sym (if (el-cons? b) (get b :car) b))
+                                    (val-form (if (el-cons? b) (el-car (get b :cdr)) nil))
+                                    (val-expr (compile-expr ctx next-cenv val-form))
+                                    (js-var (ctx-gensym ctx "v"))
+                                    (sym-expr (ctx-sym ctx (get sym :name)))
+                                    (cur-bind-fn (ctx-bind-fn ctx is-const force-dyn)))
+                               (js-call decls :push (str "(" js-var " nil)"))
+                               (js-call steps :push
+                                        (str "(setq " js-var " (" cur-bind-fn " session " sym-expr " " val-expr " " dyn-var "))"))
+                               (cenv-set-var ctx next-cenv (get sym :name) js-var sym-expr is-const force-dyn)
+                               (when (eq sym s-lexical-binding)
+                                 (let ((ov (extract-lex-mode-override val-form)))
+                                   (when (not (nil? ov))
+                                     (put ctx :dynamicMode (= ov "dynamic"))))))))
+                  (js-call steps :push (compile-list-body ctx next-cenv body-list))
+                  (str "(let (" (js-call decls :join " ") ") "
+                       "(try (progn " (js-call steps :join " ") ") "
+                       "(finally (rt-restore-dyn session " dyn-var "))))"))
+              (let ((init-decls (js-array))
+                    (var-decls (js-array (str "(" dyn-var " (js-array))")))
+                    (bind-steps (js-array))
+                    (entries (js-array)))
                 (js-call raw-bindings :forEach
                          (lambda (b)
                            (let* ((sym (if (el-cons? b) (get b :car) b))
                                   (val-form (if (el-cons? b) (el-car (get b :cdr)) nil))
-                                  (val-expr (compile-expr ctx next-cenv val-form))
+                                  (init-var (ctx-gensym ctx "init"))
                                   (js-var (ctx-gensym ctx "v"))
                                   (sym-expr (ctx-sym ctx (get sym :name))))
-                             (js-call decls :push (str "(" js-var " nil)"))
-                             (js-call steps :push
-                                      (str "(setq " js-var " (" bind-fn " session " sym-expr " " val-expr " " dyn-var "))"))
-                             (js-call (get next-cenv :vars) :set (get sym :name)
-                                      (js-object :jsVar js-var :symExpr sym-expr :isConst is-const))
-                             (if is-const
-                                 (js-call (get next-cenv :consts) :add (get sym :name))
-                               (js-call (get next-cenv :consts) :delete (get sym :name))))))
-                (js-call steps :push (compile-list-body ctx next-cenv body-list))
-                (str "(let (" (js-call decls :join " ") ") "
-                     "(try (progn " (js-call steps :join " ") ") "
-                     "(finally (rt-restore-dyn session " dyn-var "))))"))
-            (let ((init-decls (js-array))
-                  (var-decls (js-array (str "(" dyn-var " (js-array))")))
-                  (bind-steps (js-array))
-                  (entries (js-array)))
-              (js-call raw-bindings :forEach
-                       (lambda (b)
-                         (let* ((sym (if (el-cons? b) (get b :car) b))
-                                (val-form (if (el-cons? b) (el-car (get b :cdr)) nil))
-                                (init-var (ctx-gensym ctx "init"))
-                                (js-var (ctx-gensym ctx "v"))
-                                (sym-expr (ctx-sym ctx (get sym :name))))
-                           (js-call init-decls :push (str "(" init-var " " (compile-expr ctx cenv val-form) ")"))
-                           (js-call var-decls :push (str "(" js-var " nil)"))
-                           (js-call bind-steps :push
-                                    (str "(setq " js-var " (" bind-fn " session " sym-expr " " init-var " " dyn-var "))"))
-                           (js-call entries :push (js-object :name (get sym :name) :jsVar js-var :symExpr sym-expr)))))
-              (js-call entries :forEach
-                       (lambda (e)
-                         (js-call (get next-cenv :vars) :set (get e :name)
-                                  (js-object :jsVar (get e :jsVar) :symExpr (get e :symExpr) :isConst is-const))
-                         (if is-const
-                             (js-call (get next-cenv :consts) :add (get e :name))
-                           (js-call (get next-cenv :consts) :delete (get e :name)))))
-              (js-call bind-steps :push (compile-list-body ctx next-cenv body-list))
-              (str "(let (" (js-call (js-call init-decls :concat var-decls) :join " ") ") "
-                   "(try (progn " (js-call bind-steps :join " ") ") "
-                   "(finally (rt-restore-dyn session " dyn-var "))))")))))))
+                             (js-call init-decls :push (str "(" init-var " " (compile-expr ctx cenv val-form) ")"))
+                             (js-call var-decls :push (str "(" js-var " nil)"))
+                             (js-call bind-steps :push
+                                      (str "(setq " js-var " (" bind-fn " session " sym-expr " " init-var " " dyn-var "))"))
+                             (js-call entries :push (js-object :sym sym :valForm val-form :name (get sym :name) :jsVar js-var :symExpr sym-expr)))))
+                (js-call entries :forEach
+                         (lambda (e)
+                           (cenv-set-var ctx next-cenv (get e :name) (get e :jsVar) (get e :symExpr) is-const force-dyn)
+                           (when (eq (get e :sym) s-lexical-binding)
+                             (let ((ov (extract-lex-mode-override (get e :valForm))))
+                               (when (not (nil? ov))
+                                 (put ctx :dynamicMode (= ov "dynamic")))))))
+                (js-call bind-steps :push (compile-list-body ctx next-cenv body-list))
+                (str "(let (" (js-call (js-call init-decls :concat var-decls) :join " ") ") "
+                     "(try (progn " (js-call bind-steps :join " ") ") "
+                     "(finally (rt-restore-dyn session " dyn-var "))))")))
+            (finally
+              (put ctx :dynamicMode prev-dyn-mode)))))))
 
   (defun compile-letrec (ctx cenv bindings-form body-list)
     (let ((raw-bindings (el-list-to-array bindings-form)))
@@ -1439,6 +1514,7 @@
           (compile-list-body ctx cenv body-list)
         (let ((dyn-var (ctx-gensym ctx "dyn"))
               (next-cenv (make-cenv cenv))
+              (bind-fn (ctx-bind-fn ctx false false))
               (decls (js-array))
               (init-steps (js-array))
               (assign-steps (js-array)))
@@ -1450,10 +1526,8 @@
                             (js-var (ctx-gensym ctx "v"))
                             (sym-expr (ctx-sym ctx (get sym :name))))
                        (js-call decls :push (str "(" js-var " nil)"))
-                       (js-call init-steps :push (str "(setq " js-var " (rt-bind-var session " sym-expr " nil " dyn-var "))"))
-                       (js-call (get next-cenv :vars) :set (get sym :name)
-                                (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                       (js-call (get next-cenv :consts) :delete (get sym :name))
+                       (js-call init-steps :push (str "(setq " js-var " (" bind-fn " session " sym-expr " nil " dyn-var "))"))
+                       (cenv-set-var ctx next-cenv (get sym :name) js-var sym-expr false false)
                        (js-call assign-steps :push (js-array sym val-form)))))
           (let ((compiled-assigns
                   (js-call assign-steps :map
@@ -1573,15 +1647,16 @@
               acc))))
       (t (compile-quote ctx pattern))))
 
-  (defun compile-setter-branches (vars next-cenv dyn-var)
+  (defun compile-setter-branches (ctx vars next-cenv dyn-var)
     (let ((s-param "__s") (v-param "__v") (d-param "__d")
+          (bind-fn (ctx-bind-fn ctx false false))
           (clauses (js-array)))
       (js-call vars :forEach
                (lambda (sym)
                  (let ((info (js-call (get next-cenv :vars) :get (get sym :name))))
                    (js-call clauses :push
                             (str "((eq " s-param " " (get info :symExpr) ") "
-                                 "(setq " (get info :jsVar) " (rt-bind-var session " (get info :symExpr) " " v-param " " d-param ")))")))))
+                                 "(setq " (get info :jsVar) " (" bind-fn " session " (get info :symExpr) " " v-param " " d-param ")))")))))
       (js-call clauses :push "(t nil)")
       (str "(lambda (" s-param " " v-param " " d-param ") (cond " (js-call clauses :join " ") "))")))
 
@@ -1598,7 +1673,8 @@
               (res-var (ctx-gensym ctx "res"))
               (dyn-var (ctx-gensym ctx "cdyn"))
               (ens-cenv (make-cenv cenv))
-              (res-sym (ctx-sym ctx "result")))
+              (res-sym (ctx-sym ctx "result"))
+              (bind-fn (ctx-bind-fn ctx false false)))
           (js-call reqs :forEach
                    (lambda (r)
                      (js-call steps :push
@@ -1609,8 +1685,7 @@
                 (js-call steps :push (compile-body ctx cenv body))
                 (str "(progn " (js-call steps :join " ") ")"))
             (progn
-              (js-call (get ens-cenv :vars) :set "result"
-                       (js-object :jsVar res-var :symExpr res-sym :isConst false))
+              (cenv-set-var ctx ens-cenv "result" res-var res-sym false false)
               (let ((ens-steps (js-array)))
                 (js-call enss :forEach
                          (lambda (e)
@@ -1619,7 +1694,7 @@
                                          (el-eliscript-string-literal name) " \"Postcondition\")"))))
                 (str "(progn " (js-call steps :join " ")
                      (if (> (js-length steps) 0) " " "")
-                     "(let* ((" dyn-var " (js-array)) (" res-var " (rt-bind-var session " res-sym " "
+                     "(let* ((" dyn-var " (js-array)) (" res-var " (" bind-fn " session " res-sym " "
                      (compile-body ctx cenv body) " " dyn-var "))) "
                      "(try (progn " (js-call ens-steps :join " ") " " res-var ") "
                      "(finally (rt-restore-dyn session " dyn-var ")))))"))))))))
@@ -1631,8 +1706,12 @@
            (body (get extracted :body))
            (args-var (ctx-gensym ctx "args"))
            (dyn-var (ctx-gensym ctx "dyn"))
+           (bind-fn (ctx-bind-fn ctx false false))
            (fn-cenv (make-cenv cenv)))
       (put fn-cenv :inRecur false)
+      (when (get ctx :dynamicMode)
+        (put fn-cenv :vars (new globalThis.Map))
+        (put fn-cenv :consts (new globalThis.Set)))
       (if (and (not is-cl) (el-simple-arglist? arglist))
           (let* ((spec (el-parse-arglist arglist))
                  (req (get spec :required))
@@ -1649,11 +1728,9 @@
                              (sym-expr (ctx-sym ctx (get sym :name))))
                          (js-call decls :push (str "(" js-var " nil)"))
                          (js-call bind-steps :push
-                                  (str "(setq " js-var " (rt-bind-var session " sym-expr
+                                  (str "(setq " js-var " (" bind-fn " session " sym-expr
                                        " (el-opt (aref " args-var " " idx ")) " dyn-var "))"))
-                         (js-call (get fn-cenv :vars) :set (get sym :name)
-                                  (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                         (js-call (get fn-cenv :consts) :delete (get sym :name)))))
+                         (cenv-set-var ctx fn-cenv (get sym :name) js-var sym-expr false false))))
             (js-call opt :forEach
                      (lambda (sym idx)
                        (let ((js-var (ctx-gensym ctx "v"))
@@ -1661,21 +1738,17 @@
                              (pos (+ nreq idx)))
                          (js-call decls :push (str "(" js-var " nil)"))
                          (js-call bind-steps :push
-                                  (str "(setq " js-var " (rt-bind-var session " sym-expr
+                                  (str "(setq " js-var " (" bind-fn " session " sym-expr
                                        " (rt-opt-arg " args-var " " pos ") " dyn-var "))"))
-                         (js-call (get fn-cenv :vars) :set (get sym :name)
-                                  (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                         (js-call (get fn-cenv :consts) :delete (get sym :name)))))
+                         (cenv-set-var ctx fn-cenv (get sym :name) js-var sym-expr false false))))
             (unless (nil? rest-sym)
               (let ((js-var (ctx-gensym ctx "v"))
                     (sym-expr (ctx-sym ctx (get rest-sym :name))))
                 (js-call decls :push (str "(" js-var " nil)"))
                 (js-call bind-steps :push
-                         (str "(setq " js-var " (rt-bind-var session " sym-expr
+                         (str "(setq " js-var " (" bind-fn " session " sym-expr
                               " (rt-rest-arg " args-var " " nmax ") " dyn-var "))"))
-                (js-call (get fn-cenv :vars) :set (get rest-sym :name)
-                         (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                (js-call (get fn-cenv :consts) :delete (get rest-sym :name))))
+                (cenv-set-var ctx fn-cenv (get rest-sym :name) js-var sym-expr false false)))
             (let* ((body-expr (compile-body-with-contracts ctx fn-cenv body props name))
                    (wrapped-body (if (nil? block-name)
                                      body-expr
@@ -1701,11 +1774,9 @@
                      (let ((js-var (ctx-gensym ctx "v"))
                            (sym-expr (ctx-sym ctx (get sym :name))))
                        (js-call decls :push (str "(" js-var " nil)"))
-                       (js-call (get fn-cenv :vars) :set (get sym :name)
-                                (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                       (js-call (get fn-cenv :consts) :delete (get sym :name)))))
+                       (cenv-set-var ctx fn-cenv (get sym :name) js-var sym-expr false false))))
           (setq pat-expr (compile-destructure-pattern ctx fn-cenv arglist))
-          (setq setter-expr (compile-setter-branches vars fn-cenv dyn-var))
+          (setq setter-expr (compile-setter-branches ctx vars fn-cenv dyn-var))
           (let* ((body-expr (compile-body-with-contracts ctx fn-cenv body props name))
                  (wrapped-body (if (nil? block-name)
                                    body-expr
@@ -1726,16 +1797,17 @@
            (vars (collect-destructure-vars arglist (js-array)))
            (decls (js-array (str "(" dyn-var " (js-array))"))))
       (put fn-cenv :inRecur false)
+      (when (get ctx :dynamicMode)
+        (put fn-cenv :vars (new globalThis.Map))
+        (put fn-cenv :consts (new globalThis.Set)))
       (js-call vars :forEach
                (lambda (sym)
                  (let ((js-var (ctx-gensym ctx "v"))
                        (sym-expr (ctx-sym ctx (get sym :name))))
                    (js-call decls :push (str "(" js-var " nil)"))
-                   (js-call (get fn-cenv :vars) :set (get sym :name)
-                            (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                   (js-call (get fn-cenv :consts) :delete (get sym :name)))))
+                   (cenv-set-var ctx fn-cenv (get sym :name) js-var sym-expr false false))))
       (let ((pat-expr (compile-destructure-pattern ctx fn-cenv arglist))
-            (setter-expr (compile-setter-branches vars fn-cenv dyn-var))
+            (setter-expr (compile-setter-branches ctx vars fn-cenv dyn-var))
             (body-expr (compile-body ctx fn-cenv body-array)))
         (str "(lambda (" forms-var ") "
              "(let (" (js-call decls :join " ") ") "
@@ -1752,7 +1824,8 @@
               (if (not (nil? (get cenv :moduleName)))
                   (el-compile-error (str "ELI-M0002: cannot reassign defconst-lexical " name " in module " (get cenv :moduleName)))
                 (el-compile-error (str "ELI-C0010: cannot mutate immutable binding " name))))
-            (if (js-call (get cenv :vars) :has name)
+            (if (and (js-call (get cenv :vars) :has name)
+                     (not (get (js-call (get cenv :vars) :get name) :isDynamic)))
                 (let ((info (js-call (get cenv :vars) :get name))
                       (v-param (ctx-gensym ctx "pv")))
                   (str "(js-object :get (lambda () (rt-read-var session " (get info :symExpr) " " (get info :jsVar) ")) "
@@ -1834,6 +1907,7 @@
         (let ((dyn-var (ctx-gensym ctx "dyn"))
               (restores-var (ctx-gensym ctx "rest"))
               (next-cenv (make-cenv cenv))
+              (bind-fn (ctx-bind-fn ctx false false))
               (decls (js-array))
               (steps (js-array))
               (val-inits (js-array)))
@@ -1847,7 +1921,8 @@
                        (if (el-symobj? place-form)
                            (let* ((name (get place-form :name))
                                   (sym-expr (ctx-sym ctx name))
-                                  (was-lex (js-call (get eval-cenv :vars) :has name))
+                                  (was-lex (and (js-call (get eval-cenv :vars) :has name)
+                                                (not (get (js-call (get eval-cenv :vars) :get name) :isDynamic))))
                                   (val-expr (compile-expr ctx eval-cenv val-form))
                                   (js-var (ctx-gensym ctx "v")))
                              (js-call decls :push (str "(" js-var " nil)"))
@@ -1856,9 +1931,8 @@
                                    (unless was-lex
                                      (js-call steps :push (str "(el-add-special-var session " sym-expr ")")))
                                    (js-call steps :push
-                                            (str "(setq " js-var " (rt-bind-var session " sym-expr " " val-expr " " dyn-var "))"))
-                                   (js-call (get next-cenv :vars) :set name
-                                            (js-object :jsVar js-var :symExpr sym-expr :isConst false)))
+                                            (str "(setq " js-var " (" bind-fn " session " sym-expr " " val-expr " " dyn-var "))"))
+                                   (cenv-set-var ctx next-cenv name js-var sym-expr false false))
                                (let ((init-v (ctx-gensym ctx "linit")))
                                  (js-call decls :push (str "(" init-v " " val-expr ")"))
                                  (js-call val-inits :push
@@ -1889,10 +1963,9 @@
                              (unless (get item :wasLex)
                                (js-call steps :push (str "(el-add-special-var session " (get item :symExpr) ")")))
                              (js-call steps :push
-                                      (str "(setq " (get item :jsVar) " (rt-bind-var session "
+                                      (str "(setq " (get item :jsVar) " (" bind-fn " session "
                                            (get item :symExpr) " " (get item :initVar) " " dyn-var "))"))
-                             (js-call (get next-cenv :vars) :set (get item :name)
-                                      (js-object :jsVar (get item :jsVar) :symExpr (get item :symExpr) :isConst false)))
+                             (cenv-set-var ctx next-cenv (get item :name) (get item :jsVar) (get item :symExpr) false false))
                          (js-call steps :push
                                   (str "(progn (js-call " restores-var " :push (js-array (get "
                                        (get item :pVar) " :set) " (get item :oldVar) ")) "
@@ -2034,6 +2107,7 @@
            (val-var (ctx-gensym ctx "pval"))
            (res-var (ctx-gensym ctx "pres"))
            (done-var (ctx-gensym ctx "pdone"))
+           (bind-fn (ctx-bind-fn ctx false false))
            (clauses (el-list-to-array (el-rest-after form 1)))
            (clause-exprs (js-array)))
       (js-call clauses :forEach
@@ -2049,9 +2123,7 @@
                               (let ((js-var (ctx-gensym ctx "v"))
                                     (sym-expr (ctx-sym ctx (get sym :name))))
                                 (js-call decls :push (str "(" js-var " nil)"))
-                                (js-call (get clause-cenv :vars) :set (get sym :name)
-                                         (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                                (js-call (get clause-cenv :consts) :delete (get sym :name)))))
+                                (cenv-set-var ctx clause-cenv (get sym :name) js-var sym-expr false false))))
                    (let ((pat-expr (compile-pcase-pattern ctx clause-cenv pat))
                          (setter-expr
                            (let ((s-param "__s") (v-param "__v") (s-clauses (js-array)))
@@ -2060,7 +2132,7 @@
                                         (let ((info (js-call (get clause-cenv :vars) :get (get sym :name))))
                                           (js-call s-clauses :push
                                                    (str "((eq " s-param " " (get info :symExpr) ") "
-                                                        "(setq " (get info :jsVar) " (rt-bind-var session "
+                                                        "(setq " (get info :jsVar) " (" bind-fn " session "
                                                         (get info :symExpr) " " v-param " " dyn-var ")))")))))
                              (js-call s-clauses :push "(t nil)")
                              (str "(lambda (" s-param " " v-param ") (cond " (js-call s-clauses :join " ") "))")))
@@ -2088,6 +2160,7 @@
           (compile-list-body ctx cenv body)
         (let ((dyn-var (ctx-gensym ctx "dyn"))
               (next-cenv (make-cenv cenv))
+              (bind-fn (ctx-bind-fn ctx false false))
               (decls (js-array))
               (steps (js-array)))
           (js-call decls :push (str "(" dyn-var " (js-array))"))
@@ -2106,9 +2179,7 @@
                                   (let ((js-var (ctx-gensym ctx "v"))
                                         (sym-expr (ctx-sym ctx (get sym :name))))
                                     (js-call decls :push (str "(" js-var " nil)"))
-                                    (js-call (get next-cenv :vars) :set (get sym :name)
-                                             (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                                    (js-call (get next-cenv :consts) :delete (get sym :name)))))
+                                    (cenv-set-var ctx next-cenv (get sym :name) js-var sym-expr false false))))
                        (let* ((pat-expr (compile-pcase-pattern ctx next-cenv pat))
                               (s-param "__s") (v-param "__v")
                               (s-clauses (js-array)))
@@ -2117,7 +2188,7 @@
                                     (let ((info (js-call (get next-cenv :vars) :get (get sym :name))))
                                       (js-call s-clauses :push
                                                (str "((eq " s-param " " (get info :symExpr) ") "
-                                                    "(setq " (get info :jsVar) " (rt-bind-var session "
+                                                    "(setq " (get info :jsVar) " (" bind-fn " session "
                                                     (get info :symExpr) " " v-param " " dyn-var ")))")))))
                          (js-call s-clauses :push "(t nil)")
                          (let ((match-call (str "(rt-pcase-match session " pat-expr " " val-var
@@ -2140,6 +2211,7 @@
            (idx-var (ctx-gensym ctx "i"))
            (item-var (ctx-gensym ctx "item"))
            (dyn-var (ctx-gensym ctx "dyn"))
+           (bind-fn (ctx-bind-fn ctx false false))
            (vars (collect-pcase-vars pat (js-array)))
            (iter-cenv (make-cenv cenv))
            (decls (js-array (str "(" dyn-var " (js-array))"))))
@@ -2148,9 +2220,7 @@
                  (let ((js-var (ctx-gensym ctx "v"))
                        (sym-expr (ctx-sym ctx (get sym :name))))
                    (js-call decls :push (str "(" js-var " nil)"))
-                   (js-call (get iter-cenv :vars) :set (get sym :name)
-                            (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                   (js-call (get iter-cenv :consts) :delete (get sym :name)))))
+                   (cenv-set-var ctx iter-cenv (get sym :name) js-var sym-expr false false))))
       (let* ((pat-expr (compile-pcase-pattern ctx iter-cenv pat))
              (s-param "__s") (v-param "__v")
              (s-clauses (js-array)))
@@ -2159,7 +2229,7 @@
                    (let ((info (js-call (get iter-cenv :vars) :get (get sym :name))))
                      (js-call s-clauses :push
                               (str "((eq " s-param " " (get info :symExpr) ") "
-                                   "(setq " (get info :jsVar) " (rt-bind-var session "
+                                   "(setq " (get info :jsVar) " (" bind-fn " session "
                                    (get info :symExpr) " " v-param " " dyn-var ")))")))))
         (js-call s-clauses :push "(t nil)")
         (str "(let ((" items-var " (el-seq-items " (compile-expr ctx cenv seq-form) ")) "
@@ -2338,15 +2408,14 @@
               (t (js-call raw-body :push (parse-clause))))))
         (let* ((loop-cenv (make-cenv cenv))
                (dyn-var (ctx-gensym ctx "dyn"))
+               (bind-fn (ctx-bind-fn ctx false false))
                (decls (js-array (str "(" dyn-var " (js-array))"))))
           (js-call vars :forEach
                    (lambda (sym)
                      (let ((js-var (ctx-gensym ctx "v"))
                            (sym-expr (ctx-sym ctx (get sym :name))))
                        (js-call decls :push (str "(" js-var " nil)"))
-                       (js-call (get loop-cenv :vars) :set (get sym :name)
-                                (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                       (js-call (get loop-cenv :consts) :delete (get sym :name)))))
+                       (cenv-set-var ctx loop-cenv (get sym :name) js-var sym-expr false false))))
           (letfn ((compile-clause (c)
                     (let ((t-kind (get c :type)))
                       (cond
@@ -2410,10 +2479,10 @@
                          (let ((info (js-call (get loop-cenv :vars) :get (get sym :name))))
                            (js-call g-clauses :push
                                     (str "((eq " s-param " " (get info :symExpr) ") "
-                                         "(rt-read-var session " (get info :symExpr) " " (get info :jsVar) "))"))
+                                         (compile-var-read ctx loop-cenv sym) ")"))
                            (js-call s-clauses :push
                                     (str "((eq " s-param " " (get info :symExpr) ") "
-                                         "(setq " (get info :jsVar) " (rt-bind-var session "
+                                         "(setq " (get info :jsVar) " (" bind-fn " session "
                                          (get info :symExpr) " " v-param " " dyn-var ")))")))))
               (js-call g-clauses :push "(t nil)")
               (js-call s-clauses :push "(t nil)")
@@ -2533,6 +2602,7 @@
                    (let* ((args-var (ctx-gensym ctx "kargs"))
                           (plist-var (ctx-gensym ctx "plist"))
                           (dyn-var (ctx-gensym ctx "dyn"))
+                          (bind-fn (ctx-bind-fn ctx false false))
                           (ctor-cenv (make-cenv cenv))
                           (decls (js-array (str "(" plist-var " (el-list-from " args-var "))")
                                            (str "(" dyn-var " (js-array))")))
@@ -2549,12 +2619,11 @@
                                   (js-call decls :push (str "(" js-var " nil)"))
                                   (js-call steps :push
                                            (str "(let ((" cell-var " (el-plist-member " plist-var " " kw-expr " el-eq-test))) "
-                                                "(setq " js-var " (rt-bind-var session " sym-expr " "
+                                                "(setq " js-var " (" bind-fn " session " sym-expr " "
                                                 "(if (nil? " cell-var ") " init-expr " (el-car-safe (get " cell-var " :cdr))) "
                                                 dyn-var ")))"))
-                                  (js-call (get ctor-cenv :vars) :set sname
-                                           (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                                  (js-call slot-vars :push (str "(rt-read-var session " sym-expr " " js-var ")")))))
+                                  (cenv-set-var ctx ctor-cenv sname js-var sym-expr false false)
+                                  (js-call slot-vars :push (compile-var-read ctx ctor-cenv (get slot :name))))))
                      (js-call steps :push
                               (str "(js-object :kind \"record\" :items (js-array " type-sym-expr
                                    (js-call (js-call slot-vars :map (lambda (v) (str " " v))) :join "")
@@ -2590,10 +2659,9 @@
                                   (let ((js-var (ctx-gensym ctx "v"))
                                         (sym-expr (ctx-sym ctx (get sym :name))))
                                     (js-call decls :push (str "(" js-var " nil)"))
-                                    (js-call (get boa-cenv :vars) :set (get sym :name)
-                                             (js-object :jsVar js-var :symExpr sym-expr :isConst false)))))
+                                    (cenv-set-var ctx boa-cenv (get sym :name) js-var sym-expr false false))))
                        (let ((pat-expr (compile-destructure-pattern ctx boa-cenv full-arglist))
-                             (setter-expr (compile-setter-branches all-vars boa-cenv dyn-var))
+                             (setter-expr (compile-setter-branches ctx all-vars boa-cenv dyn-var))
                              (item-reads
                                (js-call all-slots :map
                                         (lambda (slot)
@@ -2682,11 +2750,9 @@
                                   (let ((js-var (ctx-gensym ctx "v"))
                                         (sym-expr (ctx-sym ctx (get sym :name))))
                                     (js-call decls :push (str "(" js-var " nil)"))
-                                    (js-call (get next-cenv :vars) :set (get sym :name)
-                                             (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                                    (js-call (get next-cenv :consts) :delete (get sym :name)))))
+                                    (cenv-set-var ctx next-cenv (get sym :name) js-var sym-expr false false))))
                        (let ((pat-expr (compile-bind-pattern ctx next-cenv pat))
-                             (setter-expr (compile-setter-branches vars next-cenv dyn-var)))
+                             (setter-expr (compile-setter-branches ctx vars next-cenv dyn-var)))
                          (js-call steps :push
                                   (str "(rt-match-binding session " pat-expr " " val-expr " " setter-expr " " dyn-var ")"))))))
           (js-call steps :push (compile-list-body ctx next-cenv body))
@@ -2718,16 +2784,17 @@
              (decls (js-array (str "(" dyn-var " (js-array))")))
              (steps (js-array)))
         (put fn-cenv :inRecur false)
+        (when (get ctx :dynamicMode)
+          (put fn-cenv :vars (new globalThis.Map))
+          (put fn-cenv :consts (new globalThis.Set)))
         (js-call seen :forEach (lambda (v) (js-call vars :push (if (el-symobj? v) v (el-intern (str v))))))
         (js-call vars :forEach
                  (lambda (sym)
                    (let ((js-var (ctx-gensym ctx "v"))
                          (sym-expr (ctx-sym ctx (get sym :name))))
                      (js-call decls :push (str "(" js-var " nil)"))
-                     (js-call (get fn-cenv :vars) :set (get sym :name)
-                              (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                     (js-call (get fn-cenv :consts) :delete (get sym :name)))))
-        (let ((setter-expr (compile-setter-branches vars fn-cenv dyn-var)))
+                     (cenv-set-var ctx fn-cenv (get sym :name) js-var sym-expr false false))))
+        (let ((setter-expr (compile-setter-branches ctx vars fn-cenv dyn-var)))
           (js-call required :forEach
                    (lambda (pat idx)
                      (js-call steps :push
@@ -2751,6 +2818,7 @@
   (defun compile-case-fn (ctx cenv clauses name)
     (let ((fixed (new globalThis.Map))
           (rest-clause nil)
+          (bind-fn (ctx-bind-fn ctx false false))
           (fixed-entries (js-array)))
       (js-call clauses :forEach
                (lambda (clause)
@@ -2783,16 +2851,18 @@
                         (decls (js-array (str "(" dyn-var " (js-array))")))
                         (steps (js-array)))
                    (put b-cenv :inRecur false)
+                   (when (get ctx :dynamicMode)
+                     (put b-cenv :vars (new globalThis.Map))
+                     (put b-cenv :consts (new globalThis.Set)))
                    (js-call (get branch :names) :forEach
                             (lambda (sym idx)
                               (let ((js-var (ctx-gensym ctx "v"))
                                     (sym-expr (ctx-sym ctx (get sym :name))))
                                 (js-call decls :push (str "(" js-var " nil)"))
                                 (js-call steps :push
-                                         (str "(setq " js-var " (rt-bind-var session " sym-expr
+                                         (str "(setq " js-var " (" bind-fn " session " sym-expr
                                               " (aref " args-var " " idx ") " dyn-var "))"))
-                                (js-call (get b-cenv :vars) :set (get sym :name)
-                                         (js-object :jsVar js-var :symExpr sym-expr :isConst false)))))
+                                (cenv-set-var ctx b-cenv (get sym :name) js-var sym-expr false false))))
                    (js-call steps :push (compile-list-body ctx b-cenv (get branch :body)))
                    (js-call fixed-entries :push
                             (str "(js-array " arity " (lambda (" args-var ") "
@@ -2810,24 +2880,25 @@
                        (min-a (get rest-clause :min))
                        (rest-sym (get rest-clause :rest)))
                   (put r-cenv :inRecur false)
+                  (when (get ctx :dynamicMode)
+                    (put r-cenv :vars (new globalThis.Map))
+                    (put r-cenv :consts (new globalThis.Set)))
                   (js-call (get rest-clause :names) :forEach
                            (lambda (sym idx)
                              (let ((js-var (ctx-gensym ctx "v"))
                                    (sym-expr (ctx-sym ctx (get sym :name))))
                                (js-call decls :push (str "(" js-var " nil)"))
                                (js-call steps :push
-                                        (str "(setq " js-var " (rt-bind-var session " sym-expr
+                                        (str "(setq " js-var " (" bind-fn " session " sym-expr
                                              " (aref " args-var " " idx ") " dyn-var "))"))
-                               (js-call (get r-cenv :vars) :set (get sym :name)
-                                        (js-object :jsVar js-var :symExpr sym-expr :isConst false)))))
+                               (cenv-set-var ctx r-cenv (get sym :name) js-var sym-expr false false))))
                   (let ((r-var (ctx-gensym ctx "v"))
                         (r-sym-expr (ctx-sym ctx (get rest-sym :name))))
                     (js-call decls :push (str "(" r-var " nil)"))
                     (js-call steps :push
-                             (str "(setq " r-var " (rt-bind-var session " r-sym-expr
+                             (str "(setq " r-var " (" bind-fn " session " r-sym-expr
                                   " (rt-rest-arg " args-var " " min-a ") " dyn-var "))"))
-                    (js-call (get r-cenv :vars) :set (get rest-sym :name)
-                             (js-object :jsVar r-var :symExpr r-sym-expr :isConst false)))
+                    (cenv-set-var ctx r-cenv (get rest-sym :name) r-var r-sym-expr false false))
                   (js-call steps :push (compile-list-body ctx r-cenv (get rest-clause :body)))
                   (str "(js-object :min " min-a " :fn (lambda (" args-var ") "
                        "(let (" (js-call decls :join " ") ") "
@@ -2844,6 +2915,7 @@
            (res-var (ctx-gensym ctx "rres"))
            (run-var (ctx-gensym ctx "rrun"))
            (sig-var (ctx-gensym ctx "rsig"))
+           (bind-fn (ctx-bind-fn ctx false false))
            (loop-cenv (make-cenv cenv))
            (decls (js-array (str "(" dyn-var " (js-array))")
                             (str "(" res-var " nil)")
@@ -2858,13 +2930,11 @@
                        (init-expr (aref init-exprs idx)))
                    (js-call decls :push (str "(" js-var " nil)"))
                    (js-call init-steps :push
-                            (str "(setq " js-var " (rt-bind-var session " sym-expr " " init-expr " " dyn-var "))"))
+                            (str "(setq " js-var " (" bind-fn " session " sym-expr " " init-expr " " dyn-var "))"))
+                   (cenv-set-var ctx loop-cenv (get sym :name) js-var sym-expr false false)
                    (js-call rebind-steps :push
-                            (str "(setq " js-var " (rt-write-var session " sym-expr
-                                 " (el-opt (aref (get " sig-var " :args) " idx "))))"))
-                   (js-call (get loop-cenv :vars) :set (get sym :name)
-                            (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                   (js-call (get loop-cenv :consts) :delete (get sym :name)))))
+                            (compile-var-write ctx loop-cenv sym
+                                               (str "(el-opt (aref (get " sig-var " :args) " idx "))"))))))
       (let ((body-expr (compile-body ctx loop-cenv body-array)))
         (str "(let (" (js-call decls :join " ") ") "
              "(try (progn " (js-call init-steps :join " ")
@@ -2885,6 +2955,7 @@
            (bindings (el-list-to-array bindings-list))
            (dyn-var (ctx-gensym ctx "dyn"))
            (ok-var (ctx-gensym ctx "ok"))
+           (bind-fn (ctx-bind-fn ctx false false))
            (guard-cenv (make-cenv cenv))
            (decls (js-array (str "(" dyn-var " (js-array))") (str "(" ok-var " t)")))
            (steps (js-array)))
@@ -2908,10 +2979,8 @@
                        (js-call steps :push
                                 (str "(when " ok-var " (let ((" tmp-var " " val-expr ")) "
                                      "(if (nil? " tmp-var ") (setq " ok-var " false) "
-                                     "(setq " js-var " (rt-bind-var session " sym-expr " " tmp-var " " dyn-var ")))))"))
-                       (js-call (get guard-cenv :vars) :set (get sym :name)
-                                (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                       (js-call (get guard-cenv :consts) :delete (get sym :name)))))))
+                                     "(setq " js-var " (" bind-fn " session " sym-expr " " tmp-var " " dyn-var ")))))"))
+                       (cenv-set-var ctx guard-cenv (get sym :name) js-var sym-expr false false))))))
       (str "(let (" (js-call decls :join " ") ") "
            "(try (progn " (js-call steps :join " ")
            (if (> (js-length steps) 0) " " "")
@@ -2928,22 +2997,21 @@
            (dyn-var (ctx-gensym ctx "dyn"))
            (js-var (ctx-gensym ctx "v"))
            (sym-expr (ctx-sym ctx (get var-sym :name)))
+           (bind-fn (ctx-bind-fn ctx false false))
            (iter-cenv (make-cenv cenv)))
-      (js-call (get iter-cenv :vars) :set (get var-sym :name)
-               (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-      (js-call (get iter-cenv :consts) :delete (get var-sym :name))
+      (cenv-set-var ctx iter-cenv (get var-sym :name) js-var sym-expr false false)
       (let ((core-expr
               (str "(let ((" cur-var " " (compile-expr ctx cenv list-form) ")) "
                    "(while (el-cons? " cur-var ") "
                    "(let ((" dyn-var " (js-array)) (" js-var " nil)) "
-                   "(try (progn (setq " js-var " (rt-bind-var session " sym-expr " (el-opt (get " cur-var " :car)) " dyn-var ")) "
+                   "(try (progn (setq " js-var " (" bind-fn " session " sym-expr " (el-opt (get " cur-var " :car)) " dyn-var ")) "
                    (compile-list-body ctx iter-cenv body) ") "
                    "(finally (rt-restore-dyn session " dyn-var ")))) "
                    "(setq " cur-var " (get " cur-var " :cdr))) "
                    (if (nil? res-form)
                        "nil"
                      (str "(let ((" dyn-var " (js-array)) (" js-var " nil)) "
-                          "(try (progn (setq " js-var " (rt-bind-var session " sym-expr " nil " dyn-var ")) "
+                          "(try (progn (setq " js-var " (" bind-fn " session " sym-expr " nil " dyn-var ")) "
                           (compile-expr ctx iter-cenv res-form) ") "
                           "(finally (rt-restore-dyn session " dyn-var "))))"))
                    ")")))
@@ -2962,22 +3030,21 @@
            (dyn-var (ctx-gensym ctx "dyn"))
            (js-var (ctx-gensym ctx "v"))
            (sym-expr (ctx-sym ctx (get var-sym :name)))
+           (bind-fn (ctx-bind-fn ctx false false))
            (iter-cenv (make-cenv cenv)))
-      (js-call (get iter-cenv :vars) :set (get var-sym :name)
-               (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-      (js-call (get iter-cenv :consts) :delete (get var-sym :name))
+      (cenv-set-var ctx iter-cenv (get var-sym :name) js-var sym-expr false false)
       (let ((core-expr
               (str "(let ((" cnt-var " (el-num " (compile-expr ctx cenv count-form) ")) (" idx-var " 0)) "
                    "(while (rt-lt " idx-var " " cnt-var ") "
                    "(let ((" dyn-var " (js-array)) (" js-var " nil)) "
-                   "(try (progn (setq " js-var " (rt-bind-var session " sym-expr " " idx-var " " dyn-var ")) "
+                   "(try (progn (setq " js-var " (" bind-fn " session " sym-expr " " idx-var " " dyn-var ")) "
                    (compile-list-body ctx iter-cenv body) ") "
                    "(finally (rt-restore-dyn session " dyn-var ")))) "
                    "(setq " idx-var " (1+ " idx-var "))) "
                    (if (nil? res-form)
                        "nil"
                      (str "(let ((" dyn-var " (js-array)) (" js-var " nil)) "
-                          "(try (progn (setq " js-var " (rt-bind-var session " sym-expr " " cnt-var " " dyn-var ")) "
+                          "(try (progn (setq " js-var " (" bind-fn " session " sym-expr " " cnt-var " " dyn-var ")) "
                           (compile-expr ctx iter-cenv res-form) ") "
                           "(finally (rt-restore-dyn session " dyn-var "))))"))
                    ")")))
@@ -2995,14 +3062,13 @@
            (dyn-var (ctx-gensym ctx "dyn"))
            (js-var (ctx-gensym ctx "v"))
            (sym-expr (ctx-sym ctx (get var-sym :name)))
+           (bind-fn (ctx-bind-fn ctx false false))
            (iter-cenv (make-cenv cenv)))
-      (js-call (get iter-cenv :vars) :set (get var-sym :name)
-               (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-      (js-call (get iter-cenv :consts) :delete (get var-sym :name))
+      (cenv-set-var ctx iter-cenv (get var-sym :name) js-var sym-expr false false)
       (str "(let ((" items-var " (el-seq-items " (compile-expr ctx cenv seq-form) ")) (" idx-var " 0)) "
            "(while (rt-lt " idx-var " (js-length " items-var ")) "
            "(let ((" dyn-var " (js-array)) (" js-var " nil)) "
-           "(try (progn (setq " js-var " (rt-bind-var session " sym-expr " (el-opt (aref " items-var " " idx-var ")) " dyn-var ")) "
+           "(try (progn (setq " js-var " (" bind-fn " session " sym-expr " (el-opt (aref " items-var " " idx-var ")) " dyn-var ")) "
            (compile-list-body ctx iter-cenv body) ") "
            "(finally (rt-restore-dyn session " dyn-var ")))) "
            "(setq " idx-var " (1+ " idx-var "))) nil)")))
@@ -3011,6 +3077,7 @@
     (let* ((var-sym (el-second form))
            (body-form (el-third form))
            (raw-handlers (el-list-to-array (el-rest-after form 2)))
+           (bind-fn (ctx-bind-fn ctx false false))
            (success-clause (js-call raw-handlers :find (lambda (h) (and (el-cons? h) (el-sym-is (get h :car) ":success")))))
            (err-clauses (js-call raw-handlers :filter (lambda (h) (not (and (el-cons? h) (el-sym-is (get h :car) ":success"))))))
            (compiled-handlers (js-array)))
@@ -3022,12 +3089,10 @@
                            (js-var (ctx-gensym ctx "v"))
                            (sym-expr (ctx-sym ctx (get var-sym :name)))
                            (h-cenv (make-cenv cenv)))
-                      (js-call (get h-cenv :vars) :set (get var-sym :name)
-                               (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                      (js-call (get h-cenv :consts) :delete (get var-sym :name))
+                      (cenv-set-var ctx h-cenv (get var-sym :name) js-var sym-expr false false)
                       (str "(lambda (" val-param ") "
                            "(let ((" dyn-var " (js-array)) (" js-var " nil)) "
-                           "(try (progn (setq " js-var " (rt-bind-var session " sym-expr " " val-param " " dyn-var ")) "
+                           "(try (progn (setq " js-var " (" bind-fn " session " sym-expr " " val-param " " dyn-var ")) "
                            (compile-list-body ctx h-cenv clause-body) ") "
                            "(finally (rt-restore-dyn session " dyn-var ")))))"))))))
         (js-call err-clauses :forEach
@@ -3077,7 +3142,7 @@
                                 (sym-expr (ctx-sym ctx sname)))
                            (js-call decls :push (str "(" js-var " nil)"))
                            (js-call (get mod-cenv :vars) :set sname
-                                    (js-object :jsVar js-var :symExpr sym-expr :isConst false))))
+                                    (js-object :jsVar js-var :symExpr sym-expr :isConst false :isDyn false))))
                        ((= head "defun-lexical")
                          (let* ((sym (el-second sub))
                                 (sname (get sym :name))
@@ -3096,7 +3161,7 @@
                                 (info (js-call (get mod-cenv :vars) :get sname))
                                 (val-expr (compile-expr ctx mod-cenv (el-third sub))))
                            (js-call steps :push
-                                    (str "(setq " (get info :jsVar) " (rt-bind-var session "
+                                    (str "(setq " (get info :jsVar) " (" (ctx-bind-fn ctx (get info :isDyn)) " session "
                                          (get info :symExpr) " " val-expr " " dyn-var "))"))
                            (when (= head "defconst-lexical")
                              (js-call (get mod-cenv :consts) :add sname))))
@@ -3175,22 +3240,21 @@
                     (t (compile-quote ctx target)))))
               ((= name "`") (compile-backquote ctx cenv (el-second form) 1))
               ((or (= name "progn") (= name "eval-and-compile") (= name "with-no-warnings")
-                   (= name "save-restriction") (= name "with-demoted-errors") (= name "inline")
+                   (= name "inline")
                    (= name "with-local-quit") (= name "with-syntax-table")
                    (= name "combine-after-change-calls") (= name "with-silent-modifications")
                    (= name "save-mark-and-excursion"))
                 (when (= name "eval-and-compile")
                   (try (el-eval-body csession (el-list-to-array (get form :cdr)) (el-root-env)) (catch _ nil)))
                 (compile-list-body ctx cenv (get form :cdr)))
+              ((= name "save-restriction")
+                (str "(rt-save-restriction session (lambda () " (compile-list-body ctx cenv (get form :cdr)) "))"))
               ((= name "eval-when-compile")
                 (let ((val (try (el-eval-body csession (el-list-to-array (get form :cdr)) (el-root-env))
                              (catch _ nil))))
                   (compile-quote ctx val)))
               ((= name "with-suppressed-warnings")
                 (compile-list-body ctx cenv (el-rest-after form 1)))
-              ((= name "with-eval-after-load")
-                (str "(rt-with-eval-after-load session " (compile-expr ctx cenv (el-second form))
-                     " (lambda () " (compile-list-body ctx cenv (el-rest-after form 1)) "))"))
               ((= name "prog1")
                 (let ((v1 (ctx-gensym ctx "p1"))
                       (rest (el-list-to-array (el-rest-after form 1))))
@@ -3209,12 +3273,6 @@
                 (str "(if (rt-truthy " (compile-expr ctx cenv (el-second form)) ") "
                      (compile-expr ctx cenv (el-third form)) " "
                      (compile-list-body ctx cenv (el-rest-after form 2)) ")"))
-              ((= name "when")
-                (str "(if (rt-truthy " (compile-expr ctx cenv (el-second form)) ") "
-                     (compile-list-body ctx cenv (el-rest-after form 1)) " nil)"))
-              ((= name "unless")
-                (str "(if (rt-truthy " (compile-expr ctx cenv (el-second form)) ") nil "
-                     (compile-list-body ctx cenv (el-rest-after form 1)) ")"))
               ((= name "and")
                 (let ((args (el-list-to-array (get form :cdr))))
                   (cond
@@ -3278,13 +3336,15 @@
                            "(rt-call-fn session " fn-var " (js-array"
                            (js-call (js-call init-args :map (lambda (a) (str " " a))) :join "")
                            ")))"))
-                  (compile-let ctx cenv (el-second form) (el-rest-after form 1) false false)))
-              ((or (= name "let*") (= name "dlet"))
-                (compile-let ctx cenv (el-second form) (el-rest-after form 1) t false))
+                  (compile-let ctx cenv (el-second form) (el-rest-after form 1) false false false)))
+              ((= name "let*")
+                (compile-let ctx cenv (el-second form) (el-rest-after form 1) t false false))
+              ((= name "dlet")
+                (compile-let ctx cenv (el-second form) (el-rest-after form 1) t false t))
               ((and (= name "let-const") (ext-active? csession "eliscript-bind" name))
-                (compile-let ctx cenv (el-second form) (el-rest-after form 1) false t))
+                (compile-let ctx cenv (el-second form) (el-rest-after form 1) false t false))
               ((and (= name "let*-const") (ext-active? csession "eliscript-bind" name))
-                (compile-let ctx cenv (el-second form) (el-rest-after form 1) t t))
+                (compile-let ctx cenv (el-second form) (el-rest-after form 1) t t false))
               ((= name "letrec")
                 (compile-letrec ctx cenv (el-second form) (el-rest-after form 1)))
               ((= name "setq")
@@ -3356,6 +3416,7 @@
                   (el-validate-defun csession "defun" fn-sym (get extracted :props) (get extracted :body) (el-car rest))
                   (ctx-record-fn ctx fn-name)
                   (js-call (get csession :userDefinedFns) :add fn-name)
+                  (js-call (get csession :macros) :delete fn-sym)
                   (try (el-eval csession form (el-root-env)) (catch _ nil))
                   (str "(rt-defun session " (ctx-sym ctx fn-name) " " (compile-quote ctx (el-car rest))
                        " (get " (compile-lambda-impl ctx cenv rest fn-name false nil) " :elispCall))")))
@@ -3365,6 +3426,7 @@
                        (rest (el-rest-after form 1)))
                   (ctx-record-fn ctx fn-name)
                   (js-call (get csession :userDefinedFns) :add fn-name)
+                  (js-call (get csession :macros) :delete fn-sym)
                   (try (el-eval csession form (el-root-env)) (catch _ nil))
                   (str "(rt-defun session " (ctx-sym ctx fn-name) " " (compile-quote ctx (el-car rest))
                        " (get " (compile-lambda-impl ctx cenv rest fn-name t fn-name) " :elispCall))")))
@@ -3400,6 +3462,11 @@
                          "(rt-defmacro session " (ctx-sym ctx m-name) " "
                          (compile-macro-fn ctx m-cenv arglist (get extracted :body) m-name) "))"))))
               ((= name "defalias")
+                (let ((target (el-second form)))
+                  (when (and (el-cons? target) (eq (get target :car) s-quote) (el-symobj? (el-second target)))
+                    (let ((tsym (el-second target)))
+                      (js-call (get csession :userDefinedFns) :add (get tsym :name))
+                      (js-call (get csession :macros) :delete tsym))))
                 (str "(rt-defalias session " (compile-expr ctx cenv (el-second form)) " "
                      (compile-expr ctx cenv (el-third form)) ")"))
               ((= name "catch")
@@ -3410,6 +3477,55 @@
                      " (finally " (compile-list-body ctx cenv (el-rest-after form 1)) "))"))
               ((or (= name "condition-case") (= name "condition-case-unless-debug"))
                 (compile-condition-case ctx cenv form))
+              ((= name "save-match-data")
+                (str "(rt-save-match-data session (lambda () " (compile-list-body ctx cenv (get form :cdr)) "))"))
+              ((= name "save-excursion")
+                (str "(rt-save-excursion session (lambda () " (compile-list-body ctx cenv (get form :cdr)) "))"))
+              ((= name "save-current-buffer")
+                (str "(rt-save-current-buffer session (lambda () " (compile-list-body ctx cenv (get form :cdr)) "))"))
+              ;; Local function call (cl-flet / cl-labels / defun-lexical / macro-gensym)
+              ((js-call (get cenv :fns) :has name)
+                (let ((fn-var (js-call (get cenv :fns) :get name))
+                      (args (el-list-to-array (get form :cdr))))
+                  (str "(rt-call-fn session " fn-var " (js-array"
+                       (js-call (js-call args :map (lambda (a) (str " " (compile-expr ctx cenv a)))) :join "")
+                       "))")))
+              ;; User/library compile-time macro expansion
+              ((js-call (get csession :macros) :has head)
+                (let* ((expander (js-call (get csession :macros) :get head))
+                       (expanded (funcall expander (get form :cdr) (el-root-env))))
+                  (compile-expr ctx cenv expanded)))
+              ;; User-defined function overriding built-in macro forms
+              ((js-call (get csession :userDefinedFns) :has name)
+                (let* ((args (el-list-to-array (get form :cdr)))
+                       (n (js-length args))
+                       (sym-expr (ctx-sym ctx name)))
+                  (cond
+                    ((= n 0) (str "(rt-call0 session " sym-expr ")"))
+                    ((= n 1) (str "(rt-call1 session " sym-expr " " (compile-expr ctx cenv (aref args 0)) ")"))
+                    ((= n 2) (str "(rt-call2 session " sym-expr " "
+                                  (compile-expr ctx cenv (aref args 0)) " "
+                                  (compile-expr ctx cenv (aref args 1)) ")"))
+                    ((= n 3) (str "(rt-call3 session " sym-expr " "
+                                  (compile-expr ctx cenv (aref args 0)) " "
+                                  (compile-expr ctx cenv (aref args 1)) " "
+                                  (compile-expr ctx cenv (aref args 2)) ")"))
+                    (t (str "(rt-callN session " sym-expr " (js-array"
+                            (js-call (js-call args :map (lambda (a) (str " " (compile-expr ctx cenv a)))) :join "")
+                            "))")))))
+              ;; Overridable built-in macro forms
+              ((= name "when")
+                (str "(if (rt-truthy " (compile-expr ctx cenv (el-second form)) ") "
+                     (compile-list-body ctx cenv (el-rest-after form 1)) " nil)"))
+              ((= name "unless")
+                (str "(if (rt-truthy " (compile-expr ctx cenv (el-second form)) ") nil "
+                     (compile-list-body ctx cenv (el-rest-after form 1)) ")"))
+              ((= name "with-eval-after-load")
+                (str "(rt-with-eval-after-load session " (compile-expr ctx cenv (el-second form))
+                     " (lambda () " (compile-list-body ctx cenv (el-rest-after form 1)) "))"))
+              ((= name "with-demoted-errors")
+                (str "(rt-with-demoted-errors session " (compile-expr ctx cenv (el-second form))
+                     " (lambda () " (compile-list-body ctx cenv (el-rest-after form 1)) "))"))
               ((= name "ignore-errors")
                 (str "(rt-ignore-errors session (lambda () " (compile-list-body ctx cenv (get form :cdr)) "))"))
               ((= name "ignore-error")
@@ -3417,12 +3533,6 @@
                   (str "(rt-ignore-error session (js-array"
                        (js-call (js-call conds :map (lambda (c) (str " " (el-eliscript-string-literal c)))) :join "")
                        ") (lambda () " (compile-list-body ctx cenv (el-rest-after form 1)) "))")))
-              ((= name "save-match-data")
-                (str "(rt-save-match-data session (lambda () " (compile-list-body ctx cenv (get form :cdr)) "))"))
-              ((= name "save-excursion")
-                (str "(rt-save-excursion session (lambda () " (compile-list-body ctx cenv (get form :cdr)) "))"))
-              ((= name "save-current-buffer")
-                (str "(rt-save-current-buffer session (lambda () " (compile-list-body ctx cenv (get form :cdr)) "))"))
               ((= name "with-temp-buffer")
                 (str "(rt-with-temp-buffer session (lambda () " (compile-list-body ctx cenv (get form :cdr)) "))"))
               ((= name "with-temp-file")
@@ -3582,11 +3692,9 @@
                              (let ((js-var (ctx-gensym ctx "v"))
                                    (sym-expr (ctx-sym ctx (get sym :name))))
                                (js-call decls :push (str "(" js-var " nil)"))
-                               (js-call (get next-cenv :vars) :set (get sym :name)
-                                        (js-object :jsVar js-var :symExpr sym-expr :isConst false))
-                               (js-call (get next-cenv :consts) :delete (get sym :name)))))
+                               (cenv-set-var ctx next-cenv (get sym :name) js-var sym-expr false))))
                   (let ((pat-expr (compile-destructure-pattern ctx next-cenv pat))
-                        (setter-expr (compile-setter-branches vars next-cenv dyn-var)))
+                        (setter-expr (compile-setter-branches ctx vars next-cenv dyn-var)))
                     (str "(let (" (js-call decls :join " ") ") "
                          "(try (progn (rt-destructure session " pat-expr " "
                          (compile-expr ctx cenv val-form) " " setter-expr " " dyn-var ") "
@@ -3824,18 +3932,17 @@
                        (js-var (ctx-gensym ctx "v"))
                        (sym-expr (ctx-sym ctx (get var-sym :name)))
                        (t-cenv (make-cenv cenv))
+                       (info (cenv-set-var ctx t-cenv (get var-sym :name) js-var sym-expr false))
                        (step-exprs (js-array)))
-                  (js-call (get t-cenv :vars) :set (get var-sym :name)
-                           (js-object :jsVar js-var :symExpr sym-expr :isConst false))
                   (js-call steps :forEach
                            (lambda (s)
                              (js-call step-exprs :push
-                                      (str "(setq " js-var " (rt-write-var session " sym-expr " " (compile-expr ctx t-cenv s) "))"))))
+                                      (compile-var-write ctx t-cenv var-sym (compile-expr ctx t-cenv s)))))
                   (str "(let ((" dyn-var " (js-array)) (" js-var " nil)) "
-                       "(try (progn (setq " js-var " (rt-bind-var session " sym-expr " " (compile-expr ctx cenv val-form) " " dyn-var ")) "
+                       "(try (progn (setq " js-var " (" (ctx-bind-fn ctx (get info :isDyn)) " session " sym-expr " " (compile-expr ctx cenv val-form) " " dyn-var ")) "
                        (js-call step-exprs :join " ")
                        (if (> (js-length step-exprs) 0) " " "")
-                       "(rt-read-var session " sym-expr " " js-var ")) "
+                       (compile-var-read ctx t-cenv var-sym) ") "
                        "(finally (rt-restore-dyn session " dyn-var "))))")))
               ((and (or (= name "thread-cond-first") (= name "thread-cond-last")) (ext-active? csession "eliscript-bind" name))
                 (let* ((last (= name "thread-cond-last"))
@@ -3967,12 +4074,11 @@
                        (dyn-var (ctx-gensym ctx "dyn"))
                        (js-var (ctx-gensym ctx "v"))
                        (sym-expr (ctx-sym ctx (get var-sym :name)))
-                       (t-cenv (make-cenv cenv)))
-                  (js-call (get t-cenv :vars) :set (get var-sym :name)
-                           (js-object :jsVar js-var :symExpr sym-expr :isConst false))
+                       (t-cenv (make-cenv cenv))
+                       (info (cenv-set-var ctx t-cenv (get var-sym :name) js-var sym-expr false)))
                   (str "(rt-with-transient " (compile-expr ctx cenv src-form)
                        " (lambda (" b-param ") (let ((" dyn-var " (js-array)) (" js-var " nil)) "
-                       "(try (progn (setq " js-var " (rt-bind-var session " sym-expr " " b-param " " dyn-var ")) "
+                       "(try (progn (setq " js-var " (" (ctx-bind-fn ctx (get info :isDyn)) " session " sym-expr " " b-param " " dyn-var ")) "
                        (compile-list-body ctx t-cenv (el-rest-after form 1)) ") "
                        "(finally (rt-restore-dyn session " dyn-var "))))))")))
               ((and (= name "defmodule") (ext-active? csession "eliscript-module" name))
@@ -4008,12 +4114,11 @@
                        (dyn-var (ctx-gensym ctx "dyn"))
                        (js-var (ctx-gensym ctx "v"))
                        (sym-expr (ctx-sym ctx (get var-sym :name)))
-                       (s-cenv (make-cenv cenv)))
-                  (js-call (get s-cenv :vars) :set (get var-sym :name)
-                           (js-object :jsVar js-var :symExpr sym-expr :isConst false))
+                       (s-cenv (make-cenv cenv))
+                       (info (cenv-set-var ctx s-cenv (get var-sym :name) js-var sym-expr false)))
                   (str "(rt-with-async-scope session (lambda (" sc-param ") "
                        "(let ((" dyn-var " (js-array)) (" js-var " nil)) "
-                       "(try (progn (setq " js-var " (rt-bind-var session " sym-expr " " sc-param " " dyn-var ")) "
+                       "(try (progn (setq " js-var " (" (ctx-bind-fn ctx (get info :isDyn)) " session " sym-expr " " sc-param " " dyn-var ")) "
                        (compile-list-body ctx s-cenv (el-rest-after form 1)) ") "
                        "(finally (rt-restore-dyn session " dyn-var "))))))")))
               ((and (= name "with-abi-memory") (ext-active? csession "eliscript-abi" name))
@@ -4022,20 +4127,24 @@
                        (pages-expr (if (< index 0) "1" (compile-expr ctx cenv (aref options (1+ index))))))
                   (str "(rt-with-abi-memory session " pages-expr
                        " (lambda () " (compile-list-body ctx cenv (el-rest-after form 1)) "))")))
-              ;; Compile-time macro expansion
-              ((js-call (get csession :macros) :has head)
-                (let* ((expander (js-call (get csession :macros) :get head))
-                       (expanded (funcall expander (get form :cdr) (el-root-env))))
-                  (compile-expr ctx cenv expanded)))
-              ;; Local function call (cl-flet / cl-labels / defun-lexical / macro-gensym)
-              ((js-call (get cenv :fns) :has name)
-                (let ((fn-var (js-call (get cenv :fns) :get name))
-                      (args (el-list-to-array (get form :cdr))))
-                  (str "(rt-call-fn session " fn-var " (js-array"
-                       (js-call (js-call args :map (lambda (a) (str " " (compile-expr ctx cenv a)))) :join "")
-                       "))")))
               ;; Standard function call
               (t
+                (when (and (= name "fset")
+                           (el-cons? (get form :cdr))
+                           (el-cons? (el-second form))
+                           (eq (get (el-second form) :car) s-quote)
+                           (el-symobj? (el-second (el-second form))))
+                  (let ((tsym (el-second (el-second form))))
+                    (js-call (get csession :userDefinedFns) :add (get tsym :name))
+                    (js-call (get csession :macros) :delete tsym)))
+                (when (and (= name "fmakunbound")
+                           (el-cons? (get form :cdr))
+                           (el-cons? (el-second form))
+                           (eq (get (el-second form) :car) s-quote)
+                           (el-symobj? (el-second (el-second form))))
+                  (let ((tsym (el-second (el-second form))))
+                    (js-call (get csession :userDefinedFns) :delete (get tsym :name))
+                    (js-call (get csession :macros) :delete tsym)))
                 (when (and (= name "require")
                            (el-cons? (get form :cdr))
                            (el-cons? (el-second form))
@@ -4069,16 +4178,35 @@
 
   (defun rt-with-source-file (session filename thunk &optional lex-mode)
     (let ((dyn (js-array))
-          (truename (rt-true-source-file filename)))
+          (truename (rt-true-source-file filename))
+          (stack (get session :loadStack))
+          (pending-features (js-array)))
+      (when (not (nullish? stack))
+        (js-call stack :push pending-features))
       (try
-        (progn
-          (when (el-string? filename)
-            (rt-bind-var session (el-intern "load-file-name") filename dyn)
-            (rt-bind-var session (el-intern "load-true-file-name") truename dyn))
-          (rt-bind-var session s-lexical-binding (if (undefined? lex-mode) t lex-mode) dyn)
-          (funcall thunk))
-        (finally
-          (rt-restore-dyn session dyn)))))
+        (let ((result
+                (try
+                  (progn
+                    (when (el-string? filename)
+                      (rt-bind-dyn session (el-intern "load-file-name") filename dyn)
+                      (rt-bind-dyn session (el-intern "load-true-file-name") truename dyn))
+                    (rt-bind-dyn session s-lexical-binding (if (undefined? lex-mode) t lex-mode) dyn)
+                    (funcall thunk))
+                  (finally
+                    (rt-restore-dyn session dyn)))))
+          (when (not (nullish? stack))
+            (js-call stack :pop))
+          (let ((i 0))
+            (while (< i (js-length pending-features))
+              (el-fire-after-load session (aref pending-features i))
+              (setq i (1+ i))))
+          result)
+        (catch err
+          (when (and (not (nullish? stack))
+                     (> (js-length stack) 0)
+                     (eq (aref stack (1- (js-length stack))) pending-features))
+            (js-call stack :pop))
+          (throw err)))))
 
   (defun rt-autorun-module (session load-fn)
     (let ((p globalThis.process))
@@ -4133,11 +4261,9 @@
                (raw-body (if (= (js-length compiled-top) 0)
                              "    nil"
                            (js-call compiled-top :join "\n")))
-               (body-block (if (or has-file (nil? lex-mode))
-                               (str "    (rt-with-source-file session "
-                                    (if has-file (el-eliscript-string-literal source-file) "nil")
-                                    " (lambda ()\n" raw-body ") " (if (nil? lex-mode) "nil" "t") ")")
-                             raw-body)))
+               (body-block (str "    (rt-with-source-file session "
+                                (if has-file (el-eliscript-string-literal source-file) "nil")
+                                " (lambda ()\n" raw-body ") " (if (nil? lex-mode) "nil" "t") ")")))
           (str "(module " module-name "\n"
            "  (import " (el-eliscript-string-literal runtime)
            " OPTION_NONE createSession callSession evalSession invokeFunction registerModule"
@@ -4146,7 +4272,7 @@
            " el-list el-list-from el-list-to-array el-make-float el-make-pcoll el-make-pmap el-make-pset el-member-with"
            " el-num el-opt el-plist-member el-prin1-string el-seq-items el-set-fn el-signal el-string-match"
            " el-throw el-value-equal el-vector"
-           " rt-aset-sym rt-aset-val rt-autorun-module rt-bind-const-var rt-bind-var rt-bound-and-true-p"
+           " rt-aset-sym rt-aset-val rt-autorun-module rt-bind-const-var rt-bind-dyn rt-bind-var rt-bound-and-true-p"
            " rt-call-fn rt-call0 rt-call1 rt-call2 rt-call3 rt-callN rt-callf rt-catch"
            " rt-check-arity rt-check-contract rt-condition-case rt-dec rt-defalias"
            " rt-defconst rt-defgeneric-value rt-define-derived-mode rt-define-minor-mode"
@@ -4159,10 +4285,10 @@
            " rt-match-binding rt-mod rt-opt-arg rt-pcase-match rt-place-alist-get"
            " rt-place-aref rt-place-call rt-place-plist-get rt-pushnew rt-read-var"
            " rt-register-module rt-remf rt-rest-arg rt-restore-dyn rt-return-from"
-           " rt-run-cl-loop rt-save-current-buffer rt-save-excursion rt-save-match-data"
+           " rt-run-cl-loop rt-save-current-buffer rt-save-excursion rt-save-match-data rt-save-restriction"
            " rt-set-global rt-setq-default rt-setq-local rt-should rt-should-error"
            " rt-should-not rt-sub rt-truthy rt-with-abi-memory rt-with-async-scope"
-           " rt-with-current-buffer rt-with-eval-after-load rt-with-output-to-string rt-with-source-file rt-with-temp-buffer"
+           " rt-with-current-buffer rt-with-demoted-errors rt-with-eval-after-load rt-with-output-to-string rt-with-source-file rt-with-temp-buffer"
            " rt-with-temp-file rt-with-timeout rt-with-transient rt-wrap-fn rt-write-var)\n"
            (if (> (js-length (get ctx :symDefs)) 0)
                (str (js-call (get ctx :symDefs) :join "\n") "\n")
@@ -4210,7 +4336,7 @@
 
   (export
     compileModule compileProgram
-    rt-aset-sym rt-aset-val rt-autorun-module rt-bind-const-var rt-bind-var rt-bound-and-true-p
+    rt-aset-sym rt-aset-val rt-autorun-module rt-bind-const-var rt-bind-dyn rt-bind-var rt-bound-and-true-p
     rt-call-fn rt-call0 rt-call1 rt-call2 rt-call3 rt-callN rt-callf rt-catch
     rt-check-arity rt-check-contract rt-condition-case rt-dec rt-defalias
     rt-defconst rt-defgeneric-value rt-define-derived-mode rt-define-minor-mode
@@ -4223,8 +4349,8 @@
     rt-match-binding rt-mod rt-opt-arg rt-pcase-match rt-place-alist-get
     rt-place-aref rt-place-call rt-place-plist-get rt-pushnew rt-read-var
     rt-register-module rt-remf rt-rest-arg rt-restore-dyn rt-return-from
-    rt-run-cl-loop rt-save-current-buffer rt-save-excursion rt-save-match-data
+    rt-run-cl-loop rt-save-current-buffer rt-save-excursion rt-save-match-data rt-save-restriction
     rt-set-global rt-setq-default rt-setq-local rt-should rt-should-error
     rt-should-not rt-sub rt-truthy rt-with-abi-memory rt-with-async-scope
-    rt-with-current-buffer rt-with-eval-after-load rt-with-output-to-string rt-with-source-file rt-with-temp-buffer
+    rt-with-current-buffer rt-with-demoted-errors rt-with-eval-after-load rt-with-output-to-string rt-with-source-file rt-with-temp-buffer
     rt-with-temp-file rt-with-timeout rt-with-transient rt-wrap-fn rt-write-var))

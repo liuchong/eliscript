@@ -100,6 +100,14 @@
   (defun el-wasm-section (id payload)
     (js-call (js-array id) :concat (el-wasm-uleb128 (js-length payload)) payload))
 
+  (defun el-abi-form-uses-u32? (form)
+    (if (not (el-cons? form))
+        false
+      (let ((head (if (el-symobj? (get form :car)) (el-symbol-name (get form :car)) "")))
+        (if (or (js-call head :startsWith "mem-") (js-call head :startsWith "word-"))
+            t
+          (js-call (el-list-to-array (get form :cdr)) :some (lambda (sub) (el-abi-form-uses-u32? sub)))))))
+
   (defun el-parse-abi-kernel (source export-name)
     (let ((forms (el-read-all source))
           (session (createSession))
@@ -125,8 +133,17 @@
                                           (js-call fn-name :replace (new globalThis.RegExp "-" "g") "_")))
                               (abi-prop (if (js-call props :has ":abi")
                                             (el-symbol-name (js-call props :get ":abi"))
-                                          ":numeric-f64")))
+                                          (if (js-call body :some (lambda (f) (el-abi-form-uses-u32? f)))
+                                              ":memory-u32"
+                                            ":numeric-f64"))))
                          (el-validate-defun session "defun" fn-sym props body arglist)
+                         (let ((seen-params (new globalThis.Set)))
+                           (js-call (el-list-to-array arglist) :forEach
+                                    (lambda (p)
+                                      (let ((pname (el-symbol-name p)))
+                                        (when (js-call seen-params :has pname)
+                                          (el-compile-error (str "ELI-B0002: duplicate ABI parameter " pname)))
+                                        (js-call seen-params :add pname)))))
                          (when (or (= exp-prop want) (= fn-name want))
                            (setq matched
                                  (js-object :name fn-name
@@ -143,7 +160,29 @@
       matched))
 
   (defun el-abi-void-stmt? (form)
-    (and (el-cons? form) (el-sym-is (get form :car) "mem-store-u32")))
+    (and (el-cons? form)
+         (let ((h (if (el-symobj? (get form :car)) (el-symbol-name (get form :car)) "")))
+           (or (= h "mem-store-u8") (= h "mem-store-u16") (= h "mem-store-u32") (= h "while")))))
+
+  (defun el-abi-cmp-op? (head)
+    (or (= head "=") (= head "/=") (= head "<") (= head "<=") (= head ">") (= head ">=")))
+
+  (defun el-compile-wasm-cond (expr local-map is-u32 alloc-local)
+    (if (and (el-cons? expr) (el-symobj? (get expr :car)) (el-abi-cmp-op? (el-symbol-name (get expr :car))))
+        (let* ((head (el-symbol-name (get expr :car)))
+               (args (el-list-to-array (get expr :cdr)))
+               (lhs (el-compile-wasm-expr (aref args 0) local-map is-u32 alloc-local))
+               (rhs (el-compile-wasm-expr (aref args 1) local-map is-u32 alloc-local))
+               (op (if is-u32
+                       (cond ((= head "=") 70) ((= head "/=") 71) ((= head "<") 73)
+                             ((= head ">") 75) ((= head "<=") 77) (t 79))
+                     (cond ((= head "=") 97) ((= head "/=") 98) ((= head "<") 99)
+                           ((= head ">") 100) ((= head "<=") 101) (t 102)))))
+          (js-call lhs :concat rhs (js-array op)))
+      (let ((code (el-compile-wasm-expr expr local-map is-u32 alloc-local)))
+        (if is-u32
+            code
+          (js-call code :concat (js-array 68) (el-wasm-f64-bytes 0) (js-array 98))))))
 
   (defun el-compile-wasm-expr (expr local-map is-u32 alloc-local)
     (cond
@@ -173,7 +212,10 @@
                           (unless (el-abi-void-stmt? sub)
                             (js-call out :push 26))
                         (when (el-abi-void-stmt? sub)
-                          (setq out (js-call out :concat (js-array 65 0))))))
+                          (setq out (js-call out :concat
+                                             (if is-u32
+                                                 (js-array 65 0)
+                                               (js-call (js-array 68) :concat (el-wasm-f64-bytes 0))))))))
                     (setq i (1+ i)))
                   out)))
             ((or (= head "let") (= head "let*"))
@@ -194,6 +236,57 @@
                 (js-call out :concat
                          (el-compile-wasm-expr (el-cons (el-intern "progn") (el-list-from body))
                                                next-map is-u32 alloc-local))))
+            ((= head "setq")
+              (let ((out (js-array)) (i 0))
+                (while (< i n)
+                  (let* ((var-name (el-symbol-name (aref args i)))
+                         (_ (unless (js-call local-map :has var-name)
+                              (el-compile-error (str "ELI-B0003: unbound ABI variable " var-name))))
+                         (slot (js-call local-map :get var-name))
+                         (val-code (el-compile-wasm-expr (aref args (1+ i)) local-map is-u32 alloc-local))
+                         (set-op (if (>= (+ i 2) n) 34 33)))
+                    (setq out (js-call out :concat val-code (js-array set-op) (el-wasm-uleb128 slot))))
+                  (setq i (+ i 2)))
+                out))
+            ((= head "while")
+              (let ((cond-code (el-compile-wasm-cond (aref args 0) local-map is-u32 alloc-local))
+                    (body-out (js-array))
+                    (i 1))
+                (while (< i n)
+                  (let* ((sub (aref args i))
+                         (c (el-compile-wasm-expr sub local-map is-u32 alloc-local)))
+                    (setq body-out (js-call body-out :concat c))
+                    (unless (el-abi-void-stmt? sub)
+                      (js-call body-out :push 26)))
+                  (setq i (1+ i)))
+                (js-call (js-array 2 64 3 64)
+                         :concat cond-code (js-array 69 13 1) body-out (js-array 12 0 11 11))))
+            ((= head "if")
+              (let* ((val-type (if is-u32 127 124))
+                     (cond-code (el-compile-wasm-cond (aref args 0) local-map is-u32 alloc-local))
+                     (then-code (el-compile-wasm-expr (aref args 1) local-map is-u32 alloc-local))
+                     (else-form (if (> n 2)
+                                    (el-cons (el-intern "progn") (el-list-from (js-call args :slice 2)))
+                                  0))
+                     (else-code (el-compile-wasm-expr else-form local-map is-u32 alloc-local)))
+                (js-call cond-code :concat (js-array 4 val-type) then-code (js-array 5) else-code (js-array 11))))
+            ((el-abi-cmp-op? head)
+              (let ((cond-code (el-compile-wasm-cond expr local-map is-u32 alloc-local)))
+                (if is-u32 cond-code (js-call cond-code :concat (js-array 184)))))
+            ((= head "mem-store-u8")
+              (js-call (el-compile-wasm-expr (aref args 0) local-map is-u32 alloc-local)
+                       :concat (el-compile-wasm-expr (aref args 1) local-map is-u32 alloc-local)
+                       (js-array 58 0 0)))
+            ((= head "mem-load-u8")
+              (js-call (el-compile-wasm-expr (aref args 0) local-map is-u32 alloc-local)
+                       :concat (js-array 45 0 0)))
+            ((= head "mem-store-u16")
+              (js-call (el-compile-wasm-expr (aref args 0) local-map is-u32 alloc-local)
+                       :concat (el-compile-wasm-expr (aref args 1) local-map is-u32 alloc-local)
+                       (js-array 59 1 0)))
+            ((= head "mem-load-u16")
+              (js-call (el-compile-wasm-expr (aref args 0) local-map is-u32 alloc-local)
+                       :concat (js-array 47 1 0)))
             ((= head "mem-store-u32")
               (let ((off-code (el-compile-wasm-expr (aref args 0) local-map is-u32 alloc-local))
                     (val-code (el-compile-wasm-expr (aref args 1) local-map is-u32 alloc-local)))
@@ -201,6 +294,11 @@
             ((= head "mem-load-u32")
               (let ((off-code (el-compile-wasm-expr (aref args 0) local-map is-u32 alloc-local)))
                 (js-call off-code :concat (js-array 40 2 0))))
+            ((= head "mem-size")
+              (js-array 63 0))
+            ((= head "mem-grow")
+              (js-call (el-compile-wasm-expr (aref args 0) local-map is-u32 alloc-local)
+                       :concat (js-array 64 0)))
             ((or (= head "+") (= head "word-add"))
               (if (= n 0)
                   (if is-u32 (js-array 65 0) (js-call (js-array 68) :concat (el-wasm-f64-bytes 0)))
@@ -216,10 +314,13 @@
             ((or (= head "-") (= head "word-sub"))
               (let ((op (if is-u32 107 161)))
                 (if (= n 1)
-                    (let ((zero (if is-u32 (js-array 65 0) (js-call (js-array 68) :concat (el-wasm-f64-bytes 0)))))
-                      (js-call zero :concat
-                               (el-compile-wasm-expr (aref args 0) local-map is-u32 alloc-local)
-                               (js-array op)))
+                    (if is-u32
+                        (js-call (js-array 65 0)
+                                 :concat
+                                 (el-compile-wasm-expr (aref args 0) local-map is-u32 alloc-local)
+                                 (js-array 107))
+                      (js-call (el-compile-wasm-expr (aref args 0) local-map is-u32 alloc-local)
+                               :concat (js-array 154)))
                   (let ((out (el-compile-wasm-expr (aref args 0) local-map is-u32 alloc-local))
                         (i 1))
                     (while (< i n)
@@ -331,20 +432,45 @@
 
 
   (defun el-c-ident (name)
-    (str "v_" (js-call (str name) :replace (new globalThis.RegExp "[^A-Za-z0-9_]" "g") "_")))
+    (let ((s (str name))
+          (out "v_")
+          (i 0))
+      (while (< i (js-length s))
+        (let ((ch (js-call s :charAt i))
+              (code (js-call s :charCodeAt i)))
+          (setq out
+                (str out
+                     (cond
+                       ((or (and (>= code 48) (<= code 57))
+                            (and (>= code 65) (<= code 90))
+                            (and (>= code 97) (<= code 122)))
+                         ch)
+                       ((= ch "_") "_u_")
+                       ((= ch "-") "_h_")
+                       (t (str "_x" (js-call code :toString 16) "_"))))))
+        (setq i (1+ i)))
+      out))
 
-  (defun el-compile-c-expr (expr local-set is-u32)
+  (defun el-c-f64-literal (n)
+    (cond
+      ((Number/isNaN n) "NAN")
+      ((= n globalThis.Infinity) "INFINITY")
+      ((= n (- globalThis.Infinity)) "(-INFINITY)")
+      ((Object/is n -0) "-0.0")
+      ((Number/isInteger n) (str n ".0"))
+      (t (str n))))
+
+  (defun el-compile-c-expr (expr local-map is-u32 alloc-c-var)
     (cond
       ((el-symobj? expr)
         (let ((name (el-symbol-name expr)))
-          (unless (js-call local-set :has name)
+          (unless (js-call local-map :has name)
             (el-compile-error (str "ELI-B0003: unbound ABI variable " name)))
-          (el-c-ident name)))
+          (js-call local-map :get name)))
       ((el-number? expr)
         (if is-u32
             (str (unsigned-bit-shift-right (el-num expr) 0) "u")
-          (let ((n (el-num expr)))
-            (if (Number/isInteger n) (str n ".0") (str n)))))
+          (el-c-f64-literal (el-num expr))))
       ((el-cons? expr)
         (let* ((head (el-symbol-name (get expr :car)))
                (args (el-list-to-array (get expr :cdr)))
@@ -356,45 +482,130 @@
                 (str "("
                      (js-call (js-call args :map
                                        (lambda (sub idx)
-                                         (let ((c (el-compile-c-expr sub local-set is-u32)))
+                                         (let ((c (el-compile-c-expr sub local-map is-u32 alloc-c-var)))
                                            (if (and (= idx (1- n)) (el-abi-void-stmt? sub))
-                                               (str c ", 0u")
+                                               (str c (if is-u32 ", 0u" ", 0.0"))
                                              c))))
                               :join ", ")
                      ")")))
+            ((or (= head "let") (= head "let*"))
+              (let ((bindings (el-list-to-array (aref args 0)))
+                    (body (js-call args :slice 1))
+                    (ctype (if is-u32 "uint32_t" "double"))
+                    (next-map (new globalThis.Map local-map))
+                    (stmts (js-array)))
+                (if (= head "let*")
+                    (js-call bindings :forEach
+                             (lambda (b)
+                               (let* ((var-name (el-symbol-name (if (el-cons? b) (get b :car) b)))
+                                      (init-form (if (el-cons? b) (el-second b) 0))
+                                      (init-c (el-compile-c-expr init-form next-map is-u32 alloc-c-var))
+                                      (cvar (funcall alloc-c-var var-name)))
+                                 (js-call stmts :push (str ctype " " cvar " = " init-c ";"))
+                                 (js-call next-map :set var-name cvar))))
+                  (let ((temps (js-array)))
+                    (js-call bindings :forEach
+                             (lambda (b)
+                               (let* ((var-name (el-symbol-name (if (el-cons? b) (get b :car) b)))
+                                      (init-form (if (el-cons? b) (el-second b) 0))
+                                      (init-c (el-compile-c-expr init-form local-map is-u32 alloc-c-var))
+                                      (tvar (funcall alloc-c-var "tmp")))
+                                 (js-call stmts :push (str ctype " " tvar " = " init-c ";"))
+                                 (js-call temps :push (js-object :varName var-name :tvar tvar)))))
+                    (js-call temps :forEach
+                             (lambda (item)
+                               (let ((cvar (funcall alloc-c-var (get item :varName))))
+                                 (js-call stmts :push (str ctype " " cvar " = " (get item :tvar) ";"))
+                                 (js-call next-map :set (get item :varName) cvar))))))
+                (let ((body-c (el-compile-c-expr (el-cons (el-intern "progn") (el-list-from body))
+                                                 next-map is-u32 alloc-c-var)))
+                  (str "({ " (js-call stmts :join " ") " " body-c "; })"))))
+            ((= head "setq")
+              (let ((assigns (js-array)) (i 0))
+                (while (< i n)
+                  (let* ((var-name (el-symbol-name (aref args i)))
+                         (_ (unless (js-call local-map :has var-name)
+                              (el-compile-error (str "ELI-B0003: unbound ABI variable " var-name))))
+                         (cvar (js-call local-map :get var-name))
+                         (val-c (el-compile-c-expr (aref args (1+ i)) local-map is-u32 alloc-c-var)))
+                    (js-call assigns :push (str "(" cvar " = " val-c ")")))
+                  (setq i (+ i 2)))
+                (str "(" (js-call assigns :join ", ") ")")))
+            ((= head "while")
+              (let ((cond-c (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var))
+                    (body-c (el-compile-c-expr (el-cons (el-intern "progn") (el-list-from (js-call args :slice 1)))
+                                               local-map is-u32 alloc-c-var)))
+                (str "({ while (" cond-c " != 0) { (void)" body-c "; } " (if is-u32 "0u" "0.0") "; })")))
+            ((= head "if")
+              (let* ((cond-c (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var))
+                     (then-c (el-compile-c-expr (aref args 1) local-map is-u32 alloc-c-var))
+                     (else-form (if (> n 2)
+                                    (el-cons (el-intern "progn") (el-list-from (js-call args :slice 2)))
+                                  0))
+                     (else-c (el-compile-c-expr else-form local-map is-u32 alloc-c-var)))
+                (str "((" cond-c " != 0) ? (" then-c ") : (" else-c "))")))
+            ((el-abi-cmp-op? head)
+              (let* ((lhs (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var))
+                     (rhs (el-compile-c-expr (aref args 1) local-map is-u32 alloc-c-var))
+                     (cop (cond ((= head "=") " == ") ((= head "/=") " != ")
+                                (t (str " " head " "))))
+                     (cmp (str "((" lhs cop rhs ") ? 1u : 0u)")))
+                (if is-u32 cmp (str "((double)" cmp ")"))))
+            ((= head "mem-store-u8")
+              (str "mem_store_u8("
+                   (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var) ", "
+                   (el-compile-c-expr (aref args 1) local-map is-u32 alloc-c-var) ")"))
+            ((= head "mem-load-u8")
+              (str "mem_load_u8(" (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var) ")"))
+            ((= head "mem-store-u16")
+              (str "mem_store_u16("
+                   (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var) ", "
+                   (el-compile-c-expr (aref args 1) local-map is-u32 alloc-c-var) ")"))
+            ((= head "mem-load-u16")
+              (str "mem_load_u16(" (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var) ")"))
             ((= head "mem-store-u32")
               (str "mem_store_u32("
-                   (el-compile-c-expr (aref args 0) local-set is-u32) ", "
-                   (el-compile-c-expr (aref args 1) local-set is-u32) ")"))
+                   (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var) ", "
+                   (el-compile-c-expr (aref args 1) local-map is-u32 alloc-c-var) ")"))
             ((= head "mem-load-u32")
-              (str "mem_load_u32(" (el-compile-c-expr (aref args 0) local-set is-u32) ")"))
+              (str "mem_load_u32(" (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var) ")"))
+            ((= head "mem-size")
+              "mem_size()")
+            ((= head "mem-grow")
+              (str "mem_grow(" (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var) ")"))
             ((or (= head "+") (= head "word-add"))
               (if (= n 0)
                   (if is-u32 "0u" "0.0")
-                (str "(" (js-call (js-call args :map (lambda (a) (el-compile-c-expr a local-set is-u32))) :join " + ") ")")))
+                (str "(" (js-call (js-call args :map (lambda (a) (el-compile-c-expr a local-map is-u32 alloc-c-var))) :join " + ") ")")))
             ((or (= head "-") (= head "word-sub"))
               (if (= n 1)
-                  (str "(-" (el-compile-c-expr (aref args 0) local-set is-u32) ")")
-                (str "(" (js-call (js-call args :map (lambda (a) (el-compile-c-expr a local-set is-u32))) :join " - ") ")")))
+                  (str "(-" (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var) ")")
+                (str "(" (js-call (js-call args :map (lambda (a) (el-compile-c-expr a local-map is-u32 alloc-c-var))) :join " - ") ")")))
             ((or (= head "*") (= head "word-mul"))
               (if (= n 0)
                   (if is-u32 "1u" "1.0")
-                (str "(" (js-call (js-call args :map (lambda (a) (el-compile-c-expr a local-set is-u32))) :join " * ") ")")))
+                (str "(" (js-call (js-call args :map (lambda (a) (el-compile-c-expr a local-map is-u32 alloc-c-var))) :join " * ") ")")))
             ((or (= head "/") (= head "word-div"))
-              (str "(" (js-call (js-call args :map (lambda (a) (el-compile-c-expr a local-set is-u32))) :join " / ") ")"))
+              (if is-u32
+                  (let ((acc (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var)) (i 1))
+                    (while (< i n)
+                      (setq acc (str "word_div(" acc ", " (el-compile-c-expr (aref args i) local-map is-u32 alloc-c-var) ")"))
+                      (setq i (1+ i)))
+                    acc)
+                (str "(" (js-call (js-call args :map (lambda (a) (el-compile-c-expr a local-map is-u32 alloc-c-var))) :join " / ") ")")))
             ((= head "1+")
-              (str "(" (el-compile-c-expr (aref args 0) local-set is-u32) (if is-u32 " + 1u)" " + 1.0)")))
+              (str "(" (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var) (if is-u32 " + 1u)" " + 1.0)")))
             ((= head "1-")
-              (str "(" (el-compile-c-expr (aref args 0) local-set is-u32) (if is-u32 " - 1u)" " - 1.0)")))
+              (str "(" (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var) (if is-u32 " - 1u)" " - 1.0)")))
             ((and is-u32 (or (= head "word-and") (= head "word-or") (= head "word-xor")))
               (let ((cop (cond ((= head "word-and") " & ")
                                ((= head "word-or") " | ")
                                (t " ^ "))))
-                (str "((uint32_t)(" (js-call (js-call args :map (lambda (a) (el-compile-c-expr a local-set is-u32))) :join cop) "))")))
+                (str "((uint32_t)(" (js-call (js-call args :map (lambda (a) (el-compile-c-expr a local-map is-u32 alloc-c-var))) :join cop) "))")))
             ((and is-u32 (or (= head "word-shl") (= head "word-shr")))
               (let ((cop (if (= head "word-shl") " << " " >> ")))
-                (str "((uint32_t)(" (el-compile-c-expr (aref args 0) local-set is-u32)
-                     cop "((" (el-compile-c-expr (aref args 1) local-set is-u32) ") & 31u)))")))
+                (str "((uint32_t)(" (el-compile-c-expr (aref args 0) local-map is-u32 alloc-c-var)
+                     cop "((" (el-compile-c-expr (aref args 1) local-map is-u32 alloc-c-var) ") & 31u)))")))
             (t
               (el-compile-error (str "ELI-B0003: unsupported ABI operation " head))))))
       (t
@@ -405,22 +616,65 @@
            (is-u32 (= (get kernel :abi) ":memory-u32"))
            (ctype (if is-u32 "uint32_t" "double"))
            (params (get kernel :params))
-           (local-set (new globalThis.Set params))
+           (local-map (new globalThis.Map))
+           (c-seq 0)
+           (alloc-c-var (lambda (prefix)
+                          (setq c-seq (1+ c-seq))
+                          (str (el-c-ident prefix) "_" c-seq)))
+           (_ (js-call params :forEach (lambda (p) (js-call local-map :set p (el-c-ident p)))))
            (c-params (if (= (js-length params) 0)
                          "void"
                        (js-call (js-call params :map (lambda (p) (str ctype " " (el-c-ident p)))) :join ", ")))
            (body-expr (el-compile-c-expr (el-cons (el-intern "progn") (el-list-from (get kernel :body)))
-                                         local-set is-u32))
+                                         local-map is-u32 alloc-c-var))
            (call-args (js-call (if (nullish? args) (js-array) args)
                                :map (lambda (a)
                                       (if is-u32
                                           (str (unsigned-bit-shift-right (el-num a) 0) "u")
-                                        (let ((n (el-num a)))
-                                          (if (Number/isInteger n) (str n ".0") (str n)))))))
-           (c-code (str "#include <stdint.h>\n#include <stdio.h>\n"
-                        "static uint8_t abi_mem[65536];\n"
-                        "static inline void mem_store_u32(uint32_t off, uint32_t v) { *(uint32_t *)(abi_mem + off) = v; }\n"
-                        "static inline uint32_t mem_load_u32(uint32_t off) { return *(uint32_t *)(abi_mem + off); }\n"
+                                        (el-c-f64-literal (el-num a))))))
+           (c-code (str "#include <math.h>\n#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n"
+                        "static uint8_t abi_mem[256 * 65536];\n"
+                        "static uint32_t abi_pages = 1u;\n"
+                        "static inline uint32_t mem_size(void) { return abi_pages; }\n"
+                        "static inline uint32_t mem_grow(uint32_t delta) {\n"
+                        "  if ((uint64_t)abi_pages + (uint64_t)delta > 256ULL) return 0xFFFFFFFFu;\n"
+                        "  uint32_t old = abi_pages;\n"
+                        "  abi_pages += delta;\n"
+                        "  return old;\n"
+                        "}\n"
+                        "static inline void mem_store_u8(uint32_t off, uint32_t v) {\n"
+                        "  if ((uint64_t)off + 1ULL > (uint64_t)abi_pages * 65536ULL) { fprintf(stderr, \"out of bounds memory access\\n\"); exit(1); }\n"
+                        "  abi_mem[off] = (uint8_t)(v & 0xFFu);\n"
+                        "}\n"
+                        "static inline uint32_t mem_load_u8(uint32_t off) {\n"
+                        "  if ((uint64_t)off + 1ULL > (uint64_t)abi_pages * 65536ULL) { fprintf(stderr, \"out of bounds memory access\\n\"); exit(1); }\n"
+                        "  return (uint32_t)abi_mem[off];\n"
+                        "}\n"
+                        "static inline void mem_store_u16(uint32_t off, uint32_t v) {\n"
+                        "  if ((uint64_t)off + 2ULL > (uint64_t)abi_pages * 65536ULL) { fprintf(stderr, \"out of bounds memory access\\n\"); exit(1); }\n"
+                        "  uint16_t u = (uint16_t)(v & 0xFFFFu);\n"
+                        "  memcpy(abi_mem + off, &u, 2);\n"
+                        "}\n"
+                        "static inline uint32_t mem_load_u16(uint32_t off) {\n"
+                        "  if ((uint64_t)off + 2ULL > (uint64_t)abi_pages * 65536ULL) { fprintf(stderr, \"out of bounds memory access\\n\"); exit(1); }\n"
+                        "  uint16_t u;\n"
+                        "  memcpy(&u, abi_mem + off, 2);\n"
+                        "  return (uint32_t)u;\n"
+                        "}\n"
+                        "static inline void mem_store_u32(uint32_t off, uint32_t v) {\n"
+                        "  if ((uint64_t)off + 4ULL > (uint64_t)abi_pages * 65536ULL) { fprintf(stderr, \"out of bounds memory access\\n\"); exit(1); }\n"
+                        "  memcpy(abi_mem + off, &v, 4);\n"
+                        "}\n"
+                        "static inline uint32_t mem_load_u32(uint32_t off) {\n"
+                        "  if ((uint64_t)off + 4ULL > (uint64_t)abi_pages * 65536ULL) { fprintf(stderr, \"out of bounds memory access\\n\"); exit(1); }\n"
+                        "  uint32_t v;\n"
+                        "  memcpy(&v, abi_mem + off, 4);\n"
+                        "  return v;\n"
+                        "}\n"
+                        "static inline uint32_t word_div(uint32_t a, uint32_t b) {\n"
+                        "  if (b == 0u) { fprintf(stderr, \"integer divide by zero\\n\"); exit(1); }\n"
+                        "  return a / b;\n"
+                        "}\n"
                         "static " ctype " kernel_fn(" c-params ") { return " body-expr "; }\n"
                         "int main(void) {\n"
                         "  " ctype " res = kernel_fn(" (js-call call-args :join ", ") ");\n"
@@ -434,7 +688,7 @@
            (path-mod (el-path))
            (tmp-base (if (and (not (nullish? os-mod)) (not (nullish? (get os-mod :tmpdir))))
                          (js-call os-mod :tmpdir)
-                       "/tmp"))
+                       "."))
            (bin-path (js-call path-mod :join tmp-base
                               (str "eliscript-abi-" (get globalThis.process :pid) "-" (js-call globalThis.Date :now) "-"
                                    (Math/floor (* (Math/random) 1000000))))))
@@ -447,7 +701,15 @@
           (let ((run-res (js-call cp :spawnSync bin-path (js-array) (js-object :encoding "utf8"))))
             (when (/= (get run-res :status) 0)
               (el-compile-error (str "ELI-B0004: native ABI execution failed: " (or (get run-res :stderr) ""))))
-            (Number/parseFloat (js-call (str (or (get run-res :stdout) "0")) :trim))))
+            (let ((out-str (js-call (js-call (str (or (get run-res :stdout) "0")) :trim) :toLowerCase)))
+              (cond
+                ((or (= out-str "inf") (= out-str "+inf") (= out-str "infinity") (= out-str "+infinity"))
+                  globalThis.Infinity)
+                ((or (= out-str "-inf") (= out-str "-infinity"))
+                  (- globalThis.Infinity))
+                ((or (= out-str "nan") (= out-str "-nan") (= out-str "+nan"))
+                  globalThis.NaN)
+                (t (Number/parseFloat out-str))))))
         (finally
           (try
             (when (and (not (nullish? fs-mod)) (js-call fs-mod :existsSync bin-path))

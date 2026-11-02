@@ -298,6 +298,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
                   ("tools/testing/fixture-environment.eli" . "tools/testing/fixture-environment.mjs")
                   ("tools/backends/eliscript/compiler-corpus-bit.eli" . "tools/backends/compiler-corpus-bit.mjs")
                   ("tools/compiler/eliscript/runtime-scan-cases.eli" . "tools/compiler/runtime-scan-cases.mjs")
+                  ("tools/integrity/check-ground.eli" . "tools/integrity/check-ground.mjs")
                   ("tools/integrity/eliscript/check.eli" . "tools/integrity/check.mjs")
                   ("tools/testing/final-functional-scope.eli" . "tools/testing/final-functional-scope.mjs")
                   ("tools/testing/file-workers.eli" . "tools/testing/file-workers.mjs")

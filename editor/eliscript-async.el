@@ -45,6 +45,22 @@
   "Return t if OBJ is an Eliscript Future."
   (and (eliscript-future-p obj) t))
 
+(defun future-state (fut)
+  "Return the current state symbol of Future FUT."
+  (unless (eliscript-future-p fut)
+    (signal 'wrong-type-argument (list 'future-p fut)))
+  (eliscript-future-state fut))
+
+(defun eliscript-async--settle-future (fut new-state new-val)
+  "Transition pending Future FUT to NEW-STATE with NEW-VAL and run callbacks."
+  (when (eq (eliscript-future-state fut) 'pending)
+    (setf (eliscript-future-state fut) new-state)
+    (setf (eliscript-future-value fut) new-val)
+    (let ((cbs (eliscript-future-callbacks fut)))
+      (setf (eliscript-future-callbacks fut) nil)
+      (dolist (cb cbs)
+        (funcall cb)))))
+
 (defun eliscript-async--make-fulfilled (val)
   "Return a settled Future fulfilled with VAL (unwrapping single-layer Future)."
   (if (eliscript-future-p val)
@@ -60,10 +76,9 @@
   (unless (eliscript-future-p fut)
     (signal 'wrong-type-argument (list 'future-p fut)))
   (when (eq (eliscript-future-state fut) 'pending)
-    (setf (eliscript-future-state fut) 'cancelled)
-    (setf (eliscript-future-value fut) '(eliscript-cancelled "Task cancelled"))
     (when (eliscript-future-cancel-fn fut)
-      (funcall (eliscript-future-cancel-fn fut))))
+      (funcall (eliscript-future-cancel-fn fut)))
+    (eliscript-async--settle-future fut 'cancelled '(eliscript-cancelled "Task cancelled")))
   fut)
 
 (defun future-then (fut on-fulfilled &optional on-rejected)
@@ -90,7 +105,28 @@
                 (eliscript-async--make-fulfilled
                  (run-with-bindings on-rejected (eliscript-future-value fut)))
               fut))
-           (t fut))
+           (t
+            (let ((child (eliscript-future--create :state 'pending :value nil :callbacks nil :cancel-fn nil)))
+              (setf (eliscript-future-callbacks fut)
+                    (append (eliscript-future-callbacks fut)
+                            (list (lambda ()
+                                    (condition-case cb-err
+                                        (cond
+                                         ((eq (eliscript-future-state fut) 'fulfilled)
+                                          (let ((res (if on-fulfilled
+                                                         (run-with-bindings on-fulfilled (eliscript-future-value fut))
+                                                       (eliscript-future-value fut))))
+                                            (if (eliscript-future-p res)
+                                                (eliscript-async--settle-future child (eliscript-future-state res) (eliscript-future-value res))
+                                              (eliscript-async--settle-future child 'fulfilled res))))
+                                         (t
+                                          (if on-rejected
+                                              (let ((res (run-with-bindings on-rejected (eliscript-future-value fut))))
+                                                (eliscript-async--settle-future child 'fulfilled res))
+                                            (eliscript-async--settle-future child (eliscript-future-state fut) (eliscript-future-value fut)))))
+                                      (( error quit )
+                                       (eliscript-async--settle-future child 'rejected cb-err)))))))
+              child)))
         (( error quit )
          (eliscript-async--make-rejected err))))))
 
@@ -239,13 +275,15 @@
 
 (progn
   (cl-defstruct (eliscript-async-channel (:constructor eliscript-async-channel--create))
-    capacity buffer closed-p))
+    capacity buffer putters takers closed-p))
 
 (defun make-async-channel (&optional capacity)
-  "Create a backpressured async channel with optional buffer CAPACITY (default 0)."
+  "Create a backpressured async channel with optional buffer CAPACITY (default 1)."
   (eliscript-async-channel--create
-   :capacity (max 1 (or capacity 0))
+   :capacity (max 1 (or capacity 1))
    :buffer nil
+   :putters nil
+   :takers nil
    :closed-p nil))
 
 (defun async-channel-p (obj)
@@ -256,30 +294,67 @@
   "Put VALUE into async channel CH, returning a Future."
   (unless (eliscript-async-channel-p ch)
     (signal 'wrong-type-argument (list 'async-channel-p ch)))
-  (if (eliscript-async-channel-closed-p ch)
-      (eliscript-async--make-rejected '(eliscript-channel-closed "Cannot put into closed channel"))
+  (cond
+   ((eliscript-async-channel-closed-p ch)
+    (eliscript-async--make-rejected '(eliscript-channel-closed "Cannot put into closed channel")))
+   ((eliscript-async-channel-takers ch)
+    (let ((taker (car (eliscript-async-channel-takers ch))))
+      (setf (eliscript-async-channel-takers ch) (cdr (eliscript-async-channel-takers ch)))
+      (eliscript-async--settle-future taker 'fulfilled (option-some value))
+      (eliscript-async--make-fulfilled t)))
+   ((< (length (eliscript-async-channel-buffer ch)) (eliscript-async-channel-capacity ch))
     (setf (eliscript-async-channel-buffer ch)
           (append (eliscript-async-channel-buffer ch) (list value)))
-    (eliscript-async--make-fulfilled t)))
+    (eliscript-async--make-fulfilled t))
+   (t
+    (let ((pending (eliscript-future--create :state 'pending :value nil :callbacks nil :cancel-fn nil)))
+      (setf (eliscript-async-channel-putters ch)
+            (append (eliscript-async-channel-putters ch) (list (cons value pending))))
+      pending))))
 
 (defun channel-take! (ch)
   "Take next item from channel CH as a Future of `option-some'/`option-none'."
   (unless (eliscript-async-channel-p ch)
     (signal 'wrong-type-argument (list 'async-channel-p ch)))
-  (let ((buf (eliscript-async-channel-buffer ch)))
-    (if buf
-        (let ((head (car buf)))
-          (setf (eliscript-async-channel-buffer ch) (cdr buf))
-          (eliscript-async--make-fulfilled (option-some head)))
-      (if (eliscript-async-channel-closed-p ch)
-          (eliscript-async--make-fulfilled option-none)
-        (eliscript-async--make-fulfilled option-none)))))
+  (let ((buf (eliscript-async-channel-buffer ch))
+        (putters (eliscript-async-channel-putters ch)))
+    (cond
+     (buf
+      (let ((head (car buf)))
+        (setf (eliscript-async-channel-buffer ch) (cdr buf))
+        (when putters
+          (let ((putter (car putters)))
+            (setf (eliscript-async-channel-putters ch) (cdr putters))
+            (setf (eliscript-async-channel-buffer ch)
+                  (append (eliscript-async-channel-buffer ch) (list (car putter))))
+            (eliscript-async--settle-future (cdr putter) 'fulfilled t)))
+        (eliscript-async--make-fulfilled (option-some head))))
+     (putters
+      (let ((putter (car putters)))
+        (setf (eliscript-async-channel-putters ch) (cdr putters))
+        (eliscript-async--settle-future (cdr putter) 'fulfilled t)
+        (eliscript-async--make-fulfilled (option-some (car putter)))))
+     ((eliscript-async-channel-closed-p ch)
+      (eliscript-async--make-fulfilled option-none))
+     (t
+      (let ((pending (eliscript-future--create :state 'pending :value nil :callbacks nil :cancel-fn nil)))
+        (setf (eliscript-async-channel-takers ch)
+              (append (eliscript-async-channel-takers ch) (list pending)))
+        pending)))))
 
 (defun channel-close! (ch)
   "Idempotently close async channel CH."
   (unless (eliscript-async-channel-p ch)
     (signal 'wrong-type-argument (list 'async-channel-p ch)))
   (setf (eliscript-async-channel-closed-p ch) t)
+  (let ((takers (eliscript-async-channel-takers ch))
+        (putters (eliscript-async-channel-putters ch)))
+    (setf (eliscript-async-channel-takers ch) nil)
+    (setf (eliscript-async-channel-putters ch) nil)
+    (dolist (taker takers)
+      (eliscript-async--settle-future taker 'fulfilled option-none))
+    (dolist (putter putters)
+      (eliscript-async--settle-future (cdr putter) 'rejected '(eliscript-channel-closed "Cannot put into closed channel"))))
   nil)
 
 ;; ============================================================================
@@ -337,30 +412,35 @@
 
 (defun engine-call (engine target &rest args)
   "Invoke TARGET on ENGINE with ARGS, returning a Future."
-  (cond
-   ((eliscript-engine-handle-p target)
-    (let* ((slot (eliscript-engine-handle-slot target))
-           (entry (gethash slot eliscript-async--engine-slots)))
-      (if (or (null entry)
-              (not (plist-get entry :active))
-              (not (eq (plist-get entry :owner) (eliscript-engine-handle-owner target)))
-              (not (eq (eliscript-engine-handle-owner target) (or engine 'local)))
-              (/= (plist-get entry :generation) (eliscript-engine-handle-generation target)))
-          (eliscript-async--make-rejected
-           (list 'eliscript-engine-handle-error
-                 (format "Invalid, mismatched-owner, or revoked engine handle %S" target)))
-        (condition-case err
-            (eliscript-async--make-fulfilled (apply (plist-get entry :fn) args))
-          (( error quit )
-           (eliscript-async--make-rejected err))))))
-   ((and (symbolp target) (fboundp target))
-    (condition-case err
-        (eliscript-async--make-fulfilled (apply (symbol-function target) args))
-      (( error quit )
-       (eliscript-async--make-rejected err))))
-   (t
-    (eliscript-async--make-rejected
-     (list 'eliscript-engine-handle-error (format "Uncallable engine target %S" target))))))
+  (let ((eng (or engine 'local)))
+    (cond
+     ((not (memq eng '(local self emacs)))
+      (eliscript-async--make-rejected
+       (list 'eliscript-engine-handle-error
+             (format "Engine unavailable or not connected: %S" eng))))
+     ((eliscript-engine-handle-p target)
+      (let* ((slot (eliscript-engine-handle-slot target))
+             (entry (gethash slot eliscript-async--engine-slots)))
+        (if (or (null entry)
+                (not (plist-get entry :active))
+                (not (eq (plist-get entry :owner) (eliscript-engine-handle-owner target)))
+                (not (eq (eliscript-engine-handle-owner target) eng))
+                (/= (plist-get entry :generation) (eliscript-engine-handle-generation target)))
+            (eliscript-async--make-rejected
+             (list 'eliscript-engine-handle-error
+                   (format "Invalid, mismatched-owner, or revoked engine handle %S" target)))
+          (condition-case err
+              (eliscript-async--make-fulfilled (apply (plist-get entry :fn) args))
+            (( error quit )
+             (eliscript-async--make-rejected err))))))
+     ((and (symbolp target) (fboundp target))
+      (condition-case err
+          (eliscript-async--make-fulfilled (apply (symbol-function target) args))
+        (( error quit )
+         (eliscript-async--make-rejected err))))
+     (t
+      (eliscript-async--make-rejected
+       (list 'eliscript-engine-handle-error (format "Uncallable engine target %S" target)))))))
 
 (progn
   (defun eliscript-async-reset-state! ()

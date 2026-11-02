@@ -879,7 +879,7 @@
             (ok entry)
             (eq-check (get archive :file) "tests/direct-wasm-backend-test-ground.mjs")
             (eq-check (get original :suite) (get archive :file))
-            (eq-check (get archive :sourceSha256) "b3e2af96d7da3d92ad4613fcb341656fd7625fb7fd1ca8bae421f171e8c73ea9")
+            (eq-check (get archive :sourceSha256) "d8590e98b2d6a748ecf71c01d4194ac43d9051edde886e34c900355354664f4f")
             (eq-check (get archive :sourceSha256) (hash (await (readFile (get archive :file)))))
             (eq-check (get migration :executedSuite) "tests/direct-wasm-backend.test.mjs")
             (eq-check (js-length (get migration :sourceAssets)) 28)

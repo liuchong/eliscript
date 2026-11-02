@@ -11,7 +11,7 @@
   (import "./lisp/builtins.eli" createSession resetSessionState)
   (import "./lisp/compiler.eli"
     compileModule compileProgram
-    rt-aset-sym rt-aset-val rt-autorun-module rt-bind-const-var rt-bind-var rt-bound-and-true-p
+    rt-aset-sym rt-aset-val rt-autorun-module rt-bind-const-var rt-bind-dyn rt-bind-var rt-bound-and-true-p
     rt-call-fn rt-call0 rt-call1 rt-call2 rt-call3 rt-callN rt-callf rt-catch
     rt-check-arity rt-check-contract rt-condition-case rt-dec rt-defalias
     rt-defconst rt-defgeneric-value rt-define-derived-mode rt-define-minor-mode
@@ -24,10 +24,10 @@
     rt-match-binding rt-mod rt-opt-arg rt-pcase-match rt-place-alist-get
     rt-place-aref rt-place-call rt-place-plist-get rt-pushnew rt-read-var
     rt-register-module rt-remf rt-rest-arg rt-restore-dyn rt-return-from
-    rt-run-cl-loop rt-save-current-buffer rt-save-excursion rt-save-match-data
+    rt-run-cl-loop rt-save-current-buffer rt-save-excursion rt-save-match-data rt-save-restriction
     rt-set-global rt-setq-default rt-setq-local rt-should rt-should-error
     rt-should-not rt-sub rt-truthy rt-with-abi-memory rt-with-async-scope
-    rt-with-current-buffer rt-with-eval-after-load rt-with-output-to-string rt-with-source-file rt-with-temp-buffer
+    rt-with-current-buffer rt-with-demoted-errors rt-with-eval-after-load rt-with-output-to-string rt-with-source-file rt-with-temp-buffer
     rt-with-temp-file rt-with-timeout rt-with-transient rt-wrap-fn rt-write-var)
   (import "./lisp/cli.eli"
     callSession compileAbiWasm evalProgram evalProgramAsync evalSession
@@ -48,7 +48,7 @@
     el-list el-list-from el-list-to-array el-make-float el-make-pcoll el-make-pmap el-make-pset el-member-with
     el-num el-opt el-plist-member el-prin1-string el-seq-items el-set-fn el-signal el-string-match
     el-throw el-value-equal el-vector
-    rt-aset-sym rt-aset-val rt-autorun-module rt-bind-const-var rt-bind-var rt-bound-and-true-p
+    rt-aset-sym rt-aset-val rt-autorun-module rt-bind-const-var rt-bind-dyn rt-bind-var rt-bound-and-true-p
     rt-call-fn rt-call0 rt-call1 rt-call2 rt-call3 rt-callN rt-callf rt-catch
     rt-check-arity rt-check-contract rt-condition-case rt-dec rt-defalias
     rt-defconst rt-defgeneric-value rt-define-derived-mode rt-define-minor-mode
@@ -61,8 +61,8 @@
     rt-match-binding rt-mod rt-opt-arg rt-pcase-match rt-place-alist-get
     rt-place-aref rt-place-call rt-place-plist-get rt-pushnew rt-read-var
     rt-register-module rt-remf rt-rest-arg rt-restore-dyn rt-return-from
-    rt-run-cl-loop rt-save-current-buffer rt-save-excursion rt-save-match-data
+    rt-run-cl-loop rt-save-current-buffer rt-save-excursion rt-save-match-data rt-save-restriction
     rt-set-global rt-setq-default rt-setq-local rt-should rt-should-error
     rt-should-not rt-sub rt-truthy rt-with-abi-memory rt-with-async-scope
-    rt-with-current-buffer rt-with-eval-after-load rt-with-output-to-string rt-with-source-file rt-with-temp-buffer
+    rt-with-current-buffer rt-with-demoted-errors rt-with-eval-after-load rt-with-output-to-string rt-with-source-file rt-with-temp-buffer
     rt-with-temp-file rt-with-timeout rt-with-transient rt-wrap-fn rt-write-var))
