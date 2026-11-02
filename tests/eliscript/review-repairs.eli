@@ -11,7 +11,7 @@
   (import "../dist/runtime/lisp/async-runtime.mjs" el-async-track-binding el-async-capture el-async-resume)
   (import "../dist/runtime/lisp/evaluator.mjs" el-restore-dynamic)
   (import "../dist/runtime/lisp/core.mjs" el-intern)
-  (import "../dist/runtime/lisp/keymap.mjs" el-make-keymap el-define-key el-lookup-key)
+  (import "../dist/runtime/lisp/keymap.mjs" el-make-keymap el-define-key el-lookup-key el-copy-keymap)
 
   (defconst root (js-call globalThis.process :cwd))
   (defconst directory (resolve root "_worktree/review-repairs"))
@@ -256,6 +256,29 @@
         "(let ((p (make-sparse-keymap)) (c (make-sparse-keymap)) (a (make-sparse-keymap)) (base (make-sparse-keymap))) (define-key p \"ab\" 'ignore) (define-key base \"d\" 'backward-char) (define-key a \"c\" 'forward-char) (set-keymap-parent a base) (define-key c \"a\" a) (set-keymap-parent c p) (let ((sub (copy-keymap (lookup-key c \"a\")))) (list (lookup-key sub \"b\") (lookup-key sub \"c\") (lookup-key sub \"d\"))))"
         "(ignore forward-char backward-char)")))
 
+  (defconst nested-prefix-program
+    (str "(defun repair-prefix-graph () "
+      "(let ((p (make-sparse-keymap)) (c (make-sparse-keymap)) (a (make-sparse-keymap)) (base (make-sparse-keymap)) (q (make-sparse-keymap)) (holder (make-sparse-keymap))) "
+      "(define-key p \"ab\" 'ignore) (define-key base \"d\" 'backward-char) (define-key a \"c\" 'forward-char) "
+      "(set-keymap-parent a base) (define-key c \"a\" a) (set-keymap-parent c p) "
+      "(define-key q \"ae\" 'next-line) (set-keymap-parent holder q) (define-key holder \"a\" (lookup-key c \"a\")) "
+      "(list holder p a base)))"))
+
+  (test "R8ac-01: nested composed prefixes retain complete lookup, copy, and mutation semantics"
+    (lambda ()
+      (parity "nested-prefix-primary" nested-prefix-program
+        "(let* ((holder (car (repair-prefix-graph))) (sub (lookup-key holder \"a\"))) (list (lookup-key holder \"ad\") (lookup-key sub \"d\") (lookup-key sub \"b\") (lookup-key sub \"e\")))"
+        "(backward-char backward-char ignore next-line)")
+      (parity "nested-prefix-copy-write" nested-prefix-program
+        "(let* ((maps (repair-prefix-graph)) (sub (lookup-key (car maps) \"a\")) (copy (copy-keymap sub))) (define-key copy \"d\" 'previous-line) (define-key copy \"c\" 'beginning-of-line) (define-key (nth 1 maps) \"ab\" 'end-of-line) (list (lookup-key sub \"d\") (lookup-key copy \"d\") (lookup-key copy \"b\") (lookup-key sub \"c\") (lookup-key copy \"c\")))"
+        "(backward-char previous-line end-of-line forward-char beginning-of-line)")
+      (parity "nested-prefix-live-parent" nested-prefix-program
+        "(let* ((maps (repair-prefix-graph)) (holder (car maps)) (sub (lookup-key holder \"a\")) (copy (copy-keymap sub)) (replacement (make-sparse-keymap))) (define-key (nth 3 maps) \"d\" 'upcase-word) (define-key replacement \"d\" 'downcase-word) (set-keymap-parent (nth 2 maps) replacement) (list (lookup-key holder \"ad\") (lookup-key sub \"d\") (lookup-key copy \"d\")))"
+        "(downcase-word downcase-word upcase-word)")
+      (parity "nested-prefix-detach-tail" nested-prefix-program
+        "(let ((sub (lookup-key (car (repair-prefix-graph)) \"a\"))) (set-keymap-parent sub nil) (list (lookup-key sub \"e\") (lookup-key sub \"b\") (lookup-key sub \"d\")))"
+        "(nil ignore backward-char)")))
+
   (test "binding cell protection: shadowed bindings retain distinct mutable identities"
     (lambda ()
       (let* ((session (createSession)) (values (get session :values)) (symbol (el-intern "repair-cell"))
@@ -296,6 +319,31 @@
           (js-call (expect (get (aref context 0) :value)) :toBe 3)
           (el-restore-dynamic session (js-array binding))
           (js-call (expect (js-call values :get symbol)) :toBe 10)))))
+
+  (test "keymap protection: repeated composition preserves primary depth and copied writes"
+    (lambda ()
+      (let* ((primary (el-make-keymap)) (base (el-make-keymap))
+             (target (el-intern "backward-char")) (own (el-intern "forward-char"))
+             (changed (el-intern "next-line")) (view primary) (depth 0))
+        (put primary :_parent base)
+        (el-define-key primary "c" own)
+        (el-define-key base "d" target)
+        (while (< depth 12)
+          (let ((holder (el-make-keymap)) (parent (el-make-keymap)))
+            (el-define-key parent "ae" changed)
+            (put holder :_parent parent)
+            (el-define-key holder "a" view)
+            (setq view (el-lookup-key holder "a")))
+          (setq depth (1+ depth)))
+        (js-call (expect (el-lookup-key view "d")) :toBe target)
+        (js-call (expect (el-lookup-key view "c")) :toBe own)
+        (js-call (expect (el-lookup-key view "e")) :toBe changed)
+        (let ((copy (el-copy-keymap view)))
+          (el-define-key copy "c" changed)
+          (js-call (expect (el-lookup-key copy "c")) :toBe changed)
+          (js-call (expect (el-lookup-key view "c")) :toBe own)
+          (js-call (expect (el-lookup-key copy "d")) :toBe target)
+          (js-call (expect (el-lookup-key copy "unbound")) :toBe nil)))))
 
   (test "keymap protection: late parent changes and removal affect existing child prefixes"
     (lambda ()

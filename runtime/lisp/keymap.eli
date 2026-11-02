@@ -100,21 +100,24 @@
     ;; Re-read parent maps at every event. Inherited prefix candidates must not
     ;; be attached to a child when it is defined: parents and prefixes can be
     ;; added, changed, or removed after that point.
-    (let ((found (js-array)) (seen (new globalThis.Set)) (visit nil))
-      (setq visit (lambda (map)
-        (let ((current map))
-          (while (and (el-keymap? current) (not (js-call seen :has current)))
+    (let ((found (js-array)) (seen (new globalThis.Set))
+          (pending (js-call (js-call candidates :slice) :reverse)))
+      (while (> (js-length pending) 0)
+        (let ((current (js-call pending :pop)))
+          (when (and (el-keymap? current) (not (js-call seen :has current)))
             (js-call seen :add current)
             (el-ensure-keymap current)
-            (let ((value (js-call (get current :_bindings) :get event)))
-              (when (and (undefined? value) accept-default)
-                (setq value (js-call (get current :_bindings) :get "symbol:t")))
-              (unless (undefined? value) (js-call found :push value)))
+            ;; A composed map is its entire primary map followed by its tail.
+            ;; Expand the primary itself, including another composed primary;
+            ;; reading only its parent would discard an inner primary chain.
+            (js-call pending :push (get current :_parent))
             (let ((primary (get current :_primary)))
-              (when (el-keymap? primary)
-                (funcall visit (get primary :_parent))))
-            (setq current (get current :_parent))))))
-      (js-call candidates :forEach visit)
+              (if (el-keymap? primary)
+                  (js-call pending :push primary)
+                (let ((value (js-call (get current :_bindings) :get event)))
+                  (when (and (undefined? value) accept-default)
+                    (setq value (js-call (get current :_bindings) :get "symbol:t")))
+                  (unless (undefined? value) (js-call found :push value))))))))
       found))
 
   (defun el-lookup-key (map key &optional accept-default)
@@ -166,10 +169,14 @@
         (let ((copy (el-make-keymap)))
           (js-call memo :set map copy)
           (put copy :_parent (get map :_parent))
-          (when (el-keymap? (get map :_primary))
-            (put copy :_primary (el-copy-keymap (get map :_primary) memo)))
-          (js-call (get map :_bindings) :forEach (lambda (value event)
-            (js-call (get copy :_bindings) :set event (if (el-keymap? value) (el-copy-keymap value memo) value))))
+          (if (el-keymap? (get map :_primary))
+              (let ((primary (el-copy-keymap (get map :_primary) memo)))
+                (put copy :_primary primary)
+                ;; Writes through the copied view belong to its copied primary,
+                ;; while inherited tail maps retain their original identity.
+                (put copy :_bindings (get primary :_bindings)))
+            (js-call (get map :_bindings) :forEach (lambda (value event)
+              (js-call (get copy :_bindings) :set event (if (el-keymap? value) (el-copy-keymap value memo) value)))))
           copy))))
 
   (export el-keymap? el-ensure-keymap el-make-keymap el-key-events el-key-parse el-kbd
