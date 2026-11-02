@@ -348,7 +348,7 @@
               (setf (eliscript-future-cancel-fn child)
                     (lambda () (when cancel (funcall cancel)) (future-cancel value)))))
           child)
-      value)))
+      (eliscript-async--make-fulfilled value))))
 
 (defmacro defun-async (name args &rest body)
   "Define asynchronous function NAME with ARGS and BODY returning a Future."

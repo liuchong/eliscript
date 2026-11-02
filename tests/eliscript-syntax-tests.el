@@ -1162,6 +1162,27 @@
     (should (= eliscript-test--async-cell 3))
     (should (= (cdr cell) 3))))
 
+(ert-deftest eliscript-async-nested-while-and-cond-across-pending-await ()
+  (let* ((ch (make-async-channel 4))
+         (worker
+          (lambda-async (c)
+            (let ((i 0) (j 0) (acc 0))
+              (while (< i 2)
+                (setq j 0)
+                (while (< j 2)
+                  (let ((v (option-value (await (channel-take! c)))))
+                    (setq acc (+ acc (cond ((= i 0) v) (t (* 2 v))))))
+                  (setq j (1+ j)))
+                (setq i (1+ i))
+                (when (> i 10) (error "inner-loop-hijacked-outer-next")))
+              (list i j acc))))
+         (fut (funcall worker ch)))
+    (channel-put! ch 1)
+    (channel-put! ch 2)
+    (channel-put! ch 3)
+    (channel-put! ch 4)
+    (should (equal (eliscript-async-wait fut) '(2 2 17)))))
+
 (provide 'eliscript-syntax-tests)
 
 ;;; eliscript-syntax-tests.el ends here

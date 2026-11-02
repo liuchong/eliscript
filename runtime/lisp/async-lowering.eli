@@ -102,14 +102,17 @@
                    ((= name "while")
                      ;; A recursive continuation represents the loop back-edge;
                      ;; the runtime trampolines ready iterations without growing
-                     ;; the host stack.
-                     (let ((loop-name (funcall fresh)))
-                       (el-list (el-intern "%async-loop") loop-name
-                         (funcall lower (aref args 0) (lambda (test)
-                           (el-list (el-intern "if") test
-                             (funcall sequence (js-call args :slice 1)
-                               (lambda (value) (el-list (el-intern "progn") value (el-list (el-intern "%async-next")))))
-                             (funcall k nil)))))))
+                     ;; the host stack. Chain outer k outside %async-loop so nested
+                     ;; loops cannot mistake an outer %async-next for an inner step.
+                     (let ((loop-name (funcall fresh)) (tmp (funcall fresh)))
+                       (el-list (el-intern "%async-bind")
+                         (el-list (el-intern "%async-loop") loop-name
+                           (funcall lower (aref args 0) (lambda (test)
+                             (el-list (el-intern "if") test
+                               (funcall sequence (js-call args :slice 1)
+                                 (lambda (value) (el-list (el-intern "progn") value (el-list (el-intern "%async-next")))))
+                               nil))))
+                         tmp (funcall k tmp))))
                    ((or (= name "and") (= name "or"))
                      (if (= (js-length args) 0) (funcall k (if (= name "and") t nil))
                        (funcall lower (aref args 0) (lambda (value)

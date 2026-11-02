@@ -192,7 +192,7 @@
       (if (= (el-kind result) "future")
           (el-chain-future result (lambda (value)
             (if (eq value el-async-next) (el-async-loop session step cells) value)) nil t)
-        result)))
+        (el-future "fulfilled" result nil))))
 
   (export el-future el-settle-future el-cancel-future el-adopt-future el-chain-future
           el-async-track-binding el-async-untrack-binding el-async-capture el-async-resume el-async-await

@@ -86,12 +86,22 @@
           (el-string-from-codes events)
         (el-vector events))))
 
+  (defun el-compose-keymap-candidates (candidates)
+    (if (<= (js-length candidates) 1) (aref candidates 0)
+      (let ((primary (aref candidates 0))
+            (tail (el-compose-keymap-candidates (js-call candidates :slice 1)))
+            (view (el-list (el-intern "keymap"))))
+        (put view :_bindings (get primary :_bindings))
+        (put view :_parent (if (nil? (get primary :_parent)) tail (get primary :_parent)))
+        (put view :_inherited (js-call candidates :slice 1))
+        view)))
+
   (defun el-keymap-bindings (candidates event accept-default)
     ;; Re-read parent maps at every event. Inherited prefix candidates must not
     ;; be attached to a child when it is defined: parents and prefixes can be
     ;; added, changed, or removed after that point.
-    (let ((found (js-array)) (seen (new globalThis.Set)))
-      (js-call candidates :forEach (lambda (map)
+    (let ((found (js-array)) (seen (new globalThis.Set)) (visit nil))
+      (setq visit (lambda (map)
         (let ((current map))
           (while (and (el-keymap? current) (not (js-call seen :has current)))
             (js-call seen :add current)
@@ -100,7 +110,11 @@
               (when (and (undefined? value) accept-default)
                 (setq value (js-call (get current :_bindings) :get "symbol:t")))
               (unless (undefined? value) (js-call found :push value)))
-            (setq current (get current :_parent))))))
+            (let ((inherited (get current :_inherited)))
+              (setq current (get current :_parent))
+              (when (not (nullish? inherited))
+                (js-call inherited :forEach visit)))))))
+      (js-call candidates :forEach visit)
       found))
 
   (defun el-lookup-key (map key &optional accept-default)
@@ -117,7 +131,9 @@
             ((< index (1- (js-length events)))
               (setq result (1+ index) index (js-length events)))
             (t (setq index (1+ index))))))
-      result))
+      (if (and (el-keymap? result) (> (js-length candidates) 1))
+          (el-compose-keymap-candidates candidates)
+        result)))
 
   (defun el-define-key (map key definition &optional remove)
     (el-ensure-keymap map)

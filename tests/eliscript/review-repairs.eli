@@ -214,7 +214,26 @@
       (await (memory-parity "store-as-test" "(if (if (= x 0) (mem-store-u32 off 42) (mem-store-u32 off 99)) 77 (mem-load-u32 off))" 0 42))
       (await (memory-parity "store-in-loop" "(let ((i 0)) (while (< i 3) (if (< i 2) (mem-store-u32 off (+ (mem-load-u32 off) 14))) (setq i (1+ i))) (mem-load-u32 off))" 0 28))
       (await (abi-parity "discard-one-arm" "(let ((v 0.0)) (if (< x 0.0) (setq v 1.0)) v)" (js-array -1 0 0) 1))
-      (await (abi-parity "discard-let-arm" "(let ((v 0.0)) (let* ((w 1.0)) (if (< x 0.0) (setq v w))) v)" (js-array -1 0 0) 1))))
+      (await (abi-parity "discard-let-arm" "(let ((v 0.0)) (let* ((w 1.0)) (if (< x 0.0) (setq v w))) v)" (js-array -1 0 0) 1)))
+    15000)
+
+  (test "R701-01: nested while loops and cond clauses suspend and resume across runtimes"
+    (lambda ()
+      (js-call (js-array false t) :forEach (lambda (dynamic)
+        (parity (str "nested-while-" dynamic)
+          "(require 'eliscript-async) (defun-async nested-loops (c) (let ((i 0) (j 0) (acc 0)) (while (< i 2) (setq j 0) (while (< j 2) (setq acc (+ acc (* (1+ i) (option-value (await (channel-take! c)))))) (setq j (1+ j))) (setq i (1+ i)) (when (> i 10) (error \"inner-loop-hijacked-outer-next\"))) (list i j acc)))"
+          "(let* ((c (make-async-channel 4)) (f (nested-loops c))) (channel-put! c 1) (channel-put! c 2) (channel-put! c 3) (channel-put! c 4) (eliscript-async-wait f))"
+          "(2 2 17)" dynamic)
+        (parity (str "cond-async-" dynamic)
+          "(require 'eliscript-async) (defun-async cond-consumer (c) (let ((v (option-value (await (channel-take! c))))) (cond ((= v 1) (+ 100 (option-value (await (channel-take! c))))) ((= (option-value (await (channel-take! c))) 20) 220) (t 999))))"
+          "(let* ((c (make-async-channel 4)) (f (cond-consumer c))) (channel-put! c 2) (channel-put! c 20) (eliscript-async-wait f))"
+          "220" dynamic)))))
+
+  (test "R701-02: prefix sub-keymap returned by lookup-key preserves inherited parent prefix bindings"
+    (lambda ()
+      (parity "sub-keymap-lookup" ""
+        "(let ((p (make-sparse-keymap)) (c (make-sparse-keymap))) (set-keymap-parent c p) (define-key p \"ab\" 'ignore) (define-key c \"ac\" 'forward-char) (let ((sub (lookup-key c \"a\"))) (list (keymapp sub) (lookup-key sub \"b\") (lookup-key sub \"c\"))))"
+        "(t ignore forward-char)")))
 
   (test "binding cell protection: shadowed bindings retain distinct mutable identities"
     (lambda ()
