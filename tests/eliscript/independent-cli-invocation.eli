@@ -5,7 +5,7 @@
   (import "../tools/backends/build.mjs" root)
   (import "../tools/testing/independent-cli-fixture.mjs" rewriteIndependentCLIInvocation)
   (defconst bin (resolve root "bin/eliscript-compiler"))
-  (defconst parser (resolve root "tools/backends/compiler-cli-legacy.mjs"))
+  (defconst parser (resolve root "tools/backends/compiler-cli-ground.mjs"))
   (test "independent CLI bin invocation preserves the exact selected engine argv options and metadata without relaxing final stage authentication"
     (lambda ()
       (let* ((arguments (js-array "compile" "--compiler-artifact" "own😀.json" "--input" "-" "--json-errors"))

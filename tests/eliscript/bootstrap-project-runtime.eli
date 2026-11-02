@@ -7,7 +7,7 @@
   (import "node:crypto" createHash)
   (import "node:child_process" spawnSync)
   (import "../bootstrap/host/project.mjs" buildProject checkProject)
-  (import "../bootstrap/host/project-legacy.mjs" :as legacy)
+  (import "../bootstrap/host/project-ground.mjs" :as ground)
   (import "../bootstrap/host/evaluation.mjs" EvaluationSession)
   (import "../bootstrap/host/bun.mjs" loadCompiler)
   (import "../tools/backends/build.mjs" root)
@@ -45,11 +45,11 @@
             (lambda (name) (js-array name (Object/hasOwn environment name) (get environment name)))) before)
         (let ((maintained (await (readFile (resolve root "tools/project/project-cli.eli") "utf8")))
               (contract (JSON/parse (await (readFile (resolve root "contracts/public-surface.json") "utf8")))))
-          (js-call assert :ok (js-call maintained :includes "(import \"./project-cli-legacy.mjs\" :as legacy)"))
-          (js-call assert :ok (js-call maintained :includes "(defconst parseArguments (get legacy :parseArguments))"))
+          (js-call assert :ok (js-call maintained :includes "(import \"./project-cli-ground.mjs\" :as ground)"))
+          (js-call assert :ok (js-call maintained :includes "(defconst parseArguments (get ground :parseArguments))"))
           (js-call assert :strictEqual
             (get (js-call (get contract :commands) :find (lambda (command) (= (get command :name) "eliscript-build"))) :implementation)
-            "bootstrap/host/project-cli-legacy.mjs")))))
+            "bootstrap/host/project-cli-ground.mjs")))))
   (defasync fixture (directory)
     (let ((source-root (resolve directory "source")))
       (await (mkdir source-root))
@@ -105,7 +105,7 @@
         (put overrides (get options :entry) virtual)
         (let* ((request (Object/assign (js-object) options (js-object :sourceOverrides overrides :outDir out-dir)))
                (actual (await (buildProject request)))
-               (original (await (js-call legacy :buildProject (Object/assign (js-object) request
+               (original (await (js-call ground :buildProject (Object/assign (js-object) request
                  (js-object :outDir (resolve directory "original")))))))
           (js-call assert :strictEqual (get (get (get actual :report) :cache) :enabled) false)
           (js-call assert :deepStrictEqual (await (readFile (get actual :manifest))) (await (readFile (get original :manifest))))
@@ -127,11 +127,11 @@
                  (records (js-call (get corpus :records) :filter (lambda (record)
                    (js-call (js-array "tests/bootstrap-project.test.mjs" "tests/bootstrap-evaluation.test.mjs")
                      :includes (get (get record :original (js-object)) :suite)))))
-                 (files (js-array "bootstrap/host/project.mjs" "bootstrap/host/project-legacy.mjs" "tools/project/project.eli"
+                 (files (js-array "bootstrap/host/project.mjs" "bootstrap/host/project-ground.mjs" "tools/project/project.eli"
                    "bootstrap/host/project-cli.mjs" "bootstrap/host/project-cli.mjs.map"
-                   "bootstrap/host/project-cli-legacy.mjs" "tools/project/project-cli.eli")))
+                   "bootstrap/host/project-cli-ground.mjs" "tools/project/project-cli.eli")))
             (js-call assert :ok (> (js-length records) 0))
-            (js-call assert :strictEqual (digest (await (readFile (resolve root "bootstrap/host/project-cli-legacy.mjs"))))
+            (js-call assert :strictEqual (digest (await (readFile (resolve root "bootstrap/host/project-cli-ground.mjs"))))
               "79980b2a6e38e4ab9daca31b04cb366bd749b66e3b384fbd04e696ddc465cd82")
             (js-call capsules :forEach (lambda (name)
               (js-call files :push (str "runtime/" name ".eli") (str "runtime/" name ".mjs") (str "runtime/" name ".mjs.map"))))
@@ -221,7 +221,7 @@
 
   (test "project facade keeps the original checker identity and original option getter first failure"
     (async () (await (workspace (async (directory)
-      (js-call assert :strictEqual checkProject (get legacy :checkProject))
+      (js-call assert :strictEqual checkProject (get ground :checkProject))
       (let* ((first (js-object :original t)) (options (js-object))
              (out-dir (resolve directory "never-created")) (reads (js-array)))
         (Object/defineProperty options "entry" (js-object :get (lambda ()

@@ -209,18 +209,18 @@
           (end-of-file nil))))
     (nreverse names)))
 
-(defun eliscript-runtime--session-mjs-path ()
-  "Return the path to `dist/session/session.mjs', building it if missing."
+(defun eliscript-runtime--lisp-mjs-path ()
+  "Return the path to `dist/runtime/lisp.mjs', building it if missing."
   (let* ((proj-dir (file-name-as-directory
                     (file-truename eliscript-runtime--project-directory)))
-         (dist-mjs (expand-file-name "dist/session/session.mjs" proj-dir))
+         (dist-mjs (expand-file-name "dist/runtime/lisp.mjs" proj-dir))
          (build-bin (expand-file-name "bin/eliscript-build" proj-dir))
          (runtime-dir (expand-file-name "runtime" proj-dir))
-         (session-eli (expand-file-name "runtime/session.eli" proj-dir))
-         (out-dir (expand-file-name "dist/session" proj-dir)))
+         (lisp-eli (expand-file-name "runtime/lisp.eli" proj-dir))
+         (out-dir (expand-file-name "dist/runtime" proj-dir)))
     (unless (file-exists-p dist-mjs)
       (unless (= 0 (call-process build-bin nil nil nil
-                                 "--root" runtime-dir "--out-dir" out-dir session-eli))
+                                 "--root" runtime-dir "--out-dir" out-dir lisp-eli))
         (error "Failed to build %s" dist-mjs)))
     dist-mjs))
 
@@ -239,14 +239,14 @@
           (end-of-file last-val)))))
 
   (defun eliscript-runtime-eval-file (file)
-    "Read and evaluate unmodified Emacs Lisp or Eliscript FILE in 0.1.0 session."
+    "Read and evaluate unmodified Emacs Lisp or Eliscript FILE in 0.1.0 runtime."
     (with-temp-buffer
       (insert-file-contents file)
       (eliscript-runtime-eval-string (buffer-string))))
 
   (defun eliscript-runtime--elisp-module-source (source _function-names module-name)
     "Compile SOURCE into an AOT Eliscript `(module ...)' string named MODULE-NAME."
-    (let* ((session-mjs (eliscript-runtime--session-mjs-path))
+    (let* ((lisp-mjs (eliscript-runtime--lisp-mjs-path))
            (runner (or (executable-find "bun")
                        (executable-find "node")
                        (error "Neither bun nor node found in PATH")))
@@ -255,7 +255,7 @@
                     "import { pathToFileURL } from 'node:url';\n"
                     "const mod = await import(pathToFileURL(process.argv[1]).href);\n"
                     "const src = fs.readFileSync(0, 'utf8');\n"
-                    "process.stdout.write(mod.compileModule(src, { moduleName: process.argv[2], runtime: 'eliscript/runtime/session' }));\n"))
+                    "process.stdout.write(mod.compileModule(src, { moduleName: process.argv[2], runtime: 'eliscript/runtime/lisp' }));\n"))
            (coding-system-for-read 'utf-8)
            (coding-system-for-write 'utf-8-unix))
       (with-temp-buffer
@@ -263,7 +263,7 @@
         (let ((status (call-process-region
                        (point-min) (point-max)
                        runner t t nil
-                       "-e" script "--" session-mjs module-name)))
+                       "-e" script "--" lisp-mjs module-name)))
           (unless (and (integerp status) (= status 0))
             (error "Failed to compile module %s: %s" module-name (buffer-string)))
           (buffer-string)))))
@@ -283,15 +283,9 @@
             (while (re-search-forward "\"eliscript/runtime/\\([^\"]+\\)\"" nil t)
               (let* ((sub (match-string 1))
                      (sub-mjs (if (string-suffix-p ".mjs" sub) sub (concat sub ".mjs")))
-                     (target (cond
-                              ((equal sub-mjs "session.mjs")
-                               (let ((dist-session (expand-file-name "dist/session/session.mjs" proj-dir))
-                                     (root-session (expand-file-name "runtime/session.mjs" proj-dir)))
-                                 (if (file-exists-p dist-session) dist-session root-session)))
-                              (t
-                               (let ((root-target (expand-file-name (concat "runtime/" sub-mjs) proj-dir))
-                                     (dist-target (expand-file-name (concat "dist/runtime/" sub-mjs) proj-dir)))
-                                 (if (file-exists-p root-target) root-target dist-target)))))
+                     (dist-target (expand-file-name (concat "dist/runtime/" sub-mjs) proj-dir))
+                     (root-target (expand-file-name (concat "runtime/" sub-mjs) proj-dir))
+                     (target (if (file-exists-p dist-target) dist-target root-target))
                      (rel (file-relative-name target out-dir))
                      (spec (if (string-prefix-p "." rel) rel (concat "./" rel))))
                 (replace-match (concat "\"" spec "\"") t t)))

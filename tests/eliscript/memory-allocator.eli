@@ -1282,7 +1282,7 @@
   (defun extended-fresh ()
     (get (new globalThis.WebAssembly.Instance extended-image) :exports))
 
-  (test "extended layouts spend fresh slots before FIFO reuse without changing the legacy policy"
+  (test "extended layouts spend fresh slots before FIFO reuse without changing the ground policy"
     (lambda ()
       (js-call (js-array 20 21 22 23) :forEach (lambda (bits)
         (let* ((r (fresh))
@@ -1518,7 +1518,7 @@
               (js-call r "heap-new-extended" (aref parameters 0) (aref parameters 1) (aref parameters 2)) 0)
             (js-call assert :strictEqual (js-call r "last-error") 3)))
         ;; The same instance is usable after each rejected constructor. The
-        ;; legacy ABI still has its original twenty-bit handle and budget.
+        ;; ground ABI still has its original twenty-bit handle and budget.
         (let* ((heap (js-call r "heap-new" 1 4096 8192))
                (value (uint32 (js-call r "value-bytes" heap 0))))
           (js-call assert :ok (> heap 0))

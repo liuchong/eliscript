@@ -13,12 +13,6 @@ done
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)
 PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
 
-case "${1:-}" in
-  --batch|-batch|-Q|-q|--quick|-l|--load|--eval|-f|--funcall|-L|--directory|--version|--che-session-worker)
-    exec "$SCRIPT_DIR/eliscript-batch" "$@"
-    ;;
-esac
-
 MODULE_DIR=${ELISCRIPT_BOOTSTRAP_MODULE_DIR:-"$PROJECT_DIR/dist/bootstrap"}
 : "${ELISCRIPT_JS_RUNTIME:=bun}"
 
@@ -30,6 +24,10 @@ fi
 if [ ! -f "$MODULE_DIR/compiler.mjs" ] || [ ! -f "$HOST_DIR/bun.mjs" ]; then
   ELISCRIPT_DIST_ONLY=1 ELISCRIPT_BOOTSTRAP_OUT_DIR="$MODULE_DIR" \
     "$PROJECT_DIR/bin/eliscript-bootstrap"
+fi
+
+if [ ! -f "$PROJECT_DIR/dist/runtime/lisp.mjs" ]; then
+  "$PROJECT_DIR/bin/eliscript-build" --root "$PROJECT_DIR/runtime" --out-dir "$PROJECT_DIR/dist/runtime" "$PROJECT_DIR/runtime/lisp.eli" >/dev/null
 fi
 
 export ELISCRIPT_BOOTSTRAP_MODULE_DIR="$MODULE_DIR"

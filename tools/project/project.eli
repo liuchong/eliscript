@@ -5,9 +5,9 @@
   (import "node:url" fileURLToPath)
   (import "node:buffer" Buffer)
   (import "node:module" createRequire)
-  (import "./project-legacy.mjs" :as legacy)
+  (import "./project-ground.mjs" :as ground)
 
-  (defconst checkProject (get legacy :checkProject))
+  (defconst checkProject (get ground :checkProject))
   (defconst source-root (resolve (dirname (fileURLToPath (js* "import.meta.url"))) "../.."))
   (defconst capsules (js-array "math" "prelude" "unicode-case" "unicode-case-data"))
   (defun digest (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
@@ -115,8 +115,8 @@
       result))
 
   (defasync buildProject (options)
-    ;; Preserve legacy option reads, validation, root isolation, cache, reports,
+    ;; Preserve ground option reads, validation, root isolation, cache, reports,
     ;; errors and its frozen return identity. Deployment is only post-success.
-    (complete-runtime (await (js-call legacy :buildProject options))))
+    (complete-runtime (await (js-call ground :buildProject options))))
 
   (export checkProject buildProject))

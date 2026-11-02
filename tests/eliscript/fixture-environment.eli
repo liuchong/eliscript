@@ -131,7 +131,7 @@
               (js-call assert :deepStrictEqual arguments before)
               (let ((prepared (fixtureChildArguments arguments environment)))
                 (js-call assert :deepStrictEqual (fixtureChildArguments prepared environment) prepared)))))
-          (let ((ordinary (js-array "test" "tests/direct-wasm-backend-test-legacy.mjs" "tests/unrelated.test.mjs")))
+          (let ((ordinary (js-array "test" "tests/direct-wasm-backend-test-ground.mjs" "tests/unrelated.test.mjs")))
             (js-call assert :strictEqual (fixtureChildArguments ordinary (js-object)) ordinary))
           (finally (js-call fixture :close))))))
 

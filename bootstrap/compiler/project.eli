@@ -19,7 +19,7 @@
   (defconst project-check-report-version 1)
   (defconst project-cache-format "eliscript-project-cache")
   (defconst project-cache-version 2)
-  (defconst project-cache-legacy-version 1)
+  (defconst project-cache-ground-version 1)
 
   ;; Compiler metadata uses the same deterministic UTF-16 order as Array.sort.
   ;; This intentionally does not perform locale collation or normalization.
@@ -691,8 +691,8 @@
             (= (get cache :version) project-cache-version))
        "current")
       ((and (undefined? (get cache :format))
-            (= (get cache :version) project-cache-legacy-version))
-       "legacy")
+            (= (get cache :version) project-cache-ground-version))
+       "ground")
       (t false)))
 
   (defun project-cache-records (identity-modules cache-modules)

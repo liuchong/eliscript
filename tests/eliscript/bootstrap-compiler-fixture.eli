@@ -23,10 +23,10 @@
           (js-array title body 30000 "extra") (js-array title nil 30000)) :forEach (lambda (original)
             (js-call assert :strictEqual (bootstrapCompilerFunctionalArguments root environment original) original)))
         (let* ((fixture (prepareFixtureEnvironment root (get globalThis.process :env)))
-               (directory (get fixture :directory)) (archive (resolve directory "tests/bootstrap-compiler-test-legacy.mjs")))
+               (directory (get fixture :directory)) (archive (resolve directory "tests/bootstrap-compiler-test-ground.mjs")))
           (try
             (mkdirSync (resolve directory "tests"))
-            (writeFileSync archive (readFileSync (resolve root "tests/bootstrap-compiler-test-legacy.mjs")))
+            (writeFileSync archive (readFileSync (resolve root "tests/bootstrap-compiler-test-ground.mjs")))
             (js-call assert :deepStrictEqual (bootstrapCompilerFunctionalArguments directory environment arguments) (js-array title body 0))
             (writeFileSync archive "changed original full bootstrap suite")
             (js-call assert :throws (lambda () (bootstrapCompilerFunctionalArguments directory environment arguments)) globalThis.TypeError)

@@ -6,7 +6,7 @@
   (import "../../tools/backends/build.mjs" root)
   (import "./managed-runtime-cases.mjs" managedRuntimeCases prepareManagedRuntimeCases closeManagedRuntimeCases)
   (defconst original (Object/assign (js-object) framework))
-  (defconst source (readFileSync (resolve root "tests/wasm-managed-runtime-test-legacy.mjs")))
+  (defconst source (readFileSync (resolve root "tests/wasm-managed-runtime-test-ground.mjs")))
   (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex")
              "0b240d3dff9164f23edf534b5a79598948b80f001e9316fa0f37e55a40f0fed2")
     (throw (new globalThis.TypeError "the complete original managed runtime suite source identity changed")))

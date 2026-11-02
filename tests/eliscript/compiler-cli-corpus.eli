@@ -6,19 +6,19 @@
   (import "node:crypto" createHash)
   (import "../tools/backends/build.mjs" root)
   (import "../tools/backends/compiler-corpus-cli-adapters.mjs" addOriginalCLIPrograms addOriginalWorkerProgram)
-  (import "../tools/backends/compiler-corpus-cli-adapters-legacy.mjs" :as legacy)
+  (import "../tools/backends/compiler-corpus-cli-adapters-ground.mjs" :as ground)
   (import "../tools/backends/compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
 
   (defun hash (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
   (defconst generation-suite "tests/bootstrap-compiler.test.mjs")
-  (defconst generation-archive "tests/bootstrap-compiler-test-legacy.mjs")
+  (defconst generation-archive "tests/bootstrap-compiler-test-ground.mjs")
   (defconst generation-eli "tests/eliscript/bootstrap-compiler.eli")
   (defasync generation-services ()
     (let* ((service (await (services))) (options (get service :options)))
       (put options :locators (js-array (js-object :file generation-suite
         :id "original-js-bootstrap-generations" :contains "portable compiler driver reaches a reproducible fixed point")))
       service))
-  (defun legacy-generation-carrier (options)
+  (defun ground-generation-carrier (options)
     ;; Historical transport receives the actual archive, never today's
     ;; generated canonical bytes represented as if they were the old body.
     (let ((text (get options :text)) (file (get options :file)))
@@ -30,10 +30,10 @@
     (async ()
       (let* ((service (await (generation-services))) (options (get service :options))
              (baseline (js-array))
-             (old-options (legacy-generation-carrier (Object/assign (js-object) options
+             (old-options (ground-generation-carrier (Object/assign (js-object) options
                (js-object :add (lambda (record) (js-call baseline :push record))))))
              (mapped (await (addOriginalCLIPrograms options)))
-             (old-mapped (await (js-call legacy :addOriginalCLIPrograms old-options)))
+             (old-mapped (await (js-call ground :addOriginalCLIPrograms old-options)))
              (record (aref (get service :records) 0)) (old-record (aref baseline 0))
              (original (get record :original))
              (source (await (readFile (resolve root generation-archive) "utf8")))
@@ -136,12 +136,12 @@
   (test "CLI replay retains the complete shell stdout source identity Seed oracle and unchanged original recipe"
     (async ()
       (let* ((service (await (services))) (options (get service :options))
-             (legacy-records (js-array))
-             (legacy-options (Object/assign (js-object) options
-               (js-object :add (lambda (record) (js-call legacy-records :push record)))))
+             (ground-records (js-array))
+             (ground-options (Object/assign (js-object) options
+               (js-object :add (lambda (record) (js-call ground-records :push record)))))
              (mapped (await (addOriginalCLIPrograms options)))
-             (old-mapped (await (js-call legacy :addOriginalCLIPrograms legacy-options)))
-             (record (aref (get service :records) 0)) (old-record (aref legacy-records 0))
+             (old-mapped (await (js-call ground :addOriginalCLIPrograms ground-options)))
+             (record (aref (get service :records) 0)) (old-record (aref ground-records 0))
              (expected "CLI and Bun execution test passed\nPublic Seed RAM bytecode and unchanged small-input path passed\n"))
         (js-call assert :deepStrictEqual mapped old-mapped)
         (js-call assert :strictEqual (js-length (get service :records)) 1)
@@ -153,7 +153,7 @@
         (js-call assert :strictEqual (get (get old-record :expected) :stdout) "CLI and Bun execution test passed\n")
         (put old-record :expected (get record :expected))
         (js-call assert :deepStrictEqual record old-record)
-        (js-call assert :strictEqual addOriginalWorkerProgram (get legacy :addOriginalWorkerProgram)))))
+        (js-call assert :strictEqual addOriginalWorkerProgram (get ground :addOriginalWorkerProgram)))))
 
   (test "CLI replay refuses missing duplicated reordered and unbound original success statements before publishing"
     (async ()

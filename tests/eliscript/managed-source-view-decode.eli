@@ -109,7 +109,7 @@
         (js-call assert :strictEqual (get (get view :value) :value) 9)
         (js-call assert :deepStrictEqual trace (js-array "descriptor" "get")))))
 
-  (test "shared decoded handlers retain legacy receiver descriptor ownKeys and integrity operation order"
+  (test "shared decoded handlers retain ground receiver descriptor ownKeys and integrity operation order"
     (lambda ()
       (let ((reports (js-array)))
         (js-call (js-array false t) :forEach (lambda (shared)

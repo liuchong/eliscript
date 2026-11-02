@@ -11,7 +11,7 @@
   (import "../../dist/bootstrap/compiler.mjs" compile-string compile-ir-string)
   (import "../../dist/bootstrap/emitter.mjs" emit-expression)
   (import "./build.mjs" root loadLiteralSources)
-  (import "./compiler-corpus-managed-adapters-legacy.mjs" :as legacy)
+  (import "./compiler-corpus-managed-adapters-ground.mjs" :as ground)
   (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
 
 
@@ -257,7 +257,7 @@
             (/= (value-type (get options :text)) "function") (nullish? (get options :stableFiles))) options
       (let* ((files (js-array "tools/backends/eliscript/compiler-corpus-managed-adapters.eli"
                      "tools/backends/compiler-corpus-managed-adapters.mjs"
-                     "tools/backends/compiler-corpus-managed-adapters-legacy.mjs"
+                     "tools/backends/compiler-corpus-managed-adapters-ground.mjs"
                      "tools/backends/eliscript/compiler-corpus-process.eli" "tools/backends/compiler-corpus-process.mjs"
                      "tools/backends/eliscript/compiler-corpus-program-driver.eli" "tools/backends/compiler-corpus-program-driver.mjs"
                      "tools/backends/eliscript/managed-source-view.eli" "tools/backends/managed-source-view.mjs"))
@@ -272,13 +272,13 @@
           (funcall add (migrate-original-observation-record record assets helper-url))))))))
 
   (defconst suite "tests/wasm-managed-sequence-data.test.mjs")
-  (defconst retained "tests/wasm-managed-sequence-data-test-legacy.mjs")
+  (defconst retained "tests/wasm-managed-sequence-data-test-ground.mjs")
   (defconst maintained "tests/eliscript/wasm-managed-sequence-data.eli")
   (defconst fixture "tests/fixtures/wasm-managed-sequence-data.eli")
   (defconst identity-host "tools/backends/eliscript/compiler-corpus-project-entry-host.eli")
   (defconst transient-fixture "tests/fixtures/wasm-managed-transient-state.eli")
   (defconst transient-transports (js-array "tools/backends/eliscript/compiler-corpus-host-context.eli"
-    "tools/backends/compiler-corpus-host-context.mjs" "tools/backends/compiler-corpus-host-context-legacy.mjs"
+    "tools/backends/compiler-corpus-host-context.mjs" "tools/backends/compiler-corpus-host-context-ground.mjs"
     "tools/backends/original-program-bun-launcher.el"))
   (defun hash (source) (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
   (defun fail (message) (throw (new globalThis.TypeError message)))
@@ -446,9 +446,9 @@
             (/= (value-type (get options :file)) "function")
             (/= (value-type (get options :add)) "function")
             (nullish? (get options :stableFiles)))
-      (await (js-call legacy :addOriginalManagedLibraryAdapters options))
+      (await (js-call ground :addOriginalManagedLibraryAdapters options))
       (if (not (js-call (get options :stableFiles) :has fixture))
-        (await (js-call legacy :addOriginalManagedLibraryAdapters (linker-refusal-options options)))
+        (await (js-call ground :addOriginalManagedLibraryAdapters (linker-refusal-options options)))
       (let* ((text (get options :text)) (file (get options :file)) (add (get options :add))
              (source (await (funcall text retained)))
              (identity (await (funcall file retained)))
@@ -463,7 +463,7 @@
                "tools/backends/eliscript/compiler-corpus-host-context.eli" "tools/backends/compiler-corpus-host-context.mjs"
                "tools/backends/eliscript/managed-foreign-binding.eli" "tools/backends/managed-foreign-binding.mjs"
                "tools/backends/eliscript/managed-host.eli"
-               "tools/backends/managed-host.mjs" "tools/backends/managed-host-legacy.mjs"
+               "tools/backends/managed-host.mjs" "tools/backends/managed-host-ground.mjs"
                "tools/backends/eliscript/managed-host-runtime.eli" "tools/backends/managed-host-runtime.mjs" "tools/backends/managed-host-runtime.mjs.map"
                "tools/backends/eliscript/managed-host-lifecycle.eli" "tools/backends/managed-host-lifecycle.mjs"
                "tools/backends/eliscript/managed-host-object-provider.eli" "tools/backends/managed-host-object-provider.mjs"
@@ -511,5 +511,5 @@
                    (transport (get (get selected :original) :observationTransport)))
               (funcall add (if (and transport (= (get transport :kind) "original-managed-standard-identities-host"))
                 (bindOriginalProcessHostDependency selected dependency) selected)))))
-          (await (js-call legacy :addOriginalManagedLibraryAdapters forwarded)))))))
+          (await (js-call ground :addOriginalManagedLibraryAdapters forwarded)))))))
   (export addOriginalManagedLibraryAdapters originalManagedObservationLaunch runOriginalManagedObservation runOriginalManagedSequenceHost runInheritedOriginalManagedObservation originalManagedProgramCompletionSource))

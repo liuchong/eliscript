@@ -6,7 +6,7 @@
   (import "../tools/backends/build.mjs" root)
   (import "../tools/testing/independent-cli-fixture.mjs" rewriteIndependentCLIArguments installIndependentCLIFixture)
   (defconst canonical (resolve root "tools/backends/compiler-cli.mjs"))
-  (defconst independent (resolve root "tools/backends/compiler-cli-legacy.mjs"))
+  (defconst independent (resolve root "tools/backends/compiler-cli-ground.mjs"))
   (test "independent CLI transport relocates only one exact actual parser coordinate and preserves every argument"
     (lambda ()
       (let* ((arguments (js-array "--smol" canonical "compile" "--compiler-artifact" "原😀.json" "--input" "-"))

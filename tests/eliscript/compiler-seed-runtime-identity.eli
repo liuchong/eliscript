@@ -281,7 +281,7 @@
         (put (get record :execution) :hostRuntime "bun")
         (put (get record :execution) :arguments (js-array (js-object :directory t) (js-object :literal "main.mjs")))
         (put (get record :execution) :hostSource
-          (compile-string "(throw (new globalThis.Error \"legacy host must not replace explicit JavaScript capability\"))" "old-host.eli"))
+          (compile-string "(throw (new globalThis.Error \"ground host must not replace explicit JavaScript capability\"))" "old-host.eli"))
         (put (get record :execution) :javascriptHostSource (await (readFile (resolve root host-file) "utf8")))
         (let ((files (js-array fixture host-file host-eli)) (index 0))
           (while (< index (js-length files))

@@ -5,7 +5,7 @@
     createManagedModuleGraph createManagedProjectFacades loadManagedProjectGraph managedHostModuleEdges
     observeManagedProjectRuntime observeManagedProjectExports)
   (import "./compiler-debug.mjs" createCompilerDebugMap)
-  (import "./managed-runtime-host-legacy.mjs" :as runtime-host)
+  (import "./managed-runtime-host-ground.mjs" :as runtime-host)
   (import "./managed-host-proxy.mjs" prepareManagedHostProxyClassifier)
 
   (defasync loadManagedHostModules (descriptor &rest arguments)
@@ -54,10 +54,10 @@
           (throw (new globalThis.TypeError "managed runtime requires heap-new-extended for extendedHeap"))))
       (unless (= (value-type constructor) "function") (failManagedRuntime 3))
       (let* ((descriptors (Object/getOwnPropertyDescriptors exports))
-             (legacy (get descriptors "heap-new"))
+             (ground (get descriptors "heap-new"))
              (facade (Object/create (Object/getPrototypeOf exports))))
-        (unless legacy (failManagedRuntime 3))
-        (put legacy :value (lambda (slots initial maximum)
+        (unless ground (failManagedRuntime 3))
+        (put ground :value (lambda (slots initial maximum)
           (let ((heap (Reflect/apply constructor undefined (js-array slots initial maximum))))
             (put record :heap (uint32 heap)) heap)))
         (Object/defineProperties facade descriptors)

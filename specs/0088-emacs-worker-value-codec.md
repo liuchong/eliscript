@@ -128,20 +128,20 @@ runtime owned by that worker. The resolver rejects paths escaping the package
 runtime directory.
 
 Portable functions can therefore construct and return persistent values when
-their caller opts into the codec. Legacy JSON callers remain responsible for
+their caller opts into the codec. Ground JSON callers remain responsible for
 using JSON-compatible values.
 
 ## Compatibility
 
 The `eliscript-value-v1` identifier, opt-in negotiation, wire tags, category
 distinctions, deterministic non-streaming ordering, default limits, structured
-failure families, and Emacs record mapping are stable. The legacy protocol-v1
+failure families, and Emacs record mapping are stable. The ground protocol-v1
 JSON path remains unchanged. Unsupported executable and host-identity values
 remain outside the codec rather than acquiring a lossy fallback.
 
 ## Acceptance Criteria
 
-- **WVC-01:** Worker protocol version remains 1 and legacy requests preserve
+- **WVC-01:** Worker protocol version remains 1 and ground requests preserve
   their existing JSON behavior.
 - **WVC-02:** Ready messages advertise value codec and runtime resolution
   capabilities.

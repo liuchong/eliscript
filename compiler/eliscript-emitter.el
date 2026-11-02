@@ -221,7 +221,7 @@ call any function. Return the decision of each recorded access in order."
 
 
 
-(defun eliscript-emitter--tdz-legacy-shadow (pattern scope)
+(defun eliscript-emitter--tdz-ground-shadow (pattern scope)
   (let ((pending (list pattern)))
     (while pending
       (let ((item (pop pending)))
@@ -232,12 +232,12 @@ call any function. Return the decision of each recorded access in order."
                (let ((index (1- (length item))))
                  (while (>= index 0) (push (aref item index) pending) (setq index (1- index))))))))))
 
-(defun eliscript-emitter--tdz-legacy-parameters (parameters scope)
-  (dolist (parameter parameters) (eliscript-emitter--tdz-legacy-shadow parameter scope)))
-(defun eliscript-emitter--tdz-legacy-predeclare (forms scope state)
+(defun eliscript-emitter--tdz-ground-parameters (parameters scope)
+  (dolist (parameter parameters) (eliscript-emitter--tdz-ground-shadow parameter scope)))
+(defun eliscript-emitter--tdz-ground-predeclare (forms scope state)
   (dolist (form forms)
     (if (and (consp form) (eq (car form) 'module))
-        (eliscript-emitter--tdz-legacy-predeclare (cddr form) scope state)
+        (eliscript-emitter--tdz-ground-predeclare (cddr form) scope state)
       (when (consp form)
         (pcase (car form)
           ((or 'defvar 'defconst)
@@ -256,9 +256,9 @@ call any function. Return the decision of each recorded access in order."
              (when (and name (symbolp name) (not (keywordp name)))
                (puthash (eliscript-emitter--binding-name name) nil scope))))))
       (setf (plist-get state :position) (1+ (plist-get state :position))))))
-(defun eliscript-emitter--tdz-legacy-sequence (forms scope)
-  (mapcar (lambda (form) (eliscript-emitter--tdz-legacy-expression form scope)) forms))
-(defun eliscript-emitter--tdz-legacy-expression (form scope)
+(defun eliscript-emitter--tdz-ground-sequence (forms scope)
+  (mapcar (lambda (form) (eliscript-emitter--tdz-ground-expression form scope)) forms))
+(defun eliscript-emitter--tdz-ground-expression (form scope)
   "Rewrite ordinary TDZ expression trees using explicit continuations."
   (eliscript-emitter--run-depth-plan #'eliscript-emitter--tdz-depth-plan :expression form scope))
 
@@ -274,7 +274,7 @@ call any function. Return the decision of each recorded access in order."
            (let* ((binding (car remaining)) (parsed (eliscript-emitter--parse-binding binding)) (target (car parsed)))
              (list :children (list (list :expression (cadr parsed) (if sequential child scope)))
                    (lambda (results)
-                     (when sequential (eliscript-emitter--tdz-legacy-shadow target child))
+                     (when sequential (eliscript-emitter--tdz-ground-shadow target child))
                      (list :children
                            (list (list :bindings
                                        (list (cdr remaining) original
@@ -283,7 +283,7 @@ call any function. Return the decision of each recorded access in order."
                            (lambda (tail) (list :value (car tail)))))))
          (unless sequential
            (dolist (binding original)
-             (eliscript-emitter--tdz-legacy-shadow (car (eliscript-emitter--parse-binding binding)) child)))
+             (eliscript-emitter--tdz-ground-shadow (car (eliscript-emitter--parse-binding binding)) child)))
          (list :children (list (list :sequence body child))
                (lambda (results) (list :value (cons operator (cons (nreverse reversed) (car results)))))))))
     (:expression
@@ -297,7 +297,7 @@ call any function. Return the decision of each recorded access in order."
              (lambda (results) (list :value (car results)))))
       ((and (consp value) (memq (car value) '(lambda fn async)))
        (let ((child (copy-hash-table scope)))
-         (eliscript-emitter--tdz-legacy-parameters (cadr value) child)
+         (eliscript-emitter--tdz-ground-parameters (cadr value) child)
          (list :children (list (list :sequence (cddr value) child))
                (lambda (results) (list :value (cons (car value) (cons (cadr value) (car results))))))))
       ((and (consp value) (not (memq (car value) '(quote js* setq set! try cond js-object))))
@@ -312,10 +312,10 @@ call any function. Return the decision of each recorded access in order."
                (append (unless fixed (list (list :expression operator scope)))
                        (mapcar (lambda (form) (list :expression form scope)) (cdr value)))
                (lambda (results) (list :value (if fixed (cons operator results) results))))))
-      (t (list :value (eliscript-emitter--tdz-legacy-expression-recursive value scope)))))
+      (t (list :value (eliscript-emitter--tdz-ground-expression-recursive value scope)))))
     (_ (error "unknown TDZ continuation mode: %S" mode))))
 
-(defun eliscript-emitter--tdz-legacy-expression-recursive (form scope)
+(defun eliscript-emitter--tdz-ground-expression-recursive (form scope)
   (cond
    ((and form (symbolp form) (not (keywordp form)))
     (let ((record (gethash (eliscript-emitter--tdz-root form) scope))
@@ -326,7 +326,7 @@ call any function. Return the decision of each recorded access in order."
        ((and record (eliscript-emitter--tdz-site state :read record))
         (list eliscript-emitter--tdz-read-tag record form))
        (t form))))
-   ((vectorp form) (vconcat (eliscript-emitter--tdz-legacy-sequence (append form nil) scope)))
+   ((vectorp form) (vconcat (eliscript-emitter--tdz-ground-sequence (append form nil) scope)))
    ((consp form)
     (let ((operator (car form)) (arguments (cdr form)))
       (pcase operator
@@ -334,20 +334,20 @@ call any function. Return the decision of each recorded access in order."
         ('js* (eliscript-emitter--tdz-raw eliscript-emitter--tdz-state) form)
         ((or 'lambda 'fn 'async)
          (let ((child (copy-hash-table scope)))
-           (eliscript-emitter--tdz-legacy-parameters (car arguments) child)
-           (cons operator (cons (car arguments) (eliscript-emitter--tdz-legacy-sequence (cdr arguments) child)))))
+           (eliscript-emitter--tdz-ground-parameters (car arguments) child)
+           (cons operator (cons (car arguments) (eliscript-emitter--tdz-ground-sequence (cdr arguments) child)))))
         ((or 'let 'let* 'loop)
          (let ((child (copy-hash-table scope)) (sequential (eq operator 'let*)) bindings)
            (dolist (binding (car arguments))
              (let* ((parsed (eliscript-emitter--parse-binding binding))
                     (target (car parsed))
-                    (value (eliscript-emitter--tdz-legacy-expression (cadr parsed) (if sequential child scope))))
+                    (value (eliscript-emitter--tdz-ground-expression (cadr parsed) (if sequential child scope))))
                (push (if (or (symbolp binding) (vectorp binding)) binding (list target value)) bindings)
-               (when sequential (eliscript-emitter--tdz-legacy-shadow target child))))
+               (when sequential (eliscript-emitter--tdz-ground-shadow target child))))
            (unless sequential
              (dolist (binding (car arguments))
-               (eliscript-emitter--tdz-legacy-shadow (car (eliscript-emitter--parse-binding binding)) child)))
-           (cons operator (cons (nreverse bindings) (eliscript-emitter--tdz-legacy-sequence (cdr arguments) child)))))
+               (eliscript-emitter--tdz-ground-shadow (car (eliscript-emitter--parse-binding binding)) child)))
+           (cons operator (cons (nreverse bindings) (eliscript-emitter--tdz-ground-sequence (cdr arguments) child)))))
         ((or 'setq 'set!)
          (if (eq operator 'set!) (eliscript-emitter--require-arity "set!" arguments 2 2)
            (when (or (null arguments) (= (% (length arguments) 2) 1))
@@ -355,7 +355,7 @@ call any function. Return the decision of each recorded access in order."
          (let ((pending arguments) pairs original-pairs guarded)
            (while pending
              (let* ((name (pop pending)) (value (pop pending))
-                    (rewritten (eliscript-emitter--tdz-legacy-expression value scope))
+                    (rewritten (eliscript-emitter--tdz-ground-expression value scope))
                     (entry (and (symbolp name) (gethash (eliscript-emitter--tdz-root name) scope)))
                     (record (and (eliscript-emitter--tdz-variable-p entry)
                                  (eliscript-emitter--tdz-site eliscript-emitter--tdz-state :write entry)
@@ -372,19 +372,19 @@ call any function. Return the decision of each recorded access in order."
              (cond
               ((and (consp clause) (eq (car clause) 'catch))
                (let ((child (copy-hash-table scope)))
-                 (eliscript-emitter--tdz-legacy-shadow (cadr clause) child)
-                 (cons 'catch (cons (cadr clause) (eliscript-emitter--tdz-legacy-sequence (cddr clause) child)))))
+                 (eliscript-emitter--tdz-ground-shadow (cadr clause) child)
+                 (cons 'catch (cons (cadr clause) (eliscript-emitter--tdz-ground-sequence (cddr clause) child)))))
               ((and (consp clause) (eq (car clause) 'finally))
-               (cons 'finally (eliscript-emitter--tdz-legacy-sequence (cdr clause) scope)))
-              (t (eliscript-emitter--tdz-legacy-expression clause scope)))) arguments)))
+               (cons 'finally (eliscript-emitter--tdz-ground-sequence (cdr clause) scope)))
+              (t (eliscript-emitter--tdz-ground-expression clause scope)))) arguments)))
         ('cond
-         (cons operator (mapcar (lambda (clause) (eliscript-emitter--tdz-legacy-sequence clause scope)) arguments)))
+         (cons operator (mapcar (lambda (clause) (eliscript-emitter--tdz-ground-sequence clause scope)) arguments)))
         ('js-object
          (let ((pending arguments) fields)
            (while pending
              (let ((key (pop pending)) (value (pop pending)))
-               (push (if (or (symbolp key) (stringp key)) key (eliscript-emitter--tdz-legacy-expression key scope)) fields)
-               (push (eliscript-emitter--tdz-legacy-expression value scope) fields)))
+               (push (if (or (symbolp key) (stringp key)) key (eliscript-emitter--tdz-ground-expression key scope)) fields)
+               (push (eliscript-emitter--tdz-ground-expression value scope) fields)))
            (cons operator (nreverse fields))))
         (_
          (cons
@@ -394,36 +394,36 @@ call any function. Return the decision of each recorded access in order."
                 value-type host-identity-token string-code-unit-at string-from-code-unit string-to-number string-to-bigint number-float64-words
                 list vector hash-map hash-set queue js-array car cdr cons js-cons nth js-nth aref length js-length
                 new print str object-keys object-has? object-assoc __eliscript_arity_error funcall apply get put js-call await throw))
-              operator (eliscript-emitter--tdz-legacy-expression operator scope))
-          (eliscript-emitter--tdz-legacy-sequence arguments scope))))))
+              operator (eliscript-emitter--tdz-ground-expression operator scope))
+          (eliscript-emitter--tdz-ground-sequence arguments scope))))))
    (t form)))
-(defun eliscript-emitter--tdz-legacy-top (form scope state)
+(defun eliscript-emitter--tdz-ground-top (form scope state)
   (if (and (consp form) (eq (car form) 'module))
-      (cons 'module (cons (cadr form) (mapcar (lambda (child) (eliscript-emitter--tdz-legacy-top child scope state)) (cddr form))))
+      (cons 'module (cons (cadr form) (mapcar (lambda (child) (eliscript-emitter--tdz-ground-top child scope state)) (cddr form))))
     (let ((position (plist-get state :position)))
       (setf (plist-get state :position) (1+ position))
       (setf (plist-get state :owner)
             (if (and (consp form) (memq (car form) '(defun defn defasync)))
                 (eliscript-emitter--binding-name (cadr form))
               position))
-      (if (not (consp form)) (eliscript-emitter--tdz-legacy-expression form scope)
+      (if (not (consp form)) (eliscript-emitter--tdz-ground-expression form scope)
         (pcase (car form)
           ((or 'import 'import-portable 'export) form)
           ((or 'defvar 'defconst)
-           (let ((copy (cons (car form) (cons (cadr form) (eliscript-emitter--tdz-legacy-sequence (cddr form) scope)))))
+           (let ((copy (cons (car form) (cons (cadr form) (eliscript-emitter--tdz-ground-sequence (cddr form) scope)))))
              (puthash copy (gethash form (plist-get state :declarations)) (plist-get state :declarations)) copy))
           ((or 'defun 'defn 'defasync)
            (let ((child (copy-hash-table scope)))
-             (eliscript-emitter--tdz-legacy-parameters (nth 2 form) child)
-             (append (list (car form) (cadr form) (nth 2 form)) (eliscript-emitter--tdz-legacy-sequence (nthcdr 3 form) child))))
-          ('export-default (cons 'export-default (eliscript-emitter--tdz-legacy-sequence (cdr form) scope)))
-          (_ (eliscript-emitter--tdz-legacy-expression form scope)))))))
+             (eliscript-emitter--tdz-ground-parameters (nth 2 form) child)
+             (append (list (car form) (cadr form) (nth 2 form)) (eliscript-emitter--tdz-ground-sequence (nthcdr 3 form) child))))
+          ('export-default (cons 'export-default (eliscript-emitter--tdz-ground-sequence (cdr form) scope)))
+          (_ (eliscript-emitter--tdz-ground-expression form scope)))))))
 
-(defun eliscript-emitter--tdz-legacy-rewrite (forms scope state)
+(defun eliscript-emitter--tdz-ground-rewrite (forms scope state)
   "Rewrite FORMS with only the TDZ guards their accesses require."
   (let ((rewrite (lambda ()
                    (setf (plist-get state :position) 0)
-                   (mapcar (lambda (form) (eliscript-emitter--tdz-legacy-top form scope state)) forms))))
+                   (mapcar (lambda (form) (eliscript-emitter--tdz-ground-top form scope state)) forms))))
     (funcall rewrite)
     (setf (plist-get state :decisions) (vconcat (eliscript-emitter--tdz-finalize state)))
     (funcall rewrite)))
@@ -2379,12 +2379,12 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
   "Emit FORMS as one ECMAScript module."
   (let* ((eliscript-emitter--tdz-state (eliscript-emitter--tdz-state-create))
          (scope (make-hash-table :test #'equal)))
-    (eliscript-emitter--tdz-legacy-predeclare forms scope eliscript-emitter--tdz-state)
+    (eliscript-emitter--tdz-ground-predeclare forms scope eliscript-emitter--tdz-state)
     (if (eliscript-emitter--forms-prelude-p forms filename)
         eliscript-emitter--prelude-module
       (eliscript-emitter--emit-module-ready
        (if (plist-get eliscript-emitter--tdz-state :variables)
-           (eliscript-emitter--tdz-legacy-rewrite forms scope eliscript-emitter--tdz-state)
+           (eliscript-emitter--tdz-ground-rewrite forms scope eliscript-emitter--tdz-state)
          forms)
        forms filename))))
 

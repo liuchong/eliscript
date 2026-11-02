@@ -1,5 +1,5 @@
 (module tools.backends.managed-source-view
-  (import "./managed-source-view-legacy.mjs" :as legacy)
+  (import "./managed-source-view-ground.mjs" :as ground)
   (import "./managed-host-proxy.mjs" isManagedHostProxy prepareManagedHostProxyClassifierSync)
   (defconst host-literal-prototype globalThis.Object.getPrototypeOf)
   (defun host-literal-foreign-proxy-chain-p (value)
@@ -23,7 +23,7 @@
   ;; Public materializers retain the original implementation. Private decoder
   ;; targets use shared traps without retaining per-view operation functions.
   (defun createManagedLiteralHostProvider (&rest arguments)
-    (let* ((provider (Reflect/apply (get legacy :createManagedLiteralHostProvider) undefined arguments))
+    (let* ((provider (Reflect/apply (get ground :createManagedLiteralHostProvider) undefined arguments))
            (direct (when (> (js-length arguments) 0) (aref arguments 0))))
       ;; A supplied complete custom provider keeps its exact original contract.
       ;; Only the standard boundary materializer gains native Proxy exclusion.
@@ -304,7 +304,7 @@
               (finally (setq current-boundary previous))))))))
 
   ;; A decoder supplies a fresh private target. Public caller-owned targets
-  ;; never enter this map: their operations/getter contract stays in legacy.
+  ;; never enter this map: their operations/getter contract stays in ground.
   ;; Weak keys allow the private target/record/view cycle to be reclaimed.
   (defconst decoded-source-records (new globalThis.WeakMap))
 
@@ -481,7 +481,7 @@
                 (withManagedSourceBoundary (get record :observer)
                   (lambda () (funcall decode-call
                     (lambda () (Reflect/apply method operations arguments)))))) method)))))
-      (let* ((view (js-call legacy :createManagedSourceView (js-object :target target :operations observed)))
+      (let* ((view (js-call ground :createManagedSourceView (js-object :target target :operations observed)))
              (proxy (get view :value)) (refreshed false)
              (perform-refresh (lambda ()
                (setq refreshed false)

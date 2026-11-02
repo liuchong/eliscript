@@ -4,17 +4,17 @@
   (import "node:path" resolve)
   (import "node:os" tmpdir)
   (import "../backends/build.mjs" root)
-  (import "./reader-program-fuzz-legacy.mjs" :as legacy)
+  (import "./reader-program-fuzz-ground.mjs" :as ground)
   (import "./program-emission-proof.mjs" proveFullProgramEmission)
 
   ;; Keep the deterministic generator, complete verifier, independent Emacs
   ;; oracle and all original limits. Only the default compiler's package
   ;; dependency preparation moves here; supplied selected compilers stay real.
-  (defconst parseArguments (get legacy :parseArguments))
-  (defconst fuzzCases (get legacy :fuzzCases))
+  (defconst parseArguments (get ground :parseArguments))
+  (defconst fuzzCases (get ground :fuzzCases))
   (defconst children (new globalThis.Set))
   (defasync verified-report (compiler total seed)
-    (let* ((report (await (js-call legacy :runReaderProgramFuzz
+    (let* ((report (await (js-call ground :runReaderProgramFuzz
                      (js-object :cases total :seed seed :compilerDirectory compiler))))
            (proof (await (proveFullProgramEmission compiler total seed report))))
       (put (get report :compiler) :independentEmission proof) report))
@@ -22,7 +22,7 @@
     (let ((error (new globalThis.Error message))) (put error :eliscriptFuzzInvariant t) (throw error)))
   (defun stopReaderProgramFuzz (signal)
     (js-call children :forEach (lambda (child) (js-call child :kill "SIGTERM")))
-    (js-call legacy :stopReaderProgramFuzz signal))
+    (js-call ground :stopReaderProgramFuzz signal))
   (defun build-compiler (directory)
     (new globalThis.Promise (lambda (accept reject)
       (let* ((command (resolve root "bin/eliscript-bootstrap"))

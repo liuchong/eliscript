@@ -123,7 +123,7 @@ stable. Source that relied on the pre-freeze native Array behavior must use
 should use collection protocols rather than List-specific operations.
 
 Specification 0093 closed static transient ownership analysis. This
-specification closed the remaining legacy List-operation audit. Specification
+specification closed the remaining ground List-operation audit. Specification
 0095 then removed the provisional host-container aliases and completed the P3
 compatibility promotion.
 

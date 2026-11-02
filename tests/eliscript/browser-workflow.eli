@@ -6,7 +6,7 @@
   (import "../tools/backends/build.mjs" root)
   (import "../tools/ci/render-browser-workflow.mjs"
     BrowserCompatibilityError validateBrowserCompatibility renderBrowserWorkflow checkBrowserCompatibilityWorkflow)
-  (import "../tools/ci/render-browser-workflow-legacy.mjs" :as original)
+  (import "../tools/ci/render-browser-workflow-ground.mjs" :as original)
 
   (defconst bootstrap-step
     "      - name: Bootstrap maintained compiler and backend tools\n        run: make bootstrap-backends\n")
@@ -20,7 +20,7 @@
     (async ()
       (let* ((input (await (inputs))) (contract (aref input 0)) (matrix (aref input 1))
              (workflow (renderBrowserWorkflow contract matrix))
-             (legacy (js-call original :renderBrowserWorkflow contract matrix))
+             (ground (js-call original :renderBrowserWorkflow contract matrix))
              (dependencies (js-call workflow :indexOf "run: bun install --frozen-lockfile"))
              (bootstrap (js-call workflow :indexOf bootstrap-step))
              (browser (js-call workflow :indexOf "      - name: Install selected browser\n"))
@@ -31,7 +31,7 @@
         (js-call assert :ok (> tests browser))
         (js-call assert :strictEqual
           (js-call (js-call (js-call workflow :replace bootstrap-step "")
-            :replace fixture-preload "bun test ") :replace fixture-environment "") legacy
+            :replace fixture-preload "bun test ") :replace fixture-environment "") ground
           "all original browser rows, six suite inputs, performance budgets and evidence remain byte-identical")
         (let ((report (await (checkBrowserCompatibilityWorkflow
                 (js-object :root root :contract contract :matrix matrix :workflowText workflow)))))

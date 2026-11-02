@@ -124,7 +124,7 @@ specific reason while clean modules report `verified`.
 
 ## Acceptance Evidence
 
-- Pure Eliscript policy accepts current v2 and legacy v1 records and rejects
+- Pure Eliscript policy accepts current v2 and ground v1 records and rejects
   incompatible or damaged identity facts.
 - Seed ERT proves v1 read compatibility and automatic v2 rewrite.
 - Cache-free seed, Bun, and Node builds remain byte-identical for ordinary and

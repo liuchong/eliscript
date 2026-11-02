@@ -71,7 +71,7 @@
           (js-call assert :deepStrictEqual (get (aref requests index) :args) (js-array
             "--import" (resolve root "tools/testing/fixture-environment.mjs")
             "--import" (resolve root "tests/helpers/portable-node-install.mjs") "--test"
-            (if (= index 0) "./tests/wasm-memory-static-data-test-legacy.mjs" (aref files index))))))
+            (if (= index 0) "./tests/wasm-memory-static-data-test-ground.mjs" (aref files index))))))
         (js-call (js-array 2 3) :forEach (lambda (index)
           (js-call assert :strictEqual (get (aref requests index) :command) (get globalThis.process :execPath))
           (js-call assert :deepStrictEqual (get (aref requests index) :args)

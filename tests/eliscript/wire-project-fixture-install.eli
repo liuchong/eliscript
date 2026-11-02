@@ -67,7 +67,7 @@
                    (= method "invoke") (= (aref arguments 0) "roundtrip-report"))
           (diagnoseWireRoundtrip facade (js-call runtime :readString (aref (aref arguments 1) 0))))))))
   (defconst original-source-sha (js-call (js-call (createHash "sha256") :update
-    (readFileSync (resolve root "tests/wasm-managed-wire-test-legacy.mjs"))) :digest "hex"))
+    (readFileSync (resolve root "tests/wasm-managed-wire-test-ground.mjs"))) :digest "hex"))
   (js-call assert :strictEqual original-source-sha
     "05835e2d5f6fd6e973a052df3389cafb3e131fbcfce305272070b13d20453df0")
   (defun functional-settings (settings)

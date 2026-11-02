@@ -118,7 +118,7 @@
           (put bridge-descriptor :value private-bridge)
           ;; A factory installs its final close hook only after the creator
           ;; returns. Descriptor-preserving nested views must read that latest
-          ;; hook, and legacy construction must publish its dispose to the
+          ;; hook, and ground construction must publish its dispose to the
           ;; original envelope. A one-time data copy loses one of those writes.
           (put local-descriptors "dispose" (js-object
             :get (lambda () (get lifecycle :dispose))

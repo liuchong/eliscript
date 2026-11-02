@@ -115,7 +115,7 @@ DIAGNOSTIC_FILE="$TEMP_DIR/option.json" bun -e '
 
 ACTUAL_OUTPUT=$(bun run "$TEMP_DIR/core.mjs")
 SOURCE_MAPPED_OUTPUT=$(bun run "$TEMP_DIR/core-with-map.mjs")
-EXPECTED_OUTPUT='{"message":"hello from Eliscript","values":[1,2,3],"factorial":120,"class":"positive","sum":15,"doubled":[2,4,6],"consed":[0,1,2],"empty-car":null,"nil-only":[true,false],"undefined-only":[false,true],"nullish":[true,true,false],"legacy-null":[true,true,false],"parameters":[["required",null,[]],["required",null,[]],["required","optional",[3,4]]]}'
+EXPECTED_OUTPUT='{"message":"hello from Eliscript","values":[1,2,3],"factorial":120,"class":"positive","sum":15,"doubled":[2,4,6],"consed":[0,1,2],"empty-car":null,"nil-only":[true,false],"undefined-only":[false,true],"nullish":[true,true,false],"ground-null":[true,true,false],"parameters":[["required",null,[]],["required",null,[]],["required","optional",[3,4]]]}'
 
 if [ "$ACTUAL_OUTPUT" != "$EXPECTED_OUTPUT" ]; then
   printf 'expected: %s\nactual:   %s\n' "$EXPECTED_OUTPUT" "$ACTUAL_OUTPUT" >&2
@@ -241,7 +241,7 @@ if [ "$MAP_PATTERNS_OUTPUT" != "$EXPECTED_MAP_PATTERNS" ]; then
 fi
 
 printf '%s\n' '(defun broken () missing)' > "$TEMP_DIR/broken.eli"
-if "$PROJECT_DIR/bin/eliscript" "$TEMP_DIR/broken.eli" \
+if "$PROJECT_DIR/bin/eliscript" --diagnostic-format human "$TEMP_DIR/broken.eli" \
   > "$TEMP_DIR/broken.out" 2> "$TEMP_DIR/broken.err"; then
   printf 'expected invalid module compilation to fail\n' >&2
   exit 1
@@ -251,6 +251,29 @@ if ! grep -F "$TEMP_DIR/broken.eli:1:18: unbound symbol: missing" \
   "$TEMP_DIR/broken.err" >/dev/null; then
   printf 'expected located analyzer diagnostic, got:\n' >&2
   cat "$TEMP_DIR/broken.err" >&2
+  exit 1
+fi
+
+EVAL_ARGS_OUTPUT=$("$PROJECT_DIR/bin/eliscript" -e '(princ (format "%S" command-line-args-left))' -- alpha beta)
+if [ "$EVAL_ARGS_OUTPUT" != '("--" "alpha" "beta")' ]; then
+  printf 'expected -e -- args output ("--" "alpha" "beta"), got: %s\n' "$EVAL_ARGS_OUTPUT" >&2
+  exit 1
+fi
+
+printf '%s\n' '(princ (format "%S" command-line-args-left))' > "$TEMP_DIR/script-with-o.el"
+DASH_SCRIPT_OUTPUT=$("$PROJECT_DIR/bin/eliscript" -- "$TEMP_DIR/script-with-o.el" -- alpha beta)
+if [ "$DASH_SCRIPT_OUTPUT" != '("alpha" "beta")' ]; then
+  printf 'expected -- script -- args output ("alpha" "beta"), got: %s\n' "$DASH_SCRIPT_OUTPUT" >&2
+  exit 1
+fi
+
+SCRIPT_O_OUTPUT=$("$PROJECT_DIR/bin/eliscript" "$TEMP_DIR/script-with-o.el" -o "$TEMP_DIR/not-a-build.json")
+if [ "$SCRIPT_O_OUTPUT" != '("-o" "'"$TEMP_DIR/not-a-build.json"'")' ]; then
+  printf 'expected script -o arg to pass through, got: %s\n' "$SCRIPT_O_OUTPUT" >&2
+  exit 1
+fi
+if [ -f "$TEMP_DIR/not-a-build.json" ]; then
+  printf 'script -o arg must not trigger compiler file write\n' >&2
   exit 1
 fi
 

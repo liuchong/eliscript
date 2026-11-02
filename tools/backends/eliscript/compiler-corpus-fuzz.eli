@@ -2,7 +2,7 @@
   (import "node:crypto" createHash)
   (import "node:buffer" Buffer)
   (import "./build.mjs" root)
-  (import "./compiler-corpus-legacy.mjs" createOriginalCorpusSourceReader)
+  (import "./compiler-corpus-ground.mjs" createOriginalCorpusSourceReader)
   (defconst id "original-program:compiler-module-reader-program-fuzz")
   (defconst suite "tests/reader-program-fuzz.test.mjs")
   (defconst suite-sha "d53a6fab62d6ca7f9a58ae56265149d1a8b51ce4b53080da018724a29ce52b6d")
@@ -16,7 +16,7 @@
     "tools/fuzz/program-emission-node.eli" "tools/fuzz/program-emission-node.mjs"
     "tools/fuzz/program-emission-proof.eli" "tools/fuzz/program-emission-proof.mjs"
     "tools/fuzz/program-emission-oracle.el"
-    "tools/fuzz/reader-program-fuzz.eli" "tools/fuzz/reader-program-fuzz.mjs" "tools/fuzz/reader-program-fuzz-legacy.mjs"
+    "tools/fuzz/reader-program-fuzz.eli" "tools/fuzz/reader-program-fuzz.mjs" "tools/fuzz/reader-program-fuzz-ground.mjs"
     "tests/bootstrap-emitter-oracle.el" "tests/bootstrap-analyzer-oracle.el"))
   (defun hash (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
   (defun fail (message) (throw (new globalThis.TypeError message)))

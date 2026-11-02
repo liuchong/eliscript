@@ -38,7 +38,7 @@ done
 if [ "$CLEAN_ALL" -eq 0 ]; then
   # Preserve host CLI and runtime modules inside dist/ so CLI commands work immediately
   mkdir -p "$PROJECT_DIR/dist/host-cli" "$PROJECT_DIR/dist/runtime"
-  for name in bun build project-legacy project-cli-legacy check-cli-legacy evaluation evaluation-cli format-cli watch watch-cli project-cli check-cli eliscript-cli; do
+  for name in bun build project-ground project-cli-ground check-cli-ground evaluation evaluation-cli format-cli watch watch-cli project-cli check-cli eliscript-cli; do
     if [ -f "$PROJECT_DIR/bootstrap/host/$name.mjs" ] && [ ! -f "$PROJECT_DIR/dist/host-cli/$name.mjs" ]; then
       cp "$PROJECT_DIR/bootstrap/host/$name.mjs" "$PROJECT_DIR/dist/host-cli/$name.mjs"
       if [ -f "$PROJECT_DIR/bootstrap/host/$name.mjs.map" ]; then
@@ -46,8 +46,8 @@ if [ "$CLEAN_ALL" -eq 0 ]; then
       fi
     fi
   done
-  if [ -f "$PROJECT_DIR/dist/host-cli/project-legacy.mjs" ]; then
-    cp "$PROJECT_DIR/dist/host-cli/project-legacy.mjs" "$PROJECT_DIR/dist/host-cli/project.mjs"
+  if [ -f "$PROJECT_DIR/dist/host-cli/project-ground.mjs" ]; then
+    cp "$PROJECT_DIR/dist/host-cli/project-ground.mjs" "$PROJECT_DIR/dist/host-cli/project.mjs"
   fi
   for name in prelude math unicode-case unicode-case-data; do
     if [ -f "$PROJECT_DIR/runtime/$name.mjs" ] && [ ! -f "$PROJECT_DIR/dist/runtime/$name.mjs" ]; then
@@ -81,7 +81,9 @@ rm -rf "$PROJECT_DIR"/.eliscript-test.* \
        "$PROJECT_DIR"/.eliscript-array-* \
        "$PROJECT_DIR"/.eliscript-host-completion-* \
        "$PROJECT_DIR"/.eliscript-object-properties-* \
-       "$PROJECT_DIR"/.eliscript-exception-browser-*
+       "$PROJECT_DIR"/.eliscript-exception-browser-* \
+       "$PROJECT_DIR/dist/lisp-tests" \
+       "$PROJECT_DIR/dist/lisp-aot-tests"
 
 if [ "$CLEAN_ALL" -eq 1 ]; then
   rm -rf "$PROJECT_DIR/dist" \

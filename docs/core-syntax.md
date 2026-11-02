@@ -498,13 +498,13 @@
 
 ## 十三、 原装 `.el` 双端共用（Dual-Host）与常驻 Worker 加速
 
-同一份未经修改的 Emacs Lisp 源文件，可以同时在原生 Emacs 与 Eliscript JavaScript 运行时中执行，并可交给常驻 Worker 加速。兼容运行时 `eliscript/runtime/session` 本身是 Eliscript 源码（`runtime/session.eli`）编译的产物，不含手写 JavaScript。
+同一份未经修改的 Emacs Lisp 源文件，可以同时在原生 Emacs 与 Eliscript JavaScript 运行时中执行，并可交给常驻 Worker 加速。运行时 `eliscript/runtime/lisp` 本身是 Eliscript 源码（`runtime/lisp.eli`）编译的产物，不含手写 JavaScript。
 
 ### 13.1 JavaScript 端直接执行
 
 ```js
 import { createSession, evalProgram, invokeFunction,
-         callElisp, serializeValue } from "eliscript/runtime/session";
+         callElisp, serializeValue } from "eliscript/runtime/lisp";
 
 const session = createSession();
 evalProgram(sourceOfUnmodifiedEl, { session });          // 按依赖顺序加载 .el

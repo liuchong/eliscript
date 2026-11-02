@@ -12,7 +12,7 @@
 
 Eliscript project builds now enter the seed toolchain through one explicit
 `ProjectRequest` operation. The request can be assembled by an Emacs caller,
-by legacy command-line flags, or from a versioned `eliscript.json` file. Both
+by ground command-line flags, or from a versioned `eliscript.json` file. Both
 ordinary and portable builds pass through `eliscript-project-execute` before
 the existing graph compiler is selected.
 

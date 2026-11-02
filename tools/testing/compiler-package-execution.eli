@@ -22,7 +22,7 @@
       (progn
         (unless (= (js-call (js-call (createHash "sha256") :update
                      (readFileSync (resolve source-root "tests/compiler-package-session.test.mjs"))) :digest "hex")
-                   "cabaee3897e99a1c920dc4d3ba16459351a6d4864b327a03839c0c8d7d7d2b4c")
+                   "6f0000e0b65e429a4d270a05f6c866acb4f465189755f3823f3ecf0249252a1b")
           (throw (new globalThis.TypeError "package functional deadline requires the unchanged complete original suite")))
         (let ((forwarded (js-call arguments :slice))) (put forwarded 2 0) forwarded)) arguments))
   (defun compilerPackageRuntimeFacade (runtime)

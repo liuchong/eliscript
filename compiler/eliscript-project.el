@@ -102,7 +102,7 @@
 (defconst eliscript-project-cache-version 2
   "Version of private incremental metadata in the project manifest.")
 
-(defconst eliscript-project-cache-legacy-version 1
+(defconst eliscript-project-cache-ground-version 1
   "Oldest private cache version accepted for read-only migration.")
 
 (defconst eliscript-project-build-report-version 1
@@ -754,8 +754,8 @@ artifacts onto an input, another artifact, or outside OUT-DIR."
     'current)
    ((and (null (alist-get 'format cache))
          (equal (alist-get 'version cache)
-                eliscript-project-cache-legacy-version))
-    'legacy)))
+                eliscript-project-cache-ground-version))
+    'ground)))
 
 (defun eliscript-project--cache-identity (cache cache-modules version-kind)
   "Normalize CACHE and CACHE-MODULES for VERSION-KIND digest verification."

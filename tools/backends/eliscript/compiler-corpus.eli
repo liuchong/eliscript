@@ -8,7 +8,7 @@
   (import "./compiler-build.mjs" independentCompilerResources)
   (import "./compiler-corpus-host-context.mjs" originalInteropFullRuntimeRecipe)
   (import "./build.mjs" root)
-  (import "./compiler-corpus-legacy.mjs" :as legacy)
+  (import "./compiler-corpus-ground.mjs" :as ground)
   (import "./compiler-corpus-fuzz.mjs" transportOriginalFuzzCorpus)
   (import "./compiler-corpus-bit.mjs" transportOriginalStdlibBitCorpus)
   (import "./compiler-corpus-debugging.mjs" transportOriginalSourceDebuggingCorpus)
@@ -16,9 +16,9 @@
 
   ;; Preserve the unaffected public implementations and function identities.
   ;; The source-audit branch and binary replay request transport live here.
-  (defconst createOriginalCorpusSourceReader (get legacy :createOriginalCorpusSourceReader))
-  (defconst cloneCompilerCorpusData (get legacy :cloneCompilerCorpusData))
-  (defconst cloneCompilerCorpusModules (get legacy :cloneCompilerCorpusModules))
+  (defconst createOriginalCorpusSourceReader (get ground :createOriginalCorpusSourceReader))
+  (defconst cloneCompilerCorpusData (get ground :cloneCompilerCorpusData))
+  (defconst cloneCompilerCorpusModules (get ground :cloneCompilerCorpusModules))
   (defconst literal-suite "tests/literal-runtime.test.mjs")
   (defconst literal-source "tests/eliscript/literal-runtime.eli")
   (defconst literal-title "maintained Eliscript sources use explicit host constructors")
@@ -671,7 +671,7 @@
             (throw (new globalThis.TypeError "original foreign entry has no authenticated host source"))) t))))
 
   (defun compilerCorpusRequest (record target &rest arguments)
-    (let ((request (Reflect/apply (get legacy :compilerCorpusRequest) undefined
+    (let ((request (Reflect/apply (get ground :compilerCorpusRequest) undefined
                      (js-call (js-array record target) :concat arguments))))
       ;; These original hosts emit usage modules at their output root, beside
       ;; runtime/ and stdlib/. Their archived source filenames remain the real
@@ -855,7 +855,7 @@
                  (lambda (item) (= (get item :id) "compiler-parity"))) :document))
                (files (get parity :bootstrapSources)) (modules (js-array))
                (regions (js-array)) (index 0))
-          ;; Keep the original bytes and all three exact legacy regions. Only
+          ;; Keep the original bytes and all three exact ground regions. Only
           ;; the locator moved to the maintained generated suite; it has its
           ;; own authenticated identity, never the old file's invented spans.
           (js-call (js-array
@@ -1105,9 +1105,9 @@
                        :includes (get original :suite))
                    (and (Array/isArray proofs) (js-call proofs :some (lambda (proof)
                      (= (get proof :file) "bootstrap/host/project.mjs"))))))))))
-           (files (js-array "bootstrap/host/project.mjs" "bootstrap/host/project-legacy.mjs" "tools/project/project.eli"
+           (files (js-array "bootstrap/host/project.mjs" "bootstrap/host/project-ground.mjs" "tools/project/project.eli"
              "bootstrap/host/project-cli.mjs" "bootstrap/host/project-cli.mjs.map"
-             "bootstrap/host/project-cli-legacy.mjs" "tools/project/project-cli.eli")))
+             "bootstrap/host/project-cli-ground.mjs" "tools/project/project-cli.eli")))
       (when (> (js-length records) 0)
         (js-call (js-array "math" "prelude" "unicode-case" "unicode-case-data") :forEach (lambda (name)
           (js-call files :push (str "runtime/" name ".eli")
@@ -1119,7 +1119,7 @@
             (let* ((filename (aref files index)) (asset (await (js-call reader :file filename)))
                    (existing (js-call (get document :evidence) :find
                      (lambda (entry) (= (get entry :file) filename)))))
-              (when (and (= filename "bootstrap/host/project-cli-legacy.mjs")
+              (when (and (= filename "bootstrap/host/project-cli-ground.mjs")
                          (/= (get asset :sha256) "79980b2a6e38e4ab9daca31b04cb366bd749b66e3b384fbd04e696ddc465cd82"))
                 (throw (new globalThis.TypeError "original project CLI archive bytes changed")))
               (if existing
@@ -1240,7 +1240,7 @@
       document))
 
   (defasync load-original-corpus (options)
-    (let ((document (await (js-call legacy :loadOriginalCompilerCorpus (prepareOriginalBootstrapEmitterOptions options)))))
+    (let ((document (await (js-call ground :loadOriginalCompilerCorpus (prepareOriginalBootstrapEmitterOptions options)))))
       ;; The canonical HTTP literal imports the actual host provider. It is
       ;; source evidence and a hostSource, never a fabricated .eli module.
       (when (js-call (get document :records) :some

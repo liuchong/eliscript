@@ -375,7 +375,7 @@
         (js-call assert :strictEqual descriptors 2)
         (js-call view :refresh)
         (js-call assert :strictEqual descriptors 3)
-        ;; Internal legacy Proxy trap synchronization never uses the gate.
+        ;; Internal ground Proxy trap synchronization never uses the gate.
         (withManagedSourceBindingPoll owner (lambda ()
           (js-call assert :deepStrictEqual (Reflect/getOwnPropertyDescriptor proxy "x")
             (Reflect/getOwnPropertyDescriptor source "x"))

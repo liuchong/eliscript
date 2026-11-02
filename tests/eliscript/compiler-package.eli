@@ -11,17 +11,17 @@
   (import "node:child_process" spawnSync)
   (import "../dist/bootstrap/compiler.mjs" compile-ir-string emit-ir-string)
   (import "../tools/backends/compiler-package.mjs" packageIndependentCompiler)
-  (import "../tools/backends/compiler-package-legacy.mjs" :as legacy)
+  (import "../tools/backends/compiler-package-ground.mjs" :as ground)
   (import "../tools/backends/compiler-build.mjs" writeCompilerMetadata)
   (import "../tools/backends/compiler-metadata.mjs" readCompilerMetadata)
   (import "../tools/backends/compiler-bootstrap.mjs" compilerSourceIdentity)
   (import "../tools/backends/build.mjs" root)
 
-  (defconst dependency "transport/backends/managed-runtime-host-legacy.mjs")
+  (defconst dependency "transport/backends/managed-runtime-host-ground.mjs")
   (defconst retained-dependencies (js-array dependency
-    "transport/backends/managed-host-legacy.mjs"
-    "transport/backends/managed-module-graph-legacy.mjs"
-    "transport/backends/managed-source-view-legacy.mjs"))
+    "transport/backends/managed-host-ground.mjs"
+    "transport/backends/managed-module-graph-ground.mjs"
+    "transport/backends/managed-source-view-ground.mjs"))
   (defconst helper-support (js-array "transport/backends/managed-host-object-realm.mjs"
     "transport/backends/managed-host-runtime.mjs" "transport/backends/managed-host-runtime.mjs.map"
     "transport/backends/managed-host-object-provider.mjs"
@@ -212,14 +212,14 @@
     (async ()
       (await (workspace (async (directory)
         (let* ((artifact (await (protocol-artifact (resolve directory "input"))))
-               (original (await (js-call legacy :packageIndependentCompiler
-                 (js-object :artifact artifact :outputRoot (resolve directory "legacy")))))
+               (original (await (js-call ground :packageIndependentCompiler
+                 (js-object :artifact artifact :outputRoot (resolve directory "ground")))))
                (packaged (await (packageIndependentCompiler
                  (js-object :artifact artifact :outputRoot (resolve directory "current")))))
                (manifest (get packaged :manifest)) (files (get manifest :files))
                (record (js-call files :find (lambda (item) (= (get item :path) dependency))))
                (actual (await (readFile (resolve (get packaged :directory) dependency))))
-               (source (await (readFile (resolve root "tools/backends/managed-runtime-host-legacy.mjs")))))
+               (source (await (readFile (resolve root "tools/backends/managed-runtime-host-ground.mjs")))))
           (js-call assert :deepStrictEqual actual source)
           (js-call assert :deepStrictEqual record
             (js-object :path dependency :bytes (js-length actual) :sha256 (digest actual)))
@@ -248,7 +248,7 @@
                      (source (await (readFile (resolve root local))))
                      (record (js-call files :find (lambda (item) (= (get item :path) path))))
                      (position (js-call files :findIndex (lambda (item) (= (get item :path) path))))
-                     (importer (js-call path :replace "-legacy.mjs" ".mjs")))
+                     (importer (js-call path :replace "-ground.mjs" ".mjs")))
                 (js-call assert :deepStrictEqual bytes source)
                 (js-call assert :deepStrictEqual record (js-object :path path :bytes (js-length bytes) :sha256 (digest bytes)))
                 (js-call assert :strictEqual (get (aref files (1- position)) :path) importer))
@@ -375,7 +375,7 @@
           (await (rm (resolve missing dependency)))
           (await (js-call assert :rejects
             (load-module (resolve missing "compiler-loader.mjs"))
-            (lambda (error) (and (js-call (get error :message) :includes "managed-runtime-host-legacy.mjs")
+            (lambda (error) (and (js-call (get error :message) :includes "managed-runtime-host-ground.mjs")
                                 (js-call (get error :message) :includes "Cannot find")))))
           ;; The public loader honestly delegates static ESM reads to the host.
           ;; Its recorded identity still detects a same-length changed file;

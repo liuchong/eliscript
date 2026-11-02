@@ -3,14 +3,14 @@
   (import "node:path" resolve dirname join)
   (import "node:url" fileURLToPath)
   (import "../backends/build.mjs" root)
-  (import "./render-browser-workflow-legacy.mjs" :as legacy)
+  (import "./render-browser-workflow-ground.mjs" :as ground)
 
   (defconst default-root root)
-  (defconst BrowserCompatibilityError (get legacy :BrowserCompatibilityError))
-  (defconst validateBrowserCompatibility (get legacy :validateBrowserCompatibility))
+  (defconst BrowserCompatibilityError (get ground :BrowserCompatibilityError))
+  (defconst validateBrowserCompatibility (get ground :validateBrowserCompatibility))
 
   (defun renderBrowserWorkflow (contract matrix)
-    (let* ((workflow (js-call legacy :renderBrowserWorkflow contract matrix))
+    (let* ((workflow (js-call ground :renderBrowserWorkflow contract matrix))
            (anchor "      - name: Install selected browser\n")
            (step "      - name: Bootstrap maintained compiler and backend tools\n        run: make bootstrap-backends\n")
            (command (get contract :testCommand))

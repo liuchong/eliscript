@@ -49,7 +49,7 @@ visited once. Diagnostics identify the portable declaration, forbidden
 dependency or form, and source location.
 
 The checker establishes host independence, not a complete data type proof.
-Legacy calls require protocol-v1 JSON-compatible arguments and results.
+Ground calls require protocol-v1 JSON-compatible arguments and results.
 Callers selecting the versioned codec from specification 0088 may carry
 persistent List, Vector, Map, Set, Keyword, Symbol, and metadata values.
 

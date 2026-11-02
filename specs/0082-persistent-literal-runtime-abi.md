@@ -89,7 +89,7 @@ behavior. Three-generation compiler fixed-point evidence remains mandatory.
 Portable worker closures may construct `(vector ...)`, square-bracket Vector
 values, `(hash-map ...)`, source Keywords, and persistent quoted data. Calls
 that carry those values select the explicit worker value codec from 0088;
-legacy JSON calls remain limited to JSON-compatible results. Explicit native
+ground JSON calls remain limited to JSON-compatible results. Explicit native
 arrays remain portable in either mode. Queue construction is not portable
 until a separately versioned worker codec extension defines Queue transport.
 
@@ -106,7 +106,7 @@ The literal runtime module path, constructor names, dedicated persistent IR
 kinds, explicit host-container forms, conditional import behavior, and
 seed/self-hosted output identity are stable. Specification 0095 completed the
 P3 value and host-container freeze after 0093 and 0094 closed transient
-ownership and legacy List migration. Changes to these observations require the
+ownership and ground List migration. Changes to these observations require the
 compatibility process; internal constructor algorithms remain replaceable.
 
 ## Acceptance Criteria

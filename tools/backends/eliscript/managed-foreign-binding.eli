@@ -1,5 +1,5 @@
 (module tools.backends.managed-foreign-binding
-  (import "./managed-host-legacy.mjs" failManagedRuntime)
+  (import "./managed-host-ground.mjs" failManagedRuntime)
   (import "./managed-source-view.mjs" withManagedSourceDecode
     registerManagedSourceDecodeRuntime isManagedSourceViewForRuntime)
   (import "../../runtime/core/collection.mjs" :as collection)
@@ -126,7 +126,7 @@
                                 (funcall checked "value-set" heap tuple 0
                                   (funcall checked "value-get" heap arguments 0))
                                 ;; The original opcode is replaced by an owned
-                                ;; number; the real legacy codec handles Call.
+                                ;; number; the real ground codec handles Call.
                                 (let ((number (js-call runtime :number 8)))
                                   (try
                                     (js-call runtime :frameSet frame 2 number)

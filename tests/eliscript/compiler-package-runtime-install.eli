@@ -12,7 +12,7 @@
             (lambda (argument) (= (resolve root argument) (resolve root suite))))
     (throw (new globalThis.TypeError "package cleanup adapter requires its exact original suite")))
   (unless (= (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root suite))) :digest "hex")
-             "cabaee3897e99a1c920dc4d3ba16459351a6d4864b327a03839c0c8d7d7d2b4c")
+             "6f0000e0b65e429a4d270a05f6c866acb4f465189755f3823f3ecf0249252a1b")
     (throw (new globalThis.TypeError "package cleanup adapter refuses changed original suite bytes")))
   (defconst original (Object/assign (js-object) wasm))
   (defconst original-framework (Object/assign (js-object) framework))

@@ -121,7 +121,7 @@ an added or changed declaration cannot silently bootstrap an incomplete graph."
                   (insert payload)
                   (write-region (point-min) (point-max) target nil 'silent))
                 (when (member rel '("bootstrap/host/bun.eli"
-                                    "bootstrap/host/project-cli-legacy.eli"
+                                    "bootstrap/host/project-cli-ground.eli"
                                     "runtime/worker.eli"))
                   (set-file-modes target #o755))))))))))
 
@@ -640,10 +640,10 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
         (let ((status (call-process
                        runtime nil t nil "bootstrap/host/project-cli.mjs"
                        "--root" "runtime"
-                       "--out-dir" "dist/session"
-                       "runtime/session.eli")))
+                       "--out-dir" "dist/runtime"
+                       "runtime/lisp.eli")))
           (unless (and (integerp status) (zerop status))
-            (push (format "Self-hosted session runtime build failed (%s): %s"
+            (push (format "Self-hosted lisp runtime build failed (%s): %s"
                           status (buffer-string))
                   failures))))
       (dolist (tool tools)

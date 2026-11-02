@@ -9,7 +9,7 @@
   (import "./retained-refresh.mjs" runFreshSoakCase)
   (defconst original (Object/assign (js-object) framework))
   (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update
-    (readFileSync (resolve root "tests/retained-soak-refresh-test-legacy.mjs"))) :digest "hex")
+    (readFileSync (resolve root "tests/retained-soak-refresh-test-ground.mjs"))) :digest "hex")
     "c4253b3d983af955bb6fd967e06e13b42461f617f0c756bb9d4e1a9f7b114667")
   (defconst registration (createDirectWasmRegistration original (js-object
     "fresh strict soak acceptance remains accepted when deferral is explicitly enabled" runFreshSoakCase)))

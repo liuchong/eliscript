@@ -157,7 +157,7 @@
                        (eliscript-project-tests--read
                         (eliscript-project-build-result-manifest second))))))))
 
-(ert-deftest eliscript-project-migrates-legacy-cache-on-successful-read ()
+(ert-deftest eliscript-project-migrates-ground-cache-on-successful-read ()
   (eliscript-project-tests--with-directory root
     (let* ((entry (expand-file-name "main.eli" root))
            (out-dir (expand-file-name "build" root))
@@ -171,13 +171,13 @@
                (eliscript-project-tests--read manifest-path)
                :object-type 'alist :array-type 'array))
              (cache (alist-get 'cache manifest))
-             (legacy (assq-delete-all 'format cache)))
-        (setf (alist-get 'version legacy) 1)
-        (setf (alist-get 'digest legacy)
+             (ground (assq-delete-all 'format cache)))
+        (setf (alist-get 'version ground) 1)
+        (setf (alist-get 'digest ground)
               (eliscript-project--json-digest
                (eliscript-project--cache-identity
-                legacy (append (alist-get 'modules legacy) nil) 'legacy)))
-        (setf (alist-get 'cache manifest) legacy)
+                ground (append (alist-get 'modules ground) nil) 'ground)))
+        (setf (alist-get 'cache manifest) ground)
         (with-temp-file manifest-path
           (insert (json-serialize manifest) "\n")))
       (let ((migrated (eliscript-project-build entry out-dir root)))

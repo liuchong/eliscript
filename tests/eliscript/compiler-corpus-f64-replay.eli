@@ -66,7 +66,7 @@
       (let* ((assertions (get migration :assertionSource)) (archive (get assertions :file))
              (bytes (await (readFile (resolve sourceRoot archive))))
              (cases (get assertions :cases)) (wrapper (await (js-call reader :text staticData))))
-        (assert-equal archive "tests/wasm-memory-static-data-test-legacy.mjs")
+        (assert-equal archive "tests/wasm-memory-static-data-test-ground.mjs")
         (ok (js-call wrapper :includes
           (str "import \"./" (js-call archive :slice (js-length "tests/")) "\";"))
           "the selected canonical suite must actually import its complete original assertion archive")

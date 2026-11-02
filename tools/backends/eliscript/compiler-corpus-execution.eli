@@ -6,7 +6,7 @@
   (import "node:url" pathToFileURL)
   (import "node:crypto" createHash)
   (import "node:buffer" Buffer)
-  (import "./compiler-corpus-execution-legacy.mjs" :as legacy)
+  (import "./compiler-corpus-execution-ground.mjs" :as ground)
   (import "./compiler-build.mjs" independentCompilerResources buildIndependentCompiler compilerMetadataDigest)
   (import "./compiler-corpus.mjs" prepareOriginalSeedSources originalSequenceNativeInteropP transportOriginalSequenceRuntime
     compilerCorpusRequest compilerCorpusFunctionalResources bindOriginalFunctionalResourceInputs)
@@ -21,9 +21,9 @@
   (import "../../dist/bootstrap/reader.mjs" read-string)
   (import "../../dist/bootstrap/compiler.mjs" compile-string)
   (import "../../bootstrap/host/bun.mjs" loadCompiler)
-  (defconst resolveOriginalCorpusRequest (get legacy :resolveOriginalCorpusRequest))
-  (defconst originalProgramArguments (get legacy :originalProgramArguments))
-  (defconst compareCompilerCorpusObservation (get legacy :compareCompilerCorpusObservation))
+  (defconst resolveOriginalCorpusRequest (get ground :resolveOriginalCorpusRequest))
+  (defconst originalProgramArguments (get ground :originalProgramArguments))
+  (defconst compareCompilerCorpusObservation (get ground :compareCompilerCorpusObservation))
   (defun field (value key) (if (nullish? value) undefined (get value key)))
   (defun fallback (value other) (if (nullish? value) other value))
   (defun execution-digest (bytes)
@@ -568,7 +568,7 @@
             (Object/defineProperty configuration key (js-object :value
               (Object/freeze (js-call values :map (lambda (value) (Object/freeze (Object/assign (js-object) value)))))
               :enumerable t))))))
-      (let* ((original (js-call legacy :createOriginalSeedOracle configuration))
+      (let* ((original (js-call ground :createOriginalSeedOracle configuration))
              (shared-cache (not (undefined? (get configuration :programCache))))
              (suites (if (undefined? (get configuration :programCache)) (new globalThis.Map) (get configuration :programCache)))
              (binding (compilerMetadataDigest (js-object
@@ -774,7 +774,7 @@
   (defun exports-sequence-p (context)
     ;; Binary exports and pure product comparisons share this bounded lifetime.
     ;; JS, stdout,
-    ;; original-program launchers and all other legacy capabilities are intact.
+    ;; original-program launchers and all other ground capabilities are intact.
     (let* ((record (get context :record)) (steps (field record "steps")) (found false) (valid t) (index 0))
       (when (and (= (field record "kind") "sequence") (Array/isArray steps)
                  (or (= (get context :target) "wasm") (= (get context :target) "native")
@@ -1362,7 +1362,7 @@
   (defasync configure-local-runtime-package (context)
     ;; The original host sidecars already declare the entire runtime graph.
     ;; A package self-reference must use that graph, just as relative host
-    ;; imports do. Other products retain the legacy source-root package route.
+    ;; imports do. Other products retain the ground source-root package route.
     (let* ((record (get context :record)) (sources (field (get record :request) "hostSources"))
            (declared (new globalThis.Map)))
       (when (Array/isArray sources)
@@ -1670,7 +1670,7 @@
               (await (executeOriginalProgram context)))
             ((and (not (Object/hasOwn context "failure")) (= kind "compiler-session-program"))
               (await (executeCompilerSessionProgram context)))
-            (t (await (js-call legacy :executeCompilerCorpusRecord context))))))
+            (t (await (js-call ground :executeCompilerCorpusRecord context))))))
       (let* ((record (get context :record)) (options (fallback (get context :options) (js-object)))
              (resources (independentCompilerResources options)) (configured (copy context (js-object :options options)))
              (results (new globalThis.Map)) (products (new globalThis.Map)) (observations (js-array))

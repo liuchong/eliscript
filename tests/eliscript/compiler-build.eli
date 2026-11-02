@@ -300,7 +300,7 @@
                         ((= value -1) (setq negative-one-count (1+ negative-one-count)))))))))
         (let* ((entries (Array/from (js-call numbers :entries))) (sum 0) (index 0)
                (object-lower-bound (+ (get nodes :size) (get spans :size) (get collection-arrays :size)))
-               (legacy-limit (get (get (get independentCompilerProfiles "full-runtime") :budget) :maxSlots))
+               (ground-limit (get (get (get independentCompilerProfiles "full-runtime") :budget) :maxSlots))
                (common (js-call entries :map (lambda (entry)
                  (js-object :value (if (= (value-type (aref entry 0)) "string") "-0"
                                       (funcall globalThis.String (aref entry 0)))
@@ -315,9 +315,9 @@
           ;; This is a conservative necessary-object lower bound, not a
           ;; measured managed slot count. It excludes the top-level forms
           ;; array, all property tables, primitive handles and Reader state.
-          (js-call assert :strictEqual legacy-limit 1048575)
-          (js-call assert :ok (> object-lower-bound legacy-limit)
-            "the unchanged complete runtime AST alone exceeds the legacy full-runtime slot limit")
+          (js-call assert :strictEqual ground-limit 1048575)
+          (js-call assert :ok (> object-lower-bound ground-limit)
+            "the unchanged complete runtime AST alone exceeds the ground full-runtime slot limit")
           (js-call assert :ok (> numeric-count 0))
           (js-call assert :strictEqual sum numeric-count)
           (js-call assert :ok (<= (get numbers :size) numeric-count))
@@ -326,7 +326,7 @@
               :sourceSha256 (sha256-text source "utf16le") :topLevelForms (js-length forms)
               :nodeCount (get nodes :size) :spanCount (get spans :size) :kinds kinds
               :collectionArrayCount (get collection-arrays :size)
-              :necessaryObjectLowerBound object-lower-bound :legacyFullRuntimeSlotLimit legacy-limit
+              :necessaryObjectLowerBound object-lower-bound :groundFullRuntimeSlotLimit ground-limit
               :numericLiteralCount numeric-count :distinctNumericValues (get numbers :size)
               :repeatedNumericOccurrences (- numeric-count (get numbers :size))
               :positiveZero zero-count :negativeZero negative-zero-count :one one-count :negativeOne negative-one-count
@@ -857,10 +857,10 @@
             :budget (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864)
             :memory (js-object :initialPages 128 :maximumPages 4096) :auto 65536)))))
 
-  (test "compiler-build exposes the explicit full-compiler functional capacity profile without changing legacy profiles"
+  (test "compiler-build exposes the explicit full-compiler functional capacity profile without changing ground profiles"
     (lambda ()
       ;; The new profile makes a larger functional construction explicit. It
-      ;; does not turn earlier legacy capacity or performance failures into
+      ;; does not turn earlier ground capacity or performance failures into
       ;; passing evidence under the old resource configuration.
       (let* ((expected (js-object
                 :budget (js-object :maxSlots 8388607 :initialBytes 268435456 :maxBytes 1073741824 :extendedHeap t)

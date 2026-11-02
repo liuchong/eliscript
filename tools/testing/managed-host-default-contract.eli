@@ -8,11 +8,11 @@
     (js-call assert :strictEqual (get failure :constructor) globalThis.TypeError)
     (js-call assert :strictEqual (get failure :name) "TypeError")
     (js-call assert :strictEqual (get failure :eliscriptDiagnostic) undefined))
-  (defun assertManagedHostDefaultContract (host legacy)
+  (defun assertManagedHostDefaultContract (host ground)
     (js-call (js-array "failManagedRuntime" "validateManagedRuntimeOptions" "createManagedHostCapabilityBridge") :forEach
-      (lambda (name) (js-call assert :strictEqual (get host name) (get legacy name))))
+      (lambda (name) (js-call assert :strictEqual (get host name) (get ground name))))
     (js-call assert :strictEqual (get (get host :createManagedHostRuntime) :length) 3)
-    (let ((factories (js-array (get host :createManagedHostRuntime) (get legacy :createManagedHostRuntime))))
+    (let ((factories (js-array (get host :createManagedHostRuntime) (get ground :createManagedHostRuntime))))
       ;; The same malformed call must retain its actual error class. Engine
       ;; expression spellings in native TypeError messages are private code.
       (js-call (js-array (js-array) (js-array undefined) (js-array nil)) :forEach (lambda (tail)

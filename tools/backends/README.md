@@ -160,7 +160,7 @@ host Math or request additional entropy. `randomSeed: [a, b, c, d]` (also a
 four-element Uint32Array) snapshots an explicit nonzero u32 seed for reproducible
 WASM/native replay. The raw ABI exposes `runtime-random-seed` before `heap-new`;
 reseeding a live raw runtime is rejected. A heap's 16-byte state survives GC and
-is unrooted on module close. Legacy artifacts without that export remain
+is unrooted on module close. Ground artifacts without that export remain
 loadable with default options and reject an explicit seed.
 
 The complete Math batch and its permanent tests await unified execution.
@@ -969,7 +969,7 @@ remain cycle errors. Each physical object's properties are visited once in
 this explicit mode; ordinary and `events-v1` traversal are unchanged. Binary
 builds with `debug: true` prefer graph responses when advertised, preserving
 shared source spans throughout the debug mapping. Other builds prefer events;
-graph-only producers and legacy JSON producers remain supported. This choice
+graph-only producers and ground JSON producers remain supported. This choice
 does not establish that a complete compiler fits its memory or time budget.
 Each reply contains at most 256 events. An `array-values` event carries at most
 256 consecutive numeric array elements, preserving signed zero and the ordinary

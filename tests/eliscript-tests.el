@@ -6,7 +6,7 @@
 (require 'cl-lib)
 (require 'eliscript)
 
-(defun eliscript-tests--legacy-compile-string (source &optional filename)
+(defun eliscript-tests--ground-compile-string (source &optional filename)
   "Compile SOURCE from FILENAME through the compatibility form emitter."
   (eliscript-emit-module
    (mapcar
@@ -333,7 +333,7 @@
          (keyword-read
           (eliscript-tests--plain-module-read output "keyword_value")))
     (should (equal output
-                   (eliscript-tests--legacy-compile-string
+                   (eliscript-tests--ground-compile-string
                     source "keywords.eli")))
     (should (= (length (split-string output "eliscript/runtime/literals" t))
                2))
@@ -383,7 +383,7 @@
     (should (= (length (split-string output "runtime/core/collection.mjs" t))
                2))
     (should (equal output
-                   (eliscript-tests--legacy-compile-string
+                   (eliscript-tests--ground-compile-string
                     source "vectors.eli")))
     (should
      (equal
@@ -417,7 +417,7 @@
     (should (= (length (split-string output "eliscript/runtime/literals" t))
                2))
     (should (equal output
-                   (eliscript-tests--legacy-compile-string
+                   (eliscript-tests--ground-compile-string
                     source "maps.eli")))
     (should
      (equal
@@ -464,7 +464,7 @@
                2))
     (should (string-match-p "__eliscript_hash_set" output))
     (should (equal output
-                   (eliscript-tests--legacy-compile-string
+                   (eliscript-tests--ground-compile-string
                     source "sets.eli")))
     (should
      (equal
@@ -510,7 +510,7 @@
                2))
     (should (string-match-p "__eliscript_queue" output))
     (should (equal output
-                   (eliscript-tests--legacy-compile-string
+                   (eliscript-tests--ground-compile-string
                     source "queues.eli")))
     (should
      (equal
@@ -524,7 +524,7 @@
   [(nil? value) (undefined? value) (nullish? value) (null value)])")
          (output (eliscript-compile-string source "nullish.eli")))
     (should (equal output
-                   (eliscript-tests--legacy-compile-string
+                   (eliscript-tests--ground-compile-string
                     source "nullish.eli")))
     (should (string-match-p "(value === null)" output))
     (should (string-match-p "(value === undefined)" output))
@@ -576,7 +576,7 @@
            (eliscript-ir-node-children lambda-node)
            0 (eliscript-ir-property lambda-node :parameter-count))))
     (should (equal output
-                   (eliscript-tests--legacy-compile-string
+                   (eliscript-tests--ground-compile-string
                     source "parameters.eli")))
     (should (string-match-p
              (regexp-quote
@@ -643,7 +643,7 @@
                   (eliscript-ir-property node :rest))
          (setq rest-pattern node))))
     (should (equal output
-                   (eliscript-tests--legacy-compile-string
+                   (eliscript-tests--ground-compile-string
                     source "patterns.eli")))
     (should (string-match-p
              (regexp-quote
@@ -771,7 +771,7 @@
      program
      (lambda (node) (push (eliscript-ir-node-kind node) kinds)))
     (should (equal output
-                   (eliscript-tests--legacy-compile-string
+                   (eliscript-tests--ground-compile-string
                     source "async.eli")))
     (should (string-match-p
              (regexp-quote
@@ -831,7 +831,7 @@
      program
      (lambda (node) (push (eliscript-ir-node-kind node) kinds)))
     (should (equal output
-                   (eliscript-tests--legacy-compile-string
+                   (eliscript-tests--ground-compile-string
                     source "exceptions.eli")))
     (should (string-match-p (regexp-quote "try {") output))
     (should (string-match-p (regexp-quote "catch (error) {") output))
@@ -983,7 +983,7 @@ already nested suffix, or use either production emitter to build the oracle."
                     "(defun f (value) (loop ((n value)) (or n (recur 1))))"
                     "(defun f (value) (loop ((n value)) (and n (recur 1))))"))
     (should (equal (eliscript-compile-string source "short-circuit-order.eli")
-                   (eliscript-tests--legacy-compile-string source "short-circuit-order.eli")))))
+                   (eliscript-tests--ground-compile-string source "short-circuit-order.eli")))))
 
 (ert-deftest eliscript-wide-cond-retains-all-emission-contexts-and-source-marks ()
   "512 sibling branches retain exact expression, statement and tail products."
@@ -1033,7 +1033,7 @@ already nested suffix, or use either production emitter to build the oracle."
     (let* ((filename "cond-order.eli")
            (plain (eliscript-compile-string source filename))
            (mapped (eliscript-compile-string-with-source-map source filename "cond.mjs" filename)))
-      (should (equal plain (eliscript-tests--legacy-compile-string source filename)))
+      (should (equal plain (eliscript-tests--ground-compile-string source filename)))
       (should (equal plain (eliscript-emission-javascript mapped))))))
 
 (ert-deftest eliscript-specializes-binary-comparisons ()
@@ -1058,16 +1058,16 @@ already nested suffix, or use either production emitter to build the oracle."
          "(defun compare (left right third) [(= left right) (< left right third)])"))
     (should
      (equal (eliscript-compile-string source "comparison.eli")
-            (eliscript-tests--legacy-compile-string source "comparison.eli")))))
+            (eliscript-tests--ground-compile-string source "comparison.eli")))))
 
 (ert-deftest eliscript-separates-identity-and-value-equality ()
   (let* ((source
           "(defun compare (left right) [(eq left right) (equal left right)])")
          (output (eliscript-compile-string source "equality.eli"))
-         (legacy (eliscript-tests--legacy-compile-string source "equality.eli"))
+         (ground (eliscript-tests--ground-compile-string source "equality.eli"))
          (runtime-path "eliscript/runtime/core/value.mjs")
          (first-import (string-match (regexp-quote runtime-path) output)))
-    (should (equal output legacy))
+    (should (equal output ground))
     (should first-import)
     (should-not
      (string-match (regexp-quote runtime-path)
@@ -1421,7 +1421,7 @@ already nested suffix, or use either production emitter to build the oracle."
   ;; With an import, a cycle can call the exported writer before value exists.
   (let ((source "(import \"./peer.mjs\" peer) (defvar value -0.0) (defun replace-value (next) (setq value next)) (export value replace-value)"))
     (dolist (output (list (eliscript-compile-string source "tdz-value.eli")
-                          (eliscript-tests--legacy-compile-string source "tdz-value.eli")))
+                          (eliscript-tests--ground-compile-string source "tdz-value.eli")))
       (should (string-match-p
                (regexp-quote
                 "function __eliscript_tdz_write_0(__eliscript_tdz_value_0) { if (__eliscript_tdz_ready_0 !== true) __eliscript_tdz_error(\"value\"); return (value = __eliscript_tdz_value_0); }")
@@ -1878,7 +1878,7 @@ already nested suffix, or use either production emitter to build the oracle."
       (should (equal (delete-dups (nreverse guarded)) (cadr case)))
       (should (eq (and (cadr case) t)
                   (and (string-match-p (regexp-quote "__eliscript_tdz_error") output) t)))
-      (should (equal output (eliscript-tests--legacy-compile-string source "narrowing.eli"))))))
+      (should (equal output (eliscript-tests--ground-compile-string source "narrowing.eli"))))))
 
 (ert-deftest eliscript-expander-validates-type-and-reify-forms ()
   (dolist (case
@@ -2333,7 +2333,7 @@ already nested suffix, or use either production emitter to build the oracle."
         (filename "emitter-parity.eli"))
     (should
      (equal (eliscript-compile-string source filename)
-            (eliscript-tests--legacy-compile-string source filename)))))
+            (eliscript-tests--ground-compile-string source filename)))))
 
 (ert-deftest eliscript-loop-recur-matches-compatibility-backend ()
   (let ((source
@@ -2347,7 +2347,7 @@ already nested suffix, or use either production emitter to build the oracle."
         (filename "loop-recur-parity.eli"))
     (should
      (equal (eliscript-compile-string source filename)
-            (eliscript-tests--legacy-compile-string source filename)))))
+            (eliscript-tests--ground-compile-string source filename)))))
 
 (ert-deftest eliscript-loop-recur-round-trips-through-ir-forms ()
   (let* ((source
@@ -2381,7 +2381,7 @@ already nested suffix, or use either production emitter to build the oracle."
          (filename "bits.eli")
          (output (eliscript-compile-string source filename)))
     (should
-     (equal output (eliscript-tests--legacy-compile-string source filename)))
+     (equal output (eliscript-tests--ground-compile-string source filename)))
     (dolist (fragment
              '("__eliscript_numeric_int32(value)"
                "__eliscript_numeric_uint32(value)"
@@ -2429,7 +2429,7 @@ already nested suffix, or use either production emitter to build the oracle."
            '(inspect-value)
            filename)))
     (should
-     (equal output (eliscript-tests--legacy-compile-string source filename)))
+     (equal output (eliscript-tests--ground-compile-string source filename)))
     (dolist (generated (list output portable-output))
       (should
        (string-match-p
@@ -2511,7 +2511,7 @@ already nested suffix, or use either production emitter to build the oracle."
                   "(progn (while (< n 0) (setq n (1+ n))) (* seed captured))"))
     (let ((source (concat "(defvar captured \"2\") (defun f (n seed) " body ") (export f)")))
       (should (equal (eliscript-compile-string source "scalar-proof.eli")
-                     (eliscript-tests--legacy-compile-string source "scalar-proof.eli"))))))
+                     (eliscript-tests--ground-compile-string source "scalar-proof.eli"))))))
 
 (ert-deftest eliscript-ir-emitter-does-not-call-form-backend ()
   (let ((program
@@ -2677,9 +2677,9 @@ already nested suffix, or use either production emitter to build the oracle."
   (let* ((source "(defun packed () \"\\ud800\\ud83d\\ude00\\udfff\\\\ud800\") (export packed)")
          (expected "return \"\\ud800😀\\udfff\\\\ud800\";")
          (actual (eliscript-compile-string source "packed-utf16.eli"))
-         (legacy (eliscript-tests--legacy-compile-string source "packed-utf16.eli")))
+         (ground (eliscript-tests--ground-compile-string source "packed-utf16.eli")))
     (should (string-match-p (regexp-quote expected) actual))
-    (should (string-match-p (regexp-quote expected) legacy))))
+    (should (string-match-p (regexp-quote expected) ground))))
 
 (ert-deftest eliscript-source-map-records-ir-spans-and-utf16-columns ()
   (let* ((source "(defun choose (value)\n\t(if value value nil))\n(print \"😀\" \"after\")")
@@ -2845,7 +2845,7 @@ already nested suffix, or use either production emitter to build the oracle."
     (should-not (gethash "ignored" names))
     (should (equal before (prin1-to-string forms)))))
 
-(ert-deftest eliscript-legacy-context-proof-skips-declarations-and-literal-keys ()
+(ert-deftest eliscript-ground-context-proof-skips-declarations-and-literal-keys ()
   (dolist (initializer '("(lambda (b) 1)" "(fn (b) 1)"
                          "(let ((b 1)) 3)" "(let* ((b 1)) 3)"
                          "(loop ((b 1)) 3)" "(js-object b 1)"
@@ -2853,23 +2853,23 @@ already nested suffix, or use either production emitter to build the oracle."
                          "(try 1 (catch b 3))" "(cond (t 1))"))
     (let ((source (format "(defun f () (let* ((a %s) (b 2)) a))" initializer)))
       (should (equal (eliscript-compile-string source "context-proof.eli")
-                     (eliscript-tests--legacy-compile-string source "context-proof.eli")))))
+                     (eliscript-tests--ground-compile-string source "context-proof.eli")))))
   (let ((source "(defun f () (let* ((a (js-object :b 1)) (js-object 2)) a))"))
     (should (equal (eliscript-compile-string source "context-proof.eli")
-                   (eliscript-tests--legacy-compile-string source "context-proof.eli")))))
+                   (eliscript-tests--ground-compile-string source "context-proof.eli")))))
 
-(ert-deftest eliscript-legacy-context-proof-retains-reference-assignment-and-raw-guards ()
+(ert-deftest eliscript-ground-context-proof-retains-reference-assignment-and-raw-guards ()
   (dolist (initializer '("b" "(lambda (b) b)" "(let ((b 1)) b)"
                          "(js-object (+ b 1) 1)" "(b 1)" "b/value"
                          "(progn (setq b 1) 3)" "(try 1 (catch b b))"
                          "(js* \"1\")"))
     (let* ((source (format "(defun f (b) (let* ((a %s) (b 2)) a))" initializer))
-           (legacy (eliscript-tests--legacy-compile-string source "context-guard.eli")))
+           (ground (eliscript-tests--ground-compile-string source "context-guard.eli")))
       (should-not (eliscript-emitter--context-sequential-safe-p
                    (list (list 'a (car (eliscript-read-string initializer))) '(b 2))))
-      (should (equal (eliscript-compile-string source "context-guard.eli") legacy)))))
+      (should (equal (eliscript-compile-string source "context-guard.eli") ground)))))
 
-(ert-deftest eliscript-legacy-context-proof-matches-ir-for-binding-pattern-metadata ()
+(ert-deftest eliscript-ground-context-proof-matches-ir-for-binding-pattern-metadata ()
   (dolist (case '(("(lambda ([b]) 1)" t)
                   ("(lambda ({:strs [b]}) 1)" t)
                   ("(lambda ({:strs [b] :or {b 1}}) 1)" t)
@@ -2882,18 +2882,18 @@ already nested suffix, or use either production emitter to build the oracle."
            (function (car (eliscript-ir-program-body program)))
            (lexical (nth 1 (eliscript-ir-node-children function)))
            (bindings (cl-subseq (eliscript-ir-node-children lexical) 0 2))
-           (legacy (eliscript-emitter--context-sequential-safe-p
+           (ground (eliscript-emitter--context-sequential-safe-p
                     (list (list 'a (car (eliscript-read-string initializer))) '(b 2))))
            (ir (eliscript-ir-emitter--context-sequential-safe-p bindings)))
-      (should (eq (not (null legacy)) (cadr case)))
-      (should (eq (not (null legacy)) (not (null ir)))))))
+      (should (eq (not (null ground)) (cadr case)))
+      (should (eq (not (null ground)) (not (null ir)))))))
 
 (ert-deftest eliscript-default-unicode-prelude-is-unconditional ()
   (dolist (source '("(defun run () 1) (export run)"
                     "(defun run (value key) (js-call value key)) (export run)"
                     "(defun run (value key) (get value key)) (export run)"))
     (dolist (output (list (eliscript-compile-string source "ordinary.eli")
-                          (eliscript-tests--legacy-compile-string source "ordinary.eli")))
+                          (eliscript-tests--ground-compile-string source "ordinary.eli")))
       (should (string-match-p
                (regexp-quote "import \"eliscript/runtime/unicode-case.mjs\";") output)))))
 
@@ -2903,7 +2903,7 @@ already nested suffix, or use either production emitter to build the oracle."
     (let ((source (format "(module %s (defun run () 1) (export run))" (cdr entry)))
           (dependency (regexp-quote "import \"eliscript/runtime/unicode-case.mjs\";")))
       (should-not (string-match-p dependency (eliscript-compile-string source (car entry))))
-      (should-not (string-match-p dependency (eliscript-tests--legacy-compile-string source (car entry))))
+      (should-not (string-match-p dependency (eliscript-tests--ground-compile-string source (car entry))))
       (should-not (string-match-p dependency (eliscript-compile-string source (expand-file-name (car entry)))))
       (should (string-match-p dependency (eliscript-compile-string source "unicode-case.eli")))
       (should (string-match-p dependency (eliscript-compile-string

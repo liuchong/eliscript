@@ -9,7 +9,7 @@
   (import "./dogfood-action-source.mjs" runSourceWorkflowCase)
   (defconst original (Object/assign (js-object) framework))
   (js-call assert :strictEqual
-    (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root "tests/dogfood-workflow-test-legacy.mjs"))) :digest "hex")
+    (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root "tests/dogfood-workflow-test-ground.mjs"))) :digest "hex")
     "4a80cf7a80a3faa921f2438ee87974a74c9fa6225acde2b936ba60776aa8d44e")
   (defconst registration (createDirectWasmRegistration original (js-object
     "the template checks out the consumer repository and invokes the action" runSourceWorkflowCase)))

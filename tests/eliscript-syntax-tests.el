@@ -1021,7 +1021,7 @@
   (eliscript-syntax-tests--run-isolated
    "T16-01" "T16"
    (lambda ()
-     (let* ((out-dir (expand-file-name "dist/session-tests/"
+     (let* ((out-dir (expand-file-name "dist/lisp-tests/"
                                        eliscript-runtime--project-directory))
             (temp-el (progn (make-directory out-dir t)
                             (make-temp-file (expand-file-name "accel-src-" out-dir) nil ".el")))

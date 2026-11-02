@@ -7,7 +7,7 @@
   (import "./managed-integrity-cases.mjs" managedIntegrityCases prepareManagedIntegrity closeManagedIntegrity)
   (defconst original (Object/assign (js-object) framework))
   (unless (= (js-call (js-call (createHash "sha256") :update
-               (readFileSync (resolve root "tests/wasm-managed-object-integrity-test-legacy.mjs"))) :digest "hex")
+               (readFileSync (resolve root "tests/wasm-managed-object-integrity-test-ground.mjs"))) :digest "hex")
              "a6a752d58e7399aa5228061736c52cdd7ca81129b6ab810205f109317abed349")
     (throw (new globalThis.TypeError "complete original integrity suite source identity changed")))
   (defconst counts (new globalThis.Map))

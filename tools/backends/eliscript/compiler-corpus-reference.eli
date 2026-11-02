@@ -2,7 +2,7 @@
   (import "node:fs/promises" readFile writeFile readdir lstat realpath rename symlink unlink)
   (import "node:path" resolve relative)
   (import "node:crypto" createHash)
-  (import "./compiler-corpus-reference-legacy.mjs" :as legacy)
+  (import "./compiler-corpus-reference-ground.mjs" :as ground)
   (defun optional (value key) (if (nullish? value) undefined (get value key)))
   (defasync runtime-files (directory prefix)
     (let ((entries (await (readdir directory (js-object :withFileTypes t)))) (result (js-array)) (index 0))
@@ -38,7 +38,7 @@
     ;; the host, as they do in the original CLI's single runtime environment.
     (let* ((sharing (when (= (optional (get (get context :record) :execution) "referenceArtifact") t)
                       (await (shared-runtime context))))
-           (result (await (js-call legacy :prepareOriginalReferenceArtifact context))))
+           (result (await (js-call ground :prepareOriginalReferenceArtifact context))))
       (when (and sharing result)
         (let* ((directory (get result :directory)) (selected (get sharing :directory))
                (files (get sharing :files)) (declared (get sharing :declared)) (index 0))

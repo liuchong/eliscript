@@ -131,7 +131,7 @@ remain separate contracts.
 ## P3 Completion
 
 Specifications 0093 and 0094 closed static transient ownership analysis and
-legacy List-operation migration. Specification 0095 removed the provisional
+ground List-operation migration. Specification 0095 removed the provisional
 host aliases and completed the stable literal/host-container family;
 application clients are not core acceptance evidence.
 

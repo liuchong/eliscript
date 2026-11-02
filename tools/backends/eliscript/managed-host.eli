@@ -1,5 +1,5 @@
 (module tools.backends.managed-host
-  (import "./managed-host-legacy.mjs" :as legacy)
+  (import "./managed-host-ground.mjs" :as ground)
   (import "./managed-host-runtime.mjs" :as maintained)
   (import "./managed-host-lifecycle.mjs" createManagedHostRuntimeWithLifecycle)
   (import "./managed-foreign-binding.mjs" createManagedForeignBindingRuntime)
@@ -9,9 +9,9 @@
   ;; Retain all unaffected public functions, including their original defaults
   ;; and identity. Only the high-level host decoder's function property read
   ;; needs the generic source Get ABI; raw object Get remains object-only.
-  (defconst failManagedRuntime (get legacy :failManagedRuntime))
-  (defconst validateManagedRuntimeOptions (get legacy :validateManagedRuntimeOptions))
-  (defconst createManagedHostCapabilityBridge (get legacy :createManagedHostCapabilityBridge))
+  (defconst failManagedRuntime (get ground :failManagedRuntime))
+  (defconst validateManagedRuntimeOptions (get ground :validateManagedRuntimeOptions))
+  (defconst createManagedHostCapabilityBridge (get ground :createManagedHostCapabilityBridge))
 
   (defun managedHostLiteralProbeExports (exports descriptor)
     (let ((literal (when descriptor (get descriptor :literalRuntime nil))))
@@ -280,7 +280,7 @@
            (ordinary (get descriptors "value-object-get"))
            (generic (get descriptors "value-property-get"))
            (kind (get descriptors "value-kind")))
-      ;; Older/fake exports and accessor services keep the exact legacy path.
+      ;; Older/fake exports and accessor services keep the exact ground path.
       ;; Both real factories provide own data functions with this existing ABI.
       (if (not (and ordinary generic kind (Object/hasOwn ordinary "value")
                     (Object/hasOwn generic "value") (Object/hasOwn kind "value")
@@ -296,7 +296,7 @@
                (name (Object/getOwnPropertyDescriptor object-get "name")))
           ;; A fresh descriptor object avoids the nonconfigurable-export Proxy
           ;; invariant. The original WASM/native exports and their ABI are never
-          ;; mutated; only legacy host IO receives this private view.
+          ;; mutated; only ground host IO receives this private view.
           (when (and name (Object/hasOwn name "value"))
             (Object/defineProperty read "name" name))
           (put ordinary :value read)
@@ -318,7 +318,7 @@
       (registerManagedSourceDecodeRuntime facade runtime)
       (Object/freeze facade)))
   (defun createManagedHostRuntime (exports descriptor memory &rest tail)
-    ;; The legacy ABI already fixes old images without a case selector to 17.
+    ;; The ground ABI already fixes old images without a case selector to 17.
     ;; Configurable images receive the language default without probing a host
     ;; method or evaluating options earlier than the original destructuring.
     (let ((selector (Object/getOwnPropertyDescriptor exports "runtime-case-version")))

@@ -6,7 +6,7 @@
   (import "node:path" resolve)
   (import "node:fs/promises" readFile)
   (import "../tools/backends/build.mjs" root)
-  (import "./ci-contract-test-legacy.mjs")
+  (import "./ci-contract-test-ground.mjs")
   (test "default validation preserves the literal core and application contract plus both original bootstrap phases"
     (async ()
       (let* ((makefile (await (readFile (resolve root "Makefile") "utf8")))

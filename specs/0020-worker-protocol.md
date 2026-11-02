@@ -132,7 +132,7 @@ Specification
 adds an opt-in `eliscript-value-chunks-v1` framing. It sends bounded value-event
 batches in protocol messages, acknowledges one argument chunk at a time, and
 streams progress and success values while awaiting stdout backpressure. The
-legacy JSON and non-streaming codec paths remain unchanged.
+ground JSON and non-streaming codec paths remain unchanged.
 
 ## Timing Contract
 

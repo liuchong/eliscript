@@ -22,7 +22,7 @@
   (defconst persistent-literals-file "tests/wasm-managed-persistent-literals.test.mjs")
   (defconst direct-wasm-file "tests/direct-wasm-backend.test.mjs")
   (defconst ingress-sha "510213d89769be93ce574f11de72061e2f7ff5605cfb792d79388aa419807183")
-  (defconst package-sha "cabaee3897e99a1c920dc4d3ba16459351a6d4864b327a03839c0c8d7d7d2b4c")
+  (defconst package-sha "6f0000e0b65e429a4d270a05f6c866acb4f465189755f3823f3ecf0249252a1b")
   (defconst tools-sha "4668c61b9956b5501e496fc6246300667cf3fb85d5ebdd414d86269c5a56acd0")
   (defconst cancellation-reason
     "The user cancelled WASM/native compiler execution hosts; JS stage3 still emits and executes all user-program targets.")
@@ -91,7 +91,7 @@
            (mixed (or (= name package-file) (= name tools-file) (= name ingress-file)))
            (cancelled (if mixed (cancelledCompilerHostCases name
                          (await (readFile (resolve source-root
-                           (if (= name ingress-file) "tests/compiler-ir-session-ingress-test-legacy.mjs" name)) "utf8"))) (js-array))))
+                           (if (= name ingress-file) "tests/compiler-ir-session-ingress-test-ground.mjs" name)) "utf8"))) (js-array))))
       (js-object :file file :kind (cond ((or (= name ingress-file) (= name package-file)) "sequence") (mixed "mixed")
           ((or (= name sequence-file) (= name record-grid-file) (= name response-events-file)
                (= name literal-runtime-file) (= name wire-runtime-file) (= name artifact-archive-file)

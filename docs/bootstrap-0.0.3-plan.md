@@ -8,7 +8,7 @@
 - **基线分支 / Commit**：`master` @ `7901f00`（已发布签名标签 `v0.0.2`，工作区干净）
 - **核心交付目标（`Q01`–`Q04`）**：
   - **Q01（12,000 层 Zipper 深度性能闭环）**：消除受管运行时（WASM 与 Native）在 12,000 层嵌套向量与 `zipper` 深度下探、祖先路径（`path`）物化、单子节点回溯重建（`up` / `root`）中的热路径分配与协议分派放大，使原始 650 项编译器语料中的深度 Zipper 用例（`570`、`631`、`649`）及 `tests/eliscript/persistent-zipper-path.eli` 在无需 `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1` 的条件下正常通过（12,000 层全流程耗时约 `67ms`）。
-  - **Q02（无引用遗留手写 JS 文件清理）**：在保持 `stage0 + stage1/2/3` 自举与所有契约摘要不变的前提下，从 Git 仓库清理 14 个无任何构建、测试或契约引用的遗留 `*-legacy.mjs` 手写 JS 文件。
+  - **Q02（无引用遗留手写 JS 文件清理）**：在保持 `stage0 + stage1/2/3` 自举与所有契约摘要不变的前提下，从 Git 仓库清理 14 个无任何构建、测试或契约引用的遗留 `*-ground.mjs` 手写 JS 文件。
   - **Q03（浏览器端 IR/JS 优化、产物压缩与无后缀包导入支持）**：在 `browser/host.mjs` 中提供无外部依赖的 IR 常量折叠与死分支消除（`optimizeProgramIr`）及安全 JS 词法级注释剥离与空白压缩（`optimizeJavaScript`），支持 `compileSource` / `compileProject` / `runSource` 按选项启用；在 `package.json` `"exports"`、`browser/host.mjs` 与 `browser/worker.mjs` 中支持 `eliscript/runtime/...` 等包内子路径省略 `.mjs` 后缀（同时兼容显式 `.mjs`）；在 `package.json` 的 `build:docs-site` 中开启浏览器 bundle 压缩（`--minify`），并移除 `.github/workflows/release.yml` 中冗余的 `Upgrade npm for OIDC trusted publishing` 步骤。
   - **Q04（文档、Pages 版本号与 `0.0.3` 正式发布）**：更新 `package.json`、`docs/pages/site.eli`、`tools/surface/generate-api.mjs`、`docs/index.html`、`docs/pages/*.html`、`README.md` 与 `docs/getting-started.md` 至 `0.0.3` / `v0.0.3`（含可点击跳转 GitHub Release 与 npm 的版本链接），补充浏览器热加载编译器的优化选项与无后缀导入说明，重建四阶段固定点与发布包，完成集中验收、GPG 签名提交推送、`v0.0.3` 签名标签及 GitHub Release 发布。
 
@@ -21,7 +21,7 @@
     release.yml                                    # 发布工作流（含冗余 npm 升级步骤）
   bootstrap/
     host/
-      eliscript-cli-legacy.mjs                     # 遗留未引用 CLI 入口
+      eliscript-cli-ground.mjs                     # 遗留未引用 CLI 入口
   browser/
     host.mjs                                       # 浏览器端内存编译与热加载宿主
     worker.mjs                                     # 浏览器端编译 Worker
@@ -49,7 +49,7 @@
     browser-host.test.mjs                          # 浏览器编译宿主单测
     onboarding-docs.test.mjs                       # 入门文档与契约测试
     pages-site.test.mjs                            # Pages 站点导航与版本测试
-    *-legacy.mjs                                   # 13 个未引用遗留测试文件
+    *-ground.mjs                                   # 13 个未引用遗留测试文件
   tools/
     backends/eliscript/
       compiler-package.eli                         # 独立编译器包与浏览器传输打包器
@@ -104,7 +104,7 @@ flowchart LR
 | D03 | `stdlib/managed-runtime-metadata.eli` | L5–L19 (`IMeta`, `IWithMeta`, `meta`, `withMeta`) | 每次调用 `(protocol-method IMeta "meta")` 与 `(protocol-method IWithMeta "withMeta")` | 顶层预绑定 `meta-method` 与 `with-meta-method` 并在 `meta` / `withMeta` 中直接 `funcall` | Q01 | C03 / A01, A02 |
 | D04 | `stdlib/managed-runtime-collection.eli` | L53 (`invoke`)、L481–L563 (`count`..`rseq`) | 每次公开集合操作经 `invoke` 查找 `protocol-method` 并 `apply` | 顶层预绑定 15 个协议方法常量并在 `count`..`rseq` 中直接 `funcall` | Q01 | C04 / A01, A02 |
 | D05 | `stdlib/core/zipper.eli` | L6 (`import vector.mjs`)、L18–L60 (`zipper-slot`, `zipper-config-value`)、L99–L132 (`zipper-materialize`, `zipper-rebuild-children`)、L160–L191 (`zipper`, `zipper?`)、L223–L247 (`path`) | 每次 `zipper?` 和 `zipper-config-value` 走 HAMT 查找；`zipper-materialize` 对无元数据向量重复归约；`path` 逐个 `conj` 12,000 次 | 引入 `zipper-valid-configs` 与 `zipper-config-callbacks`；`zipper-materialize` 无元数据向量直返；`zipper-rebuild-children` 单子节点快路径；`path` 在 `(nil? current)` 时通过 `PersistentVector.from` 一次构建 | Q01 / D01–D04 | C05 / A01, A02 |
-| D06 | `bootstrap/host/eliscript-cli-legacy.mjs` 及 `tests/*-legacy.mjs`（共 14 个文件） | 全文件（未被引用的遗留手写 JS 文件） | 保存在仓库中的 14 个无引用 `*-legacy.mjs` 文件 | 使用 `git rm` 删除这 14 个无引用遗留 `.mjs` 文件 | Q02 | C06 / A03 |
+| D06 | `bootstrap/host/eliscript-cli-ground.mjs` 及 `tests/*-ground.mjs`（共 14 个文件） | 全文件（未被引用的遗留手写 JS 文件） | 保存在仓库中的 14 个无引用 `*-ground.mjs` 文件 | 使用 `git rm` 删除这 14 个无引用遗留 `.mjs` 文件 | Q02 | C06 / A03 |
 | D07 | `browser/host.mjs` | L98–L295 (`walkProgram`, `compileSource`, `compileProject`, `runSource`) | 直接发射未折叠 IR 且无内建 JS 压缩辅助函数 | 新增并导出 `optimizeProgramIr`（常量折叠与死条件分支消除）与 `optimizeJavaScript`（词法感知注释剥离与空白压缩），在 `compileSource` / `compileProject` 中默认启用 IR 优化并支持 `options.minify` | Q03 | C07 / A04 |
 | D08 | `tools/backends/eliscript/compiler-package.eli` | L136–L151 (`bundleCompilerBrowserTransport`) | `bun build` 未传 `--minify` | 在 `bundleCompilerBrowserTransport` 的参数列表中加入 `"--minify"` | Q03 | C08 / A05 |
 | D09 | `.github/workflows/release.yml` | L89–L91 (`Upgrade npm for OIDC trusted publishing`) | 含冗余 `npm install -g npm@latest` 步骤 | 移除冗余的 `Upgrade npm for OIDC trusted publishing` 步骤 | Q03 | C09 / A06 |
@@ -116,8 +116,8 @@ flowchart LR
 | D15 | `tests/pages-site.test.mjs` | L44 (`expect(source).toContain("v0.0.2")`) | 断言页面包含 `v0.0.2` | 更新断言为 `expect(source).toContain("v0.0.3")` | Q04 | C15 / A05 |
 | D16 | `tests/eliscript/persistent-zipper-path.eli` | L194–L216 | 验证 12,000 层 `down`、`path`、`root` 与编辑回溯 | 保持并验证 12,000 层耗时与结果断言 | Q01 | C16 / A01, A02 |
 | D17 | `tests/eliscript/compiler-host-scope.eli` 与 `tools/testing/file-workers.eli` | `compiler-host-scope.eli` L99–L106, L224–L225, L552–L553, L899–L905, L1051；`file-workers.eli` L12–L19 | 从 3 个废弃 `tests/wasm-compiler-*.test.mjs` 读取内联 fixture 字符串；`exclusive-files` 保留 5 个已废弃文件名 | 将 `prefixSource`、`originalStringLiteral`、4 个 emitter `corpus` 用例与 5 个 lower `source` 用例直接内联为 Eliscript 常量，移除 `original-template` 外部文件依赖与 `exclusive-files` 中的废弃文件名 | Q02 | C17 / A09 |
-| D18 | `tools/pages/assemble.eli` | L1–L91 (`SITE_SOURCE`..`assemblePages`) | 通过 `(import "./assemble-legacy.mjs" :as legacy)` 委托实现 | 将 `assemble-legacy.mjs` 的全部逻辑原生迁移进 `tools/pages/assemble.eli`，消除对 `assemble-legacy.mjs` 的依赖 | Q02 | C18 / A10 |
-| D19 | `examples/dogfood/tmp/x-out/**`（21 个文件）、24 个无引用 `tests/*.mjs` / `tools/testing/native-reader-corpus.mjs`、`tools/pages/assemble-legacy.mjs` 与 `.gitignore` | 全文件（共 46 个废弃/临时文件） | Git 跟踪了临时产物 `examples/dogfood/tmp/x-out/`、24 个无引用 `.mjs` 测试/语料文件及 `assemble-legacy.mjs` | 使用 `git rm` 彻底清理全部 46 个废弃/临时文件，并在 `.gitignore` 中忽略 `/examples/dogfood/tmp/` | Q02 | C19 / A09, A10, A11 |
+| D18 | `tools/pages/assemble.eli` | L1–L91 (`SITE_SOURCE`..`assemblePages`) | 通过 `(import "./assemble-ground.mjs" :as ground)` 委托实现 | 将 `assemble-ground.mjs` 的全部逻辑原生迁移进 `tools/pages/assemble.eli`，消除对 `assemble-ground.mjs` 的依赖 | Q02 | C18 / A10 |
+| D19 | `examples/dogfood/tmp/x-out/**`（21 个文件）、24 个无引用 `tests/*.mjs` / `tools/testing/native-reader-corpus.mjs`、`tools/pages/assemble-ground.mjs` 与 `.gitignore` | 全文件（共 46 个废弃/临时文件） | Git 跟踪了临时产物 `examples/dogfood/tmp/x-out/`、24 个无引用 `.mjs` 测试/语料文件及 `assemble-ground.mjs` | 使用 `git rm` 彻底清理全部 46 个废弃/临时文件，并在 `.gitignore` 中忽略 `/examples/dogfood/tmp/` | Q02 | C19 / A09, A10, A11 |
 | D20 | `browser/host.mjs` | L111–L297 (`foldIrNode`, `optimizeProgramIr`, `optimizeJavaScript`, `compileSource`, `compileProject`) | 仅支持基础算术常量折叠与按行空白修剪 | 升级为多遍 Closure 风格 IR 优化器（支持不可变 `let`/`defconst` 常量传播、比较/布尔/类型谓词折叠、代数恒等式化简、死分支消除）与词法级 JS 操作符空白紧缩，并支持 `options.closureCompiler` 外部/自定义 Closure Compiler 钩子 | Q03 | C20 / A12 |
 | D21 | `docs/getting-started.md` 与 `docs/pages/getting-started.html` | `docs/getting-started.md` L256–L264；`docs/pages/getting-started.html` L103–L109 | 描述基础 `optimize` / `minify` 选项 | 补充常量传播、死分支消除与 `closureCompiler` 自定义优化钩子说明 | Q03, Q04 | C21 / A12 |
 | D22 | `tests/browser-host.test.mjs` | L226–L274 | 覆盖基础常量折叠与注释剥离 | 新增对 `let`/`defconst` 常量传播、比较/布尔谓词折叠、操作符空白紧缩与 `closureCompiler` 钩子的单元测试 | Q03 | C22 / A12 |
@@ -131,7 +131,7 @@ flowchart LR
     release.yml                                    # 修改 D09：移除冗余 npm 升级步骤
   bootstrap/
     host/
-      eliscript-cli-legacy.mjs                     # 删除 D06：无引用遗留文件
+      eliscript-cli-ground.mjs                     # 删除 D06：无引用遗留文件
   browser/
     host.mjs                                       # 修改 D07：新增 optimizeProgramIr / optimizeJavaScript
   docs/
@@ -151,7 +151,7 @@ flowchart LR
   tests/
     browser-host.test.mjs                          # 修改 D14：新增 IR/JS 优化与 minify 测试
     pages-site.test.mjs                            # 修改 D15：断言 v0.0.3
-    *-legacy.mjs                                   # 删除 D06：移除 13 个无引用遗留测试文件
+    *-ground.mjs                                   # 删除 D06：移除 13 个无引用遗留测试文件
   tools/
     backends/eliscript/
       compiler-package.eli                         # 修改 D08：浏览器 bundle 开启 --minify
@@ -194,7 +194,7 @@ flowchart LR
 | C03 | [x] | D03 / Q01 | `stdlib/managed-runtime-metadata.eli` L5–L19 (`meta`, `withMeta`) | 预绑定 `meta-method` 与 `with-meta-method` 并直接 `funcall` | S1 | A01, A02 |
 | C04 | [x] | D04 / Q01 | `stdlib/managed-runtime-collection.eli` L481–L563 (`count`..`rseq`) | 预绑定 15 个协议方法常量并在公开函数中直接 `funcall` | S1 | A01, A02 |
 | C05 | [x] | D05 / Q01 | `stdlib/core/zipper.eli` L6, L18–L247 (`zipper?`, `zipper-materialize`, `zipper-rebuild-children`, `path`) | 增加 `zipper-valid-configs` / `zipper-config-callbacks`、无元数据向量直返、单子节点快路径及 `path` 的 `PersistentVector.from` 批量构建 | C01–C04 | A01, A02 |
-| C06 | [x] | D06 / Q02 | `bootstrap/host/eliscript-cli-legacy.mjs` 及 13 个 `tests/*-legacy.mjs` | 删除 14 个无引用遗留手写 `.mjs` 文件 | S1 | A03 |
+| C06 | [x] | D06 / Q02 | `bootstrap/host/eliscript-cli-ground.mjs` 及 13 个 `tests/*-ground.mjs` | 删除 14 个无引用遗留手写 `.mjs` 文件 | S1 | A03 |
 | C07 | [x] | D07 / Q03 | `browser/host.mjs` L98–L295 (`optimizeProgramIr`, `optimizeJavaScript`, `compileSource`, `compileProject`) | 实现并导出 `optimizeProgramIr` 与 `optimizeJavaScript`，接入 `compileSource` 与 `compileProject` | S1 | A04 |
 | C08 | [x] | D08 / Q03 | `tools/backends/eliscript/compiler-package.eli` L142 (`bundleCompilerBrowserTransport`) | 在 `bun build` 参数中加入 `"--minify"` | S1 | A05 |
 | C09 | [x] | D09 / Q03 | `.github/workflows/release.yml` L89–L91 | 移除冗余的 `Upgrade npm for OIDC trusted publishing` 步骤 | S1 | A06 |
@@ -206,8 +206,8 @@ flowchart LR
 | C15 | [x] | D15 / Q04 | `tests/pages-site.test.mjs` L44 | 更新页面版本号断言为 `v0.0.3` | S0 | A05 |
 | C16 | [x] | D16 / Q01 | `tests/eliscript/persistent-zipper-path.eli` L194–L216 | 保持 12,000 层 Zipper 深度下探、路径与编辑回溯验收用例 | S0 | A01 |
 | C17 | [x] | D17 / Q02 | `tests/eliscript/compiler-host-scope.eli`, `tools/testing/file-workers.eli` | 内联 3 个废弃 `tests/wasm-compiler-*.test.mjs` 中的 fixture 字符串，清理 `exclusive-files` 中的废弃文件名 | C22 | A09 |
-| C18 | [x] | D18 / Q02 | `tools/pages/assemble.eli` | 将 `tools/pages/assemble-legacy.mjs` 完整迁移至 `tools/pages/assemble.eli` | C22 | A10 |
-| C19 | [x] | D19 / Q02 | `examples/dogfood/tmp/x-out/**`、24 个无引用 `.mjs`、`tools/pages/assemble-legacy.mjs`、`.gitignore` | 执行 `git rm` 移除全部 46 个废弃/临时文件，并在 `.gitignore` 忽略 `/examples/dogfood/tmp/` | C17, C18 | A09, A10, A11 |
+| C18 | [x] | D18 / Q02 | `tools/pages/assemble.eli` | 将 `tools/pages/assemble-ground.mjs` 完整迁移至 `tools/pages/assemble.eli` | C22 | A10 |
+| C19 | [x] | D19 / Q02 | `examples/dogfood/tmp/x-out/**`、24 个无引用 `.mjs`、`tools/pages/assemble-ground.mjs`、`.gitignore` | 执行 `git rm` 移除全部 46 个废弃/临时文件，并在 `.gitignore` 忽略 `/examples/dogfood/tmp/` | C17, C18 | A09, A10, A11 |
 | C20 | [x] | D20 / Q03 | `browser/host.mjs` | 升级 Closure 风格 IR 优化器（常量传播、比较/布尔/谓词折叠、恒等式化简）与词法级 JS 操作符紧缩，新增 `options.closureCompiler` 钩子 | C22 | A12 |
 | C21 | [x] | D21 / Q03, Q04 | `docs/getting-started.md`, `docs/pages/getting-started.html` | 补充常量传播与 `closureCompiler` 钩子文档说明 | C20 | A12 |
 | C22 | [x] | D22 / Q03 | `tests/browser-host.test.mjs` | 编写常量传播、比较/布尔折叠、操作符紧缩与 `closureCompiler` 钩子的单元测试（不运行） | S0 | A12 |
@@ -216,7 +216,7 @@ flowchart LR
 
 - **BDD 行为定义**：
   - **场景 1（12,000 层 Zipper 深度性能与语义）**：给定 12,000 层嵌套向量与 `vector-zipper`，当在 JS、WASM 与 Native 后端上执行 12,000 次 `down`、`path`、`root` 与 `replace` 后 `root` 回溯，则所有断言精确成立且无需 `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1` 即可在常规时间内完成。
-  - **场景 2（遗留文件清理与契约完整性）**：给定删除了 14 个无引用 `*-legacy.mjs` 的工作区，当执行 `bun run check:contracts` 与 `bun run check:integrity` 时，所有契约与仓库完整性检查全部通过。
+  - **场景 2（遗留文件清理与契约完整性）**：给定删除了 14 个无引用 `*-ground.mjs` 的工作区，当执行 `bun run check:contracts` 与 `bun run check:integrity` 时，所有契约与仓库完整性检查全部通过。
   - **场景 3（浏览器端 IR/JS 优化与 Bundle 压缩）**：给定含常量运算与死分支的 `.eli` 源码，当调用 `compileSource` / `runSource`（含 `minify: true`）以及构建浏览器与 Pages 产物时，IR 常量与死分支被折叠消除、输出 JS 体积减小且 Source Map 与执行语义保持一致。
   - **场景 4（`0.0.3` 自举固定点与正式发布）**：给定更新至 `0.0.3` 的全部源码与文档，当重建 `bootstrap-release` 与发布包时，`stage2 == stage3` 固定点成立，打包体积保持精简（`< 5 MB`），GPG 签名提交、签名标签 `v0.0.3` 与 GitHub Release 发布全部验证通过。
 
@@ -226,14 +226,14 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- | --- |
 | A01 | [x] | Q01 / C01–C05, C16 | 编译更新后的 `stdlib/` 与受管后端 | `node --test ./tests/persistent-zipper-path-selfhosted.test.mjs` | 6 个测试（含 12,000 层 Zipper 用例）全部通过并记录逐例耗时 | 6/6 通过（12,000 层全流程耗时 **66.95ms**：构建 2.10ms、`down` 26.06ms、`path` 4.41ms、缓存 `path` 0.014ms、未修改 `root` 10.00ms、`replace+root` 24.36ms） |
 | A02 | [x] | Q01 / C01–C05 | 不设置 `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE` | 运行深度 Zipper 用例与三目标编译验证 | 三种目标输出均通过且无超时或堆溢出 | 全部通过（`stage3-targets-selfhosted.test.mjs` 与 `persistent-zipper-path-selfhosted.test.mjs` 0 失败） |
-| A03 | [x] | Q02 / C06 | 已删除 14 个无引用 `*-legacy.mjs` | `git status --short` 及 `bun run check:integrity` | 14 个遗留文件已移除，仓库完整性检查 exit 0 | 14 个遗留手写 `.mjs` 已移除，`check:integrity` 通过 |
+| A03 | [x] | Q02 / C06 | 已删除 14 个无引用 `*-ground.mjs` | `git status --short` 及 `bun run check:integrity` | 14 个遗留文件已移除，仓库完整性检查 exit 0 | 14 个遗留手写 `.mjs` 已移除，`check:integrity` 通过 |
 | A04 | [x] | Q03 / C07, C14 | 更新后的 `browser/host.mjs` 与 `dist/browser/` | `bun run build:browser && bun test tests/browser-host.test.mjs` | 全部浏览器宿主单测（含 IR/JS 优化、热加载与无后缀包导入）通过 | 14/14 通过（含 `optimizeProgramIr`、`optimizeJavaScript` 与无后缀/`.mjs` 双模导入） |
 | A05 | [x] | Q03, Q04 / C08, C10–C12, C15 | 更新后的 Pages 与 API 产物 | `bun run generate:api && bun run build:docs-site && bun test tests/pages-site.test.mjs tests/docs-site.test.mjs` | 页面展示 `v0.0.3`、`dist/docs-site/site.js` 已压缩、单测全部通过 | 10/10 通过（`site.js` 102.88 KB minified，全站 `v0.0.3` 与可点击链接校验通过） |
 | A06 | [x] | Q04 / C09–C13 | 更新后的文档与契约 | `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 bun run check:contracts && bun test tests/onboarding-docs.test.mjs` | 全部契约检查与入门文档端到端测试 exit 0 | 契约检查与 `onboarding-docs.test.mjs`（4/4）全部通过 |
 | A07 | [x] | Q01, Q03, Q04 / C01–C13 | `0.0.3` 源码完整就绪 | 重建后端、`make bootstrap-release`、`make prepare-release-package`、`npm pack --dry-run` | `stage2 == stage3` 固定点成立（313 文件完全一致），`eliscript-0.0.3.tgz` 体积 `< 5 MB` | `stage2 == stage3`（SHA-256 `7642d697c024b3239133913844715b02ad7b863344cbff3b53490e7c048ba94a`），包体积 4.5 MB |
 | A08 | [x] | Q04 / 全量交付 | A01–A12 全部通过 | GPG 签名提交推送 `master`、向用户汇报完整总结并在确认后打签名标签 `v0.0.3` 发布 | 远端 `master` 同步且所有检查绿灯 | `v0.0.3` 签名标签、GitHub Release 及 npm `eliscript@0.0.3`（含 SLSA Provenance，`9fe44c83e84ae7a83a59223c739012a521514106`）已正式发布 |
 | A09 | [x] | Q02 / C17, C19 | 内联 `compiler-host-scope.eli` fixture 并移除 24 个废弃 `.mjs` 测试文件 | `make bootstrap-backends && node --test ./tests/compiler-host-scope-selfhosted.test.mjs && bun test tests/file-workers-selfhosted.test.mjs` | 全部测试通过且无外部废弃 `.mjs` 文件依赖 | `compiler-host-scope-selfhosted.test.mjs` 43/43 通过，`file-workers-selfhosted.test.mjs` 9/9 通过 |
-| A10 | [x] | Q02 / C18, C19 | 迁移 `tools/pages/assemble.eli` 并移除 `tools/pages/assemble-legacy.mjs` | `bun test tests/pages-assembly.test.mjs tests/pages-derived-transports-selfhosted.test.mjs` | Pages 组装与派生传输测试全部通过 | `pages-assembly.test.mjs` 8/8 通过，`pages-derived-transports-selfhosted.test.mjs` 2/2 通过 |
+| A10 | [x] | Q02 / C18, C19 | 迁移 `tools/pages/assemble.eli` 并移除 `tools/pages/assemble-ground.mjs` | `bun test tests/pages-assembly.test.mjs tests/pages-derived-transports-selfhosted.test.mjs` | Pages 组装与派生传输测试全部通过 | `pages-assembly.test.mjs` 8/8 通过，`pages-derived-transports-selfhosted.test.mjs` 2/2 通过 |
 | A11 | [x] | Q02 / C19 | 移除 `examples/dogfood/tmp/x-out/` 等共 46 个废弃/临时文件 | `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 bun run check:integrity && ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 bun run check:contracts` | 仓库完整性与契约检查全部 exit 0 | `check:integrity` 与 `check:contracts`（176/176 features）全部通过 |
 | A12 | [x] | Q03 / C20–C22 | 升级后的 `browser/host.mjs` 与新增单测 | `bun run build:browser && bun test tests/browser-host.test.mjs tests/onboarding-docs.test.mjs` | 全部浏览器宿主单测（含常量传播、谓词折叠、操作符紧缩与 `closureCompiler` 钩子）与文档单测通过 | `browser-host.test.mjs` 16/16 通过，`onboarding-docs.test.mjs` 4/4 通过 |
 

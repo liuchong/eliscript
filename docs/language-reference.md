@@ -241,7 +241,7 @@ inferring stability from this overview.
 
 In `0.1.0`, Eliscript also ships the formal **100% Emacs Lisp core +
 `1+5+2` explicit extension packs** (`editor/eliscript-runtime.el` in Emacs and
-`eliscript/runtime/session` in JavaScript), covering `eliscript-contract`
+`eliscript/runtime/lisp` in JavaScript), covering `eliscript-contract`
 (`declare` static type/purity/pre/post contracts), `eliscript-data` (7
 persistent collections, `cl-defstruct-persistent` with JSON Schema round-trip,
 `state-cell`, lazy sequences, Transducers, and Transients), `eliscript-bind`

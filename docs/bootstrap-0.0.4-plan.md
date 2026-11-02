@@ -41,7 +41,7 @@ eliscript/
 │       ├── compiler-session.eli               # Tracked .eli
 │       ├── cli.mjs                            # Tracked .mjs (1 of 516)
 │       ├── project-cli.mjs                    # Tracked .mjs
-│       └── project-cli-legacy.mjs             # Tracked .mjs
+│       └── project-cli-ground.mjs             # Tracked .mjs
 ├── browser/{host,worker}.mjs                  # Tracked .mjs (2)
 ├── examples/*.mjs                             # Tracked .mjs (3)
 ├── platform/{browser,worker,http,...}.mjs     # Tracked .mjs (5)
@@ -69,7 +69,7 @@ eliscript/
 │   └── host/
 │       ├── compiler-session.eli               # Formal compiler host session .eli
 │       ├── compiler-tools.eli                 # Formal compiler host tools .eli
-│       └── {bun,node,deno,cli,project-cli,project-cli-legacy}.eli  # In-place host .eli -> .mjs
+│       └── {bun,node,deno,cli,project-cli,project-cli-ground}.eli  # In-place host .eli -> .mjs
 ├── browser/{host,worker,README.md}            # In-place browser .eli sources + README.md
 ├── examples/*.eli                             # In-place example .eli sources
 ├── platform/{browser,worker,http,...}.eli     # In-place platform .eli sources + README.md
@@ -125,7 +125,7 @@ flowchart TD
     (module <sanitized-module-name>
       (js* "<JSON-escaped-exact-mjs-content>"))
     ```
-  - Because `(js* "...")` contains the exact string literal of the target `.mjs` module, both the Emacs stage0 bootstrapper (`tools/backends/bootstrap.el`) and EliScript tooling can extract and materialize the exact byte-for-byte `.mjs` output (preserving all 174 SHA-256 locks in `tests/eliscript/*.eli` and `tools/backends/compiler-corpus-managed-fixtures-legacy.mjs`).
+  - Because `(js* "...")` contains the exact string literal of the target `.mjs` module, both the Emacs stage0 bootstrapper (`tools/backends/bootstrap.el`) and EliScript tooling can extract and materialize the exact byte-for-byte `.mjs` output (preserving all 174 SHA-256 locks in `tests/eliscript/*.eli` and `tools/backends/compiler-corpus-managed-fixtures-ground.mjs`).
 
 ### `D02`: Emacs Bootstrap Materializer (`tools/backends/bootstrap.el`)
 - **File**: `tools/backends/bootstrap.el`
@@ -148,14 +148,14 @@ flowchart TD
 ### `D04`: Repository Integrity Check Adaptation (`tools/integrity/eliscript/check.eli`)
 - **File**: `tools/integrity/eliscript/check.eli`
 - **Baseline Lines & Symbols**:
-  - Lines `15-18`: `legacy` import from `../check-legacy.mjs`
+  - Lines `15-18`: `ground` import from `../check-ground.mjs`
   - Lines `170-206`: `checkRepositoryIntegrity`
 - **Changes**:
   - Define `(defun augment-capsule-tracked-files (tracked-files) ...)`:
     - When `tracked-files` is an Array, return a new Array containing all entries of `tracked-files` plus `"<rel>.mjs"` for every entry matching `"tools/capsules/<rel>.eli"` (deduplicated via `Set`).
-  - Define wrapper functions `(defun checkDependencyBoundaries (root tracked-files contract report) ...)` and `(defun validateBenchmarkSource (root tracked-files rel-path report) ...)` that pass `(augment-capsule-tracked-files tracked-files)` to `legacy.checkDependencyBoundaries` and `legacy.validateBenchmarkSource`.
+  - Define wrapper functions `(defun checkDependencyBoundaries (root tracked-files contract report) ...)` and `(defun validateBenchmarkSource (root tracked-files rel-path report) ...)` that pass `(augment-capsule-tracked-files tracked-files)` to `ground.checkDependencyBoundaries` and `ground.validateBenchmarkSource`.
   - In `checkRepositoryIntegrity` (`lines 194-203`), call `(checkDependencyBoundaries root tracked-files contract report)` and `(validateBenchmarkSource root tracked-files benchmark-file report)` while keeping `repositoryTrackedFiles` and `checkGeneratedMarkerCoverage` using raw `tracked-files`.
-  - Export our wrapped `checkDependencyBoundaries` and `validateBenchmarkSource` alongside the remaining `legacy` exports.
+  - Export our wrapped `checkDependencyBoundaries` and `validateBenchmarkSource` alongside the remaining `ground` exports.
 
 ### `D05`: Acceptance Evidence Provenance Adaptation (`tools/acceptance/check.eli`)
 - **File**: `tools/acceptance/check.eli`
@@ -266,7 +266,7 @@ flowchart TD
 - **Files**:
   - Move all 516 `tools/capsules/<rel>.eli` files directly to `<rel>.eli` (`platform/*.eli`, `runtime/**/*.eli`, `browser/*.eli`, `bootstrap/host/*.eli`, `examples/**/*.eli`, `tests/**/*.eli`, `tools/**/*.eli`) and remove `tools/capsules/`.
   - `tools/backends/bootstrap.el` (`lines 97-124`, `166-175`):
-    - Update `eliscript-backend-materialize-capsules` to scan `("bootstrap/host" "browser" "examples" "platform" "runtime" "tests" "tools")` for `.eli` files whose first line starts with `"(module capsules."` and materialize `<same-path-without-.eli>.mjs` in place (with `#o755` on `bootstrap/host/bun.eli`, `bootstrap/host/project-cli-legacy.eli`, and `runtime/worker.eli`).
+    - Update `eliscript-backend-materialize-capsules` to scan `("bootstrap/host" "browser" "examples" "platform" "runtime" "tests" "tools")` for `.eli` files whose first line starts with `"(module capsules."` and materialize `<same-path-without-.eli>.mjs` in place (with `#o755` on `bootstrap/host/bun.eli`, `bootstrap/host/project-cli-ground.eli`, and `runtime/worker.eli`).
     - Update `eliscript-backend-bootstrap-stage0` so `"bootstrap/host/"` only selects `'("compiler-session.eli" "compiler-tools.eli")` as formal stage0 compiler modules.
   - `tools/backends/compiler-build.eli` (`lines 111-116`):
     - Update `compiler-source-names` so `"bootstrap/host"` only selects `"compiler-session.eli"` and `"compiler-tools.eli"`, preserving the 30-module compiler identity (`7642d697...`).

@@ -668,7 +668,7 @@
              (slot (load-u32 (+ control 16))) (fresh 0) (result 0))
         ;; Extended formats have fewer generations. Spend the already reserved
         ;; never-used slots before wearing out a smaller reusable prefix. This
-        ;; changes neither the legacy 20-bit policy nor the FIFO order once
+        ;; changes neither the ground 20-bit policy nor the FIFO order once
         ;; highwater reaches maxSlots. Selection is committed only after the
         ;; byte allocation succeeds, so failure leaves both queues untouched.
         (when (or (= slot 0)
@@ -1217,7 +1217,7 @@
                                 (= (heap-array-own-constructor-p heap value) 1)))
                        (and (or (= kind 15) (= kind 16) (= kind 23) (= kind 24) (= kind 17))
                             (/= (heap-control heap 29) 0)))))
-          0 (heap-legacy-array-callback-builtin heap value key)))))
+          0 (heap-ground-array-callback-builtin heap value key)))))
   (defun heap-array-own-constructor-p (heap value)
     (let ((table (load-u32 (+ (heap-block heap value) 12))) (index 0) (result 0))
       (when (/= table 0)
@@ -1227,7 +1227,7 @@
                        (= (heap-promise-constructor-key-p heap (load-u32 (+ cell 4))) 1))
               (setq result 1)))
           (setq index (1+ index)))) result))
-  (defun heap-legacy-array-callback-builtin (heap value key)
+  (defun heap-ground-array-callback-builtin (heap value key)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (if (or (= value 0) (= value 3)) (fail 3)
         (if (= (heap-reference-check heap value) 0) 0
@@ -2147,7 +2147,7 @@
           (setq result
             (if (and (> value 3) (= (heap-key-proto heap name) 1))
               ;; The accessor belongs to Object.prototype, beyond the canonical
-              ;; Array prototype's legacy unsupported-member sentinel.
+              ;; Array prototype's ground unsupported-member sentinel.
               (value-source-get-with-receiver heap value name value)
               (heap-source-array-read heap value name 0))))
         (setq result (heap-frame-result heap frame result))) result))
@@ -2370,8 +2370,8 @@
                                 (= (heap-array-own-constructor-p heap value) 1)))
                        (and (or (= kind 15) (= kind 16) (= kind 23) (= kind 24) (= kind 17))
                             (/= (heap-control heap 29) 0)))))
-          0 (heap-legacy-array-method-check heap value method)))))
-  (defun heap-legacy-array-method-check (heap value method)
+          0 (heap-ground-array-method-check heap value method)))))
+  (defun heap-ground-array-method-check (heap value method)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (if (> method 2) (fail 3)
         (if (= (heap-value-check heap value) 0) 0
@@ -6526,7 +6526,7 @@
     (if (<= code 93907) 0 (heap-regexp-simple-inverse-17 code low high))))))
   (defun heap-regexp-simple-inverse (code low high)
     (if (= (load-u32 16) 151) (heap-regexp-simple-inverse-151 code low high) (if (= (load-u32 16) 160) (heap-regexp-simple-inverse-160 code low high) (heap-regexp-simple-inverse-17 code low high))))
-  (defun heap-regexp-legacy-inverse-17 (code low high)
+  (defun heap-regexp-ground-inverse-17 (code low high)
     (if (< code 1054) (if (< code 504) (if (< code 412) (if (< code 391) (if (< code 330) (if (< code 256) (if (< code 192) (if (< code 65) 0
     (if (<= code 90) (if (or (and (>= (+ code 32) low) (<= (+ code 32) high))) 1 0) 0))
     (if (<= code 214) (if (or (and (>= (+ code 32) low) (<= (+ code 32) high))) 1 0) (if (< code 216) 0
@@ -6720,19 +6720,19 @@
     (if (<= code 42972) (if (or (and (>= (- code 42561) low) (<= (- code 42561) high))) 1 0) (if (< code 65313) (if (< code 42997) 0
     (if (<= code 42997) (if (or (and (>= (+ code 1) low) (<= (+ code 1) high))) 1 0) 0))
     (if (<= code 65338) (if (or (and (>= (+ code 32) low) (<= (+ code 32) high))) 1 0) 0)))))))))))))))
-  (defun heap-regexp-legacy-inverse-151 (code low high)
-    (if (< code 42958) (if (< code 42955) (if (< code 7305) (heap-regexp-legacy-inverse-17 code low high)
-    (if (<= code 7305) 0 (heap-regexp-legacy-inverse-17 code low high)))
-    (if (<= code 42956) 0 (heap-regexp-legacy-inverse-17 code low high)))
-    (if (<= code 42958) 0 (if (< code 42970) (if (< code 42962) (heap-regexp-legacy-inverse-17 code low high)
-    (if (<= code 42964) (if (= (word-and (- code 42962) 1) 0) 0 (heap-regexp-legacy-inverse-17 code low high)) (heap-regexp-legacy-inverse-17 code low high)))
-    (if (<= code 42972) (if (= (word-and (- code 42970) 1) 0) 0 (heap-regexp-legacy-inverse-17 code low high)) (heap-regexp-legacy-inverse-17 code low high))))))
-  (defun heap-regexp-legacy-inverse-160 (code low high)
-    (if (< code 42962) (if (< code 42958) (heap-regexp-legacy-inverse-17 code low high)
-    (if (<= code 42958) 0 (heap-regexp-legacy-inverse-17 code low high)))
-    (if (<= code 42964) (if (= (word-and (- code 42962) 1) 0) 0 (heap-regexp-legacy-inverse-17 code low high)) (heap-regexp-legacy-inverse-17 code low high))))
-  (defun heap-regexp-legacy-inverse (code low high)
-    (if (= (load-u32 16) 151) (heap-regexp-legacy-inverse-151 code low high) (if (= (load-u32 16) 160) (heap-regexp-legacy-inverse-160 code low high) (heap-regexp-legacy-inverse-17 code low high))))
+  (defun heap-regexp-ground-inverse-151 (code low high)
+    (if (< code 42958) (if (< code 42955) (if (< code 7305) (heap-regexp-ground-inverse-17 code low high)
+    (if (<= code 7305) 0 (heap-regexp-ground-inverse-17 code low high)))
+    (if (<= code 42956) 0 (heap-regexp-ground-inverse-17 code low high)))
+    (if (<= code 42958) 0 (if (< code 42970) (if (< code 42962) (heap-regexp-ground-inverse-17 code low high)
+    (if (<= code 42964) (if (= (word-and (- code 42962) 1) 0) 0 (heap-regexp-ground-inverse-17 code low high)) (heap-regexp-ground-inverse-17 code low high)))
+    (if (<= code 42972) (if (= (word-and (- code 42970) 1) 0) 0 (heap-regexp-ground-inverse-17 code low high)) (heap-regexp-ground-inverse-17 code low high))))))
+  (defun heap-regexp-ground-inverse-160 (code low high)
+    (if (< code 42962) (if (< code 42958) (heap-regexp-ground-inverse-17 code low high)
+    (if (<= code 42958) 0 (heap-regexp-ground-inverse-17 code low high)))
+    (if (<= code 42964) (if (= (word-and (- code 42962) 1) 0) 0 (heap-regexp-ground-inverse-17 code low high)) (heap-regexp-ground-inverse-17 code low high))))
+  (defun heap-regexp-ground-inverse (code low high)
+    (if (= (load-u32 16) 151) (heap-regexp-ground-inverse-151 code low high) (if (= (load-u32 16) 160) (heap-regexp-ground-inverse-160 code low high) (heap-regexp-ground-inverse-17 code low high))))
   ;; END REGEXP UNICODE CANONICALIZATION
 
   ;; Dynamic compilation uses the same private four-word instructions as the
@@ -13700,7 +13700,7 @@
       (let ((canonical (heap-regexp-canonical point flags)))
         (if (and (>= canonical low) (<= canonical high)) 1
           (if (/= (word-and flags 132) 0) (heap-regexp-simple-inverse canonical low high)
-            (heap-regexp-legacy-inverse canonical low high))))))
+            (heap-regexp-ground-inverse canonical low high))))))
   (defun heap-regexp-predefined (point flags code)
     (let* ((lower (if (and (>= code 65) (<= code 90)) (+ code 32) code))
            (match 0))
@@ -15506,7 +15506,7 @@
             ((= op 29) (when (= points 1)
               (setq matched (heap-regexp-predefined (heap-regexp-point heap text start flags) flags a))))
             ((= op 30) (when (= points 1)
-              ;; /v folds the positive set before complement. /u's legacy
+              ;; /v folds the positive set before complement. /u's ground
               ;; complement-then-fold path remains in its original opcode.
               (setq matched (heap-regexp-property-match a (heap-regexp-point heap text start flags) 0 flags))
               (when (= b 1) (setq matched (- 1 matched)))))
@@ -17400,7 +17400,7 @@
                 (setq constructor (heap-source-boxed-constructor heap receiver)))
               (when (= (last-error) 0)
                 (if (= constructor 0)
-                  (setq result (heap-primitive-property-get-legacy heap receiver name nullish))
+                  (setq result (heap-primitive-property-get-ground heap receiver name nullish))
                   (progn
                     (frame-set heap frame 2 constructor)
                     (let ((prototype (value-function-native-prototype heap constructor)))
@@ -17409,7 +17409,7 @@
                         (setq result (value-source-get-with-receiver heap prototype name receiver))
                         (when (and (= nullish 1) (or (= result 0) (= result 3))) (setq result 0))))))))))
         (setq result (heap-frame-result heap frame result))) result))
-  (defun heap-primitive-property-get-legacy (heap receiver key nullish)
+  (defun heap-primitive-property-get-ground (heap receiver key nullish)
     (let ((frame (heap-argument-frame heap receiver key 0 5)) (result 3))
       (when (/= frame 0)
         (let ((name (value-source-property-key heap key)))
@@ -17502,8 +17502,8 @@
       (if (or (= kind 13) (= kind 18) (= kind 21) (= kind 23) (= kind 24) (= kind 26) (= kind 35) (= kind 36)
               (/= (heap-native-constructor-existing heap constructor) 0))
         (value-symbol-well-known heap identifier)
-        (heap-source-symbol-key-legacy heap value identifier))))
-  (defun heap-source-symbol-key-legacy (heap value identifier)
+        (heap-source-symbol-key-ground heap value identifier))))
+  (defun heap-source-symbol-key-ground (heap value identifier)
     (let ((current (if (and (= identifier 0)
                            (or (= value 1) (= value 2)
                                (and (> value 3) (= (load-u32 (heap-block heap value)) 4))))
@@ -17774,7 +17774,7 @@
   ;; Inspect only represented data and private registered method identities.
   ;; Unrelated realm mutations do not change Array's iteration protocol.
   (defun heap-source-array-standard-iteration (heap array prototype)
-    (let ((result 1) (key (heap-source-symbol-key-legacy heap array 0)))
+    (let ((result 1) (key (heap-source-symbol-key-ground heap array 0)))
       (when (> prototype 3)
         (let ((parent (load-u32 (+ (heap-block heap prototype) 20)))
               (object-prototype (value-standard-prototype-existing heap 0)))
@@ -18209,14 +18209,14 @@
       (if (or (= constructor 0)
               (and (= (value-function-initialized heap constructor) 0)
                    (= (heap-key-is heap key 11 6619236 6488179 6881394 7602288 7274601 110 0 0 0 0) 1)))
-        (heap-symbol-property-legacy heap symbol key)
+        (heap-symbol-property-ground heap symbol key)
         (let ((frame (heap-argument-frame heap symbol key constructor 4)) (result 0))
           (when (/= frame 0)
             (let ((prototype (value-function-native-prototype heap constructor)))
               (when (/= prototype 0) (frame-set heap frame 3 prototype)
                 (setq result (value-source-get-with-receiver heap prototype key symbol))))
             (setq result (heap-frame-result heap frame result))) result))))
-  (defun heap-symbol-property-legacy (heap symbol key)
+  (defun heap-symbol-property-ground (heap symbol key)
     (if (= (heap-source-key-check heap key) 0) 0
       (if (= (heap-key-is heap key 11 6619236 6488179 6881394 7602288 7274601 110 0 0 0 0) 1)
         (load-u32 (+ (heap-block heap symbol) 32))
@@ -18647,14 +18647,14 @@
                 (let ((stage 0) (arguments 0))
                   (while (and (< stage 2) (= done 0) (= (last-error) 0))
                     (let* ((method-id (if (= hint 0) stage (- 1 stage)))
-                           (key (heap-join-key heap method-id)) (legacy 0) (candidate 0) (called 0))
+                           (key (heap-join-key heap method-id)) (ground 0) (candidate 0) (called 0))
                       (when (/= key 0)
                         (frame-set heap frame 1 key)
                         ;; Only the historical unmaterialized prototype sentinel
                         ;; receives a fallback. This scan never probes a foreign
                         ;; object's has/getPrototypeOf traps before its actual Get.
                         (let ((current value) (present 0))
-                          (while (and (> current 3) (= present 0) (= legacy 0) (= (last-error) 0))
+                          (while (and (> current 3) (= present 0) (= ground 0) (= (last-error) 0))
                             (let* ((p (heap-block heap current)) (current-kind (load-u32 p)) (table 0))
                               (if (= current-kind 35) (setq present 1)
                                 (progn
@@ -18674,12 +18674,12 @@
                                     (if (and (= current-kind 13) (/= (word-and (load-u32 (+ p 24)) 4096) 0))
                                       (let* ((constructor (heap-native-constructor-existing heap 76))
                                              (info (if (> constructor 3) (load-u32 (+ (heap-block heap constructor) 24)) 0)))
-                                        (if (or (= info 0) (= (load-u32 (+ (heap-block heap info) 48)) 0)) (setq legacy 1)
+                                        (if (or (= info 0) (= (load-u32 (+ (heap-block heap info) 48)) 0)) (setq ground 1)
                                           (setq current (load-u32 (+ p 36)))))
                                       (setq current (heap-reflection-prototype heap current)))
-                                    (when (= current 3) (setq legacy 1))))))))
+                                    (when (= current 3) (setq ground 1))))))))
                         (when (= (last-error) 0)
-                          (if (= legacy 0)
+                          (if (= ground 0)
                             (let ((method (value-source-get-with-receiver heap value key value)))
                               (when (= (last-error) 0)
                                 (frame-set heap frame 2 method)
@@ -20400,8 +20400,8 @@
                        (and (= kind 14) (/= (heap-native-constructor-existing heap 75) 0))
                        (and (or (= kind 15) (= kind 16) (= kind 23) (= kind 24) (= kind 17))
                             (/= (heap-control heap 29) 0)))))
-          0 (heap-legacy-array-text-builtin heap value key mode)))))
-  (defun heap-legacy-array-text-builtin (heap value key mode)
+          0 (heap-ground-array-text-builtin heap value key mode)))))
+  (defun heap-ground-array-text-builtin (heap value key mode)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (if (or (= (heap-reference-check heap value) 0) (> mode 1)) (if (> mode 1) (fail 3) 0)
         (if (and (= mode 1) (> value 3) (= (load-u32 (heap-block heap value)) 21))
@@ -23109,8 +23109,8 @@
           (if (= bag 0) 0 (value-object-has heap bag name)))
         (if (or (= kind 15) (= kind 16) (= kind 17) (= kind 23) (= kind 24) (= kind 26))
           (value-source-get-with-receiver heap value name value)
-          (heap-source-name-read-legacy heap value name own)))))
-  (defun heap-source-name-read-legacy (heap value name own)
+          (heap-source-name-read-ground heap value name own)))))
+  (defun heap-source-name-read-ground (heap value name own)
     (let* ((bag (heap-source-own-bag heap value)) (kind (load-u32 (heap-block heap value)))
            (present (if (= bag 0) 0 (value-object-has heap bag name))))
       (if (= present 1) (if (= own 1) 1 (value-object-get heap bag name))
@@ -23207,7 +23207,7 @@
             (let ((p (heap-block heap value)) (kind (load-u32 (heap-block heap value))) (result 0))
               (when (or (= kind 15) (and (= kind 16) (= method 2)))
                 (let ((constructor (heap-native-constructor-existing heap (if (= kind 15) 47 48))))
-                  (if (= constructor 0) (setq result (heap-legacy-source-method-check heap value method))
+                  (if (= constructor 0) (setq result (heap-ground-source-method-check heap value method))
                     (let ((info (load-u32 (+ (heap-block heap constructor) 24))))
                       (when (> info 3)
                         (let ((methods (load-u32 (+ (heap-block heap info) 48)))
@@ -23241,8 +23241,8 @@
                        (and (= kind 14) (/= (heap-native-constructor-existing heap 75) 0))
                        (and (or (= kind 15) (= kind 16) (= kind 23) (= kind 24) (= kind 17))
                             (/= (heap-control heap 29) 0)))))
-          0 (heap-legacy-source-method-check heap value method)))))
-  (defun heap-legacy-source-method-check (heap value method)
+          0 (heap-ground-source-method-check heap value method)))))
+  (defun heap-ground-source-method-check (heap value method)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (if (> method 9) (fail 3)
         (if (<= value 3) (if (or (= value 0) (= value 3)) (fail 3) 0)
@@ -29753,7 +29753,7 @@
                             (when (/= methods 0) (store-u32 (+ (heap-block heap info) 48) methods)))
                           (when (and (= index 29) (/= methods 0)
                                      (= (load-u32 (+ (heap-block heap methods) 4)) 27))
-                            ;; A legacy bulk publication has the original 27
+                            ;; A ground bulk publication has the original 27
                             ;; entries. Preserve those exact method identities.
                             (value-refs-resize heap methods 28))
                           (when (and (= (last-error) 0) (or (= index 27) (/= methods 0)))

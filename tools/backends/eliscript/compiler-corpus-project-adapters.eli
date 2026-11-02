@@ -1,7 +1,7 @@
 (module tools.backends.compiler-corpus-project-adapters
   (import "node:crypto" createHash)
   (import "node:buffer" Buffer)
-  (import "./compiler-corpus-project-adapters-legacy.mjs" :as legacy)
+  (import "./compiler-corpus-project-adapters-ground.mjs" :as ground)
 
   (defconst literal-suite "tests/literal-runtime.test.mjs")
   (defconst literal-source "tests/eliscript/literal-runtime.eli")
@@ -18,7 +18,7 @@
   (defun literal-hash (value)
     (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
 
-  ;; Only this migrated suite replaces the legacy setup transport. Its emitted
+  ;; Only this migrated suite replaces the ground setup transport. Its emitted
   ;; file is the complete executable harness, not an edited JavaScript template.
   (defasync literal-record (options locators)
     (let* ((text (get options :text)) (file (get options :file))
@@ -114,10 +114,10 @@
   (defasync add-original-project-programs (options)
     (let ((locators (get options :locators)))
       (if (not (Array/isArray locators))
-          (await (js-call legacy :addOriginalProjectPrograms options))
+          (await (js-call ground :addOriginalProjectPrograms options))
         (let ((selected (js-call locators :filter (lambda (item) (= (get item :file) literal-suite)))))
           (if (= (js-length selected) 0)
-              (await (js-call legacy :addOriginalProjectPrograms options))
+              (await (js-call ground :addOriginalProjectPrograms options))
             (let* ((record (await (literal-record options selected)))
                    (add (get options :add)) (published false)
                    (after (js-array "original-program:compiler-interop-package-complete"
@@ -129,7 +129,7 @@
                        (when (and (not published) (js-call after :includes (get item :id)))
                          (funcall add record) (setq published t))
                        (funcall add item)))))
-                   (mapped (await (js-call legacy :addOriginalProjectPrograms delegated)))
+                   (mapped (await (js-call ground :addOriginalProjectPrograms delegated)))
                    (position (js-call mapped :findIndex (lambda (suite)
                      (js-call (js-array "tests/interop-package.test.mjs" "tests/loop-recur.test.mjs" "tests/stdlib-bit.test.mjs") :includes suite)))))
               (unless published (funcall add record))

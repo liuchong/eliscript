@@ -103,7 +103,7 @@
     {
       "name": "nullish-predicate-macros",
       "filename": "nullish.eli",
-      "source": "(defmacro classify-nullish (value)\n  (cond\n    ((nil? value) '(quote nil-only))\n    ((undefined? value) '(quote undefined-only))\n    ((nullish? value) '(quote nullish))\n    (t '(quote other))))\n(defmacro legacy-nullish (value)\n  (if (null value) '(quote nullish) '(quote other)))\n(defconst nil-kind (classify-nullish nil))\n(defconst undefined-kind (classify-nullish undefined))\n(defconst false-kind (classify-nullish false))\n(defconst legacy-kind (legacy-nullish undefined))\n(export nil-kind undefined-kind false-kind legacy-kind)"
+      "source": "(defmacro classify-nullish (value)\n  (cond\n    ((nil? value) '(quote nil-only))\n    ((undefined? value) '(quote undefined-only))\n    ((nullish? value) '(quote nullish))\n    (t '(quote other))))\n(defmacro ground-nullish (value)\n  (if (null value) '(quote nullish) '(quote other)))\n(defconst nil-kind (classify-nullish nil))\n(defconst undefined-kind (classify-nullish undefined))\n(defconst false-kind (classify-nullish false))\n(defconst ground-kind (ground-nullish undefined))\n(export nil-kind undefined-kind false-kind ground-kind)"
     },
     {
       "name": "macro-evaluator-core",

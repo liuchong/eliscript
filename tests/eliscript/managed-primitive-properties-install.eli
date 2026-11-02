@@ -7,7 +7,7 @@
   (import "./managed-primitive-properties-cases.mjs"
     managedPrimitivePropertiesCases prepareManagedPrimitiveProperties closeManagedPrimitiveProperties)
   (defconst original (Object/assign (js-object) framework))
-  (defconst source (readFileSync (resolve root "tests/wasm-managed-primitive-properties-test-legacy.mjs")))
+  (defconst source (readFileSync (resolve root "tests/wasm-managed-primitive-properties-test-ground.mjs")))
   (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex")
              "4bc4538a02623f53c7ef8e54ad62fa047afddb9c6a1e78923a0e4bcea8a60a98")
     (throw (new globalThis.TypeError "the complete original primitive properties suite identity changed")))

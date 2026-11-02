@@ -198,7 +198,7 @@
 
   (test "IR ingress scope preserves all JavaScript compiler outputs and Worker identity while cancelling only the eight binary compiler hosts"
     (async ()
-      (let* ((source (await (readFile (resolve root "tests/compiler-ir-session-ingress-test-legacy.mjs") "utf8")))
+      (let* ((source (await (readFile (resolve root "tests/compiler-ir-session-ingress-test-ground.mjs") "utf8")))
              (cancelled (cancelledCompilerHostCases ingress-file source))
              (pattern (new globalThis.RegExp (functionalScopePattern cancelled))))
         (js-call assert :strictEqual (js-length cancelled) 8)
@@ -234,7 +234,7 @@
           (js-call assert :strictEqual (js-call pattern :test (+ (get item :title) " unrelated")) t)))
         (js-call (js-array
           "small actual WASM source streams preserve identity-before-decode UTF8-before-JSON and invalid-encoding precedence without refetching decoded failures"
-          "small source downloads retry original read failures share concurrent readers support legacy fallback and reject use after close"
+          "small source downloads retry original read failures share concurrent readers support ground fallback and reject use after close"
           "small actual WASM HTTP package streams source chunks once per URL with strict UTF16 dual decoding and reader cleanup"
           "small real package loaders retain decoded sources and executable state without retaining their consumed whole-byte buffers in a bounded Node process"
           "complete javascript compiler JSON-UTF16 sources survive original and relocated package sessions in Node and Bun"

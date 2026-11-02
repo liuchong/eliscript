@@ -1,5 +1,5 @@
 (module tools.backends.managed-module-graph
-  (import "./managed-module-graph-legacy.mjs" :as legacy)
+  (import "./managed-module-graph-ground.mjs" :as ground)
   (import "./managed-source-view.mjs"
     bindManagedSourceBoundary withManagedSourceBoundary withManagedSourceBindingPoll withManagedSourceDecode
     registerManagedSourceDecodeRuntime)
@@ -8,7 +8,7 @@
   ;; Keep the unchanged ESM emission/loading implementation. Namespace name
   ;; validation belongs here: a real module namespace's property descriptor
   ;; reads its binding, which can still be in the temporal dead zone.
-  (defconst managedHostModuleEdges (get legacy :managedHostModuleEdges))
+  (defconst managedHostModuleEdges (get ground :managedHostModuleEdges))
   (defconst project-boundaries (new globalThis.WeakMap))
   (defconst prepared-load-results (new globalThis.WeakMap))
 
@@ -89,7 +89,7 @@
       (compile-string (js-call forms :join "\n") (+ file ".prepared.eli"))))
 
   (defun prepared-project-facades (plan options)
-    (let* ((base (js-call legacy :createManagedProjectFacades (get plan :descriptor) options))
+    (let* ((base (js-call ground :createManagedProjectFacades (get plan :descriptor) options))
            (files (js-call (get base :files) :map (lambda (file)
              (let ((bindings (js-call (get plan :exports) :get (get file :id))))
                (if (not bindings) file
@@ -102,18 +102,18 @@
     (let* ((options (if (> (js-length arguments) 0) (aref arguments 0) undefined))
            (plan (prepared-project-plan descriptor)))
       (if plan (prepared-project-facades plan options)
-        (js-call legacy :createManagedProjectFacades descriptor options))))
+        (js-call ground :createManagedProjectFacades descriptor options))))
 
   (defasync loadManagedProjectGraph (runtime descriptor &rest arguments)
     (let* ((options (if (> (js-length arguments) 0) (aref arguments 0) undefined))
            (plan (prepared-project-plan descriptor)))
-      (if (not plan) (await (js-call legacy :loadManagedProjectGraph runtime descriptor options))
+      (if (not plan) (await (js-call ground :loadManagedProjectGraph runtime descriptor options))
         (let* ((configuration (if (undefined? options) (js-object) options))
                (facades (prepared-project-facades plan (js-object
                  :entry (if (nullish? (get configuration :projectEntry))
                           (get (get descriptor :project) :entry) (get configuration :projectEntry))
                  :privateDirectory (get configuration :projectPrivateDirectory))))
-               (loaded (await (js-call legacy :loadManagedProjectGraph runtime
+               (loaded (await (js-call ground :loadManagedProjectGraph runtime
                          (get plan :descriptor) options))))
           (let ((previous (js-call prepared-load-results :get loaded)))
             (if previous previous
@@ -160,7 +160,7 @@
               (finally
                 ;; The private pump calls this before decoding its result and
                 ;; resolving/rejecting its original Promise. Queue only: the
-                ;; legacy call boundary must inspect last-error and clean up
+                ;; ground call boundary must inspect last-error and clean up
                 ;; before polling can begin another managed operation.
                 (unless (get state :queued)
                   (put state :queued t)
@@ -204,7 +204,7 @@
     ;; The host API defaults only omitted/undefined options. Eliscript's
     ;; optional parameter would turn omission into an explicit null.
     (let* ((options (if (> (js-length arguments) 0) (aref arguments 0) undefined))
-           (base (js-call legacy :createManagedModuleGraph descriptor options))
+           (base (js-call ground :createManagedModuleGraph descriptor options))
            (descriptors (Object/getOwnPropertyDescriptors base))
            (facade (Object/create (Object/getPrototypeOf base)))
            (prepared false) (preparing false) (prepare-notifications (js-array))
@@ -243,7 +243,7 @@
           (registerManagedSourceDecodeRuntime facade runtime) facade))
       (put (get descriptors :prepare) :value
         (lambda ()
-          ;; Actual prepare-owned declarations can notify before the legacy
+          ;; Actual prepare-owned declarations can notify before the ground
           ;; prepare call publishes ready. Do not publish a readable graph or
           ;; install listeners early; deliver these events only after success.
           (setq preparing t)
@@ -258,7 +258,7 @@
               facade)
             ;; In particular a false/undefined prepare failure must stay the
             ;; original failure. Never retain its unpublished values or replay
-            ;; them on a subsequent call to the legacy cached failure.
+            ;; them on a subsequent call to the ground cached failure.
             (finally (setq preparing false prepare-notifications (js-array))))))
       (graph-method descriptors "bindingChanged" (lambda (kind index value)
         (if (not preparing) (js-call base :bindingChanged kind index value)

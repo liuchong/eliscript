@@ -147,7 +147,7 @@ decoded partial values from reaching application callbacks.
 The `eliscript-value-chunks-v1` framing identifier, event grammar, bounded
 chunk limits, acknowledgement and sequence rules, backpressure behavior,
 cancellation semantics, structured errors, and non-canonical Map/Set byte-order
-warning are stable. The framing remains opt-in and preserves both legacy JSON
+warning are stable. The framing remains opt-in and preserves both ground JSON
 and non-streaming value-codec paths.
 
 ## Acceptance Criteria
@@ -176,7 +176,7 @@ and non-streaming value-codec paths.
   execution, progress, and response encoding.
 - **WVS-12:** Stream failures retain stable codes and logical paths and never
   deliver partial values to callbacks.
-- **WVS-13:** Legacy JSON and non-streaming 0088 call paths remain unchanged.
+- **WVS-13:** Ground JSON and non-streaming 0088 call paths remain unchanged.
 - **WVS-14:** Bun unit tests, worker protocol tests, and real Emacs/Bun process
   tests exercise chunking, progress, results, errors, and cancellation.
 - **WVS-15:** Public-surface, compatibility, specification, and conformance

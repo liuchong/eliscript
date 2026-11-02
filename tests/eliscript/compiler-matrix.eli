@@ -138,7 +138,7 @@
             (js-call assert :deepStrictEqual (js-call trace :map (lambda (entry) (get entry :status)))
               (js-array "returned" "returned" "returned" "returned" "returned" "failed" "failed" "failed")))))))))
 
-  (test "binary matrix negotiation prefers advertised graph events with tree and legacy fallbacks"
+  (test "binary matrix negotiation prefers advertised graph events with tree and ground fallbacks"
     (lambda ()
       (js-call assert :strictEqual (matrix-response-mode (js-array "events-v1" "graph-events-v1")) "graph-events-v1")
       (js-call assert :strictEqual (matrix-response-mode (js-array "graph-events-v1" "events-v1")) "graph-events-v1")

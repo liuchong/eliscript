@@ -11,7 +11,7 @@
 
   (defvar directory undefined)
   (defvar bytes undefined)
-  (defvar legacy-bytes undefined)
+  (defvar ground-bytes undefined)
   (defvar raw-module undefined)
   (defvar lowered undefined)
   (defvar library undefined)
@@ -51,7 +51,7 @@
         (let* ((typed (Object/assign (js-object) (get lowered :typed)))
                (exports (js-call (get typed :exports) :filter (lambda (name) (not (= name "heap-new-extended"))))))
           (put typed :exports exports)
-          (setq legacy-bytes (js-call globalThis.Uint8Array :from
+          (setq ground-bytes (js-call globalThis.Uint8Array :from
             (js-call (get backend :wasm) :append_metadata_section
               (js-call (get backend :wasm) :emit_typed_memory_wasm typed configuration)
               "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))))))
@@ -64,7 +64,7 @@
     (js-object :timeout 180000))
 
   (after (async ()
-    (setq bytes undefined legacy-bytes undefined raw-module undefined lowered undefined)
+    (setq bytes undefined ground-bytes undefined raw-module undefined lowered undefined)
     (when directory (await (rm directory (js-object :recursive t :force t))))))
 
   (defun small-options ()
@@ -283,11 +283,11 @@
 
   (test "WASM loader keeps omitted and false heap mode on the original constructor"
     (lambda ()
-      (exercise-loader (instantiateManagedRuntime legacy-bytes (small-options)))
-      (exercise-loader (instantiateManagedRuntime legacy-bytes
+      (exercise-loader (instantiateManagedRuntime ground-bytes (small-options)))
+      (exercise-loader (instantiateManagedRuntime ground-bytes
         (Object/assign (small-options) (js-object :extendedHeap false))))
       (js-call assert :throws
-        (lambda () (instantiateManagedRuntime legacy-bytes
+        (lambda () (instantiateManagedRuntime ground-bytes
           (Object/assign (small-options) (js-object :extendedHeap t)))) missing-extended-p)))
 
   (test "WASM synchronous and host-module loading opt into the extended constructor without changing roots"
@@ -575,7 +575,7 @@
     (lambda ()
       (js-call assert :throws (lambda () (readManagedAllocatorSnapshot (js-object)))
         (lambda (error) (= (get error :message) "unknown managed runtime allocator instance")))
-      (let* ((runtime (instantiateManagedRuntime legacy-bytes (small-options))) (keys (Reflect/ownKeys runtime)))
+      (let* ((runtime (instantiateManagedRuntime ground-bytes (small-options))) (keys (Reflect/ownKeys runtime)))
         (assert-snapshot-counts (readManagedAllocatorSnapshot runtime))
         (js-call assert :deepStrictEqual (Reflect/ownKeys runtime) keys)
         (js-call runtime :closeModule)

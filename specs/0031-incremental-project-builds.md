@@ -43,7 +43,7 @@ The manifest adds a private `cache` object after the graph digest:
 The cache digest covers the ordered metadata fields, including `format` and
 `version`, before its own `digest` is added. This prevents damaged dependency
 edges from being trusted while keeping private build mechanics outside the
-runtime graph digest. Legacy version 1 records without `format` remain
+runtime graph digest. Ground version 1 records without `format` remain
 read-only compatible and are rewritten as version 2 after a successful build.
 
 `compilerDigest` hashes the relative name and exact bytes of every Emacs Lisp

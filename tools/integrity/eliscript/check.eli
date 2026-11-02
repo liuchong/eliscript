@@ -1,5 +1,5 @@
 (module tools.integrity.check
-  (import "./check-legacy.mjs" :as legacy)
+  (import "./check-ground.mjs" :as ground)
   (import "node:fs/promises" mkdtemp readFile readdir rm)
   (import "node:os" tmpdir)
   (import "node:path" :default path)
@@ -9,15 +9,15 @@
   (import "../ci/render-browser-workflow.mjs" checkBrowserCompatibilityWorkflow)
   (import "../surface/generate-api.mjs" generateApiArtifacts)
 
-  (defconst DEFAULT_ROOT (get legacy :DEFAULT_ROOT))
-  (defconst RepositoryIntegrityError (get legacy :RepositoryIntegrityError))
-  (defconst validateIntegrityContract (get legacy :validateIntegrityContract))
-  (defconst repositoryTrackedFiles (get legacy :repositoryTrackedFiles))
-  (defconst validateImportRecords (get legacy :validateImportRecords))
-  (defconst legacyCheckDependencyBoundaries (get legacy :checkDependencyBoundaries))
-  (defconst legacyValidateBenchmarkSource (get legacy :validateBenchmarkSource))
-  (defconst validateBenchmarkInventory (get legacy :validateBenchmarkInventory))
-  (defconst humanIntegrityReport (get legacy :humanIntegrityReport))
+  (defconst DEFAULT_ROOT (get ground :DEFAULT_ROOT))
+  (defconst RepositoryIntegrityError (get ground :RepositoryIntegrityError))
+  (defconst validateIntegrityContract (get ground :validateIntegrityContract))
+  (defconst repositoryTrackedFiles (get ground :repositoryTrackedFiles))
+  (defconst validateImportRecords (get ground :validateImportRecords))
+  (defconst groundCheckDependencyBoundaries (get ground :checkDependencyBoundaries))
+  (defconst groundValidateBenchmarkSource (get ground :validateBenchmarkSource))
+  (defconst validateBenchmarkInventory (get ground :validateBenchmarkInventory))
+  (defconst humanIntegrityReport (get ground :humanIntegrityReport))
   (defconst contract-file "contracts/repository-integrity.json")
   ;; These are the existing deterministic source-output inventories. The
   ;; bootstrap tool outputs live outside this registry and remain generated.
@@ -216,7 +216,7 @@
     (let* ((options (call-options arguments))
            (directory (js-call path :resolve (nullish (get options :root) DEFAULT_ROOT)))
            (tracked (await (augment-capsule-tracked-files directory (await (read-tracked options directory))))))
-      (await (legacyCheckDependencyBoundaries
+      (await (groundCheckDependencyBoundaries
         (Object/assign (js-object) options (js-object :root directory :trackedFiles tracked))))))
 
   (defasync validateBenchmarkSource (directory tracked-files filename report)
@@ -232,7 +232,7 @@
               (when (js-call known :has (aref pair 0))
                 (js-call known :add (aref pair 1)))))
           (setq augmented (js-call (Array/from known) :sort))))
-      (await (legacyValidateBenchmarkSource directory augmented filename report))))
+      (await (groundValidateBenchmarkSource directory augmented filename report))))
 
   (defasync checkRepositoryIntegrity (&rest arguments)
     (let* ((options (call-options arguments))

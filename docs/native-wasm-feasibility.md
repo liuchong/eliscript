@@ -1404,14 +1404,14 @@ lowering 独占生成的 typed 图改为按函数验证共享子树一次，能�
 
 Q03 的响应协议整合另定位到测试父进程不必要的 ESM/JIT 重叠：四种协议、
 owned WASM 及真实 native 的原大用例均已使用顺序子进程，但此前父进程先
-加载其他用例的完整编译器/serializer，导致 legacy 子进程启动后整树超限
+加载其他用例的完整编译器/serializer，导致 ground 子进程启动后整树超限
 9022832640 字节。仅将这三个 child-only 原用例提前注册，全部输入、四种
 模式、字节/身份/FFI/清理断言及各原 120 秒期限保持；新整合运行峰值
 7217283072 字节、91.342 秒，四协议及真实 WASM/native 大用例均通过。
 该次总计 29/30：余项仍期望 native 优先 events，已严格同步为 native
 graph、WASM events，原首错和零 Seed 回退断言保留，单项复验通过，峰值
 634159104 字节、6.095 秒。最终 make 仍需完整退出 0；该测试寿命修复也不
-等同 legacy 生产协议的内存优化。没有追加保护额度。
+等同 ground 生产协议的内存优化。没有追加保护额度。
 
 H04 已进一步实际发射完整 native 编译器动态库：27 模块、53 literal、
 5233 个生成函数，182406701 字节；原 8 GiB 保护下整树峰值
@@ -2134,9 +2134,9 @@ native 镜像也已实际构建成功：134.637 秒、峰值 6062063616 字节�
 仍待真实终态。
 
 T01 的分发接线发现主线依赖缺失：新的 `.eli` managed loader 静态导入原样
-保留的 legacy 模块，而原装包清单未包含该模块。已新增 `.eli` 装包入口，
+保留的 ground 模块，而原装包清单未包含该模块。已新增 `.eli` 装包入口，
 委托原装配流程后复制真实依赖并流式记录实际字节数及 SHA，再发布 manifest；
-原装包器逐字节保留为 legacy，Bootstrap 生成原入口，生成物不提交。该变更
+原装包器逐字节保留为 ground，Bootstrap 生成原入口，生成物不提交。该变更
 不改变编译器源码身份，不影响正在运行的三代链。四项永久回归已写，统一
 Bootstrap 首次发现测试使用了仅允许模块顶层的 import，修齐动态导入写法
 后唯一 Bootstrap 实际通过（5.283 秒、149635072 字节、退出 0 且清理完成）。
@@ -2473,7 +2473,7 @@ bootstrap/runtime/memory.eli                 # CAP01：显式扩展档增加23�
 bootstrap/host/compiler-session.eli          # CAP03：保留原IR schema错误
 tools/backends/compiler-build.eli            # CAP02：仅full-compiler扩大编号与初始池
 tools/backends/eliscript/managed-runtime.eli  # CAP02：真实快照识别23位布局
-tools/backends/eliscript/compiler-corpus.eli  # CAP04新增：替换源审计能力，其余委托原legacy
+tools/backends/eliscript/compiler-corpus.eli  # CAP04新增：替换源审计能力，其余委托原ground
 tools/backends/eliscript/compiler-corpus-project-adapters.eli # CAP04新增：literal完整回放
 tests/eliscript/                            # CAP01–04全部原回归及新增Eli测试
 tools/backends/bootstrap.el、.gitignore      # CAP05：统一生成工具与测试，产物不入库
@@ -2495,8 +2495,8 @@ flowchart LR
 | [x] CAP01 | memory.eli:329 `heap-new-extended`、336 `heap-new-layout` | 显式档新增 maxSlots 8388607、slotBits 23、generationMax 511；20/21/22位、永久退役、防ABA、1GiB池上限均保持。23位表201326592字节，最小初始池201326624 | 实际八百万表、23位511代全部退休/陈旧引用、FIFO/分配失败恢复、旧布局原断言 |
 | [x] CAP02 | compiler-build.eli:32 `full-compiler`；managed-runtime.eli `readManagedAllocatorSnapshot` | 仅该profile maxSlots=8388607、initialBytes=268435456，maxBytes仍1073741824；原memory4096/65535及旧profile不变；快照识别23位，native复用相同分配器 | 两类实际WASM factory与真实native构造/快照/边界、原资源档精确值 |
 | [x] CAP03 | compiler-session.eli:664 `session-protocol` deserialize-ir 分支 | 将 `(session-string input "text" undefined)` 改交 `(get input :text undefined)` 给原 `deserialize-ir-program`，由原schema validator处理类型；不改IR语法或接受范围 | 新compiler-session-protocol Eli用实际独立编译器检查6类非法值的ELI-I0001与同session恢复；原完整sequence保留 |
-| [x] CAP04 | 原literal-runtime.test.mjs五组、project adapter literal分支、core corpus:619源审计 | 整套literal测试及受影响source-archive测试迁Eli；hostSource为真实完整生成测试原文，保独立seed/selected算法、完整字节/map/值/错误/codec及原时限。项目adapter和core corpus用Eli facade只替换受影响literal能力，旧其余实现原字节改名legacy；source-only精确绑定Eli审计函数完整form/span/真实hash，最终恢复全部原coverage顺序，不冒充semantic覆盖 | 全部原case及源证据拒绝、5原标题/时限/13模块、源码审计真实执行与独立覆盖、原完整corpus与source-archive全用例 |
-| [x] CAP05 | bootstrap.el工具/测试映射与.gitignore | 新Eli工具和测试统一从维护中Emacs Lisp起点生成；新中间.mjs忽略且最终从index排除，保留未修改legacy来源字节；Makefile以bootstrap-backends前置生成，并将新增Eli用例接入原全量门禁 | 全B/全C完成后一次Bootstrap及集中回归，再生成同源三镜像执行九格和原门禁 |
+| [x] CAP04 | 原literal-runtime.test.mjs五组、project adapter literal分支、core corpus:619源审计 | 整套literal测试及受影响source-archive测试迁Eli；hostSource为真实完整生成测试原文，保独立seed/selected算法、完整字节/map/值/错误/codec及原时限。项目adapter和core corpus用Eli facade只替换受影响literal能力，旧其余实现原字节改名ground；source-only精确绑定Eli审计函数完整form/span/真实hash，最终恢复全部原coverage顺序，不冒充semantic覆盖 | 全部原case及源证据拒绝、5原标题/时限/13模块、源码审计真实执行与独立覆盖、原完整corpus与source-archive全用例 |
+| [x] CAP05 | bootstrap.el工具/测试映射与.gitignore | 新Eli工具和测试统一从维护中Emacs Lisp起点生成；新中间.mjs忽略且最终从index排除，保留未修改ground来源字节；Makefile以bootstrap-backends前置生成，并将新增Eli用例接入原全量门禁 | 全B/全C完成后一次Bootstrap及集中回归，再生成同源三镜像执行九格和原门禁 |
 
 本批 B 已全部写齐且未运行：allocator原回归与23位边界、真实WASM/native工厂、资源档、IR六类非法输入及恢复、完整五组literal、完整source-archive，以及真实来源审计与corpus保真对照。CAP01–CAP05 全部施工完成并冻结，进入统一 Bootstrap、集中回归与九格最终整合；当前尚不计验收通过。
 
@@ -2512,7 +2512,7 @@ flowchart LR
 
 本批D内再收齐的生产漏项为managed.eli的lower-managed-text-method/text-method-output与lower-managed-access-key/literal-property-key：两个私有输出原来未加入temporaryRoots，分别保活4KiB重复字符串和每轮length键。只改接入既有new-managed-temporary-local；三个原Red仍用64槽/16KiB和原循环/异常/capture输入，不改heap或广泛控制流。它会使之前三份镜像源码身份过期，修齐后再一次同源重建，不能沿用它们冒充当前源码证据。
 
-CAP04受影响能力因此补齐到`compiler-corpus-runtime-adapters.eli`：仅替换literal的真实source locators、complete-hosts、host-only、portable-codec及两种非法输入。未改runtime其余分支原字节转legacy；原record ID、项目/请求、60秒及独立seed oracle均保留。新的运输harness从真实Eli原用例AST经既有编译器产生，不新增手写JS模板，不为每个小record重复编译整套编译器。
+CAP04受影响能力因此补齐到`compiler-corpus-runtime-adapters.eli`：仅替换literal的真实source locators、complete-hosts、host-only、portable-codec及两种非法输入。未改runtime其余分支原字节转ground；原record ID、项目/请求、60秒及独立seed oracle均保留。新的运输harness从真实Eli原用例AST经既有编译器产生，不新增手写JS模板，不为每个小record重复编译整套编译器。
 
 八百万槽的三份镜像已实际从维护中Emacs seed构建完成，尚不能代替语料和固定点：JS `f51f390996414441be81b7cb20432a80`，6.024秒、362758144字节；WASM `a4e136beabaf499bbb8e4258a806d50b`，80.606秒、4816076800字节；native `80ad6d58d2e94cf4b5b623069b962ca6`，135.136秒、5299896320字节，额度按系统余量从4GiB动态增长至9GiB。三项均退出0、清理完成，目录为`{javascript,wasm,native}-slot23-current`。集中回归的真实23位边界、WASM同步/hostmodule及native工厂用例已通过；其余失败未据此改判。
 
@@ -2538,7 +2538,7 @@ metadata、binary、原日志/失败结果均未改。`f29217bd11ae447994fb60659
 | --- | --- | --- |
 | [ ] 请求/初始化资源一致 | `compiler-corpus.eli`的`compilerCorpusRequest`按原compiler运行档和显式override生成实际binary memory；不改原档数值 | 23条原ELI-RT0002初始化差异，实际binary声明与运行配置一致；非compiler档保持原合同 |
 | [x] 项目描述完整 | 同一请求入口仅为未显式指定的binary original-program启用phased；永久Eli回归已写，验收待执行 | formatter与双host宏命名3条原assertions完整执行；显式false/JS请求不覆盖 |
-| [x] ESM延迟绑定 | `managed-module-graph.mjs:122`的`namespace`能力迁入`managed-module-graph.eli`；未改能力原字节保留legacy。新facade保留全部属性描述、生命周期和链式返回，仅以`Reflect.ownKeys`验证导出名，禁止提前读取真实ESM未初始化绑定；两组永久Eli回归已写且接入Bootstrap/Makefile，验收待执行 | 真实Eli编译出的循环ESM中导出名可检查、值仍抛原ReferenceError；初始化后保持namespace身份/活绑定；缺失导出/生命周期/重复身份拒绝 |
+| [x] ESM延迟绑定 | `managed-module-graph.mjs:122`的`namespace`能力迁入`managed-module-graph.eli`；未改能力原字节保留ground。新facade保留全部属性描述、生命周期和链式返回，仅以`Reflect.ownKeys`验证导出名，禁止提前读取真实ESM未初始化绑定；两组永久Eli回归已写且接入Bootstrap/Makefile，验收待执行 | 真实Eli编译出的循环ESM中导出名可检查、值仍抛原ReferenceError；初始化后保持namespace身份/活绑定；缺失导出/生命周期/重复身份拒绝 |
 | [ ] 原调用边界 | `executeExports`及symbol-mapping原请求/descriptor的句柄和参数传递，先按证据判断实际根因 | 原36调用及重复执行，不改变输出或错误断言 |
 | [ ] 标准库项目依赖 | 当前JS→JS已越过第538条CLI代际用例且该用例equivalent；随后core-set/core-stdlib/core-language-api三条出现缺失`runtime/core/collection.mjs`、`stdlib/core/seq.mjs`、`stdlib/core/protocol.mjs`。按实际请求图与session标准库入队规则确定缺依赖或ID规范化根因，先补Eli回归再一次修复 | 三条原完整项目实际编译和执行；不移除标准库依赖，不以seed结果替代所选producer |
 | [ ] 本地产物runtime身份 | `javascriptEnvironment`原package链接与原请求hostSources内的runtime副本形成双实例，literal-runtime原IPrint/Queue精确原型分派失败；在Eli执行入口根据实际本地runtime图建立一致的package self-reference，不改原fixture或协议语义 | 真正Eli生成的Queue literal与相对导入runtime同原型且printValue成功；无声明/已有冲突package严格处理；binary路径不变 |
@@ -2558,7 +2558,7 @@ initializers，丢失父语句真实 projectModule/projectPrepare，导致55项�
 与关闭归零，再统一验收。33项portableBinding缺失与6项内部保留名拒绝合并
 归portable实现；64项pure项目多余host import须连同live binding边界完整修复。
 对应包接线仍在既有 `compiler-package.eli`：对runtime-host/module-graph/source-view
-三份真实legacy依赖逐份复制、流式核SHA/字节并登记manifest，紧随各实际importer；
+三份真实ground依赖逐份复制、流式核SHA/字节并登记manifest，紧随各实际importer；
 既有纯Eli装包测试验证三份真实字节/唯一顺序、其余原清单完全不变及实际loader、
 worker、browser静态导入，不把漏打包问题留到发布时才发现。
 
@@ -2569,7 +2569,7 @@ binding-changed→每写通知；纯项目也产生导入。仅实际hostModules
 watch的cell，在source调用边界批量回读并发布活绑定。prepare前、未初始化cell、
 close后不回读；同步重入用pending轮次，不吞原抛值。canonical函数实际绕过
 graph.invoke，故仅迁移 `managed-source-view` 的createManagedSourceView能力为
-Eli+原字节legacy，以私有WeakMap把边界绑定到同一个Proxy，返回闭包沿解码
+Eli+原字节ground，以私有WeakMap把边界绑定到同一个Proxy，返回闭包沿解码
 上下文继承；WASM/native已有Eli factory在完整API调用返回后建立同一边界，
 不在raw exports内清除或覆盖last-error。外部host能力仍用原即时通知。
 同批异步 A/B：真实 fulfilled/rejected/throw false 的源 Promise 不包装、不读
@@ -2579,13 +2579,13 @@ facade排一次microtask。pump原`call/objectCall`先完成首错提取/帧恢�
 Promise身份，arm constructor getter证明未新增读取，再严格比较await后的
 绑定及拒绝false。此处不声称覆盖“异步fulfillment新建source Proxy随后逃逸”
 的owner继承组合；当前尚无该组合阻塞原794条的证据，按用户非阻主线不扩写
-1100行legacy factory规则保留未完成，不能将其记为完整异步组合验收。
+1100行ground factory规则保留未完成，不能将其记为完整异步组合验收。
 
 | 施工项 | 精确源码/接线 | 验收待执行 |
 | --- | --- | --- |
 | [x] B完整永久回归 | `tests/eliscript/managed-project-zero-imports.eli`，真实小phased WASM/native、实际生成ESM、无导入、正常/throw false/TDZ/返回闭包/重入、fulfilled/rejected与close；源码已写未运行 | 原64项zeroImports与原live bindings全部断言；普通JS同源语义，不减资源/输入 |
 | [x] C双stub条件 | `bootstrap/backends/managed.eli`原4513–4525锚点，现root同批新增使位置后移；只按实际外部能力接两stub | pure WebAssembly.Module.imports严格空，host能力仍原imports |
-| [x] C同Proxy边界 | 新`tools/backends/eliscript/managed-source-view.eli`，旧完整文件原字节改名legacy；仅代理受影响能力，literal provider不改 | callable/object身份、返回闭包、异常首错、嵌套/reentry；不增加公开options getter |
+| [x] C同Proxy边界 | 新`tools/backends/eliscript/managed-source-view.eli`，旧完整文件原字节改名ground；仅代理受影响能力，literal provider不改 | callable/object身份、返回闭包、异常首错、嵌套/reentry；不增加公开options getter |
 | [x] C纯graph/factory接线 | `managed-module-graph.eli`私有watch同步、raw-drain排队hook及已有`managed-runtime.eli`/`native-managed-runtime.eli`工厂 | 已读watch cell正常/异常更新、TDZ不提前读、错误恢复/原frame/live归零、外部host通知不变；上述异步新Proxy组合仍未覆盖 |
 
 本批集中D仍有两个exports失败只暴露`expectedSatisfied=false`，临时目录关闭后
@@ -2601,7 +2601,7 @@ zeroImports实际D在cached Proxy的descriptor刷新处容量失败；源码确�
 同一容量调用链中，private watch poll的`base.read`会让已缓存同一Proxy反复
 执行完整descriptor镜像。新增仅包围该`base.read`的私有动态范围：只有同一
 owner且先前已完整成功refresh的Proxy可复用；首次decode、其他heap与公开
-refresh不跳过。原legacy Proxy内部get/ownKeys/descriptor同步闭包完全不改，
+refresh不跳过。原ground Proxy内部get/ownKeys/descriptor同步闭包完全不改，
 失败刷新不标完成，finally恢复范围后才通知listeners，重入/异常不得携带poll
 状态。对应首次刷新、同owner复用、跨owner、公开反射与失败恢复计数回归源码
 已写齐；仍待统一D，原live binding/容量及所有输入不变。
@@ -2657,8 +2657,8 @@ lower-managed-access返回记录中交接，不进入typed节点或新增运行�
 本轮新九格JS→JS在加载原corpus前，`compiler-corpus-managed-adapters.mjs:266`
 按`const observations =`提取迁移后的generated sequence suite失败；真实run
 `926966b09121495aa3f1ff71a6db46ed`退出1，尚未执行原794条。
-A：原334行adapter完整原字节保留legacy，新增同能力Eli facade只将sequence
-suite的断言文本读取转到`wasm-managed-sequence-data-test-legacy.mjs`；其余
+A：原334行adapter完整原字节保留ground，新增同能力Eli facade只将sequence
+suite的断言文本读取转到`wasm-managed-sequence-data-test-ground.mjs`；其余
 fixture、53个canonical库、source读取与locators身份不变。record同时绑定
 generated suite及Eli维护源身份，并以独立assertionSource/sourceAssets和每case
 sourceFile、真实span/hash绑定保留断言，绝不把旧字节span冒充generated行。
@@ -2669,7 +2669,7 @@ console-log；仅该族取消错误zeroImports期待，代之同顺序、module/
 B：新Eli永久套件逐record对比旧完整recipe（modules/request/预算/输入/host
 正文/独立Seed标志），核双身份真实case字节、全部53源绑定、缺失/错配首错，
 并用真实最小WASM import数据覆盖固定三项、缺少/额外/乱序/arity/ABI/type
-拒绝及继续原executor的首错。A/B/C源码已写齐冻结：legacy仅原字节移动，
+拒绝及继续原executor的首错。A/B/C源码已写齐冻结：ground仅原字节移动，
 Eli facade双身份交接与execution有own字段才触发的固定三项校验完成；没有
 该字段不额外await、不读取artifact或执行caller getter。尚未生成、编译、
 测试或审核，原失败保留，等待本批统一D。
@@ -2707,10 +2707,10 @@ collect使live归零。证实槽耗尽，不能由abort后的归零推断成功�
 | A：真实阻断与精确位置 | B：先写永久用例 | C：一次完成接线；D统一执行 |
 | --- | --- | --- |
 | `managed.eli:3983`的`managed-project-stage-functions`构造单prepare-body；已存在`lower-managed-initializer-parts`逐part帧机制 | 新`managed-project-prepare-roots.eli`以真实生成literal/link来源覆盖临时根、公开绑定、顺序、首错、调用者帧与恢复；全图复用原sequence/nth | 按prepare原顺序建立真实私有part，空children coordinator仅持有initializerParts；单次初始化、TDZ、abort、preparedBindings不变，不复制monolithic body，不增加槽预算 |
-| `native-managed-runtime.test.mjs:105–107`的provider原文件导入在factory前失败 | 全11项原测试完整迁`tests/eliscript/native-managed-runtime.eli`，只构建原normal/trapped各一次 | 以编译器生成真实Eli provider并通过createRequire取namespace；原hostReady异步窗口、元数据突变、原断言/预算/期限全保；原字节legacy重命名，Bootstrap仍输出原测试入口 |
+| `native-managed-runtime.test.mjs:105–107`的provider原文件导入在factory前失败 | 全11项原测试完整迁`tests/eliscript/native-managed-runtime.eli`，只构建原normal/trapped各一次 | 以编译器生成真实Eli provider并通过createRequire取namespace；原hostReady异步窗口、元数据突变、原断言/预算/期限全保；原字节ground重命名，Bootstrap仍输出原测试入口 |
 | `compiler-matrix.eli:400`重复把已单独保存的debug正文写入product.json，空间阻碍后续完整九格 | 新`compiler-matrix-archive-debug.eli`覆盖完整正文/返回值/原哈希/独立debug文件/快照隔离及absence合同 | 仅写盘快照同时省略typed/debug；完整debug.json、debugPath/debugSha256、返回product.debug及原产品身份均不变，原执行器仍读返回对象；不删除调试信息 |
 | 当前JS→JS已保存13项IR emitter差异、4项完整程序差异；`eliscript-ir-emitter.el:37/45/66/67/70`把原名写入scope，lookup却用已munge名称 | 新`emitter-tdz-seed-parity.eli`以真实Seed与自举发射对照Unicode/连字符/保留名、遮蔽、读前初始化/const写、JS/maps和原IR | 仅将Seed IR五处scope插入统一为现有`eliscript-emitter--binding-name`；自举已按该key插入，不改正确输出或黄金 |
-| 四项Seed oracle把bare runtime加载到仓库、相对runtime加载到产物副本，Vector/Queue的Symbol与prototype身份不同；`compiler-corpus-execution.eli:12`仍将整个oracle直接alias legacy | 新`compiler-seed-runtime-identity.eli`验证真实bare/relative构造器、Symbol/prototype、Vector reduce、Queue print及拒绝路径 | 仅迁入Seed program分支，在实际执行前复用已有`configure-local-runtime-package`；原独立Seed编译/完整输入/其余oracle保持，不能改协议或全局化Symbol绕过 |
+| 四项Seed oracle把bare runtime加载到仓库、相对runtime加载到产物副本，Vector/Queue的Symbol与prototype身份不同；`compiler-corpus-execution.eli:12`仍将整个oracle直接alias ground | 新`compiler-seed-runtime-identity.eli`验证真实bare/relative构造器、Symbol/prototype、Vector reduce、Queue print及拒绝路径 | 仅迁入Seed program分支，在实际执行前复用已有`configure-local-runtime-package`；原独立Seed编译/完整输入/其余oracle保持，不能改协议或全局化Symbol绕过 |
 | 原完整literal suite新增四个静态工具依赖，`compiler-corpus-project-adapters.eli:44–79`仍无相应资产/文件投影，执行未进入编译器 | 新`compiler-corpus-host-tool-projection.eli`绑定真实源字节/路径，验证幂等、冲突/缺失/篡改拒绝及真实Eli host加载 | adapter声明实际build/managed/native工具与nth helper；execution按已绑定真实文件精确symlink至产物相对路径，保留import.meta真实根和完整hostSource；不造假package/删用例/改import |
 | 四个wire记录的独立Node/Bun原程序比较把宿主Error.line栈位置误作Markdown文档行（长度限制RangeError额外line91）；实际wire定义仅MarkdownError有文档line | 新`wire-error-report.eli`编译真实fixture原helper正文，严格验证MarkdownError的code/完整message/line与对象不变，以及原生Error宿主line仍保在原对象、primitive原抛值 | fixture只对真实MarkdownError报告文档line，其他name/message/code/raw保持，原Error对象不改；原全部130roundtrip/错误输入/HTTP观察和独立Node/Bun继续验收，不把栈位置冒充文档行 |
 
@@ -2720,7 +2720,7 @@ collect使live归零。证实槽耗尽，不能由abort后的归零推断成功�
 本批首次JS→JS原794项已完整终态，source/corpus校验均完成；整格失败，
 `2c731c796c8b475ea23fe71a2150e1fe`退出1、峰值4351164416字节、2059.021秒、
 清理完成。其源冻结现已解除；上述六项B均已写齐，C正在同一批次一次合入，
-不得把尚未复验的新源计为通过。原native测试原字节迁为legacy前后SHA均为
+不得把尚未复验的新源计为通过。原native测试原字节迁为ground前后SHA均为
 `e2487b8cef7bfd8f5d93de3799c9a5eaafe186d7cc942ac1c64c33ffecf0fb0c`；
 新测试入口只由维护种子自举生成，不提交生成MJS。
 
@@ -2738,7 +2738,7 @@ standard-identities。其余同根修复包括source-map尾换行、实际backen
 快照的中间阶段，原三代固定点、当前源及完整九格不据此改判。native旧源链仍
 在实际runtime请求内计算，保留监控与原输入，不按运行时长中断。
 
-源码树变化仅为上述Eli facade/永久测试及原字节legacy；生成入口仍由唯一
+源码树变化仅为上述Eli facade/永久测试及原字节ground；生成入口仍由唯一
 Bootstrap接线。流程由“每次写cell→宿主import”改为纯图“已完成调用→私有
 source-view边界→watch cell同步→原ESM绑定”，外部能力图原流程不变。
 
@@ -2773,7 +2773,7 @@ pendingPromise→drainJobs/state/result，外来then经原source-operation31，
 
 受影响的 arithmetic/word/control 原13/10/17项测试及其独立Node执行能力迁入
 `tests/eliscript/`；原字节仅改名保留为不匹配自动测试glob的
-`wasm-managed-*-test-legacy.mjs`。新增language-intrinsics六项与真实fixture，
+`wasm-managed-*-test-ground.mjs`。新增language-intrinsics六项与真实fixture，
 均通过维护的Emacs种子→生成的Eliscript编译器构建。Bootstrap接齐八个
 source→generated入口，共用numeric helper及独立Node helper；原三套测试仍
 沿原入口接现有门禁，新增六项接同一Makefile，不提交这些生成MJS。
@@ -2952,7 +2952,7 @@ literal主loader、core-project-core运行时身份及complete-fixture-suites；
 影响先完成已证明的650/665传输修复；Unicode需在既有严格输入和真实selected
 产物上补齐完整生产能力，不能用默认版本、改golden或外部算法替代验收。
 
-本批首次统一Bootstrap`2d8dd1dacb4341bab6318ad3d3929d2c`在execution Eli作用域提前闭合处退出1，8.127秒/102187008字节/清理完成；已按整文件reader/展开/绑定诊断修复，不手改生成物。此前两份legacy执行/CLI文件原字节SHA核对相等。所有新增实现完成后再统一生成、集中行为回归及原全门禁，不以静态分析代替行为验收。
+本批首次统一Bootstrap`2d8dd1dacb4341bab6318ad3d3929d2c`在execution Eli作用域提前闭合处退出1，8.127秒/102187008字节/清理完成；已按整文件reader/展开/绑定诊断修复，不手改生成物。此前两份ground执行/CLI文件原字节SHA核对相等。所有新增实现完成后再统一生成、集中行为回归及原全门禁，不以静态分析代替行为验收。
 
 空间只对38份已结束旧文本继续无损压缩，原文与解压SHA逐份一致，当前slot23-roots产物/链/日志未触碰；`383fa524310a4a68a94ad17986594db6`，52.291秒/4653056字节/退出0/清理完成，逻辑节省2411052822字节，不计功能进度。清理已结束，保留私有恢复凭证。
 
@@ -3089,7 +3089,7 @@ instantiated且两次比较identical，产物身份均
 后续prepared元数据修复改变源身份时，这些链必须按其真实旧快照归档，不能
 称为修复后新源码通过。JS→JS当前构建及初始化成功，但在完整语料加载阶段
 被旧adapter文本边界拒绝，`926966b09121495aa3f1ff71a6db46ed`退出1，尚非一格通过。
-受影响adapter改为纯Eli入口，原JS仅原字节保留为legacy；原断言文本及真实
+受影响adapter改为纯Eli入口，原JS仅原字节保留为ground；原断言文本及真实
 case坐标绑定保留源码，当前fixture/53库、coverage、独立Seed及原语料不缩减。
 
 sequence原完整图含三份真实print，必须严格声明固定三项host能力而非零imports；
@@ -3156,7 +3156,7 @@ CI 修复、性能工作、文档、评审及签名推送必须归入一个 ID�
 | H02 | 50 | 0 | 0 | 0 | 0 | 完整源码读取、阶段传递与大 JSON 边界 | 原完整 memory/编译器源码、固定资源与原 180 秒入口；read-invoke、JSON 解码、native instantiate 超时均保留。已补 8 KiB 字符串分块解码、完整归档 IR/源码逐块 hash/读写；同步 snapshot/预验证、manifest1、原逐字节内容和身份先于解码错误合同保留。1715 个 Unicode 别名与 519 个范围行已由条件树改为紧凑数据，旧终端规则及原来源身份保留，范围表只保留一个 7236B 实例常量缓冲区，跨 heap/retire 复用；永久完整边界/生命周期/离线生成测试与原保护断言已写并接回门禁。均尚未统一运行，不据源码声称内存达标，不原样重试旧大构建 |
 | H03 | 60 | 0 | 0 | 0 | 0 | 完整 WASM 编译器运行形式 | 27 模块/53 literal 的完整编译器已在原 8 GiB 内生成 35210707 字节 WASM，并在新进程实际启动、返回全部能力；完整 runtime 请求仍在原 180 秒超时，尚无三个完整输出及完整语料通过证据。Worker/虚拟项目原协议、批量跨界和资源清理仍须联合验收；依赖 R10/H02，不以构建/启动关闭整行 |
 | H04 | 60 | 1 | 0 | 0 | 0 | 完整 native 编译器运行形式 | 完整产物构建、真实 native JS 编译和大归档重启已有历史证据；metadata 超长 key/value 已改有界转义/解码，seed 直接构建误走公共整文 snapshot 的所有权判定已修，私有 transport/IR 包装在原语义顺序落盘后清引用，公共 producer 合同保留。完整源归档捕获必要字段的同步快照并以 ≤64KiB 块读写精确 UTF16；本地与分发 loader 的 native 文件校验不再完整读取，源码流式解码且不保留重复 byte image，原身份/错误优先保留；永久测试接线已写，尚未统一运行。三个完整目标、完整语料、调试及 CLI 文件能力仍待验收，不据历史单次例外关闭整项 |
-| T01 | 60 | 0 | 0 | 0 | 0 | 目标平台、能力与可分发运行时 | 冻结发布平台/架构及 ABI，补缺失目标发射/重定位/系统能力；Node native 读写已改为最多 64 KiB base64 包，保留完整 read 和 write 单次快照、完整范围先验/空包/回调，原测试追加短包与隔离断言尚未运行；新增纯 Eli 装包接线，补齐真实 legacy 运行时依赖，四项回归通过，原协议与实际文件身份保留；完整独立编译器包、各声明平台真实运行与干净安装待验收，不把协议 fixture 或单一 macOS ARM64 等同全部平台 |
+| T01 | 60 | 0 | 0 | 0 | 0 | 目标平台、能力与可分发运行时 | 冻结发布平台/架构及 ABI，补缺失目标发射/重定位/系统能力；Node native 读写已改为最多 64 KiB base64 包，保留完整 read 和 write 单次快照、完整范围先验/空包/回调，原测试追加短包与隔离断言尚未运行；新增纯 Eli 装包接线，补齐真实 ground 运行时依赖，四项回归通过，原协议与实际文件身份保留；完整独立编译器包、各声明平台真实运行与干净安装待验收，不把协议 fixture 或单一 macOS ARM64 等同全部平台 |
 | A01 | 40 | 0 | 0 | 0 | 0 | AI 工具接口及编辑闭环完整验收 | 沿用 AI-TOOLS：结构化诊断/身份、语义查询、增量/全量等价、Unicode/宏来源/遮蔽、过期编辑拒绝、只读/取消/隔离；已补纯编译器文本身份和只读 edit-preview 代码及拒绝/Unicode/缓存隔离断言，Worker 身份按原 UTF16LE 字节使用固定 64 KiB 增量 hash；尚未统一验收，既有 JS 基础不冒充三宿主通过 |
 | M01 | 60 | 0 | 0 | 0 | 0 | 完整语言/标准库/宏/项目功能矩阵 | 复用原完整独立语料、错误语料、差分/随机/GC/资源边界，逐宿主逐目标实际编译执行；新缺口记入 R10 或具体行，不缩小语料 |
 | M02 | 60 | 0 | 0 | 0 | 0 | 完整九格同目标一致性 | 九格分别保存源码绑定和实际执行；固定输入，同目标 IR/字节/诊断/调试相同，不同目标语义相同；当前联合终验 0/9，仅为本行状态。矩阵调度原先同时保留三个宿主和九个产物的大型 IR/debug 图；正将对应 Eli 调度改为逐格读取完整声明、真实编译归档并释放，仅保留路径与小身份，保留原对象入口和全部门槛，避免下一步叠加超限；尚未统一验收 |
@@ -5780,7 +5780,7 @@ counted-guard 实测发射身份一致。仍保持网格稳定性与完整宿主
 当前提交 CI 分别核验，不能以以上专项通过替代这些门禁。
 
 首轮原始全量完整执行 160/160 核心文件，1206 项通过、3 项失败：历史失败
-报告仍要求与优化后新 WASM 同身份、legacy 测试按整行删除导出的脆弱匹配，
+报告仍要求与优化后新 WASM 同身份、ground 测试按整行删除导出的脆弱匹配，
 以及局部变量 array 被旧构造器检查误认为调用。分别改为冻结历史实际身份并
 核验当前真实发射、按精确导出 token 删除且断言确已删除、重命名局部变量；
 三项专项均真实通过。为绑定最后的源码变动重新执行原参数三报告，所有产物

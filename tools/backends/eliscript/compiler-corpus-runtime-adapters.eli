@@ -5,11 +5,11 @@
   (import "../../dist/bootstrap/reader.mjs" read-string)
   (import "../../dist/bootstrap/compiler.mjs" compile-ir-string emit-ir-string)
   (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
-  (import "./compiler-corpus-runtime-adapters-legacy.mjs" :as legacy)
+  (import "./compiler-corpus-runtime-adapters-ground.mjs" :as ground)
 
-  (defconst originalRuntimeSourceSuites (get legacy :originalRuntimeSourceSuites))
-  (defconst isOriginalRuntimeHostOnly (get legacy :isOriginalRuntimeHostOnly))
-  (defconst originalRuntimeOnlyCase (get legacy :originalRuntimeOnlyCase))
+  (defconst originalRuntimeSourceSuites (get ground :originalRuntimeSourceSuites))
+  (defconst isOriginalRuntimeHostOnly (get ground :isOriginalRuntimeHostOnly))
+  (defconst originalRuntimeOnlyCase (get ground :originalRuntimeOnlyCase))
   (defconst suite "tests/literal-runtime.test.mjs")
   (defconst eli-source "tests/eliscript/literal-runtime.eli")
   (defconst titles (js-array
@@ -96,7 +96,7 @@
       (js-object :source (string-data (aref (get write :items) 4)) :node write)))
 
   (defun originalRuntimeCaseLocators (file source)
-    (if (/= file suite) (js-call legacy :originalRuntimeCaseLocators file source)
+    (if (/= file suite) (js-call ground :originalRuntimeCaseLocators file source)
       (let ((cases (originalSourceCaseLocators file source)) (result (js-array)) (index 0))
         (while (< index (js-length plans))
           (let* ((plan (aref plans index))
@@ -372,7 +372,7 @@
     (let* ((options (await (core-project-options options)))
            (locators (get options :locators))
            (selected (js-call locators :filter (lambda (locator) (= (get locator :file) suite)))))
-      (if (= (js-length selected) 0) (await (js-call legacy :addOriginalStdlibRuntimeAdapters options))
+      (if (= (js-length selected) 0) (await (js-call ground :addOriginalStdlibRuntimeAdapters options))
         (let ((literal-records (js-array)) (publish (get options :add))
               (published-host false) (published-extra false))
           (await (add-literal-records (Object/assign (js-object) options
@@ -387,7 +387,7 @@
                        (while (< index (js-length literal-records))
                          (funcall publish (aref literal-records index)) (setq index (1+ index))))
                      (setq published-extra t))))
-                 (mapped (await (js-call legacy :addOriginalStdlibRuntimeAdapters
+                 (mapped (await (js-call ground :addOriginalStdlibRuntimeAdapters
                    (Object/assign (js-object) options (js-object
                      :locators (js-call locators :filter (lambda (locator) (/= (get locator :file) suite)))
                      :add (lambda (record)

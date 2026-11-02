@@ -51,7 +51,7 @@ machine, or hosted job.
 The stable fixture and migrated host-container fixture compile through both
 compiler generations. Their generated modules must be byte-identical, and
 every generated module must produce the frozen stdout under both JavaScript
-runtimes. Legacy source must fail under both compilers with matching normalized
+runtimes. Ground source must fail under both compilers with matching normalized
 diagnostics. The cache migration runs as one named ERT test.
 
 ## Evidence Contract
@@ -86,7 +86,7 @@ bun tools/compatibility/rehearse.mjs \
   and identical expected output under Bun and Node.
 - **CMR-03:** Retired native-container aliases fail consistently, while the
   documented explicit-host rewrite preserves intended runtime behavior.
-- **CMR-04:** The maintained project implementation reads a legacy cache hit
+- **CMR-04:** The maintained project implementation reads a ground cache hit
   and rewrites it to the current cache family and version.
 - **CMR-05:** The framework-specific contract transition is verified without
   importing or executing application frameworks.
@@ -98,7 +98,7 @@ bun tools/compatibility/rehearse.mjs \
 ## Compatibility Freeze
 
 The version 1 transition schema, ordered migration inventory, dual-compiler
-artifact comparison, Bun and Node execution checks, legacy diagnostic parity,
+artifact comparison, Bun and Node execution checks, ground diagnostic parity,
 cache migration, local provenance, and explicit `completesAc02: false`
 boundary are stable. Future transitions may be added deliberately, but an
 existing transition cannot disappear without replacement evidence and this
@@ -110,6 +110,6 @@ rehearsal cannot be reinterpreted as the complete final compatibility corpus.
 local rehearsal from commit `f1f6ec1a7b5a2c86b4ca91517c689ae69cfbef23`.
 Both compiler generations produced identical artifacts for the frozen program
 and migrated host-container source, all eight Bun/Node executions matched their
-expected stdout, both legacy compiler paths returned the frozen diagnostic, and
+expected stdout, both ground compiler paths returned the frozen diagnostic, and
 the named cache migration ERT test passed. The checkout was clean before and
 after the run; application evidence was excluded and AC-02 remains incomplete.

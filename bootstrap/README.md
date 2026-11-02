@@ -52,7 +52,7 @@ traversal, portable-name fixed points, and versioned build-report normalization
 and cache-status policy.
 `host/build.eli` (`host/build.mjs`) dispatches normalized operations without
 defining compiler semantics.
-`host/project-legacy.eli` and `tools/project/project.eli` (`host/project.mjs`)
+`host/project-ground.eli` and `tools/project/project.eli` (`host/project.mjs`)
 supply the replaceable filesystem, path, artifact, and
 timing boundary while using those generated operations for real multi-module
 builds.

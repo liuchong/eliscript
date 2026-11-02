@@ -157,7 +157,7 @@ precedence over parent rules when they address the same decision.
   the active task needs to change such an implementation, progressively replace
   the affected capability with Emacs Lisp or Eliscript and continue the main
   task through it. Do not stop the current delivery to rewrite or remove every
-  unrelated legacy file at once. The eventual goal is to remove handwritten
+  unrelated ground file at once. The eventual goal is to remove handwritten
   foreign-language implementations, including handwritten `.mjs` files.
 - **LANGUAGE-04** - JavaScript remains a compiler output target. JavaScript and
   `.mjs` emitted by the compiler are generated artifacts, never an alternative

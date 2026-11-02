@@ -64,7 +64,7 @@
         (should (equal (eliscript-ir-emitter--emit-context node returning) expected))
         (should (= eliscript-emitter--temporary-counter width))))))
 
-(defun eliscript-emitter-depth-tests--legacy (source filename)
+(defun eliscript-emitter-depth-tests--ground (source filename)
   "Emit SOURCE through the independent form representation."
   (eliscript-emit-module
    (mapcar #'eliscript-form-strip
@@ -83,7 +83,7 @@
              "(defun f (x) (let (([a &rest b] x)) (if a b x)))"))
     (let* ((filename "depth-equivalence.eli")
            (actual (eliscript-compile-string-with-source-map source filename "depth.mjs" filename))
-           (actual-form (eliscript-emitter-depth-tests--legacy source filename))
+           (actual-form (eliscript-emitter-depth-tests--ground source filename))
            reference reference-form)
       ;; These saved implementations are used only for shallow oracle input;
       ;; the production entry points keep their explicit continuation engine.
@@ -96,11 +96,11 @@
                 ((symbol-function 'eliscript-emitter--emit-context)
                  (symbol-function 'eliscript-emitter--emit-context-recursive)))
         (setq reference (eliscript-compile-string-with-source-map source filename "depth.mjs" filename)
-              reference-form (eliscript-emitter-depth-tests--legacy source filename)))
+              reference-form (eliscript-emitter-depth-tests--ground source filename)))
       (should (equal (eliscript-emission-javascript actual) (eliscript-emission-javascript reference)))
       (should (equal (eliscript-emission-source-map actual) (eliscript-emission-source-map reference)))
       ;; Each emitter preserves its own complete historical product. The
-      ;; legacy form scanner already includes a literal import for binding
+      ;; ground form scanner already includes a literal import for binding
       ;; vectors, whereas the IR scanner distinguishes those from literals.
       (should (equal actual-form reference-form)))))
 

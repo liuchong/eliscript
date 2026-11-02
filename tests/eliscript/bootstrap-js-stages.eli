@@ -48,7 +48,7 @@
       (await (readFile (resolve root "tools/runtime/unicode-case-runtime.el")))))
     (await (write-source destination "package.json"
       (await (readFile (resolve root "package.json")))))
-    (let ((support (js-array "tools/project/project.eli" "bootstrap/host/project-legacy.mjs"
+    (let ((support (js-array "tools/project/project.eli" "bootstrap/host/project-ground.mjs"
                     "bootstrap/host/bun.mjs" "bootstrap/host/build.mjs"
                     "tools/bootstrap-seed.el" "tools/bootstrap-runtime.el")) (index 0))
       (while (< index (js-length support))
@@ -116,9 +116,9 @@
       (let* ((entry (resolve source-root "bootstrap/host/project.mjs"))
              (require-module (createRequire entry))
              (facade (funcall require-module entry))
-             (legacy (funcall require-module (resolve source-root "bootstrap/host/project-legacy.mjs")))
+             (ground (funcall require-module (resolve source-root "bootstrap/host/project-ground.mjs")))
              (map (JSON/parse (await (readFile (+ entry ".map") "utf8")))))
-        (js-call assert :strictEqual (get facade :checkProject) (get legacy :checkProject))
+        (js-call assert :strictEqual (get facade :checkProject) (get ground :checkProject))
         (js-call assert :strictEqual (value-type (get facade :buildProject)) "function")
         (js-call assert :deepStrictEqual (get map :sourcesContent)
           (js-array (await (readFile (resolve source-root "tools/project/project.eli") "utf8")))))))

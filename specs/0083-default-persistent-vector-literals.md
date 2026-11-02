@@ -102,7 +102,7 @@ silently redirected through collection protocols.
 Portable closures accept square-bracket value expressions, `(vector ...)`, and
 `(hash-map ...)`. Calls that transport their values select the explicit 0088
 worker codec. Binding patterns and explicit host arrays remain portable under
-both the codec and legacy JSON modes.
+both the codec and ground JSON modes.
 
 All maintained self-hosted compiler sources use explicit host containers and
 access operations for syntax trees, IR nodes, source-map segments, emission

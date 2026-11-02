@@ -194,7 +194,7 @@
         ;; The source locator must read the exact historical assertion input,
         ;; not a migrated generated registration entry with additional B cases.
         (let* ((source-file (if (= suite "tests/wasm-managed-sequence-data.test.mjs")
-                              "tests/wasm-managed-sequence-data-test-legacy.mjs" suite))
+                              "tests/wasm-managed-sequence-data-test-ground.mjs" suite))
                (source (await (js-call options :text source-file))))
           (Reflect/apply (get locators :push) locators (originalManagedCaseLocators suite source))))))
       (deep (await (addOriginalManagedLibraryAdapters options)) (js-array) "per-case mapping does not declare its original suite exhausted")

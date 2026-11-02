@@ -41,7 +41,7 @@
     (unless pending (setq pending (funcall (async ()
       (setq fixture (prepareFixtureEnvironment root (get globalThis.process :env)))
       (let* ((directory (get fixture :directory)) (b (await (buildBackends (js-object :outputRoot directory))))
-             (raw (await (readFile (resolve root "tests/wasm-managed-source-collections-test-legacy.mjs") "utf8")))
+             (raw (await (readFile (resolve root "tests/wasm-managed-source-collections-test-ground.mjs") "utf8")))
              (begin (+ (js-call raw :indexOf "const supportedCollectionSource=`") (js-length "const supportedCollectionSource=`")))
              (end (js-call raw :indexOf "`;\nbeforeAll" begin))
              (source (await (readFile (resolve root "tests/fixtures/wasm-managed-source-collections.eli") "utf8")))

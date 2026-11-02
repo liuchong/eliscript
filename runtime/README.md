@@ -322,14 +322,14 @@ Request contexts now include a frozen `capabilities` token from
 confined resolver accepts package-owned `eliscript/platform/` imports and
 rejects traversal outside that directory.
 
-### Session Runtime and AOT Module Compiler
+### Lisp Runtime and AOT Module Compiler
 
-`session.eli` and its modular layers under `session/` (`core.eli`,
+`lisp.eli` and its modular layers under `lisp/` (`core.eli`,
 `regexp-buffer.eli`, `reader-format.eli`, `evaluator.eli`, `macros-forms.eli`,
-`host-io.eli`, `extensions.eli`, `builtins.eli`, `compiler.eli`, and `session-cli.eli`) form a
+`host-io.eli`, `extensions.eli`, `builtins.eli`, `compiler.eli`, and `cli.eli`) form a
 100% pure Eliscript subsystem (zero `js*` capsules) compiled into
-`dist/session/` (`dist/session/session.mjs` +
-`dist/session/session/*.mjs`). It provides the `0.1.0`/`0.1.2`
+`dist/runtime/` (`dist/runtime/lisp.mjs` +
+`dist/runtime/lisp/*.mjs`). It provides the `0.1.0`/`0.1.2`
 Emacs Lisp core kernel, the explicit `1+5+2` extension libraries
 (`eliscript-contract`, `eliscript-data`, `eliscript-bind`, `eliscript-module`,
 `eliscript-async`, `eliscript-js`, `eliscript-abi`), industrial Emacs Lisp

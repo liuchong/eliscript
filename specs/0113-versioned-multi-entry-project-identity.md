@@ -111,7 +111,7 @@ when compiler identity also matches.
 ## Report And Public Results
 
 Multi-entry builds return `eliscript-project-build` version 2 with frozen
-`entries` and `entryOutputs` arrays. The legacy singular `entry` and
+`entries` and `entryOutputs` arrays. The ground singular `entry` and
 `entryOutput` fields remain available only for a one-entry result.
 
 The build report similarly uses version 2 and replaces the singular fields:

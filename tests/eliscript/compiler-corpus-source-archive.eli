@@ -164,7 +164,7 @@
   (test "the static-data fixture provenance rejects changed original archives and forged maintained maps even under consistent asset hashes"
     (async ()
       (let* ((reader (createOriginalCorpusSourceReader (js-object :sourceRoot root)))
-             (mutations (js-array "tests/wasm-memory-static-data-test-legacy.mjs" "tools/testing/wasm-static-snapshot.mjs.map"
+             (mutations (js-array "tests/wasm-memory-static-data-test-ground.mjs" "tools/testing/wasm-static-snapshot.mjs.map"
                "tools/testing/wasm-static-repairs.mjs.map" "tools/testing/generated-fixture-module.mjs.map")))
         (await (each-await mutations (async (filename ignored)
           (let* ((original (await (js-call reader :text filename)))
@@ -201,19 +201,19 @@
                "tests/math-oracle-fixture-selfhosted.test.mjs.map" "tools/testing/array-text-fixture.mjs.map"
                "tests/helpers/array-text-fixture-install.mjs.map" "tests/array-text-fixture-selfhosted.test.mjs.map"
                "tools/testing/managed-primitive-own-repairs.mjs.map" "tests/managed-primitive-own-repairs-selfhosted.test.mjs.map"))
-             (files (js-array "tests/wasm-managed-runtime-test-legacy.mjs" "tests/wasm-managed-wire-test-legacy.mjs"
-               "tests/wasm-managed-source-collections-test-legacy.mjs" "tests/wasm-managed-collection-for-each-test-legacy.mjs"
-               "tests/compiler-response-events-test-legacy.mjs"
+             (files (js-array "tests/wasm-managed-runtime-test-ground.mjs" "tests/wasm-managed-wire-test-ground.mjs"
+               "tests/wasm-managed-source-collections-test-ground.mjs" "tests/wasm-managed-collection-for-each-test-ground.mjs"
+               "tests/compiler-response-events-test-ground.mjs"
                "tests/wasm-managed-transient-state.test.mjs" "tests/wasm-managed-core-modules.test.mjs"
                "tests/wasm-managed-sorted-core.test.mjs" "tests/helpers/managed-runtime-cases.mjs.map"
-               "tests/wasm-managed-primitive-properties-test-legacy.mjs" "tests/wasm-managed-objects-test-legacy.mjs"
-               "tests/wasm-managed-arrays-test-legacy.mjs" "tests/backend-cli-isolation-test-legacy.mjs"
-               "tests/wasm-managed-project-sharing.test.mjs" "tests/wasm-managed-builtins-test-legacy.mjs"
-               "tests/wasm-managed-identity-test-legacy.mjs" "tests/helpers/managed-container-cases.mjs.map"
-               "tests/wasm-managed-object-integrity-test-legacy.mjs" "tests/helpers/managed-integrity-cases.mjs.map"
+               "tests/wasm-managed-primitive-properties-test-ground.mjs" "tests/wasm-managed-objects-test-ground.mjs"
+               "tests/wasm-managed-arrays-test-ground.mjs" "tests/backend-cli-isolation-test-ground.mjs"
+               "tests/wasm-managed-project-sharing.test.mjs" "tests/wasm-managed-builtins-test-ground.mjs"
+               "tests/wasm-managed-identity-test-ground.mjs" "tests/helpers/managed-container-cases.mjs.map"
+               "tests/wasm-managed-object-integrity-test-ground.mjs" "tests/helpers/managed-integrity-cases.mjs.map"
                "tests/wasm-managed-function-properties.test.mjs" "tools/testing/managed-function-properties-repairs.mjs.map"
-               "tests/eliscript-protocol-test-legacy.mjs" "tests/eliscript-protocol-selfhosted.test.mjs.map"
-               "tests/compiler-portable-guards-test-legacy.mjs" "tests/compiler-portable-guards.test.mjs.map"
+               "tests/eliscript-protocol-test-ground.mjs" "tests/eliscript-protocol-selfhosted.test.mjs.map"
+               "tests/compiler-portable-guards-test-ground.mjs" "tests/compiler-portable-guards.test.mjs.map"
                "tests/compiler-portable-predicates.test.mjs" "tests/compiler-portable-reader.test.mjs"
                "tools/testing/compiler-portable-fixtures.mjs.map" "tests/emacs-analysis-evidence.test.mjs"
                "tests/native-node-memory.test.mjs" "tools/testing/generated-fixture-module.mjs.map"
@@ -804,8 +804,8 @@
           (let* ((migration (get (get replay :original) :staticDataFixtureMigration))
                  (assertion (get migration :assertionSource)))
             (eq-check (get migration :executedSuite) "tests/wasm-memory-static-data.test.mjs")
-            (eq-check (get assertion :file) "tests/wasm-memory-static-data-test-legacy.mjs")
-            (eq-check (get assertion :sourceSha256) "8265218c316f48bd22ef4eefaff5303ec5fa1208387ca9fb22afadcd85c2ef5a")
+            (eq-check (get assertion :file) "tests/wasm-memory-static-data-test-ground.mjs")
+            (eq-check (get assertion :sourceSha256) "060bb7f392c7d1978815f66b34fe1de601fa5d64d4d410e1d363e3bc424e41bc")
             (eq-check (js-length (get assertion :cases)) 19)
             (eq-check (js-length (get migration :sourceAssets)) 34)
             (await (each-await (get migration :sourceAssets) (async (asset ignored)
@@ -877,9 +877,9 @@
                  (original (get entry :original)) (archive (get original :assertionSource))
                  (migration (get original :directWasmSourceMigration)))
             (ok entry)
-            (eq-check (get archive :file) "tests/direct-wasm-backend-test-legacy.mjs")
+            (eq-check (get archive :file) "tests/direct-wasm-backend-test-ground.mjs")
             (eq-check (get original :suite) (get archive :file))
-            (eq-check (get archive :sourceSha256) "f0fa57d2aae13f0bef9f7afa04ee51d1d3386c4a3e011ad231ad2577c99876c2")
+            (eq-check (get archive :sourceSha256) "b3e2af96d7da3d92ad4613fcb341656fd7625fb7fd1ca8bae421f171e8c73ea9")
             (eq-check (get archive :sourceSha256) (hash (await (readFile (get archive :file)))))
             (eq-check (get migration :executedSuite) "tests/direct-wasm-backend.test.mjs")
             (eq-check (js-length (get migration :sourceAssets)) 28)
@@ -984,23 +984,23 @@
             (each (select (get (get document :originalGateEvidence) :locators) (lambda (item) (= (get item :file) "tests/interop-package.test.mjs")))
               (lambda (locator index) (ok (includes (get interop :coverage) (get locator :id)))
                 (ok (not (some (get document :missingCaseAdapters) (lambda (item) (= (get item :coverageId) (get locator :id)))))))))
-          (let* ((legacy (find (get document :records) (lambda (record) (= (get record :id) "original-sequence:legacy-native-container-rejection"))))
-                 (legacy-fixture "tests/fixtures/compatibility/native-containers-v1.eli")
-                 (legacy-source (await (readFile legacy-fixture "utf8")))
+          (let* ((ground (find (get document :records) (lambda (record) (= (get record :id) "original-sequence:ground-native-container-rejection"))))
+                 (ground-fixture "tests/fixtures/compatibility/native-containers-v1.eli")
+                 (ground-source (await (readFile ground-fixture "utf8")))
                  (migration-contract (JSON/parse (await (readFile "contracts/compatibility-rehearsal.json" "utf8"))))
-                 (migration (find (get migration-contract :migrations) (lambda (item) (= (get item :legacySource) legacy-fixture)))))
-            (ok legacy "the ignored legacy source is separately executed as its original complete negative stage input")
-            (deep (get legacy :coverage) (js-array (+ "stable-compatibility:" legacy-fixture))) (eq-check (js-length (get legacy :steps)) 1)
-            (deep (get (aref (get legacy :steps) 0) :request) (js-object :operation "stage" :stage "emitter" :source legacy-source :filename legacy-fixture))
-            (deep (get (get legacy :original) :expectedLegacyDiagnostic) (get migration :expectedLegacyDiagnostic))
-            (deep (get (aref (get legacy :steps) 0) :error) (js-object :code (get (get migration :expectedLegacyDiagnostic) :code)
-              :phase (get (get migration :expectedLegacyDiagnostic) :phase) :expectFields (js-array
-                (js-object :path (js-array "message") :value (get (get migration :expectedLegacyDiagnostic) :message))
-                (js-object :path (js-array "location" "file") :value legacy-fixture))))
-            (eq-check (get (get legacy :original) :sourceSha256) (hash (js-call Buffer :from legacy-source)))
-            (eq-check (get (get (get legacy :original) :contract) :sourceSha256) (hash (await (readFile (get (get (get legacy :original) :contract) :file)))))
-            (eq-check (get (get legacy :original) :hostSourceSha256) (hash (await (readFile (get (get legacy :original) :host)))))
-            (ok (not (some (get document :missingCaseAdapters) (lambda (item) (= (get item :coverageId) (+ "stable-compatibility:" legacy-fixture)))))))
+                 (migration (find (get migration-contract :migrations) (lambda (item) (= (get item :groundSource) ground-fixture)))))
+            (ok ground "the ignored ground source is separately executed as its original complete negative stage input")
+            (deep (get ground :coverage) (js-array (+ "stable-compatibility:" ground-fixture))) (eq-check (js-length (get ground :steps)) 1)
+            (deep (get (aref (get ground :steps) 0) :request) (js-object :operation "stage" :stage "emitter" :source ground-source :filename ground-fixture))
+            (deep (get (get ground :original) :expectedGroundDiagnostic) (get migration :expectedGroundDiagnostic))
+            (deep (get (aref (get ground :steps) 0) :error) (js-object :code (get (get migration :expectedGroundDiagnostic) :code)
+              :phase (get (get migration :expectedGroundDiagnostic) :phase) :expectFields (js-array
+                (js-object :path (js-array "message") :value (get (get migration :expectedGroundDiagnostic) :message))
+                (js-object :path (js-array "location" "file") :value ground-fixture))))
+            (eq-check (get (get ground :original) :sourceSha256) (hash (js-call Buffer :from ground-source)))
+            (eq-check (get (get (get ground :original) :contract) :sourceSha256) (hash (await (readFile (get (get (get ground :original) :contract) :file)))))
+            (eq-check (get (get ground :original) :hostSourceSha256) (hash (await (readFile (get (get ground :original) :host)))))
+            (ok (not (some (get document :missingCaseAdapters) (lambda (item) (= (get item :coverageId) (+ "stable-compatibility:" ground-fixture)))))))
           (await (each-await (js-array
             (js-array "tests/fixtures/declarative-protocol.eli" "stable-compatibility:program:tests/fixtures/declarative-protocol.eli")
             (js-array "tests/fixtures/declarative-multimethod.eli" "stable-compatibility:program:stdlib/multimethod.eli")
@@ -1132,7 +1132,7 @@
 
   (test "direct WASM original assertion identity refuses a rewritten archive even with a self-consistent asset hash"
     (async ()
-      (let* ((archive "tests/direct-wasm-backend-test-legacy.mjs")
+      (let* ((archive "tests/direct-wasm-backend-test-ground.mjs")
              (reader (createOriginalCorpusSourceReader (js-object :sourceRoot root)))
              (forged (str (await (js-call reader :text archive)) "\n")) (records (js-array)))
         (await (js-call assert :rejects (addOriginalManagedFixtureAdapters (js-object
@@ -1308,13 +1308,13 @@
   (test "maintained browser registration reads all original literal titles and deadlines and rejects extra nested registrations"
     (async ()
       (let ((families (js-array
-              (js-array "tests/wasm-managed-array-search.test.mjs" "tests/wasm-managed-array-search-test-legacy.mjs"
+              (js-array "tests/wasm-managed-array-search.test.mjs" "tests/wasm-managed-array-search-test-ground.mjs"
                 (js-array "tests/eliscript/managed-array-search.eli" "tests/eliscript/managed-array-search-abi.eli"))
-              (js-array "tests/wasm-managed-symbols.test.mjs" "tests/wasm-managed-symbols-test-legacy.mjs"
+              (js-array "tests/wasm-managed-symbols.test.mjs" "tests/wasm-managed-symbols-test-ground.mjs"
                 (js-array "tests/eliscript/managed-symbols.eli"))
-              (js-array "tests/wasm-managed-object-properties.test.mjs" "tests/wasm-managed-object-properties-test-legacy.mjs"
+              (js-array "tests/wasm-managed-object-properties.test.mjs" "tests/wasm-managed-object-properties-test-ground.mjs"
                 (js-array "tests/eliscript/managed-object-properties.eli"))
-              (js-array "tests/wasm-managed-array-construction.test.mjs" "tests/wasm-managed-array-construction-test-legacy.mjs"
+              (js-array "tests/wasm-managed-array-construction.test.mjs" "tests/wasm-managed-array-construction-test-ground.mjs"
                 (js-array "tests/eliscript/managed-array-construction.eli")))))
         (await (each-await families (async (family ignored)
           (let* ((expected (originalSourceCaseLocators (aref family 0)
@@ -1384,8 +1384,8 @@
   (test "new migrated complete suites reject changed original bytes even with a self-consistent asset identity"
     (async ()
       (let* ((reader (createOriginalCorpusSourceReader (js-object :sourceRoot root)))
-             (archives (js-array "tests/wasm-managed-object-properties-test-legacy.mjs"
-                                "tests/wasm-managed-array-construction-test-legacy.mjs")))
+             (archives (js-array "tests/wasm-managed-object-properties-test-ground.mjs"
+                                "tests/wasm-managed-array-construction-test-ground.mjs")))
         (await (each-await archives (async (archive ignored)
           (let ((changed (str (await (js-call reader :text archive)) "\n")))
             (await (js-call assert :rejects (lambda () (readOriginalManagedSuiteMigrations
@@ -1404,7 +1404,7 @@
         (await (each-await (js-array "archive" "identity" "map" "missing") (async (mutation ignored)
           (let ((options (js-object :text (async (filename)
                     (let ((source (await (funcall text filename))))
-                      (cond ((and (= mutation "archive") (= filename "tests/wasm-managed-array-search-test-legacy.mjs")) (str source "\n"))
+                      (cond ((and (= mutation "archive") (= filename "tests/wasm-managed-array-search-test-ground.mjs")) (str source "\n"))
                         ((and (= mutation "map") (= filename "tests/helpers/managed-array-search-abi.mjs.map"))
                           (let ((document (JSON/parse source))) (put document :sourcesContent (js-array "different source")) (JSON/stringify document)))
                         (t source))))

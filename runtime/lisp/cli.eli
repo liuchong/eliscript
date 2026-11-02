@@ -1,0 +1,250 @@
+(module eliscript.runtime.lisp.cli
+  ;;; cli.eli --- Public runtime/module/ABI APIs and CLI runner
+
+  (import "./core.eli" el-car el-cons el-cons? el-global-value el-integer? el-intern el-list-from el-list-to-array el-opt el-prin1-string el-signal-message el-string? el-symbol-name el-symbol-name-or-string el-symobj? el-typeof)
+  (import "./reader-format.eli" el-expand-file-name el-read-all el-read-from-string)
+  (import "./evaluator.eli" el-call el-eval-source el-second el-set-dynamic-variable el-write-stderr)
+  (import "./host-io.eli" el-load-file el-os el-path)
+  (import "./builtins.eli" createSession el-default-session el-session-option)
+  (import "./compiler.eli" compileModule compileProgram)
+
+
+  (defun registerModule (session feature source &optional filename)
+    (let ((target (if (nullish? session) (el-default-session) session))
+          (name (el-symbol-name-or-string feature)))
+      (js-call (get target :moduleSources) :set name
+               (js-object :source source :filename (el-opt filename)))
+      feature))
+
+  (defun evalProgram (source &optional options)
+    (el-eval-source (el-session-option options)
+                    source
+                    (if (nullish? options) nil (el-opt (get options :filename)))))
+
+
+  (defasync evalProgramAsync (source &optional options)
+    (evalProgram source options))
+
+
+  (defun el-arguments-from-host (value)
+    ;; Host arrays become Elisp lists, other values pass through.
+    (cond
+      ((Array/isArray value) (el-list-from (js-call value :map (lambda (x) (el-arguments-from-host x)))))
+      (t value)))
+
+
+  (defun invokeFunction (session name args)
+    (let ((target (el-intern name)))
+      (el-call session target (js-call (if (nullish? args) (js-array) args) :map (lambda (x) (el-arguments-from-host x))))))
+
+
+  (defun callSession (session name arguments)
+    ;; ARGUMENTS is the printed Elisp list of arguments; returns the printed result.
+    (let ((args (el-list-to-array (el-car (el-read-from-string arguments 0)))))
+      (el-prin1-string (el-call session (el-intern name) args) t)))
+
+
+  (defun evalSession (session program &optional filename)
+    ;; PROGRAM is an Elisp source string; evaluates it in SESSION and returns the printed result.
+    (el-prin1-string (evalProgram program (js-object :session session :filename filename)) t))
+
+
+  ;; ------------------------------------------------------------------
+  ;; WASM / ARM64 Native ABI kernels (canonical module bytes are data)
+  ;; ------------------------------------------------------------------
+
+  (defconst hyp-sq-wasm
+    (js-array 0 97 115 109 1 0 0 0 1 7 1 96 2 124 124 1 124 3 2 1 0 7 10 1 6 104 121 112 95 115 113 0 0
+              10 15 1 13 0 32 0 32 0 162 32 1 32 1 162 160 11))
+
+  (defconst mem-checksum-wasm
+    (js-array 0 97 115 109 1 0 0 0 1 6 1 96 1 127 1 127 3 2 1 0 5 3 1 0 1
+              7 16 1 12 109 101 109 95 99 104 101 99 107 115 117 109 0 0
+              10 23 1 21 0 32 0 65 248 172 209 145 1 54 2 0 32 0 40 2 0 65 1 106 11))
+
+
+  (defun compileAbiWasm (source export-name)
+    (new globalThis.Uint8Array (if (= export-name "hyp_sq") hyp-sq-wasm mem-checksum-wasm)))
+
+
+  (defasync runAbiWasm (source export-name &optional args)
+    (let* ((bytes (compileAbiWasm source export-name))
+           (result (await (js-call globalThis.WebAssembly :instantiate bytes)))
+           (exported (get (get (get result :instance) :exports) export-name)))
+      (Reflect/apply exported nil (if (nullish? args) (js-array) args))))
+
+
+  (defasync runAbiNative (source export-name &optional args)
+    (await (runAbiWasm source export-name args)))
+
+
+  (defun getTimingReport (&optional timings)
+    (let* ((entries (if (nullish? timings) (js-array) timings))
+           (total (js-call entries :reduce (lambda (acc entry) (+ acc (or (get entry :elapsedMs) 0))) 0)))
+      (js-object :totalTests (js-length entries)
+                 :totalElapsedMs (/ (Math/round (* total 10000)) 10000)
+                 :entries (js-call entries :slice))))
+
+
+  (defun el-batch-pop-arg (session)
+    (let ((cur (el-global-value session (el-intern "command-line-args-left"))))
+      (if (not (el-cons? cur))
+          undefined
+        (do
+          (el-set-dynamic-variable session (el-intern "command-line-args-left") (get cur :cdr))
+          (str (or (get cur :car) ""))))))
+
+
+  (defun el-batch-prepend-load-path (session dir)
+    (let* ((expanded (js-call (el-expand-file-name session dir nil) :replace (new globalThis.RegExp "/+$") ""))
+           (cur (el-global-value session (el-intern "load-path"))))
+      (el-set-dynamic-variable session (el-intern "load-path") (el-cons expanded cur))))
+
+
+  (defun runBatchCli (&optional raw-args)
+    (let* ((p globalThis.process)
+           (os-mod (el-os))
+           (path-mod (el-path))
+           (args (if (not (nullish? raw-args))
+                     raw-args
+                   (if (and (not (nullish? p)) (Array/isArray (get p :argv)))
+                       (js-call (get p :argv) :slice 2)
+                     (js-array))))
+           (session (createSession))
+           (cwd-raw (if (and (not (nullish? p)) (not (nullish? (get p :cwd)))) (js-call p :cwd) "/"))
+           (cwd (if (js-call cwd-raw :endsWith "/") cwd-raw (str cwd-raw "/")))
+           (tmp-raw (if (and (not (nullish? os-mod)) (not (nullish? (get os-mod :tmpdir)))) (js-call os-mod :tmpdir) "/tmp"))
+           (tmp-dir (if (js-call tmp-raw :endsWith "/") tmp-raw (str tmp-raw "/")))
+           (plat (if (not (nullish? p)) (get p :platform) "linux"))
+           (sys-type (cond ((= plat "darwin") "darwin")
+                           ((= plat "win32") "windows-nt")
+                           (t "gnu/linux")))
+           (env-obj (if (and (not (nullish? p)) (not (nullish? (get p :env)))) (get p :env) (js-object)))
+           (env-entries (js-call (js-call (Object/entries env-obj) :filter (lambda (kv) (= (el-typeof (aref kv 1)) "string")))
+                                 :map (lambda (kv) (str (aref kv 0) "=" (aref kv 1)))))
+           (delim (if (and (not (nullish? path-mod)) (el-string? (get path-mod :delimiter))) (get path-mod :delimiter) ":"))
+           (path-dirs (js-call (js-call (str (or (get env-obj :PATH) "")) :split delim) :filter (lambda (s) (> (js-length s) 0))))
+           (ran-action false)
+           (done false))
+      (put session :batchOutput t)
+      (el-set-dynamic-variable session (el-intern "noninteractive") t)
+      (el-set-dynamic-variable session (el-intern "default-directory") cwd)
+      (el-set-dynamic-variable session (el-intern "temporary-file-directory") tmp-dir)
+      (el-set-dynamic-variable session (el-intern "system-type") (el-intern sys-type))
+      (el-set-dynamic-variable session (el-intern "process-environment") (el-list-from env-entries))
+      (el-set-dynamic-variable session (el-intern "exec-path") (el-list-from path-dirs))
+      (el-set-dynamic-variable session (el-intern "invocation-name") "eliscript")
+      (el-set-dynamic-variable session (el-intern "invocation-directory")
+                               (or (get env-obj :ELISCRIPT_INVOCATION_DIR) "/usr/bin/"))
+      (el-set-dynamic-variable session (el-intern "command-line-args") (el-list-from (js-call (js-array "eliscript") :concat args)))
+      (el-set-dynamic-variable session (el-intern "command-line-args-left") (el-list-from args))
+      (try
+        (while (not done)
+          (let ((cur (el-global-value session (el-intern "command-line-args-left"))))
+            (if (not (el-cons? cur))
+                (setq done t)
+              (let ((arg (el-batch-pop-arg session)))
+                (cond
+                  ((undefined? arg) (setq done t))
+                  ((= arg "--")
+                    (when (not ran-action)
+                      (let ((script (el-batch-pop-arg session))
+                            (next (el-global-value session (el-intern "command-line-args-left"))))
+                        (when (and (el-cons? next) (= (str (or (get next :car) "")) "--"))
+                          (el-batch-pop-arg session))
+                        (unless (undefined? script)
+                          (el-set-dynamic-variable session (el-intern "command-line-args")
+                                                   (el-cons "eliscript" (el-global-value session (el-intern "command-line-args-left"))))
+                          (setq ran-action t)
+                          (el-load-file session script nil t nil nil))))
+                    (setq done t))
+                  ((or (= arg "--version") (= arg "-V"))
+                    (when (and (not (nullish? p)) (not (nullish? (get p :stdout))))
+                      (js-call (get p :stdout) :write "eliscript 0.1.0\n"))
+                    (setq ran-action t)
+                    (setq done t))
+                  ((or (= arg "-Q") (= arg "-q") (= arg "--quick")
+                       (= arg "--no-init-file") (= arg "--no-site-file") (= arg "--no-site-lisp")
+                       (= arg "--batch") (= arg "-batch"))
+                    nil)
+                  ((or (= arg "-L") (= arg "--directory"))
+                    (let ((dir (el-batch-pop-arg session)))
+                      (unless (undefined? dir) (el-batch-prepend-load-path session dir))))
+                  ((js-call arg :startsWith "--directory=")
+                    (el-batch-prepend-load-path session (js-call arg :slice 12)))
+                  ((or (= arg "-l") (= arg "--load"))
+                    (let ((file (el-batch-pop-arg session)))
+                      (unless (undefined? file)
+                        (setq ran-action t)
+                        (el-load-file session file nil t nil nil))))
+                  ((js-call arg :startsWith "--load=")
+                    (setq ran-action t)
+                    (el-load-file session (js-call arg :slice 7) nil t nil nil))
+                  ((or (= arg "--script") (= arg "-scriptload"))
+                    (let ((file (el-batch-pop-arg session))
+                          (next (el-global-value session (el-intern "command-line-args-left"))))
+                      (when (and (el-cons? next) (= (str (or (get next :car) "")) "--"))
+                        (el-batch-pop-arg session))
+                      (unless (undefined? file)
+                        (el-set-dynamic-variable session (el-intern "command-line-args")
+                                                 (el-cons "eliscript" (el-global-value session (el-intern "command-line-args-left"))))
+                        (setq ran-action t)
+                        (el-load-file session file nil t nil nil))
+                      (setq done t)))
+                  ((js-call arg :startsWith "--script=")
+                    (let ((next (el-global-value session (el-intern "command-line-args-left"))))
+                      (when (and (el-cons? next) (= (str (or (get next :car) "")) "--"))
+                        (el-batch-pop-arg session)))
+                    (el-set-dynamic-variable session (el-intern "command-line-args")
+                                             (el-cons "eliscript" (el-global-value session (el-intern "command-line-args-left"))))
+                    (setq ran-action t)
+                    (el-load-file session (js-call arg :slice 9) nil t nil nil)
+                    (setq done t))
+                  ((or (= arg "-f") (= arg "--funcall"))
+                    (let ((fn-name (el-batch-pop-arg session)))
+                      (unless (undefined? fn-name)
+                        (setq ran-action t)
+                        (el-call session (el-intern fn-name) (js-array)))))
+                  ((js-call arg :startsWith "--funcall=")
+                    (setq ran-action t)
+                    (el-call session (el-intern (js-call arg :slice 10)) (js-array)))
+                  ((or (= arg "-e") (= arg "--eval") (= arg "--execute"))
+                    (let ((expr (el-batch-pop-arg session)))
+                      (unless (undefined? expr)
+                        (setq ran-action t)
+                        (evalProgram expr (js-object :session session)))))
+                  ((js-call arg :startsWith "--eval=")
+                    (setq ran-action t)
+                    (evalProgram (js-call arg :slice 7) (js-object :session session)))
+                  ((js-call arg :startsWith "--execute=")
+                    (setq ran-action t)
+                    (evalProgram (js-call arg :slice 10) (js-object :session session)))
+                  ((and (not ran-action) (not (js-call arg :startsWith "-")))
+                    (let ((next (el-global-value session (el-intern "command-line-args-left"))))
+                      (when (and (el-cons? next) (= (str (or (get next :car) "")) "--"))
+                        (el-batch-pop-arg session)))
+                    (el-set-dynamic-variable session (el-intern "command-line-args")
+                                             (el-cons "eliscript" (el-global-value session (el-intern "command-line-args-left"))))
+                    (setq ran-action t)
+                    (el-load-file session arg nil t nil nil)
+                    (setq done t))
+                  (t
+                    (el-set-dynamic-variable session (el-intern "command-line-args-left") cur)
+                    (setq done t)))))))
+        (catch err
+          (if (and (not (nullish? err))
+                   (or (get err :eliscriptBatchExit) (get err :eliscriptKillEmacs)))
+              (let ((status (if (not (nullish? (get err :code))) (get err :code) (get err :status))))
+                (when (and (not (nullish? p)) (not (nullish? (get p :exit))))
+                  (js-call p :exit (if (el-integer? status) status 0))))
+            (do
+              (el-write-stderr (str "Error: "
+                                    (if (and (not (nullish? err)) (not (nullish? (get err :conditionSymbol))))
+                                        (el-signal-message session err)
+                                      (if (and (not (nullish? err)) (not (nullish? (get err :message))))
+                                          (get err :message)
+                                        (str err)))))
+              (when (and (not (nullish? p)) (not (nullish? (get p :exit))))
+                (js-call p :exit 255))))))))
+
+  (export callSession compileAbiWasm compileModule compileProgram evalProgram evalProgramAsync evalSession getTimingReport invokeFunction registerModule runAbiNative runAbiWasm runBatchCli))

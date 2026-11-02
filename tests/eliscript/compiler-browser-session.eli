@@ -67,7 +67,7 @@
   (defun cancelled (id title start end)
     (js-call cancellations :push (js-object :id id :title title :status "cancelled" :host "wasm"
       :reason "WASM compiler host is outside the JavaScript stage0-stage3 delivery; user WASM/native output remains required"
-      :sourceFile "tests/compiler-browser-session-test-legacy.mjs" :startLine start :endLine end))
+      :sourceFile "tests/compiler-browser-session-test-ground.mjs" :startLine start :endLine end))
     (js-call test :skip title (lambda () nil)))
 
   ;; Exact expanded old registrations remain source-bound evidence, not passes.
@@ -142,14 +142,14 @@
     (setq packaged (await (packageIndependentCompiler (js-object :artifact artifact :outputRoot (resolve directory "package")))))
     (js-call assert :strictEqual (get (get packaged :manifest) :browserArtifact) "browser/compiler-artifact.json")
     (let* ((derived (await (readCompilerMetadata (resolve (get packaged :directory) (get (get packaged :manifest) :browserArtifact)))))
-           (legacy (await (readFile (resolve "tests/compiler-browser-session-test-legacy.mjs") "utf8")))
-           (lines (js-call legacy :split "\n")))
+           (ground (await (readFile (resolve "tests/compiler-browser-session-test-ground.mjs") "utf8")))
+           (lines (js-call ground :split "\n")))
       (js-call assert :deepStrictEqual (get derived :sourceIdentity) (get artifact :sourceIdentity))
       (js-call assert :deepStrictEqual (get (get derived :provenance) :originalProductIdentity) (get artifact :productIdentity))
       (js-call assert :strictEqual (js-length cancellations) 19)
       (js-call cancellations :forEach (lambda (item)
         (let ((region (js-call (js-call lines :slice (1- (get item :startLine)) (get item :endLine)) :join "\n")))
-          (put item :sourceSha256 (digest legacy)) (put item :regionSha256 (digest region))
+          (put item :sourceSha256 (digest ground)) (put item :regionSha256 (digest region))
           (put item :region (js-object :startLine (get item :startLine) :endLine (get item :endLine) :sha256 (digest region)))))))
     (let* ((page-code (await (bundle "tests/helpers/compiler-browser-session-page.mjs"
                        (js-array "/package/browser/compiler-browser.mjs" "/managed-project-runtime.mjs" "/debug-map.mjs"))))

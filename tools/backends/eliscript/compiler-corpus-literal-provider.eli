@@ -58,7 +58,7 @@
                   (let ((bytes (js-call Buffer :from (get source :source) "utf8")))
                     (js-call files :push (js-object :id (get source :id) :bytes (js-length bytes) :sha256 (digest bytes)))))))
               (js-call files :sort (lambda (left right) (if (< (get left :id) (get right :id)) -1 (if (> (get left :id) (get right :id)) 1 0))))
-              ;; Legacy sidecar publication happens after this wrapper. Bind
+              ;; Ground sidecar publication happens after this wrapper. Bind
               ;; the authenticated declarations here; the child validates the
               ;; complete published byte graph before loading any namespace.
               (let ((proof (js-object :format format :version 1 :files files)))

@@ -381,12 +381,12 @@
         (while (< index (js-length hosts))
           (let* ((product (await (mkdtemp (resolve directory "identity-product-")))) (entry "main.mjs")
                  (javascript (js-call (get backend :compiler) :compile_string source "host-identity.eli"))
-                 (legacy-host (js-call (get backend :compiler) :compile_string
+                 (ground-host (js-call (get backend :compiler) :compile_string
                    "(throw (new globalThis.Error \"binary host must not replace the explicit selected JS host\"))" "binary-host.eli"))
                  (modules (js-array (js-object :id entry :filename "host-identity.eli" :source source)))
                  (record (js-object :kind "project" :entry entry :modules modules :request (js-object)
                    :execution (js-object :kind "original-program" :host "tests/identity-host.mjs"
-                     :hostSource legacy-host :javascriptHostSource host :hostRuntime (aref hosts index)
+                     :hostSource ground-host :javascriptHostSource host :hostRuntime (aref hosts index)
                      :referenceArtifact t :arguments (js-array (js-object :directory t) (js-object :literal entry))
                      :timeoutMs 30000)))
                  (bound (bindOriginalProcessHostDependency record dependency))

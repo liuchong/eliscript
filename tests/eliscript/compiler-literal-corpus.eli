@@ -26,7 +26,7 @@
   (import "../tools/backends/compiler-corpus-bit.mjs" transportOriginalStdlibBitCorpus)
   (import "../tools/backends/compiler-corpus-debugging.mjs" transportOriginalSourceDebuggingCorpus)
   (import "../tools/backends/compiler-corpus-emitter.mjs" transportOriginalBootstrapEmitterCorpus prepareOriginalBootstrapEmitterOptions)
-  (import "../tools/backends/compiler-corpus-legacy.mjs" :as legacy-corpus)
+  (import "../tools/backends/compiler-corpus-ground.mjs" :as ground-corpus)
   (import "../tools/backends/compiler-corpus-execution.mjs" createOriginalSeedOracle)
   (import "../tools/backends/compiler-corpus-runtime-adapters.mjs"
     originalRuntimeCaseLocators addOriginalStdlibRuntimeAdapters)
@@ -297,13 +297,13 @@
                (private-originals (Object/assign (js-object) originals
                  (js-object :requiredCoverage (js-call (get originals :requiredCoverage) :filter (lambda (value) (/= value id))))))
                (before (Array/from (get originals :requiredCoverage)))
-               (legacy (await (js-call legacy-corpus :loadOriginalCompilerCorpus
+               (ground (await (js-call ground-corpus :loadOriginalCompilerCorpus
                                 (prepareOriginalBootstrapEmitterOptions (js-object :sourceRoot root :originals private-originals)))))
                (actual (await (loadOriginalCompilerCorpus (js-object :sourceRoot root :originals originals))))
-               (gate (get actual :originalGateEvidence)) (legacy-gate (get legacy :originalGateEvidence))
+               (gate (get actual :originalGateEvidence)) (ground-gate (get ground :originalGateEvidence))
                (dependencies (get gate :hostOnlyDependencies))
                (audit (js-call dependencies :filter (lambda (item) (= (get item :coverageId) id))))
-               (expected-gate-ids (new globalThis.Set (get legacy-gate :coverageIds))))
+               (expected-gate-ids (new globalThis.Set (get ground-gate :coverageIds))))
           (js-call assert :deepStrictEqual (get originals :requiredCoverage) before)
           (js-call assert :deepStrictEqual (get actual :coverageIds) before)
           (js-call expected-gate-ids :add id)
@@ -345,7 +345,7 @@
                 (js-call assert :strictEqual (get wasm :entry) (get record :entry))
                 (js-call assert :strictEqual (get native :entry) (get record :entry))
                 (js-call assert :deepStrictEqual (compilerCorpusRequest record "javascript")
-                  (js-call legacy-corpus :compilerCorpusRequest record "javascript"))
+                  (js-call ground-corpus :compilerCorpusRequest record "javascript"))
                 (js-call assert :strictEqual (isDeepStrictEqual record before-record) t
                   "request transport must not change the complete retained source record")
                 (let* ((explicit (Object/assign (js-object) record (js-object
@@ -375,20 +375,20 @@
               (setq index (1+ index)))
             (js-call assert :strictEqual (isDeepStrictEqual record before-record) t)
             (js-call assert :deepStrictEqual (compilerCorpusRequest record "javascript" options)
-              (js-call legacy-corpus :compilerCorpusRequest record "javascript" options)))
+              (js-call ground-corpus :compilerCorpusRequest record "javascript" options)))
           (let* ((provider-bytes (await (readFile (resolve root "platform/http.mjs"))))
                  (reader (createOriginalCorpusSourceReader (js-object :sourceRoot root)))
                  (provider (await (js-call reader :file "platform/http.mjs")))
-                 (expected (Object/assign (js-object) legacy
-                             (js-object :evidence (Array/from (get legacy :evidence))
-                               :records (Array/from (get legacy :records))
-                               :expectedIds (Array/from (get legacy :expectedIds)))))
+                 (expected (Object/assign (js-object) ground
+                             (js-object :evidence (Array/from (get ground :evidence))
+                               :records (Array/from (get ground :records))
+                               :expectedIds (Array/from (get ground :expectedIds)))))
                  (expected-evidence (get expected :evidence))
                  (retained (js-call expected-evidence :filter (lambda (asset) (= (get asset :file) "platform/http.mjs"))))
                  (actual-providers (js-call (get actual :evidence) :filter
                                      (lambda (asset) (= (get asset :file) "platform/http.mjs"))))
                  (without-audit (Object/assign (js-object) actual (js-object
-                   :coverageIds (get legacy :coverageIds)
+                   :coverageIds (get ground :coverageIds)
                    :originalGateEvidence (Object/assign (js-object) gate (js-object
                      :coverageIds (js-call (get gate :coverageIds) :filter (lambda (value) (/= value id)))
                      :hostOnlyDependencies (js-call dependencies :filter (lambda (item) (/= (get item :coverageId) id)))))))))
@@ -463,7 +463,7 @@
             ;; Two original report hosts retain every assertion byte and
             ;; change only the authenticated first import specifier. Bind the
             ;; exact new sources; the rest of the complete corpus still has to
-            ;; equal the unchanged legacy model below.
+            ;; equal the unchanged ground model below.
             (let ((files (js-array "tools/backends/eliscript/compiler-corpus-matchers.eli"
                      "tools/backends/compiler-corpus-matchers.mjs"
                      "tools/backends/eliscript/managed-source-view.eli" "tools/backends/managed-source-view.mjs"
@@ -524,7 +524,7 @@
             ;; Compare complete values; failures cannot format the entire
             ;; multi-megabyte source/recipe inventory into a diagnostic diff.
             (js-call assert :strictEqual (isDeepStrictEqual without-audit expected) t
-              "only the exact authenticated literal, HTTP, runtime-scan, matcher, execution assets, tools reference inputs, functional input proofs, runtime assets and maintained complete-suite transports may differ from the unchanged legacy corpus")
+              "only the exact authenticated literal, HTTP, runtime-scan, matcher, execution assets, tools reference inputs, functional input proofs, runtime assets and maintained complete-suite transports may differ from the unchanged ground corpus")
             (let* ((changed (globalThis.structuredClone without-audit))
                    (untouched (js-call (get changed :records) :find (lambda (record)
                      (= (get record :id) "original-program:compiler-module-bootstrap-reader")))))
@@ -736,11 +736,11 @@
             (while (< target-index (js-length targets))
               (let* ((target (aref targets target-index))
                      (request (compilerCorpusRequest record target))
-                     (legacy (js-call legacy-corpus :compilerCorpusRequest record target))
+                     (ground (js-call ground-corpus :compilerCorpusRequest record target))
                      (aliases (new globalThis.Set)) (modules (get request :modules)) (position 0))
                 (js-call assert :strictEqual (get request :entry) (+ name ".mjs"))
                 (js-call assert :strictEqual (get request :resolveImports) t)
-                (js-call assert :deepStrictEqual (get request :hostSources) (get legacy :hostSources))
+                (js-call assert :deepStrictEqual (get request :hostSources) (get ground :hostSources))
                 (if (= name "core-language-api-usage")
                   (progn
                     ;; Its unchanged original Node host imports seq directly,
@@ -748,8 +748,8 @@
                     (js-call assert :deepStrictEqual (get request :entries)
                       (js-call (get record :modules) :map (lambda (module) (get module :id))))
                     (js-call assert :ok (js-call (get request :entries) :includes "stdlib/core/seq.mjs"))
-                    (js-call assert :deepStrictEqual (get legacy :entries) (js-array (get record :entry))))
-                  (js-call assert :deepStrictEqual (get request :entries) (get legacy :entries)))
+                    (js-call assert :deepStrictEqual (get ground :entries) (js-array (get record :entry))))
+                  (js-call assert :deepStrictEqual (get request :entries) (get ground :entries)))
                 (js-call assert :strictEqual (js-length modules) (js-length (get record :modules)))
                 (js-call (js-call modules :concat (get request :hostSources)) :forEach
                   (lambda (module)
@@ -787,9 +787,9 @@
               (put unrelated :id "unrelated-core-recipe")
               (put wrong-entry :entry "different.mjs")
               (js-call assert :deepStrictEqual (compilerCorpusRequest unrelated "javascript")
-                (js-call legacy-corpus :compilerCorpusRequest unrelated "javascript"))
+                (js-call ground-corpus :compilerCorpusRequest unrelated "javascript"))
               (js-call assert :deepStrictEqual (compilerCorpusRequest wrong-entry "javascript")
-                (js-call legacy-corpus :compilerCorpusRequest wrong-entry "javascript"))))
+                (js-call ground-corpus :compilerCorpusRequest wrong-entry "javascript"))))
           (setq index (1+ index))))))
   (test "the original multimethod recipe resolves its declarative input beside the complete unmodified stdlib family"
     (async ()
@@ -802,12 +802,12 @@
         (js-call assert :ok record)
         (while (< index (js-length targets))
           (let* ((target (aref targets index)) (request (compilerCorpusRequest record target))
-                 (legacy (js-call legacy-corpus :compilerCorpusRequest record target))
+                 (ground (js-call ground-corpus :compilerCorpusRequest record target))
                  (modules (get request :modules)) (aliases (new globalThis.Map))
                  (pending (js-array)) (visited (new globalThis.Set)) (position 0) (changed 0))
             (js-call assert :strictEqual (get request :entry) "multimethod.mjs")
-            (js-call assert :deepStrictEqual (get request :entries) (get legacy :entries))
-            (js-call assert :deepStrictEqual (get request :hostSources) (get legacy :hostSources))
+            (js-call assert :deepStrictEqual (get request :entries) (get ground :entries))
+            (js-call assert :deepStrictEqual (get request :hostSources) (get ground :hostSources))
             (js-call assert :strictEqual (js-length modules) (js-length (get record :modules)))
             (while (< position (js-length modules))
               (let* ((module (aref modules position)) (original (aref (get record :modules) position))
@@ -853,9 +853,9 @@
           (put unrelated :id "unrelated-multimethod-recipe")
           (put wrong-entry :entry "other.mjs")
           (js-call assert :deepStrictEqual (compilerCorpusRequest unrelated "javascript")
-            (js-call legacy-corpus :compilerCorpusRequest unrelated "javascript"))
+            (js-call ground-corpus :compilerCorpusRequest unrelated "javascript"))
           (js-call assert :deepStrictEqual (compilerCorpusRequest wrong-entry "javascript")
-            (js-call legacy-corpus :compilerCorpusRequest wrong-entry "javascript"))))))
+            (js-call ground-corpus :compilerCorpusRequest wrong-entry "javascript"))))))
   (test "all retained missing-source recipe families carry their complete real virtual dependency graph"
     (async ()
       (let* ((originals (await (loadOriginalCompilerManifests)))

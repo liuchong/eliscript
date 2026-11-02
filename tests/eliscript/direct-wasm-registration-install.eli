@@ -8,10 +8,10 @@
   (import "./direct-wasm-registration.mjs" createDirectWasmRegistration registerDirectWasmCompletion)
   (import "./direct-wasm-affected.mjs" runDirectReflectionCase runDirectValueJsonCase closeDirectAffected)
   (defconst original (Object/assign (js-object) framework))
-  (defconst archive (resolve root "tests/direct-wasm-backend-test-legacy.mjs"))
+  (defconst archive (resolve root "tests/direct-wasm-backend-test-ground.mjs"))
   (defconst source (readFileSync archive))
   (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update source) :digest "hex")
-    "f0fa57d2aae13f0bef9f7afa04ee51d1d3386c4a3e011ad231ad2577c99876c2"
+    "b3e2af96d7da3d92ad4613fcb341656fd7625fb7fd1ca8bae421f171e8c73ea9"
     "the full original direct WASM suite must retain its exact bytes")
   (defconst registration (createDirectWasmRegistration original
     (js-object

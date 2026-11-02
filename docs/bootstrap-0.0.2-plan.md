@@ -138,7 +138,7 @@ host，631/649才有suite/region。集中修正为两种真实合同，保完整
 集中修复后受影响2/2通过，3.453s、峰1911668872字节、cleanup=true；
 复用同批未受影响39项，共41/41通过。C128初次失败1轮/2项、修后仍失败
 0次。全部标准工具/测试已由真实Emacs入口生成（29.868s），两项派生
-contract由原生成器成功重新派生。新增13份legacy MJS归档均以Git blob
+contract由原生成器成功重新派生。新增13份ground MJS归档均以Git blob
 核对为原HEAD对应旧测试的逐字副本，无手写新JS或提交生成物。
 
 D128前置收齐：原18项中实际功能12/12通过、语义失败0，压力6项明确后置
@@ -149,11 +149,11 @@ Seed comparison=equivalent。严格bytecompile通过；Emacs248/248通过。
 整轮465.908s、峰10551137448字节、cleanup=true，make exit2唯一原因是
 核心Bun入口缺旧IR ingress档案，尚未启动该批Bun用例；不冒充test-core通过。
 
-集中修正仅补回`tests/compiler-ir-session-ingress-test-legacy.mjs`：取原HEAD
+集中修正仅补回`tests/compiler-ir-session-ingress-test-ground.mjs`：取原HEAD
 对应`tests/compiler-ir-session-ingress.test.mjs`逐字归档，SHA256
 510213d89769be93ce574f11de72061e2f7ff5605cfb792d79388aa419807183，
 与既有scope/test固定期待相同。复用现成完整测试，无新手写JS、不改原断言。
-一次查完所有显式legacy引用，仅此文件遗漏。入口失败1次，补齐后复验完整
+一次查完所有显式ground引用，仅此文件遗漏。入口失败1次，补齐后复验完整
 test-core；原18项、应用及bytecompile未受影响不重复跑，再通过才完整自举。
 
 完整core续跑在107.530s被controlled-run的measure_footprint/EPERM采样错误
@@ -2818,7 +2818,7 @@ C89 原 604 WASM 实际在 64.081 秒达到整树 12 GiB 上限，峰值计量
 不是新语义断言失败。该树已退出，不原样重试、不扩大上限。
 
 后继施工直接消除每节点函数数：当前 source view 每实例仍有约 13 个 runtime
-operation、13 个边界包装和 14 个 legacy handler 闭包；百万对象仍会放大这部分。
+operation、13 个边界包装和 14 个 ground handler 闭包；百万对象仍会放大这部分。
 目标：私有 decoder 的 fresh target → WeakMap 私有 record → 模块共享 Proxy
 handler → runtime 共享 dispatchOrdinarySourceOperation(state,name,args) → 临时
 codec。每实例只保留 raw/type/value 与 observer/realm，refresh 允许一个小函数。
@@ -3201,7 +3201,7 @@ C80 核心继续收集独立原库存，当前实际新增9个断言失败，归
 | --- | --- | --- |
 | 7项宿主部署缺依赖：project-entry-host/identity-host 的 process 静态导入在换目录后缺文件 | 将真实 compiler-corpus-process 模块加入相邻 hostSources 及维护/生成来源证明；所有 observer、renamed physical host、standard-main、token replay 使用同一完整依赖闭包，补两宿主实际执行及缺失/篡改/冲突拒绝；保原宿主字节和黄金 | A/B/C已完成，待集中验证 |
 | 1项 raw strings：raw-language-fixtures 的 ignored 调用传4参，原 ignored(s,trace)只收2参 | helper 与独立 oracle 均改为(text,trace)，保原函数内部 charAt 多余参数的 first/second 副作用、全部7文本及严格 raw ABI；补实参长度2、首错和根释放；原首错与清理次错同时存在时保原首错身份 | A/B/C已完成，待集中验证 |
-| 1项 receipt：project-entry 测试遗漏真实原 replay suite 的执行选择 | 用原迁移记录和 reader.file 证明补真实 locators；legacy 与维护 adapter 同一 options，全7 caller 的14个双宿主记录与原源码/黄金不变；缺失/改动选择继续拒绝 | A/B/C已完成，待集中验证 |
+| 1项 receipt：project-entry 测试遗漏真实原 replay suite 的执行选择 | 用原迁移记录和 reader.file 证明补真实 locators；ground 与维护 adapter 同一 options，全7 caller 的14个双宿主记录与原源码/黄金不变；缺失/改动选择继续拒绝 | A/B/C已完成，待集中验证 |
 | 1项新 native B：负零已合法降低为 low=0/high=2147483648，错误要求 typed 中仍有原生数字-0 | 保 ordinary/owned 全部bytes、typed DAG、descriptor/debug和归档对比；精确核对 value-number 的位对，library真实执行导出函数并 Object.is(result,-0)，独立 wire 的[-0,NaN]完整检查不变 | A/B/C已完成，待集中验证 |
 
 以上新增失败各为首次取得本轮具体错误，不能算作已做过修复又失败的重试；native
@@ -3603,7 +3603,7 @@ FIX-03、FIX-12继续后置，原容量及性能失败记录不改。
 - [x] 运行时源码：恢复raw Error stack拒绝边界；host反射只省略不可表示的stack；
   native清理保留原首错，关闭后的真实业务操作仍拒绝。补js-nth属性键位置，避免
   属性名误引入完整持久库；Array继承toLocaleString的自有写入与不支持读取分别判定。
-- [x] ingress生成物索引：原完整手写文件与HEAD SHA完全相等，移动为legacy数据；
+- [x] ingress生成物索引：原完整手写文件与HEAD SHA完全相等，移动为ground数据；
   Git停止跟踪新生成test.mjs，已有ignore接管。修复误把生成TDZ依赖当作手写源码审计，
   emitter和依赖边界标准不变。
 - [x] FIX-32源码（C76历史）：phased/entries的JS exports sequence接入维护执行器。
@@ -3664,7 +3664,7 @@ c74-stable-inventory-generate.log与c74-parity-inventory-generate.log；
 | --- | --- |
 | FIX-45 | 新host codec五处optional默认nil与undefined合同混淆；改rest读取原缺省。只解释C73新回归。 |
 | FIX-46 | admission回归缺真实artifact.entry，提前在resolve失败；补完整上下文并保原首错断言。 |
-| FIX-47 | 原nested-observation回归读取错误legacy来源边界；恢复认证完整归档suite。 |
+| FIX-47 | 原nested-observation回归读取错误ground来源边界；恢复认证完整归档suite。 |
 | FIX-48 | raw observer回归未closeModule即断言live=0；按真实生命周期关闭后收集。 |
 | FIX-49 | Math模型将statement传给expression emitter并漏取text；按正式IR和片段接口接线。 |
 | FIX-50 | 三个Node测试入口静态载入bun:test；使用node:test并限定Bun专属注册入口。 |
@@ -3801,9 +3801,9 @@ wire 四模式 codec 的首例 RT0003 已确认属于 FIX-39 的入口命名，�
 
 本批新增施工接口已收敛，不另造运行框架或扩大旧语言迁移：
 
-- FIX-33：`managed-host-runtime.eli/readSourceWords` 复用 runtime 已有 `readBytes`，先读取表地址与 header，再按最多 65,520 字节读取 cell 块；保完整代际句柄、同步边界、首错和 callback 可见性，不永久缓存。416 全活格从每次 2,502 次 Node RPC 改为 3 次读取、6 次 RPC，这是源码推导，尚非性能验收。无需修改 legacy transport；B 保原 formatter 与 Map 覆盖/delete/reinsert/reentry，并补读取次数及跨块边界。
+- FIX-33：`managed-host-runtime.eli/readSourceWords` 复用 runtime 已有 `readBytes`，先读取表地址与 header，再按最多 65,520 字节读取 cell 块；保完整代际句柄、同步边界、首错和 callback 可见性，不永久缓存。416 全活格从每次 2,502 次 Node RPC 改为 3 次读取、6 次 RPC，这是源码推导，尚非性能验收。无需修改 ground transport；B 保原 formatter 与 Map 覆盖/delete/reinsert/reentry，并补读取次数及跨块边界。
 - FIX-35：`memory.eli` 的 foreign 对象复制使用私有 `heap-foreign-object-copy`，7 个根槽保护输入、输出、键快照及当前键/descriptor/value。一次 op4 完整 ownKeys 后逐键 op5 enumerable 判定、op1 Get、mode2 CreateDataProperty；保 symbol、getter/Proxy 顺序、浅层身份和首错，不将复制缺口冒称 keys 首错已修复。
-- FIX-36：统一 corpus 功能执行策略，复用现有监督框架；legacy `executeOriginalProgram` 的 child IO/driver 与受影响 Seed/工具入口迁至 Eli。完整输入、输出及阶段独立保留，首错锁定、清理错误另记，功能模式不设总 deadline；HTTP 的 10ms 等业务超时语义不能取消，原性能失败不改记通过。
+- FIX-36：统一 corpus 功能执行策略，复用现有监督框架；ground `executeOriginalProgram` 的 child IO/driver 与受影响 Seed/工具入口迁至 Eli。完整输入、输出及阶段独立保留，首错锁定、清理错误另记，功能模式不设总 deadline；HTTP 的 10ms 等业务超时语义不能取消，原性能失败不改记通过。
 - FIX-38：维护 `compiler-corpus-managed-adapters.eli` 的原 host-body transport，复用已有 Eli `load-body`/`loadManagedProjectGraph` 顺序：安装成功后动态加载独立完整原 body。覆盖六个 host 家族 Node/Bun，不向含静态 import 的同一模块继续塞前缀，也不放宽 graph 未安装拒绝；B 保原身份与黄金，增加延迟安装、安装失败先传播及图隔离断言。
 - FIX-39：复用现有标准 runtime facade 的源码名适配，将 wire 的同步、异步和 HTTP 原调用入口与实际 descriptor 对齐，并保留 transient-state 现有适配。源名映射来自实际声明，未知名仍拒绝、歧义不能静默合并；不 hardcode 首个 codec 名字，不修改原源码、黄金或 descriptor。四模式完整原 wire 测试与既有 facade 否例同批验收。
 
@@ -3858,7 +3858,7 @@ FIX-36 的维护接口固定为 `originalCorpusExecutionPolicy(context)` 与
 - [x] D / C73 正式包准备：stage3 安装与浏览器包构建通过，证据 `c73-prepare-release-package.log`。
 - [ ] D / C73 三输出整轮：C72 三输出已收齐，全部本批代码生成与固定点通过后，启动同一 stage3 的三输出全量功能验收，保原 small profile 明示容量延期及所有原输入/黄金。启用已有 allocator diagnostic 与有限首错窗口，受控进程树 8 GiB 起步/24 GiB 硬上限、无总期限。原 C72 文件续验另树继续，不等待其结束才生成新三输出；不重启原已完成文件、不合并两个候选的通过数。证据 `c73-final-three-outputs.log`。
 - [x] D / C73 三输出入口失败收齐：库存构造抛 `original case deadline is no longer a numeric literal`，尚未执行任何输出样例，监督退出 1 且回收完成。原因是 sequence 功能时限改用表达式，但原来源定位器要求正数字字面量；本问题验证失败 1 次、失败修复 0 次，不记为运行时行为失败。修复须保原 60000 来源字段，在明确的功能测试注册边界转换实际期限，不放宽 locator。
-- [x] B/C / C73 库存入口与已知来源断言集中修齐：sequence 原调用均恢复字面量 60000，仅注册包装在显式功能模式向实际 Bun registrar 传 0，并补 callback/name/return identity 与 strict deadline B；末尾原负例保 60000。FIX19 project-entry 完整 metadata 比较保所有原字段及 assertionSource，仅明确已迁移的 legacy suite/原完整源码 SHA；28 资产验证保持，未混淆 managed repair 的 21 套件/57 资产。只变两测试源，不改定位器、正式编译器源或黄金；统一重生成工具/测试并重新准备 stage3 公开运行文件，已通过的固定点不重建。
+- [x] B/C / C73 库存入口与已知来源断言集中修齐：sequence 原调用均恢复字面量 60000，仅注册包装在显式功能模式向实际 Bun registrar 传 0，并补 callback/name/return identity 与 strict deadline B；末尾原负例保 60000。FIX19 project-entry 完整 metadata 比较保所有原字段及 assertionSource，仅明确已迁移的 ground suite/原完整源码 SHA；28 资产验证保持，未混淆 managed repair 的 21 套件/57 资产。只变两测试源，不改定位器、正式编译器源或黄金；统一重生成工具/测试并重新准备 stage3 公开运行文件，已通过的固定点不重建。
 - [x] D/C / C73 第二个入口失败及整批修复：`c73-final-three-outputs-2.log` 在动态 host 编译时发现 project-entry-host 的未绑定 aset，仍无目标样例执行。已改为现有 put，并一次修齐同组动态生成片段对 originalFixtureCompare/observations/originalFixtureGroups 的标识符桥接。该新问题失败 1 次，不沿用前一 deadline 问题计数；统一源生成与 stage3 包准备再通过，日志 `c73-generated-host-repair-build.log`，正式编译器产品未改变。
 - [ ] D / C73 第三次入口：以相同 stage3 启动完整三输出，独立保留 `targets-round3` 及 `c73-final-three-outputs-3.log`；前两次入口失败证据不覆盖。期间冻结实现，继续完整收集可独立执行的原门禁。
 - [x] D / C73 第三次入口失败：同一动态 host 在第 240 行暴露非 async 作用域的 await，尚未执行目标样例。动态 host 编译这一问题组累计失败 2 次、修复后仍失败 1 次（先 aset、后 await）；禁止再逐条重试，先调查完整生成程序及异步生命周期，不移除等待掩盖 FIX40。
@@ -4669,7 +4669,7 @@ provider，execution/outcome 保存真实 provider 来源和逐文件哈希。
   PersistentVector 互操作、原声明不变、provider 真 SHA、篡改/缺项/重复/
   emitted-provider 冲突拒绝、非该五项及非 JS 路径不改变。
 - [x] C：execution 私有路由和 matrix 成功/失败 outcome 证据接线；不改
-  legacy 运输实现或生产库算法。
+  ground 运输实现或生产库算法。
 - [ ] D：统一生成并运行受影响回归与完整原记录，尚未验收。
 
 同轮 sequence 运输阻塞：relational-set 的两个 host 在独立参考中将原生
@@ -4728,7 +4728,7 @@ suite/fixture、`original-managed:sequence-data*` 的正常完整程序使用已
 - [x] B：纯 Eli 回归覆盖显式/缺省配置、三目标同档、原字节/IEEE/ID不变、
   非正常程序不覆盖、未知档拒绝及报告中功能/容量分离。
 - [x] C：execution 私有资源包装、matrix outcome、stage3 调度/汇总及 CLI
-  接线完整；不改 legacy 实现、原输入或模型。
+  接线完整；不改 ground 实现、原输入或模型。
 - [ ] D：先保留严格基线终态，再用显式 small 跑原完整功能；只按实际
   功能结果填写 A05/A06，1024 容量仍标 DEFERRED / NOT ACCEPTED。
 每个状态只按对应清单的完成项比例计，不按文件数、代码行数或隐藏计算量计。
@@ -4742,7 +4742,7 @@ stage0–3 的实际状态和 stage3 三目标通过数。启动施工时根据�
 本次执行接线补充（沿 D06/D07，不增加交付范围）：
 
 包命令分发入口也使用 Eli：`tools/backends/eliscript/package-cli-entry.eli`
-生成 `bootstrap/host/eliscript-cli.mjs`，原入口原样保存在 legacy 文件。
+生成 `bootstrap/host/eliscript-cli.mjs`，原入口原样保存在 ground 文件。
 保留全部七个命令、基于入口位置定位包、调用名称、现有环境变量优先级、
 参数及异步错误退出；新 `eliscript-compiler` 路由仍使用认证 stage3。
 Emacs 引导器只为这个可执行产物添加 shebang、相应 Source Map 行偏移和
@@ -4753,7 +4753,7 @@ Emacs 引导器只为这个可执行产物添加 shebang、相应 Source Map 行
 同一 Emacs 前置步骤从维护中的 `stdlib/core/{protocol,text,object}.eli`
 生成 `runtime/core/*-impl.mjs` 及 maps，替代对 Git 中生成物的依赖；
 源与输出显式配对，并在首次启动 JS 工具前全部生成。这三项生成物
-ignored/untracked，原 runtime 手写外壳和未受影响的 legacy 实现保留。
+ignored/untracked，原 runtime 手写外壳和未受影响的 ground 实现保留。
 B 复用现有 source-only 引导及严格逐字节、逐 map 的生成一致性用例，
 不得靠保留编译生成物于 Git 中满足干净 checkout。
 
@@ -4775,7 +4775,7 @@ Math import、namespace identity、原文件字节及两项精确运算结果回
 错配：`decodeLiteralProtocol` 对已确认 kind18 的协议方法读取真实 `slot`，
 却调用仅接收 kind13 的 raw `value-object-get`。这不是句柄已失效的证据。
 新增 `managed-host.eli` 生成原 host 入口，原字节实现保留为
-`managed-host-legacy.mjs`。只向 legacy host 传入私有 exports descriptors
+`managed-host-ground.mjs`。只向 ground host 传入私有 exports descriptors
 副本：kind18 的该读取调用既有 `value-property-get(heap, value, key, 0)`，
 其他 kind 仍调用原 Object ABI；真实 WASM/native exports 与其拒绝合同不变。
 三个未改导出保持原函数 identity，factory 用三个 required 参数及 rest
@@ -4784,9 +4784,9 @@ Math import、namespace identity、原文件字节及两项精确运算结果回
 - [x] B：真实发射函数的 Symbol slot、独立 JS 参考、WASM/native 读取、
   GC 身份、getter 抛 false、caller frame 和完全释放回归已写；raw Object
   Get 对真实函数仍拒绝，原完整 sequence 继续检验实际协议初始化。
-- [x] C：纯 Eli bridge、原字节 legacy、生成映射/ignore，以及 sequence 和
-  project-entry 的 bridge 源/生成入口/legacy 三份真实 SHA sourceAssets 已写。
-  包与页面运输沿原清单携带 legacy，不另造 ABI 或错误放行规则。
+- [x] C：纯 Eli bridge、原字节 ground、生成映射/ignore，以及 sequence 和
+  project-entry 的 bridge 源/生成入口/ground 三份真实 SHA sourceAssets 已写。
+  包与页面运输沿原清单携带 ground，不另造 ABI 或错误放行规则。
 - [ ] D：统一生成后执行上述新回归及原完整 sequence；当前不宣称功能已过。
 
 Math 支持作为正式普通模块 `{id:"runtime/math.mjs",
@@ -4805,7 +4805,7 @@ filename:"runtime/math.eli"}` 纳入 Emacs stage0 与 `loadCompilerSources`
   `renderReleaseCLIError(error, options)`；最终编译器认证复用
   `authenticateStage3Targets`，不为 CLI 加载整份语料。
 - 新 `compiler-cli-entry.eli` 生成原公共 CLI 路径，转发上述入口；旧 CLI
-  未改能力保留原字节在 `compiler-cli-legacy.mjs`，只用于既有编译/项目/包传输。
+  未改能力保留原字节在 `compiler-cli-ground.mjs`，只用于既有编译/项目/包传输。
   新默认入口认证 JS stage3，旧九格及二进制宿主命令明确拒绝。
 - 新 `tools/ci/release-workflow.eli` 生成
   `tools/ci/dist/compiler-release.mjs`，导出 `renderCompilerReleaseWorkflow(matrix)`；
@@ -4841,9 +4841,9 @@ filename:"runtime/math.eli"}` 纳入 Emacs stage0 与 `loadCompilerSources`
 
 ```text
 tools/integrity/eliscript/check.eli -> tools/integrity/check.mjs (ignored)
-  -> check-legacy.mjs (原实现字节不变：依赖/benchmark/错误类型)
+  -> check-ground.mjs (原实现字节不变：依赖/benchmark/错误类型)
 tests/eliscript/repository-integrity.eli -> tests/repository-integrity.test.mjs (ignored)
-  -> repository-integrity-test-legacy.mjs (原八个用例字节不变并实际注册)
+  -> repository-integrity-test-ground.mjs (原八个用例字节不变并实际注册)
 ```
 
 原流程 `tracked MJS -> marker inventory -> deterministic bytes/maps`
@@ -5386,7 +5386,7 @@ run `1079090f000042959f92b13b0f9e404d` exit 0，产出的五个 elc 已精确移
   原 wire、foreign 数组逐元素 identity/负零/GC、10000/10001 深树均已通过。
   nth 后续 RangeError 报告仍失败；新增 hasInstance B 把 `true` 写成不合法
   Eli 标识；另一项是未设置既定性能延期环境引起的旧 hash 校验。遗漏的
-  Bun 文件与正确延期环境下的原 legacy integrity 已一次补收 16/16 passed，
+  Bun 文件与正确延期环境下的原 ground integrity 已一次补收 16/16 passed，
   run `43143b30b3a34829a90b0a5c4d572e0a`，不修改任何历史报告。
 - 完整原 sequence run `9802b66ebfde4f53b9110adb321bb235`：先完成
   16 项中的 9 passed、7 failed，随后在首个 WASM/Node 子程序阶段触及
@@ -5613,7 +5613,7 @@ exit 0、cleanup complete，新增 elc 已回收。
 
 - Node26：229 项，227 passed、1 failed、1 原性能延期；run
   `5b15e5fd8c844dadb1e75eb9c869dd96`，33.081 秒、峰值 9751019520 字节，
-  exit 1、cleanup complete。唯一失败是完整 legacy 文档对照的独立 expected
+  exit 1、cleanup complete。唯一失败是完整 ground 文档对照的独立 expected
   未计新增两条 matcher 依赖运输及四份真实来源，须补精确预期并继续完整
   deep equality，不能忽略这些记录或字段。运输专用新增 B 已通过。
 - Bun10：79 项，76 passed、3 failed；run
@@ -6050,7 +6050,7 @@ compiler-corpus-matchers-selfhosted.test.mjs 两个精确 basename 的 smol 参�
 ['--smol','test',file]，包括原 ci-contract synthetic fixtures。
 
 源码位置：完整迁 tools/testing/file-workers.mjs 到维护
- tools/testing/file-workers.eli，生成仍原入口（不新增legacy wrapper）；复用
+ tools/testing/file-workers.eli，生成仍原入口（不新增ground wrapper）；复用
 resource-supervisor.mjs 的原 IO，保 FILE_WORKERS=2、exclusive barriers、原序结果、
 SIGINT/SIGTERM取消及未启动尾部、严格 shard parsing、所有 outcome/archive 与关闭。
 私有 worker-test-arguments(file) 是唯一 mode 分支；主入口仍实际执行整个清单。
@@ -6068,7 +6068,7 @@ C28 A/B/C施工完成后冻结；D尚未执行，不因源码迁移或先前stan
 C28 施工已写齐：维护 Eli runner完整迁移，原六项公开exports及原两worker/
 exclusive/取消/分片/outcome/archive流程保留；新增五个B注册，原ci-contract
 所有既有B未改。bootstrap两条生成映射、Make原Bun清单单项、ignore四条仅在
-本批overlay；旧mjs不手写、不加legacy wrapper，合批生成后才作为ignored产物。
+本批overlay；旧mjs不手写、不加ground wrapper，合批生成后才作为ignored产物。
 本批未生成/编译/检查/运行，最终D须同时收新B与原ci-contract完整回归。
 
 ### C29 / P05、P07：matcher 新 B 的真实 host descriptor capability
@@ -6096,7 +6096,7 @@ exclusive/取消/分片/outcome/archive流程保留；新增五个B注册，原c
 - [x] A：原 setter 对 source Array 写 parent=0 并置显式 bit8192；
   `heap-reflection-prototype` 与 `heap-source-inherited-prototype` 却在该
   bit 分支把 0 当默认 Object.prototype，`heap-standard-link(type0)` 又会
-  将显式 0 回填为 realm Object root。legacy public view 原样读取 raw
+  将显式 0 回填为 realm Object root。ground public view 原样读取 raw
   prototype，faithful snapshot/private projection 原样运输该结果，故真实
   缺陷首先位于 raw runtime，而非 matcher 特例。canonical Array.prototype
   创建时 Object root 已存在，`value-array-new` 原本存非零父链。
@@ -6176,7 +6176,7 @@ exclusive/取消/分片/outcome/archive流程保留；新增五个B注册，原c
   projection、原包装 matcher 与原 Bun matcher 均抛 Error，精确 message
   `managed host value is closed`。原 raw root release/live0/帧清理保持。
 - [x] C：仅修 `tests/eliscript/compiler-corpus-matchers.eli` 末尾新增 B 的
-  错误关闭后读取前提，不改 runtime/legacy、关闭合同、golden 或生产六文件。
+  错误关闭后读取前提，不改 runtime/ground、关闭合同、golden 或生产六文件。
 - [ ] D：统一生成后执行原完整七项；本 overlay 未生成、未运行、未检查。
 
 ### C30 / P05、P07：source Array 显式 null 原型保真
@@ -6184,7 +6184,7 @@ exclusive/取消/分片/outcome/archive流程保留；新增五个B注册，原c
 - [x] A：原 setter 对 source Array 写 parent=0 并置显式 bit8192；
   `heap-reflection-prototype` 与 `heap-source-inherited-prototype` 却在该
   bit 分支把 0 当默认 Object.prototype，`heap-standard-link(type0)` 又会
-  将显式 0 回填为 realm Object root。legacy public view 原样读取 raw
+  将显式 0 回填为 realm Object root。ground public view 原样读取 raw
   prototype，faithful snapshot/private projection 原样运输该结果，故真实
   缺陷首先位于 raw runtime，而非 matcher 特例。canonical Array.prototype
   创建时 Object root 已存在，`value-array-new` 原本存非零父链。
@@ -6716,7 +6716,7 @@ provider，execution/outcome 保存真实 provider 来源和逐文件哈希。
   PersistentVector 互操作、原声明不变、provider 真 SHA、篡改/缺项/重复/
   emitted-provider 冲突拒绝、非该五项及非 JS 路径不改变。
 - [x] C：execution 私有路由和 matrix 成功/失败 outcome 证据接线；不改
-  legacy 运输实现或生产库算法。
+  ground 运输实现或生产库算法。
 - [ ] D：统一生成并运行受影响回归与完整原记录，尚未验收。
 
 同轮 sequence 运输阻塞：relational-set 的两个 host 在独立参考中将原生
@@ -6775,7 +6775,7 @@ suite/fixture、`original-managed:sequence-data*` 的正常完整程序使用已
 - [x] B：纯 Eli 回归覆盖显式/缺省配置、三目标同档、原字节/IEEE/ID不变、
   非正常程序不覆盖、未知档拒绝及报告中功能/容量分离。
 - [x] C：execution 私有资源包装、matrix outcome、stage3 调度/汇总及 CLI
-  接线完整；不改 legacy 实现、原输入或模型。
+  接线完整；不改 ground 实现、原输入或模型。
 - [ ] D：先保留严格基线终态，再用显式 small 跑原完整功能；只按实际
   功能结果填写 A05/A06，1024 容量仍标 DEFERRED / NOT ACCEPTED。
 每个状态只按对应清单的完成项比例计，不按文件数、代码行数或隐藏计算量计。
@@ -6789,7 +6789,7 @@ stage0–3 的实际状态和 stage3 三目标通过数。启动施工时根据�
 本次执行接线补充（沿 D06/D07，不增加交付范围）：
 
 包命令分发入口也使用 Eli：`tools/backends/eliscript/package-cli-entry.eli`
-生成 `bootstrap/host/eliscript-cli.mjs`，原入口原样保存在 legacy 文件。
+生成 `bootstrap/host/eliscript-cli.mjs`，原入口原样保存在 ground 文件。
 保留全部七个命令、基于入口位置定位包、调用名称、现有环境变量优先级、
 参数及异步错误退出；新 `eliscript-compiler` 路由仍使用认证 stage3。
 Emacs 引导器只为这个可执行产物添加 shebang、相应 Source Map 行偏移和
@@ -6800,7 +6800,7 @@ Emacs 引导器只为这个可执行产物添加 shebang、相应 Source Map 行
 同一 Emacs 前置步骤从维护中的 `stdlib/core/{protocol,text,object}.eli`
 生成 `runtime/core/*-impl.mjs` 及 maps，替代对 Git 中生成物的依赖；
 源与输出显式配对，并在首次启动 JS 工具前全部生成。这三项生成物
-ignored/untracked，原 runtime 手写外壳和未受影响的 legacy 实现保留。
+ignored/untracked，原 runtime 手写外壳和未受影响的 ground 实现保留。
 B 复用现有 source-only 引导及严格逐字节、逐 map 的生成一致性用例，
 不得靠保留编译生成物于 Git 中满足干净 checkout。
 
@@ -6822,7 +6822,7 @@ Math import、namespace identity、原文件字节及两项精确运算结果回
 错配：`decodeLiteralProtocol` 对已确认 kind18 的协议方法读取真实 `slot`，
 却调用仅接收 kind13 的 raw `value-object-get`。这不是句柄已失效的证据。
 新增 `managed-host.eli` 生成原 host 入口，原字节实现保留为
-`managed-host-legacy.mjs`。只向 legacy host 传入私有 exports descriptors
+`managed-host-ground.mjs`。只向 ground host 传入私有 exports descriptors
 副本：kind18 的该读取调用既有 `value-property-get(heap, value, key, 0)`，
 其他 kind 仍调用原 Object ABI；真实 WASM/native exports 与其拒绝合同不变。
 三个未改导出保持原函数 identity，factory 用三个 required 参数及 rest
@@ -6831,9 +6831,9 @@ Math import、namespace identity、原文件字节及两项精确运算结果回
 - [x] B：真实发射函数的 Symbol slot、独立 JS 参考、WASM/native 读取、
   GC 身份、getter 抛 false、caller frame 和完全释放回归已写；raw Object
   Get 对真实函数仍拒绝，原完整 sequence 继续检验实际协议初始化。
-- [x] C：纯 Eli bridge、原字节 legacy、生成映射/ignore，以及 sequence 和
-  project-entry 的 bridge 源/生成入口/legacy 三份真实 SHA sourceAssets 已写。
-  包与页面运输沿原清单携带 legacy，不另造 ABI 或错误放行规则。
+- [x] C：纯 Eli bridge、原字节 ground、生成映射/ignore，以及 sequence 和
+  project-entry 的 bridge 源/生成入口/ground 三份真实 SHA sourceAssets 已写。
+  包与页面运输沿原清单携带 ground，不另造 ABI 或错误放行规则。
 - [ ] D：统一生成后执行上述新回归及原完整 sequence；当前不宣称功能已过。
 
 Math 支持作为正式普通模块 `{id:"runtime/math.mjs",
@@ -6852,7 +6852,7 @@ filename:"runtime/math.eli"}` 纳入 Emacs stage0 与 `loadCompilerSources`
   `renderReleaseCLIError(error, options)`；最终编译器认证复用
   `authenticateStage3Targets`，不为 CLI 加载整份语料。
 - 新 `compiler-cli-entry.eli` 生成原公共 CLI 路径，转发上述入口；旧 CLI
-  未改能力保留原字节在 `compiler-cli-legacy.mjs`，只用于既有编译/项目/包传输。
+  未改能力保留原字节在 `compiler-cli-ground.mjs`，只用于既有编译/项目/包传输。
   新默认入口认证 JS stage3，旧九格及二进制宿主命令明确拒绝。
 - 新 `tools/ci/release-workflow.eli` 生成
   `tools/ci/dist/compiler-release.mjs`，导出 `renderCompilerReleaseWorkflow(matrix)`；
@@ -6888,9 +6888,9 @@ filename:"runtime/math.eli"}` 纳入 Emacs stage0 与 `loadCompilerSources`
 
 ```text
 tools/integrity/eliscript/check.eli -> tools/integrity/check.mjs (ignored)
-  -> check-legacy.mjs (原实现字节不变：依赖/benchmark/错误类型)
+  -> check-ground.mjs (原实现字节不变：依赖/benchmark/错误类型)
 tests/eliscript/repository-integrity.eli -> tests/repository-integrity.test.mjs (ignored)
-  -> repository-integrity-test-legacy.mjs (原八个用例字节不变并实际注册)
+  -> repository-integrity-test-ground.mjs (原八个用例字节不变并实际注册)
 ```
 
 原流程 `tracked MJS -> marker inventory -> deterministic bytes/maps`
@@ -7433,7 +7433,7 @@ run `1079090f000042959f92b13b0f9e404d` exit 0，产出的五个 elc 已精确移
   原 wire、foreign 数组逐元素 identity/负零/GC、10000/10001 深树均已通过。
   nth 后续 RangeError 报告仍失败；新增 hasInstance B 把 `true` 写成不合法
   Eli 标识；另一项是未设置既定性能延期环境引起的旧 hash 校验。遗漏的
-  Bun 文件与正确延期环境下的原 legacy integrity 已一次补收 16/16 passed，
+  Bun 文件与正确延期环境下的原 ground integrity 已一次补收 16/16 passed，
   run `43143b30b3a34829a90b0a5c4d572e0a`，不修改任何历史报告。
 - 完整原 sequence run `9802b66ebfde4f53b9110adb321bb235`：先完成
   16 项中的 9 passed、7 failed，随后在首个 WASM/Node 子程序阶段触及
@@ -7660,7 +7660,7 @@ exit 0、cleanup complete，新增 elc 已回收。
 
 - Node26：229 项，227 passed、1 failed、1 原性能延期；run
   `5b15e5fd8c844dadb1e75eb9c869dd96`，33.081 秒、峰值 9751019520 字节，
-  exit 1、cleanup complete。唯一失败是完整 legacy 文档对照的独立 expected
+  exit 1、cleanup complete。唯一失败是完整 ground 文档对照的独立 expected
   未计新增两条 matcher 依赖运输及四份真实来源，须补精确预期并继续完整
   deep equality，不能忽略这些记录或字段。运输专用新增 B 已通过。
 - Bun10：79 项，76 passed、3 failed；run
@@ -8097,7 +8097,7 @@ compiler-corpus-matchers-selfhosted.test.mjs 两个精确 basename 的 smol 参�
 ['--smol','test',file]，包括原 ci-contract synthetic fixtures。
 
 源码位置：完整迁 tools/testing/file-workers.mjs 到维护
- tools/testing/file-workers.eli，生成仍原入口（不新增legacy wrapper）；复用
+ tools/testing/file-workers.eli，生成仍原入口（不新增ground wrapper）；复用
 resource-supervisor.mjs 的原 IO，保 FILE_WORKERS=2、exclusive barriers、原序结果、
 SIGINT/SIGTERM取消及未启动尾部、严格 shard parsing、所有 outcome/archive 与关闭。
 私有 worker-test-arguments(file) 是唯一 mode 分支；主入口仍实际执行整个清单。
@@ -8115,7 +8115,7 @@ C28 A/B/C施工完成后冻结；D尚未执行，不因源码迁移或先前stan
 C28 施工已写齐：维护 Eli runner完整迁移，原六项公开exports及原两worker/
 exclusive/取消/分片/outcome/archive流程保留；新增五个B注册，原ci-contract
 所有既有B未改。bootstrap两条生成映射、Make原Bun清单单项、ignore四条仅在
-本批overlay；旧mjs不手写、不加legacy wrapper，合批生成后才作为ignored产物。
+本批overlay；旧mjs不手写、不加ground wrapper，合批生成后才作为ignored产物。
 本批未生成/编译/检查/运行，最终D须同时收新B与原ci-contract完整回归。
 
 ### C29 / P05、P07：matcher 新 B 的真实 host descriptor capability
@@ -8143,7 +8143,7 @@ exclusive/取消/分片/outcome/archive流程保留；新增五个B注册，原c
 - [x] A：原 setter 对 source Array 写 parent=0 并置显式 bit8192；
   `heap-reflection-prototype` 与 `heap-source-inherited-prototype` 却在该
   bit 分支把 0 当默认 Object.prototype，`heap-standard-link(type0)` 又会
-  将显式 0 回填为 realm Object root。legacy public view 原样读取 raw
+  将显式 0 回填为 realm Object root。ground public view 原样读取 raw
   prototype，faithful snapshot/private projection 原样运输该结果，故真实
   缺陷首先位于 raw runtime，而非 matcher 特例。canonical Array.prototype
   创建时 Object root 已存在，`value-array-new` 原本存非零父链。
@@ -8223,7 +8223,7 @@ exclusive/取消/分片/outcome/archive流程保留；新增五个B注册，原c
   projection、原包装 matcher 与原 Bun matcher 均抛 Error，精确 message
   `managed host value is closed`。原 raw root release/live0/帧清理保持。
 - [x] C：仅修 `tests/eliscript/compiler-corpus-matchers.eli` 末尾新增 B 的
-  错误关闭后读取前提，不改 runtime/legacy、关闭合同、golden 或生产六文件。
+  错误关闭后读取前提，不改 runtime/ground、关闭合同、golden 或生产六文件。
 - [ ] D：统一生成后执行原完整七项；本 overlay 未生成、未运行、未检查。
 
 ### C30 / P05、P07：source Array 显式 null 原型保真
@@ -8231,7 +8231,7 @@ exclusive/取消/分片/outcome/archive流程保留；新增五个B注册，原c
 - [x] A：原 setter 对 source Array 写 parent=0 并置显式 bit8192；
   `heap-reflection-prototype` 与 `heap-source-inherited-prototype` 却在该
   bit 分支把 0 当默认 Object.prototype，`heap-standard-link(type0)` 又会
-  将显式 0 回填为 realm Object root。legacy public view 原样读取 raw
+  将显式 0 回填为 realm Object root。ground public view 原样读取 raw
   prototype，faithful snapshot/private projection 原样运输该结果，故真实
   缺陷首先位于 raw runtime，而非 matcher 特例。canonical Array.prototype
   创建时 Object root 已存在，`value-array-new` 原本存非零父链。
@@ -8309,7 +8309,7 @@ exclusive/取消/分片/outcome/archive流程保留；新增五个B注册，原c
   百万旧版同步更新至少产生平方级扫描。portable vector/map 每版本的
   record/table/key/count 等至少 10 个 managed 值；set 连同其独有 map
   至少 17 个。各自超现 8,388,607 槽，不据耗时声称死循环，不提前释放
-  逃逸 view，不提高预算或迁移整份 legacy 工厂。
+  逃逸 view，不提高预算或迁移整份 ground 工厂。
 - B：完整 source/host/SHA/region 认证以下六个实际百万 recipe；显式
   small 时 JS/WASM/native 使用同一延期集合，原 complete-hosts 保持有效。
   原无 profile/显式负向预算/篡改/缺失证据保持原严格门槛或拒绝。
@@ -8402,7 +8402,7 @@ compiler-corpus-matchers-selfhosted.test.mjs 两个精确 basename 的 smol 参�
 ['--smol','test',file]，包括原 ci-contract synthetic fixtures。
 
 源码位置：完整迁 tools/testing/file-workers.mjs 到维护
- tools/testing/file-workers.eli，生成仍原入口（不新增legacy wrapper）；复用
+ tools/testing/file-workers.eli，生成仍原入口（不新增ground wrapper）；复用
 resource-supervisor.mjs 的原 IO，保 FILE_WORKERS=2、exclusive barriers、原序结果、
 SIGINT/SIGTERM取消及未启动尾部、严格 shard parsing、所有 outcome/archive 与关闭。
 私有 worker-test-arguments(file) 是唯一 mode 分支；主入口仍实际执行整个清单。
@@ -8420,7 +8420,7 @@ C28 A/B/C施工完成后冻结；D尚未执行，不因源码迁移或先前stan
 C28 施工已写齐：维护 Eli runner完整迁移，原六项公开exports及原两worker/
 exclusive/取消/分片/outcome/archive流程保留；新增五个B注册，原ci-contract
 所有既有B未改。bootstrap两条生成映射、Make原Bun清单单项、ignore四条仅在
-本批overlay；旧mjs不手写、不加legacy wrapper，合批生成后才作为ignored产物。
+本批overlay；旧mjs不手写、不加ground wrapper，合批生成后才作为ignored产物。
 本批未生成/编译/检查/运行，最终D须同时收新B与原ci-contract完整回归。
 
 ### C29 / P05、P07：matcher 新 B 的真实 host descriptor capability
@@ -8448,7 +8448,7 @@ exclusive/取消/分片/outcome/archive流程保留；新增五个B注册，原c
 - [x] A：原 setter 对 source Array 写 parent=0 并置显式 bit8192；
   `heap-reflection-prototype` 与 `heap-source-inherited-prototype` 却在该
   bit 分支把 0 当默认 Object.prototype，`heap-standard-link(type0)` 又会
-  将显式 0 回填为 realm Object root。legacy public view 原样读取 raw
+  将显式 0 回填为 realm Object root。ground public view 原样读取 raw
   prototype，faithful snapshot/private projection 原样运输该结果，故真实
   缺陷首先位于 raw runtime，而非 matcher 特例。canonical Array.prototype
   创建时 Object root 已存在，`value-array-new` 原本存非零父链。
@@ -8528,7 +8528,7 @@ exclusive/取消/分片/outcome/archive流程保留；新增五个B注册，原c
   projection、原包装 matcher 与原 Bun matcher 均抛 Error，精确 message
   `managed host value is closed`。原 raw root release/live0/帧清理保持。
 - [x] C：仅修 `tests/eliscript/compiler-corpus-matchers.eli` 末尾新增 B 的
-  错误关闭后读取前提，不改 runtime/legacy、关闭合同、golden 或生产六文件。
+  错误关闭后读取前提，不改 runtime/ground、关闭合同、golden 或生产六文件。
 - [ ] D：统一生成后执行原完整七项；本 overlay 未生成、未运行、未检查。
 
 ### C30 / P05、P07：source Array 显式 null 原型保真
@@ -8536,7 +8536,7 @@ exclusive/取消/分片/outcome/archive流程保留；新增五个B注册，原c
 - [x] A：原 setter 对 source Array 写 parent=0 并置显式 bit8192；
   `heap-reflection-prototype` 与 `heap-source-inherited-prototype` 却在该
   bit 分支把 0 当默认 Object.prototype，`heap-standard-link(type0)` 又会
-  将显式 0 回填为 realm Object root。legacy public view 原样读取 raw
+  将显式 0 回填为 realm Object root。ground public view 原样读取 raw
   prototype，faithful snapshot/private projection 原样运输该结果，故真实
   缺陷首先位于 raw runtime，而非 matcher 特例。canonical Array.prototype
   创建时 Object root 已存在，`value-array-new` 原本存非零父链。
@@ -8871,9 +8871,9 @@ scope=stage2-stage3-complete-products、verification=identical、fileCount 为�
   副本中严格同 heap 解码 opcode35，0/1仅选原型/构造器，再翻为既有
   opcode8 Call。selector 由真实 runtime.fromHostValue 装箱，原 hostModules、
   imports、descriptor/project 对象和原 Get 顺序不增加私有 namespace。
-  旧 managed-host-legacy 字节保持，完整已有 foreign codec/first-error/roots
+  旧 managed-host-ground 字节保持，完整已有 foreign codec/first-error/roots
   复用，不迁移无关 API。默认参数和 creator 三 required + rest 保持。
-  原 initializeModule 的 undefined/boolean 在 legacy 原读取处暂不初始化；
+  原 initializeModule 的 undefined/boolean 在 ground 原读取处暂不初始化；
   非法值仍交原 validator，所有原 lifecycle/foreign/sourceDecode 已建立后、
   public factory 返回前完成同一原 initializer；显式 false 保持延迟。
 - [x] A：memory 的 host-object-identity-enabled 原 stub 为0；managed 仅在
@@ -8918,7 +8918,7 @@ scope=stage2-stage3-complete-products、verification=identical、fileCount 为�
   小 published tree 缺真实 public bootstrap 依赖和 runtime 源。
 - 目标树：两份 `tests/eliscript/bootstrap-{compiler,seed-batch}.eli`
   → 原 canonical generated `.test.mjs`；旧源原字节保留为
-  `tests/bootstrap-{compiler,seed-batch}-test-legacy.mjs`。两个小 Eli helper
+  `tests/bootstrap-{compiler,seed-batch}-test-ground.mjs`。两个小 Eli helper
   `bootstrap-seed-proxy.eli` / `bootstrap-published-probe.eli` 分别维护
   EMACS spawn 计数/失败和实际 packaged compiler 用户程序运行，不内嵌 JS。
 - [x] B：原 1+5 tests 全迁移，所有 parseArguments、三代13模块/26文件、
@@ -8955,7 +8955,7 @@ flowchart LR
 
 C51 同根 corpus 来源闭合（仍 P06/P07、A06/A07）：
 
-- A：原 CLI legacy adapter 对 canonical bootstrap-compiler suite 按唯一 JS
+- A：原 CLI ground adapter 对 canonical bootstrap-compiler suite 按唯一 JS
   边界构建历史 recipe；canonical 迁生成后不可再把其新 bytes 当旧断言。
   该 generations recipe 在 stage3 scope 已精确移交 make 最终 JS 门禁，
   保全部原 record/coverage/13 modules 身份，不复活旧 selected-target
@@ -8965,13 +8965,13 @@ C51 同根 corpus 来源闭合（仍 P06/P07、A06/A07）：
   SHA/byte/物理路径、唯一原 case 30000ms/region、原 expected/setup/body/
   coverage/ID/13modules 原样；缺失、错 SHA、错 physical label、缺 locator
   保失败且零发布。原 shell stdout 和 source negative 两项不变，未运行。
-- [x] C：compiler-corpus-cli-adapters.eli 仅在 legacy 真正读取该逻辑 suite
+- [x] C：compiler-corpus-cli-adapters.eli 仅在 ground 真正读取该逻辑 suite
   后懒认证三个真实源：byte-preserving archive、维护 Eli、当前 generated。
   原 source-reader 分别读取真实路径，按 text SHA + UTF8 byte count + file
   label 严格核对；给历史运输的是 archive 原文及其真实 identity。source
   assets 记录三者真实 SHA；original.assertionSource / cases / regions 都
   显式指 archive 实际坐标；maintainedGate 绑定 Eli 与当前 generated SHA
-  以及 make test 门禁。logical suite/fixture/host、legacy host transport、
+  以及 make test 门禁。logical suite/fixture/host、ground host transport、
   原 independent Seed oracle/source/input/golden 不改，不伪装 canonical
   仍有旧断言 bytes。无新映射/Make 改动，使用既有 adapter/test 生成入口。
 - [ ] D：与全部 C46/C49/C50/C51 完整源统一生成、集中验收；不可把源码
@@ -9044,7 +9044,7 @@ C51 同根 corpus 来源闭合（仍 P06/P07、A06/A07）：
   `node_modules/eliscript`；创建时只允许EEXIST走已有路径，随后严格比较
   链接与真实root的realpath。原同步/异步Eli输入、模块图、Node预加载、
   beforeExit、退出码、时限与全部golden不改；无空package、无删除默认
-  Unicode依赖、无生产launcher或legacy/generated JS变更。未局部生成、
+  Unicode依赖、无生产launcher或ground/generated JS变更。未局部生成、
   reader、测试或审核；本次仅修维护Eli fixture。
 - [ ] C52 lifecycle D：父级统一生成后复验原完整文件，未将部署修正当作
   生命周期行为已经通过，也未声称最新两bootstrap suite源码已验收。
@@ -9095,7 +9095,7 @@ C51 同根 corpus 来源闭合（仍 P06/P07、A06/A07）：
   原完整产品已具有真实 Math/Unicode package scope，不改产品source或
   生成物；该新文件沿既有 realpath+createRequire namespace 边界加载。
 - [x] B/C：仅 `tests/eliscript/compiler-package.eli` 与
-  `tests/eliscript/compiler-build.eli`；生产 builder/loader/legacy 不变。
+  `tests/eliscript/compiler-build.eli`；生产 builder/loader/ground 不变。
   package 临时input用已有 `node_modules/eliscript` 实际目录链接绑定真实
   root，并严格 realpath 对照；原driver字节及fixture sourceIdentity、
   artifactIdentity不变，明确保其默认runtime import，不伪装bootstrap capsule。
@@ -9136,7 +9136,7 @@ C52/C53 同批原自举测试入口修正（C51，A06）：
 - A：完整 local-recursive fixture 真实 await source call 会声明唯一
   source-operation；其Object根按C49合同必须是actual host intrinsic，
   旧无条件notStrictEqual前提错误。真正imports[]图仍拥有自己实际根。
-  第二失败为legacy自动decode/type13或18提前调用literal-kind；该原函数
+  第二失败为ground自动decode/type13或18提前调用literal-kind；该原函数
   先读取literal-records，普通值还读literal-protocol-runtime与
   literal-transports，真实registry cell未初始化时会产生ELI-RT0008。
   不改变公开Get/TDZ，不catch并吞8，不删除literalRuntime descriptor。
@@ -9154,7 +9154,7 @@ C52/C53 同批原自举测试入口修正（C51，A06）：
   仅用于descriptor.literalRuntime.bindings.literal-kind：三cell未ready时不
   Get任何registry值/用户predicate，ready才调用原literal-kind并原样保留
   异常。原语言函数/真实TDZ/transport注册算法不变，不声称ready意味着全部
-  transport注册完成；不迁移或改legacyJS。descriptor另记录原binding和真实
+  transport注册完成；不迁移或改groundJS。descriptor另记录原binding和真实
   三cell供固定B反证，所有function/table index由真实lowerer分配。
 - [ ] D：父统一生成/新四阶段/完整受影响组及最终三输出；本批源写齐未执行。
 
@@ -9197,13 +9197,13 @@ C52/C53 同批原自举测试入口修正（C51，A06）：
   不在上述私有scope下，继承外层自定义包名后无法解析自己的Unicode import。
   必须给实际包根 `runtime/package.json` 配真实 self-scope，不能靠测试
   目录链接代替交付闭包；原metadata/source/artifact identities仍不变。
-- [x] A：真实legacy `compiler-browser.mjs` 明确导出
+- [x] A：真实ground `compiler-browser.mjs` 明确导出
   `installBrowserCompilerWorker`，内部才调用低层 `installCompilerWorker`；
   当前Eli facade公开导出/委托同名正确，不做猜测式API改名。
-  该legacy的真实Blob Worker以 `import(import.meta.url)`重新读取当前
+  该ground的真实Blob Worker以 `import(import.meta.url)`重新读取当前
   browser模块namespace；测试probe若把它inline进无此export的probe
   entry便破坏原模块自import边界。原HTTP browser模块必须独立部署/加载，
-  不能用main-thread回退或重写legacy Worker模板修饰错误。
+  不能用main-thread回退或重写ground Worker模板修饰错误。
 - [x] B/C：`compiler-package.eli` 给真实root runtime增加私有
   name=eliscript/type=module作用域，三个实际exports分别路由本目录
   math/unicode-case/unicode-case-data；外层包名/原公开exports不变。
@@ -9213,7 +9213,7 @@ C52/C53 同批原自举测试入口修正（C51，A06）：
   不覆盖或重签原artifact代码/地图/已认证package文件。
 - [x] B/C：原5case全部保留。新增scope用独立完整expected对象对照、实际
   SHA/bytes核对；原entry完整复制字节/manifest identity再次严格比较。
-  缺依赖case仍必须实际静态import拒绝目标legacy文件，不接受其它错误。
+  缺依赖case仍必须实际静态import拒绝目标ground文件，不接受其它错误。
   Worker probe保原全部业务/abort false/显式404/HTTP请求断言，仅运输
   specifier使用本次真实监听server的绝对browser模块URL，并将该精确URL
   设为bundler external，避免相对文件specifier被inline进probe。
@@ -9252,11 +9252,11 @@ C52/C53 同批原自举测试入口修正（C51，A06）：
 - [x] B/C：认证fixture的sourceIdentity/artifactIdentity在packaging前后
   全量严格比较，artifact私有scope与原input完整字节相同；三个真实map
   各自同长度篡改后，都须在原copy哈希校验处精确拒绝对应原路径且不重签
-  原身份。原legacy依赖缺失/篡改/公开scope/hash/Browser原断言完整保留，
+  原身份。原ground依赖缺失/篡改/公开scope/hash/Browser原断言完整保留，
   原5case不删不跳，fixture明确independentCompiler=false。
 - [x] C：生产按pair处理：无module/map才取同root producer两文件；
   已认证module+map留其原bytes；已有module未声明map则不附其它生成物；
-  孤立map严格拒绝。没有修改legacy、生成JS/map文本、已认证sourceIdentity
+  孤立map严格拒绝。没有修改ground、生成JS/map文本、已认证sourceIdentity
   或正式编译器/黄金/预算，不新增额外映射或公开API。
 - [ ] D：父统一生成后完整原5case复验。本次仅源码实现，未运行测试、
   编译、reader、探针或静态审核；保留原map失败收据，不提前计通过。
@@ -9311,7 +9311,7 @@ C52/C53 同批原自举测试入口修正（C51，A06）：
   检查上述三 cell 加真实 role Map cell，未 ready 返回3；ready 后调用
   原 helper，原异常和动态注册保持。只由内部 WeakMap 记录真实链接事实，
   descriptor 绑定私有入口并保原 helper/registry 位置供反证；不新增
-  公共 raw ABI 或外部 IR schema 字段，不改 memory/legacy JS。
+  公共 raw ABI 或外部 IR schema 字段，不改 memory/ground JS。
 - [x] C：`tests/eliscript/managed-project-zero-imports.eli` 保原完整
   fixture、全部黄金、纯/能力两 variant、WASM/native 两 target、原预算
   和时限；原报告、普通绑定、真实 queue/ordinary codec、async 及清理
@@ -9339,7 +9339,7 @@ C52/C53 同批原自举测试入口修正（C51，A06）：
   或提前释放根；factory 私有状态按 heap 隔离。原 invoke 的成功、
   错误或抛值均由 finally 清范围；只对实际嵌套自动 probe 的有效 ABI
   返回无品牌/无协议，非法参数仍交原 validator。公开 helper、显式
-  import/export 不被替换；不改 legacy JS、memory ABI 或原 helper。
+  import/export 不被替换；不改 ground JS、memory ABI 或原 helper。
 - [ ] D：父统一生成后集中验证原完整第17 case及受影响 host/protocol
   门禁。本批未运行生成、测试、reader或审核；C56原 protocol9已有
   run `2386dd9a0dea431ab7d76847c095455c`、9/9、43.663s、1780809728
@@ -9392,7 +9392,7 @@ C52/C53 同批原自举测试入口修正（C51，A06）：
   running/unverified，等整路终态，不能拿中途record数量冒充通过。
 - [x] P08源码整合已把本轮维护源/接线同步交付worktree，保无关WIP；
   三个已迁移canonical生成入口已untrack，维护Eli源保留，原有两份实际
-  使用的bootstrap legacy字节档案保全。最后kind/role/backend/runtime/
+  使用的bootstrap ground字节档案保全。最后kind/role/backend/runtime/
   host与其测试族已在 C57冻结后同步。尚未暂存/签名提交/推送或升级版本；
   最终原全量门禁、浏览器/平台、0.0.2冻结/包安装及对应CI仍待关闭。
 
@@ -9421,7 +9421,7 @@ C52/C53 同批原自举测试入口修正（C51，A06）：
   foreign codec 在对应 heap 注册固定三个函数根；原 dispose 前平衡释放，
   登记异常也清理且保首错。实际 source-operation Call 仅在目标函数
   身份精确相同且参数是可证明 owned ordinary record/array 时复用已有
-  raw ABI，不解码发布其 receiver；无新增 runtime ABI/legacy JS。
+  raw ABI，不解码发布其 receiver；无新增 runtime ABI/ground JS。
 - [x] C：defineProperty 进一步仅限可扩展目标的新增属性、primitive key、
   无自定义原型/污染继承的普通 data-only descriptor。已有属性、不可
   扩展、accessor/inherited descriptor、namespace/function、对象键、
@@ -9471,13 +9471,13 @@ C52/C53 同批原自举测试入口修正（C51，A06）：
 
 A（已确定）：C57 原 `tests/bootstrap-project.test.mjs:731–789` 的 virtual-bun 两模块项目经真实 buildProject 发射 main.mjs 后缺 `eliscript/runtime/unicode-case.mjs`，原输出 43 尚未得到。C46 默认 Unicode import 是语言交付要求，不删除该 import，也不更改原 sourceOverrides、maps、独立 Node/Bun 和 cache 断言。`bootstrap/host/project.mjs:874–1081` 原实现完整处理校验、图隔离、IR 发射、缓存、manifest 和 report，但成功返回前后从不部署默认 runtime。原模块只有 checkProject/buildProject 两个公开导出。
 
-施工边界：将此旧模块原字节保留 `bootstrap/host/project-legacy.mjs`；维护源 `tools/project/project.eli` 生成回原 `bootstrap/host/project.mjs`。checkProject 保原函数 identity；buildProject 仅以原 options 单次转交真实 legacy 构建，成功后读取其真实 outDir/result，不改变原验证/Get 顺序、module 输入/产物、manifest/cache/report/digest 或 frozen result。独立的输出内 `node_modules/eliscript` scope 声明三个真实 exports，复制 root/runtime 的 math、unicode-case、unicode-case-data 三对 mjs/map 原始 bytes，不混用 dist/runtime 的另一套 generator 坐标。逐份 map.sourcesContent 必须等于实际维护 Eli 源；私有 eliscript-runtime.json 保存相同真实 source/module/map 的 bytes/SHA256，不重写任何已认证原产物身份。
+施工边界：将此旧模块原字节保留 `bootstrap/host/project-ground.mjs`；维护源 `tools/project/project.eli` 生成回原 `bootstrap/host/project.mjs`。checkProject 保原函数 identity；buildProject 仅以原 options 单次转交真实 ground 构建，成功后读取其真实 outDir/result，不改变原验证/Get 顺序、module 输入/产物、manifest/cache/report/digest 或 frozen result。独立的输出内 `node_modules/eliscript` scope 声明三个真实 exports，复制 root/runtime 的 math、unicode-case、unicode-case-data 三对 mjs/map 原始 bytes，不混用 dist/runtime 的另一套 generator 坐标。逐份 map.sourcesContent 必须等于实际维护 Eli 源；私有 eliscript-runtime.json 保存相同真实 source/module/map 的 bytes/SHA256，不重写任何已认证原产物身份。
 
 部署前先读取认证全部源、预检全部已有目标及目录；拒绝非目录、symlink、不同 bytes、源/输出 alias。只允许相同 bytes 复用或 wx 新建，race 下 EEXIST 仍比较相同 bytes；不改调用方 package.json，不写出 outDir，不覆盖用户文件。缺真实源/map 或 source/map 不匹配必须原样拒绝，不能偷偷改用另一生成器。
 
-B（源码写齐、未运行）：新增 `tests/eliscript/bootstrap-project-runtime.eli`，5 项保留真实两模块 sourceOverrides 输入/43，独立 legacy manifest 与每个 module/map 全 bytes、原源不变与 sourceDigest；Node/Bun 真执行；原 disk/cache 复用/42、调用方 package scope 原字节；3 capsules×module/map 及 scope 每项冲突严格拒绝且原 bytes 保留；symlink 不可逃逸、删除真实依赖后执行必须失败、重新部署恢复；checkProject 原 identity、option getter 原首错与 Get 顺序。原 bootstrap-project 全套不删不换。生成入口 `tests/bootstrap-project-runtime-selfhosted.test.mjs`，加入既有 Node 门禁。
+B（源码写齐、未运行）：新增 `tests/eliscript/bootstrap-project-runtime.eli`，5 项保留真实两模块 sourceOverrides 输入/43，独立 ground manifest 与每个 module/map 全 bytes、原源不变与 sourceDigest；Node/Bun 真执行；原 disk/cache 复用/42、调用方 package scope 原字节；3 capsules×module/map 及 scope 每项冲突严格拒绝且原 bytes 保留；symlink 不可逃逸、删除真实依赖后执行必须失败、重新部署恢复；checkProject 原 identity、option getter 原首错与 Get 顺序。原 bootstrap-project 全套不删不换。生成入口 `tests/bootstrap-project-runtime-selfhosted.test.mjs`，加入既有 Node 门禁。
 
-C（源码已齐，验收待执行）：纯 Eli facade＋原字节 legacy、Emacs tools bootstrap 源/输出映射、generated canonical/maps ignore/untrack、B 映射与 Make 既有 Node 组均已落实。无手写 JS/模板，无新增正式 compiler module。
+C（源码已齐，验收待执行）：纯 Eli facade＋原字节 ground、Emacs tools bootstrap 源/输出映射、generated canonical/maps ignore/untrack、B 映射与 Make 既有 Node 组均已落实。无手写 JS/模板，无新增正式 compiler module。
 
 D（待父统一）：本批不生成/编译/reader/测试；父在全部 C 齐后统一生成，完整原 bootstrap-project 套件和新 5 项一起验证，再按当前正式 stage3 三输出验收。此前 C57 ENOSPC 中止和原缺依赖失败保留，不补写历史通过。
 
@@ -9504,7 +9504,7 @@ D（待父统一）：本批不生成/编译/reader/测试；父在全部 C 齐�
 
 ### C58 A07：Browser CI 全新 checkout 的生成工具前置
 
-- [x] A：真实 Browser compatibility CI 在未生成迁移后的 runtime/tools 时直接导入原 browser tests，出现 `managed-runtime.mjs` 等模块缺失。保持原系统×浏览器矩阵、完整六文件命令、断言、预算和证据上传，只在依赖安装后、浏览器安装及测试前新增无条件 `make bootstrap-backends`。工具源 `tools/ci/render-browser-workflow.eli` 发射 canonical renderer；原 renderer 原字节保留为 `render-browser-workflow-legacy.mjs`，SHA256 `a2beec03e9a61946097e57a11638f47e6a52f3b69fce1afdfabca2bad226d684`。
+- [x] A：真实 Browser compatibility CI 在未生成迁移后的 runtime/tools 时直接导入原 browser tests，出现 `managed-runtime.mjs` 等模块缺失。保持原系统×浏览器矩阵、完整六文件命令、断言、预算和证据上传，只在依赖安装后、浏览器安装及测试前新增无条件 `make bootstrap-backends`。工具源 `tools/ci/render-browser-workflow.eli` 发射 canonical renderer；原 renderer 原字节保留为 `render-browser-workflow-ground.mjs`，SHA256 `a2beec03e9a61946097e57a11638f47e6a52f3b69fce1afdfabca2bad226d684`。
 - [x] B：新增维护 Eli `tests/eliscript/browser-workflow.eli`，接既有 Node 完整组。断言 bootstrap 严格位于依赖与浏览器/原测试之间；去掉新增步骤后与原 renderer 输出逐字节一致，原验证函数及 Error 类身份保留；checker 拒绝缺失或 `if: false` 跳过 bootstrap。原 `ci-contract.test.mjs` 未改，继续覆盖原六文件命令、不可删减/过滤测试和全部矩阵行。
 - [x] C：Eli facade 保留四个公开导出、完整 contract/workflow checker 与 `--write`/默认验证 CLI；仅在原 browser 安装锚点前插入 bootstrap 步骤。`tools/backends/bootstrap.el` 补工具与测试源/输出映射，canonical renderer/map、新测试/map 全部 ignored，Make 既有 Node 门禁接入新测试。无新增手写 JS 或 JS 模板，未覆盖同批 runtime 前置修改。
 - [ ] D：父任务统一生成 canonical renderer/test、执行 renderer `--write` 与 checker、新 Eli 回归及原 CI contract/browser 完整门禁；验证全新 checkout 构建路径与真实 CI 后才判 A07 完成。本子任务未编译、未测试、未提交。
@@ -9514,8 +9514,8 @@ D（待父统一）：本批不生成/编译/reader/测试；父在全部 C 齐�
 A：原 `tools/acceptance/check.mjs` 的 validateAcceptanceCorpus 只接纳 git ls-files
 结果，原 AC-04/05/07 合同仍指向已迁移的 bootstrap-compiler.test.mjs。因此
 保持原合同、m13-01 JSON/Markdown、全部历史 hash 原字节不变，将原 checker
-原字节归档为 check-legacy.mjs。维护 tools/acceptance/check.eli，迁移完整
-validate/check/run/verify 与 CLI；仅错误类与纯报告格式函数继续引用 legacy。
+原字节归档为 check-ground.mjs。维护 tools/acceptance/check.eli，迁移完整
+validate/check/run/verify 与 CLI；仅错误类与纯报告格式函数继续引用 ground。
 不代理旧内部 validator，不伪造 Git/index/root，不投影修改报告。
 
 唯一例外为 tests/bootstrap-compiler.test.mjs：维护源
@@ -9541,9 +9541,9 @@ canonical module/map ignore/untrack、Make 原 Node 组入口、package files �
 两个 CLI、原 suite 与新否定组；当前 corpus/parity identity 由父真实生成器更新。
 
 本族 A/B/C 已写齐（D 待父统一）：新增纯 Eli checker 与 5 项完整新 B、
-Emacs 内存重编译器；原 checker 归档为 check-legacy.mjs，canonical 已从
+Emacs 内存重编译器；原 checker 归档为 check-ground.mjs，canonical 已从
 index 移除并 ignored。原导出全部保留，validate/check/run/verify 与 CLI 均
-走维护 Eli 内部 validator；只有原 error class 与三个纯 formatter 引用 legacy。
+走维护 Eli 内部 validator；只有原 error class 与三个纯 formatter 引用 ground。
 默认 bootstrap 仅为原 bootstrap-compiler 测试增加真实 --source-map，其它
 工具生成选项不变。bootstrap 两映射、Make Node 组、package files 和 ignore
 均已接齐。不生成、不运行测试或构建，不修改 core acceptance 合同和历史
@@ -9552,7 +9552,7 @@ report/markdown、corpus/parity 派生 identity。源/模块/map 使用 Buffer �
 
 ### C58 P05：真实 native defineProperty 的 owned 函数与已有属性
 
-- [x] A：完整 WASM `core-stdlib-usage` 的真实原产物诊断中，prepare 在实际 `Object.defineProperty` 给 owned kind18 函数（code179）重设已有 `length` 时进入 legacy host codec，触发 brandProbe1110 后产生约4900次嵌套 descriptor has/get，原 effective 131072 slots / 8 MiB initial / 64 MiB max / auto65536 下容量耗尽；原完整重放也报告递归溢出。`native-object-operation` 原规则仅接 kind13/14 且 `native-data-definition-p` 要求目标 own 属性不存在，因此该调用被排除。已有 raw `value-object-meta-builtin(0)` 经 `value-source-define-descriptor` → descriptor normalize/merge → kind18 `heap-function-data-put` 明确支持函数、已有属性、不可配置字段拒绝及 flags 保留，不需要新增 runtime ABI。
+- [x] A：完整 WASM `core-stdlib-usage` 的真实原产物诊断中，prepare 在实际 `Object.defineProperty` 给 owned kind18 函数（code179）重设已有 `length` 时进入 ground host codec，触发 brandProbe1110 后产生约4900次嵌套 descriptor has/get，原 effective 131072 slots / 8 MiB initial / 64 MiB max / auto65536 下容量耗尽；原完整重放也报告递归溢出。`native-object-operation` 原规则仅接 kind13/14 且 `native-data-definition-p` 要求目标 own 属性不存在，因此该调用被排除。已有 raw `value-object-meta-builtin(0)` 经 `value-source-define-descriptor` → descriptor normalize/merge → kind18 `heap-function-data-put` 明确支持函数、已有属性、不可配置字段拒绝及 flags 保留，不需要新增 runtime ABI。
 - [x] A 范围：仅扩展真实 native `Object.defineProperty` 的 owned kind18 目标，以及 owned 对象/数组/函数已有属性；仍认证原 native callee，仍拒绝 namespace、foreign Proxy、对象键及非纯 data descriptor 的优化分支，保持原 getter/用户覆盖/继承污染 fallback。目标 extensibility 与已有属性合法性由同一个原 raw 实现判定，避免错误拒绝非扩展对象对已有可配置字段的合法重定义。不扩其它 Object 方法，不变原输入、容量或黄金。
 - [ ] B：在既有 owned-binding 原完整 source fixture 加函数 length/普通已有字段重定义、flags 保留、不可配置不同值拒绝，独立固定预期与 JS 原输出一致；pure 与真实 source-operation complete 两图的 WASM/native 共用原回归接线。保留原 getter次序、false异常、Proxy、override、10000循环与全部原输出。
 - [ ] C：`tools/backends/eliscript/managed-host-object-realm.eli` 原 `native-object-operation` 仅为 defineProperty 接受 kind18；`native-data-definition-p` 保留 descriptor prototype/纯own data字段检查，去掉 target 可扩展/own缺失两个不必要前置。其余原 raw 转发、frame/error恢复不变。
@@ -9560,13 +9560,13 @@ report/markdown、corpus/parity 派生 identity。源/模块/map 使用 Buffer �
 
 C58 P05 本项施工收口：
 - [x] B：`managed-project-zero-imports.eli` 的原完整 source fixture 新增 `owned-native-function-report` 并纳入原 pure/complete、WASM/native 循环。独立固定预期 `[true,2,7,7,false,false,true,2,true,true,true,false,"TypeError"]` 检查已有函数 length、原参数调用、长度属性 flags、原已有普通字段 flags、不允许改变不可配置字段；独立 JS 参考与两图比较均已接线。原所有 source/golden/负预算不变。
-- [x] C：defineProperty 分支允许 kind18，纯 data descriptor 检查保留，目标已有属性/可扩展性原前置移除，交原 raw descriptor normalize/merge 与 kind18 写入路径。未改 managed-host.eli/其它方法/legacy JS，未改另一协作者的 managed-host 回归。
+- [x] C：defineProperty 分支允许 kind18，纯 data descriptor 检查保留，目标已有属性/可扩展性原前置移除，交原 raw descriptor normalize/merge 与 kind18 写入路径。未改 managed-host.eli/其它方法/ground JS，未改另一协作者的 managed-host 回归。
 - [ ] D：本修复源码全部写齐，父统一生成后验收。独立诊断的 stderr/峰值与原失败均保留，未将诊断截断或 narrow case 作为正式三输出通过。
 
 ### C58 P05：数组方法选择及稀疏读取越过真实 foreign 原型
 
-- [x] A 真实基线：`fb98a50` 的原完整 `original-program:formatter-node`，原三模块源码、原 hostEval/参数、131072 slots/8 MiB initial/64 MiB max/auto65536 与黄金保持不变。原失败及最小 ABI 重放均为 `ELI-RT0003`；callee kind18/code66、tuple kind7/length2/count2 合法。只读 inspector 在原 WASM `fail(code)` 断点取得首次 bounds 栈：`heap-array-prototype-owner` → `heap-legacy-array-callback-builtin` → `value-array-callback-builtin`。当前祖先 `1048649` 的实际 kind=35，不是无效句柄。持久原收据见 `_worktree/evidence/goal-0.0.2/c58-formatter-{original-abi-diagnostic,fail-local-values}.log`；无产物改写或黄金变更。
-- [x] A 当前/目标源码树（只有标记处施工）：`bootstrap/runtime/memory.eli` L2093 `heap-array-inherited-index`、L2108 `heap-array-prototype-owner`、L2147 `heap-source-array-read`；`tests/eliscript/managed-host.eli` L508 `canonical-source`、L562 `canonical-api`、L575 `exercise-canonical`。不修改宿主原型替身、legacy JS、ABI 或声明字段。
+- [x] A 真实基线：`fb98a50` 的原完整 `original-program:formatter-node`，原三模块源码、原 hostEval/参数、131072 slots/8 MiB initial/64 MiB max/auto65536 与黄金保持不变。原失败及最小 ABI 重放均为 `ELI-RT0003`；callee kind18/code66、tuple kind7/length2/count2 合法。只读 inspector 在原 WASM `fail(code)` 断点取得首次 bounds 栈：`heap-array-prototype-owner` → `heap-ground-array-callback-builtin` → `value-array-callback-builtin`。当前祖先 `1048649` 的实际 kind=35，不是无效句柄。持久原收据见 `_worktree/evidence/goal-0.0.2/c58-formatter-{original-abi-diagnostic,fail-local-values}.log`；无产物改写或黄金变更。
+- [x] A 当前/目标源码树（只有标记处施工）：`bootstrap/runtime/memory.eli` L2093 `heap-array-inherited-index`、L2108 `heap-array-prototype-owner`、L2147 `heap-source-array-read`；`tests/eliscript/managed-host.eli` L508 `canonical-source`、L562 `canonical-api`、L575 `exercise-canonical`。不修改宿主原型替身、ground JS、ABI 或声明字段。
 
 ```mermaid
 flowchart LR
@@ -9584,16 +9584,16 @@ flowchart LR
 
 ### C58 P05/A07：fuzz 当前发射字节、独立全发射与历史摘要分开证明
 
-A 现状与施工位置：`tests/reader-program-fuzz.test.mjs` 保留100000输入/50000 program、原320000ms测试与300000ms子进程、四个合法/运行时结构和不可变写入否例，但 compiler.resultDigest 历史固定值 b31… 与新增默认Unicode import后的真实输出摘要不同。`tools/fuzz/reader-program-fuzz.eli` 继续复用原完整reader verifier及确定性generator，不修改其 resultDigest 定义。legacy corpus adapter以旧test marker抽原helper/body，需要保旧字节archive并明确迁入新维护host，不能修改旧JS模板。
+A 现状与施工位置：`tests/reader-program-fuzz.test.mjs` 保留100000输入/50000 program、原320000ms测试与300000ms子进程、四个合法/运行时结构和不可变写入否例，但 compiler.resultDigest 历史固定值 b31… 与新增默认Unicode import后的真实输出摘要不同。`tools/fuzz/reader-program-fuzz.eli` 继续复用原完整reader verifier及确定性generator，不修改其 resultDigest 定义。ground corpus adapter以旧test marker抽原helper/body，需要保旧字节archive并明确迁入新维护host，不能修改旧JS模板。
 
-施工树与流程：原 test JS → 原字节 `reader-program-fuzz-test-legacy.mjs`（历史断言/regions保留）；新 `tests/eliscript/reader-program-fuzz.eli` → ignored canonical test。新 `tools/fuzz/program-emission-proof.eli` 与 `tools/fuzz/program-emission-oracle.el`：同完整program输入 → 独立Emacs逐项真实输出/结构化错误NDJSON → selected compiler逐项全bytes/错误比较 → 当前原义摘要与精确移除单行Unicode import的历史摘要。新 `tools/fuzz/reader-program-acceptance.eli` 维护原全部断言与四结构证明；固定Eli Node helper读取JSON数据并实际执行两个编译器的产物，不写JS模板。新Eli corpus host复用同一验收入口，选最终实际compiler directory；corpus维护接线保原archive/regions/coverage并记录新源/输出/El oracle资产。
+施工树与流程：原 test JS → 原字节 `reader-program-fuzz-test-ground.mjs`（历史断言/regions保留）；新 `tests/eliscript/reader-program-fuzz.eli` → ignored canonical test。新 `tools/fuzz/program-emission-proof.eli` 与 `tools/fuzz/program-emission-oracle.el`：同完整program输入 → 独立Emacs逐项真实输出/结构化错误NDJSON → selected compiler逐项全bytes/错误比较 → 当前原义摘要与精确移除单行Unicode import的历史摘要。新 `tools/fuzz/reader-program-acceptance.eli` 维护原全部断言与四结构证明；固定Eli Node helper读取JSON数据并实际执行两个编译器的产物，不写JS模板。新Eli corpus host复用同一验收入口，选最终实际compiler directory；corpus维护接线保原archive/regions/coverage并记录新源/输出/El oracle资产。
 
 - [x] A：结果层严格分开：真实 compiler.resultDigest保持完整当前JS字节语义；独立Emacs每条完整输出必须相同、全部拒绝诊断必须相同；历史摘要只允许恰好撤销一行 `import "eliscript/runtime/unicode-case.mjs";`，其余字节和全部error摘要不变，完整固定语料仍要求原 b31c1f4546e42b3501fcc8a97403b171a6d3bb0ba8976bbe8bf305a235db7024。不把fcaef测量值直接写入golden。
 - [ ] B：迁移原100000全部reader断言/50000完整program计数与否例/所有摘要/原timeout；保原四结构Seed全JS/maps与Node运行的独立预期，新增完整program逐项独立发射证明与历史b31摘要；保archive来源和原coverage。
 - [ ] C：维护Eli/El实现与所有tool/test/helper mapping、ignore及corpus唯一hook一次写齐。无手写JS，无改旧archive，不缩原语料、不吞Unicode行后冒称原resultDigest。
 - [ ] D：父同批集中生成并执行原完整100000验收、corpus真实最终编译器与三输出门禁；若精确单行撤销不能恢复b31，保失败并调查其它字节变化，不改golden。
 
-C58 fuzz 接线澄清（以此为准）：父确认 corpus post-hook ownership 后，原 JS test 按原坐标、原字节只读保留为历史断言输入（SHA256 d53a6fab62d6ca7f9a58ae56265149d1a8b51ce4b53080da018724a29ce52b6d）；不执行它的旧固定当前摘要断言，不搬旧文本，避免legacy抽取在post-hook前失败。新维护测试命名 `tests/eliscript/reader-program-fuzz-acceptance.eli` → `tests/reader-program-fuzz-acceptance-selfhosted.test.mjs`，替换Make原执行位置，全部旧行为与golden在Eli中真实保持/区分。新增 `transportOriginalFuzzCorpus(document, options)` 仅替换唯一fuzz record执行host，父负责主corpus唯一import/调用，原metadata/coverage/regions不动并追加维护资产证据。
+C58 fuzz 接线澄清（以此为准）：父确认 corpus post-hook ownership 后，原 JS test 按原坐标、原字节只读保留为历史断言输入（SHA256 d53a6fab62d6ca7f9a58ae56265149d1a8b51ce4b53080da018724a29ce52b6d）；不执行它的旧固定当前摘要断言，不搬旧文本，避免ground抽取在post-hook前失败。新维护测试命名 `tests/eliscript/reader-program-fuzz-acceptance.eli` → `tests/reader-program-fuzz-acceptance-selfhosted.test.mjs`，替换Make原执行位置，全部旧行为与golden在Eli中真实保持/区分。新增 `transportOriginalFuzzCorpus(document, options)` 仅替换唯一fuzz record执行host，父负责主corpus唯一import/调用，原metadata/coverage/regions不动并追加维护资产证据。
 
 ### C59 / P06、A06–A07：项目 runtime scope 不遮蔽真实会话依赖
 
@@ -9643,11 +9643,11 @@ C58 fuzz 本批源码施工收口（D待执行）：
 ### C59 P05：构造器品牌登记前的 native defineProperties/freeze 不得发布普通缓存身份
 
 A 基线与真实现场：`fb98a50` 加当前未提交 C58 修复；C58 原完整 WASM
-tree-walk/declarative-record 在 legacy `decode`→provider.create(record) 报
+tree-walk/declarative-record 在 ground `decode`→provider.create(record) 报
 invalid persistent record type。`stdlib/managed-runtime-record.eli:153–165`
 依次对 RecordValue 执行 Object.defineProperties、Object.freeze，最后才
 record-types.add；`managed-runtime-type.eli:184–189` 同样最后才写 type-states。
-legacy decode 在 literal-kind 前先读 sourceCache，故品牌登记前被 Object
+ground decode 在 literal-kind 前先读 sourceCache，故品牌登记前被 Object
 物化的普通 SourceView 后来不能冒充已登记的主机 RecordType。不得改黄金、
 从缓存猜品牌、替换已公开函数身份或接受假的 record/type。
 
@@ -9800,7 +9800,7 @@ A：原 text 固定点实际split结果夹入每轮剩余suffix且超过8项。
 原128slots module_init提前耗尽已由真实原资源诊断证明是Array静态取值提前
 注册六个iterator callable；由后端负责人移除该无关提前注册，按需路径保留。
 证据为 `c60-construction-init-diagnostic-arity.log`，不是增大容量；
-旧trap注入只命中不再被新版静态Array.from调用的legacy ABI，归原测试迁移接线，
+旧trap注入只命中不再被新版静态Array.from调用的ground ABI，归原测试迁移接线，
 不能倒退生产到旧ABI。完整原case/黄金均保留。
 
 - [x] A：以上真实根因和最小函数范围已明确；其余已收集失败分交对应所有者。
@@ -9814,7 +9814,7 @@ A：C58 原 `compiler-stdlib-bit-complete` 在真正 Seed bit-usage.mjs 执行�
 因默认 Unicode import 没有 package scope 失败。原 tests/stdlib-bit.test.mjs
 为完整只读历史断言源，SHA256 为
 c550405d71455b5ce694c929b63b6a0843ea637f5b35ccf221afd5780ce16771。
-保持旧源码原字节，让 legacy recipe 仍按原 markers/regions/原身份生成；维护
+保持旧源码原字节，让 ground recipe 仍按原 markers/regions/原身份生成；维护
 `tools/testing/stdlib-bit.eli` 实现原整例，正常 Bun 测试与 corpus host 共用，
 只在自己 mkdtemp 创建的新根下链接真实源码包。原 Seed/portable 两编译路径、
 bit+usage 原输入、完整 JS/maps 字节相等、2 compiler×Node/Bun 四次原 host
@@ -9860,7 +9860,7 @@ managed prototype/brand 修复不能静态证明覆盖此超时。现存现场�
 
 本族 B/C 接线（未生成、未验收）：原主 suite 路径继续为
 `tests/wasm-managed-array-search.test.mjs`，原字节历史源保留为
-`tests/wasm-managed-array-search-test-legacy.mjs`，其取消 tracked 由父已完成。
+`tests/wasm-managed-array-search-test-ground.mjs`，其取消 tracked 由父已完成。
 维护 `tests/eliscript/managed-array-search.eli` 发射回原主 suite；独立
 `managed-array-search-{node,page,abi}.eli` 各发射至
 `tests/helpers/managed-array-search-{node,page,abi}.mjs`，四项均已加入
@@ -9873,7 +9873,7 @@ ABI 用例待全批 C 齐后父统一生成与 D，不提前局部执行。
 
 ### C59 / P06、A06–A07：array-search 原 ABI 两项边界用例迁 Eli
 
-A：只读原 `wasm-managed-array-search-test-legacy.mjs:38–46` 两项完整测试，
+A：只读原 `wasm-managed-array-search-test-ground.mjs:38–46` 两项完整测试，
 迁到 `tests/eliscript/managed-array-search-abi.eli`，生成位置为已接线、已
 ignored 的 `tests/helpers/managed-array-search-abi.mjs`。唯一导出
 `registerOriginalArraySearchAbi(context)` 在注册时保存 context 函数；每项
@@ -9905,7 +9905,7 @@ C59 search 主实现已写齐（D未运行）：原11项中9项在维护主suite
 全部fromIndex/holes/NaN/-0/Unicode/identity输入与断言。五个原内嵌Eli场景迁为真实 .eli fixtures。
 浏览器page静态导入HTTP /oracle.mjs，在执行前断言浏览器现场 emit_ir_string 与服务器原始JS完整字节相同；
 不通过JS模板/字符串回调构造宿主代码，不把Bun bundle或HTTP运输字节冒称compiler产物。
-原suite原字节保留 -test-legacy，canonical已untrack；四维护源映射和ignore完成。
+原suite原字节保留 -test-ground，canonical已untrack；四维护源映射和ignore完成。
 
 C59 原CI失败范围保持：Browser compatibility 的失败不止两个缺依赖入口；原完整日志还报告
 array-construction/object-properties 的资源、callee及trap断言，以及 direct-wasm/backend
@@ -9914,7 +9914,7 @@ array-construction/object-properties 的资源、callee及trap断言，以及 di
 
 ### C59 / P06、A06–A07：完整 browser suites 的真实迁移来源接线
 
-A（实际入口与范围）：`compiler-corpus-managed-fixtures-legacy.mjs` 的 plans
+A（实际入口与范围）：`compiler-corpus-managed-fixtures-ground.mjs` 的 plans
 约 L686/L693 只给 search/symbols 既有 fixture 添加静态观察；L639 replaySuites
 及 L834 selectedSuites 仍直接执行两个 canonical 完整 Bun suite。matrix 的
 originalManagedSuites 只有原六族，runtime/identity families 也没有这两族；
@@ -9923,7 +9923,7 @@ originalManagedSuites 只有原六族，runtime/identity families 也没有这�
 
 在维护 `compiler-corpus-managed-fixtures.eli` 增加
 `readOriginalManagedSuiteMigrations(options)`：通过同一 options.text/file 读取
-两个明确的 -test-legacy 原字节文件，固定 SHA 并由原 registration reader
+两个明确的 -test-ground 原字节文件，固定 SHA 并由原 registration reader
 解析 search 11 项、symbols 35 项，原注册顺序、完整 span/byteSpan、case SHA、
 标题和每项 deadline 全保留，显式 sourceFile 指向 archive。分别绑定实际
 canonical main、维护 Eli、Node/page/ABI helper、共享 browser helper、对应
@@ -9943,7 +9943,7 @@ archive 改动、file/text 冲突、map 源错配、缺失 helper 的拒绝用�
 完整 record 保持原 execution/coverage/suites。旧全部 source-archive 测试保留。
 
 C 清单：维护 reader＋wrapper、B 用例、九个实际 source-map 参数接线；不改
-legacy、matrix、compiler-corpus、原合同/报告、任何历史 hash 或生成物。
+ground、matrix、compiler-corpus、原合同/报告、任何历史 hash 或生成物。
 D 由父在全批 C 齐后统一生成及原完整 corpus / suites 验收，当前仍待执行。
 
 C59 同族维护用例依赖闭包（A/B/C齐、D待执行）：`compiler-corpus-host-completion.eli`
@@ -9958,7 +9958,7 @@ false原异常、清理/重试及所有原断言，不伪造namespace或跳过�
 execution、coverage、expected 不改。source-archive 原套件追加来源正例和
 四类否例，不运行。bootstrap --source-map 增补的是 8 个输出（上述“九个”
 包括已有 bootstrap-compiler 项，非 9 个新增输出）。matrix/requiredCoverage/
-compiler-corpus/legacy 未修改，原稳定分母未增加。未生成、未测试、未审查。
+compiler-corpus/ground 未修改，原稳定分母未增加。未生成、未测试、未审查。
 
 C59 统一 D 首轮源修复（本族）：`check.eli` 的 Git NUL 分隔符改用真实
 String.fromCharCode(0)，避免 JSON 字符串 reader 不接受 `\0`；保相同实际
@@ -10031,7 +10031,7 @@ callback 前关闭整个模块；后续三项 test 也因同处未闭合成为 t
 length snapshot、push、index mutation、valueOf 与独立 JS reference。
 
 - [x] A：从 mutation 到尾部四项 test 完整修正词法边界；每个 finish 只在该项全部循环结束后执行，所有 test 独立注册；identity lone-surrogate 保原输入而非双转义文本。
-- [x] B：保原 legacy:20–36 全部 method×mode×needle（3×3×2）、empty/captured、identity/ordinary、String 3×5×8×3、random128×8×3 原参数、黄金、固定 seed、GC 和 live/frame 清理断言，不缩减。
+- [x] B：保原 ground:20–36 全部 method×mode×needle（3×3×2）、empty/captured、identity/ordinary、String 3×5×8×3、random128×8×3 原参数、黄金、固定 seed、GC 和 live/frame 清理断言，不缩减。
 - [x] C：维护 Eli 尾部四项按同一根因写齐，fixture/runtime 无需猜测修改。
 - [ ] D：父统一生成并执行原完整 11 项及真实 browser；本代理不局部执行/编译。
 
@@ -10099,7 +10099,7 @@ ignore已接。B 扩两入口全 source/module/map/漏tracked/缺map/编译失�
 ### C61 / P06、A06–A07：原 object-properties 完整20项维护 Eli 迁移
 
 A：原 tests/wasm-managed-object-properties.test.mjs 全44行/25019B 原样归档
-为 -test-legacy.mjs，canonical 同名改由 tests/eliscript/managed-object-properties.eli
+为 -test-ground.mjs，canonical 同名改由 tests/eliscript/managed-object-properties.eli
 生成。主套件保持原20登记、题名/默认5000与显式30000 deadline，beforeAll
 120000、Seed与三代compiler/module-map/JS/WASM全字节、原128-slot容量、
 8192/65536预算、256轮固定随机、全部raw ABI/frame/trap/UTF16/GC输入及黄金。
@@ -10130,14 +10130,14 @@ corpus browser-suite-plans 追加本族与construction的实际archive原SHA、c
 - [ ] 原完整功能门禁、声明浏览器/原生平台实际运行、版本冻结及最终签名推送仍待验收；本节不提前勾选A05–A08。
 
 C60/C61 同批生成物接线：原 Symbol 手写测试保留为未改字节的
-`tests/wasm-managed-symbols-test-legacy.mjs`；canonical同名测试从维护Eli生成，
+`tests/wasm-managed-symbols-test-ground.mjs`；canonical同名测试从维护Eli生成，
 已移出Git索引并保持ignored，不能把本轮实际生成的JS误作为源码提交。
 
 ### C60 / P06：Array construction 完整原 20 项迁维护 Eli
 
 A：原 `tests/wasm-managed-array-construction.test.mjs` 共20项，完整源SHA为
 456846a3f8356e9fa7cedd60561e2080e07895127b30c39d6266cef1e361b646，原字节
-保留到 `wasm-managed-array-construction-test-legacy.mjs`，不执行旧 JS。
+保留到 `wasm-managed-array-construction-test-ground.mjs`，不执行旧 JS。
 新增 tests/eliscript/managed-array-construction.eli 发射回原canonical入口，
 node/page 同名前缀维护 Eli 发射 helpers，复用已维护真实 reference/file/HTTP
 transport。源 fixture、Seed、三代 compiler+source maps、独立 JS 黄金、
@@ -10249,7 +10249,7 @@ C62 Value/JSON 独立完整单case真实通过：`c62-direct-value-json-diagnost
 ### C62 原CLI/ERT stdin：维护入口与 Node fd0 兼容
 
 A：原project CLI及unsaved-buffer ERT共同失败于fs/promises.readFile(0,"utf8")，
-该API不接受数字fd。原295行完整JS按字节归档project-cli-legacy.mjs，SHA256
+该API不接受数字fd。原295行完整JS按字节归档project-cli-ground.mjs，SHA256
 79980b2a6e38e4ab9daca31b04cb366bd749b66e3b384fbd04e696ddc465cd82。
 tools/project/project-cli.eli生成原canonical入口，复用原parser/config/execute；
 仅存在stdinFile且stdinSource nullish时由node:fs readFileSync读取真实fd0并传入。
@@ -10276,7 +10276,7 @@ dogfood-browser原全文件“不含eliscript/”误把合法namespace数据当�
 排除用例，功能不随尺寸延期被跳过。不展开Unicode或正式compiler优化。
 
 - [x] B：早期head-null/多次观察/只安装一次及断开回归齐；原docs/runtime全部功能断言不变，原Worker真实执行和UTF16身份仍严格。dogfood六原title与原静态字符串黄金全迁维护Eli，额外功能case不减覆盖。
-- [x] C：fixture observer及两个实际probe bundle接线、tests/eliscript/dogfood-browser.eli→原canonical映射/ignore齐；原JS原字节归档dogfood-browser-test-legacy.mjs，SHA66888ccd1e50564c8e92fc49eda8b4585e8a5378f82b52fb89a1db2c1f8693aa。未局部生成或运行。
+- [x] C：fixture observer及两个实际probe bundle接线、tests/eliscript/dogfood-browser.eli→原canonical映射/ignore齐；原JS原字节归档dogfood-browser-test-ground.mjs，SHA66888ccd1e50564c8e92fc49eda8b4585e8a5378f82b52fb89a1db2c1f8693aa。未局部生成或运行。
 - [ ] D：父统一生成后只复验受影响应用文件及fixture回归；尺寸延期不能冒充64KiB达标。Action产物源码构建与归档另由对应负责人同批收敛。
 
 当前平台边界补充：只面向最新稳定版平台、Node/Bun及浏览器，不新增旧平台
@@ -10310,7 +10310,7 @@ C61 D 原命令接线修正：Bun 的 preload 只能插入明确 `test` 子命�
 当前树/流程：`finalize.mjs` → 当前合同/当前artifact bytes → 原run SHA；
 性能文件另走retained-{transient,soak}.mjs；fuzz漂移一律拒绝。
 目标树/流程：原入口`finalize.mjs`为ignored生成物 ← 新`finalize.eli`；
-原完整JS逐字保留`finalize-legacy.mjs`；新Eli负责validator/build/verify/
+原完整JS逐字保留`finalize-ground.mjs`；新Eli负责validator/build/verify/
 generate/CLI，复用原typed error、defect validator、manifest validator及全部
 公开formatter。显式`deferPerformanceAcceptance:true`是既有功能验收模式；
 仅该模式下且唯一精确`tests/reader-program-fuzz.test.mjs`发生漂移，读取
@@ -10326,7 +10326,7 @@ CLI明确仅历史，当前fuzz由另一个真实完整功能验收提供。本�
 | ID | 精确位置/动作 | 施工 | 验收 |
 |---|---|---|---|
 | C62.1 | 新tests/eliscript/final-acceptance-history.eli：严格默认/false/外层env不自动放行；显式历史正例、真假tree/commit/hash/唯一绑定/路径，完整manifest/markdown/缺证据/伪通过/缺陷/生成与晋级拒绝 | [x] | [ ] |
-| C62.2 | finalize.mjs原字节copy到finalize-legacy.mjs；git rm --cached原canonical，不改旧字节；新增finalize.eli维护上述全部词法调用，formatter与原typederror复用 | [x] | [ ] |
+| C62.2 | finalize.mjs原字节copy到finalize-ground.mjs；git rm --cached原canonical，不改旧字节；新增finalize.eli维护上述全部词法调用，formatter与原typederror复用 | [x] | [ ] |
 | C62.3 | bootstrap.el tools组增加finalize.eli→原canonical，tests组增加新B；ignore canonical及map，Make Bun组加入B；package files包含两维护源码/原档，不改version | [x] | [ ] |
 | C62.4 | 父统一D生成、原final suite+retained deferral完整否例+新增B+正确env check-contracts；默认strict额外负例仍拒绝；历史JSON/MD/hash无修改；不重跑fuzz/性能 | 待D | [ ] |
 
@@ -10340,7 +10340,7 @@ CLI明确仅历史，当前fuzz由另一个真实完整功能验收提供。本�
 真实两次集中D约50–52秒且持续推进，却被原显式30000ms回收。按用户最新
 授权，功能测试给300000ms总截止，不改任何性能报告/预算，也不做14场景的
 性能优化。原全文SHA6bb42e4b3078fa769209dd6c0a44d78f3afd6b63e086469e5e630e835e716fd4
-归档 `wasm-managed-exceptions-browser-test-legacy.mjs`。
+归档 `wasm-managed-exceptions-browser-test-ground.mjs`。
 
 维护源码树为 tests/eliscript/managed-exceptions-browser.eli → 原canonical
 入口，managed-exceptions-browser-page.eli → helpers同名mjs。beforeAll仍
@@ -10512,7 +10512,7 @@ record30000、empty stderr、CLI诊断/Session映射/Node+Bun双执行及合同�
 
 真实C61 core-set完整原程序原WASM/product/host/131072slots/auto65536唯一重放，
 仅NODE_OPTIONS stack-trace-limit=100；c61-core-set-stack100.log给出重复周期：
-managed-host-legacy decode(Symbol):963 → literalOperation(role) → decode(protocol):979
+managed-host-ground decode(Symbol):963 → literalOperation(role) → decode(protocol):979
 → literalOperation("literal-export-value") → WASM内部直接brand → host能力 →
 再次decode(Symbol)。managed-host.mjs:189是unknown callee原直通路径；冻结
 literal bindings exporter525/importer526，而现guard只认证brand780/role781，
@@ -10532,7 +10532,7 @@ source false/undefined、status8和普通callee/跨heap原路径均保留。
 
 - [x] A：真实根因、精确函数/新增scope-only模式/校验和finally责任写齐。
 - [x] B：两codec真实返回、混合嵌套/跨heap/普通callee、坏ABI透传、false/undefined/status8恢复、伪binding拒绝及原完整程序回归保留；新增维护Eli用例写齐，未运行。
-- [x] C：仅managed-host.eli该函数与对应managed-host维护测试实现齐，不改legacy/Object反射/memory；源码冻结交统一D。
+- [x] C：仅managed-host.eli该函数与对应managed-host维护测试实现齐，不改ground/Object反射/memory；源码冻结交统一D。
 - [ ] D：父统一生成/受影响原完整程序验收，不能以重放或mock代替通过。
 
 D期间按既有编译产物清理授权，仅回收旧候选58/59/60的stage1–3/ir可再生
@@ -10618,10 +10618,10 @@ directory；runFunctionalChild 显式传 sourceRoot=root 与其 environment，
 ### C62 D 收口：原 direct browser 两用例的维护语言迁移
 
 原 tests/direct-wasm-backend.test.mjs SHA256 为
-f0fa57d2aae13f0bef9f7afa04ee51d1d3386c4a3e011ad231ad2577c99876c2。
+b3e2af96d7da3d92ad4613fcb341656fd7625fb7fd1ca8bae421f171e8c73ea9。
 2000起 function properties 用例仍把已实现的 builtin reflection 全部当作拒绝；
 2030起 complete Value/JSON 旧总截止提前关闭浏览器，需保完整原语义并收集
-有限阶段证据。原文件全字节归档 direct-wasm-backend-test-legacy.mjs，
+有限阶段证据。原文件全字节归档 direct-wasm-backend-test-ground.mjs，
 canonical由 direct-wasm-backend.eli生成。该独占测试进程先复制真实bun:test
 全部导出，SHA认证原档，mock.module只转发注册接口：仅两个完整精确标题
 各恰一次替换为维护Eli callback，其他注册/describe/hooks逐一交真实框架。
@@ -11007,14 +11007,14 @@ operationsRaw1050165 kind35；role=collection.ICounted。run
 完整，有限原日志c62-protocol-definition-inspector-original.log。源头是
 stdlib/core/protocol.eli:22–23 captured真实Object.create(null)返回host对象，
 而decoder严格要求owned13。不是GC或brand scope问题。原私有闭包decoder无
-注入memo/identity接缝，不迁整个legacy factory，也不伪35为13或克隆operation。
+注入memo/identity接缝，不迁整个ground factory，也不伪35为13或克隆operation。
 
 父选定最小合法实现：managed-host-object-provider.eli固定native intrinsics
 加入create，仍以捕获真实身份与native source校验；realm.native-object-operation
 仅name=create、原source-operation Call count=4、唯一operand raw null0匹配。
 call-native-object-operation对该匹配调用既有raw value-object-new(heap,0)，
 得到真正新owned13、null prototype、唯一identity。其余create（非null/
-2参数/用户Proxy或替换）原handler原路径；不改正式compiler/runtime/legacy。
+2参数/用户Proxy或替换）原handler原路径；不改正式compiler/runtime/ground。
 原异常/帧/首错finally不变，必需exports完整校验加入value-object-new。
 
 B在现canonical真实源fixture/API补createNullObject/createWithPrototype/
@@ -11222,7 +11222,7 @@ Node、父intrinsic不变、close后live0/frame0等全部原黄金继续执行�
 
 原 `tests/wasm-managed-runtime.test.mjs` 完整 SHA
 `0b240d3dff9164f23edf534b5a79598948b80f001e9316fa0f37e55a40f0fed2`
-保为同目录 `wasm-managed-runtime-test-legacy.mjs`。当前 control 中独立
+保为同目录 `wasm-managed-runtime-test-ground.mjs`。当前 control 中独立
 256 个弱bucket已取代未分配slot尾部；碰撞链命中不替换head，small511
 同样有独立bucket。原四失败只来自这三项私有布局预设及free-slot分配次序，
 不修改正式runtime。
@@ -11254,8 +11254,8 @@ collections=2/live=2，不强制私有分配先后。
 
 原 response 完整25项实际24通过，唯一graph identity segments案例仍要求
 私有limit=8388608，而生产session-response-identity-segment-size已经固定
-1048576。保原完整1750行到compiler-response-events-test-legacy.mjs，SHA
-`dbf2cc1022dd98c05266c32c2e43b596865382713a50f2e4444a7106052154ab`。
+1048576。保原完整1750行到compiler-response-events-test-ground.mjs，SHA
+`7fd4730b201a32a56dcd50ae3deaed752f64fe104b2c7e9ee28e563384be26e7`。
 新增compiler-response-events/response-identities-install/response-identities
 三维护Eli，canonical+两个helpers各自生成map；仅精确原标题callback换成
 维护版本，其余24及原hooks真实执行，preload和十资产闭包均完整接入。
@@ -11401,7 +11401,7 @@ C63原wasm-memory-static-data套件阻塞：私有9函数snapshot fixture通过�
 生产Eli函数片段装配，require-wasm-expression-node新增两个实际依赖
 memory-f64-unary-opcode/require-memory-f64-unary，原fixture漏绑定。保原19项
 完整source/黄金/typed图/65536容量/120000时限/运行与所有独立比对，原全档
-SHA `8265218c316f48bd22ef4eefaff5303ec5fa1208387ca9fb22afadcd85c2ef5a`
+SHA `060bb7f392c7d1978815f66b34fe1de601fa5d64d4d410e1d363e3bc424e41bc`
 只读归档。维护Eli负责完整snapshot source装配：先严格复构原9函数source
 验证调用输入，再从相同真实生产源加入上述两完整原定义；其它compile调用
 原样。仅本suite的build fixture返回compiler facade，无正式compiler修改，
@@ -11411,7 +11411,7 @@ filename的compiler方法/参数/receiver/错误保留。新B写完整装配/每
 调用的buildBackends入口直到afterAll，规范Make canonical生成/ignore接齐。
 
 C63 原库存继续验收：202个未执行文件中14个完成，11个通过；browser缺显式
-stage3 artifact环境、static-data原fixture漏新依赖、response-events legacy协商
+stage3 artifact环境、static-data原fixture漏新依赖、response-events ground协商
 在内层8GiB终止（8.64GB），均保留真实失败。最后一项沿已有完整文件入口使用
 外层24GiB受控构建预算，原四mode、输入、断言和deadline不改，补调度回归；
 未执行188项继续扣除已完成库存，不重复前14项。该资源结果不记作原8GiB通过。
@@ -11487,7 +11487,7 @@ foreach等必要来源迁移齐后统一生成来源工具和最终stable，不�
   `c63-sequence-symbol-bridge-diagnostic.log`及
   `c63-sequence-raw-symbol-bridge-diagnostic.log`。
 - [x] A/B：必要迁移范围固定为原host factory及真实闭包依赖；新唯一维护源
-  `tools/backends/eliscript/managed-host-runtime.eli`，原legacy1181行字节只读。
+  `tools/backends/eliscript/managed-host-runtime.eli`，原ground1181行字节只读。
   初始化/描述符验证/Unicode/随机种子/所有公开API/Promise/foreign/roots/
   cleanup/override按原算法机械保留，fail/validate/bridge原公共导出身份
   不变。共享factory内词法名原camelCase，临时翻译片段合并后删除，不新增
@@ -11709,13 +11709,13 @@ ProtocolDispatchError不可改。父已授权独立负责人仅修该函数/补B
 - [x] A：原手工填充 1024 slots 后依赖默认槽预算恰为 1024 的初始化拒绝不再成立；保原严格压力 callback、输入、预算和所有断言，功能模式按既有 `currentPerformanceTest` 明确 DEFERRED / NOT ACCEPTED。独立正常语义仍保原无压力 initialize/collections0/cached，填入原 1024 个垃圾值后 collecting initialize/cached/帧/回收和完整清理。原 Node24 严格 restricted accessor 独立黄金完全不改。
 - [x] B：原缺 dispose/asyncDispose 用例直接改生成 JS 的旧模板已失效。新 `managed-function-properties-repairs.eli` 在真实维护 `managed-host-runtime.eli` 的唯一 host symbol table 将最后两个值定点改为 undefined，交真实编译器生成隔离宿主；同样生成现有完整 facade 并只重定位 IR imports 到原真实依赖/隔离 runtime。无手写 JS、无新增生产测试 API、无修改全局 Symbol。
 - [x] B：原完整 program 通过同一 `lower_managed_program`/`emit_managed_wasm` 产生真实零 imports bytes，metadata 必须逐字段等于完整原 descriptor，IR 不变；保 dispose 与 asyncDispose 两个 TypeError 类型及精确 message、两 description、caller frame/负零、GC，以及原 iterator 跨宿主身份。
-- [x] C：独立 helper `tools/testing/managed-function-properties-repairs.eli` 和 exact-SHA 注册器 `tests/eliscript/managed-function-properties-install.eli` 写齐。原 suite SHA `dc63fc65ca9a84ff6faac3f7666774e162bef2d4375140e40a17480673c90ce7` 不变；只有精确两个标题接线，其余原 Node/WASM/native 六组 body 全保。当前冻结窗口不改 bootstrap、来源工具或既有 installer；接线待父统一窗口。
+- [x] C：独立 helper `tools/testing/managed-function-properties-repairs.eli` 和 exact-SHA 注册器 `tests/eliscript/managed-function-properties-install.eli` 写齐。原 suite SHA `6d587e122fdc20fd7c7da85aa30cf0e07e31fca0964256058484d87bbff1ae15` 不变；只有精确两个标题接线，其余原 Node/WASM/native 六组 body 全保。当前冻结窗口不改 bootstrap、来源工具或既有 installer；接线待父统一窗口。
 - [ ] D：窗口结束后接两 source/output/map、exact preload/source closure，统一生成并集中验收；本节未执行行为测试，原压力未通过。
 
 ### C65 Node host/lifecycle 既有门禁的真实基座
 
 - [x] A：`managed-host.eli` 的 omitted/undefined/null B 用无 heap-new 的 fake exports 比较宿主引擎报错局部表达式拼写；Eli 生成调用与旧 JS 局部表达式不同，实际均为 TypeError。独立 `managed-host-default-contract.eli` 保原三种参数失败的真实构造器/name/无结构诊断，并用 caller 提供 heap-new sentinel 证明 omitted/undefined/空 options 的 1024/65536/16777216 默认、显式六字段 Getter 顺序/参数和 user getter 首错对象身份，不能仅删 message 断言。
-- [x] A：`managed-host-lifecycle.eli` real WASM prepare 的 creator 直接选已归档 legacy factory，它只识别 host opcode 0–24、28–31；当前真实 image 通过 canonical Object identity 的 opcode 35，旧 test 基座无法运行。窗口结束后该 creator 选现公开维护 `createManagedHostRuntime`，外层生命周期传下的 `dispose` descriptor 使内层 exact-one-property 私有生命周期条件自然 passthrough，不产生第二次 deferred notification。原 graph/prepare/ready/function+Symbol/真实日志/负零/收集/零 live 全保，不改生产实现。
+- [x] A：`managed-host-lifecycle.eli` real WASM prepare 的 creator 直接选已归档 ground factory，它只识别 host opcode 0–24、28–31；当前真实 image 通过 canonical Object identity 的 opcode 35，旧 test 基座无法运行。窗口结束后该 creator 选现公开维护 `createManagedHostRuntime`，外层生命周期传下的 `dispose` descriptor 使内层 exact-one-property 私有生命周期条件自然 passthrough，不产生第二次 deferred notification。原 graph/prepare/ready/function+Symbol/真实日志/负零/收集/零 live 全保，不改生产实现。
 - [x] B/C：默认合同独立 Eli helper 已写齐；受 C65 完整 targets 末尾 source verify 约束，现绑定 host/lifecycle test、bootstrap、来源、preload 一律保持不变。
 - [ ] C 接线：C65 来源验证结束后再将 helper 接原同标题 B，并将真实 lifecycle 单 creator/import 切到维护公开工厂；统一两源生成。
 - [ ] D：集中复验受影响 Node host/lifecycle 两 suite；本节没有启动新测试，不将原失败标为通过。
@@ -11871,7 +11871,7 @@ ProtocolDispatchError不可改。父已授权独立负责人仅修该函数/补B
 
 ### C73 monitor snapshot 主线阻断（C72产物冻结后的隔离施工）
 
-- [x] A：基线 `tools/testing/resource-supervisor.mjs` 的 snapshot(101)、startSampling(151)、launcherMain(165)、supervisorMain(217)、startResourceSupervisor(312) 为完整迁移边界。原实现逐字节归档 `resource-supervisor-legacy.mjs`，维护源改 `.eli`；原8GiB tree/本批aggregate、75ms采样、150ms回收宽限、PID birth+private token+独立pgid认证、已知脱离后代、IPC确认/失联回收/首错均保留。
+- [x] A：基线 `tools/testing/resource-supervisor.mjs` 的 snapshot(101)、startSampling(151)、launcherMain(165)、supervisorMain(217)、startResourceSupervisor(312) 为完整迁移边界。原实现逐字节归档 `resource-supervisor-ground.mjs`，维护源改 `.eli`；原8GiB tree/本批aggregate、75ms采样、150ms回收宽限、PID birth+private token+独立pgid认证、已知脱离后代、IPC确认/失联回收/首错均保留。
 - [x] A：单个ps采集上限3000ms；仅code ETIMEDOUT或本次限时触发的killed+SIGTERM执行失败可重试，总共最多3次、间隔75ms。坏行/空数据/自身不可见/非瞬态执行错误立即失败。最终错误保code/signal/killed/attempts/cause并在fatal/result传播；不把最后snapshot当当前有效数据。独立75ms IPC heartbeat不依赖ps成功；失联12s覆盖有限采集窗口，不设置任务总时限，不关闭RSS保护。
 - [ ] B：原 `tests/test-resource-supervisor.test.mjs` 完整11项和原输入不改；新增维护Eli覆盖一次timeout恢复、三次timeout停止、非瞬态/坏数据首错、完整diagnostic与fatal cleanup，编写不运行。
 - [ ] C：新增 `.eli` 实现全部原公开入口和私有IPC入口；共享mapping/ignore/来源资产由独立负责人统一接线。
@@ -11881,7 +11881,7 @@ ProtocolDispatchError不可改。父已授权独立负责人仅修该函数/补B
 
 ### C73 历史独立CLI门禁与正式stage3的真实入口分离
 
-- [x] A：现状链为原3个SHA绑定suite→`fixtureChildArguments`→`independent-cli-fixture`→原child_process.spawnSync；原独立artifact应由已有`compiler-cli-legacy.mjs` parser执行。当前仅default对象/syncBuiltinESMExports，Bun named spawnSync仍可进入正式release；package还直接spawn `bin/eliscript-compiler`，未在现argv替换边界。这导致help文本和独立artifact错误被正式stage3身份拒绝遮住。图索引无Eliscript coverage，按具体源码/原完整失败栈定位，无推断改变authenticator。
+- [x] A：现状链为原3个SHA绑定suite→`fixtureChildArguments`→`independent-cli-fixture`→原child_process.spawnSync；原独立artifact应由已有`compiler-cli-ground.mjs` parser执行。当前仅default对象/syncBuiltinESMExports，Bun named spawnSync仍可进入正式release；package还直接spawn `bin/eliscript-compiler`，未在现argv替换边界。这导致help文本和独立artifact错误被正式stage3身份拒绝遮住。图索引无Eliscript coverage，按具体源码/原完整失败栈定位，无推断改变authenticator。
 - [x] A：只改维护 `tools/testing/independent-cli-fixture.eli`。保原3个SHA/原source/所有argv/timeout/structured errors。新增`rewriteIndependentCLIInvocation(command, arguments, options)`：精确绝对bin坐标作command时以原options.env.BUN或当前runtime执行同独立parser，bin在argv中则单点替换；原tools CLI坐标及唯一eval URL沿旧算法，最多一处，不识别的路径原样，多个坐标拒绝。Bun安装时用现成mock.module显式转发真实child_process named spawnSync，恢复原全部exports；Node继续syncBuiltinESMExports。没有新CLI实现或JS脚本，正式release/stage3指定校验完全不动。
 - [ ] B：现Node维护入口新增精确bin/engine/options/模糊路径/重复坐标反例；新增Bun维护入口真实named spawnSync调用原独立parserhelp与未知参数structured error（Node24和Bun各一次），不伪造输出。原三个完整suite所有正负例/UTF8/structured diagnostics/body原字节保留；已有stage3完整拒绝stage2/伪造固定点B复用不改。
 - [ ] C：全批B齐后一次实现，新增pair统一交共享负责人接线；不写正式compiler/runtime、不改stage3认证。
@@ -11899,7 +11899,7 @@ ProtocolDispatchError不可改。父已授权独立负责人仅修该函数/补B
 
 ### C73 C72 最后两个JS原完整记录入口修复
 
-- [x] A：`original-sequence:managed-language-intrinsics-source`（000771）保留execution两步都因实际0n与JSON bigint marker对象比较失败；request/project均真实返回。现解码器只由binary execute-exports调用，JS明确转legacy，故只在exact JS记录私有context副本解码原artifact contract，原42calls/两个完整project/同产物byte证据不变，不改bigint语义或golden。
+- [x] A：`original-sequence:managed-language-intrinsics-source`（000771）保留execution两步都因实际0n与JSON bigint marker对象比较失败；request/project均真实返回。现解码器只由binary execute-exports调用，JS明确转ground，故只在exact JS记录私有context副本解码原artifact contract，原42calls/两个完整project/同产物byte证据不变，不改bigint语义或golden。
 - [x] A：`original-tools-artifact:compiler-session-tools:node`（000788）原AggregateError oracle编译dataURL包含真实默认Unicode bare import；Node24以dataURL不能解析package，未到Aggregate业务。最小源transport为纯Eli helper真实导出node:child_process.spawnSync，注册仅data父模块下精确Unicode specifier→真实包内runtime URL。现prepareOriginalToolsCLIContext只将该原host唯一child_process import坐标替换为真实helperURL，完整oracle原bytes、原host其余body、CLI认证、Aggregate共享cause/undefined/false/-0、UTF8全部原assert不动。Bun/非exact记录保持原入口。
 - [x] B：直接复用这两个原完整record+原独立黄金/时限；sourcearchive既有原42calls/完整BigInt精确值/非法marker拒绝/编码往返B复用，不为流程缩输入或重复造用例。旧失败各1次，当前尚未修后验证。
 - [ ] C：仅维护execution exact context预处理和Node host模块坐标，新helper .eli/真实mapping与资产闭包由共享负责人接；父持有主runtime，完全不改其源码。
@@ -12000,7 +12000,7 @@ tools/testing/resource-supervisor.eli optional-field(message, :type)
 ```text
 tools/testing/resource-supervisor.eli              # FIX-44: 16 个消息类型读取参数改字符串
 tests/eliscript/resource-supervisor.eli             # FIX-44: 真实监管器连续两个 Node --version 作业及关闭
-tools/testing/resource-supervisor-legacy.mjs        # 原完整源码原字节保留
+tools/testing/resource-supervisor-ground.mjs        # 原完整源码原字节保留
 tools/testing/resource-supervisor.mjs               # 删除 Git 跟踪；仍为忽略的自动生成物
 tools/backends/eliscript/compiler-corpus-*          # 动态入口 async 完成、原来源边界、身份/math 观察接线
 tools/backends/eliscript/managed-host-runtime.eli    # 可选参数缺省 nil 与 undefined 的合同混淆
@@ -12008,12 +12008,12 @@ contracts/stable-compatibility-corpus.json          # 最终源码确定后原�
 contracts/compiler-parity-corpus.json              # 原生成器重算真实源码身份
 ```
 
-FIX-44 精确边界：`optional-field` 基线 L19 保持动态字段函数；全部调用把 `:type` 改为 `"type"`，不改变普通静态 `(get value :type)`。`startResourceSupervisor` L286 返回现有 `{run,cancel,close,pid,failure}`，新增测试 await ready 后顺序发两个不同 id，要求各结果 id 原样、exitCode=0、两次 onStart、failure=nil，finally await close。保原内存上限与独立进程树，无新增运行期限。生成物完整 legacy SHA256 为 `428b33c2875c8dea174fcd2cec6a8d74c15c299fdb5b521f395615cb5b6064bb`；正常迁移索引即可修来源检查，不放宽依赖白名单、不引入新编译器模式。
+FIX-44 精确边界：`optional-field` 基线 L19 保持动态字段函数；全部调用把 `:type` 改为 `"type"`，不改变普通静态 `(get value :type)`。`startResourceSupervisor` L286 返回现有 `{run,cancel,close,pid,failure}`，新增测试 await ready 后顺序发两个不同 id，要求各结果 id 原样、exitCode=0、两次 onStart、failure=nil，finally await close。保原内存上限与独立进程树，无新增运行期限。生成物完整 ground SHA256 为 `428b33c2875c8dea174fcd2cec6a8d74c15c299fdb5b521f395615cb5b6064bb`；正常迁移索引即可修来源检查，不放宽依赖白名单、不引入新编译器模式。
 
 其他失败已经一次分配给三个 Astra 任务：异步生成入口/来源断言，原始 identity/math/Node 测试入口，以及 runtime 缺参/真实源值/provider 计划。所有失败的原名、坐标、分组与回归项在 `astra-failure-inventory.md`、对应 root-causes 文件，仍归本批，不单项试跑。
 
 - [x] A / 全量失败分组与监管器根因：FIX-44 验证失败 1 轮（两个执行器启动均失败），修复失败 0；动态 host 编译累计失败 2、失败修复 1，继续保留前轮记录。
-- [x] B/C / FIX-44：真实 IPC 连续作业与关闭回归已写，全部 16 处字段读取已改字符串，legacy/生成物索引迁移已完成。未运行。
+- [x] B/C / FIX-44：真实 IPC 连续作业与关闭回归已写，全部 16 处字段读取已改字符串，ground/生成物索引迁移已完成。未运行。
 - [ ] B/C / 全部其他已知失败：依照完整源码调查一次写齐回归与实现，保持首错、来源认证、原始输入及黄金。
 - [ ] D / 本批全部实现完成后：统一源生成、stage3 包准备、现有 source inventory 生成器；同一 stage3 三种输出全量与原门禁统一运行。正式编译器若无改动不重建已通过固定点。
 
@@ -12037,7 +12037,7 @@ FIX-44 精确边界：`optional-field` 基线 L19 保持动态字段函数；全
 - [ ] 仍需闭合：数组 inherited-key RT3、cold-own/operand 小堆耗尽、原 wire/foreign keys/zipper 及已列相似 RT1、pow 宿主一 ULP 分歧与 Math held-route 总期限。不同首错保持独立，C73 新迁移的五处缺参错误不能倒推解释 C72。
 - [ ] 源码完整后执行原稳定库存/parity生成器，再启动 C74 自举与独立完整比较；所有当轮实现写齐前不启动编译或新的测试。
 
-已确认施工完成但尚未验收：监管器所有 16 处消息字段字符串、实际 IPC 两作业与关闭回归、测试产物正确导入坐标；原监管器完整 legacy 字节保留，生成物 Git 跟踪迁移完成。未扩大依赖白名单。退役候选 58/61/62/65 的 targets 已压缩保存在本机持久证据目录，压缩校验通过后删除原可再生展开目录；当前 72/73、源码与原始测试日志保留，避免磁盘不足阻塞后续正式构建。
+已确认施工完成但尚未验收：监管器所有 16 处消息字段字符串、实际 IPC 两作业与关闭回归、测试产物正确导入坐标；原监管器完整 ground 字节保留，生成物 Git 跟踪迁移完成。未扩大依赖白名单。退役候选 58/61/62/65 的 targets 已压缩保存在本机持久证据目录，压缩校验通过后删除原可再生展开目录；当前 72/73、源码与原始测试日志保留，避免磁盘不足阻塞后续正式构建。
 
 ### C86-persistent-host：完整持久化宿主的身份与功能期限
 

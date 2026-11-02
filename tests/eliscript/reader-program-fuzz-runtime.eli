@@ -2,14 +2,14 @@
   (import "bun:test" test)
   (import "node:assert/strict" :default assert)
   (import "../tools/fuzz/reader-program-fuzz.mjs" runReaderProgramFuzz parseArguments fuzzCases)
-  (import "../tools/fuzz/reader-program-fuzz-legacy.mjs" :as legacy)
+  (import "../tools/fuzz/reader-program-fuzz-ground.mjs" :as ground)
 
   (test "fuzz dependency transport keeps original deterministic generators and argument parsing"
     (lambda ()
-      (js-call assert :strictEqual parseArguments (get legacy :parseArguments))
-      (js-call assert :strictEqual fuzzCases (get legacy :fuzzCases))
+      (js-call assert :strictEqual parseArguments (get ground :parseArguments))
+      (js-call assert :strictEqual fuzzCases (get ground :fuzzCases))
       (js-call assert :deepStrictEqual (Array/from (fuzzCases 20 1162627377))
-        (Array/from (js-call legacy :fuzzCases 20 1162627377)))))
+        (Array/from (js-call ground :fuzzCases 20 1162627377)))))
   (test "default fuzz bootstrap loads its actual compiler Math dependency and executes every original invariant"
     (async ()
       ;; The original acceptance still executes all 100000 inputs. This small
@@ -27,7 +27,7 @@
         (while (< index (js-length cases))
           (let ((first undefined) (second undefined))
             (try (await (runReaderProgramFuzz (aref cases index))) (catch error (setq first error)))
-            (try (await (js-call legacy :runReaderProgramFuzz (aref cases index))) (catch error (setq second error)))
+            (try (await (js-call ground :runReaderProgramFuzz (aref cases index))) (catch error (setq second error)))
             (js-call assert :strictEqual (get first :message) (get second :message))
             (js-call assert :strictEqual (get first :eliscriptFuzzInvariant) t))
           (setq index (1+ index)))))))

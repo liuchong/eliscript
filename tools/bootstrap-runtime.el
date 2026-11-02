@@ -84,15 +84,15 @@
                                (./runtime/unicode-case.mjs . "./runtime/unicode-case.mjs")
                                (./runtime/unicode-case-data.mjs . "./runtime/unicode-case-data.mjs")))))
                 "\n")))
-    (dolist (name '("bun" "build" "project-legacy" "project-cli-legacy" "check-cli-legacy"
+    (dolist (name '("bun" "build" "project-ground" "project-cli-ground" "check-cli-ground"
                     "evaluation" "evaluation-cli" "format-cli" "watch" "watch-cli"))
       (eliscript-bootstrap--materialize-capsule
        (expand-file-name (concat "bootstrap/host/" name ".eli") root)
        (expand-file-name (concat name ".mjs") dist-host)))
-    (let ((proj-legacy (expand-file-name "project-legacy.mjs" dist-host))
+    (let ((proj-ground (expand-file-name "project-ground.mjs" dist-host))
           (proj-target (expand-file-name "project.mjs" dist-host)))
-      (when (file-exists-p proj-legacy)
-        (copy-file proj-legacy proj-target t)))
+      (when (file-exists-p proj-ground)
+        (copy-file proj-ground proj-target t)))
     (dolist (entry '(("tools/project/project-cli.eli" . "dist/host-cli/project-cli.mjs")
                      ("tools/project/check-cli.eli" . "dist/host-cli/check-cli.mjs")))
       (let ((source (expand-file-name (car entry) root))

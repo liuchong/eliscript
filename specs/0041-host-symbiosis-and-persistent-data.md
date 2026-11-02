@@ -748,7 +748,7 @@ closes the complete cross-host gate. Default Vector and Map expression syntax
 is implemented by 0083 and 0084, and first-class quoted persistent data is
 implemented by 0087. The first transport integration slice now lands in 0088:
 an opt-in versioned worker codec carries persistent values and metadata through
-explicit Emacs records while legacy JSON mode remains unchanged. Streaming,
+explicit Emacs records while ground JSON mode remains unchanged. Streaming,
 chunking, and bounded large-value evidence now land through 0089-0090.
 Transport-safe protocol definitions land in 0091 as declarative data with
 fresh local runtime identities.

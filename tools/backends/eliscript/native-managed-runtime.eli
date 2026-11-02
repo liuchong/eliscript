@@ -90,9 +90,9 @@
         (unless (= (value-type constructor) "function")
           (throw (new globalThis.TypeError "managed runtime requires heap-new-extended for extendedHeap")))
         (let* ((descriptors (Object/getOwnPropertyDescriptors exports))
-               (legacy (get descriptors "heap-new")) (facade (Object/create (Object/getPrototypeOf exports))))
-          (unless legacy (failManagedRuntime 3))
-          (put legacy :value constructor)
+               (ground (get descriptors "heap-new")) (facade (Object/create (Object/getPrototypeOf exports))))
+          (unless ground (failManagedRuntime 3))
+          (put ground :value constructor)
           (Object/defineProperties facade descriptors) (Object/freeze facade)))))
 
   (defun native-runtime-abi (lowered)

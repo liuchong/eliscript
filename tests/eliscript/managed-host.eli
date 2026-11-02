@@ -8,7 +8,7 @@
   (import "../tools/backends/build.mjs" buildBackends root)
   (import "../tools/backends/compiler-build.mjs" independentCompilerResources)
   (import "../tools/backends/managed-host.mjs" :as host)
-  (import "../tools/backends/managed-host-legacy.mjs" :as legacy)
+  (import "../tools/backends/managed-host-ground.mjs" :as ground)
   (import "../tools/backends/managed-host-runtime.mjs" createManagedSourceOperationObserver readManagedSourceOperationDiagnostics)
   (import "../tools/testing/managed-host-default-contract.mjs" assertManagedHostDefaultContract)
   (import "../tools/testing/math-oracle-fixture.mjs" readOriginalMathThisForm)
@@ -1378,7 +1378,7 @@
                 (when (get runtime :close) (js-call runtime :close))))))))))
 
   (test "host bridge preserves unchanged export identities and omitted versus explicit default arguments"
-    (lambda () (assertManagedHostDefaultContract host legacy)))
+    (lambda () (assertManagedHostDefaultContract host ground)))
   (test "WASM host reads actual function Symbol slots across GC and preserves accessor throws and caller roots"
     (lambda () (exercise (instantiateManagedRuntime bytes (options)))))
   (test "native host uses the same function property bridge without executing WASM"

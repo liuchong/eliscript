@@ -1,6 +1,6 @@
 (module tests.compiler-artifact-private-cases
   (import "node:assert/strict" :default assert)
-  (import "../../tools/backends/compiler-cli-legacy.mjs" renderCompilerCLIError)
+  (import "../../tools/backends/compiler-cli-ground.mjs" renderCompilerCLIError)
   (import "./compiler-build-private.mjs" loadCompilerBuildPrivateUnit)
   (defasync scheduling-case ()
     (let* ((schedule (get (get (await (loadCompilerBuildPrivateUnit)) :real) :seedJavaScriptProduct))

@@ -692,7 +692,7 @@ PROJECT-MANIFEST names an `eliscript-project.json' file whose digest identifies
 the complete generated module graph and whose source maps cover dependencies.
 PROGRESS receives each progress value.
 When VALUE-CODEC is non-nil, persistent Eliscript values use the negotiated
-versioned worker codec instead of the legacy JSON representation.
+versioned worker codec instead of the ground JSON representation.
 When VALUE-CHUNKS is non-nil, the codec uses bounded incremental chunks with
 one-chunk request backpressure; this option implies VALUE-CODEC.
 TIMEOUT-MS is enforced remotely, with local worker termination after a grace

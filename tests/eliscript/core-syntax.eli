@@ -11,7 +11,7 @@
   (import "node:perf_hooks" performance)
   (import "node:url" pathToFileURL)
   (import "../dist/bootstrap/compiler.mjs" compile-string)
-  (import "../dist/session/session.mjs"
+  (import "../dist/runtime/lisp.mjs"
           callSession compileModule createSession evalProgram
           getTimingReport invokeFunction resetSessionState
           runAbiNative runAbiWasm serializeValue)
@@ -248,8 +248,8 @@
                                         fallback-align-source))
                               (module-source (compileModule source
                                                             (js-object :moduleName "tests.generated.che-accelerated"
-                                                                       :runtime "../session/session.mjs")))
-                              (directory (resolve project-root "dist/session-tests"))
+                                                                       :runtime "../runtime/lisp.mjs")))
+                              (directory (resolve project-root "dist/lisp-tests"))
                               (output (resolve directory "che-accelerated.mjs")))
                          (js-call (expect (js-call module-source :startsWith "(module ")) :toBe t)
                          (js-call (expect (js-call module-source :includes (str "(js" "*"))) :toBe false)
@@ -291,7 +291,7 @@
           (run-timed "T16-02" "T16"
                      (lambda ()
                        (let* ((t13-cases (parse-fixture (resolve fixture-directory "t13.el")))
-                              (directory (resolve project-root "dist/session-aot-tests"))
+                              (directory (resolve project-root "dist/lisp-aot-tests"))
                               (require-fn (createRequire (get (pathToFileURL (resolve project-root "package.json")) :href))))
                          (mkdirSync directory (js-object :recursive t))
                          (try
@@ -299,7 +299,7 @@
                                     (lambda (entry idx)
                                       (let* ((eli (compileModule (get entry :code)
                                                                  (js-object :moduleName (str "tests.aot.t13." idx)
-                                                                            :runtime "../session/session.mjs")))
+                                                                            :runtime "../runtime/lisp.mjs")))
                                              (js (compile-string eli (str "t13-" idx ".eli")))
                                              (mjs-path (resolve directory (str "t13-" idx ".mjs")))
                                              (native (js-call (runtime-oracle-results) :get (get entry :id))))
@@ -321,8 +321,8 @@
         (lambda ()
           (let ((manifest (JSON/parse (readFileSync (resolve project-root "package.json") "utf8")))
                 (report (getTimingReport timings)))
-            (js-call (expect (get (get manifest :exports) "./runtime/session")) :toBe "./dist/session/session.mjs")
-            (js-call (expect (get (get manifest :exports) "./runtime/session.mjs")) :toBe "./dist/session/session.mjs")
+            (js-call (expect (get (get manifest :exports) "./runtime/lisp")) :toBe "./dist/runtime/lisp.mjs")
+            (js-call (expect (get (get manifest :exports) "./runtime/lisp.mjs")) :toBe "./dist/runtime/lisp.mjs")
             (js-call (expect (>= (js-length timings) 100)) :toBe t)
             (js-call timings :forEach
                      (lambda (entry)

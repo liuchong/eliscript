@@ -6,9 +6,9 @@
   (import "node:child_process" spawn)
   (import "./build.mjs" root)
   (import "./compiler-build.mjs" writeCompilerMetadata)
-  (import "./compiler-package-legacy.mjs" :as legacy)
+  (import "./compiler-package-ground.mjs" :as ground)
 
-  ;; The legacy assembler retains the existing loader template and all artifact
+  ;; The ground assembler retains the existing loader template and all artifact
   ;; validation. Complete its transport before publishing the returned package.
   (defconst retained-transports (js-array
     (js-array "tools/backends/managed-host-object-realm.mjs" "transport/backends/managed-host-object-realm.mjs"
@@ -25,13 +25,13 @@
       "transport/backends/managed-host.mjs")
     (js-array "tools/backends/managed-host-runtime.mjs.map" "transport/backends/managed-host-runtime.mjs.map"
       "transport/backends/managed-host-runtime.mjs")
-    (js-array "tools/backends/managed-host-legacy.mjs" "transport/backends/managed-host-legacy.mjs"
+    (js-array "tools/backends/managed-host-ground.mjs" "transport/backends/managed-host-ground.mjs"
       "transport/backends/managed-host.mjs")
-    (js-array "tools/backends/managed-runtime-host-legacy.mjs" "transport/backends/managed-runtime-host-legacy.mjs"
+    (js-array "tools/backends/managed-runtime-host-ground.mjs" "transport/backends/managed-runtime-host-ground.mjs"
       "transport/backends/managed-runtime.mjs")
-    (js-array "tools/backends/managed-module-graph-legacy.mjs" "transport/backends/managed-module-graph-legacy.mjs"
+    (js-array "tools/backends/managed-module-graph-ground.mjs" "transport/backends/managed-module-graph-ground.mjs"
       "transport/backends/managed-module-graph.mjs")
-    (js-array "tools/backends/managed-source-view-legacy.mjs" "transport/backends/managed-source-view-legacy.mjs"
+    (js-array "tools/backends/managed-source-view-ground.mjs" "transport/backends/managed-source-view-ground.mjs"
       "transport/backends/managed-source-view.mjs")))
   (defun package-default (value fallback) (if (undefined? value) fallback value))
   (defconst frontend-support (js-call (js-array "analyzer" "compiler" "emitter" "expander" "formatter"
@@ -238,7 +238,7 @@
            (artifact (get options :artifact)) (output-root (get options :outputRoot))
            (source-root (package-default (get options :sourceRoot) root))
            (name (package-default (get options :name) "eliscript-independent-compiler"))
-           (result (await (js-call legacy :packageIndependentCompiler
+           (result (await (js-call ground :packageIndependentCompiler
              (js-object :artifact artifact :outputRoot output-root :sourceRoot source-root :name name))))
            (files (get (get result :manifest) :files)) (index 0))
       ;; Preserve the assembler's phase order: every retained dependency

@@ -1,0 +1,68 @@
+(module eliscript.runtime.lisp
+  ;;; lisp.eli --- Eliscript Lisp Runtime, AOT Compiler, and CLI Entrypoint
+
+  (import "./lisp/core.eli"
+    OPTION_NONE el-add-special-var el-append el-aref el-arith el-arith-2 el-bool el-car el-car-safe el-cdr el-cdr-safe
+    el-cons el-cons? el-equal-p el-intern el-list el-list-from el-list-to-array el-make-float el-make-pcoll el-make-pmap el-make-pset
+    el-member-with el-num el-opt el-plist-member el-prin1-string el-seq-items el-signal el-value-equal el-vector
+    printValue serializeValue)
+  (import "./lisp/regexp-buffer.eli" el-string-match)
+  (import "./lisp/evaluator.eli" el-catch-block el-cl-typep el-define-function el-eq-test el-eql-test el-set-fn el-throw)
+  (import "./lisp/builtins.eli" createSession resetSessionState)
+  (import "./lisp/compiler.eli"
+    compileModule compileProgram
+    rt-aset-sym rt-aset-val rt-autorun-module rt-bind-const-var rt-bind-var rt-bound-and-true-p
+    rt-call-fn rt-call0 rt-call1 rt-call2 rt-call3 rt-callN rt-callf rt-catch
+    rt-check-arity rt-check-contract rt-condition-case rt-dec rt-defalias
+    rt-defconst rt-defgeneric-value rt-define-derived-mode rt-define-minor-mode
+    rt-defmacro rt-defmethod-value rt-defprotocol rt-defstruct rt-defstruct-persistent
+    rt-defun rt-defvar rt-defvar-init rt-defvar-keymap rt-defvar-local rt-delay
+    rt-destructure rt-ert-deftest rt-extend-protocol rt-get-global
+    rt-gt rt-gte rt-gv-define-setter rt-gv-define-simple-setter
+    rt-ignore-error rt-ignore-errors rt-import-functions rt-import-values
+    rt-lt rt-lte rt-make-async-fn rt-make-case-fn rt-make-gensym
+    rt-match-binding rt-mod rt-opt-arg rt-pcase-match rt-place-alist-get
+    rt-place-aref rt-place-call rt-place-plist-get rt-pushnew rt-read-var
+    rt-register-module rt-remf rt-rest-arg rt-restore-dyn rt-return-from
+    rt-run-cl-loop rt-save-current-buffer rt-save-excursion rt-save-match-data
+    rt-set-global rt-setq-default rt-setq-local rt-should rt-should-error
+    rt-should-not rt-sub rt-truthy rt-with-abi-memory rt-with-async-scope
+    rt-with-current-buffer rt-with-output-to-string rt-with-source-file rt-with-temp-buffer
+    rt-with-temp-file rt-with-timeout rt-with-transient rt-wrap-fn rt-write-var)
+  (import "./lisp/cli.eli"
+    callSession compileAbiWasm evalProgram evalProgramAsync evalSession
+    getTimingReport invokeFunction registerModule runAbiNative runAbiWasm runBatchCli)
+
+  (export
+    createSession resetSessionState
+    evalProgram evalProgramAsync
+    compileProgram compileModule
+    callSession evalSession invokeFunction
+    registerModule
+    printValue serializeValue
+    compileAbiWasm runAbiWasm runAbiNative
+    getTimingReport
+    runBatchCli
+    OPTION_NONE el-add-special-var el-append el-aref el-arith el-arith-2 el-bool el-car el-car-safe el-cdr el-cdr-safe
+    el-catch-block el-cl-typep el-cons el-cons? el-define-function el-eq-test el-eql-test el-equal-p el-intern
+    el-list el-list-from el-list-to-array el-make-float el-make-pcoll el-make-pmap el-make-pset el-member-with
+    el-num el-opt el-plist-member el-prin1-string el-seq-items el-set-fn el-signal el-string-match
+    el-throw el-value-equal el-vector
+    rt-aset-sym rt-aset-val rt-autorun-module rt-bind-const-var rt-bind-var rt-bound-and-true-p
+    rt-call-fn rt-call0 rt-call1 rt-call2 rt-call3 rt-callN rt-callf rt-catch
+    rt-check-arity rt-check-contract rt-condition-case rt-dec rt-defalias
+    rt-defconst rt-defgeneric-value rt-define-derived-mode rt-define-minor-mode
+    rt-defmacro rt-defmethod-value rt-defprotocol rt-defstruct rt-defstruct-persistent
+    rt-defun rt-defvar rt-defvar-init rt-defvar-keymap rt-defvar-local rt-delay
+    rt-destructure rt-ert-deftest rt-extend-protocol rt-get-global
+    rt-gt rt-gte rt-gv-define-setter rt-gv-define-simple-setter
+    rt-ignore-error rt-ignore-errors rt-import-functions rt-import-values
+    rt-lt rt-lte rt-make-async-fn rt-make-case-fn rt-make-gensym
+    rt-match-binding rt-mod rt-opt-arg rt-pcase-match rt-place-alist-get
+    rt-place-aref rt-place-call rt-place-plist-get rt-pushnew rt-read-var
+    rt-register-module rt-remf rt-rest-arg rt-restore-dyn rt-return-from
+    rt-run-cl-loop rt-save-current-buffer rt-save-excursion rt-save-match-data
+    rt-set-global rt-setq-default rt-setq-local rt-should rt-should-error
+    rt-should-not rt-sub rt-truthy rt-with-abi-memory rt-with-async-scope
+    rt-with-current-buffer rt-with-output-to-string rt-with-source-file rt-with-temp-buffer
+    rt-with-temp-file rt-with-timeout rt-with-transient rt-wrap-fn rt-write-var))

@@ -22,7 +22,7 @@
   (import "../tools/backends/compiler-corpus.mjs" createOriginalCorpusSourceReader transportOriginalSequenceRuntime compilerCorpusFunctionalResources)
   (import "../tools/backends/compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
   (import "../tools/backends/compiler-corpus-managed-adapters.mjs" addOriginalManagedLibraryAdapters originalManagedObservationLaunch runOriginalManagedObservation originalManagedProgramCompletionSource)
-  (import "../tools/backends/compiler-corpus-managed-adapters-legacy.mjs" :as legacy)
+  (import "../tools/backends/compiler-corpus-managed-adapters-ground.mjs" :as ground)
   (import "../tools/backends/compiler-corpus-execution.mjs" executeCompilerCorpusRecord
     compilerCorpusRuntimeAcceptance prepareCompilerCorpusSourceMapContext prepareOriginalProgramProcessLifetime)
   (import "../tools/backends/compiler-corpus.mjs" compilerCorpusRequest transportOriginalMatcherRecord)
@@ -393,7 +393,7 @@
             (await (writeFile host-path (str host-source "\n")))
             (await (js-call assert :rejects (lambda () (selectOriginalInteropRuntimeOptions input environment)) globalThis.TypeError)))
           (finally (await (rm directory (js-object :recursive t :force t))))))))
-  (defconst retained "tests/wasm-managed-sequence-data-test-legacy.mjs")
+  (defconst retained "tests/wasm-managed-sequence-data-test-ground.mjs")
   (defconst eli "tests/eliscript/wasm-managed-sequence-data.eli")
   (defconst fixture "tests/fixtures/wasm-managed-sequence-data.eli")
   (defconst names (js-array "source-operation" "console-log-capture" "console-log"))
@@ -661,7 +661,7 @@
              (options (js-object :sourceRoot root :text (get reader :text) :file (get reader :file)
                :stableFiles (new globalThis.Set (js-array "tests/fixtures/wasm-managed-transient-state.eli"))
                :locators (js-array) :add (lambda (record) (js-call baseline :push record)))))
-        (await (js-call legacy :addOriginalManagedLibraryAdapters options))
+        (await (js-call ground :addOriginalManagedLibraryAdapters options))
         (await (addOriginalManagedLibraryAdapters (Object/assign (js-object) options
           (js-object :add (lambda (record) (js-call actual :push record))))))
         (js-call assert :strictEqual (js-length actual) 4)
@@ -672,7 +672,7 @@
                    (metadata (Object/assign (js-object) (get record :original)))
                    (assets (get metadata :sourceAssets))
                    (files (js-array "tools/backends/eliscript/compiler-corpus-host-context.eli"
-                     "tools/backends/compiler-corpus-host-context.mjs" "tools/backends/compiler-corpus-host-context-legacy.mjs"
+                     "tools/backends/compiler-corpus-host-context.mjs" "tools/backends/compiler-corpus-host-context-ground.mjs"
                      "tools/backends/original-program-bun-launcher.el"))
                    (position 0))
               (Reflect/deleteProperty metadata "sourceAssets")
@@ -816,7 +816,7 @@
                :locators (js-array (js-object :file filename :id "original-core-unrelated-refusal"
                  :contains "no actual source library"))
                :add (lambda (record) (js-call baseline :push record)))))
-        (await (js-call legacy :addOriginalManagedLibraryAdapters options))
+        (await (js-call ground :addOriginalManagedLibraryAdapters options))
         (let ((before (globalThis.structuredClone baseline)))
           (await (addOriginalManagedLibraryAdapters (Object/assign (js-object) options
             (js-object :add (lambda (record) (js-call actual :push record))))))
@@ -878,7 +878,7 @@
                (js-object :text (async (filename)
                   (if (= filename suite) source (await (funcall (get options :text) filename))))
                  :add (lambda (record) (js-call baseline :push record))))))
-        (await (js-call legacy :addOriginalManagedLibraryAdapters old-options))
+        (await (js-call ground :addOriginalManagedLibraryAdapters old-options))
         (await (addOriginalManagedLibraryAdapters options))
         (let ((records (get state :records)) (index 0) (process-hosts 0))
           (js-call assert :ok (> (js-length records) 0))
@@ -931,7 +931,7 @@
                 (js-call (js-array suite retained eli) :forEach (lambda (filename)
                   (js-call assert :ok (js-call assets :some (lambda (asset) (= (get asset :file) filename))))))
                 (let ((files (js-array "tools/backends/eliscript/managed-host.eli"
-                               "tools/backends/managed-host.mjs" "tools/backends/managed-host-legacy.mjs"
+                               "tools/backends/managed-host.mjs" "tools/backends/managed-host-ground.mjs"
                                "tools/backends/eliscript/managed-host-lifecycle.eli" "tools/backends/managed-host-lifecycle.mjs"
                                "tools/backends/eliscript/managed-host-object-provider.eli" "tools/backends/managed-host-object-provider.mjs"
                                "tools/backends/eliscript/managed-host-object-realm.eli" "tools/backends/managed-host-object-realm.mjs"))
@@ -1392,7 +1392,7 @@
                (await (readFile (resolve root "tools/backends/eliscript/compiler-corpus-project-entry-host.eli") "utf8"))
                "tools/backends/eliscript/compiler-corpus-project-entry-host.eli"))
              (options (get state :options)))
-        (await (js-call legacy :addOriginalManagedLibraryAdapters
+        (await (js-call ground :addOriginalManagedLibraryAdapters
           (Object/assign (js-object) options (js-object
             :text (async (filename) (if (= filename suite) (get state :source)
               (await (js-call (get state :reader) :text filename))))
