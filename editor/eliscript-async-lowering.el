@@ -21,7 +21,6 @@
              ,scoped
              (lambda (,tmp)
                (setq ,tmp (cdr ,tmp))
-               (ignore ,tmp)
                ,(funcall k tmp))
              (eliscript-async--capture))))
        (finish (scoped k)
@@ -30,10 +29,7 @@
          (cond ((null forms) (funcall k nil))
                ((null (cdr forms)) (lower (car forms) vars k))
                (t (lower (car forms) vars
-                         (lambda (value)
-                           (let ((rest (sequence (cdr forms) vars k)))
-                             (if (or (null value) (symbolp value)) rest
-                               `(progn ,value ,rest))))))))
+                         (lambda (value) `(progn ,value ,(sequence (cdr forms) vars k)))))))
        (arguments (forms vars k)
          (if (null forms) (funcall k nil)
            (lower (car forms) vars
@@ -52,7 +48,7 @@
                        (lambda (value)
                          (let ((tmp (make-symbol "async-value")))
                            `(eliscript-async--await ,value
-                              (lambda (,tmp) (ignore ,tmp) ,(funcall k tmp))
+                              (lambda (,tmp) ,(funcall k tmp))
                               (eliscript-async--capture))))))
                ('progn (sequence (cdr form) vars k))
                ('if (lower (cadr form) vars
@@ -100,11 +96,7 @@
                     (eliscript-async--loop
                      (lambda () ,(lower (cadr form) vars
                        (lambda (test) `(if ,test
-                         ,(sequence (cddr form) vars
-                                    (lambda (value)
-                                      (if (or (null value) (symbolp value))
-                                          'eliscript-async--next
-                                        `(progn ,value eliscript-async--next))))
+                         ,(sequence (cddr form) vars (lambda (value) `(progn ,value eliscript-async--next)))
                          nil)))))
                     (lambda (,tmp) (ignore ,tmp) ,(funcall k nil))
                     (eliscript-async--capture))))

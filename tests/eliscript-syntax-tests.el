@@ -1183,6 +1183,24 @@
     (channel-put! ch 4)
     (should (equal (eliscript-async-wait fut) '(2 2 17)))))
 
+(ert-deftest eliscript-async-discarded-symbol-signals-void-variable ()
+  (let* ((before
+          (eval '(lambda-async (c)
+                   missing-review-variable
+                   (await (channel-take! c)))
+                t))
+         (after
+          (eval '(lambda-async (c)
+                   (await (channel-take! c))
+                   missing-review-variable
+                   42)
+                t))
+         (ch1 (make-async-channel 1))
+         (ch2 (make-async-channel 1)))
+    (channel-put! ch2 0)
+    (should (eq (future-state (funcall before ch1)) 'rejected))
+    (should (eq (future-state (funcall after ch2)) 'rejected))))
+
 (provide 'eliscript-syntax-tests)
 
 ;;; eliscript-syntax-tests.el ends here

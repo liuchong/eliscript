@@ -235,6 +235,27 @@
         "(let ((p (make-sparse-keymap)) (c (make-sparse-keymap))) (set-keymap-parent c p) (define-key p \"ab\" 'ignore) (define-key c \"ac\" 'forward-char) (let ((sub (lookup-key c \"a\"))) (list (keymapp sub) (lookup-key sub \"b\") (lookup-key sub \"c\"))))"
         "(t ignore forward-char)")))
 
+  (test "Rafba-01: discarded unbound symbol before or after await still signals void-variable"
+    (lambda ()
+      (js-call (js-array false t) :forEach (lambda (dynamic)
+        (parity (str "discarded-unbound-before-" dynamic)
+          "(require 'eliscript-async) (defun-async consume (c) missing-review-variable (await (channel-take! c)))"
+          "(future-state (consume (make-async-channel 1)))"
+          "rejected" dynamic)
+        (parity (str "discarded-unbound-after-" dynamic)
+          "(require 'eliscript-async) (defun-async consume (c) (await (channel-take! c)) missing-review-variable 42)"
+          "(let ((c (make-async-channel 1))) (channel-put! c 0) (future-state (consume c)))"
+          "rejected" dynamic)))))
+
+  (test "Rafba-02: composed prefix view respects explicit prefix parent precedence and copy-keymap"
+    (lambda ()
+      (parity "prefix-own-parent" ""
+        "(let ((p (make-sparse-keymap)) (c (make-sparse-keymap)) (a (make-sparse-keymap)) (base (make-sparse-keymap))) (define-key p \"ab\" 'ignore) (define-key base \"b\" 'backward-char) (define-key a \"c\" 'forward-char) (set-keymap-parent a base) (define-key c \"a\" a) (set-keymap-parent c p) (list (lookup-key c \"ab\") (lookup-key (lookup-key c \"a\") \"b\")))"
+        "(backward-char backward-char)")
+      (parity "prefix-copy" ""
+        "(let ((p (make-sparse-keymap)) (c (make-sparse-keymap)) (a (make-sparse-keymap)) (base (make-sparse-keymap))) (define-key p \"ab\" 'ignore) (define-key base \"d\" 'backward-char) (define-key a \"c\" 'forward-char) (set-keymap-parent a base) (define-key c \"a\" a) (set-keymap-parent c p) (let ((sub (copy-keymap (lookup-key c \"a\")))) (list (lookup-key sub \"b\") (lookup-key sub \"c\") (lookup-key sub \"d\"))))"
+        "(ignore forward-char backward-char)")))
+
   (test "binding cell protection: shadowed bindings retain distinct mutable identities"
     (lambda ()
       (let* ((session (createSession)) (values (get session :values)) (symbol (el-intern "repair-cell"))
