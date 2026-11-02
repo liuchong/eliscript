@@ -14,6 +14,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'eliscript-async-lowering)
 (require 'eliscript-contract)
 (require 'eliscript-data)
 
@@ -76,10 +77,33 @@
   (unless (eliscript-future-p fut)
     (signal 'wrong-type-argument (list 'future-p fut)))
   (when (eq (eliscript-future-state fut) 'pending)
-    (when (eliscript-future-cancel-fn fut)
-      (funcall (eliscript-future-cancel-fn fut)))
-    (eliscript-async--settle-future fut 'cancelled '(eliscript-cancelled "Task cancelled")))
+    (let ((cancel (eliscript-future-cancel-fn fut))
+          (callbacks (eliscript-future-callbacks fut)))
+      (setf (eliscript-future-callbacks fut) nil)
+      (eliscript-async--settle-future fut 'cancelled '(eliscript-cancelled "Task cancelled"))
+      (when cancel (funcall cancel))
+      (dolist (callback callbacks) (funcall callback))))
   fut)
+
+(defun eliscript-async--adopt (child value)
+  "Resolve CHILD from VALUE, subscribing if VALUE is an unsettled Future."
+  (cond
+   ((eq child value) (eliscript-async--settle-future child 'rejected '(error "Future resolution cycle")))
+   ((eliscript-future-p value)
+    (let ((forward (lambda ()
+                     (eliscript-async--settle-future child (eliscript-future-state value)
+                                                   (eliscript-future-value value)))))
+      (if (eq (eliscript-future-state value) 'pending)
+          (setf (eliscript-future-callbacks value)
+                (append (eliscript-future-callbacks value) (list forward)))
+        (funcall forward))
+      (when (eq (future-state child) 'pending)
+        (setf (eliscript-future-cancel-fn child)
+              (lambda ()
+                (setf (eliscript-future-callbacks value) (delq forward (eliscript-future-callbacks value)))
+                (future-cancel value))))))
+   (t (eliscript-async--settle-future child 'fulfilled value)))
+  child)
 
 (defun future-then (fut on-fulfilled &optional on-rejected)
   "Chain ON-FULFILLED and optional ON-REJECTED onto Future FUT."
@@ -116,13 +140,11 @@
                                           (let ((res (if on-fulfilled
                                                          (run-with-bindings on-fulfilled (eliscript-future-value fut))
                                                        (eliscript-future-value fut))))
-                                            (if (eliscript-future-p res)
-                                                (eliscript-async--settle-future child (eliscript-future-state res) (eliscript-future-value res))
-                                              (eliscript-async--settle-future child 'fulfilled res))))
+                                            (eliscript-async--adopt child res)))
                                          (t
                                           (if on-rejected
                                               (let ((res (run-with-bindings on-rejected (eliscript-future-value fut))))
-                                                (eliscript-async--settle-future child 'fulfilled res))
+                                                (eliscript-async--adopt child res))
                                             (eliscript-async--settle-future child (eliscript-future-state fut) (eliscript-future-value fut)))))
                                       (( error quit )
                                        (eliscript-async--settle-future child 'rejected cb-err)))))))
@@ -177,21 +199,92 @@
         (dolist (sub (cdr form))
           (eliscript-async--scan-forbidden-await sub in-async-p context-name)))))))
 
+(defun eliscript-async--source-symbols (forms)
+  "Collect source symbols for a dynamically scoped coroutine environment."
+  (let ((pending (copy-sequence forms)) result)
+    (while pending
+      (let ((form (pop pending)))
+        (cond
+         ((and (symbolp form) form (not (eq form t)) (not (keywordp form))
+               (not (string-prefix-p "&" (symbol-name form))))
+          (cl-pushnew form result))
+         ((consp form)
+          (unless (memq (car form) '(quote function lambda defun))
+            (push (car form) pending)
+            (push (cdr form) pending))))))
+    result))
+
 (defun eliscript-async--build-async-lambda (name args raw-body)
   "Build an async function form for NAME with ARGS and RAW-BODY."
   (let* ((extracted (eliscript-contract-extract-declarations raw-body name))
          (plist (plist-get extracted :eliscript))
-         (clean-body (plist-get extracted :body)))
+         (clean-body (plist-get extracted :body))
+         (source-lexical lexical-binding)
+         (symbols (unless source-lexical (eliscript-async--source-symbols (cons args clean-body))))
+         (parameters (cl-remove-if (lambda (x) (or (not (symbolp x))
+                                    (string-prefix-p "&" (symbol-name x)))) args)))
     (eliscript-contract-validate-context 'defun-async name plist args clean-body)
-    (dolist (form clean-body)
-      (eliscript-async--scan-forbidden-await form t name))
-    (let ((wrapped-body (eliscript-contract-wrap-body name plist args clean-body)))
-      `(lambda ,args
-         (condition-case err
-             (let ((eliscript-async--in-async-context t))
-               (eliscript-async--make-fulfilled (progn ,@wrapped-body)))
-           (( error quit )
-            (eliscript-async--make-rejected err)))))))
+    (dolist (form clean-body) (eliscript-async--scan-forbidden-await form t name))
+    (let* ((wrapped (eliscript-contract-wrap-body name plist args clean-body))
+           (lowered (eliscript-async--lower-body wrapped (unless source-lexical parameters) (not source-lexical)))
+           (renamed (mapcar (lambda (p) (cons p (make-symbol (symbol-name p)))) parameters))
+           (private-args (if source-lexical args
+                           (mapcar (lambda (arg) (or (cdr (assq arg renamed)) arg)) args)))
+           (entry (if source-lexical lowered
+                    `(let ,(mapcar (lambda (pair) (list (car pair) (cdr pair))) renamed) ,lowered)))
+           (error-symbol (make-symbol "async-error"))
+           (fn `(lambda ,private-args
+                  (condition-case ,error-symbol
+                      (let ((eliscript-async--in-async-context t))
+                        (eliscript-async--make-fulfilled ,entry))
+                    ((error quit) (eliscript-async--make-rejected ,error-symbol))))))
+      (if source-lexical fn `(eval ',fn ',symbols)))))
+
+(defun eliscript-async--await (source continuation bindings)
+  "Resume CONTINUATION with SOURCE's value under task-local BINDINGS."
+  (unless (future-p source) (signal 'wrong-type-argument (list 'future-p source)))
+  (let ((child (future-then source
+                 (lambda (value)
+                   (cl-progv (mapcar #'car bindings) (mapcar #'cdr bindings)
+                     (let ((eliscript-async--in-async-context t))
+                       (funcall continuation value)))))))
+    (when (eq (future-state child) 'pending)
+      (let ((cancel (eliscript-future-cancel-fn child)))
+        (setf (eliscript-future-cancel-fn child)
+              (lambda () (when cancel (funcall cancel)) (future-cancel source)))))
+    child))
+
+(defun eliscript-async--protect (body failure cleanup)
+  "Apply asynchronous error handling and finalization to BODY."
+  (let ((source (condition-case err (eliscript-async--make-fulfilled (funcall body))
+                  ((error quit) (eliscript-async--make-rejected err)))))
+    (when failure (setq source (future-then source nil failure)))
+    (if (not cleanup) source
+      (let* ((cleaned nil)
+             (finish (lambda () (unless cleaned (setq cleaned t) (funcall cleanup))))
+             (result (future-then source
+                       (lambda (value) (future-then (eliscript-async--protect finish nil nil) (lambda (_) value)))
+                       (lambda (error) (future-then (eliscript-async--protect finish nil nil)
+                                        (lambda (_) (signal (car error) (cdr error))))))))
+        (when (eq (future-state result) 'pending)
+          (setf (eliscript-future-cancel-fn result)
+                (lambda () (future-cancel source) (eliscript-async--protect finish nil nil))))
+        result))))
+
+
+(defconst eliscript-async--next (make-symbol "async-loop-next"))
+
+(defun eliscript-async--loop (step)
+  "Trampoline STEP until it returns a value or a pending Future."
+  (let ((value (funcall step)))
+    (while (or (eq value eliscript-async--next)
+               (and (future-p value) (eq (future-state value) 'fulfilled)
+                    (eq (eliscript-future-value value) eliscript-async--next)))
+      (setq value (funcall step)))
+    (if (future-p value)
+        (future-then value (lambda (result) (if (eq result eliscript-async--next)
+                                              (eliscript-async--loop step) result)))
+      value)))
 
 (defmacro defun-async (name args &rest body)
   "Define asynchronous function NAME with ARGS and BODY returning a Future."
@@ -310,6 +403,10 @@
     (let ((pending (eliscript-future--create :state 'pending :value nil :callbacks nil :cancel-fn nil)))
       (setf (eliscript-async-channel-putters ch)
             (append (eliscript-async-channel-putters ch) (list (cons value pending))))
+      (setf (eliscript-future-cancel-fn pending)
+            (lambda ()
+              (setf (eliscript-async-channel-putters ch)
+                    (cl-remove pending (eliscript-async-channel-putters ch) :key #'cdr :test #'eq))))
       pending))))
 
 (defun channel-take! (ch)
@@ -340,6 +437,10 @@
       (let ((pending (eliscript-future--create :state 'pending :value nil :callbacks nil :cancel-fn nil)))
         (setf (eliscript-async-channel-takers ch)
               (append (eliscript-async-channel-takers ch) (list pending)))
+        (setf (eliscript-future-cancel-fn pending)
+              (lambda ()
+                (setf (eliscript-async-channel-takers ch)
+                      (delq pending (eliscript-async-channel-takers ch)))))
         pending)))))
 
 (defun channel-close! (ch)

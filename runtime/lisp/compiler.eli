@@ -10,6 +10,9 @@
   (import "./extensions.eli" el-activate-extension el-check-const-mutation el-collect-pattern-vars el-dispatch-tag el-future el-require el-verify-recur-tail)
   (import "./builtins.eli" createSession)
 
+  (import "./async-runtime.eli" el-async-track-binding el-async-await el-async-protect el-async-guard el-async-loop el-async-next)
+  (import "./async-lowering.eli" el-lower-async-body el-lower-async-spec)
+
 
   ;; ------------------------------------------------------------------
   ;; Compiled-Module Runtime Helpers (rt-*)
@@ -57,6 +60,7 @@
       (js-call dynamic :push
                (js-array sym (js-call values :has sym) (js-call values :get sym)
                          (if has-local locals nil) (if has-local (js-call locals :get sym) nil)))
+      (el-async-track-binding session (aref dynamic (1- (js-length dynamic))))
       (if has-local
           (js-call locals :set sym value)
         (js-call values :set sym value))
@@ -3228,6 +3232,29 @@
                   (str "(rt-call-fn session " (compile-expr ctx cenv head) " (js-array"
                        (js-call (js-call args :map (lambda (a) (str " " (compile-expr ctx cenv a)))) :join "")
                        "))")))
+              ((= name "%async-bind")
+                (let* ((parameter (ctx-gensym ctx "resume")) (next (make-cenv cenv))
+                       (symbol (el-third form)) (sym-expr (ctx-sym ctx (get symbol :name))))
+                  (js-call (get next :vars) :set (get symbol :name)
+                    (js-object :jsVar parameter :symExpr sym-expr :isConst false :isDynamic false))
+                  (str "(el-async-await session " (compile-expr ctx cenv (el-second form))
+                       " (lambda (" parameter ") " (compile-expr ctx next (el-nth 3 form)) "))")))
+              ((= name "%async-next") "el-async-next")
+              ((= name "%async-loop")
+                (str "(el-async-loop (lambda () " (compile-expr ctx cenv (el-third form)) "))"))
+              ((= name "%async-catch")
+                (let ((error-var (ctx-gensym ctx "async_error")))
+                  (str "(el-async-guard session (lambda () " (compile-expr ctx cenv (el-second form))
+                       ") (lambda (" error-var ") "
+                       (compile-condition-case ctx cenv
+                         (el-cons (el-intern "condition-case")
+                           (el-cons (el-third form)
+                             (el-cons (el-list (el-intern "%async-raise") (el-intern error-var)) (el-nth 3 form)))))
+                       ") nil)")))
+              ((= name "%async-raise") (str "(throw " (get (el-second form) :name) ")"))
+              ((= name "%async-finally")
+                (str "(el-async-guard session (lambda () " (compile-expr ctx cenv (el-second form))
+                     ") nil (lambda () " (compile-expr ctx cenv (el-third form)) "))"))
               ;; Special forms & core language constructs
               ((= name "quote") (compile-quote ctx (el-second form)))
               ((= name "function")
@@ -4102,11 +4129,11 @@
                   (str "(el-define-function session " (ctx-sym ctx fn-name)
                        " (rt-make-async-fn session " (el-eliscript-string-literal fn-name) " "
                        (compile-quote ctx (el-car rest)) " (get "
-                       (compile-lambda-impl ctx cenv rest fn-name false nil) " :elispCall)))")))
+                       (compile-lambda-impl ctx cenv (el-lower-async-spec csession rest (lambda (f) (el-macroexpand csession f (el-root-env)))) fn-name false nil) " :elispCall)))")))
               ((and (= name "lambda-async") (ext-active? csession "eliscript-async" name))
                 (let ((rest (get form :cdr)))
                   (str "(rt-make-async-fn session \"lambda-async\" " (compile-quote ctx (el-car rest))
-                       " (get " (compile-lambda-impl ctx cenv rest "lambda-async" false nil) " :elispCall))")))
+                       " (get " (compile-lambda-impl ctx cenv (el-lower-async-spec csession rest (lambda (f) (el-macroexpand csession f (el-root-env)))) "lambda-async" false nil) " :elispCall))")))
               ((and (= name "with-async-scope") (ext-active? csession "eliscript-async" name))
                 (let* ((spec (el-second form))
                        (var-sym (el-car spec))
@@ -4281,7 +4308,7 @@
            " rt-destructure rt-ert-deftest rt-extend-protocol rt-get-global"
            " rt-gt rt-gte rt-gv-define-setter rt-gv-define-simple-setter"
            " rt-ignore-error rt-ignore-errors rt-import-functions rt-import-values"
-           " rt-lt rt-lte rt-make-async-fn rt-make-case-fn rt-make-gensym"
+           " el-async-await el-async-protect el-async-guard el-async-loop el-async-next rt-lt rt-lte rt-make-async-fn rt-make-case-fn rt-make-gensym"
            " rt-match-binding rt-mod rt-opt-arg rt-pcase-match rt-place-alist-get"
            " rt-place-aref rt-place-call rt-place-plist-get rt-pushnew rt-read-var"
            " rt-register-module rt-remf rt-rest-arg rt-restore-dyn rt-return-from"
@@ -4345,7 +4372,7 @@
     rt-destructure rt-ert-deftest rt-extend-protocol rt-get-global
     rt-gt rt-gte rt-gv-define-setter rt-gv-define-simple-setter
     rt-ignore-error rt-ignore-errors rt-import-functions rt-import-values
-    rt-lt rt-lte rt-make-async-fn rt-make-case-fn rt-make-gensym
+    el-async-await el-async-protect el-async-guard el-async-loop el-async-next rt-lt rt-lte rt-make-async-fn rt-make-case-fn rt-make-gensym
     rt-match-binding rt-mod rt-opt-arg rt-pcase-match rt-place-alist-get
     rt-place-aref rt-place-call rt-place-plist-get rt-pushnew rt-read-var
     rt-register-module rt-remf rt-rest-arg rt-restore-dyn rt-return-from

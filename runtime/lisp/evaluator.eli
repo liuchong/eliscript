@@ -5,6 +5,7 @@
   (import "./regexp-buffer.eli" el-buffer-insert el-clamp-position el-current-buffer el-generate-new-buffer el-get-buffer-create el-kill-buffer el-point-max el-point-min el-rx)
   (import "./reader-format.eli" el-concat-pieces el-format el-read-all el-source-lexical-binding)
 
+  (import "./async-runtime.eli" el-async-track-binding el-async-untrack-binding)
 
   (defun el-sort-items (items predicate session)
     ;; Stable merge sort with an Elisp predicate.
@@ -152,8 +153,9 @@
   (defun el-set-variable (session symbol value env)
     (when (or (nil? symbol) (eq symbol t) (el-keyword? symbol)) (el-signal "setting-constant" symbol))
     (unless (el-symobj? symbol) (el-signal "wrong-type-argument" (el-intern "symbolp") symbol))
-    (when (and (eq symbol s-lexical-binding) (not (nil? env)) (not (nullish? (get env :lexical))))
-      (put env :lexical (not (nil? value))))
+    ;; The reader/evaluator fixes a form's binding environment when loading it.
+    ;; Assigning the variable changes subsequent eval defaults, not the lexical
+    ;; environment of forms that have already been read from the current file.
     (if (el-is-special-var session symbol)
         (el-set-dynamic-variable session symbol value)
       (if (and (not (nil? env)) (js-call (get env :vars) :has symbol))
@@ -187,12 +189,12 @@
           (js-call dynamic :push
                    (js-array symbol (js-call values :has symbol) (js-call values :get symbol)
                              (if has-local locals nil) (if has-local (js-call locals :get symbol) nil)))
+          (el-async-track-binding session (aref dynamic (1- (js-length dynamic))))
           (if has-local
               (js-call locals :set symbol value)
             (js-call values :set symbol value))
           (when (eq symbol s-lexical-binding)
-            (put session :dynamicMode (nil? value))
-            (unless (nil? frame) (put frame :lexical (not (nil? value)))))))
+            (put session :dynamicMode (nil? value)))))
       (t (js-call (get frame :vars) :set symbol value))))
 
 
@@ -201,6 +203,7 @@
       (while (>= index 0)
         (let ((saved (aref dynamic index))
               (sym (aref (aref dynamic index) 0)))
+          (el-async-untrack-binding session saved)
           (if (not (nil? (aref saved 3)))
               (js-call (aref saved 3) :set sym (aref saved 4))
             (if (aref saved 1)
@@ -1862,6 +1865,7 @@
            (lex-mode (el-source-lexical-binding source filename prev-lex))
            (bind-lex (or has-file (not (eq lex-mode prev-lex))))
            (pending-features (if has-file (js-array) nil)))
+      (put env :lexical (not (nil? lex-mode)))
       (when (el-string? filename)
         (js-call (get session :values) :set load-sym filename))
       (when (and has-file (not (nullish? (get session :loadStack))))

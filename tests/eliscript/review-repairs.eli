@@ -1,0 +1,143 @@
+(module tests.review-repairs
+  (import "bun:test" test expect afterAll)
+  (import "node:child_process" spawnSync)
+  (import "node:fs" mkdirSync writeFileSync rmSync)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "node:module" createRequire)
+  (import "../dist/bootstrap/compiler.mjs" compile-string)
+  (import "../dist/runtime/lisp.mjs" compileModule createSession evalProgram runAbiNative runAbiWasm)
+
+  (defconst root (js-call globalThis.process :cwd))
+  (defconst directory (resolve root "_worktree/review-repairs"))
+  (defconst runtime-url (get (pathToFileURL (resolve root "dist/runtime/lisp.mjs")) :href))
+  (defconst require-module (createRequire (str (get (pathToFileURL (resolve directory "entry.mjs")) :href))))
+
+  (afterAll (lambda () (rmSync directory (js-object :recursive t :force t))))
+
+  (defun parity (id program expression expected &optional dynamic)
+    (mkdirSync directory (js-object :recursive t))
+    (let* ((source (str (if dynamic "" ";;; -*- lexical-binding: t -*-\n") program
+                        "\n(setq repair-result (prin1-to-string " expression "))\n"))
+           (file (resolve directory (str id ".el")))
+           (output (resolve directory (str id ".mjs"))))
+      (try
+        (progn
+          (writeFileSync file source "utf8")
+          (let ((oracle (spawnSync (or (get (get globalThis.process :env) :EMACS) "emacs")
+                         (js-array "--batch" "-Q" "-L" "editor" "-L" "compiler" "-l" file
+                                   "--eval" "(princ repair-result)")
+                         (js-object :encoding "utf8" :timeout 10000 :maxBuffer 1048576))))
+            (unless (= (get oracle :status) 0) (throw (new globalThis.Error (get oracle :stderr))))
+            (js-call (expect (get oracle :stdout)) :toBe expected))
+          (let ((session (createSession)))
+            (evalProgram source (js-object :session session :filename file))
+            (js-call (expect (evalProgram "repair-result" (js-object :session session))) :toBe expected))
+          (writeFileSync output (compile-string (compileModule source
+            (js-object :sourceFile file :moduleName (str "tests.repairs." id) :runtime runtime-url)) (str id ".eli")) "utf8")
+          (let ((module (funcall require-module output)))
+            (funcall (get module :getLoaded))
+            ;; The result was calculated by AOT code above, not by evalElisp.
+            (js-call (expect (JSON/parse (funcall (get module :evalElisp) "repair-result"))) :toBe expected)))
+        (finally
+          (rmSync file (js-object :force t))
+          (rmSync output (js-object :force t))))))
+
+  (test "R655-01: file scope survives assignment to lexical-binding"
+    (lambda ()
+      (parity "lexical" "(setq lexical-binding nil) (defun read-x () x) (defun pass-x (x) (read-x))"
+        "(condition-case nil (pass-x 19) (void-variable 'unbound))" "unbound")))
+
+  (test "R655-12A: suspension preserves locals, ordering, and multiple awaits"
+    (lambda ()
+      (parity "suspend"
+        "(require 'eliscript-async) (setq hits 0) (defun-async consumer (c) (setq hits (1+ hits)) (let ((a (option-value (await (channel-take! c))))) (+ a (option-value (await (channel-take! c))))))"
+        "(let* ((c (make-async-channel 1)) (f (consumer c)) (before (future-state f))) (channel-put! c 20) (let ((middle (future-state f))) (channel-put! c 22) (list before middle (future-state f) (eliscript-async-wait f) hits)))"
+        "(pending pending fulfilled 42 1)")
+      (parity "dynamic-suspend" "(require 'eliscript-async) (defun-async consumer (c) (+ 1 (option-value (await (channel-take! c)))))"
+        "(let* ((c (make-async-channel 1)) (f (consumer c))) (channel-put! c 41) (eliscript-async-wait f))" "42" t)
+      (parity "dynamic-no-args"
+        "(require 'eliscript-async) (setq c (make-async-channel 1)) (defun-async consume () (let ((x 41)) (await (channel-take! c)) (+ x 1)))"
+        "(let ((f (consume))) (channel-put! c 0) (eliscript-async-wait f))" "42" t)
+      (parity "dynamic-read-suspend"
+        "(require 'eliscript-async) (defun read-x () x) (defun-async consume (c x) (let ((x (+ x 1))) (await (channel-take! c)) (read-x)))"
+        "(let* ((c (make-async-channel 1)) (f (consume c 41))) (channel-put! c 0) (eliscript-async-wait f))" "42" t)
+      (parity "async-cleanup" "(require 'eliscript-async) (setq cleaned 0) (defun-async consumer (c) (condition-case caught (unwind-protect (progn (await (channel-take! c)) (error \"after\")) (setq cleaned (1+ cleaned))) (error (car caught))))"
+        "(let* ((c (make-async-channel 1)) (f (consumer c))) (channel-put! c 1) (list (eliscript-async-wait f) cleaned))" "(error 1)")))
+
+  (test "R655-12B: cancelled channel waiters cannot consume or insert values"
+    (lambda ()
+      (parity "cancel-taker" "(require 'eliscript-async)"
+        "(let* ((c (make-async-channel 1)) (f (channel-take! c))) (future-cancel f) (channel-put! c 'kept) (let ((next (channel-take! c))) (list (future-state f) (future-state next) (option-value (eliscript-async-wait next)))))"
+        "(cancelled fulfilled kept)")
+      (parity "cancel-putter" "(require 'eliscript-async)"
+        "(let ((c (make-async-channel 1))) (channel-put! c 'first) (let ((f (channel-put! c 'ghost))) (future-cancel f) (list (option-value (eliscript-async-wait (channel-take! c))) (future-state (channel-take! c)))))"
+        "(first pending)")))
+
+  (test "R655-14: prefix maps share canonical string/vector events"
+    (lambda ()
+      (parity "prefix" ""
+        "(let ((k (make-sparse-keymap))) (define-key k \"ab\" 'ignore) (list (keymapp (lookup-key k \"a\")) (lookup-key k [97 98]) (lookup-key k \"abc\")))" "(t ignore 2)")
+      (parity "control" ""
+        "(let ((k (make-sparse-keymap))) (keymap-set k \"C-x C-f\" 'find-file) (list (keymapp (lookup-key k [24])) (lookup-key k [24 6]) (keymap-lookup k \"C-x C-f\")))" "(t find-file find-file)")
+      (parity "copy-prefix" ""
+        "(let ((k (make-sparse-keymap))) (define-key k \"ab\" 'ignore) (let ((copy (copy-keymap k))) (define-key copy \"ab\" 'forward-char) (list (lookup-key k \"ab\") (lookup-key copy \"ab\"))))" "(ignore forward-char)")))
+
+  (defasync abi-parity (id body args expected)
+    (let* ((source (str "(defun kernel (x y z) (declare (eliscript :abi :numeric-f64 :params ((x :f64) (y :f64) (z :f64)) :returns :f64)) " body ")"))
+           (call (str "(kernel " (js-call (js-call args :map (lambda (x) (str x ".0"))) :join " ") ")")))
+      (parity id source call (str expected ".0"))
+      (js-call (expect (await (runAbiWasm source "kernel" args))) :toBe expected)
+      (js-call (expect (await (runAbiNative source "kernel" args))) :toBe expected)))
+
+  (test "R748-01: numeric zero stays true, comparison false stays false"
+    (async ()
+      (await (abi-parity "zero-truth" "(if x 1.0 2.0)" (js-array 0 3 2) 1))
+      (await (abi-parity "bool-local" "(let ((flag (< y z))) (if flag 1.0 2.0))" (js-array 0 3 2) 2))))
+
+  (test "R748-02: comparisons use all operands and preserve operand effects"
+    (async ()
+      (await (abi-parity "chain" "(if (< x y z) 1.0 2.0)" (js-array 1 3 2) 2))
+      (await (abi-parity "chain-effects" "(let ((count 0.0)) (if (< 3.0 2.0 (setq count (+ count 1.0))) 0.0 count))" (js-array 1 3 2) 1))))
+  (test "async protection: loop back-edges, cancellation, and Future adoption"
+    (lambda ()
+      (parity "async-loop"
+        "(require 'eliscript-async) (defun-async consume (c) (let ((sum 0) (n 0)) (while (< n 3) (setq sum (+ sum (option-value (await (channel-take! c)))) n (1+ n))) sum))"
+        "(let* ((c (make-async-channel 1)) (f (consume c))) (channel-put! c 10) (channel-put! c 20) (channel-put! c 12) (list (future-state f) (eliscript-async-wait f)))"
+        "(fulfilled 42)")
+      (parity "cancel-consumer"
+        "(require 'eliscript-async) (setq hit 0) (defun-async consume (c) (await (channel-take! c)) (setq hit 1))"
+        "(let* ((c (make-async-channel 1)) (f (consume c))) (future-cancel f) (channel-put! c 7) (list (future-state f) hit (option-value (eliscript-async-wait (channel-take! c)))))"
+        "(cancelled 0 7)")
+      (parity "cancel-second-await"
+        "(require 'eliscript-async) (defun-async consume (c) (await (channel-take! c)) (await (channel-take! c)))"
+        "(let* ((c (make-async-channel 1)) (f (consume c))) (channel-put! c 1) (future-cancel f) (channel-put! c 42) (list (future-state f) (option-value (eliscript-async-wait (channel-take! c)))))"
+        "(cancelled 42)")
+      (parity "cancel-finalizer"
+        "(require 'eliscript-async) (setq cleaned 0) (defun-async consume (c) (unwind-protect (await (channel-take! c)) (setq cleaned (1+ cleaned))))"
+        "(let* ((c (make-async-channel 1)) (f (consume c))) (future-cancel f) (list (future-state f) cleaned))"
+        "(cancelled 1)")
+      (parity "adopt-pending" "(require 'eliscript-async)"
+        "(let* ((a (make-async-channel 1)) (b (make-async-channel 1)) (f (future-then (channel-take! a) (lambda (_) (channel-take! b))))) (channel-put! a 1) (let ((middle (future-state f))) (channel-put! b 42) (list middle (future-state f) (option-value (eliscript-async-wait f)))))"
+        "(pending fulfilled 42)")))
+
+  (test "keymap protection: inheritance and non-prefix rejection"
+    (lambda ()
+      (parity "prefix-parent" ""
+        "(let ((parent (make-sparse-keymap)) (child (make-sparse-keymap))) (define-key parent \"ab\" 'ignore) (set-keymap-parent child parent) (define-key child \"ac\" 'forward-char) (list (lookup-key child \"ab\") (lookup-key child \"ac\") (lookup-key parent \"ac\")))"
+        "(ignore forward-char nil)")
+      (parity "non-prefix" ""
+        "(let ((k (make-sparse-keymap))) (define-key k \"a\" 'ignore) (condition-case nil (define-key k \"ab\" 'forward-char) (error 'rejected)))" "rejected")))
+
+  (test "ABI protection: mixed scalar assignment is explicitly rejected"
+    (async ()
+      (let ((source "(defun kernel (x) (declare (eliscript :abi :numeric-f64 :params ((x :f64)) :returns :f64)) (let ((v 1.0)) (setq v (< x 0.0)) (if v 1.0 2.0)))")
+            (wasm-failed false) (native-failed false))
+        (try (await (runAbiWasm source "kernel" (js-array 0)))
+          (catch error (setq wasm-failed (js-call (str (get error :message)) :includes "changes between boolean and number"))))
+        (try (await (runAbiNative source "kernel" (js-array 0)))
+          (catch error (setq native-failed (js-call (str (get error :message)) :includes "changes between boolean and number"))))
+        (js-call (expect wasm-failed) :toBe t)
+        (js-call (expect native-failed) :toBe t))))
+
+)

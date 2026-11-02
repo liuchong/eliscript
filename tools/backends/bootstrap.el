@@ -392,6 +392,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
       (setq tools (append tools
                           '(("tests/eliscript/bootstrap-compiler.eli" . "tests/bootstrap-compiler.test.mjs")
                             ("tests/eliscript/core-syntax.eli" . "tests/core-syntax.test.mjs")
+                            ("tests/eliscript/review-repairs.eli" . "tests/review-repairs.test.mjs")
                             ("tests/seed-symbol-reservation.test.eli" . "tests/seed-symbol-reservation.test.mjs")
                             ("tests/pages-site.test.eli" . "tests/pages-site.test.mjs")
                             ("tests/docs-site.test.eli" . "tests/docs-site.test.mjs")
@@ -667,7 +668,8 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
                 (with-temp-buffer
                   (insert-file-contents entry)
                   (goto-char (point-min))
-                  (insert "#!/usr/bin/env node\n")
+                  (insert (format "#!%s node\n" (or (executable-find "env")
+                                                     (error "Cannot locate env for the CLI executable"))))
                   (write-region (point-min) (point-max) entry nil 'silent))
                 (when (file-exists-p (concat entry ".map"))
                   (let* ((map-path (concat entry ".map"))

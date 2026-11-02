@@ -368,7 +368,8 @@ test-core: check-contracts
 		./tests/persistent-list.test.mjs ./tests/persistent-queue.test.mjs ./tests/persistent-vector.test.mjs ./tests/value-semantics.test.mjs \
 		./tests/persistent-map.test.mjs ./tests/persistent-set.test.mjs \
 		./tests/record.test.mjs ./tests/type.test.mjs \
-		./tests/core-syntax.test.mjs
+		./tests/core-syntax.test.mjs \
+		./tests/review-repairs.test.mjs
 	$(NODE) --test --test-concurrency=1 ./tests/compiler-session-protocol-selfhosted.test.mjs ./tests/compiler-matrix-selfhosted.test.mjs ./tests/managed-module-graph-selfhosted.test.mjs ./tests/compiler-corpus-managed-adapters-selfhosted.test.mjs \
 		./tests/number-text-node-bridge-selfhosted.test.mjs \
 		./tests/compiler-host-scope-selfhosted.test.mjs \

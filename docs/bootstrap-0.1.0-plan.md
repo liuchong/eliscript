@@ -413,3 +413,50 @@ flowchart LR
   - `2026-10-27`: 设计修正 R1（§6.4）：兼容运行时、测试与 Dual-Host 生成物改为真正的 Eliscript，新增 `C14`；`C10`–`C14` 施工完成。
   - `2026-10-29`: 完成 `S7` 与 `A17` 全量闭环验收：完成 Option A TDZ 守卫窄化与 `runtime/prelude.eli` 公共运行时 helper 提取，重写 `tests/seed-symbol-reservation.test.eli` 为纯 Eliscript，修复托管标准库向量 `dynamic-from` 与分阶段项目测试适配器，刷新全部契约与基准摘要并通过全套门禁。
   - `2026-10-29`: 完成 `S8`（`C15`–`C18` / `A18`–`A22`）`0.1.1` 发布收尾：支持 `.el` 与 `.eli` 多文件项目构建与相对模块导入，新增平台编码与工程规范（`docs/core-syntax.md` §十四），将 `tools/performance/version-comparison.eli` 改写为纯 Eliscript 模块，补充全量测试验收总表、四维版本与原生 Emacs Lisp 性能对比报告及多版本产物体积对比表，准备发布 `v0.1.1`。
+
+### 当前复审修复批次
+
+本批次只修复独立复审确认的五组缺口，不调整版本号，不以局部用例通过宣称完整生产级验收完成。
+
+- [x] R655-01：修改 `lexical-binding` 变量不改变当前文件已建立的词法环境。
+- [x] R655-12：保存真实执行续步；多次等待、循环、动态绑定、异常清理、取消队列与 Future 接续已通过差分验收。
+- [x] R655-14：按事件组织前缀树，字符串与向量按键等价，继承与复制前缀互不污染。
+- [x] R748-01：numeric-f64 中数值零为真，比较结果的假值仍为假。
+- [x] R748-02：比较链求值全部参数，各参数仅求值一次，顺序与 Lisp 一致。
+- [ ] 交由搭档在提交后的固定版本独立复审，确认是否关闭全部缺口；本批次不执行发布。
+
+可重现步骤：
+
+1. `bin/eliscript-build --root runtime --out-dir dist/runtime runtime/lisp.eli`
+2. `bin/eliscript --output tests/review-repairs.test.mjs tests/eliscript/review-repairs.eli`
+3. `bun test tests/core-syntax.test.mjs tests/review-repairs.test.mjs`
+4. `emacs --batch -Q -L compiler -L editor -L tools/org -L tools/worker -L tests -l tests/eliscript-syntax-tests.el -f ert-run-tests-batch-and-exit`
+5. `bash tools/ci/strict-byte-compile.sh`、`bash tests/cli-test.sh`、`bun tools/integrity/check.mjs --dependencies`
+
+本地证据：核心与保护套件合计 **124/124 通过，619 项断言**；Emacs 原生套件
+**26/26 通过**。新增差分在同一份源码内计算结果，分别执行 GNU Emacs、JS 解释器和
+真实 AOT 模块；数值内核额外执行 WASM 与 C 编译的 native 产物。生成物不入库。
+严格字节编译、CLI 及依赖完整性检查通过；全量仓库完整性检查仍存在下述基线缺口。
+数值 ABI 显式拒绝无法保持类型的布尔／数值混合局部赋值及非数值导出，不把它们默默编码为零。
+
+累计失败记录保留为有证据的下界，关闭问题不归零：
+
+| 问题组 | 行为验证失败轮数 | 修复后仍失败次数（含编译失败） | 本批次最终状态 |
+| --- | --- | --- | --- |
+| R655-01 | ≥3 | ≥2 | 本地通过，待独立复审 |
+| R655-12 | ≥10 | ≥12 | 本地通过，待独立复审 |
+| R655-14 | ≥2 | ≥2 | 本地通过，待独立复审 |
+| R748-01 | 1 | 0 | 本地通过，待独立复审 |
+| R748-02 | 1 | 0 | 本地通过，待独立复审 |
+
+另外保留一次共享导出接线失败、一次验收器字符串序列化误比对，以及一次监控器采样异常中断；
+这些不冒充语言行为断言失败。动态绑定遮蔽恢复曾连续 4 次仍返回旧值，最终通过显式续步
+捕获任务绑定解决；不再使用早先未通过的 generator 方案，也不重放函数已执行的副作用。
+
+全量契约检查新增定位 R748-03（验证失败 1 次，修复后失败 0 次）：
+`benchmarks/core-performance-macos-arm64.json` 绑定的 `bootstrap/host/bun.mjs`
+摘要与基线宿主源码不符。固定基线 `74805fe` 的 `.eli` 胶囊原文与当前生成物摘要均为
+`1af9911ac5aaadcf4c5d51de8f10c354fc747af6d1021069e5f9ad0fc9a9e8cd`，报告要求
+`21720c5fbd85acd20f9161ea0905962a6f27b27a2735b19d4588fabbbba13b9d`。
+本批次没有修改该宿主源码或历史测量结果，也不改写摘要伪造通过；此项交由独立复审确认
+后续历史证据修复范围。在其解决前，不能宣称全量门禁通过或满足发布条件。

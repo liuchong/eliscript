@@ -1,0 +1,164 @@
+(module eliscript.runtime.lisp.async-runtime
+  ;; Futures use synchronous continuations. A settled input stays synchronous;
+  ;; an unsettled input stores its continuation once, without replaying effects.
+  (import "./core.eli" el-global-value el-is-special-var el-intern el-kind el-make-signal el-signal)
+
+  (defun el-future (state value error)
+    (js-object :kind "future" :state state :value value :error error :callbacks (js-array) :cancel nil))
+
+  (defun el-settle-future (future state value error)
+    (when (and (= (get future :state) "pending") (/= state "pending"))
+      (put future :state state)
+      (put future :value value)
+      (put future :error error)
+      (put future :cancel nil)
+      (let ((callbacks (get future :callbacks)))
+        (put future :callbacks (js-array))
+        (js-call callbacks :forEach (lambda (callback) (funcall callback)))))
+    future)
+
+  (defun el-cancel-future (future)
+    (when (= (get future :state) "pending")
+      (let ((cancel (get future :cancel)) (callbacks (get future :callbacks)))
+        (put future :callbacks (js-array))
+        (el-settle-future future "cancelled" nil
+          (el-make-signal "eliscript-cancelled" (js-array "Task cancelled")))
+        (when (not (nullish? cancel)) (funcall cancel))
+        (js-call callbacks :forEach (lambda (callback) (funcall callback)))))
+    future)
+
+  (defun el-adopt-future (child value)
+    (cond
+      ((eq child value)
+        (el-settle-future child "rejected" nil (el-make-signal "error" (js-array "Future resolution cycle"))))
+      ((= (el-kind value) "future")
+        (let ((forward (lambda ()
+                         (el-settle-future child (get value :state) (get value :value) (get value :error)))))
+          (if (= (get value :state) "pending")
+              (progn
+                (js-call (get value :callbacks) :push forward)
+                (put child :cancel (lambda ()
+                  (let ((i (js-call (get value :callbacks) :indexOf forward)))
+                    (when (>= i 0) (js-call (get value :callbacks) :splice i 1)))
+                  (el-cancel-future value))))
+            (funcall forward))))
+      (t (el-settle-future child "fulfilled" value nil)))
+    child)
+
+  (defun el-chain-future (source success failure &optional cancel-source)
+    (unless (= (el-kind source) "future")
+      (el-signal "wrong-type-argument" (el-intern "future-p") source))
+    (let* ((child (el-future "pending" nil nil))
+           (resume (lambda ()
+             (when (= (get child :state) "pending")
+               (try
+                 (if (= (get source :state) "fulfilled")
+                     (el-adopt-future child (if (nullish? success) (get source :value) (funcall success (get source :value))))
+                   (if (nullish? failure)
+                       (el-settle-future child (get source :state) nil (get source :error))
+                     (el-adopt-future child (funcall failure (get source :error)))))
+                 (catch error (el-settle-future child "rejected" nil error)))))))
+      (if (= (get source :state) "pending")
+          (progn
+            (js-call (get source :callbacks) :push resume)
+            (put child :cancel (lambda ()
+              (let ((i (js-call (get source :callbacks) :indexOf resume)))
+                (when (>= i 0) (js-call (get source :callbacks) :splice i 1)))
+              (when cancel-source (el-cancel-future source)))))
+        (funcall resume))
+      child))
+
+  ;; Save only bindings owned by this async invocation, never the whole session.
+  ;; Each resumption reinstalls them for its synchronous step, then restores the
+  ;; caller's values before yielding to another task.
+  (defun el-async-track-binding (session saved)
+    (when (get session :inAsyncContext)
+      (when (nullish? (get session :asyncBindings)) (put session :asyncBindings (js-array)))
+      (js-call (get session :asyncBindings) :push saved)))
+
+  (defun el-async-untrack-binding (session saved)
+    (when (not (nullish? (get session :asyncBindings)))
+      (let ((index (js-call (get session :asyncBindings) :lastIndexOf saved)))
+        (when (>= index 0) (js-call (get session :asyncBindings) :splice index 1)))))
+
+  (defun el-async-capture (session)
+    (let ((snapshot (js-array)))
+      (js-call (or (get session :asyncBindings) (js-array)) :forEach
+        (lambda (saved)
+          (let ((symbol (aref saved 0)) (storage (aref saved 3)))
+            (unless (el-is-special-var session symbol)
+              (js-call snapshot :push (js-array symbol storage
+                (if (nil? storage) (el-global-value session symbol) (js-call storage :get symbol))))))))
+      snapshot))
+
+  (defun el-async-resume (session snapshot thunk)
+    (let ((saved (js-array)) (before (get session :inAsyncContext))
+          (old-bindings (get session :asyncBindings)))
+      (put session :inAsyncContext t)
+      (put session :asyncBindings (js-array))
+      (try
+        (progn
+          (js-call snapshot :forEach (lambda (entry)
+            (let* ((symbol (aref entry 0)) (storage (or (aref entry 1) (get session :values)))
+                   (record (js-array symbol (js-call storage :has symbol) (js-call storage :get symbol) storage)))
+              (js-call saved :push record)
+              (js-call storage :set symbol (aref entry 2))
+              (el-async-track-binding session record))))
+          (funcall thunk))
+        (finally
+          (js-call (js-call saved :reverse) :forEach (lambda (entry)
+            (let ((storage (aref entry 3)) (symbol (aref entry 0)))
+              (if (aref entry 1) (js-call storage :set symbol (aref entry 2)) (js-call storage :delete symbol)))))
+          (put session :asyncBindings old-bindings)
+          (put session :inAsyncContext before)))))
+
+  (defun el-async-await (session source continuation)
+    (let ((snapshot (el-async-capture session)))
+      (el-chain-future source
+        (lambda (value) (el-async-resume session snapshot (lambda () (funcall continuation value)))) nil t)))
+
+  (defun el-async-protect (body failure cleanup)
+    (let ((source (try (el-adopt-future (el-future "pending" nil nil) (funcall body))
+                     (catch error (el-future "rejected" nil error)))))
+      (when (not (nullish? failure))
+        (setq source (el-chain-future source nil failure t)))
+      (if (nullish? cleanup) source
+        (let* ((cleaned false)
+               (finish (lambda ()
+                         (unless cleaned (setq cleaned t) (funcall cleanup))))
+               (result (el-chain-future source
+                 (lambda (value)
+                   (el-chain-future (el-async-protect finish nil nil) (lambda (_) value) nil t))
+                 (lambda (error)
+                   (el-chain-future (el-async-protect finish nil nil) (lambda (_) (throw error)) nil t)) t)))
+          (when (= (get result :state) "pending")
+            (let ((cancel (get result :cancel)))
+              (put result :cancel (lambda ()
+                (when (not (nullish? cancel)) (funcall cancel))
+                (el-async-protect finish nil nil)))))
+          result))))
+
+
+  (defun el-async-guard (session body failure cleanup)
+    (let ((snapshot (el-async-capture session)))
+      (el-async-protect body
+        (if (nullish? failure) nil
+          (lambda (error) (el-async-resume session snapshot (lambda () (funcall failure error)))))
+        (if (nullish? cleanup) nil
+          (lambda () (el-async-resume session snapshot cleanup))))))
+
+  (defconst el-async-next (js-object :kind "async-loop-next"))
+
+  (defun el-async-loop (step)
+    (let ((result (funcall step)))
+      (while (or (eq result el-async-next)
+                 (and (= (el-kind result) "future") (= (get result :state) "fulfilled")
+                      (eq (get result :value) el-async-next)))
+        (setq result (funcall step)))
+      (if (= (el-kind result) "future")
+          (el-chain-future result (lambda (value) (if (eq value el-async-next) (el-async-loop step) value)) nil t)
+        result)))
+
+  (export el-future el-settle-future el-cancel-future el-adopt-future el-chain-future
+          el-async-track-binding el-async-untrack-binding el-async-capture el-async-resume el-async-await
+          el-async-protect el-async-guard el-async-next el-async-loop))
