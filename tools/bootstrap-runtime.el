@@ -50,8 +50,7 @@
   "Prepare `dist/runtime', `dist/package.json', and `dist/host-cli' inside ROOT."
   (let ((dist-dir (expand-file-name "dist" root))
         (dist-runtime (expand-file-name "dist/runtime" root))
-        (dist-host (expand-file-name "dist/host-cli" root))
-        (boot-runtime (expand-file-name "dist/bootstrap/runtime" root)))
+        (dist-host (expand-file-name "dist/host-cli" root)))
     (make-directory dist-runtime t)
     (make-directory dist-host t)
     (dolist (name '("prelude" "unicode-case-data" "unicode-case" "math"))
@@ -100,6 +99,45 @@
         (when (file-exists-p source)
           (eliscript-compile-file-with-source-map source output))))))
 
+(defun eliscript-bootstrap-prepare-lisp-runtime (root &optional preserve-existing)
+  "Prepare ROOT's maintained Lisp runtime for the generated build host.
+PRESERVE-EXISTING keeps installed modules intact for independent seed builds."
+  (let ((entry (expand-file-name "runtime/lisp.eli" root))
+        (sources (expand-file-name "runtime/lisp" root)))
+    (when (file-regular-p entry)
+      (dolist (source (cons entry (directory-files sources t "\\.eli\\'")))
+        (let ((output (expand-file-name
+                       (concat (file-name-sans-extension
+                                (file-relative-name source
+                                                    (expand-file-name "runtime" root)))
+                               ".mjs")
+                       (expand-file-name "dist/runtime" root))))
+          (unless (and preserve-existing (file-exists-p output))
+            (make-directory (file-name-directory output) t)
+            (let* ((program (eliscript-compile-ir-file source))
+                   (text (with-temp-buffer
+                           (insert-file-contents source) (buffer-string)))
+                   (map-path (concat output ".map")))
+              ;; Project builds retarget local source imports to emitted files.
+              ;; Do the same on real seed IR, preserving original source spans.
+              (eliscript-ir-walk
+               program
+               (lambda (node)
+                 (when (eq (eliscript-ir-node-kind node) 'import-declaration)
+                   (let ((path (eliscript-ir-node-value node)))
+                     (when (and (string-prefix-p "." path)
+                                (string-suffix-p ".eli" path))
+                       (setf (eliscript-ir-node-value node)
+                             (concat (file-name-sans-extension path) ".mjs")))))))
+              (let ((emission (eliscript-emit-ir-module-with-source-map
+                               program text (file-name-nondirectory output)
+                               (file-relative-name source (file-name-directory output)))))
+                (with-temp-file output
+                  (insert (eliscript-emission-javascript emission)
+                          "//# sourceMappingURL=" (file-name-nondirectory map-path) "\n"))
+                (with-temp-file map-path
+                  (insert (eliscript-emission-source-map emission)))))))))))
+
 (defun eliscript-bootstrap-prepare-project-host (root &optional preserve-existing)
   "Prepare ROOT's maintained project host before loading the JS build driver."
   (if (equal (getenv "ELISCRIPT_DIST_ONLY") "1")
@@ -126,7 +164,10 @@
                            (file-exists-p (concat output ".map")))
                 (eliscript-compile-file-with-source-map source output))))))
       (unless preserve-existing
-        (eliscript-bootstrap-prepare-dist-host root)))))
+        (eliscript-bootstrap-prepare-dist-host root))))
+  ;; Plain .el/.eli programs use the same maintained Lisp frontend as the
+  ;; public CLI, even when the caller enters through executeBuild directly.
+  (eliscript-bootstrap-prepare-lisp-runtime root preserve-existing))
 
 (defun eliscript-bootstrap--call-emacs (emacs arguments)
   "Call EMACS with ARGUMENTS, preserving its output and error streams."

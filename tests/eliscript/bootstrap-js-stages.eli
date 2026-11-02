@@ -48,6 +48,11 @@
       (await (readFile (resolve root "tools/runtime/unicode-case-runtime.el")))))
     (await (write-source destination "package.json"
       (await (readFile (resolve root "package.json")))))
+    (await (write-source destination "runtime/lisp.eli"
+      (await (readFile (resolve root "runtime/lisp.eli")))))
+    (await (cp (resolve root "runtime/lisp") (resolve destination "runtime/lisp")
+      (js-object :recursive t :filter (lambda (path)
+        (or (= path (resolve root "runtime/lisp")) (js-call path :endsWith ".eli"))))))
     (let ((support (js-array "tools/project/project.eli" "bootstrap/host/project-ground.mjs"
                     "bootstrap/host/bun.mjs" "bootstrap/host/build.mjs"
                     "tools/bootstrap-seed.el" "tools/bootstrap-runtime.el")) (index 0))
@@ -146,7 +151,8 @@
             (js-call assert :strictEqual (get run :status) 0 (get run :stderr))
             (js-call assert :strictEqual (js-call (get run :stdout) :trim) "43")))
         (let ((paths (js-array "runtime/math.mjs" "runtime/unicode-case.mjs"
-                       "runtime/unicode-case-data.mjs" "bootstrap/host/project.mjs"))
+                       "runtime/unicode-case-data.mjs" "bootstrap/host/project.mjs"
+                       "dist/runtime/lisp.mjs" "dist/runtime/lisp/core.mjs"))
               (before (js-array)))
           (let ((index 0))
             (while (< index (js-length paths))
