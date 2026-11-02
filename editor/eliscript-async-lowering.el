@@ -14,7 +14,13 @@
 (defun eliscript-async--lower-body (body dynamic-variables &optional dynamic-mode)
   "Lower BODY, retaining DYNAMIC-VARIABLES in DYNAMIC-MODE at suspension points."
   (cl-labels
-      ((sequence (forms vars k)
+      ((box (value) `(cons 'eliscript-async-value ,value))
+       (finish (scoped k)
+         (let ((tmp (make-symbol "async-scope-value")))
+           `(eliscript-async--await
+             (eliscript-async--protect (lambda () ,scoped) nil nil)
+             (lambda (,tmp) ,(funcall k `(cdr ,tmp))) (eliscript-async--capture))))
+       (sequence (forms vars k)
          (cond ((null forms) (funcall k nil))
                ((null (cdr forms)) (lower (car forms) vars k))
                (t (lower (car forms) vars
@@ -37,7 +43,7 @@
                        (lambda (value)
                          (let ((tmp (make-symbol "async-value")))
                            `(eliscript-async--await ,value (lambda (,tmp) ,(funcall k tmp))
-                              (list ,@(mapcar (lambda (v) `(cons ',v ,v)) vars)))))))
+                              (eliscript-async--capture))))))
                ('progn (sequence (cdr form) vars k))
                ('if (lower (cadr form) vars
                            (lambda (test) `(if ,test ,(lower (caddr form) vars k)
@@ -49,15 +55,18 @@
                         (let* ((binding (car bindings))
                                (var (if (consp binding) (car binding) binding))
                                (init (and (consp binding) (cadr binding))))
-                          (lower init vars (lambda (value)
-                            `(let ((,var ,value))
-                               ,(lower `(let* ,(cdr bindings) ,@rest)
-                                       (if dynamic-mode (cons var vars) vars) k))))))
+                          (arguments (list init) vars (lambda (values)
+                            (finish `(eliscript-async--binding-scope
+                              (lambda () (let ((,var ,(car values)))
+                                (eliscript-async--with-bindings '(,var) ,dynamic-mode
+                                  (lambda () ,(lower `(let* ,(cdr bindings) ,@rest) vars #'box)))))) k)))))
                     (arguments (mapcar (lambda (b) (and (consp b) (cadr b))) bindings) vars
                       (lambda (values)
                         (let ((names (mapcar (lambda (b) (if (consp b) (car b) b)) bindings)))
-                          `(let ,(cl-mapcar #'list names values)
-                             ,(sequence rest (if dynamic-mode (append names vars) vars) k))))))))
+                          (finish `(eliscript-async--binding-scope
+                            (lambda () (let ,(cl-mapcar #'list names values)
+                              (eliscript-async--with-bindings ',names ,dynamic-mode
+                                (lambda () ,(sequence rest vars #'box)))))) k)))))))
                ('setq
                 (unless (and (cdr form) (= (% (length (cdr form)) 2) 0)) (error "Malformed async setq"))
                 (lower (caddr form) vars (lambda (value)
@@ -71,24 +80,29 @@
                       ,(sequence (cddr form) vars (lambda (value) `(progn ,value eliscript-async--next)))
                       ,(funcall k nil)))))))
                ('condition-case
-                (let ((tmp (make-symbol "async-handled")) (err (make-symbol "async-error")))
+                (let ((tmp (make-symbol "async-handled")) (err (make-symbol "async-error"))
+                      (caught (make-symbol "async-caught")) (variable (cadr form)))
                   `(eliscript-async--await
                     (eliscript-async--protect
-                     (lambda () ,(lower (caddr form) vars #'identity))
+                     (lambda () ,(lower (caddr form) vars #'box))
                      (lambda (,err)
-                       (condition-case ,(cadr form) (signal (car ,err) (cdr ,err))
-                         ,@(mapcar (lambda (h) (list (car h)
-                           (sequence (cdr h) (if (and dynamic-mode (cadr form)) (cons (cadr form) vars) vars) #'identity)))
+                       (condition-case ,caught (signal (car ,err) (cdr ,err))
+                         ,@(mapcar (lambda (h)
+                           (list (car h)
+                             `(eliscript-async--binding-scope
+                               (lambda () (let ,(if variable (list (list variable caught)) nil)
+                                 (eliscript-async--with-bindings ',(if variable (list variable) nil) ,dynamic-mode
+                                   (lambda () ,(sequence (cdr h) vars #'box))))))))
                            (cdddr form)))) nil)
-                    (lambda (,tmp) ,(funcall k tmp))
-                    (list ,@(mapcar (lambda (v) `(cons ',v ,v)) vars)))))
+                    (lambda (,tmp) ,(funcall k `(cdr ,tmp)))
+                    (eliscript-async--capture))))
                ('unwind-protect
                 (let ((tmp (make-symbol "async-protected")))
                   `(eliscript-async--await
-                    (eliscript-async--protect (lambda () ,(lower (cadr form) vars #'identity)) nil
-                      (lambda () ,(sequence (cddr form) vars #'identity)))
-                    (lambda (,tmp) ,(funcall k tmp))
-                    (list ,@(mapcar (lambda (v) `(cons ',v ,v)) vars)))))
+                    (eliscript-async--protect (lambda () ,(lower (cadr form) vars #'box)) nil
+                      (lambda () ,(sequence (cddr form) vars #'box)))
+                    (lambda (,tmp) ,(funcall k `(cdr ,tmp)))
+                    (eliscript-async--capture))))
                ((or 'and 'or)
                 (if (null (cdr form)) (funcall k (eq (car form) 'and))
                   (lower (cadr form) vars (lambda (value)

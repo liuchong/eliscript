@@ -8,6 +8,11 @@
   (import "../dist/bootstrap/compiler.mjs" compile-string)
   (import "../dist/runtime/lisp.mjs" compileModule createSession evalProgram runAbiNative runAbiWasm)
 
+  (import "../dist/runtime/lisp/async-runtime.mjs" el-async-track-binding el-async-capture el-async-resume)
+  (import "../dist/runtime/lisp/evaluator.mjs" el-restore-dynamic)
+  (import "../dist/runtime/lisp/core.mjs" el-intern)
+  (import "../dist/runtime/lisp/keymap.mjs" el-make-keymap el-define-key el-lookup-key)
+
   (defconst root (js-call globalThis.process :cwd))
   (defconst directory (resolve root "_worktree/review-repairs"))
   (defconst runtime-url (get (pathToFileURL (resolve root "dist/runtime/lisp.mjs")) :href))
@@ -139,5 +144,131 @@
           (catch error (setq native-failed (js-call (str (get error :message)) :includes "changes between boolean and number"))))
         (js-call (expect wasm-failed) :toBe t)
         (js-call (expect native-failed) :toBe t))))
+
+  (defun async-driver (ready &optional suffix)
+    (str "(let ((c (make-async-channel 1))) "
+      (if ready "(channel-put! c 0) " "")
+      "(let ((f (consume c))) "
+      (if ready "" "(channel-put! c 0) ")
+      (or suffix "(eliscript-async-wait f)") "))"))
+
+  (test "R95e-01a: dynamic loop iterations share current binding state"
+    (lambda ()
+      (js-call (js-array false t) :forEach (lambda (dynamic)
+        (parity (str "live-loop-" dynamic)
+          "(require 'eliscript-async) (defun-async consume (c) (let ((sum 0) (n 0)) (while (< n 3) (setq sum (+ sum (option-value (await (channel-take! c)))) n (1+ n))) sum))"
+          "(let* ((c (make-async-channel 1)) (f (consume c))) (channel-put! c 10) (channel-put! c 20) (channel-put! c 12) (eliscript-async-wait f))" "42" dynamic)))))
+
+  (test "R95e-01b: pending cleanup and handlers see mutations after await"
+    (lambda ()
+      (js-call (js-array false t) :forEach (lambda (dynamic)
+        (js-call (js-array false t) :forEach (lambda (ready)
+          (parity (str "live-cleanup-" dynamic "-" ready)
+            "(require 'eliscript-async) (setq seen nil) (defun-async consume (c) (let ((x 1)) (unwind-protect (progn (await (channel-take! c)) (setq x 99)) (setq seen x)) (list seen x)))"
+            (async-driver ready) "(99 99)" dynamic)
+          (parity (str "live-handler-" dynamic "-" ready)
+            "(require 'eliscript-async) (setq seen nil) (defun-async consume (c) (let ((x 1)) (condition-case caught (progn (await (channel-take! c)) (setq x 99) (error \"after\")) (error (setq seen (list x (car caught))))) (list x seen)))"
+            (async-driver ready) "(99 (99 error))" dynamic)))))))
+
+  (test "R95e-01c: special bindings survive pending await without leaking between tasks"
+    (lambda ()
+      (js-call (js-array false t) :forEach (lambda (dynamic)
+        (js-call (js-array false t) :forEach (lambda (ready)
+          (parity (str "live-special-" dynamic "-" ready)
+            "(require 'eliscript-async) (defvar dyn-x 10) (defun read-x () dyn-x) (defun-async consume (c) (let ((dyn-x 42)) (await (channel-take! c)) (read-x)))"
+            (async-driver ready "(list (eliscript-async-wait f) dyn-x)") "(42 10)" dynamic)))
+        (parity (str "live-interleaving-" dynamic)
+          "(require 'eliscript-async) (defvar dyn-x 10) (defun read-x () dyn-x) (defun-async consume-value (c x) (let ((dyn-x x)) (await (channel-take! c)) (read-x)))"
+          "(let* ((a (make-async-channel 1)) (b (make-async-channel 1)) (fa (consume-value a 42)) (fb (consume-value b 87))) (channel-put! b 0) (channel-put! a 0) (list (eliscript-async-wait fa) (eliscript-async-wait fb) dyn-x))" "(42 87 10)" dynamic)))))
+
+  (test "R95e-01 scope boundaries: continuations exit let and preserve Future values"
+    (lambda ()
+      (js-call (js-array false t) :forEach (lambda (dynamic)
+        (parity (str "scope-exit-" dynamic)
+          "(require 'eliscript-async) (defvar dyn-x 10) (defun-async consume (c) (let ((dyn-x 42)) (await (channel-take! c))) dyn-x)"
+          (async-driver false) "10" dynamic)
+        (parity (str "future-as-data-" dynamic)
+          "(require 'eliscript-async) (defun-async consume (c) (future-state (let ((x (await (channel-take! c)))) (channel-take! c))))"
+          (async-driver false) "pending" dynamic)))))
+
+  (test "R95e-02: parent prefix inheritance is independent of mutation order"
+    (lambda ()
+      (parity "late-prefix-parent" ""
+        "(list (let ((p (make-sparse-keymap)) (c (make-sparse-keymap))) (define-key p \"ab\" 'ignore) (define-key c \"ac\" 'forward-char) (set-keymap-parent c p) (list (lookup-key c \"ab\") (lookup-key c \"ac\"))) (let ((p (make-sparse-keymap)) (c (make-sparse-keymap))) (set-keymap-parent c p) (define-key c \"ac\" 'forward-char) (define-key p \"ab\" 'ignore) (list (lookup-key c \"ab\") (lookup-key c \"ac\"))))"
+        "((ignore forward-char) (ignore forward-char))")
+      (parity "replace-prefix-parent" ""
+        "(let ((p (make-sparse-keymap)) (q (make-sparse-keymap)) (c (make-sparse-keymap))) (define-key p \"ab\" 'ignore) (define-key q \"ab\" 'backward-char) (define-key c \"ac\" 'forward-char) (set-keymap-parent c p) (let ((first (lookup-key c \"ab\"))) (set-keymap-parent c q) (list first (lookup-key c \"ab\") (lookup-key c \"ac\"))))"
+        "(ignore backward-char forward-char)")))
+
+  (defasync memory-parity (id body x expected)
+    (let ((source (str "(require 'eliscript-abi) (defun kernel (off x) (declare (eliscript :abi :memory-u32 :params ((off :u32) (x :u32)) :returns :u32)) " body ")")))
+      (parity id source (str "(with-abi-memory (:initial-pages 1) (kernel 0 " x "))") (str expected))
+      (js-call (expect (await (runAbiWasm source "kernel" (js-array 0 x)))) :toBe expected)
+      (js-call (expect (await (runAbiNative source "kernel" (js-array 0 x)))) :toBe expected)))
+
+  (test "R95e-03: void branches and discarded mixed branches preserve stack and types"
+    (async ()
+      (await (memory-parity "store-both" "(if (= x 0) (mem-store-u32 off 42) (mem-store-u32 off 99)) (mem-load-u32 off)" 0 42))
+      (await (memory-parity "store-both-else" "(if (= x 0) (mem-store-u32 off 42) (mem-store-u32 off 99)) (mem-load-u32 off)" 1 99))
+      (await (memory-parity "store-one" "(if (= x 0) (mem-store-u32 off 42)) (mem-load-u32 off)" 0 42))
+      (await (memory-parity "store-as-test" "(if (if (= x 0) (mem-store-u32 off 42) (mem-store-u32 off 99)) 77 (mem-load-u32 off))" 0 42))
+      (await (memory-parity "store-in-loop" "(let ((i 0)) (while (< i 3) (if (< i 2) (mem-store-u32 off (+ (mem-load-u32 off) 14))) (setq i (1+ i))) (mem-load-u32 off))" 0 28))
+      (await (abi-parity "discard-one-arm" "(let ((v 0.0)) (if (< x 0.0) (setq v 1.0)) v)" (js-array -1 0 0) 1))
+      (await (abi-parity "discard-let-arm" "(let ((v 0.0)) (let* ((w 1.0)) (if (< x 0.0) (setq v w))) v)" (js-array -1 0 0) 1))))
+
+  (test "binding cell protection: shadowed bindings retain distinct mutable identities"
+    (lambda ()
+      (let* ((session (createSession)) (values (get session :values)) (symbol (el-intern "repair-cell"))
+             (outer (js-array symbol t 10 nil nil)) (inner (js-array symbol t 1 nil nil)))
+        (js-call values :set symbol 10)
+        (put session :inAsyncContext t)
+        (el-async-track-binding session outer 1)
+        (js-call values :set symbol 1)
+        (let ((outer-context (el-async-capture session)))
+          (el-async-track-binding session inner 2)
+          (js-call values :set symbol 2)
+          (let ((inner-context (el-async-capture session)))
+            (js-call values :set symbol 99)
+            (el-restore-dynamic session (js-array inner))
+            (el-restore-dynamic session (js-array outer))
+            (js-call (expect (get (aref outer-context 0) :value)) :toBe 1)
+            (js-call (expect (get (aref inner-context 1) :value)) :toBe 99)
+            (js-call (expect (js-call values :get symbol)) :toBe 10)
+            (el-async-resume session inner-context (lambda ()
+              (js-call (expect (js-call values :get symbol)) :toBe 99)
+              (js-call values :set symbol 100)))
+            (js-call (expect (get (aref inner-context 1) :value)) :toBe 100)
+            (js-call (expect (get (aref outer-context 0) :value)) :toBe 1)
+            (js-call (expect (js-call values :get symbol)) :toBe 10))))))
+
+  (test "binding cell protection: reentrant resumption restores the updated live caller"
+    (lambda ()
+      (let* ((session (createSession)) (values (get session :values)) (symbol (el-intern "repair-reentrant-cell"))
+             (binding (js-array symbol t 10 nil nil)))
+        (js-call values :set symbol 10)
+        (put session :inAsyncContext t)
+        (el-async-track-binding session binding 1)
+        (js-call values :set symbol 1)
+        (let ((context (el-async-capture session)))
+          (js-call values :set symbol 2)
+          (el-async-resume session context (lambda () (js-call values :set symbol 3)))
+          (js-call (expect (js-call values :get symbol)) :toBe 3)
+          (js-call (expect (get (aref context 0) :value)) :toBe 3)
+          (el-restore-dynamic session (js-array binding))
+          (js-call (expect (js-call values :get symbol)) :toBe 10)))))
+
+  (test "keymap protection: late parent changes and removal affect existing child prefixes"
+    (lambda ()
+      (let ((parent (el-make-keymap)) (child (el-make-keymap))
+            (first (el-intern "ignore")) (second (el-intern "backward-char")))
+        (el-define-key child "ac" first)
+        (put child :_parent parent)
+        (el-define-key parent "ab" first)
+        (js-call (expect (el-lookup-key child "ab")) :toBe first)
+        (el-define-key parent "ab" second)
+        (js-call (expect (el-lookup-key child "ab")) :toBe second)
+        (el-define-key parent "ab" nil t)
+        (js-call (expect (el-lookup-key child "ab")) :toBe nil)
+        (js-call (expect (el-lookup-key child "ac")) :toBe first))))
 
 )

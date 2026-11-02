@@ -60,7 +60,7 @@
       (js-call dynamic :push
                (js-array sym (js-call values :has sym) (js-call values :get sym)
                          (if has-local locals nil) (if has-local (js-call locals :get sym) nil)))
-      (el-async-track-binding session (aref dynamic (1- (js-length dynamic))))
+      (el-async-track-binding session (aref dynamic (1- (js-length dynamic))) value)
       (if has-local
           (js-call locals :set sym value)
         (js-call values :set sym value))
@@ -3232,6 +3232,12 @@
                   (str "(rt-call-fn session " (compile-expr ctx cenv head) " (js-array"
                        (js-call (js-call args :map (lambda (a) (str " " (compile-expr ctx cenv a)))) :join "")
                        "))")))
+              ((= name "%async-scope")
+                (str "(el-async-protect (lambda () " (compile-expr ctx cenv (el-second form)) ") nil nil)"))
+              ((= name "%async-value")
+                (str "(js-object :kind \"async-value\" :value " (compile-expr ctx cenv (el-second form)) ")"))
+              ((= name "%async-unbox")
+                (str "(get " (compile-expr ctx cenv (el-second form)) " :value)"))
               ((= name "%async-bind")
                 (let* ((parameter (ctx-gensym ctx "resume")) (next (make-cenv cenv))
                        (symbol (el-third form)) (sym-expr (ctx-sym ctx (get symbol :name))))
@@ -3241,7 +3247,7 @@
                        " (lambda (" parameter ") " (compile-expr ctx next (el-nth 3 form)) "))")))
               ((= name "%async-next") "el-async-next")
               ((= name "%async-loop")
-                (str "(el-async-loop (lambda () " (compile-expr ctx cenv (el-third form)) "))"))
+                (str "(el-async-loop session (lambda () " (compile-expr ctx cenv (el-third form)) "))"))
               ((= name "%async-catch")
                 (let ((error-var (ctx-gensym ctx "async_error")))
                   (str "(el-async-guard session (lambda () " (compile-expr ctx cenv (el-second form))

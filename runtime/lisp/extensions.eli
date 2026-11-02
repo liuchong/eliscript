@@ -324,6 +324,12 @@
           (el-reg-ext session (js-array "lambda-async") sf-lambda-async)
           (el-reg-ext session (js-array "with-async-scope") sf-with-async-scope)
           (el-reg-ext session (js-array "%async-bind") sf-async-bind)
+          (el-reg-ext session (js-array "%async-scope") (lambda (s f e)
+            (el-async-protect (lambda () (el-eval s (el-second f) e)) nil nil)))
+          (el-reg-ext session (js-array "%async-value") (lambda (s f e)
+            (js-object :kind "async-value" :value (el-eval s (el-second f) e))))
+          (el-reg-ext session (js-array "%async-unbox") (lambda (s f e)
+            (get (el-eval s (el-second f) e) :value)))
           (el-reg-ext session (js-array "%async-loop") sf-async-loop)
           (el-reg-ext session (js-array "%async-next") (lambda (s f e) el-async-next))
           (el-reg-ext session (js-array "%async-catch") sf-async-catch)
@@ -1069,7 +1075,7 @@
           (el-eval session body frame))))))
 
   (defun sf-async-loop (session form env)
-    (el-async-loop (lambda () (el-eval session (el-third form) env))))
+    (el-async-loop session (lambda () (el-eval session (el-third form) env))))
 
   (defun sf-async-catch (session form env)
     (el-async-guard session

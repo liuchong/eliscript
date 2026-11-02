@@ -1142,6 +1142,26 @@
          (when (file-directory-p ext-dir)
            (delete-directory ext-dir t)))))))
 
+(defvar eliscript-test--async-cell 10)
+
+(ert-deftest eliscript-async-binding-cells-protect-shadowed-state ()
+  (let* ((outer (cons 'eliscript-test--async-cell 1))
+         (inner (cons 'eliscript-test--async-cell 2)))
+    (eliscript-async--run-bindings (list outer inner)
+      (lambda () (setq eliscript-test--async-cell 99)))
+    (should (= (cdr outer) 1))
+    (should (= (cdr inner) 99))
+    (should (= eliscript-test--async-cell 10))))
+
+(ert-deftest eliscript-async-binding-cells-protect-reentrant-state ()
+  (let* ((cell (cons 'eliscript-test--async-cell 1))
+         (eliscript-async--task-bindings (list cell))
+         (eliscript-test--async-cell 2))
+    (eliscript-async--run-bindings (list cell)
+      (lambda () (setq eliscript-test--async-cell 3)))
+    (should (= eliscript-test--async-cell 3))
+    (should (= (cdr cell) 3))))
+
 (provide 'eliscript-syntax-tests)
 
 ;;; eliscript-syntax-tests.el ends here

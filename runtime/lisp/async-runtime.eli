@@ -1,7 +1,7 @@
 (module eliscript.runtime.lisp.async-runtime
   ;; Futures use synchronous continuations. A settled input stays synchronous;
   ;; an unsettled input stores its continuation once, without replaying effects.
-  (import "./core.eli" el-global-value el-is-special-var el-intern el-kind el-make-signal el-signal)
+  (import "./core.eli" el-intern el-kind el-make-signal el-signal s-lexical-binding)
 
   (defun el-future (state value error)
     (js-object :kind "future" :state state :value value :error error :callbacks (js-array) :cancel nil))
@@ -68,48 +68,81 @@
         (funcall resume))
       child))
 
-  ;; Save only bindings owned by this async invocation, never the whole session.
-  ;; Each resumption reinstalls them for its synchronous step, then restores the
-  ;; caller's values before yielding to another task.
-  (defun el-async-track-binding (session saved)
+  ;; A binding has identity independently of a synchronous host stack frame.
+  ;; Continuations share cells; they never freeze a second copy of the value.
+  (defun el-async-active-cell (records symbol storage)
+    (let ((i (1- (js-length (or records (js-array))))) (found nil))
+      (while (and (>= i 0) (nil? found))
+        (let ((cell (get (aref records i) :asyncCell)))
+          (when (and (not (nullish? cell)) (eq (get cell :symbol) symbol) (eq (get cell :storage) storage))
+            (setq found cell)))
+        (setq i (1- i)))
+      found))
+
+  (defun el-async-sync-bindings (records)
+    (let ((seen (new globalThis.Map)) (i (1- (js-length (or records (js-array))))))
+      (while (>= i 0)
+        (let* ((cell (get (aref records i) :asyncCell))
+               (storage (get cell :storage)) (symbol (get cell :symbol)))
+          (unless (js-call seen :has storage) (js-call seen :set storage (new globalThis.Set)))
+          (let ((symbols (js-call seen :get storage)))
+            (unless (js-call symbols :has symbol)
+              (js-call symbols :add symbol)
+              (put cell :value (js-call storage :get symbol)))))
+        (setq i (1- i)))))
+
+  (defun el-async-track-binding (session saved value)
     (when (get session :inAsyncContext)
       (when (nullish? (get session :asyncBindings)) (put session :asyncBindings (js-array)))
-      (js-call (get session :asyncBindings) :push saved)))
+      (let* ((records (get session :asyncBindings)) (symbol (aref saved 0))
+             (storage (or (aref saved 3) (get session :values))))
+        (el-async-sync-bindings records)
+        (put saved :previousAsyncCell (el-async-active-cell records symbol storage))
+        (put saved :asyncCell (js-object :symbol symbol :storage storage :value value))
+        (js-call records :push saved))))
 
   (defun el-async-untrack-binding (session saved)
     (when (not (nullish? (get session :asyncBindings)))
-      (let ((index (js-call (get session :asyncBindings) :lastIndexOf saved)))
-        (when (>= index 0) (js-call (get session :asyncBindings) :splice index 1)))))
+      (let* ((records (get session :asyncBindings))
+             (index (js-call records :lastIndexOf saved)))
+        (when (>= index 0)
+          (el-async-sync-bindings records)
+          (js-call records :splice index 1)))))
 
   (defun el-async-capture (session)
-    (let ((snapshot (js-array)))
-      (js-call (or (get session :asyncBindings) (js-array)) :forEach
-        (lambda (saved)
-          (let ((symbol (aref saved 0)) (storage (aref saved 3)))
-            (unless (el-is-special-var session symbol)
-              (js-call snapshot :push (js-array symbol storage
-                (if (nil? storage) (el-global-value session symbol) (js-call storage :get symbol))))))))
-      snapshot))
+    (let ((records (or (get session :asyncBindings) (js-array))))
+      (el-async-sync-bindings records)
+      (js-call records :map (lambda (record) (get record :asyncCell)))))
 
-  (defun el-async-resume (session snapshot thunk)
+  (defun el-async-resume (session cells thunk)
     (let ((saved (js-array)) (before (get session :inAsyncContext))
-          (old-bindings (get session :asyncBindings)))
+          (outer (get session :asyncBindings)))
+      (el-async-sync-bindings outer)
       (put session :inAsyncContext t)
       (put session :asyncBindings (js-array))
       (try
         (progn
-          (js-call snapshot :forEach (lambda (entry)
-            (let* ((symbol (aref entry 0)) (storage (or (aref entry 1) (get session :values)))
+          (js-call cells :forEach (lambda (cell)
+            (let* ((symbol (get cell :symbol)) (storage (get cell :storage))
                    (record (js-array symbol (js-call storage :has symbol) (js-call storage :get symbol) storage)))
+              (put record :asyncCell cell)
+              (put record :previousAsyncCell (el-async-active-cell outer symbol storage))
               (js-call saved :push record)
-              (js-call storage :set symbol (aref entry 2))
-              (el-async-track-binding session record))))
+              (js-call (get session :asyncBindings) :push record)
+              (js-call storage :set symbol (get cell :value))
+              (when (eq symbol s-lexical-binding) (put session :dynamicMode (nil? (get cell :value)))))))
           (funcall thunk))
         (finally
-          (js-call (js-call saved :reverse) :forEach (lambda (entry)
-            (let ((storage (aref entry 3)) (symbol (aref entry 0)))
-              (if (aref entry 1) (js-call storage :set symbol (aref entry 2)) (js-call storage :delete symbol)))))
-          (put session :asyncBindings old-bindings)
+          (el-async-sync-bindings (get session :asyncBindings))
+          (js-call (js-call saved :reverse) :forEach (lambda (record)
+            (let ((storage (aref record 3)) (symbol (aref record 0))
+                  (previous (get record :previousAsyncCell)))
+              (if (not (nullish? previous))
+                  (js-call storage :set symbol (get previous :value))
+                (if (aref record 1) (js-call storage :set symbol (aref record 2)) (js-call storage :delete symbol))))))
+          (when (js-call cells :some (lambda (cell) (eq (get cell :symbol) s-lexical-binding)))
+            (put session :dynamicMode (nil? (js-call (get session :values) :get s-lexical-binding))))
+          (put session :asyncBindings outer)
           (put session :inAsyncContext before)))))
 
   (defun el-async-await (session source continuation)
@@ -149,14 +182,16 @@
 
   (defconst el-async-next (js-object :kind "async-loop-next"))
 
-  (defun el-async-loop (step)
-    (let ((result (funcall step)))
+  (defun el-async-loop (session step &optional context)
+    (let* ((cells (if (nullish? context) (el-async-capture session) context))
+           (result (el-async-resume session cells step)))
       (while (or (eq result el-async-next)
                  (and (= (el-kind result) "future") (= (get result :state) "fulfilled")
                       (eq (get result :value) el-async-next)))
-        (setq result (funcall step)))
+        (setq result (el-async-resume session cells step)))
       (if (= (el-kind result) "future")
-          (el-chain-future result (lambda (value) (if (eq value el-async-next) (el-async-loop step) value)) nil t)
+          (el-chain-future result (lambda (value)
+            (if (eq value el-async-next) (el-async-loop session step cells) value)) nil t)
         result)))
 
   (export el-future el-settle-future el-cancel-future el-adopt-future el-chain-future

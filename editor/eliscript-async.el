@@ -199,6 +199,60 @@
         (dolist (sub (cdr form))
           (eliscript-async--scan-forbidden-await sub in-async-p context-name)))))))
 
+(defvar eliscript-async--task-bindings nil
+  "Outer-to-inner mutable binding cells owned by the active async task.")
+
+(defun eliscript-async--sync-bindings (bindings)
+  "Save each visible binding's current value without overwriting hidden cells."
+  (let ((seen (make-hash-table :test #'eq)))
+    (dolist (cell (reverse bindings))
+      (unless (gethash (car cell) seen)
+        (puthash (car cell) t seen)
+        (setcdr cell (symbol-value (car cell)))))))
+
+(defun eliscript-async--restore-binding-values (bindings)
+  "Reinstall visible BINDINGS after a nested scope restored stale host values."
+  (let ((seen (make-hash-table :test #'eq)))
+    (dolist (cell (reverse bindings))
+      (unless (gethash (car cell) seen)
+        (puthash (car cell) t seen)
+        (set (car cell) (cdr cell))))))
+
+(defun eliscript-async--capture ()
+  "Capture binding identities shared by all continuations of the task."
+  (eliscript-async--sync-bindings eliscript-async--task-bindings)
+  (copy-sequence eliscript-async--task-bindings))
+
+(defun eliscript-async--run-bindings (bindings thunk)
+  "Run THUNK under shared BINDINGS and save mutations before restoring callers."
+  (let ((outer eliscript-async--task-bindings))
+    (eliscript-async--sync-bindings outer)
+    (unwind-protect
+        (cl-progv (mapcar #'car bindings) (mapcar #'cdr bindings)
+          (let ((eliscript-async--task-bindings bindings)
+                (eliscript-async--in-async-context t))
+            (unwind-protect (funcall thunk)
+              (eliscript-async--sync-bindings eliscript-async--task-bindings))))
+      ;; cl-progv restores its saved host values; a reentrant continuation may
+      ;; have updated the same binding cells while the caller was suspended.
+      (dolist (cell outer)
+        (when (memq cell bindings) (set (car cell) (cdr cell)))))))
+
+(defun eliscript-async--binding-scope (thunk)
+  "Synchronize the caller around a source binding scope executed by THUNK."
+  (let ((outer eliscript-async--task-bindings))
+    (eliscript-async--sync-bindings outer)
+    (unwind-protect (funcall thunk)
+      (eliscript-async--restore-binding-values outer))))
+
+(defun eliscript-async--with-bindings (names dynamic-mode thunk)
+  "Register actual bindings NAMES for THUNK, respecting DYNAMIC-MODE and defvar."
+  (let ((cells (mapcar (lambda (name) (cons name (symbol-value name)))
+                      (cl-remove-if-not (lambda (name) (or dynamic-mode (special-variable-p name))) names))))
+    (let ((eliscript-async--task-bindings (append eliscript-async--task-bindings cells)))
+      (unwind-protect (funcall thunk)
+        (eliscript-async--sync-bindings eliscript-async--task-bindings)))))
+
 (defun eliscript-async--source-symbols (forms)
   "Collect source symbols for a dynamically scoped coroutine environment."
   (let ((pending (copy-sequence forms)) result)
@@ -230,8 +284,10 @@
            (renamed (mapcar (lambda (p) (cons p (make-symbol (symbol-name p)))) parameters))
            (private-args (if source-lexical args
                            (mapcar (lambda (arg) (or (cdr (assq arg renamed)) arg)) args)))
-           (entry (if source-lexical lowered
-                    `(let ,(mapcar (lambda (pair) (list (car pair) (cdr pair))) renamed) ,lowered)))
+           (registered `(eliscript-async--with-bindings ',parameters ,(not source-lexical) (lambda () ,lowered)))
+           (entry `(eliscript-async--binding-scope
+                     (lambda () ,(if source-lexical registered
+                       `(let ,(mapcar (lambda (pair) (list (car pair) (cdr pair))) renamed) ,registered)))))
            (error-symbol (make-symbol "async-error"))
            (fn `(lambda ,private-args
                   (condition-case ,error-symbol
@@ -245,9 +301,7 @@
   (unless (future-p source) (signal 'wrong-type-argument (list 'future-p source)))
   (let ((child (future-then source
                  (lambda (value)
-                   (cl-progv (mapcar #'car bindings) (mapcar #'cdr bindings)
-                     (let ((eliscript-async--in-async-context t))
-                       (funcall continuation value)))))))
+                   (eliscript-async--run-bindings bindings (lambda () (funcall continuation value)))))))
     (when (eq (future-state child) 'pending)
       (let ((cancel (eliscript-future-cancel-fn child)))
         (setf (eliscript-future-cancel-fn child)
@@ -256,12 +310,16 @@
 
 (defun eliscript-async--protect (body failure cleanup)
   "Apply asynchronous error handling and finalization to BODY."
-  (let ((source (condition-case err (eliscript-async--make-fulfilled (funcall body))
-                  ((error quit) (eliscript-async--make-rejected err)))))
-    (when failure (setq source (future-then source nil failure)))
+  (let* ((bindings (eliscript-async--capture))
+         (source (condition-case err
+                     (eliscript-async--make-fulfilled (eliscript-async--run-bindings bindings body))
+                   ((error quit) (eliscript-async--make-rejected err)))))
+    (when failure
+      (setq source (future-then source nil (lambda (error)
+        (eliscript-async--run-bindings bindings (lambda () (funcall failure error)))))))
     (if (not cleanup) source
       (let* ((cleaned nil)
-             (finish (lambda () (unless cleaned (setq cleaned t) (funcall cleanup))))
+             (finish (lambda () (unless cleaned (setq cleaned t) (eliscript-async--run-bindings bindings cleanup))))
              (result (future-then source
                        (lambda (value) (future-then (eliscript-async--protect finish nil nil) (lambda (_) value)))
                        (lambda (error) (future-then (eliscript-async--protect finish nil nil)
@@ -274,16 +332,22 @@
 
 (defconst eliscript-async--next (make-symbol "async-loop-next"))
 
-(defun eliscript-async--loop (step)
-  "Trampoline STEP until it returns a value or a pending Future."
-  (let ((value (funcall step)))
+(defun eliscript-async--loop (step &optional context)
+  "Trampoline STEP while retaining CONTEXT's mutable binding cells."
+  (let* ((bindings (or context (eliscript-async--capture)))
+         (value (eliscript-async--run-bindings bindings step)))
     (while (or (eq value eliscript-async--next)
                (and (future-p value) (eq (future-state value) 'fulfilled)
                     (eq (eliscript-future-value value) eliscript-async--next)))
-      (setq value (funcall step)))
+      (setq value (eliscript-async--run-bindings bindings step)))
     (if (future-p value)
-        (future-then value (lambda (result) (if (eq result eliscript-async--next)
-                                              (eliscript-async--loop step) result)))
+        (let ((child (future-then value (lambda (result)
+                       (if (eq result eliscript-async--next) (eliscript-async--loop step bindings) result)))))
+          (when (eq (future-state child) 'pending)
+            (let ((cancel (eliscript-future-cancel-fn child)))
+              (setf (eliscript-future-cancel-fn child)
+                    (lambda () (when cancel (funcall cancel)) (future-cancel value)))))
+          child)
       value)))
 
 (defmacro defun-async (name args &rest body)

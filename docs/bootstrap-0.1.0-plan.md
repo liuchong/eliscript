@@ -416,47 +416,66 @@ flowchart LR
 
 ### 当前复审修复批次
 
-本批次只修复独立复审确认的五组缺口，不调整版本号，不以局部用例通过宣称完整生产级验收完成。
+固定复审基线 `95e8342`。上一提交的本地通过不代表独立复审关闭；本批次只修复
+复审留下的三组功能缺口与源码绑定基准报告，不调整版本号、不执行发布。
 
-- [x] R655-01：修改 `lexical-binding` 变量不改变当前文件已建立的词法环境。
-- [x] R655-12：保存真实执行续步；多次等待、循环、动态绑定、异常清理、取消队列与 Future 接续已通过差分验收。
-- [x] R655-14：按事件组织前缀树，字符串与向量按键等价，继承与复制前缀互不污染。
-- [x] R748-01：numeric-f64 中数值零为真，比较结果的假值仍为假。
-- [x] R748-02：比较链求值全部参数，各参数仅求值一次，顺序与 Lisp 一致。
-- [ ] 交由搭档在提交后的固定版本独立复审，确认是否关闭全部缺口；本批次不执行发布。
+- [x] R655-01、R748-02、R655-12B：搭档已独立关闭文件作用域、比较链与通道取消队列问题。
+- [x] R95e-01（R655-12A）：动态与 special 绑定使用共享可变单元；每次续步、循环、异常处理和清理都恢复同一绑定，退出同步步骤前写回最新值。挂起的 `let` 只延续自身作用域，离开后恢复外层；作为普通数据返回的 Future 不被隐式等待。
+- [x] R95e-02（R655-14）：逐事件读取当前父表及前缀候选，支持先定义子前缀、后设置或修改父表，不保存过期的继承快照。
+- [x] R95e-03（R748-01）：区分值位置与语句位置；WASM/C 的 void 分支在值位置产生 nil，在语句位置直接执行，丢弃结果的单臂 `if` 不再被误判为混合标量类型。
+- [x] R748-03：用正式工具按原参数、原门槛实测三轮，生成绑定当前源码的报告；没有手工改写测量值或摘要。
+- [ ] 提交后交由搭档固定新版本独立复审，确认上述三组功能缺口是否关闭，再评估发布资格。
 
-可重现步骤：
+可重现步骤（生成物不入库）：
 
-1. `bin/eliscript-build --root runtime --out-dir dist/runtime runtime/lisp.eli`
-2. `bin/eliscript --output tests/review-repairs.test.mjs tests/eliscript/review-repairs.eli`
-3. `bun test tests/core-syntax.test.mjs tests/review-repairs.test.mjs`
-4. `emacs --batch -Q -L compiler -L editor -L tools/org -L tools/worker -L tests -l tests/eliscript-syntax-tests.el -f ert-run-tests-batch-and-exit`
-5. `bash tools/ci/strict-byte-compile.sh`、`bash tests/cli-test.sh`、`bun tools/integrity/check.mjs --dependencies`
+1. `make bootstrap-backends`：从维护中的 Emacs Lisp 编译器生成当前编译器及所需运行库；补齐干净或部分构建目录中的模块。
+2. `bin/eliscript-build --root runtime --out-dir dist/runtime runtime/lisp.eli`
+3. `bin/eliscript --output tests/review-repairs.test.mjs tests/eliscript/review-repairs.eli`
+4. `bun test tests/core-syntax.test.mjs tests/review-repairs.test.mjs`
+5. `emacs --batch -Q -L compiler -L editor -L tools/org -L tools/worker -L tests -l tests/eliscript-syntax-tests.el -f ert-run-tests-batch-and-exit`
+6. `bash tools/ci/strict-byte-compile.sh`、`bash tests/cli-test.sh`
+7. `bun run benchmark:core -- --output benchmarks/core-performance-macos-arm64.json`
+8. 分别运行 `tools/{conformance/check,compatibility/corpus,progress/check,diagnostics/check,parity/check,debugging/check,surface/check,documentation/check,integrity/check}.mjs`。
 
-本地证据：核心与保护套件合计 **124/124 通过，619 项断言**；Emacs 原生套件
-**26/26 通过**。新增差分在同一份源码内计算结果，分别执行 GNU Emacs、JS 解释器和
-真实 AOT 模块；数值内核额外执行 WASM 与 C 编译的 native 产物。生成物不入库。
-严格字节编译、CLI 及依赖完整性检查通过；全量仓库完整性检查仍存在下述基线缺口。
-数值 ABI 显式拒绝无法保持类型的布尔／数值混合局部赋值及非数值导出，不把它们默默编码为零。
+本批次遵循业务实现全部完成→集中集成验收→关键保护性测试。实际证据：
+
+| 验证层 | 通过 / 失败 | 说明 |
+| --- | --- | --- |
+| 核心及修复集成 | 130 / 0（100%） | 720 次断言；GNU Emacs、JS 解释器、真实 AOT 同源差分，ABI 另执行 WASM 与 C 原生产物 |
+| 修复及后置保护 | 18 / 0（100%） | 191 次断言；覆盖绑定单元遮蔽、重入恢复和父表变更。核心 115 项无后续变化，与此套件合计 133 项、734 次断言 |
+| Emacs 原生 | 28 / 0（100%） | 包括共享单元遮蔽及重入保护 |
+| 严格字节编译及 CLI | 2 / 0（100%） | 无字节编译警告或错误；CLI 验证通过 |
+| 契约及完整性 | 9 / 0（100%） | 8 项契约与完整仓库检查通过，14 份报告、291 项源码绑定检查通过；不把既有稳定性路线图状态解释为全部产品验收完成 |
+| 正式核心性能 | 11 / 0（100%） | 三轮全部正确、稳定且在回归预算内；工具参数与门槛相对基线完全相同 |
+
+正式报告生成于 `2026-11-02T18:35:50.516Z`：模块加载中位数 `6.060 ms`，
+冷语料编译 `194.698 ms`，暖语料编译 `111.529 ms`，worker 启动 `21.888 ms`，
+worker 冷端到端 `5.619 ms`。这些是本机核心基准证据，不代表所有后端性能或发布资格。
+本批次各受控命令进程树峰值均低于 `551 MiB`，未通过扩大输入豁免或降低门槛换取通过。
 
 累计失败记录保留为有证据的下界，关闭问题不归零：
 
-| 问题组 | 行为验证失败轮数 | 修复后仍失败次数（含编译失败） | 本批次最终状态 |
+| 问题组 | 行为验证失败轮数 | 修复后仍失败次数（含编译失败） | 当前状态 |
 | --- | --- | --- | --- |
-| R655-01 | ≥3 | ≥2 | 本地通过，待独立复审 |
-| R655-12 | ≥10 | ≥12 | 本地通过，待独立复审 |
-| R655-14 | ≥2 | ≥2 | 本地通过，待独立复审 |
-| R748-01 | 1 | 0 | 本地通过，待独立复审 |
-| R748-02 | 1 | 0 | 本地通过，待独立复审 |
+| R655-01 | ≥3 | ≥2 | 独立复审关闭 |
+| R655-12 | ≥12 | ≥14 | B 已独立关闭；A 本地修复通过，待独立复审 |
+| R655-14 | ≥3 | ≥3 | 本地修复通过，待独立复审 |
+| R748-01 | ≥2 | ≥1 | 本地修复通过，待独立复审 |
+| R748-02 | 1 | 0 | 独立复审关闭 |
+| R748-03（报告源码绑定） | ≥2 | 0 | 正式三轮重测与完整性检查通过 |
 
-另外保留一次共享导出接线失败、一次验收器字符串序列化误比对，以及一次监控器采样异常中断；
-这些不冒充语言行为断言失败。动态绑定遮蔽恢复曾连续 4 次仍返回旧值，最终通过显式续步
-捕获任务绑定解决；不再使用早先未通过的 generator 方案，也不重放函数已执行的副作用。
+本批次稳定子问题计数：
 
-全量契约检查新增定位 R748-03（验证失败 1 次，修复后失败 0 次）：
-`benchmarks/core-performance-macos-arm64.json` 绑定的 `bootstrap/host/bun.mjs`
-摘要与基线宿主源码不符。固定基线 `74805fe` 的 `.eli` 胶囊原文与当前生成物摘要均为
-`1af9911ac5aaadcf4c5d51de8f10c354fc747af6d1021069e5f9ad0fc9a9e8cd`，报告要求
-`21720c5fbd85acd20f9161ea0905962a6f27b27a2735b19d4588fabbbba13b9d`。
-本批次没有修改该宿主源码或历史测量结果，也不改写摘要伪造通过；此项交由独立复审确认
-后续历史证据修复范围。在其解决前，不能宣称全量门禁通过或满足发布条件。
+| 子问题 | 验证失败次数 | 修复后仍失败次数 | 修复结果 |
+| --- | --- | --- | --- |
+| R95e-01a：动态循环续步 | 2 | 1 | 第二次集成通过 |
+| R95e-01b：保护体与错误变量绑定 | 2 | 1 | 第二次集成通过 |
+| R95e-01c：special 绑定 | 1 | 0 | 首次集成通过 |
+| R95e-02：继承时序 | 1 | 0 | 首次集成通过 |
+| R95e-03：void 条件分支 | 1 | 0 | 首次集成通过 |
+
+首轮功能集成为 127/130；集中修正可选循环上下文的 nil 处理及原生错误变量绑定后，
+第二次集成 130/130 通过。另一次启动缺失生成运行库，在执行规范构建后解决，单列为
+构建启动失败，不冒充语言断言失败。上一批的共享导出接线失败、验收器序列化误比较、
+监控器采样异常中断继续单列；动态绑定遮蔽恢复曾连续 4 次返回旧值，计数不因本轮通过清零。
+数值 ABI 仍显式拒绝无法保持类型的布尔／数值混合局部赋值及非数值导出。
