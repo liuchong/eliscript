@@ -1,10 +1,10 @@
 (module eliscript.runtime.lisp.compiler
   ;;; compiler.eli --- AOT Lisp-to-Eliscript-to-JavaScript compiler and compiled-module runtime helpers
 
-  (import "./core.eli" JS_FALSE JS_NULL JS_UNDEFINED OPTION_NONE el-add-special-var el-append el-aref el-arith el-arith-2 el-aset-container el-assoc-with el-bool el-car el-car-safe el-cdr el-cdr-safe el-compile-error el-condition-matches el-cons el-cons? el-control-transfer? el-copy-sequence el-default-value el-eq el-eql el-equal-p el-error-from-host el-float? el-function? el-gethash el-global-value el-hash-table? el-integer? el-intern el-keyword? el-kind el-list el-list-from el-list-to-array el-make-pcoll el-make-pmap el-make-pset el-make-signal el-member-with el-nth el-nthcdr el-num el-number? el-opt el-plist-get el-plist-member el-plist-put el-prin1-string el-puthash el-record-field-name el-record? el-seq-items el-signal el-signal-message el-string-set el-string? el-sym-is el-symbol-name el-symbol-name-or-string el-symbol? el-symobj? el-typeof el-validate-struct-field el-value-contains el-value-equal el-value-get el-vector el-vector? s-allow-other-keys s-and s-app s-aux s-backquote s-body s-comma s-comma-at s-declare s-default s-eliscript s-function s-guard s-if s-interactive s-key s-lambda s-let s-macro s-not s-optional s-or s-otherwise s-pred s-progn s-quote s-recur s-rest s-setf s-setq s-underscore)
-  (import "./reader-format.eli" el-expand-file-name el-read-all)
+  (import "./core.eli" JS_FALSE JS_NULL JS_UNDEFINED OPTION_NONE el-add-special-var el-append el-aref el-arith el-arith-2 el-aset-container el-assoc-with el-bool el-car el-car-safe el-cdr el-cdr-safe el-compile-error el-condition-matches el-cons el-cons? el-control-transfer? el-copy-sequence el-default-value el-eq el-eql el-equal-p el-error-from-host el-float? el-function? el-gethash el-global-value el-hash-table? el-integer? el-intern el-is-dynamic-var el-keyword? el-kind el-list el-list-from el-list-to-array el-make-pcoll el-make-pmap el-make-pset el-make-signal el-member-with el-nth el-nthcdr el-num el-number? el-opt el-plist-get el-plist-member el-plist-put el-prin1-string el-puthash el-record-field-name el-record? el-seq-items el-signal el-signal-message el-string-set el-string? el-sym-is el-symbol-name el-symbol-name-or-string el-symbol? el-symobj? el-typeof el-validate-struct-field el-value-contains el-value-equal el-value-get el-vector el-vector? s-allow-other-keys s-and s-app s-aux s-backquote s-body s-comma s-comma-at s-declare s-default s-eliscript s-function s-guard s-if s-interactive s-key s-lambda s-let s-lexical-binding s-macro s-not s-optional s-or s-otherwise s-pred s-progn s-quote s-recur s-rest s-setf s-setq s-underscore)
+  (import "./reader-format.eli" el-expand-file-name el-read-all el-source-lexical-binding)
   (import "./regexp-buffer.eli" el-clamp-position el-current-buffer el-generate-new-buffer el-get-buffer-create el-kill-buffer el-point-max el-rx el-string-match)
-  (import "./evaluator.eli" el-args el-bind-variable el-call el-callable el-catch-block el-check-struct el-cl-typep el-def el-define-function el-eq-test el-eql-test el-eval el-eval-body el-extract-declarations el-get-prop el-handler-conditions el-macroexpand el-macroexpand-1 el-new-env el-normalize-result el-parse-arglist el-put-prop el-rest-after el-restore-dynamic el-root-env el-second el-set-dynamic-variable el-set-fn el-set-macro el-simple-arglist? el-struct-instance? el-symbol-function el-test-function el-third el-throw el-validate-defun el-write-stderr)
+  (import "./evaluator.eli" el-args el-bind-variable el-call el-callable el-catch-block el-check-struct el-cl-typep el-def el-define-function el-eq-test el-eql-test el-eval el-eval-after-load el-eval-body el-extract-declarations el-get-prop el-handler-conditions el-macroexpand el-macroexpand-1 el-new-env el-normalize-result el-parse-arglist el-put-prop el-rest-after el-restore-dynamic el-root-env el-second el-set-dynamic-variable el-set-fn el-set-macro el-simple-arglist? el-struct-instance? el-symbol-function el-test-function el-third el-throw el-validate-defun el-write-stderr)
   (import "./macros-forms.eli" cadr-place-pattern el-boa-arglist el-loop-final el-loop-initial el-loop-keyword? el-loop-normalize)
   (import "./host-io.eli" el-fs el-locate-library el-node-builtin el-path)
   (import "./extensions.eli" el-activate-extension el-check-const-mutation el-collect-pattern-vars el-dispatch-tag el-future el-require el-verify-recur-tail)
@@ -39,28 +39,31 @@
     (el-set-dynamic-variable session sym value))
 
   (defun rt-read-var (session sym lex-val)
-    (if (and (get sym :_everSpecial) (js-call (get session :specials) :has sym))
+    (if (or (and (get sym :_everSpecial) (js-call (get session :specials) :has sym))
+            (and (get session :dynamicMode) (js-call (get session :values) :has sym)))
         (rt-get-global session sym)
       lex-val))
 
   (defun rt-write-var (session sym val)
-    (when (and (get sym :_everSpecial) (js-call (get session :specials) :has sym))
+    (when (el-is-dynamic-var session sym)
       (el-set-dynamic-variable session sym val))
     val)
 
   (defun rt-bind-var (session sym value dynamic)
     (when (or (nil? sym) (eq sym t)) (el-signal "setting-constant" sym))
-    (when (and (get sym :_everSpecial) (js-call (get session :specials) :has sym))
+    (when (el-is-dynamic-var session sym)
       (let* ((values (get session :values))
-             (buf (get session :currentBuffer))
-             (locals (if (and (not (nullish? buf)) (get buf :live)) (get buf :locals) nil))
-             (has-local (and (not (nil? locals)) (js-call locals :has sym))))
+              (buf (get session :currentBuffer))
+              (locals (if (and (not (nullish? buf)) (get buf :live)) (get buf :locals) nil))
+              (has-local (and (not (nil? locals)) (js-call locals :has sym))))
         (js-call dynamic :push
                  (js-array sym (js-call values :has sym) (js-call values :get sym)
                            (if has-local locals nil) (if has-local (js-call locals :get sym) nil)))
         (if has-local
             (js-call locals :set sym value)
-          (js-call values :set sym value))))
+          (js-call values :set sym value))
+        (when (eq sym s-lexical-binding)
+          (put session :dynamicMode (nil? value)))))
     value)
 
   (defun rt-bind-const-var (session sym value dynamic)
@@ -332,6 +335,9 @@
       (try (progn (funcall thunk)
                   (js-call (get session :output) :join ""))
         (finally (put session :output saved)))))
+
+  (defun rt-with-eval-after-load (session target thunk)
+    (el-eval-after-load session target thunk))
 
   ;; Generalized place helpers
   (defun rt-place-aref (inner index)
@@ -3134,6 +3140,10 @@
   ;; Main Expression Compiler (compile-expr)
   ;; ------------------------------------------------------------------
 
+  (defun ext-active? (csession lib-name sym-name)
+    (and (js-call (get csession :activeLibs) :has lib-name)
+         (not (js-call (get csession :userDefinedFns) :has sym-name))))
+
   (defun compile-expr (ctx cenv form)
     (let ((csession (get ctx :session)))
       (cond
@@ -3176,8 +3186,11 @@
                 (let ((val (try (el-eval-body csession (el-list-to-array (get form :cdr)) (el-root-env))
                              (catch _ nil))))
                   (compile-quote ctx val)))
-              ((or (= name "with-suppressed-warnings") (= name "with-eval-after-load"))
+              ((= name "with-suppressed-warnings")
                 (compile-list-body ctx cenv (el-rest-after form 1)))
+              ((= name "with-eval-after-load")
+                (str "(rt-with-eval-after-load session " (compile-expr ctx cenv (el-second form))
+                     " (lambda () " (compile-list-body ctx cenv (el-rest-after form 1)) "))"))
               ((= name "prog1")
                 (let ((v1 (ctx-gensym ctx "p1"))
                       (rest (el-list-to-array (el-rest-after form 1))))
@@ -3268,9 +3281,9 @@
                   (compile-let ctx cenv (el-second form) (el-rest-after form 1) false false)))
               ((or (= name "let*") (= name "dlet"))
                 (compile-let ctx cenv (el-second form) (el-rest-after form 1) t false))
-              ((= name "let-const")
+              ((and (= name "let-const") (ext-active? csession "eliscript-bind" name))
                 (compile-let ctx cenv (el-second form) (el-rest-after form 1) false t))
-              ((= name "let*-const")
+              ((and (= name "let*-const") (ext-active? csession "eliscript-bind" name))
                 (compile-let ctx cenv (el-second form) (el-rest-after form 1) t t))
               ((= name "letrec")
                 (compile-letrec ctx cenv (el-second form) (el-rest-after form 1)))
@@ -3366,7 +3379,7 @@
                   (el-eval csession form (el-root-env))
                   (str "(rt-defmacro session " (ctx-sym ctx m-name) " "
                        (compile-macro-fn ctx cenv arglist (get extracted :body) m-name) ")")))
-              ((= name "defmacro-checked")
+              ((and (= name "defmacro-checked") (ext-active? csession "eliscript-module" name))
                 (let* ((m-sym (el-second form))
                        (m-name (el-symbol-name m-sym))
                        (arglist (el-third form))
@@ -3701,9 +3714,9 @@
               ((= name "cl-loop")
                 (compile-cl-loop ctx cenv form))
               ;; 1+5+2 Extension Special Forms
-              ((or (= name "let-bind") (= name "let*-bind"))
+              ((and (or (= name "let-bind") (= name "let*-bind")) (ext-active? csession "eliscript-bind" name))
                 (compile-let-bind ctx cenv form))
-              ((= name "defun-bind")
+              ((and (= name "defun-bind") (ext-active? csession "eliscript-bind" name))
                 (let ((fn-sym (el-second form))
                       (fn-name (el-symbol-name (el-second form))))
                   (ctx-record-fn ctx fn-name)
@@ -3711,9 +3724,9 @@
                   (str "(rt-defun session " (ctx-sym ctx fn-name) " nil (get "
                        (compile-bind-fn ctx cenv (el-third form) (el-rest-after form 2) fn-name)
                        " :elispCall))")))
-              ((= name "lambda-bind")
+              ((and (= name "lambda-bind") (ext-active? csession "eliscript-bind" name))
                 (compile-bind-fn ctx cenv (el-second form) (el-rest-after form 1) "lambda-bind"))
-              ((= name "pcase-value")
+              ((and (= name "pcase-value") (ext-active? csession "eliscript-bind" name))
                 (let* ((tv (ctx-gensym ctx "pv"))
                        (clauses (el-list-to-array (el-rest-after form 1)))
                        (acc "nil")
@@ -3728,7 +3741,7 @@
                       (setq acc (str "(if " test-expr " " body-expr " " acc ")")))
                     (setq i (1- i)))
                   (str "(let ((" tv " " (compile-expr ctx cenv (el-second form)) ")) " acc ")")))
-              ((= name "cond-predicate")
+              ((and (= name "cond-predicate") (ext-active? csession "eliscript-bind" name))
                 (let* ((pv (ctx-gensym ctx "cp"))
                        (vv (ctx-gensym ctx "cv"))
                        (clauses (el-list-to-array (el-rest-after form 2)))
@@ -3768,7 +3781,7 @@
                       (setq bi (1- bi)))
                     (str "(let ((" pv " " (compile-expr ctx cenv (el-second form)) ") "
                          "(" vv " " (compile-expr ctx cenv (el-third form)) ")) " acc ")"))))
-              ((= name "defun-case")
+              ((and (= name "defun-case") (ext-active? csession "eliscript-bind" name))
                 (let* ((fn-sym (el-second form))
                        (fn-name (el-symbol-name fn-sym))
                        (extracted (el-extract-declarations (el-list-to-array (el-rest-after form 1)))))
@@ -3776,15 +3789,15 @@
                   (js-call (get csession :userDefinedFns) :add fn-name)
                   (str "(rt-defun session " (ctx-sym ctx fn-name) " nil (get "
                        (compile-case-fn ctx cenv (get extracted :body) fn-name) " :elispCall))")))
-              ((= name "lambda-case")
+              ((and (= name "lambda-case") (ext-active? csession "eliscript-bind" name))
                 (compile-case-fn ctx cenv (el-list-to-array (get form :cdr)) "lambda-case"))
-              ((= name "let-loop")
+              ((and (= name "let-loop") (ext-active? csession "eliscript-bind" name))
                 (let* ((bindings (el-list-to-array (el-second form)))
                        (names (js-call bindings :map (lambda (b) (el-car b))))
                        (inits (js-call bindings :map (lambda (b) (compile-expr ctx cenv (el-nth 1 b)))))
                        (body (el-list-to-array (el-rest-after form 1))))
                   (compile-recur-loop ctx cenv names inits body)))
-              ((= name "defun-tail")
+              ((and (= name "defun-tail") (ext-active? csession "eliscript-bind" name))
                 (let* ((fn-sym (el-second form))
                        (fn-name (el-symbol-name fn-sym))
                        (names (el-list-to-array (el-third form)))
@@ -3796,14 +3809,14 @@
                   (str "(rt-defun session " (ctx-sym ctx fn-name) " " (compile-quote ctx (el-third form))
                        " (lambda (" args-var ") "
                        (compile-recur-loop ctx cenv names inits body) "))")))
-              ((= name "recur")
+              ((and (= name "recur") (ext-active? csession "eliscript-bind" name))
                 (unless (get cenv :inRecur)
                   (el-compile-error "ELI-R0001: recur must be in tail position"))
                 (let ((args (el-list-to-array (get form :cdr))))
                   (str "(throw (js-object :eliscriptRecur t :args (js-array"
                        (js-call (js-call args :map (lambda (a) (str " " (compile-expr ctx cenv a)))) :join "")
                        ")))")))
-              ((= name "thread-as")
+              ((and (= name "thread-as") (ext-active? csession "eliscript-bind" name))
                 (let* ((val-form (el-second form))
                        (var-sym (el-third form))
                        (steps (el-list-to-array (el-rest-after form 2)))
@@ -3824,7 +3837,7 @@
                        (if (> (js-length step-exprs) 0) " " "")
                        "(rt-read-var session " sym-expr " " js-var ")) "
                        "(finally (rt-restore-dyn session " dyn-var "))))")))
-              ((or (= name "thread-cond-first") (= name "thread-cond-last"))
+              ((and (or (= name "thread-cond-first") (= name "thread-cond-last")) (ext-active? csession "eliscript-bind" name))
                 (let* ((last (= name "thread-cond-last"))
                        (vv (ctx-gensym ctx "tcv"))
                        (items (el-list-to-array (el-rest-after form 1)))
@@ -3851,7 +3864,7 @@
                        (js-call steps :join " ")
                        (if (> (js-length steps) 0) " " "")
                        vv ")")))
-              ((or (= name "thread-some-first") (= name "thread-some-last"))
+              ((and (or (= name "thread-some-first") (= name "thread-some-last")) (ext-active? csession "eliscript-bind" name))
                 (let* ((last (= name "thread-some-last"))
                        (vv (ctx-gensym ctx "tsv"))
                        (items (el-list-to-array (el-rest-after form 1)))
@@ -3874,7 +3887,7 @@
                        (js-call steps :join " ")
                        (if (> (js-length steps) 0) " " "")
                        vv ")")))
-              ((= name "cl-defstruct-persistent")
+              ((and (= name "cl-defstruct-persistent") (ext-active? csession "eliscript-data" name))
                 (let* ((s-sym (el-second form))
                        (s-name (el-symbol-name s-sym))
                        (raw-fields (js-call (el-list-to-array (el-rest-after form 1)) :filter (lambda (f) (not (el-string? f)))))
@@ -3913,14 +3926,14 @@
                                                " :hasDefault " has-def " :defaultThunk " def-thunk ")"))))))
                   (str "(rt-defstruct-persistent session " (compile-quote ctx s-sym)
                        " (js-array" (js-call (js-call field-exprs :map (lambda (fe) (str " " fe))) :join "") "))")))
-              ((= name "defprotocol")
+              ((and (= name "defprotocol") (ext-active? csession "eliscript-data" name))
                 (let* ((p-sym (el-second form))
                        (sigs (el-list-to-array (el-rest-after form 1)))
                        (methods (js-call sigs :map (lambda (sig) (el-symbol-name (el-car sig))))))
                   (js-call methods :forEach (lambda (m) (ctx-record-fn ctx m)))
                   (str "(rt-defprotocol session " (compile-quote ctx p-sym)
                        " (js-array" (js-call (js-call methods :map (lambda (m) (str " " (el-eliscript-string-literal m)))) :join "") "))")))
-              ((= name "extend-protocol")
+              ((and (= name "extend-protocol") (ext-active? csession "eliscript-data" name))
                 (let* ((p-sym (el-second form))
                        (t-sym (el-third form))
                        (impls (el-list-to-array (el-rest-after form 2)))
@@ -3932,21 +3945,21 @@
                                            (compile-lambda-impl ctx cenv (get impl :cdr) mname false nil) ")"))))))
                   (str "(rt-extend-protocol session " (compile-quote ctx p-sym) " " (compile-quote ctx t-sym)
                        " (js-array" (js-call (js-call impl-exprs :map (lambda (ie) (str " " ie))) :join "") "))")))
-              ((= name "cl-defgeneric-value")
+              ((and (= name "cl-defgeneric-value") (ext-active? csession "eliscript-data" name))
                 (let ((g-sym (el-second form))
                       (g-name (el-symbol-name (el-second form))))
                   (ctx-record-fn ctx g-name)
                   (str "(rt-defgeneric-value session " (compile-quote ctx g-sym) " "
                        (compile-lambda-impl ctx cenv (el-rest-after form 1) g-name false nil) ")")))
-              ((= name "cl-defmethod-value")
+              ((and (= name "cl-defmethod-value") (ext-active? csession "eliscript-data" name))
                 (let ((g-sym (el-second form))
                       (g-name (el-symbol-name (el-second form))))
                   (str "(rt-defmethod-value session " (compile-quote ctx g-sym) " "
                        (compile-expr ctx cenv (el-third form)) " "
                        (compile-lambda-impl ctx cenv (el-rest-after form 2) g-name false nil) ")")))
-              ((= name "delay")
+              ((and (= name "delay") (ext-active? csession "eliscript-data" name))
                 (str "(rt-delay (lambda () " (compile-list-body ctx cenv (get form :cdr)) "))"))
-              ((= name "with-transient")
+              ((and (= name "with-transient") (ext-active? csession "eliscript-data" name))
                 (let* ((spec (el-second form))
                        (var-sym (el-car spec))
                        (src-form (el-nth 1 spec))
@@ -3962,19 +3975,19 @@
                        "(try (progn (setq " js-var " (rt-bind-var session " sym-expr " " b-param " " dyn-var ")) "
                        (compile-list-body ctx t-cenv (el-rest-after form 1)) ") "
                        "(finally (rt-restore-dyn session " dyn-var "))))))")))
-              ((= name "defmodule")
+              ((and (= name "defmodule") (ext-active? csession "eliscript-module" name))
                 (compile-defmodule ctx cenv form))
-              ((= name "import-functions")
+              ((and (= name "import-functions") (ext-active? csession "eliscript-module" name))
                 (let ((mod-name (el-symbol-name (el-second form)))
                       (syms (el-list-to-array (el-nth 3 form))))
                   (str "(rt-import-functions session " (el-eliscript-string-literal mod-name)
                        " (js-array" (js-call (js-call syms :map (lambda (s) (str " " (compile-quote ctx s)))) :join "") "))")))
-              ((= name "import-values")
+              ((and (= name "import-values") (ext-active? csession "eliscript-module" name))
                 (let ((mod-name (el-symbol-name (el-second form)))
                       (syms (el-list-to-array (el-nth 3 form))))
                   (str "(rt-import-values session " (el-eliscript-string-literal mod-name)
                        " (js-array" (js-call (js-call syms :map (lambda (s) (str " " (compile-quote ctx s)))) :join "") "))")))
-              ((= name "defun-async")
+              ((and (= name "defun-async") (ext-active? csession "eliscript-async" name))
                 (let ((fn-sym (el-second form))
                       (fn-name (el-symbol-name (el-second form)))
                       (rest (el-rest-after form 1)))
@@ -3984,11 +3997,11 @@
                        " (rt-make-async-fn session " (el-eliscript-string-literal fn-name) " "
                        (compile-quote ctx (el-car rest)) " (get "
                        (compile-lambda-impl ctx cenv rest fn-name false nil) " :elispCall)))")))
-              ((= name "lambda-async")
+              ((and (= name "lambda-async") (ext-active? csession "eliscript-async" name))
                 (let ((rest (get form :cdr)))
                   (str "(rt-make-async-fn session \"lambda-async\" " (compile-quote ctx (el-car rest))
                        " (get " (compile-lambda-impl ctx cenv rest "lambda-async" false nil) " :elispCall))")))
-              ((= name "with-async-scope")
+              ((and (= name "with-async-scope") (ext-active? csession "eliscript-async" name))
                 (let* ((spec (el-second form))
                        (var-sym (el-car spec))
                        (sc-param (ctx-gensym ctx "sc"))
@@ -4003,7 +4016,7 @@
                        "(try (progn (setq " js-var " (rt-bind-var session " sym-expr " " sc-param " " dyn-var ")) "
                        (compile-list-body ctx s-cenv (el-rest-after form 1)) ") "
                        "(finally (rt-restore-dyn session " dyn-var "))))))")))
-              ((= name "with-abi-memory")
+              ((and (= name "with-abi-memory") (ext-active? csession "eliscript-abi" name))
                 (let* ((options (el-list-to-array (el-second form)))
                        (index (js-call options :findIndex (lambda (o) (el-sym-is o ":initial-pages"))))
                        (pages-expr (if (< index 0) "1" (compile-expr ctx cenv (aref options (1+ index))))))
@@ -4054,13 +4067,15 @@
           (try (js-call fs-mod :realpathSync filename) (catch _err filename))
         filename)))
 
-  (defun rt-with-source-file (session filename thunk)
+  (defun rt-with-source-file (session filename thunk &optional lex-mode)
     (let ((dyn (js-array))
           (truename (rt-true-source-file filename)))
       (try
         (progn
-          (rt-bind-var session (el-intern "load-file-name") filename dyn)
-          (rt-bind-var session (el-intern "load-true-file-name") truename dyn)
+          (when (el-string? filename)
+            (rt-bind-var session (el-intern "load-file-name") filename dyn)
+            (rt-bind-var session (el-intern "load-true-file-name") truename dyn))
+          (rt-bind-var session s-lexical-binding (if (undefined? lex-mode) t lex-mode) dyn)
           (funcall thunk))
         (finally
           (rt-restore-dyn session dyn)))))
@@ -4105,21 +4120,25 @@
            (csession (if (and (not (nullish? options)) (not (nullish? (get options :session))))
                          (get options :session)
                        (createSession))))
-      (when (and (el-string? source-file) (> (js-length source-file) 0))
-        (el-set-dynamic-variable csession (el-intern "load-file-name") source-file)
-        (el-set-dynamic-variable csession (el-intern "load-true-file-name") (rt-true-source-file source-file)))
-      (let* ((ctx (make-compile-ctx csession))
-             (cenv (make-cenv nil))
-             (forms (el-read-all source))
-             (compiled-top (js-call forms :map (lambda (f) (str "    " (compile-expr ctx cenv f)))))
-             (raw-body (if (= (js-length compiled-top) 0)
-                           "    nil"
-                         (js-call compiled-top :join "\n")))
-             (body-block (if (and (el-string? source-file) (> (js-length source-file) 0))
-                             (str "    (rt-with-source-file session " (el-eliscript-string-literal source-file)
-                                  " (lambda ()\n" raw-body "))")
-                           raw-body)))
-      (str "(module " module-name "\n"
+      (let* ((has-file (and (el-string? source-file) (> (js-length source-file) 0)))
+             (lex-mode (el-source-lexical-binding source source-file t)))
+        (when has-file
+          (el-set-dynamic-variable csession (el-intern "load-file-name") source-file)
+          (el-set-dynamic-variable csession (el-intern "load-true-file-name") (rt-true-source-file source-file)))
+        (el-set-dynamic-variable csession s-lexical-binding lex-mode)
+        (let* ((ctx (make-compile-ctx csession))
+               (cenv (make-cenv nil))
+               (forms (el-read-all source))
+               (compiled-top (js-call forms :map (lambda (f) (str "    " (compile-expr ctx cenv f)))))
+               (raw-body (if (= (js-length compiled-top) 0)
+                             "    nil"
+                           (js-call compiled-top :join "\n")))
+               (body-block (if (or has-file (nil? lex-mode))
+                               (str "    (rt-with-source-file session "
+                                    (if has-file (el-eliscript-string-literal source-file) "nil")
+                                    " (lambda ()\n" raw-body ") " (if (nil? lex-mode) "nil" "t") ")")
+                             raw-body)))
+          (str "(module " module-name "\n"
            "  (import " (el-eliscript-string-literal runtime)
            " OPTION_NONE createSession callSession evalSession invokeFunction registerModule"
            " el-add-special-var el-append el-aref el-arith el-arith-2 el-bool el-car el-car-safe el-cdr el-cdr-safe"
@@ -4143,7 +4162,7 @@
            " rt-run-cl-loop rt-save-current-buffer rt-save-excursion rt-save-match-data"
            " rt-set-global rt-setq-default rt-setq-local rt-should rt-should-error"
            " rt-should-not rt-sub rt-truthy rt-with-abi-memory rt-with-async-scope"
-           " rt-with-current-buffer rt-with-output-to-string rt-with-source-file rt-with-temp-buffer"
+           " rt-with-current-buffer rt-with-eval-after-load rt-with-output-to-string rt-with-source-file rt-with-temp-buffer"
            " rt-with-temp-file rt-with-timeout rt-with-transient rt-wrap-fn rt-write-var)\n"
            (if (> (js-length (get ctx :symDefs)) 0)
                (str (js-call (get ctx :symDefs) :join "\n") "\n")
@@ -4180,7 +4199,7 @@
            "  (defun evalElisp (program) (evalSession (ensureDefaultSession) program))\n"
            "  (defun invokeElisp (name &rest arguments) (invokeFunction (ensureDefaultSession) name arguments))\n"
            "  (defun elispFunctions () (js-call exported-function-names :slice))\n"
-           "  (export loadWithSession ensureDefaultSession getDefaultSession getLoaded callSessionFn evalSessionFn invokeSessionFn exportedFunctions callElisp evalElisp invokeElisp elispFunctions))\n"))))
+           "  (export loadWithSession ensureDefaultSession getDefaultSession getLoaded callSessionFn evalSessionFn invokeSessionFn exportedFunctions callElisp evalElisp invokeElisp elispFunctions))\n")))))
 
   (defun compileProgram (source &optional options)
     (let ((forms (el-read-all source))
@@ -4207,5 +4226,5 @@
     rt-run-cl-loop rt-save-current-buffer rt-save-excursion rt-save-match-data
     rt-set-global rt-setq-default rt-setq-local rt-should rt-should-error
     rt-should-not rt-sub rt-truthy rt-with-abi-memory rt-with-async-scope
-    rt-with-current-buffer rt-with-output-to-string rt-with-source-file rt-with-temp-buffer
+    rt-with-current-buffer rt-with-eval-after-load rt-with-output-to-string rt-with-source-file rt-with-temp-buffer
     rt-with-temp-file rt-with-timeout rt-with-transient rt-wrap-fn rt-write-var))

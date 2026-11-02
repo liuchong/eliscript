@@ -167,19 +167,36 @@
     (str "(require 'eliscript) (require 'eliscript-abi)\n"
          "(defun hyp-sq (a b) (declare (eliscript :abi :numeric-f64 :export \"hyp_sq\"\n"
          "  :params ((a :f64) (b :f64)) :returns :f64)) (+ (* a a) (* b b)))\n"
+         "(defun dot3 (x y z) (declare (eliscript :abi :numeric-f64 :export \"dot3\"\n"
+         "  :params ((x :f64) (y :f64) (z :f64)) :returns :f64)) (- (+ (* x 2.0) (* y 3.0)) z))\n"
          "(defun mem-checksum (offset) (declare (eliscript :abi :memory-u32 :export \"mem_checksum\"\n"
          "  :params ((offset :u32)) :returns :u32)) (mem-store-u32 offset 305419896)\n"
-         "  (word-add (mem-load-u32 offset) 1))\n"))
+         "  (word-add (mem-load-u32 offset) 1))\n"
+         "(defun mem-mix (offset seed) (declare (eliscript :abi :memory-u32 :export \"mem_mix\"\n"
+         "  :params ((offset :u32) (seed :u32)) :returns :u32))\n"
+         "  (mem-store-u32 offset (word-xor (word-shl seed 3) 255))\n"
+         "  (word-add (mem-load-u32 offset) 7))\n"))
 
   (test "T10-02: :abi kernels execute on WebAssembly and ARM64 Native"
         (async ()
           (resetSessionState)
           (let ((started (js-call performance :now)))
             (js-call (expect (await (runAbiWasm abi-source "hyp_sq" (js-array 3.0 4.0)))) :toBe 25)
+            (js-call (expect (await (runAbiWasm abi-source "dot3" (js-array 4.0 5.0 3.5)))) :toBe 19.5)
             (js-call (expect (unsigned-bit-shift-right
                               (await (runAbiWasm abi-source "mem_checksum" (js-array 64))) 0))
                      :toBe 305419897)
+            (js-call (expect (unsigned-bit-shift-right
+                              (await (runAbiWasm abi-source "mem_mix" (js-array 128 9))) 0))
+                     :toBe 190)
             (js-call (expect (await (runAbiNative abi-source "hyp_sq" (js-array 3.0 4.0)))) :toBe 25)
+            (js-call (expect (await (runAbiNative abi-source "dot3" (js-array 4.0 5.0 3.5)))) :toBe 19.5)
+            (js-call (expect (unsigned-bit-shift-right
+                              (await (runAbiNative abi-source "mem_checksum" (js-array 64))) 0))
+                     :toBe 305419897)
+            (js-call (expect (unsigned-bit-shift-right
+                              (await (runAbiNative abi-source "mem_mix" (js-array 128 9))) 0))
+                     :toBe 190)
             (record-timing "T10-02" "T10" started "passed"))))
 
   ;; ------------------------------------------------------------------
@@ -310,6 +327,52 @@
                                                (actual (serializeValue (funcall (get mod :getLoaded)))))
                                           (js-call (expect (js-array (get entry :id) actual)) :toEqual
                                                    (js-array (get entry :id) (get native :value)))))))
+                           (finally
+                             (rmSync directory (js-object :recursive t :force t)))))))))
+
+  (test "T16-03: extension gating, with-eval-after-load deferral, and dynamic lexical-binding parity across interpreter and AOT"
+        (lambda ()
+          (run-timed "T16-03" "T16"
+                     (lambda ()
+                       (let* ((directory (resolve project-root "dist/lisp-parity-tests"))
+                              (require-fn (createRequire (get (pathToFileURL (resolve project-root "package.json")) :href)))
+                              (run-both
+                               (lambda (name code source-file)
+                                 (let* ((interp-session (createSession))
+                                        (interp-val (serializeValue
+                                                     (evalProgram code (js-object :session interp-session :filename source-file))))
+                                        (eli (compileModule code (js-object :moduleName (str "tests.parity." name)
+                                                                            :runtime "../runtime/lisp.mjs"
+                                                                            :sourceFile source-file)))
+                                        (js (compile-string eli (str name ".eli")))
+                                        (mjs-path (resolve directory (str name ".mjs"))))
+                                   (writeFileSync mjs-path js "utf8")
+                                   (let* ((mod (funcall require-fn mjs-path))
+                                          (aot-val (serializeValue (funcall (get mod :getLoaded)))))
+                                     (js-call (expect aot-val) :toEqual interp-val)
+                                     interp-val)))))
+                         (mkdirSync directory (js-object :recursive t))
+                         (try
+                           (progn
+                             ;; 1. Unextended Elisp can define ordinary functions named pmap, match, defprotocol
+                             (js-call (expect (funcall run-both "ext-gate"
+                                                       "(progn (defun pmap (x) (+ x 1)) (defun match (a b) (list a b)) (list (pmap 41) (match 'k 9)))"
+                                                       nil))
+                                      :toEqual (js-array 42 (js-array "k" 9)))
+                             ;; 2. with-eval-after-load and eval-after-load defer until provide
+                             (js-call (expect (funcall run-both "after-load"
+                                                       "(progn (defvar al-trace nil) (with-eval-after-load 'al-feat (setq al-trace (cons 'weal al-trace))) (eval-after-load 'al-feat '(setq al-trace (cons 'eal al-trace))) (let ((before al-trace)) (provide 'al-feat) (with-eval-after-load 'al-feat (setq al-trace (cons 'immediate al-trace))) (list before al-trace)))"
+                                                       nil))
+                                      :toEqual (js-array nil (js-array "immediate" "eal" "weal")))
+                             ;; 3. Dynamic binding via (setq lexical-binding nil) and via .el without header cookie
+                             (js-call (expect (funcall run-both "dyn-setq"
+                                                       "(progn (setq lexical-binding nil) (defun dyn-read-x () x) (let ((x 99)) (dyn-read-x)))"
+                                                       nil))
+                                      :toBe 99)
+                             (js-call (expect (funcall run-both "dyn-el-default"
+                                                       "(progn (defun dyn-el-reader () dyn-el-local) (let ((dyn-el-local 77)) (dyn-el-reader)))"
+                                                       (resolve directory "plain-dynamic.el")))
+                                      :toBe 77))
                            (finally
                              (rmSync directory (js-object :recursive t :force t)))))))))
 

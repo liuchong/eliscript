@@ -1117,10 +1117,27 @@
                  (js-call d :getDay) nil (* (- 0 (js-call d :getTimezoneOffset)) 60)))))
 
 
+  (defconst lexical-binding-cookie-pattern
+    (new globalThis.RegExp "-\\*-[^*]*?\\blexical-binding\\s*:\\s*([^;\\s*]+)"))
+
+  (defun el-source-lexical-binding (source filename &optional default-val)
+    (let ((fallback (if (undefined? default-val) t default-val)))
+      (if (not (el-string? source))
+          fallback
+        (let* ((nl1 (js-call source :indexOf "\n"))
+               (nl2 (if (< nl1 0) -1 (js-call source :indexOf "\n" (1+ nl1))))
+               (head (if (< nl1 0) source (if (< nl2 0) source (js-call source :slice 0 nl2))))
+               (m (js-call lexical-binding-cookie-pattern :exec head)))
+          (if (not (nil? m))
+              (if (= (aref m 1) "nil") nil t)
+            (if (and (el-string? filename) (> (js-length filename) 0))
+                (if (js-call filename :endsWith ".el") nil t)
+              fallback))))))
+
   ;; ------------------------------------------------------------------
   ;; Public entry points
   ;; ------------------------------------------------------------------
 
   (defun readAllForms (source) (el-read-all source))
 
-  (export default-json-special-chars el-alist? el-compare-strings el-concat-pieces el-decode-time el-encode-time el-expand-file-name el-file-name-extension el-file-name-sans-extension el-file-relative-name el-format el-format-time-string el-json-encode el-json-options el-json-parse el-json-read-options el-json-serialize el-ms-to-time el-number-from-string el-parse-time-string el-plist-of-keywords? el-read-all el-read-from-string el-regexp-opt el-secure-hash el-time-to-ms el-truncate-string-to-width el-utc-zone? readAllForms))
+  (export default-json-special-chars el-alist? el-compare-strings el-concat-pieces el-decode-time el-encode-time el-expand-file-name el-file-name-extension el-file-name-sans-extension el-file-relative-name el-format el-format-time-string el-json-encode el-json-options el-json-parse el-json-read-options el-json-serialize el-ms-to-time el-number-from-string el-parse-time-string el-plist-of-keywords? el-read-all el-read-from-string el-regexp-opt el-secure-hash el-source-lexical-binding el-time-to-ms el-truncate-string-to-width el-utc-zone? readAllForms))

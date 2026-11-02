@@ -113,6 +113,8 @@
 
   (defconst s-await (el-intern "await"))
 
+  (defconst s-lexical-binding (el-intern "lexical-binding"))
+
 
   ;; ------------------------------------------------------------------
   ;; Core containers
@@ -1290,6 +1292,10 @@
       (put symbol :_everSpecial t)
       (js-call (get session :specials) :add symbol)))
 
+  (defun el-is-dynamic-var (session symbol)
+    (or (get session :dynamicMode)
+        (and (get symbol :_everSpecial) (js-call (get session :specials) :has symbol))))
+
 
   (defun el-default-value (session symbol)
     (let ((values (get session :values)))
@@ -1578,4 +1584,4 @@
                 out))
             (t (el-prin1-string value t)))))))
 
-  (export JS_FALSE JS_NULL JS_UNDEFINED OPTION_NONE base-condition-messages base-condition-parents beyond-unicode-char el-add-special-var el-append el-aref el-arith el-arith-2 el-ascii? el-aset-container el-ash el-assoc-entries el-assoc-with el-astral? el-bitwise el-bool el-bytes-string el-car el-car-safe el-cdr el-cdr-safe el-char-string el-char-to-unit el-char-width el-compare-chain el-compile-error el-condition-matches el-cons el-cons? el-control-transfer? el-copy-sequence el-copy-tree el-decode-utf8 el-default-value el-delete-with el-divide el-downcase el-encode-utf8 el-eq el-eql el-equal el-equal-p el-error-from-host el-float? el-format-g el-function? el-gethash el-global-value el-hash-key el-hash-table-literal el-hash-table? el-integer-string el-integer? el-intern el-json-to-persistent el-keyword? el-kind el-last-cell el-lazy-force el-length el-list el-list-from el-list-length el-list-to-array el-make-float el-make-float-if-fractional el-make-hash-table el-make-pcoll el-make-pmap el-make-pset el-make-signal el-make-symbol el-mark-unibyte el-member-with el-mod el-mod-int el-multibyte? el-nconc el-nth el-nthcdr el-num el-number-string el-number? el-opt el-pad-exponent el-plist-get el-plist-member el-plist-put el-prin1-string el-proper-list-length el-puthash el-rassoc-with el-record-field-name el-record? el-rem el-remhash el-reverse el-round-half-even el-rounding el-seq-items el-seq-like el-signal el-signal-message el-string-bytes-array el-string-codes el-string-from-codes el-string-length el-string-ref el-string-set el-string-width el-string? el-substring el-sym-is el-symbol-name el-symbol-name-or-string el-symbol? el-symobj? el-type-of el-typeof el-unit-to-char el-upcase el-validate-struct-field el-value-compare el-value-contains el-value-count el-value-equal el-value-get el-vector el-vector? kw printValue s-allow-other-keys s-and s-app s-aux s-backquote s-body s-closure s-comma s-comma-at s-declare s-default s-eliscript s-function s-guard s-if s-interactive s-key s-lambda s-let s-macro s-not s-optional s-or s-otherwise s-pred s-progn s-quote s-recur s-rest s-setf s-setq s-underscore serializeValue sym symbol-table unibyte-strings valueCompare valueEqual))
+  (export JS_FALSE JS_NULL JS_UNDEFINED OPTION_NONE base-condition-messages base-condition-parents beyond-unicode-char el-add-special-var el-append el-aref el-arith el-arith-2 el-ascii? el-aset-container el-ash el-assoc-entries el-assoc-with el-astral? el-bitwise el-bool el-bytes-string el-car el-car-safe el-cdr el-cdr-safe el-char-string el-char-to-unit el-char-width el-compare-chain el-compile-error el-condition-matches el-cons el-cons? el-control-transfer? el-copy-sequence el-copy-tree el-decode-utf8 el-default-value el-delete-with el-divide el-downcase el-encode-utf8 el-eq el-eql el-equal el-equal-p el-error-from-host el-float? el-format-g el-function? el-gethash el-global-value el-hash-key el-hash-table-literal el-hash-table? el-integer-string el-integer? el-intern el-is-dynamic-var el-json-to-persistent el-keyword? el-kind el-last-cell el-lazy-force el-length el-list el-list-from el-list-length el-list-to-array el-make-float el-make-float-if-fractional el-make-hash-table el-make-pcoll el-make-pmap el-make-pset el-make-signal el-make-symbol el-mark-unibyte el-member-with el-mod el-mod-int el-multibyte? el-nconc el-nth el-nthcdr el-num el-number-string el-number? el-opt el-pad-exponent el-plist-get el-plist-member el-plist-put el-prin1-string el-proper-list-length el-puthash el-rassoc-with el-record-field-name el-record? el-rem el-remhash el-reverse el-round-half-even el-rounding el-seq-items el-seq-like el-signal el-signal-message el-string-bytes-array el-string-codes el-string-from-codes el-string-length el-string-ref el-string-set el-string-width el-string? el-substring el-sym-is el-symbol-name el-symbol-name-or-string el-symbol? el-symobj? el-type-of el-typeof el-unit-to-char el-upcase el-validate-struct-field el-value-compare el-value-contains el-value-count el-value-equal el-value-get el-vector el-vector? kw printValue s-allow-other-keys s-and s-app s-aux s-backquote s-body s-closure s-comma s-comma-at s-declare s-default s-eliscript s-function s-guard s-if s-interactive s-key s-lambda s-let s-lexical-binding s-macro s-not s-optional s-or s-otherwise s-pred s-progn s-quote s-recur s-rest s-setf s-setq s-underscore serializeValue sym symbol-table unibyte-strings valueCompare valueEqual))

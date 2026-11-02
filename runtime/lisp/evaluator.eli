@@ -1,9 +1,9 @@
 (module eliscript.runtime.lisp.evaluator
   ;;; evaluator.eli --- Lisp-2 lexical/dynamic evaluator, closures, macros, backquote, and core special forms
 
-  (import "./core.eli" el-add-special-var el-append el-aref el-bool el-car el-car-safe el-cdr el-cdr-safe el-compile-error el-condition-matches el-cons el-cons? el-control-transfer? el-eq el-eql el-equal-p el-error-from-host el-float? el-function? el-global-value el-hash-table? el-integer? el-intern el-keyword? el-kind el-list el-list-from el-list-to-array el-make-pcoll el-make-pmap el-make-pset el-mark-unibyte el-member-with el-nth el-nthcdr el-num el-number? el-opt el-plist-member el-prin1-string el-record? el-seq-items el-signal el-string-codes el-string? el-sym-is el-symbol-name el-symbol? el-symobj? el-typeof el-value-compare el-value-equal el-vector el-vector? s-allow-other-keys s-aux s-backquote s-body s-closure s-comma s-comma-at s-declare s-eliscript s-interactive s-key s-lambda s-macro s-optional s-otherwise s-quote s-rest sym unibyte-strings)
+  (import "./core.eli" el-add-special-var el-append el-aref el-bool el-car el-car-safe el-cdr el-cdr-safe el-compile-error el-condition-matches el-cons el-cons? el-control-transfer? el-eq el-eql el-equal-p el-error-from-host el-float? el-function? el-global-value el-hash-table? el-integer? el-intern el-is-dynamic-var el-keyword? el-kind el-list el-list-from el-list-to-array el-make-pcoll el-make-pmap el-make-pset el-mark-unibyte el-member-with el-nth el-nthcdr el-num el-number? el-opt el-plist-member el-prin1-string el-record? el-seq-items el-signal el-string-codes el-string? el-sym-is el-symbol-name el-symbol-name-or-string el-symbol? el-symobj? el-typeof el-value-compare el-value-equal el-vector el-vector? s-allow-other-keys s-aux s-backquote s-body s-closure s-comma s-comma-at s-declare s-eliscript s-interactive s-key s-lambda s-lexical-binding s-macro s-optional s-otherwise s-quote s-rest sym unibyte-strings)
   (import "./regexp-buffer.eli" el-buffer-insert el-clamp-position el-current-buffer el-generate-new-buffer el-get-buffer-create el-kill-buffer el-point-max el-rx)
-  (import "./reader-format.eli" el-concat-pieces el-read-all)
+  (import "./reader-format.eli" el-concat-pieces el-read-all el-source-lexical-binding)
 
 
   (defun el-sort-items (items predicate session)
@@ -61,7 +61,7 @@
   (defun el-lookup (session symbol env)
     (cond
       ((eq (get symbol :kind) "keyword") symbol)
-      ((and (get symbol :_everSpecial) (js-call (get session :specials) :has symbol))
+      ((el-is-dynamic-var session symbol)
         (el-global-value session symbol))
       (t
         (if (not (nil? env))
@@ -96,13 +96,15 @@
                         (js-call (get session :localVars) :has symbol))))
           (js-call (get buf :locals) :set symbol value)
         (js-call (get session :values) :set symbol value)))
+    (when (eq symbol s-lexical-binding)
+      (put session :dynamicMode (nil? value)))
     value)
 
 
   (defun el-set-variable (session symbol value env)
     (when (or (nil? symbol) (eq symbol t) (el-keyword? symbol)) (el-signal "setting-constant" symbol))
     (unless (el-symobj? symbol) (el-signal "wrong-type-argument" (el-intern "symbolp") symbol))
-    (if (and (get symbol :_everSpecial) (js-call (get session :specials) :has symbol))
+    (if (el-is-dynamic-var session symbol)
         (el-set-dynamic-variable session symbol value)
       (if (and (not (nil? env)) (js-call (get env :vars) :has symbol))
           (progn
@@ -127,7 +129,7 @@
     ;; previous global/local state in DYNAMIC for restoration).
     (cond
       ((or (nil? symbol) (eq symbol t)) (el-signal "setting-constant" symbol))
-      ((and (get symbol :_everSpecial) (js-call (get session :specials) :has symbol))
+      ((el-is-dynamic-var session symbol)
         (let* ((values (get session :values))
                (buf (get session :currentBuffer))
                (locals (if (and (not (nullish? buf)) (get buf :live)) (get buf :locals) nil))
@@ -137,19 +139,24 @@
                              (if has-local locals nil) (if has-local (js-call locals :get symbol) nil)))
           (if has-local
               (js-call locals :set symbol value)
-            (js-call values :set symbol value))))
+            (js-call values :set symbol value))
+          (when (eq symbol s-lexical-binding)
+            (put session :dynamicMode (nil? value)))))
       (t (js-call (get frame :vars) :set symbol value))))
 
 
   (defun el-restore-dynamic (session dynamic)
     (let ((index (1- (js-length dynamic))) (values (get session :values)))
       (while (>= index 0)
-        (let ((saved (aref dynamic index)))
+        (let ((saved (aref dynamic index))
+              (sym (aref (aref dynamic index) 0)))
           (if (not (nil? (aref saved 3)))
-              (js-call (aref saved 3) :set (aref saved 0) (aref saved 4))
+              (js-call (aref saved 3) :set sym (aref saved 4))
             (if (aref saved 1)
-                (js-call values :set (aref saved 0) (aref saved 2))
-              (js-call values :delete (aref saved 0)))))
+                (js-call values :set sym (aref saved 2))
+              (js-call values :delete sym)))
+          (when (eq sym s-lexical-binding)
+            (put session :dynamicMode (nil? (js-call values :get s-lexical-binding)))))
         (setq index (1- index)))))
 
 
@@ -315,7 +322,11 @@
                 (if (el-function? local)
                     (el-eval-call-fn session local cdr env)
                   (el-call session local (el-eval-args session cdr env)))
-              (let ((special (get head :specialForm)))
+              (let ((special (or (get head :specialForm)
+                                 (if (and (get head :_everExtSpecial)
+                                          (not (js-call (get session :userDefinedFns) :has (get head :name))))
+                                     (js-call (get session :extSpecialForms) :get head)
+                                   undefined))))
                 (if (not (undefined? special))
                     (funcall special session form env)
                   (let ((inline (get head :_inlineEval)))
@@ -408,13 +419,13 @@
   (defun el-bind-simple-args (session spec args frame dynamic name)
     (let* ((required (get spec :required)) (optional (get spec :optional))
            (rest (get spec :rest)) (count (js-length args)) (nreq (js-length required))
-           (nopt (js-length optional)) (vars (get frame :vars)) (specials (get session :specials)))
+           (nopt (js-length optional)) (vars (get frame :vars)))
       (when (or (< count nreq) (and (nil? rest) (> count (+ nreq nopt))))
         (el-signal "wrong-number-of-arguments" (if (el-string? name) (el-intern name) name) count))
       (let ((index 0))
         (while (< index nreq)
           (let ((sym (aref required index)) (val (el-opt (aref args index))))
-            (if (and (get sym :_everSpecial) (js-call specials :has sym))
+            (if (el-is-dynamic-var session sym)
                 (el-bind-variable session frame sym val dynamic)
               (js-call vars :set sym val)))
           (setq index (1+ index)))
@@ -422,13 +433,13 @@
           (while (< o nopt)
             (let ((sym (aref optional o)) (position (+ nreq o)))
               (let ((val (if (< position count) (el-opt (aref args position)) nil)))
-                (if (and (get sym :_everSpecial) (js-call specials :has sym))
+                (if (el-is-dynamic-var session sym)
                     (el-bind-variable session frame sym val dynamic)
                   (js-call vars :set sym val))))
             (setq o (1+ o))))
         (unless (nil? rest)
           (let ((val (el-list-from (js-call args :slice (+ nreq nopt)))))
-            (if (and (get rest :_everSpecial) (js-call specials :has rest))
+            (if (el-is-dynamic-var session rest)
                 (el-bind-variable session frame rest val dynamic)
               (js-call vars :set rest val)))))))
 
@@ -534,7 +545,7 @@
                   (let ((p0 (if (= nreq 1) (aref req 0) (aref opt 0))))
                     (put fn :elispCall1
                          (lambda (a0)
-                           (if (and (get p0 :_everSpecial) (js-call (get session :specials) :has p0))
+                           (if (el-is-dynamic-var session p0)
                                (el-apply-closure session arglist spec body env (js-array a0) name cprops)
                              (let ((frame (el-new-env env)))
                                (js-call (get frame :vars) :set p0 (el-opt a0))
@@ -544,8 +555,8 @@
                         (p1 (aref opt (- 1 nreq))))
                     (put fn :elispCall1
                          (lambda (a0)
-                           (if (or (and (get p0 :_everSpecial) (js-call (get session :specials) :has p0))
-                                   (and (get p1 :_everSpecial) (js-call (get session :specials) :has p1)))
+                           (if (or (el-is-dynamic-var session p0)
+                                   (el-is-dynamic-var session p1))
                                (el-apply-closure session arglist spec body env (js-array a0) name cprops)
                              (let* ((frame (el-new-env env)) (vars (get frame :vars)))
                                (js-call vars :set p0 (el-opt a0))
@@ -556,8 +567,8 @@
                     (p1 (if (= nreq 2) (aref req 1) (aref opt (- 1 nreq)))))
                 (put fn :elispCall2
                      (lambda (a0 a1)
-                       (if (or (and (get p0 :_everSpecial) (js-call (get session :specials) :has p0))
-                               (and (get p1 :_everSpecial) (js-call (get session :specials) :has p1)))
+                       (if (or (el-is-dynamic-var session p0)
+                               (el-is-dynamic-var session p1))
                            (el-apply-closure session arglist spec body env (js-array a0 a1) name cprops)
                          (let* ((frame (el-new-env env)) (vars (get frame :vars)))
                            (js-call vars :set p0 (el-opt a0))
@@ -569,9 +580,9 @@
                     (p2 (if (= nreq 3) (aref req 2) (aref opt (- 2 nreq)))))
                 (put fn :elispCall3
                      (lambda (a0 a1 a2)
-                       (if (or (and (get p0 :_everSpecial) (js-call (get session :specials) :has p0))
-                               (and (get p1 :_everSpecial) (js-call (get session :specials) :has p1))
-                               (and (get p2 :_everSpecial) (js-call (get session :specials) :has p2)))
+                       (if (or (el-is-dynamic-var session p0)
+                               (el-is-dynamic-var session p1)
+                               (el-is-dynamic-var session p2))
                            (el-apply-closure session arglist spec body env (js-array a0 a1 a2) name cprops)
                          (let* ((frame (el-new-env env)) (vars (get frame :vars)))
                            (js-call vars :set p0 (el-opt a0))
@@ -747,7 +758,6 @@
     (let* ((frame (el-new-env env))
            (dynamic nil)
            (pending nil)
-           (specials (get session :specials))
            (vars (get frame :vars))
            (cursor bindings))
       (when const (put frame :consts (new globalThis.Set)))
@@ -755,7 +765,7 @@
         (let* ((binding (get cursor :car))
                (symbol (if (el-cons? binding) (get binding :car) binding))
                (init (if (el-cons? binding) (el-car (get binding :cdr)) nil))
-               (is-special (and (get symbol :_everSpecial) (js-call specials :has symbol))))
+               (is-special (el-is-dynamic-var session symbol)))
           (when (and const is-special)
             (el-compile-error (str "ELI-C0011: let-const cannot bind special variable " (get symbol :name))))
           (let ((value (el-eval session init (if sequential frame env))))
@@ -1105,7 +1115,7 @@
            (cursor (el-eval session (el-car (el-cdr spec)) env))
            (result-form (el-car (el-cdr (el-cdr spec))))
            (body (el-rest-after form 1))
-           (is-special (and (get variable :_everSpecial) (js-call (get session :specials) :has variable))))
+           (is-special (el-is-dynamic-var session variable)))
       (if (not is-special)
           (progn
             (while (el-cons? cursor)
@@ -1145,7 +1155,7 @@
            (count (el-num (el-eval session (el-car (el-cdr spec)) env)))
            (result-form (el-car (el-cdr (el-cdr spec))))
            (body (el-rest-after form 1))
-           (is-special (and (get variable :_everSpecial) (js-call (get session :specials) :has variable)))
+           (is-special (el-is-dynamic-var session variable))
            (index 0))
       (if (not is-special)
           (progn
@@ -1185,7 +1195,7 @@
            (variable (el-car spec))
            (items (el-seq-items (el-eval session (el-car (el-cdr spec)) env)))
            (body (el-rest-after form 1))
-           (is-special (and (get variable :_everSpecial) (js-call (get session :specials) :has variable))))
+           (is-special (el-is-dynamic-var session variable)))
       (if (not is-special)
           (let ((i 0) (n (js-length items)))
             (while (< i n)
@@ -1364,7 +1374,27 @@
 
   (defun sf-eval-progn (session form env) (el-eval-list-body session (get form :cdr) env))
 
-  (defun sf-with-eval-after-load (session form env) (el-eval-list-body session (el-rest-after form 1) env))
+  (defun el-eval-after-load (session file-or-feature thunk)
+    (let ((key (el-symbol-name-or-string file-or-feature)))
+      (if (or (js-call (get session :features) :has key)
+              (js-call (get session :loadedFiles) :has key))
+          (funcall thunk)
+        (let ((list (js-call (get session :afterLoad) :get key)))
+          (when (undefined? list)
+            (setq list (js-array))
+            (js-call (get session :afterLoad) :set key list))
+          (js-call list :push thunk)
+          nil))))
+
+  (defun el-fire-after-load (session key)
+    (let ((list (js-call (get session :afterLoad) :get key)))
+      (unless (undefined? list)
+        (js-call (js-call list :slice) :forEach (lambda (thunk) (funcall thunk))))))
+
+  (defun sf-with-eval-after-load (session form env)
+    (let ((target (el-eval session (el-second form) env))
+          (body (el-rest-after form 1)))
+      (el-eval-after-load session target (lambda () (el-eval-list-body session body env)))))
 
   (defun sf-defgroup (session form env) (el-second form))
 
@@ -1704,13 +1734,24 @@
   (defun el-eval-source (session source filename)
     (let* ((env (el-root-env))
            (load-sym (el-intern "load-file-name"))
-           (prev-load (js-call (get session :values) :get load-sym)))
+           (prev-load (js-call (get session :values) :get load-sym))
+           (has-file (and (el-string? filename) (> (js-length filename) 0)))
+           (prev-lex (js-call (get session :values) :get s-lexical-binding))
+           (prev-dyn (get session :dynamicMode))
+           (lex-mode (el-source-lexical-binding source filename prev-lex))
+           (bind-lex (or has-file (not (eq lex-mode prev-lex)))))
       (when (el-string? filename)
         (js-call (get session :values) :set load-sym filename))
+      (when bind-lex
+        (js-call (get session :values) :set s-lexical-binding lex-mode)
+        (put session :dynamicMode (nil? lex-mode)))
       (try
         (el-eval-body session (el-read-all source) env)
         (finally
           (when (el-string? filename)
-            (js-call (get session :values) :set load-sym prev-load))))))
+            (js-call (get session :values) :set load-sym prev-load))
+          (when bind-lex
+            (js-call (get session :values) :set s-lexical-binding prev-lex)
+            (put session :dynamicMode prev-dyn))))))
 
-  (export el-args el-bind-variable el-bound-lexically el-call el-callable el-catch-block el-check-struct el-cl-find el-cl-typep el-comparator el-def el-def-alias el-define-function el-destructure el-emit-output el-eq-test el-eql-test el-equal-test el-eval el-eval-args el-eval-body el-eval-call-fn el-eval-list-body el-eval-source el-extract-declarations el-function-designator el-get-prop el-handler-conditions el-key-extractor el-key-test el-lookup el-macroexpand el-macroexpand-1 el-make-lambda el-make-macro el-make-sorted-map el-make-sorted-set el-mapconcat el-new-env el-normalize-result el-parse-arglist el-put-prop el-rest-after el-restore-dynamic el-root-env el-second el-seq-into-extension el-set-dynamic-variable el-set-fn el-set-macro el-set-variable el-simple-arglist? el-sort-items el-struct-instance? el-symbol-function el-test-function el-third el-throw el-validate-defun el-write-stderr el-write-stdout el-write-stream sf-and sf-and-let sf-backquote sf-bound-and-true-p sf-catch sf-cl-assert sf-cl-block sf-cl-case sf-cl-defun sf-cl-destructuring-bind sf-cl-dolist sf-cl-flet sf-cl-labels sf-cl-return sf-cl-return-from sf-cl-the sf-cond sf-condition-case sf-condition-case-unless-debug sf-declare sf-defalias sf-defconst sf-defcustom sf-defface sf-defgroup sf-define-derived-mode sf-define-minor-mode sf-defmacro sf-defsubst sf-defun sf-defvar sf-defvar-keymap sf-defvar-local sf-dolist sf-dotimes sf-function sf-gv-define-setter sf-gv-define-simple-setter sf-if sf-if-let sf-ignore-error sf-ignore-errors sf-interactive sf-lambda sf-let sf-let* sf-let*-const sf-let-const sf-letrec sf-named-let sf-or sf-prog1 sf-prog2 sf-progn sf-quote sf-rx sf-save-current-buffer sf-save-excursion sf-save-match-data sf-seq-doseq sf-setq sf-setq-default sf-setq-local sf-thread sf-unless sf-unwind-protect sf-when sf-when-let sf-while sf-while-let sf-with-current-buffer sf-with-eval-after-load sf-with-output-to-string sf-with-temp-buffer sf-with-temp-file sf-with-timeout special-forms))
+  (export el-args el-bind-variable el-bound-lexically el-call el-callable el-catch-block el-check-struct el-cl-find el-cl-typep el-comparator el-def el-def-alias el-define-function el-destructure el-emit-output el-eq-test el-eql-test el-equal-test el-eval el-eval-after-load el-eval-args el-eval-body el-eval-call-fn el-eval-list-body el-eval-source el-extract-declarations el-fire-after-load el-function-designator el-get-prop el-handler-conditions el-key-extractor el-key-test el-lookup el-macroexpand el-macroexpand-1 el-make-lambda el-make-macro el-make-sorted-map el-make-sorted-set el-mapconcat el-new-env el-normalize-result el-parse-arglist el-put-prop el-rest-after el-restore-dynamic el-root-env el-second el-seq-into-extension el-set-dynamic-variable el-set-fn el-set-macro el-set-variable el-simple-arglist? el-sort-items el-struct-instance? el-symbol-function el-test-function el-third el-throw el-validate-defun el-write-stderr el-write-stdout el-write-stream sf-and sf-and-let sf-backquote sf-bound-and-true-p sf-catch sf-cl-assert sf-cl-block sf-cl-case sf-cl-defun sf-cl-destructuring-bind sf-cl-dolist sf-cl-flet sf-cl-labels sf-cl-return sf-cl-return-from sf-cl-the sf-cond sf-condition-case sf-condition-case-unless-debug sf-declare sf-defalias sf-defconst sf-defcustom sf-defface sf-defgroup sf-define-derived-mode sf-define-minor-mode sf-defmacro sf-defsubst sf-defun sf-defvar sf-defvar-keymap sf-defvar-local sf-dolist sf-dotimes sf-function sf-gv-define-setter sf-gv-define-simple-setter sf-if sf-if-let sf-ignore-error sf-ignore-errors sf-interactive sf-lambda sf-let sf-let* sf-let*-const sf-let-const sf-letrec sf-named-let sf-or sf-prog1 sf-prog2 sf-progn sf-quote sf-rx sf-save-current-buffer sf-save-excursion sf-save-match-data sf-seq-doseq sf-setq sf-setq-default sf-setq-local sf-thread sf-unless sf-unwind-protect sf-when sf-when-let sf-while sf-while-let sf-with-current-buffer sf-with-eval-after-load sf-with-output-to-string sf-with-temp-buffer sf-with-temp-file sf-with-timeout special-forms))

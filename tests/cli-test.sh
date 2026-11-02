@@ -1,9 +1,17 @@
 #!/usr/bin/env sh
 set -eu
+if [ -z "${LANG:-}" ] || [ "${LANG:-}" = "en_CN.UTF-8" ]; then
+  LANG=en_US.UTF-8
+  export LANG
+fi
 
 PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TEMP_DIR=$(mktemp -d "$PROJECT_DIR/.eliscript-test.XXXXXX")
 trap 'rm -rf "$TEMP_DIR"' EXIT INT TERM
+
+if [ ! -f "$PROJECT_DIR/tests/snapshots/core.mjs" ] || [ ! -f "$PROJECT_DIR/runtime/core/list.mjs" ]; then
+  "${EMACS:-emacs}" --batch -Q -l "$PROJECT_DIR/tools/backends/bootstrap.el" --eval '(eliscript-backend-bootstrap-runtimes)'
+fi
 
 "$PROJECT_DIR/bin/eliscript" \
   --output "$TEMP_DIR/core.mjs" \
