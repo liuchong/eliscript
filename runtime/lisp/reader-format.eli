@@ -927,17 +927,20 @@
 
   (defun el-expand-file-name (session name dir)
     (unless (el-string? name) (el-signal "wrong-type-argument" (el-intern "stringp") name))
-    (let* ((base-raw (if (or (nullish? dir) (nil? dir))
-                         (or (js-call (get session :values) :get (el-intern "default-directory")) "/")
+    (let* ((def-dir-raw (or (el-global-value session (el-intern "default-directory")) "/"))
+           (base-raw (if (or (nullish? dir) (nil? dir))
+                         def-dir-raw
                        dir)))
       (unless (el-string? base-raw) (el-signal "wrong-type-argument" (el-intern "stringp") base-raw))
       (let ((expanded-name (el-expand-tilde name))
             (expanded-base (el-expand-tilde base-raw)))
         (if (js-call expanded-name :startsWith "/")
             (el-normalize-file-path expanded-name)
-          (let ((abs-base (if (js-call expanded-base :startsWith "/")
-                              expanded-base
-                            (str "/" expanded-base))))
+          (let* ((def-dir (el-expand-tilde (if (el-string? def-dir-raw) def-dir-raw "/")))
+                 (abs-def (if (js-call def-dir :startsWith "/") def-dir (str "/" def-dir)))
+                 (abs-base (if (js-call expanded-base :startsWith "/")
+                               expanded-base
+                             (str (js-call abs-def :replace (new globalThis.RegExp "/?$") "/") expanded-base))))
             (el-normalize-file-path
              (str (js-call abs-base :replace (new globalThis.RegExp "/?$") "/") expanded-name)))))))
 

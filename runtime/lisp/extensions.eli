@@ -66,6 +66,8 @@
                         (js-call (get session :loadingFeatures) :delete name))))
                 (when (and (not (js-call extension-exports :has name))
                            (/= name "eliscript")
+                           (/= name "eliscript-runtime")
+                           (/= name "eliscript-worker")
                            (el-cons? (el-global-value session (el-intern "load-path"))))
                   (if (and (not (nullish? noerror)) (not (nil? noerror)))
                       (setq feature nil)
@@ -80,14 +82,16 @@
         (js-call (js-array "eliscript-data" "eliscript-bind" "eliscript-async" "eliscript-module" "eliscript-contract") :forEach
                  (lambda (lib) (el-activate-extension session lib)))
       (let ((exports (js-call extension-exports :get name)))
-        (unless (or (undefined? exports) (js-call (get session :activeLibs) :has name))
-          (js-call exports :forEach
-                   (lambda (symbol)
-                     (when (js-call (get session :userDefinedFns) :has symbol)
-                       (el-compile-error (str "ELI-M0001: extension " name " symbol " symbol
-                                              " conflicts with existing user definition")))))
-          (js-call (get session :activeLibs) :add name)
-          (el-install-extension session name)))))
+        (unless (undefined? exports)
+          (unless (js-call (get session :activeLibs) :has name)
+            (js-call exports :forEach
+                     (lambda (symbol)
+                       (when (js-call (get session :userDefinedFns) :has symbol)
+                         (el-compile-error (str "ELI-M0001: extension " name " symbol " symbol
+                                                " conflicts with existing user definition")))))
+            (js-call (get session :activeLibs) :add name)
+            (el-install-extension session name))
+          (js-call (get session :features) :add name)))))
 
 
   (defun el-future (state value error) (js-object :kind "future" :state state :value value :error error))

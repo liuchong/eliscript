@@ -554,9 +554,9 @@
   (defun el-buffer-insert (buffer text)
     (let* ((content (get buffer :text))
            (at (1- (get buffer :point)))
-           (before (el-substring content 0 at))
-           (after (el-substring content at nil))
-           (next (str before text after)))
+           (next (if (= content "")
+                     text
+                   (str (el-substring content 0 at) text (el-substring content at nil)))))
       (when (or (not (get buffer :multibyte))
                 (and (> (get unibyte-strings :size) 0)
                      (or (js-call unibyte-strings :has content)
