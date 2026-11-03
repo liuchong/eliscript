@@ -202,6 +202,21 @@ precedence over parent rules when they address the same decision.
   boundary. Refresh the full compatibility matrix only at a milestone gate or
   when its evidence is the capability being delivered.
 
+## Release Package Safety
+
+- **RELEASE-01** - Keep the authenticated final runtime source at
+  `dist/runtime.eli` in the npm package. The source checkout's identical
+  `bootstrap/runtime/memory.eli` is an Emacs bootstrap input, not a second
+  published runtime. Exclude that duplicate from npm without removing the
+  maintained source or changing compiler-product identities.
+- **RELEASE-02** - Preserve the existing 5 MB compressed-package limit. Check
+  the actual npm file list for identical payloads of at least 1 MB; fix the
+  packaging rather than raising the limit or removing required debug assets.
+- **RELEASE-03** - Before npm publication, validate the exact tarball by clean
+  installation, installed CLI execution and shared-source JavaScript/WASM/native
+  output tests. Publish those same tested bytes; a checkout build or a later
+  repack is not a substitute. Keep this acceptance in compiler release CI.
+
 ## Performance Optimization
 
 - **PERF-01** - **Development Goal**: Design and implement the compiler,

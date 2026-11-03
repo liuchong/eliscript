@@ -108,6 +108,22 @@
         (catch error (setq failed t) (throw error))
         (finally (try (await (js-call file :close)) (catch error (unless failed (throw error))))))))
 
+  (defasync check-package-payloads (files)
+    (let ((paths (js-call files :map (lambda (file) (get file :path))))
+          (large (new globalThis.Map)) (index 0))
+      (js-call assert :ok (js-call paths :includes "dist/runtime.eli")
+        "the authenticated final runtime source must be packaged")
+      (js-call assert :strictEqual (js-call paths :includes "bootstrap/runtime/memory.eli") false
+        "the identical Emacs bootstrap runtime source must not be packaged twice")
+      (while (< index (js-length files))
+        (let* ((file (aref files index)) (path (get file :path)))
+          (when (>= (get file :size) 1000000)
+            (let* ((sha (await (file-sha (resolve root path)))) (previous (js-call large :get sha)))
+              (js-call assert :strictEqual previous undefined
+                (str "duplicate large package payload: " previous " and " path))
+              (js-call large :set sha path))))
+        (setq index (1+ index)))))
+
   (defasync prepared-input ()
     (let* ((environment (get globalThis.process :env))
            (manifest-path (resolve (get environment :ELISCRIPT_RELEASE_PACKAGE_BOOTSTRAP_MANIFEST
@@ -178,6 +194,7 @@
                   (put receipt :npmIntegrity (get pack-result :integrity))
                   (put receipt :tarballSha256 (await (file-sha tarball)))
                   (js-call assert :ok (< (get pack-result :size) 5000000) "release tarball must remain compact (< 5 MB)")
+                  (await (check-package-payloads (get pack-result :files)))
                   (child "install" "npm" (js-array "install" "--ignore-scripts" "--no-audit" "--no-fund" "--package-lock=false" tarball) consumer env receipt))
                 (let* ((installed (resolve consumer "node_modules/eliscript"))
                        (installed-manifest (resolve installed (get prepared :manifestRelative)))
@@ -190,6 +207,20 @@
                   (js-call assert :deepStrictEqual (get identity :productIdentity) (get receipt :producerIdentity))
                   (js-call assert :ok (js-call (await (realpath (get identity :stage3MetadataPath))) :startsWith (str (await (realpath installed)) sep)))
                   (js-call assert :strictEqual (get (JSON/parse (await (readFile (resolve installed "package.json") "utf8"))) :version) (get receipt :packageVersion))
+                  (let ((public-cli (resolve consumer "node_modules/.bin/eliscript")) (index 0)
+                        (extensions (js-array "el" "eli")))
+                    (while (< index (js-length extensions))
+                      (let* ((extension (aref extensions index))
+                             (source-file (resolve consumer (str "installed-cli." extension)))
+                             (output (resolve consumer (str "installed-cli-" extension ".mjs")))
+                             (label (str "installed-cli-" extension)))
+                        (await (writeFile source-file ";;; -*- lexical-binding: t; -*-\n(print (+ 40 2))\n"))
+                        (js-call assert :strictEqual
+                          (js-call (get (child label node (js-array public-cli "--batch" "-Q" "-l" source-file) consumer env receipt) :stdout) :trim) "42")
+                        (child (str label "-compile") node (js-array public-cli "--output" output source-file) consumer env receipt)
+                        (js-call assert :strictEqual
+                          (js-call (get (child (str label "-aot") node (js-array output) consumer env receipt) :stdout) :trim) "42"))
+                      (setq index (1+ index))))
                   (await (writeFile input source)) (await (writeFile runner runner-source))
                   ;; The installed CLI's default layout must resolve stage3 by
                   ;; itself. It receives no checkout compiler-artifact override.

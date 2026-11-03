@@ -14,7 +14,7 @@ NATIVE_TARGET ?= $(if $(filter Linux,$(shell uname -s)),arm64-linux,arm64-macos)
 STAGE3_FUNCTIONAL_RUNTIME_PROFILE ?=
 STAGE3_FUNCTIONAL_RUNTIME_OPTION = $(if $(strip $(STAGE3_FUNCTIONAL_RUNTIME_PROFILE)),--functional-runtime-profile $(STAGE3_FUNCTIONAL_RUNTIME_PROFILE),)
 
-.PHONY: bootstrap-release verify-bootstrap check-stage3-targets prepare-release-package compiler-release-ci check-release-workflow
+.PHONY: bootstrap-release verify-bootstrap check-stage3-targets prepare-release-package check-release-package compiler-release-ci check-release-workflow
 
 # All compiler hosts in this release are JavaScript. Binary targets below are
 # generated user programs, never alternative compiler hosts.
@@ -34,6 +34,10 @@ prepare-release-package:
 	$(NODE) tools/backends/dist/release-cli.mjs prepare-release-package --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)"
 	$(BUN) run build:browser
 
+# Validate the actual compact archive, not merely the checkout's modules.
+check-release-package: prepare-release-package
+	ELISCRIPT_RELEASE_PACKAGE_BOOTSTRAP_MANIFEST=dist/stage3-release.json $(NODE) --test --test-concurrency=1 tests/release-package-install-selfhosted.test.mjs
+
 check-release-workflow:
 	$(NODE) tools/ci/dist/compiler-release.mjs --check
 
@@ -42,6 +46,7 @@ compiler-release-ci: bootstrap-release
 	$(NODE) tools/ci/dist/compiler-release.mjs --check
 	$(NODE) --test --test-concurrency=1 tests/bootstrap-js-stages-selfhosted.test.mjs tests/stage3-targets-selfhosted.test.mjs tests/bootstrap-release-integration-selfhosted.test.mjs
 	ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(MAKE) check-stage3-targets STAGE3_FUNCTIONAL_RUNTIME_PROFILE=small
+	$(MAKE) check-release-package
 	# Reuse the already generated and authenticated cohort. Rebuilding here
 	# would replace the installed stage3 runtime with an Emacs bootstrap product.
 	ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE=small ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(MAKE) --assume-old=bootstrap-backends test
