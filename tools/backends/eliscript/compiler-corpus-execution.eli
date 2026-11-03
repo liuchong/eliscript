@@ -26,6 +26,25 @@
   (defconst compareCompilerCorpusObservation (get ground :compareCompilerCorpusObservation))
   (defun field (value key) (if (nullish? value) undefined (get value key)))
   (defun fallback (value other) (if (nullish? value) other value))
+  (defasync prepareCompilerCorpusExecutionScope (directory source-root)
+    ;; Programs and independent oracles must not inherit a compiler product's
+    ;; private `eliscript` self-reference. Keep their package scope separate;
+    ;; resolve the actual declared runtime through an owned local dependency.
+    (let* ((scope (str (JSON/stringify (js-object :type "module" :private t) nil 2) "\n"))
+           (scope-file (join directory "package.json"))
+           (modules (join directory "node_modules"))
+           (alias (join modules "eliscript")) (canonical (await (realpath source-root))))
+      (await (mkdir directory (js-object :recursive t)))
+      (try (await (writeFile scope-file scope (js-object :flag "wx")))
+        (catch error
+          (unless (and (= (field error "code") "EEXIST") (= (await (readFile scope-file "utf8")) scope))
+            (throw error))))
+      (await (mkdir modules (js-object :recursive t)))
+      (try (await (symlink canonical alias "dir"))
+        (catch error
+          (unless (and (= (field error "code") "EEXIST")
+                       (js-call (await (lstat alias)) :isSymbolicLink)
+                       (= (await (realpath alias)) canonical)) (throw error)))) directory))
   (defun execution-digest (bytes)
     (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
   (defun original-host-enabled (value)
@@ -1720,4 +1739,4 @@
   (defconst prepareOriginalSeedCorpusRecord seed-authenticated-record)
   (export prepareOriginalSeedCorpusRecord resolveOriginalCorpusRequest originalProgramArguments createOriginalSeedOracle executeCompilerCorpusRecord
     executeIsolatedCompilerCorpusExports decodeCompilerCorpusObservation compilerCorpusRuntimeAcceptance prepareCompilerCorpusRuntimeContext prepareOriginalToolsCLIContext prepareCompilerCorpusNativeProviders prepareCompilerCorpusSourceMapContext
-    prepareOriginalProgramProcessLifetime prepareOriginalToolsDataReferenceContext compareCompilerCorpusObservation))
+    prepareOriginalProgramProcessLifetime prepareOriginalToolsDataReferenceContext compareCompilerCorpusObservation prepareCompilerCorpusExecutionScope))

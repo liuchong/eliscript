@@ -39,7 +39,7 @@
         (when (= (get (get globalThis.process :env) :ELISCRIPT_TEST_FIXTURE_PRELOAD) "1")
           (js-call arguments :push "--preload"
             (get (get globalThis.process :env) :ELISCRIPT_TEST_FIXTURE_PRELOAD_PATH)))
-        (js-call arguments :push "--timeout" "300000" "fixture.test.mjs")
+        (js-call arguments :push "--timeout" "300000" "./fixture.test.mjs")
         (js-call assert :strictEqual
           (js-call (adaptedSpyOn framework globalThis.Bun "spawn") :mockImplementation
             (lambda (actual actual-options)
@@ -54,18 +54,18 @@
              (arguments (js-array (get globalThis.process :execPath) "--smol" "test")))
         (when (= (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD) "1")
           (js-call arguments :push "--preload" (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD_PATH)))
-        (js-call arguments :push "--timeout" "300000" "fixture.test.mjs")
+        (js-call arguments :push "--timeout" "300000" "./fixture.test.mjs")
         (js-call assert :deepStrictEqual (originalWorkerArguments arguments)
           (js-array (get globalThis.process :execPath) "--smol" "test" "fixture.test.mjs"))
         (when (= (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD) "1")
           (let* ((installer (resolve root "tests/helpers/managed-fixture-repairs-install.mjs"))
                  (str-arguments (js-call (js-call arguments :slice 0 -3) :concat
-                   (js-array "--preload" installer "--timeout" "300000" "tests/wasm-managed-str.test.mjs"))))
+                   (js-array "--preload" installer "--timeout" "300000" "./tests/wasm-managed-str.test.mjs"))))
             (js-call assert :deepStrictEqual (originalWorkerArguments str-arguments)
               (js-array (get globalThis.process :execPath) "--smol" "test" "tests/wasm-managed-str.test.mjs"))
             (js-call assert :throws (lambda () (originalWorkerArguments
               (js-call str-arguments :map (lambda (argument)
-                (if (= argument "tests/wasm-managed-str.test.mjs") "tests/not-str.test.mjs" argument)))))
+                (if (= argument "./tests/wasm-managed-str.test.mjs") "./tests/not-str.test.mjs" argument)))))
               (lambda (error) (= (get error :code) "ERR_ASSERTION")))
             (js-call assert :throws (lambda () (originalWorkerArguments
               (js-call str-arguments :filter (lambda (argument) (/= argument installer)))))
@@ -74,6 +74,7 @@
           (js-call arguments :filter (lambda (argument) (/= argument "--timeout")))
           (js-call arguments :map (lambda (argument) (if (= argument "300000") "300001" argument)))
           (js-call arguments :concat (js-array "--test-name-pattern" "filtered"))
-          (js-call arguments :map (lambda (argument) (if (= argument "fixture.test.mjs") "fixture.mjs" argument)))) :forEach
+          (js-call arguments :map (lambda (argument) (if (= argument "./fixture.test.mjs") "./fixture.mjs" argument)))
+          (js-call arguments :map (lambda (argument) (if (= argument "./fixture.test.mjs") "fixture.test.mjs" argument)))) :forEach
           (lambda (changed) (js-call assert :throws (lambda () (originalWorkerArguments changed))
             (lambda (error) (= (get error :code) "ERR_ASSERTION")))))))))

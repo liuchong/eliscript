@@ -174,6 +174,10 @@ precedence over parent rules when they address the same decision.
   criteria. Fix only defects blocking the active mainline before it is complete;
   retain other failures and deferred work without expanding tools, redesigning
   unrelated systems, or repeatedly retrying unchanged failures.
+- **LANGUAGE-06** - Register every new maintained tool and every capsule-to-Eli
+  migration in the Emacs bootstrap source/output inventory. Verify the official
+  bootstrap from absent generated outputs. Manually compiling missing files in
+  an existing checkout is not evidence that a fresh checkout can build.
 
 ## Function-First Development
 

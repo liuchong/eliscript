@@ -1,13 +1,40 @@
 (module tests.file-workers
   (import "bun:test" test)
   (import "node:assert/strict" :default assert)
-  (import "node:path" resolve)
+  (import "node:path" resolve isAbsolute)
+  (import "node:fs/promises" mkdtemp mkdir writeFile rm symlink)
+  (import "node:os" tmpdir)
+  (import "node:child_process" spawnSync)
+  (import "../dist/bootstrap/compiler.mjs" compile-string)
+  (import "../tools/backends/build.mjs" root)
   (import "../tools/testing/file-workers.mjs"
-    FILE_WORKERS isExclusiveTestFile parseTestFileArgs partitionTestFiles scheduleTestFiles)
+    FILE_WORKERS isExclusiveTestFile parseTestFileArgs partitionTestFiles scheduleTestFiles workerTestArguments)
   (import "../tools/testing/fixture-environment.mjs" fixtureChildArguments)
 
   (defasync tick ()
     (await (new globalThis.Promise (lambda (resolve reject) (funcall globalThis.setImmediate resolve)))))
+
+  (test "a requested file runs once even when an archived copy has the same path suffix"
+    (async ()
+      (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-exact-test-file-")))))
+        (try
+          (await (mkdir (resolve directory "node_modules") (js-object :recursive t)))
+          (await (symlink root (resolve directory "node_modules/eliscript") "dir"))
+          (await (writeFile (resolve directory "package.json") "{\"type\":\"module\",\"private\":true}\n"))
+          (await (mkdir (resolve directory "selected") (js-object :recursive t)))
+          (await (mkdir (resolve directory "archive/selected") (js-object :recursive t)))
+          (await (writeFile (resolve directory "selected/exact.test.mjs")
+            (compile-string "(import \"bun:test\" test) (test \"selected original\" (lambda () t))" "selected.eli")))
+          (await (writeFile (resolve directory "archive/selected/exact.test.mjs")
+            (compile-string "(throw (new globalThis.Error \"archived copy must not execute\"))" "archive.eli")))
+          (let ((result (spawnSync (get globalThis.process :execPath)
+                         (workerTestArguments "selected/exact.test.mjs")
+                         (js-object :cwd directory :encoding "utf8" :timeout 10000 :maxBuffer 1048576))))
+            (js-call assert :strictEqual (get result :error) undefined)
+            (js-call assert :strictEqual (get result :status) 0 (get result :stderr))
+            (js-call assert :match (get result :stderr) (new globalThis.RegExp "1 pass"))
+            (js-call assert :doesNotMatch (get result :stderr) (new globalThis.RegExp "archived copy")))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
 
   (test "only the exact compiler-heavy Bun files use standard mode and every original input is dispatched"
     (async ()
@@ -33,8 +60,9 @@
         (js-call requests :forEach (lambda (request index)
           (js-call assert :deepStrictEqual (get request :args)
             (fixtureChildArguments
-              (if (< index 5) (js-array "test" "--timeout" "300000" (aref files index))
-                (js-array "--smol" "test" "--timeout" "300000" (aref files index))) (get globalThis.process :env)))
+              (let* ((file (aref files index)) (entry (if (isAbsolute file) file (+ "./" file))))
+                (if (< index 5) (js-array "test" "--timeout" "300000" entry)
+                  (js-array "--smol" "test" "--timeout" "300000" entry))) (get globalThis.process :env)))
           (js-call assert :strictEqual (get request :command) (get globalThis.process :execPath))
           (js-call assert :strictEqual (get request :env) (get globalThis.process :env))
           (js-call assert :strictEqual (get request :cwd) (js-call globalThis.process :cwd))
@@ -96,7 +124,7 @@
         (js-call assert :strictEqual (get (aref requests 0) :env) environment)
         (js-call assert :strictEqual (get (aref requests 0) :cwd) fixture-root)
         (js-call assert :deepStrictEqual (get (aref requests 0) :args)
-          (js-array "--smol" "test" "--timeout" "300000" "original.test.mjs"))
+          (js-array "--smol" "test" "--timeout" "300000" "./original.test.mjs"))
         (js-call assert :strictEqual (get (get globalThis.process :env) :TMPDIR) parent))))
 
   (test "two ordinary workers settle before exact standard-mode files and later results retain original order"

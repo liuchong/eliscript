@@ -10,13 +10,13 @@
              (framework (js-object :test (lambda (&rest arguments) (js-call calls :push arguments))))
              (replacements (js-object "stress" callback "ordinary" callback))
              (registration (createDirectWasmRegistration framework replacements
-               (js-object :timeouts (js-object "stress" 600000)))))
+               (js-object :timeouts (js-object "stress" 900000)))))
         (js-call (get registration :exports) :test "stress" callback 120000)
         (js-call (get registration :exports) :test "ordinary" callback 120000)
-        (js-call assert :strictEqual (aref (aref calls 0) 2) 600000)
+        (js-call assert :strictEqual (aref (aref calls 0) 2) 900000)
         (js-call assert :strictEqual (aref (aref calls 1) 2) 300000)
         (js-call registration :complete)
-        (js-call (js-array 0 -1 600001 1.5 globalThis.Infinity globalThis.NaN) :forEach (lambda (timeout)
+        (js-call (js-array 0 -1 900001 1.5 globalThis.Infinity globalThis.NaN) :forEach (lambda (timeout)
           (js-call assert :throws (lambda () (createDirectWasmRegistration framework replacements
             (js-object :timeouts (js-object "stress" timeout)))) globalThis.TypeError)))
         (js-call assert :throws (lambda () (createDirectWasmRegistration framework replacements
@@ -36,6 +36,17 @@
             (js-call assert :strictEqual (js-call watchdog :failure) observed)
             (js-call assert :match (get observed :message) (new globalThis.RegExp "json_case\\[12\\] GC=1"))
             (finally (globalThis.clearTimeout deadline) (js-call watchdog :close)))))))
+  (test "aggregate expiry closes only its owned workload and retains the first failure"
+    (lambda ()
+      (let* ((calls 0) (watchdog (createDirectInvocationWatchdog (lambda (error) (setq calls (1+ calls)))))
+             (record (js-object :name "complete-browser-workload" :index 0 :threshold "all")))
+        (try
+          (let ((failure (js-call watchdog :expire record 840000)))
+            (js-call assert :strictEqual (js-call watchdog :expire record 840000) failure)
+            (js-call assert :strictEqual (js-call watchdog :failure) failure)
+            (js-call assert :match (get failure :message) (new globalThis.RegExp "840000ms: complete-browser-workload")))
+          (js-call assert :strictEqual calls 1)
+          (finally (js-call watchdog :close))))))
   (test "completed and closed invocation timers are cancelled without suppressing failure evidence"
     (async ()
       (let* ((calls 0) (watchdog (createDirectInvocationWatchdog (lambda (error) (setq calls (1+ calls))) 5)))

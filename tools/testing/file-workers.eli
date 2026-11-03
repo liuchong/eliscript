@@ -1,5 +1,5 @@
 (module tools.testing.file-workers
-  (import "node:path" basename resolve)
+  (import "node:path" basename resolve isAbsolute)
   (import "node:fs" existsSync)
   (import "node:fs/promises" mkdir writeFile)
   (import "./resource-supervisor.mjs" startResourceSupervisor)
@@ -29,8 +29,12 @@
       (or (js-call exclusive-files :has name) (js-call exclusive-pattern :test name)
           (js-call prefix-pattern :test name))))
   (defun workerTestArguments (file)
-    (if (js-call standard-bun-files :has (basename file)) (js-array "test" "--timeout" "300000" file)
-      (js-array "--smol" "test" "--timeout" "300000" file)))
+    ;; Bun treats bare names as discovery filters, including archived copies
+    ;; below dist. Explicit paths select only the requested original file.
+    (let ((entry (if (or (isAbsolute file) (js-call file :startsWith "./")
+                        (js-call file :startsWith "../")) file (+ "./" file))))
+      (if (js-call standard-bun-files :has (basename file)) (js-array "test" "--timeout" "300000" entry)
+        (js-array "--smol" "test" "--timeout" "300000" entry))))
   (defun node-test-plan (file source-root)
     (let ((actual (resolve source-root file)))
       (cond

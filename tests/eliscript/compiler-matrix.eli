@@ -14,10 +14,47 @@
   (import "../tools/backends/compiler-metadata.mjs" readCompilerMetadata)
   (import "../dist/bootstrap/compiler.mjs" compile-ir-string emit-ir-string)
   (import "../tools/backends/compiler-session.mjs" createCompilerSession encodeCompilerIR)
+  (import "../tools/backends/compiler-corpus-execution.mjs" prepareCompilerCorpusExecutionScope)
   (import "../tools/backends/compiler-matrix.mjs"
     loadOriginalCompilerManifests loadCompilerMatrixCorpus verifyOriginalCompilerCorpusFiles
     archiveProduct runOriginalCompilerGates buildCompilerMatrix runCompilerMatrixCell
     matrix-case-execution matrix-response-mode)
+
+  (test "program execution escapes an enclosing compiler-private package without changing products or providers"
+    (async ()
+      (let* ((directory (await (mkdtemp (join (tmpdir) "eliscript-execution-scope-"))))
+             (scope (join directory "case")) (entry (join scope "main.mjs"))
+             (parent (JSON/stringify (js-object :name "eliscript" :type "module" :private t
+                       :exports (js-object "./runtime/math.mjs" "./runtime/math.mjs"))))
+             (source "(import \"eliscript/runtime/core/list.mjs\" isPersistentList) (defun ok () (isPersistentList '(1 2))) (export ok)")
+             (driver "(import \"./program.mjs\" ok) (unless (ok) (throw (new globalThis.Error \"wrong runtime identity\"))) (console/log \"scope-ok\")")
+             (javascript (emit-ir-string (compile-ir-string source "scope-program.eli"))))
+        (try
+          (await (mkdir scope (js-object :recursive t)))
+          (await (writeFile (join directory "package.json") parent))
+          (await (writeFile (join scope "program.mjs") javascript))
+          (await (writeFile entry (emit-ir-string (compile-ir-string driver "scope-main.eli"))))
+          (js-call (js-array "node" "bun") :forEach (lambda (engine)
+            (let ((result (js-call child-process :spawnSync engine (js-array entry)
+                           (js-object :encoding "utf8" :timeout 10000 :maxBuffer 1048576))))
+              (js-call assert :notStrictEqual (get result :status) 0)
+              (js-call assert :strictEqual (get result :error) undefined)
+              (js-call assert :strictEqual (get result :signal) nil)
+              (js-call assert :match (get result :stderr) (new globalThis.RegExp "runtime/(?:unicode-case|literals|core/list)")))))
+          (await (prepareCompilerCorpusExecutionScope scope root))
+          (await (prepareCompilerCorpusExecutionScope scope root))
+          (js-call (js-array "node" "bun") :forEach (lambda (engine)
+            (let ((result (js-call child-process :spawnSync engine (js-array entry)
+                           (js-object :encoding "utf8" :timeout 10000 :maxBuffer 1048576))))
+              (js-call assert :strictEqual (get result :status) 0 (get result :stderr))
+              (js-call assert :strictEqual (get result :error) undefined)
+              (js-call assert :strictEqual (get result :stdout) "scope-ok\n"))))
+          (js-call assert :strictEqual (await (readFile (join directory "package.json") "utf8")) parent)
+          (js-call assert :strictEqual (await (readFile (join scope "program.mjs") "utf8")) javascript)
+          (await (writeFile (join scope "package.json") parent))
+          (await (js-call assert :rejects (prepareCompilerCorpusExecutionScope scope root)))
+          (js-call assert :strictEqual (await (readFile (join scope "package.json") "utf8")) parent)
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
 
   ;; This calls the real private record executor and public session decoder.
   ;; Its tiny protocol driver is transport data, never a compiler or corpus
@@ -337,7 +374,7 @@
       (await (writeFile (resolve directory "bootstrap/runtime/memory.eli") "; unit fixture runtime\n"))
       ;; Keep every real runtime source dependency in the isolated gate fixture.
       (await (mkdir (resolve directory "runtime") (js-object :recursive t)))
-      (let ((files (js-array "runtime/math.eli" "runtime/unicode-case.eli" "runtime/unicode-case-data.eli")) (index 0))
+      (let ((files (js-array "runtime/math.eli" "runtime/prelude.eli" "runtime/unicode-case.eli" "runtime/unicode-case-data.eli")) (index 0))
         (while (< index (js-length files))
           (let* ((file (aref files index)) (bytes (await (readFile (resolve root file)))))
             (await (writeFile (resolve directory file) bytes))

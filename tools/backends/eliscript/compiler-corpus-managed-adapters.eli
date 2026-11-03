@@ -212,8 +212,8 @@
                (original (get record :original))
                (configuration (js-object :recordId (get record :id) :sourceIdentity (hash host)))
                (declaration (str "(import " (JSON/stringify helper-url) " runInheritedOriginalManagedObservation)\n"
-                 "(defasync originalObservation (source &optional engine args selected)"
-                 " (await (runInheritedOriginalManagedObservation source engine args selected (JSON/parse "
+                 "(defasync originalObservation (source &rest supplied)"
+                 " (await (runInheritedOriginalManagedObservation source (aref supplied 0) (aref supplied 1) (aref supplied 2) (JSON/parse "
                  (JSON/stringify (JSON/stringify configuration)) "))))"))
                (tail (js-call host :slice end)) (parts (js-array)) (position 0) (calls 0))
           (unless (and (>= end 0)

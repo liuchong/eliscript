@@ -316,7 +316,7 @@
             (js-call assert :strictEqual (get result :exitCode) 0)
             (js-call assert :strictEqual closed 1)
             (js-call assert :deepStrictEqual (get request :args)
-              (fixtureChildArguments (js-array "--smol" "test" "--timeout" "300000" tools-file
+              (fixtureChildArguments (js-array "--smol" "test" "--timeout" "300000" (+ "./" tools-file)
                 "--test-name-pattern" (functionalScopePattern (await (cases tools-file)))) (get request :env))))
           (finally (await (rm directory (js-object :recursive t :force t))))))))
 

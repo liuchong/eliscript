@@ -35,7 +35,7 @@
         (js-call assert :strictEqual
           (js-call (js-call (js-call (js-call workflow :replace bootstrap-step "")
             :replace fixture-preload "bun test ") :replace fixture-environment "")
-            :replace "    timeout-minutes: 30\n" "    timeout-minutes: 10\n") ground
+            :replace "    timeout-minutes: 45\n" "    timeout-minutes: 10\n") ground
           "all original browser rows, six complete suites, assertions and evidence remain byte-identical")
         (let ((report (await (checkBrowserCompatibilityWorkflow
                 (js-object :root root :contract contract :matrix matrix :workflowText workflow)))))
@@ -53,7 +53,7 @@
                (js-call bootstrap-step :replace "        run:" "        if: false\n        run:")))
              (no-preload (js-call workflow :replace fixture-preload "bun test "))
              (no-environment (js-call workflow :replace fixture-environment ""))
-             (old-job-cap (js-call workflow :replace "    timeout-minutes: 30\n" "    timeout-minutes: 10\n"))
+             (old-job-cap (js-call workflow :replace "    timeout-minutes: 45\n" "    timeout-minutes: 10\n"))
              (global-registration (js-call workflow :replace fixture-preload
                "bun test --preload ./tests/helpers/direct-wasm-registration-install.mjs ")))
         (let ((variants (js-array missing conditional no-preload no-environment old-job-cap global-registration)) (index 0))

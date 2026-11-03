@@ -27,7 +27,7 @@
       (js-call (js-call (js-call (js-call workflow :replace anchor (+ step anchor))
         :replace command (js-call command :replace "bun test "
           "bun tools/testing/file-workers.mjs "))
-        :replace "    timeout-minutes: 10\n" "    timeout-minutes: 30\n")
+        :replace "    timeout-minutes: 10\n" "    timeout-minutes: 45\n")
         :replace environment (str environment "          ELISCRIPT_TEST_FIXTURE_PRELOAD: \"1\"\n"))))
 
   (defasync checkBrowserCompatibilityWorkflow (&rest arguments)

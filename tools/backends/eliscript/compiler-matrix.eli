@@ -10,7 +10,7 @@
   (import "./compiler-corpus-runtime-adapters.mjs" originalRuntimeSourceSuites originalRuntimeCaseLocators)
   (import "./compiler-corpus-identity-value-adapters.mjs" originalIdentityValueSuites originalIdentityValueCaseLocators)
   (import "./compiler-corpus-execution.mjs"
-    executeCompilerCorpusRecord compareCompilerCorpusObservation createOriginalSeedOracle compilerCorpusRuntimeAcceptance)
+    executeCompilerCorpusRecord compareCompilerCorpusObservation createOriginalSeedOracle compilerCorpusRuntimeAcceptance prepareCompilerCorpusExecutionScope)
   (import "./managed-module-graph.mjs" createManagedProjectFacades)
   (import "./compiler-corpus-source-archive.mjs" archiveCompilerCorpusSources)
   (import "./compiler-session.mjs" encodeCompilerMetadata)
@@ -901,6 +901,7 @@
              (source-identity (compilerSourceIdentity sources)))
         (await (mkdir output (js-object :recursive t)))
         (let* ((directory (await (mkdtemp (join output (+ "compiler-matrix-cell-" host "-" target "-")))))
+               (_scope (await (prepareCompilerCorpusExecutionScope directory source-root)))
                (manifest (join directory "matrix.json"))
                (metadata (js-object :format "eliscript-independent-compiler-matrix-cell" :version 1
                  :scope "single-cell" :host host :target target :status "constructing" :verification "unverified"
@@ -1042,6 +1043,7 @@
              (source-identity (compilerSourceIdentity sources)))
         (await (mkdir (get options :outputRoot) (js-object :recursive t)))
         (let* ((directory (await (mkdtemp (join (resolve (get options :outputRoot)) "compiler-matrix-"))))
+               (_scope (await (prepareCompilerCorpusExecutionScope directory source-root)))
                (profile (otherwise (get options :profile) "small"))
                (execution-options (matrix-spread options (js-object :profile profile
                  :originalOracle (if (nullish? (get options :originalOracle))

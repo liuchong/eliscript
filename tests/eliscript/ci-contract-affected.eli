@@ -1,7 +1,7 @@
 (module tests.ci-contract-affected
   (import "node:assert/strict" :default assert)
   (import "node:fs/promises" readFile)
-  (import "node:path" resolve)
+  (import "node:path" resolve isAbsolute)
   (import "../../tools/backends/build.mjs" root)
   (import "../../tools/ci/render-browser-workflow.mjs" checkBrowserCompatibilityWorkflow renderBrowserWorkflow)
   (import "../../tools/ci/render-workflow.mjs" checkCompatibilityWorkflow renderWorkflow validateCompatibilityMatrix)
@@ -12,6 +12,7 @@
            (environment (get globalThis.process :env)))
       (js-call assert :strictEqual (= (value-type file) "string") t)
       (js-call assert :ok (js-call file :endsWith ".test.mjs"))
+      (js-call assert :ok (or (isAbsolute file) (js-call file :startsWith "./") (js-call file :startsWith "../")))
       (when (= (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD) "1")
         (js-call assert :strictEqual (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD_PATH)
           (resolve root "tools/testing/fixture-environment.mjs"))
@@ -23,7 +24,11 @@
       ;; Assert the complete real argv before supplying the unchanged fake's
       ;; four-field fixture interface. No current option is discarded untested.
       (js-call assert :deepStrictEqual arguments expected)
-      (js-array (aref arguments 0) "--smol" "test" file)))
+      ;; The archived scheduler fake indexes logical input names. Check the
+      ;; complete real argv above, then remove only the equivalent leading ./
+      ;; for that fake; production dispatch keeps its explicit path unchanged.
+      (js-array (aref arguments 0) "--smol" "test"
+        (if (js-call file :startsWith "./") (js-call file :slice 2) file))))
   (defun adaptedSpyOn (framework target property)
     (let ((spy (js-call framework :spyOn target property)))
       (if (and (eq target globalThis.Bun) (= property "spawn"))
@@ -54,7 +59,7 @@
         "install --with-deps \"${{ matrix.browser }}\""
         "ELISCRIPT_TEST_BROWSER: ${{ matrix.browser }}"
         "bun tools/testing/file-workers.mjs tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee"
-        "set -o pipefail" "timeout-minutes: 30"
+        "set -o pipefail" "timeout-minutes: 45"
         "test \"$(bun -p 'process.arch')\" = \"${{ matrix.architecture }}\""
         "test \"$(node -p 'process.arch')\" = \"${{ matrix.architecture }}\""
         "if: always()" (str "actions/upload-artifact@" (get (get contract :artifactAction) :revision))) :forEach

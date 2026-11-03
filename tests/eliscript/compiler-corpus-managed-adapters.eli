@@ -11,6 +11,7 @@
   (import "node:crypto" createHash)
   (import "../tools/backends/build.mjs" root loadLiteralSources buildBackends)
   (import "node:module" createRequire)
+  (import "node:vm" runInNewContext)
   (import "../runtime/core/vector.mjs" persistentVector)
   (import "../runtime/core/map.mjs" persistentHashMap)
   (import "../runtime/core/type.mjs" isType isTypeValue typeFieldNames)
@@ -431,7 +432,7 @@
                  (context (Object/freeze (js-object :runtime (Object/freeze runtime) :graph (js-object :actual t)
                    :close (lambda () (js-call runtime :closeModule)))))
                  (input (js-object :target "wasm" :host
-                   (+ "/product/tests/__eliscript_managed_transient-state_" engine "_" auto ".mjs")
+                   (resolve root (str "fixture-product/tests/__eliscript_managed_transient-state_" engine "_" auto ".mjs"))
                    :descriptor (js-object :functions (js-array (js-object :name "vector_case") (js-object :name "held_state")))))
                  (before (globalThis.structuredClone input))
                  (adapted (bindOriginalManagedProgramContext input context))
@@ -537,7 +538,7 @@
 
   (test "process lifetime defers only driver close and preserves ordinary close and original false or undefined cleanup failures"
     (async ()
-      (let* ((input (js-object :target "wasm" :host "/actual/tests/__eliscript_original_generated_names_node.mjs"
+      (let* ((input (js-object :target "wasm" :host (resolve root "fixture-product/tests/__eliscript_original_generated_names_node.mjs")
                  :runtimeOptions (js-object :originalHostLifetime "process")))
              (events (new EventEmitter)) (closed 0)
              (close-now (lambda () (setq closed (1+ closed))))
@@ -553,7 +554,7 @@
         (js-call assert :strictEqual closed 1)
         (await (funcall (createOriginalProgramDriverClose (js-object :target "wasm") close-now)))
         (js-call assert :strictEqual closed 2)
-        (js-call (js-array "unrelated.mjs" "/actual/tests/__eliscript_original_generated_names_bun.mjs")
+        (js-call (js-array "unrelated.mjs" (resolve root "fixture-product/tests/__eliscript_original_generated_names_bun.mjs"))
           :forEach (lambda (host)
             (js-call assert :throws (lambda () (createOriginalProgramDriverClose
               (Object/assign (js-object) input (js-object :host host)) close-now)) globalThis.TypeError)))
@@ -588,7 +589,9 @@
                "(put globalThis.globalThis \"__eliscript_macro_process_lifetime__\" state)"
                "(defun close-now () (put state :closed t) (js-call (get state :trace) :push \"close\")"
                (str " (writeFileSync " (JSON/stringify result-path) " (JSON/stringify state)))")
-               "(defconst close (createOriginalProgramDriverClose (js-object :target \"wasm\" :host \"/actual/tests/__eliscript_original_generated_names_node.mjs\" :runtimeOptions (js-object :originalHostLifetime \"process\")) close-now))"
+               (str "(defconst close (createOriginalProgramDriverClose (js-object :target \"wasm\" :host "
+                 (JSON/stringify (resolve root "fixture-product/tests/__eliscript_original_generated_names_node.mjs"))
+                 " :runtimeOptions (js-object :originalHostLifetime \"process\")) close-now))")
                "(installOriginalProgramExitCleanup close-now)"
                "(defasync import-original ()"
                (str " (await (loadManagedHostModules (js-object :hostModules (js-array (js-object :id \"actual\" :specifier "
@@ -627,14 +630,14 @@
             (js-call assert :ok (js-call first :includes (str "--import=" (get (pathToFileURL preload) :href))))
             (js-call assert :strictEqual (get environment :ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT) configuration)
             (let* ((launcher (await (originalProgramBunLauncher
-                     (js-object :directory directory :bun "/actual runtime/bun" :configuration configuration :sourceRoot root))))
+                     (js-object :directory directory :bun (resolve directory "actual runtime/bun") :configuration configuration :sourceRoot root))))
                    (config (JSON/parse (await (readFile (str launcher ".json") "utf8")))))
               (js-call assert :strictEqual (await (readFile launcher "utf8"))
                 (await (readFile (resolve root "tools/backends/original-program-bun-launcher.el") "utf8")))
-              (js-call assert :deepStrictEqual config (js-object :bun "/actual runtime/bun"
+              (js-call assert :deepStrictEqual config (js-object :bun (resolve directory "actual runtime/bun")
                 :preload preload :configuration configuration :sourceRoot root :nodeOptions "--max-old-space-size=8192"))
               (await (js-call assert :rejects (originalProgramBunLauncher
-                (js-object :directory directory :bun "/actual runtime/bun" :configuration configuration :sourceRoot root))))))
+                (js-object :directory directory :bun (resolve directory "actual runtime/bun") :configuration configuration :sourceRoot root))))))
           (finally
             (js-call saved :forEach (lambda (item)
               (if (aref item 1) (put environment (aref item 0) (aref item 2))
@@ -644,13 +647,13 @@
     (lambda ()
       (let* ((runtime (Object/freeze (js-object :invoke (lambda (name) name))))
              (context (Object/freeze (js-object :runtime runtime)))
-             (input (js-object :target "wasm" :host "/product/tests/__eliscript_managed_transient-state_node_1.mjs"
+             (input (js-object :target "wasm" :host (resolve root "fixture-product/tests/__eliscript_managed_transient-state_node_1.mjs")
                :descriptor (js-object :functions (js-array (js-object :name "held_state") (js-object :name "held-state"))))))
         (js-call assert :throws (lambda () (bindOriginalManagedProgramContext input context))
           (new globalThis.RegExp "ambiguous source aliases"))
-        (put input :host "/product/tests/__eliscript_managed_transient-state_node_2.mjs")
+        (put input :host (resolve root "fixture-product/tests/__eliscript_managed_transient-state_node_2.mjs"))
         (js-call assert :strictEqual (bindOriginalManagedProgramContext input context) context)
-        (put input :host "/product/tests/__eliscript_managed_core-modules_node_1.mjs")
+        (put input :host (resolve root "fixture-product/tests/__eliscript_managed_core-modules_node_1.mjs"))
         (js-call assert :strictEqual (bindOriginalManagedProgramContext input context) context)
         (js-call assert :strictEqual (get context :runtime) runtime))))
 
@@ -1260,7 +1263,7 @@
                              (js-call calls :push name) (aref args 0))))
                          (context (Object/freeze (js-object :runtime (Object/freeze runtime) :graph value)))
                          (input (js-object :target (aref targets ti)
-                           :host (str "/product/tests/__eliscript_managed_wire_" (aref engines ei) "_" (aref autos ai) ".mjs")
+                           :host (resolve root (str "fixture-product/tests/__eliscript_managed_wire_" (aref engines ei) "_" (aref autos ai) ".mjs"))
                            :descriptor (js-object :functions (js-call functions :map (lambda (name) (js-object :name name))))))
                          (before (globalThis.structuredClone input))
                          (bound (bindOriginalManagedProgramContext input context)))
@@ -1398,7 +1401,7 @@
               (await (js-call (get state :reader) :text filename))))
             :add (lambda (record) (js-call baseline :push record))))))
         (await (addOriginalManagedLibraryAdapters options))
-        (let ((count 0))
+        (let ((count 0) (forwarded (js-array)))
           (js-call baseline :forEach (lambda (before)
             (let ((source (get (get before :execution) :hostSource)))
               (when (and (= (value-type source) "string") (js-call source :includes "function originalObservation("))
@@ -1417,7 +1420,27 @@
                   (js-call assert :deepStrictEqual (get after :expected) (get before :expected))
                   (js-call assert :strictEqual (get (get after :execution) :timeoutMs) (get (get before :execution) :timeoutMs))
                   (js-call assert :strictEqual
-                    (js-call (get (get after :execution) :hostSource) :includes "spawnSync(executable") false))))))
+                    (js-call (get (get after :execution) :hostSource) :includes "spawnSync(executable") false)
+                  (let* ((emitted (get (get after :execution) :hostSource))
+                         (begin (js-call emitted :indexOf "async function originalObservation("))
+                         (end (js-call emitted :indexOf "function plain(" begin)))
+                    (when (>= begin 0)
+                      (js-call assert :ok (> end begin))
+                      (let* ((captured undefined)
+                             (scope (js-object :JSON globalThis.JSON
+                               :runInheritedOriginalManagedObservation (lambda (&rest arguments) (setq captured arguments)))))
+                        ;; Execute the actual generated wrapper bytes. The unit
+                        ;; boundary is argument forwarding, not a fake runtime.
+                        (runInNewContext (js-call emitted :slice begin end) scope (js-object :timeout 1000))
+                        (js-call forwarded :push (js-call scope :originalObservation "unchanged-source"))
+                        (js-call assert :deepStrictEqual (js-call captured :slice 0 4)
+                          (js-array "unchanged-source" undefined undefined undefined))
+                        (js-call assert :strictEqual (get (aref captured 4) :recordId) (get after :id))
+                        (js-call forwarded :push (js-call scope :originalObservation "unchanged-source" "bun" nil false))
+                        (js-call assert :deepStrictEqual (js-call captured :slice 0 4)
+                          (js-array "unchanged-source" "bun" nil false))))))))))
+          (await (Promise/all forwarded))
+          (js-call assert :ok (>= (js-length forwarded) 8) "real generated wrappers must execute, not silently bypass this ABI check")
           (js-call assert :ok (> count 12))))))
 
   (test "identity and raw original fixture source names use the actual descriptor with unknown and ambiguous rejection"

@@ -17,7 +17,7 @@
            (exports (Object/assign (js-object) framework)))
       (js-call (Object/keys timeouts) :forEach (lambda (title)
         (let ((timeout (get timeouts title)))
-          (unless (and (Object/hasOwn replacements title) (Number/isSafeInteger timeout) (> timeout 0) (<= timeout 600000))
+          (unless (and (Object/hasOwn replacements title) (Number/isSafeInteger timeout) (> timeout 0) (<= timeout 900000))
             (throw (new globalThis.TypeError "direct WASM timeout must be bounded and belong to a declared replacement"))))))
       (put exports :test forward)
       (js-object :exports exports :complete (lambda ()

@@ -151,7 +151,8 @@
             (setq result (await (js-call supervisor :run (js-object :id "0" :file (get plan :file)
               :command (get globalThis.process :execPath) :args
                 (fixtureChildArguments
-                  (js-array "--smol" "test" "--timeout" "300000" (get plan :file) "--test-name-pattern" (get plan :pattern)) environment)
+                  (js-call (workerTestArguments (get plan :file)) :concat
+                    (js-array "--test-name-pattern" (get plan :pattern))) environment)
               :cwd (js-call globalThis.process :cwd) :env environment))))
             (setq result (Object/assign (js-object :file (get plan :file)) result))))
         (catch error (setq result (js-object :file (get plan :file)
