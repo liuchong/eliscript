@@ -1,5 +1,10 @@
 (module tests.bootstrap-emitter
-  (import "bun:test" test)
-  (import "../tools/testing/bootstrap-emitter.mjs" runBootstrapEmitterAcceptance)
+  (import "bun:test" test beforeAll afterAll)
+  (import "../tools/testing/bootstrap-emitter.mjs" runBootstrapEmitterAcceptance prepareBootstrapEmitterAcceptance)
+  (defvar fixture undefined)
+  ;; Cold Emacs compilation is preparation, as in the reader fixture. Keep
+  ;; the original emitter/diagnostic/source-map/execution deadline unchanged.
+  (beforeAll (async () (setq fixture (await (prepareBootstrapEmitterAcceptance)))) 120000)
+  (afterAll (async () (when fixture (await (js-call fixture :close)))))
   (test "bootstrapped emitter matches seed ESM and Source Map output"
-    (async () (await (runBootstrapEmitterAcceptance))) 30000))
+    (async () (await (runBootstrapEmitterAcceptance fixture))) 30000))

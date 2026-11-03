@@ -7,24 +7,6 @@
   (import "node:crypto" createHash)
   (import "../backends/build.mjs" root)
   (import "./generated-fixture-module.mjs" loadGeneratedFixture)
-  (defun compilerPackageFunctionalArguments (source-root environment arguments)
-    ;; Each original case performs several sequential compiler, execution,
-    ;; refusal and recovery subprocesses. Keep all their own 120000ms limits;
-    ;; functional acceptance only separates the authenticated case total.
-    (if (and (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
-             (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")
-             (= (js-length arguments) 3) (= (value-type (aref arguments 1)) "function")
-             (= (aref arguments 2) 120000)
-             (js-call (js-array
-               "Given the original and relocated javascript compiler When node CLI request submits emit-ir Then real products sidecars and recovery preserve their ABI"
-               "Given the original and relocated javascript compiler When node CLI request submits project-ir Then real products sidecars and recovery preserve their ABI")
-               :includes (aref arguments 0)))
-      (progn
-        (unless (= (js-call (js-call (createHash "sha256") :update
-                     (readFileSync (resolve source-root "tests/compiler-package-session.test.mjs"))) :digest "hex")
-                   "6f0000e0b65e429a4d270a05f6c866acb4f465189755f3823f3ecf0249252a1b")
-          (throw (new globalThis.TypeError "package functional deadline requires the unchanged complete original suite")))
-        (let ((forwarded (js-call arguments :slice))) (put forwarded 2 0) forwarded)) arguments))
   (defun compilerPackageRuntimeFacade (runtime)
     ;; The archived suite used close for both native and WASM runtimes. Native
     ;; keeps its real close; the maintained WASM lifetime ends at closeModule.
@@ -116,4 +98,4 @@
       (catch error (console/error error) (put globalThis.process :exitCode 1))))
   (when (= (aref (get globalThis.process :argv) 1) (resolve root "tools/testing/compiler-package-execution.mjs"))
     (main))
-  (export rewriteCompilerPackageExecution runRelocatedPackage compilerPackageRuntimeFacade compilerPackageFunctionalArguments))
+  (export rewriteCompilerPackageExecution runRelocatedPackage compilerPackageRuntimeFacade))

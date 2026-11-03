@@ -6,8 +6,8 @@
   (import "./fixture-environment.mjs" fixtureChildArguments)
   (import "./final-functional-scope.mjs" runFinalFunctionalScope)
 
-  ;; Each original file still runs in a fresh process under the same real RSS
-  ;; supervisor. Only two confirmed Bun loader failures opt out of smol mode.
+  ;; Compiler-heavy files keep a normal JSC heap under the same real RSS
+  ;; supervisor; --smol repeatedly collects their large immutable IR graphs.
   (defconst FILE_WORKERS 2)
   (defconst exclusive-files (new globalThis.Set (js-array
     "docs-site.test.mjs" "pages-assembly.test.mjs"
@@ -16,7 +16,8 @@
     "native-backend.test.mjs" "native-memory-long-branches.test.mjs"
     "regexp-property-outlining.test.mjs")))
   (defconst standard-bun-files (new globalThis.Set (js-array
-    "compiler-seed-runtime-identity.test.mjs" "compiler-corpus-matchers-selfhosted.test.mjs")))
+    "compiler-seed-runtime-identity.test.mjs" "compiler-corpus-matchers-selfhosted.test.mjs"
+    "compiler-package-session.test.mjs" "direct-wasm-backend.test.mjs" "wasm-managed-symbols.test.mjs")))
   (defconst exclusive-pattern (new globalThis.RegExp "(?:compiler.*session|session.*compiler|browser|package|matrix)"))
   (defconst prefix-pattern (new globalThis.RegExp "^(?:wasm|native|compiler|independent|bootstrap|seed|direct-wasm|managed-stdlib)-"))
   (defconst shard-pattern (new globalThis.RegExp "^[1-9][0-9]*$"))
@@ -27,7 +28,7 @@
     (let ((name (basename file)))
       (or (js-call exclusive-files :has name) (js-call exclusive-pattern :test name)
           (js-call prefix-pattern :test name))))
-  (defun worker-test-arguments (file)
+  (defun workerTestArguments (file)
     (if (js-call standard-bun-files :has (basename file)) (js-array "test" "--timeout" "300000" file)
       (js-array "--smol" "test" "--timeout" "300000" file)))
   (defun node-test-plan (file source-root)
@@ -104,7 +105,7 @@
                         :args (if node-plan
                                 (js-array "--import" (resolve source-root "tools/testing/fixture-environment.mjs")
                                   "--import" (resolve source-root (get node-plan :install)) "--test" (get node-plan :entry))
-                                (fixtureChildArguments (worker-test-arguments file) environment)) :cwd source-root
+                                (fixtureChildArguments (workerTestArguments file) environment)) :cwd source-root
                         :env environment))))
                      (row (js-object :file file :exitCode (get result :exitCode))))
                 (when (and (worker-truth (get result :failure)) (/= (get result :failure) "cancelled"))
@@ -188,4 +189,4 @@
   (when (and (> (js-length (get globalThis.process :argv)) 1)
              (= (basename (aref (get globalThis.process :argv) 1)) "file-workers.mjs"))
     (main))
-  (export FILE_WORKERS isExclusiveTestFile partitionTestFiles parseTestFileArgs scheduleTestFiles runTestFiles))
+  (export FILE_WORKERS isExclusiveTestFile partitionTestFiles parseTestFileArgs scheduleTestFiles runTestFiles workerTestArguments))

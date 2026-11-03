@@ -20,7 +20,7 @@
     (spawnSync "node" (js-call (js-array helper) :concat arguments) options))
   (defasync bundleManagedBrowserPage (path aliases)
     (let* ((mapping (if (nullish? aliases) (js-object) aliases))
-           (result (await (js-call globalThis.Bun :build (js-object :entrypoints (js-array path) :target "browser" :format "esm"
+           (result (await (js-call globalThis.Bun :build (js-object :entrypoints (js-array path) :target "browser" :format "esm" :minify t
              :plugins (js-array (js-object :name "eliscript-managed-acceptance-routes" :setup (lambda (builder)
                (js-call builder :onResolve (js-object :filter (new globalThis.RegExp "^(eliscript-test/|/oracle\\.mjs$|eliscript/runtime/unicode-case\\.mjs$)"))
                  (lambda (request) (let ((id (get request :path)))

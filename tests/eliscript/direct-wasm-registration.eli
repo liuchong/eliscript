@@ -1,6 +1,7 @@
 (module tests.direct-wasm-registration
-  (defun createDirectWasmRegistration (framework replacements)
-    (let* ((counts (new globalThis.Map)) (actual-test (get framework :test))
+  (defun createDirectWasmRegistration (framework replacements &rest options)
+    (let* ((timeouts (if (= (js-length options) 0) (js-object) (get (aref options 0) :timeouts (js-object))))
+           (counts (new globalThis.Map)) (actual-test (get framework :test))
            (forward (new globalThis.Proxy actual-test (js-object
              :apply (lambda (target receiver arguments)
                (let ((title (aref arguments 0)))
@@ -8,12 +9,16 @@
                    (let ((count (if (js-call counts :has title) (js-call counts :get title) 0)))
                      (when (/= count 0) (throw (new globalThis.Error (str "duplicate direct WASM replacement: " title))))
                      (js-call counts :set title 1)
-                     (Reflect/apply target receiver (js-array title (get replacements title) 300000)))
+                     (Reflect/apply target receiver (js-array title (get replacements title) (get timeouts title 300000))))
                    (Reflect/apply target receiver arguments))))
              ;; Bun exposes host registration methods beyond enumerable or own
              ;; properties. Forward every Get to the actual callable itself.
              :get (lambda (target key receiver) (Reflect/get target key target)))))
            (exports (Object/assign (js-object) framework)))
+      (js-call (Object/keys timeouts) :forEach (lambda (title)
+        (let ((timeout (get timeouts title)))
+          (unless (and (Object/hasOwn replacements title) (Number/isSafeInteger timeout) (> timeout 0) (<= timeout 600000))
+            (throw (new globalThis.TypeError "direct WASM timeout must be bounded and belong to a declared replacement"))))))
       (put exports :test forward)
       (js-object :exports exports :complete (lambda ()
         (js-call (Object/keys replacements) :forEach (lambda (title)

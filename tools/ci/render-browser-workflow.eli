@@ -20,10 +20,15 @@
       (unless (and (= (js-length (js-call workflow :split command)) 2)
                    (= (js-length (js-call workflow :split environment)) 2))
         (throw (new BrowserCompatibilityError "browser workflow requires one complete test command and fixture environment")))
-      (js-call (js-call (js-call workflow :replace anchor (+ step anchor))
+      ;; Registration adapters belong to one archived suite. A single global
+      ;; preload across six files lets the first file's beforeAll restore the
+      ;; mock before the direct suite has registered its callbacks. The real
+      ;; file runner gives every complete suite its own process and preloads.
+      (js-call (js-call (js-call (js-call workflow :replace anchor (+ step anchor))
         :replace command (js-call command :replace "bun test "
-          "bun test --preload ./tools/testing/fixture-environment.mjs --preload ./tests/helpers/direct-wasm-registration-install.mjs --timeout 300000 "))
-        :replace environment (+ environment "          ELISCRIPT_TEST_FIXTURE_PRELOAD: \"1\"\n"))))
+          "bun tools/testing/file-workers.mjs "))
+        :replace "    timeout-minutes: 10\n" "    timeout-minutes: 30\n")
+        :replace environment (str environment "          ELISCRIPT_TEST_FIXTURE_PRELOAD: \"1\"\n"))))
 
   (defasync checkBrowserCompatibilityWorkflow (&rest arguments)
     (let* ((options (if (or (= (js-length arguments) 0) (undefined? (aref arguments 0)))

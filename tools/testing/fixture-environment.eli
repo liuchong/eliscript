@@ -146,6 +146,22 @@
         (js-object :status 200 :body (readFileSync (resolve source-root "runtime" name) "utf8")
           :headers (js-object "content-type" "text/javascript; charset=utf-8" "access-control-allow-origin" "*"))
         (js-object :status 404 :body "Not found"))))
+  (defasync fixtureBlobModuleSource (specifier)
+    ;; The archived project tests create real independent oracle Blob modules
+    ;; in their later import map. Firefox may ignore that additional map; serve
+    ;; those exact Blob bytes through the namespaces in the first map instead.
+    (let* ((maps (Array/from (js-call globalThis.document :querySelectorAll "script[type=importmap]")))
+           (urls (js-call (js-call maps :reverse) :map (lambda (script)
+             (let* ((document (JSON/parse (get script :textContent))) (imports (get document :imports)))
+               (unless (nullish? imports)
+                 (when (= (Object/hasOwn imports specifier) t)
+                   (let ((url (get imports specifier)))
+                     (when (= (get (new globalThis.URL url) :protocol) "blob:") url))))))))
+           (url (js-call urls :find (lambda (value) (not (nullish? value))))))
+      (when (undefined? url) (throw (new globalThis.Error (str "fixture oracle Blob is missing: " specifier))))
+      (let ((response (await (globalThis.fetch url))))
+        (unless (= (get response :ok) t) (throw (new globalThis.Error "fixture oracle Blob could not be read")))
+        (await (js-call response :text)))))
   ;; This function is serialized by the real Playwright API after Eli emits it.
   ;; Its entire browser operation is standard DOM import-map installation.
   (defun installFixtureImportMap (configuration)
@@ -171,7 +187,9 @@
             "eliscript/runtime/prelude.mjs" (+ fixture-origin "/runtime/prelude.mjs")
             "eliscript/runtime/unicode-case" (+ fixture-origin "/runtime/unicode-case.mjs")
             "eliscript/runtime/unicode-case.mjs" (+ fixture-origin "/runtime/unicode-case.mjs")
-            "eliscript/runtime/math.mjs" (+ fixture-origin "/runtime/math.mjs")))))
+            "eliscript/runtime/math.mjs" (+ fixture-origin "/runtime/math.mjs")
+            "eliscript-identity/" (+ fixture-origin "/modules/eliscript-identity/")
+            "eliscript-stdlib/" (+ fixture-origin "/modules/eliscript-stdlib/")))))
       (letfn ((replace (target name replacement)
                 (let ((descriptor (Object/getOwnPropertyDescriptor target name)))
                   (Object/defineProperty target name (Object/assign
@@ -186,8 +204,18 @@
                       (let ((context (await (Reflect/apply original browser arguments))))
                         (try
                           (await (js-call context :route (+ fixture-origin "/**")
-                            (async (route) (await (js-call route :fulfill
-                              (fixtureRuntimeResponse source-root (js-call (js-call route :request) :url)))))))
+                            (async (route)
+                              (let* ((request (js-call route :request)) (address (js-call request :url))
+                                     (path (get (new globalThis.URL address) :pathname)))
+                                (if (or (js-call path :startsWith "/modules/eliscript-identity/")
+                                        (js-call path :startsWith "/modules/eliscript-stdlib/"))
+                                  (let* ((page (js-call (js-call request :frame) :page))
+                                         (source (await (js-call page :evaluate fixtureBlobModuleSource
+                                                   (globalThis.decodeURIComponent (js-call path :slice 9))))))
+                                    (await (js-call route :fulfill (js-object :status 200 :body source
+                                      :headers (js-object "content-type" "text/javascript; charset=utf-8"
+                                        "access-control-allow-origin" "*")))))
+                                  (await (js-call route :fulfill (fixtureRuntimeResponse source-root address))))))))
                           (await (js-call context :addInitScript installFixtureImportMap configuration))
                           context
                           (catch error
@@ -216,4 +244,4 @@
   (when (= (get (get globalThis.process :env) :ELISCRIPT_TEST_FIXTURE_PRELOAD) "1")
     (install-fixture-preload))
   (export prepareFixtureEnvironment fixtureChildArguments fixtureRuntimeResponse
-    installFixtureImportMap installFixtureBrowserEnvironment))
+    installFixtureImportMap installFixtureBrowserEnvironment fixtureBlobModuleSource))

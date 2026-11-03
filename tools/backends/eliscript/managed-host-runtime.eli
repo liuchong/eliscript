@@ -73,6 +73,15 @@
   ;; Diagnostic state is bounded and keyed by the existing memory owner. It
   ;; contains raw numbers only; successful capability calls do not print logs.
   (defconst source-operation-diagnostics (new globalThis.WeakMap))
+  ;; Builtin creation order is a host interoperation fact. Keep the exact
+  ;; native order as initialization data; WASM still owns enumeration, values,
+  ;; descriptors and calls, and its compiler bytes remain host independent.
+  (defconst host-builtin-property-orders (js-array
+    (js-array 1 (Object/getOwnPropertyNames globalThis.Number))
+    (js-array 7 (Object/getOwnPropertyNames globalThis.String))
+    (js-array 25 (Object/getOwnPropertyNames globalThis.Symbol))
+    (js-array 2 (Object/getOwnPropertyNames globalThis.Number.isFinite))))
+  (defconst host-reflection-string-unit (get globalThis.String.prototype :charCodeAt))
   (defun readManagedSourceOperationDiagnostics (memory)
     (let ((records (when memory (js-call source-operation-diagnostics :get memory))))
       (when records (js-call records :slice))))
@@ -1706,6 +1715,18 @@
           (Reflect/apply call undefined (js-call (js-array "runtime-random-seed") :concat (Array/from seed))))
         (unless (undefined? configuredRandomSeed) (failManagedRuntime 3)))
       (setq heap (call "heap-new" (word maxSlots) (word initialBytes) (word maxBytes)) exceptionHeap heap)
+      (when (and moduleInfo (= (hostType (get e "runtime-builtin-property-order")) "function"))
+        (js-call host-builtin-property-orders :forEach (lambda (profile)
+          (let* ((names (aref profile 1)) (units (js-call names :reduce
+                   (lambda (count name) (+ count (js-length name))) 0))
+                 (cursor (call "runtime-builtin-property-order" (aref profile 0) (js-length names) units))
+                 (metadata-view (view)))
+            (js-call names :forEach (lambda (name)
+              (js-call metadata-view :setUint32 cursor (js-length name) t) (setq cursor (+ cursor 4))
+              (let ((index 0))
+                (while (< index (js-length name))
+                  (js-call metadata-view :setUint16 cursor (Reflect/apply host-reflection-string-unit name (js-array index)) t)
+                  (setq cursor (+ cursor 2) index (1+ index))))))))))
       (put lifecycle :dispose (lambda ()
         (let ((failed false) (failure undefined))
           (js-call (js-array

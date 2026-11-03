@@ -1,5 +1,5 @@
 (module tools.testing.final-functional-scope
-  (import "./file-workers.mjs" parseTestFileArgs partitionTestFiles runTestFiles)
+  (import "./file-workers.mjs" parseTestFileArgs partitionTestFiles runTestFiles workerTestArguments)
   (import "./resource-supervisor.mjs" startResourceSupervisor)
   (import "./fixture-environment.mjs" prepareFixtureEnvironment fixtureChildArguments)
   (import "node:fs/promises" readFile mkdir writeFile)
@@ -183,7 +183,7 @@
              (await (run-mixed plan env cancellation (option executors "startSupervisor" startResourceSupervisor))))))
            (sequence (option executors "sequence" (async (plan env)
              (await (runFunctionalChild (get plan :file)
-               (let ((arguments (js-array "--smol" "test" "--timeout" "300000" (get plan :file))))
+               (let ((arguments (workerTestArguments (get plan :file))))
                  (when (get plan :pattern) (js-call arguments :push "--test-name-pattern" (get plan :pattern))) arguments)
                (js-object :sourceRoot source-root :environment env))))))
            (plans (js-array)) (cancelled (js-array)) (results (js-array)) (cursor 0) (exit-code 0) (halt false)

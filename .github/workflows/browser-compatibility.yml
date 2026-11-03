@@ -18,7 +18,7 @@ jobs:
   browser:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -126,7 +126,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/eliscript-browser-ci"
-          bun test --preload ./tools/testing/fixture-environment.mjs --preload ./tests/helpers/direct-wasm-registration-install.mjs --timeout 300000 tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee "$RUNNER_TEMP/eliscript-browser-ci/tests.log"
+          bun tools/testing/file-workers.mjs tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee "$RUNNER_TEMP/eliscript-browser-ci/tests.log"
       - name: Preserve browser test evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

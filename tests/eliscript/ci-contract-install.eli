@@ -6,7 +6,7 @@
   (import "node:path" resolve)
   (import "../../tools/backends/build.mjs" root)
   (import "./direct-wasm-registration.mjs" createDirectWasmRegistration)
-  (import "./ci-contract-affected.mjs" adaptedSpyOn runBrowserWorkflowCase)
+  (import "./ci-contract-affected.mjs" adaptedSpyOn runBrowserWorkflowCase runCompatibilityWorkflowCase runFourShardInventoryCase)
   (defconst original (Object/assign (js-object) framework))
   (defconst source (readFileSync (resolve root "tests/ci-contract-test-ground.mjs")))
   (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update source) :digest "hex")
@@ -16,7 +16,9 @@
   (defconst selected (Object/assign (js-object) original
     (js-object :spyOn (lambda (target property) (adaptedSpyOn original target property)))))
   (defconst registration (createDirectWasmRegistration selected (js-object
-    "all three real engines run on every supported machine combination" runBrowserWorkflowCase)))
+    "all three real engines run on every supported machine combination" runBrowserWorkflowCase
+    "repository compatibility matrix renders the committed CI workflow" runCompatibilityWorkflowCase
+    "twelve matrix jobs cover every core and application inventory once per machine and Emacs pair without weakening other gates" runFourShardInventoryCase)))
   (defvar restored false)
   (defun restore () (unless restored
     (js-call (get original :mock) :module "bun:test" (lambda () original)) (setq restored t)))

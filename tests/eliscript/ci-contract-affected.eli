@@ -4,6 +4,8 @@
   (import "node:path" resolve)
   (import "../../tools/backends/build.mjs" root)
   (import "../../tools/ci/render-browser-workflow.mjs" checkBrowserCompatibilityWorkflow renderBrowserWorkflow)
+  (import "../../tools/ci/render-workflow.mjs" checkCompatibilityWorkflow renderWorkflow validateCompatibilityMatrix)
+  (import "../../tools/testing/file-workers.mjs" partitionTestFiles)
   (defun originalWorkerArguments (arguments)
     (let* ((file (aref arguments (1- (js-length arguments))))
            (expected (js-array (get globalThis.process :execPath) "--smol" "test"))
@@ -51,10 +53,68 @@
       (js-call (js-array
         "install --with-deps \"${{ matrix.browser }}\""
         "ELISCRIPT_TEST_BROWSER: ${{ matrix.browser }}"
-        "bun test --preload ./tools/testing/fixture-environment.mjs --preload ./tests/helpers/direct-wasm-registration-install.mjs --timeout 300000 tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee"
-        "set -o pipefail" "timeout-minutes: 10"
+        "bun tools/testing/file-workers.mjs tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee"
+        "set -o pipefail" "timeout-minutes: 30"
         "test \"$(bun -p 'process.arch')\" = \"${{ matrix.architecture }}\""
         "test \"$(node -p 'process.arch')\" = \"${{ matrix.architecture }}\""
         "if: always()" (str "actions/upload-artifact@" (get (get contract :artifactAction) :revision))) :forEach
         (lambda (text) (js-call assert :ok (js-call workflow :includes text))))))
-  (export originalWorkerArguments adaptedSpyOn runBrowserWorkflowCase))
+  (defasync runCompatibilityWorkflowCase ()
+    (let ((report (await (checkCompatibilityWorkflow (js-object :root root)))))
+      (js-call assert :strictEqual (get report :jobs) 24)
+      (js-call assert :strictEqual (get report :acceptanceJobs) 8)
+      (js-call assert :strictEqual (get report :testFileShards) 4)
+      (js-call assert :deepStrictEqual (js-call (get report :systems) :map (lambda (system) (get system :id)))
+        (js-array "linux" "linux-arm64" "macos"))
+      (js-call assert :deepStrictEqual (js-call (get report :systems) :find (lambda (system) (= (get system :id) "linux-arm64")))
+        (js-object :id "linux-arm64" :operatingSystem "linux" :runner "ubuntu-24.04-arm" :architecture "arm64"))
+      (js-call assert :deepStrictEqual (js-call (get report :acceptanceSystems) :map (lambda (system) (get system :id))) (js-array "macos"))
+      (js-call assert :deepStrictEqual (get report :emacsVersions) (js-array "29.4" "30.2"))
+      (js-call assert :deepStrictEqual (get report :javascriptHost) (js-object :name "bun" :version "1.4.0"))
+      (js-call assert :deepStrictEqual (get report :nodeHost) (js-object :name "node" :version "24.20.0"))
+      (js-call assert :strictEqual (get report :localEvidenceDirectory) "acceptance/matrix")))
+  (defasync runFourShardInventoryCase ()
+    (let* ((baseline (JSON/parse (await (readFile (resolve root "contracts/compatibility-matrix.json") "utf8"))))
+           (makefile (await (readFile (resolve root "Makefile") "utf8")))
+           (workflow (renderWorkflow baseline)) (validated (validateCompatibilityMatrix baseline))
+           (rows (Array/from (js-call workflow :matchAll (new globalThis.RegExp
+             "          - name: ([^\\n]+)\\n            os: ([^\\n]+)\\n            architecture: ([^\\n]+)\\n            emacs: \"([^\"\\n]+)\"\\n            shard: (\\d+)$" "gm"))))
+           (inventories (js-call (js-array "test-core" "test-applications") :map (lambda (target)
+             (let* ((start (js-call makefile :indexOf (str target ":")))
+                    (end (js-call makefile :indexOf "\n\n" start)))
+               (Array/from (js-call (js-call makefile :slice start end) :matchAll
+                 (new globalThis.RegExp "[.]/tests/[a-z0-9-]+[.]test[.]mjs" "g"))
+                 (lambda (match) (aref match 0))))))))
+      (js-call assert :strictEqual (get validated :jobs) 24)
+      (js-call assert :strictEqual (get validated :acceptanceJobs) 8)
+      (js-call assert :strictEqual (get validated :testFileShards) 4)
+      (js-call assert :strictEqual (js-length rows) (get validated :jobs))
+      (js-call assert :strictEqual (js-length inventories) 2)
+      (js-call inventories :forEach (lambda (files)
+        (js-call assert :ok (> (js-length files) 20))
+        (js-call assert :strictEqual (get (new globalThis.Set files) :size) (js-length files))))
+      (js-call (get baseline :operatingSystems) :forEach (lambda (system)
+        (js-call (get baseline :emacsVersions) :forEach (lambda (emacs)
+          (let ((pair (js-call rows :filter (lambda (row)
+                        (and (= (aref row 2) (get system :runner)) (= (aref row 4) emacs))))))
+            (js-call assert :deepStrictEqual (js-call (js-call pair :map (lambda (row) (funcall globalThis.Number (aref row 5)))) :sort) (js-array 1 2 3 4))
+            (js-call pair :forEach (lambda (row)
+              (js-call assert :strictEqual (aref row 1) (str (get system :id) "-emacs-" emacs "-shard-" (aref row 5) "-of-4"))
+              (js-call assert :strictEqual (aref row 3) (get system :architecture))))
+            (js-call inventories :forEach (lambda (files)
+              (let ((all (js-call pair :flatMap (lambda (row) (partitionTestFiles files (funcall globalThis.Number (aref row 5)) 4)))))
+                (js-call assert :deepStrictEqual (js-call all :sort) (js-call (js-call files :slice) :sort))
+                (js-call assert :strictEqual (get (new globalThis.Set all) :size) (js-length files))))))))))
+      (js-call (js-array
+        "BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index ${{ matrix.shard }} --shard-count 4"
+        "Run test file shard ${{ matrix.shard }}/4" "timeout-minutes: 30" "fail-fast: false") :forEach
+        (lambda (text) (js-call assert :ok (js-call workflow :includes text))))
+      (js-call (get baseline :commands) :forEach (lambda (command) (js-call assert :ok (js-call workflow :includes (str "run: " command)))))
+      (js-call (get baseline :actions) :forEach (lambda (action)
+        (js-call assert :ok (js-call workflow :includes (str (get action :repository) "@" (get action :revision))))))
+      (js-call (js-array "cli-test.sh" "project-cli-test.sh" "check-cli-test.sh" "format-cli-test.sh" "application-cli-test.sh")
+        :forEach (lambda (script) (js-call assert :ok (js-call makefile :includes (str "./tests/" script)))))
+      (js-call assert :strictEqual (js-length (Array/from (js-call makefile :matchAll
+        (new globalThis.RegExp "ert-run-tests-batch-and-exit" "g")))) 2)
+      (js-call assert :strictEqual (js-call (new globalThis.RegExp "[|][|] true|--test-name-pattern|continue-on-error|if:.*matrix") :test workflow) false)))
+  (export originalWorkerArguments adaptedSpyOn runBrowserWorkflowCase runCompatibilityWorkflowCase runFourShardInventoryCase))

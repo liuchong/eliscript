@@ -5,13 +5,37 @@
   (import "node:path" resolve)
   (import "../tools/backends/build.mjs" root)
   (import "../tools/testing/fixture-environment.mjs" prepareFixtureEnvironment
-    fixtureChildArguments fixtureRuntimeResponse installFixtureImportMap installFixtureBrowserEnvironment)
+    fixtureChildArguments fixtureRuntimeResponse installFixtureImportMap installFixtureBrowserEnvironment fixtureBlobModuleSource)
   (import "../tools/testing/persistent-literal-fixture.mjs" projectPersistentLiteralSuite)
+
+  (test "oracle routing reads exact original Blob bytes and refuses missing or non-Blob coordinates"
+    (async ()
+      (let* ((previous (Object/getOwnPropertyDescriptor globalThis.globalThis "document"))
+             (source (readFileSync (resolve root "runtime/core/value.mjs") "utf8"))
+             (blob (js-call globalThis.URL :createObjectURL (new globalThis.Blob (js-array source))))
+             (maps (js-array)))
+        (try
+          (Object/defineProperty globalThis.globalThis "document" (js-object :configurable t :value
+            (js-object :querySelectorAll (lambda (selector)
+              (js-call assert :strictEqual selector "script[type=importmap]") maps))))
+          (js-call maps :push (js-object :textContent (JSON/stringify
+            (js-object :imports (js-object "eliscript-identity/oracle" blob)))))
+          (js-call assert :strictEqual (await (fixtureBlobModuleSource "eliscript-identity/oracle")) source)
+          (await (js-call assert :rejects (fixtureBlobModuleSource "eliscript-identity/missing")
+            (new globalThis.RegExp "Blob is missing")))
+          (put maps 0 (js-object :textContent (JSON/stringify
+            (js-object :imports (js-object "eliscript-identity/oracle" "https://example.invalid/oracle")))))
+          (await (js-call assert :rejects (fixtureBlobModuleSource "eliscript-identity/oracle")
+            (new globalThis.RegExp "Blob is missing")))
+          (finally
+            (js-call globalThis.URL :revokeObjectURL blob)
+            (if previous (Object/defineProperty globalThis.globalThis "document" previous)
+              (Reflect/deleteProperty globalThis.globalThis "document")))))))
 
   (test "fixture environment owns package-scoped scratch and preserves caller state and original arguments"
     (lambda ()
       (let* ((environment (Object/assign (js-object) (get globalThis.process :env)
-               (js-object :TMPDIR "/original-private-tmp" :TMP "original-tmp" :TEMP "original-temp" :KEEP "kept")))
+               (js-object :TMPDIR (resolve root ".eliscript-cache/caller-private-tmp") :TMP "original-tmp" :TEMP "original-temp" :KEEP "kept")))
              (before (JSON/stringify environment))
              (fixture (prepareFixtureEnvironment root environment))
              (other (prepareFixtureEnvironment root environment)))

@@ -9,11 +9,14 @@
   (defasync tick ()
     (await (new globalThis.Promise (lambda (resolve reject) (funcall globalThis.setImmediate resolve)))))
 
-  (test "only the two confirmed exact Bun files use standard mode and every original input is dispatched"
+  (test "only the exact compiler-heavy Bun files use standard mode and every original input is dispatched"
     (async ()
       (let* ((files (js-array
                 "tests/compiler-seed-runtime-identity.test.mjs"
                 (resolve "independent" "compiler-corpus-matchers-selfhosted.test.mjs")
+                "tests/compiler-package-session.test.mjs"
+                "tests/direct-wasm-backend.test.mjs"
+                "tests/wasm-managed-symbols.test.mjs"
                 "compiler-seed-runtime-identity-copy.test.mjs"
                 "compiler-corpus-matchers-selfhosted-copy.test.mjs"
                 "Compiler-seed-runtime-identity.test.mjs"
@@ -30,7 +33,7 @@
         (js-call requests :forEach (lambda (request index)
           (js-call assert :deepStrictEqual (get request :args)
             (fixtureChildArguments
-              (if (< index 2) (js-array "test" "--timeout" "300000" (aref files index))
+              (if (< index 5) (js-array "test" "--timeout" "300000" (aref files index))
                 (js-array "--smol" "test" "--timeout" "300000" (aref files index))) (get globalThis.process :env)))
           (js-call assert :strictEqual (get request :command) (get globalThis.process :execPath))
           (js-call assert :strictEqual (get request :env) (get globalThis.process :env))
@@ -82,15 +85,16 @@
   (test "worker fixture overrides reach only the owned children with original supervision and arguments"
     (async ()
       (let* ((environment (js-object :PATH "original-path" :TMPDIR "private-fixtures"))
+             (fixture-root (resolve "fixture-project"))
              (requests (js-array)) (parent (get (get globalThis.process :env) :TMPDIR))
              (supervisor (js-object :failure nil
                :run (async (request) (js-call requests :push request) (js-object :exitCode 0))
                :cancel (lambda (signal) (js-call assert :fail "unexpected cancellation"))))
              (result (await (scheduleTestFiles (js-array "original.test.mjs") supervisor
-               (js-object :environment environment :sourceRoot "/fixture-project")))))
+               (js-object :environment environment :sourceRoot fixture-root)))))
         (js-call assert :strictEqual (get result :exitCode) 0)
         (js-call assert :strictEqual (get (aref requests 0) :env) environment)
-        (js-call assert :strictEqual (get (aref requests 0) :cwd) "/fixture-project")
+        (js-call assert :strictEqual (get (aref requests 0) :cwd) fixture-root)
         (js-call assert :deepStrictEqual (get (aref requests 0) :args)
           (js-array "--smol" "test" "--timeout" "300000" "original.test.mjs"))
         (js-call assert :strictEqual (get (get globalThis.process :env) :TMPDIR) parent))))

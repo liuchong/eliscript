@@ -134,15 +134,27 @@
 
   (test "Array.from caches an own next method once and closes the iterator on mapper failure"
     (async ()
-      (let* ((source "(module protocol (defun run () (let* ((iterator (js-call (js-array 1 2) :values)) (n 0)) (put iterator :next (lambda () (setq n (1+ n)) (put iterator :next false) (js-object :done (> n 2) :value n))) (Array/from iterator))) (defun fail (trace) (let ((iterator (js-call (js-array 1 2) :values))) (put iterator :return (lambda () (put trace :closed 1) (js-object))) (Array/from iterator (lambda (x i) (js-call nil :charAt))))) (export run fail))")
-             (c (await (compiled source))) (a (get c :a)) (js (get c :js)) (out (js-call a :invoke "run"))
-             (trace (js-call a :sourceObject (js-object))))
+      (let* ((source "(module protocol (defun run () (let* ((iterator (js-call (js-array 1 2) :values)) (n 0)) (put iterator :next (lambda () (setq n (1+ n)) (put iterator :next false) (js-object :done (> n 2) :value n))) (Array/from iterator))) (defun fail (trace) (let ((iterator (js-call (js-array 1 2) :values))) (put iterator :return (lambda () (put trace :closed (1+ (get trace :closed 0))) (js-object))) (Array/from iterator (lambda (x i) (js-call nil :charAt))))) (defun fail-call (trace) (let ((iterator (js-call (js-array 1 2) :values))) (put iterator :return (lambda () (put trace :closed (1+ (get trace :closed 0))) (js-object))) (Array/from iterator (lambda (x i) (funcall false))))) (export run fail fail-call))")
+             (c (await (compiled source))) (a (get c :a)) (js (get c :js)) (out (js-call a :invoke "run")))
         (js-call assert :deepStrictEqual (read a out) (js-call js :run))
-        (js-call assert :throws (lambda () (js-call a :invoke "fail" (js-array trace))) (diagnostic "ELI-RT0003"))
-        (let* ((key (js-call a :string "closed")) (closed (js-call a :objectGet trace key)))
-          (js-call assert :strictEqual (js-call a :readNumber closed) 1)
-          (js-call assert :strictEqual (get (js-call a :stats) :frameDepth) 0)
-          (finish a (js-array out trace key closed))))))
+        ;; Nullish property access is ELI-RT0001 throughout the source runtime;
+        ;; calling a non-function is ELI-RT0003. Both must retain the original
+        ;; TypeError and execute IteratorClose exactly once under allocation GC.
+        (js-call (js-array (js-array "fail" "ELI-RT0001") (js-array "fail-call" "ELI-RT0003")) :forEach
+          (lambda (row)
+            (let* ((trace (js-call a :sourceObject (js-object))) (reference (js-object))
+                   (name (aref row 0)) (expected (diagnostic (aref row 1))))
+              (js-call assert :throws (lambda () (js-call a :invoke name (js-array trace)))
+                (lambda (error) (and (funcall expected error)
+                  (js-call (get globalThis.TypeError :prototype) :isPrototypeOf error))))
+              (js-call assert :throws (lambda () (Reflect/apply (get js (js-call name :replaceAll "-" "_")) js
+                (js-array reference))) globalThis.TypeError)
+              (let* ((key (js-call a :string "closed")) (closed (js-call a :objectGet trace key)))
+                (js-call assert :strictEqual (js-call a :readNumber closed) 1)
+                (js-call assert :strictEqual (get reference :closed) 1)
+                (js-call assert :strictEqual (get (js-call a :stats) :frameDepth) 0)
+                (js-call (js-array trace key closed) :forEach (lambda (value) (js-call a :release value)))))))
+        (finish a (js-array out)))))
 
   (test "array-like length is captured once, indexed values stay live, and nested construction preserves roots"
     (async ()

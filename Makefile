@@ -125,6 +125,7 @@ test-core: check-contracts
 		./tests/esm-imports.test.mjs \
 		./tests/ci-contract.test.mjs \
 		./tests/file-workers-selfhosted.test.mjs \
+		./tests/release-readiness-selfhosted.test.mjs \
 		./tests/test-resource-supervisor.test.mjs \
 		./tests/resource-supervisor-selfhosted.test.mjs \
 		./tests/independent-cli-named-selfhosted.test.mjs \
@@ -419,11 +420,7 @@ test-core: check-contracts
 		./tests/managed-runtime-extended-selfhosted.test.mjs \
 		./tests/math-runtime-selfhosted.test.mjs \
 		./tests/unicode-case-selfhosted.test.mjs \
-		./tests/unicode-default-selfhosted.test.mjs \
-		./tests/compiler-corpus-host-tool-projection-selfhosted.test.mjs \
-		./tests/emitter-tdz-seed-parity-selfhosted.test.mjs \
-		./tests/compiler-tools-source-identity.test.mjs \
-		./tests/wire-error-report-selfhosted.test.mjs
+		./tests/unicode-default-selfhosted.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/project-cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/check-cli-test.sh

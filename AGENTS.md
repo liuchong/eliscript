@@ -216,6 +216,11 @@ precedence over parent rules when they address the same decision.
   installation, installed CLI execution and shared-source JavaScript/WASM/native
   output tests. Publish those same tested bytes; a checkout build or a later
   repack is not a substitute. Keep this acceptance in compiler release CI.
+- **RELEASE-04** - npm publication also requires successful Compatibility,
+  Browser compatibility, Compiler bootstrap and final outputs, and Pages runs
+  on the exact signed release commit. Missing, running, cancelled or failed
+  checks block publication. Package smoke tests and a successful upload do not
+  override this requirement.
 
 ## Performance Optimization
 

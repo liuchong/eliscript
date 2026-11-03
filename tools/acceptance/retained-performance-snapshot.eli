@@ -1,2 +1,115 @@
-(module capsules.tools.acceptance.retained-performance-snapshot
-  (js* "import {createHash} from 'node:crypto';\n\nconst reports=new Set([\n 'benchmarks/transient-builder-macos-arm64.json',\n 'benchmarks/worker-lifecycle-soak-macos-arm64.json',\n]);\nconst digest=bytes=>createHash('sha256').update(bytes).digest('hex');\nconst immutableGitBytes=new Map();\nexport function retainedGitSnapshotBytes(root,args){\n if(!['show','rev-parse','log','ls-tree'].includes(args[0]))throw Error('retained performance snapshot: unsupported Git read');\n const immutable=args[0]!=='log'&&args.some(arg=>/^[0-9a-f]{40}(?::|\\^\\{tree\\}$)/.test(arg));\n const key=JSON.stringify([root,args]);\n if(immutable&&immutableGitBytes.has(key))return immutableGitBytes.get(key).slice();\n const child=Bun.spawnSync(['git',...args],{cwd:root,stdout:'pipe',stderr:'pipe'});\n if(child.exitCode!==0)throw Error('retained performance snapshot: measured Git snapshot is unavailable');\n // Only SHA-addressed Git objects are cached. Worktree reads and the mutable\n // last-report revision lookup are always rechecked on every validation.\n if(immutable)immutableGitBytes.set(key,Uint8Array.from(child.stdout));\n return child.stdout;\n}\n\n// A deferred current-source check must still authenticate the exact measured\n// report and its measured source tree. Uncommitted replacements cannot acquire\n// historical provenance merely by opting out of current-source acceptance.\nexport function retainedPerformanceSnapshot(root,filename,bytes){\n if(!reports.has(filename))throw Error('retained performance snapshot: unsupported report');\n const commit=new TextDecoder().decode(retainedGitSnapshotBytes(root,['log','-1','--format=%H','--',filename])).trim();\n if(!/^[0-9a-f]{40}$/.test(commit))throw Error('retained performance snapshot: measured commit is unavailable');\n const artifactSha256=digest(bytes);\n if(digest(retainedGitSnapshotBytes(root,['show',`${commit}:${filename}`]))!==artifactSha256)throw Error('retained performance snapshot: report bytes differ from their measured Git snapshot');\n const tree=new TextDecoder().decode(retainedGitSnapshotBytes(root,['rev-parse',`${commit}^{tree}`])).trim();\n if(!/^[0-9a-f]{40}$/.test(tree))throw Error('retained performance snapshot: measured tree is unavailable');\n return{commit,tree,artifactSha256};\n}\n\nexport function deferredPerformanceAcceptance(report,measuredSource){\n return{report,historicalSourcesVerified:true,currentSourceAcceptance:'deferred',performanceAccepted:false,measuredSource};\n}\n"))
+(module tools.acceptance.retained-performance-snapshot
+  (import "node:crypto" createHash)
+  (import "node:child_process" spawnSync)
+  (import "node:fs" readFileSync writeFileSync mkdirSync mkdtempSync rmSync)
+  (import "node:path" resolve dirname)
+  (import "../backends/build.mjs" :as backend-build)
+  (defconst reports (new globalThis.Set (js-array
+    "benchmarks/transient-builder-macos-arm64.json" "benchmarks/worker-lifecycle-soak-macos-arm64.json")))
+  (defconst immutableGitBytes (new globalThis.Map))
+  (defconst generated-runtime (js-object
+    "runtime/core/object-impl.mjs" "stdlib/core/object.eli"
+    "runtime/core/protocol-impl.mjs" "stdlib/core/protocol.eli"
+    "runtime/core/text-impl.mjs" "stdlib/core/text.eli"))
+  (defun digest (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+  (defun git-read (root arguments)
+    (spawnSync "git" arguments (js-object :cwd root :encoding nil :maxBuffer 33554432 :timeout 30000)))
+  (defun checked-output (result)
+    (unless (and (= (get result :status) 0) (not (get result :error)))
+      (throw (new globalThis.Error "retained performance snapshot: measured Git snapshot is unavailable")))
+    (get result :stdout))
+  (defun capsule-bytes (bytes)
+    ;; Decode source data only. Never evaluate archived JavaScript or accept a
+    ;; non-capsule as a substitute for the measured generated artifact.
+    (let* ((text (js-call (new globalThis.TextDecoder "utf-8" (js-object :fatal t)) :decode bytes))
+           (match (js-call (new globalThis.RegExp
+             "^\\(module [a-zA-Z0-9_.-]+\\s+\\(js\\* (\"(?:[^\"\\\\]|\\\\[\\s\\S])*\")\\)\\s*\\)\\s*$") :exec text)))
+      (when match (globalThis.Buffer.from (JSON/parse (aref match 1)) "utf8"))))
+  (defun compile-historical-runtime (root revision filename)
+    (let* ((project-root (get backend-build :root))
+           (base (resolve project-root "_worktree/ci-closure/historical-source"))
+           (_ (mkdirSync base (js-object :recursive t)))
+           (scratch (mkdtempSync (resolve base "build-")))
+           (archive (resolve scratch "source.tar"))
+           (output (resolve scratch filename)))
+      (try
+        (progn
+          (writeFileSync archive (checked-output (git-read root
+            (js-array "archive" "--format=tar" revision "compiler" "stdlib/core"))))
+          (checked-output (spawnSync "tar" (js-array "-xf" archive "-C" scratch)
+            (js-object :encoding nil :timeout 30000)))
+          (mkdirSync (dirname output) (js-object :recursive t))
+          (checked-output (spawnSync (or (get (get globalThis.process :env) :EMACS) "emacs")
+            (js-array "--batch" "-Q" "--script"
+              (resolve project-root "tools/acceptance/compile-historical-runtime.el")
+              scratch (get generated-runtime filename) output)
+            (js-object :cwd scratch :encoding nil :timeout 60000 :maxBuffer 1048576)))
+          (readFileSync output))
+        (finally (rmSync scratch (js-object :recursive t :force t))))))
+  (defun retainedGitSnapshotBytes (root arguments)
+    (unless (js-call (js-array "show" "rev-parse" "log" "ls-tree") :includes (aref arguments 0))
+      (throw (new globalThis.Error "retained performance snapshot: unsupported Git read")))
+    (let* ((immutable (and (/= (aref arguments 0) "log")
+              (js-call arguments :some (lambda (arg)
+                (js-call (new globalThis.RegExp "^[0-9a-f]{40}(?::|\\^\\{tree\\}$)") :test arg)))))
+           (key (JSON/stringify (js-array root arguments))))
+      (if (and immutable (js-call immutableGitBytes :has key))
+        (js-call (js-call immutableGitBytes :get key) :slice)
+        (let* ((result (git-read root arguments)) (bytes (get result :stdout)))
+          (unless (= (get result :status) 0)
+            (let ((match (when (and (= (aref arguments 0) "show") (= (js-length arguments) 2))
+              (js-call (new globalThis.RegExp "^([0-9a-f]{40}):([^\\\\]+[.]mjs)$") :exec (aref arguments 1)))))
+              (unless (and match (not (js-call (js-call (aref match 2) :split "/") :includes "..")))
+                (checked-output result))
+              (let* ((revision (aref match 1)) (filename (aref match 2))
+                     (source (git-read root (js-array "show" (str revision ":" (js-call filename :slice 0 -4) ".eli")))))
+                (setq bytes (when (= (get source :status) 0) (capsule-bytes (get source :stdout))))
+                (when (and (not bytes) (Object/hasOwn generated-runtime filename))
+                  (setq bytes (compile-historical-runtime root revision filename)))
+                (unless bytes (checked-output result)))))
+          ;; The caller still checks every measured hash/aggregate. A source
+          ;; representation change never grants performance acceptance.
+          (when immutable (js-call immutableGitBytes :set key (globalThis.Uint8Array.from bytes)))
+          (globalThis.Uint8Array.from bytes)))))
+  (defun retainedPerformanceSnapshot (root filename bytes)
+    (unless (js-call reports :has filename)
+      (throw (new globalThis.Error "retained performance snapshot: unsupported report")))
+    ;; A restoration must not reattribute an old measurement to today's source
+    ;; tree. Find the original introduction of these exact recorded bytes.
+    (let* ((history (js-call (js-call (js-call (new globalThis.TextDecoder) :decode
+                     (retainedGitSnapshotBytes root (js-array "log" "--reverse" "--format=%H" "--" filename))) :trim) :split "\n"))
+           (artifactSha256 (digest bytes)) (commit undefined) (index 0))
+      (while (and (< index (js-length history)) (undefined? commit))
+        (let* ((revision (aref history index))
+               (candidate (git-read root (js-array "show" (str revision ":" filename)))))
+          (when (and (= (get candidate :status) 0) (= (digest (get candidate :stdout)) artifactSha256))
+            (setq commit revision)))
+        (setq index (1+ index)))
+      (when (and (undefined? commit) (> (js-length history) 0) (/= (aref history 0) ""))
+        (throw (new globalThis.Error "retained performance snapshot: report bytes differ from their measured Git snapshot")))
+      (unless (js-call (new globalThis.RegExp "^[0-9a-f]{40}$") :test commit)
+        (throw (new globalThis.Error "retained performance snapshot: measured commit is unavailable")))
+      (unless (= (digest (retainedGitSnapshotBytes root (js-array "show" (str commit ":" filename)))) artifactSha256)
+        (throw (new globalThis.Error "retained performance snapshot: report bytes differ from their measured Git snapshot")))
+      (let ((tree (js-call (js-call (new globalThis.TextDecoder) :decode
+                    (retainedGitSnapshotBytes root (js-array "rev-parse" (str commit "^{tree}")))) :trim)))
+        (unless (js-call (new globalThis.RegExp "^[0-9a-f]{40}$") :test tree)
+          (throw (new globalThis.Error "retained performance snapshot: measured tree is unavailable")))
+        (js-object :commit commit :tree tree :artifactSha256 artifactSha256))))
+  (defun retainedRuntimeSourceFiles (root revision)
+    (let* ((names (js-call (js-call (js-call (new globalThis.TextDecoder) :decode
+                   (retainedGitSnapshotBytes root (js-array "ls-tree" "-r" "--name-only" revision "runtime/core"))) :trim) :split "\n"))
+           (outputs (new globalThis.Set)))
+      ;; Inventory logical outputs from actual files in the pinned tree.
+      ;; Their contents are independently reproduced and hash-checked below.
+      (js-call names :forEach (lambda (name)
+        (cond ((js-call name :endsWith ".mjs") (js-call outputs :add name))
+              ((js-call name :endsWith ".eli") (js-call outputs :add (str (js-call name :slice 0 -4) ".mjs"))))))
+      (js-call (Object/entries generated-runtime) :forEach (lambda (entry)
+        (when (= (get (git-read root (js-array "show" (str revision ":" (aref entry 1)))) :status) 0)
+          (js-call outputs :add (aref entry 0)))))
+      (js-call (Array/from outputs) :sort)))
+  (defun deferredPerformanceAcceptance (report measuredSource)
+    (js-object :report report :historicalSourcesVerified t :currentSourceAcceptance "deferred"
+      :performanceAccepted false :measuredSource measuredSource))
+  (export retainedGitSnapshotBytes retainedPerformanceSnapshot retainedRuntimeSourceFiles deferredPerformanceAcceptance))

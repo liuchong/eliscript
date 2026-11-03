@@ -420,7 +420,7 @@
             (matrix-error "original compiler gate command differs from the stable core contract"))
           (let ((logs (js-object :stdout (js-array) :stderr (js-array)))
                 (environment (matrix-spread (get globalThis.process :env) (js-object :ELISCRIPT_SKIP_RETAINED_ACCEPTANCE "0"))))
-            (js-call (js-array "MAKEFLAGS" "GNUMAKEFLAGS" "MFLAGS" "BUN_TEST_RUNNER") :forEach
+            (js-call (js-array "MAKELEVEL" "MAKEFLAGS" "GNUMAKEFLAGS" "MFLAGS" "BUN_TEST_RUNNER") :forEach
               (lambda (name) (Reflect/deleteProperty environment name)))
             (let ((execution (await (new globalThis.Promise (lambda (accept reject)
                     (let ((child (spawn "make" (js-array "test-core")

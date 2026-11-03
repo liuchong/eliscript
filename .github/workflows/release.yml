@@ -29,6 +29,7 @@ on:
         default: false
 
 permissions:
+  actions: read
   contents: write
   id-token: write
 
@@ -112,6 +113,9 @@ jobs:
         run: |
           set -eu
           make bootstrap-backends
+          # Publication is irreversible. A successful pack or benchmark cannot
+          # replace all required checks on this exact signed release commit.
+          bun tools/ci/check-release-ready.mjs
           bun test tests/version-comparison-benchmark.test.mjs
           gh release view "v$VERSION" --json body --jq '.body // ""' > existing-release-notes.md
           bun tools/performance/version-comparison.mjs \

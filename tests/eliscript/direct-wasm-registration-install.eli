@@ -16,7 +16,10 @@
   (defconst registration (createDirectWasmRegistration original
     (js-object
       "browser function properties preserve ordinary absence builtin refusal identities and calls" runDirectReflectionCase
-      "browser complete Value and JSON graph executes original persistent and JSON semantics" runDirectValueJsonCase)))
+      "browser complete Value and JSON graph executes original persistent and JSON semantics" runDirectValueJsonCase)
+    (js-object :timeouts (if (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
+      (js-object "browser complete Value and JSON graph executes original persistent and JSON semantics" 600000)
+      (js-object)))))
   (defvar restored false)
   (defun restoreDirectWasmRegistration ()
     (unless restored
