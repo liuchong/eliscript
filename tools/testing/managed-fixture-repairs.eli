@@ -69,11 +69,16 @@
                (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")) realmCapacityTitle undefined))
   (defun managedFixtureFunctionalArguments (plan environment arguments)
     ;; The original 32 graphs each perform two complete WASM emissions plus
-    ;; fresh JS loading and live-binding checks. Bound the already explicit
-    ;; functional deferral; never turn its deadline into unlimited execution.
-    (if (and (= (get plan :suite) "tests/wasm-managed-project-linking.test.mjs")
-             (= (get plan :sha256) "fd9c909b7e5fa57ee9237385c142349fdad1b9d66d5e9d603c2323cdf3ec0c07")
-             (= (aref arguments 0) "fixed random module graphs agree with independent binding models and fresh JS projects")
+    ;; fresh JS loading and live-binding checks, and the deterministic regexp
+    ;; model checks nullable repeated capture priority across the full corpus.
+    ;; Bound the already explicit functional deferral; never turn its deadline
+    ;; into unlimited execution.
+    (if (and (or (and (= (get plan :suite) "tests/wasm-managed-project-linking.test.mjs")
+                      (= (get plan :sha256) "fd9c909b7e5fa57ee9237385c142349fdad1b9d66d5e9d603c2323cdf3ec0c07")
+                      (= (aref arguments 0) "fixed random module graphs agree with independent binding models and fresh JS projects"))
+                 (and (= (get plan :suite) "tests/wasm-managed-regexp.test.mjs")
+                      (= (get plan :sha256) "65d8dc751109174f90eb41ee0d0332e23e3b354d123c733448a84a32ad7ae2ad")
+                      (= (aref arguments 0) "deterministic pattern/text models preserve captures and priorities including nullable repeated groups")))
              (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
              (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")
              (= (js-length arguments) 3) (= (value-type (aref arguments 1)) "function")

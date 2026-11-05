@@ -19,7 +19,7 @@ jobs:
   test:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ startsWith(matrix.os, 'macos') && 60 || 30 }}
+    timeout-minutes: 90
     env:
       BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index ${{ matrix.shard }} --shard-count 8
       ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: "1"

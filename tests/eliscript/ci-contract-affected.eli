@@ -116,7 +116,7 @@
       (js-call (js-array
         "BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index ${{ matrix.shard }} --shard-count 8"
         "Run test file shard ${{ matrix.shard }}/8"
-        "timeout-minutes: ${{ startsWith(matrix.os, 'macos') && 60 || 30 }}" "fail-fast: false") :forEach
+        "timeout-minutes: 90" "fail-fast: false") :forEach
         (lambda (text) (js-call assert :ok (js-call workflow :includes text))))
       (js-call (get baseline :commands) :forEach (lambda (command) (js-call assert :ok (js-call workflow :includes (str "run: " command)))))
       (js-call assert :ok (js-call workflow :includes "ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE: \"small\""))
@@ -125,7 +125,7 @@
         (let ((strict-workflow (renderWorkflow strict)))
           (js-call assert :strictEqual (js-call strict-workflow :includes "ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE") false)
           (js-call assert :ok (js-call strict-workflow :includes "timeout-minutes: 30"))
-          (js-call assert :strictEqual (js-call strict-workflow :includes "startsWith(matrix.os") false)
+          (js-call assert :strictEqual (js-call strict-workflow :includes "timeout-minutes: 90") false)
           (js-call assert :strictEqual (js-call strict-workflow :includes "ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE") false)))
       (js-call (get baseline :actions) :forEach (lambda (action)
         (js-call assert :ok (js-call workflow :includes (str (get action :repository) "@" (get action :revision))))))
@@ -141,7 +141,7 @@
            (package (JSON/parse (await (readFile (resolve root "package.json") "utf8"))))
            (strict (Object/assign (js-object) baseline)))
       (js-call assert :ok (js-call workflow :includes
-        "timeout-minutes: ${{ startsWith(matrix.os, 'macos') && 60 || 30 }}"))
+        "timeout-minutes: 90"))
       (Reflect/deleteProperty strict "performanceAcceptance")
       (js-call assert :ok (js-call (renderWorkflow strict) :includes "timeout-minutes: 30"))
       (js-call (js-array "BUN_TEST_RUNNER: tools/testing/file-workers.mjs"
@@ -155,7 +155,7 @@
            (strict (Object/assign (js-object) baseline)))
       (Reflect/deleteProperty strict "performanceAcceptance")
       (let ((index 0) (matrices (js-array baseline strict))
-            (expected (js-array "timeout-minutes: ${{ startsWith(matrix.os, 'macos') && 60 || 30 }}"
+            (expected (js-array "timeout-minutes: 90"
                                 "timeout-minutes: 30")))
         (while (< index (js-length matrices))
           (let* ((matrix (aref matrices index)) (original (renderWorkflow matrix))

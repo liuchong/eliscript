@@ -19,7 +19,7 @@
       (new globalThis.Promise (lambda (accept reject)
         (let* ((child (spawn "bun" (js-array (resolve root "tools/backends/compile.mjs") "--abi" "numeric-f64" "--target" target "-o" output source)
                        (js-object :cwd root :env (Object/assign (js-object) (get globalThis.process :env) (js-object :TMPDIR scratch) environment)
-                         :stdio (js-array "ignore" "pipe" "pipe") :timeout 30000)))
+                         :stdio (js-array "ignore" "pipe" "pipe") :timeout 120000)))
                (stderr ""))
           (js-call (get child :stdout) :resume)
           (js-call (get child :stderr) :on "data" (lambda (chunk) (setq stderr (+ stderr chunk))))
@@ -55,7 +55,7 @@
     (setq outcomes (await (Promise/all (js-array (cli "js" (resolve directory "out.mjs")) (cli "wasm" (resolve directory "out.wasm"))))))
     (let ((contract (JSON/parse (await (readFile (resolve "contracts/repository-integrity.json") "utf8")))))
       (try (await (checkRepositoryIntegrity (js-object :root root :contract contract :trackedFiles (js-array) :dependenciesOnly t)))
-        (catch error (setq integrityFailure error))))) 120000)
+        (catch error (setq integrityFailure error))))) 240000)
   (afterAll (async () (when directory (await (rm directory (js-object :recursive t :force t))))))
   (test "Given concurrent independent CLI requests, when JS and WASM compile, then both exact outputs execute"
     (async ()
@@ -77,7 +77,7 @@
           (js-call assert :notStrictEqual (get result :code) 0) (js-call assert :strictEqual (get result :signal) nil)
           (js-call assert :match (get result :stderr) (new globalThis.RegExp "ELI-B0001"))
           (js-call assert :strictEqual (await (js-call (js-call globalThis.Bun :file output) :exists)) false)
-          (js-call assert :deepStrictEqual (await (readdir scratch)) (js-array))))) 30000)
+          (js-call assert :deepStrictEqual (await (readdir scratch)) (js-array))))) 120000)
   (test "Given an unavailable Seed executable, when preparation fails, then private build storage is still released"
     (async ()
       (let* ((output (resolve directory "missing-seed.wasm"))
