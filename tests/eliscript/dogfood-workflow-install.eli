@@ -6,7 +6,7 @@
   (import "node:path" resolve)
   (import "../../tools/backends/build.mjs" root)
   (import "./direct-wasm-registration.mjs" createDirectWasmRegistration)
-  (import "./dogfood-action-source.mjs" runSourceWorkflowCase)
+  (import "./dogfood-action-source.mjs" runSourceWorkflowCase ensureDogfoodBrowser)
   (defconst original (Object/assign (js-object) framework))
   (js-call assert :strictEqual
     (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root "tests/dogfood-workflow-test-ground.mjs"))) :digest "hex")
@@ -16,7 +16,7 @@
   (defvar restored false)
   (defun restore ()
     (unless restored (js-call (get original :mock) :module "bun:test" (lambda () original)) (setq restored t)))
-  (defun completeWorkflowRegistration () (try (js-call registration :complete) (finally (restore))))
+  (defasync completeWorkflowRegistration () (try (js-call registration :complete) (await (ensureDogfoodBrowser)) (finally (restore))))
   (js-call original :beforeAll completeWorkflowRegistration)
   (js-call original :afterAll restore)
   (js-call (get original :mock) :module "bun:test" (lambda () (get registration :exports)))

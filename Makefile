@@ -431,6 +431,7 @@ test-core: check-contracts
 .PHONY: prepare-application-assets
 prepare-application-assets: bootstrap-backends
 	$(BUN) run build:browser
+	$(BUN) run build:dogfood-browser
 
 test-applications: prepare-application-assets
 	$(EMACS) --batch -Q -L tools/org -L tests \
