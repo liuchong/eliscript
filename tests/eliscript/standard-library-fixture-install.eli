@@ -32,6 +32,15 @@
       (isTransientCallFixture root argument (get globalThis.process :env))))))
   (defconst registration (if partitioned (transientCallTestRegistration (get original-framework :test))
     (standardLibraryFixtureTestRegistration (get original-framework :test) plan (get globalThis.process :env) original-cases)))
+  (defconst before-all
+    (if (or partitioned (not (> (get plan :functionalDeadline 0) 0)))
+      (get original-framework :beforeAll)
+      (lambda (callback &rest arguments)
+        (let ((timeout (aref arguments 0)))
+          (Reflect/apply (get original-framework :beforeAll) original-framework
+            (if (and (= (value-type timeout) "number") (< timeout (get plan :functionalDeadline)))
+              (js-array callback (get plan :functionalDeadline))
+              (js-call (js-array callback) :concat arguments)))))))
   (unless (eq registration (get original-framework :test))
     (if partitioned
       (console/error "[transient-call-partitions] 12 original vector sizes,8 exported cases,4 callback modes run independently with original per-case deadlines; original aggregate performance NOT ACCEPTED")
@@ -39,7 +48,7 @@
         "original total-case performance DEFERRED / NOT ACCEPTED; authenticated functional deadlines"
         (get plan :functionalDeadline) (get plan :nativeFunctionalDeadline)))
     (js-call (get original-framework :mock) :module "bun:test"
-      (lambda () (Object/assign (js-object) original-framework (js-object :test registration)))))
+      (lambda () (Object/assign (js-object) original-framework (js-object :test registration :beforeAll before-all)))))
   (defun options-for (input)
     (let* ((acceptance (standardLibraryFixtureOptions (get plan :suite) (get globalThis.process :env) input))
            (effective (get acceptance :options)))

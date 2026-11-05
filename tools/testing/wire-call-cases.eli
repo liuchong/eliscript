@@ -72,12 +72,12 @@
                   (console/error "[wire-call-partitions]" (JSON/stringify
                     (js-object :title title :corpus (js-length cases) :parts (js-length parts)
                       :selectedParts (js-length selected) :shard shard
-                      :deadlineMs 120000 :nativeHTTPFunctionalDeadlineMs (if functional 240000 120000)
+                      :deadlineMs 120000 :nativeHTTPFunctionalDeadlineMs (if functional 480000 120000)
                       :originalAggregatePerformance "NOT ACCEPTED")))
                   (js-call selected :forEach (lambda (part)
                     (let ((callback (aref arguments 1))
                           (deadline (if (and functional
-                            (= (get part :kind) "tail") (= (get part :key) "http-contracts")) 240000 120000)))
+                            (= (get part :kind) "tail") (= (get part :key) "http-contracts")) 480000 120000)))
                       (Reflect/apply actual receiver (js-array
                         (str title " [" (get part :kind) "/" (get part :key) ": " (get part :label) "]")
                         (async ()

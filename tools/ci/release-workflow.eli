@@ -7,6 +7,7 @@
   (import "../render-workflow.mjs" renderToolchainSteps validateCompatibilityMatrix)
 
   (defconst release-workflow-path ".github/workflows/compiler-release.yml")
+  (defconst RELEASE_SHARDS 8)
   (defconst release-artifact-action
     (get (JSON/parse (readFileSync (resolve root "contracts/browser-compatibility.json") "utf8")) :artifactAction))
 
@@ -24,14 +25,18 @@
            (versions (get validated :emacsVersions)))
       (while (< index (js-length systems))
         (let* ((system (aref systems index))
-               (platform (release-system-platform system)))
+               (platform (release-system-platform system))
+               (shard 1))
           (js-call platforms :add platform)
-          (js-call rows :push
-            (+ "          - name: " (get system :id) "-stage3\n"
-               "            os: " (get system :runner) "\n"
-               "            architecture: arm64\n"
-               "            emacs: \"" (aref versions (1- (js-length versions))) "\"\n"
-               "            native_target: " (if (= platform "linux") "arm64-linux" "arm64-macos"))))
+          (while (<= shard RELEASE_SHARDS)
+            (js-call rows :push
+              (+ "          - name: " (get system :id) "-stage3-shard-" shard "-of-" RELEASE_SHARDS "\n"
+                 "            os: " (get system :runner) "\n"
+                 "            architecture: arm64\n"
+                 "            emacs: \"" (aref versions (1- (js-length versions))) "\"\n"
+                 "            native_target: " (if (= platform "linux") "arm64-linux" "arm64-macos") "\n"
+                 "            shard: " shard))
+            (setq shard (1+ shard))))
         (setq index (1+ index)))
       (unless (and (js-call platforms :has "linux") (js-call platforms :has "macos"))
         (throw (new globalThis.TypeError "stage3 native acceptance requires ARM64 Linux and macOS platforms")))
@@ -46,6 +51,9 @@
          "    env:\n      ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: \"1\"\n"
          "      ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE: \"small\"\n"
          "      NATIVE_TARGET: ${{ matrix.native_target }}\n"
+         "      BUN_TEST_RUNNER: tools/testing/final-functional-scope.mjs --shard-index ${{ matrix.shard }} --shard-count " RELEASE_SHARDS "\n"
+         "      STAGE3_SHARD_INDEX: \"${{ matrix.shard }}\"\n"
+         "      STAGE3_SHARD_COUNT: \"" RELEASE_SHARDS "\"\n"
          "    steps:\n" (renderToolchainSteps matrix)
          "      - name: Install locked dependencies\n        run: bun install --frozen-lockfile\n"
          "      - name: Install browser engines for final compiler validation\n"

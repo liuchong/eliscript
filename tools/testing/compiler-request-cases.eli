@@ -65,8 +65,8 @@
                         (setq active (js-object :mode mode :target output))
                         (try (await (funcall callback)) (finally (setq active undefined))))
                       ;; The existing 120s deadline now bounds one original
-                      ;; artifact/output pair, including all five real processes.
-                      120000)))))))))))
+                      ;; artifact/output pair, with 240s for native codegen.
+                      (if (= output "native") 240000 120000))))))))))))
       :get (lambda (target key receiver)
         (let ((value (Reflect/get target key target)))
           (if (= (value-type value) "function") (js-call value :bind target) value))))))

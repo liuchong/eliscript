@@ -117,7 +117,8 @@
     (async ()
       (let* ((matrix (JSON/parse (await (readFile (resolve root "contracts/compatibility-matrix.json") "utf8"))))
              (workflow (renderCompilerReleaseWorkflow matrix)))
-        (js-call (js-array "ubuntu-24\\.04-arm" "macos-15" "make compiler-release-ci" "make byte-compile" "upload-artifact")
+        (js-call (js-array "ubuntu-24\\.04-arm" "macos-15" "make compiler-release-ci" "make byte-compile" "upload-artifact"
+                   "STAGE3_SHARD_INDEX" "STAGE3_SHARD_COUNT" "final-functional-scope\\.mjs --shard-index")
           :forEach (lambda (text) (js-call assert :match workflow (pattern text))))
         (js-call assert :doesNotMatch workflow (pattern "record-grid|bootstrap-all|--host wasm|--host native"))
         (js-call assert :doesNotMatch workflow (pattern "timeout-minutes: (10|30)\\b"))

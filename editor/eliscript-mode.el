@@ -589,6 +589,7 @@ Prefer the nearest `eliscript.json', then fall back to `project.el'."
           (mapconcat #'shell-quote-argument
                      (cons program arguments) " "))
          (buffer-name (format "*Eliscript %s build*" scope))
+         (process-connection-type nil)
          (compilation-buffer
           (compilation-start
            command 'eliscript-compilation-mode

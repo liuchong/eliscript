@@ -103,6 +103,27 @@ files recorded in the source map.  The return value is an `eliscript-emission'."
                    previous output-path)))
         (push output-path validated)))))
 
+(defun eliscript--write-file-content (filename content)
+  "Write CONTENT to FILENAME without Emacs lockfile conflicts."
+  (let* ((target (expand-file-name filename))
+         (directory (file-name-directory target))
+         (create-lockfiles nil)
+         (coding-system-for-write 'utf-8-unix))
+    (make-directory directory t)
+    (if (file-symlink-p target)
+        (with-temp-file target
+          (insert content))
+      (let ((temp (make-temp-file
+                   (expand-file-name
+                    (concat "." (file-name-nondirectory target) ".tmp-")
+                    directory))))
+        (unwind-protect
+            (progn
+              (write-region content nil temp nil 'silent)
+              (rename-file temp target t))
+          (when (file-exists-p temp)
+            (ignore-errors (delete-file temp))))))))
+
 (defun eliscript-compile-portable-file (input-file entries &optional output-file)
   "Compile portable ENTRIES from INPUT-FILE, optionally to OUTPUT-FILE."
   (let* ((input-path (expand-file-name input-file))
@@ -117,9 +138,7 @@ files recorded in the source map.  The return value is an `eliscript-emission'."
          (output
           (eliscript-compile-portable-string source entries input-path)))
     (when output-file
-      (make-directory (file-name-directory (expand-file-name output-file)) t)
-      (with-temp-file output-file
-        (insert output)))
+      (eliscript--write-file-content output-file output))
     output))
 
 (defun eliscript-compile-portable-file-with-source-map
@@ -153,12 +172,9 @@ files recorded in the source map.  The return value is an `eliscript-emission'."
           (eliscript-emission-create
            :javascript javascript
            :source-map (eliscript-emission-source-map emission)))
-    (make-directory map-directory t)
-    (with-temp-file map-path
-      (insert (eliscript-emission-source-map emission)))
-    (make-directory (file-name-directory output-path) t)
-    (with-temp-file output-path
-      (insert javascript))
+    (eliscript--write-file-content
+     map-path (eliscript-emission-source-map emission))
+    (eliscript--write-file-content output-path javascript)
     emission))
 
 (defun eliscript-compile-file (input-file &optional output-file)
@@ -173,9 +189,7 @@ Return the generated ECMAScript source."
          (output (eliscript-emit-ir-module
                   (eliscript-compile-ir-file input-path))))
     (when output-file
-      (make-directory (file-name-directory (expand-file-name output-file)) t)
-      (with-temp-file output-file
-        (insert output)))
+      (eliscript--write-file-content output-file output))
     output))
 
 (defun eliscript-compile-file-with-source-map
@@ -224,12 +238,9 @@ an external `sourceMappingURL' comment.  Return an `eliscript-emission'."
               (eliscript-emission-create
                :javascript javascript
                :source-map (eliscript-emission-source-map emission)))
-        (make-directory map-directory t)
-        (with-temp-file map-path
-          (insert (eliscript-emission-source-map emission)))
-        (make-directory (file-name-directory output-path) t)
-        (with-temp-file output-path
-          (insert javascript))))
+        (eliscript--write-file-content
+         map-path (eliscript-emission-source-map emission))
+        (eliscript--write-file-content output-path javascript)))
     emission))
 
 (require 'eliscript-evaluation)

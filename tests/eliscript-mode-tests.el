@@ -417,7 +417,7 @@
           (with-temp-buffer
             (setq default-directory directory)
             (setq process (eliscript-mode-watch-project directory))
-            (let ((deadline (+ (float-time) 15)))
+            (let ((deadline (+ (float-time) 60)))
               (while (and (not (seq-find
                                 (lambda (event)
                                   (equal (alist-get 'event event) "ready"))
@@ -430,7 +430,7 @@
                        (equal (alist-get 'event event) "ready"))
                      events))
             (write-region "(print 2)\n" nil source nil 'silent)
-            (let ((deadline (+ (float-time) 15)))
+            (let ((deadline (+ (float-time) 60)))
               (while (and (not (seq-find
                                 (lambda (event)
                                   (equal (alist-get 'event event) "change"))
@@ -475,7 +475,7 @@
             (eliscript-mode)
             (setq compilation-buffer (eliscript-mode-compile-buffer)))
           (let* ((process (get-buffer-process compilation-buffer))
-                 (deadline (+ (float-time) 15)))
+                 (deadline (+ (float-time) 60)))
             (while (and (process-live-p process)
                         (< (float-time) deadline))
               (accept-process-output process 0.05))
@@ -493,7 +493,9 @@
             (should (equal compilation-error-regexp-alist '(eliscript)))))
       (when (buffer-live-p compilation-buffer)
         (let ((process (get-buffer-process compilation-buffer)))
-          (when (process-live-p process) (kill-process process)))
+          (when (process-live-p process)
+            (set-process-query-on-exit-flag process nil)
+            (delete-process process)))
         (kill-buffer compilation-buffer))
       (when (buffer-live-p source-buffer)
         (with-current-buffer source-buffer

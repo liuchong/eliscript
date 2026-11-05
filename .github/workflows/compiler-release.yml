@@ -22,20 +22,109 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: linux-arm64-stage3
+          - name: linux-arm64-stage3-shard-1-of-8
             os: ubuntu-24.04-arm
             architecture: arm64
             emacs: "30.2"
             native_target: arm64-linux
-          - name: macos-stage3
+            shard: 1
+          - name: linux-arm64-stage3-shard-2-of-8
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-linux
+            shard: 2
+          - name: linux-arm64-stage3-shard-3-of-8
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-linux
+            shard: 3
+          - name: linux-arm64-stage3-shard-4-of-8
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-linux
+            shard: 4
+          - name: linux-arm64-stage3-shard-5-of-8
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-linux
+            shard: 5
+          - name: linux-arm64-stage3-shard-6-of-8
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-linux
+            shard: 6
+          - name: linux-arm64-stage3-shard-7-of-8
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-linux
+            shard: 7
+          - name: linux-arm64-stage3-shard-8-of-8
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-linux
+            shard: 8
+          - name: macos-stage3-shard-1-of-8
             os: macos-15
             architecture: arm64
             emacs: "30.2"
             native_target: arm64-macos
+            shard: 1
+          - name: macos-stage3-shard-2-of-8
+            os: macos-15
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-macos
+            shard: 2
+          - name: macos-stage3-shard-3-of-8
+            os: macos-15
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-macos
+            shard: 3
+          - name: macos-stage3-shard-4-of-8
+            os: macos-15
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-macos
+            shard: 4
+          - name: macos-stage3-shard-5-of-8
+            os: macos-15
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-macos
+            shard: 5
+          - name: macos-stage3-shard-6-of-8
+            os: macos-15
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-macos
+            shard: 6
+          - name: macos-stage3-shard-7-of-8
+            os: macos-15
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-macos
+            shard: 7
+          - name: macos-stage3-shard-8-of-8
+            os: macos-15
+            architecture: arm64
+            emacs: "30.2"
+            native_target: arm64-macos
+            shard: 8
     env:
       ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: "1"
       ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE: "small"
       NATIVE_TARGET: ${{ matrix.native_target }}
+      BUN_TEST_RUNNER: tools/testing/final-functional-scope.mjs --shard-index ${{ matrix.shard }} --shard-count 8
+      STAGE3_SHARD_INDEX: "${{ matrix.shard }}"
+      STAGE3_SHARD_COUNT: "8"
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

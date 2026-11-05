@@ -43,7 +43,7 @@
               (while (< position (js-length calls))
                 (let ((record (aref calls position)))
                   (js-call assert :strictEqual (aref record 2)
-                    (if (js-call (aref record 0) :includes "[tail/http-contracts:") 240000 120000))
+                    (if (js-call (aref record 0) :includes "[tail/http-contracts:") 480000 120000))
                   (await (funcall (aref record 1))))
                 (setq position (1+ position)))))
           (setq index (1+ index)))

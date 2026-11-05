@@ -13,6 +13,8 @@ BOOTSTRAP_RELEASE_MANIFEST ?= $(BOOTSTRAP_RELEASE_OUT)/bootstrap.json
 NATIVE_TARGET ?= $(if $(filter Linux,$(shell uname -s)),arm64-linux,arm64-macos)
 STAGE3_FUNCTIONAL_RUNTIME_PROFILE ?=
 STAGE3_FUNCTIONAL_RUNTIME_OPTION = $(if $(strip $(STAGE3_FUNCTIONAL_RUNTIME_PROFILE)),--functional-runtime-profile $(STAGE3_FUNCTIONAL_RUNTIME_PROFILE),)
+STAGE3_SHARD_INDEX ?=
+STAGE3_SHARD_COUNT ?=
 
 .PHONY: bootstrap-release verify-bootstrap check-stage3-targets prepare-release-package check-release-package compiler-release-ci check-release-workflow
 
@@ -28,7 +30,7 @@ verify-bootstrap:
 
 # Deliberately does not rebuild an already authenticated four-stage chain.
 check-stage3-targets: prepare-release-package
-	$(NODE) tools/backends/dist/release-cli.mjs targets --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)" --output "$(BOOTSTRAP_RELEASE_OUT)/targets" --native-target "$(NATIVE_TARGET)" $(STAGE3_FUNCTIONAL_RUNTIME_OPTION)
+	ELISCRIPT_STAGE3_SHARD_INDEX="$(STAGE3_SHARD_INDEX)" ELISCRIPT_STAGE3_SHARD_COUNT="$(STAGE3_SHARD_COUNT)" $(NODE) tools/backends/dist/release-cli.mjs targets --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)" --output "$(BOOTSTRAP_RELEASE_OUT)/targets" --native-target "$(NATIVE_TARGET)" $(STAGE3_FUNCTIONAL_RUNTIME_OPTION)
 
 prepare-release-package:
 	$(NODE) tools/backends/dist/release-cli.mjs prepare-release-package --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)"

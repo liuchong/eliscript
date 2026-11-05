@@ -50,7 +50,8 @@
         (let ((index 0))
           (while (< index (js-length registered))
             (let ((record (aref registered index)))
-              (js-call assert :strictEqual (aref record 2) 120000)
+              (js-call assert :strictEqual (aref record 2)
+                (if (js-call (aref record 0) :endsWith "/native]") 240000 120000))
               (await (funcall (aref record 1))))
             (setq index (1+ index))))
         (js-call assert :deepStrictEqual observed (js-call (js-array
