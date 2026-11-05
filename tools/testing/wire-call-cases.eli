@@ -76,7 +76,7 @@
                       :originalAggregatePerformance "NOT ACCEPTED")))
                   (js-call selected :forEach (lambda (part)
                     (let ((callback (aref arguments 1))
-                          (deadline (if (and functional (js-call title :startsWith "Given the identical complete wire graph")
+                          (deadline (if (and functional
                             (= (get part :kind) "tail") (= (get part :key) "http-contracts")) 240000 120000)))
                       (Reflect/apply actual receiver (js-array
                         (str title " [" (get part :kind) "/" (get part :key) ": " (get part :label) "]")

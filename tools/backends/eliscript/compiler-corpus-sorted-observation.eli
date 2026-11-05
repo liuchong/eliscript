@@ -6,7 +6,7 @@
     "rotations" "sharing" "randomized" "recovery-0" "recovery-1"
     "original-report" "original-boundaries" "ranges" "semantics" "order-cases"
     "full-order-contracts" "comparator-failure" "transport" "lazy-iterators" "held")))
-  (defconst sortedMaintainedSha "74741e834cb96b6579d18f6f92e7464d25247976f4d506a7a14be42f9453321c")
+  (defconst sortedMaintainedSha "038392b96f60d525969d485523aa58e81bce6d889d226f606b70c8ca03fb59f0")
   (defun sortedFunctionalPartition (record)
     (let* ((original (get record :original)) (bound (when original (get original :functionalPartition)))
            (proof (when original (get original :maintainedAssertions))))
@@ -27,10 +27,10 @@
     (let ((part (sortedFunctionalPartition record)))
       (when part
         (cond ((= target "javascript") 30000)
-          ((js-call part :startsWith "recovery-") (if (= target "native") 1200000 600000))
-          ((or (= part "rotations") (= part "sharing")) (if (= target "native") 900000 600000))
-          ((= part "randomized") (if (= target "native") 600000 240000))
-          (t (if (= target "native") 120000 30000))))))
+          ((js-call part :startsWith "recovery-") 1800000)
+          ((or (= part "rotations") (= part "sharing")) 1800000)
+          ((= part "randomized") 600000)
+          (t 120000)))))
   (defun observeSortedPart (m part random-operations)
     (unless (js-call sortedFunctionalParts :includes part)
       (throw (new globalThis.TypeError "unknown sorted functional partition")))

@@ -65,6 +65,7 @@ test-pre-bootstrap-originals:
 	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=1 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
 
 test-bootstrap-artifacts:
+	@test -f "$(BOOTSTRAP_RELEASE_MANIFEST)" && test -f dist/stage3-release.json || ($(MAKE) bootstrap-release && $(MAKE) prepare-release-package)
 	$(BUN) $(BUN_ARTIFACT_TEST_RUNNER) ./tests/package-surface.test.mjs ./tests/compiler-browser-session.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs
 	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-tools-cli-selfhosted.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
 

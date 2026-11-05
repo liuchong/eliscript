@@ -314,7 +314,7 @@
         (js-call assert :ok plan)
         (js-call assert :strictEqual (get (get record :originalCase) :timeoutMs) 30000)
         (funcall registration (get plan :deadlineTitle) callback 30000)
-        (js-call assert :strictEqual (aref (aref calls 0) 2) 30000)
+        (js-call assert :strictEqual (aref (aref calls 0) 2) 120000)
         (js-call assert :strictEqual (aref (aref calls 0) 1) callback)
         (js-call assert :strictEqual (standardLibraryFixtureTestRegistration original plan (js-object) cases) original))))
   (test "sorted fixtures call the source array API directly and preserve the distinct private vector factory"

@@ -82,7 +82,7 @@
                         (if (= target "javascript")
                           (Math/max 60000 (* (get (get record :execution) :timeoutMs) 4))
                           (if (= id "original-program:portable-persistent-list-1")
-                            (if (= target "native") 360000 120000)
+                            360000
                             (if (and (= id "original-program:eliscript-protocol-complete-hosts") (= target "native"))
                               1800000 600000))))
                       (js-call assert :strictEqual (get policy :originalDeadlineMs) (get (get record :execution) :timeoutMs))
@@ -230,7 +230,7 @@
                        (owned-session (await (openCompilerArtifact artifact)))
                        (request (js-object :operation "project" :target "native" :entry "original.mjs"
                          :modules modules :resolveImports t :phased t :debug t :sourceMap t
-                         :nativeTarget "arm64-macos" :nativeFormat format
+                         :nativeTarget (if (= (get globalThis.process :platform) "linux") "arm64-linux" "arm64-macos") :nativeFormat format
                          :memory (js-object :initialPages 2 :maximumPages 8)))
                        (saved (globalThis.structuredClone request)))
                   (js-call sessions :push ordinary-session owned-session)
@@ -303,7 +303,8 @@
                           (js-call assert :ok (js-call facades :some
                             (lambda (facade) (= (get facade :id) (get owned-archive key))))
                             (str "the real archived project requires its deployed " key)))))
-                      (when (= format "library")
+                      (when (and (= format "library") (= (get globalThis.process :arch) "arm64")
+                                 (js-call (js-array "darwin" "linux") :includes (get globalThis.process :platform)))
                         (let* ((descriptor (get owned :descriptor))
                                (graph (createManagedModuleGraph descriptor))
                                (configuration (Object/assign (js-object) (get request :memory)

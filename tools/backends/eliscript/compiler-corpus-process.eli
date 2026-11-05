@@ -207,7 +207,9 @@
               (if (and (not (undefined? measured-deadline))
                    (if (js-call (js-array "original-program:core-stdlib-complete-protocols"
                          "original-program:eliscript-protocol-complete-hosts"
-                         "original-program:portable-persistent-set-complete-hosts") :includes id)
+                         "original-program:portable-persistent-set-complete-hosts"
+                         "original-program:portable-persistent-list-1"
+                         "original-program:portable-persistent-list-0") :includes id)
                      (js-call (js-array "wasm" "native") :includes target)
                      (= target "native")))
                 (if (and (= id "original-program:eliscript-protocol-complete-hosts") (= target "native"))

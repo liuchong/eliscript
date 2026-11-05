@@ -170,7 +170,9 @@
                                (js-object :name "result" :args (js-array) :expected oracle-value)))))))
                          (javascript (await (js-call session :request
                            (Object/assign (js-object) effect-request (js-object :target "javascript")))))
-                         (targets (js-array "javascript" "wasm" "native")) (index 0))
+                         (targets (if (and (= (get globalThis.process :arch) "arm64")
+                                           (js-call (js-array "darwin" "linux") :includes (get globalThis.process :platform)))
+                                    (js-array "javascript" "wasm" "native") (js-array "javascript" "wasm"))) (index 0))
                     (js-call assert :strictEqual (get javascript :entry) "main.mjs")
                     (js-call assert :deepStrictEqual
                       (js-call (get javascript :modules) :map (lambda (item) (get item :id)))

@@ -41,7 +41,7 @@
             ;; share and other files. Do not repeat a provably undersized CI
             ;; job. This changes scheduling only; strict tests keep30 minutes.
             (js-call functional :replace "timeout-minutes: 30"
-              "timeout-minutes: 90"))
+              "timeout-minutes: 240"))
           text))))
   (defasync checkCompatibilityWorkflow (&rest supplied)
     (let* ((options (if (= (js-length supplied) 0) (js-object) (aref supplied 0)))

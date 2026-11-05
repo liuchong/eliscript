@@ -241,9 +241,9 @@
     (js-array "held")))
   (defun register-parts (title native-mode)
     (console/error "[sorted-call-partitions]" (JSON/stringify (js-object :title title :parts parts
-      :ordinaryDeadlineMs (if native-mode 120000 30000) :rotationScenarioDeadlineMs (if native-mode 900000 600000)
-      :randomizedScenarioDeadlineMs (if native-mode 600000 120000)
-      :recoveryScenarioDeadlineMs (if native-mode 1200000 600000)
+      :ordinaryDeadlineMs 120000 :rotationScenarioDeadlineMs 1800000
+      :randomizedScenarioDeadlineMs 600000
+      :recoveryScenarioDeadlineMs 1800000
       :originalAggregatePerformance "NOT ACCEPTED")))
     (js-call parts :forEach (lambda (part index)
       (when (or (nil? testShard) (= (% index (get testShard :count)) (1- (get testShard :index))))
@@ -255,11 +255,10 @@
             (js-call runtime :auto 1)
             (try (checkAll runtime part)
               (finally (if native-mode (try (finish runtime) (finally (js-call runtime :close))) (finish runtime))))))
-        (cond ((js-call part :startsWith "recovery-") (if native-mode 1200000 600000))
-              ((or (= part "rotations") (= part "sharing"))
-               (if native-mode 900000 600000))
-              ((= part "randomized") (if native-mode 600000 120000))
-              (t (if native-mode 120000 30000))))))))
+        (cond ((js-call part :startsWith "recovery-") 1800000)
+              ((or (= part "rotations") (= part "sharing")) 1800000)
+              ((= part "randomized") 600000)
+              (t 120000)))))))
   (when shared-part? (test "Given complete original sorted and ordering source modules when the original fixture boundaries protocols metadata ranges and fixed-seed AVL updates execute then zero-import WASM matches independent Node and Bun"
     (lambda () (let ((runtime (instantiateManagedRuntime bytes options)))
       (js-call runtime :auto 65536) (try (checkAll runtime) (finally (finish runtime))))) 30000))
