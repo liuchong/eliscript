@@ -16,22 +16,9 @@
     "Given complete original wire corpus and actual HTTP capabilities when WASM executes MDP MDS and GEPO at auto(1) then independent Node and Bun observations and cleanup agree"
     "Given the identical complete wire graph when actual native code executes original codecs schema discovery and real HTTP then Node and Bun expectations and roots agree"))
   (defun wireFixtureTestRegistration (original sourceSha environment)
-    (if (not (wireFixtureFunctionalProfile sourceSha environment)) original
-      (letfn ((wrap (target)
-        (new globalThis.Proxy target (js-object
-          :apply (lambda (actual receiver arguments)
-            (let ((selected arguments))
-              (when (and (= (js-length arguments) 3) (js-call wireFunctionalTitles :includes (aref arguments 0))
-                      (= (value-type (aref arguments 1)) "function") (= (aref arguments 2) 120000))
-                (setq selected (js-call arguments :slice)) (put selected 2 0))
-              (Reflect/apply actual receiver selected)))
-          :get (lambda (actual key receiver)
-            (let ((value (Reflect/get actual key actual)))
-              (cond ((and (= key "skipIf") (= (value-type value) "function"))
-                     (lambda (&rest arguments) (wrap (Reflect/apply value actual arguments))))
-                    ((= (value-type value) "function") (js-call value :bind actual))
-                    (t value))))))))
-        (wrap original))))
+    ;; Deliberate identity: the capacity profile does not authorize disabling
+    ;; any of the three original 120-second case deadlines or native modifiers.
+    original)
   (defun observeWireCorpusProgress (runtime report)
     (let* ((descriptors (Object/getOwnPropertyDescriptors runtime)) (facade (Object/create (Object/getPrototypeOf runtime)))
            (index 0) (pending undefined))
@@ -106,18 +93,8 @@
       (Object/defineProperties wrapped (js-object
         :name (Object/getOwnPropertyDescriptor invoke "name") :length (Object/getOwnPropertyDescriptor invoke "length")))
       (put entry :value wrapped)
-      (when (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
-        (let* ((auto-entry (get descriptors :auto))
-               (original-auto (when auto-entry (get auto-entry :value))))
-          (when (= (value-type original-auto) "function")
-            (let ((auto (lambda (threshold &rest rest)
-                    (Reflect/apply original-auto runtime
-                      (js-call (js-array (if (and (= (value-type threshold) "number") (> threshold 0) (<= threshold 65536)) 2097152 threshold))
-                               :concat rest)))))
-              (Object/defineProperties auto (js-object
-                :name (Object/getOwnPropertyDescriptor original-auto "name")
-                :length (Object/getOwnPropertyDescriptor original-auto "length")))
-              (put auto-entry :value auto)))))
+      ;; Performance deferral never changes the caller's actual collection
+      ;; threshold. In particular, auto(1) remains collection at each allocation.
       (Object/defineProperties facade descriptors)
       (unless (Reflect/isExtensible runtime) (Object/preventExtensions facade)) facade))
   (defun createWireProjectFixture ()

@@ -68,7 +68,7 @@
              (path (resolve directory "compiler.mjs")))
         (await (writeFile path javascript))
         (js-call assert :strictEqual (await (readFile path "utf8")) javascript)
-        (let ((child (spawnSync (get (get globalThis.process :env) :NODE)
+        (let ((child (spawnSync (get (get globalThis.process :env) :NODE "node")
           (js-array (resolve root "tests/helpers/number-text-cross-host.mjs"))
           (js-object :encoding "utf8" :input (JSON/stringify (js-object :directory directory :samples samples))
             :timeout 30000 :maxBuffer 65536))))

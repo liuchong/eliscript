@@ -62,7 +62,7 @@
                (restore (lambda (state)
                  (funcall raw "value-exception-class-set" owner (get state :kind))
                  (funcall raw "value-error-restore" (get state :code))))
-               (defer (lambda (name heap arguments)
+               (defer (lambda (name heap arguments &rest extra)
                  (if (and active (= name "source-operation") (= heap owner))
                    (if (/= (funcall raw "last-error") 0) 0
                      (let ((matches (notification-tuple-p raw view memory heap arguments)))
@@ -72,8 +72,8 @@
                              (funcall raw "heap-pin" heap arguments)
                              (if (/= (funcall raw "last-error") 0) 0
                                (progn (js-call pending :push arguments) 3)))
-                           (funcall handler name heap arguments)))))
-                   (funcall handler name heap arguments))))
+                           (Reflect/apply handler undefined (js-call (js-array name heap arguments) :concat extra))))))
+                   (Reflect/apply handler undefined (js-call (js-array name heap arguments) :concat extra)))))
                (new-heap (retain-function-name (lambda (slots initial maximum)
                            (setq owner (Reflect/apply original-new exports (js-array slots initial maximum)))) original-new))
                (prepare (when original-prepare (retain-function-name (lambda (heap)

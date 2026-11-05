@@ -25,7 +25,7 @@
           (setq restored (js-call (js-call restored :split loop) :join (str host-script loop)))
           (setq restored (js-call (js-call restored :split "    }, 0);") :join "    }, 60000);"))))
       restored))
-  (test "persistent functional host removes only both authenticated deadlines and preserves the complete original host body and four host combinations"
+  (test "persistent functional host retains both original deadlines and preserves the complete original host body and four host combinations"
     (lambda ()
       (let* ((source (readFileSync (resolve root "tests/wasm-managed-persistent-literals.test.mjs") "utf8"))
              (strict (projectPersistentLiteralSuite root source (js-object)))
@@ -37,13 +37,13 @@
         (js-call assert :ok (js-call strict :includes "    }, 60000);"))
         (js-call assert :strictEqual (js-call functional :includes "timeout = 60000") false)
         (js-call assert :strictEqual (js-call functional :includes "encoding: 'utf8', timeout") false)
-        (js-call assert :strictEqual (js-call functional :includes "    }, 60000);") false)
-        (js-call assert :ok (js-call functional :includes "    }, 0);"))
+        (js-call assert :ok (js-call functional :includes "    }, 60000);"))
+        (js-call assert :strictEqual (js-call functional :includes "    }, 0);") false)
         (js-call assert :strictEqual (js-length (js-call functional :split "hostTest(")) (js-length (js-call source :split "hostTest(")))
         (js-call assert :ok (js-call (restored-original-tail source strict false) :endsWith tail))
         (js-call assert :ok (js-call (restored-original-tail source functional t) :endsWith tail))
         (js-call assert :deepStrictEqual (persistentLiteralHostOptions root (js-object :MARKER "retained") "/actual/bun")
-          (js-object :cwd root :encoding "utf8" :env (js-object :MARKER "retained" :BUN "/actual/bun")))
+          (js-object :cwd root :encoding "utf8" :timeout 60000 :env (js-object :MARKER "retained" :BUN "/actual/bun")))
         (let* ((directory (mkdtempSync (resolve root ".eliscript-cache/persistent-host-proof-")))
                (file (resolve directory "host.mjs")))
           (try
@@ -105,8 +105,8 @@
           "persistent literal original 1024-slot capacity DEFERRED / NOT ACCEPTED"
           (js-object :original (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)
             :effective (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864)))
-          (js-array "persistent literal original 60000ms host and case deadlines DEFERRED / NOT ACCEPTED"
-            (js-object :originalHostDeadlineMs 60000 :originalCaseDeadlineMs 60000 :functionalDeadlineMs 0))))
+          (js-array "persistent literal original 60000ms host and case deadlines retained"
+            (js-object :originalHostDeadlineMs 60000 :originalCaseDeadlineMs 60000 :functionalDeadlineMs 60000))))
         (js-call assert :strictEqual (js-length (js-call functional :split "hostTest("))
           (js-length (js-call source :split "hostTest(")))
         (js-call assert :throws (lambda () (projectPersistentLiteralSuite root (str source "\n") environment)) globalThis.TypeError))))

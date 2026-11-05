@@ -68,9 +68,15 @@
           (finally (js-call fixture :close))))))
   (test "the complete package suite retains parser and bounded assertion preloads while adding its authenticated cleanup adapter exactly once"
     (lambda ()
-      (let* ((fixture (prepareFixtureEnvironment root (get globalThis.process :env)))
+      (js-call (js-array "0" "1") :forEach (lambda (functional)
+      (let* ((fixture (prepareFixtureEnvironment root
+                (Object/assign (js-object) (get globalThis.process :env)
+                  (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE functional))))
              (environment (get fixture :environment))
-             (arguments (js-array "--smol" "test" "--timeout" "300000" "./tests/compiler-package-session.test.mjs")))
+             (arguments (js-array "--smol" "test" "--timeout" "300000" "./tests/compiler-package-session.test.mjs"))
+             (selected (if (= functional "1")
+               (resolve (get fixture :directory) "initializer-source/tests/compiler-package-session.test.mjs")
+               "./tests/compiler-package-session.test.mjs")))
         (try
           (let ((prepared (fixtureChildArguments arguments environment)))
             (js-call assert :deepStrictEqual prepared
@@ -78,7 +84,9 @@
                 "--preload" (resolve root "tools/testing/independent-cli-fixture.mjs")
                 "--preload" (resolve root "tests/helpers/bounded-assertions-install.mjs")
                 "--preload" (resolve root "tests/helpers/compiler-package-runtime-install.mjs")
-                "--timeout" "300000" "./tests/compiler-package-session.test.mjs"))
+                "--timeout" "300000" selected))
+            (when (= functional "1")
+              (js-call assert :ok (> (js-length (readFileSync selected "utf8")) 0)))
             (js-call assert :deepStrictEqual (fixtureChildArguments prepared environment) prepared))
-          (finally (js-call fixture :close))))))
+          (finally (js-call fixture :close))))))))
 )

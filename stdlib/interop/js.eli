@@ -53,7 +53,6 @@
   (defconst interop-map-factory (lambda () (new globalThis/Map)))
   (defconst interop-set-factory (lambda () (new globalThis/Set)))
   (defconst interop-object-factory (lambda () (js-object)))
-  (defconst interop-weak-map-factory (lambda () (new globalThis/WeakMap)))
   (defconst interop-map-entries
     (lambda (value)
       (js-call globalThis/Array :from
@@ -67,10 +66,18 @@
   (defconst interop-json-string (js* "JSON.stringify"))
   (defconst interop-enumerable-own-keys
     (lambda (value)
-      (js-call (js-call globalThis/Reflect :ownKeys value) :filter
-        (lambda (key)
-          (js-call (get (get globalThis/Object :prototype) :propertyIsEnumerable)
-                   :call value key)))))
+      ;; Keep this traversal inside the compiled program. A host Array.filter
+      ;; would publish a fresh managed callback for every converted object.
+      ;; GetOwnProperty examines metadata without evaluating an accessor value.
+      (let ((keys (js-call globalThis/Reflect :ownKeys value))
+            (result (js-array)) (index 0))
+        (while (< index (js-length keys))
+          (let* ((key (js-nth index keys))
+                 (descriptor (js-call globalThis/Object :getOwnPropertyDescriptor value key)))
+            (when (and (not (undefined? descriptor)) (get descriptor :enumerable))
+              (js-call result :push key)))
+          (setq index (1+ index)))
+        result)))
   (defconst interop-own-data-property
     (lambda (value key)
       (let ((descriptor (js-call globalThis/Object :getOwnPropertyDescriptor value key)))
@@ -222,22 +229,27 @@
               :max-values (get normalized "max-values" 1000000)
               :count 0
               :direction direction
-              :memo (funcall interop-weak-map-factory)
-              :active (funcall interop-weak-map-factory))))
+              ;; This private context lives for one synchronous conversion.
+              ;; Strong identity tables retain exactly the visited containers
+              ;; until that conversion returns; they are not persistent caches.
+              ;; Weak tables need ephemeron propagation during every collection
+              ;; even though no key may disappear while this traversal needs it.
+              :memo (funcall interop-map-factory)
+              :active (funcall interop-map-factory))))
 
-  (defun interop-step (context path depth)
+  (defun interop-step (context path depth &optional index)
     (when (> depth (get context "max-depth" 256))
       (interop-fail
        "ELI-INTEROP-DEPTH-LIMIT"
        "deep conversion exceeded maxDepth"
-       path))
+       (if (nil? index) path (interop-index-path path index))))
     (let ((count (1+ (get context "count" 0))))
       (put context "count" count)
       (when (> count (get context "max-values" 1000000))
         (interop-fail
          "ELI-INTEROP-VALUE-LIMIT"
          "deep conversion exceeded maxValues"
-         path))))
+         (if (nil? index) path (interop-index-path path index))))))
 
   (defun interop-scalar? (value)
     (let ((type (value-type value)))
@@ -383,6 +395,17 @@
         (interop-from-js-node value context path depth)
       value))
 
+  (defun interop-sequence-child (value context path index depth convert)
+    (if (not (get context "deep" false)) value
+      (if (interop-scalar? value)
+          (progn
+            ;; A scalar cannot contain a cycle or sharing edge. Preserve the
+            ;; exact depth/count checks, but construct its diagnostic path only
+            ;; on an error instead of allocating one string per visited scalar.
+            (interop-step context path depth index)
+            value)
+        (funcall convert value context (interop-index-path path index) depth))))
+
   (defun interop-to-js-sequence (source kind context path depth)
     (let ((source-values (interop-sequence-source source kind))
           (result (js-array))
@@ -391,11 +414,8 @@
         (js-call
          result
          :push
-         (interop-child-to-js
-          (js-nth index source-values)
-          context
-          (interop-index-path path index)
-          (1+ depth)))
+         (interop-sequence-child (js-nth index source-values)
+          context path index (1+ depth) interop-to-js-node))
         (setq index (1+ index)))
       result))
 
@@ -494,9 +514,8 @@
         (js-call
          values
          :push
-         (interop-child-from-js
-          (js-nth index source-values) context
-          (interop-index-path path index) (1+ depth)))
+         (interop-sequence-child (js-nth index source-values)
+          context path index (1+ depth) interop-from-js-node))
         (setq index (1+ index)))
       (cond
        ((= kind "portable-list") (persistent-list-from-array values))

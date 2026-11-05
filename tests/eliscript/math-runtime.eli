@@ -202,8 +202,15 @@
     (js-call assert :strictEqual math globalThis.Math)
     (let ((abs (get math :abs)) (prototype (Object/getPrototypeOf math)))
       (js-call (js-array (js-array "f16round" f16round) (js-array "sumPrecise" sumPrecise)) :forEach (lambda (entry)
-        (let* ((key (aref entry 0)) (method (aref entry 1)) (descriptor (Object/getOwnPropertyDescriptor math key)))
+        (let* ((key (aref entry 0)) (exported (aref entry 1)) (descriptor (Object/getOwnPropertyDescriptor math key))
+               (method (get descriptor :value)))
+          ;; Independent compiler scopes initialize their own real Math module.
+          ;; A helper imported from another scope need not be that same function
+          ;; object. Check the installed method and exported helper independently.
           (js-call assert :strictEqual (get math key) method)
+          (js-call assert :strictEqual (value-type exported) "function")
+          (js-call assert :strictEqual (get exported :name) key)
+          (js-call assert :strictEqual (get exported :length) 1)
           (js-call assert :deepStrictEqual (js-array (get descriptor :writable) (get descriptor :enumerable) (get descriptor :configurable)) (js-array t false t))
           (js-call assert :strictEqual (get method :name) key) (js-call assert :strictEqual (get method :length) 1)
           (js-call assert :deepStrictEqual (Object/getOwnPropertyDescriptor method "name")

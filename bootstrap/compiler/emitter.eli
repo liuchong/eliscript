@@ -1634,6 +1634,11 @@
          (combine
            (js-array "__eliscript_cons(" (emit-expression (js-nth 0 nodes)) ", "
             (emit-expression (js-nth 1 nodes)) ")")))
+        ((= name "__eliscript_array_build")
+         (require-node-arity node 2 2)
+         (combine (js-array
+           "((count, build) => { if (!Number.isInteger(count) || count < 0 || count > 67108854 || typeof build !== 'function') throw new TypeError('invalid private array builder'); return Array.from({length: count}, (_, index) => build(index)); })("
+           (emit-expression (js-nth 0 nodes)) ", " (emit-expression (js-nth 1 nodes)) ")")))
         ((= name "js-cons")
          (require-node-arity node 2 2)
          (combine

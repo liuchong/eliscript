@@ -61,9 +61,9 @@
         (js-call assert :strictEqual (get functional :resourceAcceptance) "deferred")
         (js-call assert :strictEqual (get (sequence-execution-policy baseline) :effectiveDeadlineMs) 60000)
         (js-call assert :strictEqual (get (sequence-execution-policy functional) :originalDeadlineMs) 60000)
-        (js-call assert :strictEqual (get (sequence-execution-policy functional) :effectiveDeadlineMs) nil)
+        (js-call assert :strictEqual (get (sequence-execution-policy functional) :effectiveDeadlineMs) 240000)
         (js-call assert :strictEqual (sequence-test-deadline baseline) 60000)
-        (js-call assert :strictEqual (sequence-test-deadline functional) 0)
+        (js-call assert :strictEqual (sequence-test-deadline functional) 240000)
         (let* ((registrations (js-array))
                (body (lambda () "original body"))
                (receipt (js-object :registered t))
@@ -76,7 +76,11 @@
             (funcall (sequence-test-registrar registrar functional) "functional original" body 60000) receipt)
           (js-call assert :deepStrictEqual registrations
             (js-array (js-array "strict original" body 60000)
-                      (js-array "functional original" body 0)))
+                      (js-array "functional original" body 240000)))
+          (funcall (sequence-test-registrar registrar baseline) "strict native" body 120000)
+          (funcall (sequence-test-registrar registrar functional) "functional native" body 120000)
+          (js-call assert :deepStrictEqual (js-call registrations :slice -2)
+            (js-array (js-array "strict native" body 120000) (js-array "functional native" body 480000)))
           (js-call assert :strictEqual (get (sequence-execution-policy functional) :originalDeadlineMs) 60000))
         (js-call assert :strictEqual (get build-receipt :format) "eliscript-sequence-build")
         (js-call assert :strictEqual (get build-receipt :version) 1)
@@ -116,7 +120,7 @@
                  (js-array (resolve root "tests/helpers/managed-sequence-data-host-selfhosted.mjs") configuration)))
                (js-call assert :strictEqual (get options :sourceIdentity) (get context :sourceIdentity))
                (js-call assert :strictEqual (get options :directory) (get context :directory))
-               (js-call assert :strictEqual (get (get options :policy) :effectiveDeadlineMs) nil)
+               (js-call assert :strictEqual (get (get options :policy) :effectiveDeadlineMs) 240000)
                (if (= calls 1) (throw first) (js-object :stdout output)))))
         (await (js-call assert :rejects
           (run-sequence-child "node" configuration context (sequence-functional-resources "small") runner)
@@ -420,21 +424,19 @@
     ;; compiler's memory to this process tree. Live test inputs stay rooted.
     (js-call globalThis.Bun :gc t))
 
-  (defun sequence-execution-policy (resources)
+  (defun sequence-execution-policy (resources &optional original-deadline)
     (originalCorpusExecutionPolicy (js-object
-      :record (js-object :execution (js-object :timeoutMs 60000))
+      :record (js-object :execution (js-object :timeoutMs (if (nullish? original-deadline) 60000 original-deadline)))
       :options (js-object :functionalRuntimeProfile (get resources :functionalRuntimeProfile)))))
   (defun sequence-test-deadline (resources)
-    (let ((deadline (get (sequence-execution-policy resources) :effectiveDeadlineMs)))
-      (if (nullish? deadline) 0 deadline)))
+    (get (sequence-execution-policy resources) :effectiveDeadlineMs))
   (defun sequence-test-registrar (registrar resources)
     ;; Keep numeric deadlines at each original callsite for authenticated
     ;; corpus discovery. Only the selected Bun registrar receives the
-    ;; functional execution override; strict registration keeps its argument.
+    ;; finite functional allowance; strict registration keeps its argument.
     (lambda (name body original-deadline)
       (funcall registrar name body
-        (if (nullish? (get (sequence-execution-policy resources) :effectiveDeadlineMs))
-          0 original-deadline))))
+        (get (sequence-execution-policy resources original-deadline) :effectiveDeadlineMs))))
   (defasync run-sequence-child (engine configuration context resources runner)
     (let* ((node (get (get globalThis.process :env) "NODE_BINARY" "node"))
            (command (if (= engine "bun") (get globalThis.process :execPath) node))

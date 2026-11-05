@@ -55,7 +55,8 @@
         ;; is added through the ordinary validated IR constructor and emitter.
         (str (get (emit-top-level statement) :text) "\n"))))
   (defun persistentLiteralHostOptions (root environment executable)
-    (js-object :cwd root :encoding "utf8" :env (Object/assign (js-object) environment (js-object :BUN executable))))
+    (js-object :cwd root :encoding "utf8" :timeout 60000
+      :env (Object/assign (js-object) environment (js-object :BUN executable))))
   (defun persistentLiteralFunctionalHostScript (root engine script arguments)
     (let* ((environment (get globalThis.process :env))
            (executable (get globalThis.process :execPath))
@@ -64,7 +65,7 @@
            (result (spawnSync command (js-call (js-array script) :concat arguments)
                      (persistentLiteralHostOptions root environment executable))))
       ;; Retain the original first failure, status, full report and JSON parser.
-      ;; Only this authenticated functional caller omits its total deadline.
+      ;; Capacity deferral does not remove the original host process deadline.
       (js-call assert :equal (get result :error) undefined)
       (js-call assert :equal (get result :status) 0 (str (get result :stderr) (get result :stdout)))
       (JSON/parse (js-call (get result :stdout) :trim))))
@@ -116,14 +117,8 @@
       (when functional
         (let* ((begin (unique-boundary tail "function hostScript(" 0))
                (end (unique-boundary tail "\n\nfor (const host of" begin))
-               (deadline "    }, 60000);")
-               (at (unique-boundary tail deadline end))
-               (number-at (+ at (js-length "    }, ")))
-               (zero-program (compile-ir-string "0" "persistent-functional-deadline.eli"))
-               (zero-statement (aref (get zero-program :body) 0))
-               (zero (get (emit-expression (aref (get zero-statement :children) 0)) :text)))
-          (setq tail (str (js-call tail :slice 0 begin) (js-call tail :slice end number-at)
-                      zero (js-call tail :slice (+ number-at (js-length "60000")))))))
+               (deadline (unique-boundary tail "    }, 60000);" end)))
+          (setq tail (str (js-call tail :slice 0 begin) (js-call tail :slice end)))))
       tail))
   (defun projectPersistentLiteralSuite (root source &rest supplied)
     (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex")
@@ -165,8 +160,8 @@
         (js-call globalThis.console :error "persistent literal original 1024-slot capacity DEFERRED / NOT ACCEPTED"
           (js-object :original (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)
             :effective (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864)))
-        (js-call globalThis.console :error "persistent literal original 60000ms host and case deadlines DEFERRED / NOT ACCEPTED"
-          (js-object :originalHostDeadlineMs 60000 :originalCaseDeadlineMs 60000 :functionalDeadlineMs 0)))
+        (js-call globalThis.console :error "persistent literal original 60000ms host and case deadlines retained"
+          (js-object :originalHostDeadlineMs 60000 :originalCaseDeadlineMs 60000 :functionalDeadlineMs 60000)))
       ;; Compile all new declarations together: separate compiled modules
       ;; cannot share a lexical file because each owns its compiler prelude.
       (str header (js-call source :slice 0 root-at)

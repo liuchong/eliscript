@@ -2,11 +2,11 @@
 
 ;; Inputs (environment, all JSON):
 ;;   ELISCRIPT_ORACLE_CASES    array of {"id": ..., "code": ...}
-;;   ELISCRIPT_ORACLE_MODE     "runtime" evaluates through `eliscript-runtime-eval-string';
-;;                             "native" evaluates the forms with plain `eval'
 ;;   ELISCRIPT_ORACLE_PROVIDE  array of feature names to provide before loading
 ;;   ELISCRIPT_ORACLE_LOAD     array of absolute .el files loaded once, unmodified
-;; Output (stdout): JSON array of {"id", "ok", "value"} or {"id", "ok": false, "error"}.
+;; Ordinary forms use GNU Emacs directly, without Eliscript preprocessing.
+;; Explicit extension cases use the maintained Emacs extension implementation.
+;; Output: {"id", "ok", "value"} or {"id", "ok": false, "condition", "error"}.
 
 (require 'cl-lib)
 (require 'subr-x)
@@ -41,36 +41,42 @@
 
 (defun eliscript-oracle--eval-native (code)
   "Evaluate every form of CODE with lexical binding and return the last value."
-  (let ((position 0) (value nil) (length (length code)))
-    (condition-case nil
-        (while (< position length)
-          (let ((read (read-from-string code position)))
-            (setq position (cdr read)
-                  value (eval (car read) t))))
-      (end-of-file nil))
-    value))
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (insert code)
+    (goto-char (point-min))
+    (let ((value nil))
+      ;; Only whitespace/comments end the source. An incomplete form or an
+      ;; explicit end-of-file signal from evaluated code is a real error.
+      (while (progn (forward-comment (point-max)) (not (eobp)))
+        (setq value (eval (read (current-buffer)) t)))
+      value)))
 
-(let* ((mode (or (getenv "ELISCRIPT_ORACLE_MODE") "runtime"))
-       (cases (eliscript-oracle--env "ELISCRIPT_ORACLE_CASES"))
+(let* ((cases (eliscript-oracle--env "ELISCRIPT_ORACLE_CASES"))
        (results nil))
   (dolist (feature (eliscript-oracle--env "ELISCRIPT_ORACLE_PROVIDE"))
     (provide (intern feature)))
   (dolist (file (eliscript-oracle--env "ELISCRIPT_ORACLE_LOAD"))
     (load file nil t))
-  (when (equal mode "runtime")
-    (require 'eliscript-runtime))
+  ;; Run the language reference before any extension library can affect its
+  ;; function cells. Extension loading must never redefine the reference core.
+  (setq cases (append (seq-remove (lambda (case) (eq (alist-get 'extension case) t)) cases)
+                      (seq-filter (lambda (case) (eq (alist-get 'extension case) t)) cases)))
   (dolist (case cases)
     (let ((id (alist-get 'id case))
-          (code (alist-get 'code case)))
-      (when (and (equal mode "runtime") (fboundp 'eliscript-runtime-reset-state!))
-        (eliscript-runtime-reset-state!))
+          (code (alist-get 'code case))
+          (extension (eq (alist-get 'extension case) t)))
       (condition-case err
-          (let ((value (if (equal mode "runtime")
-                           (eliscript-runtime-eval-string code)
+          (let ((value (if extension
+                           (progn
+                             (require 'eliscript-runtime)
+                             (eliscript-runtime-reset-state!)
+                             (eliscript-runtime-eval-string code))
                          (eliscript-oracle--eval-native code))))
             (push `((id . ,id) (ok . t) (value . ,(eliscript-oracle--normalize value))) results))
         (error
-         (push `((id . ,id) (ok . :false) (error . ,(format "%S" err))) results)))))
+         (push `((id . ,id) (ok . :false) (condition . ,(symbol-name (car err)))
+                 (error . ,(format "%S" err))) results)))))
   ;; `json-serialize' returns UTF-8 bytes; print decoded text so the output
   ;; stream encodes it exactly once.
   (let ((coding-system-for-write 'utf-8-unix))

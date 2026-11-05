@@ -14,7 +14,7 @@
   (import "../stage3-targets.mjs" runStage3Targets authenticateStage3Targets)
 
   (defconst release-help
-    "Eliscript JavaScript compiler bootstrap and final outputs\n\n  bootstrap --stage0-manifest FILE --output DIRECTORY\n  verify-bootstrap [--bootstrap-manifest FILE]\n  targets [--bootstrap-manifest FILE] [--corpus-records FILE] [--output DIRECTORY] [--functional-runtime-profile small]\n  compile [--bootstrap-manifest FILE] --input SOURCE --target javascript|wasm|native --output PATH\n  compile [--bootstrap-manifest FILE] --project ENTRY --root DIRECTORY --target TARGET --output PATH\n  request [--bootstrap-manifest FILE] --request FILE [--output PATH]\n  package [--bootstrap-manifest FILE] --output DIRECTORY\n  prepare-release-package [--bootstrap-manifest FILE]\n\nEmacs generates JavaScript stage0. stage0 -> stage1 -> stage2 -> stage3 all run as JavaScript.\nOnly stage3 supplies the final javascript, wasm and native program outputs.\nThe stage2/stage3 fixed point is verified before a final compiler is used.\nFunctional small resources explicitly defer the original sequence capacity acceptance.\n")
+    "Eliscript JavaScript compiler bootstrap and final outputs\n\n  bootstrap --stage0-manifest FILE --output DIRECTORY\n  verify-bootstrap [--bootstrap-manifest FILE]\n  targets [--bootstrap-manifest FILE] [--corpus-records FILE] [--output DIRECTORY] [--functional-runtime-profile small] [--resume-from PREVIOUS_DIRECTORY]\n  compile [--bootstrap-manifest FILE] --input SOURCE --target javascript|wasm|native --output PATH\n  compile [--bootstrap-manifest FILE] --project ENTRY --root DIRECTORY --target TARGET --output PATH\n  request [--bootstrap-manifest FILE] --request FILE [--output PATH]\n  package [--bootstrap-manifest FILE] --output DIRECTORY\n  prepare-release-package [--bootstrap-manifest FILE]\n\nEmacs generates JavaScript stage0. stage0 -> stage1 -> stage2 -> stage3 all run as JavaScript.\nOnly stage3 supplies the final javascript, wasm and native program outputs.\nThe stage2/stage3 fixed point is verified before a final compiler is used.\nFunctional small resources explicitly defer the original sequence capacity acceptance.\n")
 
   (defun release-default (value fallback) (if (undefined? value) fallback value))
   (defun release-type-error (message) (throw (new globalThis.TypeError message)))
@@ -207,6 +207,7 @@
                 :bootstrap-manifest (js-object :type "string")
                 :compiler-artifact (js-object :type "string")
                 :corpus-records (js-object :type "string")
+                :resume-from (js-object :type "string")
                 :functional-runtime-profile (js-object :type "string")
                 :output (js-object :type "string" :short "o")
                 :input (js-object :type "string" :short "i")
@@ -225,6 +226,8 @@
                 (and (not (undefined? (get values :host))) (/= (get values :host) "javascript")))
         (release-type-error "this release supports only a JavaScript compiler host"))
       (unless (= (js-length positionals) 1) (release-type-error "provide exactly one compiler command"))
+      (when (and (get values :resume-from) (not (= command "targets")))
+        (release-type-error "resume-from is supported only for targets"))
       (unless (undefined? (get values :functional-runtime-profile))
         (unless (and (= command "targets") (= (get values :functional-runtime-profile) "small"))
           (release-type-error "functionalRuntimeProfile is supported only as targets --functional-runtime-profile small")))
@@ -253,6 +256,7 @@
            (let ((result (await (runStage3Targets
                    (js-object :bootstrapManifestPath (release-manifest values)
                      :stage3MetadataPath (get values :compiler-artifact) :corpusRecordsPath corpus-path
+                     :resumeFrom (get values :resume-from)
                      :functionalRuntimeProfile (get values :functional-runtime-profile)
                      :outputRoot output :nativeTarget (release-default (get values :native-target)
                        (if (= (get globalThis.process :platform) "linux") "arm64-linux" "arm64-macos"))

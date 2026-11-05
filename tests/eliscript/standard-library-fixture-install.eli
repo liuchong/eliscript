@@ -7,13 +7,16 @@
   (import "../../tools/backends/managed-runtime.mjs" :as actual-wasm)
   (import "../../tools/backends/native-managed-runtime.mjs" :as actual-native)
   (import "../../tools/backends/compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
+  (import "../../tools/testing/transient-call-cases.mjs" transientCallSuite isTransientCallFixture transientCallTestRegistration)
   (import "./standard-library-fixture.mjs" standardLibraryFixturePlans standardLibraryFixtureOptions
     readStandardLibraryDescriptor standardLibraryRuntimeFacade standardLibraryFixtureTestRegistration)
   (defconst build (Object/assign (js-object) actual-build))
   (defconst root (get build :root))
   (defconst selected (js-call standardLibraryFixturePlans :filter (lambda (plan)
     (js-call (get globalThis.process :argv) :some (lambda (argument)
-      (= (resolve root argument) (resolve root (get plan :suite))))))))
+      (or (= (resolve root argument) (resolve root (get plan :suite)))
+          (and (= (get plan :suite) transientCallSuite)
+               (isTransientCallFixture root argument (get globalThis.process :env)))))))))
   (unless (= (js-length selected) 1)
     (throw (new globalThis.TypeError "standard library fixture requires exactly one authenticated suite")))
   (defconst plan (aref selected 0))
@@ -24,10 +27,17 @@
   (defconst native (Object/assign (js-object) actual-native))
   (defconst original-framework (Object/assign (js-object) framework))
   (defconst original-cases (originalSourceCaseLocators (get plan :suite) (readFileSync (resolve root (get plan :suite)) "utf8")))
-  (defconst registration (standardLibraryFixtureTestRegistration (get original-framework :test) plan (get globalThis.process :env) original-cases))
+  (defconst partitioned (and (= (get plan :suite) transientCallSuite)
+    (js-call (get globalThis.process :argv) :some (lambda (argument)
+      (isTransientCallFixture root argument (get globalThis.process :env))))))
+  (defconst registration (if partitioned (transientCallTestRegistration (get original-framework :test))
+    (standardLibraryFixtureTestRegistration (get original-framework :test) plan (get globalThis.process :env) original-cases)))
   (unless (eq registration (get original-framework :test))
-    (console/error "[standard-library-fixture-time-acceptance]" (get plan :suite)
-      "original 30000/120000ms total-case performance DEFERRED / NOT ACCEPTED; complete functional cases have no total deadline")
+    (if partitioned
+      (console/error "[transient-call-partitions] 12 original vector sizes,8 exported cases,4 callback modes run independently with original per-case deadlines; original aggregate performance NOT ACCEPTED")
+      (console/error "[standard-library-fixture-time-acceptance]" (get plan :suite)
+        "original total-case performance DEFERRED / NOT ACCEPTED; authenticated functional deadlines"
+        (get plan :functionalDeadline) (get plan :nativeFunctionalDeadline)))
     (js-call (get original-framework :mock) :module "bun:test"
       (lambda () (Object/assign (js-object) original-framework (js-object :test registration)))))
   (defun options-for (input)
@@ -68,39 +78,19 @@
                        (put forwarded 0 (Object/assign (js-object) options (js-object :foreignEntry t))))
                      (Reflect/apply lower managed (js-call (js-array modules entry runtime-ir) :concat forwarded))))))))
           (Object/assign (js-object) actual (js-object :managed wrapped-managed))))))
-  (defun wrap-deferred-runtime (facade)
-    (if (not (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1"))
-      facade
-      (let* ((descriptors (Object/getOwnPropertyDescriptors facade))
-             (entry (get descriptors :auto))
-             (original (when entry (get entry :value))))
-        (if (not (= (value-type original) "function"))
-          facade
-          (let* ((auto (lambda (threshold &rest rest)
-                   (Reflect/apply original facade
-                     (js-call (js-array (if (and (= (value-type threshold) "number") (> threshold 0) (<= threshold 65536)) 2097152 threshold))
-                              :concat rest))))
-                 (wrapped (Object/create (Object/getPrototypeOf facade))))
-            (Object/defineProperties auto (js-object
-              :name (Object/getOwnPropertyDescriptor original "name")
-              :length (Object/getOwnPropertyDescriptor original "length")))
-            (put entry :value auto)
-            (Object/defineProperties wrapped descriptors)
-            (unless (Reflect/isExtensible facade) (Object/preventExtensions wrapped))
-            wrapped)))))
   (defun instantiate-wasm (bytes &rest arguments)
     (let ((forwarded (js-call arguments :slice)))
       (when (> (js-length forwarded) 0) (put forwarded 0 (options-for (aref forwarded 0))))
-      (wrap-deferred-runtime (standardLibraryRuntimeFacade
+      (standardLibraryRuntimeFacade
         (Reflect/apply (get wasm :instantiateManagedRuntime) undefined (js-call (js-array bytes) :concat forwarded))
-        (readStandardLibraryDescriptor bytes) plan))))
+        (readStandardLibraryDescriptor bytes) plan)))
   (defasync instantiate-native (path lowered &rest arguments)
     (let ((forwarded (js-call arguments :slice)))
       (when (> (js-length forwarded) 0) (put forwarded 0 (options-for (aref forwarded 0))))
-      (wrap-deferred-runtime (standardLibraryRuntimeFacade
+      (standardLibraryRuntimeFacade
         (await (Reflect/apply (get native :instantiateNativeManagedRuntime) undefined
                  (js-call (js-array path lowered) :concat forwarded)))
-        (get lowered :descriptor) plan))))
+        (get lowered :descriptor) plan)))
   (js-call (get framework :mock) :module (resolve root "tools/backends/build.mjs")
     (lambda () (Object/assign (js-object) build (js-object :buildBackends build-backends))))
   (js-call (get framework :mock) :module (resolve root "tools/backends/managed-runtime.mjs")

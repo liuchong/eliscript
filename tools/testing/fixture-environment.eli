@@ -63,11 +63,16 @@
       ;; adapters before ESM links the archive's real bun:test dependency.
       (js-call (js-array
         (js-array "tests/js-array-text-fast-path.test.mjs" "tests/helpers/array-text-fixture-install.mjs")
+        (js-array "tests/wasm-managed-array-text.test.mjs" "tests/helpers/array-text-parity-install.mjs")
+        (js-array "tests/wasm-managed-array-sort.test.mjs" "tests/helpers/managed-fixture-repairs-install.mjs")
+        (js-array "tests/wasm-managed-concat.test.mjs" "tests/helpers/managed-fixture-repairs-install.mjs")
+        (js-array "tests/wasm-managed-operand-conversion.test.mjs" "tests/helpers/managed-fixture-repairs-install.mjs")
         (js-array "tests/wasm-managed-math.test.mjs" "tests/helpers/math-oracle-fixture-install.mjs")
         (js-array "tests/wasm-managed-number-text.test.mjs" "tests/helpers/managed-numeric-fixtures-install.mjs")
         (js-array "tests/wasm-managed-primitive-operators.test.mjs" "tests/helpers/managed-numeric-fixtures-install.mjs")
         (js-array "tests/native-node-memory.test.mjs" "tests/helpers/compiler-portable-fixtures-install.mjs")
         (js-array "tests/emacs-analysis-evidence.test.mjs" "tests/helpers/managed-capacity-registration.mjs")
+        (js-array "tests/worker-value-stream-probe.test.mjs" "tests/helpers/managed-capacity-registration.mjs")
         (js-array "tests/compiler-fragment-combine.test.mjs" "tests/helpers/managed-fixture-repairs-install.mjs")
         (js-array "tests/compiler-portable-predicates.test.mjs" "tests/helpers/compiler-portable-fixtures-install.mjs")
         (js-array "tests/compiler-portable-reader.test.mjs" "tests/helpers/compiler-portable-fixtures-install.mjs")
@@ -122,7 +127,8 @@
         (js-array "tests/wasm-managed-wire-selfhosted.test.mjs" "tests/helpers/wire-project-fixture-install.mjs")
         (js-array "tests/compiler-artifact-archive-selfhosted.test.mjs" "tests/helpers/compiler-fixture-registration-install.mjs")
         (js-array "tests/compiler-metadata-codec-selfhosted.test.mjs" "tests/helpers/compiler-fixture-registration-install.mjs")
-        (js-array "tests/compiler-matrix-original-gates-selfhosted.test.mjs" "tests/helpers/compiler-fixture-registration-install.mjs")) :forEach
+        (js-array "tests/compiler-matrix-original-gates-selfhosted.test.mjs" "tests/helpers/compiler-fixture-registration-install.mjs")
+        (js-array "tests/compiler-corpus-tools-artifact-adapters.test.mjs" "tests/helpers/compiler-fixture-registration-install.mjs")) :forEach
         (lambda (route)
           (when (js-call arguments :some (lambda (argument) (= (resolve root argument) (resolve root (aref route 0)))))
             (js-call preloads :push (resolve root (aref route 1))))))

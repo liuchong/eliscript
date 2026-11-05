@@ -1,0 +1,128 @@
+(module tools.backends.compiler-corpus-wire-host
+  (import "node:assert/strict" :default assert)
+  (defconst wireSuiteSha "05835e2d5f6fd6e973a052df3389cafb3e131fbcfce305272070b13d20453df0")
+  (defconst wireWholePart (Object/freeze (js-object :name "whole" :kind "whole" :start 0 :end 253)))
+  (defconst wireFunctionalParts
+    (Object/freeze (js-call (Array/from (js-object :length 16) (lambda (ignored index)
+      (Object/freeze (js-object :name (str "corpus-" (js-call (funcall globalThis.String index) :padStart 2 "0"))
+        :kind "corpus" :start (* index 16) :end (Math/min 253 (* (1+ index) 16)))))) :concat
+      (js-call (js-array "negative-zero" "http-contracts" "network") :map
+        (lambda (name) (Object/freeze (js-object :name name :kind name)))))))
+  (defun wireFunctionalPartition (record)
+    (let* ((original (get record :original)) (bound (when original (get original :functionalPartition))))
+      (when (and bound (= (get bound :family) "wire"))
+        (let* ((index (get bound :index)) (part (aref wireFunctionalParts index))
+               (base (get bound :originalId)))
+          (unless (and (Number/isInteger index) (>= index 0) (< index (js-length wireFunctionalParts))
+            (= (get original :suite) "tests/wasm-managed-wire.test.mjs")
+            (= (get original :fixture) "tests/fixtures/wasm-managed-wire.eli")
+            (= (get original :sourceSha256) wireSuiteSha) (= (get record :auto) 1)
+            (= (get bound :part) (get part :name)) (= (get bound :corpusCount) 253)
+            (= (JSON/stringify (get bound :parts))
+              (JSON/stringify (js-call wireFunctionalParts :map (lambda (item) (get item :name)))))
+            (= (value-type base) "string")
+            (js-call (new globalThis.RegExp "^original-managed:wire:(node|bun):auto-1$") :test base)
+            (= (get record :id) (if (= index 0) base (str base ":part-" (get part :name)))))
+            (throw (new globalThis.TypeError "wire partition differs from its complete authenticated original schedule")))
+          part))))
+  (defun wireFunctionalDeadline (record target)
+    (let ((part (wireFunctionalPartition record)))
+      (when part
+        (cond ((= target "javascript") 60000)
+          ((= (get part :kind) "corpus") (if (= target "native") 1500000 600000))
+          (t 480000)))))
+  (defun wireCasePolicy (record target)
+    (let* ((original (get record :original)) (controller (when original (get original :wireController)))
+           (part (wireFunctionalPartition record))
+           (whole (and controller (= (get controller :scope) "whole")
+             (= (get original :suite) "tests/wasm-managed-wire.test.mjs")
+             (= (get original :fixture) "tests/fixtures/wasm-managed-wire.eli")
+             (= (get original :sourceSha256) wireSuiteSha)
+             (js-call (new globalThis.RegExp "^original-managed:wire:(node|bun):auto-(65536|1)$") :test (get record :id)))))
+      (when (or whole (and part (= (get part :kind) "corpus")))
+        (js-object :start (if whole 0 (get part :start)) :end (if whole 253 (get part :end))
+          :deadlineMs (cond ((= target "javascript") 30000) ((= target "native") 240000) (t 120000))))))
+  (defun wireCaseResources (runtime)
+    (let ((usage (js-call globalThis.process :memoryUsage)))
+      (js-object :rssBytes (get usage :rss) :hostHeapUsedBytes (get usage :heapUsed)
+        :managed (when runtime (js-call runtime :stats)))))
+  (defun wire-rethrow (raw error)
+    ;; invoke's public raw ABI transfers ownership of a source exception to
+    ;; its caller. This adapter exposes host-facing HTTP functions: decode the
+    ;; actual source exception, then release that transferred handle just as
+    ;; the original hostCall already does for successful return values.
+    ;; Host exceptions are not owned raw handles and retain their identity.
+    (let ((value error) (decoded false))
+      (try (setq value (js-call raw :toHostValue error) decoded t) (catch ignored nil))
+      (when decoded (js-call raw :release error))
+      (throw value)))
+  (defun createWireRuntimeAdapter (raw)
+    ;; Phased public exports use underscores; preserve the original argument
+    ;; boxing, ownership and actual managed-runtime methods around that spelling.
+    (when raw
+      (Object/assign (js-object) raw (js-object
+        :invoke (lambda (name &rest arguments)
+          (try (Reflect/apply (get raw :invoke) raw
+            (js-call (js-array (js-call name :replaceAll "-" "_")) :concat arguments))
+            (catch error (wire-rethrow raw error))))
+        :invokeAsync (async (name &rest arguments)
+          (try (await (Reflect/apply (get raw :invokeAsync) raw
+            (js-call (js-array (js-call name :replaceAll "-" "_")) :concat arguments)))
+            (catch error (wire-rethrow raw error))))))))
+  (defasync runWirePartition (library part)
+    (let* ((cases (get library :cases)) (expected (get library :expected))
+           (runtime (createWireRuntimeAdapter (get library :runtime))) (m (get library :module))
+           (kind (get part :kind)) (results (js-array)))
+      (js-call assert :strictEqual (js-length cases) 253 "all original wire inputs")
+      (js-call assert :strictEqual (js-length (get expected :results)) 253 "complete independent reference")
+      (js-call assert :deepStrictEqual part (if (= kind "whole") wireWholePart (js-call wireFunctionalParts :find
+        (lambda (item) (= (get item :name) (get part :name))))) "canonical complete scheduling data")
+      (cond
+        ((= kind "whole")
+          (let ((index 0))
+            (while (< index (js-length wireFunctionalParts))
+              (js-call results :push (await (runWirePartition library (aref wireFunctionalParts index))))
+              (setq index (1+ index)))))
+        ((= kind "corpus")
+          (let ((index (get part :start)))
+            (while (< index (get part :end))
+              (let* ((record (aref cases index)) (name (get record :fn)) (arguments (get record :args))
+                     (started (performance/now)) (actual undefined))
+                (console/error "[wire-original-case]" (JSON/stringify (js-object :event "start" :index index
+                  :name (get record :name) :function name :resources (wireCaseResources runtime))))
+                (setq actual (JSON/parse (if runtime
+                       (Reflect/apply (get library :call) undefined (js-array runtime name arguments))
+                       (await (Reflect/apply (get m (js-call name :replaceAll "-" "_")) m arguments)))))
+                (js-call assert :deepStrictEqual actual (aref (get expected :results) index) (get record :name))
+                (js-call results :push actual)
+                (when runtime
+                  (js-call runtime :collect)
+                  (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0
+                    (str (get record :name) " frames")))
+                (console/error "[wire-original-case]" (JSON/stringify (js-object :event "complete" :index index
+                  :name (get record :name) :elapsedMs (- (performance/now) started) :resources (wireCaseResources runtime)))))
+              (setq index (1+ index)))))
+        ((= kind "negative-zero")
+          (let ((actual (if runtime
+            (let ((value (js-call runtime :invoke "parse-negative-zero")))
+              (try (js-call runtime :toHostValue value) (finally (js-call runtime :release value))))
+            (js-call m :parse_negative_zero))))
+            (js-call assert :strictEqual actual (get expected :negativeZero))
+            (js-call results :push actual)))
+        ((= kind "http-contracts")
+          (let* ((api (if runtime (Reflect/apply (get library :targetHTTP) undefined (js-array runtime))
+                        (get library :javascriptHTTP)))
+                 (actual (await (Reflect/apply (get library :httpContracts) undefined (js-array api)))))
+            (js-call assert :deepStrictEqual actual (get expected :http))
+            (js-call results :push actual)))
+        ((= kind "network")
+          ;; Both paths run the original real HTTP server, discovery, safe usage,
+          ;; POST and original-echo assertions before reporting completion.
+          ;; This is assertion completion, not invented network return data.
+          (if runtime (await (Reflect/apply (get library :checkNetwork) undefined (js-array runtime)))
+            (await (Reflect/apply (get library :checkJavaScriptNetwork) undefined (js-array))))
+          (js-call results :push (js-object :originalNetworkAssertionsCompleted t))))
+      (js-call assert :strictEqual (get (js-object) :polluted) undefined)
+      (when runtime (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
+      (js-object :scope "complete-original-wire-partition" :part (get part :name) :results results)))
+  (export wireSuiteSha wireWholePart wireFunctionalParts wireFunctionalPartition wireFunctionalDeadline wireCasePolicy createWireRuntimeAdapter runWirePartition))

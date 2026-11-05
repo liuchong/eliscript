@@ -7,12 +7,15 @@
   (import "node:path" resolve)
   (import "node:crypto" createHash)
   (import "../../tools/testing/persistent-literal-fixture.mjs" projectPersistentLiteralSuite)
+  (import "../../tools/testing/managed-primitive-own-repairs.mjs" transformOriginalPrimitiveRuntimeSuite)
+  (import "../../tools/testing/initializer-array-fixture.mjs" projectCurrentSourceExpectations)
   (import "../../tools/backends/build.mjs" :as actual-build)
   (import "../../tools/testing/managed-fixture-repairs.mjs" managedFixtureRepairPlans malformedEmptyBindingsTitle malformedVariadicCallsTitle
     nativePrototypeFixtureSource persistentBoundaryFixtureSource managedReferenceChildArguments managedFixtureTestMethod managedFixtureRealmPressureTitle managedFixtureFunctionalArguments
     nativePromiseTitle nativePrototypeNodeTitle assertNativePrototypePromise assertNativePrototypeNode assertMalformedEmptyBindings assertMalformedVariadicCalls
     assertMalformedTypeof assertMalformedIntrinsic assertNamespaceTypeAndPressure assertNamespaceCopyTrap assertMalformedTextMethods assertTextConstructorSupport assertRegexpMalformed assertRegexpExactSupport)
   (import "../../tools/testing/managed-array-repairs.mjs" arrayCallbackCapacityTitle arraySpliceSupportTitle runNormalArrayCallbackCapacity runArraySpliceSupport)
+  (import "../../tools/testing/managed-error-priority.mjs" assertSortErrorPriority assertConcatErrorPriority assertTextMethodErrorPriority)
   (import "../../tools/testing/managed-regexp-repairs.mjs" regexpBacktrackingTitle runRegexpBacktrackingSemantics regexpIndicesTitle runRegexpIndicesSemantics regexpPropertySourceTitle runRegexpPropertySourceReads)
   (import "./performance-acceptance.mjs" currentPerformanceTest)
   (defconst build (Object/assign (js-object) actual-build))
@@ -21,12 +24,16 @@
   (defconst selected (js-call managedFixtureRepairPlans :filter (lambda (plan)
     (js-call (get globalThis.process :argv) :some (lambda (argument)
       (or (= (resolve root argument) (resolve root (get plan :suite)))
-        (and (= (get plan :kind) "persistent-boundary")
+        (and (js-call (js-array "persistent-boundary" "text-error-priority" "strings") :includes (get plan :kind))
           (= (value-type (get (get globalThis.process :env) :ELISCRIPT_TEST_FIXTURE_DIRECTORY)) "string")
           (= (resolve root argument) (resolve (get (get globalThis.process :env) :ELISCRIPT_TEST_FIXTURE_DIRECTORY)
-            "initializer-source/tests/wasm-managed-persistent-literals.test.mjs"))
+            "initializer-source" (get plan :suite)))
           (= (readFileSync (resolve root argument) "utf8")
-            (projectPersistentLiteralSuite root (readFileSync (resolve root (get plan :suite)) "utf8"))))))))))
+            (if (= (get plan :kind) "persistent-boundary")
+              (projectPersistentLiteralSuite root (readFileSync (resolve root (get plan :suite)) "utf8") (get globalThis.process :env))
+              (if (= (get plan :kind) "strings")
+                (projectCurrentSourceExpectations root (get plan :suite) (readFileSync (resolve root (get plan :suite)) "utf8"))
+                (transformOriginalPrimitiveRuntimeSuite (readFileSync (resolve root (get plan :suite)) "utf8") (get plan :suite))))))))))))
   (unless (= (js-length selected) 1)
     (throw (new globalThis.TypeError "managed fixture repairs own exactly one authenticated original suite")))
   (defconst plan (aref selected 0))
@@ -40,6 +47,7 @@
   (defvar backend undefined)
   (defvar runtime undefined)
   (defvar native-program undefined)
+  (defvar operand-program undefined)
   (defconst registrations (new globalThis.Map))
   (defvar capacity-registrations 0)
   (defvar normal-registered false)
@@ -61,6 +69,17 @@
             (async () (await (runRegexpIndicesSemantics backend runtime))) 120000))))))
   (defconst replacements (Object/create nil))
   (cond
+    ((= kind "sort-error-priority")
+      (put replacements "Given a failing comparison after source mutation, when sorting aborts, then collected values are not prematurely written back and caller roots survive"
+        (async () (await (assertSortErrorPriority backend runtime)))))
+    ((= kind "concat-error-priority")
+      (put replacements "Given a real array-copy trap, when concat enters its private frame, then inputs and the caller frame remain owned after unwinding"
+        (async () (await (assertConcatErrorPriority backend "array"))))
+      (put replacements "Given a real string-copy trap, when concat aborts, then outer roots survive and prior argument errors suppress the later trap"
+        (async () (await (assertConcatErrorPriority backend "string")))))
+    ((= kind "text-error-priority")
+      (put replacements "ordinary text method values are captured before arguments and ignored extras complete before noncallable failure"
+        (async () (await (assertTextMethodErrorPriority backend runtime operand-program)))))
     ((= kind "native-prototype")
       (put replacements nativePromiseTitle (async () (await (assertNativePrototypePromise backend runtime native-program))))
       (put replacements nativePrototypeNodeTitle (async () (await (assertNativePrototypeNode backend native-program)))))
@@ -105,7 +124,8 @@
           (let ((result (Reflect/apply compile compiler forwarded)))
             (when (and (= kind "native-prototype") (= (aref inputs 1) "native-prototype-callables.eli"))
               (setq native-program result))
-            (when (= (aref inputs 1) "runtime.eli") (setq runtime result)) result))))
+            (when (= (aref inputs 1) "runtime.eli") (setq runtime result))
+            (when (and (= kind "text-error-priority") (= (aref inputs 1) "operand-conversion.eli")) (setq operand-program result)) result))))
       ;; The JS and managed emitters receive the same maintained fixture source.
       (when (= kind "persistent-boundary")
         (let* ((js-entry (get descriptors :compile_string)) (js-compile (get js-entry :value)))
@@ -114,7 +134,20 @@
               (put forwarded 0 (persistentBoundaryFixtureSource (aref inputs 0) (aref inputs 1)))
               (Reflect/apply js-compile compiler forwarded))))))
       (Object/defineProperties facade descriptors)
-      (setq backend (Object/assign (js-object) actual (js-object :compiler facade))) backend))
+      (setq backend (Object/assign (js-object) actual (js-object :compiler facade)))
+      (when (and (= kind "namespace-copy") (= (get (get globalThis.process :env) :ELISCRIPT_TRACE_TEST_CHILDREN) "1"))
+        (let* ((managed (get actual :managed)) (emit (get managed :emit_managed_project_wasm)) (sequence 0))
+          (put backend :managed (Object/assign (js-object) managed (js-object
+            :emit_managed_project_wasm (lambda (&rest inputs)
+              (let ((started (performance/now)) (index (setq sequence (1+ sequence))))
+                (try
+                  (try (console/error "managed-project-emit-start" (js-object :sequence index)) (catch ignored nil))
+                  (Reflect/apply emit managed inputs)
+                  (finally (try
+                    (console/error "managed-project-emit-end" (js-object :sequence index
+                      :elapsedMs (Math/round (- (performance/now) started))))
+                    (catch ignored nil)))))))))))
+      backend))
   (when compiler-case
     (js-call (get original :mock) :module (resolve root "tools/backends/build.mjs")
       (lambda () (Object/assign (js-object) build (js-object :buildBackends buildBackends)))))
@@ -124,7 +157,7 @@
       :apply (lambda (target receiver arguments)
         (let ((functional (managedFixtureFunctionalArguments plan (get globalThis.process :env) arguments)))
           (unless (eq functional arguments)
-            (console/error "original 30000ms total-time acceptance DEFERRED / NOT ACCEPTED; complete original functional inputs retain no total deadline"
+            (console/error "original 30000ms total-time acceptance DEFERRED / NOT ACCEPTED; complete original functional inputs have a bounded deadline"
               (get plan :suite) (aref arguments 0))
             (setq arguments functional)))
         (register-normal target receiver)

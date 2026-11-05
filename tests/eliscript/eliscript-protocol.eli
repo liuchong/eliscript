@@ -75,7 +75,7 @@
               :forEach (lambda (text) (js-call assert :ok (js-call generated :includes text))))
             ;; The immutable module binding now has a TDZ guard. Its actual
             ;; WeakMap allocation remains required; storage spelling is private.
-            (js-call assert :match generated (new globalThis.RegExp "(?:const|var) protocol_states = new (?:globalThis\\.)?WeakMap\\(\\)"))
+            (js-call assert :match generated (new globalThis.RegExp "(?:const|var) protocol_states = new (?:\\((?:globalThis\\.)?WeakMap\\)|(?:globalThis\\.)?WeakMap)\\(\\)"))
             (js-call (js-array "Runtime.defineProtocol" "Runtime.extendProtocol" "vite" "react")
               :forEach (lambda (text) (js-call assert :strictEqual (js-call generated :includes text) false))))
           (let ((facade (await (readFile (resolve root "runtime/core/protocol.mjs") "utf8"))))

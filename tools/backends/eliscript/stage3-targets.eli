@@ -1,12 +1,13 @@
 (module tools.backends.stage3-targets
-  (import "node:fs/promises" readFile writeFile mkdir realpath)
-  (import "node:fs" existsSync)
+  (import "node:fs/promises" readFile writeFile mkdir realpath copyFile)
+  (import "node:fs" existsSync constants)
   (import "node:path" resolve dirname relative)
   (import "node:util" isDeepStrictEqual)
   (import "./build.mjs" root)
   (import "./compiler-bootstrap.mjs" compilerFailure compilerDigest saveCompilerMetadata compilerSourceIdentity)
   (import "./compiler-build.mjs" loadCompilerSources independentCompilerProductIdentity)
   (import "./compiler-metadata.mjs" readCompilerMetadata)
+  (import "./compiler-matrix-resume.mjs" findCompilerMatrixResumeManifests)
   (import "./compiler-matrix.mjs" loadCompilerMatrixCorpus runStage3CompilerTargetCell classifyStage3Corpus)
   (import "./compiler-corpus-execution.mjs" compilerCorpusRuntimeAcceptance)
   (import "./dist/bootstrap-js-stages.mjs" compareJsFixedPoint)
@@ -153,6 +154,8 @@
                              :signal signal :sessionOptions (get options :sessionOptions) :onStage observer))
                      (_resources (unless (undefined? (get options :functionalRuntimeProfile))
                        (put call :functionalRuntimeProfile (get options :functionalRuntimeProfile))))
+                     (_resume (when (and (get options :resumeManifests) (get (get options :resumeManifests) target))
+                       (put call :resumeManifestPath (get (get options :resumeManifests) target))))
                      (actual (await (funcall run-cell call)))
                      (metadata (get actual :metadata)))
                 (put entry :directory (get actual :directory))
@@ -213,7 +216,7 @@
     (object-options input)
     (compilerCorpusRuntimeAcceptance nil input)
     (js-call (js-array "host" "target" "producer" "producers" "compilerArtifact" "runCell" "execute" "compare" "corpusRecords"
-              "originalOracle" "programCache" "seedOracleCache" "parallelTargets")
+              "originalOracle" "programCache" "seedOracleCache" "parallelTargets" "resumeManifests" "resumeManifestPath")
       :forEach (lambda (key) (when (Object/hasOwn input key)
         (type-fail (+ "final stage3 acceptance does not accept " key)))))
     (let* ((options (snapshot input))
@@ -223,11 +226,26 @@
            (corpus (await (loadCompilerMatrixCorpus (js-object :sourceRoot source-root :recordsPath (get options :corpusRecordsPath)))))
            (sources (await (loadCompilerSources (js-object :sourceRoot source-root))))
            (source-identity (compilerSourceIdentity sources))
+           (resume-from (get options :resumeFrom))
+           (_resume-output (when (and (not (undefined? resume-from)) (= (required-path resume-from "resumeFrom") output))
+             (type-fail "continuation requires a new output directory to preserve the previous evidence")))
+           (resumes (await (findCompilerMatrixResumeManifests resume-from
+             (js-object :sourceIdentity source-identity :producerIdentity (get authentication :productIdentity)
+               :corpusRecordsSha256 (get corpus :recordsSha256) :functionalRuntimeProfile (get options :functionalRuntimeProfile)))))
            (frozen-path (resolve output "corpus" "records.json"))
            (summary-path (resolve output "stage3-targets.json")))
       (identical source-identity (get authentication :sourceIdentity) "current formal source identity")
       (await (mkdir (dirname frozen-path) (js-object :recursive t)))
-      (await (writeFile frozen-path (get corpus :recordsBytes)))
+      (if (and (= (value-type (get options :corpusRecordsPath)) "string")
+               (/= (resolve (get options :corpusRecordsPath)) frozen-path))
+        ;; On clone-capable filesystems, frozen runs share physical storage
+        ;; while retaining separate files and independent future writes.
+        (progn
+          (await (copyFile (resolve (get options :corpusRecordsPath)) frozen-path
+            (get constants :COPYFILE_FICLONE)))
+          (unless (= (compilerDigest (await (readFile frozen-path))) (get corpus :recordsSha256))
+            (fail "frozen stage3 corpus changed while archiving")))
+        (await (writeFile frozen-path (get corpus :recordsBytes))))
       (let* ((summary (js-object :format "eliscript-stage3-targets" :version 1 :scope "javascript-stage3-output-targets"
                :status "running" :verification "unverified" :bootstrapManifestPath (get authentication :bootstrapManifestPath)
                :stage3MetadataPath (get authentication :stage3MetadataPath) :sourceIdentity source-identity
@@ -238,6 +256,7 @@
                  (Object/assign (js-object) options (js-object :sourceAssets (get (get corpus :document) :evidence))))))
                :semanticComparison "each effective record uses the original independent Seed oracle and exact comparison"
                :functionalRuntimeProfile (get options :functionalRuntimeProfile) :resourceAcceptance "not-evaluated"
+               :resumeFrom resume-from
                :targets (js-array)))
              ;; Each complete binary-output cell can retain a large compiler
              ;; and managed heap. Keep final acceptance sequential; the
@@ -248,6 +267,7 @@
                :programCache (new globalThis.Map)
                :nativeTarget (get options :nativeTarget) :signal (get options :signal)
                :functionalRuntimeProfile (get options :functionalRuntimeProfile)
+               :resumeManifests resumes
                :sessionOptions (get options :sessionOptions) :onStage (get options :onStage))))
         (await (saveCompilerMetadata summary-path summary))
         ;; The frozen corpus is checked before every target. Each cell keeps

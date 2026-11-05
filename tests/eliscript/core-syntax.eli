@@ -43,7 +43,7 @@
           (cond
             ((js-call line :startsWith ";;;; case ")
               (setq current (js-object :id (js-call (js-call line :slice 10) :trim)
-                                       :code "" :expect undefined :error nil :oracle false
+                                       :code "" :expect undefined :error nil :oracle false :extension false
                                        :file file))
               (js-call cases :push current))
             ((nil? current) nil)
@@ -53,8 +53,15 @@
               (put current :error (js-call (js-call line :slice 11) :trim)))
             ((= (js-call line :trim) ";;;; oracle")
               (put current :oracle t))
+            ((= (js-call line :trim) ";;;; oracle extension")
+              (put current :oracle t)
+              (put current :extension t))
             (t (put current :code (str (get current :code) line "\n")))))
         (setq index (1+ index)))
+      (js-call cases :forEach (lambda (entry)
+        (unless (get entry :oracle)
+          (throw (new globalThis.TypeError
+            (str "language fixture must declare a GNU Emacs reference: " (get entry :id)))))))
       cases))
 
   (defun fixture-files ()
@@ -90,26 +97,27 @@
       (js-object :ok t
                  :value (serializeValue
                          (evalProgram (get entry :code) (js-object :session session))))
-      (catch error (js-object :ok false :message (error-text error)))))
+      (catch error (js-object :ok false :message (error-text error)
+                             :condition (get error :conditionSymbol)))))
 
   ;; ------------------------------------------------------------------
   ;; Native Emacs oracle
   ;; ------------------------------------------------------------------
 
-  (defun run-emacs-oracle (entries mode provide load)
+  (defun run-emacs-oracle (entries provide load)
     (let* ((payload (JSON/stringify
                      (js-call entries :map
-                              (lambda (entry) (js-object :id (get entry :id) :code (get entry :code))))))
+                              (lambda (entry) (js-object :id (get entry :id) :code (get entry :code)
+                                                        :extension (= (get entry :extension) t))))))
            (environment (Object/assign (js-object) (get globalThis.process :env)
                                        (js-object :ELISCRIPT_ORACLE_CASES payload
-                                                  :ELISCRIPT_ORACLE_MODE mode
                                                   :ELISCRIPT_ORACLE_PROVIDE (JSON/stringify provide)
                                                   :ELISCRIPT_ORACLE_LOAD (JSON/stringify load))))
            (child (spawnSync emacs-program
                              (js-array "--batch" "-Q" "-L" "editor" "-L" "compiler"
                                        "-l" "tests/fixtures/core-syntax/oracle-driver.el")
                              (js-object :cwd project-root :env environment :encoding "utf8"
-                                        :maxBuffer 67108864))))
+                                        :maxBuffer 67108864 :timeout 10000))))
       (unless (= (get child :status) 0)
         (throw (new globalThis.Error (str "native Emacs oracle failed: "
                                           (get child :stderr) (get child :stdout)))))
@@ -127,13 +135,23 @@
                  (lambda (file)
                    (js-call (parse-fixture file) :forEach
                             (lambda (entry) (when (get entry :oracle) (js-call entries :push entry))))))
-        (setq runtime-oracle (run-emacs-oracle entries "runtime" (js-array) (js-array)))))
+        (setq runtime-oracle (run-emacs-oracle entries (js-array) (js-array)))))
     runtime-oracle)
 
   (defun check-case (entry)
     (let* ((domain (js-call (get entry :id) :slice 0 3))
            (outcome (run-timed (get entry :id) domain
                                (lambda () (evaluate-case entry (createSession))))))
+      (when (get entry :oracle)
+        (let ((native (js-call (runtime-oracle-results) :get (get entry :id))))
+          (js-call (expect native) :toBeDefined)
+          (js-call (expect (get native :ok)) :toBe (get outcome :ok))
+          (if (get native :ok)
+            (progn
+              (unless (undefined? (get entry :expect))
+                (js-call (expect (get entry :expect)) :toEqual (get native :value)))
+              (js-call (expect (get outcome :value)) :toEqual (get native :value)))
+            (js-call (expect (get outcome :condition)) :toBe (get native :condition)))))
       (if (get entry :error)
           (progn
             (js-call (expect (get outcome :ok)) :toBe false)
@@ -143,12 +161,7 @@
           (unless (get outcome :ok)
             (throw (new globalThis.Error (str (get entry :id) " failed: " (get outcome :message)))))
           (unless (undefined? (get entry :expect))
-            (js-call (expect (get outcome :value)) :toEqual (get entry :expect)))))
-      (when (get entry :oracle)
-        (let ((native (js-call (runtime-oracle-results) :get (get entry :id))))
-          (js-call (expect (get native :ok)) :toBe (get outcome :ok))
-          (when (get outcome :ok)
-            (js-call (expect (get outcome :value)) :toEqual (get native :value)))))))
+            (js-call (expect (get outcome :value)) :toEqual (get entry :expect)))))))
 
   ;; One Bun test per fixture case: T01-T11 and T13.
   (js-call (fixture-files) :forEach
@@ -279,7 +292,7 @@
           (run-timed "T15-01" "T15"
                      (lambda ()
                        (let* ((probes (parse-fixture (resolve fixture-directory "che-probes.el")))
-                              (native (run-emacs-oracle probes "native" che-stub-features
+                              (native (run-emacs-oracle probes che-stub-features
                                                         (che-absolute-files)))
                               (session (che-session)))
                          (js-call probes :forEach

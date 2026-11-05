@@ -6,7 +6,7 @@
   (import "./helpers/managed-capacity-registration.mjs" managedCapacityPlans managedCapacityRegistration)
 
   (test "capacity registration preserves the complete original suite bytes and strict default runner" (lambda ()
-    (js-call assert :strictEqual (js-length managedCapacityPlans) 3)
+    (js-call assert :strictEqual (js-length managedCapacityPlans) 4)
     (js-call managedCapacityPlans :forEach (lambda (plan)
       (let* ((bytes (readFileSync (get plan :suite)))
              (actual (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))

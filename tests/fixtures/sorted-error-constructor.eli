@@ -1,0 +1,6 @@
+(module tests.sorted-error-constructor
+  ;; The ABI returns source exceptions as owning handles. A closed target has
+  ;; its own intrinsic constructors; a host realm's TypeError is a different
+  ;; object. Export the real target constructor, never a name-based substitute.
+  (defun comparison-error-constructor () globalThis.TypeError)
+  (export comparison-error-constructor))

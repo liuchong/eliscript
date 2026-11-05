@@ -105,11 +105,17 @@
       result))
 
   (defportable persistent-set-to-array (set)
-    (persistent-set-array-reverse
-     (persistent-set-reduce
-      (lambda (result value) (js-cons value result))
-      (js-array)
-      set)))
+    (let ((pending (persistent-set-reduce
+            (lambda (result value) (js-object :value value :next result)) nil set))
+          (ordered nil))
+      (while (not (nil? pending))
+        (setq ordered (js-object :value (get pending "value") :next ordered)
+              pending (get pending "next")))
+      (__eliscript_array_build (persistent-set-count set)
+        (lambda (_index)
+          (let ((value (get ordered "value")))
+            (setq ordered (get ordered "next")) value)))))
+
 
   (defportable persistent-set-from-array
       (hash-function key-equal-function values)

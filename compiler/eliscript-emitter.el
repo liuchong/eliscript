@@ -306,7 +306,7 @@ call any function. Return the decision of each recorded access in order."
                 + * - / % mod = /= not= < <= > >= 1+ 1- eq equal null nil? undefined? nullish?
                 int32 uint32 imul32 bit-and bit-or bit-xor bit-not bit-shift-left bit-shift-right unsigned-bit-shift-right
                 value-type host-identity-token string-code-unit-at string-from-code-unit string-to-number string-to-bigint number-float64-words
-                list vector hash-map hash-set queue js-array car cdr cons js-cons nth js-nth aref length js-length
+                list vector hash-map hash-set queue js-array car cdr cons js-cons nth js-nth aref length js-length __eliscript_array_build
                 new print str object-keys object-has? object-assoc __eliscript_arity_error funcall apply get put js-call await throw))))
          (list :children
                (append (unless fixed (list (list :expression operator scope)))
@@ -392,7 +392,7 @@ call any function. Return the decision of each recorded access in order."
                 + * - / % mod = /= not= < <= > >= 1+ 1- eq equal null nil? undefined? nullish?
                 int32 uint32 imul32 bit-and bit-or bit-xor bit-not bit-shift-left bit-shift-right unsigned-bit-shift-right
                 value-type host-identity-token string-code-unit-at string-from-code-unit string-to-number string-to-bigint number-float64-words
-                list vector hash-map hash-set queue js-array car cdr cons js-cons nth js-nth aref length js-length
+                list vector hash-map hash-set queue js-array car cdr cons js-cons nth js-nth aref length js-length __eliscript_array_build
                 new print str object-keys object-has? object-assoc __eliscript_arity_error funcall apply get put js-call await throw))
               operator (eliscript-emitter--tdz-ground-expression operator scope))
           (eliscript-emitter--tdz-ground-sequence arguments scope))))))
@@ -682,7 +682,7 @@ must retain their ordinary property identity and receiver."
                              value-type host-identity-token string-code-unit-at
                              string-from-code-unit string-to-number string-to-bigint
                              number-float64-words eq equal null nil? undefined? nullish?
-                             car cdr cons js-cons nth js-nth aref length js-length
+                             car cdr cons js-cons nth js-nth aref length js-length __eliscript_array_build
                              object-keys object-has? object-assoc __eliscript_arity_error
                              get put js-call new print str funcall apply))
                      (mapc #'walk arguments))
@@ -1998,6 +1998,11 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
       ('cons
        (eliscript-emitter--require-arity "cons" arguments 2 2)
        (format "__eliscript_cons(%s, %s)"
+               (eliscript-emitter-emit-expression (nth 0 arguments))
+               (eliscript-emitter-emit-expression (nth 1 arguments))))
+      ('__eliscript_array_build
+       (eliscript-emitter--require-arity "__eliscript_array_build" arguments 2 2)
+       (format "((count, build) => { if (!Number.isInteger(count) || count < 0 || count > 67108854 || typeof build !== 'function') throw new TypeError('invalid private array builder'); return Array.from({length: count}, (_, index) => build(index)); })(%s, %s)"
                (eliscript-emitter-emit-expression (nth 0 arguments))
                (eliscript-emitter-emit-expression (nth 1 arguments))))
       ('js-cons

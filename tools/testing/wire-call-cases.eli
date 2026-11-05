@@ -1,0 +1,160 @@
+(module tools.testing.wire-call-cases
+  (import "node:crypto" createHash)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "../../dist/bootstrap/compiler.mjs" compile-string compile-ir-string)
+  (import "../../dist/bootstrap/emitter.mjs" emit-top-level emit-expression)
+  (defconst wireCallSuite "tests/wasm-managed-wire-selfhosted.test.mjs")
+  (defconst wireCallGround "tests/wasm-managed-wire-test-ground.mjs")
+  (defconst wireCallSha "05835e2d5f6fd6e973a052df3389cafb3e131fbcfce305272070b13d20453df0")
+  (defvar active undefined)
+  (defun wireCallProfile (environment)
+    (and (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
+         (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")))
+  (defun wireNetworkOptions (&optional environment)
+    (js-object :timeoutMs (if (wireCallProfile
+      (if (nullish? environment) (get globalThis.process :env) environment)) 30000 3000)))
+  (defun wireNetworkListen (server &optional environment)
+    ;; Functional binary calls can occupy the host event loop between real
+    ;; requests. An unrelated idle keep-alive expiry must not race the next
+    ;; request. Request/abort contracts and the owning process deadline remain
+    ;; enforced; the original finally closes every connection. Strict mode
+    ;; keeps the server's original idle policy unchanged.
+    (when (wireCallProfile (if (nullish? environment) (get globalThis.process :env) environment))
+      (put server :keepAliveTimeout 0))
+    (new globalThis.Promise (lambda (accept)
+      (js-call server :listen 0 "127.0.0.1" accept))))
+  (defun runtimeCallShard (environment)
+    (let ((index (get environment :ELISCRIPT_CALL_SHARD_INDEX))
+          (count (get environment :ELISCRIPT_CALL_SHARD_COUNT))
+          (integer (new globalThis.RegExp "^[1-9][0-9]*$")))
+      (if (and (undefined? index) (undefined? count)) nil
+        (progn
+          (unless (and (wireCallProfile environment) (= (value-type index) "string")
+                       (= (value-type count) "string") (js-call integer :test index) (js-call integer :test count)
+                       (Number/isSafeInteger (funcall globalThis.Number index))
+                       (Number/isSafeInteger (funcall globalThis.Number count))
+                       (<= (funcall globalThis.Number index) (funcall globalThis.Number count)))
+            (throw (new globalThis.TypeError "runtime call shards require the explicit functional profile and a valid index/count")))
+          (js-object :index (funcall globalThis.Number index) :count (funcall globalThis.Number count))))))
+  (defun wirePartEnabled (kind key)
+    (or (undefined? active) (and (= (get active :kind) kind) (= (get active :key) key))))
+  (defun replace-once (source before after)
+    (let ((at (js-call source :indexOf before)))
+      (unless (and (>= at 0) (= (js-call source :indexOf before (1+ at)) -1))
+        (throw (new globalThis.TypeError "wire original source boundary changed")))
+      (str (js-call source :slice 0 at) after (js-call source :slice (+ at (js-length before))))))
+  (defun wireCallParts (cases)
+    (unless (and (Array/isArray cases) (> (js-length cases) 0))
+      (throw (new globalThis.TypeError "wire partitions require the actual complete original cases")))
+    (js-call (js-call cases :map (lambda (record index)
+      (js-object :kind "corpus" :key index :label (get record :name)))) :concat
+      (js-call (js-array "negative-zero" "http-contracts" "network") :map
+        (lambda (key) (js-object :kind "tail" :key key :label key)))))
+  (defun wireCallTestRegistration (original cases &optional environment)
+    (let* ((environment (if (nullish? environment) (get globalThis.process :env) environment))
+           (functional (wireCallProfile environment))
+           (parts (wireCallParts cases))
+           (shard (runtimeCallShard environment))
+           (selected (if shard (js-call parts :filter (lambda (part position)
+             (= (% position (get shard :count)) (1- (get shard :index))))) parts)))
+      (letfn ((wrap (target)
+        (new globalThis.Proxy target (js-object
+          :apply (lambda (actual receiver arguments)
+            (let ((title (aref arguments 0)))
+              (if (not (or
+                    (= title "Given complete original wire corpus and actual HTTP capabilities when WASM executes MDP MDS and GEPO at auto(1) then independent Node and Bun observations and cleanup agree")
+                    (= title "Given the identical complete wire graph when actual native code executes original codecs schema discovery and real HTTP then Node and Bun expectations and roots agree")))
+                (when (or (nil? shard) (= (get shard :index) 1)) (Reflect/apply actual receiver arguments))
+                (progn
+                  (unless (and (= (js-length arguments) 3) (= (aref arguments 2) 120000))
+                    (throw (new globalThis.TypeError "wire original callback deadline changed")))
+                  (console/error "[wire-call-partitions]" (JSON/stringify
+                    (js-object :title title :corpus (js-length cases) :parts (js-length parts)
+                      :selectedParts (js-length selected) :shard shard
+                      :deadlineMs 120000 :nativeHTTPFunctionalDeadlineMs (if functional 240000 120000)
+                      :originalAggregatePerformance "NOT ACCEPTED")))
+                  (js-call selected :forEach (lambda (part)
+                    (let ((callback (aref arguments 1))
+                          (deadline (if (and functional (js-call title :startsWith "Given the identical complete wire graph")
+                            (= (get part :kind) "tail") (= (get part :key) "http-contracts")) 240000 120000)))
+                      (Reflect/apply actual receiver (js-array
+                        (str title " [" (get part :kind) "/" (get part :key) ": " (get part :label) "]")
+                        (async ()
+                          (unless (undefined? active) (throw (new globalThis.Error "wire partitions must run independently")))
+                          (setq active part)
+                          (try (await (funcall callback)) (finally (setq active undefined))))
+                        deadline)))))))))
+          :get (lambda (actual key receiver)
+            (let ((value (Reflect/get actual key actual)))
+              (cond ((and (= key "skipIf") (= (value-type value) "function"))
+                     (lambda (&rest arguments) (wrap (Reflect/apply value actual arguments))))
+                    ((= (value-type value) "function") (js-call value :bind actual))
+                    (t value))))))))
+        (wrap original))))
+  (defun wire-template (root kind key)
+    ;; All new control flow comes from the language compiler. The placeholder
+    ;; is replaced only by the authenticated, unchanged original statements.
+    (let* ((imports (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/testing/wire-call-cases.mjs")) :href))
+                    " wirePartEnabled wireCallTestRegistration wireNetworkOptions wireNetworkListen)\n"))
+           (code (str imports "(defun wireOriginalBody () undefined)\n"
+             "(defun wireGuard (index) (if (wirePartEnabled " (JSON/stringify kind) " " key ") (wireOriginalBody)) undefined)\n"
+             "(defun wireFactory (test cases) (wireCallTestRegistration test cases))"
+             "(defun wireOptions () (wireNetworkOptions))"
+             "(defun wireListen (server) (wireNetworkListen server))"))
+           (program (compile-ir-string code "wire-call-partition.eli"))
+           (body (get program :body)) (prefix (compile-string code "wire-call-partition.eli")))
+      (js-call (js-call body :slice 1) :forEach (lambda (node)
+        (setq prefix (replace-once prefix (get (emit-top-level node) :text) ""))))
+      (let* ((conditional (aref (get (aref body 2) :children) 1))
+             (call (aref (get conditional :children) 1))
+             (guard (function-body (get (emit-top-level (aref body 2)) :text)))
+             (tail (function-body (get (emit-top-level (aref body 1)) :text))))
+        (unless (js-call guard :endsWith tail)
+          (throw (new globalThis.TypeError "wire compiler statement boundary changed")))
+        (js-object :prefix prefix :guard (js-call guard :slice 0 (- (js-length guard) (js-length tail)))
+          :placeholder (get (emit-expression call) :text)
+          :registration (get (emit-expression (js-call (get (aref body 3) :children) :at -1)) :text)
+          :networkOptions (get (emit-expression (js-call (get (aref body 4) :children) :at -1)) :text)
+          :networkListen (get (emit-expression (js-call (get (aref body 5) :children) :at -1)) :text)))))
+  (defun function-body (text)
+    (let ((start (js-call text :indexOf "{")) (end (js-call text :lastIndexOf "}")))
+      (unless (and (>= start 0) (> end start))
+        (throw (new globalThis.TypeError "wire compiler function boundary changed")))
+      (js-call (js-call text :slice (1+ start) end) :trim)))
+  (defun guard-original (source root start-marker end-marker kind key)
+    (let* ((start (js-call source :indexOf start-marker))
+           (end (js-call source :indexOf end-marker (+ start (js-length start-marker))))
+           (template (wire-template root kind key)))
+      (unless (and (>= start 0) (> end start))
+        (throw (new globalThis.TypeError "wire original block is incomplete")))
+      (let* ((original (js-call source :slice start end))
+             (guard (replace-once (get template :guard) (get template :placeholder) original)))
+        (str (js-call source :slice 0 start) guard (js-call source :slice end)))))
+  (defun projectWireCallSuite (root source)
+    (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex") wireCallSha)
+      (throw (new globalThis.TypeError "wire partitions require the complete original suite")))
+    (let ((template (wire-template root "corpus" "index")))
+      (setq source (guard-original source root "    const record=cases[index];" "  }\n  const negative=" "corpus" "index"))
+      (setq source (guard-original source root "  const negative=runtime.invoke('parse-negative-zero');"
+        "  assert.deepEqual(await httpContracts" "tail" (JSON/stringify "negative-zero")))
+      (setq source (guard-original source root "  assert.deepEqual(await httpContracts" "\n}\nfunction platformOptions"
+        "tail" (JSON/stringify "http-contracts")))
+      (setq source (guard-original source root "  const originalPayload=" "\n}\n\nfor(const auto of"
+        "tail" (JSON/stringify "network")))
+      ;; This is a positive network test budget, not a change to transport
+      ;; timers or explicit timeout/cancellation contracts. Strict mode keeps
+      ;; the original three seconds. All replacement code is compiler output.
+      (setq source (replace-once source "{timeoutMs:3000}" (get template :networkOptions)))
+      (setq source (replace-once source "new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))"
+        (get template :networkListen)))
+      (setq source (replace-once source "for(const auto of [65536,1])test("
+        (replace-once "for(const auto of [65536,1])test(" "test" (get template :registration))))
+      (setq source (replace-once source "test.skipIf(!nativeTarget)("
+        (replace-once "test.skipIf(!nativeTarget)(" "test" (get template :registration))))
+      (str (get template :prefix) source)))
+  (defun wireCallWrapperSource (root)
+    (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "tests/helpers/wire-project-fixture-install.mjs")) :href)) ")\n"
+         "(import \"./wasm-managed-wire-test-ground.mjs\")\n"))
+  (export wireCallSuite wireCallGround wireCallSha wireCallProfile wireNetworkOptions wireNetworkListen runtimeCallShard wirePartEnabled wireCallParts
+    wireCallTestRegistration projectWireCallSuite wireCallWrapperSource))

@@ -42,7 +42,7 @@
     string-to-number string-to-bigint number-float64-words
     eq equal null nil? undefined? nullish?
     list vector hash-map hash-set queue js-array car cdr cons js-cons nth js-nth aref
-    length js-length
+    length js-length __eliscript_array_build
     object-keys object-has? object-assoc __eliscript_arity_error
     new print str funcall apply))
 

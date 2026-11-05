@@ -155,12 +155,15 @@
   (test "hash-map rejects incomplete pairs in both compilers" (async ()
     (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-literals-bad-"))))
            (bootstrap (resolve directory "bootstrap")) (source (resolve directory "invalid.eli")))
-      (await (js-call globalThis.Bun :write source "(hash-map \"key\")\n"))
+      ;; This checks the core module constructor, like the positive fixture.
+      ;; A bare Elisp call is an ordinary forward function reference in AOT.
+      (await (js-call globalThis.Bun :write source
+        "(module fixture.invalid-literal-map\n  (hash-map \"key\"))\n"))
       (try
         (progn
           (await (run (js-array BUILD_BOOTSTRAP) (js-object :ELISCRIPT_BOOTSTRAP_OUT_DIR bootstrap)))
-          (let ((seed (await (run (js-array SEED source) (js-object) t)))
-                (self-hosted (await (run (js-array SELF_HOSTED source)
+          (let ((seed (await (run (js-array SEED "--output" (resolve directory "seed-invalid.mjs") source) (js-object) t)))
+                (self-hosted (await (run (js-array SELF_HOSTED "--output" (resolve directory "self-invalid.mjs") source)
                   (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR bootstrap) t))))
             (js-call (get (expect (get seed :exitCode)) :not) :toBe 0)
             (js-call (get (expect (get self-hosted :exitCode)) :not) :toBe 0)

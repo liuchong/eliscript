@@ -65,7 +65,7 @@
 
   (defasync file-digest (path)
     (let ((file (await (open path "r"))) (hash (createHash "sha256"))
-          (buffer (new globalThis.Uint8Array 65536)) (bytes 0) (failed false) (done false))
+          (buffer (new globalThis.Uint8Array 1048576)) (bytes 0) (failed false) (done false))
       (try
         (while (not done)
           (let ((count (get (await (js-call file :read buffer 0 (js-length buffer) nil)) :bytesRead)))
@@ -157,7 +157,7 @@
 
   (defasync exact-bytes (left-path right-path)
     (let ((left (await (open left-path "r"))) (right nil) (failed false)
-          (a (new globalThis.Uint8Array 65536)) (b (new globalThis.Uint8Array 65536)) (position 0) (done false))
+          (a (new globalThis.Uint8Array 1048576)) (b (new globalThis.Uint8Array 1048576)) (position 0) (done false))
       (try
         (setq right (await (open right-path "r")))
         (while (not done)
@@ -173,10 +173,13 @@
                 (put counts which count))
               (setq which (1+ which)))
             (unless (= (aref counts 0) (aref counts 1)) (fail "JavaScript fixed point has different file lengths"))
-            (let ((index 0) (count (aref counts 0)))
-              (while (< index count)
-                (unless (= (aref a index) (aref b index)) (fail "JavaScript fixed point has different original bytes"))
-                (setq index (1+ index)))
+            (let ((count (aref counts 0)))
+              ;; Compare every byte in bounded chunks. The host's native byte
+              ;; comparator avoids interpreting a language loop per product byte;
+              ;; neither stored hashes nor receipt claims replace this comparison.
+              (unless (= (js-call globalThis.Buffer :compare
+                           (js-call a :subarray 0 count) (js-call b :subarray 0 count)) 0)
+                (fail "JavaScript fixed point has different original bytes"))
               (setq position (+ position count))
               (when (= count 0) (setq done t)))))
         (catch error (setq failed t) (throw error))

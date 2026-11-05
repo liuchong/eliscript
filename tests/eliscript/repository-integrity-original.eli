@@ -43,8 +43,12 @@
            (contract (await (json "contracts/repository-integrity.json"))))
       (js-call (expect report) :toMatchObject (js-object :schemaVersion 1 :format "eliscript-repository-integrity-report" :version 1
         :dependency (js-object :packages (js-length (get contract :packages)) :localPackages 2 :lockfile "frozen" :coreExternalImports 0)
-        :artifacts (js-object :deterministicArtifacts 4 :deterministicOutputs 7 :derivedArtifacts 4 :benchmarkArtifacts 14
+        :artifacts (js-object :deterministicArtifacts 6 :deterministicOutputs 11 :derivedArtifacts 4 :benchmarkArtifacts 14
           :benchmarkSources (if deferred 0 291))))
+      (js-call (expect (get (get contract :artifacts) :deterministic)) :toContainEqual
+        (js-object :source "runtime/core/protocol.eli" :output "runtime/core/protocol.mjs" :sourceMap "runtime/core/protocol.mjs.map"))
+      (js-call (expect (get (get contract :artifacts) :deterministic)) :toContainEqual
+        (js-object :source "runtime/core/collection.eli" :output "runtime/core/collection.mjs" :sourceMap "runtime/core/collection.mjs.map"))
       (js-call (expect (get (get report :dependency) :scannedJavaScript)) :toBeGreaterThan 0)
       (js-call (expect (get (get report :dependency) :scannedEliscript)) :toBeGreaterThan 0)
       (js-call (expect (get (get report :dependency) :totalImports)) :toBeGreaterThan 0)

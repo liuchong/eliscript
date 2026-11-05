@@ -257,6 +257,21 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
   `stdlib/core/collection.eli`, classifies persistent Queue values through the
   runtime collection facade, and agrees under Bun and Node.
 
+## External host registry lookup
+
+`read-external-protocol-method` (the runtime facade's
+`readExternalProtocolMethod`) reads an operation implementation from the
+protocol's external extension registry. It returns the registered function or
+`undefined`, without reading the receiver's direct protocol slot or invoking
+the implementation. Ordinary dispatch still gives direct slots and local
+extensions their existing precedence.
+
+The managed WASM/native host bridge uses this lookup only for actual foreign
+receivers and authenticated standard protocol identities in their host realm.
+This lets a host-registered collection extension participate in the same
+generated sequence algorithms. It does not replace those algorithms with host
+implementations or make arbitrary host objects portable worker data.
+
 ## Follow-up
 
 Specification

@@ -1246,6 +1246,7 @@
       (await (js-call module :link (async (specifier referrer)
         (let* ((runtime-file
                  (cond ((= specifier "eliscript/runtime/math.mjs") "runtime/math.mjs")
+                       ((= specifier "eliscript/runtime/prelude.mjs") "runtime/prelude.mjs")
                        ((= specifier "eliscript/runtime/unicode-case.mjs") "runtime/unicode-case.mjs")
                        ((and (= specifier "./unicode-case-data.mjs")
                              (= (get referrer :identifier) (get (pathToFileURL (resolve root "runtime/unicode-case.mjs")) :href)))

@@ -5,9 +5,11 @@
   (import "node:url" pathToFileURL fileURLToPath)
   (import "node:module" createRequire)
   (import "node:crypto" createHash)
-  (import "./compiler-build.mjs" independentCompilerResources)
+  (import "node:assert/strict" :default assertStrict)
+  (import "node:assert" :default assertBase)
   (import "./compiler-metadata.mjs" readCompilerMetadata)
   (import "./managed-runtime.mjs" createManagedModuleGraph createManagedProjectFacades instantiateManagedRuntimeWithHostModules)
+  (import "./managed-source-view.mjs" isManagedSourceView projectManagedSourceViewForMatcher)
   (import "./native-managed-runtime.mjs" instantiateNativeManagedRuntime)
   (import "./compiler-corpus-literal-provider.mjs" resolveOriginalLiteralHostProvider)
 
@@ -15,7 +17,30 @@
   (defconst environment-key "ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT")
   (defconst program-contexts (new globalThis.Map))
   (defconst contexts (new globalThis.WeakMap))
-  (defconst interop-main-sha "3304e489ab6ace797f9177473279ed95840949719bf39dda7308d03184ba82ac")
+  (defconst full-runtime-budget (Object/freeze (js-object :maxSlots 1048575 :initialBytes 67108864 :maxBytes 268435456)))
+  (defvar bun-assert-adapter-installed false)
+  (defun installOriginalBunAssertSourceViewAdapter ()
+    (when (and (not bun-assert-adapter-installed)
+               globalThis.process (get globalThis.process :versions)
+               (get (get globalThis.process :versions) :bun))
+      (setq bun-assert-adapter-installed t)
+      (js-call (js-array assertStrict assertBase) :forEach (lambda (target)
+        (js-call (js-array "deepEqual" "deepStrictEqual") :forEach (lambda (method)
+          (let ((original (get target method)))
+            (when (= (value-type original) "function")
+              (put target method (lambda (actual expected &rest rest)
+                (if (not (or (isManagedSourceView actual) (isManagedSourceView expected)))
+                  (Reflect/apply original target (js-call (js-array actual expected) :concat rest))
+                  (let ((projected-actual (if (isManagedSourceView actual) (projectManagedSourceViewForMatcher actual) actual))
+                        (projected-expected (if (isManagedSourceView expected) (projectManagedSourceViewForMatcher expected) expected)))
+                    (try
+                      (Reflect/apply original target (js-call (js-array projected-actual projected-expected) :concat rest))
+                      (catch error
+                        (when (and error (= (get error :code) "ERR_ASSERTION"))
+                          (try (put error :actual actual) (catch ignored nil))
+                          (try (put error :expected expected) (catch ignored nil)))
+                        (throw error)))))))))))))))
+  (defconst interop-main-sha "a5e92051bca2afbae0ee700d94672e05a221367f8ab10b68e0767444bb34534c")
   (defconst interop-host-sha "c82823f3489de0ea565ae9b44d27439ccaa66d75e55f5b273baa0324a5b7767a")
   (defun interop-digest (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
   (defun originalInteropFullRuntimeRecipe (record)
@@ -44,7 +69,7 @@
           (progn
             (unless (= (interop-digest (await (readFile host-path))) interop-host-sha)
               (throw (new globalThis.TypeError "complete interop functional resources require the original source and host identity")))
-          (let ((selected (Object/assign (js-object) settings (get (independentCompilerResources (js-object :profile "full-runtime")) :budget))))
+          (let ((selected (Object/assign (js-object) settings full-runtime-budget)))
             (js-call globalThis.console :error "original interop strict and small capacity DEFERRED / NOT ACCEPTED; full-runtime functional resources"
               (js-object :original (js-object :maxSlots (get settings :maxSlots) :initialBytes (get settings :initialBytes)
                 :maxBytes (get settings :maxBytes) :auto (get settings :auto))
@@ -89,6 +114,28 @@
           (put environment :NODE_OPTIONS (str (if (= previous "") "" (str previous " ")) option)))
         (put environment environment-key (resolve configuration))
         (put environment :ELISCRIPT_ORIGINAL_SOURCE_ROOT (resolve source-root)))))
+  (defun installOriginalProgramBunChildContext (input &rest services)
+    ;; NODE_OPTIONS installs the graph in Node children. Bun ignores that
+    ;; option, so these unchanged original hosts need its native preload flag
+    ;; when they launch process.execPath. Keep the real process and all options.
+    (let* ((host (get input :host))
+           (runtime (if (> (js-length services) 0) (get (aref services 0) :bun) globalThis.Bun))
+           (executable (if (> (js-length services) 0) (get (aref services 0) :executable) (get globalThis.process :execPath))))
+      (if (and runtime (= (get input :childProcesses) "inherit-selected-artifact")
+                 (js-call (js-array "wasm" "native") :includes (get input :target))
+                 (= (value-type host) "string")
+                 (js-call (new globalThis.RegExp
+                   "(?:^|/)tests/__eliscript_original_core_(?:set_map|stdlib_complete)\\.mjs$") :test host))
+        (let* ((spawn (get runtime :spawn)) (preload (fileURLToPath own-url))
+               (forward (lambda (command &rest arguments)
+                 (let ((selected command))
+                   (when (and (Array/isArray command) (= (aref command 0) executable)
+                              (not (js-call command :includes preload)))
+                     (setq selected (js-call (js-array executable "--preload" preload) :concat (js-call command :slice 1))))
+                   (js-call spawn :apply runtime (js-call (js-array selected) :concat arguments))))))
+          (put runtime :spawn forward)
+          (lambda () (when (eq (get runtime :spawn) forward) (put runtime :spawn spawn))))
+        undefined)))
   (defun createOriginalProgramDriverClose (input close-now)
     (let* ((options (get input :runtimeOptions))
            (lifetime (if (nullish? options) undefined (get options :originalHostLifetime))))
@@ -129,7 +176,7 @@
     (and input (js-call (js-array "wasm" "native") :includes (get input :target))
       (= (value-type (get input :host)) "string")
       (js-call (new globalThis.RegExp
-        "(?:^|/)tests/__eliscript_(?:managed_(?:transient-state|wire)_(?:node|bun)_(?:65536|1)|identity_value_host-token-single_(?:node|bun)_(?:65536|1)|managed_fixture_(?:arrays|objects|array-callbacks|array-search|array-construction|variadic-calls|source-collections|symbols|regexp|module-bindings|persistent-vector-auto-(?:1|65536)|object-properties|math|empty-bindings|exceptions|catch-destructuring|builtins|typeof|array-text|strings|callables|primitive-operators|js-cons|json)_(?:node|bun))\\.mjs$")
+        "(?:^|/)tests/__eliscript_(?:managed_(?:transient-state|wire|core-modules)_(?:node|bun)_(?:65536|1)|identity_value_host-token-single_(?:node|bun)_(?:65536|1)|managed_fixture_(?:arrays|objects|array-callbacks|array-search|array-construction|variadic-calls|source-collections|symbols|regexp|module-bindings|persistent-vector-auto-(?:1|65536)|object-properties|math|empty-bindings|exceptions|catch-destructuring|builtins|typeof|array-text|strings|callables|primitive-operators|js-cons|json)_(?:node|bun))\\.mjs$")
         :test (js-call (get input :host) :replaceAll "\\" "/"))))
 
   ;; This is a private original-test adapter. A phased project uses JavaScript
@@ -157,7 +204,7 @@
                  (facade (Object/create (Object/getPrototypeOf runtime)))
                  (context-descriptors (Object/getOwnPropertyDescriptors context))
                  (result (Object/create (Object/getPrototypeOf context))))
-            (js-call (js-array "invoke" "invokeAsync") :forEach (lambda (method)
+            (js-call (js-array "invoke" "invokeAsync" "getExport") :forEach (lambda (method)
               (let ((entry (get descriptors method)))
                 (when entry
                   (let* ((invoke (get entry :value))
@@ -212,6 +259,7 @@
           (let* ((registry-path (fileURLToPath (new globalThis.URL (get facades :registry) (get input :base))))
                  (registry (funcall (createRequire registry-path) registry-path)))
             (js-call registry :install graph))
+          (installOriginalBunAssertSourceViewAdapter)
           (let ((context (Object/freeze (js-object :graph graph :runtime runtime :facades facades :close close))))
             ;; Exit is final and synchronous. beforeExit is deliberately not
             ;; used: Node may emit it before a dynamic import's IO resumes.
@@ -256,5 +304,5 @@
         :closeOriginalProgramResources closeOriginalProgramResources
         :installOriginalProgramExitCleanup installOriginalProgramExitCleanup
         :createOriginalProgramDriverClose createOriginalProgramDriverClose)))) reject))
-  (export originalInteropFullRuntimeRecipe selectOriginalInteropRuntimeOptions openOriginalProgramContext inheritOriginalProgramContext originalProgramBunLauncher
+  (export originalInteropFullRuntimeRecipe selectOriginalInteropRuntimeOptions openOriginalProgramContext inheritOriginalProgramContext originalProgramBunLauncher installOriginalProgramBunChildContext
     bindOriginalManagedProgramContext closeOriginalProgramResources installOriginalProgramExitCleanup createOriginalProgramDriverClose then))

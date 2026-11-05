@@ -44,8 +44,12 @@
                 "tests/compiler-package-session.test.mjs"
                 "tests/direct-wasm-backend.test.mjs"
                 "tests/wasm-managed-symbols.test.mjs"
+                "tests/wasm-managed-sorted-core.test.mjs"
+                "tests/wasm-managed-wire-selfhosted.test.mjs"
                 "compiler-seed-runtime-identity-copy.test.mjs"
                 "compiler-corpus-matchers-selfhosted-copy.test.mjs"
+                "wasm-managed-sorted-core-copy.test.mjs"
+                "wasm-managed-wire-selfhosted-copy.test.mjs"
                 "Compiler-seed-runtime-identity.test.mjs"
                 "synthetic-ci.test.mjs"))
              (requests (js-array))
@@ -61,7 +65,7 @@
           (js-call assert :deepStrictEqual (get request :args)
             (fixtureChildArguments
               (let* ((file (aref files index)) (entry (if (isAbsolute file) file (+ "./" file))))
-                (if (< index 5) (js-array "test" "--timeout" "300000" entry)
+                (if (< index 7) (js-array "test" "--timeout" "300000" entry)
                   (js-array "--smol" "test" "--timeout" "300000" entry))) (get globalThis.process :env)))
           (js-call assert :strictEqual (get request :command) (get globalThis.process :execPath))
           (js-call assert :strictEqual (get request :env) (get globalThis.process :env))

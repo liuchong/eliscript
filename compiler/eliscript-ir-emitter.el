@@ -1469,6 +1469,11 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
        (format "__eliscript_cons(%s, %s)"
                (eliscript-ir-emitter-emit-expression (nth 0 nodes))
                (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
+      ('__eliscript_array_build
+       (eliscript-ir-emitter--require-arity node 2 2)
+       (format "((count, build) => { if (!Number.isInteger(count) || count < 0 || count > 67108854 || typeof build !== 'function') throw new TypeError('invalid private array builder'); return Array.from({length: count}, (_, index) => build(index)); })(%s, %s)"
+               (eliscript-ir-emitter-emit-expression (nth 0 nodes))
+               (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
       ('js-cons
        (eliscript-ir-emitter--require-arity node 2 2)
        (format "[%s, ...((%s) ?? [])]"

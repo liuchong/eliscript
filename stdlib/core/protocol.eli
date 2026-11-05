@@ -243,6 +243,13 @@
             (get (get state :defaults)
                  (get record :name) protocol-missing))))))
 
+  ;; JavaScript uses this realm's registry directly. Managed targets replace
+  ;; this private boundary with a lookup in the explicit foreign host realm.
+  (defconst protocol-host-method (lambda (protocol operation receiver) undefined))
+  (defun read-external-protocol-method (protocol operation receiver)
+    (let ((method (external-method (protocol-state protocol) (operation-record protocol operation) receiver)))
+      (if (= method protocol-missing) undefined method)))
+
   (defun dispatch (protocol record receiver arguments)
     (let ((direct (direct-method record receiver)))
       (when (nil? direct)
@@ -251,8 +258,10 @@
               protocol (get record :name) receiver "invalid-direct-slot")))
       (if (/= direct protocol-missing)
           (js-call direct :apply receiver arguments)
-        (let ((external
-               (external-method (protocol-state protocol) record receiver)))
+        (let* ((local (external-method (protocol-state protocol) record receiver))
+               (host (when (= local protocol-missing)
+                 (funcall protocol-host-method protocol (get record :name) receiver)))
+               (external (if (and (= local protocol-missing) (not (undefined? host))) host local)))
           (if (= external protocol-missing)
               (throw
                (new ProtocolDispatchError protocol (get record :name) receiver))
@@ -443,7 +452,7 @@
   (defun read-protocol-method-owner (value)
     (js-call protocol-method-owners :get value))
 
-  (export protocol? define-protocol define-protocol-from-definition materialize-protocol-from-definition
+  (export protocol? define-protocol define-protocol-from-definition materialize-protocol-from-definition read-external-protocol-method
           read-protocol-operations-owner read-protocol-method-owner
           extend-protocol-category extend-protocol-default
           extend-protocol-type implements-protocol-operation?

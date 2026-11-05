@@ -3,7 +3,7 @@
   (import "node:path" resolve)
   (import "../backends/build.mjs" root)
   (import "./render-workflow-ground.mjs" :as ground)
-  (defconst COMPATIBILITY_FILE_SHARDS 4)
+  (defconst COMPATIBILITY_FILE_SHARDS 8)
   (defconst CompatibilityMatrixError (get ground :CompatibilityMatrixError))
   (defconst renderToolchainSteps (get ground :renderToolchainSteps))
   (defconst humanCompatibilityReport (get ground :humanCompatibilityReport))
@@ -30,8 +30,19 @@
                 "\n            emacs: \"" version "\"\n            shard: " index))
               (setq index (1+ index))))))))
       (let ((text (str (js-call original :slice 0 start) (js-call rows :join "\n") "\n" (js-call original :slice end))))
-        (js-call (js-call text :replace "--shard-count 2" (str "--shard-count " COMPATIBILITY_FILE_SHARDS))
-          :replace "Run test file shard ${{ matrix.shard }}/2" (str "Run test file shard ${{ matrix.shard }}/" COMPATIBILITY_FILE_SHARDS)))))
+        (setq text (js-call (js-call text :replace "--shard-count 2" (str "--shard-count " COMPATIBILITY_FILE_SHARDS))
+          :replace "Run test file shard ${{ matrix.shard }}/2" (str "Run test file shard ${{ matrix.shard }}/" COMPATIBILITY_FILE_SHARDS)))
+        ;; Capacity deferral is an existing explicit release mode. Its normal
+        ;; functional heap must be selected too; one flag alone remains strict.
+        (if (= (get matrix :performanceAcceptance) "deferred")
+          (let ((functional (js-call text :replace "      ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: \"1\"\n"
+            "      ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: \"1\"\n      ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE: \"small\"\n")))
+            ;; One native AVL case takes14 minutes locally, before its wire
+            ;; share and other files. Do not repeat a provably undersized CI
+            ;; job. This changes scheduling only; strict tests keep30 minutes.
+            (js-call functional :replace "timeout-minutes: 30"
+              "timeout-minutes: ${{ startsWith(matrix.os, 'macos') && 60 || 30 }}"))
+          text))))
   (defasync checkCompatibilityWorkflow (&rest supplied)
     (let* ((options (if (= (js-length supplied) 0) (js-object) (aref supplied 0)))
            (directory (get options :root root))

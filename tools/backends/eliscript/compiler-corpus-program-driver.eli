@@ -7,7 +7,7 @@
   (import "node:util" inspect types)
   (import "./managed-source-view.mjs" isManagedSourceView snapshotManagedSourceView)
   (import "./compiler-metadata.mjs" readCompilerMetadata)
-  (import "./compiler-corpus-host-context.mjs" openOriginalProgramContext inheritOriginalProgramContext originalProgramBunLauncher)
+  (import "./compiler-corpus-host-context.mjs" openOriginalProgramContext inheritOriginalProgramContext originalProgramBunLauncher installOriginalProgramBunChildContext)
   (import "./compiler-corpus-original-program.mjs" originalProgramArguments)
   (import "./managed-runtime.mjs" loadManagedHostModules)
   (import "node:assert/strict" :default assert)
@@ -127,7 +127,7 @@
               (catch ignored nil)))))))
   (defasync runOriginalProgramDriver (configuration)
     (let* ((input (await (readCompilerMetadata configuration))) (context undefined)
-           (failed false) (first undefined) (sequence 0)
+           (failed false) (first undefined) (sequence 0) (restore-child-spawn undefined)
            (stage (async (phase)
              (when (get input :driverEvidence)
                (await (appendFile (get input :driverEvidence)
@@ -142,7 +142,8 @@
           (setq context (await (openOriginalProgramContext input (js-object :identity configuration))))
           (await (funcall stage "runtime-open-end"))
           (when (= (get input :childProcesses) "inherit-selected-artifact")
-            (inheritOriginalProgramContext (js-object :configuration configuration :sourceRoot (get input :sourceRoot))))
+            (inheritOriginalProgramContext (js-object :configuration configuration :sourceRoot (get input :sourceRoot)))
+            (setq restore-child-spawn (installOriginalProgramBunChildContext input)))
           (when (get input :runtimeLaunchers)
             (let ((launcher (await (originalProgramBunLauncher
                     (js-object :directory (fileURLToPath (get input :base)) :bun (get globalThis.process :execPath)
@@ -154,7 +155,9 @@
             (cond
               ((get input :hostEval)
                (put (get globalThis.process :env) (get input :environment) (fileURLToPath entry))
-               (await (loadOriginalProgramBody (str "data:text/javascript;charset=utf-8," (globalThis.encodeURIComponent (get input :hostEval))) (fileURLToPath (get input :base)))))
+               (let ((inline-path (resolve (fileURLToPath (get input :base)) "__eliscript_original_inline_host.mjs")))
+                 (await (writeFile inline-path (get input :hostEval) "utf8"))
+                 (await (loadOriginalProgramBody (get (pathToFileURL inline-path) :href) (fileURLToPath (get input :base))))))
               ((get input :host)
                (put globalThis.process :argv (js-call (js-array (get globalThis.process :execPath) (get input :host)) :concat
                   (originalProgramArguments input (get input :entry) (get input :base))))
@@ -162,9 +165,18 @@
               (t (await (loadOriginalProgramBody (get (new globalThis.URL (get (get context :facades) :loadEntry) (get input :base)) :href) (fileURLToPath (get input :base)))))))
           (await (funcall stage "host-end")))
         (catch error
-          (setq failed t first error)
+          ;; Source exceptions are live views owned by context. Read their
+          ;; actual diagnostic before closing it; rejecting with a closed view
+          ;; otherwise replaces the real failure during Promise assimilation.
+          (setq failed t first (if (isManagedSourceView error)
+            (let ((detached (new globalThis.Error (get error :message))))
+              (put detached :name (get error :name))
+              (when (get error :stack) (put detached :stack (get error :stack)))
+              (when (Object/hasOwn error "code") (put detached :code (get error :code))) detached)
+            error))
           (try (await (recordOriginalWireFailure input error)) (catch ignored nil)))
         (finally
+          (unless (undefined? restore-child-spawn) (funcall restore-child-spawn))
           (when context
             (try
               (progn (await (funcall stage "runtime-close-start")) (await (js-call context :close))

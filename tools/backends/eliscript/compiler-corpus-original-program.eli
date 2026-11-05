@@ -9,9 +9,18 @@
   (import "./compiler-bootstrap.mjs" archiveCompilerArtifact normalizeCompilerHost saveCompilerMetadata)
   (import "./compiler-corpus-generations.mjs" prepareOriginalCompilerGenerations)
   (import "./compiler-corpus-reference.mjs" prepareOriginalReferenceArtifact)
+  (import "./native-managed-runtime.mjs" snapshotNativeManagedRuntimeABI)
   (import "./compiler-corpus-process.mjs" originalCorpusExecutionPolicy runOriginalCorpusProcess writeOriginalCorpusExecutionContext validateOriginalProcessHostDependency)
   (defun fallback (value other) (if (nullish? value) other value))
   (defun invalid (message) (throw (new globalThis.TypeError message)))
+  (defun original-program-bun? (target contract options)
+    (if (not (undefined? (get contract :hostRuntime)))
+        (= (get contract :hostRuntime) "bun")
+      (or (get contract :requiresBun) (= (get options :programHost) "bun")
+          ;; Production native loading uses Bun's in-process FFI. Node's
+          ;; explicitly requested compatibility transport remains available;
+          ;; do not make an unspecified host pay one IPC per native ABI call.
+          (and (= target "native") (undefined? (get options :programHost))))))
   (defun safe-id (id)
     (and (= (value-type id) "string") (> (js-length id) 0)
       (not (js-call (new globalThis.RegExp "[\\\\:\\u0000]") :test id))
@@ -71,10 +80,35 @@
              (resolve (get artifact :path) "..") declared-directory)))
            (request (or (get record :request) (js-object)))
            (sources (fallback (get request :hostSources) (js-array))) (index 0)
-           (execution (get record :execution)))
+           (execution (get record :execution))
+           (runtime-options (when execution (get execution :runtimeOptions)))
+           (provider (when runtime-options (get runtime-options :literalHostProvider)))
+           (shared-runtime (and (js-call (js-array "wasm" "native") :includes (get artifact :target))
+             (js-call (js-array "original-program:literal-runtime-complete-hosts"
+               "original-program:literal-runtime-portable-codec") :includes (get record :id))
+             (= (get (get record :original) :suite) "tests/literal-runtime.test.mjs")
+             provider (= (get provider :format) "eliscript-local-literal-provider")
+             (= (get provider :base) "source-root"))))
+      (when shared-runtime
+        ;; Never replace a compiled program module with a host implementation.
+        ;; These are authenticated foreign providers, not compiler outputs.
+        (when (js-call (get (get (get artifact :descriptor) :project) :modules) :some
+                (lambda (module) (js-call (get module :id) :startsWith "runtime/")))
+          (invalid "canonical original runtime cannot replace a compiled module")))
       (while (< index (js-length sources))
         (let ((source (aref sources index)))
-          (await (put-sidecar directory (get source :id) (get source :source))))
+          (if (and shared-runtime (js-call (get source :id) :startsWith "runtime/"))
+            ;; originalProgramAliases installs the canonical runtime directory.
+            ;; Copying these same bytes would create new protocol identities
+            ;; in the child host while the binary decoder uses the source root.
+            (let* ((id (get source :id))
+                   (proof (js-call (get provider :files) :find (lambda (item) (= (get item :id) id)))))
+              (unless (and (safe-id id) proof
+                (= (get proof :bytes) (Buffer/byteLength (get source :source) "utf8"))
+                (= (get proof :sha256) (js-call (js-call (createHash "sha256") :update (get source :source)) :digest "hex"))
+                (js-call (await (readFile (resolve (get record :sourceRoot) id))) :equals (Buffer/from (get source :source))))
+                (invalid "canonical original runtime differs from its authenticated sidecar")))
+            (await (put-sidecar directory (get source :id) (get source :source)))))
         (setq index (1+ index)))
       (if (not (nullish? (get execution :hostSource)))
         (await (put-sidecar directory (get execution :host) (get execution :hostSource)))
@@ -179,8 +213,7 @@
         (await (originalProgramAliases artifact source-root))
         (unless (or (undefined? (get contract :hostRuntime)) (js-call (js-array "node" "bun") :includes (get contract :hostRuntime)))
           (invalid "original host runtime must be node or bun"))
-        (let* ((bun (if (undefined? (get contract :hostRuntime))
-                       (or (= (get options :programHost) "bun") (get contract :requiresBun)) (= (get contract :hostRuntime) "bun")))
+        (let* ((bun (original-program-bun? target contract options))
                (command (if bun (fallback (get options :bun) (fallback (get (get globalThis.process :env) :BUN) "bun"))
                           (fallback (get options :node) (fallback (get (get globalThis.process :env) :NODE) "node"))))
                (preload (if bun (js-array "--preload" (resolve source-root "tests/fixtures/compiled-eli-bun-preload.mjs"))
@@ -195,9 +228,16 @@
               (setq args (if host (js-call preload :concat (js-array host)
                    (originalProgramArguments contract (get artifact :entry) (get (pathToFileURL (str directory "/")) :href)))
                  (js-call preload :concat (js-array entry)))))
-            (let ((configuration (resolve directory "__eliscript_original_program.json")))
+            (let ((configuration (resolve directory "__eliscript_original_program.json"))
+                  (abi (when (= target "native") (snapshotNativeManagedRuntimeABI
+                    (js-object :typed (get artifact :typed) :descriptor (get artifact :descriptor))))))
+              ;; Match the native factory's existing validated transport ABI.
+              ;; The full typed/debug product stays in its original archive;
+              ;; do not duplicate executable bodies in every child config.
               (await (saveCompilerMetadata configuration
-                (js-object :target target :path (get artifact :path) :descriptor (get artifact :descriptor) :typed (get artifact :typed)
+                (js-object :target target :path (get artifact :path)
+                  :descriptor (if abi (get abi :descriptor) (get artifact :descriptor))
+                  :typed (if abi (get abi :typed) (get artifact :typed))
                   :nativeTarget (fallback (get artifact :nativeTarget) (fallback (get options :nativeTarget)
                     (if (= (get globalThis.process :platform) "linux") "arm64-linux" "arm64-macos")))
                   :entry (get artifact :entry) :host host :argument (get contract :argument) :arguments (get contract :arguments)

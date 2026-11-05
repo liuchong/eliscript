@@ -1,12 +1,14 @@
 ;;; t02-t04.el --- T02 activation, T03 destructuring, T04 arity/recur/threading -*- lexical-binding: t; no-byte-compile: t; -*-
 
 ;;;; case T02-01a
+;;;; oracle
 ;;;; expect 123
 (progn
   (defun await (x) (+ x 100))
   (await 23))
 
 ;;;; case T02-01b
+;;;; oracle extension
 ;;;; expect [true, true, true, null, 77]
 (require 'eliscript)
 (list (atom 'sym)
@@ -16,12 +18,14 @@
       (cell-value (state-cell 77)))
 
 ;;;; case T02-02
+;;;; oracle extension
 ;;;; error conflict|ELI-M0001|eliscript-compile-error
 (progn
   (defun persistent-vector (x) x)
   (require 'eliscript-data))
 
 ;;;; case T03-01
+;;;; oracle extension
 ;;;; expect [10, 20, true, 2, 1, 2, true, 1, "x", "y", true, 1, null, "used-default", "Ada", 500, 99, "hi"]
 (require 'eliscript)
 (cl-defstruct-persistent account
@@ -45,6 +49,7 @@
         ok-val some-val))
 
 ;;;; case T03-02
+;;;; oracle extension
 ;;;; expect ["a:b", "a-b", "matched-vec", ["got", true]]
 (require 'eliscript)
 (defun-bind format-pair ([x y] &optional ((:map (:sep sep)) (persistent-map :sep ":")))
@@ -62,28 +67,33 @@
      'fallback)))
 
 ;;;; case T03-03a
+;;;; oracle extension
 ;;;; error missing|destructure|match
 (require 'eliscript)
 (let-bind (((:map (:required-key k)) (persistent-map :other 1)))
   k)
 
 ;;;; case T03-03b
+;;;; oracle extension
 ;;;; error destructure|vector|match
 (require 'eliscript)
 (defun-bind take-opt (&optional ([a b] [1 2])) (+ a b))
 (take-opt nil)
 
 ;;;; case T03-03c
+;;;; oracle extension
 ;;;; error duplicate|eliscript-compile-error
 (require 'eliscript)
 (let-bind (([dup dup] [1 2])) dup)
 
 ;;;; case T03-03d
+;;;; oracle extension
 ;;;; error length|destructure|match
 (require 'eliscript)
 (let-bind (([a b c] [1 2])) a)
 
 ;;;; case T04-01a
+;;;; oracle extension
 ;;;; expect [0, 50, 7, 15, ["one", "p"], ["two", "p", "q"]]
 (require 'eliscript)
 (defun-case calc
@@ -98,21 +108,25 @@
         (funcall anon 'p) (funcall anon 'p 'q)))
 
 ;;;; case T04-01b
+;;;; oracle extension
 ;;;; error duplicate|arity|eliscript-compile-error
 (require 'eliscript)
 (defun-case bad-dup ((x) x) ((y) y))
 
 ;;;; case T04-01c
+;;;; oracle extension
 ;;;; error optional|arity|eliscript-compile-error
 (require 'eliscript)
 (defun-case bad-opt ((x &optional y) x))
 
 ;;;; case T04-01d
+;;;; oracle extension
 ;;;; error overlap|arity|eliscript-compile-error
 (require 'eliscript)
 (defun-case bad-overlap ((x &rest r) x) ((a b) a))
 
 ;;;; case T04-02a
+;;;; oracle extension
 ;;;; expect [true, 1250025000, [2, 1]]
 (require 'eliscript)
 (defun-tail sum-to (n acc)
@@ -130,18 +144,21 @@
             (recur (1+ i) b a)))))
 
 ;;;; case T04-02b
+;;;; oracle extension
 ;;;; error const|setq|eliscript-compile-error
 (require 'eliscript)
 (let-const ((x 10))
   (setq x 20))
 
 ;;;; case T04-02c
+;;;; oracle extension
 ;;;; error tail|recur|eliscript-compile-error
 (require 'eliscript)
 (defun-tail bad-recur (n)
   (if (<= n 0) 0 (+ 1 (recur (1- n)))))
 
 ;;;; case T04-03
+;;;; oracle extension
 ;;;; expect [null, 0, 30, 10, 12, 13, [9, 11], true, null]
 (require 'eliscript)
 (let ((side-effects 0))

@@ -96,9 +96,7 @@
     (js-call mock :module (resolve root "tools/backends/native-managed-runtime.mjs") (lambda () original-native))
     (await (js-call fixture :close))))
   (when (wireFixtureFunctionalProfile original-source-sha (get globalThis.process :env))
-    (js-call globalThis.console :error "wire original total-time acceptance DEFERRED / NOT ACCEPTED; exact original complete functional cases have no total deadline")
-    (js-call mock :module "bun:test" (lambda () (Object/assign (js-object) original-framework
-      (js-object :test (wireFixtureTestRegistration (get original-framework :test) original-source-sha (get globalThis.process :env)))))))
+    (js-call globalThis.console :error "wire original 120000ms complete-case deadlines retained; actual GC thresholds unchanged"))
   (js-call mock :module (resolve root "tools/backends/managed-runtime.mjs")
     (lambda () (Object/assign (js-object) original-wasm
       (js-object :instantiateManagedRuntimeWithHostModules instantiateManagedRuntimeWithHostModules))))

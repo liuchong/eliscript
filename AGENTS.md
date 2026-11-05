@@ -131,6 +131,12 @@ precedence over parent rules when they address the same decision.
   explicitly named/documented JavaScript interoperation APIs, separate from
   portable Eliscript semantics. Add such APIs when required; they are not a
   prerequisite for this release and must not expand the current mainline.
+- **SEMANTICS-04** - GNU Emacs behavior is the authority for ordinary Emacs
+  Lisp semantics. Compare the same unmodified forms directly in GNU Emacs;
+  do not route that reference through Eliscript preprocessing or use generated
+  JavaScript as the language specification. Correct a conflicting test
+  expectation; correct the implementation when the test agrees with Emacs.
+  Keep semantic failures separate from timeout, capacity and harness failures.
 
 - **CORE-01** - Core progress includes the language, self-hosted compiler,
   runtime, persistent data structures, standard library, host-neutral tooling,

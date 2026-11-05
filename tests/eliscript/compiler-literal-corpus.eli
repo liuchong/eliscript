@@ -19,6 +19,7 @@
   (import "../tools/backends/compiler-bootstrap.mjs" compilerSourceIdentity)
   (import "../tools/backends/compiler-corpus.mjs"
     loadOriginalCompilerCorpus readOriginalLiteralRuntimeAudit compilerCorpusRequest createOriginalCorpusSourceReader
+    transportOriginalCoreInstrumentationRecord
     bindOriginalMaintainedSuiteEvidence bindOriginalRuntimeScanReportEvidence
     transportOriginalProjectRuntimeAssets transportOriginalToolsCLIAssets
     transportOriginalExecutionAssets transportOriginalToolsDataReferenceAssets bindOriginalFunctionalResourceInputs)
@@ -45,6 +46,30 @@
   (defconst literal-timeouts (js-array 60000 60000 60000 5000 60000))
   (defun literal-hash (bytes)
     (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+  (defun first-corpus-difference (actual expected)
+    (let ((path "$" ) (depth 0) (done false) (identity undefined))
+      ;; Retain complete equality below; report only the first differing path,
+      ;; never the multi-megabyte source payload or a full assertion diff.
+      (while (and (< depth 12) (not done))
+        (if (and actual expected (= (value-type actual) "object") (= (value-type expected) "object"))
+          (let* ((keys (Array/from (new globalThis.Set
+                          (js-call (Object/keys actual) :concat (Object/keys expected)))))
+                 (key (js-call keys :find (lambda (name)
+                        (or (/= (Object/hasOwn actual name) (Object/hasOwn expected name))
+                            (not (isDeepStrictEqual (get actual name) (get expected name))))))))
+            (when (Object/hasOwn actual "id") (setq identity (get actual :id)))
+            (if (undefined? key) (setq done t)
+              (setq path (str path "." key) actual (get actual key) expected (get expected key))))
+          (setq done t))
+        (setq depth (1+ depth)))
+      (if (and (= (value-type actual) "string") (= (value-type expected) "string"))
+        (let ((index 0) (bound (Math/min (js-length actual) (js-length expected))))
+          (while (and (< index bound) (= (js-call actual :charCodeAt index) (js-call expected :charCodeAt index)))
+            (setq index (1+ index)))
+          (JSON/stringify (js-object :path path :id identity :offset index
+            :actual (js-call actual :slice (Math/max 0 (- index 40)) (+ index 100))
+            :expected (js-call expected :slice (Math/max 0 (- index 40)) (+ index 100)))))
+        path)))
 
   (defasync literal-host-records ()
     (let* ((services (await (literal-services))) (options (get services :options))
@@ -504,7 +529,7 @@
                   (put original :matcherTransport (js-object :kind "managed-source-view-reflection-snapshot"
                     :originalHostSha256 (literal-hash source) :transportedHostSha256 (literal-hash output)
                     :originalSpecifier "bun:test" :sourceAssets proofs :assertionsUnchanged t))
-                  (put records at record)))))
+                  (put records at (transportOriginalCoreInstrumentationRecord record))))))
             ;; These explicit maintained transports have their independent
             ;; original-source/byte/negative tests. Applying only the named
             ;; migrations to the retained model keeps every unrelated recipe,
@@ -524,7 +549,8 @@
             ;; Compare complete values; failures cannot format the entire
             ;; multi-megabyte source/recipe inventory into a diagnostic diff.
             (js-call assert :strictEqual (isDeepStrictEqual without-audit expected) t
-              "only the exact authenticated literal, HTTP, runtime-scan, matcher, execution assets, tools reference inputs, functional input proofs, runtime assets and maintained complete-suite transports may differ from the unchanged ground corpus")
+              (str "complete original corpus differs at " (first-corpus-difference without-audit expected)
+                "; only the authenticated maintained transports may differ"))
             (let* ((changed (globalThis.structuredClone without-audit))
                    (untouched (js-call (get changed :records) :find (lambda (record)
                      (= (get record :id) "original-program:compiler-module-bootstrap-reader")))))
@@ -624,7 +650,8 @@
                 "async function run_original_literal_host") t))
             (setq index (1+ index))))
         (let ((negative (aref records 4)))
-          (js-call assert :strictEqual (get (get (aref (get negative :steps) 0) :request) :source) "(hash-map \"key\")\n")
+          (js-call assert :strictEqual (get (get (aref (get negative :steps) 0) :request) :source)
+            "(module fixture.invalid-literal-map\n  (hash-map \"key\"))\n")
           (js-call assert :strictEqual (get (get (aref (get negative :steps) 1) :request) :source)
             "(defportable build () [missing])\n(export build)\n")
           (js-call assert :deepStrictEqual (get (get (aref (get negative :steps) 1) :request) :portableEntries) (js-array "build")))

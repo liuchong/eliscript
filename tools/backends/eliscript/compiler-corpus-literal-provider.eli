@@ -5,6 +5,7 @@
   (import "node:module" createRequire)
   (import "node:crypto" createHash)
   (import "node:buffer" Buffer)
+  (import "./compiler-corpus-sorted-observation.mjs" sortedFunctionalPartition)
   (defconst format "eliscript-local-literal-provider")
   (defun fail () (throw (new globalThis.TypeError "original local literal provider source identity differs")))
   (defun digest (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
@@ -40,9 +41,44 @@
       (unless (and (= (get seen :size) (js-length actual)) (js-call actual :every (lambda (id) (js-call seen :has id)))) (fail))
       base))
   (defasync prepareOriginalLiteralHostProvider (context)
-    (let* ((record (get context :record)) (execution (get record :execution))
+    (let* ((record (get context :record)) (execution (get record :execution (js-object)))
            (artifact (get context :artifact)) (descriptor (when artifact (get artifact :descriptor)))
-           (sources (when (get record :request) (get (get record :request) :hostSources))))
+           (sources (when (get record :request) (get (get record :request) :hostSources)))
+           (source-root-provider false))
+      ;; These original hosts compare against the genuine independent Seed,
+      ;; whose persistent constructors belong to the source package realm.
+      ;; Verify the same archived runtime bytes in that realm for the decoder.
+      (when (and (js-call (js-array "original-program:literal-runtime-complete-hosts"
+                         "original-program:literal-runtime-portable-codec") :includes (get record :id))
+                 (= (get (get record :original) :suite) "tests/literal-runtime.test.mjs")
+                 (Array/isArray sources))
+        (setq source-root-provider t))
+      ;; Sorted's completed compiler request acquires its native providers from
+      ;; the authenticated archive. Its raw recipe intentionally has none.
+      ;; Publish those same bytes before constructing the literal decoder;
+      ;; falling back to another provider realm loses protocol/class identity.
+      (when (and (nullish? sources) (not (Object/hasOwn context "failure"))
+                 (js-call (js-array "wasm" "native") :includes (get context :target))
+                 (= (get execution :kind) "original-program") descriptor (get descriptor :literalRuntime)
+                 (= (get (get record :original) :fixture) "tests/fixtures/wasm-managed-sorted.eli")
+                 (= (get (get record :original) :suite) "tests/wasm-managed-sorted-core.test.mjs")
+                 (or (js-call (new globalThis.RegExp "^original-managed:sorted-core(?:-provider)?:(node|bun):auto-(65536|1)$") :test (get record :id))
+                     (sortedFunctionalPartition record))
+                 (Array/isArray (get context :sourceAssets)))
+        (setq sources (js-array))
+        (js-call (get context :sourceAssets) :forEach (lambda (asset)
+          (when (runtime-file-p (get asset :file))
+            (unless (and (= (get asset :encoding) "base64") (= (value-type (get asset :content)) "string")) (fail))
+            (let ((bytes (js-call Buffer :from (get asset :content) "base64")))
+              (unless (and (= (js-call bytes :toString "base64") (get asset :content))
+                           (= (js-length bytes) (get asset :bytes)) (= (digest bytes) (get asset :sha256))) (fail))
+              (js-call sources :push (js-object :id (get asset :file) :filename (get asset :file)
+                :source (js-call bytes :toString "utf8")))))))
+        (unless (js-call sources :some (lambda (source) (= (get source :id) "runtime/literals.mjs"))) (fail))
+        ;; Keep the independent Seed reference's original dependency URLs.
+        ;; This boundary explicitly supplies sourceRoot's native classes, so
+        ;; authenticate and load that realm instead of cloning it into product.
+        (setq source-root-provider t))
       (if (or (Object/hasOwn context "failure") (not (js-call (js-array "wasm" "native") :includes (get context :target)))
               (not descriptor) (not (get descriptor :literalRuntime))
               (not (= (get execution :kind) "original-program")) (not (Array/isArray sources))
@@ -61,7 +97,8 @@
               ;; Ground sidecar publication happens after this wrapper. Bind
               ;; the authenticated declarations here; the child validates the
               ;; complete published byte graph before loading any namespace.
-              (let ((proof (js-object :format format :version 1 :files files)))
+              (let ((proof (Object/assign (js-object :format format :version 1 :files files)
+                             (if source-root-provider (js-object :base "source-root") (js-object)))))
                 (if existing
                   (progn (unless (= (JSON/stringify existing) (JSON/stringify proof)) (fail)) context)
                   (progn
@@ -76,7 +113,9 @@
         (progn
           (unless (and (= (get proof :version) 1) (js-call (js-array "wasm" "native") :includes (get input :target))
                        (get (get input :descriptor) :literalRuntime)) (fail))
-          (let* ((base (await (verify (fileURLToPath (get input :base)) (get proof :files))))
+          (unless (or (undefined? (get proof :base)) (= (get proof :base) "source-root")) (fail))
+          (let* ((base (await (verify (if (= (get proof :base) "source-root")
+                          (get input :sourceRoot) (fileURLToPath (get input :base))) (get proof :files))))
                  (require (createRequire (resolve base "__eliscript_original_program.json")))
                  (load (lambda (name) (funcall require (resolve base (+ "runtime/" name ".mjs")))))
                  (namespaces (js-object))

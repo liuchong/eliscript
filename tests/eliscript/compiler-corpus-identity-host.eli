@@ -49,7 +49,7 @@
             (js-call assert :strictEqual (get launch :command) (str "original-" engine))
             (js-call assert :deepStrictEqual (js-call (get launch :args) :slice -3) (js-array host "--observe" path))
             (js-call assert :strictEqual (get (get options :policy) :originalDeadlineMs) 30000)
-            (js-call assert :strictEqual (get (get options :policy) :effectiveDeadlineMs) nil)
+            (js-call assert :strictEqual (get (get options :policy) :effectiveDeadlineMs) 120000)
             (js-call assert :strictEqual (get (get options :env) :ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT) undefined)
             (js-call assert :strictEqual (get (get options :env) :ELISCRIPT_ORIGINAL_TARGET) undefined)
             (js-call assert :strictEqual (get (get options :env) :NODE_OPTIONS) "--trace-warnings")

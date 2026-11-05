@@ -6,18 +6,17 @@
   (defconst persistent-vector-max-count 2147483647)
 
   (defportable array-reverse (values)
-    (cond
-      ((= (js-length values) 0) (js-array))
-      ((= (js-length values) 1) (js-array (get values 0)))
-      ((= (js-length values) 2)
-       ;; Snapshot in original getter order before reversing the data slots.
-       (let* ((first (get values 0)) (second (get values 1))) (js-array second first)))
-      (t (let ((result (js-array))
-          (index 0))
+    ;; Read original getters in ascending order, then materialize the private
+    ;; linked snapshot without copying a growing array at every element.
+    (let ((pending nil) (index 0))
       (while (< index (js-length values))
-        (setq result (js-cons (get values index) result)
+        (setq pending (js-object :value (get values index) :next pending)
               index (1+ index)))
-      result))))
+      (__eliscript_array_build index
+        (lambda (_index)
+          (let ((value (get pending "value")))
+            (setq pending (get pending "next")) value)))))
+
 
   (defportable array-copy-assoc (values wanted-index wanted-value)
     (cond
@@ -27,34 +26,18 @@
       ((and (= (js-length values) 2) (= wanted-index 0)) (js-array wanted-value (get values 1)))
       ((and (= (js-length values) 2) (= wanted-index 1)) (js-array (get values 0) wanted-value))
       ((and (= (js-length values) 2) (= wanted-index 2)) (js-array (get values 0) (get values 1) wanted-value))
-      (t (let ((result (js-array))
-          (index 0)
-          (result-length
-           (if (< wanted-index (js-length values))
-               (js-length values)
-             (1+ wanted-index))))
-      (while (< index result-length)
-        (setq result
-              (js-cons
-               (if (= index wanted-index)
-                   wanted-value
-                 (get values index))
-               result)
-              index (1+ index)))
-      (array-reverse result)))))
+      (t (__eliscript_array_build
+           (if (< wanted-index (js-length values)) (js-length values) (1+ wanted-index))
+           (lambda (index) (if (= index wanted-index) wanted-value (get values index)))))))
+
 
   (defportable array-drop-last (values)
     (cond
       ((<= (js-length values) 1) (js-array))
       ((= (js-length values) 2) (js-array (get values 0)))
       ((= (js-length values) 3) (js-array (get values 0) (get values 1)))
-      (t (let ((result (js-array))
-          (index 0)
-          (result-length (1- (js-length values))))
-      (while (< index result-length)
-        (setq result (js-cons (get values index) result)
-              index (1+ index)))
-      (array-reverse result)))))
+      (t (__eliscript_array_build (1- (js-length values)) (lambda (index) (get values index))))))
+
 
   (defportable make-vector-node (slots)
     (js-object :slots slots))
@@ -330,11 +313,10 @@
       result))
 
   (defportable persistent-vector-to-array (vector)
-    (array-reverse
-     (persistent-vector-reduce
-      (lambda (result value) (js-cons value result))
-      (js-array)
-      vector)))
+    (__eliscript_array_build (persistent-vector-count vector)
+      (lambda (index) (get (persistent-vector-array-for vector index)
+                          (bit-and index persistent-vector-branch-mask)))))
+
 
   (defportable persistent-vector-from-array (values)
     (let ((result (empty-persistent-vector))

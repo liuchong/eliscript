@@ -230,15 +230,20 @@
                       (setq asset-index (1+ asset-index))))
                   (let* ((metadata (Object/assign (js-object) (get record :original)))
                          (process-files (js-array "tools/backends/eliscript/compiler-corpus-process.eli"
-                           "tools/backends/compiler-corpus-process.mjs"))
+                           "tools/backends/compiler-corpus-process.mjs"
+                           "tools/backends/eliscript/compiler-corpus-sorted-observation.eli"
+                           "tools/backends/compiler-corpus-sorted-observation.mjs"
+                           "tools/backends/eliscript/compiler-corpus-wire-host.eli"
+                           "tools/backends/compiler-corpus-wire-host.mjs"))
                          (process-proofs (js-array))
                          (process-id (js-call posix :join
                            (js-call posix :dirname (get (get record :execution) :host)) "compiler-corpus-process.mjs"))
                          (expected-marker (js-object :version 1 :id process-id :sourceAssets process-proofs))
                          (expected-sources (js-call (or (get (get old :request) :hostSources) (js-array)) :slice))
                          (process-index 0))
-                    ;; Construct the marker oracle from both complete physical
-                    ;; files, independently of the dependency binding helper.
+                    ;; Construct the marker from all six physical sources,
+                    ;; including the two actual scheduling dependencies,
+                    ;; independently of the dependency binding helper.
                     (js-call assert :strictEqual (js-length (js-call expected-sources :filter
                       (lambda (source) (= (get source :id) process-id)))) 0)
                     (while (< process-index (js-length process-files))
@@ -249,14 +254,16 @@
                         (js-call assert :deepStrictEqual
                           (js-call (get (get record :original) :sourceAssets) :filter
                             (lambda (asset) (= (get asset :file) filename))) (js-array proof))
-                        (when (= process-index 1)
-                          (let ((declarations (js-call (get (get record :request) :hostSources) :filter
-                                  (lambda (source) (= (get source :id) process-id)))))
+                        (when (js-call filename :endsWith ".mjs")
+                          (let* ((source-id (js-call posix :join
+                                   (js-call posix :dirname (get (get record :execution) :host)) (basename filename)))
+                                 (declarations (js-call (get (get record :request) :hostSources) :filter
+                                  (lambda (source) (= (get source :id) source-id)))))
                             (js-call assert :strictEqual (js-length declarations) 1)
                             (js-call assert :strictEqual (get (aref declarations 0) :filename) filename)
                             (js-call assert :ok (js-call bytes :equals
                               (Buffer/from (get (aref declarations 0) :source) "utf8")))
-                            (js-call expected-sources :push (js-object :id process-id :filename filename
+                            (js-call expected-sources :push (js-object :id source-id :filename filename
                               :source (js-call bytes :toString "utf8"))))))
                       (setq process-index (1+ process-index)))
                     (js-call assert :deepStrictEqual (get metadata :processHostDependency) expected-marker)

@@ -359,4 +359,60 @@
         (js-call (expect (el-lookup-key child "ab")) :toBe nil)
         (js-call (expect (el-lookup-key child "ac")) :toBe first))))
 
+  (test "GNU Emacs declaration and contract conditions match interpreter and AOT rejection"
+    (lambda ()
+      (let* ((cases (js-array
+               (js-array "(require 'eliscript) (defun invalid-async (x) (declare (eliscript :async t)) x)" "eliscript-declaration-error")
+               (js-array "(require 'eliscript) (defun invalid-bind (x) (declare (eliscript :destructure t)) x)" "eliscript-declaration-error")
+               (js-array "(require 'eliscript) (defun invalid-host () (declare (eliscript :portable t)) (current-buffer))" "eliscript-contract-error")
+               (js-array "(require 'eliscript) (defun invalid-alloc () (declare (eliscript :abi :numeric-f64)) (list 1))" "eliscript-contract-error")))
+             (inputs (js-call (js-call cases :map (lambda (item) (JSON/stringify (aref item 0)))) :join " "))
+             (reference (spawnSync (or (get (get globalThis.process :env) :EMACS) "emacs")
+               (js-array "--batch" "-Q" "-L" "editor" "-L" "compiler" "--eval"
+                 (str "(progn (require 'eliscript-runtime) (prin1 (mapcar (lambda (source) (condition-case err (progn (eliscript-runtime-reset-state!) (eliscript-runtime-eval-string source)) (error (car err)))) '(" inputs "))))"))
+               (js-object :encoding "utf8" :timeout 10000 :maxBuffer 1048576))))
+        (js-call (expect (get reference :status)) :toBe 0)
+        (js-call (expect (get reference :stdout)) :toBe
+          (str "(" (js-call (js-call cases :map (lambda (item) (aref item 1))) :join " ") ")"))
+        (js-call cases :forEach (lambda (item)
+          (js-call (js-array
+            (lambda () (evalProgram (aref item 0) (js-object :session (createSession))))
+            (lambda () (compileModule (aref item 0) (js-object :runtime runtime-url)))) :forEach
+            (lambda (run)
+              (let ((condition "no error"))
+                (try (funcall run) (catch error (setq condition (get error :conditionSymbol))))
+                (js-call (expect condition) :toBe (aref item 1))))))))))
+
+  (test "ordinary language reference cannot enter Eliscript preprocessing"
+    (lambda ()
+      (mkdirSync directory (js-object :recursive t))
+      (let ((poison (resolve directory "oracle-preprocessor-poison.el")))
+        (try
+          (writeFileSync poison
+            "(defun eliscript-runtime-eval-string (&rest _) (error \"ordinary reference entered project preprocessing\"))\n(provide 'eliscript-runtime)\n" "utf8")
+          (let* ((cases (js-array
+                   (js-object :id "truth" :code "(list (if nil 'bad 'nil-only) (if 0 'zero-true 'bad) (/ -7 2))" :extension false)
+                   (js-object :id "condition" :code "missing-core-reference-variable" :extension false)
+                   (js-object :id "signal-eof" :code "(signal 'end-of-file nil)" :extension false)
+                   (js-object :id "incomplete" :code "(list" :extension false)
+                   (js-object :id "trailing-comment" :code "42 ; complete source\n" :extension false)))
+                 (environment (Object/assign (js-object) (get globalThis.process :env)
+                   (js-object :ELISCRIPT_ORACLE_CASES (JSON/stringify cases)
+                     :ELISCRIPT_ORACLE_LOAD (JSON/stringify (js-array poison)) :ELISCRIPT_ORACLE_PROVIDE "[]")))
+                 (reference (spawnSync (or (get environment :EMACS) "emacs")
+                   (js-array "--batch" "-Q" "-L" "editor" "-L" "compiler" "-l" "tests/fixtures/core-syntax/oracle-driver.el")
+                   (js-object :encoding "utf8" :env environment :timeout 10000 :maxBuffer 1048576))))
+            (js-call (expect (get reference :status)) :toBe 0)
+            (let ((observations (JSON/parse (get reference :stdout))))
+              (js-call (expect (get (aref observations 0) :ok)) :toBe t)
+              (js-call (expect (get (aref observations 0) :value)) :toEqual (js-array "nil-only" "zero-true" -3))
+              (js-call (expect (get (aref observations 1) :ok)) :toBe false)
+              (js-call (expect (get (aref observations 1) :condition)) :toBe "void-variable")
+              (js-call (js-array 2 3) :forEach (lambda (index)
+                (js-call (expect (get (aref observations index) :ok)) :toBe false)
+                (js-call (expect (get (aref observations index) :condition)) :toBe "end-of-file")))
+              (js-call (expect (get (aref observations 4) :ok)) :toBe t)
+              (js-call (expect (get (aref observations 4) :value)) :toBe 42)))
+          (finally (rmSync poison (js-object :force t)))))))
+
 )

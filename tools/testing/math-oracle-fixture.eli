@@ -97,23 +97,31 @@
       ;; the mapped emission written by the formal CLI, including its exact
       ;; relative coordinates, map bytes and external source-map trailer.
       ;; No user-selected dependency or alternate runtime is admitted.
-      (let ((names (js-array "unicode-case-data" "unicode-case" "math")) (index 0))
+      (let ((names (js-array "prelude" "unicode-case-data" "unicode-case" "math")) (index 0))
         (while (< index (js-length names))
           (let* ((name (aref names index)) (id (str "runtime/" name))
                  (input-path (resolve root (str id ".eli"))) (output-path (resolve root (str id ".mjs")))
                  (map-path (str output-path ".map")) (map-directory (dirname map-path))
-                 (generated-name (relative map-directory output-path))
-                 (source-name (relative map-directory input-path))
                  (map-url (relative (dirname output-path) map-path))
                  (source-bytes (await (readFile input-path))) (source (js-call source-bytes :toString "utf8"))
                  (javascript-bytes (await (readFile output-path))) (javascript (js-call javascript-bytes :toString "utf8"))
                  (map-bytes (await (readFile map-path))) (mapping (js-call map-bytes :toString "utf8"))
+                 (map (JSON/parse mapping))
+                 ;; Formal stage3 products use package-relative coordinates;
+                 ;; file-CLI products use map-directory-relative coordinates.
+                 ;; Authenticate complete bytes for either current build path.
+                 (generated-name (get map :file))
+                 (source-name (aref (get map :sources) 0))
                  (emission (js-call compiler :compile_string_with_source_map source input-path generated-name source-name)))
-            (unless (and (js-call source-bytes :equals (Buffer/from source "utf8"))
+            (unless (and (or (and (= generated-name (str id ".mjs")) (= source-name (str id ".eli")))
+                             (and (= generated-name (relative map-directory output-path))
+                                  (= source-name (relative map-directory input-path))))
+                         (js-call source-bytes :equals (Buffer/from source "utf8"))
                          (= (value-type (get emission :javascript)) "string")
                          (= (value-type (get emission :sourceMap)) "string")
-                         (js-call javascript-bytes :equals (Buffer/from
-                           (str (get emission :javascript) "//# sourceMappingURL=" map-url "\n") "utf8"))
+                         (or (js-call javascript-bytes :equals (Buffer/from (get emission :javascript) "utf8"))
+                             (js-call javascript-bytes :equals (Buffer/from
+                               (str (get emission :javascript) "//# sourceMappingURL=" map-url "\n") "utf8")))
                          (js-call map-bytes :equals (Buffer/from (get emission :sourceMap) "utf8")))
               (throw (new globalThis.TypeError (str "Math oracle runtime is not its maintained source emission: " id))))
             (let ((map (JSON/parse mapping)))

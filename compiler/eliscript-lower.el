@@ -19,7 +19,7 @@
     value-type host-identity-token string-code-unit-at string-from-code-unit
     string-to-number string-to-bigint number-float64-words
     eq equal null nil? undefined? nullish?
-    car cdr cons js-cons nth js-nth aref length js-length
+    car cdr cons js-cons nth js-nth aref length js-length __eliscript_array_build
     object-keys object-has? object-assoc __eliscript_arity_error)
   "Operators represented by the generic intrinsic IR node.")
 

@@ -1,0 +1,20 @@
+(module tools.backends.compiler-corpus-esm-host
+  (import "node:fs/promises" mkdtemp symlink rm)
+  (import "node:path" dirname resolve)
+  (import "../../bootstrap/host/bun.mjs" loadCompiler)
+  (defasync main ()
+    (let* ((input (resolve (aref (get globalThis.process :argv) 2)))
+           (directory (await (mkdtemp (resolve (dirname input) ".eliscript-esm-loader-")))))
+      (try
+        (await (symlink input (resolve directory "compiler.mjs") "file"))
+        (let ((module (await (loadCompiler directory))))
+          (console/log (JSON/stringify (js-call module :report))))
+        (finally (await (rm directory (js-object :recursive t :force t)))))))
+  ;; The importing acceptance driver must retain its execution context until
+  ;; every asynchronous assertion has finished, including failures.
+  (defconst completion (main))
+  (js-call completion :catch (lambda (error)
+    (console/error error) (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

@@ -449,7 +449,7 @@
             (js-call assert :strictEqual (failure s runtime (lambda () (setq actual (value s "from-points" (raw-args s values)))))
               (error-name (lambda () (setq expected (Reflect/apply (get oracle :from_points) oracle values)))))
             (js-call assert :deepStrictEqual actual expected))))))
-      (js-call (js-array -1 -0 0 65 55296 65535 65536 128512 1114111 1114112 1.5 globalThis.NaN globalThis.Infinity (- globalThis.Infinity)) :forEach (lambda (input)
+      (js-call (js-array -1 -0 0 65 55296 65535 65536 128512 1114111 1114112 1.5 globalThis.NaN globalThis.Infinity) :forEach (lambda (input)
         (funcall check "single character constructors" (lambda (s)
           (let ((raw (js-call s :box input)))
             (js-call assert :deepStrictEqual

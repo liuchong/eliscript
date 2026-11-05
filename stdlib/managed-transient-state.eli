@@ -15,8 +15,9 @@
   (defportable managed-transient-vector-node (slots owner)
     (js-object :slots slots :owner owner))
   (defun managed-transient-vector-editable (node owner)
-    (if (eq (get node :owner nil) owner) node
-      (managed-transient-vector-node (js-call (get node :slots) :slice) owner)))
+    (let ((editable (if (eq (get node :owner nil) owner) node
+                      (managed-transient-vector-node (js-call (get node :slots) :slice) owner))))
+      (put editable :revision (1+ (get editable :revision 0))) editable))
   (defportable managed-transient-vector-new-path (level node owner)
     (if (= level 0) node
       (managed-transient-vector-node
@@ -107,13 +108,14 @@
   (defportable managed-transient-map-collision (hash entries owner)
     (js-object :kind "collision" :hash hash :entries entries :owner owner))
   (defun managed-transient-map-editable (node owner)
-    (if (eq (get node :owner nil) owner) node
+    (let ((editable (if (eq (get node :owner nil) owner) node
       (cond
         ((= (get node :kind) "bitmap")
           (managed-transient-map-bitmap (get node :bitmap) (js-call (get node :items) :slice) owner))
         ((= (get node :kind) "array")
           (managed-transient-map-array (get node :count) (js-call (get node :children) :slice) owner))
-        (t (managed-transient-map-collision (get node :hash) (js-call (get node :entries) :slice) owner)))))
+        (t (managed-transient-map-collision (get node :hash) (js-call (get node :entries) :slice) owner))))))
+      (put editable :revision (1+ (get editable :revision 0))) editable))
   (defportable managed-transient-map-bit-count (value)
     (let* ((bits (uint32 value))
            (pairs (- bits (bit-and (unsigned-bit-shift-right bits 1) 1431655765)))

@@ -10,6 +10,12 @@
   (import "../../tests/helpers/managed-browser-transport.mjs" writeManagedReference)
   (import "../../dist/bootstrap/ir.mjs" validate-serializable-program)
   (defconst managedFixtureRepairPlans (js-array
+    (js-object :suite "tests/wasm-managed-array-sort.test.mjs" :kind "sort-error-priority"
+      :sha256 "d8341b89894f2460a68e94925b41c6237f19e12417af3fccd19d289ee7171082")
+    (js-object :suite "tests/wasm-managed-concat.test.mjs" :kind "concat-error-priority"
+      :sha256 "62971a207c89e5abc1797eaa5ca861d1970078df91a3c5db175cb25e4f4a0229")
+    (js-object :suite "tests/wasm-managed-operand-conversion.test.mjs" :kind "text-error-priority"
+      :sha256 "d9385ea1cf4c2b17bd046590950e524f1cbf2e33adf87afeceba8c554ea5a95d")
     (js-object :suite "tests/wasm-managed-persistent-literals.test.mjs" :kind "persistent-boundary"
       :sha256 "bb8fe651361e49b5dee4f12252209a054401e03beed7d150efd8fd9781e81287")
     (js-object :suite "tests/compiler-fragment-combine.test.mjs" :kind "file-reference"
@@ -62,17 +68,17 @@
                (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
                (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")) realmCapacityTitle undefined))
   (defun managedFixtureFunctionalArguments (plan environment arguments)
-    (if (and (or (and (= (get plan :suite) "tests/wasm-managed-project-linking.test.mjs")
+    ;; The original 32 graphs each perform two complete WASM emissions plus
+    ;; fresh JS loading and live-binding checks. Bound the already explicit
+    ;; functional deferral; never turn its deadline into unlimited execution.
+    (if (and (= (get plan :suite) "tests/wasm-managed-project-linking.test.mjs")
              (= (get plan :sha256) "fd9c909b7e5fa57ee9237385c142349fdad1b9d66d5e9d603c2323cdf3ec0c07")
-             (= (aref arguments 0) "fixed random module graphs agree with independent binding models and fresh JS projects"))
-             (and (= (get plan :suite) "tests/wasm-managed-regexp.test.mjs")
-               (= (get plan :sha256) "65d8dc751109174f90eb41ee0d0332e23e3b354d123c733448a84a32ad7ae2ad")
-               (= (aref arguments 0) "deterministic pattern/text models preserve captures and priorities including nullable repeated groups")))
+             (= (aref arguments 0) "fixed random module graphs agree with independent binding models and fresh JS projects")
              (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
              (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")
              (= (js-length arguments) 3) (= (value-type (aref arguments 1)) "function")
              (= (aref arguments 2) 30000))
-      (let ((forwarded (js-call arguments :slice))) (put forwarded 2 0) forwarded) arguments))
+      (let ((forwarded (js-call arguments :slice))) (put forwarded 2 120000) forwarded) arguments))
   (defasync assertNativePrototypeNode (backend program)
     (let ((fixture (prepareFixtureEnvironment root (get globalThis.process :env))))
       (try
@@ -333,11 +339,14 @@
              (js-object :id "main.mjs" :program (js-call compiler :compile_ir_string
                "(import \"./lib.mjs\" :as ns) (defun copy () (object-assoc ns :extra 7)) (export copy)" "main.eli"))))
            (source (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")))
-           (signature "  (defun heap-module-cell-read (heap cell index)")
+           ;; Reading any module cell also runs during normal initialization.
+           ;; Inject at the namespace entry read used by copying, so setup can
+           ;; finish before the intended copy operation really traps.
+           (signature "  (defun heap-module-namespace-entry-read (heap object index)")
            (start (js-call source :indexOf signature)) (end (js-call source :indexOf "  (defun " (+ start 10))))
       (js-call assert :ok (and (>= start 0) (> end start)))
       (js-call assert :strictEqual (js-call source :indexOf signature (1+ start)) -1)
-      (let* ((faulty (str (js-call source :slice 0 start) "  (defun heap-module-cell-read (heap cell index) (load-u32 4294967295))\n" (js-call source :slice end)))
+      (let* ((faulty (str (js-call source :slice 0 start) "  (defun heap-module-namespace-entry-read (heap object index) (load-u32 4294967295))\n" (js-call source :slice end)))
              (rt (js-call compiler :compile_ir_string faulty "namespace-copy-trap.eli"))
              (before (JSON/stringify modules))
              (a (instantiateManagedRuntime (globalThis.Uint8Array.from

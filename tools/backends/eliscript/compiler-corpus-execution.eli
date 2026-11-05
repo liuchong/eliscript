@@ -16,14 +16,20 @@
   (import "./managed-runtime.mjs" instantiateManagedRuntimeWithHostModules loadManagedHostModules)
   (import "./native-managed-runtime.mjs" instantiateNativeManagedRuntime snapshotNativeManagedRuntimeABI)
   (import "./compiler-corpus-literal-provider.mjs" prepareOriginalLiteralHostProvider)
+  (import "./compiler-corpus-sorted-observation.mjs" sortedFunctionalPartition)
   (import "./compiler-corpus-original-program.mjs" executeOriginalProgram executeCompilerSessionProgram)
   (import "./compiler-corpus-process.mjs" originalCorpusExecutionPolicy runOriginalCorpusProcess)
+  (import "./compiler-corpus-source-archive.mjs" archiveCompilerCorpusSources)
   (import "../../dist/bootstrap/reader.mjs" read-string)
   (import "../../dist/bootstrap/compiler.mjs" compile-string)
   (import "../../bootstrap/host/bun.mjs" loadCompiler)
   (defconst resolveOriginalCorpusRequest (get ground :resolveOriginalCorpusRequest))
   (defconst originalProgramArguments (get ground :originalProgramArguments))
   (defconst compareCompilerCorpusObservation (get ground :compareCompilerCorpusObservation))
+  ;; Only independently prepared contexts may pair a private execution layout
+  ;; with its authenticated original resource inputs. Callers cannot supply a
+  ;; replacement resource record through a serialized context field.
+  (defconst seed-resource-inputs (new globalThis.WeakMap))
   (defun field (value key) (if (nullish? value) undefined (get value key)))
   (defun fallback (value other) (if (nullish? value) other value))
   (defasync prepareCompilerCorpusExecutionScope (directory source-root)
@@ -120,19 +126,16 @@
         ;; Authenticate the original complete input before resolving its private
         ;; Seed graph. An altered original proof can never be refreshed away.
         (when retained
-          (compilerCorpusFunctionalResources record (js-object :functionalRuntimeProfile "small")))
+          (compilerCorpusFunctionalResources record (js-object :functionalRuntimeProfile "small"))
+          ;; Authenticate physical source names before the Seed compiler gives
+          ;; them private virtual paths. Never rebind original input identity
+          ;; to that compiler layout, nor mutate the caller's original proof.
+          (bindOriginalFunctionalResourceInputs (js-object :evidence (get configuration :sourceAssets)
+            :records (js-array (copy record (js-object :original (copy (get record :original))))))))
         (let ((request (prepareOriginalSeedSources record proofs)))
           (if (or (nullish? request) (not (= (get request :resolveImports) t))) record
-            (let* ((original (get record :original))
-                   (private (copy record (js-object :modules (get request :modules) :request request
-                     :original (copy original)))))
-              (when retained
-                ;; The existing archive binder verifies every expanded module
-                ;; and the complete original host against actual source bytes.
-                ;; Only this independently resolved record receives its proof.
-                (bindOriginalFunctionalResourceInputs (js-object :evidence (get configuration :sourceAssets)
-                  :records (js-array private))))
-              private))))))
+            (copy record (js-object :modules (get request :modules) :request request
+              :original (copy (get record :original)))))))))
 
   (defun seed-host-tokens (source)
     ;; Source-data scanning only: preserve the original suite scanner's opaque
@@ -535,7 +538,8 @@
                :bootstrapManifestPath (get configuration :bootstrapManifestPath)))
              (context (js-object :artifact artifact :record record :target "javascript"
                :independentSeedProgram t
-               :sourceAssets (get configuration :sourceAssets)
+               :sourceIdentity (await (archiveCompilerCorpusSources original-record (resolve output "sources-original")))
+               :sourceAssets (get configuration :sourceAssets) :transportEvidence (js-object)
                :sourceRoot source-root :signal signal :options options :directory output
                :archiveProduct (async (value &rest arguments)
                  (let ((name (if (or (= (js-length arguments) 0) (undefined? (aref arguments 0)))
@@ -543,7 +547,9 @@
                        (target (if (or (< (js-length arguments) 2) (undefined? (aref arguments 1)))
                                  "javascript" (aref arguments 1))))
                    (await (archiveProduct value target (resolve output name))))))))
-        ;; Enter the same maintained prelaunch path as the selected product.
+        (js-call seed-resource-inputs :set context original-record)
+        ;; Execution still needs the resolved graph's authenticated providers;
+        ;; resource admission uses only the retained original input identity.
         ;; It installs only authentic declared runtime bytes and exact tools.
         (if (or (= (field (field record "execution") "kind") "compiler-session-program")
                 (not (original-host-enabled (field (field record "execution") "compilerGenerations"))))
@@ -555,7 +561,8 @@
                           :auto (get configuration :auto) :nativeTarget (get configuration :nativeTarget)
                           :retainIR t :debug t :signal signal))))
                  (session (await (openCompilerArtifact seed (get configuration :sessionOptions)))) (failed false))
-            (try (await (executeCompilerCorpusRecord (copy context (js-object :session session))))
+            (put context :session session)
+            (try (await (executeCompilerCorpusRecord context))
               (catch error (setq failed t) (throw error))
               (finally (try (await (js-call session :close))
                 (catch error (unless failed (throw error)))))))))))
@@ -710,7 +717,9 @@
         ;; loader at runtime. Forward the same profile used by the compiled
         ;; request, as well as the pool budget; otherwise its default 16MiB
         ;; linear memory cannot construct a genuine 256MiB initial heap.
-        (copy context (js-object :options (copy (get context :options) (js-object :memory memory))
+        (copy context (js-object :options (copy (get context :options) (js-object :memory memory)
+            (unless (undefined? (get acceptance :functionalExecutionDeadlineMs))
+              (js-object :functionalExecutionDeadlineMs (get acceptance :functionalExecutionDeadlineMs))))
           :record (copy record (js-object :execution execution)))))))
 
   (defasync prepareCompilerCorpusSourceMapContext (context)
@@ -1241,8 +1250,8 @@
     (and (= (field (get record :original) "suite") "tests/wasm-managed-sorted-core.test.mjs")
       (= (field (get record :original) "fixture") "tests/fixtures/wasm-managed-sorted.eli")
       (= (value-type (field record "id")) "string")
-      (js-call (new globalThis.RegExp "^original-managed:sorted-core:(node|bun):auto-(65536|1)$")
-        :test (get record :id))))
+      (or (js-call (new globalThis.RegExp "^original-managed:sorted-core(?:-provider)?:(node|bun):auto-(65536|1)$")
+        :test (get record :id)) (sortedFunctionalPartition record))))
   (defun canonical-native-literal-seed-p (context)
     ;; The original complete suite creates its portable outputs below
     ;; sourceRoot, where their real package reference resolves. Its independent
@@ -1635,10 +1644,19 @@
                            (lambda (token) (= (seed-host-string token) "node:child_process"))))
                  (token (aref matches 0)) (before (field token "text"))
                  (module-file "tools/backends/compiler-corpus-tools-reference.mjs")
-                 (after (JSON/stringify (get (pathToFileURL (resolve source-root module-file)) :href))))
-            (unless (and (= (js-length matches) 1) (= (js-call host :indexOf before (1+ (js-call host :indexOf before))) -1))
+                 (url (get (pathToFileURL (resolve source-root module-file)) :href))
+                 (after (JSON/stringify url))
+                 (semantic-tools (= (field (get execution :setupReplacement) "kind") "selected-complete-compiler-semantic-tools")))
+            (unless (or (and semantic-tools (= (js-length matches) 0))
+                        (and (not semantic-tools) (= (js-length matches) 1)
+                             (= (js-call host :indexOf before (1+ (js-call host :indexOf before))) -1)))
               (throw (new globalThis.TypeError "original tools child-process import changed")))
-            (let* ((projected (js-call host :replace before after)) (artifact (get context :artifact))
+            ;; The selected-session semantic host no longer spawns a second
+            ;; compiler, but its real generated data modules still need the
+            ;; authenticated Unicode resolver installed before evaluation.
+            (let* ((projected (if semantic-tools
+                     (str (compile-string (str "(import " after ")") "original-tools-data-import.eli") host)
+                     (js-call host :replace before after))) (artifact (get context :artifact))
                    (directory (fallback (get artifact :directory) (resolve (get artifact :path) "..")))
                    (proof (js-object :kind "original-tools-data-reference" :version 1 :recordId id
                      :sourceRoot source-root :configurationPath (resolve directory "__eliscript_original_compiler_session.json")
@@ -1721,13 +1739,18 @@
             (copy execution (js-object :runtimeOptions
               (copy (get execution :runtimeOptions) (js-object :originalHostLifetime "process"))))))))))))
   (defasync executeCompilerCorpusRecord (context)
+    (let* ((seed-input (js-call seed-resource-inputs :get context))
+           ;; Authenticate the complete caller input before deriving private
+           ;; source-map/module layouts. Those layouts are compiler products,
+           ;; not replacements for the archive-bound resource identity.
+           (acceptance (compilerCorpusRuntimeAcceptance
+             (if (undefined? seed-input) (get context :record) seed-input) (get context :options))))
     (when (and (not (Object/hasOwn context "failure")) (originalSequenceNativeInteropP (get context :record)))
       (let ((record (transportOriginalSequenceRuntime (get context :record)
                       (await (loadLiteralSources (js-object :sourceRoot (get context :sourceRoot)))))))
         (setq context (copy context (js-object :record record)))))
     (setq context (await (prepareCompilerCorpusSourceMapContext context)))
-    (let* ((acceptance (compilerCorpusRuntimeAcceptance (get context :record) (get context :options)))
-           (configured (await (prepareCompilerCorpusNativeProviders context)))
+    (let* ((configured (await (prepareCompilerCorpusNativeProviders context)))
            (provider (if (eq configured context) undefined (get configured :nativeProviderIdentity))))
       (setq configured (prepareCompilerCorpusRuntimeContext configured acceptance))
       (setq configured (await (prepareOriginalLiteralHostProvider configured)))
@@ -1735,7 +1758,7 @@
       (let ((observation (await (execute-compiler-corpus-record configured))))
         (unless (undefined? acceptance) (setq observation (copy observation acceptance)))
         (if (undefined? provider) observation
-          (copy observation (js-object :nativeProviderIdentity provider))))))
+          (copy observation (js-object :nativeProviderIdentity provider)))))))
   (defconst prepareOriginalSeedCorpusRecord seed-authenticated-record)
   (export prepareOriginalSeedCorpusRecord resolveOriginalCorpusRequest originalProgramArguments createOriginalSeedOracle executeCompilerCorpusRecord
     executeIsolatedCompilerCorpusExports decodeCompilerCorpusObservation compilerCorpusRuntimeAcceptance prepareCompilerCorpusRuntimeContext prepareOriginalToolsCLIContext prepareCompilerCorpusNativeProviders prepareCompilerCorpusSourceMapContext

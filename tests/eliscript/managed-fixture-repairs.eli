@@ -2,12 +2,80 @@
   (import "node:test" test)
   (import "node:assert/strict" :default assert)
   (import "node:fs" readFileSync)
+  (import "node:fs/promises" writeFile)
   (import "node:path" resolve)
   (import "node:crypto" createHash)
-  (import "../tools/backends/build.mjs" root)
+  (import "../tools/backends/build.mjs" root buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "../tools/testing/fixture-environment.mjs" prepareFixtureEnvironment)
+  (import "../tools/testing/generated-fixture-module.mjs" loadGeneratedFixture)
   (import "../tools/testing/managed-fixture-repairs.mjs" managedFixtureRepairPlans nativePrototypeFixtureSource managedReferenceChildArguments
     managedFixtureTestMethod managedFixtureRealmPressureTitle persistentBoundaryFixtureSource managedFixtureFunctionalArguments)
-  (test "only the complete authenticated project graph case defers its original total deadline under both functional flags"
+  (test "source callback tail transfers finish before sort conversion and discarded Map Set results, including throws and recovery"
+    (js-object :timeout 120000)
+    (async ()
+      (let* ((fixture (prepareFixtureEnvironment root (get globalThis.process :env)))
+             (directory (get fixture :directory)))
+        (try
+          (let* ((b (await (buildBackends (js-object :outputRoot directory)))) (compiler (get b :compiler))
+                 (source (str
+                   "(defun compare (left right) (- left right))\n"
+                   "(defun record (trace value) (js-call trace :push value))\n"
+                   "(defun reject (marker) (throw marker))\n"
+                   "(defun observe () (let* ((trace (js-array)) (items (js-array 3 1 2))"
+                   " (sorted (js-call items :sort (lambda (left right) (compare left right))))"
+                   " (copied (js-call (js-array 6 4 5) :toSorted (lambda (left right) (compare left right))))"
+                   " (table (new globalThis.Map (js-array (js-array 1 7) (js-array 2 8))))"
+                   " (set (new globalThis.Set (js-array 9 10))))"
+                   " (js-call table :forEach (lambda (value key) (record trace (+ value key))))"
+                   " (js-call set :forEach (lambda (value) (record trace value)))"
+                   " (JSON/stringify (js-array sorted copied trace))))\n"
+                   "(defun failure (marker) (let ((results (js-array)))"
+                   " (js-call results :push (try (js-call (js-array 2 1) :sort (lambda (a b) (reject marker))) false (catch error (eq error marker))))"
+                   " (js-call results :push (try (js-call (new globalThis.Map (js-array (js-array 1 2))) :forEach (lambda (v k) (reject marker))) false (catch error (eq error marker))))"
+                   " (js-call results :push (try (js-call (new globalThis.Set (js-array 1)) :forEach (lambda (v) (reject marker))) false (catch error (eq error marker))))"
+                   " (JSON/stringify results))) (export observe failure)"))
+                 (program (js-call compiler :compile_ir_string source "callback-tail.eli"))
+                 (before (JSON/stringify program))
+                 (runtime (js-call compiler :compile_ir_string (readFileSync (resolve root "bootstrap/runtime/memory.eli") "utf8") "runtime.eli"))
+                 (lowered (js-call (get b :managed) :lower_managed_program program runtime))
+                 (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program runtime)))
+                 (reference (await (loadGeneratedFixture directory (js-call compiler :emit_ir_string program) "callback-tail")))
+                 (expected "[[1,2,3],[4,5,6],[8,10,9,10]]")
+                 (factories (js-array (lambda () (instantiateManagedRuntime bytes)))))
+            (js-call assert :strictEqual (js-call reference :observe) expected)
+            (js-call assert :strictEqual (js-call reference :failure (js-object)) "[true,true,true]")
+            (js-call assert :deepStrictEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+            (when (and (= (get globalThis.process :arch) "arm64")
+                       (js-call (js-array "darwin" "linux") :includes (get globalThis.process :platform)))
+              (let* ((target (if (= (get globalThis.process :platform) "darwin") "arm64-macos" "arm64-linux"))
+                     (path (resolve directory (if (= target "arm64-macos") "callback-tail.dylib" "callback-tail.so"))))
+                (await (writeFile path (Uint8Array/from (js-call (get b :native) :emit_typed_native_memory_library (get lowered :typed) target))))
+                (js-call factories :push (lambda () (instantiateNativeManagedRuntime path lowered)))))
+            (let ((index 0))
+              (while (< index (js-length factories))
+                (let* ((a (await (funcall (aref factories index)))) (held (js-call a :number -0.0))
+                       (marker (js-call a :sourceObject (js-object))) (caller (js-call a :frame 2)))
+                  (js-call a :frameSet caller 0 held) (js-call a :frameSet caller 1 marker) (js-call a :auto 1)
+                  (try
+                    (js-call (js-array "observe" "failure" "observe") :forEach (lambda (entry)
+                      (let ((result (js-call a :invoke entry (if (= entry "failure") (js-array marker) (js-array)))))
+                        (try (js-call assert :strictEqual (js-call a :readString result)
+                               (if (= entry "failure") "[true,true,true]" expected))
+                          (finally (js-call a :release result))))
+                      (js-call assert :strictEqual (get (js-call a :stats) :frameDepth) 1)
+                      (js-call assert :ok (Object/is (js-call a :readNumber held) -0.0))))
+                    (finally
+                      (js-call a :leaveFrame caller) (js-call a :release marker) (js-call a :release held)
+                      (js-call a :closeModule) (js-call a :collect)
+                      (js-call assert :strictEqual (js-call a :live) 0)
+                      (js-call assert :strictEqual (get (js-call a :stats) :frameDepth) 0)
+                      (unless (undefined? (get a :close)) (js-call a :close)))))
+                (setq index (1+ index))))
+            (js-call assert :strictEqual (JSON/stringify program) before))
+          (finally (js-call fixture :close))))))
+  (test "only the complete authenticated 32 graph case has a bounded functional deferral and regex retains its original deadline"
     (lambda ()
       (let* ((plan (js-call managedFixtureRepairPlans :find (lambda (item)
                (= (get item :suite) "tests/wasm-managed-project-linking.test.mjs"))))
@@ -16,7 +84,7 @@
              (environment (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1"
                :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE "small"))
              (actual (managedFixtureFunctionalArguments plan environment arguments)))
-        (js-call assert :deepStrictEqual actual (js-array (aref arguments 0) callback 0))
+        (js-call assert :deepStrictEqual actual (js-array (aref arguments 0) callback 120000))
         (js-call assert :strictEqual (aref arguments 2) 30000)
         (js-call (js-array (js-object) (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1")
           (js-object :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE "small")) :forEach
@@ -28,8 +96,7 @@
         (let* ((regexp-plan (js-call managedFixtureRepairPlans :find (lambda (item)
                  (= (get item :suite) "tests/wasm-managed-regexp.test.mjs"))))
                (model (js-array "deterministic pattern/text models preserve captures and priorities including nullable repeated groups" callback 30000)))
-          (js-call assert :deepStrictEqual (managedFixtureFunctionalArguments regexp-plan environment model)
-            (js-array (aref model 0) callback 0))
+          (js-call assert :strictEqual (managedFixtureFunctionalArguments regexp-plan environment model) model)
           (js-call assert :strictEqual (managedFixtureFunctionalArguments regexp-plan (js-object) model) model)))))
   (test "fixture framework native methods keep their real receiver and preserve noncallable properties"
     (lambda ()
@@ -56,9 +123,9 @@
         (js-call (js-array (Object/assign (js-object) plan (js-object :sha256 "changed"))
           (Object/assign (js-object) plan (js-object :suite "tests/unrelated.test.mjs"))) :forEach (lambda (other)
           (js-call assert :strictEqual (managedFixtureRealmPressureTitle other environment) undefined))))))
-  (test "managed fixture repair plans preserve all nineteen complete original source identities"
+  (test "managed fixture repair plans preserve all twenty-two complete original source identities"
     (lambda ()
-      (js-call assert :strictEqual (js-length managedFixtureRepairPlans) 19)
+      (js-call assert :strictEqual (js-length managedFixtureRepairPlans) 22)
       (js-call managedFixtureRepairPlans :forEach (lambda (plan)
         (js-call assert :strictEqual
           (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root (get plan :suite)))) :digest "hex")

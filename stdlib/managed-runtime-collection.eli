@@ -560,10 +560,11 @@
       (fail "assoc requires a collection followed by one or more key/value pairs"))
     (let ((result (aref arguments 0)) (index 1))
       (while (< index (js-length arguments))
-        (let ((slot (directSlot result COLLECTION_ASSOC))
-              (key (aref arguments index)) (value (aref arguments (1+ index))))
-          (setq result (if (not (nullish? slot)) (js-call slot :call result key value) (funcall assoc-method result key value))
-                index (+ index 2)))) result))
+        ;; The protocol owns both slot validation and its single property read.
+        ;; Pre-reading here would repeat observable accessors on fallback.
+        (setq result (funcall assoc-method result
+                       (aref arguments index) (aref arguments (1+ index)))
+              index (+ index 2))) result))
   (defun contains (collection key)
     (let* ((slot (directSlot collection COLLECTION_CONTAINS))
            (result (if (not (nullish? slot)) (js-call slot :call collection key) (funcall contains-method collection key))))

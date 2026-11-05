@@ -137,12 +137,31 @@
   (defun host-header (members source)
     (let ((imports (js-array
         "(import \"bun:test\" expect)" "(import \"node:fs/promises\" readFile writeFile mkdir)"
-        "(import \"node:path\" resolve relative dirname basename)" "(import \"node:module\" createRequire)")) (index 0))
+        "(import \"node:path\" resolve relative dirname basename)" "(import \"node:module\" createRequire)"
+        (str "(defun original-runtime-namespace (path) "
+          "(funcall (createRequire (aref (get globalThis.process :argv) 1)) "
+          "(resolve (if (= (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_TARGET) \"javascript\") "
+          "(aref (get globalThis.process :argv) 2) "
+          "(get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_SOURCE_ROOT)) "
+          "(js-call path :slice 3))))"))) (index 0))
       (while (< index (js-length members))
         (let ((form (aref members index)))
           (when (and (head-p form "import")
                 (js-call (get (aref (get form :items) 1) :value) :startsWith "../runtime/"))
-            (js-call imports :push (form-text source form))))
+            ;; The independent Seed and binary literal decoder use the
+            ;; authenticated source-root provider. Bind its actual namespaces,
+            ;; not copies with identical class names but different identities.
+            (let* ((path (get (aref (get form :items) 1) :value))
+                   (local (str "original-runtime-" index)) (at 2))
+              (js-call imports :push (str "(defconst " local
+                " (original-runtime-namespace " (JSON/stringify path) "))"))
+              (while (< at (js-length (get form :items)))
+                (let ((binding (aref (get form :items) at)))
+                  (unless (= (get binding :kind) "symbol")
+                    (throw (new globalThis.TypeError "original literal runtime import must keep its named bindings")))
+                  (js-call imports :push (str "(defconst " (get binding :name)
+                    " (get " local " " (JSON/stringify (get binding :name)) "))")))
+                (setq at (1+ at))))))
         (setq index (1+ index)))
       (js-call imports :join "\n")))
 

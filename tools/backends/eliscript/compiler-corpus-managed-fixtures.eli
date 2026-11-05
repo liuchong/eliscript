@@ -4,7 +4,8 @@
   (import "node:path" posix resolve)
   (import "node:url" pathToFileURL)
   (import "../../dist/bootstrap/reader.mjs" read-string)
-  (import "../../dist/bootstrap/compiler.mjs" compile-string)
+  (import "../../dist/bootstrap/compiler.mjs" compile-string compile-ir-string)
+  (import "../../dist/bootstrap/emitter.mjs" emit-top-level)
   (import "./compiler-corpus-managed-fixtures-ground.mjs" :as ground)
   (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
   (import "./compiler-corpus-managed-adapters.mjs" originalManagedProgramCompletionSource)
@@ -249,6 +250,7 @@
       :inputs (js-array "stdlib/managed-wire-http-rpc.eli" "stdlib/managed-wire-schema.eli" "stdlib/managed-wire-markdown.eli")
       :pairs (js-array
         (js-array "tools/testing/wire-project-fixture.eli" "tools/testing/wire-project-fixture.mjs")
+        (js-array "tools/testing/wire-call-cases.eli" "tools/testing/wire-call-cases.mjs")
         (js-array "tests/eliscript/wasm-managed-wire.eli" "tests/wasm-managed-wire-selfhosted.test.mjs")
         (js-array "tests/eliscript/wire-project-fixture-install.eli" "tests/helpers/wire-project-fixture-install.mjs")
         (js-array "tests/eliscript/standard-library-fixture.eli" "tests/helpers/standard-library-fixture.mjs")
@@ -286,8 +288,10 @@
         (js-array "tests/eliscript/standard-library-fixture-install.eli" "tests/helpers/standard-library-fixture-install.mjs")
         (js-array "tests/eliscript/standard-library-fixture-tests.eli" "tests/standard-library-fixture-selfhosted.test.mjs")))
     (js-object :suite "tests/wasm-managed-sorted-core.test.mjs" :archive "tests/wasm-managed-sorted-core.test.mjs"
-      :sha256 "84fd970f85e0df39b2efad23a8aa445106954fd9fa8df41d7c5978a70f70f303" :count 5 :replay t
+      :sha256 "849c6c8975d20817e4bb8e4d90c804adfc99f24c29b67af044749887ca5d63bf" :count 5 :replay t
       :pairs (js-array
+        (js-array "tests/wasm-managed-sorted-core.test.eli" "tests/wasm-managed-sorted-core.test.mjs")
+        (js-array "tools/testing/wire-call-cases.eli" "tools/testing/wire-call-cases.mjs")
         (js-array "tests/eliscript/standard-library-fixture.eli" "tests/helpers/standard-library-fixture.mjs")
         (js-array "tests/eliscript/standard-library-fixture-install.eli" "tests/helpers/standard-library-fixture-install.mjs")
         (js-array "tests/eliscript/standard-library-fixture-tests.eli" "tests/standard-library-fixture-selfhosted.test.mjs")))
@@ -882,7 +886,10 @@
                    "original-fixture-observation-counter.eli"))
                ;; The imported helper and counter belong to the same analyzed
                ;; Eli unit. The retained host calls that emitted closure only.
-               (report (compile-string "(funcall (js* \"originalFixtureReceipt\"))" "original-fixture-receipt.eli")))
+               ;; This replaces a statement inside finish(), not a module.
+               ;; Keep imports and the shared prelude in the prefix above.
+               (report-program (compile-ir-string "(funcall (js* \"originalFixtureReceipt\"))" "original-fixture-receipt.eli"))
+               (report (get (emit-top-level (aref (get report-program :body) 0)) :text)))
           (str prefix "\n" (js-call (js-call old :replace declaration "function originalFixtureCompare(label,observe){") :replace receipt report))))))
   (defasync fixture-observation-options (options)
     (if (or (nullish? options) (nullish? (get options :stableFiles))

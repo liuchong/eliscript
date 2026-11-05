@@ -43,6 +43,10 @@
   (defconst literal-records (new globalThis/WeakMap))
   (defconst literal-wrappers (new globalThis/WeakMap))
   (defconst literal-node-views (new globalThis/WeakMap))
+  ;; Editable tries retain node identity. Revisit only the nodes whose owning
+  ;; edit operation changed their revision, rather than rescanning the tree
+  ;; after every transient update. Public class views keep their same fields.
+  (defconst literal-node-view-revisions (new globalThis/WeakMap))
   (defconst literal-map-root-views (new globalThis/WeakMap))
   (defconst literal-queue-views (new globalThis/WeakMap))
   (defconst literal-subvector-sources (new globalThis/WeakMap))
@@ -190,7 +194,8 @@
     (let ((cached (js-call literal-node-views :get node)))
       (if (not (undefined? cached))
         (progn
-          (unless (nil? (literal-node-owner node))
+          (unless (or (nil? (literal-node-owner node))
+                      (= (js-call literal-node-view-revisions :get node) (get node :revision 0)))
             (let ((source (get node :slots)) (slots (get cached :slots)) (index 0))
               (put slots :length (js-length source))
               (while (< index (js-length source))
@@ -199,7 +204,8 @@
                     (put slots index (if (and (> level 0) (not (nullish? item)))
                       (literal-vector-node-view item (- level 5)) item))
                     (Reflect/deleteProperty slots index)))
-                (setq index (1+ index))))) cached)
+                (setq index (1+ index))))
+            (js-call literal-node-view-revisions :set node (get node :revision 0))) cached)
         (let* ((slots (get node :slots)) (values (new globalThis/Array (js-length slots))) (index 0))
           (while (< index (js-length slots))
             (let ((value (get slots index)))
@@ -208,13 +214,15 @@
                   (literal-vector-node-view value (- level 5)) value))))
             (setq index (1+ index)))
           (let ((view (new VectorNode values (literal-node-owner node))))
-            (js-call literal-node-views :set node view) view)))))
+            (js-call literal-node-views :set node view)
+            (js-call literal-node-view-revisions :set node (get node :revision 0)) view)))))
   (defun literal-map-node-view (node)
     (if (nil? node) literal-empty-bitmap
       (let ((cached (js-call literal-node-views :get node)))
         (if (not (undefined? cached))
           (progn
-            (unless (or (= (get node :kind) "entry") (nil? (literal-node-owner node)))
+            (unless (or (= (get node :kind) "entry") (nil? (literal-node-owner node))
+                        (= (js-call literal-node-view-revisions :get node) (get node :revision 0)))
               (let* ((kind (get node :kind)) (field (if (= kind "bitmap") "items" (if (= kind "array") "children" "entries")))
                      (source (get node field)) (items (get cached field)) (index 0))
                 (put items :length (js-length source))
@@ -223,7 +231,8 @@
                     (put items index (if (nullish? child) undefined (literal-map-node-view child))))
                   (setq index (1+ index)))
                 (put cached (if (= kind "bitmap") "bitmap" (if (= kind "array") "count" "hash"))
-                  (get node (if (= kind "bitmap") "bitmap" (if (= kind "array") "count" "hash")))))) cached)
+                  (get node (if (= kind "bitmap") "bitmap" (if (= kind "array") "count" "hash")))))
+              (js-call literal-node-view-revisions :set node (get node :revision 0))) cached)
           (let* ((kind (get node :kind))
                  (view (if (= kind "entry") (new MapEntry (get node :key) (get node :value) (get node :hash))
                    (let* ((source (get node (if (= kind "bitmap") "items" (if (= kind "array") "children" "entries"))))
@@ -235,7 +244,8 @@
                      (cond ((= kind "bitmap") (new BitmapIndexedNode (get node :bitmap) items (literal-node-owner node)))
                        ((= kind "array") (new ArrayNode (get node :count) items (literal-node-owner node)))
                        (t (new HashCollisionNode (get node :hash) items (literal-node-owner node))))))))
-            (js-call literal-node-views :set node view) view)))))
+            (js-call literal-node-views :set node view)
+            (js-call literal-node-view-revisions :set node (get node :revision 0)) view)))))
   (defun literal-map-root-view (root)
     (if (nil? root) literal-empty-bitmap
       (if (or (= (get root :kind) "entry") (= (get root :kind) "collision"))

@@ -1,6 +1,7 @@
 ;;; t05-t07.el --- T05 data, T06 modules/macros, T07 contracts -*- lexical-binding: t; no-byte-compile: t; -*-
 
 ;;;; case T05-01
+;;;; oracle extension
 ;;;; expect [true, true, true, true, true, true, true, 2, 22, "gone", 2, 3, 20, [2, 3, 4], [10, 20, 30], 22, true, true, [":a", ":m", ":z"], [10, 20, 30], true, "truthy", "meta-ok"]
 (require 'eliscript)
 (let* ((pl (persistent-list 1 2 3))
@@ -32,6 +33,7 @@
    (value-get (value-meta empty-with-meta) :tag)))
 
 ;;;; case T05-02a
+;;;; oracle extension
 ;;;; expect [true, "search", 1, 3, true, "object", true]
 (require 'eliscript)
 (cl-defstruct-persistent tool-spec
@@ -53,12 +55,14 @@
         (value-equal-p t2 t3)))
 
 ;;;; case T05-02b
+;;;; oracle extension
 ;;;; error min|schema|validate|type
 (require 'eliscript)
 (cl-defstruct-persistent item (score :type integer :min 0 :max 10))
 (make-item :score -1)
 
 ;;;; case T05-03a
+;;;; oracle extension
 ;;;; expect ["pt(3,4)", 42, 15, [[10, 15]], null, 42, true, [2, 4, 6, 8], 14, true, [10, 20, 30]]
 (require 'eliscript)
 (defprotocol IDescribe
@@ -92,6 +96,7 @@
         (seq-into built 'list)))
 
 ;;;; case T05-03b
+;;;; oracle extension
 ;;;; error transient|sealed|expired
 (require 'eliscript)
 (let ((escaped nil))
@@ -101,6 +106,7 @@
   (conj! escaped 2))
 
 ;;;; case T06-01a
+;;;; oracle extension
 ;;;; expect [0, 5, 5]
 (require 'eliscript)
 (defmodule sample.counter
@@ -122,6 +128,7 @@
   (list c0 c1 c2))
 
 ;;;; case T06-01b
+;;;; oracle extension
 ;;;; error const|setq|eliscript-compile-error
 (require 'eliscript)
 (defmodule bad.const
@@ -129,6 +136,7 @@
   (defun mutate () (setq fixed 2)))
 
 ;;;; case T06-02a
+;;;; oracle extension
 ;;;; expect [2, 1]
 (require 'eliscript)
 (defmacro-checked eval-once-double (form)
@@ -141,6 +149,7 @@
         counter))
 
 ;;;; case T06-02b
+;;;; oracle extension
 ;;;; error inputs|undeclared|eliscript-compile-error
 (require 'eliscript)
 (defmacro-checked bad-reader ()
@@ -148,6 +157,7 @@
 (bad-reader)
 
 ;;;; case T07-01a
+;;;; oracle extension
 ;;;; expect [0, 45, 100]
 (require 'eliscript)
 (defun clamp-pct (x)
@@ -160,6 +170,7 @@
 (list (clamp-pct -20) (clamp-pct 45) (clamp-pct 250))
 
 ;;;; case T07-01b
+;;;; oracle extension
 ;;;; error defun-async|async|eliscript-compile-error
 (require 'eliscript)
 (defun sneaky-async (x)
@@ -167,6 +178,7 @@
   x)
 
 ;;;; case T07-01c
+;;;; oracle extension
 ;;;; error defun-bind|destructure|eliscript-compile-error
 (require 'eliscript)
 (defun sneaky-bind ([x y])
@@ -174,6 +186,7 @@
   (+ x y))
 
 ;;;; case T07-01d
+;;;; oracle extension
 ;;;; error portable|current-buffer|eliscript-compile-error
 (require 'eliscript)
 (defun non-portable-fn ()
@@ -181,6 +194,7 @@
   (current-buffer))
 
 ;;;; case T07-01e
+;;;; oracle extension
 ;;;; error requires|contract
 (require 'eliscript)
 (defun positive-only (x)

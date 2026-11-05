@@ -1195,11 +1195,19 @@
       (setq name (js-call name :slice 11)))
     (let ((index (js-call (js-array "JSON.parse" "JSON.stringify" "JSON.rawJSON" "JSON.isRawJSON") :indexOf name)))
       (if (>= index 0) (js-nth index (js-array 10 11 460 461)) -1)))
+  (defun managed-static-reflect-operation (name)
+    (when (and (= (value-type name) "string") (js-call name :startsWith "globalThis."))
+      (setq name (js-call name :slice 11)))
+    (let ((index (js-call (js-array "Reflect.get" "Reflect.set" "Reflect.getPrototypeOf" "Reflect.setPrototypeOf" "Reflect.ownKeys" "Reflect.getOwnPropertyDescriptor" "Reflect.defineProperty" "Reflect.deleteProperty" "Reflect.has" "Reflect.isExtensible" "Reflect.preventExtensions" "Reflect.apply" "Reflect.construct") :indexOf name)))
+      (if (>= index 0) (+ 181 index) -1)))
   (defun lower-managed-static-math-reference (operation state functions)
     (lower-managed-static-namespace-reference operation 402
       (js-nth (- operation 12) (js-array "round" "floor" "ceil" "trunc")) state functions))
   (defun lower-managed-static-json-reference (operation state functions)
     (lower-managed-static-namespace-reference operation 403
+      (get (managed-namespace-method-info operation) :name) state functions))
+  (defun lower-managed-static-reflect-reference (operation state functions)
+    (lower-managed-static-namespace-reference operation 404
       (get (managed-namespace-method-info operation) :name) state functions))
   (defun lower-managed-static-namespace-reference (operation namespace name state functions)
     (let* ((holder (managed-result state (runtime-call state "heap-native-constructor-existing"
@@ -1389,6 +1397,9 @@
           ((>= (managed-static-json-operation name) 0)
             (setq start (js-length parts) value
               (lower-managed-static-json-reference (managed-static-json-operation name) state functions)))
+          ((>= (managed-static-reflect-operation name) 0)
+            (setq start (js-length parts) value
+              (lower-managed-static-reflect-reference (managed-static-reflect-operation name) state functions)))
           ((>= (managed-well-known-symbol name) 0)
             ;; These native own constants cannot be overwritten or deleted.
             ;; Resolving the exact unshadowed name does not observe Symbol's
@@ -1575,14 +1586,16 @@
            (owner-name (and parts (> (js-length parts) 1) (js-call (js-call parts :slice 0 -1) :join ".")))
            (math (managed-static-math-operation name))
            (json (managed-static-json-operation name))
+           (reflect (managed-static-reflect-operation name))
            (root (and parts (js-nth 0 parts)))
-           (shadow (and (or (>= math 0) (>= json 0)) root (or (resolve-managed-local scope state root) (managed-global state root) (find-function functions root)))))
+           (shadow (and (or (>= math 0) (>= json 0) (>= reflect 0)) root (or (resolve-managed-local scope state root) (managed-global state root) (find-function functions root)))))
       (if (and (= (get callee :kind) "property-read") (= (js-length (get callee :children)) 2))
         (let ((value (lower-managed-access callee scope state functions)))
           (js-object :callee (get value :result) :receiver (get value :receiver) :steps (get value :steps)))
-      (if (and (or (>= math 0) (>= json 0)) (not shadow))
-        (let ((value (if (>= math 0) (lower-managed-static-math-reference math state functions)
-                       (lower-managed-static-json-reference json state functions))))
+      (if (and (or (>= math 0) (>= json 0) (>= reflect 0)) (not shadow))
+        (let ((value (cond ((>= math 0) (lower-managed-static-math-reference math state functions))
+                       ((>= json 0) (lower-managed-static-json-reference json state functions))
+                       (t (lower-managed-static-reflect-reference reflect state functions)))))
           (js-object :callee (get value :result) :receiver (get value :receiver) :steps (get value :steps)))
       (if (and owner-name (managed-qualified-owner-p owner-name scope state functions))
         (let* ((owner (snapshot-managed (lower-managed-expression (js-object :kind "reference" :value owner-name :children (js-array) :properties nil :managedCanonicalReference t) scope state functions) state))
@@ -3406,6 +3419,13 @@
                   (result (managed-result state (runtime-call state "value-host-identity-token" (runtime-arguments state
                     (js-array (get owner :result) (get argument :result)))) t)))
              (put result :steps (word-sequence (js-array (get owner :steps) (get argument :steps) (get result :steps)))) result)))
+        ((and (= kind "intrinsic") (= value "__eliscript_array_build"))
+         (unless (= (js-length children) 2) (managed-fail node "invalid private array builder arity"))
+         (let* ((count (snapshot-managed (lower-managed-expression (js-nth 0 children) scope state functions) state))
+                (builder (snapshot-managed (lower-managed-expression (js-nth 1 children) scope state functions) state))
+                (result (managed-result state (runtime-call state "value-array-build"
+                  (runtime-arguments state (js-array (get count :result) (get builder :result)))) t)))
+           (put result :steps (word-sequence (js-array (get count :steps) (get builder :steps) (get result :steps)))) result))
         ((and (= kind "intrinsic") (= value "js-cons"))
          (unless (= (js-length children) 2) (managed-fail node "invalid managed js-cons arity"))
          (let* ((head (snapshot-managed (lower-managed-expression (js-nth 0 children) scope state functions) state))
@@ -4033,14 +4053,17 @@
                           (when parameter-setup
                             (put lowered :steps (word-sequence (js-array (get parameter-setup :entry)
                               (get parameter-setup :iteration) (get lowered :steps))))) lowered)))))))))
-               (body (if (get source :managedProtocolExactPrototype nil)
+               (body (if (get source :managedProtocolHostMethod nil)
+                 (managed-result state (runtime-call state "value-protocol-host-method"
+                   (runtime-arguments state (js-call scope :map word-local))) t)
+                 (if (get source :managedProtocolExactPrototype nil)
                  (let* ((original (snapshot-managed raw-body state))
                         (normalized (managed-result state (runtime-call state "value-protocol-exact-prototype"
                           (runtime-arguments state (js-array (get original :result)))) t)))
                    ;; First execute the complete original helper, including its
                    ;; dynamic Object.getPrototypeOf Get and all abrupt effects.
                    (put normalized :steps (word-sequence (js-array (get original :steps) (get normalized :steps)))) normalized)
-                 raw-body))
+                 raw-body)))
                (captures (get state :captures)) (result (new-managed-local state "result" nil)) (steps (js-array)))
           (js-call steps :push (runtime-call state "begin-operation" (js-array))
             (runtime-call state "heap-check" (runtime-arguments state (js-array))) (capture-error state))
@@ -4599,6 +4622,9 @@
       (if (not (and (= (get node :kind) "variable-declaration") (= (js-length children) 1))) node
         (let ((initializer (js-nth 0 children)))
           (cond
+            ((and (= name "protocol-host-method") (= (get initializer :kind) "function-expression"))
+              (Object/assign (js-object) node (js-object :children (js-array
+                (Object/assign (js-object) initializer (js-object :managedProtocolHostMethod t))))))
             ((and (= name "protocol-exact-prototype") (= (get initializer :kind) "function-expression"))
               (Object/assign (js-object) node (js-object :children (js-array
                 (Object/assign (js-object) initializer (js-object :managedProtocolExactPrototype t))))))

@@ -1,0 +1,234 @@
+(module tools.backends.compiler-corpus-sorted
+        (import "../../dist/bootstrap/reader.mjs" read-string)
+        (import "../../dist/bootstrap/compiler.mjs" compile-string)
+        (import "node:crypto" createHash)
+        (import "node:path" resolve posix)
+        (import "node:url" pathToFileURL)
+  (import "./compiler-corpus-sorted-observation.mjs" sortedFunctionalParts sortedMaintainedSha)
+        (defconst suite "tests/wasm-managed-sorted-core.test.mjs")
+        (defconst maintained "tests/wasm-managed-sorted-core.test.eli")
+        (defconst fixture "tests/fixtures/wasm-managed-sorted.eli")
+        (defun head? (node name)
+          (and node (= (get node :kind) "list") (> (js-length (get node :items)) 0)
+               (= (get (aref (get node :items) 0) :name) name)))
+        (defun syntax-source (node source)
+          ;; Reader spans retain the exact maintained form, including empty argument
+          ;; lists, comments and literals. Never reserialize data as executable syntax.
+          (let ((span (get node :span)))
+            (unless (and span (Number/isInteger (get span :start)) (Number/isInteger (get span :end)))
+              (throw (new globalThis.TypeError "sorted contract form has no original source span")))
+            (js-call source :slice (get span :start) (get span :end))))
+        (defun definition (forms name)
+          (let ((matches (js-call forms :filter (lambda (node)
+                                                  (and (or (head? node "defun") (head? node "defconst"))
+                                                       (= (get (aref (get node :items) 1) :name) name))))))
+            (unless (= (js-length matches) 1)
+              (throw (new globalThis.TypeError (str "sorted contract definition changed: " name))))
+            (aref matches 0)))
+        (defun javascript-provider-source (node source)
+          ;; JS has no managed heap. Remove only real heap collection operations;
+          ;; every provider value/identity/comparator assertion remains unchanged.
+          (let ((pending (js-array node)) (ranges (js-array)) (span (get node :span)))
+            (while (> (js-length pending) 0)
+              (let* ((current (js-call pending :pop)) (items (get current :items)))
+                (if (and (head? current "js-call") (= (js-length items) 3)
+                         (= (get (aref items 1) :name) "runtime") (= (get (aref items 2) :name) "collect"))
+                    (js-call ranges :push (get current :span))
+                  (when (Array/isArray items) (Reflect/apply (get pending :push) pending items)))))
+            (js-call ranges :sort (lambda (left right) (- (get left :start) (get right :start))))
+            (let ((parts (js-array)) (position (get span :start)))
+              (js-call ranges :forEach (lambda (range)
+                                         (js-call parts :push (js-call source :slice position (get range :start)))
+                                         (setq position (get range :end))))
+              (js-call parts :push (js-call source :slice position (get span :end)))
+              (js-call parts :join ""))))
+        (defasync source-graph (options)
+                  (let ((pending (js-array (js-object :id "tests/sorted-entry.mjs" :filename fixture)
+                                           (js-object :id "tests/sorted-error-constructor.mjs" :filename "tests/fixtures/sorted-error-constructor.eli")))
+                        (modules (new globalThis.Map)))
+                    (while (> (js-length pending) 0)
+                      (let* ((record (js-call pending :shift)) (id (get record :id)) (filename (get record :filename)))
+                        (unless (js-call modules :has id)
+                          (let* ((source (await (js-call options :text filename)))
+                                 (forms (get (aref (read-string source filename) 0) :items)))
+                            (js-call modules :set id (js-object :id id :filename filename :source source))
+                            (js-call forms :forEach (lambda (node)
+                                                      (when (or (head? node "import") (head? node "import-portable"))
+                                                        (let ((specifier (get (aref (get node :items) 1) :value)))
+                                                          (when (and (= (value-type specifier) "string") (js-call specifier :startsWith "."))
+                                                            (let ((target (posix/normalize (posix/join (posix/dirname id) specifier))))
+                                                              (when (js-call target :startsWith "../")
+                                                                (throw (new globalThis.TypeError "sorted fixture import escapes source graph")))
+                                                              (unless (js-call target :startsWith "runtime/")
+                                                                (js-call pending :push (js-object
+                                                                                        :id (if (js-call target :endsWith ".eli") (str (js-call target :slice 0 -4) ".mjs") target)
+                                                                                        :filename (if (js-call target :endsWith ".mjs") (str (js-call target :slice 0 -4) ".eli") target))))))))))))))
+                    (Array/from (js-call modules :values))))
+        (defun sorted-host-source (source root provider-mode &optional part)
+          (let* ((forms (js-call (get (aref (read-string source maintained) 0) :items) :slice 2))
+                 (before (js-call forms :find (lambda (node) (head? node "beforeAll"))))
+                 (setup (js-call (get (aref (get before :items) 1) :items) :slice 2))
+                 (assertions (js-call setup :slice 3))
+                 (provider (get (aref (get (definition forms "checkProvider") :items) 4) :items))
+                 (provider-assertions (js-call provider :slice 3 -1))
+                 (declarations (js-array))
+                 (imports (js-array
+                           (js-array (get (pathToFileURL (resolve root "tools/backends/compiler-corpus-sorted-observation.mjs")) :href) "observeSortedPart")
+                           (js-array "node:assert/strict" ":default assert")
+                           (js-array "node:path" "resolve")
+                           (js-array "node:fs/promises" "readFile")
+                           (js-array (get (pathToFileURL (resolve root "tools/backends/compiler-corpus-program-driver.mjs")) :href) "loadOriginalProgramBody")
+                           (js-array (get (pathToFileURL (resolve root "tools/backends/compiler-corpus-host-context.mjs")) :href) "openOriginalProgramContext")
+                           (js-array (get (pathToFileURL (resolve root "tools/backends/compiler-metadata.mjs")) :href) "readCompilerMetadata")
+                           (js-array (get (pathToFileURL (resolve root "tools/backends/compiler-corpus-managed-adapters.mjs")) :href) "runInheritedOriginalManagedObservation")
+                           (js-array (get (pathToFileURL (resolve root "runtime/core/sorted.mjs")) :href) ":as RootSorted")
+                           (js-array (get (pathToFileURL (resolve root "runtime/literals.mjs")) :href) ":as RootLiterals")
+                           (js-array (get (pathToFileURL (resolve root "runtime/core/metadata.mjs")) :href) ":as RootMetadata"))))
+            ;; Copy complete maintained forms, including every fixed oracle assertion.
+            ;; Reject shape drift instead of silently omitting assertions.
+            (unless (and (= (js-length assertions) 7) (= (js-length provider-assertions) 2)
+                         (head? (aref assertions 0) "let") (head? (aref assertions 6) "let")
+                         (head? (aref provider-assertions 0) "let*"))
+              (throw (new globalThis.TypeError "maintained sorted assertion layout changed")))
+            (js-call imports :forEach (lambda (item)
+                                        (js-call declarations :push (str "(import " (JSON/stringify (aref item 0)) " " (aref item 1) ")"))))
+      (js-call declarations :push (str "(defconst functionalPart " (if (nullish? part) "undefined" (JSON/stringify part)) ")"))
+            (js-call declarations :push "(defconst partitioned (not (nullish? functionalPart))) (defvar expected undefined) (defvar expectedPart undefined) (defvar selectedObservation undefined) (defconst actualPart (js-object :calls (js-array) :errors (js-array))) (defvar boundaryLowered undefined) (defvar boundaryTypeError globalThis.TypeError) (defconst entry \"tests/sorted-entry.mjs\")")
+      (js-call declarations :push (str "(defconst providerMode " (if provider-mode "t" "false") ")"))
+            (js-call declarations :push "(defvar OriginalSorted RootSorted) (defvar OriginalLiterals RootLiterals) (defvar OriginalMetadata RootMetadata)")
+            (js-call (js-array "cases" "operations" "randomOperations" "read-value" "invoke" "boxedOperations" "finish"
+                               "check-rotations" "check-sharing" "checkAll" "checkProvider") :forEach (lambda (name)
+                               (let ((form (syntax-source (definition forms name) source)))
+                 (when (= name "invoke")
+                   (setq form (js-call form :replace "(defun invoke " "(defun invoke-unobserved ")))
+                                 ;; The original instanceof assertion remains an instanceof check.
+                                 ;; Its constructor belongs to the selected program's own realm.
+                                 (when (= name "checkAll")
+                                   (setq form (js-call form :replace "globalThis.TypeError" "boundaryTypeError")))
+                                 (when (= name "checkProvider")
+                                   ;; The real phased entry loader has already initialized every
+                                   ;; dependency. Calling the standalone initializer on that graph
+                                   ;; is an invalid ABI transition, rather than another assertion.
+                                   (setq form (js-call form :replace "(js-call runtime :initializeModule)" "")))
+                                 (when (= name "checkProvider")
+                                   (setq form (js-call form :replace "(js-call (get runtime :project) :invoke"
+                                                       "(invoke-provider-boundary runtime name")))
+                                 (js-call declarations :push form))))
+      (js-call declarations :push "(defun invoke (runtime name &optional arguments) (let ((value (invoke-unobserved runtime name arguments))) (when partitioned (js-call (get actualPart :calls) :push (js-array name value))) value))")
+            (js-call declarations :push
+                     "(defun observe (m) (let ((out (js-object))) (js-call cases :forEach (lambda (name) (put out name (funcall (get m (js-call name :replaceAll \"-\" \"_\")))))) (put out :randomized (js-call m :randomized randomOperations)) (let ((state (js-call m :held_state))) (put out :held (Array/from (js-object :length 5) (lambda () (js-call m :held_step state))))) (try (js-call m :throw_comparison) (throw (new globalThis.Error \"missing expected comparison failure\")) (catch error (js-call assert :strictEqual (get error :name) \"TypeError\") (js-call assert :strictEqual (get error :message) \"sorted comparison marker\") (put out :failure (js-array (get error :name) (get error :message))))) out))")
+            (let ((observer (aref declarations (1- (js-length declarations)))))
+              (js-call declarations :push
+                       "(defun invoke-provider-boundary (runtime name &rest arguments) (try (Reflect/apply (get (get runtime :project) :invoke) (get runtime :project) arguments) (catch error (console/error \"[sorted-provider-call]\" name) (throw error))))")
+              (js-call declarations :push
+                       ;; Raw phased calls own source exception handles. Decode through the
+                       ;; actual runtime and release that owned handle, as its host transport
+                       ;; does; native host errors retain their original identity.
+                       "(defun invoke-sorted-runtime (runtime name supplied) (try (Reflect/apply (get runtime :invoke) runtime (js-call (js-array (js-call name :replaceAll \"-\" \"_\")) :concat supplied)) (catch error (let ((value error) (decoded false)) (try (setq value (js-call runtime :toHostValue error) decoded t) (catch ignored nil)) (when decoded (try (js-call runtime :release error) (catch ignored nil))) (when partitioned (js-call (get actualPart :errors) :push (js-array (get value :name) (get value :message)))) (throw value)))))")
+              (js-call declarations :push
+                       "(defasync main () (let* ((environment (get globalThis.process :env)) (root (get environment :ELISCRIPT_ORIGINAL_SOURCE_ROOT)) (reference (get environment :ELISCRIPT_ORIGINAL_REFERENCE_PRODUCT_ROOT)) (product (aref (get globalThis.process :argv) 2)) (configuration (get environment :ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT))) (unless (and root reference product) (throw (new globalThis.Error \"complete sorted contract requires independent reference and selected product\")))")
+              (let ((observer (str "(import \"node:assert/strict\" :default assert) "
+                  "(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/backends/compiler-corpus-sorted-observation.mjs")) :href)) " observeSortedPart) "
+                  "(defconst functionalPart " (if (nullish? part) "undefined" (JSON/stringify part)) ") "
+                                   (syntax-source (definition forms "cases") source) " " (syntax-source (definition forms "operations") source) " "
+                                   (syntax-source (definition forms "randomOperations") source) " "
+                                   observer
+                                   " (import ORIGINAL_ENTRY :as m) (console/log (JSON/stringify (js-object :full (observe m) :part (if (nullish? functionalPart) nil (observeSortedPart m functionalPart randomOperations)))))")))
+                (js-call declarations :push (str "(let ((source " (JSON/stringify observer) "))"
+                                                 " (setq source (js-call source :replace \"ORIGINAL_ENTRY\" (JSON/stringify (get (pathToFileURL (resolve reference entry)) :href))))"
+                                                 " (setq source (compileReference source))"
+                                                 " (let ((observation (await (runInheritedOriginalManagedObservation source \"node\" (js-array) false (js-object :recordId \"sorted-contract\")))))"
+                                                 " (js-call assert :deepStrictEqual (await (runInheritedOriginalManagedObservation source \"bun\" (js-array) false (js-object :recordId \"sorted-contract\"))) observation)"
+                  " (setq expected (get observation :full) expectedPart (get observation :part))))")))
+              (Reflect/apply (get declarations :push) declarations (js-call assertions :map (lambda (node) (syntax-source node source))))
+              (js-call declarations :push
+                       "(if (= (get environment :ELISCRIPT_ORIGINAL_TARGET) \"javascript\") (let* ((modules (await (loadOriginalProgramBody (get (pathToFileURL (resolve product entry)) :href) (resolve product \"sorted-contract-loader\")))) (m (js-call modules :get \"original-body\")) (call (lambda (name &optional arguments) (Reflect/apply (get m (js-call name :replaceAll \"-\" \"_\")) undefined (or arguments (js-array)))))) (js-call assert :deepStrictEqual (JSON/parse (JSON/stringify (observe m))) expected) (when partitioned (setq selectedObservation (observeSortedPart m functionalPart randomOperations)) (js-call assert :deepStrictEqual selectedObservation expectedPart))"
+                       (str "(when providerMode " (js-call (js-call provider-assertions :map
+                                                                    (lambda (node) (javascript-provider-source node source))) :join "\n") ")")
+                       ") (let* ((input (await (readCompilerMetadata configuration))) (raw-runtime (get (await (openOriginalProgramContext input (js-object :identity configuration))) :runtime)) (runtime (Object/assign (js-object) raw-runtime (js-object :invoke (lambda (name &rest supplied) (invoke-sorted-runtime raw-runtime name supplied)))))) (await (loadOriginalProgramBody (get (pathToFileURL (resolve product entry)) :href) (resolve product \"sorted-contract-loader\"))) (when (and (get (get input :runtimeOptions) :literalHostProvider) (= (get (get (get input :runtimeOptions) :literalHostProvider) :format) \"eliscript-local-literal-provider\") (undefined? (get (get (get input :runtimeOptions) :literalHostProvider) :base))) (setq OriginalSorted (js-call (await (loadOriginalProgramBody (get (pathToFileURL (resolve product \"runtime/core/sorted.mjs\")) :href) (resolve product \"sorted-provider-class-loader\"))) :get \"original-body\") OriginalLiterals (js-call (await (loadOriginalProgramBody (get (pathToFileURL (resolve product \"runtime/literals.mjs\")) :href) (resolve product \"sorted-provider-literal-loader\"))) :get \"original-body\") OriginalMetadata (js-call (await (loadOriginalProgramBody (get (pathToFileURL (resolve product \"runtime/core/metadata.mjs\")) :href) (resolve product \"sorted-provider-metadata-loader\"))) :get \"original-body\"))) (setq boundaryLowered (js-object :descriptor (get input :descriptor))) (let* ((module (js-call (get (get (get input :descriptor) :project) :modules) :find (lambda (item) (= (get item :id) \"tests/sorted-error-constructor.mjs\")))) (binding (js-call (get module :exports) :find (lambda (item) (= (get item :name) \"comparison_error_constructor\"))))) (js-call assert :ok binding \"actual target intrinsic constructor export\") (setq boundaryTypeError (js-call (get raw-runtime :project) :invoke (get binding :kind) (get binding :index) undefined (js-array)))) (if providerMode (checkProvider runtime) (checkAll runtime functionalPart)) (when partitioned (js-call assert :deepStrictEqual actualPart expectedPart) (setq selectedObservation actualPart)))) (console/log (JSON/stringify (if partitioned selectedObservation expected)))))"
+                       "(defconst completion (main)) (js-call completion :catch (lambda (error) (console/error error) (put globalThis.process :exitCode 1))) (defun then (fulfill reject) (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject)) (export then)")
+              (js-call declarations :unshift (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "dist/bootstrap/compiler.mjs")) :href)) " compile-string) (import \"node:url\" pathToFileURL) (defun compileReference (source) (compile-string source \"sorted-reference.eli\"))"))
+              (compile-string (str "(module original.sorted.contract " (js-call declarations :join "\n") ")") "original-sorted-contract.eli"))))
+        (defun provider-locator? (locator)
+          (let ((bound (get locator :originalCase)))
+            (and bound (js-call (get bound :templateTitle "") :startsWith "Given actual provider"))))
+  (defun make-sorted-record (options modules assets locators identity original source provider-mode auto engine part)
+    (let* ((family (if provider-mode "sorted-core-provider" "sorted-core"))
+           (base (str "original-managed:" family ":" engine ":auto-" auto))
+           (index (if (nullish? part) -1 (js-call sortedFunctionalParts :indexOf part)))
+           (id (if (> index 0) (str base ":part-" part) base))
+           (selected (if provider-mode (js-array) (js-array (str "stable-compatibility:" fixture))))
+           (bound-cases (js-array)))
+      (js-call locators :forEach (lambda (locator)
+        (let* ((bound (get locator :originalCase)) (parameters (when bound (get bound :parameters))))
+          (when (and (eq (funcall globalThis.Boolean (provider-locator? locator)) provider-mode)
+                     (or (nullish? bound)
+                       (and (or (undefined? (get parameters :engine)) (= (get parameters :engine) engine))
+                            (or (undefined? (get parameters :auto)) (= (get parameters :auto) auto))
+                            (or (undefined? (get bound :auto)) (= (get bound :auto) auto)))))
+            (js-call selected :push (get locator :id))
+            (when bound (js-call bound-cases :push
+              (Object/assign (js-object :id (get locator :id)) (globalThis.structuredClone bound))))))))
+      (let* ((provenance (js-object :manifest "stable-compatibility" :fixture fixture :suite suite :host suite
+                :sourceSha256 (get original :sha256) :sourceAssets assets :originalAssertion (js-array)
+                :maintainedAssertions (js-object :sourceFile maintained :sourceSha256 (get identity :sha256) :generatedFile suite)
+                :cases bound-cases
+                :targetSpecificAssertions (js-object :javascript "actual public source observations in the configured provider realm"
+                  :binary (if provider-mode "actual provider identities, metadata and live native comparator callbacks"
+                    "zero-import target algorithms, actual GC thresholds, errors and complete resource recovery"))))
+             (host (str "tests/__eliscript_managed_" family "_" engine "_" auto
+                     (if (nullish? part) "" (str "_" part)) ".mjs")))
+        (unless (nullish? part)
+          (put provenance :functionalPartition (js-object :originalId base :index index :part part
+            :parts (Array/from sortedFunctionalParts) :originalAggregatePerformance "NOT ACCEPTED")))
+        (js-object :id id :kind "project" :coverage selected :modules (globalThis.structuredClone modules)
+          :entry "tests/sorted-entry.mjs" :memory (js-object :initialPages 4 :maximumPages 1024) :auto auto
+          :request (Object/assign (js-object :operation "project" :resolveImports t :phased t
+            :entries (js-call modules :map (lambda (item) (get item :id))) :sourceMap t)
+            (if provider-mode (js-object :foreignEntry t) (js-object)))
+          :execution (js-object :kind "original-program" :host host
+            :hostSource (sorted-host-source source (get options :sourceRoot) provider-mode part)
+            :arguments (js-array (js-object :directory t) (js-object :literal "tests/sorted-entry.mjs"))
+            :hostRuntime engine :aliases t :referenceArtifact t :zeroImports (not provider-mode)
+            :childProcesses "inherit-selected-artifact" :timeoutMs 30000
+            :timeoutByTarget (js-object :javascript 30000 :wasm 30000 :native 120000)
+            :runtimeOptions (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216))
+          :expected (js-object :kind "seed-program" :oracleRequired t) :original provenance))))
+  (defasync addOriginalSortedRecipes (options)
+    (let ((records (js-array)))
+      (when (js-call (get options :stableFiles) :has fixture)
+        (let* ((source (await (js-call options :text maintained)))
+               (identity (await (js-call options :file maintained)))
+               (original (await (js-call options :file suite))) (modules (await (source-graph options)))
+               (locators (js-call (get options :locators) :filter (lambda (item) (= (get item :file) suite))))
+               (assets (js-array))
+               (files (js-array maintained "tests/fixtures/sorted-error-constructor.eli"
+                 "tools/backends/eliscript/compiler-corpus-sorted.eli" "tools/backends/compiler-corpus-sorted.mjs"
+                 "tools/backends/eliscript/compiler-corpus-sorted-observation.eli" "tools/backends/compiler-corpus-sorted-observation.mjs"
+                 "tools/backends/eliscript/compiler-corpus-literal-provider.eli" "tools/backends/compiler-corpus-literal-provider.mjs"
+                 "tools/backends/eliscript/compiler-corpus-managed-adapters.eli" "tools/backends/compiler-corpus-managed-adapters.mjs"))
+               (index 0))
+          (unless (= (get identity :sha256) sortedMaintainedSha)
+            (throw (new globalThis.TypeError "maintained sorted assertions changed; update complete recipe")))
+          (while (< index (js-length files))
+            (let* ((file (aref files index)) (asset (await (js-call options :file file))))
+              (js-call assets :push (js-object :file file :sourceSha256 (get asset :sha256))))
+            (setq index (1+ index)))
+          ;; The original suite builds separate zero-import and foreign-entry
+          ;; products. The functional schedule also preserves all fifteen of
+          ;; its actual-GC scenarios; strict mode retains the original aggregate.
+          (let ((plans (js-array (js-object :provider false :auto 65536)
+                               (js-object :provider false :auto 1)
+                               (js-object :provider t :auto 1))) (plan-index 0))
+            (while (< plan-index (js-length plans))
+              (let* ((plan (aref plans plan-index)) (provider-mode (get plan :provider)) (auto (get plan :auto))
+                     (parts (if (and (not provider-mode) (= auto 1)
+                                  (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1"))
+                                sortedFunctionalParts (js-array undefined))))
+                (js-call (js-array "node" "bun") :forEach (lambda (engine)
+                  (js-call parts :forEach (lambda (part)
+                    (js-call records :push (make-sorted-record options modules assets locators identity original
+                      source provider-mode auto engine part)))))))
+              (setq plan-index (1+ plan-index))))))
+      records))
+  (export addOriginalSortedRecipes))

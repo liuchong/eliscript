@@ -173,6 +173,47 @@
           (Object/defineProperties facade descriptors)
           (Object/freeze facade)))))
 
+  (defconst non-observing-runtime-methods
+    (new globalThis.Set (js-array
+      "unicodeVersion" "number" "readNumber" "bigint" "readBigInt" "binary" "negate" "compare" "truth"
+      "keyEqual" "keyHash" "map" "setTable" "tableSize" "tableHas" "tableGet" "tableSet" "tableAdd"
+      "tableDelete" "tableClear" "tableIterator" "iteratorNext" "closeIterator" "string" "readString"
+      "concatStrings" "sliceString" "compareStrings" "findString" "codePoint" "encodeUtf8" "decodeUtf8"
+      "bytes" "readBytes" "array" "sourceArray" "record" "sourceObject" "get" "set" "length" "resize"
+      "pin" "release" "auto" "frame" "frameSet" "frameGet" "leaveFrame" "frameReturn" "unwindFrames"
+      "collect" "live" "stats" "promiseState" "promiseResult" "getExport" "errorStackAvailable")))
+
+  (defun own-data-property (object key)
+    (when (and (not (nullish? object)) (= (value-type object) "object"))
+      (let ((field (Object/getOwnPropertyDescriptor object key)))
+        (when (and field (Object/hasOwn field "value")) (get field :value)))))
+
+  (defun immutable-project-cells (descriptor)
+    (let ((project (own-data-property descriptor "project"))
+          (mutable (new globalThis.Set)) (immutable (new globalThis.Set)))
+      (when (and project (Array/isArray (own-data-property project "modules")))
+        (letfn ((record-cell (item)
+                  (let ((kind (own-data-property item "kind"))
+                        (index (own-data-property item "index"))
+                        (flag (own-data-property item "mutable")))
+                    (when (and (= kind 0) (Number/isSafeInteger index) (= (value-type flag) "boolean"))
+                      (let ((key (str "0:" index)))
+                        (if flag
+                          (progn (js-call mutable :add key) (js-call immutable :delete key))
+                          (unless (js-call mutable :has key) (js-call immutable :add key))))))))
+          (let ((prepared (own-data-property project "preparedBindings")))
+            (when (Array/isArray prepared) (js-call prepared :forEach record-cell)))
+          (js-call (own-data-property project "modules") :forEach (lambda (module)
+            (let ((exports (own-data-property module "exports"))
+                  (steps (own-data-property module "steps")))
+              (when (Array/isArray exports) (js-call exports :forEach record-cell))
+              (when (Array/isArray steps)
+                (js-call steps :forEach (lambda (step)
+                  (let ((initializes (own-data-property step "initializes")))
+                    (when (Array/isArray initializes)
+                      (js-call initializes :forEach record-cell)))))))))))
+      immutable))
+
   (defun observeManagedProjectRuntime (runtime graph)
     ;; Called only by the existing Eli factories, before publishing their API.
     ;; Do not insert hooks in raw exports: they still own last-error cleanup.
@@ -193,7 +234,7 @@
                             (observed-project-method method value key state))))))
                     (Object/defineProperties project project-descriptors)
                     (put entry :value (Object/freeze project))))
-                ((= (value-type value) "function")
+                ((and (= (value-type value) "function") (not (js-call non-observing-runtime-methods :has name)))
                   (graph-method descriptors name
                     (observed-project-method value runtime name state)))))))
           (Object/defineProperties facade descriptors)
@@ -210,6 +251,7 @@
            (prepared false) (preparing false) (prepare-notifications (js-array))
            (declarations (new globalThis.Map))
            (pure (pure-project-description descriptor))
+           (immutable (when pure (immutable-project-cells descriptor)))
            (known (new globalThis.Set)) (watched (new globalThis.Map))
            (state (js-object :stopped false :syncing false)) (observer undefined))
       (when pure
@@ -284,7 +326,7 @@
         (graph-method descriptors "watch" (lambda (kind index listener)
           (let* ((stop (js-call base :watch kind index listener)) (key (str kind ":" index))
                  (entry (js-call watched :get key)))
-            (when (and (not entry) (js-call known :has key))
+            (when (and (not entry) (js-call known :has key) (not (js-call immutable :has key)))
               (try
                 (setq entry (js-object :kind kind :index index :listeners (new globalThis.Set)
                   :value (withManagedSourceBoundary observer (lambda () (js-call base :read kind index)))))

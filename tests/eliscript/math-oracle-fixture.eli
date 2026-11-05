@@ -137,7 +137,7 @@
             (await (mkdir (resolve directory "tests")))
             (await (writeFile (resolve directory "tests/wasm-managed-math.test.mjs")
               (await (readFile (resolve root "tests/wasm-managed-math.test.mjs")))))
-            (let ((names (js-array "unicode-case-data" "unicode-case" "math")) (index 0)
+            (let ((names (js-array "prelude" "unicode-case-data" "unicode-case" "math")) (index 0)
                   ;; Isolate provenance here; the complete static capsule
                   ;; transport is retained below and in the original suite.
                   (scan (lambda (source) (js-array))))
@@ -168,7 +168,7 @@
                   (let ((changes (js-array (js-object :file "other.mjs")
                     (js-object :sources (js-array "other.eli"))
                     (js-object :sourcesContent (js-array (str source "\n")))
-                    (js-object :mappings ""))) (position 0))
+                    (js-object :mappings (if (= (get (JSON/parse mapping) :mappings) "") "AAAA" "")))) (position 0))
                     (while (< position (js-length changes))
                       (await (writeFile map-path (str (JSON/stringify (Object/assign (js-object)
                         (JSON/parse mapping) (aref changes position))) "\n")))

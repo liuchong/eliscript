@@ -12,7 +12,8 @@
   (import "../../tools/backends/compiler-bootstrap.mjs" compilerSourceIdentity compilerDigest)
   (import "../../tools/backends/compiler-corpus-managed-adapters.mjs" addOriginalManagedLibraryAdapters originalManagedProgramCompletionSource)
   (import "../../tools/backends/compiler-corpus-managed-fixtures.mjs" addOriginalManagedFixtureAdapters readOriginalFinalFixtureMigrations)
-  (import "../../tools/backends/compiler-corpus-tools-artifact-adapters.mjs" addOriginalToolsArtifactPrograms)
+  (import "../../tools/backends/compiler-corpus-tools-artifact-adapters.mjs" addOriginalToolsArtifactPrograms originalToolsHostGateCase)
+  (import "../../tools/backends/compiler-corpus-wire-host.mjs" wireSuiteSha)
   (import "../../tools/backends/compiler-corpus-managed-cases.mjs" originalManagedSuites originalManagedCaseLocators)
   (defun eqv (a b &optional message) (js-call assert :strictEqual a b message))
   (defun deep (a b &optional message) (js-call assert :deepStrictEqual a b message))
@@ -141,8 +142,15 @@
             (wire (find records (lambda (record) (= (get record :id) "original-managed:wire:node:auto-1"))))
             (sequence (find records (lambda (record) (= (get record :id) "original-managed:sequence-data:node:auto-65536")))))
         (ok (includes (get (get transient :execution) :hostSource) "[0, 1, 31, 32, 33, 63, 64, 1023, 1024, 1055, 1056, 1057]"))
-        (each (js-array "index<128" "await checkNetwork(runtime)" "await checkJavaScriptNetwork()" "assert.equal(item.module,'eliscript.host')")
+        ;; The unchanged corpus/ABI assertions remain in the original body.
+        ;; Network calls now pass through the maintained Eli controller; bind
+        ;; that actual interface rather than requiring removed JS call text.
+        (each (js-array "index<128" "assert.equal(item.module,'eliscript.host')"
+                "runWirePartition" "\"checkNetwork\": checkNetwork" "\"checkJavaScriptNetwork\": checkJavaScriptNetwork")
           (lambda (part) (ok (includes (get (get wire :execution) :hostSource) part))))
+        (eqv (get (get (get wire :original) :wireController) :sourceSha256) wireSuiteSha)
+        (js-call assert :match (get (get (get wire :original) :wireController) :originalHostSha256)
+          (new globalThis.RegExp "^[a-f0-9]{64}$"))
         (each (js-array "runtime/core/transducer.mjs" "runtime/core/sequence.mjs" "runtime/core/data.mjs" "runtime/core/value-internals.mjs" "runtime/testing/value.mjs")
           (lambda (name) (ok (some (get sequence :modules) (lambda (module) (= (get module :id) (+ "public/" name)))) (+ name " requires its actual target export cell")))))
       (each (js-array "sequence" "text" "object") (lambda (family)
@@ -349,4 +357,32 @@
     "new managed library corpus transports complete original fixtures and original budgets into every selected target" library-case
     "all six registered original suites enter selected-session records by individual case identity without whole-suite exemptions" coverage-case
     "original managed fixture recipes execute selected products and retain complete raw suites through the actual original Bun runner" fixture-replay-case))
-  (export originalGateCases))
+  (defasync tools-gate-refusals ()
+    (let* ((options (services (js-array) (js-array) (new globalThis.Set)))
+           (file (get options :file))
+           (worker "tests/worker-runtime.test.mjs")
+           (worker-title "long-lived worker implements the versioned NDJSON protocol and maps failures through project source maps")
+           (locator (js-object :file "tests/public-surface.test.mjs"
+             :contains "repository public surface matches every tracked implementation"))
+           (source (await (js-call options :text (get locator :file)))))
+      (eqv (await (originalToolsHostGateCase (js-object :locator (js-object :file worker :contains worker-title)
+               :source (await (js-call options :text worker)) :file file))) nil)
+      ;; Prove the unchanged maintained suite is admitted first. The previous
+      ;; test's textual mutation no longer matched after the Eli migration.
+      (ok (await (originalToolsHostGateCase (js-object :locator locator :source source :file file))))
+      (let* ((dependency (compile-string "(module rejected (import \"./other.mjs\" other))" "rejected-dependency.eli"))
+             (compiler (compile-string "(defun compile-string (source) source)\n(compile-string \"source\")" "rejected-compiler.eli")))
+        (ok (> (js-length dependency) 0))
+        (js-call assert :match compiler (new globalThis.RegExp "compile_string\\s*\\("))
+        (await (each-await (js-array dependency compiler) (async (suffix)
+          (let ((altered (+ source "\n" suffix)))
+            (js-call assert :notStrictEqual altered source)
+            (await (js-call assert :rejects
+              (originalToolsHostGateCase (js-object :locator locator :source altered :file file))
+              (new globalThis.RegExp "dependencies changed|acquired a compiler path"))))))))
+      (eqv (await (originalToolsHostGateCase (js-object
+        :locator (Object/assign (js-object) locator (js-object :contains "new unbound case"))
+        :source source :file file))) nil)))
+  (defconst toolsGateCases (js-object
+    "tools gate classification refuses compiler cases unknown dependencies and borrowed sibling titles" tools-gate-refusals))
+  (export originalGateCases toolsGateCases))

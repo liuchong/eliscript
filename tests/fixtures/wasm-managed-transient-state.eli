@@ -15,8 +15,10 @@
   (import "./stdlib/value.eli" value-hash value-equal? value-map-from-entries value-set-from-array)
 
   (defun sequence-values (count)
-    (let ((values (js-array)) (index 0))
-      (while (< index count) (js-call values :push index) (setq index (1+ index))) values))
+    ;; Input construction is not the transient operation under test. Build
+    ;; the same dense indices once, without dynamic push/increment machinery
+    ;; at every element when the fixture collects on every allocation.
+    (__eliscript_array_build count (lambda (index) index)))
   (defun metadata-value () (value-map-from-entries (js-array (js-array "tag" 17))))
   (defun caught-report (callback)
     (try (funcall callback) (catch error (js-array (get error :name) (get error :message)))))

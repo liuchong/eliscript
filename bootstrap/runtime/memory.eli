@@ -734,11 +734,16 @@
              (flags (load-u32 (+ entry 4))))
         (when (= (word-and flags 3) old-color)
           (store-u32 (+ entry 4) (word-xor flags 2))
-          ;; Numbers, strings and byte buffers have no child handles.
-          (when (>= (load-u32 (+ base (load-u32 (+ entry 8)))) 7)
-            (let ((head (load-u32 (+ control 36))))
-              (store-u32 (+ entry 20) head)
-              (store-u32 (+ control 36) (word-or (word-and head 2147483648) slot))))))) 0)
+          ;; A capture-free function with no info record has no strong edges.
+          ;; It still needs gray work if it was ever installed as a weak key.
+          ;; Mark its color normally; only omit the empty traversal.
+          (let* ((p (+ base (load-u32 (+ entry 8)))) (kind (load-u32 p)))
+            (when (and (>= kind 7)
+                       (or (/= kind 18) (/= (load-u32 (+ p 4)) 0)
+                           (/= (load-u32 (+ p 24)) 0) (/= (word-and flags 8) 0)))
+              (let ((head (load-u32 (+ control 36))))
+                (store-u32 (+ entry 20) head)
+                (store-u32 (+ control 36) (word-or (word-and head 2147483648) slot)))))))) 0)
   (defun heap-weak-marked (base control slots value old-color)
     (let ((slot (word-and value (load-u32 (+ control 1168)))))
       (if (and (> value (load-u32 (+ control 1168))) (/= slot 0) (<= slot slots))
@@ -779,11 +784,18 @@
                  (p (+ base (load-u32 (+ current-entry 8)))) (kind (load-u32 p)))
             (store-u32 (+ control 36) (load-u32 (+ current-entry 20)))
             (when (= kind 25) (heap-weak-mark-table base control p old-color))
-            (when (or (and (>= kind 13) (<= kind 18)) (and (>= kind 21) (<= kind 24))
-                      (= kind 26) (= kind 35) (= kind 36))
+            ;; Bit 8 is conservative weak-key membership for this slot's
+            ;; generation. Most objects were never inserted into a weak table;
+            ;; probing every live table for each of them multiplies mark work
+            ;; by the table count. Deletion leaves the bit set, since another
+            ;; table can still own the key; slot reuse resets all flags.
+            (when (and (/= (word-and (load-u32 (+ current-entry 4)) 8) 0)
+                       (or (and (>= kind 13) (<= kind 18)) (and (>= kind 21) (<= kind 24))
+                           (= kind 26) (= kind 35) (= kind 36)))
               (heap-weak-mark-key base control
                 (word-or (word-shl (load-u32 current-entry) (load-u32 (+ control 1164))) current) old-color))
-            (when (= kind 18) (heap-mark-at base control (load-u32 (+ p 24)) old-color))
+            (when (and (= kind 18) (/= (load-u32 (+ p 24)) 0))
+              (heap-mark-at base control (load-u32 (+ p 24)) old-color))
             (when (= kind 9) (heap-mark-at base control (load-u32 (+ p 12)) old-color))
             (when (= kind 14) (heap-mark-at base control (load-u32 (+ p 12)) old-color)
               (heap-mark-at base control (load-u32 (+ p 20)) old-color))
@@ -810,10 +822,14 @@
                              (flags (load-u32 (+ child-entry 4))))
                         (when (= (word-and flags 3) old-color)
                           (store-u32 (+ child-entry 4) (word-xor flags 2))
-                          (when (>= (load-u32 (+ base (load-u32 (+ child-entry 8)))) 7)
-                            (let ((head (load-u32 (+ control 36))))
-                              (store-u32 (+ child-entry 20) head)
-                              (store-u32 (+ control 36) (word-or (word-and head 2147483648) child-slot))))))))
+                          (let* ((child-p (+ base (load-u32 (+ child-entry 8))))
+                                 (child-kind (load-u32 child-p)))
+                            (when (and (>= child-kind 7)
+                                       (or (/= child-kind 18) (/= (load-u32 (+ child-p 4)) 0)
+                                           (/= (load-u32 (+ child-p 24)) 0) (/= (word-and flags 8) 0)))
+                              (let ((head (load-u32 (+ control 36))))
+                                (store-u32 (+ child-entry 20) head)
+                                (store-u32 (+ control 36) (word-or (word-and head 2147483648) child-slot)))))))))
                   (setq child (+ child 4)))))))
     0)
   ;; Sweep owns dead block headers: sort their links without allocating or
@@ -955,6 +971,12 @@
         (store-u32 (+ control 2204) 0)
         ;; Full sweep also rebuilds the next pinned-root list, without another
         ;; whole-pool root scan or writes to unpinned survivors.
+        ;; Rebuild the weak named-function buckets in that same ascending sweep.
+        ;; Marking is complete, so clearing these non-root words cannot affect
+        ;; reachability; every surviving named function is inserted exactly once.
+        ;; This also repairs invalid/cyclic old cache chains without following
+        ;; them, preserving the standalone repair scan's canonical order.
+        (heap-named-cache-reset heap)
         (while (/= slot 0)
           (setq entry (+ base (* slot 24)))
           (let ((flags (load-u32 (+ entry 4))))
@@ -970,17 +992,19 @@
                 (when (< (load-u32 entry) (load-u32 (+ control 1172)))
                   (heap-free-slot-append base control entry slot))
                 (setq reclaimed (1+ reclaimed)) 0)
-              (progn (when (/= (word-and flags 4) 0)
-                (if (/= (load-u32 (+ entry 16)) 0)
-                  (progn (store-u32 (+ entry 20) roots) (setq roots slot) 0)
-                  (progn (store-u32 (+ entry 4) (word-and flags 4294967291)) 0))) 0)))
+              (progn
+                (when (= (load-u32 (+ base (load-u32 (+ entry 8)))) 18)
+                  (heap-named-cache-insert-at heap base entry slot))
+                (when (/= (word-and flags 4) 0)
+                  (if (/= (load-u32 (+ entry 16)) 0)
+                    (progn (store-u32 (+ entry 20) roots) (setq roots slot) 0)
+                    (progn (store-u32 (+ entry 4) (word-and flags 4294967291)) 0))) 0)))
           (setq slot (heap-next-allocated-slot heap slot)))
         (when (/= garbage 0) (heap-gc-free-blocks heap garbage reclaimed))
         (store-u32 (+ control 36) (word-or (word-and (load-u32 (+ control 36)) 2147483648) roots))
         (store-u32 (+ control 28) (- (load-u32 (+ control 28)) reclaimed))
-        ;; Neither the bucket heads nor named-only capacity words are traced.
-        ;; Rebuild only after dead generations have been invalidated by sweep.
-        (heap-named-cache-rebuild heap base slots)
+        ;; Buckets already contain only survivors. Dead generations have been
+        ;; invalidated before any source code can observe the rebuilt chains.
         (store-u32 (+ base 8) 0)
         (store-u32 (+ base 12) (if (= (load-u32 (+ base 12)) 4294967295) 4294967295 (1+ (load-u32 (+ base 12))))) reclaimed)))
   (defun value-kind (heap value)
@@ -1164,6 +1188,10 @@
                   (when (>= length 8) (store-u32 (+ p 12) d))
                   (when (= length 9) (store-u16 (+ p 16) e)))
                 (value-seal heap result)))
+                (when (and (= (last-error) 0) (= intrinsic 1) (> value 3)
+                           (= (load-u32 (heap-block heap value)) 35))
+                  (let ((brand (heap-host-request heap 39 value 0 0 0 0)))
+                    (when (and (= (last-error) 0) (/= brand 3)) (setq result brand))))
             (setq result (heap-frame-result heap frame result))) result)))))
   (defun value-source-typeof (heap value) (heap-source-type-label heap value 0))
   (defun value-source-value-type (heap value) (heap-source-type-label heap value 1))
@@ -5163,7 +5191,19 @@
       (if (or (= (heap-host-identity-state-check heap state) 0) (= (heap-reference-check heap value) 0)) 0
         (let ((frame (heap-argument-frame heap state value 0 6)) (result 0))
           (when (/= frame 0)
-            (setq result (heap-host-identity-token-value heap state value frame))
+            (if (and (> value 3) (= (load-u32 (heap-block heap value)) 35))
+              (let ((owner (heap-number-from-word heap state 0)) (cached 0))
+                (when (/= owner 0)
+                  (frame-set heap frame 4 owner)
+                  (setq cached (heap-host-request heap 38 value owner 3 0 0))
+                  (when (= (last-error) 0)
+                    (if (/= cached 3) (setq result cached)
+                      (progn
+                        (setq result (heap-host-identity-token-value heap state value frame))
+                        (when (/= result 0)
+                          (frame-set heap frame 3 result)
+                          (setq result (heap-host-request heap 38 value owner result 0 0))))))))
+              (setq result (heap-host-identity-token-value heap state value frame)))
             (setq result (heap-frame-result heap frame result))) result))))
   (export value-host-identity-state-new value-host-identity-token)
   (defun heap-json-position (heap state) (load-u32 (+ (heap-block heap state) 32)))
@@ -18396,12 +18436,24 @@
                       (if (< index (load-u32 (+ (heap-block heap value) 4)))
                         (setq result (value-string-slice heap value index (1+ index)))
                         (let ((constructor (heap-native-constructor-existing heap 6)))
-                          (if (/= constructor 0)
-                            (let ((prototype (value-function-native-prototype heap constructor)))
-                              (when (= (last-error) 0)
-                                (frame-set heap frame 3 prototype) (setq result (value-source-get-with-receiver heap prototype name value))))
-                            (when (or (and (> name 3) (= (load-u32 (heap-block heap name)) 5) (= (heap-typeof-string-builtin heap name) 1))
-                                      (= (heap-symbol-well-known-p heap name 0) 1)) (fail 3))))))))))
+                          ;; A cold primitive lookup can precede every explicit
+                          ;; String reference, or follow collection of its weak
+                          ;; constructor cache. Use the same realm handshake as
+                          ;; ordinary primitive boxing before observing a native
+                          ;; method or @@iterator, rather than reporting bounds.
+                          (when (and (= constructor 0)
+                                     (or (and (> name 3) (= (load-u32 (heap-block heap name)) 5)
+                                              (= (heap-typeof-string-builtin heap name) 1))
+                                         (= (heap-symbol-well-known-p heap name 0) 1)))
+                            (setq constructor (heap-source-boxed-constructor heap value)))
+                          (if (and (= (last-error) 0) (/= constructor 0))
+                            (progn
+                              ;; Prototype publication can allocate. Keep the
+                              ;; constructor alive even when only the cache knew it.
+                              (frame-set heap frame 4 constructor)
+                              (let ((prototype (value-function-native-prototype heap constructor)))
+                                (when (= (last-error) 0)
+                                  (frame-set heap frame 3 prototype) (setq result (value-source-get-with-receiver heap prototype name value))))) 0))))))))
             (when (and (= (last-error) 0) (= nullish 1) (or (= result 0) (= result 3))) (setq result 0))
             (setq result (heap-frame-result heap frame result))) result))))
 
@@ -20428,10 +20480,10 @@
                     (when (= (last-error) 0) (frame-set heap frame 7 b) (setq result (value-string-compare heap a b)))))) 0)
             (progn
               (value-set heap arguments 0 left) (value-set heap arguments 1 right)
-              (let* ((code (value-function-code heap comparator))
-                     ;; The surrounding sort frame already roots both handles;
-                     ;; the returned value is rooted before any next allocation.
-                     (returned (if (= (last-error) 0) (call-source heap comparator arguments 2 code) 0)))
+              ;; The surrounding sort frame owns the callable and argv. Finish
+              ;; a source tail transfer before coercing the comparator result;
+              ;; call-source alone can return the private kind-30 request.
+              (let ((returned (value-source-invoke-rooted-with-this heap comparator 3 arguments 2)))
                 (when (= (last-error) 0)
                   (frame-set heap frame 8 returned)
                   (let ((number (heap-source-number heap returned)))
@@ -23015,7 +23067,11 @@
           (when (<= old 1)
             (store-u32 (+ p 4) (1+ (load-u32 (+ p 4))))
             (when (= old 0) (store-u32 (+ p 12) (1+ (load-u32 (+ p 12))))))
-          (store-u32 (+ cell 4) value) (store-u32 cell key) 1))))
+          (store-u32 (+ cell 4) value) (store-u32 cell key)
+          ;; No allocation or safepoint occurs between publishing the entry
+          ;; and marking the key. Growth copies use this same insertion path.
+          (let ((entry (heap-entry heap (heap-slot-index heap key))))
+            (store-u32 (+ entry 4) (word-or (load-u32 (+ entry 4)) 8))) 1))))
   (defun heap-weak-prepare (heap wrapper key value)
     (let ((frame (heap-argument-frame heap wrapper key value 5)) (result 0))
       (when (/= frame 0)
@@ -23290,7 +23346,10 @@
                               (when (= (last-error) 0)
                                 (value-set heap arguments 0 value)
                                 (value-set heap arguments 1 key)
-                                (when (= (last-error) 0) (call-source heap callback arguments 3 code))))
+                                ;; A discarded return still has to execute its
+                                ;; tail call (including effects and errors).
+                                (when (= (last-error) 0)
+                                  (value-source-invoke-rooted-with-this heap callback 3 arguments 3))))
                             (when (= (last-error) 0) (setq next (value-iterator-next heap iterator)))))))
                     (when (= (last-error) 0) (setq result 3))
                     (setq result (heap-frame-result heap frame result))))) result))))))
@@ -24920,8 +24979,8 @@
       (when (/= frame 0)
         (frame-set heap frame 3 arguments)
         (let* ((size (if (= operation 8) (+ count 2) (if (= operation 9) (1+ count)
-                       (if (or (= operation 2) (= operation 10) (= operation 32) (or (= operation 18) (= operation 21))) 3
-                         (if (or (= operation 4) (= operation 6) (= operation 12) (= operation 13) (= operation 15) (= operation 16) (= operation 24) (= operation 33) (= operation 34) (= operation 35) (= operation 36) (or (= operation 17) (= operation 23))) 1 2)))))
+                       (if (or (= operation 2) (= operation 10) (= operation 32) (= operation 37) (= operation 38) (or (= operation 18) (= operation 21))) 3
+                         (if (or (= operation 4) (= operation 6) (= operation 12) (= operation 13) (= operation 15) (= operation 16) (= operation 24) (= operation 33) (= operation 34) (= operation 35) (= operation 36) (= operation 39) (or (= operation 17) (= operation 23))) 1 2)))))
                (argv (value-refs heap 7 (1+ size))))
           (when (/= argv 0)
             (frame-set heap frame 4 argv)
@@ -28154,24 +28213,30 @@
       (let ((p (heap-block heap value)))
         (if (and (= (load-u32 p) 18) (= (load-u32 (+ p 4)) 0)
                  (= (load-u32 (+ p 16)) 1) (= (word-and (load-u32 (+ p 12)) 255) bucket)) 1 0))))
+  (defun heap-named-cache-reset (heap)
+    (let ((cache (heap-named-cache-entry heap 0))
+          (counts (heap-named-cache-count-entry heap 0)) (bucket 0))
+      (while (< bucket 256)
+        (store-u32 (+ cache (* bucket 4)) 0)
+        (store-u32 (+ counts (* bucket 4)) 0) (setq bucket (1+ bucket)))) 0)
+  (defun heap-named-cache-insert-at (heap base entry slot)
+    (let ((p (+ base (load-u32 (+ entry 8)))))
+      (when (and (= (load-u32 p) 18) (= (load-u32 (+ p 4)) 0) (= (load-u32 (+ p 16)) 1))
+        (let* ((code (load-u32 (+ p 12))) (head (heap-named-cache-entry heap code))
+               (count (heap-named-cache-count-entry heap code)))
+          (store-u32 (+ p 8) (load-u32 head))
+          (store-u32 head (heap-handle heap (load-u32 entry) slot))
+          (store-u32 count (1+ (load-u32 count)))))) 0)
   (defun heap-named-cache-rebuild (heap base slots)
-    (let ((cache (heap-named-cache-entry heap 0)) (counts (heap-named-cache-count-entry heap 0)))
-      (when (/= cache 0)
-        (let ((bucket 0) (slot (heap-next-allocated-slot heap 0)))
-          (while (< bucket 256)
-            (store-u32 (+ cache (* bucket 4)) 0)
-            (store-u32 (+ counts (* bucket 4)) 0) (setq bucket (1+ bucket)))
-          (while (/= slot 0)
-            (let ((entry (+ base (* slot 24))))
-              (when (/= (word-and (load-u32 (+ entry 4)) 1) 0)
-                (let ((p (+ base (load-u32 (+ entry 8)))))
-                  (when (and (= (load-u32 p) 18) (= (load-u32 (+ p 4)) 0) (= (load-u32 (+ p 16)) 1))
-                    (let* ((bucket (word-and (load-u32 (+ p 12)) 255))
-                           (head (+ cache (* bucket 4))) (count (+ counts (* bucket 4))))
-                      (store-u32 (+ p 8) (load-u32 head))
-                      (store-u32 head (heap-handle heap (load-u32 entry) slot))
-                      (store-u32 count (1+ (load-u32 count))))))))
-            (setq slot (heap-next-allocated-slot heap slot)))))) 0)
+    ;; Standalone repair is still required when a lookup detects a damaged
+    ;; private chain between collections. Ordinary GC already visits survivors.
+    (heap-named-cache-reset heap)
+    (let ((slot (heap-next-allocated-slot heap 0)))
+      (while (/= slot 0)
+        (let ((entry (+ base (* slot 24))))
+          (when (/= (word-and (load-u32 (+ entry 4)) 1) 0)
+            (heap-named-cache-insert-at heap base entry slot)))
+        (setq slot (heap-next-allocated-slot heap slot)))) 0)
   (defun value-function-named (heap code)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (let ((cache (heap-named-cache-entry heap code)) (result 0) (repair 1))
@@ -28367,6 +28432,39 @@
   (export value-source-tail-call)
   (defun value-source-invoke (heap function arguments count)
     (value-source-invoke-with-this heap function 3 arguments count))
+  ;; Internal pure array construction: callback indices increase exactly once,
+  ;; and only this fresh dense result is written. All inputs/results remain
+  ;; rooted across callback reentry, collection and memory growth.
+  (defun value-array-build (heap size function)
+    (begin-operation)
+    (if (or (= (heap-check heap) 0) (= (heap-kind-check heap size 4) 0)
+            (= (heap-kind-check heap function 18) 0)) 0
+      (let ((frame (heap-argument-frame heap size function 0 7)) (result 0))
+        (when (/= frame 0)
+          (let* ((count (heap-number-word heap size)) (normalized (heap-number-from-word heap count 0)))
+            (when (/= normalized 0)
+              (frame-set heap frame 2 normalized)
+              (if (or (> count 67108854) (/= (value-number-compare heap size normalized 0) 1))
+                (heap-language-fail heap 3 2)
+                (let ((array (value-array-new heap count)) (arguments 0) (index 0))
+                  (when (/= array 0)
+                    (frame-set heap frame 3 array)
+                    (setq arguments (value-refs heap 7 1))
+                    (when (/= arguments 0)
+                      (frame-set heap frame 4 arguments)
+                      (while (and (< index count) (= (last-error) 0))
+                        (let ((number (heap-number-from-word heap index 0)))
+                          (when (/= number 0)
+                            (frame-set heap frame 5 number)
+                            (value-set heap arguments 0 number)
+                            (let ((child (value-source-invoke-with-this heap function 3 arguments 1)))
+                              (when (= (last-error) 0)
+                                (frame-set heap frame 6 child)
+                                (value-set heap array index child)))))
+                        (setq index (1+ index)))
+                      (when (= (last-error) 0) (setq result array))))))))
+          (setq result (heap-frame-result heap frame result))) result)))
+  (export value-array-build)
   (export value-function-current-this value-call-reset value-source-invoke-with-this)
 
   (defun value-function-capture-set (heap function index cell)
@@ -30229,6 +30327,13 @@
   ;; Foreign native Object/Array/Map/Set prototypes belong to the host realm, while
   ;; exact implementations are registered against this heap's own prototypes.
   ;; Keep public GetPrototypeOf and every foreign capability unchanged.
+  (defun value-protocol-host-method (heap protocol operation receiver)
+    (begin-operation)
+    (if (= (heap-check heap) 0) 0
+      (if (= (heap-reference-check heap receiver) 0) 0
+        (if (or (<= receiver 3) (/= (value-kind heap receiver) 35)) 3
+          (heap-host-request heap 37 protocol operation receiver 0 0)))))
+  (export value-protocol-host-method)
   (defun value-protocol-exact-prototype (heap prototype)
     (begin-operation)
     (if (= (heap-check heap) 0) 0

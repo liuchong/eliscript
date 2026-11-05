@@ -20,6 +20,9 @@
         (when (= (resolve root file) (resolve root "tests/wasm-managed-str.test.mjs"))
           (js-call expected :push "--preload"
             (resolve root "tests/helpers/managed-fixture-repairs-install.mjs"))))
+      (when (= (resolve root file) (resolve root "tests/wasm-managed-array-sort.test.mjs"))
+        (js-call expected :push "--preload"
+          (resolve root "tests/helpers/managed-fixture-repairs-install.mjs")))
       (js-call expected :push "--timeout" "300000" file)
       ;; Assert the complete real argv before supplying the unchanged fake's
       ;; four-field fixture interface. No current option is discarded untested.
@@ -66,9 +69,9 @@
         (lambda (text) (js-call assert :ok (js-call workflow :includes text))))))
   (defasync runCompatibilityWorkflowCase ()
     (let ((report (await (checkCompatibilityWorkflow (js-object :root root)))))
-      (js-call assert :strictEqual (get report :jobs) 24)
-      (js-call assert :strictEqual (get report :acceptanceJobs) 8)
-      (js-call assert :strictEqual (get report :testFileShards) 4)
+      (js-call assert :strictEqual (get report :jobs) 48)
+      (js-call assert :strictEqual (get report :acceptanceJobs) 16)
+      (js-call assert :strictEqual (get report :testFileShards) 8)
       (js-call assert :deepStrictEqual (js-call (get report :systems) :map (lambda (system) (get system :id)))
         (js-array "linux" "linux-arm64" "macos"))
       (js-call assert :deepStrictEqual (js-call (get report :systems) :find (lambda (system) (= (get system :id) "linux-arm64")))
@@ -78,7 +81,7 @@
       (js-call assert :deepStrictEqual (get report :javascriptHost) (js-object :name "bun" :version "1.4.0"))
       (js-call assert :deepStrictEqual (get report :nodeHost) (js-object :name "node" :version "24.20.0"))
       (js-call assert :strictEqual (get report :localEvidenceDirectory) "acceptance/matrix")))
-  (defasync runFourShardInventoryCase ()
+  (defasync runEightShardInventoryCase ()
     (let* ((baseline (JSON/parse (await (readFile (resolve root "contracts/compatibility-matrix.json") "utf8"))))
            (makefile (await (readFile (resolve root "Makefile") "utf8")))
            (workflow (renderWorkflow baseline)) (validated (validateCompatibilityMatrix baseline))
@@ -90,9 +93,9 @@
                (Array/from (js-call (js-call makefile :slice start end) :matchAll
                  (new globalThis.RegExp "[.]/tests/[a-z0-9-]+[.]test[.]mjs" "g"))
                  (lambda (match) (aref match 0))))))))
-      (js-call assert :strictEqual (get validated :jobs) 24)
-      (js-call assert :strictEqual (get validated :acceptanceJobs) 8)
-      (js-call assert :strictEqual (get validated :testFileShards) 4)
+      (js-call assert :strictEqual (get validated :jobs) 48)
+      (js-call assert :strictEqual (get validated :acceptanceJobs) 16)
+      (js-call assert :strictEqual (get validated :testFileShards) 8)
       (js-call assert :strictEqual (js-length rows) (get validated :jobs))
       (js-call assert :strictEqual (js-length inventories) 2)
       (js-call inventories :forEach (lambda (files)
@@ -102,19 +105,28 @@
         (js-call (get baseline :emacsVersions) :forEach (lambda (emacs)
           (let ((pair (js-call rows :filter (lambda (row)
                         (and (= (aref row 2) (get system :runner)) (= (aref row 4) emacs))))))
-            (js-call assert :deepStrictEqual (js-call (js-call pair :map (lambda (row) (funcall globalThis.Number (aref row 5)))) :sort) (js-array 1 2 3 4))
+            (js-call assert :deepStrictEqual (js-call (js-call pair :map (lambda (row) (funcall globalThis.Number (aref row 5)))) :sort) (js-array 1 2 3 4 5 6 7 8))
             (js-call pair :forEach (lambda (row)
-              (js-call assert :strictEqual (aref row 1) (str (get system :id) "-emacs-" emacs "-shard-" (aref row 5) "-of-4"))
+              (js-call assert :strictEqual (aref row 1) (str (get system :id) "-emacs-" emacs "-shard-" (aref row 5) "-of-8"))
               (js-call assert :strictEqual (aref row 3) (get system :architecture))))
             (js-call inventories :forEach (lambda (files)
-              (let ((all (js-call pair :flatMap (lambda (row) (partitionTestFiles files (funcall globalThis.Number (aref row 5)) 4)))))
+              (let ((all (js-call pair :flatMap (lambda (row) (partitionTestFiles files (funcall globalThis.Number (aref row 5)) 8)))))
                 (js-call assert :deepStrictEqual (js-call all :sort) (js-call (js-call files :slice) :sort))
                 (js-call assert :strictEqual (get (new globalThis.Set all) :size) (js-length files))))))))))
       (js-call (js-array
-        "BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index ${{ matrix.shard }} --shard-count 4"
-        "Run test file shard ${{ matrix.shard }}/4" "timeout-minutes: 30" "fail-fast: false") :forEach
+        "BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index ${{ matrix.shard }} --shard-count 8"
+        "Run test file shard ${{ matrix.shard }}/8"
+        "timeout-minutes: ${{ startsWith(matrix.os, 'macos') && 60 || 30 }}" "fail-fast: false") :forEach
         (lambda (text) (js-call assert :ok (js-call workflow :includes text))))
       (js-call (get baseline :commands) :forEach (lambda (command) (js-call assert :ok (js-call workflow :includes (str "run: " command)))))
+      (js-call assert :ok (js-call workflow :includes "ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE: \"small\""))
+      (let* ((strict (Object/assign (js-object) baseline)))
+        (Reflect/deleteProperty strict "performanceAcceptance")
+        (let ((strict-workflow (renderWorkflow strict)))
+          (js-call assert :strictEqual (js-call strict-workflow :includes "ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE") false)
+          (js-call assert :ok (js-call strict-workflow :includes "timeout-minutes: 30"))
+          (js-call assert :strictEqual (js-call strict-workflow :includes "startsWith(matrix.os") false)
+          (js-call assert :strictEqual (js-call strict-workflow :includes "ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE") false)))
       (js-call (get baseline :actions) :forEach (lambda (action)
         (js-call assert :ok (js-call workflow :includes (str (get action :repository) "@" (get action :revision))))))
       (js-call (js-array "cli-test.sh" "project-cli-test.sh" "check-cli-test.sh" "format-cli-test.sh" "application-cli-test.sh")
@@ -122,4 +134,36 @@
       (js-call assert :strictEqual (js-length (Array/from (js-call makefile :matchAll
         (new globalThis.RegExp "ert-run-tests-batch-and-exit" "g")))) 2)
       (js-call assert :strictEqual (js-call (new globalThis.RegExp "[|][|] true|--test-name-pattern|continue-on-error|if:.*matrix") :test workflow) false)))
-  (export originalWorkerArguments adaptedSpyOn runBrowserWorkflowCase runCompatibilityWorkflowCase runFourShardInventoryCase))
+  (defasync runWorkflowCommandsCase ()
+    (let* ((baseline (JSON/parse (await (readFile (resolve root "contracts/compatibility-matrix.json") "utf8"))))
+           (workflow (renderWorkflow baseline))
+           (makefile (await (readFile (resolve root "Makefile") "utf8")))
+           (package (JSON/parse (await (readFile (resolve root "package.json") "utf8"))))
+           (strict (Object/assign (js-object) baseline)))
+      (js-call assert :ok (js-call workflow :includes
+        "timeout-minutes: ${{ startsWith(matrix.os, 'macos') && 60 || 30 }}"))
+      (Reflect/deleteProperty strict "performanceAcceptance")
+      (js-call assert :ok (js-call (renderWorkflow strict) :includes "timeout-minutes: 30"))
+      (js-call (js-array "BUN_TEST_RUNNER: tools/testing/file-workers.mjs"
+        "run: bun run test" "run: make byte-compile") :forEach
+        (lambda (text) (js-call assert :ok (js-call workflow :includes text))))
+      (js-call assert :strictEqual (get (get package :scripts) :test) "make test")
+      (js-call assert :strictEqual (js-length (Array/from (js-call makefile :matchAll
+        (new globalThis.RegExp "\\$\\(BUN\\) \\$\\(BUN_TEST_RUNNER\\)" "g")))) 2)))
+  (defasync runWorkflowDriftCase ()
+    (let* ((baseline (JSON/parse (await (readFile (resolve root "contracts/compatibility-matrix.json") "utf8"))))
+           (strict (Object/assign (js-object) baseline)))
+      (Reflect/deleteProperty strict "performanceAcceptance")
+      (let ((index 0) (matrices (js-array baseline strict))
+            (expected (js-array "timeout-minutes: ${{ startsWith(matrix.os, 'macos') && 60 || 30 }}"
+                                "timeout-minutes: 30")))
+        (while (< index (js-length matrices))
+          (let* ((matrix (aref matrices index)) (original (renderWorkflow matrix))
+                 (altered (js-call original :replace (aref expected index) "timeout-minutes: 1")))
+            (js-call assert :notStrictEqual altered original)
+            (await (js-call assert :rejects
+              (checkCompatibilityWorkflow (js-object :root root :matrix matrix :workflowText altered))
+              (new globalThis.RegExp "differs from the compatibility matrix"))))
+          (setq index (1+ index))))))
+  (export originalWorkerArguments adaptedSpyOn runBrowserWorkflowCase runCompatibilityWorkflowCase runEightShardInventoryCase
+    runWorkflowCommandsCase runWorkflowDriftCase))

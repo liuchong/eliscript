@@ -1,0 +1,90 @@
+(module tools.backends.compiler-corpus-tools-artifact-adapters
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
+  (import "./compiler-corpus-tools-artifact-adapters-ground.mjs" :as ground)
+  (defconst addOriginalToolsArtifactPrograms (get ground :addOriginalToolsArtifactPrograms))
+  (defun digest (source) (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
+  (defun plan (imports dependencies cases)
+    (js-object :imports imports :dependencies dependencies :cases (new globalThis.Map cases)))
+  ;; Bind the exact maintained suite dependencies. A source inventory is an
+  ;; original host gate, never evidence of selected-compiler execution.
+  (defconst host-plans (new globalThis.Map (js-array
+    (js-array "tests/collection-layout-benchmark.test.mjs"
+      (plan (js-array "./helpers/performance-acceptance.mjs" "bun:test" "node:fs/promises" "node:url"
+              "../tools/collections/layout-benchmark.mjs" "../tools/collections/benchmark.mjs")
+        (js-array "tools/collections/layout-host.mjs" "benchmarks/hamt-layout-macos-arm64.json")
+        (js-array
+          (js-array "HAMT layout core validates equivalent real node operations" "original-host-runtime-case")
+          (js-array "HAMT layout host adapters agree under Bun and Node" "original-host-runtime-case")
+          (js-array "HAMT browser benchmark uses copied native ESM without a bundler" "original-source-inventory-case")
+          (js-array "committed HAMT layout baseline proves the 32/24 threshold decision" "original-retained-report-case"))))
+    (js-array "tests/transient-builder-benchmark.test.mjs"
+      (plan (js-array "./helpers/performance-acceptance.mjs" "bun:test" "node:fs/promises" "node:path"
+              "../tools/collections/transient-builder-benchmark.mjs")
+        (js-array "benchmarks/transient-builder-macos-arm64.json")
+        (js-array
+          (js-array "committed transient builder report matches core runtime sources" "original-current-source-report-case")
+          (js-array "transient builder report validator rejects incomplete evidence" "original-retained-report-case"))))
+    (js-array "tests/public-surface.test.mjs"
+      (plan (js-array "eliscript/runtime/unicode-case.mjs" "eliscript/runtime/prelude.mjs"
+              "bun:test" "node:fs/promises" "node:path" "../tools/backends/build.mjs" "../tools/surface/check.mjs")
+        (js-array "contracts/public-surface.json" "runtime/unicode-case.mjs" "runtime/prelude.mjs")
+        (js-array
+          (js-array "repository public surface matches every tracked implementation" "original-source-inventory-case")
+          (js-array "public surface checker follows aliased runtime re-exports" "original-source-inventory-case"))))
+    (js-array "tests/worker-value-codec.test.mjs"
+      (plan (js-array "bun:test" "../runtime/core/identifier.mjs" "../runtime/core/list.mjs" "../runtime/core/map.mjs"
+              "../runtime/core/metadata.mjs" "../runtime/core/protocol.mjs" "../runtime/core/set.mjs"
+              "../runtime/core/transient.mjs" "../runtime/core/value.mjs" "../runtime/core/vector.mjs"
+              "../runtime/worker-value-codec.mjs")
+        (js-array) (js-array
+          (js-array "worker value codec transports protocol definitions without runtime identity" "original-host-runtime-case")))))))
+  (defun source-imports (source)
+    (js-call (Array/from (js-call source :matchAll (new globalThis.RegExp
+      "^import\\s+(?:[^;\"']*?\\sfrom\\s+)?[\"']([^\"']+)[\"'];" "gm")))
+      :map (lambda (match) (aref match 1))))
+  (defasync originalToolsHostGateCase (options)
+    (let* ((locator (get options :locator)) (source (get options :source)) (file (get options :file))
+           (entry (unless (nullish? locator) (js-call host-plans :get (get locator :file)))))
+      (if (or (nullish? entry) (not (js-call (get entry :cases) :has (get locator :contains)))) nil
+        (progn
+          (unless (and (= (value-type source) "string") (= (value-type file) "function"))
+            (throw (new globalThis.TypeError "original tools gate requires source services")))
+          (let ((imports (source-imports source)))
+            (unless (and (= (js-length imports) (js-length (get entry :imports)))
+                         (not (js-call imports :some (lambda (name index) (/= name (aref (get entry :imports) index))))))
+              (throw (new globalThis.TypeError (+ "original tools gate dependencies changed: " (get locator :file)))))
+            (when (js-call (new globalThis.RegExp
+              "\\b(?:compile_string|compile_ir_string|compileFile|buildIndependentCompiler|createCompilerSession|import)\\s*\\(|bin/eliscript|ELISCRIPT_[A-Z_]*COMPILER") :test source)
+              (throw (new globalThis.TypeError (+ "original tools gate acquired a compiler path: " (get locator :file)))))
+            (let* ((found (js-call (originalSourceCaseLocators (get locator :file) source) :find
+                            (lambda (item) (= (get item :contains) (get locator :contains)))))
+                   (selected (unless (nullish? found) (get found :originalCase))))
+              (when (and (nullish? selected) (= (get locator :file) "tests/transient-builder-benchmark.test.mjs"))
+                (let* ((prefix (+ "currentPerformanceTest(test)(" (JSON/stringify (get locator :contains)) ", async () => {"))
+                       (start (js-call source :indexOf prefix)))
+                  (unless (and (>= start 0) (< (js-call source :indexOf prefix (+ start (js-length prefix))) 0)
+                               (js-call (js-call (js-call source :slice start) :trimEnd) :endsWith "});"))
+                    (throw (new globalThis.TypeError "original current-source report gate boundary changed")))
+                  (setq selected (js-object :title (get locator :contains) :span (js-object :start start :end (js-length source))
+                    :byteStart (Buffer/byteLength (js-call source :slice 0 start)) :byteEnd (Buffer/byteLength source)
+                    :sha256 (digest (js-call source :slice start)) :registration "currentPerformanceTest(test)" :timeoutMs 5000))))
+              (when (nullish? selected)
+                (throw (new globalThis.TypeError (+ "original tools gate case boundary changed: " (get locator :contains)))))
+              (let ((dependencies (js-array)) (paths (new globalThis.Set (get entry :dependencies))))
+                (js-call imports :forEach (lambda (specifier)
+                  (when (js-call specifier :startsWith ".")
+                    (js-call paths :add (js-call (get (new globalThis.URL specifier (+ "file:///" (get locator :file))) :pathname) :slice 1)))))
+                (let ((all (Array/from paths)) (index 0))
+                  (while (< index (js-length all))
+                    (let* ((name (aref all index)) (asset (await (funcall file name))))
+                      (js-call dependencies :push (js-object :file name :sourceSha256 (get asset :sha256))))
+                    (setq index (1+ index))))
+                (js-object :kind (js-call (get entry :cases) :get (get locator :contains))
+                  :originalAssertion (get locator :contains)
+                  :region (js-object :start (get (get selected :span) :start) :end (get (get selected :span) :end)
+                    :byteStart (get selected :byteStart) :byteEnd (get selected :byteEnd) :sha256 (get selected :sha256))
+                  :dependencies dependencies :registration (get selected :registration) :timeoutMs (get selected :timeoutMs)
+                  :reason "unchanged complete original gate; this case has no language compiler or selected-product injection"))))))))
+  (export originalToolsHostGateCase addOriginalToolsArtifactPrograms))

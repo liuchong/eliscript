@@ -21,7 +21,7 @@
         (t route))))))
   (defconst original-spawn (get processes :spawnSync))
   (put processes :spawnSync (lambda (command arguments &rest options)
-    (let ((forwarded (if (= (basename command) "node")
+    (let ((forwarded (if (and (= (value-type command) "string") (= (basename command) "node"))
       (managedReferenceChildArguments arguments (resolve root "tests/helpers/managed-reference-node.mjs")) arguments)))
       (Reflect/apply original-spawn processes (js-call (js-array command forwarded) :concat options)))))
   (syncBuiltinESMExports)

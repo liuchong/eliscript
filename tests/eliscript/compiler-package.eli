@@ -204,8 +204,15 @@
                  (source (resolve root "runtime" (str name ".eli"))))
             (js-call assert :ok (> (js-length bytes) 0))
             (js-call assert :strictEqual (get map :version) 3)
-            (js-call assert :deepStrictEqual (js-call (get map :sources) :map (lambda (path)
-              (resolve (dirname file) (get map :sourceRoot "") path))) (js-array source))
+            ;; Formal stage products retain package-relative logical coordinates;
+            ;; direct CLI builds retain physical coordinates relative to the map.
+            ;; Both producer contracts carry the complete original source.
+            (if (= (get map :file) (str "runtime/" name ".mjs"))
+              (progn
+                (js-call assert :ok (or (undefined? (get map :sourceRoot)) (= (get map :sourceRoot) "")))
+                (js-call assert :deepStrictEqual (get map :sources) (js-array (str "runtime/" name ".eli"))))
+              (js-call assert :deepStrictEqual (js-call (get map :sources) :map (lambda (path)
+                (resolve (dirname file) (get map :sourceRoot "") path))) (js-array source)))
             (js-call assert :deepStrictEqual (get map :sourcesContent) (js-array (await (readFile source "utf8")))))
           (setq index (1+ index))))))
   (test "packaged loader worker and browser carry the exact preserved runtime dependency and original identities"

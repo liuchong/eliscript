@@ -26,7 +26,7 @@
   (import "../tools/backends/compiler-corpus-managed-adapters-ground.mjs" :as ground)
   (import "../tools/backends/compiler-corpus-execution.mjs" executeCompilerCorpusRecord
     compilerCorpusRuntimeAcceptance prepareCompilerCorpusSourceMapContext prepareOriginalProgramProcessLifetime)
-  (import "../tools/backends/compiler-corpus.mjs" compilerCorpusRequest transportOriginalMatcherRecord)
+  (import "../tools/backends/compiler-corpus.mjs" compilerCorpusRequest transportOriginalMatcherRecord transportOriginalCoreInstrumentationRecord)
   (import "../tools/backends/compiler-build.mjs" independentCompilerResources)
   (import "../tools/backends/compiler-corpus-host-context.mjs"
     bindOriginalManagedProgramContext inheritOriginalProgramContext originalProgramBunLauncher
@@ -34,6 +34,7 @@
     originalInteropFullRuntimeRecipe selectOriginalInteropRuntimeOptions)
   (import "../dist/bootstrap/reader.mjs" read-string)
   (import "../dist/bootstrap/compiler.mjs" compile-string)
+  (import "../bootstrap/host/bun.mjs" loadCompiler)
 
   (defconst mixed-literal-source (str
     "(module mixed.literal.boundary\n"
@@ -339,12 +340,12 @@
             (finally (await (rm directory (js-object :recursive t :force t)))))))))
 
   (defconst suite "tests/wasm-managed-sequence-data.test.mjs")
-  (test "only the authenticated complete interop record selects a bounded functional heap with both flags and unchanged auto"
+  (test "only the authenticated complete interop record selects a bounded functional heap with both flags and preserved explicit auto"
     (async ()
       (let* ((main (await (readFile (resolve root "stdlib/interop/js.eli") "utf8")))
              (host-source (await (readFile (resolve root "tests/fixtures/interop-js-host.mjs") "utf8")))
              (record (js-object :id "stable-compatibility:program:stdlib/interop/js.eli" :kind "project"
-               :entry "stdlib/interop/js.mjs"
+               :entry "stdlib/interop/js.mjs" :request (js-object)
                :original (js-object :manifest "stable-compatibility" :fixture "stdlib/interop/js.eli" :host "tests/fixtures/interop-js-host.mjs")
                :modules (js-array (js-object :id "stdlib/interop/js.mjs" :filename "stdlib/interop/js.eli" :source main))
                :expected (js-object :kind "seed-program" :oracleRequired t)
@@ -380,7 +381,31 @@
                     (js-call assert :strictEqual (get acceptance :effectiveRuntimeProfile) "full-runtime")
                     (js-call assert :strictEqual (get acceptance :resourceAcceptance) "deferred")
                     (js-call assert :deepStrictEqual (get acceptance :effectiveRuntimeOptions)
-                      (Object/assign (js-object) budget (get (independentCompilerResources (js-object :profile "full-runtime")) :budget)))))
+                      (Object/assign (js-object) budget (get (independentCompilerResources (js-object :profile "full-runtime")) :budget)
+                        (js-object :auto 8388608))))
+                  (js-call assert :strictEqual (compilerCorpusFunctionalResources record (js-object)) undefined)
+                  (js-call (js-array 0 1 17) :forEach (lambda (auto)
+                    (let ((provided (compilerCorpusFunctionalResources record
+                            (js-object :functionalRuntimeProfile "small" :runtimeOptions (js-object :auto auto))))
+                          (declared (compilerCorpusFunctionalResources
+                            (Object/assign (js-object) record (js-object :execution
+                              (Object/assign (js-object) (get record :execution) (js-object :runtimeOptions (js-object :auto auto)))))
+                            (js-object :functionalRuntimeProfile "small")))
+                          (top-level (compilerCorpusFunctionalResources
+                            (Object/assign (js-object) record (js-object :auto auto))
+                            (js-object :functionalRuntimeProfile "small"))))
+                      (js-call assert :strictEqual (get (get provided :effectiveRuntimeOptions) :auto) auto)
+                      (js-call assert :strictEqual (get (get declared :effectiveRuntimeOptions) :auto) auto)
+                      (js-call assert :strictEqual (get (get top-level :effectiveRuntimeOptions) :auto) auto))))
+                  (js-call names :forEach (lambda (name)
+                    (Reflect/deleteProperty actual name)
+                    ;; This isolated recipe carries only the full-interop
+                    ;; source proof, not a general full-library archive proof.
+                    (js-call assert :throws
+                      (lambda () (compilerCorpusFunctionalResources record (js-object :functionalRuntimeProfile "small")))
+                      (js-object :name "TypeError" :message
+                        (new globalThis.RegExp "functional resource inputs differ from their authenticated archive")))
+                    (put actual name (get environment name)))))
                 (finally (js-call names :forEach (lambda (key)
                   (if (undefined? (get previous key)) (Reflect/deleteProperty actual key) (put actual key (get previous key))))))))
             (let ((changed (globalThis.structuredClone record)))
@@ -653,7 +678,7 @@
           (new globalThis.RegExp "ambiguous source aliases"))
         (put input :host (resolve root "fixture-product/tests/__eliscript_managed_transient-state_node_2.mjs"))
         (js-call assert :strictEqual (bindOriginalManagedProgramContext input context) context)
-        (put input :host (resolve root "fixture-product/tests/__eliscript_managed_core-modules_node_1.mjs"))
+        (put input :host (resolve root "fixture-product/tests/__eliscript_unrelated_node_1.mjs"))
         (js-call assert :strictEqual (bindOriginalManagedProgramContext input context) context)
         (js-call assert :strictEqual (get context :runtime) runtime))))
 
@@ -850,7 +875,11 @@
 
   (defasync authenticated-process-request (record old)
     (let* ((files (js-array "tools/backends/eliscript/compiler-corpus-process.eli"
-                    "tools/backends/compiler-corpus-process.mjs"))
+                    "tools/backends/compiler-corpus-process.mjs"
+                    "tools/backends/eliscript/compiler-corpus-sorted-observation.eli"
+                    "tools/backends/compiler-corpus-sorted-observation.mjs"
+                    "tools/backends/eliscript/compiler-corpus-wire-host.eli"
+                    "tools/backends/compiler-corpus-wire-host.mjs"))
            (proofs (js-array)) (index 0)
            (id (js-call posix :join (js-call posix :dirname (get (get record :execution) :host))
                  "compiler-corpus-process.mjs"))
@@ -864,10 +893,13 @@
           (js-call assert :deepStrictEqual
             (js-call (get (get record :original) :sourceAssets) :filter
               (lambda (asset) (= (get asset :file) file))) (js-array proof))
-          (when (= index 1)
-            (let ((source (js-call bytes :toString "utf8")))
+          (when (= (% index 2) 1)
+            (let ((source (js-call bytes :toString "utf8"))
+                  (module-id (js-call posix :join (js-call posix :dirname id) (js-call posix :basename file))))
               (js-call assert :ok (js-call bytes :equals (Buffer/from source "utf8")))
-              (js-call sources :push (js-object :id id :filename file :source source)))))
+              (js-call assert :strictEqual (js-length (js-call sources :filter
+                (lambda (item) (= (get item :id) module-id)))) 0)
+              (js-call sources :push (js-object :id module-id :filename file :source source)))))
         (setq index (1+ index)))
       (js-call assert :deepStrictEqual (get (get record :original) :processHostDependency)
         (js-object :version 1 :id id :sourceAssets proofs))
@@ -1242,6 +1274,105 @@
           (js-call assert :strictEqual reads 0)))))
 
 
+  (test "core host counters remain strict for JS while every target keeps the unchanged fifty-thousand result assertion"
+    (async ()
+      (let* ((original (await (readFile (resolve root "tests/core-stdlib.test.mjs") "utf8")))
+             (start (js-call original :indexOf "    expect(indexed.count).toBe(50_000);"))
+             (metrics (js-call original :indexOf "    expect(transientMapMetrics()).toMatchObject({" start))
+             (end (+ (js-call original :indexOf "\n    });" metrics) (js-length "\n    });")))
+             (source (js-call original :slice start end))
+             (assertion (js-call original :slice metrics end))
+             (record (js-object :id "stable-compatibility:program:tests/fixtures/core-stdlib-usage.eli"
+                       :execution (js-object :kind "original-program" :hostSource source) :original (js-object)))
+             (before (JSON/stringify record))
+             (changed (transportOriginalCoreInstrumentationRecord record))
+             (output (get (get changed :execution) :hostSource))
+             (scope (get (get changed :original) :nativeInstrumentationScope))
+             (parent (resolve root "_worktree/evidence/core-counter-scope")))
+        (js-call assert :ok (and (>= start 0) (> metrics start) (> end metrics)))
+        (js-call assert :strictEqual (JSON/stringify record) before)
+        (js-call assert :strictEqual (get scope :assertionSha256) (hash assertion))
+        (js-call assert :strictEqual (get scope :functionalInputCount) 50000)
+        (js-call assert :strictEqual (js-length (js-call output :split assertion)) 2)
+        (js-call assert :ok (js-call output :includes assertion))
+        (await (mkdir parent (js-object :recursive t)))
+        (let* ((directory (await (mkdtemp (resolve parent "case-"))))
+               (preload (resolve directory "globals.mjs")) (host (resolve directory "host.mjs")))
+          (try
+            (await (writeFile preload (compile-string (str
+              "(import \"bun:test\" expect) (put (js* \"globalThis\") :expect expect) "
+              "(put (js* \"globalThis\") :indexed (js-object :count (globalThis.Number (get (get globalThis.process :env) :SCOPE_COUNT)))) "
+              "(put (js* \"globalThis\") :transientMapMetrics (lambda () (js-object "
+              ":persistentCalls (globalThis.Number (get (get globalThis.process :env) :SCOPE_CALLS)) :invalidCalls 0)))") "core-counter-globals.eli")))
+            (await (writeFile host output))
+            (js-call (js-array
+              (js-array "javascript" "1" "50000" t)
+              (js-array "javascript" "0" "50000" false)
+              (js-array "wasm" "0" "50000" t)
+              (js-array "native" "0" "50000" t)
+              (js-array "wasm" "0" "49999" false)
+              (js-array "native" "0" "49999" false)) :forEach
+              (lambda (row)
+                (let ((result (spawnSync "bun" (js-array "--preload" preload host)
+                        (js-object :cwd root :encoding "utf8" :timeout 5000
+                          :env (Object/assign (js-object) (get globalThis.process :env)
+                            (js-object :ELISCRIPT_ORIGINAL_TARGET (aref row 0)
+                              :SCOPE_CALLS (aref row 1) :SCOPE_COUNT (aref row 2)))))))
+                  (js-call assert :strictEqual (get result :error) undefined)
+                  (js-call assert :strictEqual (= (get result :status) 0) (aref row 3) (get result :stderr)))))
+            (finally (await (rm directory (js-object :recursive t :force t)))))))))
+
+  (test "editable trie mirrors update changed paths without traversing unchanged sibling subtrees"
+    (async ()
+      (let* ((source (await (readFile (resolve root "stdlib/managed-literals.eli") "utf8")))
+             (names (js-array "literal-node-views" "literal-node-view-revisions"
+               "literal-object-freeze" "literal-object-has-own" "literal-has-transients" "literal-node-owner"
+               "VectorNode" "MapEntry" "BitmapIndexedNode" "ArrayNode" "HashCollisionNode"
+               "literal-vector-node-view" "literal-map-node-view" "literal-empty-bitmap"))
+             (forms (js-call (get (aref (read-string source "stdlib/managed-literals.eli") 0) :items) :slice 2))
+             (selected (js-call forms :filter (lambda (form)
+               (let ((items (get form :items)))
+                 (and items (> (js-length items) 1) (js-call names :includes (get (aref items 1) :name)))))))
+             (body (js-call (js-call selected :map (lambda (form)
+               (let ((span (get form :span))) (js-call source :slice (get span :start) (get span :end))))) :join "\n")))
+        (js-call assert :strictEqual (js-length selected) (js-length names))
+        (let* ((code (compile-string (str body "\n(setq literal-has-transients t)\n"
+                       "(export literal-vector-node-view literal-map-node-view)") "actual-node-mirrors.eli"))
+               (parent (resolve root "_worktree/evidence/node-mirror"))
+               (directory (progn (await (mkdir parent (js-object :recursive t)))
+                                 (await (mkdtemp (resolve parent "case-")))))
+               (api (progn (await (writeFile (resolve directory "compiler.mjs") code))
+                           (await (loadCompiler directory))))
+               (owner (js-object)) (left-value (js-object :kind "entry" :key "left" :value 1 :hash 1))
+               (right-value (js-object :kind "entry" :key "right" :value 2 :hash 2))
+               (left (js-object :kind "bitmap" :bitmap 1 :items (js-array left-value) :owner owner :revision 1))
+               (right (js-object :kind "bitmap" :bitmap 1 :items (js-array right-value) :owner owner :revision 1))
+               (map (js-object :kind "array" :count 2 :children (js-array left right) :owner owner :revision 1))
+               (map-view (js-call api :literal_map_node_view map))
+               (right-view (aref (get map-view :children) 1))
+               (vector-left (js-object :slots (js-array 1) :owner owner :revision 1))
+               (vector-right (js-object :slots (js-array 2) :owner owner :revision 1))
+               (vector (js-object :slots (js-array vector-left vector-right) :owner owner :revision 1))
+               (vector-view (js-call api :literal_vector_node_view vector 5))
+               (vector-right-view (aref (get vector-view :slots) 1)))
+          (try
+          ;; A read here proves the mirror needlessly entered an unchanged
+          ;; owned sibling. These are private input nodes, not public views.
+          (Object/defineProperty right "items" (js-object :get (lambda () (throw "unchanged map sibling traversed"))))
+          (Object/defineProperty vector-right "slots" (js-object :get (lambda () (throw "unchanged vector sibling traversed"))))
+          (put (get left :items) 0 (js-object :kind "entry" :key "left" :value 99 :hash 1))
+          (put left :revision 2) (put map :revision 2)
+          (put (get vector-left :slots) 0 99) (put vector-left :revision 2) (put vector :revision 2)
+          (js-call assert :strictEqual (js-call api :literal_map_node_view map) map-view)
+          (js-call assert :strictEqual (get (aref (get (aref (get map-view :children) 0) :items) 0) :value) 99)
+          (js-call assert :strictEqual (aref (get map-view :children) 1) right-view)
+          (js-call assert :strictEqual (js-call api :literal_vector_node_view vector 5) vector-view)
+          (js-call assert :strictEqual (aref (get (aref (get vector-view :slots) 0) :slots) 0) 99)
+          (js-call assert :strictEqual (aref (get vector-view :slots) 1) vector-right-view)
+          (js-call assert :strictEqual (get (Object/getOwnPropertyDescriptor right-view "items") :get) undefined)
+          (js-call assert :strictEqual (get (Object/getOwnPropertyDescriptor vector-right-view "slots") :get) undefined)
+          (finally (await (rm directory (js-object :recursive t :force t)))))))))
+
   (test "FIX39 all original wire coordinates bind synchronous and asynchronous source names from the actual descriptor"
     (async ()
       (let ((targets (js-array "wasm" "native")) (engines (js-array "node" "bun"))
@@ -1381,7 +1512,7 @@
                 (js-call assert :deepStrictEqual (await (runOriginalManagedObservation input context)) (js-array 1 2 3))
                 (let ((receipt (JSON/parse (await (readFile (resolve case-directory "process-outcome.json") "utf8")))))
                   (js-call assert :strictEqual (get receipt :status) "passed")
-                  (js-call assert :strictEqual (get (get receipt :policy) :effectiveDeadlineMs) nil)
+                  (js-call assert :strictEqual (get (get receipt :policy) :effectiveDeadlineMs) 60000)
                   (js-call assert :strictEqual (get (get receipt :policy) :performanceAcceptance) "deferred"))
                 (js-call assert :strictEqual (get input :timeoutMs) 1))
               (setq index (1+ index))))

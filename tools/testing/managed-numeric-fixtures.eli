@@ -1,11 +1,13 @@
 (module tools.testing.managed-numeric-fixtures
   (import "node:assert/strict" :default assert)
-  (import "node:fs/promises" readFile mkdtemp symlink realpath)
+  (import "node:fs/promises" readFile mkdtemp symlink realpath mkdir copyFile writeFile rm)
   (import "node:path" resolve)
   (import "node:crypto" createHash)
   (import "node:child_process" spawnSync)
   (import "../backends/build.mjs" root)
+  (import "../../bootstrap/host/bun.mjs" loadCompiler)
   (defconst typedNumericOutputTitle "typed Number-only JS emission validates every source node and preserves the accepted optimized JS control bytes")
+  (defconst boundedRadixTitle "radix conversion bounds exact integer parsing after full grammar validation instead of allocating from unbounded prefixes")
   (defun digest (source) (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
   (defasync assertTypedNumericOutput (backend)
     (let* ((source (+ (await (readFile (resolve root "tools/experiments/native-wasm/kernels.eli") "utf8")) "\n"
@@ -31,7 +33,7 @@
                (entry (resolve directory "compiler.mjs")))
           (await (symlink output entry "file"))
           (js-call assert :strictEqual (await (realpath entry)) (await (realpath output)))
-          (let ((reference (spawnSync (get (get globalThis.process :env) :NODE)
+          (let ((reference (spawnSync (get (get globalThis.process :env) :NODE "node")
             (js-array (resolve root "tests/helpers/numeric-seed-node.mjs") directory)
             (js-object :cwd root :encoding "utf8" :input saved :timeout 30000 :maxBuffer (* 1024 1024)))))
             (js-call assert :strictEqual (get reference :error) undefined)
@@ -46,4 +48,42 @@
             (lambda (error) (and (= (get (get error :eliscriptDiagnostic) :code) "ELI-B0001")
               (= (get (get (get error :eliscriptDiagnostic) :location) :file) "invalid-numeric-js.eli"))))
           (js-call assert :strictEqual (JSON/stringify bad) before))))))
-  (export typedNumericOutputTitle assertTypedNumericOutput))
+  (defasync assertBoundedRadixParsing (backend)
+    (let* ((directory (await (mkdtemp (resolve (get backend :directory) "radix-isolation-"))))
+           (compiler (get backend :compiler))
+           (program (js-call compiler :compile_ir_string
+             (await (readFile (resolve root "tests/fixtures/wasm-managed-primitive-operators.eli") "utf8")) "primitive-operators.eli"))
+           (before (JSON/stringify program))
+           (original globalThis.BigInt) (calls 0) (module undefined))
+      (try
+        ;; The public prelude was already imported by the test process. Its
+        ;; captured intrinsics cannot be probed by replacing globalThis.BigInt.
+        ;; Import byte-identical runtime modules at fresh physical identities.
+        (await (mkdir (resolve directory "runtime")))
+        (let ((files (js-array "prelude" "unicode-case" "unicode-case-data")) (index 0))
+          (while (< index (js-length files))
+            (let* ((name (str (aref files index) ".mjs")) (input (resolve root "runtime" name))
+                   (output (resolve directory "runtime" name)))
+              (await (copyFile input output))
+              (js-call assert :deepStrictEqual (await (readFile output)) (await (readFile input))))
+            (setq index (1+ index))))
+        (await (writeFile (resolve directory "package.json") (JSON/stringify (js-object
+          :name "eliscript" :type "module" :private t :exports (js-object
+            "./runtime/prelude.mjs" "./runtime/prelude.mjs"
+            "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs")))))
+        (await (writeFile (resolve directory "compiler.mjs") (js-call compiler :emit_ir_string program)))
+        (try
+          (put globalThis.globalThis :BigInt (lambda () (setq calls (1+ calls)) (throw (new globalThis.Error "integer parser called"))))
+          (setq module (await (loadCompiler directory)))
+          (finally (put globalThis.globalThis :BigInt original)))
+        (js-call (js-array (str "0x" (js-call "f" :repeat 4096))
+                   (str "0b" (js-call "1" :repeat 4096)) (str "0o" (js-call "7" :repeat 4096))) :forEach
+          (lambda (text) (js-call assert :strictEqual (js-call module :subtract text 0) globalThis.Infinity)))
+        (js-call assert :ok (Object/is (js-call module :subtract (str "0x" (js-call "0" :repeat 10000)) 0) 0))
+        (js-call assert :ok (Number/isNaN (js-call module :subtract (str "0x" (js-call "f" :repeat 4096) "z") 0)))
+        (js-call assert :strictEqual calls 0)
+        (js-call assert :throws (lambda () (js-call module :subtract "0xff" 0)) (new globalThis.RegExp "integer parser called"))
+        (js-call assert :strictEqual calls 1)
+        (js-call assert :strictEqual (JSON/stringify program) before)
+        (finally (put globalThis.globalThis :BigInt original) (await (rm directory (js-object :recursive t :force t)))))))
+  (export typedNumericOutputTitle assertTypedNumericOutput boundedRadixTitle assertBoundedRadixParsing))

@@ -488,7 +488,7 @@
       "version": 1,
       "evidence": [
         {"file": "stdlib/core/protocol.eli", "contains": ["protocol-definition-format \"eliscript-protocol-definition\"", "protocol-definition-version 1"]},
-        {"file": "runtime/core/protocol.mjs", "contains": ["define_protocol_from_definition as defineProtocolFromDefinition", "protocol_definition as protocolDefinition"]}
+        {"file": "runtime/core/protocol.eli", "contains": ["(defconst defineProtocolFromDefinition define_protocol_from_definition)", "(defconst protocolDefinition protocol_definition)"]}
       ]
     },
     {
@@ -900,7 +900,7 @@
       "spec": "0058",
       "visibility": "public",
       "file": "runtime/core/protocol.mjs",
-      "namedExports": ["ProtocolDispatchError", "defineProtocol", "defineProtocolFromDefinition", "extendProtocolCategory", "extendProtocolDefault", "extendProtocolType", "implementsProtocol", "implementsProtocolOperation", "isProtocol", "materializeProtocolFromDefinition", "protocolDefinition", "protocolHostCategory", "protocolMethod", "protocolSlot", "readProtocolMethodOwner", "readProtocolOperationsOwner"],
+      "namedExports": ["ProtocolDispatchError", "defineProtocol", "defineProtocolFromDefinition", "extendProtocolCategory", "extendProtocolDefault", "extendProtocolType", "implementsProtocol", "implementsProtocolOperation", "isProtocol", "materializeProtocolFromDefinition", "protocolDefinition", "protocolHostCategory", "protocolMethod", "protocolSlot", "readExternalProtocolMethod", "readProtocolMethodOwner", "readProtocolOperationsOwner"],
       "defaultExport": false
     },
     {
@@ -908,7 +908,7 @@
       "spec": "0080",
       "visibility": "internal",
       "file": "runtime/core/protocol-impl.mjs",
-      "namedExports": ["define_protocol", "define_protocol_from_definition", "extend_protocol_category", "extend_protocol_default", "extend_protocol_type", "implements_protocol_QMARK_", "implements_protocol_operation_QMARK_", "materialize_protocol_from_definition", "protocol_QMARK_", "protocol_definition", "protocol_host_category", "protocol_method", "protocol_slot", "read_protocol_method_owner", "read_protocol_operations_owner"],
+      "namedExports": ["define_protocol", "define_protocol_from_definition", "extend_protocol_category", "extend_protocol_default", "extend_protocol_type", "implements_protocol_QMARK_", "implements_protocol_operation_QMARK_", "materialize_protocol_from_definition", "protocol_QMARK_", "protocol_definition", "protocol_host_category", "protocol_method", "protocol_slot", "read_external_protocol_method", "read_protocol_method_owner", "read_protocol_operations_owner"],
       "defaultExport": false
     },
     {
@@ -1005,7 +1005,7 @@
     {"module": "core-metadata", "spec": "0068", "file": "stdlib/core/metadata.eli", "exports": ["IMeta", "IWithMeta", "meta", "supports-metadata?", "vary-meta", "with-meta"]},
     {"module": "core-object", "spec": "0081", "file": "stdlib/core/object.eli", "exports": ["assoc", "dissoc", "filter-values", "has?", "key-in?", "keys", "map-values", "merge", "omit", "pick", "update"]},
     {"module": "core-order", "spec": "0066", "file": "stdlib/core/order.eli", "exports": ["IComparable", "comparator", "compare-values", "max-key", "min-key", "reverse-comparator", "sort", "sort-by"]},
-    {"module": "core-protocol", "spec": "0066", "file": "stdlib/core/protocol.eli", "exports": ["define-protocol", "define-protocol-from-definition", "extend-protocol-category", "extend-protocol-default", "extend-protocol-type", "implements-protocol-operation?", "implements-protocol?", "materialize-protocol-from-definition", "protocol-definition", "protocol-host-category", "protocol-method", "protocol-slot", "protocol?", "read-protocol-method-owner", "read-protocol-operations-owner"]},
+    {"module": "core-protocol", "spec": "0066", "file": "stdlib/core/protocol.eli", "exports": ["define-protocol", "define-protocol-from-definition", "extend-protocol-category", "extend-protocol-default", "extend-protocol-type", "implements-protocol-operation?", "implements-protocol?", "materialize-protocol-from-definition", "protocol-definition", "protocol-host-category", "protocol-method", "protocol-slot", "protocol?", "read-external-protocol-method", "read-protocol-method-owner", "read-protocol-operations-owner"]},
     {"module": "core-record", "spec": "0168", "file": "stdlib/core/record.eli", "exports": ["define-record-type", "record-field-names", "record-type", "record-type-name", "record-type?", "record?"]},
     {"module": "core-regex", "spec": "0178", "file": "stdlib/core/regex.eli", "exports": ["re-find", "re-matches", "re-replace", "re-seq", "regex", "regex-flags", "regex-source", "regex?"]},
     {"module": "core-sequence", "spec": "0066", "file": "stdlib/core/seq.eli", "exports": ["butlast", "concat", "cycle", "dedupe", "distinct", "drop", "drop-last", "drop-while", "every?", "ffirst", "filter", "find", "first", "flatten", "fnext", "generate", "interleave", "interleave-all", "interpose", "iterate", "keep", "keep-indexed", "last", "map", "map-indexed", "mapcat", "next", "nfirst", "nnext", "not-any?", "not-every?", "nth-next", "nth-rest", "partition", "partition-all", "partition-by", "prepend", "range", "reductions", "remove", "repeat", "repeatedly", "rest", "reverse", "second", "sequence-nth", "some", "split-at", "split-with", "take", "take-last", "take-nth", "take-while", "tree-seq"]},

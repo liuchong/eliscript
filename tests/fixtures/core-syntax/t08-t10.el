@@ -1,6 +1,7 @@
 ;;; t08-t10.el --- T08 async, T09 JS interop, T10 ABI kernels -*- lexical-binding: t; no-byte-compile: t; -*-
 
 ;;;; case T08-01a
+;;;; oracle extension
 ;;;; expect [42, true, true, true]
 (require 'eliscript)
 (defun-async compute-step (x)
@@ -24,12 +25,14 @@
 (eliscript-async-wait (pipeline-demo))
 
 ;;;; case T08-01b
+;;;; oracle extension
 ;;;; error await|async|eliscript-compile-error
 (require 'eliscript)
 (defun sync-caller (f)
   (await f))
 
 ;;;; case T08-01c
+;;;; oracle extension
 ;;;; error eliscript-engine-handle-error|revoked
 (require 'eliscript)
 (let ((h (engine-bind (lambda (x) x))))
@@ -37,6 +40,7 @@
   (eliscript-async-wait (engine-call 'local h 10)))
 
 ;;;; case T09-01
+;;;; oracle extension
 ;;;; expect [null, null, 42, true, true, true, true, null, 2, 2.5, 1, 2, "123", true]
 (require 'eliscript)
 (require 'eliscript-js)
@@ -62,6 +66,7 @@
      (equal before-match after-match))))
 
 ;;;; case T10-01a
+;;;; oracle extension
 ;;;; expect [25.0, 305419897, 0]
 (require 'eliscript)
 (require 'eliscript-abi)
@@ -84,6 +89,7 @@
         (word-add #xffffffff 1)))
 
 ;;;; case T10-01b
+;;;; oracle extension
 ;;;; error ELI-B0001|numeric-f64|eliscript-compile-error
 (require 'eliscript)
 (require 'eliscript-abi)

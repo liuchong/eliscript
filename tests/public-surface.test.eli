@@ -1,2 +1,101 @@
-(module capsules.tests.public-surface.test
-  (js* "import { expect, test } from \"bun:test\";\nimport { readFile } from \"node:fs/promises\";\nimport path from \"node:path\";\nimport { fileURLToPath } from \"node:url\";\n\nimport {\n  checkPublicSurface,\n  extractLibraryExports,\n  SurfaceValidationError,\n} from \"../tools/surface/check.mjs\";\n\nconst ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), \"..\");\n\nasync function surfaceDocument() {\n  return JSON.parse(\n    await readFile(path.join(ROOT, \"contracts/public-surface.json\"), \"utf8\"),\n  );\n}\n\nasync function validationErrors(surface) {\n  try {\n    await checkPublicSurface({ root: ROOT, surface });\n  } catch (error) {\n    expect(error).toBeInstanceOf(SurfaceValidationError);\n    return error.errors;\n  }\n  throw new Error(\"expected public surface validation to fail\");\n}\n\ntest(\"repository public surface matches every tracked implementation\", async () => {\n  expect(await checkPublicSurface({ root: ROOT })).toEqual({\n    schemaVersion: 1,\n    language: { groups: 19, entries: 194 },\n    ir: { nodeKinds: 58 },\n    commands: { commands: 9, options: 47 },\n    schemas: { total: 30 },\n    adapters: { adapters: 9, exports: 32 },\n    platformPackages: { packages: 2, exports: 37 },\n    runtimeModules: { modules: 45, exports: 482, public: 32, internal: 13 },\n    standardLibrary: { modules: 46, exports: 598 },\n    emacs: {\n      functions: 158,\n      records: 47,\n      publicRecords: 28,\n      internalRecords: 19,\n    },\n  });\n});\n\ntest(\"standard library export scanner accepts formatted multiline forms\", () => {\n  expect(extractLibraryExports(`(module example\n    (defun value () 1)\n    (export\n      value\n      other-value))`)).toEqual([\"other-value\", \"value\"]);\n  expect(extractLibraryExports(\"(module example (export value\")).toEqual([]);\n});\n\ntest(\"public surface checker rejects IR node drift\", async () => {\n  const surface = await surfaceDocument();\n  surface.ir.nodeKinds.shift();\n  expect(await validationErrors(surface)).toContain(\n    \"IR node kind inventory is missing current entries: apply-call\",\n  );\n});\n\ntest(\"public surface checker rejects standard library export drift\", async () => {\n  const surface = await surfaceDocument();\n  surface.standardLibrary.find(({ module }) => module === \"object\")\n    .exports.shift();\n  expect(await validationErrors(surface)).toContain(\n    \"object export inventory is missing current entries: assoc\",\n  );\n});\n\ntest(\"public surface checker rejects CLI option drift\", async () => {\n  const surface = await surfaceDocument();\n  surface.commands[0].options.push(\"--watch\");\n  surface.commands[0].options.sort();\n  expect(await validationErrors(surface)).toContain(\n    \"eliscript option inventory declares absent entries: --watch\",\n  );\n});\n\ntest(\"public surface checker rejects adapter export drift\", async () => {\n  const surface = await surfaceDocument();\n  surface.adapters.find(({ id }) => id === \"vite\").namedExports.shift();\n  expect(await validationErrors(surface)).toContain(\n    \"vite export inventory is missing current entries: compileEliscript\",\n  );\n});\n\ntest(\"public surface checker rejects platform classification and export drift\", async () => {\n  const surface = await surfaceDocument();\n  const package_ = surface.platformPackages.find(\n    ({ id }) => id === \"browser-capabilities\",\n  );\n  package_.host = \"ambient\";\n  package_.stability = \"accepted\";\n  package_.namedExports.shift();\n  const errors = await validationErrors(surface);\n  expect(errors).toContain(\n    'browser-capabilities has invalid platform host \"ambient\"',\n  );\n  expect(errors).toContain(\n    \"browser-capabilities stability must match specification 0126 status stable\",\n  );\n  expect(errors).toContain(\n    \"browser-capabilities export inventory is missing current entries: BrowserCapabilityError\",\n  );\n});\n\ntest(\"public surface checker rejects runtime visibility and export drift\", async () => {\n  const surface = await surfaceDocument();\n  const module = surface.runtimeModules.find(\n    ({ id }) => id === \"persistent-hash-map\",\n  );\n  module.visibility = \"accidental\";\n  module.namedExports.shift();\n  const errors = await validationErrors(surface);\n  expect(errors).toContain(\n    'persistent-hash-map has invalid visibility \"accidental\"',\n  );\n  expect(errors).toContain(\n    \"persistent-hash-map export inventory is missing current entries: EMPTY_MAP\",\n  );\n});\n\ntest(\"public surface checker follows aliased runtime re-exports\", async () => {\n  const surface = await surfaceDocument();\n  const module = surface.runtimeModules.find(\n    ({ id }) => id === \"protocol-dispatch\",\n  );\n  module.namedExports = module.namedExports.filter(\n    (name) => name !== \"defineProtocol\",\n  );\n  expect(await validationErrors(surface)).toContain(\n    \"protocol-dispatch export inventory is missing current entries: defineProtocol\",\n  );\n});\n\ntest(\"public surface checker rejects unclassified Emacs APIs\", async () => {\n  const surface = await surfaceDocument();\n  surface.emacs.publicFunctions.shift();\n  expect(await validationErrors(surface)).toContain(\n    \"Emacs public function inventory is missing current entries: eliscript-analysis-frequencies-sync\",\n  );\n});\n\ntest(\"public surface checker rejects documented contradictions\", async () => {\n  const surface = await surfaceDocument();\n  surface.documentation[0].mustNotContain = [\"# Eliscript\"];\n  expect(await validationErrors(surface)).toContain(\n    \"README.md retains stale text \\\"# Eliscript\\\"\",\n  );\n});\n"))
+(module tests.public-surface
+  (import "bun:test" expect test)
+  (import "node:fs/promises" readFile)
+  (import "node:path" :default path)
+  (import "../tools/backends/build.mjs" root)
+  (import "../tools/surface/check.mjs" checkPublicSurface extractLibraryExports SurfaceValidationError)
+  (defconst ROOT root)
+  (defasync surface-document ()
+    (JSON/parse (await (readFile (js-call path :join ROOT "contracts/public-surface.json") "utf8"))))
+  (defasync validation-errors (surface)
+    (let ((errors undefined))
+      (try (await (checkPublicSurface (js-object :root ROOT :surface surface)))
+        (catch error
+          (js-call (expect error) :toBeInstanceOf SurfaceValidationError)
+          (setq errors (get error :errors))))
+      (if (undefined? errors) (throw (new globalThis.Error "expected public surface validation to fail")) errors)))
+  (defun find-entry (entries key name)
+    (js-call entries :find (lambda (entry) (= (get entry key) name))))
+  (test "repository public surface matches every tracked implementation"
+    (async ()
+      (js-call (expect (await (checkPublicSurface (js-object :root ROOT)))) :toEqual
+        (js-object :schemaVersion 1 :language (js-object :groups 19 :entries 194)
+          :ir (js-object :nodeKinds 58) :commands (js-object :commands 9 :options 47)
+          :schemas (js-object :total 30) :adapters (js-object :adapters 9 :exports 32)
+          :platformPackages (js-object :packages 2 :exports 37)
+          :runtimeModules (js-object :modules 45 :exports 484 :public 32 :internal 13)
+          :standardLibrary (js-object :modules 46 :exports 599)
+          :emacs (js-object :functions 158 :records 47 :publicRecords 28 :internalRecords 19)))
+      ;; The new counts correspond to declared foreign-protocol boundaries.
+      (let* ((surface (await (surface-document)))
+             (protocol (find-entry (get surface :runtimeModules) "id" "protocol-dispatch")))
+        (js-call (expect (get protocol :namedExports)) :toContain "protocolSlot")
+        (js-call (expect (get protocol :namedExports)) :toContain "readExternalProtocolMethod"))))
+  (test "standard library export scanner accepts formatted multiline forms"
+    (lambda ()
+      (js-call (expect (extractLibraryExports "(module example\n    (defun value () 1)\n    (export\n      value\n      other-value))")) :toEqual
+        (js-array "other-value" "value"))
+      (js-call (expect (extractLibraryExports "(module example (export value")) :toEqual (js-array))))
+  (test "public surface checker rejects IR node drift"
+    (async ()
+      (let ((surface (await (surface-document))))
+        (js-call (get (get surface :ir) :nodeKinds) :shift)
+        (js-call (expect (await (validation-errors surface))) :toContain
+          "IR node kind inventory is missing current entries: apply-call"))))
+  (test "public surface checker rejects standard library export drift"
+    (async ()
+      (let ((surface (await (surface-document))))
+        (js-call (get (find-entry (get surface :standardLibrary) "module" "object") :exports) :shift)
+        (js-call (expect (await (validation-errors surface))) :toContain
+          "object export inventory is missing current entries: assoc"))))
+  (test "public surface checker rejects CLI option drift"
+    (async ()
+      (let* ((surface (await (surface-document))) (options (get (aref (get surface :commands) 0) :options)))
+        (js-call options :push "--watch")
+        (js-call options :sort)
+        (js-call (expect (await (validation-errors surface))) :toContain
+          "eliscript option inventory declares absent entries: --watch"))))
+  (test "public surface checker rejects adapter export drift"
+    (async ()
+      (let ((surface (await (surface-document))))
+        (js-call (get (find-entry (get surface :adapters) "id" "vite") :namedExports) :shift)
+        (js-call (expect (await (validation-errors surface))) :toContain
+          "vite export inventory is missing current entries: compileEliscript"))))
+  (test "public surface checker rejects platform classification and export drift"
+    (async ()
+      (let* ((surface (await (surface-document)))
+             (package (find-entry (get surface :platformPackages) "id" "browser-capabilities")))
+        (put package :host "ambient")
+        (put package :stability "accepted")
+        (js-call (get package :namedExports) :shift)
+        (let ((errors (await (validation-errors surface))))
+          (js-call (expect errors) :toContain "browser-capabilities has invalid platform host \"ambient\"")
+          (js-call (expect errors) :toContain "browser-capabilities stability must match specification 0126 status stable")
+          (js-call (expect errors) :toContain "browser-capabilities export inventory is missing current entries: BrowserCapabilityError")))))
+  (test "public surface checker rejects runtime visibility and export drift"
+    (async ()
+      (let* ((surface (await (surface-document)))
+             (module (find-entry (get surface :runtimeModules) "id" "persistent-hash-map")))
+        (put module :visibility "accidental")
+        (js-call (get module :namedExports) :shift)
+        (let ((errors (await (validation-errors surface))))
+          (js-call (expect errors) :toContain "persistent-hash-map has invalid visibility \"accidental\"")
+          (js-call (expect errors) :toContain "persistent-hash-map export inventory is missing current entries: EMPTY_MAP")))))
+  (test "public surface checker follows aliased runtime re-exports"
+    (async ()
+      (let* ((surface (await (surface-document)))
+             (module (find-entry (get surface :runtimeModules) "id" "protocol-dispatch")))
+        (put module :namedExports (js-call (get module :namedExports) :filter (lambda (name) (/= name "defineProtocol"))))
+        (js-call (expect (await (validation-errors surface))) :toContain
+          "protocol-dispatch export inventory is missing current entries: defineProtocol"))))
+  (test "public surface checker rejects unclassified Emacs APIs"
+    (async ()
+      (let ((surface (await (surface-document))))
+        (js-call (get (get surface :emacs) :publicFunctions) :shift)
+        (js-call (expect (await (validation-errors surface))) :toContain
+          "Emacs public function inventory is missing current entries: eliscript-analysis-frequencies-sync"))))
+  (test "public surface checker rejects documented contradictions"
+    (async ()
+      (let ((surface (await (surface-document))))
+        (put (aref (get surface :documentation) 0) :mustNotContain (js-array "# Eliscript"))
+        (js-call (expect (await (validation-errors surface))) :toContain "README.md retains stale text \"# Eliscript\"")))))

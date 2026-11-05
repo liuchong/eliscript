@@ -15,7 +15,7 @@
   (defun runNativeBoundary (directory)
     (let* ((configuration (js-object :initialPages 1 :maximumPages 8 :nativeTarget target
               :bunExecutable (get globalThis.process :execPath) :hostCapabilities capabilities))
-           (result (spawnSync (get (get globalThis.process :env) :NODE)
+           (result (spawnSync (get (get globalThis.process :env) :NODE "node")
              (js-array (resolve root "tests/helpers/native-node-boundaries.mjs") (libraryPath directory)
                (JSON/stringify signatures) (JSON/stringify configuration))
              (js-object :cwd directory :encoding "utf8" :timeout 30000

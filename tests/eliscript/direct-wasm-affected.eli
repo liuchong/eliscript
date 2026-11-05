@@ -153,7 +153,11 @@
            (watchdog (createDirectInvocationWatchdog (async (error) (when browser (await (js-call browser :close))))))
            ;; Leave cleanup time before Bun's own deadline. Its timeout kills
            ;; every browser owned by this test process, including other cases.
-           (aggregate-budget (if (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1") 840000 undefined))
+           ;; ARM64 Firefox completed 207/208 original invocations by 840s;
+           ;; its remaining invocation costs about 10.2s. Bound this explicitly
+           ;; deferred functional run at 870s and retain 30s for cleanup before
+           ;; the unchanged 900s framework deadline. Strict 300s is unaccepted.
+           (aggregate-budget (if (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1") 870000 undefined))
            (aggregate-timer (unless (undefined? aggregate-budget)
              (globalThis.setTimeout (lambda ()
                (js-call watchdog :expire (js-object :name "complete-browser-workload" :index 0 :threshold "all") aggregate-budget)) aggregate-budget))))
@@ -194,7 +198,7 @@
           (js-call compiler :compile_ir_string runtime "runtime.eli"))))))
   (defasync runDirectValueJsonCase ()
     (when (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
-      (console/error "Value/JSON original 300000ms aggregate acceptance DEFERRED / NOT ACCEPTED; full functional GC workload bounded by 900000ms, owned workload by 840000ms plus cleanup, and each invocation by 30000ms"))
+      (console/error "Value/JSON original 300000ms aggregate acceptance DEFERRED / NOT ACCEPTED; full functional GC workload bounded by 900000ms, owned workload by 870000ms plus cleanup, and each invocation by 30000ms"))
     (let* ((state (await (prepareDirectAffected))) (fixture (get state :fixture))
            (runtime (get state :runtime)) (generations (get state :generations)))
       (js-call generations :forEach (lambda (generation)

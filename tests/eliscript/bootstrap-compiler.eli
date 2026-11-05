@@ -385,10 +385,13 @@
         (js-call (expect (await (readFile node "utf8"))) :toBe (await (readFile seed "utf8")))
         (js-call (expect (await (readFile (+ node ".map") "utf8"))) :toBe (await (readFile (+ seed ".map") "utf8"))))
       (let ((broken (resolve directory "broken.eli")))
-        (await (writeFile broken "(defun broken () missing)\n"))
+        ;; This case compares module compiler diagnostics. Plain Lisp takes
+        ;; the unified CLI's evaluator route; keep that separate semantic
+        ;; contract and select the compiler explicitly with a module form.
+        (await (writeFile broken "(module broken (if))\n"))
         (let ((seed (await (run (js-array seed-cli broken) seed-options)))
               (self (await (run (js-array portable-cli broken) options)))
-              (message (+ broken ":1:18: unbound symbol: missing")))
+              (message "if expects 2..3 arguments"))
           (js-call (expect (get seed :exitCode)) :toBe 1)
           (js-call (expect (get self :exitCode)) :toBe 1)
           (js-call (expect (get self :stdout)) :toBe (get seed :stdout))

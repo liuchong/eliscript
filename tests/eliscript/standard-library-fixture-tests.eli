@@ -1,18 +1,232 @@
 (module tests.standard-library-fixture-tests
-  (import "node:test" test)
+  (import "node:test" :as node-test)
   (import "node:assert/strict" :default assert)
-  (import "node:fs/promises" readFile mkdtemp rm)
+  (import "node:fs/promises" readFile writeFile mkdtemp rm)
   (import "node:os" tmpdir)
   (import "node:path" resolve)
   (import "node:crypto" createHash)
+  (import "node:child_process" spawnSync)
   (import "../tools/backends/build.mjs" buildBackends root)
   (import "../tools/backends/compiler-build.mjs" independentCompilerResources)
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
   (import "../tools/backends/compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
+  (import "../tools/testing/transient-call-cases.mjs" transientCallSuite transientCallTitles transientCallParts
+    transientCallProfile transientCallSelection transientCallTestRegistration projectTransientCallSuite)
   (import "./helpers/standard-library-fixture.mjs" standardLibraryFixturePlans standardLibraryFixtureOptions
     readStandardLibraryDescriptor standardLibraryRuntimeFacade standardLibraryFixtureTestRegistration)
   (defconst environment (js-object :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE "small"
     :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1"))
+  (defun test (title callback &rest deadlines)
+    (js-call node-test :test title
+      (js-object :timeout (if (> (js-length deadlines) 0) (aref deadlines 0) 30000)) callback))
+  (test "pure dense array construction preserves callback order special values exceptions and GC roots"
+    (async ()
+      (let ((directory (await (mkdtemp (resolve root "_worktree/dense-array-contract-"))))
+            (runtime undefined) (out undefined))
+        (try
+          (let* ((source (str
+                   "(defun invalid-count (count) (try (__eliscript_array_build count (lambda (index) index)) false (catch error t)))\n"
+                   "(defun dense-contract () (let* ((order 0) (empty-calls 0) (failed-calls 0) (failure false)"
+                   " (values (__eliscript_array_build 6 (lambda (index) (setq order (+ (* order 10) index))"
+                   " (cond ((= index 0) undefined) ((= index 1) false) ((= index 2) nil)"
+                   " ((= index 3) -0.0) ((= index 4) Number/NaN)"
+                   " (t (js-object :index index :payload (js-array index (js-object :nested index))))))))"
+                   " (empty (__eliscript_array_build 0 (lambda (index) (setq empty-calls (1+ empty-calls)) index))))"
+                   " (try (__eliscript_array_build 7 (lambda (index) (setq failed-calls (1+ failed-calls))"
+                   " (if (= index 2) (throw \"builder-stop\") (js-object :index index))))"
+                   " (catch error (setq failure (= error \"builder-stop\"))))"
+                   " (JSON/stringify (js-array order (js-length values) (Object/hasOwn values \"0\")"
+                   " (undefined? (get values 0)) (Object/is (get values 1) false) (Object/is (get values 2) nil)"
+                   " (Object/is (get values 3) -0.0) (Number/isNaN (get values 4))"
+                   " (get (get values 5) :index) (get (get (get (get values 5) :payload) 1) :nested)"
+                   " (js-length empty) empty-calls failure failed-calls"
+                   " (invalid-count -1) (invalid-count 0.5) (invalid-count Number/NaN))))) (export dense-contract)"))
+                 (expected (js-array 12345 6 t t t t t t 5 5 0 0 t 3 t t t))
+                 (input (resolve directory "input.eli")) (output (resolve directory "input.mjs"))
+                 (backend (await (buildBackends (js-object :outputRoot directory))))
+                 (compiler (get backend :compiler))
+                 (entry (str source "\n(console/log (dense-contract))")))
+            (await (writeFile input entry))
+            (let ((seed (spawnSync "emacs" (js-array "--batch" "-Q" "-L" (resolve root "compiler")
+                    "-l" "eliscript" "--eval" (str "(eliscript-compile-file " (JSON/stringify input) " " (JSON/stringify output) ")"))
+                    (js-object :encoding "utf8" :timeout 20000))))
+              (js-call assert :strictEqual (get seed :status) 0 (get seed :stderr)))
+            (js-call (js-array (await (readFile output "utf8")) (js-call compiler :compile_string entry "dense-array.eli")) :forEach
+              (lambda (javascript)
+                (let ((reference (spawnSync "node" (js-array "--input-type=module")
+                         (js-object :encoding "utf8" :timeout 5000 :input javascript))))
+                  (js-call assert :strictEqual (get reference :status) 0 (get reference :stderr))
+                  (js-call assert :deepStrictEqual (JSON/parse (get reference :stdout)) expected))))
+            (let* ((program (js-call compiler :compile_ir_string source "dense-array.eli"))
+                   (memory (js-call compiler :compile_ir_string
+                     (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
+                   (bytes (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm program memory))))
+              (setq runtime (instantiateManagedRuntime bytes (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216)))
+              (js-call runtime :auto 1)
+              (setq out (js-call runtime :invoke "dense-contract"))
+              (js-call assert :deepStrictEqual (JSON/parse (js-call runtime :readString out)) expected)
+              (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)))
+          (finally
+            (when runtime
+              (when out (js-call runtime :release out))
+              (js-call runtime :closeModule) (js-call runtime :collect)
+              (js-call assert :strictEqual (js-call runtime :live) 0)
+              (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
+            (await (rm directory (js-object :recursive t))))))) 30000)
+  (test "sorted validation cache preserves malformed nodes accessors mutable descendants and actual GC cleanup"
+    (async ()
+      (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-sorted-validation-"))))
+            (runtime undefined) (out undefined))
+        (try
+          (let* ((fixture (await (readFile (resolve root "tests/fixtures/wasm-managed-sorted.eli") "utf8")))
+                 (start (js-call fixture :indexOf "  (defun tree-data-field?"))
+                 (end (js-call fixture :indexOf "  (defun tree-valid" start))
+                 (source (str (js-call fixture :slice start end)
+                   "(defun frozen-node (left right height size) (Object/freeze (js-object :left left :right right :height height :size size)))\n"
+                   "(defun cache-contract () (let* ((leaf (frozen-node nil nil 1 1)) (root (frozen-node leaf leaf 2 3)) (cache (new globalThis/WeakMap)) (first (valid-tree root cache)) (again (valid-tree root cache)) (height (valid-tree (frozen-node nil nil 2 1) cache)) (size (valid-tree (frozen-node nil nil 1 2) cache)) (unbalanced (valid-tree (frozen-node (frozen-node leaf nil 2 2) nil 3 3) cache)) (mutable (js-object :left nil :right nil :height 1 :size 1)) (unfrozen (valid-tree mutable cache)) (hits 0) (getter (js-object :left nil :right nil :size 1)))\n"
+                   "(Object/defineProperty getter \"height\" (js-object :get (lambda () (setq hits (1+ hits)) (if (= hits 1) 1 2)) :enumerable t :configurable t)) (Object/freeze getter)\n"
+                   "(let* ((parent (frozen-node getter nil 2 2)) (getter-first (valid-tree parent cache)) (getter-second (valid-tree parent cache)) (mutable-parent (frozen-node mutable nil 2 2)) (mutable-first (valid-tree mutable-parent cache)))\n"
+                   "(Object/freeze mutable) (let ((mutable-second (valid-tree mutable-parent cache)))\n"
+                   "(js-array (get first 0) (Object/is first again) (get height 0) (get size 0) (get unbalanced 0) (get unfrozen 0) (get getter-first 0) (get getter-second 0) (js-call cache :has getter) (js-call cache :has parent) hits (get mutable-first 0) (get mutable-second 0)))))) (export cache-contract)"))
+                 (backend (await (buildBackends (js-object :outputRoot directory)))))
+            (js-call assert :ok (and (>= start 0) (> end start)))
+            (let* ((compiler (get backend :compiler))
+                   (program (js-call compiler :compile_ir_string source "sorted-validation-contract.eli"))
+                   (before (JSON/stringify program))
+                   (reference (spawnSync "node" (js-array "--input-type=module")
+                     (js-object :encoding "utf8" :timeout 5000 :input (js-call compiler :compile_string
+                       (str source "\n(console/log (JSON/stringify (cache-contract)))") "sorted-validation-reference.eli"))))
+                   (expected (js-array t t false false false false t false false false 2 false t))
+                   (memory-ir (js-call compiler :compile_ir_string
+                     (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
+                   (bytes (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm program memory-ir))))
+              (js-call assert :strictEqual (get reference :status) 0 (get reference :stderr))
+              (js-call assert :deepStrictEqual (JSON/parse (get reference :stdout)) expected)
+              (js-call assert :strictEqual (JSON/stringify program) before)
+              (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+              (setq runtime (instantiateManagedRuntime bytes (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216)))
+              (js-call runtime :auto 1)
+              (setq out (js-call runtime :invoke "cache-contract"))
+              (let ((values (Array/from (js-object :length (js-call runtime :length out)) (lambda (ignored index)
+                (let ((value (js-call runtime :get out index)))
+                  (try (if (and (not (nullish? value)) (= (value-type value) "object") (= (get value :kind) 4))
+                         (js-call runtime :readNumber value) value)
+                    (finally (js-call runtime :release value))))))))
+                (js-call assert :deepStrictEqual values expected))
+              (js-call runtime :release out) (setq out undefined)
+              (js-call runtime :closeModule) (js-call runtime :collect)
+              (js-call assert :strictEqual (js-call runtime :live) 0)
+              (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)))
+          (finally
+            (when (and runtime out) (js-call runtime :release out))
+            (await (rm directory (js-object :recursive t :force t))))))) 30000)
+  (test "transient partitions cover every original input once retain deadlines and restore selection after failure"
+    (async ()
+      (js-call assert :strictEqual (js-length transientCallParts) 24)
+      (js-call assert :strictEqual (transientCallProfile (js-object)) false)
+      (js-call assert :strictEqual (transientCallProfile (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1")) false)
+      (js-call assert :strictEqual (transientCallProfile environment) t)
+      (let* ((records (js-array))
+             (original (lambda (&rest arguments) (js-call records :push arguments)))
+             (_ (put original :skipIf (lambda (condition) (js-call assert :strictEqual condition false) original)))
+             (register (transientCallTestRegistration original))
+             (candidates (js-object
+               :vector (js-call (js-array 0 1 31 32 33 63 64 1023 1024 1055 1056 1057) :map
+                         (lambda (count index) (js-array index count)))
+               :entry (js-call (js-array "vector-ownership" "map-branches" "collisions" "real-collision"
+                 "set-case" "index-errors" "vector-limit" "invalid-sources") :map (lambda (name) (js-array name name)))
+               :callback (js-array 0 1 2 3)))
+             (observed (js-array))
+             (callback (lambda ()
+               (let ((picked (js-call (js-array "vector" "entry" "callback") :flatMap (lambda (kind)
+                 (js-call (transientCallSelection kind (get candidates kind)) :map (lambda (item)
+                   (str kind "/" (if (= kind "vector") (aref item 1) (if (= kind "entry") (aref item 0) item)))))))))
+                 (js-call assert :strictEqual (js-length picked) 1)
+                 (js-call observed :push (aref picked 0))))))
+        (js-call transientCallTitles :forEach (lambda (title index)
+          (funcall (if (= index 2) (js-call register :skipIf false) register) title callback (if (= index 2) 120000 30000))))
+        (js-call assert :strictEqual (js-length records) 72)
+        (let ((index 0))
+          (while (< index (js-length records))
+            (let ((record (aref records index)))
+              (js-call assert :strictEqual (aref record 2) (if (< index 48) 30000 120000))
+              (await (funcall (aref record 1))))
+            (setq index (1+ index))))
+        (js-call (js-array "vector" "entry" "callback") :forEach (lambda (kind)
+          (js-call assert :deepStrictEqual (transientCallSelection kind (get candidates kind)) (get candidates kind))))
+        (js-call assert :strictEqual (get (new globalThis.Set observed) :size) 24)
+        (js-call (Array/from (new globalThis.Set observed)) :forEach (lambda (id)
+          (js-call assert :strictEqual (js-length (js-call observed :filter (lambda (value) (= value id)))) 3)))
+        (js-call assert :throws (lambda () (funcall register (aref transientCallTitles 0) callback 0)) globalThis.TypeError)
+        (js-call records :splice 0)
+        (let ((failure (new globalThis.Error "original transient callback failure")))
+          (funcall register (aref transientCallTitles 0) (lambda () (throw failure)) 30000)
+          (await (js-call assert :rejects (aref (aref records 0) 1) (lambda (error) (eq error failure)))))
+        (js-call assert :deepStrictEqual (transientCallSelection "callback" (get candidates :callback)) (get candidates :callback)))))
+  (test "transient projection changes only three loop iterables in the complete authenticated original suite"
+    (async ()
+      (let* ((source (await (readFile (resolve root transientCallSuite) "utf8")))
+             (projected (projectTransientCallSuite root source))
+             (prefixes (js-array "for (const [index, count] of " "for (const [name,key] of " "for (const mode of ")))
+        (js-call prefixes :forEach (lambda (prefix)
+          (let* ((old-start (js-call source :indexOf prefix)) (old-end (+ 3 (js-call source :indexOf ") {" old-start)))
+                 (new-start (js-call projected :indexOf prefix)) (new-end (+ 3 (js-call projected :indexOf ") {" new-start))))
+            (setq projected (str (js-call projected :slice 0 new-start) (js-call source :slice old-start old-end)
+                                 (js-call projected :slice new-end))))))
+        (js-call assert :strictEqual (js-call projected :slice (js-call projected :indexOf (js-call source :slice 0 60))) source)
+        (js-call assert :throws (lambda () (projectTransientCallSuite root (str source " "))) globalThis.TypeError))))
+  (test "cold primitive string iteration survives GC and preserves undefined overrides and single getter reads"
+    (async ()
+      (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-cold-string-")))) (runtime undefined))
+        (try
+          (let* ((backend (await (buildBackends (js-object :outputRoot directory))))
+                 (compiler (get backend :compiler))
+                 (source (str
+                   "(defvar reads 0)\n"
+                   "(defun scan () (let* ((text \"😀中\") (method (get text (get globalThis/Symbol :iterator)))"
+                   " (iterator (js-call method :call text)))"
+                   " (JSON/stringify (js-object :steps (js-array (js-call iterator :next) (js-call iterator :next) (js-call iterator :next)) :reads reads))))\n"
+                   "(defun disable () (Object/defineProperty (get globalThis/String :prototype) (get globalThis/Symbol :iterator)"
+                   " (js-object :value undefined :writable t :configurable t)) (readkind))\n"
+                   "(defun readkind () (JSON/stringify (value-type (get \"x\" (get globalThis/Symbol :iterator)))))\n"
+                   "(defun replace () (Object/defineProperty (get globalThis/String :prototype) (get globalThis/Symbol :iterator)"
+                   " (js-object :get (lambda () (setq reads (1+ reads)) (lambda () (js-object :next"
+                   " (lambda () (js-object :value \"custom\" :done false))))) :configurable t)) (scan))\n"
+                   "(export scan disable readkind replace)"))
+                 (program (js-call compiler :compile_ir_string source "cold-string.eli"))
+                 (memory (js-call compiler :compile_ir_string (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
+                 (lowered (js-call (get backend :managed) :lower_managed_project
+                   (js-array (js-object :id "entry.mjs" :program program)) "entry.mjs" memory))
+                 (bytes (globalThis.Uint8Array.from (js-call (get backend :wasm) :append_metadata_section
+                   (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) (js-object :maximumPages 256))
+                   "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))))
+                 (ordinary (js-object :steps (js-array (js-object :value "😀" :done false)
+                   (js-object :value "中" :done false) (js-object :done t)) :reads 0)))
+            (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+            (setq runtime (instantiateManagedRuntime bytes (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216)))
+            (js-call runtime :auto 1)
+            (let ((run (lambda (name)
+              (let ((result (js-call runtime :invoke name)))
+                (try (JSON/parse (js-call runtime :readString result))
+                  (finally (js-call runtime :release result)))))))
+              (js-call assert :deepStrictEqual (funcall run "scan") ordinary)
+              (js-call runtime :collect)
+              (js-call assert :deepStrictEqual (funcall run "scan") ordinary)
+              (js-call assert :strictEqual (funcall run "disable") "undefined")
+              (js-call runtime :collect)
+              (js-call assert :strictEqual (funcall run "readkind") "undefined")
+              (let ((steps (js-array (js-object :value "custom" :done false) (js-object :value "custom" :done false)
+                                    (js-object :value "custom" :done false))))
+                (js-call assert :deepStrictEqual (funcall run "replace") (js-object :steps steps :reads 1))
+                (js-call runtime :collect)
+                (js-call assert :deepStrictEqual (funcall run "scan") (js-object :steps steps :reads 2)))
+              (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
+            (js-call runtime :closeModule) (js-call runtime :collect)
+            (js-call assert :strictEqual (js-call runtime :live) 0))
+          (finally
+            (when runtime (js-call runtime :closeModule) (js-call runtime :collect))
+            (await (rm directory (js-object :recursive t :force t))))))) 30000)
+
   (test "sorted fixture source throws decode their real fields and release every transferred token only for the authenticated comparator"
     (lambda ()
       (let* ((source (Object/freeze (js-object :kind 13))) (released (js-array))
@@ -40,7 +254,7 @@
         (js-call assert :throws (lambda () (js-call (standardLibraryRuntimeFacade runtime descriptor) :invoke "throw-comparison"))
           (lambda (error) (eq error source)))
         (js-call assert :deepStrictEqual released (js-array)))))
-  (test "standard library no-total-deadline registration binds original suite SHA literal titles deadlines callbacks and strict defaults"
+  (test "standard library registration retains strict deadlines and bounds only the authenticated provider deferral"
     (async ()
       (let ((callback (lambda () "unchanged original callback")))
         (let ((position 0))
@@ -55,14 +269,19 @@
                   (funcall registered title callback deadline)
                   (js-call assert :strictEqual (aref (js-call calls :at -1) 1) callback)
                   (js-call assert :strictEqual (aref (js-call calls :at -1) 2)
-                    (if (and (js-call (js-array 30000 120000) :includes deadline)
-                          (or (not (get plan :deadlineTitle)) (= title (get plan :deadlineTitle))))
-                      0 deadline)))))
+                    (if (and (> (get plan :functionalDeadline 0) 0) (js-call (js-array 30000 120000) :includes deadline)
+                          (or (not (get plan :deadlineTitle)) (= title (get plan :deadlineTitle))
+                              (= title (get plan :nativeDeadlineTitle))))
+                      (if (= title (get plan :nativeDeadlineTitle)) (get plan :nativeFunctionalDeadline)
+                        (get plan :functionalDeadline)) deadline)))))
               (let ((item (get (aref cases 0) :originalCase)))
                 (funcall (js-call registered :skipIf false) (get item :title) callback (get item :timeoutMs))
                 (js-call assert :strictEqual (aref (js-call calls :at -1) 2)
-                  (if (or (not (get plan :deadlineTitle)) (= (get item :title) (get plan :deadlineTitle)))
-                    0 (get item :timeoutMs))))
+                  (if (and (> (get plan :functionalDeadline 0) 0)
+                         (or (not (get plan :deadlineTitle)) (= (get item :title) (get plan :deadlineTitle))
+                             (= (get item :title) (get plan :nativeDeadlineTitle))))
+                    (if (= (get item :title) (get plan :nativeDeadlineTitle)) (get plan :nativeFunctionalDeadline)
+                      (get plan :functionalDeadline)) (get item :timeoutMs))))
               (funcall registered "unknown original title" callback 30000)
               (js-call assert :strictEqual (aref (js-call calls :at -1) 2) 30000)
               (js-call assert :strictEqual (standardLibraryFixtureTestRegistration original plan (js-object) cases) original)
@@ -71,7 +290,7 @@
               (js-call assert :strictEqual (standardLibraryFixtureTestRegistration original plan
                 (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1") cases) original))
             (setq position (1+ position)))))))
-  (test "value JSON every-allocation deadline deferral preserves its exact input resources and strict numeric provenance"
+  (test "value JSON every-allocation contract preserves its original deadline exact resources and strict numeric provenance"
     (async ()
       (let* ((suite "tests/managed-stdlib-value-json.test.mjs")
              (plan (js-call standardLibraryFixturePlans :find (lambda (item) (= (get item :suite) suite))))
@@ -83,7 +302,7 @@
         (js-call assert :ok plan)
         (js-call assert :strictEqual (get (get record :originalCase) :timeoutMs) 30000)
         (js-call assert :strictEqual (get (standardLibraryFixtureOptions suite environment input) :options) input))))
-  (test "held Math registration retains the original numeric deadline and only releases its authenticated functional case"
+  (test "held Math registration retains its original numeric and functional deadlines"
     (async ()
       (let* ((suite "tests/wasm-managed-math-transcendental.test.mjs")
              (plan (js-call standardLibraryFixturePlans :find (lambda (item) (= (get item :suite) suite))))
@@ -95,23 +314,22 @@
         (js-call assert :ok plan)
         (js-call assert :strictEqual (get (get record :originalCase) :timeoutMs) 30000)
         (funcall registration (get plan :deadlineTitle) callback 30000)
-        (js-call assert :strictEqual (aref (aref calls 0) 2) 0)
+        (js-call assert :strictEqual (aref (aref calls 0) 2) 30000)
         (js-call assert :strictEqual (aref (aref calls 0) 1) callback)
         (js-call assert :strictEqual (standardLibraryFixtureTestRegistration original plan (js-object) cases) original))))
-  (test "only the authenticated sorted source-input fixture maps its obsolete private vector factory to the genuine source array API"
+  (test "sorted fixtures call the source array API directly and preserve the distinct private vector factory"
     (lambda ()
-      (let* ((calls (js-array)) (value (js-object)) (original-array (lambda (&rest arguments) value))
-             (actual undefined) (source-array (new globalThis.Proxy (lambda () nil) (js-object
-               :apply (lambda (target receiver arguments)
-                 (js-call assert :strictEqual receiver actual) (js-call calls :push arguments) value))))
+      (let* ((calls (js-array)) (value (js-object)) (vector (js-object)) (original-array (lambda (&rest arguments) vector))
+             (source-array (lambda (&rest arguments) (js-call calls :push arguments) value))
              (runtime (Object/freeze (js-object :invoke (lambda () nil) :array original-array :sourceArray source-array)))
-             (_ (setq actual runtime))
              (descriptor (js-object :format "eliscript-managed-control" :version 1 :functions (js-array)))
              (plan (aref standardLibraryFixturePlans 2))
              (facade (standardLibraryRuntimeFacade runtime descriptor plan)) (input (js-array 17)))
-        (js-call assert :strictEqual (js-call facade :array input) value)
+        (js-call assert :strictEqual (get facade :array) original-array)
+        (js-call assert :strictEqual (js-call facade :array input) vector)
+        (js-call assert :strictEqual (js-call facade :sourceArray input) value)
         (js-call assert :strictEqual (aref (aref calls 0) 0) input)
-        (js-call facade :array) (js-call facade :array undefined) (js-call facade :array nil)
+        (js-call facade :sourceArray) (js-call facade :sourceArray undefined) (js-call facade :sourceArray nil)
         (js-call assert :deepStrictEqual (js-call calls :map (lambda (arguments) (js-length arguments))) (js-array 1 0 1 1))
         (js-call assert :strictEqual (aref (aref calls 2) 0) undefined)
         (js-call assert :strictEqual (aref (aref calls 3) 0) nil)
@@ -134,6 +352,14 @@
                    (source (await (readFile (resolve root suite))))
                    (actual (standardLibraryFixtureOptions suite environment input)))
               (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update source) :digest "hex") (get plan :sha256))
+              (when (= suite "tests/wasm-managed-sorted-core.test.mjs")
+                (let ((cases (originalSourceCaseLocators suite (js-call source :toString "utf8"))))
+                  (js-call assert :strictEqual (js-length cases) 5 "all original suite contracts, including both native cases, remain discoverable")
+                  (js-call assert :strictEqual (get (new globalThis.Set (js-call cases :map
+                    (lambda (item) (get (get item :originalCase) :title)))) :size) 5)
+                  (js-call assert :deepStrictEqual (js-call (js-call cases :map
+                    (lambda (item) (get (get item :originalCase) :timeoutMs))) :sort (lambda (a b) (- a b)))
+                    (js-array 30000 30000 30000 120000 120000))))
               (js-call (js-array (js-object) (js-object :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE "small")
                                 (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1")) :forEach
                 (lambda (env)
@@ -221,7 +447,7 @@
                 (setq round (1+ round)))))
             (let* ((facade (standardLibraryRuntimeFacade runtime descriptor (aref standardLibraryFixturePlans 2)))
                    (number (js-call runtime :number 17)) (private (js-call runtime :array (js-array number)))
-                   (input (js-call facade :array (js-array number))) (result undefined))
+                   (input (js-call facade :sourceArray (js-array number))) (result undefined))
               (try
                 (progn
                   (js-call assert :strictEqual (get private :kind) 7)

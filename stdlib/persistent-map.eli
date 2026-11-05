@@ -12,48 +12,40 @@
   (defconst persistent-map-max-count 2147483647)
 
   (defportable persistent-map-array-reverse (values)
-    (let ((result (js-array))
-          (index 0))
+    ;; Read original getters in ascending order, then materialize the private
+    ;; linked snapshot without copying a growing array at every element.
+    (let ((pending nil) (index 0))
       (while (< index (js-length values))
-        (setq result (js-cons (get values index) result)
+        (setq pending (js-object :value (get values index) :next pending)
               index (1+ index)))
-      result))
+      (__eliscript_array_build index
+        (lambda (_index)
+          (let ((value (get pending "value")))
+            (setq pending (get pending "next")) value)))))
+
 
   (defportable persistent-map-array-copy-assoc (values wanted-index value)
-    (let ((result (js-array))
-          (index 0)
-          (result-length
-           (if (< wanted-index (js-length values))
-               (js-length values)
-             (1+ wanted-index))))
-      (while (< index result-length)
-        (setq result
-              (js-cons
-               (if (= index wanted-index) value (get values index))
-               result)
-              index (1+ index)))
-      (persistent-map-array-reverse result)))
+    (__eliscript_array_build
+      (if (< wanted-index (js-length values)) (js-length values) (1+ wanted-index))
+      (lambda (index) (if (= index wanted-index) value (get values index)))))
+
 
   (defportable persistent-map-array-insert (values wanted-index value)
-    (let ((result (js-array))
-          (index 0))
-      (while (< index (js-length values))
-        (when (= index wanted-index)
-          (setq result (js-cons value result)))
-        (setq result (js-cons (get values index) result)
-              index (1+ index)))
-      (when (= wanted-index (js-length values))
-        (setq result (js-cons value result)))
-      (persistent-map-array-reverse result)))
+    (let* ((length (js-length values))
+           (insert (and (>= wanted-index 0) (<= wanted-index length) (= wanted-index (int32 wanted-index)))))
+      (__eliscript_array_build (if insert (1+ length) length)
+        (lambda (index)
+          (if (not insert) (get values index)
+            (if (= index wanted-index) value
+              (get values (if (< index wanted-index) index (1- index)))))))))
+
 
   (defportable persistent-map-array-remove (values wanted-index)
-    (let ((result (js-array))
-          (index 0))
-      (while (< index (js-length values))
-        (unless (= index wanted-index)
-          (setq result (js-cons (get values index) result)))
-        (setq index (1+ index)))
-      (persistent-map-array-reverse result)))
+    (let* ((length (js-length values))
+           (remove (and (>= wanted-index 0) (< wanted-index length) (= wanted-index (int32 wanted-index)))))
+      (__eliscript_array_build (if remove (1- length) length)
+        (lambda (index) (get values (if (and remove (>= index wanted-index)) (1+ index) index))))))
+
 
   (defportable persistent-map-array-append (values value)
     (persistent-map-array-copy-assoc values (js-length values) value))
@@ -688,11 +680,17 @@
         (persistent-map-reduce-item function initial root))))
 
   (defportable persistent-map-to-entries (map)
-    (persistent-map-array-reverse
-     (persistent-map-reduce
-      (lambda (result key value) (js-cons (js-array key value) result))
-      (js-array)
-      map)))
+    (let ((pending (persistent-map-reduce
+            (lambda (result key value) (js-object :value (js-array key value) :next result)) nil map))
+          (ordered nil))
+      (while (not (nil? pending))
+        (setq ordered (js-object :value (get pending "value") :next ordered)
+              pending (get pending "next")))
+      (__eliscript_array_build (persistent-map-count map)
+        (lambda (_index)
+          (let ((value (get ordered "value")))
+            (setq ordered (get ordered "next")) value)))))
+
 
   (defportable persistent-map-from-entries
       (hash-function key-equal-function value-equal-function entries)

@@ -5,6 +5,7 @@
 ;; ";;;; oracle" also compares the result with native Emacs.
 
 ;;;; case T01-01a
+;;;; oracle
 ;;;; expect [42, 18, 30, 21, "kernel-ok"]
 (progn
   (defvar dual-sym 21)
@@ -17,11 +18,13 @@
         (get 'dual-sym :meta-tag)))
 
 ;;;; case T01-01b
+;;;; oracle
 ;;;; error void-function
 (let ((local-fn (lambda (x) (+ x 1))))
   (local-fn 10))
 
 ;;;; case T01-02
+;;;; oracle extension
 ;;;; expect [true, true, true, "no", "no", "t-zero", "t-float", "t-negzero", "t-empty-str", "t-empty-vec", "t-plist", "t-pvec", "t-err", "t-none", "t-js-false", "t-js-null", "t-js-undef"]
 (require 'eliscript)
 (require 'eliscript-js)
@@ -45,6 +48,7 @@
  (if js-undefined 't-js-undef 'f-js-undef))
 
 ;;;; case T01-03
+;;;; oracle
 ;;;; expect [15, 25, 10, 6]
 (progn
   (defvar *dyn-rate* 10)
@@ -61,6 +65,7 @@
      (progn (setq *const-advisory* 6) *const-advisory*))))
 
 ;;;; case T01-04a
+;;;; oracle
 ;;;; expect [11, 22, true, 99, 42, 1, 3, -3, 3.5, 4, 2, -1, 3, "😀"]
 (let ((pair (cons 1 2))
       (vec [10 20 30])
@@ -78,10 +83,12 @@
         (substring "a😀b" 1 2)))
 
 ;;;; case T01-04b
+;;;; oracle
 ;;;; error arith-error
 (/ 10 0)
 
 ;;;; case T01-05
+;;;; oracle
 ;;;; expect [42, ["entered", "cleaned"], ["caught-arith", "arith-error"]]
 (progn
   (defmacro with-double-add (a b)

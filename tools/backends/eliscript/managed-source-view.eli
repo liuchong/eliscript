@@ -1,6 +1,7 @@
 (module tools.backends.managed-source-view
   (import "./managed-source-view-ground.mjs" :as ground)
   (import "./managed-host-proxy.mjs" isManagedHostProxy prepareManagedHostProxyClassifierSync)
+  (import "../../runtime/core/protocol.mjs" readExternalProtocolMethod)
   (defconst host-literal-prototype globalThis.Object.getPrototypeOf)
   (defun host-literal-foreign-proxy-chain-p (value)
     ;; A host without an engine-owned recognizer keeps the original provider
@@ -32,7 +33,11 @@
                (entry (get descriptors :kind)) (original (get entry :value))
                (kind (lambda (value)
                  (if (host-literal-foreign-proxy-chain-p value) nil
-                   (Reflect/apply original provider (js-array value))))))
+                   (Reflect/apply original provider (js-array value)))))
+               (modules (if (> (js-length arguments) 1) (aref arguments 1) undefined))
+               (lookup (or (when modules (get modules :readExternalProtocolMethod))
+                           (when direct (get direct :readExternalProtocolMethod))
+                           (when (nullish? direct) readExternalProtocolMethod))))
           ;; Unknown host Proxies remain foreign capabilities. They are not
           ;; canonical persistent instances; instanceof classification would
           ;; itself invoke their source-visible [[GetPrototypeOf]] traps.
@@ -40,6 +45,12 @@
             :name (Object/getOwnPropertyDescriptor original "name")
             :length (Object/getOwnPropertyDescriptor original "length")))
           (put entry :value kind)
+          (when (= (value-type lookup) "function")
+            (put descriptors :externalProtocolMethod (js-object :enumerable t
+              :value (lambda (protocol operation receiver)
+                (let ((reference (js-call provider :standardProtocolReference protocol)))
+                  (if (and reference (= (get reference :member) "protocol"))
+                    (Reflect/apply lookup undefined (js-array protocol operation receiver)) undefined))))))
           (Object/freeze (Object/create (Object/getPrototypeOf provider) descriptors))))))
   (defconst source-boundaries (new globalThis.WeakMap))
   (defconst decode-realms (new globalThis.WeakMap))

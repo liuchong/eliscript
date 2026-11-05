@@ -44,6 +44,7 @@
          "    strategy:\n      fail-fast: false\n      matrix:\n        include:\n"
          (js-call rows :join "\n") "\n"
          "    env:\n      ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: \"1\"\n"
+         "      ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE: \"small\"\n"
          "      NATIVE_TARGET: ${{ matrix.native_target }}\n"
          "    steps:\n" (renderToolchainSteps matrix)
          "      - name: Install locked dependencies\n        run: bun install --frozen-lockfile\n"

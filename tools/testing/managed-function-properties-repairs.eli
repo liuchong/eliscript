@@ -12,6 +12,19 @@
   (defconst functionMissingDisposalTitle "a host missing a represented disposal symbol rejects transfer and preserves caller roots and supported identities")
   (defconst wellKnownSymbolNames (js-array "iterator" "toPrimitive" "match" "replace" "search" "split" "species"
     "isConcatSpreadable" "toStringTag" "hasInstance" "asyncIterator" "unscopables" "matchAll" "dispose" "asyncDispose"))
+  (defun currentHostBuiltinShape (mode)
+    ;; Intrinsic creation order is host interoperation data (the runtime feeds
+    ;; the same native order through runtime-builtin-property-order). Compare
+    ;; the entire same-host shape, never a filtered or sorted set of keys.
+    ;; The original independent Node oracle still checks every Node field.
+    (let* ((owner (aref (js-array globalThis.Number globalThis.String globalThis.Symbol
+                         globalThis.Error globalThis.Number.isFinite) mode))
+           (prototype (Object/getPrototypeOf owner)))
+      (JSON/stringify (js-array (Object/keys owner) (Object/getOwnPropertyNames owner)
+        (js-call (Object/getOwnPropertySymbols owner) :map globalThis.String)
+        (Object/is prototype globalThis.Function.prototype)
+        (js-array "function" (get prototype :name) (get prototype :length)
+          (Object/hasOwn prototype "prototype") (Object/is prototype globalThis.Function.prototype))))))
   (defun read (a value)
     (cond ((and (not (nullish? value)) (= (get value :kind) 4)) (js-call a :readNumber value))
       ((and (not (nullish? value)) (= (get value :kind) 5)) (js-call a :readString value))
@@ -122,4 +135,4 @@
                     (finally (js-call a :release index) (js-call a :release symbol)))))
               (finally (js-call a :leaveFrame frame) (js-call a :release held) (finish a)))))
         (finally (js-call fixture :close)))))
-  (export functionInitializationPressureTitle functionMissingDisposalTitle runFunctionInitializationSemantics runFunctionMissingDisposal))
+  (export functionInitializationPressureTitle functionMissingDisposalTitle runFunctionInitializationSemantics runFunctionMissingDisposal currentHostBuiltinShape))
