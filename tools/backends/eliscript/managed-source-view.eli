@@ -322,11 +322,18 @@
   (defun decoded-source-call (record name arguments)
     ;; These two callbacks exist only for the synchronous operation. No view
     ;; retains them, and polling/first-throw restoration remains per operation.
-    (withManagedSourceBoundary (get record :observer)
-      (lambda ()
-        (source-decode-with-realm
-          (lambda () (funcall (get record :invoke) (get record :state) name arguments))
-          (get record :realm)))))
+    (let ((observer (get record :observer))
+          (realm (get record :realm)))
+      (if (or (not (= (value-type observer) "function")) (eq current-boundary observer))
+        (let ((previous current-source-decode) (previous-realm current-source-realm))
+          (setq current-source-decode t current-source-realm realm)
+          (try (funcall (get record :invoke) (get record :state) name arguments)
+            (finally (setq current-source-decode previous current-source-realm previous-realm))))
+        (withManagedSourceBoundary observer
+          (lambda ()
+            (source-decode-with-realm
+              (lambda () (funcall (get record :invoke) (get record :state) name arguments))
+              realm))))))
 
   (defun decoded-source-mirror (target key entry)
     (let ((existing (Reflect/getOwnPropertyDescriptor target key)))

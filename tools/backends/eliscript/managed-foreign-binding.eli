@@ -77,15 +77,29 @@
                (raw (lambda (name &rest arguments)
                  ;; The bridge consumes and returns u32 ABI words, even when
                  ;; WASM exposes their high bit as a signed JavaScript i32.
-                 (unsigned-bit-shift-right
-                   (Reflect/apply (aref functions name) exports arguments) 0)))
+                 (let ((fn (aref functions name)) (argc (js-length arguments)))
+                   (unsigned-bit-shift-right
+                     (cond
+                       ((= argc 0) (funcall fn))
+                       ((= argc 1) (funcall fn (aref arguments 0)))
+                       ((= argc 2) (funcall fn (aref arguments 0) (aref arguments 1)))
+                       ((= argc 3) (funcall fn (aref arguments 0) (aref arguments 1) (aref arguments 2)))
+                       ((= argc 4) (funcall fn (aref arguments 0) (aref arguments 1) (aref arguments 2) (aref arguments 3)))
+                       (t (Reflect/apply fn exports arguments))) 0))))
                (checked (lambda (name &rest arguments)
-                 (let* ((value (unsigned-bit-shift-right
-                                 (Reflect/apply (aref functions name) exports arguments) 0))
-                        (code (unsigned-bit-shift-right (Reflect/apply fn-last-error exports (js-array)) 0)))
+                 (let* ((fn (aref functions name)) (argc (js-length arguments))
+                        (value (unsigned-bit-shift-right
+                                 (cond
+                                   ((= argc 0) (funcall fn))
+                                   ((= argc 1) (funcall fn (aref arguments 0)))
+                                   ((= argc 2) (funcall fn (aref arguments 0) (aref arguments 1)))
+                                   ((= argc 3) (funcall fn (aref arguments 0) (aref arguments 1) (aref arguments 2)))
+                                   ((= argc 4) (funcall fn (aref arguments 0) (aref arguments 1) (aref arguments 2) (aref arguments 3)))
+                                   (t (Reflect/apply fn exports arguments))) 0))
+                        (code (unsigned-bit-shift-right (funcall fn-last-error) 0)))
                    (when (/= code 0)
                      (failManagedRuntime code
-                       (unsigned-bit-shift-right (Reflect/apply fn-exception-class exports (js-array owner)) 0)))
+                       (unsigned-bit-shift-right (funcall fn-exception-class owner) 0)))
                    value)))
                (new-heap (aref functions "heap-new"))
                (forwarded (Array/from tail))
@@ -97,8 +111,15 @@
             (let ((original-handler handler))
               (setq handler (lambda (name heap arguments &rest extra)
                 (if (= heap owner)
-                  (withManagedSourceDecode (lambda () (Reflect/apply original-handler undefined (js-call (js-array name heap arguments) :concat extra))) realm)
-                  (Reflect/apply original-handler undefined (js-call (js-array name heap arguments) :concat extra))))))
+                  (withManagedSourceDecode
+                    (lambda ()
+                      (if (> (js-length extra) 0)
+                        (funcall original-handler name heap arguments (aref extra 0))
+                        (funcall original-handler name heap arguments)))
+                    realm)
+                  (if (> (js-length extra) 0)
+                    (funcall original-handler name heap arguments (aref extra 0))
+                    (funcall original-handler name heap arguments))))))
             (Reflect/apply attach bridge (js-array (lambda (name heap arguments &rest extra)
               (let ((supplied (aref extra 0)))
                 (if (or (undefined? runtime) (/= heap owner) (/= name "source-operation")
