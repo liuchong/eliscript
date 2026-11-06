@@ -1,7 +1,7 @@
 (module tests.compiler-corpus-original-regressions
-  (import "node:test" before test)
+  (import "node:test" before after test)
   (import "node:assert/strict" :default assert)
-  (import "node:fs/promises" mkdir mkdtemp readFile)
+  (import "node:fs/promises" mkdir mkdtemp readFile rm)
   (import "node:path" resolve)
   (import "../tools/backends/build.mjs" root)
   (import "../tools/backends/stage3-targets.mjs" authenticateStage3Targets)
@@ -36,7 +36,24 @@
   (defvar literal-identity undefined)
   (defconst pre-bootstrap (= (get (get globalThis.process :env) :ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL) "1"))
   (defconst execution-label (if pre-bootstrap "pre-bootstrap candidate" "authenticated final stage3"))
+  (defun regression-shard (environment)
+    (let* ((runner (get environment :BUN_TEST_RUNNER ""))
+           (match (and (= (value-type runner) "string")
+             (js-call (new globalThis.RegExp "(?:^|\\s)--shard-index\\s+([1-9][0-9]*)\\s+--shard-count\\s+([1-9][0-9]*)(?:\\s|$)")
+               :exec runner))))
+      (when match
+        (let ((index (funcall globalThis.Number (aref match 1)))
+              (count (funcall globalThis.Number (aref match 2))))
+          (when (and (Number/isSafeInteger index) (Number/isSafeInteger count) (>= index 1) (<= index count))
+            (js-object :index index :count count))))))
+  (defconst active-shard (regression-shard (get globalThis.process :env)))
+  (defconst selected-regressions
+    (if active-shard
+      (js-call regressions :filter (lambda (plan index)
+        (= (% index (get active-shard :count)) (1- (get active-shard :index)))))
+      regressions))
   (before (async ()
+    (when (> (js-length selected-regressions) 0)
     (let* ((environment (get globalThis.process :env))
            (sources (await (loadCompilerSources (js-object :sourceRoot root))))
            (identity (compilerSourceIdentity sources))
@@ -80,7 +97,10 @@
           (put selection :bootstrapManifestPath (get authentication :bootstrapManifestPath)))
         (put options :originalOracle (createOriginalSeedOracle oracle-options))
         (await (saveCompilerMetadata (resolve directory "compiler-selection.json") selection))
-        (js-call globalThis.console :error execution-label (js-object :directory directory :stage3Authenticated (not pre-bootstrap)))))))
+        (js-call globalThis.console :error execution-label (js-object :directory directory :stage3Authenticated (not pre-bootstrap))))))))
+  (after (async ()
+    (when directory
+      (await (rm directory (js-object :recursive t :force t))))))
   (defasync run-original-regression (target plan test-context)
           (let* ((id (aref plan 1))
                  (matches (js-call (get corpus :records) :filter (lambda (record) (= (get record :id) id))))
@@ -124,29 +144,41 @@
                 (catch error (setq failed t failure error)))
               (if failed (put context :failure failure)
                 (progn (put context :response response) (put context :artifact product)))
-              (let* ((observation (await (executeCompilerCorpusRecord context)))
-                     (comparison (await (compareCompilerCorpusObservation
-                       (Object/assign (js-object) context (js-object :observation observation))))))
-                (await (saveCompilerMetadata (resolve output "execution.json") observation))
-                (await (saveCompilerMetadata (resolve output "comparison.json") comparison))
-                (js-call assert :strictEqual (get comparison :status) "equivalent" (JSON/stringify comparison))
-                ;; 601/604 retain their original complete inputs and golden.
-                ;; Functional success never certifies their original heap gate.
-                (when (js-call (js-array 601 604) :includes (aref plan 0))
-                  (js-call assert :strictEqual (get observation :resourceAcceptance) "deferred")
-                  (js-call assert :strictEqual (get observation :effectiveRuntimeProfile) "full-compiler"))))
-                (finally (await (js-call session :close)))))))))
+              (unless (= (get (get record :execution) :compilerSourceMaps) t)
+                (await (js-call session :close))
+                (setq session nil)
+                (Reflect/deleteProperty context "session"))
+              (let ((observation (await (executeCompilerCorpusRecord context))))
+                (when session
+                  (await (js-call session :close))
+                  (setq session nil)
+                  (Reflect/deleteProperty context "session"))
+                (let ((comparison (await (compareCompilerCorpusObservation
+                        (Object/assign (js-object) context (js-object :observation observation))))))
+                  (await (saveCompilerMetadata (resolve output "execution.json") observation))
+                  (await (saveCompilerMetadata (resolve output "comparison.json") comparison))
+                  (js-call assert :strictEqual (get comparison :status) "equivalent" (JSON/stringify comparison))
+                  ;; 601/604 retain their original complete inputs and golden.
+                  ;; Functional success never certifies their original heap gate.
+                  (when (js-call (js-array 601 604) :includes (aref plan 0))
+                    (js-call assert :strictEqual (get observation :resourceAcceptance) "deferred")
+                    (js-call assert :strictEqual (get observation :effectiveRuntimeProfile) "full-compiler")))))
+                (finally (when session (await (js-call session :close))))))))))
 
   ;; Each complete case owns its real compiler session. Closing releases its
   ;; last project IR, literals and runtime before the next case builds them.
   ;; This bounds overlapping case state without changing production reuse or
   ;; increasing the engine heap limit. Every case still uses this same artifact.
-  (js-call (js-array "javascript" "wasm" "native") :forEach (lambda (target)
-    (js-call regressions :forEach (lambda (plan)
-      (test (str execution-label ": original case " (aref plan 0) " retains its complete program and independent Seed oracle on " target)
-        (js-object :skip (and (= target "native")
-                              (not (and (= (get globalThis.process :arch) "arm64")
-                                        (js-call (js-array "darwin" "linux") :includes (get globalThis.process :platform))))))
-        (async (test-context)
-          (await (run-original-regression target plan test-context))))))))
+  (if (= (js-length selected-regressions) 0)
+    (test (str execution-label ": shard " (get active-shard :index) "/" (get active-shard :count) " has no assigned original regressions")
+      (js-object :skip "assigned to shards 1..6")
+      (lambda () nil))
+    (js-call (js-array "javascript" "wasm" "native") :forEach (lambda (target)
+      (js-call selected-regressions :forEach (lambda (plan)
+        (test (str execution-label ": original case " (aref plan 0) " retains its complete program and independent Seed oracle on " target)
+          (js-object :skip (and (= target "native")
+                                (not (and (= (get globalThis.process :arch) "arm64")
+                                          (js-call (js-array "darwin" "linux") :includes (get globalThis.process :platform))))))
+          (async (test-context)
+            (await (run-original-regression target plan test-context)))))))))
 )

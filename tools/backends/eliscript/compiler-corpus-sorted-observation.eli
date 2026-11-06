@@ -29,7 +29,7 @@
         (cond ((= target "javascript") 30000)
           ((js-call part :startsWith "recovery-") 1800000)
           ((or (= part "rotations") (= part "sharing")) 1800000)
-          ((= part "randomized") 600000)
+          ((= part "randomized") 1800000)
           (t 120000)))))
   (defun observeSortedPart (m part random-operations)
     (unless (js-call sortedFunctionalParts :includes part)

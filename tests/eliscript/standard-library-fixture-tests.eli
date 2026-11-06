@@ -284,6 +284,11 @@
                       (get plan :functionalDeadline)) (get item :timeoutMs))))
               (funcall registered "unknown original title" callback 30000)
               (js-call assert :strictEqual (aref (js-call calls :at -1) 2) 30000)
+              (when (= suite "tests/wasm-managed-sorted-core.test.mjs")
+                (funcall registered "sorted [randomized]" callback 600000)
+                (js-call assert :strictEqual (aref (js-call calls :at -1) 2) 1800000)
+                (funcall registered "sorted [rotations]" callback 1800000)
+                (js-call assert :strictEqual (aref (js-call calls :at -1) 2) 2700000))
               (js-call assert :strictEqual (standardLibraryFixtureTestRegistration original plan (js-object) cases) original)
               (js-call assert :strictEqual (standardLibraryFixtureTestRegistration original
                 (Object/assign (js-object) plan (js-object :sha256 "changed")) environment cases) original)

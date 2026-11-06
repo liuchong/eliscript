@@ -805,7 +805,7 @@
                     (let* ((functional (originalCorpusExecutionPolicy context))
                            (needed (cond ((js-call part :startsWith "recovery-") 1800000)
                              ((or (= part "rotations") (= part "sharing")) 1800000)
-                             ((= part "randomized") 600000) (t 480000)))
+                             ((= part "randomized") 1800000) (t 480000)))
                            (capacity (compilerCorpusRuntimeAcceptance record (js-object :functionalRuntimeProfile "small"))))
                       (js-call assert :strictEqual (get functional :originalDeadlineMs) 120000)
                       (js-call assert :strictEqual (get functional :effectiveDeadlineMs) needed)

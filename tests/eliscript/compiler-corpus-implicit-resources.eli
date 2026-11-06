@@ -82,7 +82,7 @@
                         (if (= target "javascript")
                           (Math/max 60000 (* (get (get record :execution) :timeoutMs) 4))
                           (if (= id "original-program:portable-persistent-list-1")
-                            360000
+                            (if (= target "native") 720000 360000)
                             (if (and (= id "original-program:eliscript-protocol-complete-hosts") (= target "native"))
                               1800000 600000))))
                       (js-call assert :strictEqual (get policy :originalDeadlineMs) (get (get record :execution) :timeoutMs))

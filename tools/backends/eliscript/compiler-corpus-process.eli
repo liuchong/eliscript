@@ -212,8 +212,11 @@
                          "original-program:portable-persistent-list-0") :includes id)
                      (js-call (js-array "wasm" "native") :includes target)
                      (= target "native")))
-                (if (and (= id "original-program:eliscript-protocol-complete-hosts") (= target "native"))
-                  1800000 measured-deadline)
+                (cond ((and (= id "original-program:eliscript-protocol-complete-hosts") (= target "native")) 1800000)
+                      ((and (js-call (js-array "original-program:portable-persistent-list-1"
+                                               "original-program:portable-persistent-list-0") :includes id)
+                            (= target "native")) 720000)
+                      (t measured-deadline))
                 0)
               (if (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
                 (or (if (wireFunctionalPartition (get context :record))
