@@ -86,7 +86,7 @@
                      :signal (get actual :signal) :stdout (get actual :stdout) :stderr (get actual :stderr))))
       (js-call (get receipt :commands) :push record)
       (js-call assert :strictEqual (get actual :error) undefined name)
-      (js-call assert :strictEqual (get actual :signal) nil name)
+      (js-call assert :strictEqual (get actual :signal) nil (str name "\n" (get actual :stderr)))
       (js-call assert :strictEqual (get actual :status) 0 (str name "\n" (get actual :stderr)))
       actual))
 
