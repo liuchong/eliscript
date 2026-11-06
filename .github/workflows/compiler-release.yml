@@ -18,6 +18,7 @@ jobs:
   bootstrap:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
@@ -175,8 +176,13 @@ jobs:
         run: make compiler-release-ci
       - name: Strict byte compilation
         run: make byte-compile
+      - name: Prune workspace symlinks before artifact upload
+        if: always()
+        run: if [ -d dist/bootstrap-release ]; then find dist/bootstrap-release -type l -delete; fi
       - name: Preserve compiler acceptance evidence
         if: always()
+        env:
+          NODE_OPTIONS: "--max-old-space-size=8192"
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: compiler-release-${{ matrix.name }}-${{ github.sha }}

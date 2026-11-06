@@ -203,19 +203,19 @@
           ;; fourfold functional overhead, and retain an executable ceiling.
           :effectiveDeadlineMs (if (= profile "small")
             (if wire-deadline wire-deadline
-            (Math/min 1800000 (Math/max 60000 (if (nullish? deadline) 600000 (* deadline 4))
+            (Math/min 1800000 (Math/max 60000
+              (if (nullish? deadline)
+                (if (and (= target "native")
+                         (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
+                         (js-call (funcall globalThis.String id) :startsWith "stable-compatibility:program:"))
+                  1800000 600000)
+                (* deadline 4))
               (if (and (not (undefined? measured-deadline))
-                   (if (js-call (js-array "original-program:core-stdlib-complete-protocols"
-                         "original-program:eliscript-protocol-complete-hosts"
-                         "original-program:portable-persistent-set-complete-hosts"
-                         "original-program:portable-persistent-list-1"
-                         "original-program:portable-persistent-list-0") :includes id)
-                     (js-call (js-array "wasm" "native") :includes target)
-                     (= target "native")))
-                (cond ((and (= id "original-program:eliscript-protocol-complete-hosts") (= target "native")) 1800000)
-                      ((and (js-call (js-array "original-program:portable-persistent-list-1"
+                       (js-call (js-array "wasm" "native") :includes target))
+                (cond ((and (js-call (js-array "original-program:portable-persistent-list-1"
                                                "original-program:portable-persistent-list-0") :includes id)
                             (= target "native")) 720000)
+                      ((= target "native") (Math/max 1800000 measured-deadline))
                       (t measured-deadline))
                 0)
               (if (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")

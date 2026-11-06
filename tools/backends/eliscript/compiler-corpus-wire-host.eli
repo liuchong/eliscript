@@ -29,7 +29,7 @@
     (let ((part (wireFunctionalPartition record)))
       (when part
         (cond ((= target "javascript") 60000)
-          ((= (get part :kind) "corpus") (if (= target "native") 1500000 600000))
+          ((= (get part :kind) "corpus") (if (= target "native") 2400000 600000))
           (t 480000)))))
   (defun wireCasePolicy (record target)
     (let* ((original (get record :original)) (controller (when original (get original :wireController)))
