@@ -76,8 +76,10 @@
                       :originalAggregatePerformance "NOT ACCEPTED")))
                   (js-call selected :forEach (lambda (part)
                     (let ((callback (aref arguments 1))
-                          (deadline (if (and functional
-                            (= (get part :kind) "tail") (= (get part :key) "http-contracts")) 480000 120000)))
+                          (deadline (cond ((not functional) 120000)
+                            ((and (= (get part :kind) "tail")
+                                  (js-call (js-array "http-contracts" "network") :includes (get part :key))) 480000)
+                            (t 240000))))
                       (Reflect/apply actual receiver (js-array
                         (str title " [" (get part :kind) "/" (get part :key) ": " (get part :label) "]")
                         (async ()
