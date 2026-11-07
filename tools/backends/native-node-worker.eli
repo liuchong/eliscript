@@ -1,2 +1,157 @@
-(module capsules.tools.backends.native-node-worker
-  (js* "import {parentPort,workerData} from 'node:worker_threads';\nimport {spawn} from 'node:child_process';\nimport {fileURLToPath} from 'node:url';\nimport {errorData} from './compiler-worker.mjs';\n\nlet buffer=workerData.buffer,control=new Int32Array(buffer,0,4),payload=new Uint8Array(buffer,16);\nlet current=null,ready=false,failed=false,closing=false,parentClosed=false,receivedBytes=0;\nconst received=[],packets=[],encoder=new TextEncoder(),decoder=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true});\nfunction failure(error){\n  return errorData(error,{transport:'json'});\n}\nfunction publish(){\n  if(current!==null&&Atomics.load(control,0)===0)current=null;\n  if(current!==null||packets.length===0)return;\n  current=packets.shift();\n  Atomics.store(control,2,packets.length);\n  flush();\n}\nfunction flush(){\n  if(current===null)return;\n  if(current.length>payload.length){Atomics.store(control,1,current.length);Atomics.store(control,0,2);}\n  else{payload.set(current);Atomics.store(control,1,current.length);Atomics.store(control,0,1);}\n  Atomics.notify(control,0);\n}\nfunction deliver(message){\n  packets.push(encoder.encode(JSON.stringify(message)));\n  Atomics.store(control,2,packets.length);\n  publish();\n}\nfunction fail(error){\n  if(failed||parentClosed)return;failed=true;received.length=0;receivedBytes=0;\n  const record=failure(error);\n  if(!ready)parentPort.postMessage({startupFailure:record});\n  else deliver({transportFailure:record});\n  child.kill();\n}\nconst child=spawn(workerData.bunExecutable,[fileURLToPath(new URL('./native-node-runner.mjs',import.meta.url))],{\n  stdio:['pipe','pipe','inherit'],env:{...process.env,NODE_OPTIONS:'',BUN_OPTIONS:''},\n});\nchild.on('error',fail);child.stdin.on('error',error=>{if(!closing)fail(error);});\n// Wait for stdio to drain before reporting process termination. Its final\n// packet may still be buffered when the process emits the earlier exit event.\nchild.on('close',(code,signal)=>{\n  if(parentClosed)return;\n  if(!failed&&receivedBytes!==0){fail(new Error('native process ended with an incomplete JSON packet'));return;}\n  if(!closing)fail(new Error('native process exited: '+(signal??code)));\n  else if(!failed)parentPort.close();\n});\nchild.stdout.on('error',fail);\nchild.stdout.on('data',chunk=>{\n  if(failed||parentClosed)return;\n  try {\n    let start=0;\n    // Search only the newly arrived bytes. Retained fragments are never\n    // rescanned or decoded until their single complete JSON packet arrives.\n    for(let end=chunk.indexOf(0x0a,start);end!==-1;end=chunk.indexOf(0x0a,start)){\n      const tail=chunk.subarray(start,end);\n      if(tail.length){received.push(tail);receivedBytes+=tail.length;}\n      const packet=Buffer.concat(received,receivedBytes);\n      received.length=0;receivedBytes=0;start=end+1;\n      const message=JSON.parse(decoder.decode(packet));\n      if(message?.ready){if(ready)throw new Error('duplicate native process initialization');ready=true;parentPort.postMessage({ready:true});}\n      else{if(!ready)throw new Error('native process responded before initialization');deliver(message);}\n    }\n    if(start<chunk.length){const tail=chunk.subarray(start);received.push(tail);receivedBytes+=tail.length;}\n  }catch(error){fail(error);}\n});\nchild.stdout.on('end',()=>{\n  if(!failed&&!parentClosed&&receivedBytes!==0)fail(new Error('native process ended with an incomplete JSON packet'));\n});\nparentPort.on('message',message=>{\n  if(message?.buffer){buffer=message.buffer;control=new Int32Array(buffer,0,4);payload=new Uint8Array(buffer,16);flush();}\n  else if(message?.consumed){publish();}\n  else if(message?.shutdown){closing=true;child.stdin.end();}\n  else if(message?.request){\n    if(failed){deliver({transportFailure:failure(new Error('native process is unavailable'))});return;}\n    try{child.stdin.write(JSON.stringify(message.request)+'\\n');}catch(error){fail(error);}\n  }\n});\nparentPort.once('close',()=>{parentClosed=true;closing=true;received.length=0;receivedBytes=0;child.kill('SIGTERM');});\nprocess.on('uncaughtException',fail);\nprocess.on('unhandledRejection',fail);\n"))
+(module tools.backends.native-node-worker
+  (import "node:worker_threads" parentPort workerData)
+  (import "node:child_process" spawn)
+  (import "node:path" resolve)
+  (import "node:url" fileURLToPath pathToFileURL)
+  (import "./compiler-worker.mjs" errorData)
+
+  (defun worker-module-url ()
+    (let* ((stack (str (get (new globalThis.Error) :stack)))
+           (file-match (js-call (new globalThis.RegExp "(file://[^\\s):]+\\.mjs):\\d+:\\d+") :exec stack)))
+      (if file-match
+        (aref file-match 1)
+        (let ((path-match (js-call (new globalThis.RegExp "(/[^\\s():]+\\.mjs):\\d+:\\d+") :exec stack)))
+          (if path-match
+            (get (pathToFileURL (aref path-match 1)) :href)
+            (get (pathToFileURL (resolve "tools/backends/native-node-worker.mjs")) :href))))))
+
+  (defvar buffer (get workerData :buffer))
+  (defvar control (new globalThis.Int32Array buffer 0 4))
+  (defvar payload (new globalThis.Uint8Array buffer 16))
+  (defvar current nil)
+  (defvar ready false)
+  (defvar failed false)
+  (defvar closing false)
+  (defvar parent-closed false)
+  (defvar received-bytes 0)
+  (defconst received (js-array))
+  (defconst packets (js-array))
+  (defconst encoder (new globalThis.TextEncoder))
+  (defconst decoder (new globalThis.TextDecoder "utf-8" (js-object :fatal t :ignoreBOM t)))
+  (defvar child undefined)
+
+  (defun failure (error)
+    (errorData error (js-object :transport "json")))
+
+  (defun flush ()
+    (unless (nil? current)
+      (if (> (js-length current) (js-length payload))
+        (progn
+          (Atomics/store control 1 (js-length current))
+          (Atomics/store control 0 2))
+        (progn
+          (js-call payload :set current)
+          (Atomics/store control 1 (js-length current))
+          (Atomics/store control 0 1)))
+      (Atomics/notify control 0)))
+
+  (defun publish ()
+    (when (and (not (nil? current)) (= (Atomics/load control 0) 0))
+      (setq current nil))
+    (unless (or (not (nil? current)) (= (js-length packets) 0))
+      (setq current (js-call packets :shift))
+      (Atomics/store control 2 (js-length packets))
+      (flush)))
+
+  (defun deliver (message)
+    (js-call packets :push (js-call encoder :encode (JSON/stringify message)))
+    (Atomics/store control 2 (js-length packets))
+    (publish))
+
+  (defun fail (error)
+    (unless (or failed parent-closed)
+      (setq failed t)
+      (put received :length 0)
+      (setq received-bytes 0)
+      (let ((record (failure error)))
+        (if (not ready)
+          (js-call parentPort :postMessage (js-object :startupFailure record))
+          (deliver (js-object :transportFailure record))))
+      (js-call child :kill)))
+
+  (setq child
+    (spawn (get workerData :bunExecutable)
+      (js-array (fileURLToPath (new globalThis.URL "./native-node-runner.mjs" (worker-module-url))))
+      (js-object
+        :stdio (js-array "pipe" "pipe" "inherit")
+        :env (Object/assign (js-object) (get globalThis.process :env)
+               (js-object :NODE_OPTIONS "" :BUN_OPTIONS "")))))
+
+  (js-call child :on "error" fail)
+  (js-call (get child :stdin) :on "error"
+    (lambda (error) (unless closing (fail error))))
+  ;; Wait for stdio to drain before reporting process termination. Its final
+  ;; packet may still be buffered when the process emits the earlier exit event.
+  (js-call child :on "close"
+    (lambda (code signal)
+      (unless parent-closed
+        (if (and (not failed) (/= received-bytes 0))
+          (fail (new globalThis.Error "native process ended with an incomplete JSON packet"))
+          (if (not closing)
+            (fail (new globalThis.Error (+ "native process exited: " (if (nullish? signal) code signal))))
+            (unless failed (js-call parentPort :close)))))))
+  (js-call (get child :stdout) :on "error" fail)
+  (js-call (get child :stdout) :on "data"
+    (lambda (chunk)
+      (unless (or failed parent-closed)
+        (try
+          (let ((start 0)
+                (end (js-call chunk :indexOf 10 0)))
+            ;; Search only the newly arrived bytes. Retained fragments are never
+            ;; rescanned or decoded until their single complete JSON packet arrives.
+            (while (/= end -1)
+              (let ((tail (js-call chunk :subarray start end)))
+                (when (> (js-length tail) 0)
+                  (js-call received :push tail)
+                  (setq received-bytes (+ received-bytes (js-length tail))))
+                (let ((packet (Buffer/concat received received-bytes)))
+                  (put received :length 0)
+                  (setq received-bytes 0)
+                  (setq start (1+ end))
+                  (let ((message (JSON/parse (js-call decoder :decode packet))))
+                    (if (and (not (nullish? message)) (get message :ready))
+                      (progn
+                        (when ready (throw (new globalThis.Error "duplicate native process initialization")))
+                        (setq ready t)
+                        (js-call parentPort :postMessage (js-object :ready t)))
+                      (progn
+                        (unless ready (throw (new globalThis.Error "native process responded before initialization")))
+                        (deliver message))))))
+              (setq end (js-call chunk :indexOf 10 start)))
+            (when (< start (js-length chunk))
+              (let ((tail (js-call chunk :subarray start)))
+                (js-call received :push tail)
+                (setq received-bytes (+ received-bytes (js-length tail))))))
+          (catch error (fail error))))))
+  (js-call (get child :stdout) :on "end"
+    (lambda ()
+      (when (and (not failed) (not parent-closed) (/= received-bytes 0))
+        (fail (new globalThis.Error "native process ended with an incomplete JSON packet")))))
+  (js-call parentPort :on "message"
+    (lambda (message)
+      (cond
+        ((and (not (nullish? message)) (get message :buffer))
+         (setq buffer (get message :buffer))
+         (setq control (new globalThis.Int32Array buffer 0 4))
+         (setq payload (new globalThis.Uint8Array buffer 16))
+         (flush))
+        ((and (not (nullish? message)) (get message :consumed))
+         (publish))
+        ((and (not (nullish? message)) (get message :shutdown))
+         (setq closing t)
+         (js-call (get child :stdin) :end))
+        ((and (not (nullish? message)) (get message :request))
+         (if failed
+           (deliver (js-object :transportFailure (failure (new globalThis.Error "native process is unavailable"))))
+           (try
+             (js-call (get child :stdin) :write (+ (JSON/stringify (get message :request)) "\n"))
+             (catch error (fail error))))))))
+  (js-call parentPort :once "close"
+    (lambda ()
+      (setq parent-closed t)
+      (setq closing t)
+      (put received :length 0)
+      (setq received-bytes 0)
+      (js-call child :kill "SIGTERM")))
+  (js-call globalThis.process :on "uncaughtException" fail)
+  (js-call globalThis.process :on "unhandledRejection" fail))

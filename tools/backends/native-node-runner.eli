@@ -1,2 +1,525 @@
-(module capsules.tools.backends.native-node-runner
-  (js* "import {readSync,writeSync} from 'node:fs';\nimport {Worker} from 'node:worker_threads';\nimport {openNativeMemory} from './native-memory.mjs';\nimport {errorData} from './compiler-worker.mjs';\n\nlet memory,hasLastError=false,hasTupleHeader=false,hasForeignToken=false,hasCollections=false,hasFastOps=false,callbackSequence=0,remainder=Buffer.alloc(0),eof=false;\nconst pendingForeign=[],fastNumberBuffer=new DataView(new ArrayBuffer(8));\nconst input=Buffer.allocUnsafe(65536),hostFailures=new WeakMap(),pause=new Int32Array(new SharedArrayBuffer(4));\nconst decoder=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true});\nfunction allocFastString(heap,str){\n  const len=str.length>>>0,val=memory.invoke('value-string',heap,len)>>>0,off=memory.invoke('value-data',heap,val,5);\n  for(let i=0;i<len;i++)memory.setUint16(off+i*2,str.charCodeAt(i),true);\n  memory.invoke('value-seal',heap,val);\n  return val;\n}\nfunction executeFastOp(heap,op){\n  switch(op.fastOp){\n    case 'number':\n      return memory.invoke('value-number',heap,op.low>>>0,op.high>>>0)>>>0;\n    case 'string':\n      return allocFastString(heap,op.value);\n    case 'string-array':{\n      const list=op.strings,count=list.length>>>0,arr=memory.invoke('value-array-new',heap,count)>>>0;\n      memory.invoke('heap-pin',heap,arr);\n      try{\n        for(let i=0;i<count;i++){\n          const s=allocFastString(heap,list[i]);\n          memory.invoke('value-set',heap,arr,i,s);\n        }\n      }finally{memory.invoke('heap-release',heap,arr);}\n      return arr;\n    }\n    case 'array-new':\n      return memory.invoke('value-array-new',heap,op.length>>>0)>>>0;\n    case 'foreign-new':{\n      const raw=memory.invoke('value-foreign-new',heap,op.identity>>>0,op.callable?1:0)>>>0;\n      if(op.constructible)memory.invoke('value-foreign-constructor-set',heap,raw,1);\n      pendingForeign.push([op.identity>>>0,raw]);\n      return raw;\n    }\n    case 'array-set':{\n      const receiver=op.receiver>>>0,index=op.index>>>0,length=op.length>>>0,value=op.value>>>0;\n      if(index>=length)memory.invoke('value-array-resize',heap,receiver,index+1);\n      memory.invoke('value-set',heap,receiver,index,value);\n      return 2;\n    }\n    case 'object-put':{\n      const args=op.arguments>>>0,receiver=op.receiver>>>0,key=op.key>>>0,value=op.value>>>0;\n      memory.invoke('heap-pin',heap,args);\n      try{memory.invoke('value-object-put',heap,receiver,key,value,2);}\n      finally{memory.invoke('heap-release',heap,args);}\n      return 2;\n    }\n    case 'table-op':{\n      const args=op.arguments>>>0,target=op.target>>>0,kind=op.kind>>>0,arg0=op.arg0>>>0,arg1=op.arg1>>>0;\n      const tOff=memory.invoke('value-data',heap,target,kind),table=memory.getUint32(tOff,true);\n      if(op.mode==='put'){\n        memory.invoke('heap-pin',heap,args);\n        try{memory.invoke('value-table-put',heap,table,arg0,arg1);}\n        finally{memory.invoke('heap-release',heap,args);}\n        return target;\n      }\n      if(op.mode==='add'){\n        memory.invoke('heap-pin',heap,args);\n        try{memory.invoke('value-table-add',heap,table,arg0);}\n        finally{memory.invoke('heap-release',heap,args);}\n        return target;\n      }\n      if(op.mode==='has')return memory.invoke('value-table-has',heap,table,arg0)!==0?2:1;\n      if(op.mode==='delete')return memory.invoke('value-table-delete',heap,table,arg0)!==0?2:1;\n      if(op.mode==='get')return memory.invoke('value-table-get',heap,table,arg0)>>>0;\n      if(op.mode==='clear'){memory.invoke('value-table-clear',heap,table);return 3;}\n      if(op.mode==='size'){\n        const sz=memory.invoke('value-table-size',heap,table)>>>0;\n        fastNumberBuffer.setFloat64(0,sz,true);\n        return memory.invoke('value-number',heap,fastNumberBuffer.getUint32(0,true),fastNumberBuffer.getUint32(4,true))>>>0;\n      }\n      throw new TypeError('unknown fast table op');\n    }\n    default:\n      throw new TypeError('unknown native fastOp');\n  }\n}\nfunction read(){\n  const pieces=[];let length=0;\n  for(;;){\n    const end=remainder.indexOf(10);\n    if(end>=0){\n      const tail=remainder.subarray(0,end);\n      const bytes=pieces.length?Buffer.concat([...pieces,tail],length+tail.length):tail;\n      remainder=remainder.subarray(end+1);\n      return JSON.parse(decoder.decode(bytes));\n    }\n    if(remainder.length){pieces.push(remainder);length+=remainder.length;remainder=Buffer.alloc(0);}\n    if(eof){if(length)throw new Error('incomplete native transport request');return null;}\n    let count;\n    try{count=readSync(0,input,0,input.length,null);}\n    catch(error){if(error?.code==='EINTR')continue;if(error?.code==='EAGAIN'||error?.code==='EWOULDBLOCK'){Atomics.wait(pause,0,0,1);continue;}throw error;}\n    if(count===0)eof=true;\n    // Keep each filled read buffer once, then join a complete packet once.\n    // Growing the entire prefix here copies large compiler inputs repeatedly.\n    else remainder=Buffer.from(input.subarray(0,count));\n  }\n}\nfunction send(record){\n  const bytes=Buffer.from(JSON.stringify(record)+'\\n');let offset=0;\n  while(offset<bytes.length){\n    try{const written=writeSync(1,bytes,offset,bytes.length-offset,null);if(written===0)throw new Error('native transport output made no progress');offset+=written;}\n    catch(error){if(error?.code==='EINTR')continue;if(error?.code==='EAGAIN'||error?.code==='EWOULDBLOCK'){Atomics.wait(pause,0,0,1);continue;}throw error;}\n  }\n}\nfunction describe(error){\n  return errorData(error,{transport:'json'});\n}\nfunction hostCall(index,heap,argv){\n  const id=++callbackSequence;\n  let tuple;\n  if(hasTupleHeader&&argv>3&&memory.invoke('last-error')===0){\n    if(memory.invoke('value-kind',heap,argv)===7&&memory.invoke('last-error')===0){\n      const count=memory.invoke('value-length',heap,argv);\n      if(memory.invoke('last-error')===0&&count>=0&&count<=8){\n        const offset=count>0?memory.invoke('value-data',heap,argv,7):0;\n        if(memory.invoke('last-error')===0){\n          const items=[],kinds=[],tokens=[],strings=[],numbers=[],symbols=[];\n          for(let i=0;i<count;i++){\n            const v=memory.getUint32(offset+i*4,true);\n            items.push(v);\n            const k=v>3?memory.invoke('value-kind',heap,v):0;\n            kinds.push(k);\n            tokens.push(k===35&&hasForeignToken?memory.invoke('value-foreign-token',heap,v):0);\n            if(k===5){\n              const len=memory.invoke('value-length',heap,v);\n              if(len===0)strings.push('');\n              else if(len<=64){\n                const strOff=memory.invoke('value-data',heap,v,5),units=[];\n                for(let j=0;j<len;j++)units.push(memory.getUint16(strOff+j*2,true));\n                strings.push(String.fromCharCode(...units));\n              }else strings.push(null);\n            }else strings.push(null);\n            if(k===4){\n              const numOff=memory.invoke('value-data',heap,v,4),n=memory.getFloat64(numOff,true);\n              numbers.push(Number.isFinite(n)&&!Object.is(n,-0)?n:null);\n            }else numbers.push(null);\n            if(k===22){\n              const symOff=memory.invoke('value-data',heap,v,22);\n              symbols.push([memory.getUint32(symOff-20,true),memory.getUint32(symOff-16,true)]);\n            }else symbols.push(null);\n          }\n          const opcodeNumber=count>0&&kinds[0]===4&&Number.isInteger(numbers[0])?numbers[0]:-1;\n          let receiverHeader=null,applyArgs=null;\n          if(opcodeNumber===20&&count===5&&(kinds[4]===13||kinds[4]===14)){\n            const rOff=memory.invoke('value-data',heap,items[4],kinds[4]);\n            if(memory.invoke('last-error')===0){\n              if(kinds[4]===14){\n                receiverHeader=[memory.getUint32(rOff-28,true),memory.getUint32(rOff-8,true),memory.getUint32(rOff-4,true)];\n              }else{\n                const ns=memory.getUint32(rOff-12,true),fl=memory.getUint32(rOff-8,true),ig=memory.getUint32(rOff-4,true);\n                const hasOwn=(ns===0&&(fl&16416)===0&&(ig&3)===0&&kinds[2]===5&&hasFastOps)?memory.invoke('value-object-has',heap,items[4],items[2]):-1;\n                receiverHeader=[ns,fl,ig,memory.invoke('last-error')===0?hasOwn:-1];\n              }\n            }\n          }else if(opcodeNumber===8&&count===5&&kinds[4]===14){\n            const aOff=memory.invoke('value-data',heap,items[4],14);\n            if(memory.invoke('last-error')===0){\n              const aLen=memory.getUint32(aOff-28,true),aFlags=memory.getUint32(aOff-8,true);\n              if((aFlags&16384)===0&&aLen<=8){\n                const list=[];let ok=true;\n                for(let i=0;i<aLen;i++){\n                  const av=memory.getUint32(aOff+i*4,true);\n                  if(av===4){ok=false;break;}\n                  const ak=av>3?memory.invoke('value-kind',heap,av):0;\n                  const at=ak===35&&hasForeignToken?memory.invoke('value-foreign-token',heap,av):0;\n                  let as=null,an=null,asym=null;\n                  if(ak===5){\n                    const sl=memory.invoke('value-length',heap,av);\n                    if(sl===0)as='';\n                    else if(sl<=64){\n                      const sOff=memory.invoke('value-data',heap,av,5),units=[];\n                      for(let j=0;j<sl;j++)units.push(memory.getUint16(sOff+j*2,true));\n                      as=String.fromCharCode(...units);\n                    }\n                  }else if(ak===4){\n                    const nOff=memory.invoke('value-data',heap,av,4),n=memory.getFloat64(nOff,true);\n                    if(Number.isFinite(n)&&!Object.is(n,-0))an=n;\n                  }else if(ak===22){\n                    const yOff=memory.invoke('value-data',heap,av,22);\n                    asym=[memory.getUint32(yOff-20,true),memory.getUint32(yOff-16,true)];\n                  }\n                  list.push({raw:av,kind:ak,token:at,string:as,number:an,symbol:asym});\n                }\n                if(ok&&memory.invoke('last-error')===0)applyArgs=list;\n              }\n            }\n          }\n          const collections=hasCollections?memory.invoke('heap-collections',heap):-1;\n          if(memory.invoke('last-error')===0){\n            const syncedForeign=pendingForeign.length?pendingForeign.splice(0,pendingForeign.length):undefined;\n            tuple={count,opcode:count>0?items[0]:0,opcodeNumber,items,kinds,tokens,strings,numbers,symbols,receiverHeader,applyArgs,collections,fastOpOk:hasFastOps,pendingForeign:syncedForeign};\n          }\n        }\n      }\n    }\n    if(!tuple){\n      memory.invoke('value-error-restore',0);\n      if(pendingForeign.length)tuple={untupled:true,pendingForeign:pendingForeign.splice(0,pendingForeign.length)};\n    }\n  }\n  send({callback:tuple?{id,index,heap,argv,tuple}:{id,index,heap,argv}});\n  for(;;){\n    const message=read();\n    if(message===null)throw new Error('native host disconnected during a callback');\n    if(message.callback!==undefined){\n      if(message.callback!==id)throw new Error('native callback response belongs to a different invocation');\n      if(Object.hasOwn(message,'hostError')){const error=Object.freeze({});hostFailures.set(error,message.hostError);throw error;}\n      if(message.fastOp!==undefined)return executeFastOp(heap,message.fastOp);\n      return message.result;\n    }\n    // Host reflection may call back into the same library while a source frame\n    // is suspended. Run that nested memory operation before resuming the frame.\n    dispatch(message);\n  }\n}\nfunction dispatch(message){\n  const {id,method,args=[]}=message;\n  try {\n    if(!Number.isSafeInteger(id)||id<1)throw new TypeError('invalid native transport invocation');\n    if(method==='open')throw new Error('native memory is already open');\n    if(!memory)throw new Error('native memory is closed');\n    let result,lastError;\n    if(method==='size')result=memory.byteLength;\n    else if(method==='invoke'){\n      result=memory.invoke(...args);\n      if(hasLastError)lastError=args[0]==='last-error'?result:memory.invoke('last-error');\n    }\n    else if(method==='getUint16')result=memory.getUint16(...args);\n    else if(method==='getUint32')result=memory.getUint32(...args);\n    else if(method==='getFloat64'){const v=memory.getFloat64(...args);result=Number.isNaN(v)?'NaN':v===Infinity?'Infinity':v===-Infinity?'-Infinity':Object.is(v,-0)?'-0':v;}\n    else if(method==='setUint16')result=memory.setUint16(...args);\n    else if(method==='setUint32')result=memory.setUint32(...args);\n    else if(method==='read')result=Buffer.from(memory.read(...args)).toString('base64');\n    else if(method==='write')result=memory.write(new Uint8Array(Buffer.from(args[0],'base64')),args[1]);\n    else if(method==='close')result=memory.close();\n    else throw new TypeError('unknown native transport method');\n    send(lastError===undefined?{id,result:result??null}:{id,result:result??null,lastError});\n  }catch(error){\n    if(error!==null&&(typeof error==='object'||typeof error==='function')&&hostFailures.has(error))send({id,hostError:hostFailures.get(error)});\n    else send({id,error:describe(error)});\n  }\n}\nconst watchdog=new Worker(new URL('./native-node-watchdog.mjs',import.meta.url),{\n  workerData:{parentPID:process.ppid},execArgv:[],env:{...process.env,NODE_OPTIONS:'',BUN_OPTIONS:''},\n});\ntry {\n  await new Promise((resolve,reject)=>{\n    const ready=message=>{if(message?.ready){cleanup();resolve();}};\n    const fail=error=>{cleanup();reject(error);};\n    const exit=code=>fail(new Error('native loader ownership watcher exited before initialization: '+code));\n    const cleanup=()=>{watchdog.off('message',ready);watchdog.off('error',fail);watchdog.off('exit',exit);};\n    watchdog.on('message',ready);watchdog.once('error',fail);watchdog.once('exit',exit);\n  });\n} catch(error) {await watchdog.terminate();throw error;}\nwatchdog.on('error',error=>{send({transportFailure:describe(error)});process.exit(1);});\nwatchdog.unref();\nsend({ready:true});\ntry {\n  const first=read();\n  if(first!==null){\n    try{\n      if(first.method!=='open'||!Array.isArray(first.args)||first.args.length!==3)throw new TypeError('native transport requires initialization');\n      const signatures=first.args[1];\n      hasLastError=Boolean(signatures&&typeof signatures==='object'&&Object.hasOwn(signatures,'last-error')&&signatures['last-error']===0);\n      hasTupleHeader=Boolean(hasLastError&&signatures['value-error-restore']===1&&signatures['value-kind']===2&&signatures['value-length']===2&&signatures['value-get']===3&&signatures['value-data']===3);\n      hasForeignToken=Boolean(hasTupleHeader&&signatures['value-foreign-token']===2);\n      hasCollections=Boolean(hasTupleHeader&&signatures['heap-collections']===1);\n      hasFastOps=Boolean(hasTupleHeader&&signatures['heap-pin']===2&&signatures['heap-release']===2&&signatures['value-number']===3&&signatures['value-string']===2&&signatures['value-seal']===2&&signatures['value-array-new']===2&&signatures['value-array-resize']===3&&signatures['value-set']===4&&signatures['value-object-has']===3&&signatures['value-object-put']===5&&signatures['value-foreign-new']===3&&signatures['value-foreign-constructor-set']===3&&signatures['value-table-put']===4&&signatures['value-table-add']===3&&signatures['value-table-has']===3&&signatures['value-table-delete']===3&&signatures['value-table-get']===3&&signatures['value-table-clear']===2&&signatures['value-table-size']===2);\n      memory=await openNativeMemory(first.args[0],signatures,{...first.args[2],hostCall});\n      send({id:first.id,result:true});\n    }catch(error){send({id:first.id,error:describe(error)});process.exitCode=1;}\n    if(memory){let message;while((message=read())!==null)dispatch(message);}\n  }\n}finally{try{memory?.close();}finally{await watchdog.terminate();}}\n"))
+(module tools.backends.native-node-runner
+  (import "node:fs" readSync writeSync)
+  (import "node:worker_threads" Worker)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "./native-memory.mjs" openNativeMemory)
+  (import "./compiler-worker.mjs" errorData)
+
+  (defun runner-module-url ()
+    (let* ((stack (str (get (new globalThis.Error) :stack)))
+           (file-match (js-call (new globalThis.RegExp "(file://[^\\s):]+\\.mjs):\\d+:\\d+") :exec stack)))
+      (if file-match
+        (aref file-match 1)
+        (let ((path-match (js-call (new globalThis.RegExp "(/[^\\s():]+\\.mjs):\\d+:\\d+") :exec stack)))
+          (if path-match
+            (get (pathToFileURL (aref path-match 1)) :href)
+            (get (pathToFileURL (resolve "tools/backends/native-node-runner.mjs")) :href))))))
+
+  (defvar memory undefined)
+  (defvar has-last-error false)
+  (defvar has-tuple-header false)
+  (defvar has-foreign-token false)
+  (defvar has-collections false)
+  (defvar has-fast-ops false)
+  (defvar callback-sequence 0)
+  (defvar remainder (Buffer/alloc 0))
+  (defvar eof false)
+  (defconst pending-foreign (js-array))
+  (defconst fast-number-buffer (new globalThis.DataView (new globalThis.ArrayBuffer 8)))
+  (defconst input (Buffer/allocUnsafe 65536))
+  (defconst host-failures (new globalThis.WeakMap))
+  (defconst pause (new globalThis.Int32Array (new globalThis.SharedArrayBuffer 4)))
+  (defconst decoder (new globalThis.TextDecoder "utf-8" (js-object :fatal t :ignoreBOM t)))
+
+  (defun alloc-fast-string (heap str)
+    (let* ((len (unsigned-bit-shift-right (js-length str) 0))
+           (val (unsigned-bit-shift-right (js-call memory :invoke "value-string" heap len) 0))
+           (off (js-call memory :invoke "value-data" heap val 5))
+           (i 0))
+      (while (< i len)
+        (js-call memory :setUint16 (+ off (* i 2)) (js-call str :charCodeAt i) t)
+        (setq i (1+ i)))
+      (js-call memory :invoke "value-seal" heap val)
+      val))
+
+  (defun execute-fast-op (heap op)
+    (let ((fast-op (get op :fastOp)))
+      (cond
+        ((= fast-op "number")
+         (unsigned-bit-shift-right
+           (js-call memory :invoke "value-number" heap
+             (unsigned-bit-shift-right (get op :low) 0)
+             (unsigned-bit-shift-right (get op :high) 0))
+           0))
+        ((= fast-op "string")
+         (alloc-fast-string heap (get op :value)))
+        ((= fast-op "string-array")
+         (let* ((list (get op :strings))
+                (count (unsigned-bit-shift-right (js-length list) 0))
+                (arr (unsigned-bit-shift-right (js-call memory :invoke "value-array-new" heap count) 0))
+                (i 0))
+           (js-call memory :invoke "heap-pin" heap arr)
+           (try
+             (while (< i count)
+               (let ((s (alloc-fast-string heap (aref list i))))
+                 (js-call memory :invoke "value-set" heap arr i s))
+               (setq i (1+ i)))
+             (finally (js-call memory :invoke "heap-release" heap arr)))
+           arr))
+        ((= fast-op "array-new")
+         (unsigned-bit-shift-right
+           (js-call memory :invoke "value-array-new" heap (unsigned-bit-shift-right (get op :length) 0))
+           0))
+        ((= fast-op "foreign-new")
+         (let* ((identity (unsigned-bit-shift-right (get op :identity) 0))
+                (raw (unsigned-bit-shift-right
+                       (js-call memory :invoke "value-foreign-new" heap identity (if (get op :callable) 1 0))
+                       0)))
+           (when (get op :constructible)
+             (js-call memory :invoke "value-foreign-constructor-set" heap raw 1))
+           (js-call pending-foreign :push (js-array identity raw))
+           raw))
+        ((= fast-op "array-set")
+         (let ((receiver (unsigned-bit-shift-right (get op :receiver) 0))
+               (index (unsigned-bit-shift-right (get op :index) 0))
+               (length (unsigned-bit-shift-right (get op :length) 0))
+               (value (unsigned-bit-shift-right (get op :value) 0)))
+           (when (>= index length)
+             (js-call memory :invoke "value-array-resize" heap receiver (1+ index)))
+           (js-call memory :invoke "value-set" heap receiver index value)
+           2))
+        ((= fast-op "object-put")
+         (let ((args (unsigned-bit-shift-right (get op :arguments) 0))
+               (receiver (unsigned-bit-shift-right (get op :receiver) 0))
+               (key (unsigned-bit-shift-right (get op :key) 0))
+               (value (unsigned-bit-shift-right (get op :value) 0)))
+           (js-call memory :invoke "heap-pin" heap args)
+           (try (js-call memory :invoke "value-object-put" heap receiver key value 2)
+             (finally (js-call memory :invoke "heap-release" heap args)))
+           2))
+        ((= fast-op "table-op")
+         (let* ((args (unsigned-bit-shift-right (get op :arguments) 0))
+                (target (unsigned-bit-shift-right (get op :target) 0))
+                (kind (unsigned-bit-shift-right (get op :kind) 0))
+                (arg0 (unsigned-bit-shift-right (get op :arg0) 0))
+                (arg1 (unsigned-bit-shift-right (get op :arg1) 0))
+                (t-off (js-call memory :invoke "value-data" heap target kind))
+                (table (js-call memory :getUint32 t-off t))
+                (mode (get op :mode)))
+           (cond
+             ((= mode "put")
+              (js-call memory :invoke "heap-pin" heap args)
+              (try (js-call memory :invoke "value-table-put" heap table arg0 arg1)
+                (finally (js-call memory :invoke "heap-release" heap args)))
+              target)
+             ((= mode "add")
+              (js-call memory :invoke "heap-pin" heap args)
+              (try (js-call memory :invoke "value-table-add" heap table arg0)
+                (finally (js-call memory :invoke "heap-release" heap args)))
+              target)
+             ((= mode "has")
+              (if (/= (js-call memory :invoke "value-table-has" heap table arg0) 0) 2 1))
+             ((= mode "delete")
+              (if (/= (js-call memory :invoke "value-table-delete" heap table arg0) 0) 2 1))
+             ((= mode "get")
+              (unsigned-bit-shift-right (js-call memory :invoke "value-table-get" heap table arg0) 0))
+             ((= mode "clear")
+              (js-call memory :invoke "value-table-clear" heap table)
+              3)
+             ((= mode "size")
+              (let ((sz (unsigned-bit-shift-right (js-call memory :invoke "value-table-size" heap table) 0)))
+                (js-call fast-number-buffer :setFloat64 0 sz t)
+                (unsigned-bit-shift-right
+                  (js-call memory :invoke "value-number" heap
+                    (js-call fast-number-buffer :getUint32 0 t)
+                    (js-call fast-number-buffer :getUint32 4 t))
+                  0)))
+             (t (throw (new globalThis.TypeError "unknown fast table op"))))))
+        (t (throw (new globalThis.TypeError "unknown native fastOp"))))))
+
+  (defun read-packet ()
+    (let ((pieces (js-array)) (length 0) (done false) (result nil))
+      (while (not done)
+        (let ((end (js-call remainder :indexOf 10)))
+          (if (>= end 0)
+            (let* ((tail (js-call remainder :subarray 0 end))
+                   (bytes (if (> (js-length pieces) 0)
+                            (Buffer/concat (js-call pieces :concat (js-array tail)) (+ length (js-length tail)))
+                            tail)))
+              (setq remainder (js-call remainder :subarray (1+ end)))
+              (setq result (JSON/parse (js-call decoder :decode bytes)))
+              (setq done t))
+            (progn
+              (when (> (js-length remainder) 0)
+                (js-call pieces :push remainder)
+                (setq length (+ length (js-length remainder)))
+                (setq remainder (Buffer/alloc 0)))
+              (if eof
+                (progn
+                  (when (> length 0)
+                    (throw (new globalThis.Error "incomplete native transport request")))
+                  (setq result nil)
+                  (setq done t))
+                (let ((count undefined) (retry false))
+                  (try
+                    (setq count (readSync 0 input 0 (js-length input) nil))
+                    (catch error
+                      (let ((code (if (nullish? error) undefined (get error :code))))
+                        (cond
+                          ((= code "EINTR") (setq retry t))
+                          ((or (= code "EAGAIN") (= code "EWOULDBLOCK"))
+                           (Atomics/wait pause 0 0 1)
+                           (setq retry t))
+                          (t (throw error))))))
+                  (unless retry
+                    (if (= count 0)
+                      (setq eof t)
+                      ;; Keep each filled read buffer once, then join a complete packet once.
+                      ;; Growing the entire prefix here copies large compiler inputs repeatedly.
+                      (setq remainder (Buffer/from (js-call input :subarray 0 count)))))))))))
+      result))
+
+  (defun send (record)
+    (let ((bytes (Buffer/from (+ (JSON/stringify record) "\n")))
+          (offset 0))
+      (while (< offset (js-length bytes))
+        (try
+          (let ((written (writeSync 1 bytes offset (- (js-length bytes) offset) nil)))
+            (when (= written 0)
+              (throw (new globalThis.Error "native transport output made no progress")))
+            (setq offset (+ offset written)))
+          (catch error
+            (let ((code (if (nullish? error) undefined (get error :code))))
+              (cond
+                ((= code "EINTR") nil)
+                ((or (= code "EAGAIN") (= code "EWOULDBLOCK"))
+                 (Atomics/wait pause 0 0 1))
+                (t (throw error)))))))))
+
+  (defun describe (error)
+    (errorData error (js-object :transport "json")))
+
+  (defun decode-short-string (heap v)
+    (let ((len (js-call memory :invoke "value-length" heap v)))
+      (cond
+        ((= len 0) "")
+        ((<= len 64)
+         (let ((str-off (js-call memory :invoke "value-data" heap v 5))
+               (units (js-array))
+               (j 0))
+           (while (< j len)
+             (js-call units :push (js-call memory :getUint16 (+ str-off (* j 2)) t))
+             (setq j (1+ j)))
+           (Reflect/apply globalThis.String.fromCharCode globalThis.String units)))
+        (t nil))))
+
+  (defun decode-finite-number (heap v)
+    (let* ((num-off (js-call memory :invoke "value-data" heap v 4))
+           (n (js-call memory :getFloat64 num-off t)))
+      (if (and (Number/isFinite n) (not (Object/is n (* -1 0)))) n nil)))
+
+  (defun decode-symbol-pair (heap v)
+    (let ((sym-off (js-call memory :invoke "value-data" heap v 22)))
+      (js-array (js-call memory :getUint32 (- sym-off 20) t)
+        (js-call memory :getUint32 (- sym-off 16) t))))
+
+  (defvar dispatch-fn undefined)
+
+  (defun host-call (index heap argv)
+    (setq callback-sequence (1+ callback-sequence))
+    (let ((id callback-sequence)
+          (tuple undefined))
+      (when (and has-tuple-header (> argv 3) (= (js-call memory :invoke "last-error") 0))
+        (when (and (= (js-call memory :invoke "value-kind" heap argv) 7)
+                   (= (js-call memory :invoke "last-error") 0))
+          (let ((count (js-call memory :invoke "value-length" heap argv)))
+            (when (and (= (js-call memory :invoke "last-error") 0) (>= count 0) (<= count 8))
+              (let ((offset (if (> count 0) (js-call memory :invoke "value-data" heap argv 7) 0)))
+                (when (= (js-call memory :invoke "last-error") 0)
+                  (let ((items (js-array)) (kinds (js-array)) (tokens (js-array))
+                        (strings (js-array)) (numbers (js-array)) (symbols (js-array))
+                        (i 0))
+                    (while (< i count)
+                      (let* ((v (js-call memory :getUint32 (+ offset (* i 4)) t))
+                             (k (if (> v 3) (js-call memory :invoke "value-kind" heap v) 0)))
+                        (js-call items :push v)
+                        (js-call kinds :push k)
+                        (js-call tokens :push
+                          (if (and (= k 35) has-foreign-token)
+                            (js-call memory :invoke "value-foreign-token" heap v)
+                            0))
+                        (js-call strings :push (if (= k 5) (decode-short-string heap v) nil))
+                        (js-call numbers :push (if (= k 4) (decode-finite-number heap v) nil))
+                        (js-call symbols :push (if (= k 22) (decode-symbol-pair heap v) nil)))
+                      (setq i (1+ i)))
+                    (let ((opcode-number (if (and (> count 0) (= (aref kinds 0) 4) (Number/isInteger (aref numbers 0)))
+                                           (aref numbers 0)
+                                           -1))
+                          (receiver-header nil)
+                          (apply-args nil))
+                      (cond
+                        ((and (= opcode-number 20) (= count 5)
+                              (or (= (aref kinds 4) 13) (= (aref kinds 4) 14)))
+                         (let ((r-off (js-call memory :invoke "value-data" heap (aref items 4) (aref kinds 4))))
+                           (when (= (js-call memory :invoke "last-error") 0)
+                             (if (= (aref kinds 4) 14)
+                               (setq receiver-header
+                                 (js-array (js-call memory :getUint32 (- r-off 28) t)
+                                   (js-call memory :getUint32 (- r-off 8) t)
+                                   (js-call memory :getUint32 (- r-off 4) t)))
+                               (let* ((ns (js-call memory :getUint32 (- r-off 12) t))
+                                      (fl (js-call memory :getUint32 (- r-off 8) t))
+                                      (ig (js-call memory :getUint32 (- r-off 4) t))
+                                      (has-own (if (and (= ns 0) (= (bit-and fl 16416) 0) (= (bit-and ig 3) 0)
+                                                        (= (aref kinds 2) 5) has-fast-ops)
+                                                 (js-call memory :invoke "value-object-has" heap (aref items 4) (aref items 2))
+                                                 -1)))
+                                 (setq receiver-header
+                                   (js-array ns fl ig (if (= (js-call memory :invoke "last-error") 0) has-own -1))))))))
+                        ((and (= opcode-number 8) (= count 5) (= (aref kinds 4) 14))
+                         (let ((a-off (js-call memory :invoke "value-data" heap (aref items 4) 14)))
+                           (when (= (js-call memory :invoke "last-error") 0)
+                             (let ((a-len (js-call memory :getUint32 (- a-off 28) t))
+                                   (a-flags (js-call memory :getUint32 (- a-off 8) t)))
+                               (when (and (= (bit-and a-flags 16384) 0) (<= a-len 8))
+                                 (let ((list (js-array)) (ok t) (idx 0))
+                                   (while (and ok (< idx a-len))
+                                     (let ((av (js-call memory :getUint32 (+ a-off (* idx 4)) t)))
+                                       (if (= av 4)
+                                         (setq ok false)
+                                         (let* ((ak (if (> av 3) (js-call memory :invoke "value-kind" heap av) 0))
+                                                (at (if (and (= ak 35) has-foreign-token)
+                                                      (js-call memory :invoke "value-foreign-token" heap av)
+                                                      0))
+                                                (as (if (= ak 5) (decode-short-string heap av) nil))
+                                                (an (if (= ak 4) (decode-finite-number heap av) nil))
+                                                (asym (if (= ak 22) (decode-symbol-pair heap av) nil)))
+                                           (js-call list :push
+                                             (js-object :raw av :kind ak :token at :string as :number an :symbol asym)))))
+                                     (setq idx (1+ idx)))
+                                   (when (and ok (= (js-call memory :invoke "last-error") 0))
+                                     (setq apply-args list)))))))))
+                      (let ((collections (if has-collections (js-call memory :invoke "heap-collections" heap) -1)))
+                        (when (= (js-call memory :invoke "last-error") 0)
+                          (let ((synced-foreign (if (> (js-length pending-foreign) 0)
+                                                  (js-call pending-foreign :splice 0 (js-length pending-foreign))
+                                                  undefined)))
+                            (setq tuple
+                              (js-object :count count :opcode (if (> count 0) (aref items 0) 0)
+                                :opcodeNumber opcode-number :items items :kinds kinds :tokens tokens
+                                :strings strings :numbers numbers :symbols symbols
+                                :receiverHeader receiver-header :applyArgs apply-args
+                                :collections collections :fastOpOk has-fast-ops
+                                :pendingForeign synced-foreign))))))))))))
+        (unless tuple
+          (js-call memory :invoke "value-error-restore" 0)
+          (when (> (js-length pending-foreign) 0)
+            (setq tuple
+              (js-object :untupled t
+                :pendingForeign (js-call pending-foreign :splice 0 (js-length pending-foreign)))))))
+      (send (js-object :callback
+              (if tuple
+                (js-object :id id :index index :heap heap :argv argv :tuple tuple)
+                (js-object :id id :index index :heap heap :argv argv))))
+      (let ((done false) (callback-result undefined))
+        (while (not done)
+          (let ((message (read-packet)))
+            (when (nil? message)
+              (throw (new globalThis.Error "native host disconnected during a callback")))
+            (if (not (undefined? (get message :callback)))
+              (progn
+                (unless (= (get message :callback) id)
+                  (throw (new globalThis.Error "native callback response belongs to a different invocation")))
+                (when (Object/hasOwn message "hostError")
+                  (let ((error (Object/freeze (js-object))))
+                    (js-call host-failures :set error (get message :hostError))
+                    (throw error)))
+                (setq callback-result
+                  (if (not (undefined? (get message :fastOp)))
+                    (execute-fast-op heap (get message :fastOp))
+                    (get message :result)))
+                (setq done t))
+              ;; Host reflection may call back into the same library while a source frame
+              ;; is suspended. Run that nested memory operation before resuming the frame.
+              (funcall dispatch-fn message))))
+        callback-result)))
+
+  (defun dispatch (message)
+    (let ((id (get message :id))
+          (method (get message :method))
+          (args (if (undefined? (get message :args)) (js-array) (get message :args))))
+      (try
+        (progn
+          (unless (and (Number/isSafeInteger id) (>= id 1))
+            (throw (new globalThis.TypeError "invalid native transport invocation")))
+          (when (= method "open")
+            (throw (new globalThis.Error "native memory is already open")))
+          (unless memory
+            (throw (new globalThis.Error "native memory is closed")))
+          (let ((result undefined) (last-error undefined))
+            (cond
+              ((= method "size")
+               (setq result (get memory :byteLength)))
+              ((= method "invoke")
+               (setq result (Reflect/apply (get memory :invoke) memory args))
+               (when has-last-error
+                 (setq last-error
+                   (if (= (aref args 0) "last-error")
+                     result
+                     (js-call memory :invoke "last-error")))))
+              ((= method "getUint16")
+               (setq result (Reflect/apply (get memory :getUint16) memory args)))
+              ((= method "getUint32")
+               (setq result (Reflect/apply (get memory :getUint32) memory args)))
+              ((= method "getFloat64")
+               (let ((v (Reflect/apply (get memory :getFloat64) memory args)))
+                 (setq result
+                   (cond
+                     ((Number/isNaN v) "NaN")
+                     ((= v globalThis.Infinity) "Infinity")
+                     ((= v (- globalThis.Infinity)) "-Infinity")
+                     ((Object/is v (* -1 0)) "-0")
+                     (t v)))))
+              ((= method "setUint16")
+               (setq result (Reflect/apply (get memory :setUint16) memory args)))
+              ((= method "setUint32")
+               (setq result (Reflect/apply (get memory :setUint32) memory args)))
+              ((= method "read")
+               (setq result
+                 (js-call (Buffer/from (Reflect/apply (get memory :read) memory args)) :toString "base64")))
+              ((= method "write")
+               (setq result
+                 (js-call memory :write
+                   (new globalThis.Uint8Array (Buffer/from (aref args 0) "base64"))
+                   (aref args 1))))
+              ((= method "close")
+               (setq result (js-call memory :close)))
+              (t (throw (new globalThis.TypeError "unknown native transport method"))))
+            (send (if (undefined? last-error)
+                    (js-object :id id :result (if (nullish? result) nil result))
+                    (js-object :id id :result (if (nullish? result) nil result) :lastError last-error)))))
+        (catch error
+          (if (and (not (nil? error))
+                   (or (= (value-type error) "object") (= (value-type error) "function"))
+                   (js-call host-failures :has error))
+            (send (js-object :id id :hostError (js-call host-failures :get error)))
+            (send (js-object :id id :error (describe error))))))))
+
+  (setq dispatch-fn dispatch)
+
+  (defasync run-native-node-runner ()
+    (let ((watchdog (new Worker (new globalThis.URL "./native-node-watchdog.mjs" (runner-module-url))
+                      (js-object
+                        :workerData (js-object :parentPID (get globalThis.process :ppid))
+                        :execArgv (js-array)
+                        :env (Object/assign (js-object) (get globalThis.process :env)
+                               (js-object :NODE_OPTIONS "" :BUN_OPTIONS ""))))))
+      (try
+        (await (new globalThis.Promise
+          (lambda (resolve-ready reject-ready)
+            (let ((ready undefined) (fail undefined) (exit undefined) (cleanup undefined))
+              (setq cleanup
+                (lambda ()
+                  (js-call watchdog :off "message" ready)
+                  (js-call watchdog :off "error" fail)
+                  (js-call watchdog :off "exit" exit)))
+              (setq ready
+                (lambda (message)
+                  (when (and (not (nullish? message)) (get message :ready))
+                    (funcall cleanup)
+                    (funcall resolve-ready undefined))))
+              (setq fail
+                (lambda (error) (funcall cleanup) (funcall reject-ready error)))
+              (setq exit
+                (lambda (code)
+                  (funcall fail
+                    (new globalThis.Error (+ "native loader ownership watcher exited before initialization: " code)))))
+              (js-call watchdog :on "message" ready)
+              (js-call watchdog :once "error" fail)
+              (js-call watchdog :once "exit" exit)))))
+        (catch error
+          (await (js-call watchdog :terminate))
+          (throw error)))
+      (js-call watchdog :on "error"
+        (lambda (error)
+          (send (js-object :transportFailure (describe error)))
+          (js-call globalThis.process :exit 1)))
+      (js-call watchdog :unref)
+      (send (js-object :ready t))
+      (try
+        (let ((first (read-packet)))
+          (unless (nil? first)
+            (try
+              (progn
+                (unless (and (= (get first :method) "open")
+                             (Array/isArray (get first :args))
+                             (= (js-length (get first :args)) 3))
+                  (throw (new globalThis.TypeError "native transport requires initialization")))
+                (let* ((args (get first :args))
+                       (signatures (aref args 1)))
+                  (setq has-last-error
+                    (funcall globalThis.Boolean
+                      (and signatures (= (value-type signatures) "object")
+                           (Object/hasOwn signatures "last-error")
+                           (= (get signatures "last-error") 0))))
+                  (setq has-tuple-header
+                    (funcall globalThis.Boolean
+                      (and has-last-error
+                           (= (get signatures "value-error-restore") 1)
+                           (= (get signatures "value-kind") 2)
+                           (= (get signatures "value-length") 2)
+                           (= (get signatures "value-get") 3)
+                           (= (get signatures "value-data") 3))))
+                  (setq has-foreign-token
+                    (funcall globalThis.Boolean
+                      (and has-tuple-header (= (get signatures "value-foreign-token") 2))))
+                  (setq has-collections
+                    (funcall globalThis.Boolean
+                      (and has-tuple-header (= (get signatures "heap-collections") 1))))
+                  (setq has-fast-ops
+                    (funcall globalThis.Boolean
+                      (and has-tuple-header
+                           (= (get signatures "heap-pin") 2)
+                           (= (get signatures "heap-release") 2)
+                           (= (get signatures "value-number") 3)
+                           (= (get signatures "value-string") 2)
+                           (= (get signatures "value-seal") 2)
+                           (= (get signatures "value-array-new") 2)
+                           (= (get signatures "value-array-resize") 3)
+                           (= (get signatures "value-set") 4)
+                           (= (get signatures "value-object-has") 3)
+                           (= (get signatures "value-object-put") 5)
+                           (= (get signatures "value-foreign-new") 3)
+                           (= (get signatures "value-foreign-constructor-set") 3)
+                           (= (get signatures "value-table-put") 4)
+                           (= (get signatures "value-table-add") 3)
+                           (= (get signatures "value-table-has") 3)
+                           (= (get signatures "value-table-delete") 3)
+                           (= (get signatures "value-table-get") 3)
+                           (= (get signatures "value-table-clear") 2)
+                           (= (get signatures "value-table-size") 2))))
+                  (setq memory
+                    (await (openNativeMemory (aref args 0) signatures
+                             (Object/assign (js-object) (aref args 2) (js-object :hostCall host-call)))))
+                  (send (js-object :id (get first :id) :result t))))
+              (catch error
+                (send (js-object :id (get first :id) :error (describe error)))
+                (put globalThis.process :exitCode 1)))
+            (when memory
+              (let ((message (read-packet)))
+                (while (not (nil? message))
+                  (dispatch message)
+                  (setq message (read-packet)))))))
+        (finally
+          (try (when memory (js-call memory :close))
+            (finally (await (js-call watchdog :terminate))))))))
+
+  (js-call (run-native-node-runner) :catch
+    (lambda (error)
+      (js-call (get globalThis.process :stderr) :write
+        (+ (if (and (not (nullish? error)) (= (value-type (get error :stack)) "string"))
+             (get error :stack)
+             (str error))
+           "\n"))
+      (js-call globalThis.process :exit 1))))

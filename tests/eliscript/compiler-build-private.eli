@@ -10,6 +10,7 @@
   (import "../../dist/bootstrap/compiler.mjs" compile-string)
   (defvar fixture undefined)
   (defvar pending undefined)
+  (defvar metadata-read-pending undefined)
   (defconst names (js-array "build-truth" "build-nullish" "build-optional-get" "build-copy-properties"
     "compiler-metadata-utf8-block" "compilerMetadataDigest" "compiler-file-identity"
     "writeCompilerMetadata" "write-owned-compiler-metadata" "seed-javascript-product"))
@@ -59,5 +60,45 @@
                 (js-object :makeUnit (get loaded :makeUnit) :real (js-call loaded :makeUnit)
                   :sourcePath path :sourceSha256 (js-call (js-call (createHash "sha256") :update source) :digest "hex"))))))))))
     (await pending))
-  (defun closeCompilerBuildPrivateUnit () (when fixture (js-call fixture :close) (setq fixture undefined)))
-  (export loadCompilerBuildPrivateUnit closeCompilerBuildPrivateUnit))
+  (defasync loadCompilerMetadataReadUnit ()
+    (unless metadata-read-pending
+      (setq metadata-read-pending (funcall (async ()
+        (await (loadCompilerBuildPrivateUnit))
+        (let* ((path "tools/backends/compiler-metadata.eli")
+               (source (await (readFile (resolve root path) "utf8")))
+               (forms (get (aref (read-string source path) 0) :items))
+               (selected undefined) (index 1))
+          (while (< index (js-length forms))
+            (let* ((form (aref forms index)) (items (get form :items))
+                   (kind (and items (get (aref items 0) :name)))
+                   (name (and items (get (aref items 1) :name))))
+              (when (and (= kind "defasync") (= name "readCompilerMetadata"))
+                (when selected (throw (new globalThis.Error "duplicate readCompilerMetadata function")))
+                (setq selected form)))
+            (setq index (1+ index)))
+          (unless selected
+            (throw (new globalThis.Error "readCompilerMetadata function inventory changed")))
+          (let* ((items (get selected :items))
+                 (parameters (source-part source (aref items 2)))
+                 (body (js-call source :slice (get (get (aref items 3) :span) :start)
+                   (get (get (aref items (1- (js-length items))) :span) :end)))
+                 (module (str
+                   "(import "
+                   (JSON/stringify (get (pathToFileURL (resolve root "tools/backends/compiler-metadata.mjs")) :href))
+                   " createCompilerMetadataDecoder)\n"
+                   "(defun make (open)\n"
+                   "(let ((readCompilerMetadata undefined))\n"
+                   "(setq readCompilerMetadata (async " parameters " " body "))\n"
+                   "readCompilerMetadata))\n(export make)\n"))
+                 (output (resolve (get fixture :directory) "metadata-read-private-unit.mjs")))
+            (await (writeFile output (compile-string module "metadata-read-private-unit.eli")))
+            (let ((loaded (funcall (createRequire output) output)))
+              (js-object :make (get loaded :make)))))))))
+    (await metadata-read-pending))
+  (defun closeCompilerBuildPrivateUnit ()
+    (when fixture
+      (js-call fixture :close)
+      (setq fixture undefined)
+      (setq pending undefined)
+      (setq metadata-read-pending undefined)))
+  (export loadCompilerBuildPrivateUnit loadCompilerMetadataReadUnit closeCompilerBuildPrivateUnit))

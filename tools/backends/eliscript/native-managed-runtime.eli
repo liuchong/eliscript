@@ -180,7 +180,22 @@
                  (configuration (native-copy (native-copy (js-object) options) (js-object :hostModules host-modules)))
                  (_configuration-graph (when module-graph
                    (native-copy configuration (js-object :moduleGraph module-graph :initializeModule false))))
-                 (bridge (createManagedHostCapabilityBridge descriptor configuration))
+                 (base-bridge (createManagedHostCapabilityBridge descriptor configuration))
+                 (pending-extra undefined) (has-pending-extra false)
+                 (bridge (let ((bridge-descriptors (Object/getOwnPropertyDescriptors base-bridge))
+                               (base-attach (get base-bridge :attach)))
+                           (put (get bridge-descriptors :attach) :value
+                             (lambda (handler)
+                               (if (/= (value-type handler) "function")
+                                 (Reflect/apply base-attach base-bridge (js-array handler))
+                                 (Reflect/apply base-attach base-bridge
+                                   (js-array (lambda (name owner arguments-list)
+                                     (if has-pending-extra
+                                       (let ((extra pending-extra))
+                                         (setq has-pending-extra false pending-extra undefined)
+                                         (funcall handler name owner arguments-list extra))
+                                       (funcall handler name owner arguments-list))))))))
+                           (Object/freeze (Object/create (Object/getPrototypeOf base-bridge) bridge-descriptors))))
                  (debug (native-debug-value options lowered))
                  (source-map (when (and (native-truth debug) (= (value-type debug) "object")) (createCompilerDebugMap debug)))
                  (lifecycle (js-object :capabilityBridge bridge)) (owned undefined) (closed false))
@@ -196,7 +211,10 @@
                     (let ((capability (native-optional (get descriptor :hostCapabilities) index)))
                       (unless (native-truth capability) (throw (new globalThis.TypeError "undeclared native host capability")))
                       (if (> (js-length extra) 0)
-                        (js-call bridge :dispatch (get capability :name) heap argv (aref extra 0))
+                        (try
+                          (setq has-pending-extra t pending-extra (aref extra 0))
+                          (js-call bridge :dispatch (get capability :name) heap argv)
+                          (finally (setq has-pending-extra false pending-extra undefined)))
                         (js-call bridge :dispatch (get capability :name) heap argv))))))))
               (catch error
                 (try (js-call bridge :close) (catch ignored nil))

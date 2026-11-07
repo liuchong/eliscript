@@ -1,2 +1,330 @@
-(module capsules.tools.backends.native-node-memory
-  (js* "// Node keeps the original host program in its own process. A dedicated Bun\n// process owns the native library and its linear memory; the wire carries only\n// memory-u32 calls and byte blocks, never compiler or source-language work.\nimport {Worker} from 'node:worker_threads';\nimport {fromErrorData} from './compiler-worker.mjs';\n\nfunction remoteFailure(record) {\n  return fromErrorData(record);\n}\n\nconst nativeMemoryBlockBytes = 65536;\n\nexport async function openNodeNativeMemory(path,signatures,options={}) {\n  const {hostCall,bunExecutable=process.env.BUN??'bun',...configuration}=options;\n  if(typeof bunExecutable!=='string'||!bunExecutable)throw new TypeError('native Node transport requires a Bun executable');\n  const arities=new Map(Object.entries(signatures));\n  let buffer=new SharedArrayBuffer(65536),control=new Int32Array(buffer,0,4),payload=new Uint8Array(buffer,16);\n  let closed=false,depth=0,sequence=0,hostSequence=0,stopped=false,terminal,cachedLastError;\n  const hostFailures=new Map(),decoder=new TextDecoder(),worker=new Worker(new URL('./native-node-worker.mjs',import.meta.url),{\n    workerData:{buffer,bunExecutable},\n    // The source program's preload belongs to its Node host. Replaying that\n    // preload in this transport worker would instantiate the project again.\n    execArgv:[],env:{...process.env,NODE_OPTIONS:''},\n  });\n  try {\n    await new Promise((resolve,reject)=>{\n      const ready=message=>{if(message?.ready){cleanup();resolve();}else if(message?.startupFailure){cleanup();reject(remoteFailure(message.startupFailure));}};\n      const fail=error=>{cleanup();reject(error);};\n      const exit=code=>{cleanup();reject(new Error('native transport exited before initialization: '+code));};\n      const cleanup=()=>{worker.off('message',ready);worker.off('error',fail);worker.off('exit',exit);};\n      worker.on('message',ready);worker.once('error',fail);worker.once('exit',exit);\n    });\n  } catch(error) {await worker.terminate();throw error;}\n  // Worker failures after initialization are also delivered through the shared\n  // channel, which remains observable while this thread is synchronously waiting.\n  worker.on('error',error=>{terminal??=error;});\n  worker.unref();\n\n  function stop() {\n    if(stopped)return;stopped=true;worker.postMessage({shutdown:true});\n  }\n  function receive() {\n    for(;;){\n      if(terminal)throw terminal;\n      let status=Atomics.load(control,0);\n      while(status===0){Atomics.wait(control,0,0);status=Atomics.load(control,0);}\n      if(status===2){\n        const length=Atomics.load(control,1);\n        if(length<1)throw new Error('invalid native transport buffer request');\n        buffer=new SharedArrayBuffer(Math.max(buffer.byteLength*2,length+16));\n        control=new Int32Array(buffer,0,4);payload=new Uint8Array(buffer,16);\n        worker.postMessage({buffer});continue;\n      }\n      if(status!==1)throw new Error('invalid native transport response state');\n      const length=Atomics.load(control,1);\n      if(length<0||length>payload.length)throw new Error('invalid native transport response length');\n      const text=decoder.decode(payload.subarray(0,length));\n      Atomics.store(control,0,0);\n      if(Atomics.load(control,2)!==0)worker.postMessage({consumed:true});\n      const record=JSON.parse(text);\n      if(record?.transportFailure){terminal=remoteFailure(record.transportFailure);throw terminal;}\n      return record;\n    }\n  }\n  function exchange(method,args=[]) {\n    if(stopped)throw new Error('native memory is closed');\n    if(method==='invoke'||method==='open'||method==='close')cachedLastError=undefined;\n    const id=++sequence;depth++;\n    try {\n      worker.postMessage({request:{id,method,args}});\n      for(;;){\n        const message=receive();\n        if(message?.callback!==undefined){\n          const callback=message.callback;\n          cachedLastError=callback.tuple?0:undefined;\n          try {\n            if(typeof hostCall!=='function')throw new TypeError('native artifact requires an explicit host capability dispatcher');\n            const value=callback.tuple!==undefined?hostCall(callback.index,callback.heap,callback.argv,callback.tuple):hostCall(callback.index,callback.heap,callback.argv);\n            if(callback.tuple!==undefined&&value!==null&&typeof value==='object'&&typeof value.fastOp==='string'){\n              cachedLastError=undefined;\n              worker.postMessage({request:{callback:callback.id,fastOp:value}});\n            }else{\n              if(!Number.isInteger(value)||value<0||value>0xffffffff)throw new TypeError('native host capability returned an invalid managed word');\n              cachedLastError=undefined;\n              worker.postMessage({request:{callback:callback.id,result:value}});\n            }\n          } catch(error) {\n            cachedLastError=undefined;\n            const token=++hostSequence;hostFailures.set(token,error);\n            worker.postMessage({request:{callback:callback.id,hostError:token}});\n          }\n          continue;\n        }\n        if(message?.id!==id)throw new Error('native transport response belongs to a different invocation');\n        if(Object.hasOwn(message,'hostError')){\n          if(!hostFailures.has(message.hostError))throw new Error('unknown native host exception identity');\n          const error=hostFailures.get(message.hostError);hostFailures.delete(message.hostError);throw error;\n        }\n        if(message.error)throw remoteFailure(message.error);\n        if(message.lastError!==undefined)cachedLastError=message.lastError;\n        return message.result;\n      }\n    } finally {depth--;if(closed&&depth===0){hostFailures.clear();stop();}}\n  }\n  const active=()=>{if(closed)throw new Error('native memory is closed');};\n  const scalarOffset=offset=>{\n    active();\n    if(!Number.isSafeInteger(offset)||offset<0)throw new RangeError('memory access out of bounds');\n  };\n  const range=(offset,length)=>{\n    active();\n    // Validate in the original Node realm before the JSON wire can coerce an\n    // unsupported value (for example NaN, undefined or a boxed number).\n    if(!Number.isSafeInteger(offset)||!Number.isSafeInteger(length)||offset<0||length<0)\n      throw new RangeError('memory access out of bounds');\n    if(offset+length>exchange('size'))throw new RangeError('memory access out of bounds');\n  };\n  try {exchange('open',[path,signatures,configuration]);}\n  catch(error){closed=true;stop();throw error;}\n  return Object.freeze({\n    get byteLength(){active();return exchange('size');},\n    invoke(name,...args){\n      active();\n      if(!arities.has(name))throw new TypeError('unknown native memory export');\n      if(args.length!==arities.get(name))throw new TypeError('native memory argument count mismatch');\n      for(const value of args)\n        if(!Number.isInteger(value)||value<0||value>0xffffffff)throw new RangeError('memory32 arguments must be u32');\n      if(name==='last-error'&&args.length===0&&cachedLastError!==undefined)return cachedLastError;\n      return exchange('invoke',[name,...args]);\n    },\n    getUint16(offset,endian){\n      scalarOffset(offset);\n      return exchange('getUint16',[offset,Boolean(endian)]);\n    },\n    getUint32(offset,endian){\n      scalarOffset(offset);\n      return exchange('getUint32',[offset,Boolean(endian)]);\n    },\n    getFloat64(offset,endian){\n      scalarOffset(offset);\n      const value=exchange('getFloat64',[offset,Boolean(endian)]);\n      return value==='NaN'?NaN:value==='Infinity'?Infinity:value==='-Infinity'?-Infinity:value==='-0'?-0:value;\n    },\n    setUint16(offset,value,endian){\n      const converted=Math.trunc(value);\n      scalarOffset(offset);\n      exchange('setUint16',[offset,Number.isFinite(converted)?converted|0:0,Boolean(endian)]);\n    },\n    setUint32(offset,value,endian){\n      const converted=Math.trunc(value);\n      scalarOffset(offset);\n      exchange('setUint32',[offset,Number.isFinite(converted)?converted>>>0:0,Boolean(endian)]);\n    },\n    read(offset,length){\n      range(offset,length);\n      const result=new Uint8Array(length);\n      // Keep the complete independent public result, but never a second\n      // complete base64 string/decoded Buffer beside it. The empty operation\n      // still crosses the original remote boundary once.\n      for(let start=0;start<length||start===0;start+=nativeMemoryBlockBytes){\n        const count=Math.min(nativeMemoryBlockBytes,length-start);\n        const encoded=exchange('read',[offset+start,count]);\n        if(typeof encoded!=='string'||encoded.length!==Math.ceil(count/3)*4)\n          throw new Error('native memory read returned an invalid byte count');\n        const bytes=Buffer.from(encoded,'base64');\n        if(bytes.byteLength!==count)throw new Error('native memory read returned an invalid byte count');\n        result.set(bytes,start);\n      }\n      return result;\n    },\n    write(input,offset=0){\n      active();if(!(input instanceof Uint8Array))throw new TypeError('memory write requires Uint8Array');\n      // Snapshot the whole caller view before dispatch, including before the\n      // full range check. Only its cross-process encoding is block bounded.\n      const bytes=Buffer.from(input);range(offset,bytes.byteLength);\n      for(let start=0;start<bytes.byteLength||start===0;start+=nativeMemoryBlockBytes)\n        exchange('write',[bytes.toString('base64',start,Math.min(start+nativeMemoryBlockBytes,bytes.byteLength)),offset+start]);\n    },\n    close(){if(closed)return;try{exchange('close');}finally{closed=true;if(depth===0){hostFailures.clear();stop();}}},\n  });\n}\n"))
+(module tools.backends.native-node-memory
+  (import "node:worker_threads" Worker)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "./compiler-worker.mjs" fromErrorData)
+
+  (defun memory-module-url ()
+    (let* ((stack (str (get (new globalThis.Error) :stack)))
+           (file-match (js-call (new globalThis.RegExp "(file://[^\\s):]+\\.mjs):\\d+:\\d+") :exec stack)))
+      (if file-match
+        (aref file-match 1)
+        (let ((path-match (js-call (new globalThis.RegExp "(/[^\\s():]+\\.mjs):\\d+:\\d+") :exec stack)))
+          (if path-match
+            (get (pathToFileURL (aref path-match 1)) :href)
+            (get (pathToFileURL (resolve "tools/backends/native-node-memory.mjs")) :href))))))
+
+  (defun remoteFailure (record)
+    (fromErrorData record))
+
+  (defconst nativeMemoryBlockBytes 65536)
+
+  (defun copy-configuration (options)
+    (let ((target (js-object)))
+      (unless (nullish? options)
+        (let* ((object (funcall globalThis.Object options))
+               (keys (Reflect/ownKeys object))
+               (index 0))
+          (while (< index (js-length keys))
+            (let ((key (aref keys index)))
+              (unless (or (= key "hostCall") (= key "bunExecutable"))
+                (let ((descriptor (Object/getOwnPropertyDescriptor object key)))
+                  (when (and descriptor (get descriptor :enumerable))
+                    (Object/defineProperty target key
+                      (js-object :value (get object key) :writable t :enumerable t :configurable t))))))
+            (setq index (1+ index)))))
+      target))
+
+  ;; Node keeps the original host program in its own process. A dedicated Bun
+  ;; process owns the native library and its linear memory; the wire carries only
+  ;; memory-u32 calls and byte blocks, never compiler or source-language work.
+  (defasync openNodeNativeMemory (path signatures &rest rest)
+    (let* ((options (if (or (= (js-length rest) 0) (undefined? (aref rest 0))) (js-object) (aref rest 0)))
+           (host-call (get options :hostCall))
+           (bun-executable (if (undefined? (get options :bunExecutable))
+                             (let ((env-bun (get (get globalThis.process :env) :BUN)))
+                               (if (nullish? env-bun) "bun" env-bun))
+                             (get options :bunExecutable)))
+           (configuration (copy-configuration options)))
+      (unless (and (= (value-type bun-executable) "string") (> (js-length bun-executable) 0))
+        (throw (new globalThis.TypeError "native Node transport requires a Bun executable")))
+      (let* ((arities (new globalThis.Map (Object/entries signatures)))
+             (buffer (new globalThis.SharedArrayBuffer 65536))
+             (control (new globalThis.Int32Array buffer 0 4))
+             (payload (new globalThis.Uint8Array buffer 16))
+             (closed false) (depth 0) (sequence 0) (host-sequence 0)
+             (stopped false) (terminal undefined) (cached-last-error undefined)
+             (host-failures (new globalThis.Map))
+             (decoder (new globalThis.TextDecoder))
+             (worker (new Worker (new globalThis.URL "./native-node-worker.mjs" (memory-module-url))
+                       (js-object
+                         :workerData (js-object :buffer buffer :bunExecutable bun-executable)
+                         ;; The source program's preload belongs to its Node host. Replaying that
+                         ;; preload in this transport worker would instantiate the project again.
+                         :execArgv (js-array)
+                         :env (Object/assign (js-object) (get globalThis.process :env)
+                                (js-object :NODE_OPTIONS ""))))))
+        (try
+          (await (new globalThis.Promise
+            (lambda (resolve-ready reject-ready)
+              (let ((ready undefined) (fail undefined) (exit undefined) (cleanup undefined))
+                (setq cleanup
+                  (lambda ()
+                    (js-call worker :off "message" ready)
+                    (js-call worker :off "error" fail)
+                    (js-call worker :off "exit" exit)))
+                (setq ready
+                  (lambda (message)
+                    (cond
+                      ((and (not (nullish? message)) (get message :ready))
+                       (funcall cleanup) (funcall resolve-ready undefined))
+                      ((and (not (nullish? message)) (get message :startupFailure))
+                       (funcall cleanup)
+                       (funcall reject-ready (remoteFailure (get message :startupFailure)))))))
+                (setq fail
+                  (lambda (error) (funcall cleanup) (funcall reject-ready error)))
+                (setq exit
+                  (lambda (code)
+                    (funcall cleanup)
+                    (funcall reject-ready
+                      (new globalThis.Error (+ "native transport exited before initialization: " code)))))
+                (js-call worker :on "message" ready)
+                (js-call worker :once "error" fail)
+                (js-call worker :once "exit" exit)))))
+          (catch error
+            (await (js-call worker :terminate))
+            (throw error)))
+        ;; Worker failures after initialization are also delivered through the shared
+        ;; channel, which remains observable while this thread is synchronously waiting.
+        (js-call worker :on "error"
+          (lambda (error)
+            (when (undefined? terminal) (setq terminal error))))
+        (js-call worker :unref)
+        (let* ((stop (lambda ()
+                 (unless stopped
+                   (setq stopped t)
+                   (js-call worker :postMessage (js-object :shutdown t)))))
+               (receive (lambda ()
+                 (let ((result undefined) (done false))
+                   (while (not done)
+                     (when (not (undefined? terminal)) (throw terminal))
+                     (let ((status (Atomics/load control 0)))
+                       (while (= status 0)
+                         (Atomics/wait control 0 0)
+                         (setq status (Atomics/load control 0)))
+                       (if (= status 2)
+                         (let ((length (Atomics/load control 1)))
+                           (when (< length 1)
+                             (throw (new globalThis.Error "invalid native transport buffer request")))
+                           (setq buffer
+                             (new globalThis.SharedArrayBuffer
+                               (Math/max (* (get buffer :byteLength) 2) (+ length 16))))
+                           (setq control (new globalThis.Int32Array buffer 0 4))
+                           (setq payload (new globalThis.Uint8Array buffer 16))
+                           (js-call worker :postMessage (js-object :buffer buffer)))
+                         (progn
+                           (unless (= status 1)
+                             (throw (new globalThis.Error "invalid native transport response state")))
+                           (let ((length (Atomics/load control 1)))
+                             (when (or (< length 0) (> length (js-length payload)))
+                               (throw (new globalThis.Error "invalid native transport response length")))
+                             (let ((text (js-call decoder :decode (js-call payload :subarray 0 length))))
+                               (Atomics/store control 0 0)
+                               (when (/= (Atomics/load control 2) 0)
+                                 (js-call worker :postMessage (js-object :consumed t)))
+                               (let ((record (JSON/parse text)))
+                                 (when (and (not (nullish? record)) (get record :transportFailure))
+                                   (setq terminal (remoteFailure (get record :transportFailure)))
+                                   (throw terminal))
+                                 (setq result record)
+                                 (setq done t))))))))
+                   result)))
+               (exchange (lambda (method &optional args-arg)
+                 (when stopped (throw (new globalThis.Error "native memory is closed")))
+                 (when (or (= method "invoke") (= method "open") (= method "close"))
+                   (setq cached-last-error undefined))
+                 (setq sequence (1+ sequence))
+                 (let ((id sequence)
+                       (args (if (nullish? args-arg) (js-array) args-arg))
+                       (done false)
+                       (response-result undefined))
+                   (setq depth (1+ depth))
+                   (try
+                     (progn
+                       (js-call worker :postMessage (js-object :request (js-object :id id :method method :args args)))
+                       (while (not done)
+                         (let ((message (funcall receive)))
+                           (if (and (not (nullish? message)) (not (undefined? (get message :callback))))
+                             (let ((callback (get message :callback)))
+                               (setq cached-last-error (if (get callback :tuple) 0 undefined))
+                               (try
+                                 (progn
+                                   (unless (= (value-type host-call) "function")
+                                     (throw (new globalThis.TypeError "native artifact requires an explicit host capability dispatcher")))
+                                   (let ((value (if (not (undefined? (get callback :tuple)))
+                                                  (funcall host-call (get callback :index) (get callback :heap) (get callback :argv) (get callback :tuple))
+                                                  (funcall host-call (get callback :index) (get callback :heap) (get callback :argv)))))
+                                     (if (and (not (undefined? (get callback :tuple)))
+                                              (not (nil? value))
+                                              (= (value-type value) "object")
+                                              (= (value-type (get value :fastOp)) "string"))
+                                       (progn
+                                         (setq cached-last-error undefined)
+                                         (js-call worker :postMessage
+                                           (js-object :request (js-object :callback (get callback :id) :fastOp value))))
+                                       (progn
+                                         (unless (and (Number/isInteger value) (>= value 0) (<= value 4294967295))
+                                           (throw (new globalThis.TypeError "native host capability returned an invalid managed word")))
+                                         (setq cached-last-error undefined)
+                                         (js-call worker :postMessage
+                                           (js-object :request (js-object :callback (get callback :id) :result value)))))))
+                                 (catch error
+                                   (setq cached-last-error undefined)
+                                   (setq host-sequence (1+ host-sequence))
+                                   (let ((token host-sequence))
+                                     (js-call host-failures :set token error)
+                                     (js-call worker :postMessage
+                                       (js-object :request (js-object :callback (get callback :id) :hostError token)))))))
+                             (progn
+                               (unless (and (not (nullish? message)) (= (get message :id) id))
+                                 (throw (new globalThis.Error "native transport response belongs to a different invocation")))
+                               (when (Object/hasOwn message "hostError")
+                                 (unless (js-call host-failures :has (get message :hostError))
+                                   (throw (new globalThis.Error "unknown native host exception identity")))
+                                 (let ((error (js-call host-failures :get (get message :hostError))))
+                                   (js-call host-failures :delete (get message :hostError))
+                                   (throw error)))
+                               (when (get message :error)
+                                 (throw (remoteFailure (get message :error))))
+                               (when (not (undefined? (get message :lastError)))
+                                 (setq cached-last-error (get message :lastError)))
+                               (setq response-result (get message :result))
+                               (setq done t)))))
+                       response-result)
+                     (finally
+                       (setq depth (1- depth))
+                       (when (and closed (= depth 0))
+                         (js-call host-failures :clear)
+                         (funcall stop)))))))
+               (active (lambda ()
+                 (when closed (throw (new globalThis.Error "native memory is closed")))))
+               (scalar-offset (lambda (offset)
+                 (funcall active)
+                 (unless (and (Number/isSafeInteger offset) (>= offset 0))
+                   (throw (new globalThis.RangeError "memory access out of bounds")))))
+               (range (lambda (offset length)
+                 (funcall active)
+                 ;; Validate in the original Node realm before the JSON wire can coerce an
+                 ;; unsupported value (for example NaN, undefined or a boxed number).
+                 (unless (and (Number/isSafeInteger offset) (Number/isSafeInteger length)
+                              (>= offset 0) (>= length 0))
+                   (throw (new globalThis.RangeError "memory access out of bounds")))
+                 (when (> (+ offset length) (funcall exchange "size"))
+                   (throw (new globalThis.RangeError "memory access out of bounds"))))))
+          (try
+            (funcall exchange "open" (js-array path signatures configuration))
+            (catch error
+              (setq closed t)
+              (funcall stop)
+              (throw error)))
+          (let ((handle
+                  (js-object
+                    :invoke (lambda (name &rest args)
+                      (funcall active)
+                      (unless (js-call arities :has name)
+                        (throw (new globalThis.TypeError "unknown native memory export")))
+                      (unless (= (js-length args) (js-call arities :get name))
+                        (throw (new globalThis.TypeError "native memory argument count mismatch")))
+                      (let ((index 0))
+                        (while (< index (js-length args))
+                          (let ((value (aref args index)))
+                            (unless (and (Number/isInteger value) (>= value 0) (<= value 4294967295))
+                              (throw (new globalThis.RangeError "memory32 arguments must be u32"))))
+                          (setq index (1+ index))))
+                      (if (and (= name "last-error") (= (js-length args) 0) (not (undefined? cached-last-error)))
+                        cached-last-error
+                        (funcall exchange "invoke" (js-call (js-array name) :concat args))))
+                    :getUint16 (lambda (offset endian)
+                      (funcall scalar-offset offset)
+                      (funcall exchange "getUint16" (js-array offset (funcall globalThis.Boolean endian))))
+                    :getUint32 (lambda (offset endian)
+                      (funcall scalar-offset offset)
+                      (funcall exchange "getUint32" (js-array offset (funcall globalThis.Boolean endian))))
+                    :getFloat64 (lambda (offset endian)
+                      (funcall scalar-offset offset)
+                      (let ((value (funcall exchange "getFloat64" (js-array offset (funcall globalThis.Boolean endian)))))
+                        (cond
+                          ((= value "NaN") globalThis.NaN)
+                          ((= value "Infinity") globalThis.Infinity)
+                          ((= value "-Infinity") (- globalThis.Infinity))
+                          ((= value "-0") (* -1 0))
+                          (t value))))
+                    :setUint16 (lambda (offset value endian)
+                      (let ((converted (Math/trunc value)))
+                        (funcall scalar-offset offset)
+                        (funcall exchange "setUint16"
+                          (js-array offset (if (Number/isFinite converted) (bit-or converted 0) 0)
+                            (funcall globalThis.Boolean endian)))
+                        undefined))
+                    :setUint32 (lambda (offset value endian)
+                      (let ((converted (Math/trunc value)))
+                        (funcall scalar-offset offset)
+                        (funcall exchange "setUint32"
+                          (js-array offset (if (Number/isFinite converted) (unsigned-bit-shift-right converted 0) 0)
+                            (funcall globalThis.Boolean endian)))
+                        undefined))
+                    :read (lambda (offset length)
+                      (funcall range offset length)
+                      (let ((result (new globalThis.Uint8Array length))
+                            (start 0))
+                        ;; Keep the complete independent public result, but never a second
+                        ;; complete base64 string/decoded Buffer beside it. The empty operation
+                        ;; still crosses the original remote boundary once.
+                        (while (or (< start length) (= start 0))
+                          (let* ((count (Math/min nativeMemoryBlockBytes (- length start)))
+                                 (encoded (funcall exchange "read" (js-array (+ offset start) count))))
+                            (unless (and (= (value-type encoded) "string")
+                                         (= (js-length encoded) (* (Math/ceil (/ count 3)) 4)))
+                              (throw (new globalThis.Error "native memory read returned an invalid byte count")))
+                            (let ((bytes (Buffer/from encoded "base64")))
+                              (unless (= (get bytes :byteLength) count)
+                                (throw (new globalThis.Error "native memory read returned an invalid byte count")))
+                              (js-call result :set bytes start)))
+                          (setq start (+ start nativeMemoryBlockBytes)))
+                        result))
+                    :write (lambda (input &rest write-rest)
+                      (let ((offset (if (or (= (js-length write-rest) 0) (undefined? (aref write-rest 0)))
+                                      0
+                                      (aref write-rest 0))))
+                        (funcall active)
+                        (unless (js-call globalThis.Uint8Array (get globalThis.Symbol :hasInstance) input)
+                          (throw (new globalThis.TypeError "memory write requires Uint8Array")))
+                        ;; Snapshot the whole caller view before dispatch, including before the
+                        ;; full range check. Only its cross-process encoding is block bounded.
+                        (let ((bytes (Buffer/from input))
+                              (start 0))
+                          (funcall range offset (get bytes :byteLength))
+                          (while (or (< start (get bytes :byteLength)) (= start 0))
+                            (funcall exchange "write"
+                              (js-array
+                                (js-call bytes :toString "base64" start
+                                  (Math/min (+ start nativeMemoryBlockBytes) (get bytes :byteLength)))
+                                (+ offset start)))
+                            (setq start (+ start nativeMemoryBlockBytes)))
+                          undefined)))
+                    :close (lambda ()
+                      (unless closed
+                        (try
+                          (funcall exchange "close")
+                          (finally
+                            (setq closed t)
+                            (when (= depth 0)
+                              (js-call host-failures :clear)
+                              (funcall stop))))
+                        undefined)))))
+            (Object/defineProperty handle "byteLength"
+              (js-object :get (lambda () (funcall active) (funcall exchange "size"))
+                :enumerable t :configurable t))
+            (Object/freeze handle))))))
+
+  (export openNodeNativeMemory))

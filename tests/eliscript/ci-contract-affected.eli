@@ -16,11 +16,9 @@
       (when (= (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD) "1")
         (js-call assert :strictEqual (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD_PATH)
           (resolve root "tools/testing/fixture-environment.mjs"))
-        (js-call expected :push "--preload" (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD_PATH))
-        (when (= (resolve root file) (resolve root "tests/wasm-managed-str.test.mjs"))
-          (js-call expected :push "--preload"
-            (resolve root "tests/helpers/managed-fixture-repairs-install.mjs"))))
-      (when (= (resolve root file) (resolve root "tests/wasm-managed-array-sort.test.mjs"))
+        (js-call expected :push "--preload" (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD_PATH)))
+      (when (or (= (resolve root file) (resolve root "tests/wasm-managed-str.test.mjs"))
+                (= (resolve root file) (resolve root "tests/wasm-managed-array-sort.test.mjs")))
         (js-call expected :push "--preload"
           (resolve root "tests/helpers/managed-fixture-repairs-install.mjs")))
       (js-call expected :push "--timeout" "300000" file)

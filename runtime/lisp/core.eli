@@ -28,7 +28,7 @@
   (defun el-make-symbol (name) (js-object :kind "symbol" :name name :uninterned t))
 
 
-  (defun el-typeof (x) (js* "typeof x"))
+  (defun el-typeof (x) (value-type x))
 
   (defun el-symbol? (x)
     (or (nil? x) (eq x t)
@@ -188,9 +188,9 @@
 
   (defun el-record? (x) (and (not (nullish? x)) (= (get x :kind) "record")))
 
-  (defun el-string? (x) (= (js* "typeof x") "string"))
+  (defun el-string? (x) (= (value-type x) "string"))
 
-  (defun el-function? (x) (= (js* "typeof x") "function"))
+  (defun el-function? (x) (= (value-type x) "function"))
 
   (defun el-hash-table? (x) (and (not (nullish? x)) (= (get x :kind) "hash-table")))
 
@@ -199,8 +199,8 @@
   (defun el-kind (x)
     (cond ((nil? x) "nil")
           ((eq x t) "t")
-          ((= (js* "typeof x") "object") (or (get x :kind) "object"))
-          (t (js* "typeof x"))))
+          ((= (value-type x) "object") (or (get x :kind) "object"))
+          (t (value-type x))))
 
 
   ;; ------------------------------------------------------------------
@@ -346,17 +346,17 @@
 
   (defun el-float-box? (x) (and (not (nullish? x)) (= (get x :kind) float-tag)))
 
-  (defun el-number? (x) (or (= (js* "typeof x") "number") (el-float-box? x)))
+  (defun el-number? (x) (or (= (value-type x) "number") (el-float-box? x)))
 
   (defun el-num (x)
-    (cond ((= (js* "typeof x") "number") x)
+    (cond ((= (value-type x) "number") x)
           ((el-float-box? x) (get x :value))
           (t (el-signal "wrong-type-argument" (el-intern "number-or-marker-p") x))))
 
   (defun el-float? (x)
-    (or (el-float-box? x) (and (= (js* "typeof x") "number") (not (Number/isInteger x)))))
+    (or (el-float-box? x) (and (= (value-type x) "number") (not (Number/isInteger x)))))
 
-  (defun el-integer? (x) (and (= (js* "typeof x") "number") (Number/isInteger x)))
+  (defun el-integer? (x) (and (= (value-type x) "number") (Number/isInteger x)))
 
   (defun el-make-float (n)
     (if (Number/isInteger n) (js-object :kind float-tag :value n) n))
@@ -366,7 +366,7 @@
 
 
   (defun el-arith-2 (name a b)
-    (if (and (= (js* "typeof a") "number") (= (js* "typeof b") "number"))
+    (if (and (= (value-type a) "number") (= (value-type b) "number"))
         (let ((r (cond ((= name "+") (+ a b)) ((= name "-") (- a b)) (t (* a b)))))
           (if (and (or (not (Number/isInteger a)) (not (Number/isInteger b)))
                    (Number/isInteger r))
@@ -993,7 +993,7 @@
 
   (defun el-eq (a b)
     (cond ((eq a b) t)
-          ((and (= (js* "typeof a") "number") (= (js* "typeof b") "number")) (el-bool (= a b)))
+          ((and (= (value-type a) "number") (= (value-type b) "number")) (el-bool (= a b)))
           (t nil)))
 
 
@@ -1014,7 +1014,7 @@
       ((> depth 100000) false)
       ((or (nil? a) (nil? b)) false)
       ((and (el-number? a) (el-number? b)) (and (eq (el-float? a) (el-float? b)) (= (el-num a) (el-num b))))
-      ((or (not (= (js* "typeof a") "object")) (not (= (js* "typeof b") "object"))) false)
+      ((or (not (= (value-type a) "object")) (not (= (value-type b) "object"))) false)
       (t
         (let ((kind (get a :kind)))
           (cond
@@ -1048,15 +1048,15 @@
       (cond
         ((nil? key) "n:")
         ((eq key t) "t:")
-        ((= (js* "typeof key") "number") key)
+        ((= (value-type key) "number") key)
         ((el-float-box? key) (str "f:" (get key :value)))
-        ((= (js* "typeof key") "string") (if (= test "eq") (str "s:" key) (str "s:" key)))
+        ((= (value-type key) "string") (if (= test "eq") (str "s:" key) (str "s:" key)))
         ((= test "equal")
           (let ((kind (get key :kind)))
             (if (or (= kind "cons") (= kind "vector") (= kind "record"))
                 (str "c:" (el-prin1-string key t))
               (if (or (= kind "symbol") (= kind "keyword") (= kind "hash-table") (= kind "buffer")
-                      (= (js* "typeof key") "function"))
+                      (= (value-type key) "function"))
                   key
                 (el-value-hash-key key)))))
         (t key))))
@@ -1106,8 +1106,8 @@
     ;; bool vectors and the persistent collections).
     (cond
       ((nil? seq) (js-array))
-      ((= (js* "typeof seq") "string") (el-string-codes seq))
-      ((= (js* "typeof seq") "object")
+      ((= (value-type seq) "string") (el-string-codes seq))
+      ((= (value-type seq) "object")
         (let ((kind (get seq :kind)))
           (cond
             ((= kind "cons") (el-list-to-array seq))
@@ -1126,7 +1126,7 @@
   (defun el-length (seq)
     (cond
       ((nil? seq) 0)
-      ((= (js* "typeof seq") "string") (el-string-length seq))
+      ((= (value-type seq) "string") (el-string-length seq))
       ((el-cons? seq)
         (let ((count 0) (cursor seq))
           (while (el-cons? cursor) (setq count (1+ count)) (setq cursor (get cursor :cdr)))
@@ -1140,7 +1140,7 @@
   (defun el-aref (array index)
     (let ((i (el-int-check index)))
       (cond
-        ((= (js* "typeof array") "string") (el-string-ref array i))
+        ((= (value-type array) "string") (el-string-ref array i))
         ((or (el-vector? array) (el-record? array))
           (let ((items (get array :items)))
             (when (or (< i 0) (>= i (js-length items))) (el-signal "args-out-of-range" array index))
@@ -1162,7 +1162,7 @@
   (defun el-copy-sequence (seq)
     (cond
       ((nil? seq) nil)
-      ((= (js* "typeof seq") "string") seq)
+      ((= (value-type seq) "string") seq)
       ((el-cons? seq) (el-list-from (el-list-to-array seq)))
       ((el-vector? seq) (el-vector (js-call (get seq :items) :slice)))
       ((el-record? seq) (js-object :kind "record" :items (js-call (get seq :items) :slice)))
@@ -1353,7 +1353,7 @@
 
 
   (defun el-persistent? (x)
-    (and (not (nullish? x)) (= (js* "typeof x") "object")
+    (and (not (nullish? x)) (= (value-type x) "object")
          (or (js-call sequence-kinds :includes (get x :kind)) (js-call map-kinds :includes (get x :kind))
              (= (get x :kind) "lazy-seq"))))
 
@@ -1363,7 +1363,7 @@
       ((eq a b) t)
       ((or (nil? a) (nil? b)) false)
       ((and (el-number? a) (el-number? b)) (= (el-num a) (el-num b)))
-      ((or (not (= (js* "typeof a") "object")) (not (= (js* "typeof b") "object"))) (and (= a b) t))
+      ((or (not (= (value-type a) "object")) (not (= (value-type b) "object"))) (and (= a b) t))
       (t
         (let ((ka (get a :kind)) (kb (get b :kind)))
           (cond
