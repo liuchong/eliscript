@@ -2,7 +2,6 @@
   (import "node:fs/promises" readFile writeFile)
   (import "node:fs" readFileSync)
   (import "node:path" resolve)
-  (import "node:url" fileURLToPath)
   (import "../../backends/build.mjs" root)
   (import "../render-workflow.mjs" renderToolchainSteps validateCompatibilityMatrix)
 
@@ -84,7 +83,7 @@
       (js-call (get globalThis.process :stdout) :write (+ release-workflow-path " unchanged\n"))))
 
   (when (and (aref (get globalThis.process :argv) 1)
-             (= (resolve (aref (get globalThis.process :argv) 1)) (fileURLToPath (js* "import.meta.url"))))
+             (= (resolve (aref (get globalThis.process :argv) 1)) (resolve root "tools/ci/dist/compiler-release.mjs")))
     (js-call (main (js-call (get globalThis.process :argv) :slice 2)) :catch
       (lambda (error)
         (js-call (get globalThis.process :stderr) :write (+ (get error :message) "\n"))
