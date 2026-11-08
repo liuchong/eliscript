@@ -191,14 +191,14 @@
            (attach (lambda (value)
              (if (= (js-length frames) 0)
                (progn
-                 (when has-root (funcall invalid))
+                 (when (= has-root t) (funcall invalid))
                  (setq root value)
                  (setq has-root t))
                (let ((frame (aref frames (1- (js-length frames)))))
-                 (if (get frame :array)
+                 (if (= (get frame :array) t)
                    (js-call (get frame :value) :push value)
                    (progn
-                     (unless (get frame :hasKey) (funcall invalid))
+                     (unless (= (get frame :hasKey) t) (funcall invalid))
                      (if (= (get frame :key) "__proto__")
                        (Object/defineProperty (get frame :value) (get frame :key)
                          (js-object :value value :writable t :enumerable t :configurable t))
@@ -208,18 +208,18 @@
       (let ((decoder
               (js-object
                 :append (lambda (events)
-                  (when (or (not (Array/isArray events)) (= (js-length events) 0) (> (js-length events) 256))
+                  (when (or (not (= (Array/isArray events) t)) (= (js-length events) 0) (> (js-length events) 256))
                     (funcall invalid))
                   (let ((idx 0) (len (js-length events)))
                     (while (< idx len)
                       (let ((event (aref events idx)))
-                        (unless (Array/isArray event) (funcall invalid))
+                        (unless (= (Array/isArray event) t) (funcall invalid))
                         (let ((kind (aref event 0))
                               (value (aref event 1))
                               (active (aref frames (1- (js-length frames)))))
-                          (if (and (not (undefined? active)) (get active :string))
+                          (if (and (not (undefined? active)) (= (get active :string) t))
                             (cond
-                              ((and (= kind "string-chunk") (= (js-length event) 2) (= (value-type value) "string")
+                              ((and (= kind "string-chunk") (= (js-length event) 2) (= (session-value-type value) "string")
                                     (> (js-length value) 0) (<= (js-length value) 8192)
                                     (<= (+ (get active :units) (js-length value)) (get active :length)))
                                (js-call (get active :parts) :push value)
@@ -231,60 +231,65 @@
                                  (funcall attach text)))
                               (t (funcall invalid)))
                             (cond
-                              ((and string-chunks (= kind "string") (= (js-length event) 2)
-                                    (Number/isSafeInteger value) (> value 0))
+                              ((and (= string-chunks t) (= kind "string") (= (js-length event) 2)
+                                    (= (Number/isSafeInteger value) t) (> value 0))
                                ;; Complete only after the announced UTF16 length is received. The
                                ;; parent key remains pending until this single scalar is attached.
                                (js-call frames :push (js-object :string t :length value :units 0 :parts (js-array))))
                               ((and (or (= kind "object") (= kind "array"))
-                                    (if graph
-                                      (and (= (js-length event) 2) (Number/isSafeInteger value)
-                                           (= value (1+ (js-length references))))
-                                      (= (js-length event) 1)))
+                                    (or (and (= graph t) (= (js-length event) 2)
+                                             (= (Number/isSafeInteger value) t)
+                                             (= value (1+ (js-length references))))
+                                        (and (not (= graph t)) (= (js-length event) 1))))
                                (let ((container (if (= kind "array") (js-array) (js-object))))
-                                 (when graph
+                                 (when (= graph t)
                                    (js-call references :push container)
                                    (js-call active-references :add value))
                                  (funcall attach container)
                                  (js-call frames :push
                                    (js-object :value container :array (= kind "array") :hasKey false
-                                     :reference (if graph value undefined)))))
-                              ((and graph (= kind "reference") (= (js-length event) 2))
-                               (when (or (not (Number/isSafeInteger value)) (< value 1)
+                                     :reference (if (= graph t) value undefined)))))
+                              ((and (= graph t) (= kind "reference") (= (js-length event) 2))
+                               (when (or (not (= (Number/isSafeInteger value) t)) (< value 1)
                                          (> value (js-length references))
-                                         (js-call active-references :has value))
+                                         (= (js-call active-references :has value) t))
                                  (funcall invalid))
                                (funcall attach (aref references (1- value))))
-                              ((and (= kind "key") (= (js-length event) 2) (= (value-type value) "string"))
+                              ((and (= kind "key") (= (js-length event) 2) (= (session-value-type value) "string"))
                                (let ((frame (aref frames (1- (js-length frames)))))
-                                 (when (or (undefined? frame) (get frame :array) (get frame :hasKey))
+                                 (when (or (undefined? frame) (= (get frame :array) t) (= (get frame :hasKey) t))
                                    (funcall invalid))
                                  (put frame :key value)
                                  (put frame :hasKey t)))
-                              ((and (= kind "value") (= (js-length event) 2)
-                                    (or (nil? value) (= (value-type value) "string")
-                                        (= (value-type value) "number") (= (value-type value) "boolean")))
-                               (funcall attach value))
+                              ((and (= kind "value") (= (js-length event) 2))
+                               (if (nil? value)
+                                 (funcall attach value)
+                                 (let ((vtype (session-value-type value)))
+                                   (if (or (= vtype "string") (= vtype "number") (= vtype "boolean"))
+                                     (funcall attach value)
+                                     (funcall invalid)))))
                               ((and (= kind "array-values") (= (js-length event) 2))
                                (let ((frame (aref frames (1- (js-length frames)))))
-                                 (when (or (undefined? frame) (not (get frame :array))
-                                           (not (Array/isArray value)) (< (js-length value) 1) (> (js-length value) 256)
-                                           (js-call value :some
-                                             (lambda (item)
-                                               (and (not (nil? item))
-                                                    (or (/= (value-type item) "number") (not (Number/isFinite item)))))))
+                                 (when (or (undefined? frame) (not (= (get frame :array) t))
+                                           (not (= (Array/isArray value) t)) (< (js-length value) 1) (> (js-length value) 256))
                                    (funcall invalid))
                                  ;; Bounded scalar runs preserve every element, including IEEE -0.
                                  ;; Validate the whole run before appending any of its values.
-                                 (let ((v-idx 0) (v-len (js-length value)))
+                                 (let ((v-idx 0) (v-len (js-length value)) (target (get frame :value)))
                                    (while (< v-idx v-len)
-                                     (js-call (get frame :value) :push (aref value v-idx))
+                                     (let ((item (aref value v-idx)))
+                                       (unless (or (nil? item) (= (Number/isFinite item) t))
+                                         (funcall invalid)))
+                                     (setq v-idx (1+ v-idx)))
+                                   (setq v-idx 0)
+                                   (while (< v-idx v-len)
+                                     (js-call target :push (aref value v-idx))
                                      (setq v-idx (1+ v-idx))))))
                               ((and (= kind "end") (= (js-length event) 1))
                                (let ((frame (js-call frames :pop)))
-                                 (when (or (undefined? frame) (get frame :hasKey))
+                                 (when (or (undefined? frame) (= (get frame :hasKey) t))
                                    (funcall invalid))
-                                 (when graph
+                                 (when (= graph t)
                                    (js-call active-references :delete (get frame :reference)))))
                               (t (funcall invalid))))))
                       (setq idx (1+ idx)))))
@@ -294,7 +299,7 @@
                   (let ((idx 0) (len (js-length frames)))
                     (while (< idx len)
                       (let ((frame (aref frames idx)))
-                        (when (get frame :string)
+                        (when (= (get frame :string) t)
                           (put frame :parts undefined)))
                       (setq idx (1+ idx))))
                   (put frames :length 0)
@@ -303,21 +308,21 @@
                   (setq root undefined)
                   (setq has-root false)))))
         (Object/defineProperty decoder "complete"
-          (js-object :get (lambda () (and has-root (= (js-length frames) 0)))
+          (js-object :get (lambda () (and (= has-root t) (= (js-length frames) 0)))
             :enumerable t :configurable t))
         (Object/defineProperty decoder "value"
           (js-object :get (lambda ()
-                            (unless (and has-root (= (js-length frames) 0))
+                            (unless (and (= has-root t) (= (js-length frames) 0))
                               (funcall invalid))
                             root)
             :enumerable t :configurable t))
         decoder)))
 
   (defun encode-request (request)
-    (if (= (value-type request) "string")
+    (if (= (session-value-type request) "string")
       request
       (let ((text (JSON/stringify request)))
-        (unless (= (value-type text) "string")
+        (unless (= (session-value-type text) "string")
           (throw (new globalThis.TypeError "compiler request must contain JSON data")))
         text)))
 
@@ -325,12 +330,12 @@
     ;; Bound the number of live token strings while retaining exact wire bytes.
     ;; Large binaries/typed IR otherwise keep millions of tiny strings and an
     ;; equally large pointer array until the final join.
-    (let* ((chunks (if consume undefined (js-array)))
+    (let* ((chunks (if (nullish? consume) (js-array) undefined))
            (ancestors (new globalThis.Set))
            (frames (js-array))
            (quoted-strings (new globalThis.Map))
            (short-quotes (new globalThis.Map))
-           (emit (if consume consume (lambda (text) (js-call chunks :push text))))
+           (emit (if (nullish? consume) (lambda (text) (js-call chunks :push text)) consume))
            (large-token-units 1024)
            ;; Quoting is a discardable primitive-value cache, not an identity table.
            ;; Getters can produce arbitrarily many distinct long strings during a
@@ -427,27 +432,27 @@
                     (funcall push
                       (if (and (= value 0) (< (/ 1 value) 0))
                         "-0"
-                        (if (Number/isFinite value) (str value) "null")))
+                        (if (= (Number/isFinite value) t) (str value) "null")))
                     t)
                    ((= kind "string")
                     (funcall push-quoted value)
                     t)
                    ((= kind "boolean")
-                    (funcall push (if value "true" "false"))
+                    (funcall push (if (= value t) "true" "false"))
                     t)
                    ((= kind "bigint")
-                    (unless metadata
+                    (unless (= metadata t)
                       (throw (new globalThis.TypeError "compiler IR cannot contain BigInt values")))
                     (funcall push-quoted (str value))
                     t)
-                   ((/= kind "object")
-                    (when array-element (funcall push "null"))
+                   ((not (= kind "object"))
+                    (when (= array-element t) (funcall push "null"))
                     false)
                    (t
-                    (when (js-call ancestors :has value)
+                    (when (= (js-call ancestors :has value) t)
                       (throw (new globalThis.TypeError "compiler IR cannot contain cycles")))
                     (js-call ancestors :add value)
-                    (if (Array/isArray value)
+                    (if (= (Array/isArray value) t)
                       (progn
                         (funcall push "[")
                         (js-call frames :push (js-object :value value :array t :index 0)))
@@ -456,14 +461,14 @@
                         (js-call frames :push
                           (js-object :value value :array false :keys (Object/keys value) :index 0 :first t))))
                     t)))))))
-      (unless (funcall append program false)
+      (unless (= (funcall append program false) t)
         (throw (new globalThis.TypeError "compiler IR must be JSON data")))
       ;; Keep traversal state on the data stack. Complete compiler IR can exceed
       ;; the host call-stack depth, and shared subtrees must remain legal once
       ;; their previous traversal has completed.
       (while (> (js-length frames) 0)
         (let ((frame (aref frames (1- (js-length frames)))))
-          (if (get frame :array)
+          (if (= (get frame :array) t)
             (if (< (get frame :index) (js-length (get frame :value)))
               (let ((index (get frame :index)))
                 (put frame :index (1+ index))
@@ -480,7 +485,7 @@
                      (item-kind (session-value-type item)))
                 (put frame :index (1+ index))
                 (unless (or (undefined? item) (= item-kind "function") (= item-kind "symbol"))
-                  (unless (get frame :first) (funcall push ","))
+                  (unless (= (get frame :first) t) (funcall push ","))
                   (put frame :first false)
                   (funcall push-quoted key)
                   (funcall push ":")
@@ -507,33 +512,34 @@
   ;; giant string. Consumption is synchronous, so getters and shared subtrees
   ;; have the same visit order as encodeCompilerMetadata.
   (defun forEachCompilerMetadataChunk (value consume)
-    (unless (= (value-type consume) "function")
+    (unless (= (session-value-type consume) "function")
       (throw (new globalThis.TypeError "compiler metadata chunk consumer must be a function")))
     (encode-compiler-data value t consume))
 
   ;; The IR wire differs from metadata only in rejecting BigInt. Archive writers
   ;; use this exact codec without materializing an additional complete document.
   (defun forEachCompilerIRChunk (value consume)
-    (unless (= (value-type consume) "function")
+    (unless (= (session-value-type consume) "function")
       (throw (new globalThis.TypeError "compiler IR chunk consumer must be a function")))
     (encode-compiler-data value false consume))
 
   ;; Like the response identity index, necessary object identities are split
   ;; across finite host tables. The index lives only for one private handoff;
   ;; its keys are already owned by that handoff or the compiler's source cache.
-  (defun compiler-owned-data-memo (&rest rest-args)
+  (defun compilerOwnedDataMemo (&rest rest-args)
     (let* ((segment-size-arg (aref rest-args 0))
            (segment-size (if (undefined? segment-size-arg) 1048576 segment-size-arg)))
-      (unless (and (Number/isSafeInteger segment-size) (>= segment-size 1) (<= segment-size 1048576))
+      (unless (and (= (Number/isSafeInteger segment-size) t)
+                   (= (Math/min (Math/max segment-size 1) 1048576) segment-size))
         (throw (new globalThis.TypeError "invalid owned compiler memo segment size")))
       (let* ((segments (js-array (new globalThis.Map)))
              (find (lambda (key)
-               (let ((index (1- (js-length segments)))
+               (let ((index (+ (js-length segments) -1))
                      (found undefined))
-                 (while (and (>= index 0) (undefined? found))
-                   (when (js-call (aref segments index) :has key)
+                 (while (and (not (= index -1)) (undefined? found))
+                   (when (= (js-call (aref segments index) :has key) t)
                      (setq found (aref segments index)))
-                   (setq index (1- index)))
+                   (setq index (+ index -1)))
                  found))))
         (js-object
           :segments segments
@@ -544,8 +550,8 @@
           :set (lambda (key value)
                  (let ((segment (funcall find key)))
                    (when (undefined? segment)
-                     (setq segment (aref segments (1- (js-length segments))))
-                     (when (>= (get segment :size) segment-size)
+                     (setq segment (aref segments (+ (js-length segments) -1)))
+                     (when (= (Math/max (get segment :size) segment-size) (get segment :size))
                        (setq segment (new globalThis.Map))
                        (js-call segments :push segment)))
                    (js-call segment :set key value)))))))
@@ -554,29 +560,32 @@
   ;; the public wire's values without serializing and parsing the entire graph.
   ;; Canonical subgraphs keep their storage; only changed nodes and their parent
   ;; paths are copied. In particular, shared source spans are never mutated.
-  (defun owned-compiler-data-normalizer (&rest rest-args)
+  (defun ownedCompilerDataNormalizer (&rest rest-args)
     (let* ((options-arg (aref rest-args 0))
            (options (if (undefined? options-arg) (js-object) options-arg))
-           (segment-size (session-default (get options :segmentSize) 1048576))
-           (complete-limit (session-default (get options :completeLimit) 65536)))
-      (unless (and (Number/isSafeInteger complete-limit) (>= complete-limit 1) (<= complete-limit 65536))
+           (segment-size-opt (get options :segmentSize))
+           (complete-limit-opt (get options :completeLimit))
+           (segment-size (if (undefined? segment-size-opt) 1048576 segment-size-opt))
+           (complete-limit (if (undefined? complete-limit-opt) 65536 complete-limit-opt)))
+      (unless (and (= (Number/isSafeInteger complete-limit) t)
+                   (= (Math/min (Math/max complete-limit 1) 65536) complete-limit))
         (throw (new globalThis.TypeError "invalid owned compiler completion cache size")))
       (let* ((omitted (funcall globalThis.Symbol "omitted compiler field"))
              (active (new globalThis.Set))
              (complete (new globalThis.Set))
-             (replacements (compiler-owned-data-memo segment-size))
-             (borrowed-copies (compiler-owned-data-memo segment-size))
+             (replacements (compilerOwnedDataMemo segment-size))
+             (borrowed-copies (compilerOwnedDataMemo segment-size))
              (frames (js-array))
              (remember (lambda (value)
                ;; This only avoids walking unchanged subgraphs again; forgetting a hit is
                ;; safe. Changed results and detached borrowed edges have persistent memos.
-               (when (>= (get complete :size) complete-limit)
+               (when (= (Math/max (get complete :size) complete-limit) (get complete :size))
                  (js-call complete :clear))
                (js-call complete :add value)))
              (resolved (lambda (value borrowed)
-               (if borrowed
+               (if (= borrowed t)
                  (js-call borrowed-copies :get value)
-                 (if (js-call replacements :has value)
+                 (if (= (js-call replacements :has value) t)
                    (js-call replacements :get value)
                    value))))
              (begin (lambda (value &optional borrowed-arg)
@@ -587,13 +596,13 @@
                  (js-call active :add value)
                  (js-call frames :push
                    (js-object :value value :array array :borrowed borrowed
-                     :keys (if array undefined keys) :index 0 :changes undefined
-                     :copy (or borrowed
-                               (/= (js-length own-keys) (if array (1+ (js-length value)) (js-length keys)))
+                     :keys (if (= array t) undefined keys) :index 0 :changes undefined
+                     :copy (or (= borrowed t)
+                               (not (= (js-length own-keys) (if (= array t) (1+ (js-length value)) (js-length keys))))
                                (not (eq (Object/getPrototypeOf value)
-                                        (if array (get globalThis.Array :prototype) (get globalThis.Object :prototype))))))))))
+                                        (if (= array t) (get globalThis.Array :prototype) (get globalThis.Object :prototype))))))))))
              (change (lambda (frame key before after)
-               (unless (Object/is before after)
+               (unless (= (Object/is before after) t)
                  (when (undefined? (get frame :changes))
                    (put frame :changes (new globalThis.Map)))
                  (js-call (get frame :changes) :set key after)
@@ -604,25 +613,25 @@
                    ((= kind "bigint")
                     (throw (new globalThis.TypeError "compiler IR cannot contain BigInt values")))
                    ((= kind "number")
-                    (if (Number/isFinite value) value nil))
+                    (if (= (Number/isFinite value) t) value nil))
                    ((or (undefined? value) (= kind "function") (= kind "symbol"))
-                    (if array nil omitted))
+                    (if (= array t) nil omitted))
                    (t value))))))
         (lambda (root)
-          (if (or (nil? root) (/= (value-type root) "object"))
+          (if (or (nil? root) (not (= (value-type root) "object")))
             (let ((result (funcall scalar root false)))
               (when (eq result omitted)
                 (throw (new globalThis.TypeError "compiler IR must be JSON data")))
               result)
             (progn
               (funcall begin root false)
-              (while (> (js-length frames) 0)
-                (let* ((frame (aref frames (1- (js-length frames))))
-                       (count (if (get frame :array)
+              (while (not (= (js-length frames) 0))
+                (let* ((frame (aref frames (+ (js-length frames) -1)))
+                       (count (if (= (get frame :array) t)
                                 (js-length (get frame :value))
                                 (js-length (get frame :keys)))))
                   (cond
-                    ((get frame :child)
+                    ((not (undefined? (get frame :child)))
                      (let* ((child (get frame :child))
                             (key (get child :key))
                             (value (get child :value))
@@ -635,73 +644,74 @@
                        ;; on fresh records; copying their entire typed parent paths would
                        ;; duplicate almost the whole runtime for no isolation benefit.
                        (let ((desc (Object/getOwnPropertyDescriptor (get frame :value) key)))
-                         (if (and borrowed (not (get frame :borrowed)) desc (get desc :writable))
+                         (if (and (= borrowed t) (not (= (get frame :borrowed) t))
+                                  (not (undefined? desc)) (= (get desc :writable) t))
                            (progn
                              (Object/defineProperty (get frame :value) key (js-object :value result))
                              (put frame :detached t))
                            (funcall change frame key value result)))))
-                    ((< (get frame :index) count)
+                    ((not (= (get frame :index) count))
                      (let* ((idx (get frame :index))
-                            (key (if (get frame :array) idx (aref (get frame :keys) idx)))
+                            (key (if (= (get frame :array) t) idx (aref (get frame :keys) idx)))
                             (property (Object/getOwnPropertyDescriptor (get frame :value) key)))
                        (put frame :index (1+ idx))
                        ;; Fresh compiler records contain data properties. Do not reinterpret an
                        ;; accessor or execute it a second time while making a partial copy. Its
                        ;; original thrown value still wins over this malformed-payload error.
-                       (when (and property (not (Object/hasOwn property "value")))
+                       (when (and (not (undefined? property)) (not (= (Object/hasOwn property "value") t)))
                          (Reflect/get (get frame :value) key)
                          (throw (new globalThis.TypeError "owned compiler data must contain data properties")))
                        (let* ((value (Reflect/get (get frame :value) key))
                               (normalized (funcall scalar value (get frame :array))))
                          (funcall change frame key value normalized)
-                         (unless property
+                         (when (undefined? property)
                            (when (undefined? (get frame :changes))
                              (put frame :changes (new globalThis.Map)))
                            (js-call (get frame :changes) :set key normalized)
                            (put frame :copy t))
-                         (unless (or (nil? normalized) (/= (value-type normalized) "object"))
-                           (when (js-call active :has value)
+                         (unless (or (nil? normalized) (not (= (value-type normalized) "object")))
+                           (when (= (js-call active :has value) t)
                              (throw (new globalThis.TypeError "compiler IR cannot contain cycles")))
-                           (let ((borrowed (or (get frame :borrowed)
+                           (let ((borrowed (or (= (get frame :borrowed) t)
                                                (= key "source") (= key "span")
                                                (= key "macroOrigins") (= key "hostCapabilities"))))
                              (put frame :child (js-object :key key :value value :borrowed borrowed))
-                             (unless (if borrowed
-                                       (js-call borrowed-copies :has value)
-                                       (or (js-call replacements :has value) (js-call complete :has value)))
+                             (unless (or (and (= borrowed t) (= (js-call borrowed-copies :has value) t))
+                                         (and (not (= borrowed t))
+                                              (or (= (js-call replacements :has value) t)
+                                                  (= (js-call complete :has value) t))))
                                (funcall begin value borrowed)))))))
                     (t
-                     (if (get frame :copy)
-                       (let ((copy (if (get frame :array) (new globalThis.Array count) (js-object)))
+                     (if (= (get frame :copy) t)
+                       (let ((copy (if (= (get frame :array) t) (new globalThis.Array count) (js-object)))
                              (idx 0))
-                         (while (< idx count)
-                           (let* ((key (if (get frame :array) idx (aref (get frame :keys) idx)))
+                         (while (not (= idx count))
+                           (let* ((key (if (= (get frame :array) t) idx (aref (get frame :keys) idx)))
                                   (changes (get frame :changes))
-                                  (value (if (and changes (js-call changes :has key))
+                                  (value (if (and (not (undefined? changes)) (= (js-call changes :has key) t))
                                            (js-call changes :get key)
-                                           (session-optional
-                                             (Object/getOwnPropertyDescriptor (get frame :value) key)
-                                             "value"))))
+                                           (let ((desc (Object/getOwnPropertyDescriptor (get frame :value) key)))
+                                             (if (undefined? desc) undefined (get desc :value))))))
                              (unless (eq value omitted)
                                (if (= key "__proto__")
                                  (Object/defineProperty copy key
                                    (js-object :value value :writable t :enumerable t :configurable t))
                                  (put copy key value))))
                            (setq idx (1+ idx)))
-                         (js-call (if (get frame :borrowed) borrowed-copies replacements)
+                         (js-call (if (= (get frame :borrowed) t) borrowed-copies replacements)
                            :set (get frame :value) copy))
-                       (when (get frame :detached)
+                       (when (= (get frame :detached) t)
                          ;; A cache miss must not revisit an edge now pointing at its private
                          ;; copy and detach it a second time. Preserve that identity independently
                          ;; of the optional, bounded completion cache.
                          (js-call replacements :set (get frame :value) (get frame :value))))
                      (js-call active :delete (get frame :value))
-                     (unless (get frame :borrowed)
+                     (unless (= (get frame :borrowed) t)
                        (funcall remember (get frame :value)))
                      (js-call frames :pop)))))
               (funcall resolved root false)))))))
 
-  (defun with-roots (runtime operation)
+  (defun withRoots (runtime operation)
     (let ((roots (js-array)) (result undefined) (failed false) (failure undefined))
       (try
         (setq result
@@ -723,7 +733,7 @@
 
   (defun property (runtime object name read &optional options)
     (let ((optional-engine-stack (and (not (nullish? options)) (get options :optionalEngineStack))))
-      (with-roots runtime
+      (withRoots runtime
         (lambda (own)
           (let ((key (funcall own (js-call runtime :string name)))
                 (stack-avail (get runtime :errorStackAvailable)))
@@ -769,7 +779,7 @@
                    (while (< i len)
                      (let ((idx i))
                        (js-call result :push
-                         (with-roots runtime
+                         (withRoots runtime
                            (lambda (own)
                              (diagnostic-data runtime (funcall own (js-call runtime :get value idx)) path memo)))))
                      (setq i (1+ i)))
@@ -777,7 +787,7 @@
                  (progn
                    (unless (= kind 13)
                      (throw (new globalThis.TypeError "compiler diagnostic contains an opaque value")))
-                   (with-roots runtime
+                   (withRoots runtime
                      (lambda (own)
                        (let ((keys (funcall own (js-call runtime :objectKeys value)))
                              (result (js-object))
@@ -786,7 +796,7 @@
                          (setq len (js-call runtime :length keys))
                          (while (< i len)
                            (let ((idx i))
-                             (with-roots runtime
+                             (withRoots runtime
                                (lambda (keep)
                                  (let* ((key (funcall keep (js-call runtime :get keys idx)))
                                         (name (js-call runtime :readString key))
@@ -818,7 +828,7 @@
               (while (< index len)
                 (let ((idx index))
                   (js-call result :push
-                    (with-roots runtime
+                    (withRoots runtime
                       (lambda (own)
                         (exception-entries runtime (funcall own (js-call runtime :get value idx)) path memo)))))
                 (setq index (1+ index)))
@@ -827,7 +837,7 @@
   (defun source-exception (runtime value &optional ancestors-arg memo)
     (let ((ancestors (if (nullish? ancestors-arg) (js-array) ancestors-arg)))
       (if (not memo)
-        (with-roots runtime
+        (withRoots runtime
           (lambda (own)
             (source-exception runtime value ancestors (js-object :entries (js-array) :own own))))
         (cond
@@ -876,7 +886,7 @@
                      (when (not (undefined? name))
                        (put error :name name))
                      (when (eq ctor globalThis.AggregateError)
-                       (with-roots runtime
+                       (withRoots runtime
                          (lambda (own)
                            (let* ((key (funcall own (js-call runtime :string "errors")))
                                   (present (js-call runtime :objectHas value key))
@@ -908,7 +918,7 @@
                                    (js-object :value (diagnostic-data runtime field (js-array) memo)
                                      :enumerable t :configurable t :writable t))))))
                          (setq k-idx (1+ k-idx))))
-                     (with-roots runtime
+                     (withRoots runtime
                        (lambda (own)
                          (let* ((key (funcall own (js-call runtime :string "cause")))
                                 (present (js-call runtime :objectHas value key))
@@ -949,6 +959,268 @@
                   (put result :releaseError release-error))))))
         result)))
 
+  (defun close-compiler-session-owned (runtime driver state has-state)
+    (let ((failed false) (failure undefined)
+          (attempt nil))
+      (setq attempt
+        (lambda (operation)
+          (try (funcall operation)
+            (catch error
+              (let ((transferred (transfer-error runtime error)))
+                (unless failed
+                  (setq failed t)
+                  (setq failure transferred)))))))
+      (when has-state
+        (if runtime
+          (progn
+            (funcall attempt
+              (lambda ()
+                (let ((result (js-call runtime :invoke (get names :close) (js-array state))))
+                  (js-call runtime :release result))))
+            (funcall attempt (lambda () (js-call runtime :release state))))
+          (funcall attempt
+            (lambda ()
+              (Reflect/apply (get driver :close) (get driver :module) (js-array state))))))
+      (when runtime
+        (funcall attempt (lambda () (js-call runtime :closeModule)))
+        (funcall attempt (lambda () (js-call runtime :collect)))
+        (funcall attempt
+          (lambda ()
+            (when (= (value-type (get runtime :close)) "function")
+              (js-call runtime :close)))))
+      (when failed (throw failure))))
+
+  (defun create-compiler-session-handle (host runtime driver state has-state)
+    (let* ((closed false) (busy false)
+           (close-owned
+             (lambda ()
+               (let ((current-runtime runtime)
+                     (current-driver driver)
+                     (current-state state)
+                     (current-has-state has-state))
+                 (setq has-state false)
+                 (setq state undefined)
+                 (setq driver undefined)
+                 (setq runtime undefined)
+                 (close-compiler-session-owned current-runtime current-driver current-state current-has-state))))
+           (exchange
+             (lambda (text)
+               (let ((input undefined) (output undefined) (result undefined)
+                     (failed false) (failure undefined))
+                 (try
+                   (progn
+                     (if (not (undefined? runtime))
+                       (progn
+                         (setq input (js-call runtime :string text))
+                         (setq output (js-call runtime :invoke (get names :request) (js-array state input)))
+                         (setq result (js-call runtime :readString output)))
+                       (setq result
+                         (Reflect/apply (get driver :request) (get driver :module) (js-array state text))))
+                     (unless (= (session-value-type result) "string")
+                       (throw (new globalThis.TypeError "compiler driver returned a non-JSON response")))
+                     (setq result (JSON/parse result)))
+                   (catch error
+                     (setq failed t)
+                     (setq failure (transfer-error runtime error)))
+                   (finally
+                     (when (not (undefined? runtime))
+                       (when (not (undefined? output))
+                         (try (js-call runtime :release output)
+                           (catch error
+                             (unless (= failed t)
+                               (setq failed t)
+                               (setq failure (transfer-error runtime error))))))
+                       (when (not (undefined? input))
+                         (try (js-call runtime :release input)
+                           (catch error
+                             (unless (= failed t)
+                               (setq failed t)
+                               (setq failure (transfer-error runtime error)))))))))
+                 (when (= failed t) (throw failure))
+                 result)))
+           (request-data
+             (lambda (request &rest rest-args)
+               (let* ((req-options-arg (aref rest-args 0))
+                      (allow-owned-arg (aref rest-args 1))
+                      (req-options (if (undefined? req-options-arg) (js-object) req-options-arg))
+                      (signal (get req-options :signal))
+                      (response-mode (get req-options :responseMode))
+                      (response-string-chunks (get req-options :responseStringChunks))
+                      (allow-owned (if (undefined? allow-owned-arg) false (funcall globalThis.Boolean allow-owned-arg))))
+                 (when closed (throw (new globalThis.Error "compiler session is closed")))
+                 (when busy (throw (new globalThis.Error "compiler session is busy")))
+                 (when (and (not (undefined? response-mode))
+                            (/= response-mode "events-v1")
+                            (/= response-mode "graph-events-v1"))
+                   (throw (new globalThis.TypeError "unsupported compiler response mode")))
+                 (when (and (not (undefined? response-string-chunks))
+                            (/= (value-type response-string-chunks) "boolean"))
+                   (throw (new globalThis.TypeError "compiler response string chunks must be a boolean")))
+                 (when (and (eq response-string-chunks t) (undefined? response-mode))
+                   (throw (new globalThis.TypeError "compiler response string chunks require an event response mode")))
+                 (check-signal signal)
+                 (setq busy t)
+                 (let* ((failed false) (failure undefined) (result undefined)
+                        (token undefined) (pending false) (transferred false)
+                        (receive (lambda (text)
+                          (try (funcall exchange text)
+                            (catch error
+                              (setq transferred t)
+                              (throw error))))))
+                   (try
+                     (let ((text (encode-request request))
+                           (owned false))
+                       (check-signal signal)
+                       (when (eq response-string-chunks t)
+                         ;; This extension is opt-in and declared by the concrete driver.
+                         ;; An opaque/older driver keeps its original request protocol and
+                         ;; never receives an unadvertised chunking field or a silent retry.
+                         (let ((capabilities (funcall receive (JSON/stringify (js-object :operation "capabilities")))))
+                           (check-signal signal)
+                           (unless (and (not (nullish? capabilities)) (eq (get capabilities :responseStringChunks) t))
+                             (throw (new globalThis.TypeError "compiler driver does not support response string chunks")))))
+                       (when (and allow-owned (not runtime))
+                         (let ((entry (get (get driver :module) :compiler_session_project_owned)))
+                           (when (= (value-type entry) "function")
+                             (let* ((input (JSON/parse text))
+                                    (target (session-optional input "target"))
+                                    (native-target (session-optional input "nativeTarget"))
+                                    (native-format (session-nullish (session-optional input "nativeFormat") "library"))
+                                    (eligible (and (not (nil? input)) (= (value-type input) "object")
+                                                   (not (Array/isArray input))
+                                                   (= (get input :operation) "project")
+                                                   (or (= target "wasm") (= target "native"))
+                                                   (not (Object/hasOwn input "responseMode")))))
+                               (setq input undefined)
+                               ;; Pass the captured wire export itself. The actual driver refuses
+                               ;; ownership when a caller wrapped or substituted that function.
+                               (let ((envelope (if eligible
+                                                 (Reflect/apply entry (get driver :module)
+                                                   (js-array (get driver :request) state text))
+                                                 nil)))
+                                 (unless (nil? envelope)
+                                   (when (or (not envelope) (/= (value-type envelope) "object") (Array/isArray envelope)
+                                             (not (Object/hasOwn envelope "format"))
+                                             (not (Object/hasOwn envelope "version"))
+                                             (/= (get envelope :format) "eliscript-compiler-owned-project")
+                                             (/= (get envelope :version) 1)
+                                             (not (Object/hasOwn envelope "value")))
+                                     (throw (new globalThis.TypeError "compiler returned an invalid owned project envelope")))
+                                   (let ((product (get envelope :value)))
+                                     (when (or (not product) (/= (value-type product) "object") (Array/isArray product)
+                                               (/= (get product :target) target)
+                                               (if (= target "wasm")
+                                                 (not (undefined? (get product :typed)))
+                                                 (or (not (get product :typed))
+                                                     (/= (value-type (get product :typed)) "object")
+                                                     (Array/isArray (get product :typed))
+                                                     (/= (get (get product :typed) :abi) "memory-u32")
+                                                     (not (Array/isArray (get (get product :typed) :functions)))
+                                                     (not (Array/isArray (get (get product :typed) :exports)))
+                                                     (/= (value-type (get product :nativeTarget)) "string")
+                                                     (/= (get product :nativeTarget) native-target)
+                                                     (not (js-call (js-array "library" "object") :includes (get product :nativeFormat)))
+                                                     (/= (get product :nativeFormat) native-format)))
+                                               (not (get product :descriptor))
+                                               (/= (value-type (get product :descriptor)) "object")
+                                               (Array/isArray (get product :descriptor))
+                                               (undefined? (get product :bytes)))
+                                       (throw (new globalThis.TypeError (+ "compiler returned an invalid owned " target " project"))))
+                                     ;; The small lowering descriptor retains the exact public JSON
+                                     ;; data contract. The fresh binary and complete debug graph have
+                                     ;; a single build owner and require no second serialized graph.
+                                     ;; The descriptor remains a small, independent public snapshot.
+                                     ;; Native typed data is also public artifact metadata: use the
+                                     ;; exact wire normalization, retaining canonical DAG nodes.
+                                     (setq result (session-copy-properties (js-object) product))
+                                     (put result :descriptor (JSON/parse (encodeCompilerIR (get product :descriptor))))
+                                     (let ((normalize (ownedCompilerDataNormalizer)))
+                                       (when (= target "native")
+                                         (put result :typed (funcall normalize (get product :typed))))
+                                       (when (not (undefined? (get product :debug)))
+                                         (put result :debug (funcall normalize (get product :debug)))))
+                                     (js-call ownedCompilerBuildProducts :add result)
+                                     (setq owned t))))))))
+                       (when (and (not owned) (not (undefined? response-mode)))
+                         (let ((input (JSON/parse text)))
+                           (when (or (nil? input) (/= (value-type input) "object") (Array/isArray input))
+                             (throw (new globalThis.TypeError "compiler event request must be an object")))
+                           (let ((patched (session-copy-properties (js-object) input)))
+                             (put patched :responseMode response-mode)
+                             (when (eq response-string-chunks t)
+                               (put patched :responseStringChunks t))
+                             (setq text (JSON/stringify patched)))))
+                       (unless owned
+                         (setq result (funcall receive text)))
+                       (when (and (not owned) (not (undefined? response-mode)))
+                         (let* ((graph (= response-mode "graph-events-v1"))
+                                (expected-version (if (= graph t) 2 1))
+                                (decoder (compiler-response-events graph (eq response-string-chunks t)))
+                                (next-request undefined)
+                                (done-loop false))
+                           (try
+                             (while (not (= done-loop t))
+                               (when (or (nullish? result)
+                                         (not (= (get result :format) "eliscript-compiler-response-events"))
+                                         (not (= (get result :version) expected-version))
+                                         (not (= (Number/isSafeInteger (get result :token)) t))
+                                         (< (get result :token) 1)
+                                         (not (= (session-value-type (get result :done)) "boolean"))
+                                         (and (not (undefined? token)) (not (= token (get result :token)))))
+                                 (throw (new globalThis.TypeError "compiler returned an invalid response envelope")))
+                               (when (undefined? token)
+                                 (setq token (get result :token))
+                                 (setq next-request (JSON/stringify (js-object :operation "response-next" :token token))))
+                               (setq pending (not (= (get result :done) t)))
+                               (js-call decoder :append (get result :events))
+                               (check-signal signal)
+                               (if (= (get result :done) t)
+                                 (progn
+                                   (setq result (get decoder :value))
+                                   (setq done-loop t))
+                                 (progn
+                                   (when (= (get decoder :complete) t)
+                                     (throw (new globalThis.TypeError "compiler response completed before its final envelope")))
+                                   (setq result (funcall receive next-request)))))
+                             (finally (js-call decoder :release)))))
+                       ;; Synchronous WASM/native execution cannot be preempted by AbortSignal.
+                       ;; Observe cancellation at the completed request boundary only.
+                       (check-signal signal))
+                     (catch error
+                       (setq failed t)
+                       (setq failure (if transferred error (transfer-error runtime error))))
+                     (finally
+                       (when pending
+                         (try
+                           (funcall exchange (JSON/stringify (js-object :operation "response-close" :token token)))
+                           (catch ignored nil)))
+                       (setq busy false)))
+                   (when failed (throw failure))
+                   result))))
+           (session
+             (js-object
+               :host host
+               :request (lambda (request &rest rest-args)
+                 (funcall request-data request (aref rest-args 0) false))
+               :close (lambda ()
+                 (unless closed
+                   (when busy
+                     (throw (new globalThis.Error "cannot close a compiler session during a request")))
+                   (setq closed t)
+                   (funcall close-owned))
+                 undefined))))
+      (Object/defineProperty session "closed"
+        (js-object :get (lambda () closed) :enumerable t :configurable t))
+      (Object/freeze session)
+      (when (= host "javascript")
+        (js-call ownedCompilerBuildRequests :set session
+          (lambda (request &rest rest-args)
+            (funcall request-data request (aref rest-args 0) t))))
+      (js-call compilerBuildConsumptionRequests :set session
+        (lambda (request &rest rest-args)
+          (funcall request-data request (aref rest-args 0) false)))
+      session))
+
   ;; A session owns one long-lived driver state. Requests cross as one JSON
   ;; string; target selection, compilation and runtime caching stay in the driver.
   ;; Only the private JS build handoff consumes a fresh result without a JSON copy.
@@ -963,309 +1235,77 @@
            (path (get config :path))
            (memory (if (undefined? (get config :memory)) (js-object) (get config :memory)))
            (options (if (undefined? (get config :options)) (js-object) (get config :options))))
+      (setq session-args undefined)
+      (setq config undefined)
       (unless (js-call (js-array "javascript" "wasm" "native") :includes host)
         (throw (new globalThis.TypeError "unknown compiler session host")))
       (when (or (nil? options) (/= (value-type options) "object") (Array/isArray options)
                 (nil? memory) (/= (value-type memory) "object") (Array/isArray memory))
         (throw (new globalThis.TypeError "compiler session memory and options must be objects")))
       (let* ((runtime undefined) (driver undefined) (state undefined)
-             (has-state false) (closed false) (busy false)
+             (has-state false)
              (auto (session-default (get options :auto) 65536))
              (heap-options (session-copy-properties (js-object) options (js-array "auto"))))
+        (setq options undefined)
         (unless (and (Number/isInteger auto) (>= auto 0) (<= auto 4294967295))
           (throw (new globalThis.RangeError "invalid compiler collection threshold")))
-        (let ((close-owned
-                (lambda ()
-                  (let ((failed false) (failure undefined)
-                        (attempt nil))
-                    (setq attempt
-                      (lambda (operation)
-                        (try (funcall operation)
-                          (catch error
-                            (let ((transferred (transfer-error runtime error)))
-                              (unless failed
-                                (setq failed t)
-                                (setq failure transferred)))))))
-                    (when has-state
-                      (if runtime
-                        (progn
-                          (funcall attempt
-                            (lambda ()
-                              (let ((result (js-call runtime :invoke (get names :close) (js-array state))))
-                                (js-call runtime :release result))))
-                          (funcall attempt (lambda () (js-call runtime :release state))))
-                        (funcall attempt
-                          (lambda ()
-                            (Reflect/apply (get driver :close) (get driver :module) (js-array state))))))
-                    (setq has-state false)
-                    (setq state undefined)
-                    (when runtime
-                      (funcall attempt (lambda () (js-call runtime :closeModule)))
-                      (funcall attempt (lambda () (js-call runtime :collect)))
-                      (funcall attempt
-                        (lambda ()
-                          (when (= (value-type (get runtime :close)) "function")
-                            (js-call runtime :close)))))
-                    (setq driver undefined)
-                    (setq runtime undefined)
-                    (when failed (throw failure))))))
-          (try
-            (if (= host "javascript")
-              (progn
-                (unless (and compiler (= (value-type compiler) "object"))
-                  (throw (new globalThis.TypeError "JavaScript compiler session requires a driver module")))
-                (setq driver
-                  (js-object :module compiler
-                    :create (get compiler (get names :create))
-                    :request (get compiler (get names :request))
-                    :close (get compiler (get names :close))))
-                (when (js-call (js-array (get driver :create) (get driver :request) (get driver :close))
-                        :some (lambda (value) (/= (value-type value) "function")))
-                  (throw (new globalThis.TypeError "compiler driver is missing its session exports")))
-                (setq state (Reflect/apply (get driver :create) (get driver :module) (js-array)))
-                (setq has-state t))
-              (let ((settings (session-copy-properties
-                                (session-copy-properties (js-object) compilerHeap)
-                                heap-options)))
-                (put settings :initializeModule false)
-                (if (= host "wasm")
-                  (progn
-                    (when (undefined? bytes)
-                      (throw (new globalThis.TypeError "WASM compiler session requires an artifact")))
-                    (setq runtime (instantiateManagedRuntime bytes settings)))
-                  (progn
-                    (unless (and (= (value-type path) "string") (> (js-length path) 0)
-                                 (= (session-optional (session-optional descriptor "typed") "abi") "memory-u32")
-                                 (session-optional descriptor "descriptor"))
-                      (throw (new globalThis.TypeError "native compiler session requires its library path and complete lowering descriptor")))
-                    (let* ((native-module "./native-managed-runtime.mjs")
-                           (native-mod (await (session-import-relative native-module)))
-                           (instantiate-native (get native-mod :instantiateNativeManagedRuntime))
-                           (native-opts (session-copy-properties
-                                          (session-copy-properties
-                                            (session-copy-properties (js-object) compilerMemory)
-                                            memory)
-                                          settings)))
-                      (setq runtime (await (funcall instantiate-native path descriptor native-opts))))))
-                (js-call runtime :auto auto)
-                (js-call runtime :initializeModule)
-                (setq state (js-call runtime :invoke (get names :create)))
-                (setq has-state t)))
-            (catch error
-              (let ((primary (transfer-error runtime error)))
-                (try (funcall close-owned) (catch ignored nil))
-                (throw primary))))
-          (let* ((exchange
-                   (lambda (text)
-                     (let ((input undefined) (output undefined) (result undefined)
-                           (failed false) (failure undefined))
-                       (try
-                         (progn
-                           (if runtime
-                             (progn
-                               (setq input (js-call runtime :string text))
-                               (setq output (js-call runtime :invoke (get names :request) (js-array state input)))
-                               (setq result (js-call runtime :readString output)))
-                             (setq result
-                               (Reflect/apply (get driver :request) (get driver :module) (js-array state text))))
-                           (unless (= (value-type result) "string")
-                             (throw (new globalThis.TypeError "compiler driver returned a non-JSON response")))
-                           (setq result (JSON/parse result)))
-                         (catch error
-                           (setq failed t)
-                           (setq failure (transfer-error runtime error)))
-                         (finally
-                           (let ((vals (js-array output input)) (v-idx 0))
-                             (while (< v-idx 2)
-                               (let ((val (aref vals v-idx)))
-                                 (when (and runtime (not (undefined? val)))
-                                   (try (js-call runtime :release val)
-                                     (catch error
-                                       (unless failed
-                                         (setq failed t)
-                                         (setq failure (transfer-error runtime error)))))))
-                               (setq v-idx (1+ v-idx))))))
-                       (when failed (throw failure))
-                       result)))
-                 (request-data
-                   (lambda (request &rest rest-args)
-                     (let* ((req-options-arg (aref rest-args 0))
-                            (allow-owned-arg (aref rest-args 1))
-                            (req-options (if (undefined? req-options-arg) (js-object) req-options-arg))
-                            (signal (get req-options :signal))
-                            (response-mode (get req-options :responseMode))
-                            (response-string-chunks (get req-options :responseStringChunks))
-                            (allow-owned (if (undefined? allow-owned-arg) false (funcall globalThis.Boolean allow-owned-arg))))
-                       (when closed (throw (new globalThis.Error "compiler session is closed")))
-                       (when busy (throw (new globalThis.Error "compiler session is busy")))
-                       (when (and (not (undefined? response-mode))
-                                  (/= response-mode "events-v1")
-                                  (/= response-mode "graph-events-v1"))
-                         (throw (new globalThis.TypeError "unsupported compiler response mode")))
-                       (when (and (not (undefined? response-string-chunks))
-                                  (/= (value-type response-string-chunks) "boolean"))
-                         (throw (new globalThis.TypeError "compiler response string chunks must be a boolean")))
-                       (when (and (eq response-string-chunks t) (undefined? response-mode))
-                         (throw (new globalThis.TypeError "compiler response string chunks require an event response mode")))
-                       (check-signal signal)
-                       (setq busy t)
-                       (let* ((failed false) (failure undefined) (result undefined)
-                              (token undefined) (pending false) (transferred false)
-                              (receive (lambda (text)
-                                (try (funcall exchange text)
-                                  (catch error
-                                    (setq transferred t)
-                                    (throw error))))))
-                         (try
-                           (let ((text (encode-request request))
-                                 (owned false))
-                             (check-signal signal)
-                             (when (eq response-string-chunks t)
-                               ;; This extension is opt-in and declared by the concrete driver.
-                               ;; An opaque/older driver keeps its original request protocol and
-                               ;; never receives an unadvertised chunking field or a silent retry.
-                               (let ((capabilities (funcall receive (JSON/stringify (js-object :operation "capabilities")))))
-                                 (check-signal signal)
-                                 (unless (and (not (nullish? capabilities)) (eq (get capabilities :responseStringChunks) t))
-                                   (throw (new globalThis.TypeError "compiler driver does not support response string chunks")))))
-                             (when (and allow-owned (not runtime))
-                               (let ((entry (get (get driver :module) :compiler_session_project_owned)))
-                                 (when (= (value-type entry) "function")
-                                   (let* ((input (JSON/parse text))
-                                          (target (session-optional input "target"))
-                                          (native-target (session-optional input "nativeTarget"))
-                                          (native-format (session-nullish (session-optional input "nativeFormat") "library"))
-                                          (eligible (and (not (nil? input)) (= (value-type input) "object")
-                                                         (not (Array/isArray input))
-                                                         (= (get input :operation) "project")
-                                                         (or (= target "wasm") (= target "native"))
-                                                         (not (Object/hasOwn input "responseMode")))))
-                                     (setq input undefined)
-                                     ;; Pass the captured wire export itself. The actual driver refuses
-                                     ;; ownership when a caller wrapped or substituted that function.
-                                     (let ((envelope (if eligible
-                                                       (Reflect/apply entry (get driver :module)
-                                                         (js-array (get driver :request) state text))
-                                                       nil)))
-                                       (unless (nil? envelope)
-                                         (when (or (not envelope) (/= (value-type envelope) "object") (Array/isArray envelope)
-                                                   (not (Object/hasOwn envelope "format"))
-                                                   (not (Object/hasOwn envelope "version"))
-                                                   (/= (get envelope :format) "eliscript-compiler-owned-project")
-                                                   (/= (get envelope :version) 1)
-                                                   (not (Object/hasOwn envelope "value")))
-                                           (throw (new globalThis.TypeError "compiler returned an invalid owned project envelope")))
-                                         (let ((product (get envelope :value)))
-                                           (when (or (not product) (/= (value-type product) "object") (Array/isArray product)
-                                                     (/= (get product :target) target)
-                                                     (if (= target "wasm")
-                                                       (not (undefined? (get product :typed)))
-                                                       (or (not (get product :typed))
-                                                           (/= (value-type (get product :typed)) "object")
-                                                           (Array/isArray (get product :typed))
-                                                           (/= (get (get product :typed) :abi) "memory-u32")
-                                                           (not (Array/isArray (get (get product :typed) :functions)))
-                                                           (not (Array/isArray (get (get product :typed) :exports)))
-                                                           (/= (value-type (get product :nativeTarget)) "string")
-                                                           (/= (get product :nativeTarget) native-target)
-                                                           (not (js-call (js-array "library" "object") :includes (get product :nativeFormat)))
-                                                           (/= (get product :nativeFormat) native-format)))
-                                                     (not (get product :descriptor))
-                                                     (/= (value-type (get product :descriptor)) "object")
-                                                     (Array/isArray (get product :descriptor))
-                                                     (undefined? (get product :bytes)))
-                                             (throw (new globalThis.TypeError (+ "compiler returned an invalid owned " target " project"))))
-                                           ;; The small lowering descriptor retains the exact public JSON
-                                           ;; data contract. The fresh binary and complete debug graph have
-                                           ;; a single build owner and require no second serialized graph.
-                                           ;; The descriptor remains a small, independent public snapshot.
-                                           ;; Native typed data is also public artifact metadata: use the
-                                           ;; exact wire normalization, retaining canonical DAG nodes.
-                                           (setq result (session-copy-properties (js-object) product))
-                                           (put result :descriptor (JSON/parse (encodeCompilerIR (get product :descriptor))))
-                                           (let ((normalize (owned-compiler-data-normalizer)))
-                                             (when (= target "native")
-                                               (put result :typed (funcall normalize (get product :typed))))
-                                             (when (not (undefined? (get product :debug)))
-                                               (put result :debug (funcall normalize (get product :debug)))))
-                                           (js-call ownedCompilerBuildProducts :add result)
-                                           (setq owned t))))))))
-                             (when (and (not owned) (not (undefined? response-mode)))
-                               (let ((input (JSON/parse text)))
-                                 (when (or (nil? input) (/= (value-type input) "object") (Array/isArray input))
-                                   (throw (new globalThis.TypeError "compiler event request must be an object")))
-                                 (let ((patched (session-copy-properties (js-object) input)))
-                                   (put patched :responseMode response-mode)
-                                   (when (eq response-string-chunks t)
-                                     (put patched :responseStringChunks t))
-                                   (setq text (JSON/stringify patched)))))
-                             (unless owned
-                               (setq result (funcall receive text)))
-                             (when (and (not owned) (not (undefined? response-mode)))
-                               (let* ((graph (= response-mode "graph-events-v1"))
-                                      (decoder (compiler-response-events graph (eq response-string-chunks t)))
-                                      (done-loop false))
-                                 (try
-                                   (while (not done-loop)
-                                     (when (or (not result)
-                                               (/= (get result :format) "eliscript-compiler-response-events")
-                                               (/= (get result :version) (if graph 2 1))
-                                               (not (Number/isSafeInteger (get result :token)))
-                                               (< (get result :token) 1)
-                                               (/= (value-type (get result :done)) "boolean")
-                                               (and (not (undefined? token)) (/= token (get result :token))))
-                                       (throw (new globalThis.TypeError "compiler returned an invalid response envelope")))
-                                     (setq token (get result :token))
-                                     (setq pending (not (get result :done)))
-                                     (js-call decoder :append (get result :events))
-                                     (check-signal signal)
-                                     (if (get result :done)
-                                       (progn
-                                         (setq result (get decoder :value))
-                                         (setq done-loop t))
-                                       (progn
-                                         (when (get decoder :complete)
-                                           (throw (new globalThis.TypeError "compiler response completed before its final envelope")))
-                                         (setq result
-                                           (funcall receive (JSON/stringify (js-object :operation "response-next" :token token)))))))
-                                   (finally (js-call decoder :release)))))
-                             ;; Synchronous WASM/native execution cannot be preempted by AbortSignal.
-                             ;; Observe cancellation at the completed request boundary only.
-                             (check-signal signal))
-                           (catch error
-                             (setq failed t)
-                             (setq failure (if transferred error (transfer-error runtime error))))
-                           (finally
-                             (when pending
-                               (try
-                                 (funcall exchange (JSON/stringify (js-object :operation "response-close" :token token)))
-                                 (catch ignored nil)))
-                             (setq busy false)))
-                         (when failed (throw failure))
-                         result))))
-                 (session
-                   (js-object
-                     :host host
-                     :request (lambda (request &rest rest-args)
-                       (funcall request-data request (aref rest-args 0) false))
-                     :close (lambda ()
-                       (unless closed
-                         (when busy
-                           (throw (new globalThis.Error "cannot close a compiler session during a request")))
-                         (setq closed t)
-                         (funcall close-owned))
-                       undefined))))
-            (Object/defineProperty session "closed"
-              (js-object :get (lambda () closed) :enumerable t :configurable t))
-            (Object/freeze session)
-            (when (= host "javascript")
-              (js-call ownedCompilerBuildRequests :set session
-                (lambda (request &rest rest-args)
-                  (funcall request-data request (aref rest-args 0) t))))
-            (js-call compilerBuildConsumptionRequests :set session
-              (lambda (request &rest rest-args)
-                (funcall request-data request (aref rest-args 0) false)))
-            session)))))
+        (try
+          (if (= host "javascript")
+            (progn
+              (unless (and compiler (= (value-type compiler) "object"))
+                (throw (new globalThis.TypeError "JavaScript compiler session requires a driver module")))
+              (setq driver
+                (js-object :module compiler
+                  :create (get compiler (get names :create))
+                  :request (get compiler (get names :request))
+                  :close (get compiler (get names :close))))
+              (setq compiler undefined)
+              (when (js-call (js-array (get driver :create) (get driver :request) (get driver :close))
+                      :some (lambda (value) (/= (value-type value) "function")))
+                (throw (new globalThis.TypeError "compiler driver is missing its session exports")))
+              (setq state (Reflect/apply (get driver :create) (get driver :module) (js-array)))
+              (setq has-state t))
+            (let ((settings (session-copy-properties
+                              (session-copy-properties (js-object) compilerHeap)
+                              heap-options)))
+              (setq heap-options undefined)
+              (put settings :initializeModule false)
+              (if (= host "wasm")
+                (progn
+                  (when (undefined? bytes)
+                    (throw (new globalThis.TypeError "WASM compiler session requires an artifact")))
+                  (let ((input-bytes bytes))
+                    (setq bytes undefined)
+                    (setq runtime (instantiateManagedRuntime input-bytes settings))))
+                (progn
+                  (unless (and (= (value-type path) "string") (> (js-length path) 0)
+                               (= (session-optional (session-optional descriptor "typed") "abi") "memory-u32")
+                               (session-optional descriptor "descriptor"))
+                    (throw (new globalThis.TypeError "native compiler session requires its library path and complete lowering descriptor")))
+                  (let* ((native-module "./native-managed-runtime.mjs")
+                         (native-mod (await (session-import-relative native-module)))
+                         (instantiate-native (get native-mod :instantiateNativeManagedRuntime))
+                         (native-opts (session-copy-properties
+                                        (session-copy-properties
+                                          (session-copy-properties (js-object) compilerMemory)
+                                          memory)
+                                        settings))
+                         (input-path path)
+                         (input-descriptor descriptor))
+                    (setq path undefined)
+                    (setq descriptor undefined)
+                    (setq memory undefined)
+                    (setq settings undefined)
+                    (setq runtime (await (funcall instantiate-native input-path input-descriptor native-opts))))))
+              (js-call runtime :auto auto)
+              (js-call runtime :initializeModule)
+              (setq state (js-call runtime :invoke (get names :create)))
+              (setq has-state t)))
+          (catch error
+            (let ((primary (transfer-error runtime error)))
+              (try (close-compiler-session-owned runtime driver state has-state) (catch ignored nil))
+              (throw primary))))
+        (create-compiler-session-handle host runtime driver state has-state))))
 
   (export
     isOwnedCompilerBuildProduct requestCompilerBuildProduct

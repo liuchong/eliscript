@@ -149,10 +149,74 @@
   (defun snapshotNativeManagedRuntimeABI (lowered)
     (aref (native-runtime-abi lowered) 0))
 
+  (defun create-native-managed-runtime-handle (owned arities options module-graph descriptor configuration lifecycle source-map state)
+    (let ((exports (Object/create nil)) (entries (Object/entries arities)) (position 0))
+      (while (< position (js-length entries))
+        (let* ((entry (aref entries position)) (name (aref entry 0)) (arity (aref entry 1))
+               (fn (lambda (&rest args)
+                 (let ((argCount (js-length args)))
+                   (cond
+                     ((= argCount 0) (js-call owned :invoke name))
+                     ((= argCount 1) (js-call owned :invoke name (aref args 0)))
+                     ((= argCount 2) (js-call owned :invoke name (aref args 0) (aref args 1)))
+                     ((= argCount 3) (js-call owned :invoke name (aref args 0) (aref args 1) (aref args 2)))
+                     ((= argCount 4) (js-call owned :invoke name (aref args 0) (aref args 1) (aref args 2) (aref args 3)))
+                     ((= argCount 5) (js-call owned :invoke name (aref args 0) (aref args 1) (aref args 2) (aref args 3) (aref args 4)))
+                     (t (Reflect/apply (get owned :invoke) owned (js-call (js-array name) :concat args))))))))
+          (Object/defineProperty fn "length" (js-object :value arity)) (put exports name fn))
+        (setq position (1+ position)))
+      (let* ((scalar-view (native-memory-scalar-view owned))
+             (memory (js-object
+              :view (lambda () scalar-view)
+              :readBytes (lambda (offset length) (js-call owned :read offset length))
+              :writeBytes (lambda (offset bytes) (js-call owned :write bytes offset))))
+             (api (createManagedHostRuntime
+                    (observeManagedProjectExports (native-heap-exports exports options) module-graph)
+                    descriptor memory configuration lifecycle))
+             (methods (js-object)) (api-entries (Object/entries api)) (item 0))
+        (while (< item (js-length api-entries))
+          (let* ((entry (aref api-entries item)) (name (aref entry 0)) (value (aref entry 1)))
+            (cond
+              ((and (= name "project") (native-truth value))
+                (let ((project (js-object)))
+                  (js-call (Object/entries value) :forEach
+                    (lambda (entry)
+                      (let ((key (aref entry 0)) (method (aref entry 1)))
+                        (put project key (lambda (&rest args)
+                          (when (get state :closed) (throw (new globalThis.Error "native managed runtime is closed")))
+                          (try (Reflect/apply method undefined args)
+                            (catch error (throw (native-source-error source-map error)))))))))
+                  (put methods name (Object/freeze project))))
+              ((not (= (value-type value) "function")) (put methods name value))
+              (t
+                (let ((guarded (lambda (&rest args)
+                        (when (get state :closed) (throw (new globalThis.Error "native managed runtime is closed")))
+                        (try
+                          (let ((result (Reflect/apply value undefined args)))
+                            (if (= name "invokeAsync")
+                              (js-call result :catch (lambda (error) (throw (native-source-error source-map error)))) result))
+                          (catch error (throw (native-source-error source-map error)))))))
+                  (Object/defineProperties guarded
+                    (js-object :length (js-object :value (get value :length)) :name (js-object :value (get value :name))))
+                  (put methods name guarded)))))
+          (setq item (1+ item)))
+        (put methods :close (lambda ()
+          (unless (get state :closed)
+            (put state :closed t)
+            (closeNativeManagedResources lifecycle owned))))
+        (observeManagedProjectRuntime
+          (registerManagedSourceDecodeRuntime (Object/freeze methods) api) module-graph))))
+
   (defasync instantiateNativeManagedRuntime (path lowered &rest arguments)
     (let* ((options (native-options arguments))
            (abi (native-runtime-abi lowered)) (snapshot (aref abi 0))
-           (descriptor (get snapshot :descriptor)) (arities (aref abi 1)))
+           (descriptor (get snapshot :descriptor)) (arities (aref abi 1))
+           (debug (native-debug-value options lowered))
+           (trap-sites (native-trap-sites options lowered)))
+        (setq lowered undefined)
+        (setq arguments undefined)
+        (setq abi undefined)
+        (setq snapshot undefined)
         (when (and (= (get options :extendedHeap) t) (not (= (get arities "heap-new-extended") 3)))
           (throw (new globalThis.TypeError "managed runtime requires heap-new-extended for extendedHeap")))
         (let* ((provided-graph (get options :moduleGraph))
@@ -196,16 +260,15 @@
                                          (funcall handler name owner arguments-list extra))
                                        (funcall handler name owner arguments-list))))))))
                            (Object/freeze (Object/create (Object/getPrototypeOf base-bridge) bridge-descriptors))))
-                 (debug (native-debug-value options lowered))
                  (source-map (when (and (native-truth debug) (= (value-type debug) "object")) (createCompilerDebugMap debug)))
-                 (lifecycle (js-object :capabilityBridge bridge)) (owned undefined) (closed false))
+                 (lifecycle (js-object :capabilityBridge bridge)) (owned undefined) (state (js-object :closed false)))
             (try
               (setq owned (await (openNativeMemory path arities
                 (js-object :initialPages (native-nullish (get options :initialPages) 1)
                   :maximumPages (native-nullish (get options :maximumPages) 256)
                   :nativeTarget (get options :nativeTarget) :libcLibrary (get options :libcLibrary) :bunExecutable (get options :bunExecutable)
-                  :trapSites (native-trap-sites options lowered)
-                  :debug (native-debug-value options lowered)
+                  :trapSites trap-sites
+                  :debug debug
                   :hostCapabilities (native-nullish (get descriptor :hostCapabilities) (js-array))
                   :hostCall (lambda (index heap argv &rest extra)
                     (let ((capability (native-optional (get descriptor :hostCapabilities) index)))
@@ -220,70 +283,18 @@
                 (try (js-call bridge :close) (catch ignored nil))
                 (try (when module-graph (js-call module-graph :close)) (catch ignored nil))
                 (throw error)))
+            (setq debug undefined)
+            (setq trap-sites undefined)
             (try
-              (let ((exports (Object/create nil)) (entries (Object/entries arities)) (position 0))
-                (while (< position (js-length entries))
-                  (let* ((entry (aref entries position)) (name (aref entry 0)) (arity (aref entry 1))
-                         (fn (lambda (&rest args)
-                           (let ((argCount (js-length args)))
-                             (cond
-                               ((= argCount 0) (js-call owned :invoke name))
-                               ((= argCount 1) (js-call owned :invoke name (aref args 0)))
-                               ((= argCount 2) (js-call owned :invoke name (aref args 0) (aref args 1)))
-                               ((= argCount 3) (js-call owned :invoke name (aref args 0) (aref args 1) (aref args 2)))
-                               ((= argCount 4) (js-call owned :invoke name (aref args 0) (aref args 1) (aref args 2) (aref args 3)))
-                               ((= argCount 5) (js-call owned :invoke name (aref args 0) (aref args 1) (aref args 2) (aref args 3) (aref args 4)))
-                               (t (Reflect/apply (get owned :invoke) owned (js-call (js-array name) :concat args))))))))
-                    (Object/defineProperty fn "length" (js-object :value arity)) (put exports name fn))
-                  (setq position (1+ position)))
-                (let* ((scalar-view (native-memory-scalar-view owned))
-                       (memory (js-object
-                        :view (lambda () scalar-view)
-                        :readBytes (lambda (offset length) (js-call owned :read offset length))
-                        :writeBytes (lambda (offset bytes) (js-call owned :write bytes offset))))
-                       (api (createManagedHostRuntime
-                              (observeManagedProjectExports (native-heap-exports exports options) module-graph)
-                              descriptor memory configuration lifecycle))
-                       (methods (js-object)) (api-entries (Object/entries api)) (item 0))
-                  (while (< item (js-length api-entries))
-                    (let* ((entry (aref api-entries item)) (name (aref entry 0)) (value (aref entry 1)))
-                      (cond
-                        ((and (= name "project") (native-truth value))
-                          (let ((project (js-object)))
-                            (js-call (Object/entries value) :forEach
-                              (lambda (entry)
-                                (let ((key (aref entry 0)) (method (aref entry 1)))
-                                  (put project key (lambda (&rest args)
-                                    (when closed (throw (new globalThis.Error "native managed runtime is closed")))
-                                    (try (Reflect/apply method undefined args)
-                                      (catch error (throw (native-source-error source-map error)))))))))
-                            (put methods name (Object/freeze project))))
-                        ((not (= (value-type value) "function")) (put methods name value))
-                        (t
-                          (let ((guarded (lambda (&rest args)
-                                  (when closed (throw (new globalThis.Error "native managed runtime is closed")))
-                                  (try
-                                    (let ((result (Reflect/apply value undefined args)))
-                                      (if (= name "invokeAsync")
-                                        (js-call result :catch (lambda (error) (throw (native-source-error source-map error)))) result))
-                                    (catch error (throw (native-source-error source-map error)))))))
-                            (Object/defineProperties guarded
-                              (js-object :length (js-object :value (get value :length)) :name (js-object :value (get value :name))))
-                            (put methods name guarded)))))
-                    (setq item (1+ item)))
-                  (put methods :close (lambda ()
-                    (unless closed
-                      (setq closed t)
-                      (closeNativeManagedResources lifecycle owned))))
-                  (let ((runtime (observeManagedProjectRuntime
-                                  (registerManagedSourceDecodeRuntime (Object/freeze methods) api) module-graph)))
-                    (when module-graph
-                      (if (= (get options :initializeModule) false) (js-call module-graph :attachRuntime runtime)
-                        (await (loadManagedProjectGraph runtime descriptor
-                          (native-copy (native-copy (js-object) options) (js-object :moduleGraph module-graph)))))) runtime)))
+              (let ((runtime (create-native-managed-runtime-handle
+                               owned arities options module-graph descriptor configuration lifecycle source-map state)))
+                (when module-graph
+                  (if (= (get options :initializeModule) false) (js-call module-graph :attachRuntime runtime)
+                    (await (loadManagedProjectGraph runtime descriptor
+                      (native-copy (native-copy (js-object) options) (js-object :moduleGraph module-graph)))))) runtime)
               (catch error
-                (unless closed
-                  (setq closed t)
+                (unless (get state :closed)
+                  (put state :closed t)
                   (try (closeNativeManagedResources lifecycle owned) (catch ignored nil)))
                 (throw (native-source-error source-map error))))))))
 
