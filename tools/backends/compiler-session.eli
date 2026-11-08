@@ -34,7 +34,7 @@
 
   (defun session-module-url ()
     (let* ((stack (str (get (new globalThis.Error) :stack)))
-           (file-match (js-call (new globalThis.RegExp "(file://[^\\s):]+\\.mjs):\\d+:\\d+") :exec stack)))
+           (file-match (js-call (new globalThis.RegExp "(file:\\/\\/[^\\s):]+\\.mjs):\\d+:\\d+") :exec stack)))
       (if file-match
         (aref file-match 1)
         (let* ((url-mod (js-call globalThis.process :getBuiltinModule "node:url"))
@@ -73,8 +73,9 @@
   ;; Only the concrete JavaScript session below can own a freshly emitted binary
   ;; product. Public requests and arbitrary producer wrappers keep their wire
   ;; snapshot contract; no caller-provided property enables this internal path.
-  (defun requestCompilerBuildProduct (session request &optional options)
-    (let ((owned (js-call ownedCompilerBuildRequests :get session)))
+  (defun requestCompilerBuildProduct (session request &rest rest-args)
+    (let ((options (aref rest-args 0))
+          (owned (js-call ownedCompilerBuildRequests :get session)))
       (if owned
         (funcall owned request options)
         (js-call session :request request options))))
@@ -84,8 +85,9 @@
   ;; records. A verified artifact loader may register its existing fresh-product
   ;; handoff instead. Public producers cannot transfer either right through
   ;; fields on a response or an old ownership token.
-  (defasync requestCompilerBuildConsumption (session request &optional options)
-    (let ((consume (js-call compilerBuildConsumptionRequests :get session)))
+  (defasync requestCompilerBuildConsumption (session request &rest rest-args)
+    (let ((options (aref rest-args 0))
+          (consume (js-call compilerBuildConsumptionRequests :get session)))
       (js-object
         :product (await (if consume
                           (funcall consume request options)
@@ -109,16 +111,18 @@
     (let ((owned (js-call ownedCompilerBuildRequests :get session)))
       (when owned
         (js-call ownedCompilerBuildRequests :set adapter
-          (lambda (request &optional options)
-            (let ((record (if (= (value-type request) "string") (JSON/parse request) request)))
+          (lambda (request &rest rest-args)
+            (let ((options (aref rest-args 0))
+                  (record (if (= (value-type request) "string") (JSON/parse request) request)))
               (if (and (not (nullish? record)) (= (get record :operation) "project"))
                 (funcall owned request options)
                 (js-call adapter :request request options)))))))
     (let ((consume (js-call compilerBuildConsumptionRequests :get session)))
       (when consume
         (js-call compilerBuildConsumptionRequests :set adapter
-          (lambda (request &optional options)
-            (let ((record (if (= (value-type request) "string") (JSON/parse request) request)))
+          (lambda (request &rest rest-args)
+            (let ((options (aref rest-args 0))
+                  (record (if (= (value-type request) "string") (JSON/parse request) request)))
               (if (and (not (nullish? record)) (= (get record :operation) "project"))
                 (funcall consume request options)
                 (js-call adapter :request request options)))))))
@@ -175,8 +179,8 @@
               (throw error)))))))
 
   (defun compiler-response-events (&optional graph-arg string-chunks-arg)
-    (let* ((graph (if (undefined? graph-arg) false (funcall globalThis.Boolean graph-arg)))
-           (string-chunks (if (undefined? string-chunks-arg) false (funcall globalThis.Boolean string-chunks-arg)))
+    (let* ((graph (if (nullish? graph-arg) false (funcall globalThis.Boolean graph-arg)))
+           (string-chunks (if (nullish? string-chunks-arg) false (funcall globalThis.Boolean string-chunks-arg)))
            (root undefined)
            (has-root false)
            (frames (js-array))
@@ -517,8 +521,9 @@
   ;; Like the response identity index, necessary object identities are split
   ;; across finite host tables. The index lives only for one private handoff;
   ;; its keys are already owned by that handoff or the compiler's source cache.
-  (defun compiler-owned-data-memo (&optional segment-size-arg)
-    (let ((segment-size (if (undefined? segment-size-arg) 1048576 segment-size-arg)))
+  (defun compiler-owned-data-memo (&rest rest-args)
+    (let* ((segment-size-arg (aref rest-args 0))
+           (segment-size (if (undefined? segment-size-arg) 1048576 segment-size-arg)))
       (unless (and (Number/isSafeInteger segment-size) (>= segment-size 1) (<= segment-size 1048576))
         (throw (new globalThis.TypeError "invalid owned compiler memo segment size")))
       (let* ((segments (js-array (new globalThis.Map)))
@@ -549,8 +554,9 @@
   ;; the public wire's values without serializing and parsing the entire graph.
   ;; Canonical subgraphs keep their storage; only changed nodes and their parent
   ;; paths are copied. In particular, shared source spans are never mutated.
-  (defun owned-compiler-data-normalizer (&optional options-arg)
-    (let* ((options (if (nullish? options-arg) (js-object) options-arg))
+  (defun owned-compiler-data-normalizer (&rest rest-args)
+    (let* ((options-arg (aref rest-args 0))
+           (options (if (undefined? options-arg) (js-object) options-arg))
            (segment-size (session-default (get options :segmentSize) 1048576))
            (complete-limit (session-default (get options :completeLimit) 65536)))
       (unless (and (Number/isSafeInteger complete-limit) (>= complete-limit 1) (<= complete-limit 65536))
@@ -574,7 +580,7 @@
                    (js-call replacements :get value)
                    value))))
              (begin (lambda (value &optional borrowed-arg)
-               (let* ((borrowed (if (undefined? borrowed-arg) false (funcall globalThis.Boolean borrowed-arg)))
+               (let* ((borrowed (if (nullish? borrowed-arg) false (funcall globalThis.Boolean borrowed-arg)))
                       (array (Array/isArray value))
                       (keys (Object/keys value))
                       (own-keys (Reflect/ownKeys value)))
@@ -740,7 +746,7 @@
     result)
 
   (defun diagnostic-data (runtime value &optional ancestors-arg memo)
-    (let ((ancestors (if (undefined? ancestors-arg) (js-array) ancestors-arg)))
+    (let ((ancestors (if (nullish? ancestors-arg) (js-array) ancestors-arg)))
       (cond
         ((or (nil? value) (undefined? value) (= (value-type value) "boolean")) value)
         ((= (get value :kind) 4) (js-call runtime :readNumber value))
@@ -819,7 +825,7 @@
               (completed-exception runtime value result memo)))))))
 
   (defun source-exception (runtime value &optional ancestors-arg memo)
-    (let ((ancestors (if (undefined? ancestors-arg) (js-array) ancestors-arg)))
+    (let ((ancestors (if (nullish? ancestors-arg) (js-array) ancestors-arg)))
       (if (not memo)
         (with-roots runtime
           (lambda (own)
@@ -1082,8 +1088,10 @@
                        (when failed (throw failure))
                        result)))
                  (request-data
-                   (lambda (request &optional req-options-arg allow-owned-arg)
-                     (let* ((req-options (if (nullish? req-options-arg) (js-object) req-options-arg))
+                   (lambda (request &rest rest-args)
+                     (let* ((req-options-arg (aref rest-args 0))
+                            (allow-owned-arg (aref rest-args 1))
+                            (req-options (if (undefined? req-options-arg) (js-object) req-options-arg))
                             (signal (get req-options :signal))
                             (response-mode (get req-options :responseMode))
                             (response-string-chunks (get req-options :responseStringChunks))
@@ -1238,8 +1246,8 @@
                  (session
                    (js-object
                      :host host
-                     :request (lambda (request &optional req-options)
-                       (funcall request-data request req-options false))
+                     :request (lambda (request &rest rest-args)
+                       (funcall request-data request (aref rest-args 0) false))
                      :close (lambda ()
                        (unless closed
                          (when busy
@@ -1252,11 +1260,11 @@
             (Object/freeze session)
             (when (= host "javascript")
               (js-call ownedCompilerBuildRequests :set session
-                (lambda (request &optional req-options)
-                  (funcall request-data request req-options t))))
+                (lambda (request &rest rest-args)
+                  (funcall request-data request (aref rest-args 0) t))))
             (js-call compilerBuildConsumptionRequests :set session
-              (lambda (request &optional req-options)
-                (funcall request-data request req-options false)))
+              (lambda (request &rest rest-args)
+                (funcall request-data request (aref rest-args 0) false)))
             session)))))
 
   (export

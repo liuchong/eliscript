@@ -29,7 +29,7 @@
 
   (defun cli-module-url ()
     (let* ((stack (str (get (new globalThis.Error) :stack)))
-           (file-match (js-call (new globalThis.RegExp "(file://[^\\s):]+\\.mjs):\\d+:\\d+") :exec stack)))
+           (file-match (js-call (new globalThis.RegExp "(file:\\/\\/[^\\s):]+\\.mjs):\\d+:\\d+") :exec stack)))
       (if file-match
         (aref file-match 1)
         (let ((path-match (js-call (new globalThis.RegExp "(/[^\\s():]+\\.mjs):\\d+:\\d+") :exec stack)))
@@ -115,7 +115,7 @@
       (progn
         (unless (Array/isArray sources)
           (throw (new globalThis.TypeError "host sources must be an array")))
-        (let ((occupied (new globalThis.Set (cli-default reserved-arg (js-array))))
+        (let ((occupied (new globalThis.Set (if (nullish? reserved-arg) (js-array) reserved-arg)))
               (records (js-array))
               (invalid-re (new globalThis.RegExp "[\\\\:\\u0000?#]"))
               (index 0))
