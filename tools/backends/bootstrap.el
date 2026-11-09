@@ -95,7 +95,7 @@ an added or changed declaration cannot silently bootstrap an incomplete graph."
             (nreverse pairs))))
 
 (defun eliscript-backend-materialize-capsules (root-directory)
-  "Materialize all in-place .eli capsule modules ((module capsules....)) to <rel>.mjs."
+  "Materialize in-place .eli capsule modules to <rel>.mjs."
   (dolist (dir '("bootstrap/host" "browser" "examples" "platform" "runtime" "tests" "tools"))
     (let ((scan-root (expand-file-name dir root-directory)))
       (when (file-directory-p scan-root)
@@ -463,6 +463,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
                             ("tests/eliscript/direct-wasm-error-profile-tests.eli" . "tests/direct-wasm-error-profile-selfhosted.test.mjs")
                             ("tests/eliscript/direct-wasm-registration-tests.eli" . "tests/direct-wasm-registration-selfhosted.test.mjs")
                             ("tests/retained-performance-deferral.test.eli" . "tests/retained-performance-deferral.test.mjs")
+                            ("tests/compiler-seed-native-fresh.test.eli" . "tests/compiler-seed-native-fresh.test.mjs")
                             ("tests/bootstrap-ir.test.eli" . "tests/bootstrap-ir.test.mjs")
                             ("tests/esm-imports.test.eli" . "tests/esm-imports.test.mjs")
                             ("tests/public-surface.test.eli" . "tests/public-surface.test.mjs")

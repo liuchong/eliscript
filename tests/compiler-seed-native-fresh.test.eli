@@ -1,2 +1,195 @@
-(module capsules.tests.compiler-seed-native-fresh.test
-  (js* "import {afterAll,beforeAll,test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {createHash} from 'node:crypto';\nimport {mkdtemp,readFile,rm} from 'node:fs/promises';\nimport {tmpdir} from 'node:os';\nimport {resolve} from 'node:path';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {buildIndependentCompiler,compilerMetadataDigest,decodeCompilerBinary} from '../tools/backends/compiler-build.mjs';\nimport {readCompilerMetadata} from '../tools/backends/compiler-metadata.mjs';\nimport {instantiateNativeManagedRuntime} from '../tools/backends/native-managed-runtime.mjs';\n\nlet directory,backend,runtimeSource;\nconst target=process.platform==='linux'?'arm64-linux':'arm64-macos';\nbeforeAll(async()=>{\n  directory=await mkdtemp(resolve(tmpdir(),'eliscript-seed-native-fresh-'));\n  backend=await buildBackends({outputRoot:resolve(directory,'frontend')});\n  runtimeSource=await readFile('bootstrap/runtime/memory.eli','utf8');\n},120000);\nafterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});\n\ntest('seed builds emit their actual freshly lowered shared native graph with complete public bytes debug and source identities',async()=>{\n  // A real small source project, supported by the complete current runtime.\n  // This exercises the build entry; it is not a complete compiler producer.\n  const source='(defvar base 1) (defun answer (value) (if value (+ value base) -0.0)) (export answer)';\n  const filename='virtual/中文😀\\ud800.eli';\n  const sources={entry:'entry.mjs',modules:[{id:'entry.mjs',filename,source}],literalSources:[],\n    runtime:{filename:'bootstrap/runtime/memory.eli',source:runtimeSource}};\n  const inputIdentity=compilerMetadataDigest(sources);\n  for(const debug of[false,true]){\n    const phases=[],observerFailure={secondary:true};\n    const built=await buildIndependentCompiler({host:'native',nativeTarget:target,sources,\n      debug,outputRoot:resolve(directory,'product-'+debug),onPhase(name,counts){\n        phases.push({name,counts});throw observerFailure;\n      }});\n    assert.equal(built.provenance.mode,'seed');assert.equal(built.debugEnabled,debug);\n    assert.equal(compilerMetadataDigest(sources),inputIdentity,'caller source records stay unchanged');\n    assert.deepEqual(built.sourceIdentity.modules,[{id:'entry.mjs',filename,\n      sha256:createHash('sha256').update(source,'utf16le').digest('hex')}]);\n    assert.equal(built.sourceIdentity.runtime.sha256,createHash('sha256').update(runtimeSource,'utf16le').digest('hex'));\n    assert.strictEqual(built.lowered.typed,built.typed);assert.strictEqual(built.lowered.descriptor,built.descriptor);\n    let shared=0;\n    for(const fn of built.typed.functions.filter(fn=>fn.name.startsWith('__eliscript_managed_'))){\n      const seen=new Set(),pending=[fn.body];\n      while(pending.length){const node=pending.pop();if(seen.has(node)){shared++;continue;}seen.add(node);\n        pending.push(...node.children);}\n    }\n    assert(shared>0,'the real managed lowering provides shared typed nodes to the seed emitter');\n    const digest=compilerMetadataDigest(built.typed);\n    const reference=debug\n      ?backend.native.emit_typed_native_memory_artifact(built.typed,target,{format:'library',binaryEncoding:'u16le-chunks'})\n      :{bytes:backend.native.emit_typed_native_memory_library(built.typed,target,{binaryEncoding:'u16le-chunks'})};\n    assert.deepEqual(built.bytes,decodeCompilerBinary(reference.bytes),'fresh and public emitters produce the same complete target image');\n    assert.equal(compilerMetadataDigest(built.typed),digest,'neither emitter consumes the deliverable typed graph');\n    assert.deepEqual(new Uint8Array(await readFile(built.path)),built.bytes);\n    const saved=await readCompilerMetadata(built.metadataPath);\n    assert.equal(compilerMetadataDigest(saved.typed),digest);assert.deepEqual(saved.descriptor,built.descriptor);\n    assert.deepEqual(saved.sourceIdentity,built.sourceIdentity);\n    if(debug){\n      const {sources:debugSources,...mapping}=await readCompilerMetadata(built.debugPath);\n      assert.deepEqual(mapping,reference.debug,'all functions, ranges, traps and code offsets remain identical');\n      assert.deepEqual(debugSources.map(record=>[record.id,record.filename]),\n        [['entry.mjs',filename],['runtime','bootstrap/runtime/memory.eli']]);\n      assert(debugSources.every(record=>Array.isArray(record.macroOrigins)));\n    }else assert.equal(built.debugPath,undefined);\n    const names=phases.map(record=>record.name);\n    const native=names.filter(name=>name.startsWith('native-'));\n    assert.deepEqual(native.filter(name=>name!=='native-code-progress'),[\n      'native-prepare-start','native-prepare-complete','native-code-start','native-code-complete',\n      'native-container-start','native-container-complete']);\n    assert(native.includes('native-code-progress'));\n    assert(names.indexOf('seed-managed-lower-complete')<names.indexOf('native-prepare-start'));\n    assert(names.indexOf('native-container-complete')<names.indexOf('binary-decode-start'));\n    for(const{name,counts}of phases.filter(record=>record.name.startsWith('native-'))){\n      assert(Object.isFrozen(counts),name);assert.equal(counts.host,'native');\n      assert.deepEqual(Object.keys(counts),['host','count','words','branches','calls']);\n      for(const key of['count','words','branches','calls'])assert(Number.isSafeInteger(counts[key])&&counts[key]>=0);\n    }\n    if(process.arch==='arm64'&&['darwin','linux'].includes(process.platform)){\n      const Module=WebAssembly.Module,Instance=WebAssembly.Instance;let a;\n      try{\n        WebAssembly.Module=function(){throw Error('native seed execution must not substitute WASM');};\n        WebAssembly.Instance=function(){throw Error('native seed execution must not substitute WASM');};\n        a=await instantiateNativeManagedRuntime(built.path,built.lowered,{...built.budget,\n          initialPages:built.memory.initialPages,maximumPages:built.memory.maximumPages,nativeTarget:target});\n      }finally{WebAssembly.Module=Module;WebAssembly.Instance=Instance;}\n      const input=a.number(41),caller=a.number(-0),frame=a.frame(1);a.frameSet(frame,0,caller);a.auto(1);\n      try{\n        const result=a.invoke('answer',[input]);try{assert.equal(a.readNumber(result),42);}finally{a.release(result);}\n        const negative=a.invoke('answer',[false]);try{assert(Object.is(a.readNumber(negative),-0));}finally{a.release(negative);}\n        a.collect();assert.equal(a.stats().frameDepth,1);assert(Object.is(a.readNumber(caller),-0));\n      }finally{a.leaveFrame(frame);a.release(input);a.release(caller);a.closeModule();a.collect();\n        assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);a.close();}\n    }\n  }\n},120000);\n\ntest('public native typed emitters still observe repeated getters and preserve the first caller failure after seed fresh routing',()=>{\n  for(const suffix of['object','library','artifact']){\n    let reads=0;const first={original:suffix};\n    const leaf={type:'u32',value:0,children:[],get kind(){if(++reads===2)throw first;return'literal';}};\n    const typed={abi:'memory-u32',filename:'caller-owned.eli',exports:['f'],functions:[{name:'f',index:0,arity:0,locals:[],\n      body:{kind:'sequence',type:'u32',value:null,children:[leaf,leaf]}}]};\n    assert.throws(()=>backend.native['emit_typed_native_memory_'+suffix](typed,target,{fresh:true,binaryEncoding:'u16le-chunks'}),error=>error===first);\n    assert.equal(reads,2,'a public options field cannot acquire the seed-owned validation path');\n    assert.strictEqual(typed.functions[0].body.children[0],leaf);assert.strictEqual(typed.functions[0].body.children[1],leaf);\n  }\n});\n"))
+(module tests.compiler-seed-native-fresh
+  (import "bun:test" afterAll beforeAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:crypto" createHash)
+  (import "node:fs/promises" mkdtemp readFile rm)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/compiler-build.mjs" buildIndependentCompiler compilerMetadataDigest decodeCompilerBinary)
+  (import "../tools/backends/compiler-metadata.mjs" readCompilerMetadata)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+
+  (defvar directory undefined)
+  (defvar backend undefined)
+  (defvar runtime-source undefined)
+  (defconst target (if (= (get globalThis.process :platform) "linux") "arm64-linux" "arm64-macos"))
+
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-seed-native-fresh-"))))
+    (setq backend (await (buildBackends (js-object :outputRoot (resolve directory "frontend")))))
+    (setq runtime-source (await (readFile "bootstrap/runtime/memory.eli" "utf8")))) 240000)
+
+  (afterAll (async ()
+    (when directory (await (rm directory (js-object :recursive t :force t))))))
+
+  (test "seed builds emit their actual freshly lowered shared native graph with complete public bytes debug and source identities"
+    (async ()
+      ;; A real small source project, supported by the complete current runtime.
+      ;; This exercises the build entry; it is not a complete compiler producer.
+      (let* ((source "(defvar base 1) (defun answer (value) (if value (+ value base) -0.0)) (export answer)")
+             (filename "virtual/中文😀\ud800.eli")
+             (sources (js-object :entry "entry.mjs"
+                        :modules (js-array (js-object :id "entry.mjs" :filename filename :source source))
+                        :literalSources (js-array)
+                        :runtime (js-object :filename "bootstrap/runtime/memory.eli" :source runtime-source)))
+             (input-identity (compilerMetadataDigest sources))
+             (debug-modes (js-array false t))
+             (mode-index 0))
+        (while (< mode-index (js-length debug-modes))
+          (let* ((debug (aref debug-modes mode-index))
+                 (phases (js-array))
+                 (observer-failure (js-object :secondary t))
+                 (built (await (buildIndependentCompiler
+                          (js-object :host "native" :nativeTarget target :sources sources
+                            :debug debug :outputRoot (resolve directory (str "product-" debug))
+                            :onPhase (lambda (name counts)
+                              (js-call phases :push (js-object :name name :counts counts))
+                              (throw observer-failure)))))))
+            (js-call assert :equal (get (get built :provenance) :mode) "seed")
+            (js-call assert :equal (get built :debugEnabled) debug)
+            (js-call assert :equal (compilerMetadataDigest sources) input-identity "caller source records stay unchanged")
+            (js-call assert :deepEqual (get (get built :sourceIdentity) :modules)
+              (js-array (js-object :id "entry.mjs" :filename filename
+                          :sha256 (js-call (js-call (createHash "sha256") :update source "utf16le") :digest "hex"))))
+            (js-call assert :equal (get (get (get built :sourceIdentity) :runtime) :sha256)
+              (js-call (js-call (createHash "sha256") :update runtime-source "utf16le") :digest "hex"))
+            (js-call assert :strictEqual (get (get built :lowered) :typed) (get built :typed))
+            (js-call assert :strictEqual (get (get built :lowered) :descriptor) (get built :descriptor))
+            (let ((shared 0)
+                  (managed-fns (js-call (get (get built :typed) :functions) :filter
+                                 (lambda (fn) (js-call (get fn :name) :startsWith "__eliscript_managed_"))))
+                  (fn-index 0))
+              (while (< fn-index (js-length managed-fns))
+                (let* ((fn (aref managed-fns fn-index))
+                       (seen (new globalThis.Set))
+                       (pending (js-array (get fn :body))))
+                  (while (> (js-length pending) 0)
+                    (let ((node (js-call pending :pop)))
+                      (if (js-call seen :has node)
+                        (setq shared (1+ shared))
+                        (progn
+                          (js-call seen :add node)
+                          (let ((children (get node :children)) (c-idx 0))
+                            (while (< c-idx (js-length children))
+                              (js-call pending :push (aref children c-idx))
+                              (setq c-idx (1+ c-idx)))))))))
+                (setq fn-index (1+ fn-index)))
+              (funcall assert (> shared 0) "the real managed lowering provides shared typed nodes to the seed emitter"))
+            (let* ((digest (compilerMetadataDigest (get built :typed)))
+                   (reference (if debug
+                                (js-call (get backend :native) :emit_typed_native_memory_artifact
+                                  (get built :typed) target (js-object :format "library" :binaryEncoding "u16le-chunks"))
+                                (js-object :bytes (js-call (get backend :native) :emit_typed_native_memory_library
+                                                    (get built :typed) target (js-object :binaryEncoding "u16le-chunks"))))))
+              (js-call assert :deepEqual (get built :bytes) (decodeCompilerBinary (get reference :bytes))
+                "fresh and public emitters produce the same complete target image")
+              (js-call assert :equal (compilerMetadataDigest (get built :typed)) digest
+                "neither emitter consumes the deliverable typed graph")
+              (js-call assert :deepEqual (new globalThis.Uint8Array (await (readFile (get built :path)))) (get built :bytes))
+              (let ((saved (await (readCompilerMetadata (get built :metadataPath)))))
+                (js-call assert :equal (compilerMetadataDigest (get saved :typed)) digest)
+                (js-call assert :deepEqual (get saved :descriptor) (get built :descriptor))
+                (js-call assert :deepEqual (get saved :sourceIdentity) (get built :sourceIdentity)))
+              (if debug
+                (let* ((debug-meta (await (readCompilerMetadata (get built :debugPath))))
+                       (debug-sources (get debug-meta :sources))
+                       (mapping (Object/assign (js-object) debug-meta)))
+                  (Reflect/deleteProperty mapping "sources")
+                  (js-call assert :deepEqual mapping (get reference :debug)
+                    "all functions, ranges, traps and code offsets remain identical")
+                  (js-call assert :deepEqual
+                    (js-call debug-sources :map (lambda (record) (js-array (get record :id) (get record :filename))))
+                    (js-array (js-array "entry.mjs" filename) (js-array "runtime" "bootstrap/runtime/memory.eli")))
+                  (funcall assert (js-call debug-sources :every (lambda (record) (Array/isArray (get record :macroOrigins))))))
+                (js-call assert :equal (get built :debugPath) undefined)))
+            (let* ((names (js-call phases :map (lambda (record) (get record :name))))
+                   (native (js-call names :filter (lambda (name) (js-call name :startsWith "native-")))))
+              (js-call assert :deepEqual
+                (js-call native :filter (lambda (name) (/= name "native-code-progress")))
+                (js-array "native-prepare-start" "native-prepare-complete" "native-code-start" "native-code-complete"
+                  "native-container-start" "native-container-complete"))
+              (funcall assert (js-call native :includes "native-code-progress"))
+              (funcall assert (< (js-call names :indexOf "seed-managed-lower-complete") (js-call names :indexOf "native-prepare-start")))
+              (funcall assert (< (js-call names :indexOf "native-container-complete") (js-call names :indexOf "binary-decode-start")))
+              (js-call (js-call phases :filter (lambda (record) (js-call (get record :name) :startsWith "native-"))) :forEach
+                (lambda (record)
+                  (let ((name (get record :name)) (counts (get record :counts)))
+                    (funcall assert (Object/isFrozen counts) name)
+                    (js-call assert :equal (get counts :host) "native")
+                    (js-call assert :deepEqual (Object/keys counts) (js-array "host" "count" "words" "branches" "calls"))
+                    (js-call (js-array "count" "words" "branches" "calls") :forEach
+                      (lambda (key)
+                        (let ((val (get counts key)))
+                          (funcall assert (and (Number/isSafeInteger val) (>= val 0))))))))))
+            (when (and (= (get globalThis.process :arch) "arm64")
+                       (js-call (js-array "darwin" "linux") :includes (get globalThis.process :platform)))
+              (let ((orig-module (get globalThis.WebAssembly :Module))
+                    (orig-instance (get globalThis.WebAssembly :Instance))
+                    (a undefined))
+                (try
+                  (progn
+                    (put globalThis.WebAssembly :Module
+                      (lambda () (throw (new globalThis.Error "native seed execution must not substitute WASM"))))
+                    (put globalThis.WebAssembly :Instance
+                      (lambda () (throw (new globalThis.Error "native seed execution must not substitute WASM"))))
+                    (setq a (await (instantiateNativeManagedRuntime (get built :path) (get built :lowered)
+                              (Object/assign (js-object) (get built :budget)
+                                (js-object :initialPages (get (get built :memory) :initialPages)
+                                  :maximumPages (get (get built :memory) :maximumPages)
+                                  :nativeTarget target))))))
+                  (finally
+                    (put globalThis.WebAssembly :Module orig-module)
+                    (put globalThis.WebAssembly :Instance orig-instance)))
+                (let ((input (js-call a :number 41))
+                      (caller (js-call a :number -0.0))
+                      (frame (js-call a :frame 1)))
+                  (js-call a :frameSet frame 0 caller)
+                  (js-call a :auto 1)
+                  (try
+                    (progn
+                      (let ((result (js-call a :invoke "answer" (js-array input))))
+                        (try (js-call assert :equal (js-call a :readNumber result) 42)
+                          (finally (js-call a :release result))))
+                      (let ((negative (js-call a :invoke "answer" (js-array false))))
+                        (try (funcall assert (Object/is (js-call a :readNumber negative) -0.0))
+                          (finally (js-call a :release negative))))
+                      (js-call a :collect)
+                      (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+                      (funcall assert (Object/is (js-call a :readNumber caller) -0.0)))
+                    (finally
+                      (js-call a :leaveFrame frame)
+                      (js-call a :release input)
+                      (js-call a :release caller)
+                      (js-call a :closeModule)
+                      (js-call a :collect)
+                      (js-call assert :equal (js-call a :live) 0)
+                      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+                      (js-call a :close)))))))
+          (setq mode-index (1+ mode-index))))) 240000)
+
+  (test "public native typed emitters still observe repeated getters and preserve the first caller failure after seed fresh routing"
+    (lambda ()
+      (js-call (js-array "object" "library" "artifact") :forEach
+        (lambda (suffix)
+          (let* ((reads 0)
+                 (first (js-object :original suffix))
+                 (leaf (js-object :type "u32" :value 0 :children (js-array))))
+            (Object/defineProperty leaf "kind"
+              (js-object :enumerable t :configurable t
+                :get (lambda ()
+                  (setq reads (1+ reads))
+                  (when (= reads 2) (throw first))
+                  "literal")))
+            (let ((typed (js-object :abi "memory-u32" :filename "caller-owned.eli" :exports (js-array "f")
+                           :functions (js-array (js-object :name "f" :index 0 :arity 0 :locals (js-array)
+                                                  :body (js-object :kind "sequence" :type "u32" :value nil
+                                                          :children (js-array leaf leaf)))))))
+              (js-call assert :throws
+                (lambda ()
+                  (js-call (get backend :native) (str "emit_typed_native_memory_" suffix)
+                    typed target (js-object :fresh t :binaryEncoding "u16le-chunks")))
+                (lambda (error) (eq error first)))
+              (js-call assert :equal reads 2 "a public options field cannot acquire the seed-owned validation path")
+              (js-call assert :strictEqual (aref (get (get (aref (get typed :functions) 0) :body) :children) 0) leaf)
+              (js-call assert :strictEqual (aref (get (get (aref (get typed :functions) 0) :body) :children) 1) leaf))))))))

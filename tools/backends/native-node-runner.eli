@@ -21,6 +21,7 @@
   (defvar has-tuple-header false)
   (defvar has-foreign-token false)
   (defvar has-collections false)
+  (defvar has-heap-stats false)
   (defvar has-fast-ops false)
   (defvar has-current-this false)
   (defvar has-call-restore false)
@@ -210,7 +211,7 @@
     (let ((len (js-call memory :invoke "value-length" heap v)))
       (cond
         ((= len 0) "")
-        ((<= len 64)
+        ((<= len 1024)
          (let ((str-off (js-call memory :invoke "value-data" heap v 5))
                (units (js-array))
                (j 0))
@@ -269,7 +270,8 @@
                   (when (= (get arg :kind) "raw")
                     (pin-raw (unsigned-bit-shift-right (get arg :raw) 0))))
                 (setq i (1+ i)))
-              (let ((tuple (unsigned-bit-shift-right (invoke-checked "value-refs" heap 7 argc) 0)))
+              (let ((tuple (unsigned-bit-shift-right (invoke-checked "value-refs" heap 7 argc) 0))
+                    (allocated-foreign (new globalThis.Map)))
                 (pin-raw tuple)
                 (let* ((encode-arg
                          (lambda (arg is-this)
@@ -293,14 +295,19 @@
                                     (when is-this (pin-raw raw))
                                     raw)))
                                ((= kind "foreign")
-                                (let* ((token (unsigned-bit-shift-right (get arg :token) 0))
-                                       (slot (unsigned-bit-shift-right (get arg :slot) 0))
-                                       (raw (unsigned-bit-shift-right (invoke-checked "value-foreign-new" heap token slot) 0)))
-                                  (when (get arg :constructible)
-                                    (invoke-checked "value-foreign-constructor-set" heap raw 1))
-                                  (js-call pending-foreign :push (js-array token raw))
-                                  (when is-this (pin-raw raw))
-                                  raw))
+                                (let ((token (unsigned-bit-shift-right (get arg :token) 0)))
+                                  (if (js-call allocated-foreign :has token)
+                                    (let ((raw (js-call allocated-foreign :get token)))
+                                      (when is-this (pin-raw raw))
+                                      raw)
+                                    (let* ((slot (unsigned-bit-shift-right (get arg :slot) 0))
+                                           (raw (unsigned-bit-shift-right (invoke-checked "value-foreign-new" heap token slot) 0)))
+                                      (when (get arg :constructible)
+                                        (invoke-checked "value-foreign-constructor-set" heap raw 1))
+                                      (js-call allocated-foreign :set token raw)
+                                      (js-call pending-foreign :push (js-array token raw))
+                                      (when is-this (pin-raw raw))
+                                      raw))))
                                ((= kind "string")
                                 (let* ((text (get arg :text))
                                        (len (unsigned-bit-shift-right (js-length text) 0))
@@ -324,38 +331,46 @@
                   (let ((raw (unsigned-bit-shift-right
                                (invoke-checked "value-source-invoke-with-this"
                                  heap target-raw this-raw tuple argc)
-                               0)))
+                               0))
+                        (collections (if has-collections
+                                       (invoke-checked "heap-collections" heap)
+                                       -1)))
                     (if (<= raw 3)
                       (let ((synced (if (> (js-length pending-foreign) 0)
                                       (js-call pending-foreign :splice 0 (js-length pending-foreign))
                                       undefined)))
-                        (js-object :kind "immediate" :raw raw :pendingForeign synced))
+                        (js-object :kind "immediate" :raw raw :collections collections :pendingForeign synced))
                       (let ((res-kind (invoke-checked "value-kind" heap raw)))
-                        (if (= res-kind 4)
-                          (let* ((off (invoke-checked "value-data" heap raw 4))
-                                 (v (js-call memory :getFloat64 off t))
-                                 (enc (cond
-                                        ((Number/isNaN v) "NaN")
-                                        ((= v globalThis.Infinity) "Infinity")
-                                        ((= v (- globalThis.Infinity)) "-Infinity")
-                                        ((Object/is v (* -1 0)) "-0")
-                                        (t v)))
+                        (cond
+                          ((= res-kind 4)
+                           (let* ((off (invoke-checked "value-data" heap raw 4))
+                                  (v (js-call memory :getFloat64 off t))
+                                  (enc (cond
+                                         ((Number/isNaN v) "NaN")
+                                         ((= v globalThis.Infinity) "Infinity")
+                                         ((= v (- globalThis.Infinity)) "-Infinity")
+                                         ((Object/is v (* -1 0)) "-0")
+                                         (t v)))
+                                  (synced (if (> (js-length pending-foreign) 0)
+                                            (js-call pending-foreign :splice 0 (js-length pending-foreign))
+                                            undefined)))
+                             (js-object :kind "number" :value enc :collections collections :pendingForeign synced)))
+                          ((and (= res-kind 5) (<= (invoke-checked "value-length" heap raw) 1024))
+                           (let ((str (decode-short-string heap raw))
                                  (synced (if (> (js-length pending-foreign) 0)
                                            (js-call pending-foreign :splice 0 (js-length pending-foreign))
                                            undefined)))
-                            (js-object :kind "number" :value enc :pendingForeign synced))
-                          (let ((token (if (and (= res-kind 35) has-foreign-token)
-                                         (unsigned-bit-shift-right (invoke-checked "value-foreign-token" heap raw) 0)
-                                         0))
-                                (collections (if has-collections
-                                               (invoke-checked "heap-collections" heap)
-                                               -1)))
-                            (invoke-checked "heap-pin" heap raw)
-                            (let ((synced (if (> (js-length pending-foreign) 0)
-                                            (js-call pending-foreign :splice 0 (js-length pending-foreign))
-                                            undefined)))
-                              (js-object :kind "pinned" :raw raw :valueKind res-kind
-                                :token token :collections collections :pendingForeign synced)))))))))))
+                             (js-object :kind "string" :value str :collections collections :pendingForeign synced)))
+                          (t
+                           (let ((token (if (and (= res-kind 35) has-foreign-token)
+                                          (unsigned-bit-shift-right (invoke-checked "value-foreign-token" heap raw) 0)
+                                          0)))
+                             (invoke-checked "heap-pin" heap raw)
+                             (let ((synced (if (> (js-length pending-foreign) 0)
+                                             (js-call pending-foreign :splice 0 (js-length pending-foreign))
+                                             undefined)))
+                               (js-object :kind "pinned" :raw raw :valueKind res-kind
+                                 :token token :collections collections :pendingForeign synced))))))))))))
           (catch error
             (if (and (not (nil? error)) (= (value-type error) "object")
                      (Object/hasOwn error "__fastApplyRuntimeError"))
@@ -548,7 +563,7 @@
             (throw (new globalThis.Error "native memory is already open")))
           (unless memory
             (throw (new globalThis.Error "native memory is closed")))
-          (let ((result undefined) (last-error undefined))
+          (let ((result undefined) (last-error undefined) (heap-stats undefined))
             (cond
               ((= method "size")
                (setq result (get memory :byteLength)))
@@ -558,7 +573,17 @@
                  (setq last-error
                    (if (= (aref args 0) "last-error")
                      result
-                     (js-call memory :invoke "last-error")))))
+                     (js-call memory :invoke "last-error"))))
+               (when (and has-heap-stats (= last-error 0) (= (js-length args) 2)
+                          (or (= (aref args 0) "heap-collect") (= (aref args 0) "heap-used")))
+                 (let ((h (aref args 1)))
+                   (setq heap-stats
+                     (js-array h
+                       (if (= (aref args 0) "heap-used") result (js-call memory :invoke "heap-used" h))
+                       (js-call memory :invoke "heap-capacity" h)
+                       (js-call memory :invoke "heap-live" h)
+                       (js-call memory :invoke "frame-depth" h)
+                       (js-call memory :invoke "heap-collections" h))))))
               ((= method "getUint16")
                (setq result (Reflect/apply (get memory :getUint16) memory args)))
               ((= method "getUint32")
@@ -589,12 +614,16 @@
               ((= method "fastApply")
                (setq result (execute-fast-apply (aref args 0)))
                (when (and has-last-error
-                          (js-call (js-array "immediate" "number" "pinned") :includes (get result :kind)))
+                          (js-call (js-array "immediate" "number" "string" "pinned") :includes (get result :kind)))
                  (setq last-error 0)))
               (t (throw (new globalThis.TypeError "unknown native transport method"))))
-            (send (if (undefined? last-error)
-                    (js-object :id id :result (if (nullish? result) nil result))
-                    (js-object :id id :result (if (nullish? result) nil result) :lastError last-error)))))
+            (send (cond
+                    ((and (not (undefined? last-error)) heap-stats)
+                     (js-object :id id :result (if (nullish? result) nil result) :lastError last-error :heapStats heap-stats))
+                    ((not (undefined? last-error))
+                     (js-object :id id :result (if (nullish? result) nil result) :lastError last-error))
+                    (t
+                     (js-object :id id :result (if (nullish? result) nil result)))))))
         (catch error
           (if (and (not (nil? error))
                    (or (= (value-type error) "object") (= (value-type error) "function"))
@@ -673,6 +702,14 @@
                   (setq has-collections
                     (funcall globalThis.Boolean
                       (and has-tuple-header (= (get signatures "heap-collections") 1))))
+                  (setq has-heap-stats
+                    (funcall globalThis.Boolean
+                      (and has-tuple-header
+                           (= (get signatures "heap-used") 1)
+                           (= (get signatures "heap-capacity") 1)
+                           (= (get signatures "heap-live") 1)
+                           (= (get signatures "frame-depth") 1)
+                           (= (get signatures "heap-collections") 1))))
                   (setq has-fast-ops
                     (funcall globalThis.Boolean
                       (and has-tuple-header
