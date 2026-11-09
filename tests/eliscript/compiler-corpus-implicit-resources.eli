@@ -65,7 +65,7 @@
              (corpus (await (loadCompilerMatrixCorpus (js-object :sourceRoot root)))))
         (try
           (js-call (js-array "original-program:core-stdlib-complete-protocols" "original-program:eliscript-protocol-complete-hosts"
-                    "original-program:portable-persistent-list-1")
+                    "original-program:atom-complete-hosts" "original-program:portable-persistent-list-1")
             :forEach (lambda (id)
               (let* ((record (js-call (get corpus :records) :find (lambda (item) (= (get item :id) id))))
                      (options (js-object :functionalRuntimeProfile "small")) (before (JSON/stringify record)))

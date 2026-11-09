@@ -169,7 +169,9 @@
              (memory (js-object
               :view (lambda () scalar-view)
               :readBytes (lambda (offset length) (js-call owned :read offset length))
-              :writeBytes (lambda (offset bytes) (js-call owned :write bytes offset))))
+              :writeBytes (lambda (offset bytes) (js-call owned :write bytes offset))
+              :fastApply (when (= (value-type (get owned :fastApply)) "function")
+                           (lambda (spec) (js-call owned :fastApply spec)))))
              (api (createManagedHostRuntime
                     (observeManagedProjectExports (native-heap-exports exports options) module-graph)
                     descriptor memory configuration lifecycle))

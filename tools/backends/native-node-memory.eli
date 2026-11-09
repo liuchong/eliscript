@@ -244,6 +244,10 @@
                       (if (and (= name "last-error") (= (js-length args) 0) (not (undefined? cached-last-error)))
                         cached-last-error
                         (funcall exchange "invoke" (js-call (js-array name) :concat args))))
+                    :fastApply (lambda (spec)
+                      (funcall active)
+                      (setq cached-last-error 0)
+                      (funcall exchange "fastApply" (js-array spec)))
                     :getUint16 (lambda (offset endian)
                       (funcall scalar-offset offset)
                       (funcall exchange "getUint16" (js-array offset (funcall globalThis.Boolean endian))))

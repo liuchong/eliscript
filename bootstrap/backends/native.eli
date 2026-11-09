@@ -1530,7 +1530,7 @@
                (if (and (get state :memory nil) (not (get state :compact nil))
                         (not (get state :leaf nil)) (= (js-length (get state :registers)) 0)
                         (memory-word-type (get right :type))
-                        (or (= (get right :kind) "literal") (= (get right :kind) "local")))
+                        (or (= (get right :kind) "literal") (= (get right :kind) "int-literal") (= (get right :kind) "local")))
                    ;; These RHS forms touch only x0/x9 in the memory backend.
                    ;; Capture the evaluated LHS without changing evaluation order.
                    (progn (word state 704644065) (expression state right)) ;; mov w1,w0
@@ -1603,12 +1603,18 @@
         ((> width 0)
          (expression state (js-nth 0 children))
          (when store
-           (push-value state "u32")
-           (expression state (js-nth 1 children))
-           (push-value state (if (= name "store-f64") "f64" "u32"))
-           (pop-value state (if (= name "store-f64") "f64" "u32"))
-           (word state (if (= name "store-f64") 509624354 704709602)) ;; mov d2,d1 / w2,w1
-           (pop-value state "u32") (word state 704709600))
+           (let ((right (js-nth 1 children)))
+             (if (or (= (get right :kind) "literal") (= (get right :kind) "int-literal") (= (get right :kind) "local"))
+                 (progn
+                   (word state 704644065) ;; mov w1,w0
+                   (expression state right)
+                   (word state (if (= name "store-f64") 509624322 704644066)) ;; fmov d2,d0 / mov w2,w0
+                   (word state 704709600)) ;; mov w0,w1
+               (progn
+                 (push-value state "u32")
+                 (expression state right)
+                 (word state (if (= name "store-f64") 509624322 704644066)) ;; fmov d2,d0 / mov w2,w0
+                 (pop-value state "u32") (word state 704709600)))))
          ;; w0 zero-extends address; compare address+width in 64 bits before
          ;; adding the host pointer, including near-4GiB wrapping addresses.
          (word state (+ 2432696330 (* width 1024))) ;; add x10,x0,#width
@@ -1623,8 +1629,12 @@
         ((= name "memory-size") (word state 4181722720) (word state 3545299968))
         ((= name "memory-grow") (memory-grow state node))
         (t
-         (expression state (js-nth 0 children)) (push-value state "u32")
-         (expression state (js-nth 1 children)) (pop-value state "u32")
+         (expression state (js-nth 0 children))
+         (let ((right (js-nth 1 children)))
+           (if (and (memory-word-type (get right :type))
+                    (or (= (get right :kind) "literal") (= (get right :kind) "int-literal") (= (get right :kind) "local")))
+               (progn (word state 704644065) (expression state right)) ;; mov w1,w0
+             (progn (push-value state "u32") (expression state right) (pop-value state "u32"))))
          (when (= name "word-div") (memory-conditional-error state 889192448 2))
          (word state (cond ((= name "word-div") 448792608) ((= name "word-shr") 448799776)
            ((= name "word-shl") 448798752) ((= name "word-and") 167772192)
@@ -1636,31 +1646,67 @@
            (count (- (js-length args) (if indirect 1 0))) (i 0)
            (slot-size (if (get state :linux nil) 8 4))
            (extra (* (js-call globalThis.Math :ceil (/ (if (> count 7) (* (- count 7) slot-size) 0) 16)) 16)))
-      (while (< i (js-length args)) (expression state (js-nth i args)) (push-value state "u32") (setq i (1+ i)))
-      (when indirect (pop-value state "u32") (memory-indirect-target state node))
-      (stack-adjust state extra t)
-      (setq i 0)
-      (while (< i count)
-        (word state 2432697321) ;; mov x9, sp
-        (let ((offset (+ extra (* (- count i 1) 16))))
-          (while (> offset 0)
-            (let ((part (if (< offset 4095) offset 4095)))
-              (word state (+ 2432696617 (* part 1024))) (setq offset (- offset part)))))
-        (word state (+ 3107979552 (if (< i 7) (1+ i) 10)))
-        (when (>= i 7)
-          (word state 2432697321)
-          (let ((offset (* (- i 7) slot-size)))
-            (while (> offset 0)
-              (let ((part (if (< offset 4095) offset 4095)))
-                (word state (+ 2432696617 (* part 1024))) (setq offset (- offset part)))))
-          (word state 3103785258))
-        (setq i (1+ i)))
+      (if (and (not indirect) (<= count 7))
+          (let ((last-complex -1))
+            (while (< i count)
+              (let ((arg (js-nth i args)))
+                (unless (and (memory-word-type (get arg :type))
+                             (or (= (get arg :kind) "literal") (= (get arg :kind) "int-literal") (= (get arg :kind) "local")))
+                  (setq last-complex i)))
+              (setq i (1+ i)))
+            (setq i 0)
+            (while (< i last-complex)
+              (expression state (js-nth i args)) (push-value state "u32") (setq i (1+ i)))
+            (when (>= last-complex 0)
+              (expression state (js-nth last-complex args))
+              (word state (+ 704644064 (1+ last-complex)))
+              (setq i (1+ last-complex)))
+            (while (< i count)
+              (expression state (js-nth i args))
+              (word state (+ 704644064 (1+ i)))
+              (setq i (1+ i)))
+            (setq i 0)
+            (while (< i last-complex)
+              (let ((offset (* (- last-complex i 1) 16)))
+                (word state (+ 3107980256 (* offset 256) (1+ i))))
+              (setq i (1+ i)))
+            (when (> last-complex 0)
+              (stack-adjust state (* last-complex 16) nil)
+              (put state :depth (- (get state :depth) last-complex))))
+        (progn
+          (while (< i (js-length args)) (expression state (js-nth i args)) (push-value state "u32") (setq i (1+ i)))
+          (when indirect (pop-value state "u32") (memory-indirect-target state node))
+          (stack-adjust state extra t)
+          (setq i 0)
+          (while (< i count)
+            (let ((offset (+ extra (* (- count i 1) 16)))
+                  (reg (if (< i 7) (1+ i) 10)))
+              (if (<= offset 16380)
+                  (word state (+ 3107980256 (* offset 256) reg))
+                (progn
+                  (word state 2432697321) ;; mov x9, sp
+                  (while (> offset 0)
+                    (let ((part (if (< offset 4095) offset 4095)))
+                      (word state (+ 2432696617 (* part 1024))) (setq offset (- offset part))))
+                  (word state (+ 3107979552 reg)))))
+            (when (>= i 7)
+              (let ((offset (* (- i 7) slot-size)))
+                (if (<= offset 16380)
+                    (word state (+ 3103785952 (* offset 256) 10))
+                  (progn
+                    (word state 2432697321)
+                    (while (> offset 0)
+                      (let ((part (if (< offset 4095) offset 4095)))
+                        (word state (+ 2432696617 (* part 1024))) (setq offset (- offset part))))
+                    (word state 3103785258)))))
+            (setq i (1+ i)))))
       (word state 2853372896) ;; mov x0, x19
       (if indirect (word state 3594453504) ;; blr x16
         (let ((at (js-length (get state :words))))
           (word state 2483027968) (js-call (get state :calls) :push (js-object :at at :target (get node :value)))))
-      (stack-adjust state (+ extra (* count 16)) nil)
-      (put state :depth (- (get state :depth) count))
+      (when (or indirect (> count 7))
+        (stack-adjust state (+ extra (* count 16)) nil)
+        (put state :depth (- (get state :depth) count)))
       (word state 3107986025)
       (let ((at (js-length (get state :words))))
         (word state 889192457) (js-call (get state :memoryErrors) :push at))))

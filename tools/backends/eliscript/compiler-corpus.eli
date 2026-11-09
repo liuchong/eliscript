@@ -603,6 +603,7 @@
               (when (and (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
                          (js-call (js-array "original-program:core-stdlib-complete-protocols"
                            "original-program:eliscript-protocol-complete-hosts"
+                           "original-program:atom-complete-hosts"
                            "original-program:portable-persistent-set-complete-hosts") :includes id)
                          (complete-library-functional-resource-recipe-p record))
                 (put result :functionalExecutionDeadlineMs 600000))
