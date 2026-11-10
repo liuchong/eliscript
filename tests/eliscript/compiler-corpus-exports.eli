@@ -512,6 +512,7 @@
             (async (previous target)
               (await previous)
               (let* ((root-directory (resolve directory (+ "isolated-" target)))
+                     (cached-product nil)
                      (steps (js-call (js-array "first" "second" "false" "undefined") :map
                        (lambda (id)
                          (js-object :id id :request (globalThis.structuredClone request)
@@ -526,18 +527,21 @@
                      (context (js-object :record item :target target :sourceRoot root :directory root-directory
                        :transportEvidence transport :options (js-object :profile "small")
                        :session (js-object :request (async (input options)
-                         (let* ((modules (js-call (get input :modules) :map (lambda (module)
-                                  (js-object :id (get module :id) :program
-                                    (js-call compiler :compile_ir_string (get module :source) (get module :filename))))))
-                                (lowered (js-call (get backend :managed) :lower_managed_project modules "main.mjs" runtime
-                                  (js-object :phased t :hostModules (get input :hostModules))))
-                                (bytes (if (= target "wasm")
-                                  (js-call (get backend :wasm) :append_metadata_section
-                                    (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) (get input :memory))
-                                    "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))
-                                  (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target))))
-                           (js-object :target target :entry "main.mjs" :bytes bytes :typed (get lowered :typed)
-                             :descriptor (get lowered :descriptor) :nativeTarget native-target :nativeFormat "library"))))
+                         (unless cached-product
+                           (let* ((modules (js-call (get input :modules) :map (lambda (module)
+                                    (js-object :id (get module :id) :program
+                                      (js-call compiler :compile_ir_string (get module :source) (get module :filename))))))
+                                  (lowered (js-call (get backend :managed) :lower_managed_project modules "main.mjs" runtime
+                                    (js-object :phased t :hostModules (get input :hostModules))))
+                                  (bytes (if (= target "wasm")
+                                    (js-call (get backend :wasm) :append_metadata_section
+                                      (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) (get input :memory))
+                                      "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))
+                                    (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target))))
+                             (setq cached-product
+                               (js-object :target target :entry "main.mjs" :bytes bytes :typed (get lowered :typed)
+                                 :descriptor (get lowered :descriptor) :nativeTarget native-target :nativeFormat "library"))))
+                         (Object/assign (js-object) cached-product)))
                        :archiveProduct (async (product name actual-target)
                          (await (archiveProduct product actual-target (resolve root-directory name))))))
                      (actual (await (executeCompilerCorpusRecord context)))

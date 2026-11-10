@@ -29,6 +29,7 @@
   (defvar has-exception-take false)
   (defvar has-exception-class false)
   (defvar has-exception-class-set false)
+  (defvar has-exception-clear false)
   (defvar callback-sequence 0)
   (defvar remainder (Buffer/alloc 0))
   (defvar eof false)
@@ -448,6 +449,167 @@
             (when pinned-previous-this
               (try (js-call memory :invoke "heap-release" heap previous-this) (catch ignored nil))))))))
 
+  (defun capture-fast-raw-failure (heap code)
+    (if (and (= code 11) has-exception-take)
+      (let* ((thrown (unsigned-bit-shift-right (js-call memory :invoke "value-exception-take" heap) 0))
+             (take-err (js-call memory :invoke "last-error")))
+        (if (/= take-err 0)
+          (js-object :ok false :code take-err :exceptionClass 0)
+          (let* ((thrown-kind (if (> thrown 3) (js-call memory :invoke "value-kind" heap thrown) 0))
+                 (thrown-token (if (and (= thrown-kind 35) has-foreign-token)
+                                 (unsigned-bit-shift-right (js-call memory :invoke "value-foreign-token" heap thrown) 0)
+                                 0))
+                 (thrown-pinned (and (> thrown 3) (/= thrown-kind 35))))
+            (when thrown-pinned
+              (js-call memory :invoke "heap-pin" heap thrown))
+            (js-object :ok false :thrown t :raw thrown :valueKind thrown-kind
+              :token thrown-token :pinned thrown-pinned))))
+      (let ((cls (if has-exception-class
+                   (unsigned-bit-shift-right (js-call memory :invoke "value-exception-class" heap) 0)
+                   0)))
+        (when has-exception-class-set
+          (js-call memory :invoke "value-exception-class-set" heap 0))
+        (js-object :ok false :code code :exceptionClass cls))))
+
+  (defun execute-fast-raw (spec)
+    (let ((op (get spec :op))
+          (heap (unsigned-bit-shift-right (get spec :heap) 0)))
+      (cond
+        ((= op "number")
+         (try
+           (let ((val (unsigned-bit-shift-right
+                        (invoke-checked "value-number" heap
+                          (unsigned-bit-shift-right (get spec :low) 0)
+                          (unsigned-bit-shift-right (get spec :high) 0))
+                        0)))
+             (invoke-checked "heap-pin" heap val)
+             (js-object :ok t :raw val :kind 4))
+           (catch error
+             (if (and (not (nil? error)) (= (value-type error) "object")
+                      (Object/hasOwn error "__fastApplyRuntimeError"))
+               (capture-fast-raw-failure heap (get error :__fastApplyRuntimeError))
+               (throw error)))))
+        ((= op "readNumber")
+         (try
+           (let ((raw (unsigned-bit-shift-right (get spec :raw) 0)))
+             (invoke-checked "value-kind" heap raw)
+             (invoke-checked "value-length" heap raw)
+             (let ((off (invoke-checked "value-data" heap raw 4)))
+               (js-object :ok t
+                 :low (js-call memory :getUint32 off t)
+                 :high (js-call memory :getUint32 (+ off 4) t))))
+           (catch error
+             (if (and (not (nil? error)) (= (value-type error) "object")
+                      (Object/hasOwn error "__fastApplyRuntimeError"))
+               (capture-fast-raw-failure heap (get error :__fastApplyRuntimeError))
+               (throw error)))))
+        ((= op "string")
+         (try
+           (let* ((text (get spec :text))
+                  (len (unsigned-bit-shift-right (js-length text) 0))
+                  (val (unsigned-bit-shift-right (invoke-checked "value-string" heap len) 0))
+                  (off (invoke-checked "value-data" heap val 5))
+                  (i 0))
+             (while (< i len)
+               (js-call memory :setUint16 (+ off (* i 2)) (js-call text :charCodeAt i) t)
+               (setq i (1+ i)))
+             (invoke-checked "value-seal" heap val)
+             (invoke-checked "heap-pin" heap val)
+             (js-object :ok t :raw val :kind 5))
+           (catch error
+             (if (and (not (nil? error)) (= (value-type error) "object")
+                      (Object/hasOwn error "__fastApplyRuntimeError"))
+               (capture-fast-raw-failure heap (get error :__fastApplyRuntimeError))
+               (throw error)))))
+        ((= op "readString")
+         (try
+           (let* ((raw (unsigned-bit-shift-right (get spec :raw) 0))
+                  (_kind (invoke-checked "value-kind" heap raw))
+                  (len (unsigned-bit-shift-right (invoke-checked "value-length" heap raw) 0))
+                  (off (invoke-checked "value-data" heap raw 5))
+                  (parts (js-array))
+                  (start 0))
+             (while (< start len)
+               (let ((units (js-array))
+                     (i start)
+                     (limit (Math/min (+ start 8192) len)))
+                 (while (< i limit)
+                   (js-call units :push (js-call memory :getUint16 (+ off (* i 2)) t))
+                   (setq i (1+ i)))
+                 (js-call parts :push (Reflect/apply globalThis.String.fromCharCode globalThis.String units)))
+               (setq start (+ start 8192)))
+             (js-object :ok t :text (js-call parts :join "")))
+           (catch error
+             (if (and (not (nil? error)) (= (value-type error) "object")
+                      (Object/hasOwn error "__fastApplyRuntimeError"))
+               (capture-fast-raw-failure heap (get error :__fastApplyRuntimeError))
+               (throw error)))))
+        ((= op "invoke")
+         (let ((wire-name (get spec :wireName))
+               (spec-args (get spec :args))
+               (previous 3)
+               (pinned-previous false)
+               (outer-target 0)
+               (inner-target 0)
+               (entered false)
+               (borrowed (js-array))
+               (failure nil))
+           (try
+             (progn
+               (when has-current-this
+                 (setq previous (unsigned-bit-shift-right (invoke-checked "value-function-current-this" heap) 0))
+                 (when (> previous 3)
+                   (invoke-checked "heap-pin" heap previous)
+                   (setq pinned-previous t)))
+               (setq outer-target (unsigned-bit-shift-right (invoke-checked "frame-current" heap) 0))
+               (let ((values (js-array))
+                     (argc (js-length spec-args))
+                     (i 0))
+                 (while (< i argc)
+                   (let* ((item (aref spec-args i))
+                          (v (unsigned-bit-shift-right (get item :raw) 0)))
+                     (when (get item :checkKind)
+                       (invoke-checked "value-kind" heap v))
+                     (invoke-checked "heap-pin" heap v)
+                     (js-call borrowed :push v)
+                     (js-call values :push v))
+                   (setq i (1+ i)))
+                 (setq inner-target (unsigned-bit-shift-right (invoke-checked "frame-current" heap) 0)
+                       entered t)
+                 (let* ((res-raw (unsigned-bit-shift-right
+                                   (Reflect/apply invoke-checked undefined
+                                     (js-call (js-array wire-name heap) :concat values))
+                                   0))
+                        (res-kind (if (> res-raw 3) (invoke-checked "value-kind" heap res-raw) 0)))
+                   (when (> res-raw 3)
+                     (invoke-checked "heap-pin" heap res-raw))
+                   (js-object :ok t :raw res-raw :kind res-kind))))
+             (catch error
+               (if (and (not (nil? error)) (= (value-type error) "object")
+                        (Object/hasOwn error "__fastApplyRuntimeError"))
+                 (progn
+                   (setq failure (capture-fast-raw-failure heap (get error :__fastApplyRuntimeError)))
+                   (when entered
+                     (try (js-call memory :invoke "frame-unwind" heap inner-target) (catch ignored nil)))
+                   (when has-exception-clear
+                     (try (js-call memory :invoke "value-exception-clear" heap) (catch ignored nil)))
+                   failure)
+                 (throw error)))
+             (finally
+               (let ((bi 0))
+                 (while (< bi (js-length borrowed))
+                   (try (js-call memory :invoke "heap-release" heap (aref borrowed bi)) (catch ignored nil))
+                   (setq bi (1+ bi))))
+               (when failure
+                 (try (js-call memory :invoke "frame-unwind" heap outer-target) (catch ignored nil))
+                 (try (cond
+                        (has-call-restore (js-call memory :invoke "value-call-restore" heap previous))
+                        (has-call-reset (js-call memory :invoke "value-call-reset" heap)))
+                   (catch ignored nil)))
+               (when pinned-previous
+                 (try (js-call memory :invoke "heap-release" heap previous) (catch ignored nil)))))))
+        (t (throw (new globalThis.TypeError "unknown fastRaw operation"))))))
+
   (defvar dispatch-fn undefined)
 
   (defun host-call (index heap argv)
@@ -632,6 +794,10 @@
                (when (and has-last-error
                           (js-call (js-array "immediate" "number" "string" "pinned") :includes (get result :kind)))
                  (setq last-error 0)))
+              ((= method "fastRaw")
+               (setq result (execute-fast-raw (aref args 0)))
+               (when (and has-last-error (get result :ok))
+                 (setq last-error 0)))
               (t (throw (new globalThis.TypeError "unknown native transport method"))))
             (send (cond
                     ((and (not (undefined? last-error)) heap-stats)
@@ -766,6 +932,9 @@
                   (setq has-exception-class-set
                     (funcall globalThis.Boolean
                       (and has-tuple-header (= (get signatures "value-exception-class-set") 2))))
+                  (setq has-exception-clear
+                    (funcall globalThis.Boolean
+                      (and has-tuple-header (= (get signatures "value-exception-clear") 1))))
                   (setq memory
                     (await (openNativeMemory (aref args 0) signatures
                              (Object/assign (js-object) (aref args 2) (js-object :hostCall host-call)))))

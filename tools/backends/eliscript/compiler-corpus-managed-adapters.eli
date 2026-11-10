@@ -183,7 +183,8 @@
       (await (runOriginalManagedObservation
         (js-object :source source :sourceRoot (get environment :ELISCRIPT_ORIGINAL_SOURCE_ROOT)
           :engine (if (undefined? engine) "node" engine) :args (if (undefined? arguments) (js-array) arguments)
-          :selected (if (undefined? selected) false selected) :environment environment :recordId id :timeoutMs 30000)
+          :selected (if (undefined? selected) false selected) :environment environment :recordId id
+          :timeoutMs (if (and selected (js-call (funcall globalThis.String id) :startsWith "original-managed:wire-original-host:")) 120000 30000))
         (Object/assign (js-object) context
           (js-object :directory (resolve (get context :directory) (str "nested-" position))))))))
 

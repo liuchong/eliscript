@@ -51,7 +51,7 @@ compiler-release-ci: bootstrap-release
 	$(MAKE) check-release-package
 	# Reuse the already generated and authenticated cohort. Rebuilding here
 	# would replace the installed stage3 runtime with an Emacs bootstrap product.
-	ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE=small ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(MAKE) --assume-old=bootstrap-backends test
+	ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE=small ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(MAKE) test-bootstrap-artifacts
 
 .PHONY: test test-pre-bootstrap test-pre-bootstrap-originals test-bootstrap-artifacts test-core test-applications check-contracts byte-compile bootstrap-backends
 test: test-core test-applications
@@ -64,12 +64,20 @@ test: test-pre-bootstrap-originals test-bootstrap-artifacts
 test-pre-bootstrap: test-core test-applications test-pre-bootstrap-originals
 
 test-pre-bootstrap-originals:
+	@case " $(BUN_TEST_RUNNER) " in *" --shard-index "[1235678]" "*) exit 0 ;; esac; \
 	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=1 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
 
 test-bootstrap-artifacts:
-	@test -f "$(BOOTSTRAP_RELEASE_MANIFEST)" && test -f dist/stage3-release.json || ($(MAKE) bootstrap-release && $(MAKE) prepare-release-package)
+	@case " $(BUN_ARTIFACT_TEST_RUNNER) " in *" --shard-index "[4-8]" "*) exit 0 ;; esac; \
+	test -f "$(BOOTSTRAP_RELEASE_MANIFEST)" && test -f dist/stage3-release.json || ($(MAKE) bootstrap-release && $(MAKE) prepare-release-package)
 	$(BUN) $(BUN_ARTIFACT_TEST_RUNNER) ./tests/package-surface.test.mjs ./tests/compiler-browser-session.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs
-	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-tools-cli-selfhosted.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
+	@case " $(BUN_ARTIFACT_TEST_RUNNER) " in \
+		*" --shard-index 1 "*) ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-tools-cli-selfhosted.test.mjs ;; \
+		*" --shard-index 2 "*) ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(NODE) --test --test-concurrency=1 ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs ;; \
+		*" --shard-index 3 "*) ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs ;; \
+		*" --shard-index "*) ;; \
+		*) ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-tools-cli-selfhosted.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs ;; \
+	esac
 
 test-core: check-contracts
 	$(EMACS) --batch -Q -L compiler -L editor -L tools/org -L tools/worker -L tests \
@@ -379,7 +387,7 @@ test-core: check-contracts
 		./tests/record.test.mjs ./tests/type.test.mjs \
 		./tests/core-syntax.test.mjs \
 		./tests/review-repairs.test.mjs
-	$(NODE) --test --test-concurrency=1 ./tests/compiler-session-protocol-selfhosted.test.mjs ./tests/compiler-matrix-selfhosted.test.mjs ./tests/managed-module-graph-selfhosted.test.mjs ./tests/compiler-corpus-managed-adapters-selfhosted.test.mjs \
+	@set -- ./tests/compiler-session-protocol-selfhosted.test.mjs ./tests/compiler-matrix-selfhosted.test.mjs ./tests/managed-module-graph-selfhosted.test.mjs ./tests/compiler-corpus-managed-adapters-selfhosted.test.mjs \
 		./tests/interop-scalar-paths-selfhosted.test.mjs \
 		./tests/number-text-node-bridge-selfhosted.test.mjs \
 		./tests/compiler-host-scope-selfhosted.test.mjs \
@@ -424,7 +432,19 @@ test-core: check-contracts
 		./tests/managed-runtime-extended-selfhosted.test.mjs \
 		./tests/math-runtime-selfhosted.test.mjs \
 		./tests/unicode-case-selfhosted.test.mjs \
-		./tests/unicode-default-selfhosted.test.mjs
+		./tests/unicode-default-selfhosted.test.mjs; \
+	case " $(BUN_TEST_RUNNER) " in \
+		*" --shard-index "*) \
+			shard=$$(printf '%s\n' "$(BUN_TEST_RUNNER)" | sed -n 's/.*--shard-index \([0-9][0-9]*\).*/\1/p'); \
+			count=$$(printf '%s\n' "$(BUN_TEST_RUNNER)" | sed -n 's/.*--shard-count \([0-9][0-9]*\).*/\1/p'); \
+			selected=""; i=0; \
+			for f in "$$@"; do \
+				if [ $$((i % count)) -eq $$((shard - 1)) ]; then selected="$$selected $$f"; fi; \
+				i=$$((i + 1)); \
+			done; \
+			set -- $$selected ;; \
+	esac; \
+	[ "$$#" -eq 0 ] || $(NODE) --test --test-concurrency=1 "$$@"
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/project-cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/check-cli-test.sh

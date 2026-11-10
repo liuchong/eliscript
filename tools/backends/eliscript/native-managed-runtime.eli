@@ -171,7 +171,9 @@
               :readBytes (lambda (offset length) (js-call owned :read offset length))
               :writeBytes (lambda (offset bytes) (js-call owned :write bytes offset))
               :fastApply (when (= (value-type (get owned :fastApply)) "function")
-                           (lambda (spec) (js-call owned :fastApply spec)))))
+                           (lambda (spec) (js-call owned :fastApply spec)))
+              :fastRaw (when (= (value-type (get owned :fastRaw)) "function")
+                         (lambda (spec) (js-call owned :fastRaw spec)))))
              (api (createManagedHostRuntime
                     (observeManagedProjectExports (native-heap-exports exports options) module-graph)
                     descriptor memory configuration lifecycle))

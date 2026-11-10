@@ -5,8 +5,63 @@
 
 (declare-function eliscript-generate-unicode-case-runtime-data "runtime/unicode-case-runtime" (root))
 
+(defvar eliscript-bootstrap--compiler-bytecompiled nil
+  "Non-nil after this seed build has prepared its compiler bytecode in RAM once.")
+
+(defun eliscript-bootstrap--bytecode-definition-p (definition)
+  "Return non-nil for bytecode DEFINITION, including its macro wrapper."
+  (or (byte-code-function-p definition)
+      (and (eq (car-safe definition) 'macro)
+           (byte-code-function-p (cdr definition)))))
+
+(defun eliscript-bootstrap--byte-compile-loaded-compiler (root)
+  "Byte-compile owned loaded compiler definitions once, entirely in RAM."
+  (setq gc-cons-threshold (max gc-cons-threshold (* 128 1024 1024)))
+  (unless eliscript-bootstrap--compiler-bytecompiled
+    (require 'bytecomp)
+    (let ((compiler-dir (file-name-as-directory
+                         (file-truename (expand-file-name "compiler" root))))
+          (seen (make-hash-table :test #'eq))
+          (compiled (make-hash-table :test #'eq))
+          (byte-compile-warnings nil)
+          (byte-compile-verbose nil)
+          (inhibit-message t)
+          (message-log-max nil))
+      (dolist (entry load-history)
+        (let ((filename (car-safe entry)))
+          (when (and (stringp filename)
+                     (file-name-absolute-p filename)
+                     (file-in-directory-p (file-truename filename) compiler-dir))
+            (dolist (item (cdr entry))
+              (when (and (eq (car-safe item) 'defun)
+                         (symbolp (cdr item))
+                         (not (gethash (cdr item) seen)))
+                (let* ((name (cdr item))
+                       (owner (symbol-file name 'defun)))
+                  (when (and owner
+                             (equal (file-truename owner) (file-truename filename)))
+                    (puthash name t seen)
+                    (when (fboundp name)
+                      (let ((definition (symbol-function name)))
+                        (when (and (not (symbolp definition))
+                                   (not (subrp definition))
+                                   (not (autoloadp definition))
+                                   (not (eliscript-bootstrap--bytecode-definition-p definition))
+                                   (or (functionp definition)
+                                       (and (eq (car-safe definition) 'macro)
+                                            (not (subrp (cdr definition))))))
+                          (let ((replacement (gethash definition compiled)))
+                            (unless replacement
+                              (setq replacement (byte-compile name))
+                              (unless (eliscript-bootstrap--bytecode-definition-p replacement)
+                                (error "cannot prepare Seed bytecode for %s" name))
+                              (puthash definition replacement compiled))
+                            (fset name replacement))))))))))))
+      (setq eliscript-bootstrap--compiler-bytecompiled t))))
+
 (defun eliscript-bootstrap-prepare-runtime (root output)
   "Compile ROOT's real default runtime into the independent seed OUTPUT."
+  (eliscript-bootstrap--byte-compile-loaded-compiler root)
   (unless (file-exists-p (expand-file-name "runtime/unicode-case-data.eli" root))
     ;; A clean source checkout has no ignored generated table module. Published
     ;; source packages can carry that actual derived Eli source directly.
