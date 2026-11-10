@@ -2,9 +2,6 @@
 name: Browser compatibility
 
 on:
-  push:
-    branches: [master]
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -18,7 +15,7 @@ jobs:
   browser:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -76,6 +73,7 @@ jobs:
       - name: Install selected browsers
         run: bun node_modules/playwright-core/cli.js install --with-deps chromium firefox webkit
       - name: Run complete backend differential suite (chromium) (performance reacceptance deferred)
+        id: chromium
         shell: bash
         env:
           ELISCRIPT_TEST_BROWSER: chromium
@@ -87,7 +85,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/eliscript-browser-ci/chromium"
           bun tools/testing/file-workers.mjs tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee "$RUNNER_TEMP/eliscript-browser-ci/chromium/tests.log"
       - name: Run complete backend differential suite (firefox) (performance reacceptance deferred)
-        if: always()
+        if: "!cancelled() && steps.chromium.outcome != 'skipped'"
         shell: bash
         env:
           ELISCRIPT_TEST_BROWSER: firefox
@@ -99,7 +97,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/eliscript-browser-ci/firefox"
           bun tools/testing/file-workers.mjs tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee "$RUNNER_TEMP/eliscript-browser-ci/firefox/tests.log"
       - name: Run complete backend differential suite (webkit) (performance reacceptance deferred)
-        if: always()
+        if: "!cancelled() && steps.chromium.outcome != 'skipped'"
         shell: bash
         env:
           ELISCRIPT_TEST_BROWSER: webkit

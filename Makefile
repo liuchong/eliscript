@@ -7,6 +7,27 @@ ELISCRIPT_NODE_HEAP_MIB ?= 12288
 export NODE_OPTIONS ?= --max-old-space-size=$(ELISCRIPT_NODE_HEAP_MIB)
 BUN_TEST_RUNNER ?= tools/testing/final-functional-scope.mjs
 BUN_ARTIFACT_TEST_RUNNER ?= $(BUN_TEST_RUNNER)
+SUITE_RUNNER ?= tools/testing/file-workers.mjs
+SUITE_STEP = $(BUN) $(SUITE_RUNNER) --suite-step
+SUITE_PREREQ = $(BUN) $(SUITE_RUNNER) --suite-prereq
+SUITE_FINALIZE = $(BUN) $(SUITE_RUNNER) --suite-finalize
+ifeq ($(origin ELISCRIPT_SUITE_RUN_ID),undefined)
+ELISCRIPT_SUITE_RUN_ID := $(shell sh -c 'printf "%s-%s-%s" "$$(date +%s)" "$$PPID" "$$RANDOM"')
+endif
+export ELISCRIPT_SUITE_RUN_ID
+ifeq ($(ELISCRIPT_SKIP_RETAINED_ACCEPTANCE),1)
+CONTRACT_RETAINED_STEPS =
+else
+CONTRACT_RETAINED_STEPS = ,check-contracts/acceptance-m13-01,check-contracts/acceptance-finalize,check-contracts/compatibility-matrix
+endif
+CONTRACT_SUITE_STEPS = check-contracts/conformance,check-contracts/compatibility-corpus,check-contracts/progress,check-contracts/diagnostics,check-contracts/parity,check-contracts/debugging$(CONTRACT_RETAINED_STEPS),check-contracts/acceptance-m13-04,check-contracts/surface,check-contracts/generate-api,check-contracts/render-workflow,check-contracts/documentation,check-contracts/onboarding-m13-02,check-contracts/rehearse-m13-03,check-contracts/integrity
+CORE_SUITE_STEPS = $(CONTRACT_SUITE_STEPS),test-core/ert,test-core/bun-files,test-core/node-selfhosted,test-core/cli-test,test-core/project-cli-test,test-core/check-cli-test,test-core/format-cli-test
+APPLICATION_PREREQ_STEPS = prepare-application-assets/build-browser,prepare-application-assets/build-dogfood-browser
+APPLICATION_SUITE_STEPS = $(APPLICATION_PREREQ_STEPS),test-applications/ert,test-applications/bun-files,test-applications/application-cli
+ORIGINALS_SUITE_STEPS = test-pre-bootstrap-originals/node-originals
+FULL_TEST_SUITE_STEPS = $(CORE_SUITE_STEPS),$(APPLICATION_SUITE_STEPS),$(ORIGINALS_SUITE_STEPS)
+ARTIFACT_SUITE_STEPS = prepare-bootstrap-artifacts,artifact-bun-files,artifact-node-selfhosted
+RELEASE_CI_SUITE_STEPS = check-release-workflow,bootstrap-selfhosted-tests,prepare-release-package,check-stage3-targets,check-release-package,$(ARTIFACT_SUITE_STEPS)
 ELISCRIPT_JS_RUNTIME ?= $(shell command -v node)
 BOOTSTRAP_RELEASE_OUT ?= dist/bootstrap-release
 BOOTSTRAP_RELEASE_MANIFEST ?= $(BOOTSTRAP_RELEASE_OUT)/bootstrap.json
@@ -43,34 +64,40 @@ check-release-workflow:
 
 compiler-release-ci: bootstrap-release
 	$(MAKE) verify-bootstrap
-	$(NODE) tools/ci/dist/compiler-release.mjs --check
-	$(NODE) --test --test-concurrency=1 tests/bootstrap-js-stages-selfhosted.test.mjs tests/stage3-targets-selfhosted.test.mjs tests/bootstrap-release-integration-selfhosted.test.mjs
-	ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(MAKE) check-stage3-targets STAGE3_FUNCTIONAL_RUNTIME_PROFILE=small
-	$(MAKE) check-release-package
+	$(SUITE_STEP) compiler-release-ci check-release-workflow "" -- $(NODE) tools/ci/dist/compiler-release.mjs --check
+	$(SUITE_STEP) compiler-release-ci bootstrap-selfhosted-tests "" -- $(NODE) --test --test-concurrency=1 tests/bootstrap-js-stages-selfhosted.test.mjs tests/stage3-targets-selfhosted.test.mjs tests/bootstrap-release-integration-selfhosted.test.mjs
+	$(SUITE_PREREQ) compiler-release-ci prepare-release-package "" -- $(MAKE) prepare-release-package
+	ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(SUITE_STEP) compiler-release-ci check-stage3-targets prepare-release-package -- $(NODE) tools/backends/dist/release-cli.mjs targets --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)" --output "$(BOOTSTRAP_RELEASE_OUT)/targets" --native-target "$(NATIVE_TARGET)" --functional-runtime-profile small
+	ELISCRIPT_RELEASE_PACKAGE_BOOTSTRAP_MANIFEST=dist/stage3-release.json $(SUITE_STEP) compiler-release-ci check-release-package prepare-release-package -- $(NODE) --test --test-concurrency=1 tests/release-package-install-selfhosted.test.mjs
 	# Reuse the already generated and authenticated cohort. Rebuilding here
 	# would replace the installed stage3 runtime with an Emacs bootstrap product.
-	ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE=small ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(MAKE) test-bootstrap-artifacts
+	ELISCRIPT_DEFER_SUITE_FINALIZE=1 ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE=small ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(MAKE) test-bootstrap-artifacts
+	@$(SUITE_FINALIZE) compiler-release-ci "$(RELEASE_CI_SUITE_STEPS)"
 
 .PHONY: test test-pre-bootstrap test-pre-bootstrap-originals test-bootstrap-artifacts test-core test-applications check-contracts byte-compile bootstrap-backends
 test: test-core test-applications
 
 test: test-pre-bootstrap-originals
+	@$(SUITE_FINALIZE) test "$(FULL_TEST_SUITE_STEPS)"
 
 # Source/runtime functionality closes before formal self-recompilation. These
 # artifact consumers stay in the complete release gate and run after a real final
 # stage3 exists; a missing receipt must fail, never trigger a synthetic fixture.
 test-pre-bootstrap: test-core test-applications test-pre-bootstrap-originals
+	@$(SUITE_FINALIZE) test "$(FULL_TEST_SUITE_STEPS)"
 
 test-pre-bootstrap-originals:
-	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=1 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
+	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=1 $(SUITE_STEP) test test-pre-bootstrap-originals/node-originals "" -- $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
+	$(if $(filter test test-pre-bootstrap,$(MAKECMDGOALS)),,@$(SUITE_FINALIZE) test "$(ORIGINALS_SUITE_STEPS)")
 
 test-bootstrap-artifacts:
-	test -f "$(BOOTSTRAP_RELEASE_MANIFEST)" && test -f dist/stage3-release.json || ($(MAKE) bootstrap-release && $(MAKE) prepare-release-package)
-	$(BUN) $(BUN_ARTIFACT_TEST_RUNNER) ./tests/package-surface.test.mjs ./tests/compiler-browser-session.test.mjs
-	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-tools-cli-selfhosted.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
+	$(SUITE_PREREQ) compiler-release-ci prepare-bootstrap-artifacts $(if $(filter 1,$(ELISCRIPT_DEFER_SUITE_FINALIZE)),prepare-release-package,"") -- sh -c 'test -f "$(BOOTSTRAP_RELEASE_MANIFEST)" && test -f dist/stage3-release.json || ($(MAKE) bootstrap-release && $(MAKE) prepare-release-package)'
+	$(SUITE_STEP) compiler-release-ci artifact-bun-files prepare-bootstrap-artifacts -- $(BUN) $(BUN_ARTIFACT_TEST_RUNNER) ./tests/package-surface.test.mjs ./tests/compiler-browser-session.test.mjs
+	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(SUITE_STEP) compiler-release-ci artifact-node-selfhosted prepare-bootstrap-artifacts -- $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-tools-cli-selfhosted.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
+	$(if $(filter 1,$(ELISCRIPT_DEFER_SUITE_FINALIZE)),,@$(SUITE_FINALIZE) compiler-release-ci "$(ARTIFACT_SUITE_STEPS)")
 
 test-core: check-contracts
-	$(EMACS) --batch -Q -L compiler -L editor -L tools/org -L tools/worker -L tests \
+	$(SUITE_STEP) test test-core/ert "" -- $(EMACS) --batch -Q -L compiler -L editor -L tools/org -L tools/worker -L tests \
 		-l tests/eliscript-tests.el \
 		-l tests/eliscript-analyzer-depth-tests.el \
 		-l tests/eliscript-lower-depth-tests.el \
@@ -91,7 +118,7 @@ test-core: check-contracts
 		-l tests/bootstrap-tests.el \
 		-l tests/eliscript-syntax-tests.el \
 		-f ert-run-tests-batch-and-exit
-	$(BUN) $(BUN_TEST_RUNNER) ./tests/conformance.test.mjs ./tests/compiler-parity-corpus.test.mjs \
+	$(SUITE_STEP) test test-core/bun-files "" -- $(BUN) $(BUN_TEST_RUNNER) ./tests/conformance.test.mjs ./tests/compiler-parity-corpus.test.mjs \
 		./tests/stable-compatibility-corpus.test.mjs \
 		./tests/public-surface.test.mjs \
 		./tests/api-index.test.mjs \
@@ -422,22 +449,24 @@ test-core: check-contracts
 		./tests/math-runtime-selfhosted.test.mjs \
 		./tests/unicode-case-selfhosted.test.mjs \
 		./tests/unicode-default-selfhosted.test.mjs; \
-	$(NODE) --test --test-concurrency=1 "$$@"
-	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh
-	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/project-cli-test.sh
-	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/check-cli-test.sh
-	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/format-cli-test.sh
+	$(SUITE_STEP) test test-core/node-selfhosted "" -- $(NODE) --test --test-concurrency=1 "$$@"
+	PATH="$(dir $(shell command -v $(BUN))):$$PATH" $(SUITE_STEP) test test-core/cli-test "" -- ./tests/cli-test.sh
+	PATH="$(dir $(shell command -v $(BUN))):$$PATH" $(SUITE_STEP) test test-core/project-cli-test "" -- ./tests/project-cli-test.sh
+	PATH="$(dir $(shell command -v $(BUN))):$$PATH" $(SUITE_STEP) test test-core/check-cli-test "" -- ./tests/check-cli-test.sh
+	PATH="$(dir $(shell command -v $(BUN))):$$PATH" $(SUITE_STEP) test test-core/format-cli-test "" -- ./tests/format-cli-test.sh
+	$(if $(filter test test-pre-bootstrap,$(MAKECMDGOALS)),,@$(SUITE_FINALIZE) test "$(CORE_SUITE_STEPS)")
 
 .PHONY: prepare-application-assets
 prepare-application-assets: bootstrap-backends
-	$(BUN) run build:browser
-	$(BUN) run build:dogfood-browser
+	$(SUITE_PREREQ) test prepare-application-assets/build-browser "" -- $(BUN) run build:browser
+	$(SUITE_PREREQ) test prepare-application-assets/build-dogfood-browser prepare-application-assets/build-browser -- $(BUN) run build:dogfood-browser
+	$(if $(filter test test-pre-bootstrap test-applications,$(MAKECMDGOALS)),,@$(SUITE_FINALIZE) test "$(APPLICATION_PREREQ_STEPS)")
 
 test-applications: prepare-application-assets
-	$(EMACS) --batch -Q -L tools/org -L tests \
+	$(SUITE_STEP) test test-applications/ert prepare-application-assets/build-browser,prepare-application-assets/build-dogfood-browser -- $(EMACS) --batch -Q -L tools/org -L tests \
 		-l tests/eliscript-org-tests.el \
 		-f ert-run-tests-batch-and-exit
-	$(BUN) $(BUN_TEST_RUNNER) ./tests/vite-plugin.test.mjs ./tests/org-vite-plugin.test.mjs \
+	$(SUITE_STEP) test test-applications/bun-files prepare-application-assets/build-browser,prepare-application-assets/build-dogfood-browser -- $(BUN) $(BUN_TEST_RUNNER) ./tests/vite-plugin.test.mjs ./tests/org-vite-plugin.test.mjs \
 		./tests/dogfood-site.test.mjs ./tests/dogfood-action.test.mjs \
 		./tests/dogfood-issues.test.mjs ./tests/dogfood-comments.test.mjs \
 		./tests/dogfood-discussions.test.mjs ./tests/dogfood-browser.test.mjs \
@@ -450,7 +479,8 @@ test-applications: prepare-application-assets
 		./tests/docs-site.test.mjs ./tests/pages-assembly.test.mjs \
 		./tests/pages-derived-transports-selfhosted.test.mjs \
 		./tests/pages-runtime.test.mjs
-	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/application-cli-test.sh
+	PATH="$(dir $(shell command -v $(BUN))):$$PATH" $(SUITE_STEP) test test-applications/application-cli prepare-application-assets/build-browser,prepare-application-assets/build-dogfood-browser -- ./tests/application-cli-test.sh
+	$(if $(filter test test-pre-bootstrap,$(MAKECMDGOALS)),,@$(SUITE_FINALIZE) test "$(APPLICATION_SUITE_STEPS)")
 
 # The browser matrix drives all three engines, so it is its own target: the
 # suite above runs one engine and reports rather than requiring a browser to
@@ -465,33 +495,34 @@ bootstrap-backends:
 	ELISCRIPT_JS_RUNTIME="$(ELISCRIPT_JS_RUNTIME)" $(EMACS) --batch -Q -l tools/backends/bootstrap.el --tests
 
 check-contracts: bootstrap-backends
-	$(BUN) tools/conformance/check.mjs
-	$(BUN) tools/compatibility/corpus.mjs
-	$(BUN) tools/progress/check.mjs
-	$(BUN) tools/diagnostics/check.mjs
-	$(BUN) tools/parity/check.mjs
-	$(BUN) tools/debugging/check.mjs
+	$(SUITE_STEP) test check-contracts/conformance "" -- $(BUN) tools/conformance/check.mjs
+	$(SUITE_STEP) test check-contracts/compatibility-corpus "" -- $(BUN) tools/compatibility/corpus.mjs
+	$(SUITE_STEP) test check-contracts/progress "" -- $(BUN) tools/progress/check.mjs
+	$(SUITE_STEP) test check-contracts/diagnostics "" -- $(BUN) tools/diagnostics/check.mjs
+	$(SUITE_STEP) test check-contracts/parity "" -- $(BUN) tools/parity/check.mjs
+	$(SUITE_STEP) test check-contracts/debugging "" -- $(BUN) tools/debugging/check.mjs
 ifneq ($(ELISCRIPT_SKIP_RETAINED_ACCEPTANCE),1)
-	$(BUN) tools/acceptance/check.mjs \
+	$(SUITE_STEP) test check-contracts/acceptance-m13-01 "" -- $(BUN) tools/acceptance/check.mjs \
 		--verify-run acceptance/runs/m13-01.json \
 		--verify-markdown acceptance/runs/m13-01.md
-	$(BUN) tools/acceptance/finalize.mjs --verify
-	$(BUN) tools/compatibility/matrix.mjs --verify-all
+	$(SUITE_STEP) test check-contracts/acceptance-finalize "" -- $(BUN) tools/acceptance/finalize.mjs --verify
+	$(SUITE_STEP) test check-contracts/compatibility-matrix "" -- $(BUN) tools/compatibility/matrix.mjs --verify-all
 endif
-	$(BUN) tools/acceptance/repeat.mjs --verify \
+	$(SUITE_STEP) test check-contracts/acceptance-m13-04 "" -- $(BUN) tools/acceptance/repeat.mjs --verify \
 		--json-report acceptance/runs/m13-04.json \
 		--markdown-report acceptance/runs/m13-04.md
-	$(BUN) tools/surface/check.mjs
-	$(BUN) tools/surface/generate-api.mjs --check
-	$(BUN) tools/ci/render-workflow.mjs --check
-	$(BUN) tools/documentation/check.mjs
-	$(BUN) tools/onboarding/check.mjs \
+	$(SUITE_STEP) test check-contracts/surface "" -- $(BUN) tools/surface/check.mjs
+	$(SUITE_STEP) test check-contracts/generate-api "" -- $(BUN) tools/surface/generate-api.mjs --check
+	$(SUITE_STEP) test check-contracts/render-workflow "" -- $(BUN) tools/ci/render-workflow.mjs --check
+	$(SUITE_STEP) test check-contracts/documentation "" -- $(BUN) tools/documentation/check.mjs
+	$(SUITE_STEP) test check-contracts/onboarding-m13-02 "" -- $(BUN) tools/onboarding/check.mjs \
 		--verify-run acceptance/runs/m13-02.json \
 		--verify-markdown acceptance/runs/m13-02.md
-	$(BUN) tools/compatibility/rehearse.mjs \
+	$(SUITE_STEP) test check-contracts/rehearse-m13-03 "" -- $(BUN) tools/compatibility/rehearse.mjs \
 		--verify-run acceptance/runs/m13-03.json \
 		--verify-markdown acceptance/runs/m13-03.md
-	$(BUN) tools/integrity/check.mjs
+	$(SUITE_STEP) test check-contracts/integrity "" -- $(BUN) tools/integrity/check.mjs
+	$(if $(filter test test-pre-bootstrap test-core,$(MAKECMDGOALS)),,@$(SUITE_FINALIZE) test "$(CONTRACT_SUITE_STEPS)")
 
 byte-compile:
 	EMACS="$(EMACS)" ./tools/ci/strict-byte-compile.sh

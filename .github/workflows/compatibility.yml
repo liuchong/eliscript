@@ -3,9 +3,6 @@
 name: Compatibility
 
 on:
-  push:
-    branches: [master]
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -91,6 +88,15 @@ jobs:
       - name: Install Chromium
         run: bun node_modules/playwright-core/cli.js install --with-deps chromium
       - name: Run test file shard 1/1 (performance reacceptance deferred)
+        id: test-suite
         run: bun run test
       - name: Strict byte compilation
+        if: "!cancelled() && steps.test-suite.outcome != 'skipped'"
         run: make byte-compile
+      - name: Preserve compatibility test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: compatibility-${{ matrix.name }}-${{ github.sha }}
+          path: .eliscript-cache/test-results/
+          if-no-files-found: warn

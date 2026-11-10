@@ -1,7 +1,9 @@
 (module tools.testing.file-workers
-  (import "node:path" basename resolve isAbsolute)
+  (import "node:path" basename dirname resolve isAbsolute)
   (import "node:fs" existsSync)
-  (import "node:fs/promises" mkdir writeFile)
+  (import "node:fs/promises" mkdir writeFile readFile rm stat)
+  (import "node:crypto" createHash)
+  (import "node:child_process" spawn)
   (import "./resource-supervisor.mjs" startResourceSupervisor)
   (import "./fixture-environment.mjs" fixtureChildArguments)
   (import "./final-functional-scope.mjs" runFinalFunctionalScope)
@@ -133,6 +135,7 @@
                   (put row :failure (get result :failure)))
                 (when (worker-truth (get result :resource)) (put row :resource (get result :resource)))
                 (when (worker-truth (get result :message)) (put row :message (get result :message)))
+                (when (Number/isFinite (get result :elapsedMs)) (put row :elapsedMs (get result :elapsedMs)))
                 (put results index row))
               (catch error
                 (console/error error) (put results index (js-object :file file :exitCode 1))))))))
@@ -155,11 +158,74 @@
           (if (or (worker-truth (get supervisor :failure))
                   (js-call results :some (lambda (row) (/= (get row :exitCode) 0)))) 1 0)))))
 
+  (defconst MAX_EVIDENCE_FILE_BYTES 16777216)
+  (defconst transient-env-keys (new globalThis.Set (js-array
+    "ELISCRIPT_SUITE_RUN_ID" "ELISCRIPT_TEST_SCOPE_ARCHIVE_OUT"
+    "ELISCRIPT_TEST_SUITE_LEDGER" "ELISCRIPT_DEFER_SUITE_FINALIZE")))
+  (defconst bound-env-keys (new globalThis.Set (js-array
+    "NATIVE_TARGET" "STAGE3_FUNCTIONAL_RUNTIME_PROFILE" "NODE_OPTIONS"
+    "BUN_TEST_RUNNER" "BUN_ARTIFACT_TEST_RUNNER" "EMACS" "BUN" "NODE")))
+
+  (defun relevant-env-entries (environment)
+    (let ((env (or environment (js-object)))
+          (entries (js-array)))
+      (js-call (js-call (Object/keys env) :sort) :forEach
+        (lambda (key)
+          (when (and (not (js-call transient-env-keys :has key))
+                     (or (js-call key :startsWith "ELISCRIPT_")
+                         (js-call bound-env-keys :has key)))
+            (let ((val (get env key)))
+              (when (= (value-type val) "string")
+                (js-call entries :push (js-array key val)))))))
+      entries))
+
+  (defun computeCommandSignature (command-args environment)
+    (let ((hasher (createHash "sha256")))
+      (js-call hasher :update
+        (JSON/stringify (js-object
+          :commandArgs command-args
+          :env (relevant-env-entries environment))))
+      (js-call hasher :digest "hex")))
+
+  (defasync computeFileSha256 (source-root file)
+    (try
+      (let* ((target (resolve source-root file))
+             (st (await (stat target))))
+        (if (not (js-call st :isFile))
+          (js-object :sha256 nil :error "not-a-regular-file")
+          (if (> (get st :size) MAX_EVIDENCE_FILE_BYTES)
+            (js-object :sha256 nil :error "file-exceeds-evidence-size-limit")
+            (let ((bytes (await (readFile target))))
+              (js-object :sha256 (js-call (js-call (createHash "sha256") :update bytes) :digest "hex") :error nil)))))
+      (catch error
+        (js-object :sha256 nil :error (or (worker-optional error "code") (get error :message) "read-failed")))))
+
+  (defasync collectPassedFileDigests (source-root results)
+    (let ((digests (js-object))
+          (errors (js-object))
+          (index 0))
+      (while (< index (js-length results))
+        (let ((row (aref results index)))
+          (when (and row (= (get row :exitCode) 0)
+                     (not (worker-truth (get row :failure)))
+                     (not (eq (get row :started) false))
+                     (= (value-type (get row :file)) "string"))
+            (let ((outcome (await (computeFileSha256 source-root (get row :file)))))
+              (if (= (value-type (get outcome :sha256)) "string")
+                (put digests (get row :file) (get outcome :sha256))
+                (put errors (get row :file) (or (get outcome :error) "digest-unavailable"))))))
+        (setq index (1+ index)))
+      (js-object :digests digests :errors errors)))
+
   (defasync runTestFiles (files &rest configuration)
     (validate-files files)
-    (let ((archive (resolve ".eliscript-cache" "test-results"
-                    (str "file-workers-" (Date/now) "-" (get globalThis.process :pid) ".json")))
-          (supervisor undefined) (result undefined))
+    (let* ((options (if (> (js-length configuration) 0) (aref configuration 0) (js-object)))
+           (environment (get options :environment (get globalThis.process :env)))
+           (source-root (get options :sourceRoot (js-call globalThis.process :cwd)))
+           (archive (resolve ".eliscript-cache" "test-results"
+                     (str "file-workers-" (Date/now) "-" (get globalThis.process :pid) ".json")))
+           (explicit-archive (worker-optional environment "ELISCRIPT_TEST_SCOPE_ARCHIVE_OUT"))
+           (supervisor undefined) (result undefined))
       (try
         (setq supervisor (await (startResourceSupervisor)))
         (setq result (await (Reflect/apply scheduleTestFiles undefined
@@ -170,39 +236,425 @@
       (when (nullish? (get result :failure))
         (put result :failure (worker-optional (worker-optional supervisor "failure") "failure")))
       ;; Genuine unstarted files stay explicitly unstarted, never passed/skipped.
-      (let ((record (Object/assign (js-object) result (js-object
-        :inventory files :unstarted (js-call files :slice (js-length (get result :results)))
-        :resourceFailure (let ((failure (worker-optional supervisor "failure")))
-                          (if (nullish? failure) nil failure))))))
+      (let* ((completed-set (new globalThis.Set (js-call (get result :results) :map (lambda (row) (get row :file)))))
+             (digest-outcome (await (collectPassedFileDigests source-root (get result :results))))
+             (failed-files (js-call (js-call (get result :results) :filter
+                             (lambda (row) (or (/= (get row :exitCode) 0) (worker-truth (get row :failure)))))
+                             :map (lambda (row) (get row :file))))
+             (record (Object/assign (js-object) result (js-object
+               :inventory files
+               :failedFiles failed-files
+               :unstarted (js-call files :filter (lambda (file) (not (js-call completed-set :has file))))
+               :passedFileDigests (get digest-outcome :digests)
+               :passedFileDigestErrors (get digest-outcome :errors)
+               :resourceFailure (let ((failure (worker-optional supervisor "failure")))
+                                 (if (nullish? failure) nil failure))))))
         (try
           (await (mkdir (resolve ".eliscript-cache" "test-results") (js-object :recursive t)))
-          (await (writeFile archive (+ (JSON/stringify record nil 2) "\n")))
+          (let ((payload (+ (JSON/stringify record nil 2) "\n")))
+            (await (writeFile archive payload))
+            (when (and (= (value-type explicit-archive) "string") (> (js-length (js-call explicit-archive :trim)) 0))
+              (let ((target-out (resolve source-root (js-call explicit-archive :trim))))
+                (await (mkdir (dirname target-out) (js-object :recursive t)))
+                (await (writeFile target-out payload)))))
           (catch error
             (console/error (+ "Cannot archive test outcomes: " (get error :message)))
             (put result :exitCode 1))))
       (when (worker-truth (get result :failure))
         (console/error (str "[" (get result :failure) "] testing stopped; details: " archive))) result))
 
+  (defun parseSuiteArgs (arguments)
+    (when (or (not (Array/isArray arguments)) (= (js-length arguments) 0))
+      (throw (new globalThis.TypeError "Suite arguments must not be empty")))
+    (let ((flag (aref arguments 0)))
+      (cond
+        ((= flag "--suite-finalize")
+          (let ((suite (worker-optional arguments 1))
+                (expected-raw (worker-optional arguments 2))
+                (expected-steps (js-array)))
+            (when (or (/= (value-type suite) "string") (= (js-length (js-call suite :trim)) 0))
+              (throw (new globalThis.TypeError "--suite-finalize requires a suite name")))
+            (when (and (= (value-type expected-raw) "string") (> (js-length (js-call expected-raw :trim)) 0))
+              (js-call (js-call expected-raw :split ",") :forEach
+                (lambda (part)
+                  (let ((trimmed (js-call part :trim)))
+                    (when (> (js-length trimmed) 0)
+                      (js-call expected-steps :push trimmed))))))
+            (js-object :mode "finalize" :suite (js-call suite :trim) :expectedSteps expected-steps)))
+        ((or (= flag "--suite-step") (= flag "--suite-prereq"))
+          (let ((suite (worker-optional arguments 1))
+                (step (worker-optional arguments 2))
+                (sep-index (js-call arguments :indexOf "--" 3)))
+            (when (or (/= (value-type suite) "string") (= (js-length (js-call suite :trim)) 0)
+                      (/= (value-type step) "string") (= (js-length (js-call step :trim)) 0))
+              (throw (new globalThis.TypeError (str flag " requires <suite> and <step>"))))
+            (when (or (< sep-index 3) (> sep-index 4) (>= (1+ sep-index) (js-length arguments)))
+              (throw (new globalThis.TypeError (str flag " requires -- followed by a command"))))
+            (let* ((prereq-raw (if (= sep-index 4) (aref arguments 3) ""))
+                   (prereqs (js-array)))
+              (when (and (= (value-type prereq-raw) "string") (> (js-length (js-call prereq-raw :trim)) 0))
+                (js-call (js-call prereq-raw :split ",") :forEach
+                  (lambda (part)
+                    (let ((trimmed (js-call part :trim)))
+                      (when (> (js-length trimmed) 0)
+                        (js-call prereqs :push trimmed))))))
+              (js-object
+                :mode (if (= flag "--suite-prereq") "prereq" "step")
+                :suite (js-call suite :trim)
+                :step (js-call step :trim)
+                :prerequisites prereqs
+                :commandArgs (js-call arguments :slice (1+ sep-index))))))
+        (t (throw (new globalThis.TypeError (str "Unsupported suite flag: " flag)))))))
+
+  (defasync spawn-suite-child (command args source-root environment)
+    (new globalThis.Promise (lambda (resolve-promise)
+      (let ((started-at (Date/now))
+            (settled false)
+            (child undefined))
+        (let ((finish (lambda (outcome)
+                        (when (not settled)
+                          (setq settled t)
+                          (funcall resolve-promise
+                            (Object/assign (js-object :elapsedMs (Math/max 0 (- (Date/now) started-at))) outcome))))))
+          (try
+            (progn
+              (setq child (spawn command args (js-object :cwd source-root :env environment :stdio "inherit")))
+              (js-call child :on "error" (lambda (error)
+                (funcall finish (js-object :exitCode 1 :signal nil :failure "spawn-error" :message (get error :message)))))
+              (js-call child :on "close" (lambda (code signal)
+                (let ((exit-code (if (Number/isInteger code) code 1)))
+                  (funcall finish (js-object
+                    :exitCode exit-code
+                    :signal (if (nullish? signal) nil signal)
+                    :failure (if (/= exit-code 0)
+                               (if (worker-truth signal) (str "signal-" signal) "command-failed")
+                               nil)))))))
+            (catch error
+              (funcall finish (js-object :exitCode 1 :signal nil :failure "spawn-error" :message (get error :message))))))))))
+
+  (defasync collectCommandArgDigests (source-root command-args)
+    (let ((digests (js-object))
+          (idx 1))
+      (while (< idx (js-length command-args))
+        (let ((arg (aref command-args idx)))
+          (when (and (= (value-type arg) "string")
+                     (> (js-length arg) 0)
+                     (not (js-call arg :startsWith "-")))
+            (let ((outcome (await (computeFileSha256 source-root arg))))
+              (when (= (value-type (get outcome :sha256)) "string")
+                (put digests arg (get outcome :sha256))))))
+        (setq idx (1+ idx)))
+      digests))
+
+  (defun summarize-scope-archive (archive-data)
+    (let* ((inventory (if (Array/isArray (get archive-data :inventory)) (get archive-data :inventory) (js-array)))
+           (results (if (Array/isArray (get archive-data :results)) (get archive-data :results) (js-array)))
+           (unstarted (if (Array/isArray (get archive-data :unstarted)) (get archive-data :unstarted) (js-array)))
+           (passed 0)
+           (failed 0)
+           (idx 0))
+      (while (< idx (js-length results))
+        (let ((row (aref results idx)))
+          (when (and row (not (eq (get row :started) false)))
+            (if (and (= (get row :exitCode) 0) (not (worker-truth (get row :failure))))
+              (setq passed (1+ passed))
+              (setq failed (1+ failed)))))
+        (setq idx (1+ idx)))
+      (js-object
+        :total (js-length inventory)
+        :passed passed
+        :failed failed
+        :unexecuted (js-length unstarted))))
+
+  (defasync write-ledger-files (ledger-path run-ledger-path payload)
+    (await (writeFile ledger-path payload))
+    (when (/= run-ledger-path ledger-path)
+      (await (writeFile run-ledger-path payload))))
+
+  (defasync runSuiteCommand (arguments &rest configuration)
+    (let* ((parsed (parseSuiteArgs arguments))
+           (options (if (> (js-length configuration) 0) (aref configuration 0) (js-object)))
+           (environment (get options :environment (get globalThis.process :env)))
+           (source-root (get options :sourceRoot (js-call globalThis.process :cwd)))
+           (suite (get parsed :suite))
+           (mode (get parsed :mode))
+           (run-id (or (worker-optional environment "ELISCRIPT_SUITE_RUN_ID") "default"))
+           (safe-run-id (js-call run-id :replace (new globalThis.RegExp "[^A-Za-z0-9_.-]+" "g") "_"))
+           (explicit-ledger (worker-optional environment "ELISCRIPT_TEST_SUITE_LEDGER"))
+           (ledger-path (if (and (= (value-type explicit-ledger) "string") (> (js-length (js-call explicit-ledger :trim)) 0))
+                          (resolve source-root (js-call explicit-ledger :trim))
+                          (resolve source-root ".eliscript-cache" "test-results" (str "suite-" suite ".json"))))
+           (run-ledger-path (resolve (dirname ledger-path) (str "suite-" suite "-run-" safe-run-id ".json"))))
+      (await (mkdir (dirname ledger-path) (js-object :recursive t)))
+      (let ((saved nil))
+        (try
+          (setq saved (JSON/parse (await (readFile ledger-path "utf8"))))
+          (catch error (setq saved nil)))
+        (if (= mode "finalize")
+          (let ((ledger-error (cond
+                                ((not (and saved (= (value-type saved) "object"))) "ledger-missing")
+                                ((or (/= (get saved :format) "eliscript-test-suite-ledger")
+                                     (/= (get saved :version) 1)) "invalid-ledger-format")
+                                ((/= (get saved :suite) suite) "suite-mismatch")
+                                ((/= (get saved :runId) run-id) "run-id-mismatch")
+                                ((or (not (Array/isArray (get saved :steps)))
+                                     (= (js-length (get saved :steps)) 0)) "empty-suite-steps")
+                                (t nil))))
+            (if (not (nil? ledger-error))
+              (progn
+                (console/error (str "Suite [" suite "] finalize rejected (" ledger-error "); ledger: " ledger-path))
+                (js-object
+                  :format "eliscript-test-suite-ledger"
+                  :version 1
+                  :suite suite
+                  :runId run-id
+                  :finalized false
+                  :failure ledger-error
+                  :steps (js-array)
+                  :summary (js-object :total 0 :passed 0 :failed 1 :unexecuted 0 :elapsedMs 0)
+                  :exitCode 1
+                  :processExitCode 1
+                  :ledgerPath ledger-path
+                  :runLedgerPath run-ledger-path))
+              (let* ((steps (js-call (get saved :steps) :slice))
+                     (expected-steps (or (get parsed :expectedSteps) (js-array)))
+                     (missing-steps (js-array))
+                     (e-idx 0))
+                (while (< e-idx (js-length expected-steps))
+                  (let ((exp-name (aref expected-steps e-idx)))
+                    (when (not (js-call steps :some (lambda (r) (and r (= (get r :step) exp-name)))))
+                      (js-call missing-steps :push exp-name)
+                      (js-call steps :push (js-object
+                        :suite suite
+                        :step exp-name
+                        :kind "step"
+                        :status "unexecuted"
+                        :started false
+                        :exitCode nil
+                        :elapsedMs 0
+                        :failure "step-not-recorded"))))
+                  (setq e-idx (1+ e-idx)))
+                (let ((passed 0) (failed 0) (unexecuted 0) (elapsed-ms 0)
+                      (failed-steps (js-array))
+                      (unexecuted-steps (js-array))
+                      (idx 0))
+                  (while (< idx (js-length steps))
+                    (let ((row (aref steps idx)))
+                      (when row
+                        (when (Number/isFinite (get row :elapsedMs))
+                          (setq elapsed-ms (+ elapsed-ms (get row :elapsedMs))))
+                        (cond
+                          ((= (get row :status) "passed")
+                            (setq passed (1+ passed)))
+                          ((= (get row :status) "unexecuted")
+                            (setq unexecuted (1+ unexecuted))
+                            (js-call unexecuted-steps :push (get row :step)))
+                          (t
+                            (setq failed (1+ failed))
+                            (js-call failed-steps :push (get row :step))))))
+                    (setq idx (1+ idx)))
+                  (let* ((exit-code (if (or (> failed 0) (> unexecuted 0)) 1 0))
+                         (summary (js-object
+                           :total (js-length steps)
+                           :passed passed
+                           :failed failed
+                           :unexecuted unexecuted
+                           :failedSteps failed-steps
+                           :unexecutedSteps unexecuted-steps
+                           :elapsedMs elapsed-ms))
+                         (final-ledger (js-object
+                           :format "eliscript-test-suite-ledger"
+                           :version 1
+                           :suite suite
+                           :runId (get saved :runId)
+                           :finalized t
+                           :steps steps
+                           :missingSteps missing-steps
+                           :failure (if (> (js-length missing-steps) 0)
+                                      "incomplete-suite-ledger"
+                                      (if (> exit-code 0) "suite-failed" nil))
+                           :summary summary
+                           :exitCode exit-code
+                           :runLedgerPath run-ledger-path)))
+                    (await (write-ledger-files ledger-path run-ledger-path (+ (JSON/stringify final-ledger nil 2) "\n")))
+                    (console/log (str "Suite [" suite "]: " passed "/" (js-length steps) " passed, "
+                      failed " failed, " unexecuted " unexecuted (" elapsed-ms "ms); ledger: " ledger-path))
+                    (Object/assign final-ledger (js-object :ledgerPath ledger-path :processExitCode exit-code)))))))
+          (let* ((step (get parsed :step))
+                 (prereqs (get parsed :prerequisites))
+                 (command-args (get parsed :commandArgs))
+                 (command-signature (computeCommandSignature command-args environment))
+                 (safe-step (js-call step :replace (new globalThis.RegExp "[^A-Za-z0-9_.-]+" "g") "_"))
+                 (step-archive-path (resolve (dirname ledger-path) (str "suite-" suite "-run-" safe-run-id "-step-" safe-step ".json")))
+                 (ledger (if (and saved
+                                  (not (worker-truth (get saved :finalized)))
+                                  (= (get saved :suite) suite)
+                                  (= (get saved :runId) run-id)
+                                  (Array/isArray (get saved :steps)))
+                           saved
+                           (js-object
+                             :format "eliscript-test-suite-ledger"
+                             :version 1
+                             :suite suite
+                             :runId run-id
+                             :finalized false
+                             :steps (js-array)))))
+            ;; 1. Check prerequisites in current ledger steps (both missing and non-passed prerequisites block execution)
+            (let ((blocked-by nil)
+                  (blocked-reason nil)
+                  (p-idx 0))
+              (while (and (nil? blocked-by) (< p-idx (js-length prereqs)))
+                (let* ((req-name (aref prereqs p-idx))
+                       (req-row (js-call (get ledger :steps) :find (lambda (s) (= (get s :step) req-name)))))
+                  (when (or (not req-row) (/= (get req-row :status) "passed"))
+                    (setq blocked-by req-name)
+                    (setq blocked-reason (if req-row "prerequisite-failed" "prerequisite-missing"))))
+                (setq p-idx (1+ p-idx)))
+              (if (not (nil? blocked-by))
+                (let ((unexecuted-row (js-object
+                        :suite suite
+                        :step step
+                        :kind mode
+                        :prerequisites prereqs
+                        :status "unexecuted"
+                        :started false
+                        :exitCode nil
+                        :elapsedMs 0
+                        :failure blocked-reason
+                        :blockedBy blocked-by)))
+                  (js-call (get ledger :steps) :push unexecuted-row)
+                  (await (write-ledger-files ledger-path run-ledger-path (+ (JSON/stringify ledger nil 2) "\n")))
+                  (console/error (str "Suite [" suite "] step [" step "] unexecuted (" blocked-reason ": " blocked-by ")"))
+                  (Object/assign (js-object) unexecuted-row (js-object :ledgerPath ledger-path :runLedgerPath run-ledger-path :processExitCode 0)))
+                ;; 2. Execute step (either multi-file node --test or single child command)
+                (let* ((cmd (aref command-args 0))
+                       (rest-args (js-call command-args :slice 1))
+                       (test-mjs-args (js-call rest-args :filter (lambda (a) (and (= (value-type a) "string") (js-call a :endsWith ".test.mjs")))))
+                       (is-multi-node-test (and (js-call rest-args :includes "--test")
+                                                (not (js-call rest-args :some (lambda (a) (and (= (value-type a) "string")
+                                                  (or (js-call a :endsWith "file-workers.mjs")
+                                                      (js-call a :endsWith "final-functional-scope.mjs"))))))
+                                                (> (js-length test-mjs-args) 1)))
+                       (step-started-at (Date/now))
+                       (step-row nil))
+                  (if is-multi-node-test
+                    (let* ((node-flags (js-call rest-args :filter (lambda (a) (not (and (= (value-type a) "string") (js-call a :endsWith ".test.mjs"))))))
+                           (file-results (js-array))
+                           (signal-exit 0)
+                           (f-idx 0))
+                      (while (and (= signal-exit 0) (< f-idx (js-length test-mjs-args)))
+                        (let* ((file (aref test-mjs-args f-idx))
+                               (child-res (await (spawn-suite-child cmd (js-call node-flags :concat (js-array file)) source-root environment))))
+                          (when (or (= (get child-res :signal) "SIGINT") (= (get child-res :signal) "SIGTERM"))
+                            (setq signal-exit (if (= (get child-res :signal) "SIGINT") 130 143)))
+                          (js-call file-results :push (js-object
+                            :file file
+                            :started t
+                            :exitCode (get child-res :exitCode)
+                            :elapsedMs (get child-res :elapsedMs)
+                            :failure (get child-res :failure))))
+                        (setq f-idx (1+ f-idx)))
+                      (let* ((completed-set (new globalThis.Set (js-call file-results :map (lambda (r) (get r :file)))))
+                             (unstarted (js-call test-mjs-args :filter (lambda (f) (not (js-call completed-set :has f)))))
+                             (failed-files (js-call (js-call file-results :filter (lambda (r) (/= (get r :exitCode) 0)))
+                                             :map (lambda (r) (get r :file))))
+                             (any-failed (or (> (js-length unstarted) 0) (> (js-length failed-files) 0)))
+                             (digest-outcome (await (collectPassedFileDigests source-root file-results)))
+                             (archive-record (js-object
+                               :inventory test-mjs-args
+                               :results file-results
+                               :failedFiles failed-files
+                               :unstarted unstarted
+                               :passedFileDigests (get digest-outcome :digests)
+                               :passedFileDigestErrors (get digest-outcome :errors)
+                               :exitCode (if any-failed 1 0))))
+                        (await (writeFile step-archive-path (+ (JSON/stringify archive-record nil 2) "\n")))
+                        (setq step-row (js-object
+                          :suite suite
+                          :step step
+                          :kind mode
+                          :prerequisites prereqs
+                          :status (if any-failed "failed" "passed")
+                          :started t
+                          :exitCode (if any-failed 1 0)
+                          :elapsedMs (Math/max 0 (- (Date/now) step-started-at))
+                          :failure (if any-failed "test-file-failed" nil)
+                          :commandSignature command-signature
+                          :scopeArchive step-archive-path
+                          :failedFiles failed-files
+                          :unexecutedFiles unstarted
+                          :fileSummary (summarize-scope-archive archive-record)))
+                        (js-call (get ledger :steps) :push step-row)
+                        (await (write-ledger-files ledger-path run-ledger-path (+ (JSON/stringify ledger nil 2) "\n")))
+                        (Object/assign (js-object) step-row (js-object :ledgerPath ledger-path :runLedgerPath run-ledger-path :processExitCode signal-exit))))
+                    (let ((child-env (Object/assign (js-object) environment
+                                       (js-object :ELISCRIPT_TEST_SCOPE_ARCHIVE_OUT step-archive-path))))
+                      (try (await (rm step-archive-path (js-object :force t))) (catch error nil))
+                      (let* ((child-res (await (spawn-suite-child cmd rest-args source-root child-env)))
+                             (signal-exit (if (= (get child-res :signal) "SIGINT") 130
+                                            (if (= (get child-res :signal) "SIGTERM") 143 0)))
+                             (exit-code (get child-res :exitCode))
+                             (scope-data nil))
+                        (when (existsSync step-archive-path)
+                          (try
+                            (setq scope-data (JSON/parse (await (readFile step-archive-path "utf8"))))
+                            (catch error (setq scope-data nil))))
+                        (let* ((file-digests (if (and (= exit-code 0) (nil? scope-data))
+                                               (await (collectCommandArgDigests source-root command-args))
+                                               nil))
+                               (failure-reason (if (and scope-data (worker-truth (get scope-data :failure)))
+                                                 (get scope-data :failure)
+                                                 (get child-res :failure))))
+                          (setq step-row (js-object
+                            :suite suite
+                            :step step
+                            :kind mode
+                            :prerequisites prereqs
+                            :status (if (= exit-code 0) "passed" "failed")
+                            :started t
+                            :exitCode exit-code
+                            :elapsedMs (get child-res :elapsedMs)
+                            :failure failure-reason
+                            :commandSignature command-signature))
+                          (when (not (nil? file-digests))
+                            (put step-row :fileDigests file-digests))
+                          (when (not (nil? scope-data))
+                            (put step-row :scopeArchive step-archive-path)
+                            (put step-row :fileSummary (summarize-scope-archive scope-data))
+                            (when (Array/isArray (get scope-data :failedFiles))
+                              (put step-row :failedFiles (get scope-data :failedFiles)))
+                            (when (Array/isArray (get scope-data :unstarted))
+                              (put step-row :unexecutedFiles (get scope-data :unstarted))))
+                          (js-call (get ledger :steps) :push step-row)
+                          (await (write-ledger-files ledger-path run-ledger-path (+ (JSON/stringify ledger nil 2) "\n")))
+                          (Object/assign (js-object) step-row (js-object :ledgerPath ledger-path :runLedgerPath run-ledger-path :processExitCode signal-exit))))))))))))))
+
   (defasync main ()
     (try
-      (let* ((arguments (js-call (get globalThis.process :argv) :slice 2))
-             (parsed (parseTestFileArgs arguments))
-             (inventory (get parsed :files)) (shard (get parsed :shard))
-             (files (if shard (partitionTestFiles inventory (get shard :index) (get shard :count)) inventory)))
-        (if (existsSync (resolve (js-call globalThis.process :cwd) "contracts/compatibility-matrix.json"))
-          (let ((result (await (runFinalFunctionalScope arguments))))
-            (console/log (str "Test files: " (js-length (js-call (get result :results) :filter
-              (lambda (item) (not (eq (get item :started) false))))) "/" (js-length (get result :inventory)) " completed; "
-              (js-length (js-call (get result :results) :filter (lambda (item) (/= (get item :exitCode) 0)))) " failed; "
-              (js-length (get result :cancelled)) " compiler-host cases cancelled (not passed); scope: " (get result :archive)))
-            (put globalThis.process :exitCode (get result :exitCode)))
-          (progn
-            (when shard (console/log (str "Test file shard " (get shard :index) "/" (get shard :count)
-              ": " (js-length files) "/" (js-length inventory) " selected")))
-            (let ((result (if (> (js-length files) 0) (await (runTestFiles files)) (js-object :results (js-array) :exitCode 0))))
-              (console/log (str "Test files: " (js-length (get result :results)) "/" (js-length files) " completed; "
-                (js-length (js-call (get result :results) :filter (lambda (row) (/= (get row :exitCode) 0)))) " failed"))
-              (put globalThis.process :exitCode (get result :exitCode))))))
+      (let ((arguments (js-call (get globalThis.process :argv) :slice 2)))
+        (if (and (> (js-length arguments) 0)
+                 (or (= (aref arguments 0) "--suite-step")
+                     (= (aref arguments 0) "--suite-prereq")
+                     (= (aref arguments 0) "--suite-finalize")))
+          (let ((result (await (runSuiteCommand arguments))))
+            (put globalThis.process :exitCode (get result :processExitCode)))
+          (let* ((parsed (parseTestFileArgs arguments))
+                 (inventory (get parsed :files)) (shard (get parsed :shard))
+                 (files (if shard (partitionTestFiles inventory (get shard :index) (get shard :count)) inventory)))
+            (if (existsSync (resolve (js-call globalThis.process :cwd) "contracts/compatibility-matrix.json"))
+              (let ((result (await (runFinalFunctionalScope arguments))))
+                (console/log (str "Test files: " (js-length (js-call (get result :results) :filter
+                  (lambda (item) (not (eq (get item :started) false))))) "/" (js-length (get result :inventory)) " completed; "
+                  (js-length (js-call (get result :results) :filter (lambda (item) (/= (get item :exitCode) 0)))) " failed; "
+                  (js-length (get result :cancelled)) " compiler-host cases cancelled (not passed); scope: " (get result :archive)))
+                (put globalThis.process :exitCode (get result :exitCode)))
+              (progn
+                (when shard (console/log (str "Test file shard " (get shard :index) "/" (get shard :count)
+                  ": " (js-length files) "/" (js-length inventory) " selected")))
+                (let ((result (if (> (js-length files) 0) (await (runTestFiles files)) (js-object :results (js-array) :exitCode 0))))
+                  (console/log (str "Test files: " (js-length (get result :results)) "/" (js-length files) " completed; "
+                    (js-length (js-call (get result :results) :filter (lambda (row) (/= (get row :exitCode) 0)))) " failed"))
+                  (put globalThis.process :exitCode (get result :exitCode))))))))
       (catch error
         (console/error (+ "Invalid test-file arguments: " (get error :message)))
         (put globalThis.process :exitCode 1))))
@@ -210,4 +662,4 @@
   (when (and (> (js-length (get globalThis.process :argv)) 1)
              (= (basename (aref (get globalThis.process :argv) 1)) "file-workers.mjs"))
     (main))
-  (export FILE_WORKERS isExclusiveTestFile partitionTestFiles parseTestFileArgs scheduleTestFiles runTestFiles workerTestArguments))
+  (export FILE_WORKERS isExclusiveTestFile partitionTestFiles parseTestFileArgs scheduleTestFiles runTestFiles workerTestArguments collectPassedFileDigests computeCommandSignature parseSuiteArgs runSuiteCommand))

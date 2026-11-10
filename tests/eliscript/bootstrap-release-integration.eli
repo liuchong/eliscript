@@ -1,14 +1,16 @@
 (module tests.bootstrap-release-integration
   (import "node:test" test)
   (import "node:assert/strict" :default assert)
-  (import "node:fs/promises" readFile mkdtemp writeFile rm lstat readlink realpath)
+  (import "node:fs/promises" readFile mkdtemp writeFile rm lstat readlink realpath readdir)
   (import "node:child_process" spawnSync)
-  (import "node:path" resolve join)
+  (import "node:path" resolve join dirname)
   (import "node:os" tmpdir)
+  (import "node:module" createRequire)
   (import "node:crypto" createHash)
   (import "../tools/backends/build.mjs" root)
   (import "../tools/backends/compiler-build.mjs" buildIndependentCompiler decodeCompilerBinary)
   (import "../tools/backends/compiler-bootstrap.mjs" openCompilerArtifact)
+  (import "../tools/backends/compiler-session.mjs" requestCompilerBuildProduct encodeCompilerMetadata)
   (import "../tools/backends/compiler-metadata.mjs" readCompilerMetadata)
   (import "../tools/backends/compiler-cli-ground.mjs" runCompilerCLI)
   (import "../tools/backends/dist/release-cli.mjs"
@@ -122,11 +124,13 @@
     (async ()
       (let* ((matrix (JSON/parse (await (readFile (resolve root "contracts/compatibility-matrix.json") "utf8"))))
              (workflow (renderCompilerReleaseWorkflow matrix)))
-        (js-call (js-array "name: linux-arm64-stage3" "name: macos-stage3"
-                   "ubuntu-24\\.04-arm" "macos-15" "make compiler-release-ci" "make byte-compile" "upload-artifact"
+        (js-call (js-array "on:\n  workflow_dispatch:\n\n" "name: linux-arm64-stage3" "name: macos-stage3"
+                   "ubuntu-24\\.04-arm" "macos-15" "make compiler-release-ci" "id: compiler-release"
+                   "if: \"!cancelled\\(\\) && steps\\.compiler-release\\.outcome != 'skipped'\""
+                   "make byte-compile" "upload-artifact" "\\.eliscript-cache/test-results/"
                    "BUN_TEST_RUNNER: tools/testing/final-functional-scope\\.mjs")
           :forEach (lambda (text) (js-call assert :match workflow (pattern text))))
-        (js-call assert :doesNotMatch workflow (pattern "STAGE3_SHARD_INDEX|STAGE3_SHARD_COUNT|--shard-index|-shard-"))
+        (js-call assert :doesNotMatch workflow (pattern "STAGE3_SHARD_INDEX|STAGE3_SHARD_COUNT|--shard-index|-shard-|branches: \\[master"))
         (js-call assert :doesNotMatch workflow (pattern "record-grid|bootstrap-all|--host wasm|--host native"))
         (js-call assert :doesNotMatch workflow (pattern "timeout-minutes: (10|30)\\b"))
         (let ((changed (globalThis.structuredClone matrix)))
@@ -155,7 +159,14 @@
               (progn
                 (await (js-call reused-session :request (js-object :operation "runtime")))
                 (await (js-call cold-session :request (js-object :operation "runtime")))
-                (let* ((host-request (js-object :operation "project" :target "wasm" :entry "host.mjs"
+                (let* ((compiler-path (join directory "compiler/bootstrap/compiler.mjs"))
+                       (managed-path (join directory "compiler/backends/managed.mjs"))
+                       (compiler-mod (funcall (createRequire compiler-path) compiler-path))
+                       (managed-mod (funcall (createRequire managed-path) managed-path))
+                       (totals (lambda ()
+                                 (let ((stats (get (get managed-mod :lower_managed_program) :__eliscriptRuntimeCacheTotals)))
+                                   (js-object :lowerCount (get stats :lowerCount) :cacheHits (get stats :cacheHits)))))
+                       (host-request (js-object :operation "project" :target "wasm" :entry "host.mjs"
                          :phased t :foreignEntry t
                          :modules (js-array (js-object :id "host.mjs" :filename "host.eli"
                            :source "(defun apply-fn (f x) (funcall f x)) (defun host-op (x) (apply-fn (lambda (v) (JSON/parse v)) (aref (js-array x) 0))) (export host-op)"))
@@ -164,9 +175,15 @@
                          :modules (js-array (js-object :id "pure.mjs" :filename "pure.eli"
                            :source "(defun apply-fn (f x) (funcall f x)) (defun add (a b) (apply-fn (lambda (v) (+ v b)) a)) (export add)"))
                          :memory (js-object :initialPages 2 :maximumPages 8)))
-                       (host-result (await (js-call reused-session :request host-request)))
-                       (warm-pure (await (js-call reused-session :request pure-request)))
-                       (cold-pure (await (js-call cold-session :request pure-request))))
+                       (host-result (await (requestCompilerBuildProduct reused-session host-request)))
+                       (_assert-after-host (js-call assert :deepStrictEqual (funcall totals)
+                                             (js-object :lowerCount 1 :cacheHits 0)))
+                       (warm-pure (await (requestCompilerBuildProduct reused-session pure-request)))
+                       (_assert-after-warm (js-call assert :deepStrictEqual (funcall totals)
+                                             (js-object :lowerCount 1 :cacheHits 1)))
+                       (cold-pure (await (requestCompilerBuildProduct cold-session pure-request)))
+                       (_assert-after-cold (js-call assert :deepStrictEqual (funcall totals)
+                                             (js-object :lowerCount 2 :cacheHits 1))))
                   (js-call assert :ok (> (js-length (decodeCompilerBinary (get host-result :bytes))) 0)
                     "foreign capability project request emits valid WASM binary")
                   (js-call assert :deepStrictEqual (decodeCompilerBinary (get warm-pure :bytes))
@@ -174,9 +191,83 @@
                   (js-call assert :deepStrictEqual (get warm-pure :descriptor) (get cold-pure :descriptor))
                   (await (js-call assert :rejects
                     (js-call reused-session :request (js-object :operation "runtime" :source "(" :filename "broken.eli"))))
-                  (let ((after-failed-replace (await (js-call reused-session :request pure-request))))
+                  (let ((after-failed-replace (await (requestCompilerBuildProduct reused-session pure-request))))
+                    (js-call assert :deepStrictEqual (funcall totals)
+                      (js-object :lowerCount 2 :cacheHits 2))
                     (js-call assert :deepStrictEqual (decodeCompilerBinary (get after-failed-replace :bytes))
-                      (decodeCompilerBinary (get cold-pure :bytes))))))
+                      (decodeCompilerBinary (get cold-pure :bytes))))
+                  ;; Also verify direct backend calls with caller-owned mutable, frozen, and numeric-mutated runtime IR
+                  (let* ((runtime-source (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")))
+                         (mutable-runtime (js-call compiler-mod :compile_ir_string runtime-source "bootstrap/runtime/memory.eli"))
+                         (user-ir (js-call compiler-mod :compile_ir_string "(defun id (x) x) (export id)" "id.eli"))
+                         (stats-for (lambda (prog)
+                                      (funcall (get (get managed-mod :lower_managed_program) :__eliscriptRuntimeCacheStatsFor) prog)))
+                         (deep-freeze (lambda (root-val)
+                                        (let ((stack (js-array root-val)) (visited (new globalThis.Set)))
+                                          (while (> (js-length stack) 0)
+                                            (let ((cur (js-call stack :pop)))
+                                              (when (and cur (= (value-type cur) "object") (not (js-call visited :has cur)))
+                                                (js-call visited :add cur)
+                                                (js-call (Object/keys cur) :forEach (lambda (k) (js-call stack :push (get cur k))))
+                                                (Object/freeze cur))))
+                                          root-val)))
+                         (find-number-literal (lambda (root-val)
+                                                (let ((stack (js-array root-val)) (found nil))
+                                                  (while (and (nil? found) (> (js-length stack) 0))
+                                                    (let ((cur (js-call stack :pop)))
+                                                      (when (and cur (= (value-type cur) "object"))
+                                                        (if (and (= (get cur :kind) "literal") (= (value-type (get cur :value)) "number"))
+                                                          (setq found cur)
+                                                          (js-call (Object/keys cur) :forEach (lambda (k) (js-call stack :push (get cur k))))))))
+                                                  found))))
+                    ;; 1. Deeply frozen runtime IR must succeed without mutating or defining properties on input
+                    (let* ((frozen-runtime (funcall deep-freeze (globalThis.structuredClone mutable-runtime)))
+                           (keys-before (Object/getOwnPropertyNames frozen-runtime)))
+                      (js-call managed-mod :lower_managed_program user-ir frozen-runtime)
+                      (js-call assert :deepStrictEqual (Object/getOwnPropertyNames frozen-runtime) keys-before)
+                      (js-call assert :deepStrictEqual (funcall stats-for frozen-runtime)
+                        (js-object :lowerCount 1 :cacheHits 0))
+                      (js-call managed-mod :lower_managed_program user-ir frozen-runtime)
+                      (js-call assert :deepStrictEqual (funcall stats-for frozen-runtime)
+                        (js-object :lowerCount 1 :cacheHits 1)))
+                    ;; 2. Forged __eliscriptSessionImmutableRuntime flag + nested +0 -> -0 -> NaN -> Infinity mutations must invalidate
+                    (put mutable-runtime :__eliscriptSessionImmutableRuntime t)
+                    (let ((num-node (funcall find-number-literal mutable-runtime)))
+                      (js-call assert :ok (not (nil? num-node)) "runtime IR contains a numeric literal node")
+                      (put num-node :value 0)
+                      (js-call managed-mod :lower_managed_program user-ir mutable-runtime)
+                      (js-call assert :deepStrictEqual (funcall stats-for mutable-runtime)
+                        (js-object :lowerCount 1 :cacheHits 0))
+                      (js-call managed-mod :lower_managed_program user-ir mutable-runtime)
+                      (js-call assert :deepStrictEqual (funcall stats-for mutable-runtime)
+                        (js-object :lowerCount 1 :cacheHits 1))
+                      ;; Mutate +0 to -0 in place (JSON.stringify would produce "0" for both and falsely hit cache!)
+                      (put num-node :value (- 0))
+                      (js-call assert :throws
+                        (lambda () (js-call managed-mod :lower_managed_program user-ir mutable-runtime))
+                        (lambda (err) (js-call (pattern "excluding negative zero") :test (str (get err :message)))))
+                      (js-call assert :deepStrictEqual (funcall stats-for mutable-runtime)
+                        (js-object :lowerCount 1 :cacheHits 1))
+                      ;; Mutate -0 to NaN in place
+                      (put num-node :value globalThis.NaN)
+                      (js-call assert :throws
+                        (lambda () (js-call managed-mod :lower_managed_program user-ir mutable-runtime))
+                        (lambda (err) (js-call (pattern "unsigned integers") :test (str (get err :message)))))
+                      (js-call assert :deepStrictEqual (funcall stats-for mutable-runtime)
+                        (js-object :lowerCount 1 :cacheHits 1))
+                      ;; Mutate NaN to Infinity in place (JSON.stringify would produce "null" for both NaN and Infinity!)
+                      (put num-node :value globalThis.Infinity)
+                      (js-call assert :throws
+                        (lambda () (js-call managed-mod :lower_managed_program user-ir mutable-runtime))
+                        (lambda (err) (js-call (pattern "unsigned integers") :test (str (get err :message)))))
+                      (js-call assert :deepStrictEqual (funcall stats-for mutable-runtime)
+                        (js-object :lowerCount 1 :cacheHits 1))
+                      ;; Restore valid u32 literal and mutate span in place
+                      (put num-node :value 0)
+                      (put (aref (get mutable-runtime :body) 0) :span (js-object :start 0 :end 1))
+                      (js-call managed-mod :lower_managed_program user-ir mutable-runtime)
+                      (js-call assert :deepStrictEqual (funcall stats-for mutable-runtime)
+                        (js-object :lowerCount 2 :cacheHits 1))))))
               (finally
                 (await (js-call reused-session :close))
                 (await (js-call cold-session :close)))))
@@ -184,34 +275,70 @@
 
   (test "CLI request cache validates digests rewrites debugPath invalidates changed requests and falls back on corruption"
     (async ()
-      (let ((directory (await (mkdtemp (join (tmpdir) "eliscript-cli-cache-verify-")))))
+      (let ((directory (await (mkdtemp (join (tmpdir) "eliscript-cli-cache-verify-"))))
+            (saved-cache-dir (get (get globalThis.process :env) :ELISCRIPT_CLI_REQUEST_CACHE_DIR))
+            (saved-max-entries (get (get globalThis.process :env) :ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRIES))
+            (saved-max-bytes (get (get globalThis.process :env) :ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRY_BYTES))
+            (saved-cache-toggle (get (get globalThis.process :env) :ELISCRIPT_CLI_REQUEST_CACHE)))
         (try
-          (let* ((built (await (buildIndependentCompiler (js-object :host "javascript" :profile "small"
+          (let* ((cache-root (join directory "cli-cache"))
+                 (_set-dir (put (get globalThis.process :env) :ELISCRIPT_CLI_REQUEST_CACHE_DIR cache-root))
+                 (_set-max (put (get globalThis.process :env) :ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRIES "2"))
+                 (_set-on (put (get globalThis.process :env) :ELISCRIPT_CLI_REQUEST_CACHE "1"))
+                 (built (await (buildIndependentCompiler (js-object :host "javascript" :profile "small"
                              :outputRoot (join directory "compiler") :retainIR false :debug false))))
                  (metadata-path (get built :metadataPath))
                  (artifact (await (readCompilerMetadata metadata-path)))
                  (session (await (openCompilerArtifact built)))
-                 (ir-a undefined) (ir-b undefined))
+                 (ir-a undefined) (ir-b undefined) (ir-c undefined))
             (try
               (progn
                 (setq ir-a (get (await (js-call session :request (js-object :operation "compile-ir"
-                             :source "(defun answer () 42) (export answer)" :filename "a.eli"))) :ir))
-                (setq ir-b (get (await (js-call session :request (js-object :operation "compile-ir"
-                             :source "(defun answer () 99) (export answer)" :filename "b.eli"))) :ir)))
+                             :source "(defun answer () 0.0) (export answer)" :filename "a.eli"))) :ir))
+                (let ((parsed-b (JSON/parse ir-a))
+                      (stack (js-array))
+                      (replaced false))
+                  (js-call stack :push parsed-b)
+                  (while (and (not replaced) (> (js-length stack) 0))
+                    (let ((cur (js-call stack :pop)))
+                      (when (and cur (= (value-type cur) "object"))
+                        (if (and (= (get cur :kind) "literal") (= (value-type (get cur :value)) "number"))
+                          (progn (put cur :value (- 0)) (setq replaced t))
+                          (js-call (Object/keys cur) :forEach (lambda (k) (js-call stack :push (get cur k))))))))
+                  (js-call assert :strictEqual replaced t "cloned IR contains numeric literal set to -0")
+                  (let ((proto-res (await (js-call session :request (js-object
+                                     :operation "protocol"
+                                     :name "serialize-ir"
+                                     :input (js-object :program parsed-b))))))
+                    (js-call assert :match (get proto-res :canonicalIR) (pattern "\"value\":-0\\b")))
+                  (setq ir-b (encodeCompilerMetadata parsed-b)))
+                (setq ir-c (get (await (js-call session :request (js-object :operation "compile-ir"
+                             :source "(defun answer () 77) (export answer)" :filename "c.eli"))) :ir)))
               (finally (await (js-call session :close))))
             (let* ((req-a (js-object :operation "emit-ir" :target "wasm" :abi "managed-module-v1"
-                     :debug t :ir ir-a :memory (js-object :initialPages 2 :maximumPages 8)))
+                     :debug t :numericTag 0 :ir ir-a :memory (js-object :initialPages 2 :maximumPages 8)))
+                   (req-a-neg (js-object :operation "emit-ir" :target "wasm" :abi "managed-module-v1"
+                     :debug t :numericTag (- 0) :ir ir-a :memory (js-object :initialPages 2 :maximumPages 8)))
                    (req-b (js-object :operation "emit-ir" :target "wasm" :abi "managed-module-v1"
-                     :debug t :ir ir-b :memory (js-object :initialPages 2 :maximumPages 8)))
+                     :debug t :numericTag (- 0) :ir ir-b :memory (js-object :initialPages 2 :maximumPages 8)))
+                   (req-c (js-object :operation "emit-ir" :target "wasm" :abi "managed-module-v1"
+                     :debug t :numericTag 1 :ir ir-c :memory (js-object :initialPages 2 :maximumPages 8)))
                    (req-a-path (join directory "req-a.json"))
+                   (req-a-neg-path (join directory "req-a-neg.json"))
                    (req-b-path (join directory "req-b.json"))
+                   (req-c-path (join directory "req-c.json"))
                    (out-a (join directory "out-a.wasm"))
+                   (out-a-neg (join directory "out-a-neg.wasm"))
                    (out-b (join directory "out-b.wasm"))
                    (out-c (join directory "out-c.wasm"))
                    (out-d (join directory "out-d.wasm"))
-                   (cache-root (resolve (tmpdir) "eliscript-cli-request-cache"))
+                   (out-e (join directory "out-e.wasm"))
+                   (out-f (join directory "out-f.wasm"))
+                   (out-g (join directory "out-g.wasm"))
+                   (out-h (join directory "out-h.wasm"))
+                   (out-i (join directory "out-i.wasm"))
                    (cache-key (js-call (js-call (createHash "sha256") :update
-                     (JSON/stringify (js-object
+                     (encodeCompilerMetadata (js-object
                        :schema 1
                        :productIdentity (get artifact :productIdentity)
                        :sourceIdentity (get artifact :sourceIdentity)
@@ -222,13 +349,35 @@
                        :literalSources (get artifact :literalSources)
                        :packageMode (get artifact :packageMode)
                        :request req-a))) :digest "hex"))
-                   (cache-dir (resolve cache-root cache-key)))
-              (await (rm cache-dir (js-object :recursive t :force t)))
-              (await (writeFile req-a-path (JSON/stringify req-a)))
-              (await (writeFile req-b-path (JSON/stringify req-b)))
+                   (cache-key-neg (js-call (js-call (createHash "sha256") :update
+                     (encodeCompilerMetadata (js-object
+                       :schema 1
+                       :productIdentity (get artifact :productIdentity)
+                       :sourceIdentity (get artifact :sourceIdentity)
+                       :artifactIdentity (get artifact :artifactIdentity)
+                       :host (get artifact :host)
+                       :runtimePath (get artifact :runtimePath)
+                       :runtimeEncoding (get artifact :runtimeEncoding)
+                       :literalSources (get artifact :literalSources)
+                       :packageMode (get artifact :packageMode)
+                       :request req-a-neg))) :digest "hex"))
+                   (cache-dir (resolve cache-root cache-key))
+                   (cache-dir-neg (resolve cache-root cache-key-neg))
+                   (metrics (js-object :hits 0 :misses 0 :repairs 0 :evictions 0 :skippedOversize 0)))
+              (Object/defineProperty globalThis.process "__eliscriptCliRequestCacheMetrics"
+                (js-object :value metrics :writable t :configurable t))
+              (js-call assert :notStrictEqual cache-key-neg cache-key)
+              (await (writeFile req-a-path (encodeCompilerMetadata req-a)))
+              (await (writeFile req-a-neg-path (encodeCompilerMetadata req-a-neg)))
+              (await (writeFile req-b-path (encodeCompilerMetadata req-b)))
+              (await (writeFile req-c-path (encodeCompilerMetadata req-c)))
+              (js-call assert :match (await (readFile req-a-neg-path "utf8")) (pattern "\"numericTag\":-0\\b"))
+              (js-call assert :match (await (readFile req-b-path "utf8")) (pattern "\"numericTag\":-0\\b"))
+              (js-call assert :match (await (readFile req-b-path "utf8")) (pattern "\\\\\"value\\\\\":-0\\b"))
               ;; 1. Cold compile populates cache
               (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
                 "--request" req-a-path "--output" out-a)))
+              (js-call assert :deepStrictEqual metrics (js-object :hits 0 :misses 1 :repairs 0 :evictions 0 :skippedOversize 0))
               (let ((meta (JSON/parse (await (readFile (resolve cache-dir "complete.json") "utf8")))))
                 (js-call assert :strictEqual (get meta :schema) 1)
                 (js-call assert :strictEqual (get meta :hasDebug) t)
@@ -237,6 +386,7 @@
               ;; 2. Warm hit with different output filename rewrites debugPath suffix
               (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
                 "--request" req-a-path "--output" out-b)))
+              (js-call assert :deepStrictEqual metrics (js-object :hits 1 :misses 1 :repairs 0 :evictions 0 :skippedOversize 0))
               (js-call assert :deepStrictEqual (await (readFile out-b)) (await (readFile out-a)))
               (js-call assert :deepStrictEqual (await (readFile (+ out-b ".debug.json")))
                 (await (readFile (+ out-a ".debug.json"))))
@@ -246,14 +396,74 @@
                 (js-call assert :strictEqual (get sidecar-b :debugPath) "out-b.wasm.debug.json")
                 (put sidecar-b :debugPath "out-a.wasm.debug.json")
                 (js-call assert :deepStrictEqual sidecar-b sidecar-a))
-              ;; 3. Changed request payload invalidates cache
-              (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
-                "--request" req-b-path "--output" out-c)))
-              (js-call assert :notDeepStrictEqual (await (readFile out-c)) (await (readFile out-a)))
-              ;; 4. Corrupted cache payload falls back to cold compilation and produces identical output
+              ;; 3. P1: Tampered compiler runtime source asset is rejected even when cache entry is warm
+              (let* ((runtime-file (resolve (dirname metadata-path) (get artifact :runtimePath)))
+                     (original-runtime (await (readFile runtime-file))))
+                (try
+                  (progn
+                    (await (writeFile runtime-file
+                      (globalThis.Buffer.concat (js-array original-runtime (globalThis.Buffer.from "\n; tampered\n")))))
+                    (await (js-call assert :rejects
+                      (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
+                        "--request" req-a-path "--output" (join directory "out-tampered.wasm"))))))
+                  (finally (await (writeFile runtime-file original-runtime)))))
+              (js-call assert :deepStrictEqual metrics (js-object :hits 1 :misses 1 :repairs 0 :evictions 0 :skippedOversize 0))
+              ;; 4. P2: Corrupted cache payload falls back to cold compilation AND repairs cache-dir so next call hits
               (await (writeFile (resolve cache-dir "product.bin") "corrupted-bytes"))
               (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
                 "--request" req-a-path "--output" out-d)))
-              (js-call assert :deepStrictEqual (await (readFile out-d)) (await (readFile out-a)))))
-          (finally (await (rm directory (js-object :recursive t :force t))))))))
+              (js-call assert :deepStrictEqual metrics (js-object :hits 1 :misses 2 :repairs 1 :evictions 0 :skippedOversize 0))
+              (js-call assert :deepStrictEqual (await (readFile out-d)) (await (readFile out-a)))
+              (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
+                "--request" req-a-path "--output" out-e)))
+              (js-call assert :deepStrictEqual metrics (js-object :hits 2 :misses 2 :repairs 1 :evictions 0 :skippedOversize 0))
+              (js-call assert :deepStrictEqual (await (readFile out-e)) (await (readFile out-a)))
+              ;; 4b. Identical IR string with only top-level numeric +0 vs -0 change produces a distinct cache key and misses warm req-a
+              (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
+                "--request" req-a-neg-path "--output" out-a-neg)))
+              (js-call assert :deepStrictEqual metrics (js-object :hits 2 :misses 3 :repairs 1 :evictions 0 :skippedOversize 0))
+              (js-call assert :strictEqual (get (JSON/parse (await (readFile (resolve cache-dir "complete.json") "utf8"))) :schema) 1)
+              (js-call assert :strictEqual (get (JSON/parse (await (readFile (resolve cache-dir-neg "complete.json") "utf8"))) :schema) 1)
+              (js-call assert :deepStrictEqual (await (readFile out-a-neg)) (await (readFile out-a)))
+              (await (rm cache-dir-neg (js-object :recursive t :force t)))
+              ;; 5. Changed request payload invalidates cache, and bounded eviction keeps <= 2 entries
+              (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
+                "--request" req-b-path "--output" out-c)))
+              (js-call assert :deepStrictEqual metrics (js-object :hits 2 :misses 4 :repairs 1 :evictions 0 :skippedOversize 0))
+              (js-call assert :notDeepStrictEqual (await (readFile out-c)) (await (readFile out-a)))
+              (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
+                "--request" req-c-path "--output" out-f)))
+              (js-call assert :deepStrictEqual metrics (js-object :hits 2 :misses 5 :repairs 1 :evictions 1 :skippedOversize 0))
+              (js-call assert :strictEqual (js-length (await (readdir cache-root))) 2)
+              ;; 6. ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRY_BYTES stat admission skips oversized publish and restore without breaking output
+              (put (get globalThis.process :env) :ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRY_BYTES "64")
+              (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
+                "--request" req-a-path "--output" out-h)))
+              (js-call assert :deepStrictEqual metrics (js-object :hits 2 :misses 6 :repairs 1 :evictions 1 :skippedOversize 1))
+              (js-call assert :deepStrictEqual (await (readFile out-h)) (await (readFile out-a)))
+              (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
+                "--request" req-b-path "--output" out-i)))
+              (js-call assert :deepStrictEqual metrics (js-object :hits 2 :misses 7 :repairs 1 :evictions 1 :skippedOversize 3))
+              (js-call assert :deepStrictEqual (await (readFile out-i)) (await (readFile out-c)))
+              (Reflect/deleteProperty (get globalThis.process :env) "ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRY_BYTES")
+              ;; 7. ELISCRIPT_CLI_REQUEST_CACHE=0 disables cache and runs cold compilation directly
+              (put (get globalThis.process :env) :ELISCRIPT_CLI_REQUEST_CACHE "0")
+              (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
+                "--request" req-b-path "--output" out-g)))
+              (js-call assert :deepStrictEqual metrics (js-object :hits 2 :misses 7 :repairs 1 :evictions 1 :skippedOversize 3))
+              (js-call assert :deepStrictEqual (await (readFile out-g)) (await (readFile out-c)))))
+          (finally
+            (if (undefined? saved-cache-dir)
+              (Reflect/deleteProperty (get globalThis.process :env) "ELISCRIPT_CLI_REQUEST_CACHE_DIR")
+              (put (get globalThis.process :env) :ELISCRIPT_CLI_REQUEST_CACHE_DIR saved-cache-dir))
+            (if (undefined? saved-max-entries)
+              (Reflect/deleteProperty (get globalThis.process :env) "ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRIES")
+              (put (get globalThis.process :env) :ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRIES saved-max-entries))
+            (if (undefined? saved-max-bytes)
+              (Reflect/deleteProperty (get globalThis.process :env) "ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRY_BYTES")
+              (put (get globalThis.process :env) :ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRY_BYTES saved-max-bytes))
+            (if (undefined? saved-cache-toggle)
+              (Reflect/deleteProperty (get globalThis.process :env) "ELISCRIPT_CLI_REQUEST_CACHE")
+              (put (get globalThis.process :env) :ELISCRIPT_CLI_REQUEST_CACHE saved-cache-toggle))
+            (await (rm directory (js-object :recursive t :force t))))))))
 )

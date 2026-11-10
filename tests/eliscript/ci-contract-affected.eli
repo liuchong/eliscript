@@ -59,9 +59,12 @@
         (js-call assert :ok (js-call workflow :includes (str "ELISCRIPT_TEST_BROWSER: " browser)))
         (js-call assert :ok (js-call workflow :includes (str "tee \"$RUNNER_TEMP/eliscript-browser-ci/" browser "/tests.log\"")))))
       (js-call (js-array
+        "on:\n  workflow_dispatch:\n\n"
         "install --with-deps chromium firefox webkit"
         "bun tools/testing/file-workers.mjs tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee"
-        "set -o pipefail" "timeout-minutes: 45"
+        "set -o pipefail" "timeout-minutes: 90"
+        "id: chromium"
+        "if: \"!cancelled() && steps.chromium.outcome != 'skipped'\""
         "test \"$(bun -p 'process.arch')\" = \"${{ matrix.architecture }}\""
         "test \"$(node -p 'process.arch')\" = \"${{ matrix.architecture }}\""
         "if: always()" (str "actions/upload-artifact@" (get (get contract :artifactAction) :revision))) :forEach
@@ -109,8 +112,13 @@
           (js-object :name "linux-arm64-emacs-30.2" :os "ubuntu-24.04-arm" :arch "arm64" :emacs "30.2")
           (js-object :name "macos-emacs-30.2" :os "macos-15" :arch "arm64" :emacs "30.2")))
       (js-call (js-array
+        "on:\n  workflow_dispatch:\n\n"
         "BUN_TEST_RUNNER: tools/testing/file-workers.mjs"
         "Run test file shard 1/1"
+        "id: test-suite"
+        "if: \"!cancelled() && steps.test-suite.outcome != 'skipped'\""
+        "Preserve compatibility test evidence"
+        ".eliscript-cache/test-results/"
         "timeout-minutes: 240" "fail-fast: false") :forEach
         (lambda (text) (js-call assert :ok (js-call workflow :includes text))))
       (js-call (get baseline :commands) :forEach (lambda (command) (js-call assert :ok (js-call workflow :includes (str "run: " command)))))

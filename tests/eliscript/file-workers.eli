@@ -2,13 +2,13 @@
   (import "bun:test" test)
   (import "node:assert/strict" :default assert)
   (import "node:path" resolve isAbsolute)
-  (import "node:fs/promises" mkdtemp mkdir writeFile rm symlink)
+  (import "node:fs/promises" mkdtemp mkdir writeFile readFile rm symlink)
   (import "node:os" tmpdir)
   (import "node:child_process" spawnSync)
   (import "../dist/bootstrap/compiler.mjs" compile-string)
   (import "../tools/backends/build.mjs" root)
   (import "../tools/testing/file-workers.mjs"
-    FILE_WORKERS isExclusiveTestFile parseTestFileArgs partitionTestFiles scheduleTestFiles workerTestArguments)
+    FILE_WORKERS isExclusiveTestFile parseTestFileArgs partitionTestFiles scheduleTestFiles runTestFiles workerTestArguments parseSuiteArgs runSuiteCommand)
   (import "../tools/testing/fixture-environment.mjs" fixtureChildArguments)
 
   (defasync tick ()
@@ -254,4 +254,123 @@
         (js-call assert :throws (lambda () (partitionTestFiles files 0 2)))
         (js-call assert :throws (lambda () (parseTestFileArgs
           (js-array "--shard-index" "1" "a.test.mjs")))))))
+
+  (test "suite runner collects all independent failures blocks prerequisite dependents as unexecuted and preserves run-isolated evidence for targeted re-test"
+    (async ()
+      (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-suite-runner-")))))
+        (try
+          (let* ((ledger-path (resolve directory "suite-unit.json"))
+                 (script-a (resolve directory "pass-a.test.mjs"))
+                 (script-b (resolve directory "fail-b.test.mjs"))
+                 (script-c (resolve directory "pass-c.test.mjs"))
+                 (node-bin (or (get (get globalThis.process :env) :NODE) "node"))
+                 (env (Object/assign (js-object) (get globalThis.process :env)
+                        (js-object :ELISCRIPT_TEST_SUITE_LEDGER ledger-path
+                                   :ELISCRIPT_SUITE_RUN_ID "run-1"))))
+            (await (writeFile script-a
+              (compile-string "(import \"node:test\" test) (test \"a\" (lambda () nil))" "pass-a.eli")))
+            (await (writeFile script-b
+              (compile-string "(import \"node:test\" test) (import \"node:assert/strict\" :default assert) (test \"b\" (lambda () (js-call assert :strictEqual 1 2)))" "fail-b.eli")))
+            (await (writeFile script-c
+              (compile-string "(import \"node:test\" test) (test \"c\" (lambda () nil))" "pass-c.eli")))
+            ;; 0. Finalizing a missing ledger fails with exitCode 1
+            (let ((missing-fin (await (runSuiteCommand
+                                 (js-array "--suite-finalize" "unit")
+                                 (js-object :sourceRoot directory :environment env)))))
+              (js-call assert :strictEqual (get missing-fin :exitCode) 1)
+              (js-call assert :strictEqual (get missing-fin :processExitCode) 1))
+            ;; 1. Step 1 (multi-file node --test with 1 pass, 1 fail, 1 pass): continues through all 3 files without aborting
+            (let ((s1 (await (runSuiteCommand
+                        (js-array "--suite-step" "unit" "node-batch" "" "--" node-bin "--test" "--test-concurrency=1" script-a script-b script-c)
+                        (js-object :sourceRoot directory :environment env)))))
+              (js-call assert :strictEqual (get s1 :status) "failed")
+              (js-call assert :strictEqual (get s1 :exitCode) 1)
+              (js-call assert :strictEqual (get s1 :processExitCode) 0)
+              (js-call assert :deepStrictEqual (get s1 :failedFiles) (js-array script-b))
+              (js-call assert :deepStrictEqual (get s1 :unexecutedFiles) (js-array))
+              (js-call assert :deepStrictEqual (get s1 :fileSummary)
+                (js-object :total 3 :passed 2 :failed 1 :unexecuted 0)))
+            ;; 2. Failing prerequisite and missing prerequisite both block dependent steps as unexecuted (never passed)
+            (let ((p1 (await (runSuiteCommand
+                        (js-array "--suite-prereq" "unit" "build-assets" "" "--" "sh" "-c" "exit 2")
+                        (js-object :sourceRoot directory :environment env))))
+                  (s2 (await (runSuiteCommand
+                        (js-array "--suite-step" "unit" "dependent-suite" "build-assets" "--" "sh" "-c" "exit 0")
+                        (js-object :sourceRoot directory :environment env))))
+                  (s-missing (await (runSuiteCommand
+                               (js-array "--suite-step" "unit" "missing-prereq-suite" "nonexistent-prereq" "--" "sh" "-c" "exit 0")
+                               (js-object :sourceRoot directory :environment env))))
+                  (s3 (await (runSuiteCommand
+                        (js-array "--suite-step" "unit" "independent-after" "" "--" node-bin "--test" script-a)
+                        (js-object :sourceRoot directory :environment env))))
+                  (fin (await (runSuiteCommand
+                         (js-array "--suite-finalize" "unit" "node-batch,build-assets,dependent-suite,missing-prereq-suite,independent-after")
+                         (js-object :sourceRoot directory :environment env)))))
+              (js-call assert :strictEqual (get p1 :status) "failed")
+              (js-call assert :strictEqual (get s2 :status) "unexecuted")
+              (js-call assert :strictEqual (get s2 :started) false)
+              (js-call assert :strictEqual (get s2 :exitCode) nil)
+              (js-call assert :strictEqual (get s2 :failure) "prerequisite-failed")
+              (js-call assert :strictEqual (get s2 :blockedBy) "build-assets")
+              (js-call assert :strictEqual (get s-missing :status) "unexecuted")
+              (js-call assert :strictEqual (get s-missing :started) false)
+              (js-call assert :strictEqual (get s-missing :exitCode) nil)
+              (js-call assert :strictEqual (get s-missing :failure) "prerequisite-missing")
+              (js-call assert :strictEqual (get s-missing :blockedBy) "nonexistent-prereq")
+              (js-call assert :strictEqual (get s3 :status) "passed")
+              (js-call assert :strictEqual (get fin :exitCode) 1)
+              (js-call assert :strictEqual (get fin :processExitCode) 1)
+              (js-call assert :deepStrictEqual (js-object
+                  :total (get (get fin :summary) :total)
+                  :passed (get (get fin :summary) :passed)
+                  :failed (get (get fin :summary) :failed)
+                  :unexecuted (get (get fin :summary) :unexecuted)
+                  :failedSteps (get (get fin :summary) :failedSteps)
+                  :unexecutedSteps (get (get fin :summary) :unexecutedSteps))
+                (js-object :total 5 :passed 1 :failed 2 :unexecuted 2
+                  :failedSteps (js-array "node-batch" "build-assets")
+                  :unexecutedSteps (js-array "dependent-suite" "missing-prereq-suite")))
+              ;; 3. --suite-finalize rejects mismatched runId, mismatched suite, or missing expected step
+              (let ((wrong-run (await (runSuiteCommand
+                                 (js-array "--suite-finalize" "unit")
+                                 (js-object :sourceRoot directory :environment
+                                   (Object/assign (js-object) env (js-object :ELISCRIPT_SUITE_RUN_ID "run-other"))))))
+                    (wrong-suite (await (runSuiteCommand
+                                   (js-array "--suite-finalize" "other-suite")
+                                   (js-object :sourceRoot directory :environment env))))
+                    (incomplete-steps (await (runSuiteCommand
+                                        (js-array "--suite-finalize" "unit" "node-batch,build-assets,dependent-suite,missing-prereq-suite,independent-after,never-ran")
+                                        (js-object :sourceRoot directory :environment env)))))
+                (js-call assert :strictEqual (get wrong-run :exitCode) 1)
+                (js-call assert :strictEqual (get wrong-suite :exitCode) 1)
+                (js-call assert :strictEqual (get incomplete-steps :exitCode) 1)
+                (js-call assert :strictEqual (get incomplete-steps :failure) "incomplete-suite-ledger"))
+              ;; 4. Fix failing script-b and prerequisite, then re-run only the failed/unexecuted items under run-2
+              ;;    using exact file/step entrypoints while preserving run-1's passed evidence in suite-unit-run-run-1.json
+              (await (writeFile script-b
+                (compile-string "(import \"node:test\" test) (test \"b-fixed\" (lambda () nil))" "fail-b.eli")))
+              (let* ((run2-env (Object/assign (js-object) env (js-object :ELISCRIPT_SUITE_RUN_ID "run-2")))
+                     (r-fixed-file (await (runSuiteCommand
+                                     (js-array "--suite-step" "unit" "node-batch-fixed" "" "--" node-bin "--test" script-b)
+                                     (js-object :sourceRoot directory :environment run2-env))))
+                     (r-p1 (await (runSuiteCommand
+                             (js-array "--suite-prereq" "unit" "build-assets" "" "--" "sh" "-c" "exit 0")
+                             (js-object :sourceRoot directory :environment run2-env))))
+                     (r-s2 (await (runSuiteCommand
+                             (js-array "--suite-step" "unit" "dependent-suite" "build-assets" "--" "sh" "-c" "exit 0")
+                             (js-object :sourceRoot directory :environment run2-env))))
+                     (r-fin (await (runSuiteCommand
+                              (js-array "--suite-finalize" "unit" "node-batch-fixed,build-assets,dependent-suite")
+                              (js-object :sourceRoot directory :environment run2-env))))
+                     (preserved-run1 (JSON/parse (await (readFile (get fin :runLedgerPath) "utf8"))))
+                     (preserved-scope1 (JSON/parse (await (readFile (get (aref (get preserved-run1 :steps) 0) :scopeArchive) "utf8")))))
+                (js-call assert :strictEqual (get r-fixed-file :status) "passed")
+                (js-call assert :strictEqual (get r-p1 :status) "passed")
+                (js-call assert :strictEqual (get r-s2 :status) "passed")
+                (js-call assert :strictEqual (get r-fin :exitCode) 0)
+                (js-call assert :strictEqual (get (get r-fin :summary) :passed) 3)
+                (js-call assert :strictEqual (get preserved-run1 :runId) "run-1")
+                (js-call assert :ok (= (value-type (get (get preserved-scope1 :passedFileDigests) script-a)) "string"))
+                (js-call assert :ok (= (value-type (get (get preserved-scope1 :passedFileDigests) script-c)) "string")))))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
 )

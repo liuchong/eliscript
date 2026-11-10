@@ -1,9 +1,12 @@
 (module tools.ci.render-workflow
   (import "node:fs/promises" readFile writeFile)
+  (import "node:fs" readFileSync)
   (import "node:path" resolve)
   (import "../backends/build.mjs" root)
   (import "./render-workflow-ground.mjs" :as ground)
   (defconst COMPATIBILITY_FILE_SHARDS 1)
+  (defconst compatibility-artifact-action
+    (get (JSON/parse (readFileSync (resolve root "contracts/browser-compatibility.json") "utf8")) :artifactAction))
   (defconst CompatibilityMatrixError (get ground :CompatibilityMatrixError))
   (defconst renderToolchainSteps (get ground :renderToolchainSteps))
   (defconst humanCompatibilityReport (get ground :humanCompatibilityReport))
@@ -37,10 +40,25 @@
             "\n            os: " (get system :runner) "\n            architecture: " (get system :architecture)
             "\n            emacs: \"" version "\"")))))
       (let ((text (str (js-call original :slice 0 start) (js-call rows :join "\n") "\n" (js-call original :slice end))))
-        (setq text (js-call (js-call text
+        (setq text (js-call (js-call (js-call (js-call (js-call text
+          :replace "on:\n  push:\n    branches: [master]\n  pull_request:\n  workflow_dispatch:\n\n"
+          "on:\n  workflow_dispatch:\n\n")
           :replace "      BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index ${{ matrix.shard }} --shard-count 2\n"
           "      BUN_TEST_RUNNER: tools/testing/file-workers.mjs\n")
-          :replace "Run test file shard ${{ matrix.shard }}/2" "Run test file shard 1/1"))
+          :replace "Run test file shard ${{ matrix.shard }}/2" "Run test file shard 1/1")
+          :replace "        run: bun run test\n" "        id: test-suite\n        run: bun run test\n")
+          :replace "      - name: Strict byte compilation\n        run: make byte-compile\n"
+          (+ "      - name: Strict byte compilation\n"
+             "        if: \"!cancelled() && steps.test-suite.outcome != 'skipped'\"\n"
+             "        run: make byte-compile\n"
+             "      - name: Preserve compatibility test evidence\n"
+             "        if: always()\n"
+             "        uses: " (get compatibility-artifact-action :repository) "@" (get compatibility-artifact-action :revision)
+             " # " (get compatibility-artifact-action :label) "\n"
+             "        with:\n"
+             "          name: compatibility-${{ matrix.name }}-${{ github.sha }}\n"
+             "          path: .eliscript-cache/test-results/\n"
+             "          if-no-files-found: warn\n")))
         ;; Capacity deferral is an existing explicit release mode. Its normal
         ;; functional heap must be selected too; one flag alone remains strict.
         (if (= (get matrix :performanceAcceptance) "deferred")

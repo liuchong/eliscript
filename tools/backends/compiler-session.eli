@@ -319,12 +319,13 @@
         decoder)))
 
   (defun encode-request (request)
-    (if (= (session-value-type request) "string")
-      request
-      (let ((text (JSON/stringify request)))
-        (unless (= (session-value-type text) "string")
-          (throw (new globalThis.TypeError "compiler request must contain JSON data")))
-        text)))
+    (let ((kind (session-value-type request)))
+      (if (= kind "string")
+        request
+        (progn
+          (when (or (undefined? request) (= kind "function") (= kind "symbol"))
+            (throw (new globalThis.TypeError "compiler request must contain JSON data")))
+          (encodeCompilerIR request)))))
 
   (defun encode-compiler-data (program metadata &optional consume)
     ;; Bound the number of live token strings while retaining exact wire bytes.
@@ -1149,7 +1150,7 @@
                              (put patched :responseMode response-mode)
                              (when (eq response-string-chunks t)
                                (put patched :responseStringChunks t))
-                             (setq text (JSON/stringify patched)))))
+                             (setq text (encodeCompilerIR patched)))))
                        (unless owned
                          (setq result (funcall receive text)))
                        (when (and (not owned) (not (undefined? response-mode)))

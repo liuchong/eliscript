@@ -57,7 +57,7 @@
                (js-call bootstrap-step :replace "        run:" "        if: false\n        run:")))
              (no-preload (js-call workflow :replace fixture-preload "bun test "))
              (no-environment (js-call workflow :replace fixture-environment ""))
-             (old-job-cap (js-call workflow :replace "    timeout-minutes: 45\n" "    timeout-minutes: 10\n"))
+             (old-job-cap (js-call workflow :replace "    timeout-minutes: 90\n" "    timeout-minutes: 10\n"))
              (global-registration (js-call workflow :replace fixture-preload
                "bun test --preload ./tests/helpers/direct-wasm-registration-install.mjs ")))
         (let ((variants (js-array missing conditional no-preload no-environment old-job-cap global-registration)) (index 0))
