@@ -5,7 +5,12 @@
   (import "node:child_process" spawnSync)
   (import "node:path" resolve join)
   (import "node:os" tmpdir)
+  (import "node:crypto" createHash)
   (import "../tools/backends/build.mjs" root)
+  (import "../tools/backends/compiler-build.mjs" buildIndependentCompiler decodeCompilerBinary)
+  (import "../tools/backends/compiler-bootstrap.mjs" openCompilerArtifact)
+  (import "../tools/backends/compiler-metadata.mjs" readCompilerMetadata)
+  (import "../tools/backends/compiler-cli-ground.mjs" runCompilerCLI)
   (import "../tools/backends/dist/release-cli.mjs"
     runReleaseCLI resolveReleaseCompiler renderReleaseCLIError)
   (import "../tools/ci/dist/compiler-release.mjs" renderCompilerReleaseWorkflow)
@@ -117,9 +122,11 @@
     (async ()
       (let* ((matrix (JSON/parse (await (readFile (resolve root "contracts/compatibility-matrix.json") "utf8"))))
              (workflow (renderCompilerReleaseWorkflow matrix)))
-        (js-call (js-array "ubuntu-24\\.04-arm" "macos-15" "make compiler-release-ci" "make byte-compile" "upload-artifact"
-                   "STAGE3_SHARD_INDEX" "STAGE3_SHARD_COUNT" "final-functional-scope\\.mjs --shard-index")
+        (js-call (js-array "name: linux-arm64-stage3" "name: macos-stage3"
+                   "ubuntu-24\\.04-arm" "macos-15" "make compiler-release-ci" "make byte-compile" "upload-artifact"
+                   "BUN_TEST_RUNNER: tools/testing/final-functional-scope\\.mjs")
           :forEach (lambda (text) (js-call assert :match workflow (pattern text))))
+        (js-call assert :doesNotMatch workflow (pattern "STAGE3_SHARD_INDEX|STAGE3_SHARD_COUNT|--shard-index|-shard-"))
         (js-call assert :doesNotMatch workflow (pattern "record-grid|bootstrap-all|--host wasm|--host native"))
         (js-call assert :doesNotMatch workflow (pattern "timeout-minutes: (10|30)\\b"))
         (let ((changed (globalThis.structuredClone matrix)))
@@ -134,4 +141,119 @@
         (js-call assert :ok (js-call (get manifest :files) :includes "dist/stage3-release.json"))
         (js-call assert :ok (js-call (get manifest :files) :includes "dist/compiler-artifact.json"))
         (js-call assert :ok (not (js-call (get manifest :files) :includes "dist/bootstrap-release/")))
-        (js-call assert :match (get (get manifest :scripts) :prepack) (pattern "prepare-release-package"))))))
+        (js-call assert :match (get (get manifest :scripts) :prepack) (pattern "prepare-release-package")))))
+
+  (test "managed runtime lowering cache isolates consecutive capability and pure requests and preserves runtime replacement"
+    (async ()
+      (let ((directory (await (mkdtemp (join (tmpdir) "eliscript-runtime-cache-isolation-")))))
+        (try
+          (let* ((artifact (await (buildIndependentCompiler (js-object :host "javascript" :profile "small"
+                             :outputRoot (join directory "compiler") :retainIR false :debug false))))
+                 (reused-session (await (openCompilerArtifact artifact)))
+                 (cold-session (await (openCompilerArtifact artifact))))
+            (try
+              (progn
+                (await (js-call reused-session :request (js-object :operation "runtime")))
+                (await (js-call cold-session :request (js-object :operation "runtime")))
+                (let* ((host-request (js-object :operation "project" :target "wasm" :entry "host.mjs"
+                         :phased t :foreignEntry t
+                         :modules (js-array (js-object :id "host.mjs" :filename "host.eli"
+                           :source "(defun apply-fn (f x) (funcall f x)) (defun host-op (x) (apply-fn (lambda (v) (JSON/parse v)) (aref (js-array x) 0))) (export host-op)"))
+                         :memory (js-object :initialPages 2 :maximumPages 8)))
+                       (pure-request (js-object :operation "project" :target "wasm" :entry "pure.mjs"
+                         :modules (js-array (js-object :id "pure.mjs" :filename "pure.eli"
+                           :source "(defun apply-fn (f x) (funcall f x)) (defun add (a b) (apply-fn (lambda (v) (+ v b)) a)) (export add)"))
+                         :memory (js-object :initialPages 2 :maximumPages 8)))
+                       (host-result (await (js-call reused-session :request host-request)))
+                       (warm-pure (await (js-call reused-session :request pure-request)))
+                       (cold-pure (await (js-call cold-session :request pure-request))))
+                  (js-call assert :ok (> (js-length (decodeCompilerBinary (get host-result :bytes))) 0)
+                    "foreign capability project request emits valid WASM binary")
+                  (js-call assert :deepStrictEqual (decodeCompilerBinary (get warm-pure :bytes))
+                    (decodeCompilerBinary (get cold-pure :bytes)))
+                  (js-call assert :deepStrictEqual (get warm-pure :descriptor) (get cold-pure :descriptor))
+                  (await (js-call assert :rejects
+                    (js-call reused-session :request (js-object :operation "runtime" :source "(" :filename "broken.eli"))))
+                  (let ((after-failed-replace (await (js-call reused-session :request pure-request))))
+                    (js-call assert :deepStrictEqual (decodeCompilerBinary (get after-failed-replace :bytes))
+                      (decodeCompilerBinary (get cold-pure :bytes))))))
+              (finally
+                (await (js-call reused-session :close))
+                (await (js-call cold-session :close)))))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "CLI request cache validates digests rewrites debugPath invalidates changed requests and falls back on corruption"
+    (async ()
+      (let ((directory (await (mkdtemp (join (tmpdir) "eliscript-cli-cache-verify-")))))
+        (try
+          (let* ((built (await (buildIndependentCompiler (js-object :host "javascript" :profile "small"
+                             :outputRoot (join directory "compiler") :retainIR false :debug false))))
+                 (metadata-path (get built :metadataPath))
+                 (artifact (await (readCompilerMetadata metadata-path)))
+                 (session (await (openCompilerArtifact built)))
+                 (ir-a undefined) (ir-b undefined))
+            (try
+              (progn
+                (setq ir-a (get (await (js-call session :request (js-object :operation "compile-ir"
+                             :source "(defun answer () 42) (export answer)" :filename "a.eli"))) :ir))
+                (setq ir-b (get (await (js-call session :request (js-object :operation "compile-ir"
+                             :source "(defun answer () 99) (export answer)" :filename "b.eli"))) :ir)))
+              (finally (await (js-call session :close))))
+            (let* ((req-a (js-object :operation "emit-ir" :target "wasm" :abi "managed-module-v1"
+                     :debug t :ir ir-a :memory (js-object :initialPages 2 :maximumPages 8)))
+                   (req-b (js-object :operation "emit-ir" :target "wasm" :abi "managed-module-v1"
+                     :debug t :ir ir-b :memory (js-object :initialPages 2 :maximumPages 8)))
+                   (req-a-path (join directory "req-a.json"))
+                   (req-b-path (join directory "req-b.json"))
+                   (out-a (join directory "out-a.wasm"))
+                   (out-b (join directory "out-b.wasm"))
+                   (out-c (join directory "out-c.wasm"))
+                   (out-d (join directory "out-d.wasm"))
+                   (cache-root (resolve (tmpdir) "eliscript-cli-request-cache"))
+                   (cache-key (js-call (js-call (createHash "sha256") :update
+                     (JSON/stringify (js-object
+                       :schema 1
+                       :productIdentity (get artifact :productIdentity)
+                       :sourceIdentity (get artifact :sourceIdentity)
+                       :artifactIdentity (get artifact :artifactIdentity)
+                       :host (get artifact :host)
+                       :runtimePath (get artifact :runtimePath)
+                       :runtimeEncoding (get artifact :runtimeEncoding)
+                       :literalSources (get artifact :literalSources)
+                       :packageMode (get artifact :packageMode)
+                       :request req-a))) :digest "hex"))
+                   (cache-dir (resolve cache-root cache-key)))
+              (await (rm cache-dir (js-object :recursive t :force t)))
+              (await (writeFile req-a-path (JSON/stringify req-a)))
+              (await (writeFile req-b-path (JSON/stringify req-b)))
+              ;; 1. Cold compile populates cache
+              (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
+                "--request" req-a-path "--output" out-a)))
+              (let ((meta (JSON/parse (await (readFile (resolve cache-dir "complete.json") "utf8")))))
+                (js-call assert :strictEqual (get meta :schema) 1)
+                (js-call assert :strictEqual (get meta :hasDebug) t)
+                (js-call assert :strictEqual (get meta :hasSidecar) t)
+                (js-call assert :strictEqual (get meta :debugPath) "out-a.wasm.debug.json"))
+              ;; 2. Warm hit with different output filename rewrites debugPath suffix
+              (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
+                "--request" req-a-path "--output" out-b)))
+              (js-call assert :deepStrictEqual (await (readFile out-b)) (await (readFile out-a)))
+              (js-call assert :deepStrictEqual (await (readFile (+ out-b ".debug.json")))
+                (await (readFile (+ out-a ".debug.json"))))
+              (let ((sidecar-a (JSON/parse (await (readFile (+ out-a ".json") "utf8"))))
+                    (sidecar-b (JSON/parse (await (readFile (+ out-b ".json") "utf8")))))
+                (js-call assert :strictEqual (get sidecar-a :debugPath) "out-a.wasm.debug.json")
+                (js-call assert :strictEqual (get sidecar-b :debugPath) "out-b.wasm.debug.json")
+                (put sidecar-b :debugPath "out-a.wasm.debug.json")
+                (js-call assert :deepStrictEqual sidecar-b sidecar-a))
+              ;; 3. Changed request payload invalidates cache
+              (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
+                "--request" req-b-path "--output" out-c)))
+              (js-call assert :notDeepStrictEqual (await (readFile out-c)) (await (readFile out-a)))
+              ;; 4. Corrupted cache payload falls back to cold compilation and produces identical output
+              (await (writeFile (resolve cache-dir "product.bin") "corrupted-bytes"))
+              (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
+                "--request" req-a-path "--output" out-d)))
+              (js-call assert :deepStrictEqual (await (readFile out-d)) (await (readFile out-a)))))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
+)

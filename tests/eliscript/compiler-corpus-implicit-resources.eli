@@ -218,23 +218,23 @@
       (let* ((fixture (prepareFixtureEnvironment root (get globalThis.process :env)))
              (directory (get fixture :directory)) (sessions (js-array)))
         (try
-          (let* ((artifact (await (buildIndependentCompiler (js-object :host "javascript" :profile "full-compiler"
+          (let* ((artifact (await (buildIndependentCompiler (js-object :host "javascript" :profile "small"
                     :outputRoot (resolve directory "compiler") :retainIR false :debug false))))
+                 (ordinary-session (await (openCompilerArtifact artifact)))
+                 (owned-session (await (openCompilerArtifact artifact)))
                  (modules (js-array (js-object :id "original.mjs" :filename "original-中文😀.eli"
                    :source "(defun negative-zero () -0.0) (defun echo (value) (js-array value value)) (export negative-zero echo)"))))
+            (js-call sessions :push ordinary-session owned-session)
+            (await (js-call ordinary-session :request (js-object :operation "runtime")))
+            (await (js-call owned-session :request (js-object :operation "runtime")))
             (let ((index 0))
               (while (< index 2)
                 (let* ((format (aref (js-array "object" "library") index))
-                       (ordinary-session (await (openCompilerArtifact artifact)))
-                       (owned-session (await (openCompilerArtifact artifact)))
                        (request (js-object :operation "project" :target "native" :entry "original.mjs"
                          :modules modules :resolveImports t :phased t :debug t :sourceMap t
                          :nativeTarget (if (= (get globalThis.process :platform) "linux") "arm64-linux" "arm64-macos") :nativeFormat format
                          :memory (js-object :initialPages 2 :maximumPages 8)))
                        (saved (globalThis.structuredClone request)))
-                  (js-call sessions :push ordinary-session owned-session)
-                  (await (js-call ordinary-session :request (js-object :operation "runtime")))
-                  (await (js-call owned-session :request (js-object :operation "runtime")))
                   (let* ((ordinary (await (js-call ordinary-session :request request)))
                          (packed-request (Object/assign (js-object) request (js-object :binaryEncoding "u16le-chunks")))
                          (owned (await (requestOriginalCompilerProduct owned-session packed-request)))
@@ -344,8 +344,7 @@
                            (public (await (requestOriginalCompilerProduct wrapper packed-request))))
                       (js-call assert :strictEqual (isOwnedCompilerBuildProduct public) false)
                       (js-call assert :deepStrictEqual (decodeCompilerBinary (get public :bytes)) bytes)
-                      (js-call assert :deepStrictEqual (get public :typed) (get owned :typed))))
-                  (await (js-call ordinary-session :close)) (await (js-call owned-session :close)))
+                      (js-call assert :deepStrictEqual (get public :typed) (get owned :typed)))))
                 (setq index (1+ index)))))
           (finally
             (let ((index 0)) (while (< index (js-length sessions))

@@ -1,10 +1,11 @@
 (module tools.backends.compiler-cli-ground
-  (import "node:fs/promises" readFile writeFile mkdir open)
-  (import "node:fs" writeSync)
+  (import "node:fs/promises" readFile writeFile mkdir open cp rename rm)
+  (import "node:fs" writeSync existsSync)
+  (import "node:os" tmpdir)
   (import "node:path" resolve dirname relative isAbsolute sep basename)
   (import "node:url" fileURLToPath pathToFileURL)
   (import "node:util" parseArgs)
-  (import "node:crypto" createHash)
+  (import "node:crypto" createHash randomBytes)
   (import "./compiler-build.mjs" buildIndependentCompiler decodeCompilerBinary writeCompilerMetadata)
   (import "./compiler-project.mjs" loadCompilerProject)
   (import "./compiler-bootstrap.mjs"
@@ -428,14 +429,7 @@
                        (progn
                          (unless (get values :request)
                            (throw (new globalThis.TypeError "request requires --request")))
-                         (setq request (JSON/parse (await (read-text (get values :request)))))
-                         (when (and (js-call (js-array "project" "project-ir" "emit-ir") :includes (cli-optional request "operation"))
-                                    (or (= (get request :target) "wasm") (= (get request :target) "native")))
-                           (await (js-call session :request
-                             (if (get values :runtime)
-                               (js-object :operation "runtime" :source (await (read-text (get values :runtime)))
-                                 :filename "bootstrap/runtime/memory.eli")
-                               (js-object :operation "runtime"))))))
+                         (setq request (JSON/parse (await (read-text (get values :request))))))
                        (progn
                          (when (eq (funcall globalThis.Boolean (get values :input))
                                    (funcall globalThis.Boolean (get values :project)))
@@ -514,10 +508,130 @@
                          (unless (Array/isArray declarations)
                            (throw (new globalThis.TypeError "host module declarations must be an array")))
                          (put request :hostModules declarations)))
-                     (let ((response (if (= cmd "compile")
-                                       (await (requestCompilerBuildProduct session request))
-                                       (await (js-call session :request request)))))
-                       (await (save-result response (get values :output) request))))
+                     (let* ((cacheable (and (= cmd "request")
+                                            (not (get values :runtime))
+                                            (not (get values :host-modules))
+                                            (get values :output)
+                                            (not (cli-optional request "hostSources"))
+                                            (js-call (js-array "emit-ir" "project-ir") :includes (cli-optional request "operation"))
+                                            (or (= (get request :target) "wasm") (= (get request :target) "native"))
+                                            (get artifact :productIdentity)
+                                            (get artifact :sourceIdentity)))
+                            (cache-root (when cacheable (resolve (tmpdir) "eliscript-cli-request-cache")))
+                            (cache-dir (when cache-root
+                                         (resolve cache-root
+                                           (js-call (js-call (createHash "sha256") :update
+                                             (JSON/stringify (js-object
+                                               :schema 1
+                                               :productIdentity (get artifact :productIdentity)
+                                               :sourceIdentity (get artifact :sourceIdentity)
+                                               :artifactIdentity (get artifact :artifactIdentity)
+                                               :host (get artifact :host)
+                                               :runtimePath (get artifact :runtimePath)
+                                               :runtimeEncoding (get artifact :runtimeEncoding)
+                                               :literalSources (get artifact :literalSources)
+                                               :packageMode (get artifact :packageMode)
+                                               :request request))) :digest "hex"))))
+                            (cache-meta-path (when cache-dir (resolve cache-dir "complete.json")))
+                            (out-path (when (get values :output) (resolve (get values :output))))
+                            (digest-bytes (lambda (buf)
+                                            (js-call (js-call (createHash "sha256") :update buf) :digest "hex")))
+                            (cache-hit false))
+                       (when (and cache-meta-path (existsSync cache-meta-path))
+                         (try
+                           (let* ((meta (JSON/parse (await (readFile cache-meta-path "utf8"))))
+                                  (product-bytes (await (readFile (resolve cache-dir "product.bin"))))
+                                  (debug-bytes (when (get meta :hasDebug)
+                                                 (await (readFile (resolve cache-dir "product.debug.json")))))
+                                  (sidecar-bytes (when (get meta :hasSidecar)
+                                                   (await (readFile (resolve cache-dir "product.json"))))))
+                             (when (and (= (get meta :schema) 1)
+                                        (= (get product-bytes :byteLength) (get meta :productBytes))
+                                        (= (funcall digest-bytes product-bytes) (get meta :productSha256))
+                                        (or (not (get meta :hasDebug))
+                                            (and debug-bytes
+                                                 (= (get debug-bytes :byteLength) (get meta :debugBytes))
+                                                 (= (funcall digest-bytes debug-bytes) (get meta :debugSha256))))
+                                        (or (not (get meta :hasSidecar))
+                                            (and sidecar-bytes
+                                                 (= (get sidecar-bytes :byteLength) (get meta :sidecarBytes))
+                                                 (= (funcall digest-bytes sidecar-bytes) (get meta :sidecarSha256)))))
+                               (let ((sidecar-output sidecar-bytes)
+                                     (sidecar-valid t))
+                                 (when (and (get meta :hasSidecar) (get meta :hasDebug))
+                                   (let* ((sidecar-text (js-call sidecar-bytes :toString "utf8"))
+                                          (expected-suffix (+ ",\"debugPath\":" (JSON/stringify (get meta :debugPath)) "}\n"))
+                                          (replacement-suffix (+ ",\"debugPath\":" (JSON/stringify (+ (basename out-path) ".debug.json")) "}\n")))
+                                     (if (js-call sidecar-text :endsWith expected-suffix)
+                                       (setq sidecar-output
+                                         (Buffer/from
+                                           (+ (js-call sidecar-text :slice 0 (- (js-length sidecar-text) (js-length expected-suffix)))
+                                              replacement-suffix)
+                                           "utf8"))
+                                       (setq sidecar-valid false))))
+                                 (when sidecar-valid
+                                   (await (mkdir (dirname out-path) (js-object :recursive t)))
+                                   (await (writeFile out-path product-bytes))
+                                   (when (get meta :hasDebug)
+                                     (await (writeFile (+ out-path ".debug.json") debug-bytes)))
+                                   (when (get meta :hasSidecar)
+                                     (await (writeFile (+ out-path ".json") sidecar-output)))
+                                   (setq cache-hit t)))))
+                           (catch error
+                             (setq cache-hit false))))
+                       (unless cache-hit
+                         (when (and (= cmd "request")
+                                    (js-call (js-array "project" "project-ir" "emit-ir") :includes (cli-optional request "operation"))
+                                    (or (= (get request :target) "wasm") (= (get request :target) "native")))
+                           (await (js-call session :request
+                             (if (get values :runtime)
+                               (js-object :operation "runtime" :source (await (read-text (get values :runtime)))
+                                 :filename "bootstrap/runtime/memory.eli")
+                               (js-object :operation "runtime")))))
+                         (let ((response (if (= cmd "compile")
+                                           (await (requestCompilerBuildProduct session request))
+                                           (await (js-call session :request request)))))
+                           (await (save-result response (get values :output) request))
+                           (when (and cache-dir
+                                      (not (cli-optional (cli-optional response "descriptor") "project"))
+                                      (existsSync out-path))
+                             (let ((stage-dir undefined))
+                               (try
+                                 (progn
+                                   (await (mkdir cache-root (js-object :recursive t)))
+                                   (setq stage-dir
+                                     (+ cache-dir ".tmp-" (get globalThis.process :pid) "-" (Date/now) "-"
+                                        (js-call (randomBytes 6) :toString "hex")))
+                                   (await (mkdir stage-dir (js-object :recursive t)))
+                                   (let* ((product-bytes (await (readFile out-path)))
+                                          (has-debug (existsSync (+ out-path ".debug.json")))
+                                          (has-sidecar (existsSync (+ out-path ".json")))
+                                          (debug-bytes (when has-debug (await (readFile (+ out-path ".debug.json")))))
+                                          (sidecar-bytes (when has-sidecar (await (readFile (+ out-path ".json")))))
+                                          (meta (js-object
+                                                  :schema 1
+                                                  :productBytes (get product-bytes :byteLength)
+                                                  :productSha256 (funcall digest-bytes product-bytes)
+                                                  :hasDebug has-debug
+                                                  :hasSidecar has-sidecar
+                                                  :debugPath (+ (basename out-path) ".debug.json"))))
+                                     (await (writeFile (resolve stage-dir "product.bin") product-bytes))
+                                     (when has-debug
+                                       (put meta :debugBytes (get debug-bytes :byteLength))
+                                       (put meta :debugSha256 (funcall digest-bytes debug-bytes))
+                                       (await (writeFile (resolve stage-dir "product.debug.json") debug-bytes)))
+                                     (when has-sidecar
+                                       (put meta :sidecarBytes (get sidecar-bytes :byteLength))
+                                       (put meta :sidecarSha256 (funcall digest-bytes sidecar-bytes))
+                                       (await (writeFile (resolve stage-dir "product.json") sidecar-bytes)))
+                                     (await (writeFile (resolve stage-dir "complete.json") (+ (JSON/stringify meta) "\n")))
+                                     (await (rename stage-dir cache-dir))
+                                     (setq stage-dir undefined)))
+                                 (catch error nil)
+                                 (finally
+                                   (when stage-dir
+                                     (try (await (rm stage-dir (js-object :recursive t :force t)))
+                                       (catch error nil)))))))))))
                    (catch error (setq failed t) (throw error))
                    (finally (await (close-compiler session failed))))))))))))
 

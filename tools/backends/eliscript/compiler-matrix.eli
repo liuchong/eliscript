@@ -814,19 +814,6 @@
           (js-object :effectiveIds effective :cancelled cancelled)
           (js-object :effectiveIds effective :cancelled cancelled :resourceDeferred deferred))))))
 
-  (defun stage3-shard-selection (stage3-scope)
-    (when stage3-scope
-      (let* ((env (get globalThis.process :env))
-             (raw-index (field env "ELISCRIPT_STAGE3_SHARD_INDEX"))
-             (raw-count (field env "ELISCRIPT_STAGE3_SHARD_COUNT")))
-        (when (and (= (value-type raw-index) "string") (> (js-length raw-index) 0)
-                   (= (value-type raw-count) "string") (> (js-length raw-count) 0))
-          (let ((index (funcall globalThis.Number raw-index))
-                (count (funcall globalThis.Number raw-count)))
-            (when (and (Number/isSafeInteger index) (Number/isSafeInteger count)
-                       (>= index 1) (> count 1) (<= index count))
-              (js-object :index index :count count)))))))
-
   (defasync matrix-resource-deferred (record index host target directory metadata manifest cell receipt)
     (let* ((output (join directory (+ (js-call (funcall globalThis.String index) :padStart 6 "0") "-"
                      (js-call (compilerDigest (get record :id)) :slice 0 16))))
@@ -904,34 +891,24 @@
             (put cell :runtimeSourceSha256 (get (get source-identity :runtime) :sha256))
             (put cell :literalSourceIdentity (clone (otherwise (get source-identity :literalSources) (js-array))))
             (put cell :compilerIdentity (field (get artifact :productIdentity) "sha256"))
-            (let ((index retained-count) (records (get corpus :records))
-                  (shard (stage3-shard-selection stage3-scope)))
+            (let ((index retained-count) (records (get corpus :records)))
               (while (< index (js-length records))
                 (let* ((record (aref records index))
                        (reason (when stage3-scope (stage3-compiler-host-reason record target)))
                        (deferred (when (and stage3-scope (not reason))
                          (compilerCorpusResourceDeferred record target
-                           (matrix-spread options (js-object :sourceAssets (get (get corpus :document) :evidence))))))
-                       (other-shard (and shard (not reason) (not deferred)
-                                         (/= (% index (get shard :count)) (1- (get shard :index))))))
+                           (matrix-spread options (js-object :sourceAssets (get (get corpus :document) :evidence)))))))
                   (if reason
-                    (progn
-                      (js-call (get cell :records) :push (js-object :id (get record :id) :host host :target target
-                        :status "cancelled" :verification "cancelled" :reason reason))
-                      (await (saveCompilerMetadata manifest metadata)))
+                    (js-call (get cell :records) :push (js-object :id (get record :id) :host host :target target
+                      :status "cancelled" :verification "cancelled" :reason reason))
                     (if deferred
                       (await (matrix-resource-deferred record index host target cell-directory metadata manifest cell deferred))
-                      (if other-shard
-                        (progn
-                          (js-call (get cell :records) :push (js-object :id (get record :id) :host host :target target
-                            :status "shard-partitioned" :verification "shard-partitioned"
-                            :shardIndex (get shard :index) :shardCount (get shard :count)))
-                          (await (saveCompilerMetadata manifest metadata)))
-                        (progn
-                          (when stage3-scope (await (matrix-output-space cell-directory target)))
-                          (await (matrix-case-execution record index host target session mode cell-directory
-                          metadata manifest corpus execution-options options cell (get sources :literalSources)
-                          (get source-identity :literalSources)))))))) (setq index (1+ index)))))
+                      (progn
+                        (when stage3-scope (await (matrix-output-space cell-directory target)))
+                        (await (matrix-case-execution record index host target session mode cell-directory
+                        metadata manifest corpus execution-options options cell (get sources :literalSources)
+                        (get source-identity :literalSources)))))) (setq index (1+ index))))
+              (await (saveCompilerMetadata manifest metadata))))
           (put cell :status "constructed")
           (await (matrix-progress options cell-directory
             (js-object :host host :target target :phase "records-complete" :count (js-length (get cell :records))))))))
@@ -1069,9 +1046,7 @@
                                   (lambda (record) (or (= (get record :verification) "equivalent")
                                     (and stage3-scope (= (get record :verification) "cancelled"))
                                     (and stage3-scope (= (get record :status) "resource-deferred")
-                                      (= (get record :verification) "deferred"))
-                                    (and stage3-scope (= (get record :status) "shard-partitioned")
-                                      (= (get record :verification) "shard-partitioned"))))))
+                                      (= (get record :verification) "deferred"))))))
                      (missing (/= (js-length (get (get corpus :identity) :missingCaseAdapters)) 0))
                      (final-identity (compilerSourceIdentity (await (loadCompilerSources (js-object :sourceRoot source-root)))))
                      (after undefined))

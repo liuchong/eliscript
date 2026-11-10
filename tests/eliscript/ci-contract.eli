@@ -16,7 +16,7 @@
         (js-call assert :strictEqual (aref aggregates 0) "test: test-core test-applications")
         ;; Make combines prerequisites from every declaration of the target.
         (js-call assert :deepStrictEqual (Array/from (new globalThis.Set dependencies))
-          (js-array "test-core" "test-applications" "test-pre-bootstrap-originals" "test-bootstrap-artifacts"))
+          (js-array "test-core" "test-applications" "test-pre-bootstrap-originals"))
         (js-call assert :ok (js-call makefile :includes "test-pre-bootstrap: test-core test-applications test-pre-bootstrap-originals"))
         (js-call assert :ok (js-call makefile :includes "ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0"))
         (js-call assert :ok (js-call makefile :includes "BUN_ARTIFACT_TEST_RUNNER ?= $(BUN_TEST_RUNNER)")))))

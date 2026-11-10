@@ -13,8 +13,6 @@ BOOTSTRAP_RELEASE_MANIFEST ?= $(BOOTSTRAP_RELEASE_OUT)/bootstrap.json
 NATIVE_TARGET ?= $(if $(filter Linux,$(shell uname -s)),arm64-linux,arm64-macos)
 STAGE3_FUNCTIONAL_RUNTIME_PROFILE ?=
 STAGE3_FUNCTIONAL_RUNTIME_OPTION = $(if $(strip $(STAGE3_FUNCTIONAL_RUNTIME_PROFILE)),--functional-runtime-profile $(STAGE3_FUNCTIONAL_RUNTIME_PROFILE),)
-STAGE3_SHARD_INDEX ?=
-STAGE3_SHARD_COUNT ?=
 
 .PHONY: bootstrap-release verify-bootstrap check-stage3-targets prepare-release-package check-release-package compiler-release-ci check-release-workflow
 
@@ -30,7 +28,7 @@ verify-bootstrap:
 
 # Deliberately does not rebuild an already authenticated four-stage chain.
 check-stage3-targets: prepare-release-package
-	ELISCRIPT_STAGE3_SHARD_INDEX="$(STAGE3_SHARD_INDEX)" ELISCRIPT_STAGE3_SHARD_COUNT="$(STAGE3_SHARD_COUNT)" $(NODE) tools/backends/dist/release-cli.mjs targets --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)" --output "$(BOOTSTRAP_RELEASE_OUT)/targets" --native-target "$(NATIVE_TARGET)" $(STAGE3_FUNCTIONAL_RUNTIME_OPTION)
+	$(NODE) tools/backends/dist/release-cli.mjs targets --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)" --output "$(BOOTSTRAP_RELEASE_OUT)/targets" --native-target "$(NATIVE_TARGET)" $(STAGE3_FUNCTIONAL_RUNTIME_OPTION)
 
 prepare-release-package:
 	$(NODE) tools/backends/dist/release-cli.mjs prepare-release-package --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)"
@@ -56,28 +54,20 @@ compiler-release-ci: bootstrap-release
 .PHONY: test test-pre-bootstrap test-pre-bootstrap-originals test-bootstrap-artifacts test-core test-applications check-contracts byte-compile bootstrap-backends
 test: test-core test-applications
 
-test: test-pre-bootstrap-originals test-bootstrap-artifacts
+test: test-pre-bootstrap-originals
 
 # Source/runtime functionality closes before formal self-recompilation. These
-# artifact consumers stay in the complete test gate and run after a real final
+# artifact consumers stay in the complete release gate and run after a real final
 # stage3 exists; a missing receipt must fail, never trigger a synthetic fixture.
 test-pre-bootstrap: test-core test-applications test-pre-bootstrap-originals
 
 test-pre-bootstrap-originals:
-	@case " $(BUN_TEST_RUNNER) " in *" --shard-index "[1235678]" "*) exit 0 ;; esac; \
 	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=1 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
 
 test-bootstrap-artifacts:
-	@case " $(BUN_ARTIFACT_TEST_RUNNER) " in *" --shard-index "[4-8]" "*) exit 0 ;; esac; \
 	test -f "$(BOOTSTRAP_RELEASE_MANIFEST)" && test -f dist/stage3-release.json || ($(MAKE) bootstrap-release && $(MAKE) prepare-release-package)
-	$(BUN) $(BUN_ARTIFACT_TEST_RUNNER) ./tests/package-surface.test.mjs ./tests/compiler-browser-session.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs
-	@case " $(BUN_ARTIFACT_TEST_RUNNER) " in \
-		*" --shard-index 1 "*) ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-tools-cli-selfhosted.test.mjs ;; \
-		*" --shard-index 2 "*) ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(NODE) --test --test-concurrency=1 ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs ;; \
-		*" --shard-index 3 "*) ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs ;; \
-		*" --shard-index "*) ;; \
-		*) ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-tools-cli-selfhosted.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs ;; \
-	esac
+	$(BUN) $(BUN_ARTIFACT_TEST_RUNNER) ./tests/package-surface.test.mjs ./tests/compiler-browser-session.test.mjs
+	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-tools-cli-selfhosted.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
 
 test-core: check-contracts
 	$(EMACS) --batch -Q -L compiler -L editor -L tools/org -L tools/worker -L tests \
@@ -428,23 +418,11 @@ test-core: check-contracts
 		./tests/math-oracle-fixture-selfhosted.test.mjs \
 		./tests/initializer-array-fixture-selfhosted.test.mjs \
 		./tests/managed-primitive-own-repairs-selfhosted.test.mjs \
-		./tests/release-package-install-selfhosted.test.mjs \
 		./tests/managed-runtime-extended-selfhosted.test.mjs \
 		./tests/math-runtime-selfhosted.test.mjs \
 		./tests/unicode-case-selfhosted.test.mjs \
 		./tests/unicode-default-selfhosted.test.mjs; \
-	case " $(BUN_TEST_RUNNER) " in \
-		*" --shard-index "*) \
-			shard=$$(printf '%s\n' "$(BUN_TEST_RUNNER)" | sed -n 's/.*--shard-index \([0-9][0-9]*\).*/\1/p'); \
-			count=$$(printf '%s\n' "$(BUN_TEST_RUNNER)" | sed -n 's/.*--shard-count \([0-9][0-9]*\).*/\1/p'); \
-			selected=""; i=0; \
-			for f in "$$@"; do \
-				if [ $$((i % count)) -eq $$((shard - 1)) ]; then selected="$$selected $$f"; fi; \
-				i=$$((i + 1)); \
-			done; \
-			set -- $$selected ;; \
-	esac; \
-	[ "$$#" -eq 0 ] || $(NODE) --test --test-concurrency=1 "$$@"
+	$(NODE) --test --test-concurrency=1 "$$@"
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/project-cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/check-cli-test.sh

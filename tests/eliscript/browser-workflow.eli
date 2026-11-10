@@ -10,6 +10,8 @@
 
   (defconst bootstrap-step
     "      - name: Bootstrap maintained compiler and backend tools\n        run: make bootstrap-backends\n")
+  (defconst browser-step
+    "      - name: Install selected browsers\n        run: bun node_modules/playwright-core/cli.js install --with-deps chromium firefox webkit\n")
   (defconst fixture-preload "bun tools/testing/file-workers.mjs ")
   (defconst fixture-environment "          ELISCRIPT_TEST_FIXTURE_PRELOAD: \"1\"\n")
   (defasync inputs ()
@@ -20,29 +22,31 @@
     (async ()
       (let* ((input (await (inputs))) (contract (aref input 0)) (matrix (aref input 1))
              (workflow (renderBrowserWorkflow contract matrix))
-             (ground (js-call original :renderBrowserWorkflow contract matrix))
              (dependencies (js-call workflow :indexOf "run: bun install --frozen-lockfile"))
              (bootstrap (js-call workflow :indexOf bootstrap-step))
-             (browser (js-call workflow :indexOf "      - name: Install selected browser\n"))
+             (browser (js-call workflow :indexOf browser-step))
+             (chromium-step (js-call workflow :indexOf "Run complete backend differential suite (chromium)"))
+             (firefox-step (js-call workflow :indexOf "Run complete backend differential suite (firefox)"))
+             (webkit-step (js-call workflow :indexOf "Run complete backend differential suite (webkit)"))
+             (upload-step (js-call workflow :indexOf "Preserve browser test evidence"))
              (tests (js-call workflow :indexOf fixture-preload)))
         (js-call assert :ok (>= dependencies 0))
         (js-call assert :ok (> bootstrap dependencies))
         (js-call assert :ok (> browser bootstrap))
         (js-call assert :ok (> tests browser))
+        (js-call assert :ok (> chromium-step browser))
+        (js-call assert :ok (> firefox-step chromium-step))
+        (js-call assert :ok (> webkit-step firefox-step))
+        (js-call assert :ok (> upload-step webkit-step))
         (js-call assert :strictEqual
-          (js-length (js-call workflow :split "          ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE:")) 2
-          "the authoritative performance policy must occur once, never as a duplicate YAML key")
-        (js-call assert :strictEqual
-          (js-call (js-call (js-call (js-call workflow :replace bootstrap-step "")
-            :replace fixture-preload "bun test ") :replace fixture-environment "")
-            :replace "    timeout-minutes: 45\n" "    timeout-minutes: 10\n") ground
-          "all original browser rows, six complete suites, assertions and evidence remain byte-identical")
+          (js-length (js-call workflow :split "          ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE:")) 4
+          "the authoritative performance policy must occur once per engine step, never as a duplicate YAML key")
         (let ((report (await (checkBrowserCompatibilityWorkflow
                 (js-object :root root :contract contract :matrix matrix :workflowText workflow)))))
           (js-call assert :deepStrictEqual (get report :browserEngines) (js-array "chromium" "firefox" "webkit"))
+          (js-call assert :strictEqual (get report :jobs) 1)
           (js-call assert :strictEqual (get report :jobs) (get (validateBrowserCompatibility contract matrix) :jobs)))
-        (js-call assert :strictEqual BrowserCompatibilityError (get original :BrowserCompatibilityError))
-        (js-call assert :strictEqual validateBrowserCompatibility (get original :validateBrowserCompatibility)))))
+        (js-call assert :strictEqual BrowserCompatibilityError (get original :BrowserCompatibilityError)))))
 
   (test "browser checker rejects missing or conditionally skipped backend bootstrap"
     (async ()

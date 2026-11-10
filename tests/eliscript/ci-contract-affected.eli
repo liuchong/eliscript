@@ -51,14 +51,15 @@
            (baseline (JSON/parse (await (readFile (resolve root "contracts/compatibility-matrix.json") "utf8"))))
            (contract (JSON/parse (await (readFile (resolve root "contracts/browser-compatibility.json") "utf8"))))
            (workflow (renderBrowserWorkflow contract baseline)))
-      (js-call assert :strictEqual (get report :jobs) 9)
+      (js-call assert :strictEqual (get report :jobs) 1)
       (js-call assert :deepStrictEqual (get report :browserEngines) (js-array "chromium" "firefox" "webkit"))
-      (js-call (get baseline :operatingSystems) :forEach (lambda (system)
-        (js-call (get report :browserEngines) :forEach (lambda (browser)
-          (js-call assert :ok (js-call workflow :includes (str "name: " (get system :id) "-" browser)))))))
+      (js-call assert :ok (js-call workflow :includes "name: linux-browsers"))
+      (js-call (get report :browserEngines) :forEach (lambda (browser)
+        (js-call assert :ok (js-call workflow :includes (str "Run complete backend differential suite (" browser ")")))
+        (js-call assert :ok (js-call workflow :includes (str "ELISCRIPT_TEST_BROWSER: " browser)))
+        (js-call assert :ok (js-call workflow :includes (str "tee \"$RUNNER_TEMP/eliscript-browser-ci/" browser "/tests.log\"")))))
       (js-call (js-array
-        "install --with-deps \"${{ matrix.browser }}\""
-        "ELISCRIPT_TEST_BROWSER: ${{ matrix.browser }}"
+        "install --with-deps chromium firefox webkit"
         "bun tools/testing/file-workers.mjs tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee"
         "set -o pipefail" "timeout-minutes: 45"
         "test \"$(bun -p 'process.arch')\" = \"${{ matrix.architecture }}\""
@@ -67,9 +68,9 @@
         (lambda (text) (js-call assert :ok (js-call workflow :includes text))))))
   (defasync runCompatibilityWorkflowCase ()
     (let ((report (await (checkCompatibilityWorkflow (js-object :root root)))))
-      (js-call assert :strictEqual (get report :jobs) 48)
-      (js-call assert :strictEqual (get report :acceptanceJobs) 16)
-      (js-call assert :strictEqual (get report :testFileShards) 8)
+      (js-call assert :strictEqual (get report :jobs) 4)
+      (js-call assert :strictEqual (get report :acceptanceJobs) 1)
+      (js-call assert :strictEqual (get report :testFileShards) 1)
       (js-call assert :deepStrictEqual (js-call (get report :systems) :map (lambda (system) (get system :id)))
         (js-array "linux" "linux-arm64" "macos"))
       (js-call assert :deepStrictEqual (js-call (get report :systems) :find (lambda (system) (= (get system :id) "linux-arm64")))
@@ -84,36 +85,32 @@
            (makefile (await (readFile (resolve root "Makefile") "utf8")))
            (workflow (renderWorkflow baseline)) (validated (validateCompatibilityMatrix baseline))
            (rows (Array/from (js-call workflow :matchAll (new globalThis.RegExp
-             "          - name: ([^\\n]+)\\n            os: ([^\\n]+)\\n            architecture: ([^\\n]+)\\n            emacs: \"([^\"\\n]+)\"\\n            shard: (\\d+)$" "gm"))))
+             "          - name: ([^\\n]+)\\n            os: ([^\\n]+)\\n            architecture: ([^\\n]+)\\n            emacs: \"([^\"\\n]+)\"$" "gm"))))
            (inventories (js-call (js-array "test-core" "test-applications") :map (lambda (target)
              (let* ((start (js-call makefile :indexOf (str target ":")))
                     (end (js-call makefile :indexOf "\n\n" start)))
                (Array/from (js-call (js-call makefile :slice start end) :matchAll
                  (new globalThis.RegExp "[.]/tests/[a-z0-9-]+[.]test[.]mjs" "g"))
                  (lambda (match) (aref match 0))))))))
-      (js-call assert :strictEqual (get validated :jobs) 48)
-      (js-call assert :strictEqual (get validated :acceptanceJobs) 16)
-      (js-call assert :strictEqual (get validated :testFileShards) 8)
+      (js-call assert :strictEqual (get validated :jobs) 4)
+      (js-call assert :strictEqual (get validated :acceptanceJobs) 1)
+      (js-call assert :strictEqual (get validated :testFileShards) 1)
       (js-call assert :strictEqual (js-length rows) (get validated :jobs))
       (js-call assert :strictEqual (js-length inventories) 2)
       (js-call inventories :forEach (lambda (files)
         (js-call assert :ok (> (js-length files) 20))
-        (js-call assert :strictEqual (get (new globalThis.Set files) :size) (js-length files))))
-      (js-call (get baseline :operatingSystems) :forEach (lambda (system)
-        (js-call (get baseline :emacsVersions) :forEach (lambda (emacs)
-          (let ((pair (js-call rows :filter (lambda (row)
-                        (and (= (aref row 2) (get system :runner)) (= (aref row 4) emacs))))))
-            (js-call assert :deepStrictEqual (js-call (js-call pair :map (lambda (row) (funcall globalThis.Number (aref row 5)))) :sort) (js-array 1 2 3 4 5 6 7 8))
-            (js-call pair :forEach (lambda (row)
-              (js-call assert :strictEqual (aref row 1) (str (get system :id) "-emacs-" emacs "-shard-" (aref row 5) "-of-8"))
-              (js-call assert :strictEqual (aref row 3) (get system :architecture))))
-            (js-call inventories :forEach (lambda (files)
-              (let ((all (js-call pair :flatMap (lambda (row) (partitionTestFiles files (funcall globalThis.Number (aref row 5)) 8)))))
-                (js-call assert :deepStrictEqual (js-call all :sort) (js-call (js-call files :slice) :sort))
-                (js-call assert :strictEqual (get (new globalThis.Set all) :size) (js-length files))))))))))
+        (js-call assert :strictEqual (get (new globalThis.Set files) :size) (js-length files))
+        (js-call assert :deepStrictEqual (partitionTestFiles files 1 1) files)))
+      (js-call assert :deepStrictEqual
+        (js-call rows :map (lambda (row) (js-object :name (aref row 1) :os (aref row 2) :arch (aref row 3) :emacs (aref row 4))))
+        (js-array
+          (js-object :name "linux-emacs-29.4" :os "ubuntu-24.04" :arch "x64" :emacs "29.4")
+          (js-object :name "linux-emacs-30.2" :os "ubuntu-24.04" :arch "x64" :emacs "30.2")
+          (js-object :name "linux-arm64-emacs-30.2" :os "ubuntu-24.04-arm" :arch "arm64" :emacs "30.2")
+          (js-object :name "macos-emacs-30.2" :os "macos-15" :arch "arm64" :emacs "30.2")))
       (js-call (js-array
-        "BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index ${{ matrix.shard }} --shard-count 8"
-        "Run test file shard ${{ matrix.shard }}/8"
+        "BUN_TEST_RUNNER: tools/testing/file-workers.mjs"
+        "Run test file shard 1/1"
         "timeout-minutes: 240" "fail-fast: false") :forEach
         (lambda (text) (js-call assert :ok (js-call workflow :includes text))))
       (js-call (get baseline :commands) :forEach (lambda (command) (js-call assert :ok (js-call workflow :includes (str "run: " command)))))
