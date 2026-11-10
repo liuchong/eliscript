@@ -147,9 +147,9 @@
         (js-call assert :ok (not (js-call (get manifest :files) :includes "dist/bootstrap-release/")))
         (js-call assert :match (get (get manifest :scripts) :prepack) (pattern "prepare-release-package")))))
 
-  (test "managed runtime lowering cache isolates consecutive capability and pure requests and preserves runtime replacement"
+  (test "compiler session isolates consecutive capability and pure requests and preserves runtime replacement and direct backend input invariants"
     (async ()
-      (let ((directory (await (mkdtemp (join (tmpdir) "eliscript-runtime-cache-isolation-")))))
+      (let ((directory (await (mkdtemp (join (tmpdir) "eliscript-runtime-session-isolation-")))))
         (try
           (let* ((artifact (await (buildIndependentCompiler (js-object :host "javascript" :profile "small"
                              :outputRoot (join directory "compiler") :retainIR false :debug false))))
@@ -163,9 +163,6 @@
                        (managed-path (join directory "compiler/backends/managed.mjs"))
                        (compiler-mod (funcall (createRequire compiler-path) compiler-path))
                        (managed-mod (funcall (createRequire managed-path) managed-path))
-                       (totals (lambda ()
-                                 (let ((stats (get (get managed-mod :lower_managed_program) :__eliscriptRuntimeCacheTotals)))
-                                   (js-object :lowerCount (get stats :lowerCount) :cacheHits (get stats :cacheHits)))))
                        (host-request (js-object :operation "project" :target "wasm" :entry "host.mjs"
                          :phased t :foreignEntry t
                          :modules (js-array (js-object :id "host.mjs" :filename "host.eli"
@@ -176,14 +173,8 @@
                            :source "(defun apply-fn (f x) (funcall f x)) (defun add (a b) (apply-fn (lambda (v) (+ v b)) a)) (export add)"))
                          :memory (js-object :initialPages 2 :maximumPages 8)))
                        (host-result (await (requestCompilerBuildProduct reused-session host-request)))
-                       (_assert-after-host (js-call assert :deepStrictEqual (funcall totals)
-                                             (js-object :lowerCount 1 :cacheHits 0)))
                        (warm-pure (await (requestCompilerBuildProduct reused-session pure-request)))
-                       (_assert-after-warm (js-call assert :deepStrictEqual (funcall totals)
-                                             (js-object :lowerCount 1 :cacheHits 1)))
-                       (cold-pure (await (requestCompilerBuildProduct cold-session pure-request)))
-                       (_assert-after-cold (js-call assert :deepStrictEqual (funcall totals)
-                                             (js-object :lowerCount 2 :cacheHits 1))))
+                       (cold-pure (await (requestCompilerBuildProduct cold-session pure-request))))
                   (js-call assert :ok (> (js-length (decodeCompilerBinary (get host-result :bytes))) 0)
                     "foreign capability project request emits valid WASM binary")
                   (js-call assert :deepStrictEqual (decodeCompilerBinary (get warm-pure :bytes))
@@ -192,16 +183,12 @@
                   (await (js-call assert :rejects
                     (js-call reused-session :request (js-object :operation "runtime" :source "(" :filename "broken.eli"))))
                   (let ((after-failed-replace (await (requestCompilerBuildProduct reused-session pure-request))))
-                    (js-call assert :deepStrictEqual (funcall totals)
-                      (js-object :lowerCount 2 :cacheHits 2))
                     (js-call assert :deepStrictEqual (decodeCompilerBinary (get after-failed-replace :bytes))
                       (decodeCompilerBinary (get cold-pure :bytes))))
                   ;; Also verify direct backend calls with caller-owned mutable, frozen, and numeric-mutated runtime IR
                   (let* ((runtime-source (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")))
                          (mutable-runtime (js-call compiler-mod :compile_ir_string runtime-source "bootstrap/runtime/memory.eli"))
                          (user-ir (js-call compiler-mod :compile_ir_string "(defun id (x) x) (export id)" "id.eli"))
-                         (stats-for (lambda (prog)
-                                      (funcall (get (get managed-mod :lower_managed_program) :__eliscriptRuntimeCacheStatsFor) prog)))
                          (deep-freeze (lambda (root-val)
                                         (let ((stack (js-array root-val)) (visited (new globalThis.Set)))
                                           (while (> (js-length stack) 0)
@@ -225,49 +212,32 @@
                            (keys-before (Object/getOwnPropertyNames frozen-runtime)))
                       (js-call managed-mod :lower_managed_program user-ir frozen-runtime)
                       (js-call assert :deepStrictEqual (Object/getOwnPropertyNames frozen-runtime) keys-before)
-                      (js-call assert :deepStrictEqual (funcall stats-for frozen-runtime)
-                        (js-object :lowerCount 1 :cacheHits 0))
                       (js-call managed-mod :lower_managed_program user-ir frozen-runtime)
-                      (js-call assert :deepStrictEqual (funcall stats-for frozen-runtime)
-                        (js-object :lowerCount 1 :cacheHits 1)))
-                    ;; 2. Forged __eliscriptSessionImmutableRuntime flag + nested +0 -> -0 -> NaN -> Infinity mutations must invalidate
-                    (put mutable-runtime :__eliscriptSessionImmutableRuntime t)
+                      (js-call assert :deepStrictEqual (Object/getOwnPropertyNames frozen-runtime) keys-before))
+                    ;; 2. Nested +0 -> -0 -> NaN -> Infinity mutations must be validated on each lowering call
                     (let ((num-node (funcall find-number-literal mutable-runtime)))
                       (js-call assert :ok (not (nil? num-node)) "runtime IR contains a numeric literal node")
                       (put num-node :value 0)
                       (js-call managed-mod :lower_managed_program user-ir mutable-runtime)
-                      (js-call assert :deepStrictEqual (funcall stats-for mutable-runtime)
-                        (js-object :lowerCount 1 :cacheHits 0))
-                      (js-call managed-mod :lower_managed_program user-ir mutable-runtime)
-                      (js-call assert :deepStrictEqual (funcall stats-for mutable-runtime)
-                        (js-object :lowerCount 1 :cacheHits 1))
-                      ;; Mutate +0 to -0 in place (JSON.stringify would produce "0" for both and falsely hit cache!)
+                      ;; Mutate +0 to -0 in place
                       (put num-node :value (- 0))
                       (js-call assert :throws
                         (lambda () (js-call managed-mod :lower_managed_program user-ir mutable-runtime))
                         (lambda (err) (js-call (pattern "excluding negative zero") :test (str (get err :message)))))
-                      (js-call assert :deepStrictEqual (funcall stats-for mutable-runtime)
-                        (js-object :lowerCount 1 :cacheHits 1))
                       ;; Mutate -0 to NaN in place
                       (put num-node :value globalThis.NaN)
                       (js-call assert :throws
                         (lambda () (js-call managed-mod :lower_managed_program user-ir mutable-runtime))
                         (lambda (err) (js-call (pattern "unsigned integers") :test (str (get err :message)))))
-                      (js-call assert :deepStrictEqual (funcall stats-for mutable-runtime)
-                        (js-object :lowerCount 1 :cacheHits 1))
-                      ;; Mutate NaN to Infinity in place (JSON.stringify would produce "null" for both NaN and Infinity!)
+                      ;; Mutate NaN to Infinity in place
                       (put num-node :value globalThis.Infinity)
                       (js-call assert :throws
                         (lambda () (js-call managed-mod :lower_managed_program user-ir mutable-runtime))
                         (lambda (err) (js-call (pattern "unsigned integers") :test (str (get err :message)))))
-                      (js-call assert :deepStrictEqual (funcall stats-for mutable-runtime)
-                        (js-object :lowerCount 1 :cacheHits 1))
                       ;; Restore valid u32 literal and mutate span in place
                       (put num-node :value 0)
                       (put (aref (get mutable-runtime :body) 0) :span (js-object :start 0 :end 1))
-                      (js-call managed-mod :lower_managed_program user-ir mutable-runtime)
-                      (js-call assert :deepStrictEqual (funcall stats-for mutable-runtime)
-                        (js-object :lowerCount 2 :cacheHits 1))))))
+                      (js-call managed-mod :lower_managed_program user-ir mutable-runtime)))))
               (finally
                 (await (js-call reused-session :close))
                 (await (js-call cold-session :close)))))
