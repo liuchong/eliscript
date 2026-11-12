@@ -1,2 +1,170 @@
-(module capsules.tools.compiler.controlled-baseline
-  (js* "import { createHash } from \"node:crypto\";\nimport { copyFile, mkdir, readFile, writeFile } from \"node:fs/promises\";\nimport path from \"node:path\";\n\nconst sha256 = (bytes) => createHash(\"sha256\").update(bytes).digest(\"hex\");\n\n// Read a complete definition, respecting strings and comments instead of\n// using a regular expression to guess where nested Lisp forms end.\nexport function definition(source, name) {\n  const prefix = `(defun ${name}`;\n  const start = source.indexOf(prefix);\n  if (start < 0 || source.indexOf(prefix, start + prefix.length) !== -1) {\n    throw new Error(`expected exactly one definition of ${name}`);\n  }\n  let depth = 0;\n  let quoted = false;\n  let comment = false;\n  for (let index = start; index < source.length; index += 1) {\n    const character = source[index];\n    if (comment) {\n      if (character === \"\\n\") comment = false;\n    } else if (quoted) {\n      if (character === \"\\\\\") index += 1;\n      else if (character === '\"') quoted = false;\n    } else if (character === '\"') quoted = true;\n    else if (character === \";\") comment = true;\n    else if (character === \"(\") depth += 1;\n    else if (character === \")\" && --depth === 0) return source.slice(start, index + 1);\n  }\n  throw new Error(`unterminated definition of ${name}`);\n}\n\n// This is a controlled reacceptance, not a claim that a historical checkout\n// emits today's JS. All modules share today's source/code generator except\n// the named functions restored verbatim from the pinned historical revision.\nexport async function buildControlledBaseline({ root, baselineRoot, revision, sources, target, names }) {\n  const historical = Bun.spawnSync([\"git\", \"-C\", baselineRoot, \"show\", `${revision}:${target}`]);\n  if (historical.exitCode !== 0) throw new Error(new TextDecoder().decode(historical.stderr));\n  const historicalSource = new TextDecoder().decode(historical.stdout);\n  let controlSource = await readFile(path.join(root, target), \"utf8\");\n  const restored = names.map((name) => {\n    const original = definition(historicalSource, name);\n    controlSource = controlSource.replace(definition(controlSource, name), () => original);\n    return { name, sha256: sha256(original) };\n  });\n  const bootstrap = Bun.spawn([path.join(root, \"bin/eliscript-bootstrap\")], {\n    cwd: root, stdout: \"pipe\", stderr: \"pipe\",\n  });\n  const [buildStatus, buildErrors] = await Promise.all([bootstrap.exited, new Response(bootstrap.stderr).text()]);\n  if (buildStatus !== 0) throw new Error(buildErrors);\n  const directory = path.join(root, \"dist/compiler-controls\", path.basename(target, \".eli\"));\n  await mkdir(directory, { recursive: true });\n  const inputs = [];\n  const artifacts = [];\n  for (const relative of sources) {\n    const name = path.basename(relative, \".eli\");\n    inputs.push({ path: relative, sha256: sha256(await readFile(path.join(root, relative))) });\n    for (const suffix of [\".mjs\", \".mjs.map\"]) {\n      await copyFile(path.join(root, \"dist/bootstrap\", name + suffix), path.join(directory, name + suffix));\n    }\n  }\n  const sourceFile = path.join(directory, path.basename(target));\n  await writeFile(sourceFile, controlSource);\n  const output = path.join(directory, `${path.basename(target, \".eli\")}.mjs`);\n  const compiler = Bun.spawn([path.join(root, \"bin/eliscript-seed\"), \"--source-map\", \"--output\", output, sourceFile], {\n    cwd: root, stdout: \"pipe\", stderr: \"pipe\",\n  });\n  const [exitCode, stderr] = await Promise.all([compiler.exited, new Response(compiler.stderr).text()]);\n  if (exitCode !== 0) throw new Error(stderr);\n  for (const relative of sources) {\n    const file = `${path.basename(relative, \".eli\")}.mjs`;\n    artifacts.push({ file,\n      treatment: sha256(await readFile(path.join(root, \"dist/bootstrap\", file))),\n      control: sha256(await readFile(path.join(directory, file))),\n    });\n  }\n  return { directory, evidence: {\n    mode: \"current-compiler-with-historical-functions\",\n    target, historicalSourceSha256: sha256(historicalSource), restored,\n    controlSourceSha256: sha256(controlSource), inputs, artifacts,\n  } };\n}\n\nexport function validateControlledBaseline(evidence, target, names, sources) {\n  const hash = (value) => /^[0-9a-f]{64}$/u.test(value ?? \"\");\n  if (evidence?.mode !== \"current-compiler-with-historical-functions\" ||\n      evidence.target !== target || !hash(evidence.historicalSourceSha256) ||\n      !hash(evidence.controlSourceSha256) ||\n      JSON.stringify(evidence.restored?.map((item) => item.name)) !== JSON.stringify(names) ||\n      !evidence.restored.every((item) => hash(item.sha256)) ||\n      JSON.stringify(evidence.inputs?.map((item) => item.path)) !== JSON.stringify(sources) ||\n      !evidence.inputs.every((item) => hash(item.sha256)) ||\n      evidence.artifacts?.length !== sources.length ||\n      !evidence.artifacts.every((item, index) => item.file === `${path.basename(sources[index], \".eli\")}.mjs` &&\n        hash(item.treatment) && hash(item.control) &&\n        (sources[index] === target ? item.treatment !== item.control : item.treatment === item.control))) {\n    throw new TypeError(\"invalid controlled compiler baseline evidence\");\n  }\n}\n"))
+(module tools.compiler.controlled-baseline
+  (import "node:crypto" createHash)
+  (import "node:fs/promises" copyFile mkdir readFile writeFile)
+  (import "node:path" :default path)
+
+  (defun sha256 (bytes)
+    (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+
+  ;; Read a complete definition, respecting strings and comments instead of
+  ;; using a regular expression to guess where nested Lisp forms end.
+  (defun definition (source name)
+    (let* ((prefix (str "(defun " name))
+           (start (js-call source :indexOf prefix)))
+      (when (or (< start 0)
+                (not (= (js-call source :indexOf prefix (+ start (js-length prefix))) -1)))
+        (throw (new globalThis.Error (str "expected exactly one definition of " name))))
+      (let ((depth 0)
+            (quoted nil)
+            (comment nil)
+            (index start)
+            (result nil))
+        (while (and (< index (js-length source)) (not result))
+          (let ((character (aref source index)))
+            (cond
+              (comment
+               (when (= character "\n")
+                 (setq comment nil)))
+              (quoted
+               (cond
+                 ((= character "\\")
+                  (setq index (+ index 1)))
+                 ((= character "\"")
+                  (setq quoted nil))))
+              ((= character "\"")
+               (setq quoted t))
+              ((= character ";")
+               (setq comment t))
+              ((= character "(")
+               (setq depth (+ depth 1)))
+              ((= character ")")
+               (setq depth (- depth 1))
+               (when (= depth 0)
+                 (setq result (js-call source :slice start (+ index 1)))))))
+          (setq index (+ index 1)))
+        (when (not result)
+          (throw (new globalThis.Error (str "unterminated definition of " name))))
+        result)))
+
+  ;; This is a controlled reacceptance, not a claim that a historical checkout
+  ;; emits today's JS. All modules share today's source/code generator except
+  ;; the named functions restored verbatim from the pinned historical revision.
+  (defasync buildControlledBaseline (options)
+    (let* ((root (get options :root))
+           (baseline-root (get options :baselineRoot))
+           (revision (get options :revision))
+           (sources (get options :sources))
+           (target (get options :target))
+           (names (get options :names))
+           (historical (js-call globalThis.Bun :spawnSync
+                         (js-array "git" "-C" baseline-root "show" (str revision ":" target)))))
+      (when (not (= (get historical :exitCode) 0))
+        (throw (new globalThis.Error (js-call (new globalThis.TextDecoder) :decode (get historical :stderr)))))
+      (let* ((historical-source (js-call (new globalThis.TextDecoder) :decode (get historical :stdout)))
+             (control-source (await (readFile (js-call path :join root target) "utf8")))
+             (restored
+               (js-call names :map
+                 (lambda (name)
+                   (let ((original (definition historical-source name)))
+                     (setq control-source
+                       (js-call control-source :replace
+                         (definition control-source name)
+                         (lambda () original)))
+                     (js-object :name name :sha256 (sha256 original))))))
+             (bootstrap (js-call globalThis.Bun :spawn
+                          (js-array (js-call path :join root "bin/eliscript-bootstrap"))
+                          (js-object :cwd root :stdout "pipe" :stderr "pipe")))
+             (bootstrap-res
+               (await (Promise/all
+                        (js-array
+                          (get bootstrap :exited)
+                          (js-call (new globalThis.Response (get bootstrap :stderr)) :text)))))
+             (build-status (aref bootstrap-res 0))
+             (build-errors (aref bootstrap-res 1)))
+        (when (not (= build-status 0))
+          (throw (new globalThis.Error build-errors)))
+        (let ((directory (js-call path :join root "dist/compiler-controls" (js-call path :basename target ".eli")))
+              (inputs (js-array))
+              (artifacts (js-array)))
+          (await (mkdir directory (js-object :recursive t)))
+          (let ((index 0))
+            (while (< index (js-length sources))
+              (let* ((relative (aref sources index))
+                     (name (js-call path :basename relative ".eli")))
+                (js-call inputs :push
+                  (js-object
+                    :path relative
+                    :sha256 (sha256 (await (readFile (js-call path :join root relative))))))
+                (await (copyFile (js-call path :join root "dist/bootstrap" (str name ".mjs"))
+                                 (js-call path :join directory (str name ".mjs"))))
+                (await (copyFile (js-call path :join root "dist/bootstrap" (str name ".mjs.map"))
+                                 (js-call path :join directory (str name ".mjs.map")))))
+              (setq index (+ index 1))))
+          (let* ((source-file (js-call path :join directory (js-call path :basename target)))
+                 (output (js-call path :join directory (str (js-call path :basename target ".eli") ".mjs"))))
+            (await (writeFile source-file control-source))
+            (let* ((compiler (js-call globalThis.Bun :spawn
+                               (js-array (js-call path :join root "bin/eliscript-seed")
+                                         "--source-map" "--output" output source-file)
+                               (js-object :cwd root :stdout "pipe" :stderr "pipe")))
+                   (compiler-res
+                     (await (Promise/all
+                              (js-array
+                                (get compiler :exited)
+                                (js-call (new globalThis.Response (get compiler :stderr)) :text)))))
+                   (exit-code (aref compiler-res 0))
+                   (stderr (aref compiler-res 1)))
+              (when (not (= exit-code 0))
+                (throw (new globalThis.Error stderr)))
+              (let ((index 0))
+                (while (< index (js-length sources))
+                  (let* ((relative (aref sources index))
+                         (file (str (js-call path :basename relative ".eli") ".mjs")))
+                    (js-call artifacts :push
+                      (js-object
+                        :file file
+                        :treatment (sha256 (await (readFile (js-call path :join root "dist/bootstrap" file))))
+                        :control (sha256 (await (readFile (js-call path :join directory file)))))))
+                  (setq index (+ index 1))))
+              (js-object
+                :directory directory
+                :evidence (js-object
+                            :mode "current-compiler-with-historical-functions"
+                            :target target
+                            :historicalSourceSha256 (sha256 historical-source)
+                            :restored restored
+                            :controlSourceSha256 (sha256 control-source)
+                            :inputs inputs
+                            :artifacts artifacts))))))))
+
+  (defun validateControlledBaseline (evidence target names sources)
+    (let ((hash (lambda (value)
+                  (js-call (new globalThis.RegExp "^[0-9a-f]{64}$" "u") :test
+                    (if (or (= value undefined) (= value nil)) "" value)))))
+      (when (or (not evidence)
+                (not (= (get evidence :mode) "current-compiler-with-historical-functions"))
+                (not (= (get evidence :target) target))
+                (not (funcall hash (get evidence :historicalSourceSha256)))
+                (not (funcall hash (get evidence :controlSourceSha256)))
+                (not (Array/isArray (get evidence :restored)))
+                (not (= (JSON/stringify (js-call (get evidence :restored) :map (lambda (item) (get item :name))))
+                        (JSON/stringify names)))
+                (not (js-call (get evidence :restored) :every (lambda (item) (funcall hash (get item :sha256)))))
+                (not (Array/isArray (get evidence :inputs)))
+                (not (= (JSON/stringify (js-call (get evidence :inputs) :map (lambda (item) (get item :path))))
+                        (JSON/stringify sources)))
+                (not (js-call (get evidence :inputs) :every (lambda (item) (funcall hash (get item :sha256)))))
+                (not (Array/isArray (get evidence :artifacts)))
+                (not (= (js-length (get evidence :artifacts)) (js-length sources)))
+                (not (js-call (get evidence :artifacts) :every
+                       (lambda (item index)
+                         (let ((source-rel (aref sources index)))
+                           (and (= (get item :file) (str (js-call path :basename source-rel ".eli") ".mjs"))
+                                (funcall hash (get item :treatment))
+                                (funcall hash (get item :control))
+                                (if (= source-rel target)
+                                    (not (= (get item :treatment) (get item :control)))
+                                  (= (get item :treatment) (get item :control)))))))))
+        (throw (new globalThis.TypeError "invalid controlled compiler baseline evidence")))))
+
+  (export definition buildControlledBaseline validateControlledBaseline))

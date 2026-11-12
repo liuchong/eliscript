@@ -11,7 +11,7 @@
   (defconst original (Object/assign (js-object) framework))
   (defconst source (readFileSync (resolve root "tests/ci-contract-test-ground.mjs")))
   (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update source) :digest "hex")
-    "d606f4a33414e046387d27b0ed2b1f33f8a89eec1ef7d5aae0cb91d2903f3ba5")
+    "16c60f6db70968ed61a1d9be9f66c4b0a2d8cf37b5f6a1f7d0b67024f8192e9a")
   (defun assertCIOriginalTitles (titles)
     (js-call titles :forEach (lambda (title) (js-call assert :ok (js-call (js-call source :toString "utf8") :includes title)))))
   (defconst selected (Object/assign (js-object) original

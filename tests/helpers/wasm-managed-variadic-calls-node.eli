@@ -1,0 +1,78 @@
+(module tests.helpers.wasm-managed-variadic-calls-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile)
+  (import "node:process" :default process)
+  (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+
+  (defun decode-val (a x)
+    (cond
+      ((or (= x nil) (= (funcall js-typeof x) "boolean") (undefined? x)) x)
+      ((= (get x :kind) 4) (js-call a :readNumber x))
+      ((= (get x :kind) 5) (js-call a :readString x))
+      (t
+       (let ((result (js-array))
+             (len (js-call a :length x))
+             (i 0))
+         (while (< i len)
+           (let ((c (js-call a :get x i)))
+             (try
+               (js-call result :push (decode-val a c))
+               (finally
+                 (js-call a :release c))))
+           (setq i (+ i 1)))
+         result))))
+
+  (defun call-val (a name &rest __host_default_arguments_1)
+    (let* ((args (aref __host_default_arguments_1 0)))
+    (let ((out (js-call a :invoke name (if (undefined? args) (js-array) args))))
+      (try
+        (decode-val a out)
+        (finally
+          (js-call a :release out))))))
+
+  (defasync run-main ()
+    (let* ((wasm-path (aref (get process :argv) 2))
+           (ref-url (aref (get process :argv) 3))
+           (ref (await (funcall dyn-import ref-url)))
+           (a (instantiateManagedRuntime (await (readFile wasm-path)))))
+      (js-call a :auto 1)
+      (js-call assert :deepEqual (call-val a "mixed") (js-call ref :mixed))
+      (let* ((n (js-call a :number -0.0))
+             (seed (js-call a :number globalThis.Number.MIN_VALUE))
+             (f (js-call a :invoke "mixed-value"))
+             (lst (js-call a :sourceArray (js-array n undefined seed)))
+             (text (js-call a :string "A😀Z"))
+             (pack (js-call a :invoke "pack-value"))
+             (captured (js-call a :invoke "make-capture" (js-array n seed)))
+             (reference (js-call ref :make_capture -0.0 globalThis.Number.MIN_VALUE))
+             (iter (js-call a :invoke "values-iterator" (js-array lst))))
+        (js-call assert :deepEqual
+          (call-val a "apply-values" (js-array f lst))
+          (js-call ref :apply_values (js-call ref :mixed_value) (js-array -0.0 undefined globalThis.Number.MIN_VALUE)))
+        (js-call assert :deepEqual
+          (call-val a "apply-values" (js-array pack text))
+          (apply (get ref :pack) (Array/from "A😀Z")))
+        (js-call assert :deepEqual
+          (call-val a "call-capture" (js-array captured t))
+          (js-call ref :call_capture reference t))
+        (js-call assert :throws
+          (lambda () (js-call a :invoke "apply-values" (js-array false iter)))
+          (lambda (e)
+            (let ((diag (get e :eliscriptDiagnostic)))
+              (and (not (nullish? diag))
+                   (= (get diag :code) "ELI-RT0003")))))
+        (js-call assert :equal (js-call a :invoke "iterator-done" (js-array iter)) t)
+        (js-call (js-array n seed f lst text pack captured iter) :forEach
+          (lambda (x) (js-call a :release x)))
+        (js-call a :collect)
+        (js-call assert :equal (js-call a :live) 0)
+        (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+        (js-call globalThis.console :log "independent Node variadic source semantics passed"))))
+
+  (js-call (run-main) :catch
+    (lambda (err)
+      (js-call globalThis.console :error err)
+      (js-call process :exit 1))))

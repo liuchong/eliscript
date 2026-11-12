@@ -1,2 +1,406 @@
-(module capsules.tests.wasm-managed-typeof-paths.test
-  (js* "import {afterAll, beforeAll, test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {readFile, mkdtemp, mkdir, rm, writeFile} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {pathToFileURL} from 'node:url';\nimport {spawnSync} from 'node:child_process';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nlet b, runtime, directory;\nbeforeAll(async () => {\n  directory = await mkdtemp(resolve(tmpdir(), 'eliscript-typeof-paths-'));b = await buildBackends({outputRoot: directory});\n  runtime = b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli', 'utf8'), 'runtime.eli');\n}, 120000);\nafterAll(async () => {if (directory) await rm(directory, {recursive: true, force: true});});\nfunction program(expression, argument = 'value') {return b.compiler.compile_ir_string(';中😀\\n(defconst marker 1)\\n(defun f (' + argument + ') (js* ' + JSON.stringify(expression) + ')) (export f)', 'type-path.eli');}\nfunction artifact(p) {const before = JSON.stringify(p), bytes = Uint8Array.from(b.managed.emit_managed_wasm(p, runtime));assert.equal(JSON.stringify(p), before);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);return bytes;}\nfunction finish(a, owned) {for (const value of owned) a.release(value);a.closeModule();a.collect();assert.equal(a.live(), 0);assert.equal(a.stats().frameDepth, 0);}\n\ntest('static numeric and JSON string member paths preserve exact JS property keys and collecting roots', async () => {\n  for (const token of ['0', '-0', '+0', '1', '-1', '+17', '4294967294', '4294967295', '9007199254740991', '-9007199254740991', ...['item', '', 'a.b', '[]', '中😀', '\\ud800', 'line\\nquote\"slash\\\\', '0', '01'].map(value => JSON.stringify(value))]) {\n    const expression = 'typeof value[' + token + ']', p = program(expression), js = await import('data:text/javascript;base64,' + Buffer.from(b.compiler.emit_ir_string(p)).toString('base64'));\n    const key = token.startsWith('\"') ? JSON.parse(token) : String(Number(token));\n    const a = instantiateManagedRuntime(artifact(p));a.auto(1);\n    const text = a.string('中😀\\ud800'), object = a.sourceObject({[key]: text}), label = a.invoke('f', [object]);\n    assert.equal(a.readString(label), js.f({[key]: '中😀\\ud800'}));assert.equal(a.readString(label), 'string');\n    finish(a, [text, object, label]);\n  }\n});\n\ntest('nested indexed queries preserve missing final members, failing intermediate access and exact UTF16 strings', () => {\n  for (const expression of ['typeof value[0].item', 'typeof value [ 0 ] . item', 'typeof value[\"child\"][1][\"item\"]']) {\n    const p = program(expression), a = instantiateManagedRuntime(artifact(p));a.auto(1);\n    const number = a.number(-0), item = a.sourceObject({item: number}), pair = a.sourceArray([null, item]), object = a.sourceObject({child: pair}), array = a.sourceArray([item]), receiver = expression.includes('child') ? object : array;\n    const label = a.invoke('f', [receiver]);assert.equal(a.readString(label), 'number');assert(Object.is(a.readNumber(number), -0));\n    assert.throws(() => a.invoke('f', [null]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');assert.equal(a.stats().frameDepth, 0);\n    finish(a, [number, item, pair, object, array, label]);\n  }\n  const a = instantiateManagedRuntime(artifact(program('typeof value[0]')));a.auto(1);const empty = a.sourceArray([]), missing = a.invoke('f', [empty]), text = a.string('😀\\ud800'), unit = a.invoke('f', [text]);\n  assert.equal(a.readString(missing), 'undefined');assert.equal(a.readString(unit), 'string');finish(a, [empty, missing, text, unit]);\n});\n\ntest('indexed query roots survive underscore aliases, lexical captures and project binding renaming', () => {\n  const library = b.compiler.compile_ir_string('(module lib (defvar values (js-array (js-object :item 1))) (defun label () (js* \"typeof values[0].item\")) (defun make (value-name) (lambda () (js* \"typeof value_name[0].item\"))) (defun invoke (f) (funcall f)) (export label make invoke))', 'paths-lib.eli');\n  const entry = b.compiler.compile_ir_string('(module entry (import \"./lib.mjs\" label make invoke) (export label make invoke))', 'paths-entry.eli'), modules = [{id: 'lib.mjs', program: library}, {id: 'entry.mjs', program: entry}], before = JSON.stringify(modules);\n  const bytes = Uint8Array.from(b.managed.emit_managed_project_wasm(modules, 'entry.mjs', runtime));assert.equal(JSON.stringify(modules), before);const a = instantiateManagedRuntime(bytes);a.auto(1);\n  const first = a.invoke('label'), object = a.sourceObject({item: undefined}), array = a.sourceArray([object]), closure = a.invoke('make', [array]), result = a.invoke('invoke', [closure]);assert.equal(a.readString(first), 'number');assert.equal(a.readString(result), 'undefined');\n  finish(a, [first, object, array, closure, result]);\n});\n\ntest('unsupported computed keys and malformed indexed syntax remain precise source-bound refusals', () => {\n  for (const expression of ['typeof unknown[0]', 'typeof value[key]', 'typeof value[1+1]', 'typeof value[0x1]', 'typeof value[01]', 'typeof value[9007199254740992]', 'typeof value[-9007199254740992]', 'typeof value[1.5]', 'typeof value[]', 'typeof value[0', 'typeof value[\"x\"', 'typeof value[\"\\\\x41\"]', 'typeof value[\"x\"]()', 'typeof value[0] trailing']) {\n    const p = program(expression), before = JSON.stringify(p);\n    assert.throws(() => b.managed.emit_managed_wasm(p, runtime), e => e.eliscriptDiagnostic?.code === 'ELI-B0001' && e.eliscriptDiagnostic.location.file === 'type-path.eli' && e.eliscriptDiagnostic.location.start.line === 3);assert.equal(JSON.stringify(p), before);\n  }\n});\n\ntest('independent Node and the identical zero-import WASM agree on nested indexed type queries', async () => {\n  const p = program('typeof value[0][\"item\"]'), jsFile = resolve(directory, 'source.mjs'), wasmFile = resolve(directory, 'paths.wasm');await writeFile(jsFile, b.compiler.emit_ir_string(p));await writeFile(wasmFile, artifact(p));\n  const child = spawnSync('node', ['--input-type=module', '-e', `import assert from'node:assert/strict';import{readFileSync}from'node:fs';const js=await import(process.argv[1]),{instantiateManagedRuntime}=await import(process.argv[2]),a=instantiateManagedRuntime(readFileSync(process.argv[3]));a.auto(1);for(const value of[null,undefined,false,-0,NaN,Number.MIN_VALUE,'中😀\\\\ud800']){const v=typeof value==='number'?a.number(value):typeof value==='string'?a.string(value):value,object=a.sourceObject({item:v}),array=a.sourceArray([object]),out=a.invoke('f',[array]);assert.equal(a.readString(out),js.f([{item:value}]));for(const x of[v,object,array,out])a.release(x);}a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);`, pathToFileURL(jsFile).href, pathToFileURL(resolve('tools/backends/managed-runtime.mjs')).href, wasmFile], {encoding: 'utf8', timeout: 30000});assert.equal(child.status, 0, child.stderr);\n});\n\ntest('value-type intrinsic agrees with typeof and evaluates source operands once under collecting GC', async () => {\n  const p = b.compiler.compile_ir_string('(defconst marker 1) (defun f (value trace) (value-type (progn (put trace :calls (1+ (get trace :calls 0))) value))) (export f)', 'value-type.eli');\n  const js = await import('data:text/javascript;base64,' + Buffer.from(b.compiler.emit_ir_string(p)).toString('base64'));\n  const a = instantiateManagedRuntime(artifact(p));a.auto(1);const objects = [a.sourceObject({}), a.sourceArray([]), a.getExport('f')];\n  for (const value of [null, undefined, false, true, -0, NaN, Infinity, -Infinity, Number.MIN_VALUE, '', '中😀\\ud800', ...objects]) {\n    const input = typeof value === 'number' ? a.number(value) : typeof value === 'string' ? a.string(value) : value, trace = a.sourceObject({}), label = a.invoke('f', [input, trace]), key = a.string('calls'), calls = a.objectGet(trace, key), modelTrace = {};\n    assert.equal(a.readString(label), js.f(value === objects[2] ? (() => {}) : value, modelTrace));assert.equal(a.readNumber(calls), 1);assert.equal(modelTrace.calls, 1);\n    if (typeof value === 'number') assert(Object.is(a.readNumber(input), value));\n    for (const item of [trace, label, key, calls]) a.release(item);if (!objects.includes(input)) a.release(input);assert.equal(a.stats().frameDepth, 0);\n  }\n  finish(a, objects);\n});\n\ntest('malformed value-type operands retain exact source-bound diagnostics and canonical IR', () => {\n  for (const mutate of [n => n.children = [], n => n.children.push(n.children[0]), n => n.children = [null]]) {\n    const p = b.compiler.compile_ir_string(';中😀\\n(defun f (value) (value-type value)) (export f)', 'value-type-shape.eli');let intrinsic;\n    const walk = n => {if (n && typeof n === 'object') {if (n.kind === 'intrinsic' && n.value === 'value-type') intrinsic = n;for (const value of Object.values(n)) walk(value);}};walk(p);assert(intrinsic);const span = intrinsic.span;mutate(intrinsic);const before = JSON.stringify(p);\n    assert.throws(() => b.managed.emit_managed_wasm(p, runtime), e => e.eliscriptDiagnostic?.code === 'ELI-B0001' && e.eliscriptDiagnostic.location.file === 'value-type-shape.eli' && e.eliscriptDiagnostic.location.start.line === span.line && e.eliscriptDiagnostic.location.start.column === span.column);assert.equal(JSON.stringify(p), before);\n  }\n});\n\ntest('static paths accept JS whitespace and escaped delimiters but reject incomplete tokens without mutating input', async () => {\n  for (const space of [' ', '\\t', '\\r', '\\n', '\\v', '\\f', '\\u00a0', '\\ufeff', '\\u2028', '\\u2029']) {\n    const expression = 'typeof' + space + 'value' + space + '[' + space + '\"a\\\\\\\"].b\"' + space + ']' + space, p = program(expression), js = await import('data:text/javascript;base64,' + Buffer.from(b.compiler.emit_ir_string(p)).toString('base64'));\n    const a = instantiateManagedRuntime(artifact(p));a.auto(1);const object = a.sourceObject({'a\"].b': false}), out = a.invoke('f', [object]);assert.equal(a.readString(out), js.f({'a\"].b': false}));finish(a, [object, out]);\n  }\n  for (const expression of ['typeofvalue', 'typeof ', 'typeof 0value', 'typeof value.', 'typeof value.0', 'typeof value[+]', 'typeof value[-]', 'typeof value[+01]', 'typeof value[-00]', 'typeof value[  ]', 'typeof value[\"x\\\\\"]', 'typeof value[\"x\\n\"]', 'typeof value[\"x\" 0]', 'typeof value[0][', 'typeof value/*x*/[0]']) {\n    const p = program(expression), before = JSON.stringify(p);assert.throws(() => b.managed.emit_managed_wasm(p, runtime), e => e.eliscriptDiagnostic?.code === 'ELI-B0001');assert.equal(JSON.stringify(p), before);\n  }\n});\n\ntest('value-type reads live own namespace descriptors and preserves callers roots on allocation failure', () => {\n  const lib = b.compiler.compile_ir_string('(module lib (defvar kind \"eliscript/symbol\") (defun update () (setq kind \"eliscript/keyword\")) (export kind update))', 'brand-lib.eli'), entry = b.compiler.compile_ir_string('(module entry (import \"./lib.mjs\" :as lib) (defun label () (value-type lib)) (defun change () (lib/update)) (export label change))', 'brand-entry.eli');\n  const bytes = Uint8Array.from(b.managed.emit_managed_project_wasm([{id: 'lib.mjs', program: lib}, {id: 'entry.mjs', program: entry}], 'entry.mjs', runtime)), a = instantiateManagedRuntime(bytes);a.auto(1);\n  const first = a.invoke('label');assert.equal(a.readString(first), 'symbol');a.release(first);const change = a.invoke('change');a.release(change);const next = a.invoke('label');assert.equal(a.readString(next), 'keyword');finish(a, [next]);\n  const small = instantiateManagedRuntime(artifact(b.compiler.compile_ir_string('(defconst marker 1) (defun f (value) (value-type value)) (export f)', 'type-oom.eli')), {maxSlots: 64, initialBytes: 8192, maxBytes: 8192});small.auto(1);\n  const retained = small.number(-0), outer = small.frame(1), held = [];small.frameSet(outer, 0, retained);let exhausted = false;\n  for (let i = 0; i < 128; i++) {try {held.push(small.number(i));} catch (e) {assert.equal(e.eliscriptDiagnostic?.code, 'ELI-RT0002');exhausted = true;break;}}\n  assert(exhausted);assert.throws(() => small.invoke('f', [retained]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0002');assert.equal(small.stats().frameDepth, 1);assert(Object.is(small.readNumber(retained), -0));\n  for (const value of held) small.release(value);small.collect();const out = small.invoke('f', [retained]);assert.equal(small.readString(out), 'number');small.leaveFrame(outer);finish(small, [retained, out]);\n});\n\ntest('value-type falls back to object when a cyclic namespace brand is still uninitialized', async () => {\n  const sources = {\n    'main.mjs': '(import \"./other.mjs\" early) (defvar kind \"eliscript/keyword\") (defun read () early) (export kind read)',\n    'other.mjs': '(import \"./main.mjs\" :as namespace) (defconst early (value-type namespace)) (export early)',\n  }, modules = [];\n  const base = resolve(directory, 'cyclic-brand');await mkdir(base);\n  for (const [id, source] of Object.entries(sources)) {const p = b.compiler.compile_ir_string(source, id);modules.push({id, program: p});await writeFile(resolve(base, id), b.compiler.emit_ir_string(p));}\n  const reference = await import(pathToFileURL(resolve(base, 'main.mjs')).href);assert.equal(reference.read(), 'object');\n  const before = JSON.stringify(modules), a = instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_project_wasm(modules, 'main.mjs', runtime)));assert.equal(JSON.stringify(modules), before);a.auto(1);const out = a.invoke('read');assert.equal(a.readString(out), reference.read());finish(a, [out]);\n});\n\ntest('value-type preserves null and own data brands while typeof and inherited or unrelated kind fields stay ordinary', async () => {\n  const p = b.compiler.compile_ir_string('(defconst marker 1) (defun f (value) (js-array (value-type value) (js* \"typeof value\"))) (defun inherit (parent) (let ((child (js-object))) (put child :__proto__ parent) child)) (defun array (marker) (let ((value (js-array))) (put value :kind marker) value)) (defun map (marker) (let ((value (new globalThis.Map))) (put value :kind marker) value)) (defun set (marker) (let ((value (new globalThis.Set))) (put value :kind marker) value)) (export f inherit array map set)', 'type-brands.eli');\n  const js = await import('data:text/javascript;base64,' + Buffer.from(b.compiler.emit_ir_string(p)).toString('base64')), a = instantiateManagedRuntime(artifact(p));a.auto(1);\n  for (const marker of ['eliscript/keyword', 'eliscript/symbol', 'keyword', 'symbol', '', 'eliscript/keywordx', null, false, 7]) {\n    const input = typeof marker === 'string' ? a.string(marker) : typeof marker === 'number' ? a.number(marker) : marker, object = a.sourceObject({kind: input}), inherited = a.invoke('inherit', [object]), array = a.invoke('array', [input]), map = a.invoke('map', [input]), set = a.invoke('set', [input]);\n    for (const [value, reference] of [[object, {kind: marker}], [inherited, Object.create({kind: marker})], [array, js.array(marker)], [map, js.map(marker)], [set, js.set(marker)]]) {\n      const out = a.invoke('f', [value]), type = a.get(out, 0), host = a.get(out, 1);assert.deepEqual([a.readString(type), a.readString(host)], js.f(reference));for (const x of [out, type, host]) a.release(x);\n    }\n    for (const x of [input, object, inherited, array, map, set]) a.release(x);a.collect();assert.equal(a.stats().frameDepth, 0);\n  }\n  finish(a, []);\n});\n"))
+(module tests.wasm-managed-typeof-paths.test
+  (import "bun:test" afterAll beforeAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:buffer" Buffer)
+  (import "node:fs/promises" mkdir mkdtemp readFile rm writeFile)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:url" pathToFileURL)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defvar b nil)
+  (defvar runtime nil)
+  (defvar directory nil)
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-typeof-paths-"))))
+      (setq b (await (buildBackends (js-object :outputRoot directory))))
+      (setq runtime (js-call (get b :compiler) :compile_ir_string (await (readFile "bootstrap/runtime/memory.eli" "utf8")) "runtime.eli")))
+    120000)
+
+  (afterAll
+    (async ()
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun make-program (expression &rest __host_default_arguments_1)
+    (let* ((argument (aref __host_default_arguments_1 0)))
+    (let ((arg (if (undefined? argument) "value" argument)))
+      (js-call (get b :compiler) :compile_ir_string
+        (str ";中😀\n(defconst marker 1)\n(defun f (" arg ") (js* " (JSON/stringify expression) ")) (export f)")
+        "type-path.eli"))))
+
+  (defun make-artifact (p)
+    (let* ((before (JSON/stringify p))
+           (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime))))
+      (js-call assert :equal (JSON/stringify p) before)
+      (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      bytes))
+
+  (defun finish (a owned)
+    (js-call owned :forEach (lambda (value) (js-call a :release value)))
+    (js-call a :closeModule)
+    (js-call a :collect)
+    (js-call assert :equal (js-call a :live) 0)
+    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))
+
+  (defun single-prop (key val)
+    (let ((o (js-object)))
+      (Object/defineProperty o key (js-object :value val :enumerable t :writable t :configurable t))
+      o))
+
+  (defun diag-code? (e code)
+    (let ((diag (if (and (not (nullish? e)) (= (funcall js-typeof e) "object"))
+                  (get e :eliscriptDiagnostic)
+                  nil)))
+      (and (not (nullish? diag)) (= (get diag :code) code))))
+
+  (defun import-emitted-js (p)
+    (funcall dynamic-import
+      (str "data:text/javascript;base64,"
+           (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string p)) :toString "base64"))))
+
+  (defun find-value-type-intrinsic (node)
+    (if (and (not (nullish? node)) (= (funcall js-typeof node) "object"))
+      (if (and (= (get node :kind) "intrinsic") (= (get node :value) "value-type"))
+        node
+        (let ((vals (Object/values node))
+              (found nil)
+              (i 0))
+          (while (and (< i (length vals)) (nil? found))
+            (setq found (find-value-type-intrinsic (aref vals i)))
+            (setq i (+ i 1)))
+          found))
+      nil))
+
+  (test "static numeric and JSON string member paths preserve exact JS property keys and collecting roots"
+    (async ()
+      (let ((tokens (js-call
+                      (js-array "0" "-0" "+0" "1" "-1" "+17" "4294967294" "4294967295" "9007199254740991" "-9007199254740991")
+                      :concat
+                      (js-call (js-array "item" "" "a.b" "[]" "中😀" "\ud800" "line\nquote\"slash\\" "0" "01")
+                               :map (lambda (v) (JSON/stringify v)))))
+            (i 0))
+        (while (< i (length tokens))
+          (let* ((token (aref tokens i))
+                 (expression (str "typeof value[" token "]"))
+                 (p (make-program expression))
+                 (js (await (import-emitted-js p)))
+                 (key (if (js-call token :startsWith "\"")
+                        (JSON/parse token)
+                        (globalThis.String (globalThis.Number token))))
+                 (a (instantiateManagedRuntime (make-artifact p))))
+            (js-call a :auto 1)
+            (let* ((text (js-call a :string "中😀\ud800"))
+                   (obj (js-call a :sourceObject (single-prop key text)))
+                   (label (js-call a :invoke "f" (js-array obj))))
+              (js-call assert :equal (js-call a :readString label) (js-call js :f (single-prop key "中😀\ud800")))
+              (js-call assert :equal (js-call a :readString label) "string")
+              (finish a (js-array text obj label))))
+          (setq i (+ i 1))))))
+
+  (test "nested indexed queries preserve missing final members, failing intermediate access and exact UTF16 strings"
+    (lambda ()
+      (js-call (js-array "typeof value[0].item" "typeof value [ 0 ] . item" "typeof value[\"child\"][1][\"item\"]") :forEach
+        (lambda (expression)
+          (let* ((p (make-program expression))
+                 (a (instantiateManagedRuntime (make-artifact p))))
+            (js-call a :auto 1)
+            (let* ((num (js-call a :number -0.0))
+                   (item (js-call a :sourceObject (js-object :item num)))
+                   (pair (js-call a :sourceArray (js-array nil item)))
+                   (obj (js-call a :sourceObject (js-object :child pair)))
+                   (arr (js-call a :sourceArray (js-array item)))
+                   (receiver (if (js-call expression :includes "child") obj arr))
+                   (label (js-call a :invoke "f" (js-array receiver))))
+              (js-call assert :equal (js-call a :readString label) "number")
+              (funcall assert (Object/is (js-call a :readNumber num) -0.0))
+              (js-call assert :throws
+                (lambda () (js-call a :invoke "f" (js-array nil)))
+                (lambda (e) (diag-code? e "ELI-RT0003")))
+              (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+              (finish a (js-array num item pair obj arr label))))))
+      (let ((a (instantiateManagedRuntime (make-artifact (make-program "typeof value[0]")))))
+        (js-call a :auto 1)
+        (let* ((empty (js-call a :sourceArray (js-array)))
+               (missing (js-call a :invoke "f" (js-array empty)))
+               (text (js-call a :string "😀\ud800"))
+               (unit (js-call a :invoke "f" (js-array text))))
+          (js-call assert :equal (js-call a :readString missing) "undefined")
+          (js-call assert :equal (js-call a :readString unit) "string")
+          (finish a (js-array empty missing text unit))))))
+
+  (test "indexed query roots survive underscore aliases, lexical captures and project binding renaming"
+    (lambda ()
+      (let* ((library (js-call (get b :compiler) :compile_ir_string
+                        "(module lib (defvar values (js-array (js-object :item 1))) (defun label () (js* \"typeof values[0].item\")) (defun make (value-name) (lambda () (js* \"typeof value_name[0].item\"))) (defun invoke (f) (funcall f)) (export label make invoke))"
+                        "paths-lib.eli"))
+             (entry (js-call (get b :compiler) :compile_ir_string
+                      "(module entry (import \"./lib.mjs\" label make invoke) (export label make invoke))"
+                      "paths-entry.eli"))
+             (modules (js-array (js-object :id "lib.mjs" :program library) (js-object :id "entry.mjs" :program entry)))
+             (before (JSON/stringify modules))
+             (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_project_wasm modules "entry.mjs" runtime))))
+        (js-call assert :equal (JSON/stringify modules) before)
+        (let ((a (instantiateManagedRuntime bytes)))
+          (js-call a :auto 1)
+          (let* ((first (js-call a :invoke "label"))
+                 (obj (js-call a :sourceObject (js-object :item undefined)))
+                 (arr (js-call a :sourceArray (js-array obj)))
+                 (closure (js-call a :invoke "make" (js-array arr)))
+                 (result (js-call a :invoke "invoke" (js-array closure))))
+            (js-call assert :equal (js-call a :readString first) "number")
+            (js-call assert :equal (js-call a :readString result) "undefined")
+            (finish a (js-array first obj arr closure result)))))))
+
+  (test "unsupported computed keys and malformed indexed syntax remain precise source-bound refusals"
+    (lambda ()
+      (js-call
+        (js-array
+          "typeof unknown[0]" "typeof value[key]" "typeof value[1+1]" "typeof value[0x1]" "typeof value[01]"
+          "typeof value[9007199254740992]" "typeof value[-9007199254740992]" "typeof value[1.5]"
+          "typeof value[]" "typeof value[0" "typeof value[\"x\"" "typeof value[\"\\x41\"]"
+          "typeof value[\"x\"]()" "typeof value[0] trailing")
+        :forEach
+        (lambda (expression)
+          (let* ((p (make-program expression))
+                 (before (JSON/stringify p)))
+            (js-call assert :throws
+              (lambda () (js-call (get b :managed) :emit_managed_wasm p runtime))
+              (lambda (e)
+                (and (diag-code? e "ELI-B0001")
+                     (= (get (get (get e :eliscriptDiagnostic) :location) :file) "type-path.eli")
+                     (= (get (get (get (get e :eliscriptDiagnostic) :location) :start) :line) 3))))
+            (js-call assert :equal (JSON/stringify p) before))))))
+
+  (test "independent Node and the identical zero-import WASM agree on nested indexed type queries"
+    (async ()
+      (let ((p (make-program "typeof value[0][\"item\"]"))
+            (js-file (resolve directory "source.mjs"))
+            (wasm-file (resolve directory "paths.wasm"))
+            (runner (resolve "tests/helpers/wasm-managed-typeof-paths-node.mjs"))
+            (rt-href (get (pathToFileURL (resolve "tools/backends/managed-runtime.mjs")) :href)))
+        (await (writeFile js-file (js-call (get b :compiler) :emit_ir_string p)))
+        (await (writeFile wasm-file (make-artifact p)))
+        (let ((child (spawnSync "node"
+                       (js-array runner (get (pathToFileURL js-file) :href) rt-href wasm-file)
+                       (js-object :encoding "utf8" :timeout 30000))))
+          (js-call assert :equal (get child :status) 0 (get child :stderr))))))
+
+  (test "value-type intrinsic agrees with typeof and evaluates source operands once under collecting GC"
+    (async ()
+      (let* ((p (js-call (get b :compiler) :compile_ir_string
+                  "(defconst marker 1) (defun f (value trace) (value-type (progn (put trace :calls (1+ (get trace :calls 0))) value))) (export f)"
+                  "value-type.eli"))
+             (js (await (import-emitted-js p)))
+             (a (instantiateManagedRuntime (make-artifact p))))
+        (js-call a :auto 1)
+        (let* ((objects (js-array (js-call a :sourceObject (js-object)) (js-call a :sourceArray (js-array)) (js-call a :getExport "f")))
+               (values (js-call (js-array nil undefined false t -0.0 globalThis.NaN globalThis.Infinity (- globalThis.Infinity) globalThis.Number.MIN_VALUE "" "中😀\ud800") :concat objects)))
+          (js-call values :forEach
+            (lambda (value)
+              (let* ((ty (funcall js-typeof value))
+                     (input (cond
+                              ((= ty "number") (js-call a :number value))
+                              ((= ty "string") (js-call a :string value))
+                              (t value)))
+                     (trace (js-call a :sourceObject (js-object)))
+                     (label (js-call a :invoke "f" (js-array input trace)))
+                     (key (js-call a :string "calls"))
+                     (calls (js-call a :objectGet trace key))
+                     (model-trace (js-object)))
+                (js-call assert :equal
+                  (js-call a :readString label)
+                  (js-call js :f (if (eq value (aref objects 2)) (lambda () nil) value) model-trace))
+                (js-call assert :equal (js-call a :readNumber calls) 1)
+                (js-call assert :equal (get model-trace :calls) 1)
+                (when (= ty "number")
+                  (funcall assert (Object/is (js-call a :readNumber input) value)))
+                (js-call (js-array trace label key calls) :forEach (lambda (item) (js-call a :release item)))
+                (when (not (js-call objects :includes input))
+                  (js-call a :release input))
+                (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
+          (finish a objects)))))
+
+  (test "malformed value-type operands retain exact source-bound diagnostics and canonical IR"
+    (lambda ()
+      (js-call
+        (js-array
+          (lambda (n) (put n :children (js-array)))
+          (lambda (n) (js-call (get n :children) :push (aref (get n :children) 0)))
+          (lambda (n) (put n :children (js-array nil))))
+        :forEach
+        (lambda (mutate)
+          (let* ((p (js-call (get b :compiler) :compile_ir_string ";中😀\n(defun f (value) (value-type value)) (export f)" "value-type-shape.eli"))
+                 (intrinsic (find-value-type-intrinsic p)))
+            (funcall assert (not (nil? intrinsic)))
+            (let ((span (get intrinsic :span)))
+              (funcall mutate intrinsic)
+              (let ((before (JSON/stringify p)))
+                (js-call assert :throws
+                  (lambda () (js-call (get b :managed) :emit_managed_wasm p runtime))
+                  (lambda (e)
+                    (let ((loc (if (diag-code? e "ELI-B0001")
+                                 (get (get e :eliscriptDiagnostic) :location)
+                                 nil)))
+                      (and (not (nullish? loc))
+                           (= (get loc :file) "value-type-shape.eli")
+                           (= (get (get loc :start) :line) (get span :line))
+                           (= (get (get loc :start) :column) (get span :column))))))
+                (js-call assert :equal (JSON/stringify p) before))))))))
+
+  (test "static paths accept JS whitespace and escaped delimiters but reject incomplete tokens without mutating input"
+    (async ()
+      (let ((spaces (js-array " " "\t" "\r" "\n" "\v" "\f" "\u00a0" "\ufeff" "\u2028" "\u2029"))
+            (i 0))
+        (while (< i (length spaces))
+          (let* ((space (aref spaces i))
+                 (expression (str "typeof" space "value" space "[" space "\"a\\\"].b\"" space "]" space))
+                 (p (make-program expression))
+                 (js (await (import-emitted-js p)))
+                 (a (instantiateManagedRuntime (make-artifact p))))
+            (js-call a :auto 1)
+            (let* ((obj (js-call a :sourceObject (single-prop "a\"].b" false)))
+                   (out (js-call a :invoke "f" (js-array obj))))
+              (js-call assert :equal (js-call a :readString out) (js-call js :f (single-prop "a\"].b" false)))
+              (finish a (js-array obj out))))
+          (setq i (+ i 1))))
+      (js-call
+        (js-array
+          "typeofvalue" "typeof " "typeof 0value" "typeof value." "typeof value.0"
+          "typeof value[+]" "typeof value[-]" "typeof value[+01]" "typeof value[-00]" "typeof value[  ]"
+          "typeof value[\"x\\\"]" "typeof value[\"x\n\"]" "typeof value[\"x\" 0]" "typeof value[0][" "typeof value/*x*/[0]")
+        :forEach
+        (lambda (expression)
+          (let* ((p (make-program expression))
+                 (before (JSON/stringify p)))
+            (js-call assert :throws
+              (lambda () (js-call (get b :managed) :emit_managed_wasm p runtime))
+              (lambda (e) (diag-code? e "ELI-B0001")))
+            (js-call assert :equal (JSON/stringify p) before))))))
+
+  (test "value-type reads live own namespace descriptors and preserves callers roots on allocation failure"
+    (lambda ()
+      (let* ((lib (js-call (get b :compiler) :compile_ir_string
+                    "(module lib (defvar kind \"eliscript/symbol\") (defun update () (setq kind \"eliscript/keyword\")) (export kind update))"
+                    "brand-lib.eli"))
+             (entry (js-call (get b :compiler) :compile_ir_string
+                      "(module entry (import \"./lib.mjs\" :as lib) (defun label () (value-type lib)) (defun change () (lib/update)) (export label change))"
+                      "brand-entry.eli"))
+             (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_project_wasm
+                                       (js-array (js-object :id "lib.mjs" :program lib) (js-object :id "entry.mjs" :program entry))
+                                       "entry.mjs" runtime)))
+             (a (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (let ((first (js-call a :invoke "label")))
+          (js-call assert :equal (js-call a :readString first) "symbol")
+          (js-call a :release first))
+        (let ((change (js-call a :invoke "change")))
+          (js-call a :release change))
+        (let ((nxt (js-call a :invoke "label")))
+          (js-call assert :equal (js-call a :readString nxt) "keyword")
+          (finish a (js-array nxt))))
+      (let* ((small (instantiateManagedRuntime
+                      (make-artifact (js-call (get b :compiler) :compile_ir_string
+                                       "(defconst marker 1) (defun f (value) (value-type value)) (export f)"
+                                       "type-oom.eli"))
+                      (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 8192))))
+        (js-call small :auto 1)
+        (let ((retained (js-call small :number -0.0))
+              (outer (js-call small :frame 1))
+              (held (js-array))
+              (exhausted false)
+              (i 0))
+          (js-call small :frameSet outer 0 retained)
+          (while (and (< i 128) (not exhausted))
+            (try
+              (js-call held :push (js-call small :number i))
+              (catch e
+                (js-call assert :equal (get (get e :eliscriptDiagnostic) :code) "ELI-RT0002")
+                (setq exhausted t)))
+            (setq i (+ i 1)))
+          (funcall assert exhausted)
+          (js-call assert :throws
+            (lambda () (js-call small :invoke "f" (js-array retained)))
+            (lambda (e) (diag-code? e "ELI-RT0002")))
+          (js-call assert :equal (get (js-call small :stats) :frameDepth) 1)
+          (funcall assert (Object/is (js-call small :readNumber retained) -0.0))
+          (js-call held :forEach (lambda (value) (js-call small :release value)))
+          (js-call small :collect)
+          (let ((out (js-call small :invoke "f" (js-array retained))))
+            (js-call assert :equal (js-call small :readString out) "number")
+            (js-call small :leaveFrame outer)
+            (finish small (js-array retained out)))))))
+
+  (test "value-type falls back to object when a cyclic namespace brand is still uninitialized"
+    (async ()
+      (let ((entries (js-array
+                       (js-array "main.mjs" "(import \"./other.mjs\" early) (defvar kind \"eliscript/keyword\") (defun read () early) (export kind read)")
+                       (js-array "other.mjs" "(import \"./main.mjs\" :as namespace) (defconst early (value-type namespace)) (export early)")))
+            (modules (js-array))
+            (base (resolve directory "cyclic-brand"))
+            (i 0))
+        (await (mkdir base))
+        (while (< i (length entries))
+          (let* ((pair (aref entries i))
+                 (id (aref pair 0))
+                 (source (aref pair 1))
+                 (p (js-call (get b :compiler) :compile_ir_string source id)))
+            (js-call modules :push (js-object :id id :program p))
+            (await (writeFile (resolve base id) (js-call (get b :compiler) :emit_ir_string p))))
+          (setq i (+ i 1)))
+        (let ((reference (await (funcall dynamic-import (get (pathToFileURL (resolve base "main.mjs")) :href)))))
+          (js-call assert :equal (js-call reference :read) "object")
+          (let* ((before (JSON/stringify modules))
+                 (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_project_wasm modules "main.mjs" runtime)))))
+            (js-call assert :equal (JSON/stringify modules) before)
+            (js-call a :auto 1)
+            (let ((out (js-call a :invoke "read")))
+              (js-call assert :equal (js-call a :readString out) (js-call reference :read))
+              (finish a (js-array out))))))))
+
+  (test "value-type preserves null and own data brands while typeof and inherited or unrelated kind fields stay ordinary"
+    (async ()
+      (let* ((p (js-call (get b :compiler) :compile_ir_string
+                  "(defconst marker 1) (defun f (value) (js-array (value-type value) (js* \"typeof value\"))) (defun inherit (parent) (let ((child (js-object))) (put child :__proto__ parent) child)) (defun array (marker) (let ((value (js-array))) (put value :kind marker) value)) (defun map (marker) (let ((value (new globalThis.Map))) (put value :kind marker) value)) (defun set (marker) (let ((value (new globalThis.Set))) (put value :kind marker) value)) (export f inherit array map set)"
+                  "type-brands.eli"))
+             (js (await (import-emitted-js p)))
+             (a (instantiateManagedRuntime (make-artifact p))))
+        (js-call a :auto 1)
+        (js-call (js-array "eliscript/keyword" "eliscript/symbol" "keyword" "symbol" "" "eliscript/keywordx" nil false 7) :forEach
+          (lambda (marker)
+            (let* ((ty (funcall js-typeof marker))
+                   (input (cond
+                            ((= ty "string") (js-call a :string marker))
+                            ((= ty "number") (js-call a :number marker))
+                            (t marker)))
+                   (obj (js-call a :sourceObject (js-object :kind input)))
+                   (inherited (js-call a :invoke "inherit" (js-array obj)))
+                   (arr (js-call a :invoke "array" (js-array input)))
+                   (mp (js-call a :invoke "map" (js-array input)))
+                   (st (js-call a :invoke "set" (js-array input)))
+                   (pairs (js-array
+                            (js-array obj (js-object :kind marker))
+                            (js-array inherited (Object/create (js-object :kind marker)))
+                            (js-array arr (js-call js :array marker))
+                            (js-array mp (js-call js :map marker))
+                            (js-array st (js-call js :set marker)))))
+              (js-call pairs :forEach
+                (lambda (pair)
+                  (let* ((out (js-call a :invoke "f" (js-array (aref pair 0))))
+                         (ty-v (js-call a :get out 0))
+                         (host-v (js-call a :get out 1)))
+                    (js-call assert :deepEqual
+                      (js-array (js-call a :readString ty-v) (js-call a :readString host-v))
+                      (js-call js :f (aref pair 1)))
+                    (js-call (js-array out ty-v host-v) :forEach (lambda (x) (js-call a :release x))))))
+              (js-call (js-array input obj inherited arr mp st) :forEach (lambda (x) (js-call a :release x)))
+              (js-call a :collect)
+              (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
+        (finish a (js-array))))))

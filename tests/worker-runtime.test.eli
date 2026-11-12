@@ -1,2 +1,838 @@
-(module capsules.tests.worker-runtime.test
-  (js* "import { expect, test } from \"bun:test\";\nimport { createHash } from \"node:crypto\";\nimport { mkdtemp, rm, writeFile } from \"node:fs/promises\";\nimport { tmpdir } from \"node:os\";\nimport { resolve } from \"node:path\";\nimport { keyword } from \"../runtime/core/identifier.mjs\";\nimport { persistentList } from \"../runtime/core/list.mjs\";\nimport { persistentHashMap } from \"../runtime/core/map.mjs\";\nimport { persistentVector } from \"../runtime/core/vector.mjs\";\nimport { equalValues } from \"../runtime/core/value.mjs\";\nimport {\n  decodeWorkerValue,\n  encodeWorkerValue,\n  workerValueEncoding,\n} from \"../runtime/worker-value-codec.mjs\";\nimport {\n  WorkerValueStreamDecoder,\n  encodeWorkerValueChunks,\n  workerValueFraming,\n} from \"../runtime/worker-value-stream.mjs\";\n\nconst projectDirectory = resolve(import.meta.dir, \"..\");\nconst compilerPath = resolve(projectDirectory, \"bin/eliscript\");\nconst workerPath = resolve(projectDirectory, \"runtime/worker.mjs\");\nconst fixturePath = resolve(projectDirectory, \"tests/fixtures/worker.eli\");\nconst emacs = process.env.EMACS ?? \"emacs\";\n\nasync function runSuccessful(command, options = {}) {\n  const child = Bun.spawn(command, {\n    cwd: projectDirectory,\n    stdout: \"pipe\",\n    stderr: \"pipe\",\n    ...options,\n  });\n  const [exitCode, stdout, stderr] = await Promise.all([\n    child.exited,\n    new Response(child.stdout).text(),\n    new Response(child.stderr).text(),\n  ]);\n  if (exitCode !== 0) {\n    throw new Error(stderr.trim() || stdout.trim() ||\n      `${command[0]} exited with ${exitCode}`);\n  }\n  return stdout;\n}\n\nfunction createWorkerClient() {\n  const child = Bun.spawn([process.execPath, workerPath], {\n    cwd: projectDirectory,\n    stdin: \"pipe\",\n    stdout: \"pipe\",\n    stderr: \"pipe\",\n  });\n  const messages = [];\n  const waiters = [];\n  const decoder = new TextDecoder();\n  let buffer = \"\";\n  let closed = false;\n\n  function deliver(message) {\n    const index = waiters.findIndex((waiter) => waiter.predicate(message));\n    if (index === -1) {\n      messages.push(message);\n      return;\n    }\n    const [waiter] = waiters.splice(index, 1);\n    clearTimeout(waiter.timer);\n    waiter.resolve(message);\n  }\n\n  const outputTask = (async () => {\n    for await (const chunk of child.stdout) {\n      buffer += decoder.decode(chunk, { stream: true });\n      let newline;\n      while ((newline = buffer.indexOf(\"\\n\")) !== -1) {\n        const line = buffer.slice(0, newline);\n        buffer = buffer.slice(newline + 1);\n        if (line.length > 0) deliver(JSON.parse(line));\n      }\n    }\n    buffer += decoder.decode();\n    closed = true;\n    for (const waiter of waiters.splice(0)) {\n      clearTimeout(waiter.timer);\n      waiter.reject(new Error(\"worker output closed\"));\n    }\n  })();\n  const stderrTask = new Response(child.stderr).text();\n\n  function send(message) {\n    child.stdin.write(`${JSON.stringify(message)}\\n`);\n    child.stdin.flush();\n  }\n\n  function sendRaw(line) {\n    child.stdin.write(`${line}\\n`);\n    child.stdin.flush();\n  }\n\n  function next(predicate, timeoutMs = 5_000) {\n    const index = messages.findIndex(predicate);\n    if (index !== -1) return Promise.resolve(messages.splice(index, 1)[0]);\n    if (closed) return Promise.reject(new Error(\"worker output closed\"));\n    return new Promise((resolve_, reject) => {\n      const waiter = {\n        predicate,\n        resolve: resolve_,\n        reject,\n        timer: undefined,\n      };\n      waiter.timer = setTimeout(() => {\n        const waiterIndex = waiters.indexOf(waiter);\n        if (waiterIndex !== -1) waiters.splice(waiterIndex, 1);\n        reject(new Error(\"timed out waiting for worker message\"));\n      }, timeoutMs);\n      waiters.push(waiter);\n    });\n  }\n\n  async function close() {\n    if (!closed) {\n      send({ version: 1, type: \"shutdown\" });\n      await next((message) => message.type === \"shutdown\");\n      child.stdin.end();\n    }\n    const exitCode = await child.exited;\n    await outputTask;\n    return { exitCode, stderr: await stderrTask };\n  }\n\n  return { child, send, sendRaw, next, close };\n}\n\nfunction scoreValues(values, rounds) {\n  let total = 0;\n  for (let round = 0; round < rounds; round += 1) {\n    for (const value of values) {\n      total = (total * 33 + value + round) % 1_000_000_007;\n    }\n  }\n  return total;\n}\n\nasync function sendChunkedRequest(client, id, fields, arguments_) {\n  client.send({\n    version: 1,\n    type: \"request\",\n    id,\n    valueEncoding: workerValueEncoding,\n    valueFraming: workerValueFraming,\n    ...fields,\n  });\n  expect(await client.next(\n    (message) => message.id === id && message.type === \"value-ack\",\n  )).toMatchObject({ sequence: -1, channel: \"arguments\", final: false });\n  const chunks = [];\n  for await (const events of encodeWorkerValueChunks(arguments_, {\n    maxChunkBytes: 512,\n    maxEventsPerChunk: 5,\n    maxTextPartUnits: 7,\n  })) {\n    chunks.push(events);\n  }\n  for (let sequence = 0; sequence < chunks.length; sequence += 1) {\n    const final = sequence === chunks.length - 1;\n    client.send({\n      version: 1,\n      type: \"value-chunk\",\n      id,\n      channel: \"arguments\",\n      sequence,\n      final,\n      valueEncoding: workerValueEncoding,\n      valueFraming: workerValueFraming,\n      events: chunks[sequence],\n    });\n    expect(await client.next(\n      (message) => message.id === id && message.type === \"value-ack\" &&\n        message.sequence === sequence,\n    )).toMatchObject({ sequence, final });\n  }\n}\n\nasync function receiveChunkedValue(client, id, channel) {\n  const decoder = new WorkerValueStreamDecoder();\n  let sequence = 0;\n  let stream;\n  while (true) {\n    const message = await client.next((candidate) =>\n      candidate.id === id && candidate.type === \"value-chunk\" &&\n      candidate.channel === channel &&\n      (stream === undefined || candidate.stream === stream));\n    if (stream === undefined) stream = message.stream;\n    expect(message).toMatchObject({\n      sequence,\n      valueEncoding: workerValueEncoding,\n      valueFraming: workerValueFraming,\n    });\n    decoder.write(message.events);\n    sequence += 1;\n    if (message.final) {\n      return { value: decoder.finish(), message };\n    }\n  }\n}\n\ntest(\"worker injects explicit operation capabilities from its platform package\", async () => {\n  const directory = await mkdtemp(resolve(tmpdir(), \"eliscript-platform-worker-\"));\n  const modulePath = resolve(directory, \"capabilities.mjs\");\n  const escapePath = resolve(directory, \"platform-escape.mjs\");\n  let client;\n  try {\n    await writeFile(modulePath, [\n      \"import { workerCancelled, workerCapabilityDescriptor, workerProgress, workerSignal } from 'eliscript/platform/worker.mjs';\",\n      \"export function inspect(value, context) {\",\n      \"  workerProgress(context.capabilities, { value, cancelled: workerCancelled(context.capabilities) });\",\n      \"  return {\",\n      \"    descriptor: workerCapabilityDescriptor(context.capabilities),\",\n      \"    cancelled: workerCancelled(context.capabilities),\",\n      \"    contextFrozen: Object.isFrozen(context),\",\n      \"    signalMatches: workerSignal(context.capabilities) === context.signal,\",\n      \"  };\",\n      \"}\",\n      \"\",\n    ].join(\"\\n\"));\n    await writeFile(\n      escapePath,\n      \"import value from 'eliscript/platform/../package.json';\\n\" +\n        \"export function run() { return value; }\\n\",\n    );\n\n    client = createWorkerClient();\n    const ready = await client.next((message) => message.type === \"ready\");\n    expect(ready.capabilities).toContain(\"operation-capabilities-v1\");\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"platform-capabilities\",\n      module: modulePath,\n      export: \"inspect\",\n      arguments: [42],\n    });\n    expect(await client.next(\n      (message) => message.id === \"platform-capabilities\" &&\n        message.type === \"progress\",\n    )).toMatchObject({ value: { value: 42, cancelled: false } });\n    expect(await client.next(\n      (message) => message.id === \"platform-capabilities\" &&\n        message.type === \"response\",\n    )).toMatchObject({\n      ok: true,\n      value: {\n        descriptor: {\n          format: \"eliscript-worker-capabilities\",\n          version: 1,\n          grants: [\"cancellation\", \"progress\"],\n        },\n        cancelled: false,\n        contextFrozen: true,\n        signalMatches: true,\n      },\n    });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"platform-escape\",\n      module: escapePath,\n      export: \"run\",\n      arguments: [],\n    });\n    const escape = await client.next(\n      (message) => message.id === \"platform-escape\",\n    );\n    expect(escape).toMatchObject({ ok: false });\n    expect(escape.error.message).toContain(\n      \"worker platform import escapes package platform\",\n    );\n  } finally {\n    if (client) await client.close();\n    await rm(directory, { recursive: true, force: true });\n  }\n});\n\ntest(\"worker negotiates the persistent value codec without changing JSON mode\", async () => {\n  const directory = await mkdtemp(resolve(tmpdir(), \"eliscript-codec-worker-\"));\n  const modulePath = resolve(directory, \"codec.mjs\");\n  const escapePath = resolve(directory, \"escape.mjs\");\n  let client;\n  try {\n    await writeFile(modulePath, [\n      \"import { keyword, eliscriptSymbol } from 'eliscript/runtime/core/identifier.mjs';\",\n      \"import { list as persistentList } from 'eliscript/runtime/literals.mjs';\",\n      \"import { persistentHashMap } from 'eliscript/runtime/core/map.mjs';\",\n      \"import { withMeta } from 'eliscript/runtime/core/metadata.mjs';\",\n      \"import { persistentVector } from 'eliscript/runtime/core/vector.mjs';\",\n      \"export function echo(value, context) { context.progress(value); return value; }\",\n      \"export function value() {\",\n      \"  const metadata = persistentHashMap([keyword('source'), 'worker']);\",\n      \"  return withMeta(persistentList(keyword('ready'), eliscriptSymbol('item'), persistentVector(undefined, -0)), metadata);\",\n      \"}\",\n      \"export function unsupported() { return 1n; }\",\n      \"\",\n    ].join(\"\\n\"));\n    await writeFile(\n      escapePath,\n      \"import value from 'eliscript/runtime/../package.json';\\n\" +\n        \"export function run() { return value; }\\n\",\n    );\n\n    client = createWorkerClient();\n    const ready = await client.next((message) => message.type === \"ready\");\n    expect(ready.capabilities).toContain(\"value-codec-v1\");\n    expect(ready.capabilities).toContain(\"value-chunks-v1\");\n    expect(ready.capabilities).toContain(\"runtime-resolution\");\n\n    const argument = persistentHashMap(\n      [keyword(\"items\"), persistentVector(1, undefined, 3)],\n    );\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"codec-echo\",\n      module: modulePath,\n      export: \"echo\",\n      valueEncoding: workerValueEncoding,\n      arguments: [encodeWorkerValue(argument)],\n    });\n    const progress = await client.next(\n      (message) => message.id === \"codec-echo\" && message.type === \"progress\",\n    );\n    const response = await client.next(\n      (message) => message.id === \"codec-echo\" && message.type === \"response\",\n    );\n    expect(progress.valueEncoding).toBe(workerValueEncoding);\n    expect(response.valueEncoding).toBe(workerValueEncoding);\n    expect(equalValues(decodeWorkerValue(progress.value), argument)).toBe(true);\n    expect(equalValues(decodeWorkerValue(response.value), argument)).toBe(true);\n\n    await sendChunkedRequest(\n      client,\n      \"chunked-echo\",\n      { module: modulePath, export: \"echo\" },\n      [argument],\n    );\n    const chunkedProgress = await receiveChunkedValue(\n      client,\n      \"chunked-echo\",\n      \"progress\",\n    );\n    const chunkedResponse = await receiveChunkedValue(\n      client,\n      \"chunked-echo\",\n      \"response\",\n    );\n    expect(equalValues(chunkedProgress.value, argument)).toBe(true);\n    expect(equalValues(chunkedResponse.value, argument)).toBe(true);\n    expect(chunkedResponse.message.timing).toMatchObject({\n      executionMs: expect.any(Number),\n      serializationMs: expect.any(Number),\n      workerMs: expect.any(Number),\n      valueStream: {\n        framing: workerValueFraming,\n        maxChunkBytes: 256 * 1024,\n        maxEventsPerChunk: 512,\n        maxTextPartUnits: 8192,\n      },\n    });\n    expect(typeof chunkedResponse.message.timing.valueStream.argumentChunks)\n      .toBe(\"number\");\n    expect(typeof chunkedResponse.message.timing.valueStream.responseChunks)\n      .toBe(\"number\");\n    expect(chunkedResponse.message.timing.valueStream.argumentChunks > 0)\n      .toBe(true);\n    expect(chunkedResponse.message.timing.valueStream.responseChunks > 0)\n      .toBe(true);\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"chunk-order\",\n      module: modulePath,\n      export: \"echo\",\n      valueEncoding: workerValueEncoding,\n      valueFraming: workerValueFraming,\n    });\n    await client.next(\n      (message) => message.id === \"chunk-order\" && message.type === \"value-ack\",\n    );\n    client.send({\n      version: 1,\n      type: \"value-chunk\",\n      id: \"chunk-order\",\n      channel: \"arguments\",\n      sequence: 1,\n      final: true,\n      valueEncoding: workerValueEncoding,\n      valueFraming: workerValueFraming,\n      events: [[\"open\", \"array\", 0]],\n    });\n    expect(await client.next((message) => message.id === \"chunk-order\"))\n      .toMatchObject({\n        ok: false,\n        error: { code: \"invalid-value-chunk\" },\n      });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"chunk-cancel\",\n      module: modulePath,\n      export: \"echo\",\n      valueEncoding: workerValueEncoding,\n      valueFraming: workerValueFraming,\n    });\n    await client.next(\n      (message) => message.id === \"chunk-cancel\" && message.type === \"value-ack\",\n    );\n    client.send({ version: 1, type: \"cancel\", id: \"chunk-cancel\" });\n    expect(await client.next(\n      (message) => message.id === \"chunk-cancel\" && message.type === \"cancel\",\n    )).toMatchObject({ accepted: true });\n    expect(await client.next(\n      (message) => message.id === \"chunk-cancel\" && message.type === \"response\",\n    )).toMatchObject({ ok: false, error: { code: \"cancelled\" } });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"codec-result\",\n      module: modulePath,\n      export: \"value\",\n      valueEncoding: workerValueEncoding,\n      arguments: [],\n    });\n    const codecResult = decodeWorkerValue((await client.next(\n      (message) => message.id === \"codec-result\",\n    )).value);\n    expect(equalValues(\n      codecResult,\n      persistentList(keyword(\"ready\"), codecResult.nth(1), persistentVector(undefined, -0)),\n    )).toBe(true);\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"ground-result\",\n      module: modulePath,\n      export: \"value\",\n      arguments: [],\n    });\n    expect(await client.next((message) => message.id === \"ground-result\"))\n      .toMatchObject({ ok: true, value: {} });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"unsupported-encoding\",\n      module: modulePath,\n      export: \"echo\",\n      valueEncoding: \"future-value-codec\",\n      arguments: [],\n    });\n    expect(await client.next(\n      (message) => message.id === \"unsupported-encoding\",\n    )).toMatchObject({ ok: false, error: { code: \"invalid-request\" } });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"invalid-value\",\n      module: modulePath,\n      export: \"echo\",\n      valueEncoding: workerValueEncoding,\n      arguments: [[\"unknown\"]],\n    });\n    expect(await client.next((message) => message.id === \"invalid-value\"))\n      .toMatchObject({\n        ok: false,\n        error: { code: \"value-decoding-invalid\" },\n      });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"unsupported-value\",\n      module: modulePath,\n      export: \"unsupported\",\n      valueEncoding: workerValueEncoding,\n      arguments: [],\n    });\n    expect(await client.next((message) => message.id === \"unsupported-value\"))\n      .toMatchObject({\n        ok: false,\n        error: { code: \"value-encoding-unsupported\" },\n      });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"runtime-escape\",\n      module: escapePath,\n      export: \"run\",\n      arguments: [],\n    });\n    const escape = await client.next(\n      (message) => message.id === \"runtime-escape\",\n    );\n    expect(escape).toMatchObject({ ok: false });\n    expect(escape.error.message).toContain(\n      \"worker runtime import escapes package runtime\",\n    );\n  } finally {\n    if (client) await client.close();\n    await rm(directory, { recursive: true, force: true });\n  }\n});\n\ntest(\"long-lived worker implements the versioned NDJSON protocol and maps failures through project source maps\", async () => {\n  const directory = await mkdtemp(resolve(tmpdir(), \"eliscript-worker-\"));\n  const modulePath = resolve(directory, \"worker.mjs\");\n  const reloadPath = resolve(directory, \"reload.mjs\");\n  const reloadMapPath = resolve(directory, \"reload.mjs.map\");\n  const otherPath = resolve(directory, \"other.mjs\");\n  const otherMapPath = resolve(directory, \"other.mjs.map\");\n  const outsidePath = resolve(directory, \"outside.mjs\");\n  const invalidManifestPath = resolve(directory, \"invalid-project.json\");\n  const multiManifestPath = resolve(directory, \"multi-project.json\");\n  let client;\n  try {\n    await runSuccessful(\n      [compilerPath, \"--source-map\", \"--output\", modulePath, fixturePath],\n      { env: { ...process.env, EMACS: emacs } },\n    );\n    const reloadSource = \"export function value() { return 1; }\\n\";\n    const reloadMap = JSON.stringify({\n      version: 3,\n      file: \"reload.mjs\",\n      sources: [\"reload.eli\"],\n      names: [],\n      mappings: \"\",\n    });\n    const otherMap = JSON.stringify({\n      version: 3,\n      file: \"other.mjs\",\n      sources: [\"other.eli\"],\n      names: [],\n      mappings: \"\",\n    });\n    await writeFile(reloadPath, reloadSource);\n    await writeFile(reloadMapPath, reloadMap);\n    await writeFile(otherPath, \"export function other() { return 2; }\\n\");\n    await writeFile(otherMapPath, otherMap);\n    await writeFile(outsidePath, \"export function outside() { return 3; }\\n\");\n    await writeFile(invalidManifestPath, JSON.stringify({\n      format: \"eliscript-project\",\n      version: 1,\n      entry: \"reload.mjs\",\n      modules: [],\n      digest: \"0\".repeat(64),\n    }));\n    const multiIdentity = {\n      format: \"eliscript-project\",\n      version: 2,\n      entries: [\"other.mjs\", \"reload.mjs\"],\n      modules: [\n        {\n          source: \"other.eli\",\n          output: \"other.mjs\",\n          sourceMap: \"other.mjs.map\",\n          sourceDigest: \"0\".repeat(64),\n          outputDigest: createHash(\"sha256\")\n            .update(\"export function other() { return 2; }\\n\")\n            .digest(\"hex\"),\n          sourceMapDigest: createHash(\"sha256\").update(otherMap).digest(\"hex\"),\n        },\n        {\n          source: \"reload.eli\",\n          output: \"reload.mjs\",\n          sourceMap: \"reload.mjs.map\",\n          sourceDigest: \"1\".repeat(64),\n          outputDigest: createHash(\"sha256\").update(reloadSource).digest(\"hex\"),\n          sourceMapDigest: createHash(\"sha256\").update(reloadMap).digest(\"hex\"),\n        },\n      ],\n    };\n    const multiDigest = createHash(\"sha256\")\n      .update(JSON.stringify(multiIdentity))\n      .digest(\"hex\");\n    await writeFile(multiManifestPath, JSON.stringify({\n      ...multiIdentity,\n      digest: multiDigest,\n    }));\n    client = createWorkerClient();\n    const ready = await client.next((message) => message.type === \"ready\");\n    expect(ready.version).toBe(1);\n    expect(ready.capabilities).toContain(\"cancel\");\n    expect(ready.capabilities).toContain(\"progress\");\n    expect(ready.capabilities).toContain(\"module-version\");\n    expect(ready.capabilities).toContain(\"project-manifest\");\n    expect(ready.capabilities).toContain(\"portable-manifest\");\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"multi-project-entry\",\n      module: reloadPath,\n      projectManifest: multiManifestPath,\n      moduleVersion: multiDigest,\n      export: \"value\",\n      arguments: [],\n    });\n    expect(await client.next(\n      (message) => message.id === \"multi-project-entry\",\n    )).toMatchObject({ ok: true, value: 1 });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"multi-project-outside-entry\",\n      module: outsidePath,\n      projectManifest: multiManifestPath,\n      moduleVersion: multiDigest,\n      export: \"outside\",\n      arguments: [],\n    });\n    expect(await client.next(\n      (message) => message.id === \"multi-project-outside-entry\",\n    )).toMatchObject({\n      ok: false,\n      error: { code: \"invalid-project-manifest\" },\n    });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"invalid-project-manifest\",\n      module: reloadPath,\n      projectManifest: invalidManifestPath,\n      moduleVersion: \"0\".repeat(64),\n      export: \"value\",\n      arguments: [],\n    });\n    expect(await client.next(\n      (message) => message.id === \"invalid-project-manifest\",\n    )).toMatchObject({\n      ok: false,\n      error: { code: \"invalid-project-manifest\" },\n    });\n\n    client.sendRaw(\"{not-json\");\n    expect(await client.next((message) => message.type === \"protocol-error\"))\n      .toMatchObject({ error: { code: \"invalid-json\" } });\n    client.send({ version: 99, type: \"request\", id: \"wrong-version\" });\n    expect(await client.next((message) => message.id === \"wrong-version\"))\n      .toMatchObject({\n        type: \"protocol-error\",\n        error: { code: \"version-mismatch\" },\n      });\n\n    const values = Array.from({ length: 2_000 }, (_, index) => index % 997);\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"score\",\n      module: modulePath,\n      export: \"score_values\",\n      arguments: [values, 4],\n    });\n    const score = await client.next((message) => message.id === \"score\");\n    expect(score).toMatchObject({ ok: true, value: scoreValues(values, 4) });\n    expect(score.timing).toMatchObject({\n      moduleLoadMs: expect.any(Number),\n      moduleCacheHit: false,\n      moduleVersion: expect.any(String),\n      executionMs: expect.any(Number),\n      serializationMs: expect.any(Number),\n      workerMs: expect.any(Number),\n    });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"portable-score\",\n      module: modulePath,\n      operation: \"score-values\",\n      arguments: [values, 2],\n    });\n    expect(await client.next((message) => message.id === \"portable-score\"))\n      .toMatchObject({\n        ok: true,\n        value: scoreValues(values, 2),\n        timing: { moduleCacheHit: true },\n      });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"source-error\",\n      module: modulePath,\n      operation: \"crash-at-source\",\n      arguments: [1],\n    });\n    const sourceError = await client.next(\n      (message) => message.id === \"source-error\",\n    );\n    expect(sourceError).toMatchObject({\n      ok: false,\n      error: {\n        code: \"runtime\",\n        location: {\n          file: fixturePath,\n          line: 15,\n          column: 6,\n        },\n      },\n    });\n    expect(sourceError.error.location.generated).toMatchObject({\n      line: expect.any(Number),\n      column: expect.any(Number),\n    });\n    expect(sourceError.error.location.generated.file.endsWith(\"worker.mjs\"))\n      .toBe(true);\n    expect(sourceError.error.frames.some(\n      (frame) => frame.file === fixturePath,\n    )).toBe(true);\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"reload-cold\",\n      module: reloadPath,\n      export: \"value\",\n      arguments: [],\n    });\n    expect(await client.next((message) => message.id === \"reload-cold\"))\n      .toMatchObject({ ok: true, value: 1, timing: { moduleCacheHit: false } });\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"reload-warm\",\n      module: reloadPath,\n      export: \"value\",\n      arguments: [],\n    });\n    expect(await client.next((message) => message.id === \"reload-warm\"))\n      .toMatchObject({ ok: true, value: 1, timing: { moduleCacheHit: true } });\n\n    await writeFile(reloadPath, \"export function value() { return 22; }\\n\");\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"reload-changed\",\n      module: reloadPath,\n      export: \"value\",\n      arguments: [],\n    });\n    expect(await client.next((message) => message.id === \"reload-changed\"))\n      .toMatchObject({\n        ok: false,\n        error: { code: \"module-version-changed\" },\n      });\n\n    await client.close();\n    client = createWorkerClient();\n    await client.next((message) => message.type === \"ready\");\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"version-one\",\n      module: reloadPath,\n      moduleVersion: \"fixed\",\n      export: \"value\",\n      arguments: [],\n    });\n    expect(await client.next((message) => message.id === \"version-one\"))\n      .toMatchObject({ ok: true, value: 22, timing: { moduleCacheHit: false } });\n\n    await writeFile(reloadPath, \"export function value() { return 3; }\\n\");\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"version-one-warm\",\n      module: reloadPath,\n      moduleVersion: \"fixed\",\n      export: \"value\",\n      arguments: [],\n    });\n    expect(await client.next((message) => message.id === \"version-one-warm\"))\n      .toMatchObject({ ok: true, value: 22, timing: { moduleCacheHit: true } });\n\n    await writeFile(reloadPath, \"export function value() { return 4; }\\n\");\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"version-two\",\n      module: reloadPath,\n      moduleVersion: \"next\",\n      export: \"value\",\n      arguments: [],\n    });\n    expect(await client.next((message) => message.id === \"version-two\"))\n      .toMatchObject({\n        ok: false,\n        error: { code: \"module-version-changed\" },\n      });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"missing\",\n      module: modulePath,\n      export: \"absent\",\n      arguments: [],\n    });\n    expect(await client.next((message) => message.id === \"missing\"))\n      .toMatchObject({ ok: false, error: { code: \"missing-export\" } });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"missing-portable\",\n      module: modulePath,\n      operation: \"absent\",\n      arguments: [],\n    });\n    expect(await client.next((message) => message.id === \"missing-portable\"))\n      .toMatchObject({ ok: false, error: { code: \"missing-portable\" } });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"inherited-portable\",\n      module: modulePath,\n      operation: \"toString\",\n      arguments: [],\n    });\n    expect(await client.next((message) => message.id === \"inherited-portable\"))\n      .toMatchObject({ ok: false, error: { code: \"missing-portable\" } });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"cancel-me\",\n      module: modulePath,\n      export: \"delayed_echo\",\n      arguments: [\"late\", 5_000],\n    });\n    expect(await client.next(\n      (message) => message.type === \"progress\" && message.id === \"cancel-me\",\n    )).toMatchObject({ value: { stage: \"started\" } });\n    client.send({ version: 1, type: \"cancel\", id: \"cancel-me\" });\n    expect(await client.next(\n      (message) => message.type === \"cancel\" && message.id === \"cancel-me\",\n    )).toMatchObject({ accepted: true });\n    expect(await client.next(\n      (message) => message.type === \"response\" && message.id === \"cancel-me\",\n    )).toMatchObject({ ok: false, error: { code: \"cancelled\" } });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"time-out\",\n      module: modulePath,\n      export: \"delayed_echo\",\n      arguments: [\"late\", 5_000],\n      timeoutMs: 10,\n    });\n    expect(await client.next(\n      (message) => message.type === \"response\" && message.id === \"time-out\",\n    )).toMatchObject({ ok: false, error: { code: \"timeout\" } });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"unserializable\",\n      module: modulePath,\n      export: \"unserializable\",\n      arguments: [],\n    });\n    expect(await client.next((message) => message.id === \"unserializable\"))\n      .toMatchObject({ ok: false, error: { code: \"serialization\" } });\n\n    client.send({\n      version: 1,\n      type: \"request\",\n      id: \"noisy\",\n      module: modulePath,\n      export: \"noisy_echo\",\n      arguments: [\"still framed\"],\n    });\n    expect(await client.next((message) => message.id === \"noisy\"))\n      .toMatchObject({ ok: true, value: \"still framed\" });\n\n    const stopped = await client.close();\n    client = undefined;\n    expect(stopped.exitCode).toBe(0);\n    expect(stopped.stderr).toContain(\"worker module log\");\n  } finally {\n    if (client) {\n      client.child.kill();\n      await client.child.exited;\n    }\n    await rm(directory, { recursive: true, force: true });\n  }\n}, 20_000);\n"))
+(module tests.worker-runtime
+  (import "bun:test" expect test)
+  (import "node:crypto" createHash)
+  (import "node:fs/promises" mkdtemp rm writeFile)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve dirname)
+  (import "node:url" fileURLToPath)
+  (import "../runtime/core/identifier.mjs" keyword)
+  (import "../runtime/core/list.mjs" persistentList)
+  (import "../runtime/core/map.mjs" persistentHashMap)
+  (import "../runtime/core/vector.mjs" persistentVector)
+  (import "../runtime/core/value.mjs" equalValues)
+  (import "../runtime/worker-value-codec.mjs"
+    decodeWorkerValue encodeWorkerValue workerValueEncoding)
+  (import "../runtime/worker-value-stream.mjs"
+    WorkerValueStreamDecoder encodeWorkerValueChunks workerValueFraming)
+
+  (defconst projectDirectory (resolve (dirname (fileURLToPath (js* "import.meta.url"))) ".."))
+  (defconst compilerPath (resolve projectDirectory "bin/eliscript"))
+  (defconst workerPath (resolve projectDirectory "runtime/worker.mjs"))
+  (defconst fixturePath (resolve projectDirectory "tests/fixtures/worker.eli"))
+  (defconst emacs (or (get (get globalThis.process :env) :EMACS) "emacs"))
+
+  (defasync runSuccessful (command &rest __host_forwarded_arguments_1)
+    (let* ((options (aref __host_forwarded_arguments_1 0)))
+    (let* ((opts (Object/assign
+                   (js-object :cwd projectDirectory :stdout "pipe" :stderr "pipe")
+                   (or options (js-object))))
+           (child (js-call globalThis.Bun :spawn command opts))
+           (parts (await (Promise/all
+                           (js-array (get child :exited)
+                             (js-call (new globalThis.Response (get child :stdout)) :text)
+                             (js-call (new globalThis.Response (get child :stderr)) :text)))))
+           (exitCode (aref parts 0))
+           (stdout (aref parts 1))
+           (stderr (aref parts 2)))
+      (unless (= exitCode 0)
+        (let ((err-trim (js-call stderr :trim))
+              (out-trim (js-call stdout :trim)))
+          (throw (new globalThis.Error
+                   (cond
+                     ((> (js-length err-trim) 0) err-trim)
+                     ((> (js-length out-trim) 0) out-trim)
+                     (t (str (aref command 0) " exited with " exitCode)))))))
+      stdout)))
+
+  (defun createWorkerClient ()
+    (let* ((child (js-call globalThis.Bun :spawn
+                    (js-array (get globalThis.process :execPath) workerPath)
+                    (js-object :cwd projectDirectory :stdin "pipe" :stdout "pipe" :stderr "pipe")))
+           (messages (js-array))
+           (waiters (js-array))
+           (decoder (new globalThis.TextDecoder))
+           (buffer "")
+           (closed false)
+           (deliver (lambda (message)
+                      (let ((index (js-call waiters :findIndex
+                                     (lambda (waiter) (funcall (get waiter :predicate) message)))))
+                        (if (= index -1)
+                          (js-call messages :push message)
+                          (let ((waiter (aref (js-call waiters :splice index 1) 0)))
+                            (globalThis.clearTimeout (get waiter :timer))
+                            (funcall (get waiter :resolve) message))))))
+           (outputTask ((async ()
+                          (let ((iterator (js-call (get child :stdout) globalThis.Symbol.asyncIterator))
+                                (done false))
+                            (while (not done)
+                              (let ((step (await (js-call iterator :next))))
+                                (if (get step :done)
+                                  (setq done t)
+                                  (progn
+                                    (setq buffer (str buffer (js-call decoder :decode (get step :value) (js-object :stream t))))
+                                    (let ((newline (js-call buffer :indexOf "\n")))
+                                      (while (not (= newline -1))
+                                        (let ((line (js-call buffer :slice 0 newline)))
+                                          (setq buffer (js-call buffer :slice (1+ newline)))
+                                          (when (> (js-length line) 0)
+                                            (funcall deliver (JSON/parse line))))
+                                        (setq newline (js-call buffer :indexOf "\n")))))))))
+                          (setq buffer (str buffer (js-call decoder :decode)))
+                          (setq closed t)
+                          (let ((remaining (js-call waiters :splice 0))
+                                (i 0))
+                            (while (< i (js-length remaining))
+                              (let ((waiter (aref remaining i)))
+                                (globalThis.clearTimeout (get waiter :timer))
+                                (funcall (get waiter :reject) (new globalThis.Error "worker output closed")))
+                              (setq i (1+ i)))))))
+           (stderrTask (js-call (new globalThis.Response (get child :stderr)) :text))
+           (send (lambda (message)
+                   (js-call (get child :stdin) :write (str (JSON/stringify message) "\n"))
+                   (js-call (get child :stdin) :flush)))
+           (sendRaw (lambda (line)
+                      (js-call (get child :stdin) :write (str line "\n"))
+                      (js-call (get child :stdin) :flush)))
+           (next (lambda (predicate &rest __host_default_arguments_1)
+    (let* ((timeoutMs (aref __host_default_arguments_1 0)))
+                   (let ((limit (if (undefined? timeoutMs) 5000 timeoutMs))
+                         (index (js-call messages :findIndex predicate)))
+                     (cond
+                       ((not (= index -1))
+                        (Promise/resolve (aref (js-call messages :splice index 1) 0)))
+                       (closed
+                        (Promise/reject (new globalThis.Error "worker output closed")))
+                       (t
+                        (new globalThis.Promise
+                          (lambda (resolve_ reject)
+                            (let ((waiter (js-object
+                                            :predicate predicate
+                                            :resolve resolve_
+                                            :reject reject
+                                            :timer undefined)))
+                              (put waiter :timer
+                                (globalThis.setTimeout
+                                  (lambda ()
+                                    (let ((waiterIndex (js-call waiters :indexOf waiter)))
+                                      (unless (= waiterIndex -1)
+                                        (js-call waiters :splice waiterIndex 1))
+                                      (reject (new globalThis.Error "timed out waiting for worker message"))))
+                                  limit))
+                              (js-call waiters :push waiter))))))))))
+           (close (async ()
+                    (unless closed
+                      (funcall send (js-object :version 1 :type "shutdown"))
+                      (await (funcall next (lambda (message) (= (get message :type) "shutdown"))))
+                      (js-call (get child :stdin) :end))
+                    (let ((exitCode (await (get child :exited))))
+                      (await outputTask)
+                      (js-object :exitCode exitCode :stderr (await stderrTask))))))
+      (js-object :child child :send send :sendRaw sendRaw :next next :close close)))
+
+  (defun scoreValues (values rounds)
+    (let ((total 0)
+          (round 0))
+      (while (< round rounds)
+        (let ((i 0))
+          (while (< i (js-length values))
+            (setq total (mod (+ (* total 33) (aref values i) round) 1000000007))
+            (setq i (1+ i))))
+        (setq round (1+ round)))
+      total))
+
+  (defasync sendChunkedRequest (client id fields arguments_)
+    (js-call client :send
+      (Object/assign
+        (js-object
+          :version 1
+          :type "request"
+          :id id
+          :valueEncoding workerValueEncoding
+          :valueFraming workerValueFraming)
+        fields))
+    (js-call (expect (await (js-call client :next
+                              (lambda (message)
+                                (and (= (get message :id) id)
+                                     (= (get message :type) "value-ack"))))))
+      :toMatchObject (js-object :sequence -1 :channel "arguments" :final false))
+    (let ((chunks (js-array))
+          (iterator (js-call (encodeWorkerValueChunks arguments_
+                               (js-object :maxChunkBytes 512 :maxEventsPerChunk 5 :maxTextPartUnits 7))
+                      globalThis.Symbol.asyncIterator))
+          (done false))
+      (while (not done)
+        (let ((step (await (js-call iterator :next))))
+          (if (get step :done)
+            (setq done t)
+            (js-call chunks :push (get step :value)))))
+      (let ((sequence 0))
+        (while (< sequence (js-length chunks))
+          (let ((final (= sequence (- (js-length chunks) 1))))
+            (js-call client :send
+              (js-object
+                :version 1
+                :type "value-chunk"
+                :id id
+                :channel "arguments"
+                :sequence sequence
+                :final final
+                :valueEncoding workerValueEncoding
+                :valueFraming workerValueFraming
+                :events (aref chunks sequence)))
+            (let ((expected-seq sequence))
+              (js-call (expect (await (js-call client :next
+                                        (lambda (message)
+                                          (and (= (get message :id) id)
+                                               (= (get message :type) "value-ack")
+                                               (= (get message :sequence) expected-seq))))))
+                :toMatchObject (js-object :sequence expected-seq :final final))))
+          (setq sequence (1+ sequence))))))
+
+  (defasync receiveChunkedValue (client id channel)
+    (let ((decoder (new WorkerValueStreamDecoder))
+          (sequence 0)
+          (stream undefined)
+          (done false)
+          (result undefined))
+      (while (not done)
+        (let ((message (await (js-call client :next
+                                (lambda (candidate)
+                                  (and (= (get candidate :id) id)
+                                       (= (get candidate :type) "value-chunk")
+                                       (= (get candidate :channel) channel)
+                                       (or (undefined? stream) (= (get candidate :stream) stream))))))))
+          (when (undefined? stream)
+            (setq stream (get message :stream)))
+          (js-call (expect message) :toMatchObject
+            (js-object
+              :sequence sequence
+              :valueEncoding workerValueEncoding
+              :valueFraming workerValueFraming))
+          (js-call decoder :write (get message :events))
+          (setq sequence (1+ sequence))
+          (when (get message :final)
+            (setq result (js-object :value (js-call decoder :finish) :message message))
+            (setq done t))))
+      result))
+
+  (test "worker injects explicit operation capabilities from its platform package"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-platform-worker-"))))
+             (modulePath (resolve directory "capabilities.mjs"))
+             (escapePath (resolve directory "platform-escape.mjs"))
+             (client undefined))
+        (try
+          (await (writeFile modulePath
+                   (js-call (js-array
+                              "import { workerCancelled, workerCapabilityDescriptor, workerProgress, workerSignal } from 'eliscript/platform/worker.mjs';"
+                              "export function inspect(value, context) {"
+                              "  workerProgress(context.capabilities, { value, cancelled: workerCancelled(context.capabilities) });"
+                              "  return {"
+                              "    descriptor: workerCapabilityDescriptor(context.capabilities),"
+                              "    cancelled: workerCancelled(context.capabilities),"
+                              "    contextFrozen: Object.isFrozen(context),"
+                              "    signalMatches: workerSignal(context.capabilities) === context.signal,"
+                              "  };"
+                              "}"
+                              "")
+                     :join "\n")))
+          (await (writeFile escapePath
+                   "import value from 'eliscript/platform/../package.json';\nexport function run() { return value; }\n"))
+          (setq client (createWorkerClient))
+          (let ((ready (await (js-call client :next (lambda (message) (= (get message :type) "ready"))))))
+            (js-call (expect (get ready :capabilities)) :toContain "operation-capabilities-v1"))
+          (js-call client :send
+            (js-object
+              :version 1
+              :type "request"
+              :id "platform-capabilities"
+              :module modulePath
+              :export "inspect"
+              :arguments (js-array 42)))
+          (js-call (expect (await (js-call client :next
+                                    (lambda (message)
+                                      (and (= (get message :id) "platform-capabilities")
+                                           (= (get message :type) "progress"))))))
+            :toMatchObject (js-object :value (js-object :value 42 :cancelled false)))
+          (js-call (expect (await (js-call client :next
+                                    (lambda (message)
+                                      (and (= (get message :id) "platform-capabilities")
+                                           (= (get message :type) "response"))))))
+            :toMatchObject
+            (js-object
+              :ok t
+              :value (js-object
+                       :descriptor (js-object
+                                     :format "eliscript-worker-capabilities"
+                                     :version 1
+                                     :grants (js-array "cancellation" "progress"))
+                       :cancelled false
+                       :contextFrozen t
+                       :signalMatches t)))
+          (js-call client :send
+            (js-object
+              :version 1
+              :type "request"
+              :id "platform-escape"
+              :module escapePath
+              :export "run"
+              :arguments (js-array)))
+          (let ((escape (await (js-call client :next (lambda (message) (= (get message :id) "platform-escape"))))))
+            (js-call (expect escape) :toMatchObject (js-object :ok false))
+            (js-call (expect (get (get escape :error) :message))
+              :toContain "worker platform import escapes package platform"))
+          (finally
+            (when client (await (js-call client :close)))
+            (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "worker negotiates the persistent value codec without changing JSON mode"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-codec-worker-"))))
+             (modulePath (resolve directory "codec.mjs"))
+             (escapePath (resolve directory "escape.mjs"))
+             (client undefined))
+        (try
+          (await (writeFile modulePath
+                   (js-call (js-array
+                              "import { keyword, eliscriptSymbol } from 'eliscript/runtime/core/identifier.mjs';"
+                              "import { list as persistentList } from 'eliscript/runtime/literals.mjs';"
+                              "import { persistentHashMap } from 'eliscript/runtime/core/map.mjs';"
+                              "import { withMeta } from 'eliscript/runtime/core/metadata.mjs';"
+                              "import { persistentVector } from 'eliscript/runtime/core/vector.mjs';"
+                              "export function echo(value, context) { context.progress(value); return value; }"
+                              "export function value() {"
+                              "  const metadata = persistentHashMap([keyword('source'), 'worker']);"
+                              "  return withMeta(persistentList(keyword('ready'), eliscriptSymbol('item'), persistentVector(undefined, -0)), metadata);"
+                              "}"
+                              "export function unsupported() { return 1n; }"
+                              "")
+                     :join "\n")))
+          (await (writeFile escapePath
+                   "import value from 'eliscript/runtime/../package.json';\nexport function run() { return value; }\n"))
+          (setq client (createWorkerClient))
+          (let ((ready (await (js-call client :next (lambda (message) (= (get message :type) "ready"))))))
+            (js-call (expect (get ready :capabilities)) :toContain "value-codec-v1")
+            (js-call (expect (get ready :capabilities)) :toContain "value-chunks-v1")
+            (js-call (expect (get ready :capabilities)) :toContain "runtime-resolution"))
+          (let ((argument (persistentHashMap (js-array (keyword "items") (persistentVector 1 undefined 3)))))
+            (js-call client :send
+              (js-object
+                :version 1
+                :type "request"
+                :id "codec-echo"
+                :module modulePath
+                :export "echo"
+                :valueEncoding workerValueEncoding
+                :arguments (js-array (encodeWorkerValue argument))))
+            (let ((progress (await (js-call client :next
+                                     (lambda (message)
+                                       (and (= (get message :id) "codec-echo")
+                                            (= (get message :type) "progress"))))))
+                  (response (await (js-call client :next
+                                     (lambda (message)
+                                       (and (= (get message :id) "codec-echo")
+                                            (= (get message :type) "response")))))))
+              (js-call (expect (get progress :valueEncoding)) :toBe workerValueEncoding)
+              (js-call (expect (get response :valueEncoding)) :toBe workerValueEncoding)
+              (js-call (expect (equalValues (decodeWorkerValue (get progress :value)) argument)) :toBe t)
+              (js-call (expect (equalValues (decodeWorkerValue (get response :value)) argument)) :toBe t))
+            (await (sendChunkedRequest client "chunked-echo"
+                     (js-object :module modulePath :export "echo")
+                     (js-array argument)))
+            (let ((chunkedProgress (await (receiveChunkedValue client "chunked-echo" "progress")))
+                  (chunkedResponse (await (receiveChunkedValue client "chunked-echo" "response"))))
+              (js-call (expect (equalValues (get chunkedProgress :value) argument)) :toBe t)
+              (js-call (expect (equalValues (get chunkedResponse :value) argument)) :toBe t)
+              (js-call (expect (get (get chunkedResponse :message) :timing)) :toMatchObject
+                (js-object
+                  :executionMs (js-call expect :any globalThis.Number)
+                  :serializationMs (js-call expect :any globalThis.Number)
+                  :workerMs (js-call expect :any globalThis.Number)
+                  :valueStream (js-object
+                                 :framing workerValueFraming
+                                 :maxChunkBytes (* 256 1024)
+                                 :maxEventsPerChunk 512
+                                 :maxTextPartUnits 8192)))
+              (let ((vs (get (get (get chunkedResponse :message) :timing) :valueStream)))
+                (js-call (expect (value-type (get vs :argumentChunks))) :toBe "number")
+                (js-call (expect (value-type (get vs :responseChunks))) :toBe "number")
+                (js-call (expect (> (get vs :argumentChunks) 0)) :toBe t)
+                (js-call (expect (> (get vs :responseChunks) 0)) :toBe t))))
+          (js-call client :send
+            (js-object
+              :version 1
+              :type "request"
+              :id "chunk-order"
+              :module modulePath
+              :export "echo"
+              :valueEncoding workerValueEncoding
+              :valueFraming workerValueFraming))
+          (await (js-call client :next
+                   (lambda (message)
+                     (and (= (get message :id) "chunk-order")
+                          (= (get message :type) "value-ack")))))
+          (js-call client :send
+            (js-object
+              :version 1
+              :type "value-chunk"
+              :id "chunk-order"
+              :channel "arguments"
+              :sequence 1
+              :final t
+              :valueEncoding workerValueEncoding
+              :valueFraming workerValueFraming
+              :events (js-array (js-array "open" "array" 0))))
+          (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "chunk-order")))))
+            :toMatchObject (js-object :ok false :error (js-object :code "invalid-value-chunk")))
+          (js-call client :send
+            (js-object
+              :version 1
+              :type "request"
+              :id "chunk-cancel"
+              :module modulePath
+              :export "echo"
+              :valueEncoding workerValueEncoding
+              :valueFraming workerValueFraming))
+          (await (js-call client :next
+                   (lambda (message)
+                     (and (= (get message :id) "chunk-cancel")
+                          (= (get message :type) "value-ack")))))
+          (js-call client :send (js-object :version 1 :type "cancel" :id "chunk-cancel"))
+          (js-call (expect (await (js-call client :next
+                                    (lambda (message)
+                                      (and (= (get message :id) "chunk-cancel")
+                                           (= (get message :type) "cancel"))))))
+            :toMatchObject (js-object :accepted t))
+          (js-call (expect (await (js-call client :next
+                                    (lambda (message)
+                                      (and (= (get message :id) "chunk-cancel")
+                                           (= (get message :type) "response"))))))
+            :toMatchObject (js-object :ok false :error (js-object :code "cancelled")))
+          (js-call client :send
+            (js-object
+              :version 1
+              :type "request"
+              :id "codec-result"
+              :module modulePath
+              :export "value"
+              :valueEncoding workerValueEncoding
+              :arguments (js-array)))
+          (let ((codecResult (decodeWorkerValue
+                               (get (await (js-call client :next (lambda (message) (= (get message :id) "codec-result"))))
+                                 :value))))
+            (js-call (expect (equalValues
+                               codecResult
+                               (persistentList (keyword "ready") (js-call codecResult :nth 1) (persistentVector undefined -0))))
+              :toBe t))
+          (js-call client :send
+            (js-object
+              :version 1
+              :type "request"
+              :id "ground-result"
+              :module modulePath
+              :export "value"
+              :arguments (js-array)))
+          (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "ground-result")))))
+            :toMatchObject (js-object :ok t :value (js-object)))
+          (js-call client :send
+            (js-object
+              :version 1
+              :type "request"
+              :id "unsupported-encoding"
+              :module modulePath
+              :export "echo"
+              :valueEncoding "future-value-codec"
+              :arguments (js-array)))
+          (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "unsupported-encoding")))))
+            :toMatchObject (js-object :ok false :error (js-object :code "invalid-request")))
+          (js-call client :send
+            (js-object
+              :version 1
+              :type "request"
+              :id "invalid-value"
+              :module modulePath
+              :export "echo"
+              :valueEncoding workerValueEncoding
+              :arguments (js-array (js-array "unknown"))))
+          (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "invalid-value")))))
+            :toMatchObject (js-object :ok false :error (js-object :code "value-decoding-invalid")))
+          (js-call client :send
+            (js-object
+              :version 1
+              :type "request"
+              :id "unsupported-value"
+              :module modulePath
+              :export "unsupported"
+              :valueEncoding workerValueEncoding
+              :arguments (js-array)))
+          (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "unsupported-value")))))
+            :toMatchObject (js-object :ok false :error (js-object :code "value-encoding-unsupported")))
+          (js-call client :send
+            (js-object
+              :version 1
+              :type "request"
+              :id "runtime-escape"
+              :module escapePath
+              :export "run"
+              :arguments (js-array)))
+          (let ((escape (await (js-call client :next (lambda (message) (= (get message :id) "runtime-escape"))))))
+            (js-call (expect escape) :toMatchObject (js-object :ok false))
+            (js-call (expect (get (get escape :error) :message))
+              :toContain "worker runtime import escapes package runtime"))
+          (finally
+            (when client (await (js-call client :close)))
+            (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "long-lived worker implements the versioned NDJSON protocol and maps failures through project source maps"
+    (async ()
+      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-worker-"))))
+             (modulePath (resolve directory "worker.mjs"))
+             (reloadPath (resolve directory "reload.mjs"))
+             (reloadMapPath (resolve directory "reload.mjs.map"))
+             (otherPath (resolve directory "other.mjs"))
+             (otherMapPath (resolve directory "other.mjs.map"))
+             (outsidePath (resolve directory "outside.mjs"))
+             (invalidManifestPath (resolve directory "invalid-project.json"))
+             (multiManifestPath (resolve directory "multi-project.json"))
+             (client undefined))
+        (try
+          (await (runSuccessful
+                   (js-array compilerPath "--source-map" "--output" modulePath fixturePath)
+                   (js-object :env (Object/assign (js-object) (get globalThis.process :env)
+                                     (js-object :EMACS emacs)))))
+          (let* ((reloadSource "export function value() { return 1; }\n")
+                 (reloadMap (JSON/stringify
+                              (js-object
+                                :version 3
+                                :file "reload.mjs"
+                                :sources (js-array "reload.eli")
+                                :names (js-array)
+                                :mappings "")))
+                 (otherMap (JSON/stringify
+                             (js-object
+                               :version 3
+                               :file "other.mjs"
+                               :sources (js-array "other.eli")
+                               :names (js-array)
+                               :mappings ""))))
+            (await (writeFile reloadPath reloadSource))
+            (await (writeFile reloadMapPath reloadMap))
+            (await (writeFile otherPath "export function other() { return 2; }\n"))
+            (await (writeFile otherMapPath otherMap))
+            (await (writeFile outsidePath "export function outside() { return 3; }\n"))
+            (await (writeFile invalidManifestPath
+                     (JSON/stringify
+                       (js-object
+                         :format "eliscript-project"
+                         :version 1
+                         :entry "reload.mjs"
+                         :modules (js-array)
+                         :digest (js-call "0" :repeat 64)))))
+            (let* ((multiIdentity (js-object
+                                    :format "eliscript-project"
+                                    :version 2
+                                    :entries (js-array "other.mjs" "reload.mjs")
+                                    :modules (js-array
+                                               (js-object
+                                                 :source "other.eli"
+                                                 :output "other.mjs"
+                                                 :sourceMap "other.mjs.map"
+                                                 :sourceDigest (js-call "0" :repeat 64)
+                                                 :outputDigest (js-call (js-call (createHash "sha256")
+                                                                          :update "export function other() { return 2; }\n")
+                                                                 :digest "hex")
+                                                 :sourceMapDigest (js-call (js-call (createHash "sha256") :update otherMap)
+                                                                    :digest "hex"))
+                                               (js-object
+                                                 :source "reload.eli"
+                                                 :output "reload.mjs"
+                                                 :sourceMap "reload.mjs.map"
+                                                 :sourceDigest (js-call "1" :repeat 64)
+                                                 :outputDigest (js-call (js-call (createHash "sha256") :update reloadSource)
+                                                                 :digest "hex")
+                                                 :sourceMapDigest (js-call (js-call (createHash "sha256") :update reloadMap)
+                                                                    :digest "hex")))))
+                   (multiDigest (js-call (js-call (createHash "sha256")
+                                           :update (JSON/stringify multiIdentity))
+                                  :digest "hex")))
+              (await (writeFile multiManifestPath
+                       (JSON/stringify
+                         (Object/assign (js-object) multiIdentity (js-object :digest multiDigest)))))
+              (setq client (createWorkerClient))
+              (let ((ready (await (js-call client :next (lambda (message) (= (get message :type) "ready"))))))
+                (js-call (expect (get ready :version)) :toBe 1)
+                (js-call (expect (get ready :capabilities)) :toContain "cancel")
+                (js-call (expect (get ready :capabilities)) :toContain "progress")
+                (js-call (expect (get ready :capabilities)) :toContain "module-version")
+                (js-call (expect (get ready :capabilities)) :toContain "project-manifest")
+                (js-call (expect (get ready :capabilities)) :toContain "portable-manifest"))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "multi-project-entry"
+                  :module reloadPath
+                  :projectManifest multiManifestPath
+                  :moduleVersion multiDigest
+                  :export "value"
+                  :arguments (js-array)))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "multi-project-entry")))))
+                :toMatchObject (js-object :ok t :value 1))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "multi-project-outside-entry"
+                  :module outsidePath
+                  :projectManifest multiManifestPath
+                  :moduleVersion multiDigest
+                  :export "outside"
+                  :arguments (js-array)))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "multi-project-outside-entry")))))
+                :toMatchObject (js-object :ok false :error (js-object :code "invalid-project-manifest")))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "invalid-project-manifest"
+                  :module reloadPath
+                  :projectManifest invalidManifestPath
+                  :moduleVersion (js-call "0" :repeat 64)
+                  :export "value"
+                  :arguments (js-array)))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "invalid-project-manifest")))))
+                :toMatchObject (js-object :ok false :error (js-object :code "invalid-project-manifest")))
+              (js-call client :sendRaw "{not-json")
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :type) "protocol-error")))))
+                :toMatchObject (js-object :error (js-object :code "invalid-json")))
+              (js-call client :send (js-object :version 99 :type "request" :id "wrong-version"))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "wrong-version")))))
+                :toMatchObject (js-object :type "protocol-error" :error (js-object :code "version-mismatch")))
+              (let ((values (Array/from (js-object :length 2000) (lambda (_ign index) (mod index 997)))))
+                (js-call client :send
+                  (js-object
+                    :version 1
+                    :type "request"
+                    :id "score"
+                    :module modulePath
+                    :export "score_values"
+                    :arguments (js-array values 4)))
+                (let ((score (await (js-call client :next (lambda (message) (= (get message :id) "score"))))))
+                  (js-call (expect score) :toMatchObject (js-object :ok t :value (scoreValues values 4)))
+                  (js-call (expect (get score :timing)) :toMatchObject
+                    (js-object
+                      :moduleLoadMs (js-call expect :any globalThis.Number)
+                      :moduleCacheHit false
+                      :moduleVersion (js-call expect :any globalThis.String)
+                      :executionMs (js-call expect :any globalThis.Number)
+                      :serializationMs (js-call expect :any globalThis.Number)
+                      :workerMs (js-call expect :any globalThis.Number))))
+                (js-call client :send
+                  (js-object
+                    :version 1
+                    :type "request"
+                    :id "portable-score"
+                    :module modulePath
+                    :operation "score-values"
+                    :arguments (js-array values 2)))
+                (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "portable-score")))))
+                  :toMatchObject
+                  (js-object
+                    :ok t
+                    :value (scoreValues values 2)
+                    :timing (js-object :moduleCacheHit t))))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "source-error"
+                  :module modulePath
+                  :operation "crash-at-source"
+                  :arguments (js-array 1)))
+              (let ((sourceError (await (js-call client :next (lambda (message) (= (get message :id) "source-error"))))))
+                (js-call (expect sourceError) :toMatchObject
+                  (js-object
+                    :ok false
+                    :error (js-object
+                             :code "runtime"
+                             :location (js-object
+                                         :file fixturePath
+                                         :line 15
+                                         :column 6))))
+                (js-call (expect (get (get (get sourceError :error) :location) :generated)) :toMatchObject
+                  (js-object
+                    :line (js-call expect :any globalThis.Number)
+                    :column (js-call expect :any globalThis.Number)))
+                (js-call (expect (js-call (get (get (get (get sourceError :error) :location) :generated) :file)
+                                   :endsWith "worker.mjs"))
+                  :toBe t)
+                (js-call (expect (js-call (get (get sourceError :error) :frames)
+                                   :some (lambda (frame) (= (get frame :file) fixturePath))))
+                  :toBe t))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "reload-cold"
+                  :module reloadPath
+                  :export "value"
+                  :arguments (js-array)))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "reload-cold")))))
+                :toMatchObject (js-object :ok t :value 1 :timing (js-object :moduleCacheHit false)))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "reload-warm"
+                  :module reloadPath
+                  :export "value"
+                  :arguments (js-array)))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "reload-warm")))))
+                :toMatchObject (js-object :ok t :value 1 :timing (js-object :moduleCacheHit t)))
+              (await (writeFile reloadPath "export function value() { return 22; }\n"))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "reload-changed"
+                  :module reloadPath
+                  :export "value"
+                  :arguments (js-array)))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "reload-changed")))))
+                :toMatchObject (js-object :ok false :error (js-object :code "module-version-changed")))
+              (await (js-call client :close))
+              (setq client (createWorkerClient))
+              (await (js-call client :next (lambda (message) (= (get message :type) "ready"))))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "version-one"
+                  :module reloadPath
+                  :moduleVersion "fixed"
+                  :export "value"
+                  :arguments (js-array)))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "version-one")))))
+                :toMatchObject (js-object :ok t :value 22 :timing (js-object :moduleCacheHit false)))
+              (await (writeFile reloadPath "export function value() { return 3; }\n"))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "version-one-warm"
+                  :module reloadPath
+                  :moduleVersion "fixed"
+                  :export "value"
+                  :arguments (js-array)))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "version-one-warm")))))
+                :toMatchObject (js-object :ok t :value 22 :timing (js-object :moduleCacheHit t)))
+              (await (writeFile reloadPath "export function value() { return 4; }\n"))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "version-two"
+                  :module reloadPath
+                  :moduleVersion "next"
+                  :export "value"
+                  :arguments (js-array)))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "version-two")))))
+                :toMatchObject (js-object :ok false :error (js-object :code "module-version-changed")))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "missing"
+                  :module modulePath
+                  :export "absent"
+                  :arguments (js-array)))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "missing")))))
+                :toMatchObject (js-object :ok false :error (js-object :code "missing-export")))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "missing-portable"
+                  :module modulePath
+                  :operation "absent"
+                  :arguments (js-array)))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "missing-portable")))))
+                :toMatchObject (js-object :ok false :error (js-object :code "missing-portable")))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "inherited-portable"
+                  :module modulePath
+                  :operation "toString"
+                  :arguments (js-array)))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "inherited-portable")))))
+                :toMatchObject (js-object :ok false :error (js-object :code "missing-portable")))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "cancel-me"
+                  :module modulePath
+                  :export "delayed_echo"
+                  :arguments (js-array "late" 5000)))
+              (js-call (expect (await (js-call client :next
+                                        (lambda (message)
+                                          (and (= (get message :type) "progress")
+                                               (= (get message :id) "cancel-me"))))))
+                :toMatchObject (js-object :value (js-object :stage "started")))
+              (js-call client :send (js-object :version 1 :type "cancel" :id "cancel-me"))
+              (js-call (expect (await (js-call client :next
+                                        (lambda (message)
+                                          (and (= (get message :type) "cancel")
+                                               (= (get message :id) "cancel-me"))))))
+                :toMatchObject (js-object :accepted t))
+              (js-call (expect (await (js-call client :next
+                                        (lambda (message)
+                                          (and (= (get message :type) "response")
+                                               (= (get message :id) "cancel-me"))))))
+                :toMatchObject (js-object :ok false :error (js-object :code "cancelled")))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "time-out"
+                  :module modulePath
+                  :export "delayed_echo"
+                  :arguments (js-array "late" 5000)
+                  :timeoutMs 10))
+              (js-call (expect (await (js-call client :next
+                                        (lambda (message)
+                                          (and (= (get message :type) "response")
+                                               (= (get message :id) "time-out"))))))
+                :toMatchObject (js-object :ok false :error (js-object :code "timeout")))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "unserializable"
+                  :module modulePath
+                  :export "unserializable"
+                  :arguments (js-array)))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "unserializable")))))
+                :toMatchObject (js-object :ok false :error (js-object :code "serialization")))
+              (js-call client :send
+                (js-object
+                  :version 1
+                  :type "request"
+                  :id "noisy"
+                  :module modulePath
+                  :export "noisy_echo"
+                  :arguments (js-array "still framed")))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "noisy")))))
+                :toMatchObject (js-object :ok t :value "still framed"))
+              (let ((stopped (await (js-call client :close))))
+                (setq client undefined)
+                (js-call (expect (get stopped :exitCode)) :toBe 0)
+                (js-call (expect (get stopped :stderr)) :toContain "worker module log"))))
+          (finally
+            (when client
+              (js-call (get client :child) :kill)
+              (await (get (get client :child) :exited)))
+            (await (rm directory (js-object :recursive t :force t)))))))
+    20000))

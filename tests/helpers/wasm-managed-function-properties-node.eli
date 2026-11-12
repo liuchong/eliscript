@@ -1,0 +1,343 @@
+(module tests.helpers.wasm-managed-function-properties-node
+  (import "node:assert/strict" :default assert)
+
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defconst standard-error-own-names (js-array "length" "name" "prototype"))
+  (defconst error-stack-extensions (js-array "captureStackTrace" "stackTraceLimit" "prepareStackTrace"))
+  (defconst standard-restricted-descriptors
+    "[true,true,true,false,true,\"\",0,false,false,false,false,\"TypeError\",[\"argument\"]]")
+  (defconst well-known-symbol-names
+    (js-array "iterator" "toPrimitive" "match" "replace" "search" "split" "species"
+              "isConcatSpreadable" "toStringTag" "hasInstance" "asyncIterator"
+              "unscopables" "matchAll" "dispose" "asyncDispose"))
+  (defconst reflection-keys
+    (js-call (js-array "isFinite" "missing" "name" "length" "prototype" "caller" "arguments"
+                       "call" "apply" "bind" "constructor" "toString" "__proto__"
+                       "parseInt" "parseFloat" "fromCharCode" "fromCodePoint" "raw")
+             :concat well-known-symbol-names))
+  (defconst constant-names
+    (js-array "MAX_VALUE" "MIN_VALUE" "NaN" "NEGATIVE_INFINITY" "POSITIVE_INFINITY"
+              "MAX_SAFE_INTEGER" "MIN_SAFE_INTEGER" "EPSILON"))
+  (defconst integer-cases
+    (js-array
+      (js-array "-0" undefined)
+      (js-array (str (String/fromCharCode 65279 8192) "-000tail") 10)
+      (js-array "1e9" 10)
+      (js-array "0xFFG" undefined)
+      (js-array "+0xF" 16)
+      (js-array "-0xF" 0)
+      (js-array "0b11" 0)
+      (js-array "zzz" 36)
+      (js-array "z" 35)
+      (js-array "900719925474099267" 10)
+      (js-array (js-call "9" :repeat 400) 10)
+      (js-array ".5" 10)
+      (js-array "101" 2)
+      (js-array "11" -4294967294)
+      (js-array "11" 4294967298)
+      (js-array "11" 2.9)
+      (js-array "" 0)
+      (js-array t 16)
+      (js-array nil 36)
+      (js-array undefined 36)))
+  (defconst float-cases
+    (js-array "-0" "-0xFF" "1e+bad" "1.e+2" ".5tail" "NaN" "+Infinityxyz" "-Infinity" "infinity"
+              (js-call "9" :repeat 400)
+              (str (String/fromCharCode 65279 8192) "-3.5tail")
+              "2.2250738585072014e-308text"
+              "4.9406564584124654e-324 trailing"
+              "1.00000000000000011102230246251565404236316680908203125tail"))
+
+  (defun norm (value owner)
+    (cond
+      ((undefined? value) (js-array "undefined"))
+      ((nil? value) (js-array "null"))
+      ((= (value-type value) "function")
+       (js-array "function" (get value :name) (get value :length)
+                 (Object/hasOwn value "prototype")
+                 (Object/is value (get globalThis.Function :prototype))))
+      ((= (value-type value) "object")
+       (js-array "object" (Object/is value (get owner :prototype))))
+      ((= (value-type value) "symbol")
+       (js-array "symbol" (globalThis.String value)))
+      (t (js-array "value" value))))
+
+  (defun record-num (value)
+    (if (Number/isNaN value)
+      (js-object :nan t)
+      (let* ((bytes (new globalThis.ArrayBuffer 8))
+             (view (new globalThis.DataView bytes)))
+        (js-call view :setFloat64 0 value t)
+        (js-object :words (js-array (js-call view :getUint32 0 t) (js-call view :getUint32 4 t))))))
+
+  (defasync run-node-oracle (module-url)
+    ;; Observe one realm without invoking its restricted accessors. Keep output
+    ;; bounded and assign identities locally instead of printing function source.
+    (let* ((initial-function globalThis.Function)
+           (initial-function-prototype (get globalThis.Function :prototype))
+           (own-descriptor Object/getOwnPropertyDescriptor)
+           (is-extensible Object/isExtensible)
+           (restricted-identities (new globalThis.WeakMap))
+           (restricted-snapshots (js-array))
+           (next-restricted-identity 1)
+           (restricted-identity
+             (lambda (value)
+               (if (or (nil? value)
+                       (and (/= (value-type value) "function")
+                            (/= (value-type value) "object")))
+                 nil
+                 (progn
+                   (unless (js-call restricted-identities :has value)
+                     (js-call restricted-identities :set value next-restricted-identity)
+                     (setq next-restricted-identity (1+ next-restricted-identity)))
+                   (js-call restricted-identities :get value)))))
+           (restricted-function
+             (lambda (value)
+               (if (/= (value-type value) "function")
+                 (js-object :type (value-type value) :id (funcall restricted-identity value))
+                 (let ((name (funcall own-descriptor value "name"))
+                       (len (funcall own-descriptor value "length")))
+                   (js-object
+                     :id (funcall restricted-identity value)
+                     :name (if (undefined? name) undefined (get name :value))
+                     :length (if (undefined? len) undefined (get len :value))
+                     :extensible (funcall is-extensible value)
+                     :prototypeOwn (not (undefined? (funcall own-descriptor value "prototype")))
+                     :nameFlags (if (undefined? name) undefined (js-array (get name :writable) (get name :enumerable) (get name :configurable)))
+                     :lengthFlags (if (undefined? len) undefined (js-array (get len :writable) (get len :enumerable) (get len :configurable))))))))
+           (restricted-snapshot
+             (lambda (stage)
+               (funcall assert (< (js-length restricted-snapshots) 48) "bounded restricted-accessor observations")
+               (let* ((prototype (get globalThis.Function :prototype))
+                      (caller (funcall own-descriptor prototype "caller"))
+                      (args (funcall own-descriptor prototype "arguments"))
+                      (desc-fn (lambda (d)
+                                 (if (undefined? d)
+                                   nil
+                                   (js-object :enumerable (get d :enumerable)
+                                              :configurable (get d :configurable)
+                                              :getter (funcall restricted-function (get d :get))
+                                              :setter (funcall restricted-function (get d :set))))))
+                      (observation (js-object
+                                     :stage stage
+                                     :functionUnchanged (Object/is globalThis.Function initial-function)
+                                     :prototypeUnchanged (Object/is prototype initial-function-prototype)
+                                     :caller (funcall desc-fn caller)
+                                     :arguments (funcall desc-fn args))))
+                 (js-call restricted-snapshots :push observation)
+                 (js-call (get globalThis.process :stderr) :write
+                   (str "[restricted-accessor-realm] " (JSON/stringify observation) "\n")))))
+           (env (get globalThis.process :env))
+           (versions (get globalThis.process :versions))
+           (release (get globalThis.process :release))
+           (node-options (let ((opt (get env :NODE_OPTIONS))) (if (nullish? opt) "" opt))))
+      (js-call (get globalThis.process :stderr) :write
+        (str "[restricted-accessor-environment] "
+             (JSON/stringify
+               (js-object
+                 :node (get versions :node)
+                 :bun (let ((b (get versions :bun))) (if b b nil))
+                 :v8 (get versions :v8)
+                 :release (if (nullish? release) undefined (get release :name))
+                 :nodeOptionsPresent (/= (js-length node-options) 0)
+                 :preloadOptionPresent (js-call (new globalThis.RegExp "--(?:require|import)(?:=|\\s)") :test node-options)
+                 :loaderOptionPresent (js-call (new globalThis.RegExp "--(?:experimental-)?loader(?:=|\\s)") :test node-options)
+                 :nodePathPresent (globalThis.Boolean (get env :NODE_PATH))))
+             "\n"))
+      (funcall restricted-snapshot "before-generated-module-import")
+      (let* ((m (await (funcall dynamic-import module-url)))
+             (_ (funcall restricted-snapshot "after-generated-module-import"))
+             (constructors (js-array globalThis.Number globalThis.String globalThis.Symbol globalThis.Error (get globalThis.Number :isFinite)))
+             (result (js-array))
+             (mode 0))
+        (while (< mode (js-length constructors))
+          (let ((owner (aref constructors mode))
+                (fields (Object/create nil))
+                (k-idx 0))
+            (while (< k-idx (js-length reflection-keys))
+              (let* ((key (aref reflection-keys k-idx))
+                     (reading (try (js-array "value" (norm (get owner key) owner))
+                                (catch error (js-array "throw" (get error :name)))))
+                     (d (Object/getOwnPropertyDescriptor owner key))
+                     (descriptor (if (undefined? d)
+                                   (js-array "undefined")
+                                   (js-array "descriptor" (Object/hasOwn d "value") (norm (get d :value) owner)
+                                             (get d :writable) (get d :enumerable) (get d :configurable)
+                                             (norm (get d :get) owner) (norm (get d :set) owner)))))
+                (put fields key (JSON/stringify (js-array reading (Object/hasOwn owner key) (Object/hasOwn owner key) descriptor)))
+                (js-call assert :equal (js-call m :reflection_snapshot mode key) (get fields key) (str mode "/" key)))
+              (setq k-idx (1+ k-idx)))
+            (let ((shape (JSON/stringify
+                           (js-array (Object/keys owner)
+                                     (Object/getOwnPropertyNames owner)
+                                     (js-call (Object/getOwnPropertySymbols owner) :map globalThis.String)
+                                     (Object/is (Object/getPrototypeOf owner) (get globalThis.Function :prototype))
+                                     (norm (Object/getPrototypeOf owner) owner)))))
+              (js-call assert :equal (js-call m :reflection_shape mode) shape (str "shape/" mode))
+              (js-call result :push (js-object :fields fields :shape shape))
+              (funcall restricted-snapshot (str "after-builtin-reflection/" mode))))
+          (setq mode (1+ mode)))
+        (let ((error-extensions (js-object :completeOwnNames (Object/getOwnPropertyNames globalThis.Error)
+                                           :fields (Object/create nil)
+                                           :unclassifiedOwnNames (js-array))))
+          (js-call error-stack-extensions :forEach
+            (lambda (key)
+              (let* ((d (Object/getOwnPropertyDescriptor globalThis.Error key))
+                     (reading (try (js-array "value" (norm (get globalThis.Error key) globalThis.Error))
+                                (catch error (js-array "throw" (get error :name)))))
+                     (descriptor (if (undefined? d)
+                                   (js-array "undefined")
+                                   (js-array "descriptor" (Object/hasOwn d "value") (norm (get d :value) globalThis.Error)
+                                             (get d :writable) (get d :enumerable) (get d :configurable)
+                                             (norm (get d :get) globalThis.Error) (norm (get d :set) globalThis.Error)))))
+                (put (get error-extensions :fields) key
+                  (JSON/stringify (js-array reading (Object/hasOwn globalThis.Error key) (Object/hasOwn globalThis.Error key) descriptor)))
+                (js-call assert :equal (js-call m :reflection_snapshot 3 key) (get (get error-extensions :fields) key)
+                  (str "Node extension/" key)))))
+          ;; Keep every host key: classification never changes the full Node shape above.
+          (js-call (get error-extensions :completeOwnNames) :forEach
+            (lambda (key)
+              (when (and (not (js-call standard-error-own-names :includes key))
+                         (not (js-call error-stack-extensions :includes key)))
+                (js-call (get error-extensions :unclassifiedOwnNames) :push key))))
+          (js-call standard-error-own-names :forEach
+            (lambda (key)
+              (let ((d (Object/getOwnPropertyDescriptor globalThis.Error key)))
+                (js-call assert :equal (get d :enumerable) false)
+                (js-call assert :equal (get d :configurable) (/= key "prototype"))
+                (js-call assert :equal (get d :writable) false))))
+          (js-call assert :equal (get globalThis.Error :length) 1)
+          (js-call assert :equal (get globalThis.Error :name) "Error")
+          (js-call assert :equal (Object/getPrototypeOf globalThis.Error) (get globalThis.Function :prototype))
+          (js-call assert :deepEqual (js-call m :error_stack_observation) (js-array "value" "string"))
+          (funcall restricted-snapshot "after-error-stack-observation")
+          (let* ((effects (js-array "[12,[\"get\",\"argument\",[\"call\",true]]]"
+                                    "[\"same getter error\",[\"get\"]]"
+                                    "[\"TypeError\",[\"get\",\"argument\"]]"))
+                 (_1 (begin-effects effects m restricted-snapshot))
+                 (ints (js-call integer-cases :map
+                         (lambda (pair)
+                           (let* ((a (aref pair 0))
+                                  (b (aref pair 1))
+                                  (expected (js-call globalThis.Number :parseInt a b)))
+                             (funcall assert (Object/is (js-call m :static_number 0 a b) expected))
+                             (record-num expected)))))
+                 (_2 (funcall restricted-snapshot "after-integer-parsing"))
+                 (floats (js-call float-cases :map
+                           (lambda (input)
+                             (let ((expected (js-call globalThis.Number :parseFloat input)))
+                               (funcall assert (Object/is (js-call m :static_number 1 input) expected))
+                               (record-num expected)))))
+                 (_3 (funcall restricted-snapshot "after-float-parsing"))
+                 (static-order (js-array "[-255,[\"extra\",\"input:string\",\"radix:number\"]]"
+                                         "[true,[\"extra\",\"input:string\"]]"
+                                         "[true,[\"extra\",\"input:string\",\"radix:number\"]]"))
+                 (raw-order (js-array "[\"AXBYC\",[\"raw\",\"length\",\"0\",\"first:string\",\"1\",\"second:string\",\"2\"]]"
+                                      "[true,[\"raw\"]]"
+                                      "[\"\",[\"raw\",\"length\"]]"
+                                      "[true,[\"raw\",\"length\",\"0\",\"first:string\"]]")))
+            (js-call static-order :forEach
+              (lambda (expected-str idx)
+                (js-call assert :equal (js-call m :static_order idx) expected-str)
+                (funcall restricted-snapshot (str "after-static-order/" idx))))
+            (js-call raw-order :forEach
+              (lambda (expected-str idx)
+                (js-call assert :equal (js-call m :raw_order idx) expected-str)
+                (funcall restricted-snapshot (str "after-raw-order/" idx))))
+            (let ((constants (js-call constant-names :map
+                               (lambda (key)
+                                 (let ((expected (get globalThis.Number key)))
+                                   (funcall assert (Object/is (js-call m :static_constant key) expected))
+                                   (record-num expected))))))
+              (funcall restricted-snapshot "after-number-constants")
+              (let ((code-effects (js-array "[\"A😀\",[\"first:number\",\"second:number\"]]"
+                                            "[true,[\"first:number\"]]")))
+                (js-call code-effects :forEach
+                  (lambda (expected-str idx)
+                    (js-call assert :equal (js-call m :code_effects idx) expected-str)
+                    (funcall restricted-snapshot (str "after-code-effects/" idx))))
+                (js-call well-known-symbol-names :forEach
+                  (lambda (key index)
+                    (let ((symbol (get globalThis.Symbol key))
+                          (descriptor (Object/getOwnPropertyDescriptor globalThis.Symbol key))
+                          (object (js-object)))
+                      (js-call assert :equal (value-type symbol) "symbol" key)
+                      (js-call assert :equal (js-call m :symbol_static index) symbol key)
+                      (js-call assert :equal (js-call m :symbol_dynamic key) symbol key)
+                      (js-call assert :equal (js-call m :symbol_alias key) symbol key)
+                      (js-call assert :equal (js-call m :symbol_description symbol) (get symbol :description))
+                      (js-call assert :equal (js-call m :symbol_text symbol) (globalThis.String symbol))
+                      (js-call assert :equal (js-call m :symbol_key_for symbol) undefined)
+                      (js-call assert :equal (get descriptor :value) symbol)
+                      (js-call assert :equal (get descriptor :writable) false)
+                      (js-call assert :equal (get descriptor :enumerable) false)
+                      (js-call assert :equal (get descriptor :configurable) false)
+                      (funcall assert (Object/is (js-call m :symbol_key object symbol -0.0) -0.0))
+                      (js-call assert :deepEqual (js-call m :symbol_own_keys object) (js-array symbol)))))
+                (funcall restricted-snapshot "after-well-known-symbols")
+                (let ((restricted (js-call m :restricted_descriptors)))
+                  (funcall restricted-snapshot "after-restricted-descriptors")
+                  (let* ((fn-proto (get globalThis.Function :prototype))
+                         (caller (Object/getOwnPropertyDescriptor fn-proto "caller"))
+                         (arguments-descriptor (Object/getOwnPropertyDescriptor fn-proto "arguments"))
+                         (getter (get caller :get))
+                         (trace (js-array))
+                         (outcome undefined))
+                    (try (funcall getter (progn (js-call trace :push "argument") 9))
+                      (catch error (setq outcome (get error :name))))
+                    (let ((restricted-host
+                            (JSON/stringify
+                              (js-array (Object/is getter (get caller :set))
+                                        (Object/is getter (get arguments-descriptor :get))
+                                        (Object/is getter (get arguments-descriptor :set))
+                                        (get caller :enumerable)
+                                        (get caller :configurable)
+                                        (get getter :name)
+                                        (get getter :length)
+                                        (Object/isExtensible getter)
+                                        (Object/hasOwn getter "prototype")
+                                        (get (Object/getOwnPropertyDescriptor getter "name") :configurable)
+                                        (get (Object/getOwnPropertyDescriptor getter "length") :configurable)
+                                        outcome
+                                        trace))))
+                      (js-call assert :equal restricted restricted-host)
+                      (funcall restricted-snapshot "after-direct-restricted-host-observation")
+                      (let ((aliases "[[true,true],true,true,true,true,77,10,1.5,null]")
+                            (shadow "[88,1,\"shadow\",\"A\"]"))
+                        (js-call assert :equal (js-call m :parser_aliases) aliases)
+                        (funcall restricted-snapshot "after-parser-aliases")
+                        (js-call assert :equal (js-call m :static_shadow) shadow)
+                        (funcall restricted-snapshot "after-static-shadow")
+                        (js-call globalThis.console :log
+                          (JSON/stringify
+                            (js-object
+                              :builtins result
+                              :errorExtensions error-extensions
+                              :effects effects
+                              :ints ints
+                              :floats floats
+                              :staticOrder static-order
+                              :rawOrder raw-order
+                              :restricted restricted
+                              :restrictedStandard standard-restricted-descriptors
+                              :restrictedSnapshots restricted-snapshots
+                              :constants constants
+                              :codeEffects code-effects
+                              :aliases aliases
+                              :shadow shadow))))))))))))))
+
+  (defun begin-effects (effects m restricted-snapshot)
+    (js-call effects :forEach
+      (lambda (expected-str idx)
+        (js-call assert :equal (js-call m :reflection_effects idx) expected-str)
+        (funcall restricted-snapshot (str "after-reflection-effects/" idx)))))
+
+  (let* ((argv (get globalThis.process :argv))
+         (idx (js-call argv :indexOf "--run-oracle")))
+    (when (>= idx 0)
+      (js-call (run-node-oracle (aref argv (1+ idx)))
+               :catch (lambda (err) (js-call globalThis.console :error err) (js-call globalThis.process :exit 1)))))
+
+  (export standard-error-own-names error-stack-extensions standard-restricted-descriptors
+          well-known-symbol-names reflection-keys constant-names integer-cases float-cases))

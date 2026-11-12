@@ -1,2 +1,254 @@
-(module capsules.tools.compiler.experiments.private-counter
-  (js* "// Deferred experiment, deliberately excluded from make test. No counter\n// optimization is implemented or accepted. Run manually with Bun; the default\n// ends at the still-Red code-shape contract. --semantics-only runs its reusable\n// oracles without claiming that specialization or performance has passed.\nimport assert from 'node:assert/strict';\nimport {mkdtemp,readFile,writeFile,rm,readdir,mkdir} from 'node:fs/promises';\nimport {resolve,dirname} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {pathToFileURL,fileURLToPath} from 'node:url';\nimport {spawnSync} from 'node:child_process';\n\nconst root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');\nassert(process.argv.slice(2).every(arg=>arg==='--semantics-only'),'unknown experiment argument');\nconst source=String.raw`\n(defun scan (values trace)\n  (let ((index 0))\n    (while (< index (get values :length))\n      (when (> index 0) (js-call trace :push index))\n      (setq index (1+ index))) index))\n(defun fixed (trace)\n  (let ((index 0)) (while (< index 3) (js-call trace :push index) (setq index (+ index 1))) index))\n(defun captured (values trace install)\n  (let ((index 0)) (funcall install (lambda (value) (setq index value)))\n    (while (< index (get values :length)) (js-call trace :push index) (setq index (1+ index))) index))\n(defun changed (values trace)\n  (let ((index 0)) (setq index \"0\")\n    (while (< index (get values :length)) (js-call trace :push index) (setq index (1+ index))) index))\n(defun raw (values trace)\n  (let ((index 0)) (js* \"void index\")\n    (while (< index (get values :length)) (js-call trace :push index) (setq index (1+ index))) index))\n(defun shadow (values trace)\n  (let ((index 0)) (let ((index \"1\")) (js-call trace :push (< index (get values :length))))\n    (while (< index (get values :length)) (js-call trace :push index) (setq index (1+ index))) index))\n(defvar outside-index \"2\")\n(defun outside (trace)\n  (js-call trace :push (< outside-index \"10\"))\n  (let ((outside-index 0)) (while (< outside-index 2) (js-call trace :push outside-index) (setq outside-index (1+ outside-index))))\n  (< outside-index \"10\"))\n(defun effectful-bound (trace)\n  (let ((index 0)) (js-call trace :push (< index (progn (setq index 2) 1))) index))\n(defasync asynchronous (values trace)\n  (let ((index 0)) (while (< index (await values)) (js-call trace :push index) (setq index (1+ index))) index))\n(export scan fixed captured changed raw shadow outside effectful-bound asynchronous)`;\nfunction nativeScan(values,trace){let index=0;while(index<values.length){if(index>0)trace.push(index);index=index+1;}return index;}\nfunction body(code,name){const start=code.indexOf('function '+name+'('),next=code.indexOf('\\nfunction ',start+1);assert(start>=0,name);return code.slice(start,next<0?undefined:next);}\nasync function check(m){\n  for(const length of[0,-0,-2,1,3,3.5,NaN,'3',null,undefined,3n]){\n    const actual=[],expected=[];\n    assert.equal(m.scan({length},actual),nativeScan({length},expected));\n    assert.deepEqual(actual,expected);\n  }\n  const build=()=>{let reads=0;const events=[];return{events,value:{get length(){events.push('length');return{[Symbol.toPrimitive](hint){events.push(hint);return reads++<3?3:0;}};}}};};\n  const a=build(),b=build(),ta=[],tb=[];\n  assert.equal(m.scan(a.value,ta),nativeScan(b.value,tb));\n  assert.deepEqual(a.events,b.events);assert.deepEqual(ta,tb);\n  let reads=0;assert.equal(m.scan({get length(){reads++;return 3;}},[]),3);assert.equal(reads,4);\n  const marker={};assert.throws(()=>m.scan({get length(){throw marker;}},[]),e=>e===marker);\n  assert.throws(()=>m.scan({length:Symbol('x')},[]),TypeError);\n  const trace=[];assert.equal(m.fixed(trace),3);assert.deepEqual(trace,[0,1,2]);\n  let set;const captured=[];\n  // On the last test the left operand is already 3 before the getter resets\n  // index to 2. The comparison fails and the function therefore returns 2.\n  assert.equal(m.captured({get length(){set(2);return 3;}},captured,fn=>{set=fn;}),2);\n  assert.deepEqual(captured,[2]);\n  const changed=[];assert.equal(m.changed({length:3},changed),'011');assert.deepEqual(changed,['0','01']);\n  const raw=[];assert.equal(m.raw({length:2},raw),2);assert.deepEqual(raw,[0,1]);\n  const shadow=[];assert.equal(m.shadow({length:2},shadow),2);assert.deepEqual(shadow,[true,0,1]);\n  const outside=[];assert.equal(m.outside(outside),false);assert.deepEqual(outside,[false,0,1]);\n  const effects=[];assert.equal(m.effectful_bound(effects),2);assert.deepEqual(effects,[true]);\n  const log=[];assert.equal(await m.asynchronous(Promise.resolve(2),log),2);assert.deepEqual(log,[0,1]);\n  for(const length of['-0x100000000000000000000000000000001','-1e300','0b0000'])assert.equal(m.scan({length},[]),nativeScan({length},[]));\n}\n\nconst directory=await mkdtemp(resolve(tmpdir(),'eliscript-counter-experiment-'));\ntry {\n  const bootstrap=resolve(directory,'compiler');\n  const build=spawnSync(resolve(root,'bin/eliscript-bootstrap'),[],{cwd:root,encoding:'utf8',timeout:30000,env:{...process.env,ELISCRIPT_BOOTSTRAP_OUT_DIR:bootstrap}});\n  assert.equal(build.status,0,build.stderr);\n  let compiler=await import(pathToFileURL(resolve(bootstrap,'compiler.mjs')).href);\n  const input=resolve(directory,'counter.eli'),output=resolve(directory,'counter.mjs');\n  await writeFile(input,source);\n  const seed=spawnSync(resolve(root,'bin/eliscript-seed'),['--output',output,input],{cwd:root,encoding:'utf8',timeout:30000});\n  assert.equal(seed.status,0,seed.stderr);\n  const code=compiler.compile_string(source,input);\n  assert.equal(await readFile(output,'utf8'),code);\n  await check(await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64')));\n  for(const name of['captured','changed','raw','shadow','outside','effectful_bound','asynchronous'])assert(body(code,name).includes('__eliscript_numeric_relation('),name+' must retain its original conversion path');\n  for(const host of['node','bun']){\n    const child=spawnSync(host,['--input-type=module','-e',`import assert from 'node:assert/strict';const m=await import(process.argv[1]);${nativeScan.toString()}\\nawait (${check.toString()})(m);`,pathToFileURL(output).href],{cwd:root,encoding:'utf8',timeout:30000});\n    assert.equal(child.status,0,host+': '+child.stderr);\n  }\n  const files=(await readdir(resolve(root,'bootstrap/compiler'))).filter(file=>file.endsWith('.eli')).sort();assert.equal(files.length,13);\n  let previous;\n  for(let generation=0;generation<3;generation++){\n    assert.equal(compiler.compile_string(source,input),code);\n    const out=resolve(directory,'g'+generation);await mkdir(out);const artifacts=[];\n    for(const file of files){const filename=resolve(root,'bootstrap/compiler',file),text=await readFile(filename,'utf8'),target=file.replace(/\\.eli$/,'.mjs'),result=compiler.compile_string_with_source_map(text,filename,target,file);artifacts.push([file,result.javascript,result.sourceMap]);await writeFile(resolve(out,target),result.javascript);}\n    if(previous)assert.deepEqual(artifacts,previous);previous=artifacts;\n    compiler=await import(pathToFileURL(resolve(out,'compiler.mjs')).href);\n  }\n  console.log('EXPERIMENT ONLY: semantic, Node/Bun, Seed and three-generation checks passed; specialization and performance remain unaccepted.');\n  if(!process.argv.includes('--semantics-only')){\n    assert.match(body(code,'scan'),/typeof __eliscript_value_\\d+ === \"number\"/,'PENDING / NOT IMPLEMENTED: guarded private-counter dynamic bound');\n    assert.match(body(code,'scan'),/if \\(\\(index > 0\\)\\)/,'PENDING / NOT IMPLEMENTED: direct proven Number comparison');\n    assert(!body(code,'fixed').includes('__eliscript_numeric_relation'),'PENDING / NOT IMPLEMENTED: private Number loop');\n  }\n} finally {\n  await rm(directory,{recursive:true,force:true});\n}\n"))
+(module tools.compiler.experiments.private-counter
+  ;; Deferred experiment, deliberately excluded from make test. No counter
+  ;; optimization is implemented or accepted. Run manually with Bun; the default
+  ;; ends at the still-Red code-shape contract. --semantics-only runs its reusable
+  ;; oracles without claiming that specialization or performance has passed.
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile writeFile rm readdir mkdir)
+  (import "node:path" resolve dirname)
+  (import "node:os" tmpdir)
+  (import "node:url" pathToFileURL fileURLToPath)
+  (import "node:child_process" spawnSync)
+
+  (defconst self-file (fileURLToPath (js* "import.meta.url")))
+  (defconst root (resolve (dirname self-file) "../../.."))
+
+  (defconst source
+    (str
+      "\n(defun scan (values trace)"
+      "\n  (let ((index 0))"
+      "\n    (while (< index (get values :length))"
+      "\n      (when (> index 0) (js-call trace :push index))"
+      "\n      (setq index (1+ index))) index))"
+      "\n(defun fixed (trace)"
+      "\n  (let ((index 0)) (while (< index 3) (js-call trace :push index) (setq index (+ index 1))) index))"
+      "\n(defun captured (values trace install)"
+      "\n  (let ((index 0)) (funcall install (lambda (value) (setq index value)))"
+      "\n    (while (< index (get values :length)) (js-call trace :push index) (setq index (1+ index))) index))"
+      "\n(defun changed (values trace)"
+      "\n  (let ((index 0)) (setq index \"0\")"
+      "\n    (while (< index (get values :length)) (js-call trace :push index) (setq index (1+ index))) index))"
+      "\n(defun raw (values trace)"
+      "\n  (let ((index 0)) (js* \"void index\")"
+      "\n    (while (< index (get values :length)) (js-call trace :push index) (setq index (1+ index))) index))"
+      "\n(defun shadow (values trace)"
+      "\n  (let ((index 0)) (let ((index \"1\")) (js-call trace :push (< index (get values :length))))"
+      "\n    (while (< index (get values :length)) (js-call trace :push index) (setq index (1+ index))) index))"
+      "\n(defvar outside-index \"2\")"
+      "\n(defun outside (trace)"
+      "\n  (js-call trace :push (< outside-index \"10\"))"
+      "\n  (let ((outside-index 0)) (while (< outside-index 2) (js-call trace :push outside-index) (setq outside-index (1+ outside-index))))"
+      "\n  (< outside-index \"10\"))"
+      "\n(defun effectful-bound (trace)"
+      "\n  (let ((index 0)) (js-call trace :push (< index (progn (setq index 2) 1))) index))"
+      "\n(defasync asynchronous (values trace)"
+      "\n  (let ((index 0)) (while (< index (await values)) (js-call trace :push index) (setq index (1+ index))) index))"
+      "\n(export scan fixed captured changed raw shadow outside effectful-bound asynchronous)"))
+
+  (defun native-scan (values trace)
+    (let ((index 0))
+      (while (< index (get values :length))
+        (when (> index 0)
+          (js-call trace :push index))
+        (setq index (+ index 1)))
+      index))
+
+  (defun body (code name)
+    (let* ((start (js-call code :indexOf (str "function " name "(")))
+           (next (js-call code :indexOf "\nfunction " (+ start 1))))
+      (funcall assert (>= start 0) name)
+      (js-call code :slice start (if (< next 0) undefined next))))
+
+  (defun make-getter-object (getter)
+    (let ((obj (js-object)))
+      (Object/defineProperty obj "length"
+        (js-object :get getter :enumerable t :configurable t))
+      obj))
+
+  (defasync check (m)
+    (let ((lengths (js-array 0 -0 -2 1 3 3.5 globalThis.NaN "3" nil undefined (globalThis.BigInt 3)))
+          (idx 0))
+      (while (< idx (js-length lengths))
+        (let ((length (aref lengths idx))
+              (actual (js-array))
+              (expected (js-array)))
+          (js-call assert :equal
+            (js-call m :scan (js-object :length length) actual)
+            (native-scan (js-object :length length) expected))
+          (js-call assert :deepEqual actual expected))
+        (setq idx (+ idx 1))))
+    (let* ((build
+             (lambda ()
+               (let ((reads 0)
+                     (events (js-array)))
+                 (js-object
+                   :events events
+                   :value (make-getter-object
+                            (lambda ()
+                              (js-call events :push "length")
+                              (let ((prim (js-object)))
+                                (put prim (get globalThis.Symbol :toPrimitive)
+                                  (lambda (hint)
+                                    (js-call events :push hint)
+                                    (let ((current reads))
+                                      (setq reads (+ reads 1))
+                                      (if (< current 3) 3 0))))
+                                prim)))))))
+           (a (funcall build))
+           (b (funcall build))
+           (ta (js-array))
+           (tb (js-array)))
+      (js-call assert :equal (js-call m :scan (get a :value) ta) (native-scan (get b :value) tb))
+      (js-call assert :deepEqual (get a :events) (get b :events))
+      (js-call assert :deepEqual ta tb))
+    (let ((reads 0))
+      (js-call assert :equal
+        (js-call m :scan (make-getter-object (lambda () (setq reads (+ reads 1)) 3)) (js-array))
+        3)
+      (js-call assert :equal reads 4))
+    (let ((marker (js-object)))
+      (js-call assert :throws
+        (lambda () (js-call m :scan (make-getter-object (lambda () (throw marker))) (js-array)))
+        (lambda (e) (= e marker))))
+    (js-call assert :throws
+      (lambda () (js-call m :scan (js-object :length (globalThis.Symbol "x")) (js-array)))
+      globalThis.TypeError)
+    (let ((trace (js-array)))
+      (js-call assert :equal (js-call m :fixed trace) 3)
+      (js-call assert :deepEqual trace (js-array 0 1 2)))
+    (let ((set-fn undefined)
+          (captured (js-array)))
+      ;; On the last test the left operand is already 3 before the getter resets
+      ;; index to 2. The comparison fails and the function therefore returns 2.
+      (js-call assert :equal
+        (js-call m :captured
+          (make-getter-object (lambda () (funcall set-fn 2) 3))
+          captured
+          (lambda (fn) (setq set-fn fn)))
+        2)
+      (js-call assert :deepEqual captured (js-array 2)))
+    (let ((changed (js-array)))
+      (js-call assert :equal (js-call m :changed (js-object :length 3) changed) "011")
+      (js-call assert :deepEqual changed (js-array "0" "01")))
+    (let ((raw (js-array)))
+      (js-call assert :equal (js-call m :raw (js-object :length 2) raw) 2)
+      (js-call assert :deepEqual raw (js-array 0 1)))
+    (let ((shadow (js-array)))
+      (js-call assert :equal (js-call m :shadow (js-object :length 2) shadow) 2)
+      (js-call assert :deepEqual shadow (js-array t 0 1)))
+    (let ((outside (js-array)))
+      (js-call assert :equal (js-call m :outside outside) false)
+      (js-call assert :deepEqual outside (js-array false 0 1)))
+    (let ((effects (js-array)))
+      (js-call assert :equal (js-call m :effectful_bound effects) 2)
+      (js-call assert :deepEqual effects (js-array t)))
+    (let ((log (js-array)))
+      (js-call assert :equal (await (js-call m :asynchronous (Promise/resolve 2) log)) 2)
+      (js-call assert :deepEqual log (js-array 0 1)))
+    (let ((string-lengths (js-array "-0x100000000000000000000000000000001" "-1e300" "0b0000"))
+          (idx 0))
+      (while (< idx (js-length string-lengths))
+        (let ((length (aref string-lengths idx)))
+          (js-call assert :equal
+            (js-call m :scan (js-object :length length) (js-array))
+            (native-scan (js-object :length length) (js-array))))
+        (setq idx (+ idx 1)))))
+
+  (defasync run-main ()
+    (let ((args (js-call (get globalThis.process :argv) :slice 2)))
+      (if (and (= (js-length args) 2)
+               (= (aref args 0) "--verify-module"))
+          (await (check (await (funcall (js* "(u) => import(u)") (aref args 1)))))
+        (progn
+          (funcall assert
+            (js-call args :every (lambda (arg) (= arg "--semantics-only")))
+            "unknown experiment argument")
+          (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-counter-experiment-")))))
+            (try
+              (let* ((bootstrap (resolve directory "compiler"))
+                     (build (spawnSync
+                              (resolve root "bin/eliscript-bootstrap")
+                              (js-array)
+                              (js-object
+                                :cwd root
+                                :encoding "utf8"
+                                :timeout 30000
+                                :env (Object/assign (js-object) (get globalThis.process :env)
+                                       (js-object :ELISCRIPT_BOOTSTRAP_OUT_DIR bootstrap))))))
+                (js-call assert :equal (get build :status) 0 (get build :stderr))
+                (let* ((compiler (await (funcall (js* "(u) => import(u)") (get (pathToFileURL (resolve bootstrap "compiler.mjs")) :href))))
+                       (input (resolve directory "counter.eli"))
+                       (output (resolve directory "counter.mjs")))
+                  (await (writeFile input source))
+                  (let ((seed (spawnSync
+                                (resolve root "bin/eliscript-seed")
+                                (js-array "--output" output input)
+                                (js-object :cwd root :encoding "utf8" :timeout 30000))))
+                    (js-call assert :equal (get seed :status) 0 (get seed :stderr)))
+                  (let ((code (js-call compiler :compile_string source input)))
+                    (js-call assert :equal (await (readFile output "utf8")) code)
+                    (await (check (await (funcall (js* "(u) => import(u)") (str "data:text/javascript;base64,"
+                                                         (js-call (Buffer/from code) :toString "base64"))))))
+                    (let ((names (js-array "captured" "changed" "raw" "shadow" "outside" "effectful_bound" "asynchronous"))
+                          (idx 0))
+                      (while (< idx (js-length names))
+                        (let ((name (aref names idx)))
+                          (funcall assert
+                            (js-call (body code name) :includes "__eliscript_numeric_relation(")
+                            (str name " must retain its original conversion path")))
+                        (setq idx (+ idx 1))))
+                    (let ((hosts (js-array "node" "bun"))
+                          (host-idx 0))
+                      (while (< host-idx (js-length hosts))
+                        (let* ((host (aref hosts host-idx))
+                               (child (spawnSync
+                                        host
+                                        (js-array self-file "--verify-module" (get (pathToFileURL output) :href))
+                                        (js-object :cwd root :encoding "utf8" :timeout 30000))))
+                          (js-call assert :equal (get child :status) 0 (str host ": " (get child :stderr))))
+                        (setq host-idx (+ host-idx 1))))
+                    (let* ((files (js-call (js-call (await (readdir (resolve root "bootstrap/compiler")))
+                                        :filter (lambda (file) (js-call file :endsWith ".eli")))
+                                     :sort))
+                           (previous undefined)
+                           (generation 0))
+                      (js-call assert :equal (js-length files) 13)
+                      (while (< generation 3)
+                        (js-call assert :equal (js-call compiler :compile_string source input) code)
+                        (let ((out (resolve directory (str "g" generation)))
+                              (artifacts (js-array))
+                              (file-idx 0))
+                          (await (mkdir out))
+                          (while (< file-idx (js-length files))
+                            (let* ((file (aref files file-idx))
+                                   (filename (resolve root "bootstrap/compiler" file))
+                                   (text (await (readFile filename "utf8")))
+                                   (target (js-call file :replace (new globalThis.RegExp "\\.eli$") ".mjs"))
+                                   (result (js-call compiler :compile_string_with_source_map text filename target file)))
+                              (js-call artifacts :push (js-array file (get result :javascript) (get result :sourceMap)))
+                              (await (writeFile (resolve out target) (get result :javascript))))
+                            (setq file-idx (+ file-idx 1)))
+                          (when previous
+                            (js-call assert :deepEqual artifacts previous))
+                          (setq previous artifacts)
+                          (setq compiler (await (funcall (js* "(u) => import(u)") (get (pathToFileURL (resolve out "compiler.mjs")) :href)))))
+                        (setq generation (+ generation 1))))
+                    (js-call globalThis.console :log
+                      "EXPERIMENT ONLY: semantic, Node/Bun, Seed and three-generation checks passed; specialization and performance remain unaccepted.")
+                    (when (not (js-call (get globalThis.process :argv) :includes "--semantics-only"))
+                      (js-call assert :match (body code "scan")
+                        (new globalThis.RegExp "typeof __eliscript_value_\\d+ === \"number\"")
+                        "PENDING / NOT IMPLEMENTED: guarded private-counter dynamic bound")
+                      (js-call assert :match (body code "scan")
+                        (new globalThis.RegExp "if \\(\\(index > 0\\)\\)")
+                        "PENDING / NOT IMPLEMENTED: direct proven Number comparison")
+                      (funcall assert
+                        (not (js-call (body code "fixed") :includes "__eliscript_numeric_relation"))
+                        "PENDING / NOT IMPLEMENTED: private Number loop")))))
+              (finally
+                (await (rm directory (js-object :recursive t :force t))))))))))
+
+  (when (js* "import.meta.main")
+    (run-main))
+
+  (export check native-scan))

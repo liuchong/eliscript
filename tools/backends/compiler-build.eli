@@ -104,6 +104,12 @@
         :memory (build-copy-properties (build-copy-properties (js-object) (get defaults :memory)) memory)
         :auto (build-nullish auto (get defaults :auto)))))
 
+  (defun compilerFunctionalRuntimeProfile (options)
+    (let ((profile (if (nullish? options) undefined (get options :functionalRuntimeProfile))))
+      (unless (or (undefined? profile) (= profile "small"))
+        (throw (new globalThis.TypeError "functionalRuntimeProfile must be small when explicitly supplied")))
+      profile))
+
   (defasync read-compiler-source (path)
     (js-call (new globalThis.TextDecoder "utf-8" (js-object :fatal t :ignoreBOM t))
       :decode (await (readFile path))))
@@ -140,8 +146,12 @@
                 :filename (+ (aref group 2) name))))
             (setq index (1+ index))))
         (setq group-index (1+ group-index)))
+      (js-call records :push (js-object :id "runtime/array-text.mjs" :filename "runtime/array-text.eli"))
+      (js-call records :push (js-object :id "runtime/errors.mjs" :filename "runtime/errors.eli"))
       (js-call records :push (js-object :id "runtime/math.mjs" :filename "runtime/math.eli"))
+      (js-call records :push (js-object :id "runtime/number-radix.mjs" :filename "runtime/number-radix.eli"))
       (js-call records :push (js-object :id "runtime/prelude.mjs" :filename "runtime/prelude.eli"))
+      (js-call records :push (js-object :id "runtime/primitives.mjs" :filename "runtime/primitives.eli"))
       (js-call records :push (js-object :id "runtime/unicode-case.mjs" :filename "runtime/unicode-case.eli"))
       (js-call records :push (js-object :id "runtime/unicode-case-data.mjs" :filename "runtime/unicode-case-data.eli"))
       (setq index 0)
@@ -209,8 +219,12 @@
     ;; symlink or caller package name participates in the compiler's imports.
     (let* ((path (resolve directory "package.json"))
            (text (str (JSON/stringify (js-object :name "eliscript" :type "module" :private t
-             :exports (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+             :exports (js-object "./runtime/array-text.mjs" "./runtime/array-text.mjs"
+               "./runtime/errors.mjs" "./runtime/errors.mjs"
+               "./runtime/math.mjs" "./runtime/math.mjs"
+               "./runtime/number-radix.mjs" "./runtime/number-radix.mjs"
                "./runtime/prelude.mjs" "./runtime/prelude.mjs"
+               "./runtime/primitives.mjs" "./runtime/primitives.mjs"
                "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
                "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs")) nil 2) "\n")))
       (try (await (writeFile path text (js-object :flag "wx")))
@@ -309,8 +323,8 @@
           (finally (try (await (js-call file :close))
             (catch error (unless failed (throw error)))))))))
 
-  (defasync write-owned-compiler-metadata (path value)
-    (let ((file (await (open path "w"))) (failed false))
+  (defasync write-owned-compiler-metadata (path value &optional hash exclusive)
+    (let ((file (await (open path (if exclusive "wx" "w")))) (failed false) (hashing t))
       (try
         (let* ((encoder (new globalThis.TextEncoder)) (bytes (new globalThis.Uint8Array 65536))
                (consume (lambda (chunk)
@@ -318,6 +332,8 @@
                    (while (< start (js-length chunk))
                      (let* ((result (compiler-metadata-utf8-block encoder bytes chunk start))
                             (written (get result :written)) (offset 0))
+                       (when (and hash hashing)
+                         (js-call hash :update (js-call bytes :subarray 0 written)))
                        (while (< offset written)
                          (let ((count (writeSync (get file :fd) bytes offset (- written offset))))
                            (unless (and (Number/isInteger count) (>= count 1) (<= count (- written offset)))
@@ -325,11 +341,19 @@
                            (setq offset (+ offset count))))
                        (setq start (+ start (get result :read)))))))))
           (forEachCompilerMetadataChunk value consume)
+          (setq hashing false)
           (funcall consume "\n")
           undefined)
         (catch error (setq failed t) (throw error))
         (finally (try (await (js-call file :close))
           (catch error (unless failed (throw error))))))))
+
+  ;; The caller owns an already detached graph. Keep the public writer's
+  ;; synchronous caller snapshot contract separate from this archive path.
+  (defasync writeOwnedCompilerMetadata (path value)
+    (let ((hash (createHash "sha256")))
+      (await (write-owned-compiler-metadata path value hash t))
+      (js-call hash :digest "hex")))
 
   (defun independentCompilerProductIdentity (input)
     (let* ((host (get input :host)) (native-target (get input :nativeTarget))
@@ -941,6 +965,6 @@
                       (funcall phase "artifact-metadata-complete")))
                   artifact))))))))
 
-  (export independentCompilerProfiles loadCompilerSources independentCompilerResources
-    decodeCompilerBinary compilerMetadataDigest writeCompilerMetadata
+  (export independentCompilerProfiles loadCompilerSources independentCompilerResources compilerFunctionalRuntimeProfile
+    decodeCompilerBinary compilerMetadataDigest writeCompilerMetadata writeOwnedCompilerMetadata
     independentCompilerProductIdentity buildIndependentCompiler))

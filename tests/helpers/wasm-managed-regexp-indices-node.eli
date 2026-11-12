@@ -1,0 +1,305 @@
+(module tests.helpers.wasm-managed-regexp-indices-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:process" :default process)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+
+  (defun call-rt (a name &rest __host_default_arguments_1)
+    (let* ((values (aref __host_default_arguments_1 0)))
+    (let* ((vals (if (undefined? values) (js-array) values))
+           (owned (js-array))
+           (args (js-call vals :map
+                   (lambda (value)
+                     (let ((ty (funcall js-typeof value)))
+                       (if (and (/= ty "string") (/= ty "number"))
+                           value
+                           (let ((boxed (if (= ty "string")
+                                            (js-call a :string value)
+                                            (js-call a :number value))))
+                             (js-call owned :push boxed)
+                             boxed)))))))
+      (try
+        (js-call a :invoke name args)
+        (finally
+          (js-call owned :forEach (lambda (v) (js-call a :release v))))))))
+
+  (defun text-call (a name &rest __host_forwarded_arguments_1)
+    (let* ((values (aref __host_forwarded_arguments_1 0)))
+    (let ((value (call-rt a name values)))
+      (try
+        (js-call a :readString value)
+        (finally
+          (js-call a :release value))))))
+
+  (defun discard (a name &rest __host_forwarded_arguments_2)
+    (let* ((values (aref __host_forwarded_arguments_2 0)))
+    (js-call a :release (call-rt a name values))))
+
+  (defun finish (a)
+    (try
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+      (finally
+        (let ((close-fn (get a :close)))
+          (when close-fn
+            (js-call a :close))))))
+
+  (defun matching (a js records)
+    (js-call records :forEach
+      (lambda (rec)
+        (let* ((pattern (aref rec 0))
+               (flags (aref rec 1))
+               (input (aref rec 2))
+               (regex (call-rt a "make" (js-array pattern flags)))
+               (result undefined))
+          (try
+            (setq result (call-rt a "exec" (js-array regex input)))
+            (let* ((original (js-call js :exec (js-call js :make pattern flags) input))
+                   (expected (js-call js :report original)))
+              (js-call assert :equal
+                (text-call a "report" (js-array result))
+                expected
+                (JSON/stringify (js-array pattern flags input)))
+              (if (and (not (nullish? original))
+                       (not (nullish? (get original :indices))))
+                  (let ((indices (get original :indices))
+                        (len (get original :length))
+                        (index 0))
+                    (funcall assert (Object/hasOwn original "indices"))
+                    (js-call assert :equal
+                      (Object/getPrototypeOf indices)
+                      (get globalThis.Array :prototype))
+                    (while (< index len)
+                      (funcall assert (Object/hasOwn indices index))
+                      (setq index (+ index 1)))
+                    (when (not (nullish? (get indices :groups)))
+                      (js-call assert :strictEqual
+                        (Object/getPrototypeOf (get indices :groups))
+                        nil)))
+                  (when (not (nullish? original))
+                    (js-call assert :equal (Object/hasOwn original "indices") false))))
+            (finally
+              (js-call a :release result)
+              (js-call a :release regex)
+              (js-call a :collect)
+              (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))))
+
+  (defun flags-and-accessor (a js)
+    (let ((literal (call-rt a "literal"))
+          (original (js-call js :literal))
+          (plain (call-rt a "plain"))
+          (clone undefined))
+      (try
+        (js-call assert :equal (text-call a "meta" (js-array literal)) (js-call js :meta original))
+        (js-call assert :equal (call-rt a "accessor" (js-array literal)) t)
+        (js-call assert :equal (call-rt a "accessor" (js-array plain)) false)
+        (discard a "last" (js-array literal 7))
+        (js-call js :last original 7)
+        (setq clone (call-rt a "clone" (js-array literal undefined)))
+        (let ((expected-clone (js-call js :clone original undefined)))
+          (js-call assert :equal (js-call a :keyEqual literal clone) false)
+          (js-call assert :equal
+            (text-call a "meta" (js-array clone))
+            (js-call js :meta expected-clone)))
+        (js-call (js-array "dygimu" "" "d") :forEach
+          (lambda (flags)
+            (let ((changed (call-rt a "clone" (js-array literal flags))))
+              (try
+                (js-call assert :equal
+                  (text-call a "meta" (js-array changed))
+                  (js-call js :meta (js-call js :clone original flags)))
+                (finally
+                  (js-call a :release changed))))))
+        (discard a "clear")
+        (js-call js :clear)
+        (js-call assert :equal
+          (text-call a "accessor-report" (js-array literal))
+          (js-call js :accessor_report original))
+        (js-call assert :equal (text-call a "trace") "[]")
+        (js-call assert :equal (js-call js :trace) "[]")
+        (js-call (js-array nil false undefined) :forEach
+          (lambda (invalid)
+            (js-call assert :throws
+              (lambda () (call-rt a "accessor" (js-array invalid)))
+              globalThis.TypeError)))
+        (js-call (js-array "dd" "dvx") :forEach
+          (lambda (flags)
+            (js-call assert :throws
+              (lambda () (call-rt a "make" (js-array "a" flags)))
+              globalThis.SyntaxError)))
+        (finally
+          (js-call a :release literal)
+          (js-call a :release plain)
+          (js-call a :release clone)))))
+
+  (defun stateful (a js)
+    (js-call (js-array "dg" "dy" "dgy") :forEach
+      (lambda (flags)
+        (let* ((pattern "(a)?")
+               (regex (call-rt a "make" (js-array pattern flags)))
+               (oracle (js-call js :make pattern flags)))
+          (try
+            (js-call (js-array -0 1 2 4) :forEach
+              (lambda (start)
+                (discard a "last" (js-array regex start))
+                (js-call js :last oracle start)
+                (let ((count 0))
+                  (while (< count 2)
+                    (let ((result (call-rt a "exec" (js-array regex "ba"))))
+                      (try
+                        (js-call assert :equal
+                          (text-call a "report" (js-array result))
+                          (js-call js :report (js-call js :exec oracle "ba")))
+                        (finally
+                          (js-call a :release result))))
+                    (js-call assert :equal
+                      (text-call a "meta" (js-array regex))
+                      (js-call js :meta oracle))
+                    (setq count (+ count 1))))))
+            (finally
+              (js-call a :release regex))))))
+    (js-call (js-array
+               (js-array "(?<x>a)?" "dg" "a")
+               (js-array "(.)" "dgu" "😀a")
+               (js-array "(a)" "dg" "aa"))
+      :forEach
+      (lambda (triple)
+        (let* ((pattern (aref triple 0))
+               (flags (aref triple 1))
+               (input (aref triple 2))
+               (regex (call-rt a "make" (js-array pattern flags)))
+               (oracle (js-call js :make pattern flags)))
+          (try
+            (js-call assert :equal
+              (text-call a "all" (js-array regex input))
+              (js-call js :all oracle input))
+            (js-call assert :equal
+              (text-call a "all" (js-array regex input))
+              (js-call js :all oracle input))
+            (js-call assert :equal
+              (text-call a "meta" (js-array regex))
+              (js-call js :meta oracle)
+              "matchAll owns an independent lastIndex")
+            (finally
+              (js-call a :release regex))))))
+    (let ((regex (call-rt a "make" (js-array "(a)" "dg")))
+          (oracle (js-call js :make "(a)" "dg")))
+      (try
+        (js-call assert :equal
+          (text-call a "independent" (js-array regex "aa"))
+          (js-call js :independent oracle "aa"))
+        (finally
+          (js-call a :release regex)))))
+
+  (defun retention (a js)
+    (let* ((regex (call-rt a "make" (js-array "(?<head>a)(b)?" "d")))
+           (oracle (js-call js :make "(?<head>a)(b)?" "d"))
+           (first (call-rt a "exec" (js-array regex "a")))
+           (expected-first (js-call js :exec oracle "a"))
+           (frame (js-call a :frame 2))
+           (second undefined))
+      (js-call a :frameSet frame 0 regex)
+      (js-call a :frameSet frame 1 first)
+      (try
+        (let ((saved (text-call a "report" (js-array first))))
+          (js-call a :collect)
+          (setq second (call-rt a "exec" (js-array regex "ab")))
+          (let ((expected-second (js-call js :exec oracle "ab")))
+            (js-call assert :equal (text-call a "report" (js-array first)) saved)
+            (js-call assert :equal (js-call a :keyEqual first second) false)
+            (let ((changed (call-rt a "change" (js-array first 17))))
+              (js-call a :release changed))
+            (js-call js :change expected-first 17)
+            (js-call a :collect)
+            (js-call assert :equal
+              (text-call a "report" (js-array first))
+              (js-call js :report expected-first))
+            (js-call assert :equal
+              (text-call a "report" (js-array second))
+              (js-call js :report expected-second)
+              "later captures do not share mutable index pairs")
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)))
+        (finally
+          (js-call a :leaveFrame frame)
+          (js-call a :release first)
+          (js-call a :release second)
+          (js-call a :release regex)))))
+
+  (defun failure-recovery (a js)
+    (let ((regex (call-rt a "make" (js-array "(a)" "dg")))
+          (oracle (js-call js :make "(a)" "dg"))
+          (zero (js-call a :number -0))
+          (frame (js-call a :frame 1)))
+      (js-call a :frameSet frame 0 zero)
+      (try
+        (discard a "last" (js-array regex 1))
+        (js-call js :last oracle 1)
+        (discard a "clear")
+        (js-call js :clear)
+        (js-call assert :throws
+          (lambda () (call-rt a "throwing" (js-array regex)))
+          (lambda (error) (= error false)))
+        (js-call assert :throws
+          (lambda () (js-call js :throwing oracle))
+          (lambda (error) (= error false)))
+        (js-call assert :equal (text-call a "trace") (js-call js :trace))
+        (js-call assert :equal (text-call a "meta" (js-array regex)) (js-call js :meta oracle))
+        (funcall assert (Object/is (js-call a :readNumber zero) -0))
+        (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+        (js-call assert :equal (text-call a "recover") (js-call js :recover))
+        (finally
+          (js-call a :leaveFrame frame)
+          (js-call a :release zero)
+          (js-call a :release regex)))))
+
+  (defasync run-node-cli ()
+    (let* ((argv (get process :argv))
+           (payload (JSON/parse (readFileSync 0 "utf8")))
+           (cases (get payload :cases))
+           (options (get payload :options))
+           (js (await (funcall dyn-import (aref argv 3))))
+           (rt-mod (await (funcall dyn-import (aref argv 4))))
+           (instantiateManagedRuntime (get rt-mod :instantiateManagedRuntime))
+           (bytes (readFileSync (aref argv 5))))
+      (js-call assert :deepEqual
+        (WebAssembly.Module/imports (new WebAssembly.Module bytes))
+        (js-array))
+      (let ((a (funcall instantiateManagedRuntime bytes options)))
+        (js-call a :auto 1)
+        (try
+          (flags-and-accessor a js)
+          (matching a js cases)
+          (stateful a js)
+          (retention a js)
+          (failure-recovery a js)
+          (let ((mode 0))
+            (while (< mode 4)
+              (let ((actual (text-call a "poisoned" (js-array mode))))
+                (js-call assert :equal actual (js-call js :poisoned mode))
+                (js-call assert :equal (aref (JSON/parse actual) 0) 0))
+              (setq mode (+ mode 1))))
+          (finally
+            (finish a))))
+      (js-call (get process :stdout) :write
+        (JSON/stringify (js-object :cases (get cases :length) :complete t)))))
+
+  (when (= (aref (get process :argv) 2) "--run-node-check")
+    (js-call (run-node-cli) :catch
+      (lambda (err)
+        (console/error err)
+        (js-call process :exit 1))))
+
+  (export
+    call-rt
+    text-call
+    discard
+    finish
+    matching
+    flags-and-accessor
+    stateful
+    retention
+    failure-recovery))

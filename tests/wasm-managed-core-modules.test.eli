@@ -1,2 +1,231 @@
-(module capsules.tests.wasm-managed-core-modules.test
-  (js* "import {beforeAll, afterAll, test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {readFile, mkdtemp, mkdir, rm, writeFile, symlink} from 'node:fs/promises';\nimport {resolve, dirname} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {pathToFileURL} from 'node:url';\nimport {spawnSync} from 'node:child_process';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nimport {instantiateNativeManagedRuntime} from '../tools/backends/native-managed-runtime.mjs';\n\nconst options = {maxSlots:8192, initialBytes:262144, maxBytes:16777216};\nconst memory = {initialPages:4, maximumPages:1024};\nconst entry = 'tests/core-entry.mjs';\nconst aliasId = 'tests/core-aliases.mjs';\nconst aliasSource = `(module core-aliases\n  (import \"eliscript/runtime/core/vector.mjs\" :as Vector)\n  (import \"../runtime/core/collection.mjs\" :as Collection)\n  (import \"eliscript/runtime/core/record.mjs\" :as Record)\n  (import \"eliscript/runtime/core/transient.mjs\" :as Transient)\n  (defun vector-identity (value) (Object/is value (get Vector :PersistentVector)))\n  (defun protocol-identity (value) (Object/is value (get Collection :ICounted)))\n  (defun record-identity (value) (Object/is value (get Record :defineRecordType)))\n  (defun transient-identity (value) (Object/is value (get Transient :persistentBang)))\n  (export vector-identity protocol-identity record-identity transient-identity))`;\nconst patternId='tests/core-patterns.mjs';\nconst patternProviderId='tests/core-pattern-provider.mjs';\nconst patternProvider=`(module pattern-provider\n  (defconst first 101) (defconst second 202) (defconst name \"provider-name\")\n  (defconst later 303) (defconst remaining 404) (defconst default-trace (js-array))\n  (defun fallback (trace) (js-call trace :push \"fallback\") 18)\n  (export first second name later remaining fallback default-trace))`;\nconst patternSource=`(module pattern-consumer\n  (import \"./core-pattern-provider.mjs\" first second name later remaining fallback default-trace)\n  (defun unpack ([first [second nil fourth] &rest tail] &optional [extra])\n    (js-array first second fourth tail extra))\n  (defun row ({:keys [name age note] :or {age 18 note \"missing\"} :as whole})\n    (js-array name age note (get whole :name)))\n  (defun nested ({alias :name {:keys [city]} :profile}) (js-array alias city))\n  (defun optional-map (&optional {:keys [name] :or {name \"anonymous\"}}) name)\n  (defun defaults ({:keys [age] :or {age (fallback default-trace)}}) age)\n  (defun invalid-forward ({:keys [first later] :or {first later}}) first)\n  (defun probe (callback) (try (funcall callback) (catch error (get error :name))))\n  (defun make-value (trace label value)\n    (js-call trace :push label)\n    (let ((array (js-array value)))\n      (Object/defineProperty array \"0\" (js-object :get (lambda () (js-call trace :push (str \"read-\" label)) value) :configurable t)) array))\n  (defun parallel ()\n    (let ((trace (js-array)))\n      (let (([first] (make-value trace \"one\" 1)) ([second] (make-value trace \"two\" 2)))\n        (js-array first second trace))))\n  (defun sequential ()\n    (let* (([first] (js-array 3)) ([second] (js-array (+ first 4)))\n           ({:keys [name] :or {name (str first second)}} (js-object)))\n      (js-array first second name)))\n  (defun map-parallel ()\n    (let (({:keys [first] :or {first second}} (js-object)) (second 77)) (js-array first second)))\n  (defun map-loop (initial)\n    (loop (({:keys [remaining total] :or {total 0}} initial))\n      (if (= remaining 0) total\n        (recur (js-object :remaining (1- remaining) :total (+ total remaining))))))\n  (defun vector-loop ()\n    (loop (([first second] (js-array 1 2)) (remaining 3))\n      (if (= remaining 0) (js-array first second)\n        (recur (js-array second first) (1- remaining)))))\n  (defun function-recur ([remaining total])\n    (if (= remaining 0) total (recur (js-array (1- remaining) (+ total remaining)))))\n  (defun map-captures ({:keys [remaining]} callbacks)\n    (if (= remaining 0) (js-call callbacks :map (lambda (callback) (funcall callback)))\n      (progn (js-call callbacks :push (lambda () remaining))\n        (recur (js-object :remaining (1- remaining)) callbacks))))\n  (defun vector-captures ([remaining] callbacks)\n    (if (= remaining 0) (js-call callbacks :map (lambda (callback) (funcall callback)))\n      (progn (js-call callbacks :push (lambda () remaining))\n        (recur (js-array (1- remaining)) callbacks))))\n  (defun capture-pattern ([first]) (lambda () first))\n  (defun loop-captures ()\n    (loop (({:keys [remaining]} (js-object :remaining 3)) (callbacks (js-array)))\n      (if (= remaining 0) (js-call callbacks :map (lambda (callback) (funcall callback)))\n        (progn (js-call callbacks :push (lambda () remaining))\n          (recur (js-object :remaining (1- remaining)) callbacks)))))\n  (defun iterator-order ()\n    (let* ((trace (js-array)) (marker (js-object)) (inner (js-object))\n           (iterator (js-object :next (lambda () (js-call trace :push \"next\")\n             (js-object :done false :value inner))))\n           (input (js-object)))\n      (Object/defineProperty inner (get globalThis/Symbol :iterator) (js-object :get (lambda () (throw marker)) :configurable t))\n      (put iterator :return (lambda () (js-call trace :push \"return\") (js-object :done t)))\n      (put input (get globalThis/Symbol :iterator) (lambda () (js-call trace :push \"iterator\") iterator))\n      (let ((same false))\n        (try\n          (let (([[first]] input)) first)\n          (catch error (setq same (Object/is error marker))))\n        (js-array same trace))))\n  (defun report ()\n    (let ((trace default-trace))\n      (put trace :length 0)\n      (JSON/stringify (js-array\n        (unpack (js-array 1 (js-array 2 3 4) 5 6) (js-array 7))\n        (unpack (js-array 1 (js-array 2 3 4)))\n        (row (js-object :name \"local\")) (row (js-object :name \"local\" :age undefined :note nil))\n        (nested (js-object :name \"alias\" :profile (js-object :city \"city\")))\n        (optional-map) (parallel) (sequential) (map-parallel)\n        (defaults (js-object)) trace\n        (probe (lambda () (invalid-forward (js-object))))\n        (map-loop (js-object :remaining 4)) (vector-loop) (function-recur (js-array 4 0))\n        (map-captures (js-object :remaining 3) (js-array))\n        (vector-captures (js-array 3) (js-array)) (loop-captures)\n        (try (throw (js-object :name \"caught\")) (catch {:keys [name]} name))\n        (js-array first second name later remaining)\n        (probe (lambda () (unpack undefined)))\n        (iterator-order)))))\n  (export report capture-pattern))`;\nconst cases = ['aliases','records','types','protocols','collections','dynamic-from','class-callback-order','patterns'];\nlet directory, backend, runtimeIR, literalModules, modules, lowered, bytes, nativePath, expected;\n\nbeforeAll(async () => {\n  directory = await mkdtemp(resolve(tmpdir(), 'eliscript-managed-core-modules-'));\n  backend = await buildBackends({outputRoot:directory});\n  runtimeIR = backend.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli', 'utf8'), 'runtime.eli');\n  ({literalModules} = await backend.loadLiteralModules());\n  modules = [\n    {id:entry,program:backend.compiler.compile_ir_string((await readFile('tests/fixtures/wasm-managed-core-modules.eli', 'utf8')).replace('  (export aliases', '  (import \\\"./core-patterns.mjs\\\" :as Patterns)\\n  (defun patterns () (Patterns/report))\\n  (defun held-pattern () (Patterns/capture-pattern (js-array 17)))\\n  (defun inspect-held-pattern (callback) (funcall callback))\\n  (export patterns held-pattern inspect-held-pattern aliases'), 'tests/fixtures/wasm-managed-core-modules.eli')},\n    {id:aliasId,program:backend.compiler.compile_ir_string(aliasSource, 'tests/core-aliases.eli')},\n    {id:patternId,program:backend.compiler.compile_ir_string(patternSource,'tests/core-patterns.eli')},\n    {id:patternProviderId,program:backend.compiler.compile_ir_string(patternProvider,'tests/core-pattern-provider.eli')},\n  ];\n  const saved = JSON.stringify(modules), savedLibraries = JSON.stringify(literalModules);\n  lowered = backend.managed.lower_managed_project(modules, entry, runtimeIR, {...memory,literalModules});\n  bytes = Uint8Array.from(backend.wasm.append_metadata_section(\n    backend.wasm.emit_typed_memory_wasm(lowered.typed, memory),\n    'eliscript-managed-control', JSON.stringify(lowered.descriptor)));\n  assert.equal(JSON.stringify(modules), saved);\n  assert.equal(JSON.stringify(literalModules), savedLibraries);\n  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);\n  assert.deepEqual([...lowered.modules].sort(), [entry,aliasId,patternId,patternProviderId].sort());\n  for (const id of ['runtime/literals.mjs','runtime/core/record.mjs','runtime/core/type.mjs','runtime/core/protocol.mjs','runtime/core/collection.mjs','runtime/core/metadata.mjs','runtime/core/transient.mjs']) {\n    assert(lowered.privateModules.some(privateId => privateId.endsWith('/' + id)), 'real private dependency: ' + id);\n  }\n  if (process.platform === 'darwin' && process.arch === 'arm64') {\n    nativePath = resolve(directory, 'core-modules.dylib');\n    await writeFile(nativePath, Uint8Array.from(backend.native.emit_typed_native_memory_library(lowered.typed, 'arm64-macos')));\n  }\n\n  // Only the actual user programs are emitted here. Their imports load\n  // the repository's original runtime in each independent reference process.\n  const reference = resolve(directory, 'reference');\n  await mkdir(resolve(reference, 'tests'), {recursive:true});\n  await mkdir(resolve(reference, 'node_modules'), {recursive:true});\n  await symlink(resolve('runtime'), resolve(reference, 'runtime'), 'dir');\n  await symlink(resolve('.'), resolve(reference, 'node_modules/eliscript'), 'dir');\n  for (const module of modules) {\n    const path = resolve(reference, module.id);await mkdir(dirname(path), {recursive:true});\n    await writeFile(path, backend.compiler.emit_ir_string(module.program));\n  }\n  const script = `const m=await import(process.argv[1]);const out={};for(const name of ${JSON.stringify(cases)})out[name]=m[name.replaceAll('-','_')]();const held=m.held_record();out.held=m.inspect_held(held);console.log(JSON.stringify(out));`;\n  const url = pathToFileURL(resolve(reference, entry)).href;\n  for (const executable of [process.env.NODE ?? 'node', process.execPath]) {\n    const result = spawnSync(executable, ['--input-type=module','--eval',script,url], {encoding:'utf8',timeout:30000});\n    assert.equal(result.status, 0, result.stderr);\n    const observations = JSON.parse(result.stdout);\n    if (expected) assert.deepEqual(observations, expected, 'independent Node and Bun original runtime');\n    else expected = observations;\n  }\n  assert(expected.aliases.every(value => value === true));\n  const patterns=JSON.parse(expected.patterns);\n  assert.deepEqual(patterns[6],[1,2,['one','two','read-one','read-two']]);\n  assert.deepEqual(patterns[7],[3,7,'37']);assert.deepEqual(patterns[8],[77,77]);\n  assert.equal(patterns[11],'ReferenceError');assert.equal(patterns[12],10);\n  assert.deepEqual(patterns[13],[2,1]);assert.equal(patterns[14],10);\n  assert.deepEqual(patterns[15],[3,2,1]);assert.deepEqual(patterns[16],[0,0,0]);\n  assert.deepEqual(patterns[17],[3,2,1]);assert.equal(patterns[18],'caught');\n  assert.deepEqual(patterns[19],[101,202,'provider-name',303,404]);\n  assert.equal(patterns[20],'TypeError');assert.deepEqual(patterns[21],[true,['iterator','next','return']]);\n  assert.deepEqual(expected['dynamic-from'], Array.from({length:5}, () => ['override',['arg','get',true,1]]));\n  assert.deepEqual(expected['class-callback-order'], [0,1,false,0,'TypeError','TypeError',true,9,true,false,['arg','element','broken','constructor']]);\n  assert.deepEqual(expected.held, [true,'Held',7,true,true]);\n}, 120000);\nafterAll(async () => { if (directory) await rm(directory, {recursive:true,force:true}); });\n\nfunction read(runtime, value) {\n  if (value?.kind === 4) return runtime.readNumber(value);\n  if (value?.kind === 5) return runtime.readString(value);\n  if (value?.kind === 14) return Array.from({length:runtime.length(value)}, (_, index) => {\n    const child = runtime.get(value,index);\n    try { return read(runtime,child); } finally { runtime.release(child); }\n  });\n  return value;\n}\nfunction invoke(runtime, name, arguments_ = []) {\n  const out = runtime.invoke(name,arguments_);\n  try { return read(runtime,out); } finally { runtime.release(out); }\n}\nfunction finish(runtime) {\n  runtime.closeModule();runtime.collect();\n  assert.equal(runtime.live(),0);assert.equal(runtime.stats().frameDepth,0);\n}\nfunction checkAll(runtime) {\n  for (const name of cases) {\n    assert.deepEqual(invoke(runtime,name),expected[name],name);\n    runtime.collect();assert.equal(runtime.stats().frameDepth,0);\n  }\n  const held = runtime.invoke('held-record');\n  try {\n    for (let round=0;round<3;round++) {\n      runtime.collect();assert.deepEqual(invoke(runtime,'inspect-held',[held]),expected.held);\n      assert.equal(runtime.stats().frameDepth,0);\n    }\n  } finally { runtime.release(held); }\n  const captured=runtime.invoke('held-pattern');\n  try {\n    for(let round=0;round<3;round++) {\n      runtime.collect();assert.equal(invoke(runtime,'inspect-held-pattern',[captured]),17);\n      assert.equal(runtime.stats().frameDepth,0,'pattern closure retains its binding cell');\n    }\n  } finally {runtime.release(captured);}\n}\n\ntest('Given original standard module imports when canonical aliases records types protocols collections metadata and transients execute then zero-import WASM agrees with Node and Bun', () => {\n  const runtime = instantiateManagedRuntime(bytes,options);runtime.auto(65536);\n  try { checkAll(runtime); } finally { finish(runtime); }\n},30000);\ntest('Given collection at every allocation when standard modules capture constructors callbacks aliases and metadata then original identities and error order survive GC', () => {\n  const runtime = instantiateManagedRuntime(bytes,options);runtime.auto(1);\n  try { checkAll(runtime); } finally { finish(runtime); }\n},30000);\ntest.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')('Given native code from the same complete typed standard-module graph when the original semantic cases run then Node and Bun results and root cleanup agree', async () => {\n  const runtime = await instantiateNativeManagedRuntime(nativePath,lowered,{...options,...memory});runtime.auto(1);\n  try { checkAll(runtime); } finally { try { finish(runtime); } finally { runtime.close(); } }\n},120000);\ntest('Given no actual source library or a different canonical path when standard module imports are lowered then source-bound refusals preserve the original IR', () => {\n  const input = [{id:entry,program:backend.compiler.compile_ir_string('(import \"eliscript/runtime/core/type.mjs\" defineType) (export defineType)','missing-core-library.eli')}];\n  const saved = JSON.stringify(input);\n  assert.throws(() => backend.managed.lower_managed_project(input,entry,runtimeIR), error => error.eliscriptDiagnostic?.code === 'ELI-B0001');\n  assert.equal(JSON.stringify(input),saved);\n  const unrelated = [{id:entry,program:backend.compiler.compile_ir_string('(import \"../vendor/core/vector.mjs\" PersistentVector) (export PersistentVector)','unrelated-core-name.eli')}];\n  const before = JSON.stringify(unrelated);\n  assert.throws(() => backend.managed.lower_managed_project(unrelated,entry,runtimeIR,{literalModules}), error => error.eliscriptDiagnostic?.code === 'ELI-B0001' && error.eliscriptDiagnostic.phase === 'managed-link');\n  assert.equal(JSON.stringify(unrelated),before);\n});\n"))
+(module tests.wasm-managed-core-modules.test
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile mkdtemp mkdir rm writeFile symlink)
+  (import "node:path" resolve dirname)
+  (import "node:os" tmpdir)
+  (import "node:url" pathToFileURL)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+
+  (defconst options (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216))
+  (defconst memory (js-object :initialPages 4 :maximumPages 1024))
+  (defconst entry "tests/core-entry.mjs")
+  (defconst aliasId "tests/core-aliases.mjs")
+  (defconst aliasSource
+    "(module core-aliases\n  (import \"eliscript/runtime/core/vector.mjs\" :as Vector)\n  (import \"../runtime/core/collection.mjs\" :as Collection)\n  (import \"eliscript/runtime/core/record.mjs\" :as Record)\n  (import \"eliscript/runtime/core/transient.mjs\" :as Transient)\n  (defun vector-identity (value) (Object/is value (get Vector :PersistentVector)))\n  (defun protocol-identity (value) (Object/is value (get Collection :ICounted)))\n  (defun record-identity (value) (Object/is value (get Record :defineRecordType)))\n  (defun transient-identity (value) (Object/is value (get Transient :persistentBang)))\n  (export vector-identity protocol-identity record-identity transient-identity))")
+  (defconst patternId "tests/core-patterns.mjs")
+  (defconst patternProviderId "tests/core-pattern-provider.mjs")
+  (defconst patternProvider
+    "(module pattern-provider\n  (defconst first 101) (defconst second 202) (defconst name \"provider-name\")\n  (defconst later 303) (defconst remaining 404) (defconst default-trace (js-array))\n  (defun fallback (trace) (js-call trace :push \"fallback\") 18)\n  (export first second name later remaining fallback default-trace))")
+  (defconst patternSource
+    "(module pattern-consumer\n  (import \"./core-pattern-provider.mjs\" first second name later remaining fallback default-trace)\n  (defun unpack ([first [second nil fourth] &rest tail] &optional [extra])\n    (js-array first second fourth tail extra))\n  (defun row ({:keys [name age note] :or {age 18 note \"missing\"} :as whole})\n    (js-array name age note (get whole :name)))\n  (defun nested ({alias :name {:keys [city]} :profile}) (js-array alias city))\n  (defun optional-map (&optional {:keys [name] :or {name \"anonymous\"}}) name)\n  (defun defaults ({:keys [age] :or {age (fallback default-trace)}}) age)\n  (defun invalid-forward ({:keys [first later] :or {first later}}) first)\n  (defun probe (callback) (try (funcall callback) (catch error (get error :name))))\n  (defun make-value (trace label value)\n    (js-call trace :push label)\n    (let ((array (js-array value)))\n      (Object/defineProperty array \"0\" (js-object :get (lambda () (js-call trace :push (str \"read-\" label)) value) :configurable t)) array))\n  (defun parallel ()\n    (let ((trace (js-array)))\n      (let (([first] (make-value trace \"one\" 1)) ([second] (make-value trace \"two\" 2)))\n        (js-array first second trace))))\n  (defun sequential ()\n    (let* (([first] (js-array 3)) ([second] (js-array (+ first 4)))\n           ({:keys [name] :or {name (str first second)}} (js-object)))\n      (js-array first second name)))\n  (defun map-parallel ()\n    (let (({:keys [first] :or {first second}} (js-object)) (second 77)) (js-array first second)))\n  (defun map-loop (initial)\n    (loop (({:keys [remaining total] :or {total 0}} initial))\n      (if (= remaining 0) total\n        (recur (js-object :remaining (1- remaining) :total (+ total remaining))))))\n  (defun vector-loop ()\n    (loop (([first second] (js-array 1 2)) (remaining 3))\n      (if (= remaining 0) (js-array first second)\n        (recur (js-array second first) (1- remaining)))))\n  (defun function-recur ([remaining total])\n    (if (= remaining 0) total (recur (js-array (1- remaining) (+ total remaining)))))\n  (defun map-captures ({:keys [remaining]} callbacks)\n    (if (= remaining 0) (js-call callbacks :map (lambda (callback) (funcall callback)))\n      (progn (js-call callbacks :push (lambda () remaining))\n        (recur (js-object :remaining (1- remaining)) callbacks))))\n  (defun vector-captures ([remaining] callbacks)\n    (if (= remaining 0) (js-call callbacks :map (lambda (callback) (funcall callback)))\n      (progn (js-call callbacks :push (lambda () remaining))\n        (recur (js-array (1- remaining)) callbacks))))\n  (defun capture-pattern ([first]) (lambda () first))\n  (defun loop-captures ()\n    (loop (({:keys [remaining]} (js-object :remaining 3)) (callbacks (js-array)))\n      (if (= remaining 0) (js-call callbacks :map (lambda (callback) (funcall callback)))\n        (progn (js-call callbacks :push (lambda () remaining))\n          (recur (js-object :remaining (1- remaining)) callbacks)))))\n  (defun iterator-order ()\n    (let* ((trace (js-array)) (marker (js-object)) (inner (js-object))\n           (iterator (js-object :next (lambda () (js-call trace :push \"next\")\n             (js-object :done false :value inner))))\n           (input (js-object)))\n      (Object/defineProperty inner (get globalThis/Symbol :iterator) (js-object :get (lambda () (throw marker)) :configurable t))\n      (put iterator :return (lambda () (js-call trace :push \"return\") (js-object :done t)))\n      (put input (get globalThis/Symbol :iterator) (lambda () (js-call trace :push \"iterator\") iterator))\n      (let ((same false))\n        (try\n          (let (([[first]] input)) first)\n          (catch error (setq same (Object/is error marker))))\n        (js-array same trace))))\n  (defun report ()\n    (let ((trace default-trace))\n      (put trace :length 0)\n      (JSON/stringify (js-array\n        (unpack (js-array 1 (js-array 2 3 4) 5 6) (js-array 7))\n        (unpack (js-array 1 (js-array 2 3 4)))\n        (row (js-object :name \"local\")) (row (js-object :name \"local\" :age undefined :note nil))\n        (nested (js-object :name \"alias\" :profile (js-object :city \"city\")))\n        (optional-map) (parallel) (sequential) (map-parallel)\n        (defaults (js-object)) trace\n        (probe (lambda () (invalid-forward (js-object))))\n        (map-loop (js-object :remaining 4)) (vector-loop) (function-recur (js-array 4 0))\n        (map-captures (js-object :remaining 3) (js-array))\n        (vector-captures (js-array 3) (js-array)) (loop-captures)\n        (try (throw (js-object :name \"caught\")) (catch {:keys [name]} name))\n        (js-array first second name later remaining)\n        (probe (lambda () (unpack undefined)))\n        (iterator-order)))))\n  (export report capture-pattern))")
+
+  (defconst cases
+    (js-array "aliases" "records" "types" "protocols" "collections" "dynamic-from" "class-callback-order" "patterns"))
+
+  (defvar directory undefined)
+  (defvar backend undefined)
+  (defvar runtimeIR undefined)
+  (defvar literalModules undefined)
+  (defvar modules undefined)
+  (defvar lowered undefined)
+  (defvar bytes undefined)
+  (defvar nativePath undefined)
+  (defvar expected undefined)
+
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-managed-core-modules-"))))
+    (setq backend (await (buildBackends (js-object :outputRoot directory))))
+    (setq runtimeIR (js-call (get backend :compiler) :compile_ir_string (await (readFile "bootstrap/runtime/memory.eli" "utf8")) "runtime.eli"))
+    (setq literalModules (get (await (js-call backend :loadLiteralModules)) :literalModules))
+    (let ((fixture-src (await (readFile "tests/fixtures/wasm-managed-core-modules.eli" "utf8"))))
+      (setq modules
+        (js-array
+          (js-object
+            :id entry
+            :program (js-call (get backend :compiler) :compile_ir_string
+                       (js-call fixture-src :replace "  (export aliases"
+                         "  (import \"./core-patterns.mjs\" :as Patterns)\n  (defun patterns () (Patterns/report))\n  (defun held-pattern () (Patterns/capture-pattern (js-array 17)))\n  (defun inspect-held-pattern (callback) (funcall callback))\n  (export patterns held-pattern inspect-held-pattern aliases")
+                       "tests/fixtures/wasm-managed-core-modules.eli"))
+          (js-object :id aliasId :program (js-call (get backend :compiler) :compile_ir_string aliasSource "tests/core-aliases.eli"))
+          (js-object :id patternId :program (js-call (get backend :compiler) :compile_ir_string patternSource "tests/core-patterns.eli"))
+          (js-object :id patternProviderId :program (js-call (get backend :compiler) :compile_ir_string patternProvider "tests/core-pattern-provider.eli")))))
+    (let ((saved (JSON/stringify modules))
+          (savedLibraries (JSON/stringify literalModules)))
+      (setq lowered
+        (js-call (get backend :managed) :lower_managed_project modules entry runtimeIR
+          (Object/assign (js-object) memory (js-object :literalModules literalModules))))
+      (setq bytes
+        (Uint8Array/from
+          (js-call (get backend :wasm) :append_metadata_section
+            (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) memory)
+            "eliscript-managed-control"
+            (JSON/stringify (get lowered :descriptor)))))
+      (js-call assert :equal (JSON/stringify modules) saved)
+      (js-call assert :equal (JSON/stringify literalModules) savedLibraries)
+      (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      (js-call assert :deepEqual
+        (js-call (Array/from (get lowered :modules)) :sort)
+        (js-call (js-array entry aliasId patternId patternProviderId) :sort))
+      (js-call
+        (js-array "runtime/literals.mjs" "runtime/core/record.mjs" "runtime/core/type.mjs"
+                  "runtime/core/protocol.mjs" "runtime/core/collection.mjs" "runtime/core/metadata.mjs"
+                  "runtime/core/transient.mjs")
+        :forEach
+        (lambda (id)
+          (assert (js-call (get lowered :privateModules) :some (lambda (privateId) (js-call privateId :endsWith (str "/" id))))
+                  (str "real private dependency: " id))))
+      (when (and (= (get globalThis.process :platform) "darwin") (= (get globalThis.process :arch) "arm64"))
+        (setq nativePath (resolve directory "core-modules.dylib"))
+        (await (writeFile nativePath
+                 (Uint8Array/from (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) "arm64-macos")))))
+      ;; Only the actual user programs are emitted here. Their imports load
+      ;; the repository's original runtime in each independent reference process.
+      (let ((reference (resolve directory "reference")))
+        (await (mkdir (resolve reference "tests") (js-object :recursive t)))
+        (await (mkdir (resolve reference "node_modules") (js-object :recursive t)))
+        (await (symlink (resolve "runtime") (resolve reference "runtime") "dir"))
+        (await (symlink (resolve ".") (resolve reference "node_modules/eliscript") "dir"))
+        (let ((idx 0))
+          (while (< idx (js-length modules))
+            (let* ((mod (aref modules idx))
+                   (path (resolve reference (get mod :id))))
+              (await (mkdir (dirname path) (js-object :recursive t)))
+              (await (writeFile path (js-call (get backend :compiler) :emit_ir_string (get mod :program)))))
+            (setq idx (1+ idx))))
+        (let ((url (get (pathToFileURL (resolve reference entry)) :href))
+              (helper (resolve "tests/helpers/wasm-managed-core-modules-node.mjs"))
+              (executables (js-array (or (get (get globalThis.process :env) :NODE) "node")
+                                     (get globalThis.process :execPath))))
+          (js-call executables :forEach
+            (lambda (executable)
+              (let ((result (spawnSync executable (js-array helper url) (js-object :encoding "utf8" :timeout 30000))))
+                (js-call assert :equal (get result :status) 0 (get result :stderr))
+                (let ((observations (JSON/parse (get result :stdout))))
+                  (if expected
+                    (js-call assert :deepEqual observations expected "independent Node and Bun original runtime")
+                    (setq expected observations)))))))
+        (assert (js-call (get expected :aliases) :every (lambda (value) (= value t))))
+        (let ((patterns (JSON/parse (get expected :patterns))))
+          (js-call assert :deepEqual (aref patterns 6) (js-array 1 2 (js-array "one" "two" "read-one" "read-two")))
+          (js-call assert :deepEqual (aref patterns 7) (js-array 3 7 "37"))
+          (js-call assert :deepEqual (aref patterns 8) (js-array 77 77))
+          (js-call assert :equal (aref patterns 11) "ReferenceError")
+          (js-call assert :equal (aref patterns 12) 10)
+          (js-call assert :deepEqual (aref patterns 13) (js-array 2 1))
+          (js-call assert :equal (aref patterns 14) 10)
+          (js-call assert :deepEqual (aref patterns 15) (js-array 3 2 1))
+          (js-call assert :deepEqual (aref patterns 16) (js-array 0 0 0))
+          (js-call assert :deepEqual (aref patterns 17) (js-array 3 2 1))
+          (js-call assert :equal (aref patterns 18) "caught")
+          (js-call assert :deepEqual (aref patterns 19) (js-array 101 202 "provider-name" 303 404))
+          (js-call assert :equal (aref patterns 20) "TypeError")
+          (js-call assert :deepEqual (aref patterns 21) (js-array t (js-array "iterator" "next" "return"))))
+        (js-call assert :deepEqual (get expected "dynamic-from")
+          (Array/from (js-object :length 5) (lambda () (js-array "override" (js-array "arg" "get" t 1)))))
+        (js-call assert :deepEqual (get expected "class-callback-order")
+          (js-array 0 1 false 0 "TypeError" "TypeError" t 9 t false (js-array "arg" "element" "broken" "constructor")))
+        (js-call assert :deepEqual (get expected :held) (js-array t "Held" 7 t t)))))
+    120000)
+
+  (afterAll (async ()
+    (when directory
+      (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun read (runtime value)
+    (cond
+      ((and value (= (get value :kind) 4)) (js-call runtime :readNumber value))
+      ((and value (= (get value :kind) 5)) (js-call runtime :readString value))
+      ((and value (= (get value :kind) 14))
+       (Array/from (js-object :length (js-call runtime :length value))
+         (lambda (_ index)
+           (let ((child (js-call runtime :get value index)))
+             (try (read runtime child) (finally (js-call runtime :release child)))))))
+      (t value)))
+
+  (defun invoke (runtime name &rest __host_default_arguments_1)
+    (let* ((arguments-list (aref __host_default_arguments_1 0)))
+    (let* ((args (if (undefined? arguments-list) (js-array) arguments-list))
+           (out (js-call runtime :invoke name args)))
+      (try (read runtime out) (finally (js-call runtime :release out))))))
+
+  (defun finish (runtime)
+    (js-call runtime :closeModule)
+    (js-call runtime :collect)
+    (js-call assert :equal (js-call runtime :live) 0)
+    (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0))
+
+  (defun checkAll (runtime)
+    (js-call cases :forEach
+      (lambda (name)
+        (js-call assert :deepEqual (invoke runtime name) (get expected name) name)
+        (js-call runtime :collect)
+        (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0)))
+    (let ((held (js-call runtime :invoke "held-record")))
+      (try
+        (let ((round 0))
+          (while (< round 3)
+            (js-call runtime :collect)
+            (js-call assert :deepEqual (invoke runtime "inspect-held" (js-array held)) (get expected :held))
+            (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0)
+            (setq round (1+ round))))
+        (finally (js-call runtime :release held))))
+    (let ((captured (js-call runtime :invoke "held-pattern")))
+      (try
+        (let ((round 0))
+          (while (< round 3)
+            (js-call runtime :collect)
+            (js-call assert :equal (invoke runtime "inspect-held-pattern" (js-array captured)) 17)
+            (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0 "pattern closure retains its binding cell")
+            (setq round (1+ round))))
+        (finally (js-call runtime :release captured)))))
+
+  (test "Given original standard module imports when canonical aliases records types protocols collections metadata and transients execute then zero-import WASM agrees with Node and Bun" (lambda ()
+    (let ((runtime (instantiateManagedRuntime bytes options)))
+      (js-call runtime :auto 65536)
+      (try (checkAll runtime) (finally (finish runtime)))))
+    30000)
+
+  (test "Given collection at every allocation when standard modules capture constructors callbacks aliases and metadata then original identities and error order survive GC" (lambda ()
+    (let ((runtime (instantiateManagedRuntime bytes options)))
+      (js-call runtime :auto 1)
+      (try (checkAll runtime) (finally (finish runtime)))))
+    30000)
+
+  (funcall
+    (js-call test :skipIf (or (/= (get globalThis.process :platform) "darwin") (/= (get globalThis.process :arch) "arm64")))
+    "Given native code from the same complete typed standard-module graph when the original semantic cases run then Node and Bun results and root cleanup agree"
+    (async ()
+      (let ((runtime (await (instantiateNativeManagedRuntime nativePath lowered (Object/assign (js-object) options memory)))))
+        (js-call runtime :auto 1)
+        (try
+          (checkAll runtime)
+          (finally
+            (try (finish runtime) (finally (js-call runtime :close)))))))
+    120000)
+
+  (test "Given no actual source library or a different canonical path when standard module imports are lowered then source-bound refusals preserve the original IR" (lambda ()
+    (let* ((input (js-array (js-object :id entry
+                                       :program (js-call (get backend :compiler) :compile_ir_string
+                                                  "(import \"eliscript/runtime/core/type.mjs\" defineType) (export defineType)"
+                                                  "missing-core-library.eli"))))
+           (saved (JSON/stringify input)))
+      (js-call assert :throws
+        (lambda () (js-call (get backend :managed) :lower_managed_project input entry runtimeIR))
+        (lambda (error) (and (get error :eliscriptDiagnostic) (= (get (get error :eliscriptDiagnostic) :code) "ELI-B0001"))))
+      (js-call assert :equal (JSON/stringify input) saved))
+    (let* ((unrelated (js-array (js-object :id entry
+                                           :program (js-call (get backend :compiler) :compile_ir_string
+                                                      "(import \"../vendor/core/vector.mjs\" PersistentVector) (export PersistentVector)"
+                                                      "unrelated-core-name.eli"))))
+           (before (JSON/stringify unrelated)))
+      (js-call assert :throws
+        (lambda () (js-call (get backend :managed) :lower_managed_project unrelated entry runtimeIR (js-object :literalModules literalModules)))
+        (lambda (error)
+          (and (get error :eliscriptDiagnostic)
+               (= (get (get error :eliscriptDiagnostic) :code) "ELI-B0001")
+               (= (get (get error :eliscriptDiagnostic) :phase) "managed-link"))))
+      (js-call assert :equal (JSON/stringify unrelated) before)))))

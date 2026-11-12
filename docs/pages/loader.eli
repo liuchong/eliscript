@@ -14,76 +14,129 @@
 
 (module docs.loader
   (defconst load (js* "(url) => import(url)"))
+
+  (defun field (object name) (get object name))
+
   ;; This script is classic, so it has no `import.meta`: it is loaded with
   ;; `defer`, and the script element is available while it runs. Its own URL is
   ;; the base for everything else it asks the server for.
+  (defconst current-script
+    (let ((doc (field globalThis.globalThis "document")))
+      (if doc (field doc "currentScript") nil)))
+
   (defconst script-url
-    (js* "String((document.currentScript && document.currentScript.src) || location.href)"))
-  (defconst relative-to (js* "((url, path) => new URL(path, url).href)"))
-  (defconst package-base (funcall relative-to script-url "../../"))
-  (defconst worker-url (funcall relative-to script-url "../../browser/worker.mjs"))
+    (funcall globalThis.String
+      (or (and current-script (field current-script "src"))
+          (field (field globalThis.globalThis "location") "href"))))
+
+  (defun relative-to (url path)
+    (field (new globalThis.URL path url) "href"))
+
+  (defconst package-base (relative-to script-url "../../"))
+  (defconst worker-url (relative-to script-url "../../dist/browser/worker.mjs"))
+
   ;; The page names the source it wants compiled, relative to itself; the file
   ;; beside the loader is the fallback for a page that does not.
-  (defconst declared-source
-    (js* "((script) => (script && script.dataset && script.dataset.eliscript) || '')"))
-  (defconst has-inline-tags
-    (js* "(() => Boolean(globalThis.document && globalThis.document.querySelector('script[type=\"text/eliscript\"]')))"))
-  (defconst current-declared
-    (funcall declared-source (js* "document.currentScript")))
+  (defun declared-source (script)
+    (let ((dataset (and script (field script "dataset"))))
+      (or (and dataset (field dataset "eliscript")) "")))
+
+  (defun has-inline-tags ()
+    (let ((doc (field globalThis.globalThis "document")))
+      (funcall globalThis.Boolean
+        (and doc (js-call doc :querySelector "script[type=\"text/eliscript\"]")))))
+
+  (defconst current-declared (declared-source current-script))
+
+  (defconst base-uri
+    (field (field globalThis.globalThis "document") "baseURI"))
+
   (defconst source-url
     (if (= current-declared "")
-        (if (funcall has-inline-tags) ""
-          (funcall relative-to (js* "document.baseURI") "site.eli"))
-      (funcall relative-to (js* "document.baseURI") current-declared)))
-  (defconst start-worker (js* "(url) => new Worker(url, { type: 'module' })"))
-  (defconst blob-url-of
-    (js* "(code) => URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))"))
-  (defconst release-blob-url (js* "(url) => URL.revokeObjectURL(url)"))
-  (defconst fetch-text (js* "((url) => fetch(url).then((response) => { if (!response.ok) throw new Error(String(response.status)); return response.text(); }))"))
-  (defconst compile-once
-    (js* "((worker, request) => new Promise((resolve, reject) => { const id = 'docs-site-' + String(Math.floor(Math.random() * 1e9)); const onMessage = (event) => { const data = event.data; if (!data || data.id !== id) return; worker.removeEventListener('message', onMessage); if (data.ok) resolve(data); else reject(new Error(data.message || 'compilation failed')); }; worker.addEventListener('message', onMessage); worker.postMessage({ id, request }); }))"))
-  (defconst inline-scripts
-    (js* "(() => Array.from((globalThis.document && globalThis.document.querySelectorAll('script[type=\"text/eliscript\"]')) || []))"))
+        (if (has-inline-tags) ""
+          (relative-to base-uri "site.eli"))
+      (relative-to base-uri current-declared)))
 
-  (defun field (object name) (get object name))
+  (defun start-worker (url)
+    (new globalThis.Worker url (js-object "type" "module")))
+
+  (defun blob-url-of (code)
+    (js-call globalThis.URL :createObjectURL
+      (new globalThis.Blob (js-array code)
+           (js-object "type" "text/javascript"))))
+
+  (defun release-blob-url (url)
+    (js-call globalThis.URL :revokeObjectURL url))
+
+  (defasync fetch-text (url)
+    (let ((response (await (funcall globalThis.fetch url))))
+      (unless (field response "ok")
+        (throw (new globalThis.Error (funcall globalThis.String (field response "status")))))
+      (await (js-call response :text))))
+
+  (defun compile-once (worker request)
+    (new globalThis.Promise
+      (lambda (resolve reject)
+        (let* ((id (str "docs-site-"
+                        (funcall globalThis.String
+                          (js-call globalThis.Math :floor (* (js-call globalThis.Math :random) 1000000000)))))
+               (on-message nil))
+          (setq on-message
+            (lambda (event)
+              (let ((data (field event "data")))
+                (when (and data (= (field data "id") id))
+                  (js-call worker :removeEventListener "message" on-message)
+                  (if (field data "ok")
+                      (funcall resolve data)
+                    (funcall reject
+                      (new globalThis.Error
+                        (or (field data "message") "compilation failed"))))))))
+          (js-call worker :addEventListener "message" on-message)
+          (js-call worker :postMessage (js-object "id" id "request" request))))))
+
+  (defun inline-scripts ()
+    (let ((doc (field globalThis.globalThis "document")))
+      (js-call globalThis.Array :from
+        (or (and doc (js-call doc :querySelectorAll "script[type=\"text/eliscript\"]"))
+            (js-array)))))
 
   ;; The failure is reported where a developer looks for it, and nowhere a
   ;; reader would mistake for page content.
   (defun report (message)
-    (js-call (js* "globalThis.console") :error message))
+    (js-call (field globalThis.globalThis "console") :error message))
 
   (defasync run-compiled-source (worker source filename output-name)
-    (let* ((reply (await (funcall compile-once
-                                  worker
-                                  (js-object
-                                    "mode" "single"
-                                    "source" source
-                                    "filename" filename
-                                    "runtimeBase" package-base))))
+    (let* ((reply (await (compile-once
+                           worker
+                           (js-object
+                             "mode" "single"
+                             "source" source
+                             "filename" filename
+                             "runtimeBase" package-base))))
            (module (field (field reply "modules") output-name))
-           (url (funcall blob-url-of (field module "javascript"))))
+           (url (blob-url-of (field module "javascript"))))
       (try
         (await (funcall load url))
         (catch error
           (report (str "site script failed at run time: "
                        (field error "message"))))
-        (finally (funcall release-blob-url url)))))
+        (finally (release-blob-url url)))))
 
   ;; A page whose script cannot be compiled stays readable: the failure is
   ;; reported where the playground reports its own, and nothing else changes.
   (defasync start ()
     (try
-      (let ((worker (funcall start-worker worker-url)))
+      (let ((worker (start-worker worker-url)))
         (when (not (= source-url ""))
-          (let ((source (await (funcall fetch-text source-url))))
+          (let ((source (await (fetch-text source-url))))
             (await (run-compiled-source worker source "site.eli" "site.mjs"))))
-        (let ((scripts (funcall inline-scripts))
+        (let ((scripts (inline-scripts))
               (index 0))
           (while (< index (js-length scripts))
             (let* ((tag (aref scripts index))
                    (src (field tag "src"))
                    (source (if (and (= (value-type src) "string") (> (js-length src) 0))
-                               (await (funcall fetch-text src))
+                               (await (fetch-text src))
                              (field tag "textContent"))))
               (await (run-compiled-source worker source "site.eli" "site.mjs")))
             (setq index (1+ index)))))
@@ -91,9 +144,9 @@
         (report (str "site script did not compile: " (field error "message"))))))
 
   (defun boot ()
-    (if (= (field (js* "globalThis.document") "readyState") "loading")
-        (js-call (js* "globalThis.document") :addEventListener
-                 "DOMContentLoaded" (lambda (event) (start)))
-      (start)))
+    (let ((doc (field globalThis.globalThis "document")))
+      (if (= (field doc "readyState") "loading")
+          (js-call doc :addEventListener "DOMContentLoaded" (lambda (event) (start)))
+        (start))))
 
   (boot))

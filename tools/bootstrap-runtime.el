@@ -8,6 +8,11 @@
 (defvar eliscript-bootstrap--compiler-bytecompiled nil
   "Non-nil after this seed build has prepared its compiler bytecode in RAM once.")
 
+(defconst eliscript-bootstrap--runtime-modules
+  '("number-radix" "array-text" "primitives" "errors" "prelude"
+    "unicode-case-data" "unicode-case" "math")
+  "Complete maintained runtime closure required by generated Seed modules.")
+
 (defun eliscript-bootstrap--bytecode-definition-p (definition)
   "Return non-nil for bytecode DEFINITION, including its macro wrapper."
   (or (byte-code-function-p definition)
@@ -59,6 +64,19 @@
                             (fset name replacement))))))))))))
       (setq eliscript-bootstrap--compiler-bytecompiled t))))
 
+(defun eliscript-bootstrap-write-runtime-package (output &optional binding)
+  "Write the real runtime export scope before loading any generated frontend."
+  (let* ((names (append (sort (copy-sequence eliscript-bootstrap--runtime-modules)
+                              #'string<)
+                        (when binding '("binding"))))
+         (exports (make-hash-table :test #'equal)))
+    (dolist (name names)
+      (let ((path (concat "./runtime/" name ".mjs"))) (puthash path path exports)))
+    (eliscript--write-file-content
+     (expand-file-name "package.json" output)
+     (concat (json-serialize `((name . "eliscript") (type . "module")
+                              (private . t) (exports . ,exports))) "\n"))))
+
 (defun eliscript-bootstrap-prepare-runtime (root output)
   "Compile ROOT's real default runtime into the independent seed OUTPUT."
   (eliscript-bootstrap--byte-compile-loaded-compiler root)
@@ -70,34 +88,14 @@
         (error "Unicode bootstrap requires its maintained generator or derived Eli data"))
       (load generator nil t)
       (eliscript-generate-unicode-case-runtime-data root)))
-  (dolist (name '("prelude" "unicode-case-data" "unicode-case" "math"))
+  (dolist (name eliscript-bootstrap--runtime-modules)
     (let ((runtime (expand-file-name (concat "runtime/" name ".mjs") output)))
       (make-directory (file-name-directory runtime) t)
       (eliscript-compile-file-with-source-map
        (expand-file-name (concat "runtime/" name ".eli") root) runtime)))
   ;; The emitted frontend keeps its imports unchanged. A private scope resolves
   ;; this complete real runtime even when OUTPUT is outside the checkout.
-  (eliscript--write-file-content
-   (expand-file-name "package.json" output)
-   (concat (json-serialize
-            '((name . "eliscript") (type . "module") (private . t)
-              (exports . ((./runtime/math.mjs . "./runtime/math.mjs")
-                          (./runtime/prelude.mjs . "./runtime/prelude.mjs")
-                          (./runtime/unicode-case.mjs . "./runtime/unicode-case.mjs")
-                          (./runtime/unicode-case-data.mjs . "./runtime/unicode-case-data.mjs")))))
-           "\n")))
-
-(defun eliscript-bootstrap--materialize-capsule (source output)
-  "Materialize capsule `.eli' file SOURCE into `.mjs' file OUTPUT."
-  (when (file-exists-p source)
-    (with-temp-buffer
-      (insert-file-contents source)
-      (goto-char (point-min))
-      (let* ((form (read (current-buffer)))
-             (body (and (consp form) (eq (car form) 'module) (nth 2 form)))
-             (code (and (consp body) (eq (car body) 'js*) (stringp (nth 1 body)) (nth 1 body))))
-        (when code
-          (eliscript--write-file-content output code))))))
+  (eliscript-bootstrap-write-runtime-package output))
 
 (defun eliscript-bootstrap-prepare-dist-host (root)
   "Prepare `dist/runtime', `dist/package.json', and `dist/host-cli' inside ROOT."
@@ -106,7 +104,7 @@
         (dist-host (expand-file-name "dist/host-cli" root)))
     (make-directory dist-runtime t)
     (make-directory dist-host t)
-    (dolist (name '("prelude" "unicode-case-data" "unicode-case" "math"))
+    (dolist (name eliscript-bootstrap--runtime-modules)
       (let ((dst-mjs (expand-file-name (concat name ".mjs") dist-runtime)))
         (unless (and (file-exists-p dst-mjs) (file-exists-p (concat dst-mjs ".map")))
           (eliscript-compile-file-with-source-map
@@ -115,11 +113,13 @@
       (let ((src-sub (expand-file-name sub root))
             (dst-sub (expand-file-name (concat "dist/" sub) root)))
         (when (file-directory-p src-sub)
+          (make-directory dst-sub t)
           (dolist (file (directory-files src-sub nil "\\.eli\\'"))
-            (eliscript-bootstrap--materialize-capsule
+            (eliscript-compile-file-with-source-map
              (expand-file-name file src-sub)
              (expand-file-name (concat (file-name-sans-extension file) ".mjs") dst-sub))))))
-    (dolist (entry '(("stdlib/core/protocol.eli" . "dist/runtime/core/protocol-impl.mjs")
+    (dolist (entry '(("stdlib/bit.eli" . "dist/stdlib/bit.mjs")
+                     ("stdlib/core/protocol.eli" . "dist/runtime/core/protocol-impl.mjs")
                      ("stdlib/core/text.eli" . "dist/runtime/core/text-impl.mjs")
                      ("stdlib/core/object.eli" . "dist/runtime/core/object-impl.mjs")))
       (let ((source (expand-file-name (car entry) root))
@@ -127,20 +127,13 @@
         (when (and (file-exists-p source) (not (file-exists-p output)))
           (make-directory (file-name-directory output) t)
           (eliscript-compile-file-with-source-map source output))))
-    (eliscript--write-file-content
-     (expand-file-name "package.json" dist-dir)
-     (concat (json-serialize
-              '((name . "eliscript") (type . "module") (private . t)
-                (exports . ((./runtime/math.mjs . "./runtime/math.mjs")
-                            (./runtime/prelude.mjs . "./runtime/prelude.mjs")
-                            (./runtime/unicode-case.mjs . "./runtime/unicode-case.mjs")
-                            (./runtime/unicode-case-data.mjs . "./runtime/unicode-case-data.mjs")))))
-             "\n"))
+    (eliscript-bootstrap-write-runtime-package dist-dir t)
     (dolist (name '("bun" "build" "project-ground" "project-cli-ground" "check-cli-ground"
                     "evaluation" "evaluation-cli" "format-cli" "watch" "watch-cli"))
-      (eliscript-bootstrap--materialize-capsule
-       (expand-file-name (concat "bootstrap/host/" name ".eli") root)
-       (expand-file-name (concat name ".mjs") dist-host)))
+      (let ((source (expand-file-name (concat "bootstrap/host/" name ".eli") root))
+            (output (expand-file-name (concat name ".mjs") dist-host)))
+        (when (file-exists-p source)
+          (eliscript-compile-file-with-source-map source output))))
     (let ((proj-ground (expand-file-name "project-ground.mjs" dist-host))
           (proj-target (expand-file-name "project.mjs" dist-host)))
       (when (file-exists-p proj-ground)
@@ -206,7 +199,7 @@ PRESERVE-EXISTING keeps installed modules intact for independent seed builds."
       (when (file-exists-p (expand-file-name (caar entries) root))
         ;; The generated host lives in ROOT, outside the private compiler output
         ;; scope. Its bare runtime imports must resolve in this same source tree.
-        (dolist (name '("prelude" "unicode-case-data" "unicode-case" "math"))
+        (dolist (name eliscript-bootstrap--runtime-modules)
           (let ((module (expand-file-name (concat "runtime/" name ".mjs") root)))
             (unless (and preserve-existing (file-exists-p module)
                          (file-exists-p (concat module ".map")))

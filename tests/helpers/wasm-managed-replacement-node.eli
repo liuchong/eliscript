@@ -1,0 +1,36 @@
+(module tests.helpers.wasm-managed-replacement-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:process" :default process)
+
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defasync run-main ()
+    (let ((mode (aref (get process :argv) 2)))
+      (cond
+        ((= mode "js")
+         (let ((m (await (funcall dynamic-import (aref (get process :argv) 3)))))
+           (js-call assert :equal (js-call m :f "aba" "a" "[$&][$`][$']$$$1") "[a][][ba]$$1ba")
+           (js-call assert :equal (js-call m :trim_comment ";中文😀 \t") ";中文😀")))
+        ((= mode "wasm")
+         (let* ((rt-mod (await (funcall dynamic-import (aref (get process :argv) 3))))
+                (instantiate (get rt-mod :instantiateManagedRuntime))
+                (a (funcall instantiate (readFileSync (aref (get process :argv) 4))))
+                (pat (js* "/(a)|(b)/")))
+           (js-call a :auto 1)
+           (let* ((s (js-call a :string "😀b"))
+                  (r (js-call a :string "$1:$2:$01:$20:$&"))
+                  (out (js-call a :invoke "f" (js-array s r)))
+                  (cb (js-call a :invoke "g" (js-array s))))
+             (js-call assert :equal (js-call a :readString out) (js-call "😀b" :replace pat "$1:$2:$01:$20:$&"))
+             (js-call assert :equal
+               (js-call a :readString cb)
+               (js-call "😀b" :replace pat (lambda (m g1 g2 i orig) (str m ":" g1 ":" g2 ":" i ":" orig))))
+             (js-call (js-array s r out cb) :forEach (lambda (x) (js-call a :release x)))
+             (js-call a :closeModule)
+             (js-call a :collect)
+             (js-call assert :equal (js-call a :live) 0)
+             (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
+        (t (throw (new globalThis.Error (str "unknown mode: " mode)))))))
+
+  (run-main))

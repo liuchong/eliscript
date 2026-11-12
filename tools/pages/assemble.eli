@@ -33,6 +33,8 @@
     "tools/backends/managed-source-view.mjs"
     "tools/backends/managed-module-graph.mjs")))
   (defconst runtime-transports (Object/freeze (js-call (js-array
+    "tools/backends/compiler-host-record.mjs"
+    "tools/backends/compiler-host-iteration.mjs"
     "tools/backends/managed-host-object-provider.mjs"
     "tools/backends/managed-host-object-realm.mjs"
     "tools/backends/managed-host-ground.mjs"
@@ -51,8 +53,13 @@
         "ir" "lower" "project" "reader" "source-map" "symbol" "syntax" "transient-analysis")
         :flatMap (lambda (name) (js-array (str "dist/bootstrap/" name ".mjs")
           (str "dist/bootstrap/" name ".mjs.map"))))
-      (js-array "dist/runtime/math.mjs" "dist/runtime/math.mjs.map"
+      (js-array "stdlib/bit.mjs" "stdlib/bit.mjs.map"
+        "dist/runtime/array-text.mjs" "dist/runtime/array-text.mjs.map"
+        "dist/runtime/errors.mjs" "dist/runtime/errors.mjs.map"
+        "dist/runtime/math.mjs" "dist/runtime/math.mjs.map"
+        "dist/runtime/number-radix.mjs" "dist/runtime/number-radix.mjs.map"
         "dist/runtime/prelude.mjs" "dist/runtime/prelude.mjs.map"
+        "dist/runtime/primitives.mjs" "dist/runtime/primitives.mjs.map"
         "dist/runtime/unicode-case.mjs" "dist/runtime/unicode-case.mjs.map"
         "dist/runtime/unicode-case-data.mjs" "dist/runtime/unicode-case-data.mjs.map"))))
   (defconst PUBLISHED_FILES (Object/freeze

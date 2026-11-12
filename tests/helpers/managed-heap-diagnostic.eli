@@ -1,2 +1,10 @@
-(module capsules.tests.helpers.managed-heap-diagnostic
-  (js* "// Keep the original exception and assertions. Print only scalar heap counters\n// when a positive recovery step fails, before the test's cleanup changes them.\nexport function invokeWithHeapDiagnostic(runtime, name, args = []) {\n  const before = runtime.stats();\n  try {return runtime.invoke(name, args);}\n  catch (error) {\n    console.error(JSON.stringify({managedInvocation: name, before, after: runtime.stats()}));\n    throw error;\n  }\n}\n"))
+(module tests.helpers.managed-heap-diagnostic
+  ;; Preserve the original exception. Sample before cleanup changes the heap.
+  (defun invokeWithHeapDiagnostic (runtime name args)
+    (setq args (if (= args undefined) (js-array) args))
+    (let ((before (js-call runtime :stats)))
+      (try (js-call runtime :invoke name args)
+        (catch error
+          (js-call globalThis.console :error (JSON/stringify (js-object :managedInvocation name :before before :after (js-call runtime :stats))))
+          (throw error)))))
+  (export invokeWithHeapDiagnostic))

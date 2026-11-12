@@ -1,2 +1,286 @@
-(module capsules.tools.runtime.unicode-property-ranges
-  (js* "// Maintenance only. The compiler consumes checked-in data without fetching\n// Unicode files, compiling a ground function, or invoking a host matcher.\nimport {createHash} from 'node:crypto';\nimport {readFile, writeFile} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {fileURLToPath} from 'node:url';\n\nconst maximumPoint = 0x10ffff;\nconst rowCount = 519;\nconst begin = '  ;; BEGIN GENERATED UNICODE PROPERTY RANGES';\nconst end = '  ;; END GENERATED UNICODE PROPERTY RANGES';\nconst dataFile = 'tools/runtime/unicode-property-ranges.json';\nconst runtimeFile = 'bootstrap/runtime/memory.eli';\nconst licenseUrl = 'https://www.unicode.org/license.txt';\nconst hash = text => createHash('sha256').update(text).digest('hex');\n\nfunction integer(token) {\n  if (!/^-?(?:0|[1-9][0-9]*)$/.test(token)) return undefined;\n  const value = Number(token);\n  if (!Number.isSafeInteger(value) || value < -4294967296 || value > 4294967295)\n    throw Error('ground range bound exceeds the supported integer domain');\n  return value;\n}\n\n// This is a parser for the generated decision-tree grammar, not an Eliscript\n// evaluator. In particular, even an unreachable unknown call is rejected.\nfunction parseTree(source) {\n  const tokens = source.match(/[()]|[^\\s()]+/g) ?? [];\n  let index = 0;\n  const read = depth => {\n    if (depth > 128 || index >= tokens.length) throw Error('invalid ground range tree');\n    const token = tokens[index++];\n    if (token === ')') throw Error('unexpected ground range close');\n    if (token !== '(') return integer(token) ?? token;\n    const list = [];\n    while (index < tokens.length && tokens[index] !== ')') list.push(read(depth + 1));\n    if (tokens[index++] !== ')') throw Error('unterminated ground range tree');\n    return list;\n  };\n  const tree = read(0);\n  if (index !== tokens.length) throw Error('trailing ground range tree data');\n  return tree;\n}\n\nfunction treeRanges(tree) {\n  const ranges = [];\n  const visit = (node, low, high) => {\n    if (node === 0 || node === 1) {\n      if (node === 1 && low <= high) {\n        const previous = ranges[ranges.length - 1];\n        if (previous && previous[1] + 1 === low) previous[1] = high;\n        else ranges.push([low, high]);\n      }\n      return;\n    }\n    if (!Array.isArray(node) || node.length !== 4 || node[0] !== 'if')\n      throw Error('unsupported ground range expression');\n    const condition = node[1];\n    if (!Array.isArray(condition) || condition.length !== 3 ||\n        !['<', '<='].includes(condition[0]) || condition[1] !== 'point' ||\n        !Number.isSafeInteger(condition[2])) throw Error('unsupported ground range comparison');\n    const boundary = condition[2] - (condition[0] === '<' ? 1 : 0);\n    visit(node[2], low, Math.min(high, boundary));\n    visit(node[3], Math.max(low, boundary + 1), high);\n  };\n  visit(tree, 0, maximumPoint);\n  return ranges;\n}\n\n// Exposed for permanent migration tests, including small mathematical trees.\n// Each original function is parsed independently so no whole-runtime AST lives\n// alongside the extracted declaration. Hashes describe source provenance only.\nexport function extractRangeRows(source) {\n  if (typeof source !== 'string') throw TypeError('range source must be a string');\n  const matcher = /\\(defun heap-regexp-property-ranges-([0-9]+)\\s+\\(point\\)/g;\n  const rows = [], ids = new Set();\n  for (let match; (match = matcher.exec(source));) {\n    const id = Number(match[1]);\n    if (!Number.isSafeInteger(id) || ids.has(id)) throw Error('duplicate or invalid ground range ID');\n    ids.add(id);\n    let position = matcher.lastIndex, depth = 1;\n    for (; position < source.length && depth; position++) {\n      if (source[position] === '(') depth++;\n      else if (source[position] === ')') depth--;\n    }\n    if (depth) throw Error('unterminated ground range function');\n    const original = source.slice(match.index, position);\n    const body = source.slice(matcher.lastIndex, position - 1);\n    rows.push({id, ranges: treeRanges(parseTree(body)), sourceSha256: hash(original.replace(/\\s/g, ''))});\n    matcher.lastIndex = position;\n  }\n  if (!rows.length) throw Error('no ground range functions found');\n  return rows.sort((left, right) => left.id - right.id);\n}\n\nfunction validateRow(row) {\n  if (!row || !Number.isInteger(row.id) || row.id < 0 || row.id >= rowCount ||\n      typeof row.sourceSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(row.sourceSha256) || !Array.isArray(row.ranges))\n    throw Error('invalid Unicode range row identity');\n  let previous = -1;\n  for (const range of row.ranges) {\n    if (!Array.isArray(range) || range.length !== 2) throw Error('invalid Unicode interval');\n    const [low, high] = range;\n    if (!Number.isInteger(low) || !Number.isInteger(high) || low <= previous ||\n        low < 0 || high > maximumPoint || low > high) throw Error('invalid Unicode interval order or bounds');\n    previous = high;\n  }\n}\n\nexport function packRangeRow(row) {\n  validateRow(row);\n  const words = [row.ranges.length];\n  for (const [low, high] of row.ranges) words.push(low, high);\n  return words;\n}\n\nfunction validateDeclaration(value) {\n  if (!value || value.format !== 'eliscript-unicode-property-ranges' || value.version !== 1 ||\n      value.license !== 'Unicode-3.0' || value.licenseUrl !== licenseUrl ||\n      !Array.isArray(value.rows) || value.rows.length !== rowCount)\n    throw Error('invalid complete Unicode property declaration');\n  for (let index = 0; index < rowCount; index++) {\n    const row = value.rows[index];validateRow(row);\n    if (row.id !== index) throw Error('missing, duplicate, or unsorted Unicode property row');\n  }\n}\n\nfunction literal(words) {\n  return '\"' + words.map(word => '\\\\u' + (word & 65535).toString(16).padStart(4, '0') +\n    '\\\\u' + (word >>> 16).toString(16).padStart(4, '0')).join('') + '\"';\n}\n\nfunction generate(declaration) {\n  validateDeclaration(declaration);\n  const maximumBytes = Math.max(...declaration.rows.map(row => (1 + row.ranges.length * 2) * 4));\n  let source = begin + '\\n' +\n    '  ;; Unicode 15.1 / 16.0 / 17.0 property rows; Unicode-3.0: ' + licenseUrl + '\\n' +\n    '  ;; Reproduce offline with tools/runtime/unicode-property-ranges.mjs --write.\\n' +\n    '  ;; Each literal is little-endian u32 [count, inclusiveLow, inclusiveHigh, ...].\\n' +\n    '  ;; Word 44 owns one instance-private raw buffer; word 48 is cached row ID+1.\\n' +\n    '  ;; The buffer holds no heap handles and survives retire, like code constants.\\n' +\n    '  ;; It is never reclaimed/reused by heap GC and allocates only once, not per row.\\n' +\n    '  (defun heap-regexp-property-range-table ()\\n' +\n    '    (initialize)\\n' +\n    '    (let ((table (load-u32 44)))\\n' +\n    '      (when (= table 0)\\n' +\n    `        (setq table (allocate ${maximumBytes}))\\n` +\n    '        (when (/= table 0) (store-u32 44 table))) table))\\n' +\n    '  (defun heap-regexp-property-range-find (table point)\\n' +\n    '    (let ((low 0) (high (load-u32 table)) (found 0))\\n' +\n    '      (while (< low high)\\n' +\n    '        (let* ((middle (word-div (+ low high) 2)) (entry (+ table (+ 4 (* middle 8)))))\\n' +\n    '          (if (< point (load-u32 entry)) (setq high middle)\\n' +\n    '            (if (> point (load-u32 (+ entry 4))) (setq low (1+ middle))\\n' +\n    '              (progn (setq found 1) (setq low high)))))) found))\\n';\n  for (const row of declaration.rows) {\n    const words = packRangeRow(row);\n    source += `  ;; Original range ${row.id} normalized-source SHA-256 ${row.sourceSha256}\\n` +\n      `  (defun heap-regexp-property-ranges-${row.id} (point)\\n` +\n      '    (if (> point 1114111) 0\\n' +\n      '      (let ((table (heap-regexp-property-range-table)))\\n' +\n      '        (if (= table 0) 0\\n' +\n      '          (progn\\n' +\n      `            (when (/= (load-u32 48) ${row.id + 1})\\n` +\n      `              (copy-static-u16 table ${literal(words)})\\n` +\n      `              (store-u32 48 ${row.id + 1}))\\n` +\n      '            (heap-regexp-property-range-find table point))))))\\n';\n  }\n  return {source: source + end, maximumBytes};\n}\n\nfunction replaceRegion(source, generated, extracting) {\n  let first = source.indexOf(begin), last = source.indexOf(end);\n  if (first >= 0 || last >= 0) {\n    if (first < 0 || last < first || source.indexOf(begin, first + begin.length) >= 0 ||\n        source.indexOf(end, last + end.length) >= 0) throw Error('invalid generated Unicode range region');\n    return source.slice(0, first) + generated + source.slice(last + end.length);\n  }\n  if (!extracting) throw Error('missing generated Unicode range region');\n  const match = /^  \\(defun heap-regexp-property-ranges-0 \\(point\\)/m.exec(source);\n  last = source.indexOf('  (defun heap-regexp-property-contains-151 ', match?.index ?? 0);\n  if (!match || last < match.index) throw Error('missing ground Unicode range region');\n  first = match.index;\n  // The extractor has already validated every function. Refuse to discard any\n  // unexpected intervening code rather than silently broadening the migration.\n  const region = source.slice(first, last);\n  if (region.split('\\n').filter(line => line.trim()).length !== rowCount)\n    throw Error('unexpected code between ground Unicode range functions');\n  return source.slice(0, first) + generated + '\\n' + source.slice(last);\n}\n\nasync function main(args) {\n  let root = fileURLToPath(new URL('../../', import.meta.url)), mode, extracting = false;\n  for (let index = 0; index < args.length; index++) {\n    const arg = args[index];\n    if (arg === '--root' && args[index + 1]) root = resolve(args[++index]);\n    else if (arg === '--extract') extracting = true;\n    else if (arg === '--write' || arg === '--check') {\n      if (mode) throw Error('choose exactly one generation mode');mode = arg;\n    } else throw Error('unknown or incomplete Unicode range option');\n  }\n  if (!mode || (extracting && mode !== '--write')) throw Error('require --write or --check; extraction requires --write');\n  const filename = resolve(root, runtimeFile), declarationPath = resolve(root, dataFile);\n  const source = await readFile(filename, 'utf8');\n  let declaration;\n  if (extracting) {\n    try {await readFile(declarationPath);throw Error('range declaration exists; refusing to replace its provenance');}\n    catch (error) {if (error.code !== 'ENOENT') throw error;}\n    declaration = {format: 'eliscript-unicode-property-ranges', version: 1,\n      license: 'Unicode-3.0', licenseUrl, rows: extractRangeRows(source)};\n  } else declaration = JSON.parse(await readFile(declarationPath, 'utf8'));\n  const generated = generate(declaration), next = replaceRegion(source, generated.source, extracting);\n  if (mode === '--write') {\n    if (extracting) await writeFile(declarationPath, JSON.stringify(declaration, null, 2) + '\\n', {flag: 'wx'});\n    await writeFile(filename, next);\n  } else if (next !== source) throw Error('generated Unicode property ranges differ');\n  console.log(JSON.stringify({rows: declaration.rows.length, maximumRowBytes: generated.maximumBytes,\n    generatedBytes: Buffer.byteLength(generated.source)}));\n}\n\nif (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));\n"))
+(module tools.runtime.unicode-property-ranges
+  ;; Maintenance only. The compiler consumes checked-in data without fetching
+  ;; Unicode files, compiling a ground function, or invoking a host matcher.
+  (import "node:crypto" createHash)
+  (import "node:fs" readFileSync writeFileSync existsSync)
+  (import "node:path" resolve)
+  (import "node:url" fileURLToPath)
+
+  (defconst maximum-point 1114111)
+  (defconst row-count 519)
+  (defconst begin "  ;; BEGIN GENERATED UNICODE PROPERTY RANGES")
+  (defconst end "  ;; END GENERATED UNICODE PROPERTY RANGES")
+  (defconst data-file "tools/runtime/unicode-property-ranges.json")
+  (defconst runtime-file "bootstrap/runtime/memory.eli")
+  (defconst license-url "https://www.unicode.org/license.txt")
+
+  (defun hash-text (text)
+    (js-call (js-call (createHash "sha256") :update text) :digest "hex"))
+
+  (defun parse-integer (token)
+    (if (not (js-call (new globalThis.RegExp "^-?(?:0|[1-9][0-9]*)$") :test token))
+      undefined
+      (let ((value (funcall globalThis.Number token)))
+        (when (or (not (Number/isSafeInteger value)) (< value -4294967296) (> value 4294967295))
+          (throw (new globalThis.Error "ground range bound exceeds the supported integer domain")))
+        value)))
+
+  ;; This is a parser for the generated decision-tree grammar, not an Eliscript
+  ;; evaluator. In particular, even an unreachable unknown call is rejected.
+  (defun parse-tree (source)
+    (let ((tokens (or (js-call source :match (new globalThis.RegExp "[()]|[^\\s()]+" "g")) (js-array)))
+          (index 0))
+      (letfn ((read-node (depth)
+                (when (or (> depth 128) (>= index (js-length tokens)))
+                  (throw (new globalThis.Error "invalid ground range tree")))
+                (let ((token (aref tokens index)))
+                  (setq index (1+ index))
+                  (when (= token ")")
+                    (throw (new globalThis.Error "unexpected ground range close")))
+                  (if (/= token "(")
+                    (let ((parsed (parse-integer token)))
+                      (if (undefined? parsed) token parsed))
+                    (let ((list (js-array)))
+                      (while (and (< index (js-length tokens)) (/= (aref tokens index) ")"))
+                        (js-call list :push (read-node (1+ depth))))
+                      (let ((close (aref tokens index)))
+                        (setq index (1+ index))
+                        (unless (= close ")")
+                          (throw (new globalThis.Error "unterminated ground range tree")))
+                        list))))))
+        (let ((tree (read-node 0)))
+          (unless (= index (js-length tokens))
+            (throw (new globalThis.Error "trailing ground range tree data")))
+          tree))))
+
+  (defun tree-ranges (tree)
+    (let ((ranges (js-array)))
+      (letfn ((visit (node low high)
+                (if (or (= node 0) (= node 1))
+                  (when (and (= node 1) (<= low high))
+                    (let ((previous (aref ranges (1- (js-length ranges)))))
+                      (if (and previous (= (1+ (aref previous 1)) low))
+                        (put previous 1 high)
+                        (js-call ranges :push (js-array low high)))))
+                  (progn
+                    (unless (and (Array/isArray node) (= (js-length node) 4) (= (aref node 0) "if"))
+                      (throw (new globalThis.Error "unsupported ground range expression")))
+                    (let ((condition (aref node 1)))
+                      (unless (and (Array/isArray condition) (= (js-length condition) 3)
+                                   (js-call (js-array "<" "<=") :includes (aref condition 0))
+                                   (= (aref condition 1) "point")
+                                   (Number/isSafeInteger (aref condition 2)))
+                        (throw (new globalThis.Error "unsupported ground range comparison")))
+                      (let ((boundary (- (aref condition 2) (if (= (aref condition 0) "<") 1 0))))
+                        (visit (aref node 2) low (Math/min high boundary))
+                        (visit (aref node 3) (Math/max low (1+ boundary)) high)))))))
+        (visit tree 0 maximum-point)
+        ranges)))
+
+  ;; Exposed for permanent migration tests, including small mathematical trees.
+  ;; Each original function is parsed independently so no whole-runtime AST lives
+  ;; alongside the extracted declaration. Hashes describe source provenance only.
+  (defun extractRangeRows (source)
+    (unless (= (value-type source) "string")
+      (throw (new globalThis.TypeError "range source must be a string")))
+    (let ((matcher (new globalThis.RegExp "\\(defun heap-regexp-property-ranges-([0-9]+)\\s+\\(point\\)" "g"))
+          (rows (js-array))
+          (ids (new globalThis.Set))
+          (match nil))
+      (while (setq match (js-call matcher :exec source))
+        (let ((id (funcall globalThis.Number (aref match 1))))
+          (when (or (not (Number/isSafeInteger id)) (js-call ids :has id))
+            (throw (new globalThis.Error "duplicate or invalid ground range ID")))
+          (js-call ids :add id)
+          (let ((position (get matcher :lastIndex))
+                (depth 1))
+            (while (and (< position (js-length source)) (> depth 0))
+              (let ((ch (aref source position)))
+                (cond
+                  ((= ch "(") (setq depth (1+ depth)))
+                  ((= ch ")") (setq depth (1- depth)))))
+              (setq position (1+ position)))
+            (when (> depth 0)
+              (throw (new globalThis.Error "unterminated ground range function")))
+            (let ((original (js-call source :slice (get match :index) position))
+                  (body (js-call source :slice (get matcher :lastIndex) (1- position))))
+              (js-call rows :push (js-object
+                :id id
+                :ranges (tree-ranges (parse-tree body))
+                :sourceSha256 (hash-text (js-call original :replace (new globalThis.RegExp "\\s" "g") ""))))
+              (put matcher :lastIndex position)))))
+      (when (= (js-length rows) 0)
+        (throw (new globalThis.Error "no ground range functions found")))
+      (js-call rows :sort (lambda (left right) (- (get left :id) (get right :id))))))
+
+  (defun validate-row (row)
+    (unless (and row (Number/isInteger (get row :id)) (>= (get row :id) 0) (< (get row :id) row-count)
+                 (= (value-type (get row :sourceSha256)) "string")
+                 (js-call (new globalThis.RegExp "^[a-f0-9]{64}$") :test (get row :sourceSha256))
+                 (Array/isArray (get row :ranges)))
+      (throw (new globalThis.Error "invalid Unicode range row identity")))
+    (let ((previous -1) (ranges (get row :ranges)) (i 0))
+      (while (< i (js-length ranges))
+        (let ((range (aref ranges i)))
+          (unless (and (Array/isArray range) (= (js-length range) 2))
+            (throw (new globalThis.Error "invalid Unicode interval")))
+          (let ((low (aref range 0)) (high (aref range 1)))
+            (when (or (not (Number/isInteger low)) (not (Number/isInteger high))
+                      (<= low previous) (< low 0) (> high maximum-point) (> low high))
+              (throw (new globalThis.Error "invalid Unicode interval order or bounds")))
+            (setq previous high)))
+        (setq i (1+ i)))))
+
+  (defun packRangeRow (row)
+    (validate-row row)
+    (let ((words (js-array (js-length (get row :ranges))))
+          (ranges (get row :ranges))
+          (i 0))
+      (while (< i (js-length ranges))
+        (let ((range (aref ranges i)))
+          (js-call words :push (aref range 0) (aref range 1)))
+        (setq i (1+ i)))
+      words))
+
+  (defun validate-declaration (value)
+    (unless (and value (= (get value :format) "eliscript-unicode-property-ranges")
+                 (= (get value :version) 1) (= (get value :license) "Unicode-3.0")
+                 (= (get value :licenseUrl) license-url)
+                 (Array/isArray (get value :rows)) (= (js-length (get value :rows)) row-count))
+      (throw (new globalThis.Error "invalid complete Unicode property declaration")))
+    (let ((index 0))
+      (while (< index row-count)
+        (let ((row (aref (get value :rows) index)))
+          (validate-row row)
+          (unless (= (get row :id) index)
+            (throw (new globalThis.Error "missing, duplicate, or unsorted Unicode property row"))))
+        (setq index (1+ index)))))
+
+  (defun literal-words (words)
+    (str "\"" (js-call (js-call words :map (lambda (word)
+                (str "\\u" (js-call (js-call (bit-and word 65535) :toString 16) :padStart 4 "0")
+                     "\\u" (js-call (js-call (unsigned-bit-shift-right word 16) :toString 16) :padStart 4 "0"))))
+                :join "") "\""))
+
+  (defun generate-ranges (declaration)
+    (validate-declaration declaration)
+    (let ((maximum-bytes (Reflect/apply (get globalThis.Math :max) globalThis.Math
+                           (js-call (get declaration :rows) :map
+                             (lambda (row) (* (1+ (* (js-length (get row :ranges)) 2)) 4)))))
+          (source nil))
+      (setq source (str begin "\n"
+        "  ;; Unicode 15.1 / 16.0 / 17.0 property rows; Unicode-3.0: " license-url "\n"
+        "  ;; Reproduce offline with tools/runtime/unicode-property-ranges.mjs --write.\n"
+        "  ;; Each literal is little-endian u32 [count, inclusiveLow, inclusiveHigh, ...].\n"
+        "  ;; Word 44 owns one instance-private raw buffer; word 48 is cached row ID+1.\n"
+        "  ;; The buffer holds no heap handles and survives retire, like code constants.\n"
+        "  ;; It is never reclaimed/reused by heap GC and allocates only once, not per row.\n"
+        "  (defun heap-regexp-property-range-table ()\n"
+        "    (initialize)\n"
+        "    (let ((table (load-u32 44)))\n"
+        "      (when (= table 0)\n"
+        "        (setq table (allocate " maximum-bytes "))\n"
+        "        (when (/= table 0) (store-u32 44 table))) table))\n"
+        "  (defun heap-regexp-property-range-find (table point)\n"
+        "    (let ((low 0) (high (load-u32 table)) (found 0))\n"
+        "      (while (< low high)\n"
+        "        (let* ((middle (word-div (+ low high) 2)) (entry (+ table (+ 4 (* middle 8)))))\n"
+        "          (if (< point (load-u32 entry)) (setq high middle)\n"
+        "            (if (> point (load-u32 (+ entry 4))) (setq low (1+ middle))\n"
+        "              (progn (setq found 1) (setq low high)))))) found))\n"))
+      (js-call (get declaration :rows) :forEach (lambda (row)
+        (let ((words (packRangeRow row)))
+          (setq source (str source
+            "  ;; Original range " (get row :id) " normalized-source SHA-256 " (get row :sourceSha256) "\n"
+            "  (defun heap-regexp-property-ranges-" (get row :id) " (point)\n"
+            "    (if (> point 1114111) 0\n"
+            "      (let ((table (heap-regexp-property-range-table)))\n"
+            "        (if (= table 0) 0\n"
+            "          (progn\n"
+            "            (when (/= (load-u32 48) " (1+ (get row :id)) ")\n"
+            "              (copy-static-u16 table " (literal-words words) ")\n"
+            "              (store-u32 48 " (1+ (get row :id)) "))\n"
+            "            (heap-regexp-property-range-find table point))))))\n")))))
+      (js-object :source (str source end) :maximumBytes maximum-bytes)))
+
+  (defun replace-region (source generated extracting)
+    (let ((first (js-call source :indexOf begin))
+          (last (js-call source :indexOf end)))
+      (if (or (>= first 0) (>= last 0))
+        (progn
+          (when (or (< first 0) (< last first)
+                    (>= (js-call source :indexOf begin (+ first (js-length begin))) 0)
+                    (>= (js-call source :indexOf end (+ last (js-length end))) 0))
+            (throw (new globalThis.Error "invalid generated Unicode range region")))
+          (str (js-call source :slice 0 first) generated (js-call source :slice (+ last (js-length end)))))
+        (progn
+          (unless extracting
+            (throw (new globalThis.Error "missing generated Unicode range region")))
+          (let* ((match (js-call (new globalThis.RegExp "^  \\(defun heap-regexp-property-ranges-0 \\(point\\)" "m") :exec source))
+                 (match-idx (if match (get match :index) 0)))
+            (setq last (js-call source :indexOf "  (defun heap-regexp-property-contains-151 " match-idx))
+            (when (or (not match) (< last match-idx))
+              (throw (new globalThis.Error "missing ground Unicode range region")))
+            (setq first match-idx)
+            (let ((region (js-call source :slice first last)))
+              (unless (= (js-length (js-call (js-call region :split "\n")
+                           :filter (lambda (line) (> (js-length (js-call line :trim)) 0))))
+                         row-count)
+                (throw (new globalThis.Error "unexpected code between ground Unicode range functions")))
+              (str (js-call source :slice 0 first) generated "\n" (js-call source :slice last))))))))
+
+  (defun main (args)
+    (let ((root (fileURLToPath (new globalThis.URL "../../" (get (js* "import.meta") :url))))
+          (mode undefined)
+          (extracting false)
+          (index 0))
+      (while (< index (js-length args))
+        (let ((arg (aref args index)))
+          (cond
+            ((and (= arg "--root") (aref args (1+ index)))
+             (setq index (1+ index))
+             (setq root (resolve (aref args index))))
+            ((= arg "--extract")
+             (setq extracting t))
+            ((or (= arg "--write") (= arg "--check"))
+             (when mode (throw (new globalThis.Error "choose exactly one generation mode")))
+             (setq mode arg))
+            (t (throw (new globalThis.Error "unknown or incomplete Unicode range option")))))
+        (setq index (1+ index)))
+      (when (or (not mode) (and extracting (/= mode "--write")))
+        (throw (new globalThis.Error "require --write or --check; extraction requires --write")))
+      (let* ((filename (resolve root runtime-file))
+             (declaration-path (resolve root data-file))
+             (source (readFileSync filename "utf8"))
+             (declaration nil))
+        (if extracting
+          (progn
+            (when (existsSync declaration-path)
+              (throw (new globalThis.Error "range declaration exists; refusing to replace its provenance")))
+            (setq declaration (js-object
+              :format "eliscript-unicode-property-ranges"
+              :version 1
+              :license "Unicode-3.0"
+              :licenseUrl license-url
+              :rows (extractRangeRows source))))
+          (setq declaration (JSON/parse (readFileSync declaration-path "utf8"))))
+        (let* ((generated (generate-ranges declaration))
+               (next (replace-region source (get generated :source) extracting)))
+          (if (= mode "--write")
+            (progn
+              (when extracting
+                (writeFileSync declaration-path (str (JSON/stringify declaration nil 2) "\n") (js-object :flag "wx")))
+              (writeFileSync filename next))
+            (when (/= next source)
+              (throw (new globalThis.Error "generated Unicode property ranges differ"))))
+          (js-call globalThis.console :log (JSON/stringify (js-object
+            :rows (js-length (get declaration :rows))
+            :maximumRowBytes (get generated :maximumBytes)
+            :generatedBytes (js-call globalThis.Buffer :byteLength (get generated :source)))))))))
+
+  (when (and (aref (get globalThis.process :argv) 1)
+             (= (resolve (aref (get globalThis.process :argv) 1))
+                (fileURLToPath (get (js* "import.meta") :url))))
+    (main (js-call (get globalThis.process :argv) :slice 2)))
+
+  (export extractRangeRows packRangeRow))

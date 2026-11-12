@@ -20,7 +20,7 @@
   (import "./compiler-matrix-resume.mjs" loadCompilerMatrixResume)
   (import "./compiler-bootstrap.mjs"
     compilerHosts normalizeCompilerHost compilerDigest compilerFailure compilerSourceIdentity
-    archiveCompilerSources saveCompilerMetadata bootstrapCompilerGrid assertCompilerArtifactSources openCompilerArtifact)
+    archiveCompilerSources saveCompilerMetadata saveOwnedCompilerMetadata bootstrapCompilerGrid assertCompilerArtifactSources openCompilerArtifact)
 
   (defconst original-manifests (Object/freeze (js-array
     (js-object :id "compiler-parity" :file "contracts/compiler-parity-corpus.json" :format "eliscript-compiler-parity-corpus")
@@ -382,16 +382,16 @@
               ;; Transfer these detached graphs instead of duplicating the
               ;; complete lowering once more during archival.
               (put product :descriptor (get response :descriptor))
-              (put product :descriptorSha256 (compilerMetadataDigest (get response :descriptor)))
-              (await (saveCompilerMetadata (join directory "descriptor.json") (get response :descriptor))))
+              (put product :descriptorSha256
+                (await (saveOwnedCompilerMetadata (join directory "descriptor.json") (get response :descriptor)))))
             (unless (undefined? (get response :typed))
               (put product :typed (get response :typed))
-              (put product :typedSha256 (compilerMetadataDigest (get response :typed)))
-              (await (saveCompilerMetadata (join directory "typed.json") (get response :typed))))
+              (put product :typedSha256
+                (await (saveOwnedCompilerMetadata (join directory "typed.json") (get response :typed)))))
             (unless (undefined? (get response :debug))
               (put product :debug (get response :debug)) (put product :debugPath (join directory "debug.json"))
-              (put product :debugSha256 (compilerMetadataDigest (get response :debug)))
-              (await (saveCompilerMetadata (get product :debugPath) (get response :debug))))
+              (put product :debugSha256
+                (await (saveOwnedCompilerMetadata (get product :debugPath) (get response :debug)))))
             (when (and (= target "native") (undefined? (get response :typed)))
               (matrix-error "native product has no actual typed lowering record"))
             (when (field (get product :descriptor) "project")
@@ -579,36 +579,50 @@
                         mode value)))))))
               forwarded))))
 
-  ;; A partition changes only the host observation, not the compiler request.
-  ;; Keep one owned response per live session, and only reuse consecutive parts
-  ;; of the same authenticated group. Every part still executes its product.
+  ;; These observations share the original suite's one beforeAll compilation.
+  ;; Match the complete request and actual consecutive cell position; keep one
+  ;; private snapshot per session and execute every original observation.
+  (defun sequence-response-record-p (record options)
+    (let ((original (get record :original)))
+      (and original
+        (= (get original :suite) "tests/wasm-managed-sequence-data.test.mjs")
+        (= (get original :fixture) "tests/fixtures/wasm-managed-sequence-data.eli")
+        (js-call (new globalThis.RegExp "^original-managed:sequence-data(?:-(?:host-(?:transducer|core-stdlib|data-text|value-hash|lazy-sequence|core-text-object)|portable-(?:sequence|text|object)|relational-set|standard-identities))?:(?:node|bun):auto-65536$")
+          :test (get record :id))
+        (= (get options :functionalRuntimeProfile) "small"))))
   (defconst sorted-response-cache (new globalThis.WeakMap))
-  (defasync matrix-project-response (record request session mode options outcome)
-    (let* ((original (get record :original))
+  (defasync matrix-project-response (record request session mode options outcome cell-index)
+    (let* ((signal (get options :signal)) (_abort (aborted signal))
+           (original (get record :original))
            (bound-header (when original (get original :functionalPartition)))
            (part (if (and bound-header (= (get bound-header :family) "wire"))
                    (wireFunctionalPartition record) (sortedFunctionalPartition record)))
+           (sequence (sequence-response-record-p record options))
+           (eligible (or part sequence))
            (bound (when part (get (get record :original) :functionalPartition)))
-           (key (when part (compilerMetadataDigest (js-object :request request :mode mode))))
+           (group (when eligible (if part (get bound :originalId) "original-managed:sequence-data")))
+           (key (when eligible (compilerMetadataDigest (js-object :request request :mode mode))))
            (previous (js-call sorted-response-cache :get session))
-           (index (when part (get bound :index))) (response undefined))
-      (if (and part (> index 0) previous (= (get previous :key) key)
-               (= (get previous :group) (get bound :originalId))
+           (index (if part (get bound :index) cell-index)) (response undefined) (reused false))
+      (if (and eligible (> index 0) previous (= (get previous :key) key)
+               (= (get previous :group) group) (= (get previous :cellIndex) (1- cell-index))
                (= (get previous :index) (1- index)))
         (progn
-          (setq response (cloneCompilerCorpusData (get previous :response)))
+          (setq reused t)
+          (setq response (clone (get previous :response)))
           (put outcome :compilation (js-object :kind "reused" :fromCase (get previous :caseId) :requestSha256 key)))
         (progn
           (js-call sorted-response-cache :delete session)
           (setq response (await (js-call session :request request
-            (matrix-spread (js-object :signal (get options :signal))
+            (matrix-spread (js-object :signal signal)
               (if (undefined? mode) (js-object) (js-object :responseMode mode))))))
-          (when part (put outcome :compilation (js-object :kind "compiled" :requestSha256 key)))))
-      (when part
-        (if (= index (1- (js-length (get bound :parts))))
+          (when eligible (put outcome :compilation (js-object :kind "compiled" :requestSha256 key)))))
+      (when eligible
+        (if (and part (= index (1- (js-length (get bound :parts)))))
           (js-call sorted-response-cache :delete session)
-          (js-call sorted-response-cache :set session (js-object :key key :group (get bound :originalId)
-            :index index :caseId (get record :id) :response (cloneCompilerCorpusData response)))))
+          (js-call sorted-response-cache :set session (js-object :key key :group group
+            :index index :cellIndex cell-index :caseId (get record :id)
+            :response (if reused (get previous :response) (clone response))))))
       response))
   (defasync matrix-case-execution (record index host target session mode cell-directory metadata manifest corpus execution-options options cell
                                   literal-sources literal-identity)
@@ -673,7 +687,7 @@
         (try
           (progn
             (unless (nil? request)
-              (setq response (await (matrix-project-response record request session mode options outcome)))
+              (setq response (await (matrix-project-response record request session mode options outcome index)))
               (if (= (get record :kind) "stage")
                 (progn
                   (await (saveCompilerMetadata (join directory "stage-response.json") response))

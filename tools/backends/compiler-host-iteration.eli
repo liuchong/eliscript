@@ -1,0 +1,28 @@
+(module tools.backends.compiler-host-iteration
+  ;; Host iterable protocol only: the traversal algorithms remain at each call
+  ;; site. Cache next once and close an unfinished iterator on body failure.
+  (defconst host-typeof (js* "(value) => typeof value"))
+  (defconst host-truth (js* "(value) => !!value"))
+  (defun object-p (value)
+    (and (not (nullish? value)) (or (= (funcall host-typeof value) "object") (= (funcall host-typeof value) "function"))))
+  (defun openHostIterator (values)
+    (let* ((method (get values (get globalThis.Symbol :iterator))) (iterator (Reflect/apply method values (js-array))))
+      (unless (object-p iterator) (throw (new globalThis.TypeError "iterator must return an object")))
+      (js-object :iterator iterator :next (get iterator :next) :active false :done false :value undefined)))
+  (defun advanceHostIterator (state)
+    (put state :active false)
+    (if (get state :done) false
+      (let ((step (Reflect/apply (get state :next) (get state :iterator) (js-array))))
+        (unless (object-p step) (throw (new globalThis.TypeError "iterator result must be an object")))
+        (if (funcall host-truth (get step :done)) (progn (put state :done t) false)
+          (progn (put state :value (get step :value)) (put state :active t) t)))))
+  (defun closeHostIterator (state suppressError)
+    (when (get state :active)
+      (put state :active false) (put state :done t)
+      (try
+        (let ((method (get (get state :iterator) :return)))
+          (unless (nullish? method)
+            (let ((result (Reflect/apply method (get state :iterator) (js-array))))
+              (unless (object-p result) (throw (new globalThis.TypeError "iterator return must return an object"))))))
+        (catch error (unless suppressError (throw error))))) undefined)
+  (export openHostIterator advanceHostIterator closeHostIterator))

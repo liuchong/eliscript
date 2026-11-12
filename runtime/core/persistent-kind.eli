@@ -1,2 +1,83 @@
-(module capsules.runtime.core.persistent-kind
-  (js* "export const PERSISTENT_MAP_KIND = Symbol(\"eliscript.persistent-map.kind\");\nexport const PERSISTENT_MAP_HAS_VALUE_KEY = Symbol(\n  \"eliscript.persistent-map.has-value-key\",\n);\nexport const PERSISTENT_SET_KIND = Symbol(\"eliscript.persistent-set.kind\");\nexport const PERSISTENT_SET_HAS_VALUE = Symbol(\n  \"eliscript.persistent-set.has-value\",\n);\n\nexport function isPersistentMapValue(value) {\n  return value?.[PERSISTENT_MAP_KIND] === true &&\n    typeof value?.[PERSISTENT_MAP_HAS_VALUE_KEY] === \"function\";\n}\n\nexport function isPersistentSetValue(value) {\n  return value?.[PERSISTENT_SET_KIND] === true &&\n    typeof value?.[PERSISTENT_SET_HAS_VALUE] === \"function\";\n}\n\nexport function persistentMapValueEqual(left, right, equal) {\n  if (left === right) {\n    return true;\n  }\n  if (!isPersistentMapValue(right) || right.count !== left.count) {\n    return false;\n  }\n  for (const [key, value] of left) {\n    if (!right[PERSISTENT_MAP_HAS_VALUE_KEY](key) ||\n        !equal(value, right.get(key))) {\n      return false;\n    }\n  }\n  return true;\n}\n\nexport function persistentSetValueEqual(left, right, equal) {\n  if (left === right) {\n    return true;\n  }\n  if (!isPersistentSetValue(right) || right.count !== left.count) {\n    return false;\n  }\n  for (const value of left) {\n    if (!right[PERSISTENT_SET_HAS_VALUE](value, equal)) {\n      return false;\n    }\n  }\n  return true;\n}\n"))
+(module eliscript.runtime.core.persistent-kind
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst PERSISTENT_MAP_KIND (funcall globalThis/Symbol "eliscript.persistent-map.kind"))
+  (defconst PERSISTENT_MAP_HAS_VALUE_KEY
+    (funcall globalThis/Symbol "eliscript.persistent-map.has-value-key"))
+  (defconst PERSISTENT_SET_KIND (funcall globalThis/Symbol "eliscript.persistent-set.kind"))
+  (defconst PERSISTENT_SET_HAS_VALUE
+    (funcall globalThis/Symbol "eliscript.persistent-set.has-value"))
+
+  (defun isPersistentMapValue (value)
+    (and (not (nullish? value))
+         (eq (aref value PERSISTENT_MAP_KIND) t)
+         (= (funcall typeof-value (aref value PERSISTENT_MAP_HAS_VALUE_KEY)) "function")))
+
+  (defun isPersistentSetValue (value)
+    (and (not (nullish? value))
+         (eq (aref value PERSISTENT_SET_KIND) t)
+         (= (funcall typeof-value (aref value PERSISTENT_SET_HAS_VALUE)) "function")))
+
+  (defun close-iterator (iterator)
+    (let ((return-method (get iterator :return)))
+      (when (not (nullish? return-method))
+        (js-call return-method :call iterator))))
+
+  (defun every-iterable (iterable predicate)
+    (let ((iterator (js-call (aref iterable (get globalThis/Symbol :iterator)) :call iterable))
+          (done false)
+          (matched t))
+      (while (not done)
+        (let ((step (js-call iterator :next)))
+          (if (funcall globalThis/Boolean (get step :done))
+              (setq done t)
+              (let ((ok false)
+                    (failed false)
+                    (failure nil))
+                (try
+                  (setq ok (funcall globalThis/Boolean (funcall predicate (get step :value))))
+                  (catch error
+                    (setq failed t failure error)))
+                (when failed
+                  (try
+                    (close-iterator iterator)
+                    (catch _close-error nil))
+                  (throw failure))
+                (unless ok
+                  (close-iterator iterator)
+                  (setq matched false done t))))))
+      matched))
+
+  (defun persistentMapValueEqual (left right equal)
+    (if (eq left right)
+        t
+        (if (or (not (isPersistentMapValue right))
+                (not (= (get right :count) (get left :count))))
+            false
+            (every-iterable left
+              (lambda (entry)
+                (let (([key value] entry))
+                  (and (funcall globalThis/Boolean
+                         (js-call (aref right PERSISTENT_MAP_HAS_VALUE_KEY) :call right key))
+                       (funcall globalThis/Boolean
+                         (funcall equal value (js-call right :get key))))))))))
+
+  (defun persistentSetValueEqual (left right equal)
+    (if (eq left right)
+        t
+        (if (or (not (isPersistentSetValue right))
+                (not (= (get right :count) (get left :count))))
+            false
+            (every-iterable left
+              (lambda (value)
+                (funcall globalThis/Boolean
+                  (js-call (aref right PERSISTENT_SET_HAS_VALUE) :call right value equal)))))))
+
+  (export
+    PERSISTENT_MAP_KIND
+    PERSISTENT_MAP_HAS_VALUE_KEY
+    PERSISTENT_SET_KIND
+    PERSISTENT_SET_HAS_VALUE
+    isPersistentMapValue
+    isPersistentSetValue
+    persistentMapValueEqual
+    persistentSetValueEqual))

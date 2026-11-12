@@ -1,0 +1,14 @@
+(module tools.testing.lisp-module-driver
+  (import "node:fs" readFileSync)
+  (import "node:url" pathToFileURL)
+  (import "node:process" :default process)
+  ;; Dynamic ESM import is the host boundary; orchestration stays in Eli.
+  (defconst host-import (js* "(url) => import(url)"))
+  (defasync main ()
+    (let* ((module (await (funcall host-import (get (pathToFileURL (aref (get process :argv) 2)) :href))))
+           (source (readFileSync 0 "utf8")))
+      (js-call (get process :stdout) :write
+        (js-call module :compileModule source
+          (js-object :moduleName (aref (get process :argv) 3) :runtime "eliscript/runtime/lisp")))))
+  (js-call (main) :catch
+    (lambda (error) (console/error error) (put process :exitCode 1))))

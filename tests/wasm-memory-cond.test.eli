@@ -1,2 +1,70 @@
-(module capsules.tests.wasm-memory-cond.test
-  (js* "import {beforeAll,afterAll,test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {mkdtemp,rm} from 'node:fs/promises';\nimport {tmpdir} from 'node:os';\nimport {resolve} from 'node:path';\nimport {buildBackends} from '../tools/backends/build.mjs';\n\nlet directory,backend;\nbeforeAll(async()=>{\n  directory=await mkdtemp(resolve(tmpdir(),'eliscript-word-cond-'));\n  backend=await buildBackends({outputRoot:directory});\n},120000);\nafterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});\nfunction word(source){\n  const ir=backend.compiler.compile_ir_string(source,'word-cond.eli');\n  const bytes=Uint8Array.from(backend.wasm.emit_memory_wasm(ir));\n  const module=new WebAssembly.Module(bytes);\n  assert.deepEqual(WebAssembly.Module.imports(module),[]);\n  return new WebAssembly.Instance(module).exports;\n}\n\ntest('word cond preserves discarded bodies, nested statements and exhaustive values',()=>{\n  const e=word(`(import \"eliscript:memory32\" load-u32 store-u32)\n    (defun run (n)\n      (store-u32 0 0)\n      (cond\n        ((= n 1) (when t (store-u32 0 7)) (store-u32 0 (+ (load-u32 0) 2)))\n        (t (unless false (store-u32 0 3))))\n      (if (= n 9) (cond (t (when t (store-u32 0 11)))) 0)\n      (load-u32 0))\n    (defun value (n) (cond ((< n 3) (+ n 1)) ((= n 3) 7) (t 9)))\n    (defun unmatched (n) (store-u32 0 5) (cond ((= n 1) (store-u32 0 8))) (load-u32 0))\n    (defun empty () (cond) 42)\n    (export run value unmatched empty)`);\n  assert.equal(e.run(1),9);assert.equal(e.run(2),3);assert.equal(e.run(9),11);\n  for(const n of [0,1,2,3,4,0xffffffff])assert.equal(e.value(n),n<3?n+1:n===3?7:9);\n  assert.equal(e.unmatched(1),8);assert.equal(e.unmatched(2),5);assert.equal(e.empty(),42);\n});\n\ntest('word cond evaluates a test-only clause once and preserves its boolean value',()=>{\n  const e=word(`(import \"eliscript:memory32\" load-u32 store-u32)\n    (defun run (n)\n      (store-u32 0 0)\n      (let ((result (if (cond ((progn (store-u32 0 (1+ (load-u32 0))) (= n 1))) (t false)) 7 9)))\n        (+ (* (load-u32 0) 100) result)))\n    (export run)`);\n  assert.equal(e.run(1),107);assert.equal(e.run(2),109);\n});\n\ntest('cond keeps consumed when and implicit nil outside the numeric result ABI',()=>{\n  for(const source of [\n    '(defun bad (n) (cond ((= n 1) (when t 7)) (t 9))) (export bad)',\n    '(defun bad (n) (let ((x (cond ((= n 1) (unless false 7)) (t 9)))) x)) (export bad)',\n    '(defun bad (n) (cond ((= n 1) 7))) (export bad)',\n    '(defun bad (n) (cond (t 7) ((= n 1) \"dead\"))) (export bad)',\n  ])assert.throws(()=>word(source),error=>error.eliscriptDiagnostic?.code==='ELI-B0001');\n  const ir=backend.compiler.compile_ir_string('(defun bad (n) (cond ((< n 1) 7))) (export bad)','numeric-cond.eli');\n  assert.throws(()=>backend.numeric.lower_numeric_program(ir),error=>error.eliscriptDiagnostic?.code==='ELI-B0001');\n  const valid=backend.compiler.compile_ir_string('(defun run (n) (cond ((< n 1) 7) (t (+ n 2)))) (export run)','numeric-cond.eli');\n  const bytes=Uint8Array.from(backend.wasm.emit_numeric_wasm(valid));\n  const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;\n  assert.equal(e.run(0),7);assert.equal(e.run(3),5);\n});\n"))
+(module tests.wasm-memory-cond.test
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp rm)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" buildBackends)
+
+  (defvar directory undefined)
+  (defvar backend undefined)
+
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-word-cond-"))))
+    (setq backend (await (buildBackends (js-object :outputRoot directory)))))
+    120000)
+
+  (afterAll (async ()
+    (when directory
+      (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun word (source)
+    (let* ((ir (js-call (get backend :compiler) :compile_ir_string source "word-cond.eli"))
+           (bytes (Uint8Array/from (js-call (get backend :wasm) :emit_memory_wasm ir)))
+           (mod (new globalThis.WebAssembly.Module bytes)))
+      (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports mod) (js-array))
+      (get (new globalThis.WebAssembly.Instance mod) :exports)))
+
+  (test "word cond preserves discarded bodies, nested statements and exhaustive values" (lambda ()
+    (let ((e (word "(import \"eliscript:memory32\" load-u32 store-u32)\n    (defun run (n)\n      (store-u32 0 0)\n      (cond\n        ((= n 1) (when t (store-u32 0 7)) (store-u32 0 (+ (load-u32 0) 2)))\n        (t (unless false (store-u32 0 3))))\n      (if (= n 9) (cond (t (when t (store-u32 0 11)))) 0)\n      (load-u32 0))\n    (defun value (n) (cond ((< n 3) (+ n 1)) ((= n 3) 7) (t 9)))\n    (defun unmatched (n) (store-u32 0 5) (cond ((= n 1) (store-u32 0 8))) (load-u32 0))\n    (defun empty () (cond) 42)\n    (export run value unmatched empty)")))
+      (js-call assert :equal (js-call e :run 1) 9)
+      (js-call assert :equal (js-call e :run 2) 3)
+      (js-call assert :equal (js-call e :run 9) 11)
+      (js-call (js-array 0 1 2 3 4 4294967295) :forEach
+        (lambda (n)
+          (js-call assert :equal (js-call e :value n)
+            (cond ((< n 3) (+ n 1)) ((= n 3) 7) (t 9)))))
+      (js-call assert :equal (js-call e :unmatched 1) 8)
+      (js-call assert :equal (js-call e :unmatched 2) 5)
+      (js-call assert :equal (js-call e :empty) 42))))
+
+  (test "word cond evaluates a test-only clause once and preserves its boolean value" (lambda ()
+    (let ((e (word "(import \"eliscript:memory32\" load-u32 store-u32)\n    (defun run (n)\n      (store-u32 0 0)\n      (let ((result (if (cond ((progn (store-u32 0 (1+ (load-u32 0))) (= n 1))) (t false)) 7 9)))\n        (+ (* (load-u32 0) 100) result)))\n    (export run)")))
+      (js-call assert :equal (js-call e :run 1) 107)
+      (js-call assert :equal (js-call e :run 2) 109))))
+
+  (test "cond keeps consumed when and implicit nil outside the numeric result ABI" (lambda ()
+    (js-call
+      (js-array
+        "(defun bad (n) (cond ((= n 1) (when t 7)) (t 9))) (export bad)"
+        "(defun bad (n) (let ((x (cond ((= n 1) (unless false 7)) (t 9)))) x)) (export bad)"
+        "(defun bad (n) (cond ((= n 1) 7))) (export bad)"
+        "(defun bad (n) (cond (t 7) ((= n 1) \"dead\"))) (export bad)")
+      :forEach
+      (lambda (source)
+        (js-call assert :throws
+          (lambda () (word source))
+          (lambda (error)
+            (let ((diag (get error :eliscriptDiagnostic)))
+              (and diag (= (get diag :code) "ELI-B0001")))))))
+    (let ((ir (js-call (get backend :compiler) :compile_ir_string "(defun bad (n) (cond ((< n 1) 7))) (export bad)" "numeric-cond.eli")))
+      (js-call assert :throws
+        (lambda () (js-call (get backend :numeric) :lower_numeric_program ir))
+        (lambda (error)
+          (let ((diag (get error :eliscriptDiagnostic)))
+            (and diag (= (get diag :code) "ELI-B0001"))))))
+    (let* ((valid (js-call (get backend :compiler) :compile_ir_string "(defun run (n) (cond ((< n 1) 7) (t (+ n 2)))) (export run)" "numeric-cond.eli"))
+           (bytes (Uint8Array/from (js-call (get backend :wasm) :emit_numeric_wasm valid)))
+           (e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports)))
+      (js-call assert :equal (js-call e :run 0) 7)
+      (js-call assert :equal (js-call e :run 3) 5)))))

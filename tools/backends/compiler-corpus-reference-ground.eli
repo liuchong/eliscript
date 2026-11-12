@@ -1,2 +1,492 @@
-(module capsules.tools.backends.compiler-corpus-reference-ground
-  (js* "import {createHash} from 'node:crypto';\nimport {spawn} from 'node:child_process';\nimport {mkdir, mkdtemp, readFile, readdir, writeFile, lstat, symlink, rm} from 'node:fs/promises';\nimport {resolve, relative, sep, isAbsolute, dirname, basename} from 'node:path';\n\nconst digest = bytes => createHash('sha256').update(bytes).digest('hex');\n\nfunction relativePath(value, label) {\n  if (typeof value !== 'string' || !value || isAbsolute(value) || /[\\\\:\\u0000]/.test(value) ||\n      value.split('/').some(part => !part || part === '.' || part === '..')) {\n    throw new TypeError(label + ' must be a relative path inside the reference artifact');\n  }\n  return value;\n}\n\nfunction localPath(directory, path) {\n  const result = relative(directory, path);\n  if (!result || isAbsolute(result) || result === '..' || result.startsWith('..' + sep)) {\n    throw new TypeError('independent reference must remain in its original case archive');\n  }\n  return result.split(sep).join('/');\n}\n\nfunction aborted(signal) {\n  if (signal?.aborted) throw signal.reason ?? new Error('independent original reference aborted');\n}\n\nasync function put(directory, id, bytes) {\n  relativePath(id, 'reference file');\n  let parent = directory;\n  for (const part of id.split('/').slice(0, -1)) {\n    parent = resolve(parent, part);\n    await mkdir(parent, {recursive: true});\n    const info = await lstat(parent);\n    if (!info.isDirectory() || info.isSymbolicLink()) throw new TypeError('reference file traverses a directory alias');\n  }\n  const path = resolve(directory, id);\n  await writeFile(path, bytes, {flag: 'wx'});\n  return path;\n}\n\nasync function seedCompile(sourceRoot, input, output, portableEntries, options, signal) {\n  aborted(signal);\n  const args = ['--source-map', ...portableEntries.flatMap(name => ['--portable', name]), '--output', output, input];\n  return new Promise(accept => {\n    const stdout = [], stderr = [];\n    let failure, child;\n    try {\n    child = spawn(resolve(sourceRoot, 'bin/eliscript-seed'), args, {\n      cwd: sourceRoot, signal, stdio: ['ignore', 'pipe', 'pipe'],\n      env: {...process.env, EMACS: options.emacs ?? process.env.EMACS ?? 'emacs'},\n    });\n    } catch (error) {\n      accept({exitCode: null, signal: null, error, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0)});\n      return;\n    }\n    child.stdout.on('data', bytes => stdout.push(bytes));\n    child.stderr.on('data', bytes => stderr.push(bytes));\n    child.once('error', error => {failure = error;});\n    child.once('close', (exitCode, terminationSignal) => accept({exitCode, signal: terminationSignal,\n      error: failure, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr)}));\n  });\n}\n\nasync function seedIdentity(sourceRoot) {\n  const files = ['bin/eliscript-seed', ...(await readdir(resolve(sourceRoot, 'compiler')))\n    .filter(name => name.endsWith('.el')).sort().map(name => 'compiler/' + name)];\n  const records = [];\n  for (const file of files) {\n    const bytes = await readFile(resolve(sourceRoot, file));\n    records.push({file, bytes: bytes.length, sha256: digest(bytes)});\n  }\n  return {implementation: 'emacs-seed', files: records, sha256: digest(JSON.stringify(records))};\n}\n\nasync function referenceEnvironment(directory, sourceRoot, modules, providers) {\n  const files = [];\n  for (const module of modules) {\n    // Retain the same .eli ESM transport used by the original host runner. This\n    // transports imports only; all compiler implementation bytes came from Seed.\n    const alias = module.id.slice(0, -4) + '.eli';\n    const specifier = './' + basename(module.id);\n    const source = 'export * from ' + JSON.stringify(specifier) + ';\\n';\n    await put(directory, alias, source);\n    files.push({path: alias, role: 'original-eli-import-transport', bytes: Buffer.byteLength(source), sha256: digest(source)});\n  }\n  for (const provider of providers) {\n    await put(directory, provider.id, provider.source);\n    files.push({path: provider.id, role: 'original-host-provider', filename: provider.filename,\n      bytes: Buffer.byteLength(provider.source), sha256: digest(provider.source)});\n  }\n  // Runtime imports resolve to the real repository package, exactly as in the\n  // original Seed oracle; this is an explicit environment dependency, not a\n  // substituted compiler or a copied provider implementation.\n  const packageDirectory = resolve(directory, 'node_modules');\n  await mkdir(packageDirectory, {recursive: true});\n  await symlink(sourceRoot, resolve(packageDirectory, 'eliscript'), 'dir');\n  const runtimePath = resolve(directory, 'runtime');\n  try {await symlink(resolve(sourceRoot, 'runtime'), runtimePath, 'dir');}\n  catch (error) {\n    if (error.code !== 'EEXIST') throw error;\n    // An emitted runtime/ module graph takes precedence over this convenience\n    // alias. Do not replace actual emitted modules with repository JavaScript.\n    const details = await lstat(runtimePath);\n    if (details.isSymbolicLink() || !details.isDirectory()) throw new TypeError('independent reference runtime path conflicts with its source graph');\n  }\n  return files;\n}\n\n// Each call creates fresh Seed output and a distinct import directory. In\n// particular the selected-program invocation and its independent Seed oracle\n// must call this separately; neither a selected session nor an imported module\n// cache can supply the reference implementation.\nexport async function prepareOriginalReferenceArtifact(context) {\n  if (context.record?.execution?.referenceArtifact !== true) return undefined;\n  const {record, signal} = context;\n  const sourceRoot = resolve(context.sourceRoot ?? record.sourceRoot);\n  if (typeof context.directory !== 'string') throw new TypeError('independent reference requires its original case directory');\n  const directory = resolve(context.directory), options = context.options ?? {};\n  const modules = record.modules ?? record.request?.modules;\n  const entry = relativePath(record.entry ?? record.request?.entry, 'reference entry');\n  if (!Array.isArray(modules) || !modules.length) throw new TypeError('independent reference requires the complete original module graph');\n  // The original Seed CLI has no capability-context input. Never silently\n  // replace capability-bearing module semantics with its default environment.\n  if (record.request?.macroContext !== undefined || modules.some(module => module?.macroContext !== undefined) ||\n      record.request?.portable === true) {\n    throw new TypeError('independent reference Seed CLI cannot transport this explicit macro or implicit portable context');\n  }\n  const portableEntries = record.request?.portableEntries ?? [];\n  if (!Array.isArray(portableEntries) || portableEntries.some(name => typeof name !== 'string' || !name || name.includes('\\u0000'))) {\n    throw new TypeError('independent reference portable entries must retain explicit function names');\n  }\n  const ids = new Set(), filenames = new Map(), outputPaths = new Set();\n  for (const module of modules) {\n    relativePath(module?.id, 'reference module id');\n    relativePath(module?.filename, 'reference source filename');\n    if (!module.id.endsWith('.mjs') || typeof module.source !== 'string' || ids.has(module.id) ||\n        filenames.has(module.filename) && filenames.get(module.filename) !== module.source) {\n      throw new TypeError('independent reference requires distinct complete source modules');\n    }\n    ids.add(module.id); filenames.set(module.filename, module.source);\n    for (const path of [module.id, module.id + '.map', module.id.slice(0, -4) + '.eli']) {\n      if (outputPaths.has(path)) throw new TypeError('independent reference output paths overlap');\n      outputPaths.add(path);\n    }\n  }\n  if (!ids.has(entry)) throw new TypeError('independent reference entry is outside the original graph');\n  const providers = record.request?.hostSources ?? [];\n  if (!Array.isArray(providers)) throw new TypeError('independent reference host sources must retain the original provider array');\n  for (const provider of providers) {\n    relativePath(provider?.id, 'reference provider id');\n    relativePath(provider?.filename, 'reference provider filename');\n    if (typeof provider.source !== 'string' || outputPaths.has(provider.id)) throw new TypeError('independent reference provider conflicts with emitted modules');\n    outputPaths.add(provider.id);\n  }\n  aborted(signal);\n  const compiler = await seedIdentity(sourceRoot);\n  await mkdir(directory, {recursive: true});\n  const work = await mkdtemp(resolve(directory, 'original-independent-reference-'));\n  const instance = basename(work), sourcesDirectory = resolve(work, 'sources'), emitted = resolve(work, 'seed-output');\n  const sourceIdentity = modules.map(module => ({id: module.id, filename: module.filename,\n    bytes: Buffer.byteLength(module.source), sha256: digest(module.source),\n    utf16Sha256: digest(Buffer.from(module.source, 'utf16le'))}));\n  const manifestPath = resolve(work, 'reference.json');\n  const manifest = {format: 'eliscript-original-independent-reference', version: 1,\n    role: 'independent-reference', producer: 'emacs-seed', selectedTarget: context.target,\n    entry, compiler, sourceIdentity: {modules: sourceIdentity, sha256: digest(JSON.stringify(sourceIdentity))},\n    instance, portableEntries: [...portableEntries], status: 'compiling', verification: 'unverified',\n    staging: {ownership: 'reference-preparation', sources: 'sources', emitted: 'seed-output', status: 'pending'},\n    modules: [], environmentFiles: [], invocations: []};\n  const save = () => writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\\n');\n  const clearStaging = async () => {\n    // Delete only the two directories created by this invocation. The actual\n    // archived product, original logs and source identities belong to the\n    // caller's case archive and remain available to its host process.\n    let failure;\n    for (const path of [sourcesDirectory, emitted]) {\n      try {await rm(path, {recursive: true, force: true});} catch (error) {failure ??= error;}\n    }\n    manifest.staging.status = failure ? 'cleanup-failed' : 'removed';\n    if (failure) throw failure;\n  };\n  await save();\n  try {\n    await mkdir(sourcesDirectory); await mkdir(emitted);\n    manifest.staging.status = 'active';\n    // Stage the whole original source graph before the first compiler call.\n    for (const [filename, source] of filenames) await put(sourcesDirectory, filename, source);\n    const response = {target: 'javascript', entry, modules: []};\n    for (const [index, module] of modules.entries()) {\n      const input = resolve(sourcesDirectory, module.filename), output = resolve(emitted, module.id);\n      await mkdir(dirname(output), {recursive: true});\n      const modulePortableEntries = module.id === entry ? portableEntries : [];\n      const invocation = await seedCompile(sourceRoot, input, output, modulePortableEntries, options, signal);\n      const stdoutPath = 'invocation-' + index + '.stdout.log', stderrPath = 'invocation-' + index + '.stderr.log';\n      await put(work, stdoutPath, invocation.stdout); await put(work, stderrPath, invocation.stderr);\n      manifest.invocations.push({module: module.id, command: 'bin/eliscript-seed',\n        arguments: ['--source-map', ...modulePortableEntries.flatMap(name => ['--portable', name]), '--output', localPath(work, output), localPath(work, input)],\n        exitCode: invocation.exitCode, signal: invocation.signal,\n        ...(invocation.error ? {error: {name: invocation.error.name, message: invocation.error.message}} : {}),\n        stdout: {path: stdoutPath, bytes: invocation.stdout.length, sha256: digest(invocation.stdout)},\n        stderr: {path: stderrPath, bytes: invocation.stderr.length, sha256: digest(invocation.stderr)}});\n      await save();\n      if (invocation.error) {invocation.error.moduleId = module.id; throw invocation.error;}\n      aborted(signal);\n      if (invocation.exitCode !== 0 || invocation.signal !== null) {\n        const error = new Error(invocation.stderr.toString('utf8').trim() || 'independent reference Seed exited with ' + invocation.exitCode);\n        error.code = 'ELISCRIPT_ORIGINAL_REFERENCE_COMPILE'; error.moduleId = module.id; throw error;\n      }\n      const javascriptBytes = await readFile(output), mapBytes = await readFile(output + '.map');\n      response.modules.push({id: module.id, javascript: javascriptBytes.toString('utf8'), sourceMap: mapBytes.toString('utf8')});\n      manifest.modules.push({id: module.id, filename: module.filename,\n        javascript: {bytes: javascriptBytes.length, sha256: digest(javascriptBytes)},\n        sourceMap: {bytes: mapBytes.length, sha256: digest(mapBytes)}});\n    }\n    const archive = context.archiveProduct ?? (async (value, name, target) => {\n      const {archiveProduct} = await import('./compiler-matrix.mjs');\n      return archiveProduct(value, target, resolve(work, 'product'));\n    });\n    const artifact = await archive(response, instance + '-product', 'javascript');\n    if (artifact.target !== 'javascript' || typeof artifact.directory !== 'string' ||\n        artifact.directory === context.artifact?.directory || artifact.path === context.artifact?.path ||\n        !Array.isArray(artifact.modules) || artifact.modules.length !== modules.length ||\n        typeof artifact.identitySha256 !== 'string') throw new Error('independent reference archive must contain its own complete JavaScript implementation');\n    const actual = new Map(artifact.modules.map(module => [module.id, module]));\n    if (actual.size !== modules.length) throw new Error('independent reference archive repeated a module');\n    for (const expected of manifest.modules) {\n      const module = actual.get(expected.id);\n      if (!module || typeof module.path !== 'string' || typeof module.sourceMapPath !== 'string' ||\n          digest(await readFile(module.path)) !== expected.javascript.sha256 ||\n          digest(await readFile(module.sourceMapPath)) !== expected.sourceMap.sha256) {\n        throw new Error('independent reference archive changed emitted Seed bytes');\n      }\n    }\n    manifest.environmentFiles = await referenceEnvironment(artifact.directory, sourceRoot, modules, providers);\n    manifest.environmentDependencies = [{role: 'original-runtime-package', specifier: 'eliscript', implementation: 'original-source-root'}];\n    manifest.product = {directory: localPath(directory, artifact.directory), identitySha256: artifact.identitySha256};\n    manifest.status = 'prepared';\n    // Detect a Seed edit during generation instead of recording mixed compiler\n    // implementations under one provenance identity.\n    if ((await seedIdentity(sourceRoot)).sha256 !== compiler.sha256) throw new Error('independent Seed compiler changed during reference generation');\n    await clearStaging();\n    await save();\n    const manifestBytes = await readFile(manifestPath);\n    return {directory: artifact.directory, manifestPath, supportingProducts: [{\n      role: 'original-independent-reference', producer: 'emacs-seed', target: 'javascript',\n      selectedTarget: context.target, directory: localPath(directory, artifact.directory),\n      identitySha256: artifact.identitySha256, sourceIdentitySha256: manifest.sourceIdentity.sha256,\n      manifest: localPath(directory, manifestPath), manifestSha256: digest(manifestBytes),\n      verification: 'unverified',\n    }]};\n  } catch (error) {\n    manifest.status = 'failed';\n    manifest.failure = {name: error?.name ?? 'Error', message: error?.message ?? String(error),\n      ...(error?.moduleId ? {module: error.moduleId} : {})};\n    try {await clearStaging();} catch (cleanupError) {\n      manifest.staging.failure = {name: cleanupError?.name ?? 'Error', message: cleanupError?.message ?? String(cleanupError)};\n      if (error && typeof error === 'object') error.referenceCleanupFailure = cleanupError;\n    }\n    try {await save();} catch (saveError) {if (error && typeof error === 'object') error.referenceArchiveFailure = saveError;}\n    throw error;\n  }\n}\n"))
+(module tools.backends.compiler-corpus-reference-ground
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "node:child_process" spawn)
+  (import "node:fs/promises" mkdir mkdtemp readFile readdir writeFile lstat symlink rm)
+  (import "node:path" resolve relative sep isAbsolute dirname basename)
+
+  (defun digest (bytes)
+    (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+
+  (defun relative-path (value label)
+    (when (or (/= (value-type value) "string")
+              (= value "")
+              (isAbsolute value)
+              (js-call (new globalThis.RegExp "[\\\\:\\u0000]") :test value)
+              (js-call (js-call value :split "/") :some
+                (lambda (part) (or (= part "") (= part ".") (= part "..")))))
+      (throw (new globalThis.TypeError (str label " must be a relative path inside the reference artifact"))))
+    value)
+
+  (defun local-path (directory path)
+    (let ((result (relative directory path)))
+      (when (or (= result "")
+                (isAbsolute result)
+                (= result "..")
+                (js-call result :startsWith (str ".." sep)))
+        (throw (new globalThis.TypeError "independent reference must remain in its original case archive")))
+      (js-call (js-call result :split sep) :join "/")))
+
+  (defun aborted (signal)
+    (when (and (not (nullish? signal)) (get signal :aborted))
+      (let ((reason (get signal :reason)))
+        (throw (if (nullish? reason)
+                 (new globalThis.Error "independent original reference aborted")
+                 reason)))))
+
+  (defasync put-file (directory id bytes)
+    (relative-path id "reference file")
+    (let ((parent directory)
+          (parts (js-call (js-call id :split "/") :slice 0 -1))
+          (i 0))
+      (while (< i (js-length parts))
+        (setq parent (resolve parent (aref parts i)))
+        (await (mkdir parent (js-object :recursive t)))
+        (let ((info (await (lstat parent))))
+          (when (or (not (js-call info :isDirectory)) (js-call info :isSymbolicLink))
+            (throw (new globalThis.TypeError "reference file traverses a directory alias"))))
+        (setq i (1+ i)))
+      (let ((path (resolve directory id)))
+        (await (writeFile path bytes (js-object :flag "wx")))
+        path)))
+
+  (defasync seed-compile (source-root input output portable-entries options signal)
+    (aborted signal)
+    (let ((args
+            (js-call
+              (js-array "--source-map")
+              :concat
+              (js-call portable-entries :flatMap (lambda (name) (js-array "--portable" name)))
+              (js-array "--output" output input))))
+      (new globalThis.Promise
+        (lambda (accept)
+          (let ((stdout (js-array))
+                (stderr (js-array))
+                (failure undefined)
+                (child undefined)
+                (env (Object/assign (js-object) (get globalThis.process :env))))
+            (put env :EMACS
+              (let ((opt-emacs (get options :emacs)))
+                (if (nullish? opt-emacs)
+                  (let ((env-emacs (get (get globalThis.process :env) :EMACS)))
+                    (if (nullish? env-emacs) "emacs" env-emacs))
+                  opt-emacs)))
+            (try
+              (setq child
+                (spawn (resolve source-root "bin/eliscript-seed") args
+                  (js-object
+                    :cwd source-root
+                    :signal signal
+                    :stdio (js-array "ignore" "pipe" "pipe")
+                    :env env)))
+              (catch error
+                (funcall accept
+                  (js-object
+                    :exitCode nil
+                    :signal nil
+                    :error error
+                    :stdout (js-call Buffer :alloc 0)
+                    :stderr (js-call Buffer :alloc 0)))
+                (setq child nil)))
+            (when child
+              (js-call (get child :stdout) :on "data" (lambda (bytes) (js-call stdout :push bytes)))
+              (js-call (get child :stderr) :on "data" (lambda (bytes) (js-call stderr :push bytes)))
+              (js-call child :once "error" (lambda (error) (setq failure error)))
+              (js-call child :once "close"
+                (lambda (exit-code termination-signal)
+                  (funcall accept
+                    (js-object
+                      :exitCode exit-code
+                      :signal termination-signal
+                      :error failure
+                      :stdout (js-call Buffer :concat stdout)
+                      :stderr (js-call Buffer :concat stderr)))))))))))
+
+  (defasync seed-identity (source-root)
+    (let* ((compiler-files
+             (js-call
+               (js-call
+                 (js-call (await (readdir (resolve source-root "compiler")))
+                   :filter (lambda (name) (js-call name :endsWith ".el")))
+                 :sort)
+               :map (lambda (name) (str "compiler/" name))))
+           (files (js-call (js-array "bin/eliscript-seed") :concat compiler-files))
+           (records (js-array))
+           (i 0))
+      (while (< i (js-length files))
+        (let* ((file (aref files i))
+               (bytes (await (readFile (resolve source-root file)))))
+          (js-call records :push
+            (js-object :file file :bytes (js-length bytes) :sha256 (digest bytes))))
+        (setq i (1+ i)))
+      (js-object
+        :implementation "emacs-seed"
+        :files records
+        :sha256 (digest (JSON/stringify records)))))
+
+  (defasync reference-environment (directory source-root modules providers)
+    (let ((files (js-array))
+          (m-idx 0))
+      (while (< m-idx (js-length modules))
+        (let* ((module (aref modules m-idx))
+               ;; Retain the same .eli ESM transport used by the original host runner. This
+               ;; transports imports only; all compiler implementation bytes came from Seed.
+               (alias (str (js-call (get module :id) :slice 0 -4) ".eli"))
+               (specifier (str "./" (basename (get module :id))))
+               (source (str "export * from " (JSON/stringify specifier) ";\n")))
+          (await (put-file directory alias source))
+          (js-call files :push
+            (js-object
+              :path alias
+              :role "original-eli-import-transport"
+              :bytes (js-call Buffer :byteLength source)
+              :sha256 (digest source))))
+        (setq m-idx (1+ m-idx)))
+      (let ((p-idx 0))
+        (while (< p-idx (js-length providers))
+          (let ((provider (aref providers p-idx)))
+            (await (put-file directory (get provider :id) (get provider :source)))
+            (js-call files :push
+              (js-object
+                :path (get provider :id)
+                :role "original-host-provider"
+                :filename (get provider :filename)
+                :bytes (js-call Buffer :byteLength (get provider :source))
+                :sha256 (digest (get provider :source)))))
+          (setq p-idx (1+ p-idx))))
+      ;; Runtime imports resolve to the real repository package, exactly as in the
+      ;; original Seed oracle; this is an explicit environment dependency, not a
+      ;; substituted compiler or a copied provider implementation.
+      (let ((package-directory (resolve directory "node_modules")))
+        (await (mkdir package-directory (js-object :recursive t)))
+        (await (symlink source-root (resolve package-directory "eliscript") "dir")))
+      (let ((runtime-path (resolve directory "runtime")))
+        (try
+          (await (symlink (resolve source-root "runtime") runtime-path "dir"))
+          (catch error
+            (when (/= (get error :code) "EEXIST")
+              (throw error))
+            ;; An emitted runtime/ module graph takes precedence over this convenience
+            ;; alias. Do not replace actual emitted modules with repository JavaScript.
+            (let ((details (await (lstat runtime-path))))
+              (when (or (js-call details :isSymbolicLink) (not (js-call details :isDirectory)))
+                (throw (new globalThis.TypeError "independent reference runtime path conflicts with its source graph")))))))
+      files))
+
+  ;; Each call creates fresh Seed output and a distinct import directory. In
+  ;; particular the selected-program invocation and its independent Seed oracle
+  ;; must call this separately; neither a selected session nor an imported module
+  ;; cache can supply the reference implementation.
+  (defasync prepareOriginalReferenceArtifact (context)
+    (let* ((record (get context :record))
+           (execution (if (nullish? record) undefined (get record :execution))))
+      (if (or (nullish? execution) (/= (get execution :referenceArtifact) t))
+        undefined
+        (let* ((signal (get context :signal))
+               (source-root (resolve (let ((v (get context :sourceRoot))) (if (nullish? v) (get record :sourceRoot) v)))))
+          (when (/= (value-type (get context :directory)) "string")
+            (throw (new globalThis.TypeError "independent reference requires its original case directory")))
+          (let* ((directory (resolve (get context :directory)))
+                 (options (let ((v (get context :options))) (if (nullish? v) (js-object) v)))
+                 (request (get record :request))
+                 (modules (let ((v (get record :modules))) (if (nullish? v) (if (nullish? request) undefined (get request :modules)) v)))
+                 (entry (relative-path (let ((v (get record :entry))) (if (nullish? v) (if (nullish? request) undefined (get request :entry)) v))
+                          "reference entry")))
+            (when (or (not (Array/isArray modules)) (= (js-length modules) 0))
+              (throw (new globalThis.TypeError "independent reference requires the complete original module graph")))
+            ;; The original Seed CLI has no capability-context input. Never silently
+            ;; replace capability-bearing module semantics with its default environment.
+            (when (or (and (not (nullish? request)) (not (undefined? (get request :macroContext))))
+                      (js-call modules :some (lambda (m) (and (not (nullish? m)) (not (undefined? (get m :macroContext))))))
+                      (and (not (nullish? request)) (= (get request :portable) t)))
+              (throw (new globalThis.TypeError "independent reference Seed CLI cannot transport this explicit macro or implicit portable context")))
+            (let ((portable-entries (if (or (nullish? request) (nullish? (get request :portableEntries)))
+                                      (js-array)
+                                      (get request :portableEntries))))
+              (when (or (not (Array/isArray portable-entries))
+                        (js-call portable-entries :some
+                          (lambda (name) (or (/= (value-type name) "string") (= name "") (js-call name :includes "\u0000")))))
+                (throw (new globalThis.TypeError "independent reference portable entries must retain explicit function names")))
+              (let ((ids (new globalThis.Set))
+                    (filenames (new globalThis.Map))
+                    (output-paths (new globalThis.Set))
+                    (m-idx 0))
+                (while (< m-idx (js-length modules))
+                  (let* ((module (aref modules m-idx))
+                         (id (relative-path (if (nullish? module) undefined (get module :id)) "reference module id"))
+                         (filename (relative-path (if (nullish? module) undefined (get module :filename)) "reference source filename"))
+                         (source (get module :source)))
+                    (when (or (not (js-call id :endsWith ".mjs"))
+                              (/= (value-type source) "string")
+                              (js-call ids :has id)
+                              (and (js-call filenames :has filename)
+                                   (/= (js-call filenames :get filename) source)))
+                      (throw (new globalThis.TypeError "independent reference requires distinct complete source modules")))
+                    (js-call ids :add id)
+                    (js-call filenames :set filename source)
+                    (let ((paths (js-array id (str id ".map") (str (js-call id :slice 0 -4) ".eli")))
+                          (p-idx 0))
+                      (while (< p-idx (js-length paths))
+                        (let ((path (aref paths p-idx)))
+                          (when (js-call output-paths :has path)
+                            (throw (new globalThis.TypeError "independent reference output paths overlap")))
+                          (js-call output-paths :add path))
+                        (setq p-idx (1+ p-idx)))))
+                  (setq m-idx (1+ m-idx)))
+                (unless (js-call ids :has entry)
+                  (throw (new globalThis.TypeError "independent reference entry is outside the original graph")))
+                (let ((providers (if (or (nullish? request) (nullish? (get request :hostSources)))
+                                   (js-array)
+                                   (get request :hostSources))))
+                  (unless (Array/isArray providers)
+                    (throw (new globalThis.TypeError "independent reference host sources must retain the original provider array")))
+                  (let ((p-idx 0))
+                    (while (< p-idx (js-length providers))
+                      (let ((provider (aref providers p-idx)))
+                        (relative-path (if (nullish? provider) undefined (get provider :id)) "reference provider id")
+                        (relative-path (if (nullish? provider) undefined (get provider :filename)) "reference provider filename")
+                        (when (or (/= (value-type (get provider :source)) "string")
+                                  (js-call output-paths :has (get provider :id)))
+                          (throw (new globalThis.TypeError "independent reference provider conflicts with emitted modules")))
+                        (js-call output-paths :add (get provider :id)))
+                      (setq p-idx (1+ p-idx))))
+                  (aborted signal)
+                  (let* ((compiler (await (seed-identity source-root)))
+                         (_ (await (mkdir directory (js-object :recursive t))))
+                         (work (await (mkdtemp (resolve directory "original-independent-reference-"))))
+                         (instance (basename work))
+                         (sources-directory (resolve work "sources"))
+                         (emitted (resolve work "seed-output"))
+                         (source-identity
+                           (js-call modules :map
+                             (lambda (module)
+                               (js-object
+                                 :id (get module :id)
+                                 :filename (get module :filename)
+                                 :bytes (js-call Buffer :byteLength (get module :source))
+                                 :sha256 (digest (get module :source))
+                                 :utf16Sha256 (digest (js-call Buffer :from (get module :source) "utf16le"))))))
+                         (manifest-path (resolve work "reference.json"))
+                         (manifest
+                           (js-object
+                             :format "eliscript-original-independent-reference"
+                             :version 1
+                             :role "independent-reference"
+                             :producer "emacs-seed"
+                             :selectedTarget (get context :target)
+                             :entry entry
+                             :compiler compiler
+                             :sourceIdentity (js-object :modules source-identity :sha256 (digest (JSON/stringify source-identity)))
+                             :instance instance
+                             :portableEntries (js-call portable-entries :slice)
+                             :status "compiling"
+                             :verification "unverified"
+                             :staging (js-object
+                                        :ownership "reference-preparation"
+                                        :sources "sources"
+                                        :emitted "seed-output"
+                                        :status "pending")
+                             :modules (js-array)
+                             :environmentFiles (js-array)
+                             :invocations (js-array)))
+                         (save
+                           (lambda ()
+                             (writeFile manifest-path (str (JSON/stringify manifest nil 2) "\n"))))
+                         (clear-staging
+                           (async ()
+                             ;; Delete only the two directories created by this invocation. The actual
+                             ;; archived product, original logs and source identities belong to the
+                             ;; caller's case archive and remain available to its host process.
+                             (let ((failure undefined)
+                                   (paths (js-array sources-directory emitted))
+                                   (i 0))
+                               (while (< i (js-length paths))
+                                 (try
+                                   (await (rm (aref paths i) (js-object :recursive t :force t)))
+                                   (catch error
+                                     (when (undefined? failure)
+                                       (setq failure error))))
+                                 (setq i (1+ i)))
+                               (put (get manifest :staging) :status (if (undefined? failure) "removed" "cleanup-failed"))
+                               (unless (undefined? failure)
+                                 (throw failure))))))
+                    (await (funcall save))
+                    (try
+                      (await (mkdir sources-directory))
+                      (await (mkdir emitted))
+                      (put (get manifest :staging) :status "active")
+                      ;; Stage the whole original source graph before the first compiler call.
+                      (let ((fn-entries (Array/from (js-call filenames :entries)))
+                            (f-idx 0))
+                        (while (< f-idx (js-length fn-entries))
+                          (let ((pair (aref fn-entries f-idx)))
+                            (await (put-file sources-directory (aref pair 0) (aref pair 1))))
+                          (setq f-idx (1+ f-idx))))
+                      (let ((response (js-object :target "javascript" :entry entry :modules (js-array)))
+                            (index 0))
+                        (while (< index (js-length modules))
+                          (let* ((module (aref modules index))
+                                 (input (resolve sources-directory (get module :filename)))
+                                 (output (resolve emitted (get module :id)))
+                                 (_ (await (mkdir (dirname output) (js-object :recursive t))))
+                                 (module-portable-entries (if (= (get module :id) entry) portable-entries (js-array)))
+                                 (invocation (await (seed-compile source-root input output module-portable-entries options signal)))
+                                 (stdout-path (str "invocation-" index ".stdout.log"))
+                                 (stderr-path (str "invocation-" index ".stderr.log")))
+                            (await (put-file work stdout-path (get invocation :stdout)))
+                            (await (put-file work stderr-path (get invocation :stderr)))
+                            (let ((inv-rec
+                                    (js-object
+                                      :module (get module :id)
+                                      :command "bin/eliscript-seed"
+                                      :arguments
+                                        (js-call
+                                          (js-array "--source-map")
+                                          :concat
+                                          (js-call module-portable-entries :flatMap (lambda (name) (js-array "--portable" name)))
+                                          (js-array "--output" (local-path work output) (local-path work input)))
+                                      :exitCode (get invocation :exitCode)
+                                      :signal (get invocation :signal))))
+                              (when (get invocation :error)
+                                (put inv-rec :error
+                                  (js-object
+                                    :name (get (get invocation :error) :name)
+                                    :message (get (get invocation :error) :message))))
+                              (put inv-rec :stdout
+                                (js-object
+                                  :path stdout-path
+                                  :bytes (js-length (get invocation :stdout))
+                                  :sha256 (digest (get invocation :stdout))))
+                              (put inv-rec :stderr
+                                (js-object
+                                  :path stderr-path
+                                  :bytes (js-length (get invocation :stderr))
+                                  :sha256 (digest (get invocation :stderr))))
+                              (js-call (get manifest :invocations) :push inv-rec))
+                            (await (funcall save))
+                            (when (get invocation :error)
+                              (put (get invocation :error) :moduleId (get module :id))
+                              (throw (get invocation :error)))
+                            (aborted signal)
+                            (when (or (/= (get invocation :exitCode) 0)
+                                      (not (nil? (get invocation :signal))))
+                              (let* ((err-msg (js-call (js-call (get invocation :stderr) :toString "utf8") :trim))
+                                     (error (new globalThis.Error
+                                              (if (= err-msg "")
+                                                (str "independent reference Seed exited with " (get invocation :exitCode))
+                                                err-msg))))
+                                (put error :code "ELISCRIPT_ORIGINAL_REFERENCE_COMPILE")
+                                (put error :moduleId (get module :id))
+                                (throw error)))
+                            (let ((javascript-bytes (await (readFile output)))
+                                  (map-bytes (await (readFile (str output ".map")))))
+                              (js-call (get response :modules) :push
+                                (js-object
+                                  :id (get module :id)
+                                  :javascript (js-call javascript-bytes :toString "utf8")
+                                  :sourceMap (js-call map-bytes :toString "utf8")))
+                              (js-call (get manifest :modules) :push
+                                (js-object
+                                  :id (get module :id)
+                                  :filename (get module :filename)
+                                  :javascript (js-object :bytes (js-length javascript-bytes) :sha256 (digest javascript-bytes))
+                                  :sourceMap (js-object :bytes (js-length map-bytes) :sha256 (digest map-bytes))))))
+                          (setq index (1+ index)))
+                        (let* ((archive
+                                 (let ((ctx-arch (get context :archiveProduct)))
+                                   (if (nullish? ctx-arch)
+                                     (async (value _name target)
+                                       (let ((mod (await (js-call (js* "(u => import(u))") :call nil "./compiler-matrix.mjs"))))
+                                         (await (js-call mod :archiveProduct value target (resolve work "product")))))
+                                     ctx-arch)))
+                               (artifact (await (funcall archive response (str instance "-product") "javascript")))
+                               (ctx-art (get context :artifact)))
+                          (when (or (/= (get artifact :target) "javascript")
+                                    (/= (value-type (get artifact :directory)) "string")
+                                    (and (not (nullish? ctx-art))
+                                         (or (= (get artifact :directory) (get ctx-art :directory))
+                                             (= (get artifact :path) (get ctx-art :path))))
+                                    (not (Array/isArray (get artifact :modules)))
+                                    (/= (js-length (get artifact :modules)) (js-length modules))
+                                    (/= (value-type (get artifact :identitySha256)) "string"))
+                            (throw (new globalThis.Error "independent reference archive must contain its own complete JavaScript implementation")))
+                          (let ((actual (new globalThis.Map
+                                          (js-call (get artifact :modules) :map (lambda (m) (js-array (get m :id) m))))))
+                            (when (/= (get actual :size) (js-length modules))
+                              (throw (new globalThis.Error "independent reference archive repeated a module")))
+                            (let ((exp-mods (get manifest :modules))
+                                  (e-idx 0))
+                              (while (< e-idx (js-length exp-mods))
+                                (let* ((expected (aref exp-mods e-idx))
+                                       (module (js-call actual :get (get expected :id))))
+                                  (when (or (not module)
+                                            (/= (value-type (get module :path)) "string")
+                                            (/= (value-type (get module :sourceMapPath)) "string")
+                                            (/= (digest (await (readFile (get module :path))))
+                                                (get (get expected :javascript) :sha256))
+                                            (/= (digest (await (readFile (get module :sourceMapPath))))
+                                                (get (get expected :sourceMap) :sha256)))
+                                    (throw (new globalThis.Error "independent reference archive changed emitted Seed bytes"))))
+                                (setq e-idx (1+ e-idx))))
+                            (put manifest :environmentFiles
+                              (await (reference-environment (get artifact :directory) source-root modules providers)))
+                            (put manifest :environmentDependencies
+                              (js-array
+                                (js-object
+                                  :role "original-runtime-package"
+                                  :specifier "eliscript"
+                                  :implementation "original-source-root")))
+                            (put manifest :product
+                              (js-object
+                                :directory (local-path directory (get artifact :directory))
+                                :identitySha256 (get artifact :identitySha256)))
+                            (put manifest :status "prepared")
+                            ;; Detect a Seed edit during generation instead of recording mixed compiler
+                            ;; implementations under one provenance identity.
+                            (when (/= (get (await (seed-identity source-root)) :sha256) (get compiler :sha256))
+                              (throw (new globalThis.Error "independent Seed compiler changed during reference generation")))
+                            (await (funcall clear-staging))
+                            (await (funcall save))
+                            (let ((manifest-bytes (await (readFile manifest-path))))
+                              (js-object
+                                :directory (get artifact :directory)
+                                :manifestPath manifest-path
+                                :supportingProducts
+                                  (js-array
+                                    (js-object
+                                      :role "original-independent-reference"
+                                      :producer "emacs-seed"
+                                      :target "javascript"
+                                      :selectedTarget (get context :target)
+                                      :directory (local-path directory (get artifact :directory))
+                                      :identitySha256 (get artifact :identitySha256)
+                                      :sourceIdentitySha256 (get (get manifest :sourceIdentity) :sha256)
+                                      :manifest (local-path directory manifest-path)
+                                      :manifestSha256 (digest manifest-bytes)
+                                      :verification "unverified")))))))
+                      (catch error
+                        (put manifest :status "failed")
+                        (let ((fail-obj
+                                (js-object
+                                  :name (if (and (not (nullish? error)) (get error :name)) (get error :name) "Error")
+                                  :message (if (and (not (nullish? error)) (get error :message)) (get error :message) (globalThis.String error)))))
+                          (when (and (not (nullish? error)) (get error :moduleId))
+                            (put fail-obj :module (get error :moduleId)))
+                          (put manifest :failure fail-obj))
+                        (try
+                          (await (funcall clear-staging))
+                          (catch cleanup-error
+                            (put (get manifest :staging) :failure
+                              (js-object
+                                :name (if (and (not (nullish? cleanup-error)) (get cleanup-error :name)) (get cleanup-error :name) "Error")
+                                :message (if (and (not (nullish? cleanup-error)) (get cleanup-error :message)) (get cleanup-error :message) (globalThis.String cleanup-error))))
+                            (when (and error (= (value-type error) "object"))
+                              (put error :referenceCleanupFailure cleanup-error))))
+                        (try
+                          (await (funcall save))
+                          (catch save-error
+                            (when (and error (= (value-type error) "object"))
+                              (put error :referenceArchiveFailure save-error))))
+                        (throw error))))))))))))
+
+  (export prepareOriginalReferenceArtifact))

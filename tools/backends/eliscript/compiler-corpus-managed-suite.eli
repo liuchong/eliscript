@@ -1,0 +1,145 @@
+(module tools.backends.compiler-corpus-managed-suite
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp writeFile rm readFile)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:url" pathToFileURL)
+  (import "node:child_process" spawn)
+  (import "node:crypto" createHash)
+  (import "node:process" :default process)
+  (import "../../dist/bootstrap/reader.mjs" read-string)
+  (import "../../dist/bootstrap/compiler.mjs" compile-ir-string emit-ir-string)
+  (import "../testing/maintained-suite-source.mjs" maintainedSuiteSource sourceCall rewriteSourceForms)
+  (import "./compiler-host-record.mjs" copyHostRecord)
+  (defun digest (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
+  (defun host-truth (value) (js* "!!value"))
+
+  (defun selected-build-source (root original)
+    (let* ((file "tools/backends/build.mjs") (source (maintainedSuiteSource root file original))
+           (count 0)
+           (rewritten (rewriteSourceForms source (lambda (node text)
+             (if (and (sourceCall node "defasync") (= (get (aref (get node :items) 1) :name) "buildBackends"))
+               (progn
+                 (setq count (1+ count))
+                 (unless (js-call (funcall text node) :startsWith "(defasync buildBackends (&rest supplied)")
+                   (throw (new globalThis.TypeError "original build transport declaration changed")))
+                 (js-call (funcall text node) :replace
+                   "(defasync buildBackends (&rest supplied)"
+                   "(defasync originalSelectedFrontendBuild (&rest supplied)")) undefined))))
+           (modified (get rewritten :source)) (points (Array/from modified))
+           (forms (read-string modified "tools/backends/build.eli")) (module (aref forms 0))
+           (insert-at (get (get (aref (get module :items) 1) :span) :end))
+           (close-at (1- (get (get module :span) :end))))
+      (unless (and (= count 1) (= (js-length forms) 1) (sourceCall module "module")
+                   (js-call modified :includes "(defasync originalSelectedFrontendBuild (&rest supplied)"))
+        (throw (new globalThis.TypeError "original build transport declaration is not unique")))
+      (emit-ir-string (compile-ir-string
+        (str (js-call (js-call points :slice 0 insert-at) :join "")
+          "\n(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/backends/compiler-corpus-selected-build.mjs")) :href))
+          " buildSelectedBackends)\n"
+          (js-call (js-call points :slice insert-at close-at) :join "")
+          "\n(defasync buildBackends (&rest supplied)\n"
+          "  (await (buildSelectedBackends originalSelectedFrontendBuild (aref supplied 0) loadLiteralSources root)))\n"
+          (js-call (js-call points :slice close-at) :join ""))
+        "original-selected-backend-build.eli"))))
+
+  (defun kill-child (child signal)
+    (when (and (eq (get child :exitCode) nil) (eq (get child :signalCode) nil))
+      (try
+        (if (and (/= (get process :platform) "win32") (host-truth (get child :pid)))
+          (js-call process :kill (- (get child :pid)) signal)
+          (js-call child :kill signal))
+        (catch error (unless (= (get error :code) "ESRCH") (throw error))))))
+
+  (defasync run-managed-suite (relative-suite source-root module-records product base)
+    (let* ((module-ids (js-call module-records :map (lambda (record) (get record :id))))
+           (build-path (resolve source-root "tools/backends/build.mjs"))
+           (directory (await (mkdtemp (resolve (tmpdir) "eliscript-original-selected-suite-"))))
+           (child undefined) (closed undefined) (failed false))
+      (try
+        (let* ((configuration (copyHostRecord base
+                 (js-object :interceptionPath (resolve directory "selected-backends-interception.json"))))
+               (config-path (resolve directory "selected-backends-config.json"))
+               (config-text (JSON/stringify configuration))
+               (plugin (resolve directory "selected-backends-preload.mjs"))
+               (environment (copyHostRecord (get process :env))) (arguments (js-array)))
+          (await (writeFile config-path config-text))
+          ;; Only native ESM import/top-level await syntax is emitted here.
+          ;; Plugin algorithms are compiled from the maintained Eli module.
+          (await (writeFile plugin
+            (str "import {installOriginalManagedPreload} from "
+              (JSON/stringify (get (pathToFileURL (resolve source-root "tools/backends/compiler-corpus-managed-preload.mjs")) :href)) ";\n"
+              "await installOriginalManagedPreload(" (JSON/stringify config-path) ", " (JSON/stringify (digest config-text)) ");\n")))
+          (when (host-truth (get environment :ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT))
+            (js-call arguments :push "--preload"
+              (get (pathToFileURL (resolve source-root "tools/backends/compiler-corpus-host-context.mjs")) :href)))
+          (js-call arguments :push "--preload" plugin "test" (resolve source-root relative-suite))
+          (setq child (spawn (get (get process :env) :BUN "bun") arguments
+            (js-object :cwd source-root :env environment :detached (/= (get process :platform) "win32")
+              :stdio (js-array "ignore" "pipe" "pipe"))))
+          (setq closed (new globalThis.Promise (lambda (done)
+            (js-call child :once "close" (lambda (_code _signal) (funcall done))))))
+          (js-call (get child :stdout) :on "data" (lambda (chunk) (js-call (get process :stderr) :write chunk)))
+          (js-call (get child :stderr) :on "data" (lambda (chunk) (js-call (get process :stderr) :write chunk)))
+          (let* ((stopped false) (kill-timer undefined)
+                 (cancel (lambda (signal)
+                   (unless stopped
+                     (setq stopped t) (kill-child child signal)
+                     (setq kill-timer (globalThis.setTimeout (lambda () (kill-child child "SIGKILL")) 1000))
+                     (let ((method (get kill-timer :unref)))
+                       (unless (nullish? method) (Reflect/apply method kill-timer (js-array)))))))
+                 (interrupt (lambda () (funcall cancel "SIGINT")))
+                 (terminate (lambda () (funcall cancel "SIGTERM"))))
+            (js-call process :on "SIGINT" interrupt) (js-call process :on "SIGTERM" terminate)
+            (try
+              (let ((result (await (new globalThis.Promise (lambda (complete reject)
+                (js-call child :once "error" reject)
+                (js-call child :once "close" (lambda (code signal)
+                  (funcall complete (js-object :code code :signal signal)))))))))
+                (js-call assert :equal stopped false "the original suite was cancelled")
+                (js-call assert :equal (get result :signal) nil)
+                (js-call assert :equal (get result :code) 0
+                  "the complete original suite must pass with the actual selected compiler product"))
+              (finally
+                (globalThis.clearTimeout kill-timer)
+                (js-call process :removeListener "SIGINT" interrupt)
+                (js-call process :removeListener "SIGTERM" terminate))))
+          (let ((interception (JSON/parse (await (readFile (get configuration :interceptionPath) "utf8")))))
+            (js-call assert :equal (get interception :product) product)
+            (js-call assert :deepEqual (get interception :modules) module-ids
+              "the original default bootstrap may not silently replace the selected compiler"))
+          (js-call globalThis.console :log (JSON/stringify (js-object :suite relative-suite :completeOriginalSuite t))))
+        (catch error (setq failed t) (throw error))
+        (finally
+          (let ((cleanup-error undefined) (cleanup-failed false))
+            (try
+              (when (and (not (undefined? child)) (eq (get child :exitCode) nil) (eq (get child :signalCode) nil))
+                (kill-child child "SIGTERM")
+                (let ((timer (globalThis.setTimeout (lambda () (kill-child child "SIGKILL")) 1000)))
+                  (try (await closed) (finally (globalThis.clearTimeout timer)))))
+              (catch error (setq cleanup-failed t cleanup-error error)))
+            (try (await (rm directory (js-object :recursive t :force t)))
+              (catch error
+                (if cleanup-failed (js-call globalThis.console :error "original managed suite directory cleanup failed" error)
+                  (setq cleanup-failed t cleanup-error error))))
+            (when cleanup-failed
+              (if failed (js-call globalThis.console :error "original managed suite cleanup failed" cleanup-error)
+                (throw cleanup-error))))))))
+
+  (defasync runOriginalManagedSuites (suites source-root module-records product)
+    (when (> (js-length suites) 0)
+      (let* ((original (await (readFile (resolve source-root "tools/backends/build.mjs") "utf8")))
+             (base (js-object :format "eliscript-original-managed-suite" :version 1
+               :product product :sourceRoot source-root :moduleRecords module-records
+               :buildSha256 (digest original) :contents (selected-build-source source-root original)
+               :transportModule (get (pathToFileURL (resolve source-root "tools/backends/compiler-data-transport.mjs")) :href)))
+             (errors (js-array)) (index 0))
+        (while (< index (js-length suites))
+          (let ((suite (aref suites index)))
+            (try (await (run-managed-suite suite source-root module-records product base))
+              (catch error (js-call errors :push
+                (new globalThis.Error (str "original managed suite failed: " suite) (js-object :cause error))))))
+          (setq index (1+ index)))
+        (when (> (js-length errors) 0)
+          (throw (new globalThis.AggregateError errors "original managed fixture suite collection failed"))))))
+  (export runOriginalManagedSuites))

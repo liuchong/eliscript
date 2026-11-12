@@ -1,2 +1,187 @@
-(module capsules.tests.dogfood-discussions.test
-  (js* "import { afterAll, beforeAll, expect, test } from \"bun:test\";\nimport { mkdtemp, rm } from \"node:fs/promises\";\nimport { resolve } from \"node:path\";\n\nimport { get as cget } from \"../runtime/core/collection.mjs\";\nimport { hashMap, keyword, vector } from \"../runtime/literals.mjs\";\n\nconst ROOT = resolve(import.meta.dir, \"..\");\nconst COMPILER = resolve(ROOT, \"bin/eliscript-build\");\n\nlet staging;\nlet discussions;\nlet renderer;\n\nconst k = (name) => keyword(name);\nconst mapOf = (entries) => hashMap(...entries.flatMap(([key, value]) => [k(key), value]));\nconst getOf = (value, name, fallback = null) => cget(value, k(name), fallback);\n\nasync function run(command) {\n  const child = Bun.spawn(command, { cwd: ROOT, stdout: \"pipe\", stderr: \"pipe\" });\n  const [exitCode, stdout, stderr] = await Promise.all([\n    child.exited,\n    new Response(child.stdout).text(),\n    new Response(child.stderr).text(),\n  ]);\n  return { exitCode, stdout, stderr };\n}\n\nfunction author(login, id, kind = \"User\") {\n  return { login, databaseId: id, __typename: kind };\n}\n\nfunction commentNode(id, login, body, replies = []) {\n  return {\n    id,\n    author: author(login, id),\n    body,\n    createdAt: \"2026-09-14T09:00:00Z\",\n    updatedAt: \"2026-09-14T09:00:00Z\",\n    url: `https://github.com/owner/repository/discussions/17#discussioncomment-${id}`,\n    replies: { nodes: replies, pageInfo: { hasNextPage: false, endCursor: null } },\n  };\n}\n\nfunction discussionNode(number, options = {}) {\n  return {\n    number,\n    title: \"Discussion title\",\n    createdAt: \"2026-09-12T00:00:00Z\",\n    updatedAt: \"2026-09-12T00:00:00Z\",\n    url: `https://github.com/owner/repository/discussions/${number}`,\n    category: { name: \"Blog\" },\n    answerChosenAt: null,\n    author: author(\"owner\", \"U_owner\"),\n    comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },\n    ...options,\n  };\n}\n\nfunction metadata(fields, body = \"Body text.\") {\n  const lines = Object.entries(fields).map(([key, value]) => `${key}: ${value}`);\n  return [\"```dogfood\", ...lines, \"```\", \"\", body, \"\"].join(\"\\n\");\n}\n\nfunction graphqlTransport(pages) {\n  const calls = [];\n  return {\n    calls,\n    transport: (request) => {\n      const payload = JSON.parse(request.body);\n      calls.push(payload);\n      const cursor = payload.variables.cursor;\n      const page = cursor === null || cursor === undefined ? 0 : Number(cursor);\n      const record = pages[page];\n      if (record === undefined) return { status: 200, headers: {}, body: { data: null } };\n      return {\n        status: 200,\n        headers: {},\n        body: { data: { repository: { discussions: record } } },\n      };\n    },\n  };\n}\n\nconst source = (extra = []) => mapOf([\n  [\"repository\", \"owner/repository\"],\n  [\"category\", \"Blog\"],\n  ...extra,\n]);\n\nconst publishing = () => mapOf([\n  [\"owner\", mapOf([[\"login\", \"owner\"], [\"id\", \"U_owner\"]])],\n  [\"coauthors\", vector()],\n]);\n\nconst discussionDeclaration = (mode = \"snapshot\") => mapOf([[\"channels\", vector(\n  mapOf([[\"id\", k(\"discussion-native\")], [\"kind\", k(\"discussion\")],\n         [\"enabled\", true], [\"mode\", k(mode)]]),\n)]]);\n\nbeforeAll(async () => {\n  staging = await mkdtemp(resolve(ROOT, \".eliscript-dogfood-discussions-\"));\n  const built = await run([\n    COMPILER, \"--no-cache\", \"--root\", \"examples/dogfood\", \"--out-dir\", staging,\n    \"examples/dogfood/src/builder/main.eli\",\n  ]);\n  if (built.exitCode !== 0) throw new Error(built.stderr.trim() || built.stdout.trim());\n  discussions = await import(resolve(staging, \"src/builder/discussions.mjs\"));\n  renderer = await import(resolve(staging, \"src/renderer/server.mjs\"));\n});\n\nafterAll(async () => {\n  if (staging) await rm(staging, { recursive: true, force: true });\n});\n\ntest(\"a repository reference splits into owner and name\", () => {\n  expect([...discussions.repository_parts(\"owner/repository\")]).toEqual([\"owner\", \"repository\"]);\n  const error = (() => {\n    try { discussions.repository_parts(\"repository\"); return null; } catch (thrown) { return thrown; }\n  })();\n  expect(error.code).toBe(\"DOGFOOD-DISCUSSIONS-001\");\n});\n\ntest(\"the query omits comments unless a snapshot asks for them\", () => {\n  const withComments = discussions.discussions_query(true);\n  const withoutComments = discussions.discussions_query(false);\n  expect(withComments).toContain(\"comments(first:\");\n  expect(withComments).toContain(\"replies(first:\");\n  // A live channel is never fetched during a build.\n  expect(withoutComments).not.toContain(\"comments(first:\");\n  // Category and author are needed either way.\n  expect(withoutComments).toContain(\"category { name }\");\n  expect(withoutComments).toContain(\"databaseId\");\n});\n\ntest(\"discussions paginate by cursor to exhaustion\", async () => {\n  const { transport, calls } = graphqlTransport([\n    { pageInfo: { hasNextPage: true, endCursor: \"1\" }, nodes: [discussionNode(1)] },\n    { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [discussionNode(2)] },\n  ]);\n  const nodes = await discussions.fetch_discussions(transport, source(), true);\n  expect([...nodes].map((node) => node.number)).toEqual([1, 2]);\n  expect(calls.length).toBe(2);\n  expect(calls[0].variables.owner).toBe(\"owner\");\n  expect(calls[1].variables.cursor).toBe(\"1\");\n});\n\ntest(\"a GraphQL error payload fails the provider\", async () => {\n  const transport = () => ({ status: 200, headers: {}, body: { errors: [{ message: \"nope\" }] } });\n  const error = await (async () => {\n    try { await discussions.fetch_discussions(transport, source(), true); return null; }\n    catch (thrown) { return thrown; }\n  })();\n  expect(error.code).toBe(\"DOGFOOD-DISCUSSIONS-003\");\n});\n\ntest(\"a reply tree stays a tree\", () => {\n  const tree = discussions.reply_tree([\n    commentNode(\"c1\", \"reader\", \"Top\", [\n      commentNode(\"c2\", \"owner\", \"Reply\", [commentNode(\"c3\", \"reader\", \"Nested\")]),\n    ]),\n  ]);\n  expect([...tree].length).toBe(1);\n  const replies = [...getOf([...tree][0], \"replies\")];\n  expect(replies.length).toBe(1);\n  expect(getOf([...getOf(replies[0], \"replies\")][0], \"id\")).toBe(\"c3\");\n});\n\ntest(\"a comment page that overflows fails rather than truncating\", () => {\n  const record = discussionNode(17, {\n    comments: { pageInfo: { hasNextPage: true, endCursor: \"x\" }, nodes: [] },\n  });\n  const error = (() => {\n    try { discussions.comment_tree(record); return null; } catch (thrown) { return thrown; }\n  })();\n  expect(error.code).toBe(\"DOGFOOD-DISCUSSIONS-007\");\n});\n\ntest(\"the category is an article selector and never publication authority\", () => {\n  const blog = discussionNode(1);\n  const other = discussionNode(2, { category: { name: \"General\" } });\n  expect(discussions.allowed_category_QMARK_(source(), blog)).toBe(true);\n  expect(discussions.allowed_category_QMARK_(source(), other)).toBe(false);\n});\n\ntest(\"only the publisher set publishes, and carriers never become articles\", async () => {\n  const { transport } = graphqlTransport([{\n    pageInfo: { hasNextPage: false, endCursor: null },\n    nodes: [\n      discussionNode(1, { body: metadata({ id: \"notes/one\", title: \"One\" }) }),\n      discussionNode(2, {\n        author: author(\"visitor\", 9),\n        body: metadata({ id: \"notes/two\", title: \"Two\" }),\n      }),\n      discussionNode(3, { category: { name: \"General\" } }),\n    ],\n  }]);\n  const result = await discussions.collect_discussions(mapOf([\n    [\"source\", source()],\n    [\"publishing\", publishing()],\n    [\"adapters\", vector()],\n    [\"identities\", vector()],\n    [\"comments\", discussionDeclaration()],\n    [\"transport\", transport],\n  ]));\n  expect([...getOf(result, \"posts\")].map((post) => getOf(post, \"id\"))).toEqual([\"notes/one\"]);\n  expect(getOf(result, \"records\")).toBe(3);\n  expect(getOf(result, \"unauthorized\")).toBe(1);\n});\n\ntest(\"a collected discussion carries a nested comment channel\", async () => {\n  const { transport } = graphqlTransport([{\n    pageInfo: { hasNextPage: false, endCursor: null },\n    nodes: [discussionNode(17, {\n      body: metadata({ id: \"notes/threaded\", title: \"Threaded\" }, \"Body.\"),\n      comments: {\n        pageInfo: { hasNextPage: false, endCursor: null },\n        nodes: [commentNode(\"c1\", \"reader\", \"First\", [commentNode(\"c2\", \"owner\", \"Second\")])],\n      },\n    })],\n  }]);\n  const result = await discussions.collect_discussions(mapOf([\n    [\"source\", source()],\n    [\"publishing\", publishing()],\n    [\"adapters\", vector()],\n    [\"identities\", vector()],\n    [\"comments\", discussionDeclaration(\"snapshot\")],\n    [\"transport\", transport],\n  ]));\n  const post = [...getOf(result, \"posts\")][0];\n  const channels = [...getOf(post, \"comment-channels\")];\n  expect(channels.length).toBe(1);\n  expect(getOf(channels[0], \"kind\")).toBe(k(\"discussion\"));\n  expect(getOf(channels[0], \"count\")).toBe(1);\n  const items = [...getOf(channels[0], \"items\")];\n  expect([...getOf(items[0], \"replies\")].length).toBe(1);\n});\n\ntest(\"a live discussion channel is declared and no comments are requested\", async () => {\n  const { transport, calls } = graphqlTransport([{\n    pageInfo: { hasNextPage: false, endCursor: null },\n    nodes: [discussionNode(17, { body: metadata({ id: \"notes/live\", title: \"Live\" }) })],\n  }]);\n  const result = await discussions.collect_discussions(mapOf([\n    [\"source\", source()],\n    [\"publishing\", publishing()],\n    [\"adapters\", vector()],\n    [\"identities\", vector()],\n    [\"comments\", discussionDeclaration(\"live\")],\n    [\"transport\", transport],\n  ]));\n  const post = [...getOf(result, \"posts\")][0];\n  const channels = [...getOf(post, \"comment-channels\")];\n  expect(getOf(channels[0], \"mode\")).toBe(k(\"live\"));\n  expect([...getOf(channels[0], \"items\")]).toEqual([]);\n  expect(calls[0].query).not.toContain(\"comments(first:\");\n});\n\ntest(\"the renderer nests discussion replies instead of flattening them\", () => {\n  const comment = (id, body, replies = []) => mapOf([\n    [\"id\", id],\n    [\"body\", body],\n    [\"author\", mapOf([[\"login\", \"reader\"]])],\n    [\"created-at\", \"2026-09-14T09:00:00Z\"],\n    [\"updated-at\", \"2026-09-14T09:00:00Z\"],\n    [\"url\", null],\n    [\"replies\", vector(...replies)],\n  ]);\n  const channel = mapOf([\n    [\"id\", k(\"discussion-native\")],\n    [\"kind\", k(\"discussion\")],\n    [\"mode\", k(\"snapshot\")],\n    [\"count\", 1],\n    [\"updated-at\", \"2026-09-14T09:00:00Z\"],\n    [\"items\", vector(comment(\"c1\", \"<p>First</p>\", [comment(\"c2\", \"<p>Second</p>\")]))],\n  ]);\n  const markup = renderer.render_comment_channels(\n    mapOf([[\"comment-channels\", vector(channel)]]),\n  );\n  expect(markup).toContain('data-comment-provider=\"GitHub Discussions\"');\n  expect(markup).toContain(\"comment-replies\");\n  expect(markup).toContain(\"<p>Second</p>\");\n  // The reply is nested inside its parent list item, not beside it.\n  const parent = markup.indexOf(\"<p>First</p>\");\n  const reply = markup.indexOf(\"<p>Second</p>\");\n  const parentEnd = markup.indexOf(\"</li>\", parent);\n  expect(reply).toBeGreaterThan(parent);\n  expect(reply).toBeLessThan(parentEnd);\n});\n"))
+(module
+  tests.dogfood-discussions.test
+  (import "bun:test" afterAll beforeAll expect test)
+  (import "node:fs/promises" mkdtemp rm)
+  (import "node:path" resolve)
+  (import "../runtime/core/collection.mjs" :as collection-mod)
+  (import "../runtime/literals.mjs" hashMap keyword vector)
+  (defconst
+    ROOT
+    (resolve (get (js* "import.meta") :dir) ".."))
+  (defconst
+    COMPILER
+    (resolve ROOT "bin/eliscript-build"))
+  (defconst
+    state
+    (js-object :staging nil :discussions nil :renderer nil))
+  (defun
+    k
+    (name)
+    (keyword name))
+  (defun
+    mapOf
+    (entries)
+    (let*
+      ((flat (js-array)) (idx (js-object :i 0)))
+      (while
+        (< (get idx :i) (get entries :length))
+        (let*
+          ((pair (aref entries (get idx :i))))
+          (js-call flat :push (k (aref pair 0)))
+          (js-call flat :push (aref pair 1)))
+        (put idx :i (+ (get idx :i) 1)))
+      (apply hashMap flat)))
+  (defun
+    getOf
+    (value name &rest __host_default_arguments_1)
+    (let* ((fallback (aref __host_default_arguments_1 0)))
+    (js-call collection-mod :get value (k name) (if
+        (= fallback undefined)
+        nil
+        fallback))))
+  (defasync
+    run
+    (command)
+    (let*
+      ((child (js-call globalThis.Bun :spawn command (js-object :cwd ROOT :stdout "pipe" :stderr "pipe"))) (results (await (js-call globalThis.Promise :all (js-array (get child :exited) (js-call (new globalThis.Response (get child :stdout)) :text) (js-call (new globalThis.Response (get child :stderr)) :text))))))
+      (js-object :exitCode (aref results 0) :stdout (aref results 1) :stderr (aref results 2))))
+  (defun
+    author
+    (login id &rest __host_forwarded_arguments_1)
+    (let* ((kind (aref __host_forwarded_arguments_1 0)))
+    (js-object :login login :databaseId id :__typename (or kind "User"))))
+  (defun
+    commentNode
+    (id login body &rest __host_forwarded_arguments_2)
+    (let* ((replies (aref __host_forwarded_arguments_2 0)))
+    (js-object :id id :author (author login id) :body body :createdAt "2026-09-14T09:00:00Z" :updatedAt "2026-09-14T09:00:00Z" :url (str "https://github.com/owner/repository/discussions/17#discussioncomment-" id) :replies (js-object :nodes (or replies (js-array)) :pageInfo (js-object :hasNextPage false :endCursor nil)))))
+  (defun
+    discussionNode
+    (number &rest __host_forwarded_arguments_3)
+    (let* ((options (aref __host_forwarded_arguments_3 0)))
+    (js-call globalThis.Object :assign (js-object :number number :title "Discussion title" :createdAt "2026-09-12T00:00:00Z" :updatedAt "2026-09-12T00:00:00Z" :url (str "https://github.com/owner/repository/discussions/" number) :category (js-object :name "Blog") :answerChosenAt nil :author (author "owner" "U_owner") :comments (js-object :pageInfo (js-object :hasNextPage false :endCursor nil) :nodes (js-array))) (or options (js-object)))))
+  (defun
+    metadata
+    (fields &rest __host_forwarded_arguments_4)
+    (let* ((body (aref __host_forwarded_arguments_4 0)))
+    (let*
+      ((entries (js-call globalThis.Object :entries fields)) (lines (js-call entries :map (lambda (pair) (str (aref pair 0) ": " (aref pair 1))))) (all (js-call (js-array "```dogfood") :concat lines (js-array "```" "" (or body "Body text.") ""))))
+      (js-call all :join "\n"))))
+  (defun
+    graphqlTransport
+    (pages)
+    (let*
+      ((calls (js-array)))
+      (js-object :calls calls :transport (lambda (request) (let*
+            ((payload (js-call globalThis.JSON :parse (get request :body))) (__ign_1 (js-call calls :push payload)) (cursor (get (get payload :variables) :cursor)) (page (if
+                  (or (= cursor nil) (= cursor undefined))
+                  0
+                  (globalThis.Number cursor))) (record (aref pages page)))
+            (if
+              (= record undefined)
+              (js-object :status 200 :headers (js-object) :body (js-object :data nil))
+              (js-object :status 200 :headers (js-object) :body (js-object :data (js-object :repository (js-object :discussions record))))))))))
+  (defun
+    source
+    (&rest __host_forwarded_arguments_5)
+    (let* ((extra (aref __host_forwarded_arguments_5 0)))
+    (mapOf (js-call (js-array (js-array "repository" "owner/repository") (js-array "category" "Blog")) :concat (or extra (js-array))))))
+  (defun
+    publishing
+    ()
+    (mapOf (js-array (js-array "owner" (mapOf (js-array (js-array "login" "owner") (js-array "id" "U_owner")))) (js-array "coauthors" (vector)))))
+  (defun
+    discussionDeclaration
+    (&rest __host_forwarded_arguments_6)
+    (let* ((mode (aref __host_forwarded_arguments_6 0)))
+    (mapOf (js-array (js-array "channels" (vector (mapOf (js-array (js-array "id" (k "discussion-native")) (js-array "kind" (k "discussion")) (js-array "enabled" t) (js-array "mode" (k (or mode "snapshot")))))))))))
+  (beforeAll (async () (let*
+        ((staging (await (mkdtemp (resolve ROOT ".eliscript-dogfood-discussions-")))) (__ign_2 (put state :staging staging)) (built (await (run (js-array COMPILER "--no-cache" "--root" "examples/dogfood" "--out-dir" staging "examples/dogfood/src/builder/main.eli")))))
+        (when
+          (not= (get built :exitCode) 0)
+          (throw (new globalThis.Error (or (js-call (get built :stderr) :trim) (js-call (get built :stdout) :trim)))))
+        (put state :discussions (await (funcall (js* "(u) => import(u)") (resolve staging "src/builder/discussions.mjs"))))
+        (put state :renderer (await (funcall (js* "(u) => import(u)") (resolve staging "src/renderer/server.mjs")))))))
+  (afterAll (async () (when
+        (get state :staging)
+        (await (rm (get state :staging) (js-object :recursive t :force t))))))
+  (test "a repository reference splits into owner and name" (lambda () (let*
+        ((discussions (get state :discussions)))
+        (js-call (expect (js-call globalThis.Array :from (js-call discussions :repository_parts "owner/repository"))) :toEqual (js-array "owner" "repository"))
+        (let*
+          ((error (try
+                (progn
+                  (js-call discussions :repository_parts "repository")
+                  nil)
+                (catch
+                  thrown
+                  thrown))))
+          (js-call (expect (get error :code)) :toBe "DOGFOOD-DISCUSSIONS-001")))))
+  (test "the query omits comments unless a snapshot asks for them" (lambda () (let*
+        ((discussions (get state :discussions)) (withComments (js-call discussions :discussions_query t)) (withoutComments (js-call discussions :discussions_query false)))
+        (js-call (expect withComments) :toContain "comments(first:")
+        (js-call (expect withComments) :toContain "replies(first:")
+        (js-call (get (expect withoutComments) :not) :toContain "comments(first:")
+        (js-call (expect withoutComments) :toContain "category { name }")
+        (js-call (expect withoutComments) :toContain "databaseId"))))
+  (test "discussions paginate by cursor to exhaustion" (async () (let*
+        ((discussions (get state :discussions)) (tp (graphqlTransport (js-array (js-object :pageInfo (js-object :hasNextPage t :endCursor "1") :nodes (js-array (discussionNode 1))) (js-object :pageInfo (js-object :hasNextPage false :endCursor nil) :nodes (js-array (discussionNode 2)))))) (nodes (await (js-call discussions :fetch_discussions (get tp :transport) (source) t))) (calls (get tp :calls)))
+        (js-call (expect (js-call (js-call globalThis.Array :from nodes) :map (lambda (node) (get node :number)))) :toEqual (js-array 1 2))
+        (js-call (expect (get calls :length)) :toBe 2)
+        (js-call (expect (get (get (aref calls 0) :variables) :owner)) :toBe "owner")
+        (js-call (expect (get (get (aref calls 1) :variables) :cursor)) :toBe "1"))))
+  (test "a GraphQL error payload fails the provider" (async () (let*
+        ((discussions (get state :discussions)) (transport (lambda () (js-object :status 200 :headers (js-object) :body (js-object :errors (js-array (js-object :message "nope")))))) (error (try
+              (progn
+                (await (js-call discussions :fetch_discussions transport (source) t))
+                nil)
+              (catch
+                thrown
+                thrown))))
+        (js-call (expect (get error :code)) :toBe "DOGFOOD-DISCUSSIONS-003"))))
+  (test "a reply tree stays a tree" (lambda () (let*
+        ((discussions (get state :discussions)) (tree (js-call globalThis.Array :from (js-call discussions :reply_tree (js-array (commentNode "c1" "reader" "Top" (js-array (commentNode "c2" "owner" "Reply" (js-array (commentNode "c3" "reader" "Nested"))))))))))
+        (js-call (expect (get tree :length)) :toBe 1)
+        (let*
+          ((replies (js-call globalThis.Array :from (getOf (aref tree 0) "replies"))))
+          (js-call (expect (get replies :length)) :toBe 1)
+          (js-call (expect (getOf (aref (js-call globalThis.Array :from (getOf (aref replies 0) "replies")) 0) "id")) :toBe "c3")))))
+  (test "a comment page that overflows fails rather than truncating" (lambda () (let*
+        ((discussions (get state :discussions)) (record (discussionNode 17 (js-object :comments (js-object :pageInfo (js-object :hasNextPage t :endCursor "x") :nodes (js-array))))) (error (try
+              (progn
+                (js-call discussions :comment_tree record)
+                nil)
+              (catch
+                thrown
+                thrown))))
+        (js-call (expect (get error :code)) :toBe "DOGFOOD-DISCUSSIONS-007"))))
+  (test "the category is an article selector and never publication authority" (lambda () (let*
+        ((discussions (get state :discussions)) (blog (discussionNode 1)) (other (discussionNode 2 (js-object :category (js-object :name "General")))))
+        (js-call (expect (js-call discussions :allowed_category_QMARK_ (source) blog)) :toBe t)
+        (js-call (expect (js-call discussions :allowed_category_QMARK_ (source) other)) :toBe false))))
+  (test "only the publisher set publishes, and carriers never become articles" (async () (let*
+        ((discussions (get state :discussions)) (tp (graphqlTransport (js-array (js-object :pageInfo (js-object :hasNextPage false :endCursor nil) :nodes (js-array (discussionNode 1 (js-object :body (metadata (js-object :id "notes/one" :title "One")))) (discussionNode 2 (js-object :author (author "visitor" 9) :body (metadata (js-object :id "notes/two" :title "Two")))) (discussionNode 3 (js-object :category (js-object :name "General")))))))) (result (await (js-call discussions :collect_discussions (mapOf (js-array (js-array "source" (source)) (js-array "publishing" (publishing)) (js-array "adapters" (vector)) (js-array "identities" (vector)) (js-array "comments" (discussionDeclaration)) (js-array "transport" (get tp :transport))))))))
+        (js-call (expect (js-call (js-call globalThis.Array :from (getOf result "posts")) :map (lambda (post) (getOf post "id")))) :toEqual (js-array "notes/one"))
+        (js-call (expect (getOf result "records")) :toBe 3)
+        (js-call (expect (getOf result "unauthorized")) :toBe 1))))
+  (test "a collected discussion carries a nested comment channel" (async () (let*
+        ((discussions (get state :discussions)) (tp (graphqlTransport (js-array (js-object :pageInfo (js-object :hasNextPage false :endCursor nil) :nodes (js-array (discussionNode 17 (js-object :body (metadata (js-object :id "notes/threaded" :title "Threaded") "Body.") :comments (js-object :pageInfo (js-object :hasNextPage false :endCursor nil) :nodes (js-array (commentNode "c1" "reader" "First" (js-array (commentNode "c2" "owner" "Second")))))))))))) (result (await (js-call discussions :collect_discussions (mapOf (js-array (js-array "source" (source)) (js-array "publishing" (publishing)) (js-array "adapters" (vector)) (js-array "identities" (vector)) (js-array "comments" (discussionDeclaration "snapshot")) (js-array "transport" (get tp :transport))))))) (post (aref (js-call globalThis.Array :from (getOf result "posts")) 0)) (channels (js-call globalThis.Array :from (getOf post "comment-channels"))))
+        (js-call (expect (get channels :length)) :toBe 1)
+        (js-call (expect (getOf (aref channels 0) "kind")) :toBe (k "discussion"))
+        (js-call (expect (getOf (aref channels 0) "count")) :toBe 1)
+        (let*
+          ((items (js-call globalThis.Array :from (getOf (aref channels 0) "items"))))
+          (js-call (expect (get (js-call globalThis.Array :from (getOf (aref items 0) "replies")) :length)) :toBe 1)))))
+  (test "a live discussion channel is declared and no comments are requested" (async () (let*
+        ((discussions (get state :discussions)) (tp (graphqlTransport (js-array (js-object :pageInfo (js-object :hasNextPage false :endCursor nil) :nodes (js-array (discussionNode 17 (js-object :body (metadata (js-object :id "notes/live" :title "Live"))))))))) (result (await (js-call discussions :collect_discussions (mapOf (js-array (js-array "source" (source)) (js-array "publishing" (publishing)) (js-array "adapters" (vector)) (js-array "identities" (vector)) (js-array "comments" (discussionDeclaration "live")) (js-array "transport" (get tp :transport))))))) (post (aref (js-call globalThis.Array :from (getOf result "posts")) 0)) (channels (js-call globalThis.Array :from (getOf post "comment-channels"))))
+        (js-call (expect (getOf (aref channels 0) "mode")) :toBe (k "live"))
+        (js-call (expect (js-call globalThis.Array :from (getOf (aref channels 0) "items"))) :toEqual (js-array))
+        (js-call (get (expect (get (aref (get tp :calls) 0) :query)) :not) :toContain "comments(first:"))))
+  (test "the renderer nests discussion replies instead of flattening them" (lambda () (let*
+        ((renderer (get state :renderer)) (mk-comment (lambda (id body &rest __host_forwarded_arguments_7)
+    (let* ((replies (aref __host_forwarded_arguments_7 0))) (mapOf (js-array (js-array "id" id) (js-array "body" body) (js-array "author" (mapOf (js-array (js-array "login" "reader")))) (js-array "created-at" "2026-09-14T09:00:00Z") (js-array "updated-at" "2026-09-14T09:00:00Z") (js-array "url" nil) (js-array "replies" (apply vector (or replies (js-array))))))))) (ch (mapOf (js-array (js-array "id" (k "discussion-native")) (js-array "kind" (k "discussion")) (js-array "mode" (k "snapshot")) (js-array "count" 1) (js-array "updated-at" "2026-09-14T09:00:00Z") (js-array "items" (vector (mk-comment "c1" "<p>First</p>" (js-array (mk-comment "c2" "<p>Second</p>")))))))) (markup (js-call renderer :render_comment_channels (mapOf (js-array (js-array "comment-channels" (vector ch)))))) (parent (js-call markup :indexOf "<p>First</p>")) (reply (js-call markup :indexOf "<p>Second</p>")) (parentEnd (js-call markup :indexOf "</li>" parent)))
+        (js-call (expect markup) :toContain "data-comment-provider=\"GitHub Discussions\"")
+        (js-call (expect markup) :toContain "comment-replies")
+        (js-call (expect markup) :toContain "<p>Second</p>")
+        (js-call (expect reply) :toBeGreaterThan parent)
+        (js-call (expect reply) :toBeLessThan parentEnd)))))

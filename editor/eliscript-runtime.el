@@ -210,17 +210,20 @@
     (nreverse names)))
 
 (defun eliscript-runtime--lisp-mjs-path ()
-  "Return the path to `dist/runtime/lisp.mjs', building it if missing."
+  "Return the Lisp runtime path, building it and its I/O worker if missing."
   (let* ((proj-dir (file-name-as-directory
                     (file-truename eliscript-runtime--project-directory)))
          (dist-mjs (expand-file-name "dist/runtime/lisp.mjs" proj-dir))
+         (worker-mjs (expand-file-name "dist/runtime/lisp/io-worker.mjs" proj-dir))
          (build-bin (expand-file-name "bin/eliscript-build" proj-dir))
          (runtime-dir (expand-file-name "runtime" proj-dir))
          (lisp-eli (expand-file-name "runtime/lisp.eli" proj-dir))
+         (worker-eli (expand-file-name "runtime/lisp/io-worker.eli" proj-dir))
          (out-dir (expand-file-name "dist/runtime" proj-dir)))
-    (unless (file-exists-p dist-mjs)
+    (unless (and (file-exists-p dist-mjs) (file-exists-p worker-mjs))
       (unless (= 0 (call-process build-bin nil nil nil
-                                 "--root" runtime-dir "--out-dir" out-dir lisp-eli))
+                                 "--root" runtime-dir "--out-dir" out-dir
+                                 lisp-eli worker-eli))
         (error "Failed to build %s" dist-mjs)))
     dist-mjs))
 
@@ -250,20 +253,21 @@
            (runner (or (executable-find "bun")
                        (executable-find "node")
                        (error "Neither bun nor node found in PATH")))
-           (script (concat
-                    "import fs from 'node:fs';\n"
-                    "import { pathToFileURL } from 'node:url';\n"
-                    "const mod = await import(pathToFileURL(process.argv[1]).href);\n"
-                    "const src = fs.readFileSync(0, 'utf8');\n"
-                    "process.stdout.write(mod.compileModule(src, { moduleName: process.argv[2], runtime: 'eliscript/runtime/lisp' }));\n"))
+           (driver-source (expand-file-name "tools/testing/lisp-module-driver.eli"
+                                            eliscript-runtime--project-directory))
+           (driver (expand-file-name "tools/testing/lisp-module-driver.mjs"
+                                     eliscript-runtime--project-directory))
            (coding-system-for-read 'utf-8)
            (coding-system-for-write 'utf-8-unix))
+      (when (or (not (file-exists-p driver))
+                (file-newer-than-file-p driver-source driver))
+        (eliscript-compile-file driver-source driver))
       (with-temp-buffer
         (insert source)
         (let ((status (call-process-region
                        (point-min) (point-max)
                        runner t t nil
-                       "-e" script "--" lisp-mjs module-name)))
+                       driver lisp-mjs module-name)))
           (unless (and (integerp status) (= status 0))
             (error "Failed to compile module %s: %s" module-name (buffer-string)))
           (buffer-string)))))

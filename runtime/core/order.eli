@@ -1,2 +1,223 @@
-(module capsules.runtime.core.order
-  (js* "import { reduce } from \"./collection.mjs\";\nimport {\n  EliscriptSymbol,\n  Keyword,\n  qualifiedIdentifierName,\n} from \"./identifier.mjs\";\nimport { PersistentList } from \"./list.mjs\";\nimport {\n  defineProtocol,\n  extendProtocolCategory,\n  extendProtocolType,\n  protocolMethod,\n} from \"./protocol.mjs\";\nimport {\n  conjBang,\n  persistentBang,\n  transient,\n} from \"./transient.mjs\";\nimport { isTruthy } from \"./truth.mjs\";\nimport { EMPTY_VECTOR, PersistentVector } from \"./vector.mjs\";\n\nexport const IComparable = defineProtocol(\"IComparable\", [\"compare\"]);\nconst dispatchCompare = protocolMethod(IComparable, \"compare\");\n\nfunction requireFunction(value, label) {\n  if (typeof value !== \"function\") {\n    throw new TypeError(`${label} must be a function`);\n  }\n  return value;\n}\n\nfunction comparisonResult(value, label) {\n  if (typeof value !== \"number\" || !Number.isFinite(value)) {\n    throw new TypeError(`${label} must return a finite number`);\n  }\n  return value < 0 ? -1 : value > 0 ? 1 : 0;\n}\n\nfunction typeName(value) {\n  if (value === null) return \"null\";\n  if (value === undefined) return \"undefined\";\n  if (value instanceof Keyword) return \"keyword\";\n  if (value instanceof EliscriptSymbol) return \"symbol\";\n  if (value instanceof PersistentVector) return \"vector\";\n  if (value instanceof PersistentList) return \"list\";\n  return typeof value;\n}\n\nfunction requireComparableType(right, predicate, leftName) {\n  if (!predicate(right)) {\n    throw new TypeError(`cannot compare ${leftName} to ${typeName(right)}`);\n  }\n  return right;\n}\n\nfunction comparePrimitive(left, right, predicate, name) {\n  requireComparableType(right, predicate, name);\n  return left < right ? -1 : left > right ? 1 : 0;\n}\n\nfunction compareNumber(left, right) {\n  requireComparableType(right, (value) => typeof value === \"number\", \"number\");\n  if (Number.isNaN(left)) return Number.isNaN(right) ? 0 : 1;\n  if (Number.isNaN(right)) return -1;\n  return left < right ? -1 : left > right ? 1 : 0;\n}\n\nfunction compareIdentifier(left, right, Constructor, name) {\n  requireComparableType(right, (value) => value instanceof Constructor, name);\n  return comparePrimitive(\n    qualifiedIdentifierName(left),\n    qualifiedIdentifierName(right),\n    (value) => typeof value === \"string\",\n    \"string\",\n  );\n}\n\nfunction compareSequential(left, right, Constructor, name) {\n  requireComparableType(right, (value) => value instanceof Constructor, name);\n  if (left === right) return 0;\n  const leftIterator = left[Symbol.iterator]();\n  const rightIterator = right[Symbol.iterator]();\n  while (true) {\n    const leftItem = leftIterator.next();\n    const rightItem = rightIterator.next();\n    if (leftItem.done || rightItem.done) {\n      return leftItem.done === rightItem.done ? 0 : leftItem.done ? -1 : 1;\n    }\n    const result = compareValues(leftItem.value, rightItem.value);\n    if (result !== 0) return result;\n  }\n}\n\nextendProtocolCategory(IComparable, \"boolean\", {\n  compare: (left, right) => comparePrimitive(\n    left,\n    right,\n    (value) => typeof value === \"boolean\",\n    \"boolean\",\n  ),\n});\nextendProtocolCategory(IComparable, \"number\", { compare: compareNumber });\nextendProtocolCategory(IComparable, \"bigint\", {\n  compare: (left, right) => comparePrimitive(\n    left,\n    right,\n    (value) => typeof value === \"bigint\",\n    \"bigint\",\n  ),\n});\nextendProtocolCategory(IComparable, \"string\", {\n  compare: (left, right) => comparePrimitive(\n    left,\n    right,\n    (value) => typeof value === \"string\",\n    \"string\",\n  ),\n});\nextendProtocolType(IComparable, Keyword, {\n  compare: (left, right) => compareIdentifier(left, right, Keyword, \"keyword\"),\n});\nextendProtocolType(IComparable, EliscriptSymbol, {\n  compare: (left, right) =>\n    compareIdentifier(left, right, EliscriptSymbol, \"symbol\"),\n});\nextendProtocolType(IComparable, PersistentVector, {\n  compare: (left, right) =>\n    compareSequential(left, right, PersistentVector, \"vector\"),\n});\nextendProtocolType(IComparable, PersistentList, {\n  compare: (left, right) =>\n    compareSequential(left, right, PersistentList, \"list\"),\n});\n\nexport function compareValues(left, right) {\n  if (left === right || (Number.isNaN(left) && Number.isNaN(right))) return 0;\n  if (typeof left === \"number\" && typeof right === \"number\") {\n    if (Number.isNaN(left)) return 1;\n    if (Number.isNaN(right)) return -1;\n    return left < right ? -1 : 1;\n  }\n  if (typeof left === \"string\" && typeof right === \"string\") {\n    return left < right ? -1 : 1;\n  }\n  if (left === null) return -1;\n  if (right === null) return 1;\n  if (left === undefined) return -1;\n  if (right === undefined) return 1;\n  return comparisonResult(\n    dispatchCompare(left, right),\n    \"IComparable/compare\",\n  );\n}\n\nexport function comparator(comparison) {\n  requireFunction(comparison, \"comparator comparison\");\n  if (comparison === compareValues) return compareValues;\n  return (left, right) => {\n    const result = comparison(left, right);\n    if (typeof result === \"number\") {\n      return comparisonResult(result, \"comparator comparison\");\n    }\n    if (isTruthy(result)) return -1;\n    return isTruthy(comparison(right, left)) ? 1 : 0;\n  };\n}\n\nexport function reverseComparator(...arguments_) {\n  if (arguments_.length > 1) {\n    throw new TypeError(\"reverseComparator expects zero or one comparator\");\n  }\n  const normalized = comparator(\n    arguments_.length === 0 ? compareValues : arguments_[0],\n  );\n  return (left, right) => normalized(right, left);\n}\n\nfunction sortDecorated(values, comparison) {\n  if (values.length === 0) return EMPTY_VECTOR;\n  values.sort((left, right) =>\n    comparison(left.key, right.key) || left.index - right.index);\n  const result = new Array(values.length);\n  for (let index = 0; index < values.length; index += 1) {\n    result[index] = values[index].value;\n  }\n  return PersistentVector.from(result);\n}\n\nfunction collectDecorated(collection, keyFunction) {\n  const values = [];\n  reduce(collection, (result, value) => {\n    result.push({ index: result.length, key: keyFunction(value), value });\n    return result;\n  }, values);\n  return values;\n}\n\nfunction collectValues(collection) {\n  const values = [];\n  reduce(collection, (result, value) => {\n    result.push(value);\n    return result;\n  }, values);\n  return values;\n}\n\nexport function sort(...arguments_) {\n  if (arguments_.length !== 1 && arguments_.length !== 2) {\n    throw new TypeError(\"sort expects a collection or comparator and collection\");\n  }\n  const comparison = arguments_.length === 1\n    ? compareValues\n    : arguments_[0];\n  const collection = arguments_[arguments_.length - 1];\n  const values = collectValues(collection);\n  const normalized = comparator(comparison);\n  if (values.length === 0) return EMPTY_VECTOR;\n  values.sort(normalized);\n  return PersistentVector.from(values);\n}\n\nexport function sortBy(keyFunction, ...arguments_) {\n  requireFunction(keyFunction, \"sortBy key function\");\n  if (arguments_.length !== 1 && arguments_.length !== 2) {\n    throw new TypeError(\n      \"sortBy expects a key function, optional comparator, and collection\",\n    );\n  }\n  const comparison = arguments_.length === 1\n    ? compareValues\n    : arguments_[0];\n  const collection = arguments_[arguments_.length - 1];\n  return sortDecorated(\n    collectDecorated(collection, keyFunction),\n    comparator(comparison),\n  );\n}\n\nfunction extremeKey(label, direction, keyFunction, values) {\n  requireFunction(keyFunction, `${label} key function`);\n  if (values.length === 0) {\n    throw new TypeError(`${label} expects a key function and at least one value`);\n  }\n  let selected = values[0];\n  let selectedKey = keyFunction(selected);\n  for (let index = 1; index < values.length; index += 1) {\n    const candidate = values[index];\n    const candidateKey = keyFunction(candidate);\n    if (compareValues(candidateKey, selectedKey) * direction >= 0) {\n      selected = candidate;\n      selectedKey = candidateKey;\n    }\n  }\n  return selected;\n}\n\nexport function minKey(keyFunction, ...values) {\n  return extremeKey(\"minKey\", -1, keyFunction, values);\n}\n\nexport function maxKey(keyFunction, ...values) {\n  return extremeKey(\"maxKey\", 1, keyFunction, values);\n}\n"))
+(module eliscript.runtime.core.order
+  (import "./collection.mjs" reduce)
+  (import "./identifier.mjs" EliscriptSymbol Keyword qualifiedIdentifierName)
+  (import "./list.mjs" PersistentList)
+  (import "./protocol.mjs" defineProtocol extendProtocolCategory extendProtocolType protocolMethod)
+  (import "./truth.mjs" isTruthy)
+  (import "./vector.mjs" EMPTY_VECTOR PersistentVector)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+  (defconst IComparable (defineProtocol "IComparable" (js-array "compare")))
+  (defconst dispatch-compare (protocolMethod IComparable "compare"))
+
+  (defun require-function (value label)
+    (unless (= (funcall typeof-value value) "function")
+      (throw (new globalThis/TypeError (str label " must be a function"))))
+    value)
+
+  (defun comparison-result (value label)
+    (unless (and (= (funcall typeof-value value) "number") (Number/isFinite value))
+      (throw (new globalThis/TypeError (str label " must return a finite number"))))
+    (if (< value 0) -1 (if (> value 0) 1 0)))
+
+  (defun type-name (value)
+    (cond
+      ((nil? value) "null")
+      ((undefined? value) "undefined")
+      ((funcall instance-of? value Keyword) "keyword")
+      ((funcall instance-of? value EliscriptSymbol) "symbol")
+      ((funcall instance-of? value PersistentVector) "vector")
+      ((funcall instance-of? value PersistentList) "list")
+      (t (funcall typeof-value value))))
+
+  (defun require-comparable-type (right predicate left-name)
+    (unless (funcall predicate right)
+      (throw (new globalThis/TypeError (str "cannot compare " left-name " to " (type-name right)))))
+    right)
+
+  (defun compare-primitive (left right predicate name)
+    (require-comparable-type right predicate name)
+    (if (< left right) -1 (if (> left right) 1 0)))
+
+  (defun compare-number (left right)
+    (require-comparable-type right (lambda (value) (= (funcall typeof-value value) "number")) "number")
+    (cond
+      ((Number/isNaN left) (if (Number/isNaN right) 0 1))
+      ((Number/isNaN right) -1)
+      ((< left right) -1)
+      ((> left right) 1)
+      (t 0)))
+
+  (defun compare-identifier (left right ctor name)
+    (require-comparable-type right (lambda (value) (funcall instance-of? value ctor)) name)
+    (compare-primitive
+      (qualifiedIdentifierName left)
+      (qualifiedIdentifierName right)
+      (lambda (value) (= (funcall typeof-value value) "string"))
+      "string"))
+
+  (defun compare-sequential (left right ctor name)
+    (require-comparable-type right (lambda (value) (funcall instance-of? value ctor)) name)
+    (if (eq left right)
+        0
+        (let ((left-iterator (js-call (aref left (get globalThis/Symbol :iterator)) :call left))
+              (right-iterator (js-call (aref right (get globalThis/Symbol :iterator)) :call right))
+              (done false)
+              (result 0))
+          (while (not done)
+            (let ((left-item (js-call left-iterator :next))
+                  (right-item (js-call right-iterator :next)))
+              (if (or (funcall globalThis/Boolean (get left-item :done))
+                      (funcall globalThis/Boolean (get right-item :done)))
+                  (setq result (if (= (get left-item :done) (get right-item :done))
+                                   0
+                                   (if (funcall globalThis/Boolean (get left-item :done)) -1 1))
+                        done t)
+                  (let ((order (compareValues (get left-item :value) (get right-item :value))))
+                    (unless (= order 0)
+                      (setq result order done t))))))
+          result)))
+
+  (extendProtocolCategory IComparable "boolean"
+    (js-object :compare
+      (lambda (left right)
+        (compare-primitive left right (lambda (value) (= (funcall typeof-value value) "boolean")) "boolean"))))
+  (extendProtocolCategory IComparable "number" (js-object :compare compare-number))
+  (extendProtocolCategory IComparable "bigint"
+    (js-object :compare
+      (lambda (left right)
+        (compare-primitive left right (lambda (value) (= (funcall typeof-value value) "bigint")) "bigint"))))
+  (extendProtocolCategory IComparable "string"
+    (js-object :compare
+      (lambda (left right)
+        (compare-primitive left right (lambda (value) (= (funcall typeof-value value) "string")) "string"))))
+  (extendProtocolType IComparable Keyword
+    (js-object :compare (lambda (left right) (compare-identifier left right Keyword "keyword"))))
+  (extendProtocolType IComparable EliscriptSymbol
+    (js-object :compare (lambda (left right) (compare-identifier left right EliscriptSymbol "symbol"))))
+  (extendProtocolType IComparable PersistentVector
+    (js-object :compare (lambda (left right) (compare-sequential left right PersistentVector "vector"))))
+  (extendProtocolType IComparable PersistentList
+    (js-object :compare (lambda (left right) (compare-sequential left right PersistentList "list"))))
+
+  (defun compareValues (left right)
+    (cond
+      ((or (eq left right) (and (Number/isNaN left) (Number/isNaN right))) 0)
+      ((and (= (funcall typeof-value left) "number") (= (funcall typeof-value right) "number"))
+       (if (Number/isNaN left) 1 (if (Number/isNaN right) -1 (if (< left right) -1 1))))
+      ((and (= (funcall typeof-value left) "string") (= (funcall typeof-value right) "string"))
+       (if (< left right) -1 1))
+      ((nil? left) -1)
+      ((nil? right) 1)
+      ((undefined? left) -1)
+      ((undefined? right) 1)
+      (t (comparison-result (funcall dispatch-compare left right) "IComparable/compare"))))
+
+  (defun comparator (comparison)
+    (require-function comparison "comparator comparison")
+    (if (eq comparison compareValues)
+        compareValues
+        (lambda (left right)
+          (let ((result (funcall comparison left right)))
+            (if (= (funcall typeof-value result) "number")
+                (comparison-result result "comparator comparison")
+                (if (isTruthy result)
+                    -1
+                    (if (isTruthy (funcall comparison right left)) 1 0)))))))
+
+  (defun reverseComparator (&rest arguments)
+    (when (> (js-length arguments) 1)
+      (throw (new globalThis/TypeError "reverseComparator expects zero or one comparator")))
+    (let ((normalized (comparator (if (= (js-length arguments) 0) compareValues (get arguments 0)))))
+      (lambda (left right) (funcall normalized right left))))
+
+  (defun sort-decorated (values comparison)
+    (if (= (js-length values) 0)
+        EMPTY_VECTOR
+        (progn
+          (js-call values :sort
+            (lambda (left right)
+              (let ((result (funcall comparison (get left :key) (get right :key))))
+                (if (= result 0) (- (get left :index) (get right :index)) result))))
+          (let ((result (new globalThis/Array (js-length values)))
+                (index 0))
+            (while (< index (js-length values))
+              (put result index (get (get values index) :value))
+              (setq index (1+ index)))
+            (js-call PersistentVector :from result)))))
+
+  (defun collect-decorated (collection key-function)
+    (let ((values (js-array)))
+      (reduce collection
+        (lambda (result value)
+          (js-call result :push
+            (js-object :index (js-length result) :key (funcall key-function value) :value value))
+          result)
+        values)
+      values))
+
+  (defun collect-values (collection)
+    (let ((values (js-array)))
+      (reduce collection
+        (lambda (result value)
+          (js-call result :push value)
+          result)
+        values)
+      values))
+
+  (defun sort (&rest arguments)
+    (unless (or (= (js-length arguments) 1) (= (js-length arguments) 2))
+      (throw (new globalThis/TypeError "sort expects a collection or comparator and collection")))
+    (let* ((comparison (if (= (js-length arguments) 1) compareValues (get arguments 0)))
+           (collection (get arguments (1- (js-length arguments))))
+           (values (collect-values collection))
+           (normalized (comparator comparison)))
+      (if (= (js-length values) 0)
+          EMPTY_VECTOR
+          (progn
+            (js-call values :sort normalized)
+            (js-call PersistentVector :from values)))))
+
+  (defun sortBy (keyFunction &rest arguments)
+    (require-function keyFunction "sortBy key function")
+    (unless (or (= (js-length arguments) 1) (= (js-length arguments) 2))
+      (throw (new globalThis/TypeError
+               "sortBy expects a key function, optional comparator, and collection")))
+    (let ((comparison (if (= (js-length arguments) 1) compareValues (get arguments 0)))
+          (collection (get arguments (1- (js-length arguments)))))
+      (sort-decorated
+        (collect-decorated collection keyFunction)
+        (comparator comparison))))
+
+  (defun extreme-key (label direction key-function values)
+    (require-function key-function (str label " key function"))
+    (when (= (js-length values) 0)
+      (throw (new globalThis/TypeError (str label " expects a key function and at least one value"))))
+    (let* ((selected (get values 0))
+           (selected-key (funcall key-function selected))
+           (index 1))
+      (while (< index (js-length values))
+        (let* ((candidate (get values index))
+               (candidate-key (funcall key-function candidate)))
+          (when (>= (* (compareValues candidate-key selected-key) direction) 0)
+            (setq selected candidate
+                  selected-key candidate-key)))
+        (setq index (1+ index)))
+      selected))
+
+  (defun minKey (keyFunction &rest values)
+    (extreme-key "minKey" -1 keyFunction values))
+
+  (defun maxKey (keyFunction &rest values)
+    (extreme-key "maxKey" 1 keyFunction values))
+
+  (export
+    IComparable
+    compareValues
+    comparator
+    reverseComparator
+    sort
+    sortBy
+    minKey
+    maxKey))

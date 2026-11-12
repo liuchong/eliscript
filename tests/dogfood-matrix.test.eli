@@ -1,2 +1,157 @@
-(module capsules.tests.dogfood-matrix.test
-  (js* "import { afterAll, beforeAll, expect, test } from \"bun:test\";\nimport { mkdir, mkdtemp, rm, writeFile } from \"node:fs/promises\";\nimport { resolve } from \"node:path\";\n\nimport { get as cget } from \"../runtime/core/collection.mjs\";\nimport { hashMap, keyword, vector } from \"../runtime/literals.mjs\";\n\nconst ROOT = resolve(import.meta.dir, \"..\");\nconst COMPILER = resolve(ROOT, \"bin/eliscript-build\");\n\nlet staging;\nlet project;\nlet sources;\n\nconst k = (name) => keyword(name);\nconst mapOf = (entries) => hashMap(...entries.flatMap(([key, value]) => [k(key), value]));\nconst getOf = (value, name, fallback = null) => cget(value, k(name), fallback);\n\nasync function run(command) {\n  const child = Bun.spawn(command, { cwd: ROOT, stdout: \"pipe\", stderr: \"pipe\" });\n  const [exitCode, stdout, stderr] = await Promise.all([\n    child.exited,\n    new Response(child.stdout).text(),\n    new Response(child.stderr).text(),\n  ]);\n  return { exitCode, stdout, stderr };\n}\n\n// Every provider answers on its own repository, so a request names the source\n// that made it and a disabled provider is provably silent.\nconst REPOSITORY = {\n  markdown: \"owner/markdown-repository\",\n  issues: \"owner/issues-repository\",\n  discussions: \"owner/discussions-repository\",\n};\n\nconst SUBJECT = [\"markdown\", \"issues\", \"discussions\"];\n\n/** The seven non-empty subsets, in a stable order. */\nconst SUBSETS = Array.from(\n  { length: (1 << SUBJECT.length) - 1 },\n  (_, mask) => SUBJECT.filter((_, index) => (mask + 1) & (1 << index)),\n);\n\nfunction markdownBody(id) {\n  return [\n    \"---\",\n    `id: ${id}`,\n    \"title: From Markdown\",\n    \"date: 2026-09-12\",\n    \"description: A markdown record.\",\n    \"tags: [design]\",\n    \"slug: from-markdown\",\n    \"---\",\n    \"\",\n    \"Body text.\",\n    \"\",\n  ].join(\"\\n\");\n}\n\nfunction metadata(fields) {\n  const lines = Object.entries(fields).map(([key, value]) => `${key}: ${value}`);\n  return [\"```dogfood\", ...lines, \"```\", \"\", \"Body text.\", \"\"].join(\"\\n\");\n}\n\nfunction issue(number, id) {\n  return {\n    number,\n    html_url: `https://github.com/owner/issues-repository/issues/${number}`,\n    created_at: \"2026-09-10T00:00:00Z\",\n    updated_at: \"2026-09-11T00:00:00Z\",\n    labels: [],\n    user: { login: \"owner\", id: \"U_owner\", type: \"User\" },\n    body: metadata({ id, title: \"From Issues\", slug: \"from-issues\" }),\n  };\n}\n\nfunction discussion(number, id) {\n  return {\n    number,\n    id: `D_${number}`,\n    title: \"Discussion carrier\",\n    url: `https://github.com/owner/discussions-repository/discussions/${number}`,\n    createdAt: \"2026-09-10T00:00:00Z\",\n    updatedAt: \"2026-09-11T00:00:00Z\",\n    category: { name: \"Blog\" },\n    labels: { nodes: [] },\n    author: { login: \"owner\", databaseId: \"U_owner\", __typename: \"User\" },\n    body: metadata({ id, title: \"From Discussions\", slug: \"from-discussions\" }),\n    answer: null,\n    comments: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },\n    commentsCount: { totalCount: 0 },\n  };\n}\n\n/** A transport that records which repository each request named. */\nfunction recordingTransport(calls) {\n  return (request) => {\n    const url = typeof request === \"string\" ? request : request.url;\n    // A GraphQL request names its repository in the body rather than the URL,\n    // so the recorded text carries both.\n    calls.push(typeof request === \"string\"\n      ? request\n      : `${request.url} ${JSON.stringify(request.body ?? \"\")}`);\n    if (url.includes(\"/graphql\")) {\n      return {\n        status: 200,\n        headers: {},\n        body: {\n          data: {\n            repository: {\n              discussions: {\n                nodes: [discussion(17, \"notes/from-discussions\")],\n                pageInfo: { hasNextPage: false, endCursor: null },\n              },\n            },\n          },\n        },\n      };\n    }\n    return {\n      status: 200,\n      headers: {},\n      body: [issue(42, \"notes/from-issues\")],\n    };\n  };\n}\n\nfunction sourceOf(subject, enabled) {\n  if (subject === \"markdown\") {\n    return mapOf([\n      [\"id\", k(\"markdown-posts\")],\n      [\"kind\", k(\"markdown\")],\n      [\"enabled\", enabled],\n      [\"directory\", \"content/posts\"],\n    ]);\n  }\n  if (subject === \"issues\") {\n    return mapOf([\n      [\"id\", k(\"issues\")],\n      [\"kind\", k(\"issues\")],\n      [\"enabled\", enabled],\n      [\"repository\", REPOSITORY.issues],\n      [\"label\", \"published\"],\n    ]);\n  }\n  return mapOf([\n    [\"id\", k(\"discussions\")],\n    [\"kind\", k(\"discussions\")],\n    [\"enabled\", enabled],\n    [\"repository\", REPOSITORY.discussions],\n    [\"category\", \"Blog\"],\n  ]);\n}\n\n// The configuration always lists all three providers; the subset only decides\n// which of them are enabled, which is what the builder must act on.\nfunction configFor(subset) {\n  return mapOf([\n    [\"sources\", vector(...SUBJECT.map((subject) => sourceOf(subject, subset.includes(subject))))],\n    [\"publishing\", mapOf([\n      [\"owner\", mapOf([[\"login\", \"owner\"], [\"id\", \"U_owner\"]])],\n      [\"coauthors\", vector()],\n    ])],\n    [\"adapters\", vector()],\n    [\"comments\", mapOf([\n      [\"presentation\", k(\"tabs\")],\n      [\"channels\", vector()],\n    ])],\n    [\"identity\", mapOf([[\"conflict\", k(\"fail\")], [\"projections\", vector()]])],\n    [\"output\", mapOf([[\"directory\", \"_site\"]])],\n  ]);\n}\n\nasync function collect(subset) {\n  const config = configFor(subset);\n  const enabled = sources.enabled_sources(config);\n  const ids = [...enabled].map((source) => getOf(source, \"id\").name);\n  const calls = [];\n  const transport = recordingTransport(calls);\n  const posts = [];\n  for (const source of enabled) {\n    const result = await sources.source_posts(project, config, source, transport, vector());\n    posts.push(...[...getOf(result, \"posts\")]);\n  }\n  return { ids, calls, posts: posts.map((post) => getOf(post, \"id\")) };\n}\n\nbeforeAll(async () => {\n  staging = await mkdtemp(resolve(ROOT, \".eliscript-dogfood-matrix-\"));\n  project = resolve(staging, \"project\");\n  await mkdir(resolve(project, \"content/posts\"), { recursive: true });\n  await writeFile(\n    resolve(project, \"content/posts/0001-from-markdown.md\"),\n    markdownBody(\"notes/from-markdown\"),\n    \"utf8\",\n  );\n\n  const built = await run([\n    COMPILER, \"--no-cache\", \"--root\", \"examples/dogfood\", \"--out-dir\",\n    resolve(staging, \"build\"), \"examples/dogfood/src/builder/main.eli\",\n  ]);\n  if (built.exitCode !== 0) throw new Error(built.stderr.trim() || built.stdout.trim());\n  sources = await import(resolve(staging, \"build/src/builder/sources.mjs\"));\n});\n\nafterAll(async () => {\n  if (staging) await rm(staging, { recursive: true, force: true });\n});\n\ntest(\"the matrix enumerates all seven non-empty subsets\", () => {\n  expect(SUBSETS.length).toBe(7);\n});\n\nfor (const subset of SUBSETS) {\n  const label = subset.join(\"+\");\n\n  test(`the ${label} subset reads exactly its providers`, async () => {\n    const result = await collect(subset);\n\n    // Only the enabled providers are dispatched, in configuration order.\n    expect(result.ids).toEqual(subset.map((subject) => ({\n      markdown: \"markdown-posts\", issues: \"issues\", discussions: \"discussions\",\n    })[subject]));\n\n    // Each enabled provider contributes its own record...\n    const expected = subset.map((subject) => `notes/from-${subject}`);\n    expect([...result.posts].sort()).toEqual([...expected].sort());\n\n    // ...and a disabled provider never reaches the network at all. Markdown is\n    // read from the filesystem, so it is not part of the network check.\n    // The repository name appears in a REST URL and in a GraphQL variable, so\n    // it identifies the provider under either protocol.\n    for (const subject of [\"issues\", \"discussions\"]) {\n      const name = REPOSITORY[subject].split(\"/\")[1];\n      const touched = result.calls.some((call) => call.includes(name));\n      expect(touched).toBe(subset.includes(subject));\n    }\n    if (!subset.includes(\"markdown\")) {\n      expect(result.posts).not.toContain(\"notes/from-markdown\");\n    }\n  });\n}\n\ntest(\"all three providers together keep every record distinct\", async () => {\n  const result = await collect([\"markdown\", \"issues\", \"discussions\"]);\n  expect([...result.posts].sort()).toEqual([\n    \"notes/from-discussions\", \"notes/from-issues\", \"notes/from-markdown\",\n  ]);\n  expect(result.calls.length).toBeGreaterThanOrEqual(2);\n});\n\ntest(\"a configuration with nothing enabled dispatches nothing\", async () => {\n  const result = await collect([]);\n  expect(result.ids).toEqual([]);\n  expect(result.posts).toEqual([]);\n  expect(result.calls).toEqual([]);\n});\n"))
+(module
+  tests.dogfood-matrix.test
+  (import "bun:test" afterAll beforeAll expect test)
+  (import "node:fs/promises" mkdir mkdtemp rm writeFile)
+  (import "node:path" resolve)
+  (import "../runtime/core/collection.mjs" :as collection-mod)
+  (import "../runtime/literals.mjs" hashMap keyword vector)
+  (defconst
+    ROOT
+    (resolve (get (js* "import.meta") :dir) ".."))
+  (defconst
+    COMPILER
+    (resolve ROOT "bin/eliscript-build"))
+  (defconst
+    state
+    (js-object :staging nil :project nil :sources nil))
+  (defun
+    k
+    (name)
+    (keyword name))
+  (defun
+    mapOf
+    (entries)
+    (let*
+      ((flat (js-array)) (idx (js-object :i 0)))
+      (while
+        (< (get idx :i) (get entries :length))
+        (let*
+          ((pair (aref entries (get idx :i))))
+          (js-call flat :push (k (aref pair 0)))
+          (js-call flat :push (aref pair 1)))
+        (put idx :i (+ (get idx :i) 1)))
+      (apply hashMap flat)))
+  (defun
+    getOf
+    (value name &rest __host_default_arguments_1)
+    (let* ((fallback (aref __host_default_arguments_1 0)))
+    (js-call collection-mod :get value (k name) (if
+        (= fallback undefined)
+        nil
+        fallback))))
+  (defasync
+    run
+    (command)
+    (let*
+      ((child (js-call globalThis.Bun :spawn command (js-object :cwd ROOT :stdout "pipe" :stderr "pipe"))) (results (await (js-call globalThis.Promise :all (js-array (get child :exited) (js-call (new globalThis.Response (get child :stdout)) :text) (js-call (new globalThis.Response (get child :stderr)) :text))))))
+      (js-object :exitCode (aref results 0) :stdout (aref results 1) :stderr (aref results 2))))
+  (defconst
+    REPOSITORY
+    (js-object :markdown "owner/markdown-repository" :issues "owner/issues-repository" :discussions "owner/discussions-repository"))
+  (defconst
+    SUBJECT
+    (js-array "markdown" "issues" "discussions"))
+  (defconst
+    SUBSETS
+    (js-array (js-array "markdown") (js-array "issues") (js-array "markdown" "issues") (js-array "discussions") (js-array "markdown" "discussions") (js-array "issues" "discussions") (js-array "markdown" "issues" "discussions")))
+  (defun
+    markdownBody
+    (id)
+    (js-call (js-array "---" (str "id: " id) "title: From Markdown" "date: 2026-09-12" "description: A markdown record." "tags: [design]" "slug: from-markdown" "---" "" "Body text." "") :join "\n"))
+  (defun
+    metadata
+    (fields)
+    (let*
+      ((entries (js-call globalThis.Object :entries fields)) (lines (js-call entries :map (lambda (pair) (str (aref pair 0) ": " (aref pair 1))))) (all (js-call (js-array "```dogfood") :concat lines (js-array "```" "" "Body text." ""))))
+      (js-call all :join "\n")))
+  (defun
+    issue
+    (number id)
+    (js-object :number number :html_url (str "https://github.com/owner/issues-repository/issues/" number) :created_at "2026-09-10T00:00:00Z" :updated_at "2026-09-11T00:00:00Z" :labels (js-array) :user (js-object :login "owner" :id "U_owner" :type "User") :body (metadata (js-object :id id :title "From Issues" :slug "from-issues"))))
+  (defun
+    discussion
+    (number id)
+    (js-object :number number :id (str "D_" number) :title "Discussion carrier" :url (str "https://github.com/owner/discussions-repository/discussions/" number) :createdAt "2026-09-10T00:00:00Z" :updatedAt "2026-09-11T00:00:00Z" :category (js-object :name "Blog") :labels (js-object :nodes (js-array)) :author (js-object :login "owner" :databaseId "U_owner" :__typename "User") :body (metadata (js-object :id id :title "From Discussions" :slug "from-discussions")) :answer nil :comments (js-object :nodes (js-array) :pageInfo (js-object :hasNextPage false :endCursor nil)) :commentsCount (js-object :totalCount 0)))
+  (defun
+    recordingTransport
+    (calls)
+    (lambda (request) (let*
+        ((is-str (= (value-type request) "string")) (url (if
+              is-str
+              request
+              (get request :url))) (recorded (if
+              is-str
+              request
+              (str (get request :url) " " (js-call globalThis.JSON :stringify (or (get request :body) ""))))))
+        (js-call calls :push recorded)
+        (if
+          (js-call url :includes "/graphql")
+          (js-object :status 200 :headers (js-object) :body (js-object :data (js-object :repository (js-object :discussions (js-object :nodes (js-array (discussion 17 "notes/from-discussions")) :pageInfo (js-object :hasNextPage false :endCursor nil))))))
+          (js-object :status 200 :headers (js-object) :body (js-array (issue 42 "notes/from-issues")))))))
+  (defun
+    sourceOf
+    (subject enabled)
+    (cond
+      ((= subject "markdown") (mapOf (js-array (js-array "id" (k "markdown-posts")) (js-array "kind" (k "markdown")) (js-array "enabled" enabled) (js-array "directory" "content/posts"))))
+      ((= subject "issues") (mapOf (js-array (js-array "id" (k "issues")) (js-array "kind" (k "issues")) (js-array "enabled" enabled) (js-array "repository" (get REPOSITORY :issues)) (js-array "label" "published"))))
+      (t (mapOf (js-array (js-array "id" (k "discussions")) (js-array "kind" (k "discussions")) (js-array "enabled" enabled) (js-array "repository" (get REPOSITORY :discussions)) (js-array "category" "Blog"))))))
+  (defun
+    configFor
+    (subset)
+    (mapOf (js-array (js-array "sources" (apply vector (js-call SUBJECT :map (lambda (subject) (sourceOf subject (js-call subset :includes subject)))))) (js-array "publishing" (mapOf (js-array (js-array "owner" (mapOf (js-array (js-array "login" "owner") (js-array "id" "U_owner")))) (js-array "coauthors" (vector))))) (js-array "adapters" (vector)) (js-array "comments" (mapOf (js-array (js-array "presentation" (k "tabs")) (js-array "channels" (vector))))) (js-array "identity" (mapOf (js-array (js-array "conflict" (k "fail")) (js-array "projections" (vector))))) (js-array "output" (mapOf (js-array (js-array "directory" "_site")))))))
+  (defasync
+    collect
+    (subset)
+    (let*
+      ((sources (get state :sources)) (config (configFor subset)) (enabled (js-call globalThis.Array :from (js-call sources :enabled_sources config))) (ids (js-call enabled :map (lambda (src) (get (getOf src "id") :name)))) (calls (js-array)) (transport (recordingTransport calls)) (posts (js-array)) (idx (js-object :i 0)))
+      (while
+        (< (get idx :i) (get enabled :length))
+        (let*
+          ((src (aref enabled (get idx :i))) (result (await (js-call sources :source_posts (get state :project) config src transport (vector)))) (src-posts (js-call globalThis.Array :from (getOf result "posts"))) (pidx (js-object :j 0)))
+          (while
+            (< (get pidx :j) (get src-posts :length))
+            (js-call posts :push (aref src-posts (get pidx :j)))
+            (put pidx :j (+ (get pidx :j) 1))))
+        (put idx :i (+ (get idx :i) 1)))
+      (js-object :ids ids :calls calls :posts (js-call posts :map (lambda (post) (getOf post "id"))))))
+  (beforeAll (async () (let*
+        ((staging (await (mkdtemp (resolve ROOT ".eliscript-dogfood-matrix-")))) (project (resolve staging "project")) (__ign_2 (put state :staging staging)) (__ign_3 (put state :project project)) (__ign_4 (await (mkdir (resolve project "content/posts") (js-object :recursive t)))) (__ign_5 (await (writeFile (resolve project "content/posts/0001-from-markdown.md") (markdownBody "notes/from-markdown") "utf8"))) (built (await (run (js-array COMPILER "--no-cache" "--root" "examples/dogfood" "--out-dir" (resolve staging "build") "examples/dogfood/src/builder/main.eli")))))
+        (when
+          (not= (get built :exitCode) 0)
+          (throw (new globalThis.Error (or (js-call (get built :stderr) :trim) (js-call (get built :stdout) :trim)))))
+        (put state :sources (await (funcall (js* "(u) => import(u)") (resolve staging "build/src/builder/sources.mjs")))))))
+  (afterAll (async () (when
+        (get state :staging)
+        (await (rm (get state :staging) (js-object :recursive t :force t))))))
+  (test "the matrix enumerates all seven non-empty subsets" (lambda () (js-call (expect (get SUBSETS :length)) :toBe 7)))
+  (let*
+    ((sidx (js-object :i 0)) (id-map (js-object :markdown "markdown-posts" :issues "issues" :discussions "discussions")))
+    (while
+      (< (get sidx :i) (get SUBSETS :length))
+      (let*
+        ((subset (aref SUBSETS (get sidx :i))) (label (js-call subset :join "+")))
+        (test (str "the " label " subset reads exactly its providers") (async () (let*
+              ((result (await (collect subset))) (expected-ids (js-call subset :map (lambda (subject) (get id-map subject)))) (expected-posts (js-call subset :map (lambda (subject) (str "notes/from-" subject)))))
+              (js-call (expect (get result :ids)) :toEqual expected-ids)
+              (js-call (expect (js-call (js-call globalThis.Array :from (get result :posts)) :sort)) :toEqual (js-call (js-call globalThis.Array :from expected-posts) :sort))
+              (let*
+                ((net-subjects (js-array "issues" "discussions")) (nidx (js-object :j 0)))
+                (while
+                  (< (get nidx :j) (get net-subjects :length))
+                  (let*
+                    ((subject (aref net-subjects (get nidx :j))) (name (aref (js-call (get REPOSITORY subject) :split "/") 1)) (touched (js-call (get result :calls) :some (lambda (call) (js-call call :includes name)))))
+                    (js-call (expect touched) :toBe (js-call subset :includes subject)))
+                  (put nidx :j (+ (get nidx :j) 1))))
+              (when
+                (not (js-call subset :includes "markdown"))
+                (js-call (get (expect (get result :posts)) :not) :toContain "notes/from-markdown"))))))
+      (put sidx :i (+ (get sidx :i) 1))))
+  (test "all three providers together keep every record distinct" (async () (let*
+        ((result (await (collect (js-array "markdown" "issues" "discussions")))))
+        (js-call (expect (js-call (js-call globalThis.Array :from (get result :posts)) :sort)) :toEqual (js-array "notes/from-discussions" "notes/from-issues" "notes/from-markdown"))
+        (js-call (expect (get (get result :calls) :length)) :toBeGreaterThanOrEqual 2))))
+  (test "a configuration with nothing enabled dispatches nothing" (async () (let*
+        ((result (await (collect (js-array)))))
+        (js-call (expect (get result :ids)) :toEqual (js-array))
+        (js-call (expect (get result :posts)) :toEqual (js-array))
+        (js-call (expect (get result :calls)) :toEqual (js-array))))))

@@ -1,0 +1,80 @@
+(module tests.helpers.wasm-managed-str-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile)
+  (import "node:process" :default process)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defun read-val (a v)
+    (if (and (not (nullish? v)) (= (funcall js-typeof v) "object"))
+      (let ((k (get v :kind)))
+        (cond
+          ((= k 4) (js-call a :readNumber v))
+          ((= k 5) (js-call a :readString v))
+          ((= k 14)
+           (Array/from (js-object :length (js-call a :length v))
+             (lambda (_ i)
+               (let ((child (js-call a :get v i)))
+                 (try
+                   (read-val a child)
+                   (finally (js-call a :release child)))))))
+          (t v)))
+      v))
+
+  (defun call-result (a name &rest __host_default_arguments_1)
+    (let* ((args (aref __host_default_arguments_1 0)))
+    (let ((out (js-call a :invoke name (if (undefined? args) (js-array) args))))
+      (try
+        (read-val a out)
+        (finally (js-call a :release out))))))
+
+  (defun diag-code? (e code)
+    (let ((diag (if (and (not (nullish? e)) (= (funcall js-typeof e) "object"))
+                  (get e :eliscriptDiagnostic)
+                  nil)))
+      (and (not (nullish? diag)) (= (get diag :code) code))))
+
+  (defasync run-main ()
+    (let* ((rt-mod (await (funcall dynamic-import (aref (get process :argv) 2))))
+           (instantiate (get rt-mod :instantiateManagedRuntime))
+           (js (await (funcall dynamic-import (aref (get process :argv) 3))))
+           (bytes (await (readFile (aref (get process :argv) 4)))))
+      (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      (let ((a (funcall instantiate bytes)))
+        (js-call a :auto 1)
+        (js-call (js-array "zero" "simple" "sparse" "symbols" "custom-join") :forEach
+          (lambda (name)
+            (js-call assert :deepEqual
+              (call-result a name)
+              (funcall (aref js (js-call name :replaceAll "-" "_"))))))
+        (js-call (js-array "ordered" "protocol") :forEach
+          (lambda (name)
+            (let ((limit (if (= name "ordered") 2 7))
+                  (mode 0))
+              (while (< mode limit)
+                (let ((n (js-call a :number mode)))
+                  (js-call assert :deepEqual (call-result a name (js-array n)) (funcall (aref js name) mode))
+                  (js-call a :release n))
+                (setq mode (+ mode 1))))))
+        (js-call (js-array undefined nil false t -0.0 globalThis.NaN globalThis.Infinity (- globalThis.Infinity) 1e-7 1e21 "中😀\ud800") :forEach
+          (lambda (v)
+            (let* ((ty (funcall js-typeof v))
+                   (input (cond
+                            ((= ty "number") (js-call a :number v))
+                            ((= ty "string") (js-call a :string v))
+                            (t v))))
+              (js-call assert :equal (call-result a "convert" (js-array input)) (js-call js :convert v))
+              (js-call a :release input))))
+        (js-call assert :throws
+          (lambda () (js-call a :invoke "symbol-template"))
+          (lambda (e) (diag-code? e "ELI-RT0003")))
+        (js-call assert :throws
+          (lambda () (js-call a :invoke "cycle"))
+          (lambda (e) (diag-code? e "ELI-RT0009")))
+        (js-call a :closeModule)
+        (js-call a :collect)
+        (js-call assert :equal (js-call a :live) 0)
+        (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
+
+  (run-main))

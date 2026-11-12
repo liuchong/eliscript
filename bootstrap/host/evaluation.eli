@@ -1,2 +1,579 @@
-(module capsules.bootstrap.host.evaluation
-  (js* "import { createHash } from \"node:crypto\";\nimport {\n  existsSync,\n  mkdirSync,\n  mkdtempSync,\n  readFileSync,\n  realpathSync,\n  rmSync,\n  symlinkSync,\n  writeFileSync,\n} from \"node:fs\";\nimport { tmpdir } from \"node:os\";\nimport { SourceMap } from \"node:module\";\nimport { format } from \"node:util\";\nimport {\n  basename,\n  dirname,\n  isAbsolute,\n  join,\n  relative,\n  resolve,\n  sep,\n} from \"node:path\";\nimport { fileURLToPath, pathToFileURL } from \"node:url\";\n\nimport { printValue } from \"../../runtime/core/data-text.mjs\";\nimport { loadCompiler } from \"./bun.mjs\";\nimport { buildProject } from \"./project.mjs\";\n\nexport const evaluationResultFormat = \"eliscript-evaluation-result\";\nexport const evaluationResultVersion = 1;\n\nconst projectDirectory = resolve(dirname(fileURLToPath(import.meta.url)), \"../..\");\nconst evaluationCompilerDigest = createHash(\"sha256\")\n  .update(\"eliscript-evaluation-session-v1\")\n  .digest(\"hex\");\n\nfunction frozen(value) {\n  return Object.freeze(value);\n}\n\nfunction diagnosticError(message, filename = undefined) {\n  const error = new Error(message);\n  error.eliscriptDiagnostic = {\n    format: \"eliscript-diagnostic\",\n    version: 1,\n    code: \"ELI-E0001\",\n    severity: \"error\",\n    phase: \"evaluation-request\",\n    message,\n    ...(filename ? { location: { file: filename } } : {}),\n  };\n  return error;\n}\n\nfunction containedPath(path, root) {\n  const pathFromRoot = relative(root, path);\n  return pathFromRoot === \"\" ||\n    (!pathFromRoot.startsWith(`..${sep}`) && pathFromRoot !== \"..\" &&\n      !isAbsolute(pathFromRoot));\n}\n\nfunction nearestProjectRoot(filename) {\n  let directory = dirname(filename);\n  while (true) {\n    if (existsSync(join(directory, \"eliscript.json\"))) return directory;\n    const parent = dirname(directory);\n    if (parent === directory) return dirname(filename);\n    directory = parent;\n  }\n}\n\nfunction requestFilename(filename) {\n  return isAbsolute(filename) ? resolve(filename) : resolve(process.cwd(), filename);\n}\n\nfunction runtimeCategory(value) {\n  if (value === null) return \"nil\";\n  if (value === undefined) return \"undefined\";\n  return typeof value;\n}\n\nfunction stackLocation(stack) {\n  if (typeof stack !== \"string\") return null;\n  const match = stack.match(\n    /(?:at\\s+)?(?:file:\\/\\/)?([^\\s()]+\\.eli):(\\d+):(\\d+)/u,\n  );\n  if (!match) return null;\n  return {\n    file: match[1].trim(),\n    line: Number(match[2]),\n    column: Number(match[3]),\n  };\n}\n\nfunction generatedStackLocation(stack) {\n  if (typeof stack !== \"string\") return null;\n  const match = stack.match(\n    /(?:at\\s+)?(?:file:\\/\\/)?([^\\s()?]+\\.mjs)(?:[?#][^\\s():]*)?:(\\d+):(\\d+)/u,\n  );\n  if (!match) return null;\n  const generatedFile = decodeURIComponent(match[1].trim());\n  const mapFile = `${generatedFile}.map`;\n  if (!existsSync(mapFile)) return null;\n  try {\n    const sourceMap = new SourceMap(JSON.parse(readFileSync(mapFile, \"utf8\")));\n    const entry = sourceMap.findEntry(Number(match[2]) - 1, Number(match[3]) - 1);\n    if (!entry?.originalSource) return null;\n    const originalSource = entry.originalSource.startsWith(\"file://\")\n      ? fileURLToPath(entry.originalSource)\n      : entry.originalSource;\n    return {\n      file: isAbsolute(originalSource)\n        ? originalSource\n        : resolve(dirname(mapFile), originalSource),\n      line: entry.originalLine + 1,\n      column: entry.originalColumn + 1,\n    };\n  } catch {\n    return null;\n  }\n}\n\nfunction remapPoint(point, adjustment) {\n  const relativeLine = point.line - adjustment.expressionLine + 1;\n  if (relativeLine < 1) return point;\n  return {\n    ...point,\n    line: adjustment.line + relativeLine - 1,\n    column: relativeLine === 1\n      ? adjustment.column + Math.max(0, point.column - adjustment.expressionColumn)\n      : point.column,\n  };\n}\n\nfunction remapLocation(location, adjustment) {\n  if (!location || !adjustment || location.file !== adjustment.syntheticFilename) {\n    return location;\n  }\n  if (location.start && typeof location.start === \"object\") {\n    return {\n      ...location,\n      file: adjustment.filename,\n      start: remapPoint(location.start, adjustment),\n      ...(location.end\n        ? { end: remapPoint(location.end, adjustment) }\n        : {}),\n    };\n  }\n  return { ...remapPoint(location, adjustment), file: adjustment.filename };\n}\n\nfunction normalizeDiagnostic(error, adjustment = undefined) {\n  const existing = error?.eliscriptDiagnostic;\n  if (existing && typeof existing === \"object\") {\n    const location = remapLocation(existing.location, adjustment);\n    return frozen({\n      ...existing,\n      ...(location ? { location: frozen({ ...location }) } : {}),\n    });\n  }\n  const location = remapLocation(\n    stackLocation(error?.stack) ?? generatedStackLocation(error?.stack),\n    adjustment,\n  );\n  return frozen({\n    format: \"eliscript-diagnostic\",\n    version: 1,\n    code: \"ELI-E0002\",\n    severity: \"error\",\n    phase: \"evaluation-runtime\",\n    message: error instanceof Error ? error.message : String(error),\n    ...(location ? { location: frozen(location) } : {}),\n  });\n}\n\nfunction resultBase(request, revision) {\n  return {\n    format: evaluationResultFormat,\n    version: evaluationResultVersion,\n    id: request?.id ?? null,\n    operation: request?.operation ?? \"unknown\",\n    revision,\n  };\n}\n\nfunction success(request, revision, details) {\n  return frozen({\n    ...resultBase(request, revision),\n    status: \"ok\",\n    ...details,\n  });\n}\n\nfunction appendCapturedOutput(result, stdout) {\n  if (stdout === \"\") return result;\n  return frozen({ ...result, stdout });\n}\n\nasync function captureStandardOutput(action) {\n  const write = process.stdout.write;\n  const consoleMethods = new Map();\n  let stdout = \"\";\n  process.stdout.write = function capture(chunk, encoding, callback) {\n    stdout += Buffer.isBuffer(chunk)\n      ? chunk.toString(typeof encoding === \"string\" ? encoding : \"utf8\")\n      : String(chunk);\n    const done = typeof encoding === \"function\" ? encoding : callback;\n    if (typeof done === \"function\") queueMicrotask(done);\n    return true;\n  };\n  for (const name of [\"debug\", \"info\", \"log\"]) {\n    consoleMethods.set(name, console[name]);\n    console[name] = (...values) => {\n      stdout += `${format(...values)}\\n`;\n    };\n  }\n  try {\n    return { value: await action(), stdout };\n  } catch (error) {\n    error.eliscriptCapturedStdout = stdout;\n    throw error;\n  } finally {\n    process.stdout.write = write;\n    for (const [name, method] of consoleMethods) console[name] = method;\n  }\n}\n\nfunction failure(rawRequest, request, revision, error, adjustment = undefined) {\n  const rawId = rawRequest && typeof rawRequest === \"object\" ? rawRequest.id : null;\n  const id = request?.id ?? (\n    (typeof rawId === \"string\" && rawId.length > 0) ||\n    (Number.isSafeInteger(rawId) && rawId >= 0)\n      ? rawId\n      : null\n  );\n  return frozen({\n    ...resultBase({\n      id,\n      operation: request?.operation ?? (\n        typeof rawRequest?.operation === \"string\" ? rawRequest.operation : \"unknown\"\n      ),\n    }, revision),\n    status: \"error\",\n    diagnostic: normalizeDiagnostic(error, adjustment),\n  });\n}\n\nfunction namespaceSource(source, description) {\n  const exported = new Set(description.exports);\n  const missing = description.bindings.filter((name) => !exported.has(name));\n  if (missing.length === 0) return source;\n  return `${source}\\n(export ${missing.join(\" \")})\\n`;\n}\n\nfunction expressionSource(request, namespace) {\n  const prelude = [...(namespace?.macroSources ?? [])];\n  if (namespace?.bindings.length > 0) {\n    prelude.push(`(import ${JSON.stringify(namespace.url)} ${\n      namespace.bindings.join(\" \")})`);\n  }\n  const prefix = \"(export-default \";\n  const expressionLine = prelude.reduce(\n    (lines, source) => lines + source.split(\"\\n\").length,\n    1,\n  );\n  const syntheticFilename = `${requestFilename(request.filename)}.eval.eli`;\n  return {\n    source: `${prelude.length > 0 ? `${prelude.join(\"\\n\")}\\n` : \"\"}${\n      prefix}${request.source}\\n)`,\n    adjustment: {\n      syntheticFilename,\n      filename: request.filename,\n      line: request.line,\n      column: request.column,\n      expressionLine,\n      expressionColumn: prefix.length + 1,\n    },\n  };\n}\n\nexport class EvaluationSession {\n  constructor(options) {\n    this.compiler = options.compiler;\n    this.directory = options.directory;\n    this.revision = 0;\n    this.artifact = 0;\n    this.namespace = null;\n    this.mode = \"empty\";\n    this.definitions = new Map();\n    this.definitionFilename = null;\n    this.closed = false;\n  }\n\n  static async create(options = {}) {\n    const compiler = options.compiler ?? await loadCompiler(options.moduleDirectory);\n    const directory = mkdtempSync(join(tmpdir(), \"eliscript-evaluation-\"));\n    try {\n      mkdirSync(join(directory, \"node_modules\"), { recursive: true });\n      symlinkSync(projectDirectory, join(directory, \"node_modules\", \"eliscript\"),\n        \"dir\");\n      return new EvaluationSession({ compiler, directory });\n    } catch (error) {\n      rmSync(directory, { recursive: true, force: true });\n      throw error;\n    }\n  }\n\n  ensureOpen() {\n    if (this.closed) throw diagnosticError(\"evaluation session is closed\");\n  }\n\n  nextArtifactDirectory(label) {\n    this.artifact += 1;\n    const directory = join(this.directory, `${String(this.artifact).padStart(6, \"0\")}-${label}`);\n    mkdirSync(directory, { recursive: true });\n    return directory;\n  }\n\n  async compileSingle(source, filename, label) {\n    const directory = this.nextArtifactDirectory(label);\n    const generatedName = `${label}.mjs`;\n    const modulePath = join(directory, generatedName);\n    const emission = this.compiler.compile_string_with_source_map(\n      source,\n      filename,\n      generatedName,\n      filename,\n    );\n    writeFileSync(\n      modulePath,\n      `${emission.javascript}\\n`,\n      \"utf8\",\n    );\n    writeFileSync(`${modulePath}.map`, emission.sourceMap, \"utf8\");\n    const url = `${pathToFileURL(modulePath).href}?artifact=${this.artifact}`;\n    return { module: await import(url), modulePath, url };\n  }\n\n  async compileProject(source, filename, root, label) {\n    const directory = this.nextArtifactDirectory(label);\n    const result = await buildProject({\n      entry: filename,\n      outDir: directory,\n      root,\n      portableEntries: [],\n      useCache: false,\n      sourceOverrides: new Map([[filename, source]]),\n      compiler: this.compiler,\n      compilerDigest: evaluationCompilerDigest,\n      sourceMapReference: false,\n    });\n    const modulePath = result.entryOutput;\n    const url = `${pathToFileURL(modulePath).href}?artifact=${this.artifact}`;\n    return { module: await import(url), modulePath, url };\n  }\n\n  async buildNamespace(source, filename, root, label) {\n    const description = this.compiler.evaluation_module_description(source, filename);\n    const compiledSource = namespaceSource(source, description);\n    const absoluteFilename = requestFilename(filename);\n    let artifact;\n    if (existsSync(absoluteFilename) && absoluteFilename.endsWith(\".eli\")) {\n      const canonicalFilename = realpathSync(absoluteFilename);\n      const requestedRoot = root === null ? nearestProjectRoot(canonicalFilename) : resolve(root);\n      const canonicalRoot = realpathSync(requestedRoot);\n      if (!containedPath(canonicalFilename, canonicalRoot)) {\n        throw diagnosticError(\"evaluation file escapes project root\", filename);\n      }\n      artifact = await this.compileProject(\n        compiledSource,\n        canonicalFilename,\n        canonicalRoot,\n        label,\n      );\n    } else {\n      artifact = await this.compileSingle(compiledSource, filename, label);\n    }\n    return frozen({\n      ...artifact,\n      filename,\n      source,\n      bindings: description.bindings,\n      exports: description.exports,\n      macroSources: description.macroSources,\n    });\n  }\n\n  commitNamespace(namespace, mode) {\n    this.namespace = namespace;\n    this.mode = mode;\n    this.revision += 1;\n  }\n\n  async describe(request) {\n    return success(request, this.revision, {\n      kind: \"capabilities\",\n      capabilities: frozen({\n        operations: frozen([\"describe\", \"evaluate\", \"load\", \"reset\"]),\n        persistentSession: true,\n        sourceMaps: true,\n        valuePrinter: \"eliscript-data-text\",\n      }),\n    });\n  }\n\n  async load(request) {\n    const namespace = await this.buildNamespace(\n      request.source,\n      request.filename,\n      request.root,\n      `namespace-${this.revision + 1}`,\n    );\n    this.definitions = new Map();\n    this.definitionFilename = null;\n    this.commitNamespace(namespace, \"loaded\");\n    return success(request, this.revision, {\n      kind: \"module\",\n      bindings: namespace.bindings,\n      value: null,\n      valueCategory: \"module\",\n    });\n  }\n\n  async evaluateDefinition(request, description) {\n    if (this.mode === \"loaded\") {\n      throw diagnosticError(\n        \"evaluate a complete updated source to replace definitions from a loaded module\",\n        request.filename,\n      );\n    }\n    if (this.definitionFilename !== null &&\n        this.definitionFilename !== request.filename) {\n      throw diagnosticError(\n        \"one definition journal cannot mix logical filenames\",\n        request.filename,\n      );\n    }\n    const definitions = new Map(this.definitions);\n    definitions.set(description.name, request.source);\n    const source = [...definitions.values()].join(\"\\n\");\n    const namespace = await this.buildNamespace(\n      source,\n      request.filename,\n      request.root,\n      `namespace-${this.revision + 1}`,\n    );\n    this.definitions = definitions;\n    this.definitionFilename = request.filename;\n    this.commitNamespace(namespace, \"journal\");\n    const hasValue = description.runtimeBinding &&\n      Object.hasOwn(namespace.module, description.name);\n    const value = hasValue ? namespace.module[description.name] : undefined;\n    return success(request, this.revision, {\n      kind: \"definition\",\n      binding: description.name,\n      hasValue,\n      value: hasValue ? printValue(value) : null,\n      valueCategory: hasValue ? runtimeCategory(value) : \"macro\",\n    });\n  }\n\n  async evaluateExpression(request) {\n    const prepared = expressionSource(request, this.namespace);\n    let artifact;\n    try {\n      artifact = await this.compileSingle(\n        prepared.source,\n        prepared.adjustment.syntheticFilename,\n        `expression-${this.artifact + 1}`,\n      );\n    } catch (error) {\n      error.eliscriptEvaluationAdjustment = prepared.adjustment;\n      throw error;\n    }\n    const value = await artifact.module.default;\n    return success(request, this.revision, {\n      kind: \"expression\",\n      hasValue: true,\n      value: printValue(value),\n      valueCategory: runtimeCategory(value),\n    });\n  }\n\n  async evaluate(request) {\n    const description = this.compiler.evaluation_form_description(\n      request.source,\n      request.filename,\n    );\n    if (description.kind === \"module\") {\n      throw diagnosticError(\n        \"module forms require a complete-source load operation\",\n        request.filename,\n      );\n    }\n    return description.kind === \"definition\"\n      ? this.evaluateDefinition(request, description)\n      : this.evaluateExpression(request);\n  }\n\n  async reset(request) {\n    this.namespace = null;\n    this.mode = \"empty\";\n    this.definitions = new Map();\n    this.definitionFilename = null;\n    this.revision += 1;\n    return success(request, this.revision, {\n      kind: \"reset\",\n      hasValue: false,\n      value: null,\n      valueCategory: \"none\",\n    });\n  }\n\n  async execute(rawRequest) {\n    this.ensureOpen();\n    let request;\n    try {\n      request = this.compiler.evaluation_operation_request(rawRequest);\n      const executed = await captureStandardOutput(async () => {\n        switch (request.operation) {\n          case \"describe\": return this.describe(request);\n          case \"evaluate\": return this.evaluate(request);\n          case \"load\": return this.load(request);\n          case \"reset\": return this.reset(request);\n          default: throw diagnosticError(\"unsupported evaluation operation\");\n        }\n      });\n      return appendCapturedOutput(executed.value, executed.stdout);\n    } catch (error) {\n      return appendCapturedOutput(failure(\n        rawRequest,\n        request,\n        this.revision,\n        error,\n        error?.eliscriptEvaluationAdjustment,\n      ), error?.eliscriptCapturedStdout ?? \"\");\n    }\n  }\n\n  close() {\n    if (this.closed) return;\n    this.closed = true;\n    rmSync(this.directory, { recursive: true, force: true });\n  }\n}\n\nexport async function evaluateOnce(request, options = {}) {\n  const session = await EvaluationSession.create(options);\n  try {\n    return await session.execute(request);\n  } finally {\n    session.close();\n  }\n}\n\nexport function readEvaluationFile(filename) {\n  const absolute = requestFilename(filename);\n  return { filename: absolute, source: readFileSync(absolute, \"utf8\") };\n}\n"))
+(module bootstrap.host.evaluation
+  (import "node:buffer" Buffer)
+  (import "node:crypto" createHash)
+  (import "node:fs" existsSync mkdirSync mkdtempSync readFileSync realpathSync rmSync symlinkSync writeFileSync)
+  (import "node:os" tmpdir)
+  (import "node:module" SourceMap)
+  (import "node:util" format)
+  (import "node:path" dirname isAbsolute join relative resolve sep)
+  (import "node:url" fileURLToPath pathToFileURL)
+  (import "../../runtime/core/data-text.mjs" printValue)
+  (import "./bun.mjs" loadCompiler)
+  (import "./project.mjs" buildProject)
+
+  (defconst evaluationResultFormat "eliscript-evaluation-result")
+  (defconst evaluationResultVersion 1)
+
+  (defconst projectDirectory
+    (resolve (dirname (fileURLToPath (js* "import.meta.url"))) "../.."))
+
+  (defconst evaluationCompilerDigest
+    (js-call (js-call (createHash "sha256") :update "eliscript-evaluation-session-v1") :digest "hex"))
+
+  (defun host-typeof (value)
+    (js* "typeof value"))
+
+  (defun host-error-instance? (value)
+    (js* "value instanceof globalThis.Error"))
+
+  (defun host-dynamic-import (url)
+    (js* "import(url)"))
+
+  (defun frozen (value)
+    (Object/freeze value))
+
+  (defun diagnosticError (message &optional filename)
+    (let ((error (new globalThis.Error message))
+          (diag (js-object
+                  :format "eliscript-diagnostic"
+                  :version 1
+                  :code "ELI-E0001"
+                  :severity "error"
+                  :phase "evaluation-request"
+                  :message message)))
+      (when (and filename (not (undefined? filename)))
+        (put diag :location (js-object :file filename)))
+      (put error :eliscriptDiagnostic diag)
+      error))
+
+  (defun containedPath (path root)
+    (let ((pathFromRoot (relative root path)))
+      (or (= pathFromRoot "")
+          (and (not (js-call pathFromRoot :startsWith (str ".." sep)))
+               (not (= pathFromRoot ".."))
+               (not (isAbsolute pathFromRoot))))))
+
+  (defun nearestProjectRoot (filename)
+    (let ((directory (dirname filename))
+          (found nil))
+      (while (nil? found)
+        (if (existsSync (join directory "eliscript.json"))
+          (setq found directory)
+          (let ((parent (dirname directory)))
+            (if (= parent directory)
+              (setq found (dirname filename))
+              (setq directory parent)))))
+      found))
+
+  (defun requestFilename (filename)
+    (if (isAbsolute filename)
+      (resolve filename)
+      (resolve (js-call globalThis.process :cwd) filename)))
+
+  (defun runtimeCategory (value)
+    (cond
+      ((nil? value) "nil")
+      ((undefined? value) "undefined")
+      (t (host-typeof value))))
+
+  (defconst eli-stack-pattern (new globalThis.RegExp "(?:at\\s+)?(?:file:\\/\\/)?([^\\s()]+\\.eli):(\\d+):(\\d+)" "u"))
+  (defconst mjs-stack-pattern (new globalThis.RegExp "(?:at\\s+)?(?:file:\\/\\/)?([^\\s()?]+\\.mjs)(?:[?#][^\\s():]*)?:(\\d+):(\\d+)" "u"))
+
+  (defun stackLocation (stack)
+    (if (not (= (host-typeof stack) "string"))
+      nil
+      (let ((match (js-call stack :match eli-stack-pattern)))
+        (if (not match)
+          nil
+          (js-object
+            :file (js-call (aref match 1) :trim)
+            :line (globalThis.Number (aref match 2))
+            :column (globalThis.Number (aref match 3)))))))
+
+  (defun generatedStackLocation (stack)
+    (if (not (= (host-typeof stack) "string"))
+      nil
+      (let ((match (js-call stack :match mjs-stack-pattern)))
+        (if (not match)
+          nil
+          (let* ((generatedFile (globalThis.decodeURIComponent (js-call (aref match 1) :trim)))
+                 (mapFile (str generatedFile ".map")))
+            (if (not (existsSync mapFile))
+              nil
+              (try
+                (let* ((sourceMap (new SourceMap (JSON/parse (readFileSync mapFile "utf8"))))
+                       (entry (js-call sourceMap :findEntry
+                                (- (globalThis.Number (aref match 2)) 1)
+                                (- (globalThis.Number (aref match 3)) 1))))
+                  (if (not (and entry (get entry :originalSource)))
+                    nil
+                    (let* ((orig (get entry :originalSource))
+                           (originalSource (if (js-call orig :startsWith "file://")
+                                             (fileURLToPath orig)
+                                             orig)))
+                      (js-object
+                        :file (if (isAbsolute originalSource)
+                                originalSource
+                                (resolve (dirname mapFile) originalSource))
+                        :line (+ (get entry :originalLine) 1)
+                        :column (+ (get entry :originalColumn) 1)))))
+                (catch _err
+                  nil))))))))
+
+  (defun remapPoint (point adjustment)
+    (let ((relativeLine (+ (- (get point :line) (get adjustment :expressionLine)) 1)))
+      (if (< relativeLine 1)
+        point
+        (let ((out (Object/assign (js-object) point)))
+          (put out :line (- (+ (get adjustment :line) relativeLine) 1))
+          (put out :column
+            (if (= relativeLine 1)
+              (+ (get adjustment :column)
+                 (Math/max 0 (- (get point :column) (get adjustment :expressionColumn))))
+              (get point :column)))
+          out))))
+
+  (defun remapLocation (location adjustment)
+    (if (or (not location)
+            (not adjustment)
+            (not (= (get location :file) (get adjustment :syntheticFilename))))
+      location
+      (if (and (get location :start) (= (host-typeof (get location :start)) "object"))
+        (let ((out (Object/assign (js-object) location)))
+          (put out :file (get adjustment :filename))
+          (put out :start (remapPoint (get location :start) adjustment))
+          (when (get location :end)
+            (put out :end (remapPoint (get location :end) adjustment)))
+          out)
+        (let ((out (remapPoint location adjustment)))
+          (put out :file (get adjustment :filename))
+          out))))
+
+  (defun normalizeDiagnostic (error &optional adjustment)
+    (let ((existing (if error (get error :eliscriptDiagnostic) nil)))
+      (if (and existing (= (host-typeof existing) "object"))
+        (let ((location (remapLocation (get existing :location) adjustment))
+              (out (Object/assign (js-object) existing)))
+          (when location
+            (put out :location (frozen (Object/assign (js-object) location))))
+          (frozen out))
+        (let* ((stack (if error (get error :stack) nil))
+               (raw-loc (let ((sl (stackLocation stack)))
+                          (if sl sl (generatedStackLocation stack))))
+               (location (remapLocation raw-loc adjustment))
+               (out (js-object
+                      :format "eliscript-diagnostic"
+                      :version 1
+                      :code "ELI-E0002"
+                      :severity "error"
+                      :phase "evaluation-runtime"
+                      :message (if (host-error-instance? error)
+                                 (get error :message)
+                                 (globalThis.String error)))))
+          (when location
+            (put out :location (frozen location)))
+          (frozen out)))))
+
+  (defun resultBase (request revision)
+    (js-object
+      :format evaluationResultFormat
+      :version evaluationResultVersion
+      :id (if (and request (not (nil? (get request :id))) (not (undefined? (get request :id))))
+            (get request :id)
+            nil)
+      :operation (if (and request (not (nil? (get request :operation))) (not (undefined? (get request :operation))))
+                   (get request :operation)
+                   "unknown")
+      :revision revision))
+
+  (defun success (request revision details)
+    (frozen (Object/assign (resultBase request revision) (js-object :status "ok") details)))
+
+  (defun appendCapturedOutput (result stdout)
+    (if (= stdout "")
+      result
+      (frozen (Object/assign (js-object) result (js-object :stdout stdout)))))
+
+  (defasync captureStandardOutput (action)
+    (let ((write (get (get globalThis.process :stdout) :write))
+          (consoleMethods (new globalThis.Map))
+          (stdout ""))
+      (put (get globalThis.process :stdout) :write
+        (lambda (chunk encoding callback)
+          (setq stdout
+            (str stdout
+                 (if (js-call Buffer :isBuffer chunk)
+                   (js-call chunk :toString (if (= (host-typeof encoding) "string") encoding "utf8"))
+                   (globalThis.String chunk))))
+          (let ((done (if (= (host-typeof encoding) "function") encoding callback)))
+            (when (= (host-typeof done) "function")
+              (globalThis.queueMicrotask done)))
+          t))
+      (let ((names (js-array "debug" "info" "log"))
+            (idx 0))
+        (while (< idx (js-length names))
+          (let ((name (aref names idx)))
+            (js-call consoleMethods :set name (aref globalThis.console name))
+            (put globalThis.console name
+              (lambda (&rest values)
+                (setq stdout (str stdout (js-call format :apply nil values) "\n")))))
+          (setq idx (+ idx 1))))
+      (try
+        (js-object :value (await (funcall action)) :stdout stdout)
+        (catch error
+          (put error :eliscriptCapturedStdout stdout)
+          (throw error))
+        (finally
+          (put (get globalThis.process :stdout) :write write)
+          (js-call consoleMethods :forEach
+            (lambda (method name)
+              (put globalThis.console name method)))))))
+
+  (defun failure (rawRequest request revision error &optional adjustment)
+    (let* ((rawId (if (and rawRequest (= (host-typeof rawRequest) "object"))
+                    (get rawRequest :id)
+                    nil))
+           (id (if (and request (not (nil? (get request :id))) (not (undefined? (get request :id))))
+                 (get request :id)
+                 (if (or (and (= (host-typeof rawId) "string") (> (js-length rawId) 0))
+                         (and (Number/isSafeInteger rawId) (>= rawId 0)))
+                   rawId
+                   nil)))
+           (operation (if (and request (not (nil? (get request :operation))) (not (undefined? (get request :operation))))
+                        (get request :operation)
+                        (if (and rawRequest (= (host-typeof (get rawRequest :operation)) "string"))
+                          (get rawRequest :operation)
+                          "unknown"))))
+      (frozen
+        (Object/assign
+          (resultBase (js-object :id id :operation operation) revision)
+          (js-object
+            :status "error"
+            :diagnostic (normalizeDiagnostic error adjustment))))))
+
+  (defun namespaceSource (source description)
+    (let* ((exported (new globalThis.Set (get description :exports)))
+           (missing (js-call (get description :bindings) :filter
+                      (lambda (name) (not (js-call exported :has name))))))
+      (if (= (js-length missing) 0)
+        source
+        (str source "\n(export " (js-call missing :join " ") ")\n"))))
+
+  (defun expressionSource (request namespace)
+    (let ((prelude (if (and namespace (get namespace :macroSources))
+                     (Array/from (get namespace :macroSources))
+                     (js-array))))
+      (when (and namespace (> (js-length (get namespace :bindings)) 0))
+        (js-call prelude :push
+          (str "(import " (JSON/stringify (get namespace :url)) " "
+               (js-call (get namespace :bindings) :join " ") ")")))
+      (let* ((prefix "(export-default ")
+             (expressionLine
+               (js-call prelude :reduce
+                 (lambda (lines src)
+                   (+ lines (js-length (js-call src :split "\n"))))
+                 1))
+             (syntheticFilename (str (requestFilename (get request :filename)) ".eval.eli")))
+        (js-object
+          :source (str (if (> (js-length prelude) 0)
+                         (str (js-call prelude :join "\n") "\n")
+                         "")
+                       prefix
+                       (get request :source)
+                       "\n)")
+          :adjustment (js-object
+                        :syntheticFilename syntheticFilename
+                        :filename (get request :filename)
+                        :line (get request :line)
+                        :column (get request :column)
+                        :expressionLine expressionLine
+                        :expressionColumn (+ (js-length prefix) 1))))))
+
+  (defasync sessionCreate (SessionClass &rest __opt)
+    (let* ((options (aref __opt 0))
+           (opts (if (undefined? options) (js-object) options))
+           (compiler (if (and (get opts :compiler) (not (undefined? (get opts :compiler))))
+                       (get opts :compiler)
+                       (await (loadCompiler (get opts :moduleDirectory)))))
+           (directory (mkdtempSync (join (tmpdir) "eliscript-evaluation-"))))
+      (try
+        (mkdirSync (join directory "node_modules") (js-object :recursive t))
+        (symlinkSync projectDirectory (join directory "node_modules" "eliscript") "dir")
+        (new SessionClass (js-object :compiler compiler :directory directory))
+        (catch error
+          (rmSync directory (js-object :recursive t :force t))
+          (throw error)))))
+
+  (defun sessionEnsureOpen (session)
+    (when (get session :closed)
+      (throw (diagnosticError "evaluation session is closed"))))
+
+  (defun sessionNextArtifactDirectory (session label)
+    (put session :artifact (+ (get session :artifact) 1))
+    (let ((directory (join (get session :directory)
+                           (str (js-call (globalThis.String (get session :artifact)) :padStart 6 "0") "-" label))))
+      (mkdirSync directory (js-object :recursive t))
+      directory))
+
+  (defasync sessionCompileSingle (session source filename label)
+    (let* ((directory (js-call session :nextArtifactDirectory label))
+           (generatedName (str label ".mjs"))
+           (modulePath (join directory generatedName))
+           (emission (js-call (get session :compiler)
+                       :compile_string_with_source_map source filename generatedName filename))
+           (_w1 (writeFileSync modulePath (str (get emission :javascript) "\n") "utf8"))
+           (_w2 (writeFileSync (str modulePath ".map") (get emission :sourceMap) "utf8"))
+           (url (str (get (pathToFileURL modulePath) :href) "?artifact=" (get session :artifact))))
+      (js-object
+        :module (await (host-dynamic-import url))
+        :modulePath modulePath
+        :url url)))
+
+  (defasync sessionCompileProject (session source filename root label)
+    (let* ((directory (js-call session :nextArtifactDirectory label))
+           (overrides (new globalThis.Map (js-array (js-array filename source))))
+           (result (await
+                     (buildProject
+                       (js-object
+                         :entry filename
+                         :outDir directory
+                         :root root
+                         :portableEntries (js-array)
+                         :useCache false
+                         :sourceOverrides overrides
+                         :compiler (get session :compiler)
+                         :compilerDigest evaluationCompilerDigest
+                         :sourceMapReference false))))
+           (modulePath (get result :entryOutput))
+           (url (str (get (pathToFileURL modulePath) :href) "?artifact=" (get session :artifact))))
+      (js-object
+        :module (await (host-dynamic-import url))
+        :modulePath modulePath
+        :url url)))
+
+  (defasync sessionBuildNamespace (session source filename root label)
+    (let* ((description (js-call (get session :compiler) :evaluation_module_description source filename))
+           (compiledSource (namespaceSource source description))
+           (absoluteFilename (requestFilename filename))
+           (artifact
+             (if (and (existsSync absoluteFilename) (js-call absoluteFilename :endsWith ".eli"))
+               (let* ((canonicalFilename (realpathSync absoluteFilename))
+                      (requestedRoot (if (nil? root)
+                                       (nearestProjectRoot canonicalFilename)
+                                       (resolve root)))
+                      (canonicalRoot (realpathSync requestedRoot)))
+                 (unless (containedPath canonicalFilename canonicalRoot)
+                   (throw (diagnosticError "evaluation file escapes project root" filename)))
+                 (await (js-call session :compileProject compiledSource canonicalFilename canonicalRoot label)))
+               (await (js-call session :compileSingle compiledSource filename label)))))
+      (frozen
+        (Object/assign
+          (js-object)
+          artifact
+          (js-object
+            :filename filename
+            :source source
+            :bindings (get description :bindings)
+            :exports (get description :exports)
+            :macroSources (get description :macroSources))))))
+
+  (defun sessionCommitNamespace (session namespace mode)
+    (put session :namespace namespace)
+    (put session :mode mode)
+    (put session :revision (+ (get session :revision) 1)))
+
+  (defasync sessionDescribe (session request)
+    (success request (get session :revision)
+      (js-object
+        :kind "capabilities"
+        :capabilities
+          (frozen
+            (js-object
+              :operations (frozen (js-array "describe" "evaluate" "load" "reset"))
+              :persistentSession t
+              :sourceMaps t
+              :valuePrinter "eliscript-data-text")))))
+
+  (defasync sessionLoad (session request)
+    (let ((namespace
+            (await
+              (js-call session :buildNamespace
+                (get request :source)
+                (get request :filename)
+                (get request :root)
+                (str "namespace-" (+ (get session :revision) 1))))))
+      (put session :definitions (new globalThis.Map))
+      (put session :definitionFilename nil)
+      (js-call session :commitNamespace namespace "loaded")
+      (success request (get session :revision)
+        (js-object
+          :kind "module"
+          :bindings (get namespace :bindings)
+          :value nil
+          :valueCategory "module"))))
+
+  (defasync sessionEvaluateDefinition (session request description)
+    (when (= (get session :mode) "loaded")
+      (throw (diagnosticError
+               "evaluate a complete updated source to replace definitions from a loaded module"
+               (get request :filename))))
+    (when (and (not (nil? (get session :definitionFilename)))
+               (not (= (get session :definitionFilename) (get request :filename))))
+      (throw (diagnosticError
+               "one definition journal cannot mix logical filenames"
+               (get request :filename))))
+    (let ((definitions (new globalThis.Map (get session :definitions))))
+      (js-call definitions :set (get description :name) (get request :source))
+      (let* ((source (js-call (Array/from (js-call definitions :values)) :join "\n"))
+             (namespace
+               (await
+                 (js-call session :buildNamespace
+                   source
+                   (get request :filename)
+                   (get request :root)
+                   (str "namespace-" (+ (get session :revision) 1))))))
+        (put session :definitions definitions)
+        (put session :definitionFilename (get request :filename))
+        (js-call session :commitNamespace namespace "journal")
+        (let* ((hasValue
+                 (globalThis.Boolean
+                   (and (get description :runtimeBinding)
+                        (Object/hasOwn (get namespace :module) (get description :name)))))
+               (value (if hasValue
+                        (aref (get namespace :module) (get description :name))
+                        undefined)))
+          (success request (get session :revision)
+            (js-object
+              :kind "definition"
+              :binding (get description :name)
+              :hasValue hasValue
+              :value (if hasValue (printValue value) nil)
+              :valueCategory (if hasValue (runtimeCategory value) "macro")))))))
+
+  (defasync sessionEvaluateExpression (session request)
+    (let ((prepared (expressionSource request (get session :namespace)))
+          (artifact nil))
+      (try
+        (setq artifact
+          (await
+            (js-call session :compileSingle
+              (get prepared :source)
+              (get (get prepared :adjustment) :syntheticFilename)
+              (str "expression-" (+ (get session :artifact) 1)))))
+        (catch error
+          (put error :eliscriptEvaluationAdjustment (get prepared :adjustment))
+          (throw error)))
+      (let ((value (await (get (get artifact :module) :default))))
+        (success request (get session :revision)
+          (js-object
+            :kind "expression"
+            :hasValue t
+            :value (printValue value)
+            :valueCategory (runtimeCategory value))))))
+
+  (defasync sessionEvaluate (session request)
+    (let ((description
+            (js-call (get session :compiler)
+              :evaluation_form_description (get request :source) (get request :filename))))
+      (when (= (get description :kind) "module")
+        (throw (diagnosticError
+                 "module forms require a complete-source load operation"
+                 (get request :filename))))
+      (if (= (get description :kind) "definition")
+        (await (js-call session :evaluateDefinition request description))
+        (await (js-call session :evaluateExpression request)))))
+
+  (defasync sessionReset (session request)
+    (put session :namespace nil)
+    (put session :mode "empty")
+    (put session :definitions (new globalThis.Map))
+    (put session :definitionFilename nil)
+    (put session :revision (+ (get session :revision) 1))
+    (success request (get session :revision)
+      (js-object
+        :kind "reset"
+        :hasValue false
+        :value nil
+        :valueCategory "none")))
+
+  (defasync sessionExecute (session rawRequest)
+    (js-call session :ensureOpen)
+    (let ((request nil))
+      (try
+        (setq request (js-call (get session :compiler) :evaluation_operation_request rawRequest))
+        (let ((executed
+                (await
+                  (captureStandardOutput
+                    (async ()
+                      (let ((op (get request :operation)))
+                        (cond
+                          ((= op "describe") (await (js-call session :describe request)))
+                          ((= op "evaluate") (await (js-call session :evaluate request)))
+                          ((= op "load") (await (js-call session :load request)))
+                          ((= op "reset") (await (js-call session :reset request)))
+                          (t (throw (diagnosticError "unsupported evaluation operation"))))))))))
+          (appendCapturedOutput (get executed :value) (get executed :stdout)))
+        (catch error
+          (appendCapturedOutput
+            (failure rawRequest request (get session :revision) error
+              (if error (get error :eliscriptEvaluationAdjustment) undefined))
+            (if (and error (get error :eliscriptCapturedStdout))
+              (get error :eliscriptCapturedStdout)
+              ""))))))
+
+  (defun sessionClose (session)
+    (unless (get session :closed)
+      (put session :closed t)
+      (rmSync (get session :directory) (js-object :recursive t :force t))))
+
+  (defun sessionInitialize (self options)
+    (put self :compiler (get options :compiler))
+    (put self :directory (get options :directory))
+    (put self :revision 0)
+    (put self :artifact 0)
+    (put self :namespace nil)
+    (put self :mode "empty")
+    (put self :definitions (new globalThis.Map))
+    (put self :definitionFilename nil)
+    (put self :closed false))
+
+  (defconst EvaluationSession
+    (js* "class EvaluationSession {
+      constructor(options) { sessionInitialize(this, options); }
+      static create(options = {}) { return sessionCreate(EvaluationSession, options); }
+      ensureOpen() { return sessionEnsureOpen(this); }
+      nextArtifactDirectory(label) { return sessionNextArtifactDirectory(this, label); }
+      compileSingle(source, filename, label) { return sessionCompileSingle(this, source, filename, label); }
+      compileProject(source, filename, root, label) { return sessionCompileProject(this, source, filename, root, label); }
+      buildNamespace(source, filename, root, label) { return sessionBuildNamespace(this, source, filename, root, label); }
+      commitNamespace(namespace, mode) { return sessionCommitNamespace(this, namespace, mode); }
+      describe(request) { return sessionDescribe(this, request); }
+      load(request) { return sessionLoad(this, request); }
+      evaluateDefinition(request, description) { return sessionEvaluateDefinition(this, request, description); }
+      evaluateExpression(request) { return sessionEvaluateExpression(this, request); }
+      evaluate(request) { return sessionEvaluate(this, request); }
+      reset(request) { return sessionReset(this, request); }
+      execute(rawRequest) { return sessionExecute(this, rawRequest); }
+      close() { return sessionClose(this); }
+    }"))
+
+  (defasync evaluateOnce (request &rest __opt)
+    (let* ((options (aref __opt 0))
+           (session (await (js-call EvaluationSession :create (if (undefined? options) (js-object) options)))))
+      (try
+        (await (js-call session :execute request))
+        (finally
+          (js-call session :close)))))
+
+  (defun readEvaluationFile (filename)
+    (let ((absolute (requestFilename filename)))
+      (js-object
+        :filename absolute
+        :source (readFileSync absolute "utf8"))))
+
+  (export
+    evaluationResultFormat
+    evaluationResultVersion
+    EvaluationSession
+    evaluateOnce
+    readEvaluationFile))

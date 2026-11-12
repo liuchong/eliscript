@@ -265,7 +265,7 @@
       "version": 2,
       "evidence": [
         {"file": "contracts/compatibility-baseline.json", "contains": ["\"format\": \"eliscript-compatibility-baseline\"", "\"version\": 2"]},
-        {"file": "tools/conformance/check.mjs", "contains": ["baseline.format !== \"eliscript-compatibility-baseline\"", "baseline.version !== 2"]}
+        {"file": "tools/conformance/check.eli", "contains": ["(not (= (get baseline :format) \"eliscript-compatibility-baseline\"))", "(not (= (get baseline :version) 2))"]}
       ]
     },
     {
@@ -275,7 +275,7 @@
       "version": 1,
       "evidence": [
         {"file": "contracts/compatibility-matrix.json", "contains": ["\"format\": \"eliscript-compatibility-matrix\"", "\"version\": 1"]},
-        {"file": "tools/ci/render-workflow-ground.mjs", "contains": ["matrix.format !== \"eliscript-compatibility-matrix\"", "matrix.version !== 1"]}
+        {"file": "tools/ci/render-workflow-ground.eli", "contains": ["\"eliscript-compatibility-matrix\"", "(not (= (get matrix :version) 1))"]}
       ]
     },
     {
@@ -327,10 +327,10 @@
           ]
         },
         {
-          "file": "tools/parity/check.mjs",
+          "file": "tools/parity/check.eli",
           "contains": [
-            "contract.format !== \"eliscript-compiler-parity-corpus\"",
-            "contract.version !== 1",
+            "(= (get contract :format) \"eliscript-compiler-parity-corpus\")",
+            "(= (get contract :version) 1)",
             "checkCompilerParityCorpus"
           ]
         }
@@ -403,10 +403,10 @@
       "version": 1,
       "evidence": [
         {
-          "file": "tools/compatibility/matrix.mjs",
+          "file": "tools/compatibility/matrix.eli",
           "contains": [
-            "REPORT_FORMAT = \"eliscript-local-compatibility-cell\"",
-            "report.version !== 1"
+            "(defconst REPORT_FORMAT \"eliscript-local-compatibility-cell\")",
+            "(eq (get report :version) 1)"
           ]
         },
         {
@@ -424,7 +424,7 @@
       "version": 1,
       "evidence": [
         {"file": "compiler/eliscript-project.el", "contains": ["(format . \"eliscript-project\")", "(version . 1)"]},
-        {"file": "runtime/worker.mjs", "contains": ["manifest.format !== \"eliscript-project\"", "manifest.version !== 1"]}
+        {"file": "runtime/worker.eli", "contains": ["(not (eq (get manifest :format) \"eliscript-project\"))", "(not (eq (get manifest :version) 1))"]}
       ]
     },
     {
@@ -434,7 +434,7 @@
       "version": 2,
       "evidence": [
         {"file": "compiler/eliscript-project.el", "contains": ["(version . 2)", "(entries . ,(vconcat relative-entries))"]},
-        {"file": "runtime/worker.mjs", "contains": ["manifest.version !== 2", "manifest.entries"]}
+        {"file": "runtime/worker.eli", "contains": ["(not (eq (get manifest :version) 2))", "(get manifest :entries)"]}
       ]
     },
     {
@@ -506,10 +506,10 @@
           ]
         },
         {
-          "file": "tools/compatibility/corpus.mjs",
+          "file": "tools/compatibility/corpus.eli",
           "contains": [
-            "contract.format !== \"eliscript-stable-compatibility-corpus\"",
-            "contract.version !== 1",
+            "(not (= (get contract :format) \"eliscript-stable-compatibility-corpus\"))",
+            "(not (= (get contract :version) 1))",
             "checkStableCompatibilityCorpus"
           ]
         }
@@ -531,7 +531,7 @@
       "format": "eliscript-worker-ndjson",
       "version": 1,
       "evidence": [
-        {"file": "runtime/worker.mjs", "contains": ["export const protocolVersion = 1"]},
+        {"file": "runtime/worker.eli", "contains": ["(defconst protocolVersion 1)"]},
         {"file": "tools/worker/eliscript-worker.el", "contains": ["eliscript-worker-protocol-version 1"]}
       ]
     },

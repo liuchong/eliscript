@@ -1,0 +1,15 @@
+(module package.source-observer
+ (defun compiler_session_new () (js-object :runtime nil :calls 0))
+ (defun compiler_session_close (state) (put state :runtime nil) t)
+ (defun compiler_session_request (state text)
+  (let ((request (JSON/parse text)))
+   (cond
+    ((= (get request :operation) "runtime")
+     (put state :calls (1+ (get state :calls))) (put state :runtime request)
+     (JSON/stringify (js-object :ready t :revision (get state :calls))))
+    ((= (get request :operation) "inspect") (JSON/stringify (get state :runtime)))
+    ((= (get request :operation) "summary")
+     (JSON/stringify (js-object :calls (get state :calls)
+       :units (if (Object/is (get state :runtime) nil) 0 (get (get (get state :runtime) :source) :length)))))
+    (t (JSON/stringify (js-object :calls (get state :calls)))))))
+ (export compiler_session_new compiler_session_request compiler_session_close))

@@ -1,0 +1,13 @@
+(module tests.fixtures.bootstrap-emitter-host
+  (defconst load-module (js* "(specifier) => import(specifier)"))
+  (defvar generated undefined)
+  (defasync run-host-main ()
+    (setq generated (await (funcall load-module (get (get globalThis.process :env) :ELISCRIPT_TEST_MODULE))))
+    (console/log (JSON/stringify (js-object :factorial (js-call generated :factorial 5) :sum (js-call generated :sum_to 5) :message (get (get generated :result) :message)))))
+  (defconst completion (run-host-main))
+  (js-call completion :catch (lambda (error)
+    (console/error error)
+    (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

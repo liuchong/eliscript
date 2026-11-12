@@ -1,0 +1,99 @@
+(module tests.helpers.wasm-memory-f64-unary-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:process" :default process)
+
+  (defun nearest-even (value)
+    (if (or (not (Number/isFinite value)) (= value 0) (>= (Math/abs value) 4503599627370496))
+      value
+      (let* ((magnitude (Math/abs value))
+             (lower (Math/floor magnitude))
+             (fraction (- magnitude lower))
+             (rounded (if (or (> fraction 0.5) (and (= fraction 0.5) (/= (% lower 2) 0)))
+                        (+ lower 1)
+                        lower)))
+        (if (< value 0) (- rounded) rounded))))
+
+  (defun expected-unary (name value)
+    (cond
+      ((= name "neg") (- value))
+      ((= name "nearest") (nearest-even value))
+      (t (funcall (aref globalThis.Math name) value))))
+
+  (defun wasm-runtime (mod)
+    (let ((exports (get (new globalThis.WebAssembly.Instance mod) :exports)))
+      (js-object
+        :invoke (lambda (name &rest args)
+                  (unsigned-bit-shift-right (js-call (aref exports name) :apply nil args) 0)))))
+
+  (defun read-float (rt address)
+    (let ((view (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
+      (js-call view :setUint32 0 (js-call rt :invoke "read_word" address) t)
+      (js-call view :setUint32 4 (js-call rt :invoke "read_word" (+ address 4)) t)
+      (js-call view :getFloat64 0 t)))
+
+  (defun check-unary (rt names cases)
+    (let ((view (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
+      (js-call cases :forEach
+        (lambda (pair)
+          (let ((low (aref pair 0))
+                (high (aref pair 1)))
+            (js-call rt :invoke "write_word" 64 low)
+            (js-call rt :invoke "write_word" 68 high)
+            (js-call view :setUint32 0 low t)
+            (js-call view :setUint32 4 high t)
+            (let ((input (js-call view :getFloat64 0 t)))
+              (js-call names :forEach
+                (lambda (name)
+                  (js-call assert :equal (js-call rt :invoke name 128 64) 0)
+                  (let ((actual (read-float rt 128))
+                        (expected (expected-unary name input)))
+                    (funcall assert
+                      (if (Number/isNaN expected) (Number/isNaN actual) (Object/is actual expected))
+                      (str name " input words " (js-call low :toString 16) ":" (js-call high :toString 16)))
+                    (js-call assert :equal (js-call rt :invoke "read_word" 64) low)
+                    (js-call assert :equal (js-call rt :invoke "read_word" 68) high
+                      "input NaN payloads and all IEEE bits remain untouched"))))))))))
+
+  (defun check-effects (rt names)
+    (js-call rt :invoke "write_word" 64 0)
+    (js-call rt :invoke "write_word" 68 1073217536)
+    (js-call names :forEach
+      (lambda (name)
+        (js-call rt :invoke "write_word" 0 0)
+        (js-call rt :invoke "write_word" 24 3405691582)
+        (js-call assert :equal (js-call rt :invoke (str "effect_" name) 128 64) 0)
+        (js-call assert :equal (js-call rt :invoke "read_word" 0) 12 "destination then exactly one unary operand")
+        (funcall assert (Object/is (read-float rt 128) (expected-unary name 1.5)))
+        (js-call assert :equal (js-call rt :invoke "read_word" 24) 3405691582)
+        (js-call (js-array (js-array 128 65532) (js-array 65532 64)) :forEach
+          (lambda (pair)
+            (let ((to (aref pair 0))
+                  (from (aref pair 1)))
+              (js-call rt :invoke "write_word" 0 0)
+              (js-call rt :invoke "write_word" 128 287454020)
+              (js-call rt :invoke "write_word" 132 1432778632)
+              (js-call assert :throws
+                (lambda () (js-call rt :invoke (str "effect_" name) to from))
+                globalThis.WebAssembly.RuntimeError)
+              (js-call assert :equal (js-call rt :invoke "read_word" 0) 12)
+              (js-call assert :equal (js-call rt :invoke "read_word" 128) 287454020)
+              (js-call assert :equal (js-call rt :invoke "read_word" 132) 1432778632)
+              (js-call rt :invoke "write_word" 0 0)
+              (js-call assert :equal (js-call rt :invoke (str "effect_" name) 128 64) 0)
+              (js-call assert :equal (js-call rt :invoke "read_word" 0) 12)
+              (funcall assert (Object/is (read-float rt 128) (expected-unary name 1.5)) "the same instance recovers after a trap")))))))
+
+  (defun run-main ()
+    (let* ((payload (JSON/parse (readFileSync 0 "utf8")))
+           (names (get payload :names))
+           (cases (get payload :cases))
+           (mod (new globalThis.WebAssembly.Module (readFileSync (aref (get process :argv) 2)))))
+      (js-call assert :deepEqual (WebAssembly.Module/imports mod) (js-array))
+      (let ((rt (wasm-runtime mod)))
+        (check-unary rt names cases)
+        (check-effects rt names)
+        (js-call (get process :stdout) :write
+          (JSON/stringify (js-object :cases (length cases) :operations (length names)))))))
+
+  (run-main))

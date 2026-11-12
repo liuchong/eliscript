@@ -1,2 +1,610 @@
-(module capsules.tests.wasm-managed-regexp-property-data.test
-  (js* "import {beforeAll, afterAll, test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {mkdtemp, readFile, writeFile, rm} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {spawnSync} from 'node:child_process';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nimport {instantiateNativeManagedRuntime} from '../tools/backends/native-managed-runtime.mjs';\nimport {openNativeMemory} from '../tools/backends/native-memory.mjs';\n\nconst target = process.arch === 'arm64' ? process.platform === 'darwin' ? 'arm64-macos'\n  : process.platform === 'linux' ? 'arm64-linux' : undefined : undefined;\nconst fixture = 'tests/fixtures/wasm-managed-regexp-property-data.eli';\nconst options = {maxSlots: 2048, initialBytes: 65536, maxBytes: 1048576, maximumPages: 32};\nlet directory, backend, rows, aliases, runtimeIR, typed, rawModule, rawNative, managedBytes, managedNative, reference, staticAliases;\nconst rawSignatures = Object.create(null);\nconst rowName = id => 'heap-regexp-property-ranges-' + id;\nconst contains = (ranges, point) => ranges.some(([lo, hi]) => lo <= point && point <= hi);\nfunction points(ranges) {\n  const result = new Set([0, 0x10ffff, 0x110000, 0xffffffff]);\n  let previous = -1;\n  for (const [lo, hi] of ranges) {\n    result.add(lo);result.add(hi);\n    if (lo) result.add(lo - 1);\n    if (hi < 0x10ffff) result.add(hi + 1);\n    if (lo > previous + 1) result.add(Math.floor((previous + 1 + lo - 1) / 2));\n    previous = hi;\n  }\n  if (previous < 0x10ffff) result.add(Math.floor((previous + 1 + 0x10ffff) / 2));\n  return result;\n}\nbeforeAll(async () => {\n  directory = await mkdtemp(resolve(tmpdir(), 'eliscript-property-data-'));\n  const declaration = JSON.parse(await readFile('tools/runtime/unicode-property-ranges.json', 'utf8'));\n  rows = declaration.rows;\n  aliases = JSON.parse(await readFile('tools/runtime/unicode-property-aliases.json', 'utf8')).records;\n  assert.equal(rows.length, 519);\n  backend = await buildBackends({outputRoot: directory});\n  const regexp = await readFile('bootstrap/backends/regexp.eli', 'utf8');\n  const aliasStart = regexp.indexOf(';; BEGIN GENERATED UNICODE PROPERTY ALIASES');\n  const aliasEnd = regexp.indexOf(';; END GENERATED UNICODE PROPERTY ALIASES', aliasStart);\n  assert(aliasStart >= 0 && aliasEnd > aliasStart);\n  // The lookup is private in the production backend. Compile its exact real\n  // region with a test-only export instead of expanding that public API.\n  const aliasProgram = '(module regexp.property-data\\n' + regexp.slice(aliasStart, aliasEnd) +\n    '\\n(export regexp-property-id-base))';\n  const aliasJavascript = backend.compiler.emit_ir_string(backend.compiler.compile_ir_string(aliasProgram, 'property-static.eli'));\n  staticAliases = await import('data:text/javascript;base64,' + Buffer.from(aliasJavascript).toString('base64'));\n  const source = await readFile('bootstrap/runtime/memory.eli', 'utf8');\n  const appended = '\\n(defun property-data-alias (heap text start length) (begin-operation) (heap-regexp-property-id-base heap text start length))' +\n    '\\n(export property-data-alias ' + rows.map(row => rowName(row.id)).join(' ') + ')';\n  runtimeIR = backend.compiler.compile_ir_string(source + appended, 'property-runtime.eli');\n  const raw = Uint8Array.from(backend.wasm.emit_memory_wasm(runtimeIR, {initialPages: 1, maximumPages: 32}));\n  rawModule = new WebAssembly.Module(raw);assert.deepEqual(WebAssembly.Module.imports(rawModule), []);\n  for (const name of ['last-error', 'retire', 'runtime-case-version', 'heap-live', 'heap-collect', 'heap-release',\n    'heap-pin', 'frame-pop', 'frame-depth', 'buffer-new']) rawSignatures[name] = 1;\n  Object.assign(rawSignatures, {'last-error': 0, retire: 0, 'runtime-case-version': 1, 'heap-new': 3,\n    'value-number': 3, 'value-data': 3, 'value-string': 2, 'value-unit-set': 4, 'value-seal': 2,\n    'heap-pin': 2, 'heap-release': 2, 'frame-new': 2, 'frame-set': 4, 'frame-get': 3, 'frame-pop': 2,\n    'property-data-alias': 4});\n  for (const row of rows) rawSignatures[rowName(row.id)] = 1;\n  const program = backend.compiler.compile_ir_string(await readFile(fixture, 'utf8'), fixture);\n  reference = await import('data:text/javascript;base64,' + Buffer.from(backend.compiler.emit_ir_string(program)).toString('base64'));\n  const lowered = backend.managed.lower_managed_program(program, runtimeIR, true);\n  typed = lowered;\n  managedBytes = Uint8Array.from(backend.wasm.append_metadata_section(\n    backend.wasm.emit_typed_memory_wasm(lowered.typed, {initialPages: 1, maximumPages: 32}),\n    'eliscript-managed-control', JSON.stringify(lowered.descriptor)));\n  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(managedBytes)), []);\n  if (target) {\n    rawNative = resolve(directory, target === 'arm64-macos' ? 'property-raw.dylib' : 'property-raw.so');\n    await writeFile(rawNative, Uint8Array.from(backend.native.emit_native_memory_library(runtimeIR, target)));\n    managedNative = resolve(directory, target === 'arm64-macos' ? 'property-managed.dylib' : 'property-managed.so');\n    await writeFile(managedNative, Uint8Array.from(backend.native.emit_typed_native_memory_library(lowered.typed, target)));\n  }\n}, 120000);\nafterAll(async () => {\n  typed = runtimeIR = rawModule = undefined;\n  if (directory) await rm(directory, {recursive: true, force: true});\n});\nfunction rawWasm(module = rawModule) {\n  const exports = new WebAssembly.Instance(module).exports;\n  return {invoke: (name, ...args) => exports[name](...args) >>> 0,\n    read: (at, length) => new Uint8Array(exports.memory.buffer).slice(at, at + length),\n    size: () => exports.memory.buffer.byteLength, close() {}};\n}\nasync function rawRuntime(native = false, configuration = {initialPages: 1, maximumPages: 32}) {\n  if (!native) return rawWasm();\n  const r = await openNativeMemory(rawNative, rawSignatures, {...configuration, nativeTarget: target});\n  return {invoke: (name, ...args) => r.invoke(name, ...args) >>> 0,\n    read: (at, length) => r.read(at, length), size: () => r.byteLength, close: () => r.close()};\n}\nfunction word(r, at) {\n  const bytes = r.read(at, 4);return new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, true);\n}\nfunction string(r, heap, text) {\n  const value = r.invoke('value-string', heap, text.length);assert(value > 3);\n  for (let i = 0; i < text.length; i++) assert.equal(r.invoke('value-unit-set', heap, value, i, text.charCodeAt(i)), 1);\n  assert.equal(r.invoke('value-seal', heap, value), value);return value;\n}\nasync function allRows(native) {\n  const r = await rawRuntime(native);\n  try {\n    r.invoke('runtime-case-version', 0);\n    for (const row of rows) {\n      assert.match(row.sourceSha256, /^[a-f0-9]{64}$/);\n      for (const point of points(row.ranges)) {\n        assert.equal(r.invoke(rowName(row.id), point), Number(contains(row.ranges, point)), row.id + '/' + point);\n        assert.equal(r.invoke('last-error'), 0);\n      }\n    }\n    const pointer = word(r, 44), cursor = word(r, 0), size = r.size();assert(pointer > 0);\n    // Every row has already been observed; changing rows must reuse the same\n    // instance-wide buffer, not allocate a table or an object per query/heap.\n    const first = r.invoke('heap-new', 16, 2048, 8192), second = r.invoke('heap-new', 16, 2048, 8192);\n    assert(first && second);\n    const afterHeaps = word(r, 0), afterHeapPages = r.size();\n    for (let round = 0; round < 3; round++) for (const row of rows) {\n      const point = row.ranges[0]?.[0] ?? 0;\n      assert.equal(r.invoke(rowName(row.id), point), Number(contains(row.ranges, point)));\n    }\n    assert.equal(word(r, 44), pointer);assert.equal(word(r, 0), afterHeaps);assert.equal(r.size(), afterHeapPages);\n    assert(r.size() >= size);assert(afterHeaps > cursor);\n    assert.equal(r.invoke('heap-live', first), 0);assert.equal(r.invoke('heap-live', second), 0);\n    const cacheBefore = [44, 48, 52].map(at => word(r, at)), cursorBefore = word(r, 0);\n    assert.equal(r.invoke('retire'), 1);\n    assert.deepEqual([44, 48, 52].map(at => word(r, at)), cacheBefore, 'raw immutable-data caches are not heap handles and survive retirement');\n    assert.equal(word(r, 0), cursorBefore);\n    const row = rows.find(row => row.ranges.length), point = row.ranges[0][0];\n    assert.equal(r.invoke(rowName(row.id), point), 1);assert.equal(word(r, 44), pointer);\n    assert.equal(word(r, 0), cursorBefore, 'retirement must not allocate another property buffer');\n  } finally {r.close();}\n}\ntest('all 519 packed Unicode rows preserve every inclusive endpoint gap scalar limit and alternating cache on WASM', async () => {\n  await allRows(false);\n}, 120000);\ntest.skipIf(!target)('all declared property rows retain exact values cache isolation retirement and fixed growth in actual native memory', async () => {\n  await allRows(true);\n}, 120000);\n\ntest('actual complete-runtime lowering stores property intervals as data and keeps every row function below the original engine local limit', () => {\n  assert.deepEqual(rows.map(row => row.id), Array.from({length: 519}, (_, index) => index));\n  let dataNodes = 0;\n  for (const row of rows) {\n    const fn = typed.typed.functions.find(fn => fn.name === rowName(row.id));assert(fn, rowName(row.id));\n    assert(fn.locals.length <= 20000, fn.name + ' retains the original local-count engine protection');\n    const pending = [fn.body], seen = new Set();let count = 0;\n    while (pending.length) {\n      const node = pending.pop();if (seen.has(node)) continue;seen.add(node);count++;\n      if (node.kind === 'memory-data-copy') dataNodes++;\n      pending.push(...node.children);\n    }\n    assert(count < 1000, fn.name + ' must not recreate an interval-sized executable decision tree');\n  }\n  assert.equal(dataNodes, 519, 'each complete row is a packed data node, never a truncated property table');\n});\n\ntest('small physical memory rejects first raw-cache allocation without losing caller roots and fresh same-budget execution recovers', async () => {\n  const limitedModule = new WebAssembly.Module(Uint8Array.from(backend.wasm.emit_memory_wasm(runtimeIR,\n    {initialPages: 1, maximumPages: 1})));\n  const largest = rows.reduce((left, right) => left.ranges.length >= right.ranges.length ? left : right);\n  for (const native of target ? [false, true] : [false]) {\n    const open = () => native ? rawRuntime(true, {initialPages: 1, maximumPages: 1}) : Promise.resolve(rawWasm(limitedModule));\n    const r = await open();\n    try {\n      r.invoke('runtime-case-version', 0);\n      const heap = r.invoke('heap-new', 32, 2048, 2048);assert(heap);\n      const held = r.invoke('value-number', heap, 0, 0x80000000);assert(held > 3);\n      assert.equal(r.invoke('heap-pin', heap, held), 1);\n      const frame = r.invoke('frame-new', heap, 1);assert(frame);\n      assert.equal(r.invoke('frame-set', heap, frame, 0, held), 1);\n      for (let filled = 0; filled < 128; filled++) {\n        if (!r.invoke('buffer-new', 1024)) break;\n      }\n      assert.equal(r.invoke('last-error'), 2);const cursor = word(r, 0);\n      assert.equal(word(r, 44), 0);\n      assert.equal(r.invoke(rowName(largest.id), largest.ranges[0]?.[0] ?? 0), 0);\n      assert.equal(r.invoke('last-error'), 2);assert.equal(word(r, 44), 0);assert.equal(word(r, 0), cursor);\n      assert.equal(r.invoke('frame-get', heap, frame, 0), held);\n      r.invoke('heap-collect', heap);\n      const address = r.invoke('value-data', heap, held, 4), bytes = r.read(address, 8);\n      assert(Object.is(new DataView(bytes.buffer, bytes.byteOffset, 8).getFloat64(0, true), -0));\n      assert.equal(r.invoke('frame-depth', heap), 1);\n      assert.equal(r.invoke('frame-pop', heap, frame), 1);assert.equal(r.invoke('heap-release', heap, held), 1);\n      r.invoke('heap-collect', heap);assert.equal(r.invoke('heap-live', heap), 0);assert.equal(r.invoke('frame-depth', heap), 0);\n    } finally {r.close();}\n    const recovered = await open();\n    try {\n      recovered.invoke('runtime-case-version', 0);\n      const point = largest.ranges[0]?.[0] ?? 0;\n      assert.equal(recovered.invoke(rowName(largest.id), point), Number(contains(largest.ranges, point)));\n      assert.equal(recovered.invoke('last-error'), 0);assert(word(recovered, 44) > 0);\n    } finally {recovered.close();}\n  }\n}, 30000);\n\nasync function allAliases(native) {\n  const r = await rawRuntime(native);r.invoke('runtime-case-version', 0);\n  const heap = r.invoke('heap-new', 32, 4096, 1048576);assert(heap);\n  const expected = text => {\n    const found = aliases.filter(([name, , exact]) => exact ? text === name : text.startsWith(name));\n    assert(found.length <= 1, 'declaration has no ambiguous accepted prefix');return found[0]?.[1] ?? 0;\n  };\n  try {\n    for (const [name, id] of aliases) {\n      for (const text of new Set([name, name.toLowerCase(), name.toUpperCase(), name + 'x', name.slice(0, -1), '\\ud800' + name, name + '\\udfff'])) {\n        const want = expected(text);\n        assert.equal(staticAliases.regexp_property_id_base(text, 0, text.length), want, text);\n        const value = string(r, heap, text);\n        try {assert.equal(r.invoke('property-data-alias', heap, value, 0, text.length), want, text);}\n        finally {r.invoke('heap-collect', heap);}\n      }\n      assert.equal(expected(name), id);\n      for (const [text, start] of [['!' + name + '?', 1], ['😀' + name + '\\udfff', 2]]) {\n        const value = string(r, heap, text);\n        assert.equal(staticAliases.regexp_property_id_base(text, start, name.length), id);\n        assert.equal(r.invoke('property-data-alias', heap, value, start, name.length), id);\n        r.invoke('heap-collect', heap);\n      }\n    }\n    assert(word(r, 52) > 0);const pointer = word(r, 52);\n    const value = string(r, heap, 'ASCII');\n    const cursor = word(r, 0);\n    for (let repeat = 0; repeat < 64; repeat++) assert.equal(r.invoke('property-data-alias', heap, value, 0, 5), expected('ASCII'));\n    assert.equal(word(r, 52), pointer);assert.equal(word(r, 0), cursor, 'repeat lookup allocates no raw table');\n    r.invoke('heap-collect', heap);assert.equal(r.invoke('heap-live', heap), 0);\n    const peer = r.invoke('heap-new', 32, 4096, 1048576), peerText = string(r, peer, 'ASCII');\n    const afterPeer = word(r, 0);\n    assert.equal(r.invoke('property-data-alias', peer, peerText, 0, 5), expected('ASCII'));\n    assert.equal(word(r, 52), pointer);assert.equal(word(r, 0), afterPeer);\n    r.invoke('heap-collect', peer);assert.equal(r.invoke('heap-live', peer), 0);\n    assert.equal(r.invoke('retire'), 1);assert.equal(word(r, 52), pointer);\n    const fresh = r.invoke('heap-new', 32, 4096, 1048576), freshText = string(r, fresh, 'ASCII');\n    const afterFresh = word(r, 0);\n    assert.equal(r.invoke('property-data-alias', fresh, freshText, 0, 5), expected('ASCII'));\n    assert.equal(word(r, 52), pointer);assert.equal(word(r, 0), afterFresh);\n    r.invoke('heap-collect', fresh);assert.equal(r.invoke('heap-live', fresh), 0);\n  } finally {r.close();}\n}\ntest('static and dynamic packed aliases retain all IDs offsets UTF16 rejection and case-sensitive prefix boundaries in WASM and native', async () => {\n  await allAliases(false);if (target) await allAliases(true);\n}, 30000);\n\nfunction invoke(a, name, values = []) {\n  const owned = [], args = values.map(value => {\n    if (typeof value !== 'string') return value;\n    const handle = a.string(value);owned.push(handle);return handle;\n  });\n  try {return a.invoke(name, args);} finally {for (const handle of owned) a.release(handle);}\n}\nfunction finish(a) {\n  try {a.closeModule();a.collect();assert.equal(a.live(), 0);assert.equal(a.stats().frameDepth, 0);}\n  finally {a.close?.();}\n}\nconst vectors = [\n  ['ASCII', 'u', 'A', true], ['ASCII', 'u', 'Ω', false],\n  ['Script=Greek', 'u', 'α', true], ['Script=Greek', 'u', 'A', false],\n  ['Lowercase_Letter', 'iu', 'a', true], ['Lowercase_Letter', 'iv', 'a', false],\n  ['Letter', 'u', 'K', true], ['ASCII', 'u', '\\ud800', false],\n];\nfunction pattern(name, flags) {return '^\\\\' + (flags.includes('i') && name === 'Lowercase_Letter' ? 'P' : 'p') + '{' + name + '}$';}\ntest('packed data retains static dynamic p/P fold differences selected Unicode profiles roots first errors and recovery in WASM and native', async () => {\n  for (const native of target ? [false, true] : [false]) for (const unicodeVersion of [15.1, 16, 17]) {\n    const configuration = {...options, unicodeVersion};\n    const a = native ? await instantiateNativeManagedRuntime(managedNative, typed, {...configuration, nativeTarget: target})\n      : instantiateManagedRuntime(managedBytes, configuration);\n    a.auto(1);\n    try {\n      for (const [name, flags, input, expected] of vectors) {\n        const regex = invoke(a, 'make', [pattern(name, flags), flags]);\n        try {assert.equal(invoke(a, 'test-value', [regex, input]), expected, name + '/' + flags + '/' + unicodeVersion);}\n        finally {a.release(regex);}\n      }\n      for (const [input, expected] of [['\\u1c89', unicodeVersion >= 16], ['\\u{1faea}', unicodeVersion >= 17]]) {\n        const regex = invoke(a, 'make', ['^\\\\p{Assigned}$', 'u']);\n        try {assert.equal(invoke(a, 'test-value', [regex, input]), expected);}\n        finally {a.release(regex);}\n      }\n      for (const [name, input, expected] of [['literal-ascii', 'A', true], ['literal-greek', 'α', true],\n        ['literal-negative', 'a', true], ['literal-negative-v', 'a', false]]) {\n        const regex = a.invoke(name);\n        try {\n          const zero = a.number(-0), frame = a.frame(2);a.frameSet(frame, 0, zero);a.frameSet(frame, 1, regex);\n          try {\n            a.collect();assert.equal(invoke(a, 'test-value', [regex, input]), expected);\n            assert.throws(() => reference.throwing(reference[name.replaceAll('-', '_')]()), error => error === false);\n            assert.throws(() => a.invoke('throwing', [regex]), error => error === false);\n            assert(Object.is(a.readNumber(zero), -0));assert.equal(a.stats().frameDepth, 1);\n            assert.equal(a.invoke('recover'), true);\n          } finally {a.leaveFrame(frame);a.release(zero);}\n        } finally {a.release(regex);}\n      }\n      for (const name of ['ascii', 'script=Greek', 'Script=greek', 'Unknown', 'General_Category=unknown'])\n        assert.throws(() => invoke(a, 'make', ['\\\\p{' + name + '}', 'u']), SyntaxError);\n    } finally {finish(a);}\n  }\n}, 120000);\n\ntest('independent Node accepts the original complete property alias and literal inputs with exact fold results', () => {\n  const inputs = vectors.map(([name, flags, input, expected]) => [pattern(name, flags), flags, input, expected]);\n  const child = spawnSync('node', ['--input-type=module', '-e',\n    'import assert from \"node:assert/strict\";for(const[p,f,s,w]of JSON.parse(process.argv[1]))assert.equal(new RegExp(p,f).test(s),w);', JSON.stringify(inputs)],\n    {encoding: 'utf8', timeout: 30000});\n  assert.equal(child.error, undefined);assert.equal(child.signal, null);assert.equal(child.status, 0, child.stderr);\n  for (const [name, flags, input, expected] of vectors) assert.equal(reference.test_value(reference.make(pattern(name, flags), flags), input), expected);\n});\n"))
+(module tests.wasm-managed-regexp-property-data.test
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile writeFile rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:child_process" spawnSync)
+  (import "node:process" :default process)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "../tools/backends/native-memory.mjs" openNativeMemory)
+  (import "./helpers/wasm-managed-regexp-property-data-node.mjs"
+    property-vectors property-pattern)
+
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+  (defconst js-typeof (js* "(v) => typeof v"))
+
+  (defconst target
+    (if (= (get process :arch) "arm64")
+        (cond
+          ((= (get process :platform) "darwin") "arm64-macos")
+          ((= (get process :platform) "linux") "arm64-linux")
+          (t undefined))
+        undefined))
+
+  (defconst fixture "tests/fixtures/wasm-managed-regexp-property-data.eli")
+  (defconst runtime-options
+    (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 1048576 :maximumPages 32))
+
+  (defvar directory nil)
+  (defvar backend nil)
+  (defvar rows nil)
+  (defvar aliases nil)
+  (defvar runtime-ir undefined)
+  (defvar typed undefined)
+  (defvar raw-module undefined)
+  (defvar raw-native nil)
+  (defvar managed-bytes nil)
+  (defvar managed-native nil)
+  (defvar reference nil)
+  (defvar static-aliases nil)
+  (defconst raw-signatures (Object/create nil))
+
+  (defun row-name (id)
+    (str "heap-regexp-property-ranges-" id))
+
+  (defun range-contains? (ranges point)
+    (js-call ranges :some
+      (lambda (pair)
+        (let ((lo (aref pair 0))
+              (hi (aref pair 1)))
+          (and (<= lo point) (<= point hi))))))
+
+  (defun boundary-points (ranges)
+    (let ((result (new globalThis.Set (js-array 0 1114111 1114112 4294967295)))
+          (previous -1))
+      (js-call ranges :forEach
+        (lambda (pair)
+          (let ((lo (aref pair 0))
+                (hi (aref pair 1)))
+            (js-call result :add lo)
+            (js-call result :add hi)
+            (when (> lo 0)
+              (js-call result :add (- lo 1)))
+            (when (< hi 1114111)
+              (js-call result :add (+ hi 1)))
+            (when (> lo (+ previous 1))
+              (js-call result :add (Math/floor (/ (+ (+ previous 1) (- lo 1)) 2))))
+            (setq previous hi))))
+      (when (< previous 1114111)
+        (js-call result :add (Math/floor (/ (+ (+ previous 1) 1114111) 2))))
+      result))
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-property-data-"))))
+      (let ((declaration (JSON/parse (await (readFile "tools/runtime/unicode-property-ranges.json" "utf8")))))
+        (setq rows (get declaration :rows)))
+      (setq aliases (get (JSON/parse (await (readFile "tools/runtime/unicode-property-aliases.json" "utf8"))) :records))
+      (js-call assert :equal (get rows :length) 519)
+      (setq backend (await (buildBackends (js-object :outputRoot directory))))
+      (let* ((compiler (get backend :compiler))
+             (wasm (get backend :wasm))
+             (managed (get backend :managed))
+             (native-backend (get backend :native))
+             (regexp (await (readFile "bootstrap/backends/regexp.eli" "utf8")))
+             (alias-start (js-call regexp :indexOf ";; BEGIN GENERATED UNICODE PROPERTY ALIASES"))
+             (alias-end (js-call regexp :indexOf ";; END GENERATED UNICODE PROPERTY ALIASES" alias-start)))
+        (funcall assert (and (>= alias-start 0) (> alias-end alias-start)))
+        ;; The lookup is private in the production backend. Compile its exact real
+        ;; region with a test-only export instead of expanding that public API.
+        (let* ((alias-program (str "(module regexp.property-data\n"
+                                   (js-call regexp :slice alias-start alias-end)
+                                   "\n(export regexp-property-id-base))"))
+               (alias-js (js-call compiler :emit_ir_string
+                           (js-call compiler :compile_ir_string alias-program "property-static.eli"))))
+          (setq static-aliases
+            (await (funcall dyn-import (str "data:text/javascript;base64,"
+                                            (js-call (Buffer/from alias-js) :toString "base64"))))))
+        (let* ((source (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
+               (appended (str "\n(defun property-data-alias (heap text start length) (begin-operation) (heap-regexp-property-id-base heap text start length))"
+                              "\n(export property-data-alias "
+                              (js-call (js-call rows :map (lambda (row) (row-name (get row :id)))) :join " ")
+                              ")")))
+          (setq runtime-ir (js-call compiler :compile_ir_string (str source appended) "property-runtime.eli")))
+        (let ((raw (Uint8Array/from (js-call wasm :emit_memory_wasm runtime-ir (js-object :initialPages 1 :maximumPages 32)))))
+          (setq raw-module (new WebAssembly.Module raw))
+          (js-call assert :deepEqual (WebAssembly.Module/imports raw-module) (js-array)))
+        (js-call (js-array "last-error" "retire" "runtime-case-version" "heap-live" "heap-collect" "heap-release"
+                           "heap-pin" "frame-pop" "frame-depth" "buffer-new") :forEach
+          (lambda (name)
+            (put raw-signatures name 1)))
+        (put raw-signatures "last-error" 0)
+        (put raw-signatures "retire" 0)
+        (put raw-signatures "runtime-case-version" 1)
+        (put raw-signatures "heap-new" 3)
+        (put raw-signatures "value-number" 3)
+        (put raw-signatures "value-data" 3)
+        (put raw-signatures "value-string" 2)
+        (put raw-signatures "value-unit-set" 4)
+        (put raw-signatures "value-seal" 2)
+        (put raw-signatures "heap-pin" 2)
+        (put raw-signatures "heap-release" 2)
+        (put raw-signatures "frame-new" 2)
+        (put raw-signatures "frame-set" 4)
+        (put raw-signatures "frame-get" 3)
+        (put raw-signatures "frame-pop" 2)
+        (put raw-signatures "property-data-alias" 4)
+        (js-call rows :forEach
+          (lambda (row)
+            (put raw-signatures (row-name (get row :id)) 1)))
+        (let* ((program (js-call compiler :compile_ir_string (await (readFile fixture "utf8")) fixture))
+               (program-js (js-call compiler :emit_ir_string program)))
+          (setq reference
+            (await (funcall dyn-import (str "data:text/javascript;base64,"
+                                            (js-call (Buffer/from program-js) :toString "base64")))))
+          (let ((lowered (js-call managed :lower_managed_program program runtime-ir t)))
+            (setq typed lowered)
+            (setq managed-bytes
+              (Uint8Array/from
+                (js-call wasm :append_metadata_section
+                  (js-call wasm :emit_typed_memory_wasm (get lowered :typed) (js-object :initialPages 1 :maximumPages 32))
+                  "eliscript-managed-control"
+                  (JSON/stringify (get lowered :descriptor)))))
+            (js-call assert :deepEqual (WebAssembly.Module/imports (new WebAssembly.Module managed-bytes)) (js-array))
+            (when target
+              (setq raw-native (resolve directory (if (= target "arm64-macos") "property-raw.dylib" "property-raw.so")))
+              (await (writeFile raw-native (Uint8Array/from (js-call native-backend :emit_native_memory_library runtime-ir target))))
+              (setq managed-native (resolve directory (if (= target "arm64-macos") "property-managed.dylib" "property-managed.so")))
+              (await (writeFile managed-native (Uint8Array/from (js-call native-backend :emit_typed_native_memory_library (get lowered :typed) target)))))))))
+    120000)
+
+  (afterAll
+    (async ()
+      (setq typed undefined)
+      (setq runtime-ir undefined)
+      (setq raw-module undefined)
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun raw-wasm (&rest __host_default_arguments_1)
+    (let* ((mod (aref __host_default_arguments_1 0)))
+    (let* ((m (if (undefined? mod) raw-module mod))
+           (inst (new WebAssembly.Instance m))
+           (exports (get inst :exports)))
+      (js-object
+        :invoke (lambda (name &rest args)
+                  (unsigned-bit-shift-right (apply (get exports name) args) 0))
+        :read (lambda (at len)
+                (js-call (new globalThis.Uint8Array (get (get exports :memory) :buffer)) :slice at (+ at len)))
+        :size (lambda ()
+                (get (get (get exports :memory) :buffer) :byteLength))
+        :close (lambda () nil)))))
+
+  (defasync open-raw-runtime (&rest __host_default_arguments_2)
+    (let* ((use-native (aref __host_default_arguments_2 0)) (configuration (aref __host_default_arguments_2 1)))
+    (let ((native-flag (if (undefined? use-native) false use-native))
+          (cfg (if (undefined? configuration) (js-object :initialPages 1 :maximumPages 32) configuration)))
+      (if (not native-flag)
+          (raw-wasm)
+          (let ((r (await (openNativeMemory raw-native raw-signatures
+                            (Object/assign (js-object) cfg (js-object :nativeTarget target))))))
+            (js-object
+              :invoke (lambda (name &rest args)
+                        (unsigned-bit-shift-right (apply (get r :invoke) name args) 0))
+              :read (lambda (at len) (js-call r :read at len))
+              :size (lambda () (get r :byteLength))
+              :close (lambda () (js-call r :close))))))))
+
+  (defun read-word (r at)
+    (let* ((bytes (js-call r :read at 4))
+           (view (new globalThis.DataView (get bytes :buffer) (get bytes :byteOffset) 4)))
+      (js-call view :getUint32 0 t)))
+
+  (defun alloc-string (r heap text)
+    (let ((value (js-call r :invoke "value-string" heap (get text :length)))
+          (i 0))
+      (funcall assert (> value 3))
+      (while (< i (get text :length))
+        (js-call assert :equal (js-call r :invoke "value-unit-set" heap value i (js-call text :charCodeAt i)) 1)
+        (setq i (+ i 1)))
+      (js-call assert :equal (js-call r :invoke "value-seal" heap value) value)
+      value))
+
+  (defasync verify-all-rows (use-native)
+    (let ((r (await (open-raw-runtime use-native)))
+          (sha-re (new globalThis.RegExp "^[a-f0-9]{64}$")))
+      (try
+        (js-call r :invoke "runtime-case-version" 0)
+        (js-call rows :forEach
+          (lambda (row)
+            (js-call assert :match (get row :sourceSha256) sha-re)
+            (let ((pts (Array/from (boundary-points (get row :ranges)))))
+              (js-call pts :forEach
+                (lambda (point)
+                  (js-call assert :equal
+                    (js-call r :invoke (row-name (get row :id)) point)
+                    (if (range-contains? (get row :ranges) point) 1 0)
+                    (str (get row :id) "/" point))
+                  (js-call assert :equal (js-call r :invoke "last-error") 0))))))
+        (let ((pointer (read-word r 44))
+              (cursor (read-word r 0))
+              (initial-size (js-call r :size)))
+          (funcall assert (> pointer 0))
+          ;; Every row has already been observed; changing rows must reuse the same
+          ;; instance-wide buffer, not allocate a table or an object per query/heap.
+          (let ((first (js-call r :invoke "heap-new" 16 2048 8192))
+                (second (js-call r :invoke "heap-new" 16 2048 8192)))
+            (funcall assert (and (> first 0) (> second 0)))
+            (let ((after-heaps (read-word r 0))
+                  (after-heap-pages (js-call r :size))
+                  (round 0))
+              (while (< round 3)
+                (js-call rows :forEach
+                  (lambda (row)
+                    (let* ((ranges (get row :ranges))
+                           (point (if (> (get ranges :length) 0) (aref (aref ranges 0) 0) 0)))
+                      (js-call assert :equal
+                        (js-call r :invoke (row-name (get row :id)) point)
+                        (if (range-contains? ranges point) 1 0)))))
+                (setq round (+ round 1)))
+              (js-call assert :equal (read-word r 44) pointer)
+              (js-call assert :equal (read-word r 0) after-heaps)
+              (js-call assert :equal (js-call r :size) after-heap-pages)
+              (funcall assert (>= (js-call r :size) initial-size))
+              (funcall assert (> after-heaps cursor))
+              (js-call assert :equal (js-call r :invoke "heap-live" first) 0)
+              (js-call assert :equal (js-call r :invoke "heap-live" second) 0)
+              (let ((cache-before (js-call (js-array 44 48 52) :map (lambda (at) (read-word r at))))
+                    (cursor-before (read-word r 0)))
+                (js-call assert :equal (js-call r :invoke "retire") 1)
+                (js-call assert :deepEqual
+                  (js-call (js-array 44 48 52) :map (lambda (at) (read-word r at)))
+                  cache-before
+                  "raw immutable-data caches are not heap handles and survive retirement")
+                (js-call assert :equal (read-word r 0) cursor-before)
+                (let* ((nonempty-row (js-call rows :find (lambda (row) (> (get (get row :ranges) :length) 0))))
+                       (point (aref (aref (get nonempty-row :ranges) 0) 0)))
+                  (js-call assert :equal (js-call r :invoke (row-name (get nonempty-row :id)) point) 1)
+                  (js-call assert :equal (read-word r 44) pointer)
+                  (js-call assert :equal (read-word r 0) cursor-before "retirement must not allocate another property buffer"))))))
+        (finally
+          (js-call r :close)))))
+
+  (test "all 519 packed Unicode rows preserve every inclusive endpoint gap scalar limit and alternating cache on WASM"
+    (async ()
+      (await (verify-all-rows false)))
+    120000)
+
+  (funcall (js-call test :skipIf (not target))
+    "all declared property rows retain exact values cache isolation retirement and fixed growth in actual native memory"
+    (async ()
+      (await (verify-all-rows t)))
+    120000)
+
+  (test "actual complete-runtime lowering stores property intervals as data and keeps every row function below the original engine local limit"
+    (lambda ()
+      (js-call assert :deepEqual
+        (js-call rows :map (lambda (row) (get row :id)))
+        (Array/from (js-object :length 519) (lambda (_u index) index)))
+      (let ((data-nodes 0)
+            (functions (get (get typed :typed) :functions)))
+        (js-call rows :forEach
+          (lambda (row)
+            (let* ((expected-name (row-name (get row :id)))
+                   (fn (js-call functions :find (lambda (item) (= (get item :name) expected-name)))))
+              (funcall assert fn expected-name)
+              (funcall assert (<= (get (get fn :locals) :length) 20000)
+                (str (get fn :name) " retains the original local-count engine protection"))
+              (let ((pending (js-array (get fn :body)))
+                    (seen (new globalThis.Set))
+                    (node-count 0))
+                (while (> (get pending :length) 0)
+                  (let ((node (js-call pending :pop)))
+                    (unless (js-call seen :has node)
+                      (js-call seen :add node)
+                      (setq node-count (+ node-count 1))
+                      (when (= (get node :kind) "memory-data-copy")
+                        (setq data-nodes (+ data-nodes 1)))
+                      (let ((children (get node :children)))
+                        (js-call children :forEach (lambda (child) (js-call pending :push child)))))))
+                (funcall assert (< node-count 1000)
+                  (str (get fn :name) " must not recreate an interval-sized executable decision tree"))))))
+        (js-call assert :equal data-nodes 519 "each complete row is a packed data node, never a truncated property table"))))
+
+  (test "small physical memory rejects first raw-cache allocation without losing caller roots and fresh same-budget execution recovers"
+    (async ()
+      (let* ((wasm (get backend :wasm))
+             (limited-module (new WebAssembly.Module
+                               (Uint8Array/from
+                                 (js-call wasm :emit_memory_wasm runtime-ir (js-object :initialPages 1 :maximumPages 1)))))
+             (largest (js-call rows :reduce
+                        (lambda (left right)
+                          (if (>= (get (get left :ranges) :length) (get (get right :ranges) :length)) left right))))
+             (modes (if target (js-array false t) (js-array false)))
+             (m 0))
+        (while (< m (get modes :length))
+          (let* ((use-native (aref modes m))
+                 (open-fn (lambda ()
+                            (if use-native
+                                (open-raw-runtime t (js-object :initialPages 1 :maximumPages 1))
+                                (Promise/resolve (raw-wasm limited-module)))))
+                 (r (await (funcall open-fn))))
+            (try
+              (js-call r :invoke "runtime-case-version" 0)
+              (let ((heap (js-call r :invoke "heap-new" 32 2048 2048)))
+                (funcall assert (> heap 0))
+                (let ((held (js-call r :invoke "value-number" heap 0 2147483648)))
+                  (funcall assert (> held 3))
+                  (js-call assert :equal (js-call r :invoke "heap-pin" heap held) 1)
+                  (let ((frame (js-call r :invoke "frame-new" heap 1)))
+                    (funcall assert (> frame 0))
+                    (js-call assert :equal (js-call r :invoke "frame-set" heap frame 0 held) 1)
+                    (let ((filled 0)
+                          (keep-filling t))
+                      (while (and (< filled 128) keep-filling)
+                        (if (= (js-call r :invoke "buffer-new" 1024) 0)
+                            (setq keep-filling false)
+                            (setq filled (+ filled 1)))))
+                    (js-call assert :equal (js-call r :invoke "last-error") 2)
+                    (let* ((cursor (read-word r 0))
+                           (largest-ranges (get largest :ranges))
+                           (first-point (if (> (get largest-ranges :length) 0) (aref (aref largest-ranges 0) 0) 0)))
+                      (js-call assert :equal (read-word r 44) 0)
+                      (js-call assert :equal (js-call r :invoke (row-name (get largest :id)) first-point) 0)
+                      (js-call assert :equal (js-call r :invoke "last-error") 2)
+                      (js-call assert :equal (read-word r 44) 0)
+                      (js-call assert :equal (read-word r 0) cursor)
+                      (js-call assert :equal (js-call r :invoke "frame-get" heap frame 0) held)
+                      (js-call r :invoke "heap-collect" heap)
+                      (let* ((address (js-call r :invoke "value-data" heap held 4))
+                             (bytes (js-call r :read address 8))
+                             (view (new globalThis.DataView (get bytes :buffer) (get bytes :byteOffset) 8)))
+                        (funcall assert (Object/is (js-call view :getFloat64 0 t) -0.0)))
+                      (js-call assert :equal (js-call r :invoke "frame-depth" heap) 1)
+                      (js-call assert :equal (js-call r :invoke "frame-pop" heap frame) 1)
+                      (js-call assert :equal (js-call r :invoke "heap-release" heap held) 1)
+                      (js-call r :invoke "heap-collect" heap)
+                      (js-call assert :equal (js-call r :invoke "heap-live" heap) 0)
+                      (js-call assert :equal (js-call r :invoke "frame-depth" heap) 0)))))
+              (finally
+                (js-call r :close)))
+            (let ((recovered (await (funcall open-fn))))
+              (try
+                (js-call recovered :invoke "runtime-case-version" 0)
+                (let* ((largest-ranges (get largest :ranges))
+                       (point (if (> (get largest-ranges :length) 0) (aref (aref largest-ranges 0) 0) 0)))
+                  (js-call assert :equal
+                    (js-call recovered :invoke (row-name (get largest :id)) point)
+                    (if (range-contains? largest-ranges point) 1 0))
+                  (js-call assert :equal (js-call recovered :invoke "last-error") 0)
+                  (funcall assert (> (read-word recovered 44) 0)))
+                (finally
+                  (js-call recovered :close)))))
+          (setq m (+ m 1)))))
+    30000)
+
+  (defasync verify-all-aliases (use-native)
+    (let* ((r (await (open-raw-runtime use-native)))
+           (lead-surrogate (String/fromCharCode 55296))
+           (trail-surrogate (String/fromCharCode 57343)))
+      (js-call r :invoke "runtime-case-version" 0)
+      (let ((heap (js-call r :invoke "heap-new" 32 4096 1048576))
+            (expected-fn (lambda (text)
+                           (let ((found (js-call aliases :filter
+                                          (lambda (record)
+                                            (let ((name (aref record 0))
+                                                  (exact (aref record 2)))
+                                              (if (and (not (nullish? exact)) (/= exact false) (/= exact 0))
+                                                  (= text name)
+                                                  (js-call text :startsWith name)))))))
+                             (funcall assert (<= (get found :length) 1) "declaration has no ambiguous accepted prefix")
+                             (if (> (get found :length) 0) (aref (aref found 0) 1) 0)))))
+        (funcall assert (> heap 0))
+        (try
+          (js-call aliases :forEach
+            (lambda (record)
+              (let* ((name (aref record 0))
+                     (id (aref record 1))
+                     (variants (Array/from
+                                 (new globalThis.Set
+                                   (js-array
+                                     name
+                                     (js-call name :toLowerCase)
+                                     (js-call name :toUpperCase)
+                                     (str name "x")
+                                     (js-call name :slice 0 -1)
+                                     (str lead-surrogate name)
+                                     (str name trail-surrogate))))))
+                (js-call variants :forEach
+                  (lambda (text)
+                    (let ((want (funcall expected-fn text)))
+                      (js-call assert :equal (js-call static-aliases :regexp_property_id_base text 0 (get text :length)) want text)
+                      (let ((value (alloc-string r heap text)))
+                        (try
+                          (js-call assert :equal (js-call r :invoke "property-data-alias" heap value 0 (get text :length)) want text)
+                          (finally
+                            (js-call r :invoke "heap-collect" heap)))))))
+                (js-call assert :equal (funcall expected-fn name) id)
+                (js-call (js-array
+                           (js-array (str "!" name "?") 1)
+                           (js-array (str "😀" name trail-surrogate) 2)) :forEach
+                  (lambda (pair)
+                    (let* ((text (aref pair 0))
+                           (start (aref pair 1))
+                           (value (alloc-string r heap text)))
+                      (js-call assert :equal (js-call static-aliases :regexp_property_id_base text start (get name :length)) id)
+                      (js-call assert :equal (js-call r :invoke "property-data-alias" heap value start (get name :length)) id)
+                      (js-call r :invoke "heap-collect" heap)))))))
+          (funcall assert (> (read-word r 52) 0))
+          (let* ((pointer (read-word r 52))
+                 (value (alloc-string r heap "ASCII"))
+                 (cursor (read-word r 0))
+                 (repeat 0))
+            (while (< repeat 64)
+              (js-call assert :equal (js-call r :invoke "property-data-alias" heap value 0 5) (funcall expected-fn "ASCII"))
+              (setq repeat (+ repeat 1)))
+            (js-call assert :equal (read-word r 52) pointer)
+            (js-call assert :equal (read-word r 0) cursor "repeat lookup allocates no raw table")
+            (js-call r :invoke "heap-collect" heap)
+            (js-call assert :equal (js-call r :invoke "heap-live" heap) 0)
+            (let* ((peer (js-call r :invoke "heap-new" 32 4096 1048576))
+                   (peer-text (alloc-string r peer "ASCII"))
+                   (after-peer (read-word r 0)))
+              (js-call assert :equal (js-call r :invoke "property-data-alias" peer peer-text 0 5) (funcall expected-fn "ASCII"))
+              (js-call assert :equal (read-word r 52) pointer)
+              (js-call assert :equal (read-word r 0) after-peer)
+              (js-call r :invoke "heap-collect" peer)
+              (js-call assert :equal (js-call r :invoke "heap-live" peer) 0))
+            (js-call assert :equal (js-call r :invoke "retire") 1)
+            (js-call assert :equal (read-word r 52) pointer)
+            (let* ((fresh (js-call r :invoke "heap-new" 32 4096 1048576))
+                   (fresh-text (alloc-string r fresh "ASCII"))
+                   (after-fresh (read-word r 0)))
+              (js-call assert :equal (js-call r :invoke "property-data-alias" fresh fresh-text 0 5) (funcall expected-fn "ASCII"))
+              (js-call assert :equal (read-word r 52) pointer)
+              (js-call assert :equal (read-word r 0) after-fresh)
+              (js-call r :invoke "heap-collect" fresh)
+              (js-call assert :equal (js-call r :invoke "heap-live" fresh) 0)))
+          (finally
+            (js-call r :close))))))
+
+  (test "static and dynamic packed aliases retain all IDs offsets UTF16 rejection and case-sensitive prefix boundaries in WASM and native"
+    (async ()
+      (await (verify-all-aliases false))
+      (when target
+        (await (verify-all-aliases t))))
+    30000)
+
+  (defun invoke-managed (a name &rest __host_default_arguments_3)
+    (let* ((values (aref __host_default_arguments_3 0)))
+    (let* ((vals (if (undefined? values) (js-array) values))
+           (owned (js-array))
+           (args (js-call vals :map
+                   (lambda (value)
+                     (if (/= (funcall js-typeof value) "string")
+                         value
+                         (let ((handle (js-call a :string value)))
+                           (js-call owned :push handle)
+                           handle))))))
+      (try
+        (js-call a :invoke name args)
+        (finally
+          (js-call owned :forEach (lambda (handle) (js-call a :release handle))))))))
+
+  (defun finish-managed (a)
+    (try
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+      (finally
+        (let ((close-fn (get a :close)))
+          (when close-fn
+            (js-call a :close))))))
+
+  (test "packed data retains static dynamic p/P fold differences selected Unicode profiles roots first errors and recovery in WASM and native"
+    (async ()
+      (let ((modes (if target (js-array false t) (js-array false)))
+            (versions (js-array 15.1 16 17))
+            (m 0))
+        (while (< m (get modes :length))
+          (let ((use-native (aref modes m))
+                (v 0))
+            (while (< v (get versions :length))
+              (let* ((unicode-version (aref versions v))
+                     (configuration (Object/assign (js-object) runtime-options (js-object :unicodeVersion unicode-version)))
+                     (a (if use-native
+                            (await (instantiateNativeManagedRuntime
+                                     managed-native
+                                     typed
+                                     (Object/assign (js-object) configuration (js-object :nativeTarget target))))
+                            (instantiateManagedRuntime managed-bytes configuration))))
+                (js-call a :auto 1)
+                (try
+                  (js-call property-vectors :forEach
+                    (lambda (vec)
+                      (let* ((name (aref vec 0))
+                             (flags (aref vec 1))
+                             (input (aref vec 2))
+                             (expected (aref vec 3))
+                             (regex (invoke-managed a "make" (js-array (property-pattern name flags) flags))))
+                        (try
+                          (js-call assert :equal
+                            (invoke-managed a "test-value" (js-array regex input))
+                            expected
+                            (str name "/" flags "/" unicode-version))
+                          (finally
+                            (js-call a :release regex))))))
+                  (js-call (js-array
+                             (js-array (String/fromCharCode 7305) (>= unicode-version 16))
+                             (js-array (String/fromCodePoint 129770) (>= unicode-version 17))) :forEach
+                    (lambda (pair)
+                      (let ((input (aref pair 0))
+                            (expected (aref pair 1))
+                            (regex (invoke-managed a "make" (js-array "^\\p{Assigned}$" "u"))))
+                        (try
+                          (js-call assert :equal (invoke-managed a "test-value" (js-array regex input)) expected)
+                          (finally
+                            (js-call a :release regex))))))
+                  (js-call (js-array
+                             (js-array "literal-ascii" "A" t)
+                             (js-array "literal-greek" "α" t)
+                             (js-array "literal-negative" "a" t)
+                             (js-array "literal-negative-v" "a" false)) :forEach
+                    (lambda (entry)
+                      (let* ((name (aref entry 0))
+                             (input (aref entry 1))
+                             (expected (aref entry 2))
+                             (regex (js-call a :invoke name)))
+                        (try
+                          (let ((zero (js-call a :number -0.0))
+                                (frame (js-call a :frame 2)))
+                            (js-call a :frameSet frame 0 zero)
+                            (js-call a :frameSet frame 1 regex)
+                            (try
+                              (js-call a :collect)
+                              (js-call assert :equal (invoke-managed a "test-value" (js-array regex input)) expected)
+                              (js-call assert :throws
+                                (lambda ()
+                                  (let ((ref-fn (get reference (js-call name :replaceAll "-" "_"))))
+                                    (js-call reference :throwing (funcall ref-fn))))
+                                (lambda (err) (= err false)))
+                              (js-call assert :throws
+                                (lambda () (js-call a :invoke "throwing" (js-array regex)))
+                                (lambda (err) (= err false)))
+                              (funcall assert (Object/is (js-call a :readNumber zero) -0.0))
+                              (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+                              (js-call assert :equal (js-call a :invoke "recover") t)
+                              (finally
+                                (js-call a :leaveFrame frame)
+                                (js-call a :release zero))))
+                          (finally
+                            (js-call a :release regex))))))
+                  (js-call (js-array "ascii" "script=Greek" "Script=greek" "Unknown" "General_Category=unknown") :forEach
+                    (lambda (bad-name)
+                      (js-call assert :throws
+                        (lambda () (invoke-managed a "make" (js-array (str "\\p{" bad-name "}") "u")))
+                        globalThis.SyntaxError)))
+                  (finally
+                    (finish-managed a))))
+              (setq v (+ v 1))))
+          (setq m (+ m 1)))))
+    120000)
+
+  (test "independent Node accepts the original complete property alias and literal inputs with exact fold results"
+    (lambda ()
+      (let* ((inputs (js-call property-vectors :map
+                       (lambda (vec)
+                         (let ((name (aref vec 0))
+                               (flags (aref vec 1))
+                               (input (aref vec 2))
+                               (expected (aref vec 3)))
+                           (js-array (property-pattern name flags) flags input expected)))))
+             (helper-script (resolve "tests/helpers/wasm-managed-regexp-property-data-node.mjs"))
+             (child (spawnSync "node" (js-array helper-script "--run-node-check" (JSON/stringify inputs))
+                      (js-object :encoding "utf8" :timeout 30000))))
+        (js-call assert :equal (get child :error) undefined)
+        (js-call assert :equal (get child :signal) nil)
+        (js-call assert :equal (get child :status) 0 (get child :stderr))
+        (js-call property-vectors :forEach
+          (lambda (vec)
+            (let ((name (aref vec 0))
+                  (flags (aref vec 1))
+                  (input (aref vec 2))
+                  (expected (aref vec 3)))
+              (js-call assert :equal
+                (js-call reference :test_value (js-call reference :make (property-pattern name flags) flags) input)
+                expected))))))))

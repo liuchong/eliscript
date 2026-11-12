@@ -1,0 +1,13 @@
+(module tests.fixtures.bootstrap-formatter-host
+  (defconst load-module (js* "(specifier) => import(specifier)"))
+  (defvar compiler undefined)
+  (defasync run-host-main ()
+    (setq compiler (await (funcall load-module (get (get globalThis.process :env) :COMPILER_URL))))
+    (js-call (get globalThis.process :stdout) :write (js-call compiler :format_source (get (get globalThis.process :env) :SOURCE) "node.eli")))
+  (defconst completion (run-host-main))
+  (js-call completion :catch (lambda (error)
+    (console/error error)
+    (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

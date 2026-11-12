@@ -1,2 +1,19 @@
-(module capsules.runtime.testing.value
-  (js* "import {\n  clearValueCaches,\n  readValueMetrics,\n  resetValueMetrics,\n} from \"../core/value-internals.mjs\";\n\nexport function resetValueHashMetrics() {\n  resetValueMetrics();\n}\n\nexport function clearValueHashCaches() {\n  clearValueCaches();\n}\n\nexport function valueHashMetrics() {\n  return readValueMetrics();\n}\n"))
+(module eliscript.runtime.testing.value
+  (import "../core/value-internals.mjs"
+    clearValueCaches
+    readValueMetrics
+    resetValueMetrics)
+
+  (defun resetValueHashMetrics ()
+    (resetValueMetrics))
+
+  (defun clearValueHashCaches ()
+    (clearValueCaches))
+
+  (defun valueHashMetrics ()
+    (readValueMetrics))
+
+  (export
+    resetValueHashMetrics
+    clearValueHashCaches
+    valueHashMetrics))

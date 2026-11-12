@@ -5,7 +5,7 @@
   (import "./compiler-corpus-ground.mjs" createOriginalCorpusSourceReader)
   (defconst id "original-program:compiler-stdlib-bit-complete")
   (defconst suite "tests/stdlib-bit.test.mjs")
-  (defconst suite-sha "c550405d71455b5ce694c929b63b6a0843ea637f5b35ccf221afd5780ce16771")
+  (defconst suite-sha "6fec188d05dd741b1e0d5bae7ac330a6f6171f75b4c17c8411d94664c17a278c")
   (defconst files (js-array
     "tools/backends/eliscript/compiler-corpus-bit.eli" "tools/backends/compiler-corpus-bit.mjs"
     "tests/stdlib-bit.test.mjs" "tests/eliscript/stdlib-bit.eli" "tests/stdlib-bit-selfhosted.test.mjs"
@@ -13,8 +13,12 @@
     "tools/testing/stdlib-bit-corpus-host.eli" "tools/testing/stdlib-bit-corpus-host.mjs"
     "tests/helpers/seed-compiler.mjs" "tools/backends/build.mjs" "package.json"
     "stdlib/bit.eli" "tests/fixtures/bit-usage.eli" "tests/fixtures/bit-host.mjs"
+    "runtime/array-text.eli" "runtime/array-text.mjs" "runtime/array-text.mjs.map"
+    "runtime/errors.eli" "runtime/errors.mjs" "runtime/errors.mjs.map"
     "runtime/math.eli" "runtime/math.mjs" "runtime/math.mjs.map"
+    "runtime/number-radix.eli" "runtime/number-radix.mjs" "runtime/number-radix.mjs.map"
     "runtime/prelude.eli" "runtime/prelude.mjs" "runtime/prelude.mjs.map"
+    "runtime/primitives.eli" "runtime/primitives.mjs" "runtime/primitives.mjs.map"
     "runtime/unicode-case.eli" "runtime/unicode-case.mjs" "runtime/unicode-case.mjs.map"
     "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs" "runtime/unicode-case-data.mjs.map"))
   (defun hash (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))

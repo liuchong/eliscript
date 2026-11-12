@@ -10,20 +10,22 @@
   ;; release records an explicit deferral rather than changing their budgets.
   (defconst managedCapacityPlans (js-array
     (js-object :suite "tests/worker-value-stream-probe.test.mjs"
-      :sha256 "19dac4fabbf7878afbaef9120bb91a5e3c413fd706fc65e4c7d0f5e6930c30b0"
+      :sha256 "ef90a014592e13f92745f21f9d6f76361bd12f31b2ccd2a43aca13ffe0e087e7"
       :title "committed 256 MiB value-stream report matches its measured sources")
     (js-object :suite "tests/wasm-managed-array-inheritance.test.mjs"
-      :sha256 "c0590bcde56a736363797834e27fdfd91bcd27d4de0ed3df38a507dc28177011"
+      :sha256 "211463fb402584e65337b1faf2ce25fc6216e4015165f2a6bd0246ef3864b560"
       :title "inherited-array allocation failure keeps caller frames and live prototype edges, then copying recovers")
     (js-object :suite "tests/wasm-managed-array-index-storage.test.mjs"
-      :sha256 "335f342bc2873f2c1580ce51789e407c00a0fb1e9b53c9c63ec49d179a5e8fac"
+      :sha256 "18e766fe9888fcf23ed549e48048c92d932aa5ffa8820e0880b407a9196affaf"
       :title "failed first native member materialization recovers in the original 64 slot budget")
     (js-object :suite "tests/emacs-analysis-evidence.test.mjs"
-      :sha256 "7adb647fd4de888fca31ea2d3726167a2dcd3d07a73baadeeee6de198e95dfa4"
-      :title "committed Emacs analysis benchmark preserves qualified evidence")))
+      :sha256 "e815b667fe16fe5158b36ddb709d1d29f4816f726a3d5d1026f0cb110a05f052"
+      :title "committed Emacs analysis benchmark preserves qualified evidence"
+      :additionalTitles (js-array "committed Emacs analysis soak proves buffer lifecycle safety"))))
 
   (defun managedCapacityRegistration (test title environment)
-    (if (js-call managedCapacityPlans :some (lambda (plan) (= title (get plan :title))))
+    (if (js-call managedCapacityPlans :some (lambda (plan)
+          (or (= title (get plan :title)) (js-call (get plan :additionalTitles (js-array)) :includes title))))
       (currentPerformanceTest test environment) test))
 
   (defconst selected (js-call managedCapacityPlans :filter (lambda (plan)
@@ -48,12 +50,13 @@
                :get (lambda (target key receiver) (Reflect/get target key target))
                :apply (lambda (target receiver arguments)
                  (let ((title (aref arguments 0)))
-                   (when (= title (get plan :title)) (setq count (1+ count)))
+                   (when (or (= title (get plan :title)) (js-call (get plan :additionalTitles (js-array)) :includes title))
+                     (setq count (1+ count)))
                    (Reflect/apply (managedCapacityRegistration target title (get globalThis.process :env))
                      receiver arguments))))))
              (exports (Object/assign (js-object) original (js-object :test wrapped))))
         (js-call original :beforeAll (lambda ()
-          (try (unless (= count 1)
+          (try (unless (= count (+ 1 (js-length (get plan :additionalTitles (js-array)))))
             (throw (new globalThis.TypeError "the original pressure case must register exactly once")))
             (finally (funcall restore)))))
         (js-call original :afterAll restore)

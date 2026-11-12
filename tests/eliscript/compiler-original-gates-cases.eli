@@ -6,6 +6,7 @@
   (import "node:url" pathToFileURL)
   (import "node:crypto" createHash)
   (import "../../dist/bootstrap/compiler.mjs" compile-string)
+  (import "../../dist/bootstrap/reader.mjs" read-string)
   (import "../../tools/backends/build.mjs" root loadLiteralSources)
   (import "../../tools/backends/compiler-build.mjs" loadCompilerSources)
   (import "../../tools/backends/compiler-matrix.mjs" runOriginalCompilerGates)
@@ -36,7 +37,7 @@
               (await (mkdir (resolve output "..") (js-object :recursive t))) (await (writeFile output (get record :source)))))))
           (await (writeFile (resolve directory "bootstrap/host/compiler-session.eli") "(export)"))
           (await (writeFile (resolve directory "bootstrap/runtime/memory.eli") "; unit fixture runtime\n"))
-          (await (each-await (js-array "runtime/math.eli" "runtime/prelude.eli" "runtime/unicode-case.eli" "runtime/unicode-case-data.eli") (async (path)
+          (await (each-await (js-array "runtime/array-text.eli" "runtime/errors.eli" "runtime/math.eli" "runtime/number-radix.eli" "runtime/prelude.eli" "runtime/primitives.eli" "runtime/unicode-case.eli" "runtime/unicode-case-data.eli") (async (path)
             (let ((bytes (await (readFile (resolve root path)))))
               (await (writeFile (resolve directory path) bytes)) (deep (await (readFile (resolve directory path))) bytes)))))
           (await (writeFile (resolve directory "Makefile") (+ "test-core:\n" (js-call (js-call recipe :map (lambda (line) (+ "\t@" line "\n"))) :join ""))))
@@ -141,13 +142,29 @@
       (let ((transient (find records (lambda (record) (= (get record :id) "original-managed:transient-state:node:auto-1"))))
             (wire (find records (lambda (record) (= (get record :id) "original-managed:wire:node:auto-1"))))
             (sequence (find records (lambda (record) (= (get record :id) "original-managed:sequence-data:node:auto-65536")))))
-        (ok (includes (get (get transient :execution) :hostSource) "[0, 1, 31, 32, 33, 63, 64, 1023, 1024, 1055, 1056, 1057]"))
-        ;; The unchanged corpus/ABI assertions remain in the original body.
-        ;; Network calls now pass through the maintained Eli controller; bind
-        ;; that actual interface rather than requiring removed JS call text.
-        (each (js-array "index<128" "assert.equal(item.module,'eliscript.host')"
-                "runWirePartition" "\"checkNetwork\": checkNetwork" "\"checkJavaScriptNetwork\": checkJavaScriptNetwork")
-          (lambda (part) (ok (includes (get (get wire :execution) :hostSource) part))))
+        (let* ((transient-helper (await (assert-maintained-observer-source transient
+                                  "tests/helpers/wasm-managed-transient-state-node.eli" options)))
+               (transient-scenarios (await (assert-maintained-observer-source transient
+                                  "tools/backends/eliscript/compiler-corpus-managed-scenarios.eli" options)))
+               (wire-oracle (await (assert-maintained-observer-source wire
+                              "tests/helpers/wasm-managed-wire-oracle.eli" options)))
+               (wire-scenarios (await (assert-maintained-observer-source wire
+                                 "tools/backends/eliscript/compiler-corpus-managed-scenarios.eli" options))))
+          ;; The original boundary inputs and checks now live in authenticated
+          ;; maintained modules, not duplicated source strings in the launcher.
+          (ok (source-form-includes? transient-helper
+            "(defconst counts (js-array 0 1 31 32 33 63 64 1023 1024 1055 1056 1057))"))
+          (ok (source-form-includes? transient-scenarios
+            "(js-call (get helpers :counts) :map (lambda (count) (js-call module :vector_case count)))"))
+          (ok (source-form-includes? wire-oracle "(while (< index 128)"))
+          (each (js-array
+                  "(js-call assert :equal (get item :module) \"eliscript.host\")"
+                  "(js-call implementation :runWirePartition library (get context :wirePartition))"
+                  ":checkNetwork (get helpers :checkNetwork)"
+                  ":checkJavaScriptNetwork (async () (await (js-call helpers :checkJavaScriptNetwork module platform)))")
+            (lambda (part) (ok (source-form-includes? wire-scenarios part))))
+          (ok (includes (get (get wire :execution) :hostSource) "verifyOriginalWireCapabilities(__managed_context)"))
+          (ok (includes (get (get wire :execution) :hostSource) "runOriginalManagedWire(__managed_context")))
         (eqv (get (get (get wire :original) :wireController) :sourceSha256) wireSuiteSha)
         (js-call assert :match (get (get (get wire :original) :wireController) :originalHostSha256)
           (new globalThis.RegExp "^[a-f0-9]{64}$"))
@@ -165,34 +182,41 @@
           (eqv (js-length (select (get record :modules) (lambda (module) (js-call (get module :filename) :startsWith "bootstrap/compiler/")))) 13)
           (let* ((execution (get record :execution)) (host (get execution :hostSource))
                  (original (get record :original)) (replacement (get execution :setupReplacement))
+                 (maintained (get original :maintainedSource))
                  (identity (compilerSourceIdentity sources))
-                 (source (await (js-call options :text (get original :suite)))))
+                 (source (await (js-call options :text (get original :suite))))
+                 (eli-source (await (js-call options :text (get maintained :sourceFile)))))
             (eqv (get replacement :kind) "selected-complete-compiler-semantic-tools")
             (eqv (get replacement :producer) "selected-session")
             (deep (get replacement :sourceIdentity) identity)
             (deep (get original :completeSourceIdentity) identity)
             (eqv (get original :sourceSha256) (compilerDigest (globalThis.Buffer.from source)))
+            (eqv (get maintained :sourceSha256) (compilerDigest (globalThis.Buffer.from eli-source)))
             (each (get original :regions) (lambda (region)
               (let ((text (js-call source :slice (get region :start) (get region :end))))
                 (eqv (get region :sha256) (compilerDigest (globalThis.Buffer.from text)))
                 (eqv (get region :byteStart) (globalThis.Buffer.byteLength (js-call source :slice 0 (get region :start))))
                 (eqv (get region :byteEnd) (globalThis.Buffer.byteLength (js-call source :slice 0 (get region :end)))))))
-            ;; Check actual selected-session operations and finally cleanup,
-            ;; rather than an obsolete local function name or JS whitespace.
-            (js-call assert :match host (new globalThis.RegExp "createCompilerSession\\s*\\(\\s*\\{\\s*host\\s*:\\s*configuration\\s*\\.\\s*target"))
-            (js-call assert :match host (new globalThis.RegExp "await\\s+openSelected\\s*\\(\\s*\\)"))
+            (each (get maintained :regions) (lambda (region)
+              (let ((text (js-call eli-source :slice (get region :start) (get region :end))))
+                (eqv (get region :sha256) (compilerDigest (globalThis.Buffer.from text)))
+                (eqv (get region :byteStart) (globalThis.Buffer.byteLength (js-call eli-source :slice 0 (get region :start))))
+                (eqv (get region :byteEnd) (globalThis.Buffer.byteLength (js-call eli-source :slice 0 (get region :end)))))))
+            ;; Check actual selected-session operations and finally cleanup in
+            ;; the compiled pure-Eli host source.
+            (js-call assert :match host (new globalThis.RegExp "createCompilerSession\\s*\\("))
+            (js-call assert :match host (new globalThis.RegExp "\"host\"\\s*:\\s*\\(\\s*configuration\\s*\\)\\s*\\[\\s*\"target\"\\s*\\]"))
+            (js-call assert :match host (new globalThis.RegExp "await\\s*\\(\\s*openSelected\\s*\\(\\s*\\)\\s*\\)"))
             (js-call assert :match host (new globalThis.RegExp
-              "try\\s*\\{\\s*await\\s+run\\s*\\(\\s*session\\s*\\)\\s*;?\\s*\\}\\s*finally\\s*\\{\\s*session\\s*\\.\\s*close\\s*\\(\\s*\\)"))
+              "try\\s*\\{[\\s\\S]*?await\\s*\\(\\s*run\\s*\\(\\s*session\\s*\\)\\s*\\)[\\s\\S]*?\\}\\s*finally\\s*\\{[\\s\\S]*?\\(\\s*session\\s*\\)\\s*\\[\\s*\"close\"\\s*\\]\\s*\\(\\s*\\)"))
             (let* ((changes (get replacement :changes))
                    (session-region (get (get replacement :dependencies) :session))
-                   (session-source (js-call source :slice (get session-region :start) (get session-region :end)))
-                   (before (js-call (new globalThis.RegExp "const\\s+session\\s*=\\s*await\\s+createCompilerSession[\\s\\S]*?;") :exec session-source)))
-              (eqv (js-length changes) 1) (ok before)
-              (eqv (get (aref changes 0) :beforeSha256) (compilerDigest (globalThis.Buffer.from (aref before 0))))
-              (ok (some (Array/from (js-call host :matchAll
-                    (new globalThis.RegExp "const\\s+session\\s*=\\s*await\\s+openSelected\\s*\\(\\s*\\)\\s*;" "g")))
-                (lambda (match) (= (compilerDigest (globalThis.Buffer.from (aref match 0)))
-                                  (get (aref changes 0) :afterSha256)))))))))))))
+                   (session-source (js-call eli-source :slice (get session-region :start) (get session-region :end)))
+                   (before-expr "(createCompilerSession (js-object :host \"javascript\" :compiler driver))"))
+              (eqv (js-length changes) 1)
+              (ok (includes session-source before-expr))
+              (eqv (get (aref changes 0) :beforeSha256) (compilerDigest (globalThis.Buffer.from before-expr)))
+              (eqv (get (aref changes 0) :afterSha256) (compilerDigest (globalThis.Buffer.from "(openSelected)")))))))))))
   (defasync coverage-case ()
     (let* ((records (js-array)) (locators (js-array))
            (stable (new globalThis.Set (js-call (js-array "core-modules" "transient-state" "sorted" "sequence-data" "wire")
@@ -226,15 +250,53 @@
           (ok (some records (lambda (record) (and (includes (get record :coverage) (get locator :id))
                 (= (get (get record :execution) :hostRuntime) host)))) (+ (get locator :contains) " requires its actual " host " host"))))))
       (let ((wire (select records (lambda (record) (js-call (get record :id) :startsWith "original-managed:wire-original-host:")))))
-        (ok (> (js-length wire) 0)) (each wire (lambda (record) (ok (includes (get (get record :execution) :hostSource) "wire.codec_report().validation.valid")))))))
+        (ok (> (js-length wire) 0))
+        (await (each-await wire (async (record)
+          (let ((source (await (assert-maintained-observer-source record "tests/fixtures/wire-host.eli" options))))
+            (ok (includes source "codec_report"))
+            (ok (includes source "validation"))
+            (ok (includes (get (get record :execution) :hostSource) "runOriginalWireHost")))))))))
   (defun fixture-source-hash (source) (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
+  (defconst verified-maintained-compilations (new globalThis.Map))
+  (defasync assert-maintained-observer-source (record filename options)
+    (let* ((output (js-call (str (js-call filename :slice 0 -4) ".mjs") :replace "tools/backends/eliscript/" "tools/backends/"))
+           (source (await (js-call options :text filename))) (artifact (await (js-call options :text output)))
+           (source-identity (await (js-call options :file filename))) (output-identity (await (js-call options :file output)))
+           (assets (get (get record :original) :sourceAssets))
+           (source-proof (find assets (lambda (asset) (= (get asset :file) filename))))
+           (output-proof (find assets (lambda (asset) (= (get asset :file) output))))
+           (key (str filename ":" (fixture-source-hash source) ":" (fixture-source-hash artifact))))
+      (ok source-proof (str filename " must bind its maintained observer source"))
+      (ok output-proof (str output " must bind its real compiled observer"))
+      (eqv (fixture-source-hash source) (get source-identity :sha256))
+      (eqv (fixture-source-hash artifact) (get output-identity :sha256))
+      (eqv (get source-proof :sourceSha256) (get source-identity :sha256))
+      (eqv (get output-proof :sourceSha256) (get output-identity :sha256))
+      (unless (js-call verified-maintained-compilations :has key)
+        (eqv (compile-string source filename)
+          (js-call artifact :replace (new globalThis.RegExp "\\n?//# sourceMappingURL=[^\\r\\n]*\\r?\\n?$") "\n")
+          "the actual observer bytes must be emitted from its authenticated maintained Eli source")
+        (js-call verified-maintained-compilations :set key t))
+      source))
+  (defun source-form-includes? (source form)
+    (includes (js-call source :replace (new globalThis.RegExp "\\s+" "g") " ")
+      (js-call form :replace (new globalThis.RegExp "\\s+" "g") " ")))
   (defasync assert-fixture-observer (record family options)
     (let* ((execution (get record :execution)) (original (get record :original))
            (transport (get original :observationTransport))
            (retained (if transport (get transport :originalHostSource) (get execution :hostSource))))
-      ;; The complete original assertions remain authenticated source data.
-      (each (js-array "const expected=observe(oracle),actual=observe(m)" "runtime.stats().frameDepth" "runtime.live(),0")
-        (lambda (part) (ok (includes retained part))))
+      ;; Follow the real maintained implementation instead of requiring its
+      ;; former handwritten JS algorithm to remain inside the launcher.
+      (let ((runtime-source (await (assert-maintained-observer-source record
+                             "tools/backends/eliscript/compiler-corpus-fixture-runtime.eli" options))))
+        (ok (< (js-call runtime-source :indexOf "(expected (funcall observe oracle))")
+               (js-call runtime-source :indexOf "(actual (funcall observe module))")))
+        (each (js-array "(expected (funcall observe oracle))" "(actual (funcall observe module))"
+                "(js-call assert :deepEqual actual expected label)" "(get (js-call runtime :stats) :frameDepth) 0"
+                "(js-call assert :equal (js-call runtime :live) 0)")
+          (lambda (part) (ok (source-form-includes? runtime-source part))))
+        (ok (includes retained (str "const fixture=await openOriginalFixtureRuntime(" (get record :auto) ");")))
+        (ok (includes retained "finish();")))
       (when transport
         (eqv (get transport :version) 1) (eqv (get transport :family) family)
         (eqv (fixture-source-hash retained) (get transport :originalHostSha256))
@@ -251,9 +313,15 @@
                  :sourceSha256 (get original :sourceSha256) :originalHostSha256 (fixture-source-hash retained)))
                (argument raw-config) (entry (if properties "runOriginalFunctionPropertiesHost" "runOriginalRawFixtureMain")))
           (when properties
-            (let* ((suite (await (js-call options :text (get original :suite))))
-                   (declaration (js-call (new globalThis.RegExp "const wellKnownSymbolNames=\\[([^\\]]*)\\];") :exec suite))
-                   (symbols (JSON/parse (str "[" (js-call (aref declaration 1) :replaceAll "'" "\"") "]"))))
+            (let* ((filename "tests/helpers/wasm-managed-function-properties-node.eli")
+                   (source (await (assert-maintained-observer-source record filename options)))
+                   (items (get (aref (read-string source filename) 0) :items))
+                   (declaration (find items (lambda (node)
+                     (let ((members (get node :items)))
+                       (and (Array/isArray members) (= (get (aref members 0) :name) "defconst")
+                            (= (get (aref members 1) :name) "well-known-symbol-names"))))))
+                   (symbols (js-call (js-call (get (aref (get declaration :items) 2) :items) :slice 1) :map
+                              (lambda (node) (get node :value)))))
               (deep symbols (js-array "iterator" "toPrimitive" "match" "replace" "search" "split" "species" "isConcatSpreadable"
                 "toStringTag" "hasInstance" "asyncIterator" "unscopables" "matchAll" "dispose" "asyncDispose"))
               (setq argument (js-call (js-array "isFinite" "missing" "name" "length" "prototype" "caller" "arguments"
@@ -317,15 +385,18 @@
             (get (await (js-call options :file (get locator :file))) :sha256)))))
         ;; Preserve the original transport source assertions against the real
         ;; original runner implementation; these do not execute a fake runner.
-        (let ((transport (get (get replay :execution) :hostSource)))
-          (js-call assert :match transport (new globalThis.RegExp "args\\s*[.]\\s*push\\s*\\(\\s*['\"]--preload['\"]\\s*,\\s*plugin\\s*,\\s*['\"]test['\"]\\s*,\\s*suite\\s*,?\\s*\\)") "the actual Bun runner must receive its selected namespace preload and the original suite")
-          (js-call assert :match transport (new globalThis.RegExp "spawn\\s*\\(\\s*process[.]env[.]BUN\\s*\\?\\?\\s*['\"]bun['\"]\\s*,\\s*args\\s*,") "the original suite must execute in a real isolated Bun process")
-          (js-call assert :match transport (new globalThis.RegExp "suite\\s*=\\s*resolve\\s*\\(\\s*sourceRoot\\s*,\\s*relativeSuite\\s*,?\\s*\\)") "the runner must load the original suite path")
-          (js-call assert :match transport (new globalThis.RegExp "assert[.]equal\\s*\\(\\s*result[.]code\\s*,\\s*0\\s*,\\s*['\"]the complete original suite must pass with the actual selected compiler product['\"]\\s*,?\\s*\\)") "a failed original suite must fail its matrix record")
-          (js-call assert :match transport (new globalThis.RegExp "originalSelectedFrontendBuild\\s*\\(\\s*\\{\\s*[.]{3}options\\s*,\\s*frontend\\s*:\\s*options[.]frontend\\s*\\?\\?\\s*actual[.]compiler\\s*,?\\s*\\}\\s*\\)") "explicit frontend and Seed rebuilds must retain the actual selected frontend")
-          (js-call assert :match transport (new globalThis.RegExp "assert[.]deepEqual\\s*\\(\\s*interception[.]modules\\s*,\\s*moduleIds\\s*,") "the child must verify every selected compiler module identity")
-          (js-call assert :match transport (new globalThis.RegExp "process[.]removeListener\\s*\\(\\s*['\"]SIGTERM['\"]\\s*,\\s*terminate\\s*,?\\s*\\)") "the completed child must remove its cancellation listener")
-        )
+        (let* ((runner (await (assert-maintained-observer-source replay "tools/backends/eliscript/compiler-corpus-managed-suite.eli" options)))
+               (build (await (assert-maintained-observer-source replay "tools/backends/eliscript/compiler-corpus-selected-build.eli" options)))
+               (transport (get (get replay :execution) :hostSource)))
+          (ok (includes transport "await runOriginalManagedSuites("))
+          (each (js-array "(js-call arguments :push \"--preload\" plugin \"test\" (resolve source-root relative-suite))"
+                  "(spawn (get (get process :env) :BUN \"bun\") arguments"
+                  "(js-call assert :equal (get result :code) 0 \"the complete original suite must pass with the actual selected compiler product\")"
+                  "(js-call assert :deepEqual (get interception :modules) module-ids"
+                  "(js-call process :removeListener \"SIGTERM\" terminate)")
+            (lambda (part) (ok (source-form-includes? runner part))))
+          (ok (source-form-includes? build "(or (not (undefined? (get options :frontend))) (eq (get options :seed) t))"))
+          (ok (source-form-includes? build "(js-object :frontend (if (nullish? frontend) (get actual :compiler) frontend))")))
         (await (each-await (js-array "wasm-managed-builtins" "wasm-managed-typeof" "wasm-managed-project-linking" "direct-wasm-backend" "wasm-managed-function-properties-runtime"
             "wasm-managed-js-cons-fast" "wasm-managed-vector-copy" "wasm-managed-type-construction")
           (async (name)
@@ -345,9 +416,20 @@
           (await (assert-fixture-observer vector "persistent-vector-auto-65536" options))
           (let* ((transport (get (get vector :original) :observationTransport))
                  (host (get transport :originalHostSource))
-                 (boundary (js-call (new globalThis.RegExp "for\\s*\\(\\s*const\\s+count\\s+of\\s*(\\[[^\\]]*\\])\\s*\\)") :exec host)))
-            (ok boundary "the complete original host retains its actual persistent Vector boundary loop")
-            (deep (JSON/parse (aref boundary 1)) (js-array 0 1 31 32 33 63 64 65 1023 1024 1025 1056 1057))
+                 (filename "tools/backends/eliscript/compiler-corpus-fixture-scenarios.eli")
+                 (source (await (assert-maintained-observer-source vector filename options)))
+                 (members (get (aref (read-string source filename) 0) :items))
+                 (function (find members (lambda (node)
+                   (let ((items (get node :items)))
+                     (and (Array/isArray items) (= (get (aref items 0) :name) "defun")
+                          (= (get (aref items 1) :name) "persistentVector"))))))
+                 (loop (aref (get function :items) 3))
+                 (boundary (get (aref (get loop :items) 1) :items)))
+            (ok (includes host "persistentVector as runFixtureScenario"))
+            (eqv (get (aref (get loop :items) 0) :name) "each")
+            (eqv (get (aref boundary 0) :name) "js-array")
+            (deep (js-call (js-call boundary :slice 1) :map (lambda (node) (get node :value)))
+              (js-array 0 1 31 32 33 63 64 65 1023 1024 1025 1056 1057))
             (eqv (get transport :originalHostSha256) (fixture-source-hash host)))))))
   (defconst originalGateCases (js-object
     "matrix original gate records the actual core command exit status and exact log bytes" successful-gate

@@ -12,18 +12,20 @@
   (import "./compiler-package-execution.mjs" rewriteCompilerPackageExecution)
   (import "./compiler-request-cases.mjs" compilerRequestSuite isCompilerRequestFixture)
   (defconst suites (js-object
-    "tests/compiler-package-session.test.mjs" "6f0000e0b65e429a4d270a05f6c866acb4f465189755f3823f3ecf0249252a1b"
-    "tests/compiler-session-tools.test.mjs" "4668c61b9956b5501e496fc6246300667cf3fb85d5ebdd414d86269c5a56acd0"
-    "tests/compiler-corpus-arguments.test.mjs" "615cdb65fadc8bdc483cc8fb08cea82a41eeb49eea3fd4d97035a5474dff1640"))
+    "tests/compiler-package-session.test.mjs" "bb0e75fe7d1da08bfa9d807a3ffa4b629f613b2f2c7baeaabffe24fe52bd5b1c"
+    "tests/compiler-session-tools.test.mjs" "17a920ec66d93b8fdae98353c352dc53ab727285ee0222a4d8f9caa337826785"
+    "tests/compiler-corpus-arguments.test.mjs" "f2041c4124e34642b6a07818cb9f101f3649f5058e497784d7acc32968f17ae9"))
   (defconst canonical (resolve root "tools/backends/compiler-cli.mjs"))
   (defconst independent (resolve root "tools/backends/compiler-cli-ground.mjs"))
   (defconst original-bin (resolve root "bin/eliscript-compiler"))
   (defconst canonical-url (get (pathToFileURL canonical) :href))
   (defconst independent-url (get (pathToFileURL independent) :href))
   (defun parser-coordinate (value)
-    (if (and (= (value-type value) "string")
-             (js-call (js-array "compiler-cli.mjs" "eliscript-compiler") :includes (basename value)))
-      (try (realpathSync value) (catch ignored value)) value))
+    (let ((path (if (and (= (value-type value) "string") (js-call value :startsWith "file:"))
+                  (try (fileURLToPath value) (catch ignored value)) value)))
+      (if (and (= (value-type path) "string")
+               (js-call (js-array "compiler-cli.mjs" "eliscript-compiler") :includes (basename path)))
+        (try (realpathSync path) (catch ignored path)) value)))
   (defun rewrite-eval-coordinate (source)
     (let ((matches (Array/from (js-call source :matchAll (new globalThis.RegExp
              "file://[^\\s\"'\\\\]*?/compiler-cli[.]mjs" "g"))))
@@ -47,7 +49,8 @@
                (coordinate (parser-coordinate argument)))
           (cond
             ((or (= coordinate canonical) (= coordinate (parser-coordinate original-bin)))
-              (put result index independent) (setq count (1+ count)))
+              (put result index (if (js-call argument :startsWith "file:") independent-url independent))
+              (setq count (1+ count)))
             ((and (> index 0) (js-call (js-array "--eval" "-e") :includes (aref result (1- index)))
                   (= (value-type argument) "string"))
               (let ((rewritten (rewrite-eval-coordinate argument)))

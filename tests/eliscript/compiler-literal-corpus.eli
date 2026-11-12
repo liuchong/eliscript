@@ -20,7 +20,7 @@
   (import "../tools/backends/compiler-corpus.mjs"
     loadOriginalCompilerCorpus readOriginalLiteralRuntimeAudit compilerCorpusRequest createOriginalCorpusSourceReader
     transportOriginalCoreInstrumentationRecord
-    bindOriginalMaintainedSuiteEvidence bindOriginalRuntimeScanReportEvidence
+    bindOriginalMaintainedSuiteEvidence bindOriginalRuntimeScanReportEvidence bindOriginalMaintainedFixtureEvidence
     transportOriginalProjectRuntimeAssets transportOriginalToolsCLIAssets
     transportOriginalExecutionAssets transportOriginalToolsDataReferenceAssets bindOriginalFunctionalResourceInputs)
   (import "../tools/backends/compiler-corpus-fuzz.mjs" transportOriginalFuzzCorpus)
@@ -344,6 +344,22 @@
               (and (= (get locator :file) "tests/bootstrap-emitter-selfhosted.test.mjs")
                    (= (get locator :contains) "bootstrapped emitter matches seed ESM and Source Map output")))
               (js-call expected-gate-ids :delete (get locator :id)))))
+          ;; Migrated runner fixtures remain obligations of the real original
+          ;; host gate. They are not cross-target program successes. Independently
+          ;; bind both maintained and emitted bytes before including those IDs.
+          (let ((index 0))
+            (while (< index (js-length dependencies))
+              (let ((binding (aref dependencies index)))
+                (when (= (get binding :kind) "maintained-test-harness-fixture")
+                  (js-call assert :ok (js-call (get stable :fixtureFiles) :includes (get binding :file)))
+                  (js-call assert :strictEqual (get binding :sourceSha256)
+                    (literal-hash (await (readFile (resolve root (get binding :file))))))
+                  (js-call assert :strictEqual (get binding :artifactSha256)
+                    (literal-hash (await (readFile (resolve root (get binding :artifact))))))
+                  (js-call assert :strictEqual (js-call (get actual :records) :some (lambda (record)
+                    (js-call (get record :coverage) :includes (get binding :coverageId)))) false)
+                  (js-call expected-gate-ids :add (get binding :coverageId))))
+              (setq index (1+ index))))
           (js-call assert :deepStrictEqual (get gate :coverageIds)
             (js-call before :filter (lambda (value) (js-call expected-gate-ids :has value))))
           (js-call assert :strictEqual (js-length audit) 1)
@@ -404,10 +420,7 @@
           (let* ((provider-bytes (await (readFile (resolve root "platform/http.mjs"))))
                  (reader (createOriginalCorpusSourceReader (js-object :sourceRoot root)))
                  (provider (await (js-call reader :file "platform/http.mjs")))
-                 (expected (Object/assign (js-object) ground
-                             (js-object :evidence (Array/from (get ground :evidence))
-                               :records (Array/from (get ground :records))
-                               :expectedIds (Array/from (get ground :expectedIds)))))
+                 (expected (funcall globalThis.structuredClone ground))
                  (expected-evidence (get expected :evidence))
                  (retained (js-call expected-evidence :filter (lambda (asset) (= (get asset :file) "platform/http.mjs"))))
                  (actual-providers (js-call (get actual :evidence) :filter
@@ -417,6 +430,32 @@
                    :originalGateEvidence (Object/assign (js-object) gate (js-object
                      :coverageIds (js-call (get gate :coverageIds) :filter (lambda (value) (/= value id)))
                      :hostOnlyDependencies (js-call dependencies :filter (lambda (item) (/= (get item :coverageId) id)))))))))
+            ;; Runtime/core imports the real bit implementation. Its source and
+            ;; emitted provider are exact additional evidence, not host fallback.
+            (let ((paths (js-array "stdlib/bit.eli" "stdlib/bit.mjs")) (index 0))
+              (while (< index (js-length paths))
+                (let* ((path (aref paths index)) (asset (await (js-call reader :file path)))
+                       (bytes (await (readFile (resolve root path))))
+                       (prior (js-call expected-evidence :find (lambda (item) (= (get item :file) path)))))
+                  (js-call assert :strictEqual (get asset :sha256) (literal-hash bytes))
+                  (js-call assert :strictEqual (get asset :bytes) (js-length bytes))
+                  (if prior (js-call assert :deepStrictEqual prior asset) (js-call expected-evidence :push asset)))
+                (setq index (1+ index))))
+            (let ((index 0) (records (get expected :records))
+                  (source (await (readFile (resolve root "stdlib/bit.mjs") "utf8"))))
+              (while (< index (js-length records))
+                (let* ((record (aref records index)) (hosts (get (get record :request (js-object)) :hostSources))
+                       (modules (get record :modules)))
+                  (when (and (Array/isArray hosts)
+                    (js-call hosts :some (lambda (item) (= (get item :id) "runtime/literals.mjs")))
+                    (js-call hosts :some (lambda (item) (js-call (js-array "runtime/core/map-internals.mjs" "runtime/core/value-internals.mjs") :includes (get item :id))))
+                    (not (js-call hosts :some (lambda (item) (= (get item :id) "stdlib/bit.mjs"))))
+                    (not (and (Array/isArray modules) (js-call modules :some (lambda (item) (= (get item :id) "stdlib/bit.mjs"))))))
+                    (let* ((copy (funcall globalThis.structuredClone record))
+                           (providers (get (get copy :request) :hostSources)))
+                      (js-call providers :push (js-object :id "stdlib/bit.mjs" :filename "stdlib/bit.mjs" :source source))
+                      (put records index copy))))
+                (setq index (1+ index))))
             ;; The request-source transport independently adds one real HTTP
             ;; provider asset. Authenticate that precise addition; never drop
             ;; or normalize the remaining source/recipe document for parity.
@@ -520,7 +559,12 @@
                        (original (get record :original))
                        (assets (get original :sourceAssets (js-array))))
                   (js-call assert :ok (>= at 0))
-                  (js-call assert :ok (< where (js-call source :indexOf "\n")))
+                  (let ((imports (Array/from (js-call source :matchAll
+                    (new globalThis.RegExp "^import [^\\n]* from \"bun:test\";" "gm")))))
+                    (js-call assert :strictEqual (js-length imports) 1)
+                    (let ((declaration (aref imports 0)))
+                      (js-call assert :ok (and (>= where (get declaration :index))
+                        (< where (+ (get declaration :index) (js-length (aref declaration 0))))))))
                   (put (get record :execution) :hostSource output)
                   (js-call proofs :forEach (lambda (proof)
                     (unless (js-call assets :some (lambda (item) (= (get item :file) (get proof :file))))
@@ -545,6 +589,7 @@
               (await (transportOriginalBootstrapEmitterCorpus expected migration-options))
               (bindOriginalMaintainedSuiteEvidence expected)
               (await (bindOriginalRuntimeScanReportEvidence expected migration-options))
+              (await (bindOriginalMaintainedFixtureEvidence expected migration-options))
               (bindOriginalFunctionalResourceInputs expected))
             ;; Compare complete values; failures cannot format the entire
             ;; multi-megabyte source/recipe inventory into a diagnostic diff.
@@ -1115,9 +1160,9 @@
                (filename "tests/compiler-runtime-scan-selfhosted.test.mjs")
                (source (await (readFile (resolve root "tests/compiler-runtime-scan.test.mjs") "utf8")))
                (boundaries (js-array
-                 (js-array "async function run(" "\ntest(")
-                 (js-array "    const module = (name) => import(" "\n  } finally {")
-                 (js-array "const compilerSources = [" "\n];"))))
+                 (js-array "const reportPath = " "\ntest(")
+                 (js-array "        return (await (async (modules) => {" "\n      } finally {")
+                 (js-array "const compilerSources = [" "];"))))
           (js-call assert :strictEqual (get locator :file) filename)
           (js-call assert :strictEqual (get locator :sourceSha256)
             (literal-hash (await (readFile (resolve root filename)))))

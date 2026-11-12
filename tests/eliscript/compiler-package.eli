@@ -35,13 +35,15 @@
     (js-array "dist/runtime/math.mjs" "dist/runtime/math.mjs.map" "dist/package.json"
       "runtime/math.mjs" "runtime/math.mjs.map" "runtime/package.json" "artifact/runtime/math.mjs"
       "artifact/runtime/math.mjs.map" "artifact/package.json"
-      "transport/runtime/math.mjs" "transport/runtime/math.mjs.map" "transport/package.json")
-    (js-call (js-array "dist/" "" "artifact/" "transport/") :flatMap
-      (lambda (prefix) (js-call (js-array "prelude" "unicode-case" "unicode-case-data") :flatMap
+      "transport/runtime/math.mjs" "transport/runtime/math.mjs.map" "transport/package.json"
+      "stdlib/bit.mjs.map" "stdlib/package.json" "stdlib/runtime/math.mjs" "stdlib/runtime/math.mjs.map"
+      "platform/package.json" "platform/runtime/math.mjs" "platform/runtime/math.mjs.map")
+    (js-call (js-array "dist/" "" "artifact/" "transport/" "stdlib/" "platform/") :flatMap
+      (lambda (prefix) (js-call (js-array "array-text" "binding" "errors" "number-radix" "prelude" "primitives" "unicode-case" "unicode-case-data") :flatMap
         (lambda (name) (js-array (str prefix "runtime/" name ".mjs") (str prefix "runtime/" name ".mjs.map"))))))))
   (defun digest (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
-  (defconst runtime-capsules (js-array "math" "prelude" "unicode-case" "unicode-case-data"))
-  (defconst runtime-prefixes (js-array "dist/" "" "artifact/" "transport/"))
+  (defconst runtime-capsules (js-array "array-text" "binding" "errors" "math" "number-radix" "prelude" "primitives" "unicode-case" "unicode-case-data"))
+  (defconst runtime-prefixes (js-array "dist/" "" "artifact/" "transport/" "stdlib/" "platform/"))
   ;; Node 24 and Bun load these synchronous ESM entry points through the same
   ;; createRequire boundary already used by the compiler build fixtures.
   (defasync load-module (path)
@@ -112,8 +114,13 @@
                 :source (await (readFile (resolve root source-path) "utf8")))))
             (setq index (1+ index))))
         (let ((scope (str (JSON/stringify (js-object :name "eliscript" :type "module" :private t
-                :exports (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+                :exports (js-object "./runtime/array-text.mjs" "./runtime/array-text.mjs"
+                "./runtime/binding.mjs" "./runtime/binding.mjs"
+                  "./runtime/errors.mjs" "./runtime/errors.mjs"
+                  "./runtime/math.mjs" "./runtime/math.mjs"
+                  "./runtime/number-radix.mjs" "./runtime/number-radix.mjs"
                   "./runtime/prelude.mjs" "./runtime/prelude.mjs"
+                  "./runtime/primitives.mjs" "./runtime/primitives.mjs"
                   "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
                   "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs")) nil 2) "\n")))
           (await (writeFile (resolve directory "package.json") scope))
@@ -295,12 +302,22 @@
                 (js-call assert :deepStrictEqual (JSON/parse (js-call bytes :toString "utf8"))
                   (js-object :name "eliscript" :type "module" :private t
                     :exports (if (= path "runtime/package.json")
-                      (js-object "./runtime/math.mjs" "./math.mjs"
+                      (js-object "./runtime/array-text.mjs" "./array-text.mjs"
+                "./runtime/binding.mjs" "./binding.mjs"
+                        "./runtime/errors.mjs" "./errors.mjs"
+                        "./runtime/math.mjs" "./math.mjs"
+                        "./runtime/number-radix.mjs" "./number-radix.mjs"
                         "./runtime/prelude.mjs" "./prelude.mjs"
+                        "./runtime/primitives.mjs" "./primitives.mjs"
                         "./runtime/unicode-case.mjs" "./unicode-case.mjs"
                         "./runtime/unicode-case-data.mjs" "./unicode-case-data.mjs")
-                      (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+                      (js-object "./runtime/array-text.mjs" "./runtime/array-text.mjs"
+                "./runtime/binding.mjs" "./runtime/binding.mjs"
+                        "./runtime/errors.mjs" "./runtime/errors.mjs"
+                        "./runtime/math.mjs" "./runtime/math.mjs"
+                        "./runtime/number-radix.mjs" "./runtime/number-radix.mjs"
                         "./runtime/prelude.mjs" "./runtime/prelude.mjs"
+                        "./runtime/primitives.mjs" "./runtime/primitives.mjs"
                         "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
                         "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs"))))
                 (js-call assert :deepStrictEqual (js-call files :find (lambda (item) (= (get item :path) path)))

@@ -87,13 +87,16 @@
                  (arguments (fixtureChildArguments input deferred))
                  (projected (resolve (get fixture :directory) "initializer-source/tests/compiler-package-session.test.mjs"))
                  (source (readFileSync (resolve root file) "utf8"))
-                 (actual (readFileSync projected "utf8"))
-                 (anchor "for (const mode of ['original', 'package']) for (const target of targets) {")
-                 (at (js-call source :indexOf anchor)))
+                 (actual (readFileSync projected "utf8")))
             (js-call assert :ok (js-call arguments :includes projected))
             (js-call assert :strictEqual actual (projectCompilerRequestSuite root source))
-            (js-call assert :ok (js-call actual :includes (js-call source :slice 0 at)))
-            (js-call assert :ok (js-call actual :endsWith (js-call source :slice (+ at (js-length anchor)))))
+            ;; The maintained source now owns three mode arrays and one target
+            ;; traversal. Its complete authenticated compilation is projected;
+            ;; the independent registration test above exercises all20 pairs.
+            (js-call assert :strictEqual (js-length (js-call actual :match
+              (new globalThis.RegExp "\\bcompilerRequestModes\\(\\)" "g"))) 3)
+            (js-call assert :strictEqual (js-length (js-call actual :match
+              (new globalThis.RegExp "\\bcompilerRequestTargets\\(targets\\)" "g"))) 1)
             (js-call assert :throws (lambda () (projectCompilerRequestSuite root (str source " "))) globalThis.TypeError)
             (let* ((path (resolve (get fixture :directory) "initializer-source/tools/backends/compiler-cli.mjs"))
                    (rewritten (rewriteIndependentCLIArguments (js-array path "--help"))))

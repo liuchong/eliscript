@@ -1,0 +1,7 @@
+(module tests.fixtures.bootstrap-project-node-host
+  (import "node:process" :default process)
+  (defasync main ()
+    (let* ((host (await (funcall (js* "(specifier) => import(specifier)") (get (get process :env) :ELISCRIPT_PROJECT_HOST))))
+           (result (await (js-call host :buildProject (JSON/parse (get (get process :env) :ELISCRIPT_OPTIONS))))))
+      (js-call globalThis.console :log (JSON/stringify (js-object :digest (get result :digest) :mode (get result :mode) :report (get result :report))))))
+  (main))

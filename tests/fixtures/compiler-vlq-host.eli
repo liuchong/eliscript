@@ -1,0 +1,13 @@
+(module tests.fixtures.compiler-vlq-host
+  (import "../helpers/source-map-vlq-contract.mjs" check checkMethods)
+  (defconst load-module (js* "(specifier) => import(specifier)"))
+  (defasync run-host-main ()
+    (let ((m (await (funcall load-module (aref (get globalThis.process :argv) 2)))))
+    (check m) (checkMethods m)))
+  (defconst completion (run-host-main))
+  (js-call completion :catch (lambda (error)
+    (console/error error)
+    (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

@@ -1,0 +1,10 @@
+(module tests.fixtures.numeric-c-oracle-host
+  (defconst load-module (js* "(specifier) => import(specifier)"))
+  (defun encode (value) (if (Object/is value (js* "-0")) "-0" (funcall globalThis.String value)))
+  (defasync main ()
+    (let ((js (await (funcall load-module (aref (get globalThis.process :argv) 2))))
+          (values (js-array (- globalThis.Infinity) -7 (js* "-0") 0 0.123 9 globalThis.Infinity globalThis.NaN)))
+      (js-call globalThis.console :log (JSON/stringify (Object/fromEntries (js-call (Object/entries js) :map
+        (lambda (entry) (js-array (aref entry 0) (js-call values :map (lambda (value) (encode (funcall (aref entry 1) value))))))))))))
+  (main)
+)

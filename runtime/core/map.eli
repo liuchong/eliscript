@@ -1,2 +1,394 @@
-(module capsules.runtime.core.map
-  (js* "import {\n  MAP_CONSTRUCTOR_TOKEN,\n  MAP_NOT_FOUND,\n  MAP_STATE,\n  TRANSIENT_MAP_CONSTRUCTOR_TOKEN,\n  TRANSIENT_MAP_STATE,\n  EMPTY_BITMAP_NODE,\n  mapAssoc,\n  mapAssocTransient,\n  mapDissoc,\n  mapDissocTransient,\n  mapEntries,\n  mapFind,\n  mapHash,\n  recordInvalidTransientMapCall,\n  recordTransientMapPersistent,\n} from \"./map-internals.mjs\";\nimport {\n  VALUE_EQUAL,\n  VALUE_HASH,\n  finishHash,\n  mixHash,\n  unorderedCollectionHash,\n} from \"./value-internals.mjs\";\nimport {\n  COLLECTION_COUNT,\n  COLLECTION_EMPTY,\n  COLLECTION_CONJ,\n  COLLECTION_GET,\n  COLLECTION_ASSOC,\n  COLLECTION_CONTAINS,\n  COLLECTION_REDUCE,\n  COLLECTION_REDUCE_KV,\n  COLLECTION_DISSOC,\n  COLLECTION_SEQ,\n  isReducedValue,\n  reduceIterable,\n  readCollectionEntry,\n  sequenceView,\n  unreducedValue,\n} from \"./collection-internals.mjs\";\nimport {\n  EDITABLE_TRANSIENT,\n  TRANSIENT_ASSOC,\n  TRANSIENT_CONJ,\n  TRANSIENT_DISSOC,\n  TRANSIENT_PERSISTENT,\n} from \"./transient-internals.mjs\";\nimport {\n  METADATA_READ,\n  METADATA_WITH,\n} from \"./metadata-internals.mjs\";\nimport {\n  PERSISTENT_MAP_HAS_VALUE_KEY,\n  PERSISTENT_MAP_KIND,\n  persistentMapValueEqual,\n} from \"./persistent-kind.mjs\";\n\nconst MAP_HASH_TAG = 0x6c8e_9cf5;\nconst MAP_ENTRY_HASH_TAG = 0x3a91_72eb;\n\nfunction makeMap(count, root, metadata = null) {\n  return new PersistentHashMap(MAP_CONSTRUCTOR_TOKEN, count, root, metadata);\n}\n\nfunction emptyMapWithMetadata(metadata) {\n  return metadata === null\n    ? EMPTY_MAP\n    : makeMap(0, EMPTY_BITMAP_NODE, metadata);\n}\n\nfunction makeTransientMap(map) {\n  return new TransientHashMap(TRANSIENT_MAP_CONSTRUCTOR_TOKEN, map);\n}\n\nfunction activeTransientMapState(map) {\n  const state = map[TRANSIENT_MAP_STATE];\n  if (!state.active) {\n    recordInvalidTransientMapCall();\n    throw new TypeError(\"transient hash map is no longer editable\");\n  }\n  return state;\n}\n\nfunction pairHash(entry, hash) {\n  return finishHash(\n    mixHash(mixHash(MAP_ENTRY_HASH_TAG, hash(entry.key)), hash(entry.value)),\n    2,\n  );\n}\n\nclass TransientHashMap {\n  constructor(token, map) {\n    if (token !== TRANSIENT_MAP_CONSTRUCTOR_TOKEN ||\n        !(map instanceof PersistentHashMap)) {\n      throw new TypeError(\n        \"transient hash maps must be created from a persistent hash map\",\n      );\n    }\n    const source = map[MAP_STATE];\n    this[TRANSIENT_MAP_STATE] = {\n      active: true,\n      changed: false,\n      owner: Object.freeze({}),\n      source: map,\n      count: source.count,\n      root: source.root,\n      metadata: source.metadata,\n    };\n    Object.defineProperty(this, \"__eliscript_transient__\", {\n      enumerable: true,\n      get() {\n        throw new TypeError(\"transient hash maps cannot be serialized\");\n      },\n    });\n    Object.freeze(this);\n  }\n\n  [TRANSIENT_CONJ](entry) {\n    const [key, value] = readCollectionEntry(entry);\n    return this[TRANSIENT_ASSOC](key, value);\n  }\n\n  get(key, notFound = null) {\n    const state = activeTransientMapState(this);\n    return mapFind(state.root, mapHash(key), key, notFound);\n  }\n\n  [TRANSIENT_ASSOC](key, value) {\n    const state = activeTransientMapState(this);\n    const result = mapAssocTransient(\n      state.root,\n      state.owner,\n      mapHash(key),\n      key,\n      value,\n    );\n    if (result.changed) {\n      state.root = result.item;\n      state.count += result.added ? 1 : 0;\n      state.changed = true;\n    }\n    return this;\n  }\n\n  [TRANSIENT_DISSOC](key) {\n    const state = activeTransientMapState(this);\n    const result = mapDissocTransient(\n      state.root,\n      state.owner,\n      mapHash(key),\n      key,\n    );\n    if (result.removed) {\n      state.count -= 1;\n      state.root = state.count === 0\n        ? EMPTY_BITMAP_NODE\n        : (result.item ?? EMPTY_BITMAP_NODE);\n      state.changed = true;\n    }\n    return this;\n  }\n\n  [TRANSIENT_PERSISTENT]() {\n    const state = activeTransientMapState(this);\n    const result = !state.changed\n      ? state.source\n      : state.count === 0\n        ? emptyMapWithMetadata(state.metadata)\n        : makeMap(state.count, state.root, state.metadata);\n    state.active = false;\n    state.owner = null;\n    recordTransientMapPersistent();\n    return result;\n  }\n\n  toJSON() {\n    throw new TypeError(\"transient hash maps cannot be serialized\");\n  }\n\n  get [Symbol.toStringTag]() {\n    return \"EliscriptTransientHashMap\";\n  }\n}\n\nexport class PersistentHashMap {\n  constructor(token, count, root, metadata = null) {\n    if (token !== MAP_CONSTRUCTOR_TOKEN) {\n      throw new TypeError(\n        \"PersistentHashMap values must be created with persistentHashMap or PersistentHashMap.from\",\n      );\n    }\n    this[MAP_STATE] = Object.freeze({ count, root, metadata });\n    Object.freeze(this);\n  }\n\n  static empty() {\n    return EMPTY_MAP;\n  }\n\n  static from(entries) {\n    if (entries instanceof PersistentHashMap) {\n      return entries;\n    }\n    let result = EMPTY_MAP;\n    for (const entry of entries) {\n      const [key, value] = readCollectionEntry(entry);\n      result = result.assoc(key, value);\n    }\n    return result;\n  }\n\n  get count() {\n    return this[MAP_STATE].count;\n  }\n\n  get size() {\n    return this[MAP_STATE].count;\n  }\n\n  get(key, notFound = null) {\n    return mapFind(\n      this[MAP_STATE].root,\n      mapHash(key),\n      key,\n      notFound,\n    );\n  }\n\n  has(key) {\n    return this.get(key, MAP_NOT_FOUND) !== MAP_NOT_FOUND;\n  }\n\n  assoc(key, value) {\n    const state = this[MAP_STATE];\n    const result = mapAssoc(state.root, mapHash(key), key, value);\n    if (!result.changed) {\n      return this;\n    }\n    return makeMap(\n      state.count + (result.added ? 1 : 0),\n      result.item,\n      state.metadata,\n    );\n  }\n\n  dissoc(key) {\n    const state = this[MAP_STATE];\n    const result = mapDissoc(state.root, mapHash(key), key);\n    if (!result.removed) {\n      return this;\n    }\n    if (state.count === 1) {\n      return emptyMapWithMetadata(state.metadata);\n    }\n    return makeMap(\n      state.count - 1,\n      result.item ?? EMPTY_BITMAP_NODE,\n      state.metadata,\n    );\n  }\n\n  *entries() {\n    for (const entry of mapEntries(this[MAP_STATE].root)) {\n      yield Object.freeze([entry.key, entry.value]);\n    }\n  }\n\n  *keys() {\n    for (const entry of mapEntries(this[MAP_STATE].root)) {\n      yield entry.key;\n    }\n  }\n\n  *values() {\n    for (const entry of mapEntries(this[MAP_STATE].root)) {\n      yield entry.value;\n    }\n  }\n\n  reduce(reducer, initial) {\n    if (typeof reducer !== \"function\") {\n      throw new TypeError(\"persistent hash map reducer must be a function\");\n    }\n    if (arguments.length < 2) {\n      throw new TypeError(\"persistent hash map reduce requires an initial value\");\n    }\n    let result = initial;\n    for (const entry of mapEntries(this[MAP_STATE].root)) {\n      result = reducer(result, entry.value, entry.key, this);\n    }\n    return result;\n  }\n\n  [COLLECTION_COUNT]() {\n    return this.count;\n  }\n\n  [COLLECTION_EMPTY]() {\n    return emptyMapWithMetadata(this[MAP_STATE].metadata);\n  }\n\n  [COLLECTION_CONJ](entry) {\n    const [key, value] = readCollectionEntry(entry);\n    return this.assoc(key, value);\n  }\n\n  [COLLECTION_GET](key, notFound = null) {\n    return this.get(key, notFound);\n  }\n\n  [COLLECTION_ASSOC](key, value) {\n    return this.assoc(key, value);\n  }\n\n  [COLLECTION_CONTAINS](key) {\n    return this.has(key);\n  }\n\n  [COLLECTION_DISSOC](key) {\n    return this.dissoc(key);\n  }\n\n  [COLLECTION_SEQ]() {\n    return this.count === 0\n      ? null\n      : sequenceView(() => this.entries(), this.count);\n  }\n\n  [COLLECTION_REDUCE](reducer, ...initial) {\n    return reduceIterable(this, reducer, ...initial);\n  }\n\n  [COLLECTION_REDUCE_KV](reducer, initial) {\n    let result = initial;\n    for (const entry of mapEntries(this[MAP_STATE].root)) {\n      result = reducer(result, entry.key, entry.value);\n      if (isReducedValue(result)) return unreducedValue(result);\n    }\n    return result;\n  }\n\n  [EDITABLE_TRANSIENT]() {\n    return makeTransientMap(this);\n  }\n\n  toMap() {\n    return new Map(this.entries());\n  }\n\n  [PERSISTENT_MAP_HAS_VALUE_KEY](key) {\n    return this.has(key);\n  }\n\n  get [PERSISTENT_MAP_KIND]() {\n    return true;\n  }\n\n  [VALUE_EQUAL](other, equal) {\n    return persistentMapValueEqual(this, other, equal);\n  }\n\n  [VALUE_HASH](hash) {\n    return unorderedCollectionHash(\n      mapEntries(this[MAP_STATE].root),\n      (entry) => pairHash(entry, hash),\n      MAP_HASH_TAG,\n    );\n  }\n\n  [METADATA_READ]() {\n    return this[MAP_STATE].metadata;\n  }\n\n  [METADATA_WITH](metadata) {\n    const state = this[MAP_STATE];\n    return metadata === state.metadata\n      ? this\n      : makeMap(state.count, state.root, metadata);\n  }\n\n  [Symbol.iterator]() {\n    return this.entries();\n  }\n\n  get [Symbol.toStringTag]() {\n    return \"EliscriptPersistentHashMap\";\n  }\n}\n\nexport const EMPTY_MAP = makeMap(0, EMPTY_BITMAP_NODE);\n\nexport function persistentHashMap(...entries) {\n  return PersistentHashMap.from(entries);\n}\n\nexport function isPersistentHashMap(value) {\n  return value instanceof PersistentHashMap;\n}\n"))
+(module eliscript.runtime.core.map
+  (import "./map-internals.mjs"
+    MAP_CONSTRUCTOR_TOKEN
+    MAP_NOT_FOUND
+    MAP_STATE
+    TRANSIENT_MAP_CONSTRUCTOR_TOKEN
+    TRANSIENT_MAP_STATE
+    EMPTY_BITMAP_NODE
+    mapAssoc
+    mapAssocTransient
+    mapDissoc
+    mapDissocTransient
+    mapEntries
+    mapFind
+    mapHash
+    recordInvalidTransientMapCall
+    recordTransientMapPersistent)
+  (import "./value-internals.mjs"
+    VALUE_EQUAL
+    VALUE_HASH
+    finishHash
+    mixHash
+    unorderedCollectionHash)
+  (import "./collection-internals.mjs"
+    COLLECTION_COUNT
+    COLLECTION_EMPTY
+    COLLECTION_CONJ
+    COLLECTION_GET
+    COLLECTION_ASSOC
+    COLLECTION_CONTAINS
+    COLLECTION_REDUCE
+    COLLECTION_REDUCE_KV
+    COLLECTION_DISSOC
+    COLLECTION_SEQ
+    isReducedValue
+    reduceIterable
+    readCollectionEntry
+    sequenceView
+    unreducedValue)
+  (import "./transient-internals.mjs"
+    EDITABLE_TRANSIENT
+    TRANSIENT_ASSOC
+    TRANSIENT_CONJ
+    TRANSIENT_DISSOC
+    TRANSIENT_PERSISTENT)
+  (import "./metadata-internals.mjs"
+    METADATA_READ
+    METADATA_WITH)
+  (import "./persistent-kind.mjs"
+    PERSISTENT_MAP_HAS_VALUE_KEY
+    PERSISTENT_MAP_KIND
+    persistentMapValueEqual)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+  (defconst host-generator (js* "(create) => function* (...args) { yield* create(this, ...args); }"))
+  (defconst MAP_HASH_TAG 1821285621)
+  (defconst MAP_ENTRY_HASH_TAG 982610667)
+
+  (defun callable? (value)
+    (= (funcall typeof-value value) "function"))
+
+  (defun method (implementation name arity)
+    (let ((function (funcall
+                      (js* "(fn, name) => ({ [name](...args) { return fn(this, ...args); } })[name]")
+                      implementation
+                      name)))
+      (Object/defineProperty function "length" (js-object :value arity :configurable t))
+      function))
+
+  (defun define-method (target key name arity implementation)
+    (Object/defineProperty
+      target
+      key
+      (js-object
+        :value (method implementation name arity)
+        :writable t
+        :configurable t)))
+
+  (defun define-getter (target key name implementation)
+    (Object/defineProperty
+      target
+      key
+      (js-object
+        :get (method implementation (str "get " name) 0)
+        :configurable t)))
+
+  (defun define-generator-method (target key name arity implementation)
+    (let ((gen-fn (funcall host-generator implementation)))
+      (Object/defineProperty gen-fn "name" (js-object :value name :configurable t))
+      (Object/defineProperty gen-fn "length" (js-object :value arity :configurable t))
+      (Object/defineProperty target key
+        (js-object :value gen-fn :writable t :configurable t))))
+
+  (defun initialize-persistent-map (self token count root metadata)
+    (unless (eq token MAP_CONSTRUCTOR_TOKEN)
+      (throw (new globalThis.TypeError "PersistentHashMap values must be created with persistentHashMap or PersistentHashMap.from")))
+    (put self MAP_STATE (Object/freeze (js-object :count count :root root :metadata metadata)))
+    (Object/freeze self))
+
+  (defconst PersistentHashMap
+    (funcall (js* "(initialize) => class PersistentHashMap { constructor(token, count, root, metadata = null) { initialize(this, token, count, root, metadata); } }") initialize-persistent-map))
+
+  (defun make-map (count root &optional metadata)
+    (new PersistentHashMap
+      MAP_CONSTRUCTOR_TOKEN
+      count
+      root
+      (if (undefined? metadata) nil metadata)))
+
+  (defconst EMPTY_MAP
+    (make-map 0 EMPTY_BITMAP_NODE))
+
+  (defun empty-map-with-metadata (metadata)
+    (if (eq metadata nil)
+        EMPTY_MAP
+        (make-map 0 EMPTY_BITMAP_NODE metadata)))
+
+  (defun initialize-transient-map (self token map)
+    (unless (and (eq token TRANSIENT_MAP_CONSTRUCTOR_TOKEN) (funcall instance-of? map PersistentHashMap))
+      (throw (new globalThis.TypeError "transient hash maps must be created from a persistent hash map")))
+    (let ((source (get map MAP_STATE)))
+      (put self TRANSIENT_MAP_STATE
+        (js-object :active t :changed false :owner (Object/freeze (js-object)) :source map
+          :count (get source :count) :root (get source :root) :metadata (get source :metadata))))
+    (Object/defineProperty self "__eliscript_transient__"
+      (js-object :enumerable t :get (funcall (js* "(reject) => ({ get() { return reject(); } }).get") (lambda ()
+        (throw (new globalThis.TypeError "transient hash maps cannot be serialized"))))))
+    (Object/freeze self))
+
+  (defconst TransientHashMap
+    (funcall (js* "(initialize) => class TransientHashMap { constructor(token, map) { initialize(this, token, map); } }") initialize-transient-map))
+
+  (defun make-transient-map (map)
+    (new TransientHashMap TRANSIENT_MAP_CONSTRUCTOR_TOKEN map))
+
+  (defun active-transient-map-state (map)
+    (let ((state (aref map TRANSIENT_MAP_STATE)))
+      (unless (get state :active)
+        (recordInvalidTransientMapCall)
+        (throw (new globalThis/TypeError "transient hash map is no longer editable")))
+      state))
+
+  (defun pair-hash (entry hash)
+    (finishHash
+      (mixHash (mixHash MAP_ENTRY_HASH_TAG (funcall hash (get entry :key)))
+               (funcall hash (get entry :value)))
+      2))
+
+  (let ((tproto (get TransientHashMap :prototype)))
+    (define-method tproto TRANSIENT_CONJ "[eliscript.transient.conj]" 1
+      (lambda (self entry)
+        (let ((pair (readCollectionEntry entry)))
+          (js-call (aref self TRANSIENT_ASSOC) :call self (get pair 0) (get pair 1)))))
+    (define-method tproto "get" "get" 1
+      (lambda (self key &rest args)
+        (let ((not-found (if (= (js-length args) 0) nil (get args 0)))
+              (state (active-transient-map-state self)))
+          (mapFind (get state :root) (mapHash key) key not-found))))
+    (define-method tproto TRANSIENT_ASSOC "[eliscript.transient.assoc]" 2
+      (lambda (self key value)
+        (let* ((state (active-transient-map-state self))
+               (result (mapAssocTransient (get state :root) (get state :owner) (mapHash key) key value)))
+          (when (get result :changed)
+            (put state "root" (get result :item))
+            (put state "count" (+ (get state :count) (if (get result :added) 1 0)))
+            (put state "changed" t))
+          self)))
+    (define-method tproto TRANSIENT_DISSOC "[eliscript.transient.dissoc]" 1
+      (lambda (self key)
+        (let* ((state (active-transient-map-state self))
+               (result (mapDissocTransient (get state :root) (get state :owner) (mapHash key) key)))
+          (when (get result :removed)
+            (put state "count" (- (get state :count) 1))
+            (put state "root"
+                  (if (= (get state :count) 0)
+                      EMPTY_BITMAP_NODE
+                      (let ((item (get result :item)))
+                        (if (nil? item) EMPTY_BITMAP_NODE item))))
+            (put state "changed" t))
+          self)))
+    (define-method tproto TRANSIENT_PERSISTENT "[eliscript.transient.persistent]" 0
+      (lambda (self)
+        (let* ((state (active-transient-map-state self))
+               (result (cond
+                         ((not (get state :changed)) (get state :source))
+                         ((= (get state :count) 0) (empty-map-with-metadata (get state :metadata)))
+                         (t (make-map (get state :count) (get state :root) (get state :metadata))))))
+          (put state "active" false)
+          (put state "owner" nil)
+          (recordTransientMapPersistent)
+          result)))
+    (define-method tproto "toJSON" "toJSON" 0
+      (lambda (_self)
+        (throw (new globalThis/TypeError "transient hash maps cannot be serialized"))))
+    (define-getter tproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptTransientHashMap")))
+
+  (defun for-each-iterable (iterable callback)
+    (let ((iterator-method (if (nil? iterable)
+                               undefined
+                               (aref iterable (get globalThis/Symbol :iterator)))))
+      (unless (callable? iterator-method)
+        (throw (new globalThis/TypeError "value is not iterable")))
+      (let ((iterator (js-call iterator-method :call iterable))
+            (done false))
+        (try
+          (while (not done)
+            (let ((step (js-call iterator :next)))
+              (if (funcall globalThis/Boolean (get step :done))
+                  (setq done t)
+                  (funcall callback (get step :value)))))
+          (finally
+            (when (and (not done) (callable? (get iterator :return)))
+              (js-call iterator :return)))))))
+
+  (defun mapped-entries-iterator (root transform)
+    (let* ((source (mapEntries root))
+           (iter (js-call (aref source (get globalThis/Symbol :iterator)) :call source)))
+      (let ((iterator
+              (js-object
+                :next (method
+                        (lambda (_self)
+                          (let ((step (js-call iter :next)))
+                            (if (funcall globalThis/Boolean (get step :done))
+                                (js-object :value undefined :done t)
+                                (js-object :value (funcall transform (get step :value)) :done false))))
+                        "next"
+                        0))))
+        (put iterator (get globalThis/Symbol :iterator)
+              (method (lambda (self) self) "[Symbol.iterator]" 0))
+        iterator)))
+
+  (let ((proto (get PersistentHashMap :prototype)))
+    (define-method PersistentHashMap "empty" "empty" 0
+      (lambda (_self) EMPTY_MAP))
+    (define-method PersistentHashMap "from" "from" 1
+      (lambda (_self entries)
+        (if (funcall instance-of? entries PersistentHashMap)
+            entries
+            (let ((result EMPTY_MAP))
+              (for-each-iterable entries
+                (lambda (entry)
+                  (let ((pair (readCollectionEntry entry)))
+                    (setq result (js-call result :assoc (get pair 0) (get pair 1))))))
+              result))))
+    (define-getter proto "count" "count"
+      (lambda (self) (get (aref self MAP_STATE) :count)))
+    (define-getter proto "size" "size"
+      (lambda (self) (get (aref self MAP_STATE) :count)))
+    (define-method proto "get" "get" 1
+      (lambda (self key &rest args)
+        (let ((not-found (if (= (js-length args) 0) nil (get args 0))))
+          (mapFind (get (aref self MAP_STATE) :root) (mapHash key) key not-found))))
+    (define-method proto "has" "has" 1
+      (lambda (self key)
+        (not (eq (js-call self :get key MAP_NOT_FOUND) MAP_NOT_FOUND))))
+    (define-method proto "assoc" "assoc" 2
+      (lambda (self key value)
+        (let* ((state (aref self MAP_STATE))
+               (result (mapAssoc (get state :root) (mapHash key) key value)))
+          (if (not (get result :changed))
+              self
+              (make-map
+                (+ (get state :count) (if (get result :added) 1 0))
+                (get result :item)
+                (get state :metadata))))))
+    (define-method proto "dissoc" "dissoc" 1
+      (lambda (self key)
+        (let* ((state (aref self MAP_STATE))
+               (result (mapDissoc (get state :root) (mapHash key) key)))
+          (cond
+            ((not (get result :removed)) self)
+            ((= (get state :count) 1) (empty-map-with-metadata (get state :metadata)))
+            (t
+             (let ((item (get result :item)))
+               (make-map
+                 (- (get state :count) 1)
+                 (if (nil? item) EMPTY_BITMAP_NODE item)
+                 (get state :metadata))))))))
+    (define-generator-method proto "entries" "entries" 0
+      (lambda (self)
+        (mapped-entries-iterator
+          (get (aref self MAP_STATE) :root)
+          (lambda (entry) (Object/freeze (js-array (get entry :key) (get entry :value)))))))
+    (define-generator-method proto "keys" "keys" 0
+      (lambda (self)
+        (mapped-entries-iterator
+          (get (aref self MAP_STATE) :root)
+          (lambda (entry) (get entry :key)))))
+    (define-generator-method proto "values" "values" 0
+      (lambda (self)
+        (mapped-entries-iterator
+          (get (aref self MAP_STATE) :root)
+          (lambda (entry) (get entry :value)))))
+    (define-method proto "reduce" "reduce" 2
+      (lambda (self &rest args)
+        (let ((reducer (get args 0)))
+          (unless (callable? reducer)
+            (throw (new globalThis/TypeError "persistent hash map reducer must be a function")))
+          (when (< (js-length args) 2)
+            (throw (new globalThis/TypeError "persistent hash map reduce requires an initial value")))
+          (let ((result (get args 1)))
+            (for-each-iterable (mapEntries (get (aref self MAP_STATE) :root))
+              (lambda (entry)
+                (setq result (funcall reducer result (get entry :value) (get entry :key) self))))
+            result))))
+    (define-method proto COLLECTION_COUNT "[eliscript.collection.count]" 0
+      (lambda (self) (get self :count)))
+    (define-method proto COLLECTION_EMPTY "[eliscript.collection.empty]" 0
+      (lambda (self) (empty-map-with-metadata (get (aref self MAP_STATE) :metadata))))
+    (define-method proto COLLECTION_CONJ "[eliscript.collection.conj]" 1
+      (lambda (self entry)
+        (let ((pair (readCollectionEntry entry)))
+          (js-call self :assoc (get pair 0) (get pair 1)))))
+    (define-method proto COLLECTION_GET "[eliscript.collection.get]" 1
+      (lambda (self key &rest args)
+        (let ((not-found (if (= (js-length args) 0) nil (get args 0))))
+          (js-call self :get key not-found))))
+    (define-method proto COLLECTION_ASSOC "[eliscript.collection.assoc]" 2
+      (lambda (self key value) (js-call self :assoc key value)))
+    (define-method proto COLLECTION_CONTAINS "[eliscript.collection.contains]" 1
+      (lambda (self key) (js-call self :has key)))
+    (define-method proto COLLECTION_DISSOC "[eliscript.collection.dissoc]" 1
+      (lambda (self key) (js-call self :dissoc key)))
+    (define-method proto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+      (lambda (self)
+        (if (= (get self :count) 0)
+            nil
+            (sequenceView (lambda () (js-call self :entries)) (get self :count)))))
+    (define-method proto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
+      (lambda (self reducer &rest initial)
+        (apply reduceIterable self reducer initial)))
+    (define-method proto COLLECTION_REDUCE_KV "[eliscript.collection.reduceKv]" 2
+      (lambda (self reducer initial)
+        (let* ((entries (mapEntries (get (aref self MAP_STATE) :root)))
+               (iter (js-call (aref entries (get globalThis/Symbol :iterator)) :call entries))
+               (result initial)
+               (done false))
+          (try
+            (while (not done)
+              (let ((step (js-call iter :next)))
+                (if (funcall globalThis/Boolean (get step :done))
+                    (setq done t)
+                    (let ((entry (get step :value)))
+                      (setq result (funcall reducer result (get entry :key) (get entry :value)))
+                      (when (isReducedValue result)
+                        (setq result (unreducedValue result)
+                              done t))))))
+            (finally
+              (when (and (not done) (callable? (get iter :return)))
+                (js-call iter :return))))
+          result)))
+    (define-method proto EDITABLE_TRANSIENT "[eliscript.transient.editable]" 0
+      (lambda (self) (make-transient-map self)))
+    (define-method proto "toMap" "toMap" 0
+      (lambda (self) (new globalThis/Map (js-call self :entries))))
+    (define-method proto PERSISTENT_MAP_HAS_VALUE_KEY "[eliscript.persistent-map.has-value-key]" 1
+      (lambda (self key) (js-call self :has key)))
+    (define-getter proto PERSISTENT_MAP_KIND "[eliscript.persistent-map.kind]"
+      (lambda (_self) t))
+    (define-method proto VALUE_EQUAL "[eliscript.value.equal]" 2
+      (lambda (self other equal)
+        (persistentMapValueEqual self other equal)))
+    (define-method proto VALUE_HASH "[eliscript.value.hash]" 1
+      (lambda (self hash)
+        (unorderedCollectionHash
+          (mapEntries (get (aref self MAP_STATE) :root))
+          (lambda (entry) (pair-hash entry hash))
+          MAP_HASH_TAG)))
+    (define-method proto METADATA_READ "[eliscript.metadata.read]" 0
+      (lambda (self) (get (aref self MAP_STATE) :metadata)))
+    (define-method proto METADATA_WITH "[eliscript.metadata.with]" 1
+      (lambda (self metadata)
+        (let ((state (aref self MAP_STATE)))
+          (if (eq metadata (get state :metadata))
+              self
+              (make-map (get state :count) (get state :root) metadata)))))
+    (define-method proto (get globalThis/Symbol :iterator) "[Symbol.iterator]" 0
+      (lambda (self) (js-call self :entries)))
+    (define-getter proto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptPersistentHashMap")))
+
+  (defun persistentHashMap (&rest entries)
+    (js-call PersistentHashMap :from entries))
+
+  (defun isPersistentHashMap (value)
+    (funcall instance-of? value PersistentHashMap))
+
+  (export
+    PersistentHashMap
+    EMPTY_MAP
+    persistentHashMap
+    isPersistentHashMap))

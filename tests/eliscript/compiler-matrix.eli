@@ -374,7 +374,7 @@
       (await (writeFile (resolve directory "bootstrap/runtime/memory.eli") "; unit fixture runtime\n"))
       ;; Keep every real runtime source dependency in the isolated gate fixture.
       (await (mkdir (resolve directory "runtime") (js-object :recursive t)))
-      (let ((files (js-array "runtime/math.eli" "runtime/prelude.eli" "runtime/unicode-case.eli" "runtime/unicode-case-data.eli")) (index 0))
+      (let ((files (js-array "runtime/array-text.eli" "runtime/errors.eli" "runtime/math.eli" "runtime/number-radix.eli" "runtime/prelude.eli" "runtime/primitives.eli" "runtime/unicode-case.eli" "runtime/unicode-case-data.eli")) (index 0))
         (while (< index (js-length files))
           (let* ((file (aref files index)) (bytes (await (readFile (resolve root file)))))
             (await (writeFile (resolve directory file) bytes))

@@ -9,9 +9,11 @@
     (async ()
       (let* ((root (resolve ".")) (source (await (readFile (resolve root "runtime/array-text.mjs") "utf8")))
              (url (get (pathToFileURL (resolve root "runtime/number-radix.mjs")) :href))
+             (errors-url (get (pathToFileURL (resolve root "runtime/errors.mjs")) :href))
              (output (arrayTextMeasuredSource root source)))
         (js-call assert :strictEqual
-          (js-call output :replace (JSON/stringify url) "'./number-radix.mjs'") source)
+          (js-call (js-call output :replace (JSON/stringify url) (JSON/stringify "./number-radix.mjs"))
+            :replace (JSON/stringify errors-url) (JSON/stringify "eliscript/runtime/errors.mjs")) source)
         (js-call assert :ok (> (js-length (await (readFile (resolve root "runtime/number-radix.mjs")))) 0))
         (js-call assert :throws (lambda () (arrayTextMeasuredSource root (str source "\n"))) globalThis.TypeError)
         (js-call assert :throws (lambda ()

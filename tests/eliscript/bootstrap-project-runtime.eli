@@ -13,7 +13,7 @@
   (import "../tools/backends/build.mjs" root)
   (import "../tools/backends/compiler-matrix.mjs" loadCompilerMatrixCorpus)
 
-  (defconst capsules (js-array "math" "prelude" "unicode-case" "unicode-case-data"))
+  (defconst capsules (js-array "array-text" "binding" "errors" "math" "number-radix" "prelude" "primitives" "unicode-case" "unicode-case-data"))
   (defun digest (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
   (defun deployment-temp-root ()
     ;; These cases exercise deployment into a consumer outside the provider
@@ -67,13 +67,18 @@
       (js-call assert :strictEqual (get scope :type) "module")
       (js-call assert :strictEqual (get scope :private) t)
       (js-call assert :deepStrictEqual (get scope :exports)
-        (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+        (js-object "./runtime/array-text.mjs" "./runtime/array-text.mjs"
+                "./runtime/binding.mjs" "./runtime/binding.mjs"
+          "./runtime/errors.mjs" "./runtime/errors.mjs"
+          "./runtime/math.mjs" "./runtime/math.mjs"
+          "./runtime/number-radix.mjs" "./runtime/number-radix.mjs"
           "./runtime/prelude.mjs" "./runtime/prelude.mjs"
+          "./runtime/primitives.mjs" "./runtime/primitives.mjs"
           "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
           "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs"))
-      (js-call assert :strictEqual (js-length (get metadata :capsules)) 4)
+      (js-call assert :strictEqual (js-length (get metadata :capsules)) 9)
       (let ((index 0))
-        (while (< index 3)
+        (while (< index (js-length capsules))
           (let* ((name (aref capsules index)) (record (aref (get metadata :capsules) index))
                  (source-path (str "runtime/" name ".eli"))
                  (module-path (str "runtime/" name ".mjs")) (map-path (str module-path ".map"))
@@ -132,7 +137,7 @@
                    "bootstrap/host/project-cli-ground.mjs" "tools/project/project-cli.eli")))
             (js-call assert :ok (> (js-length records) 0))
             (js-call assert :strictEqual (digest (await (readFile (resolve root "bootstrap/host/project-cli-ground.mjs"))))
-              "79980b2a6e38e4ab9daca31b04cb366bd749b66e3b384fbd04e696ddc465cd82")
+              "cbaaf12e9aa56c696e555d2cd101c17ac8c3177046c513d0fbe8655a10f916d2")
             (js-call capsules :forEach (lambda (name)
               (js-call files :push (str "runtime/" name ".eli") (str "runtime/" name ".mjs") (str "runtime/" name ".mjs.map"))))
             (let ((index 0))

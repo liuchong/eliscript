@@ -1,0 +1,25 @@
+(module tests.helpers.wasm-managed-tables-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:process" :default process)
+
+  (defun run-table-pipeline-check (wasm-path)
+    (let ((mod (new WebAssembly.Module (readFileSync wasm-path))))
+      (js-call assert :deepEqual (WebAssembly.Module/imports mod) (js-array))
+      (let* ((inst (new WebAssembly.Instance mod))
+             (e (get inst :exports))
+             (h (funcall (get e "heap-new") 96 8192 8192)))
+        (funcall (get e "heap-auto") h 1)
+        (let ((out (unsigned-bit-shift-right (funcall (get e "table-pressure") h 1000) 0)))
+          (funcall assert (> out 0))
+          (js-call assert :equal (funcall (get e "value-table-size") h out) 32)
+          (js-call assert :equal (funcall (get e "frame-depth") h) 0)
+          (funcall assert (>= (funcall (get e "heap-collections") h) 1000))
+          (funcall (get e "heap-release") h out)
+          (funcall (get e "heap-collect") h)
+          (js-call assert :equal (funcall (get e "heap-live") h) 0)))))
+
+  (when (= (aref (get process :argv) 2) "--run-node-check")
+    (run-table-pipeline-check (aref (get process :argv) 3)))
+
+  (export run-table-pipeline-check))

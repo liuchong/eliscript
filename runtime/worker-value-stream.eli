@@ -1,2 +1,922 @@
-(module capsules.runtime.worker-value-stream
-  (js* "import { setImmediate as yieldToEventLoop } from \"node:timers/promises\";\n\nimport {\n  eliscriptSymbol,\n  isEliscriptSymbol,\n  isKeyword,\n  keyword,\n} from \"./core/identifier.mjs\";\nimport { EMPTY_LIST, isPersistentList } from \"./core/list.mjs\";\nimport {\n  isPersistentHashMap,\n  persistentHashMap,\n} from \"./core/map.mjs\";\nimport { meta, withMeta } from \"./core/metadata.mjs\";\nimport {\n  isPersistentHashSet,\n  persistentHashSet,\n} from \"./core/set.mjs\";\nimport {\n  assocBang,\n  conjBang,\n  persistentBang,\n  transient,\n} from \"./core/transient.mjs\";\nimport {\n  isPersistentVector,\n  persistentVector,\n} from \"./core/vector.mjs\";\n\nexport const workerValueFraming = \"eliscript-value-chunks-v1\";\n\nexport const workerValueStreamLimits = Object.freeze({\n  maxDepth: 64,\n  maxNodes: 8_000_000,\n  maxCollectionLength: 4_000_000,\n  maxStringUnits: 268_435_456,\n  maxTotalStringUnits: 536_870_912,\n  maxChunkBytes: 256 * 1024,\n  maxEventsPerChunk: 512,\n  maxTextPartUnits: 8_192,\n});\n\nconst SPECIAL_NUMBERS = new Map([\n  [\"nan\", Number.NaN],\n  [\"positive-infinity\", Number.POSITIVE_INFINITY],\n  [\"negative-infinity\", Number.NEGATIVE_INFINITY],\n  [\"negative-zero\", -0],\n]);\n\nexport class WorkerValueStreamError extends TypeError {\n  constructor(code, message, path = \"$\") {\n    super(`${message} at ${path}`);\n    this.name = \"WorkerValueStreamError\";\n    this.code = code;\n    this.path = path;\n  }\n}\n\nfunction normalizedLimits(options = {}) {\n  const limits = { ...workerValueStreamLimits, ...options };\n  for (const name of Object.keys(workerValueStreamLimits)) {\n    if (!Number.isSafeInteger(limits[name]) || limits[name] < 1) {\n      throw new TypeError(`${name} must be a positive safe integer`);\n    }\n  }\n  if (limits.maxTextPartUnits < 2) {\n    throw new TypeError(\"maxTextPartUnits must be at least 2\");\n  }\n  if (limits.maxTextPartUnits > limits.maxStringUnits) {\n    throw new TypeError(\"maxTextPartUnits cannot exceed maxStringUnits\");\n  }\n  return limits;\n}\n\nfunction createState(mode, options) {\n  return {\n    active: new WeakSet(),\n    limits: normalizedLimits(options),\n    mode,\n    nodes: 0,\n    stringUnits: 0,\n  };\n}\n\nfunction streamError(state, suffix, message, path) {\n  throw new WorkerValueStreamError(\n    `value-stream-${state.mode}-${suffix}`,\n    message,\n    path,\n  );\n}\n\nfunction checkAbort(signal, path) {\n  if (signal?.aborted) {\n    throw new WorkerValueStreamError(\n      \"value-stream-cancelled\",\n      \"value stream traversal was cancelled\",\n      path,\n    );\n  }\n}\n\nfunction visit(state, depth, path) {\n  state.nodes += 1;\n  if (state.nodes > state.limits.maxNodes) {\n    streamError(\n      state,\n      \"limit\",\n      `value stream exceeds ${state.limits.maxNodes} nodes`,\n      path,\n    );\n  }\n  if (depth > state.limits.maxDepth) {\n    streamError(\n      state,\n      \"limit\",\n      `value stream exceeds depth ${state.limits.maxDepth}`,\n      path,\n    );\n  }\n}\n\nfunction collectionLength(state, length, path) {\n  if (!Number.isSafeInteger(length) || length < 0) {\n    streamError(state, \"invalid\", \"collection length must be a safe integer\", path);\n  }\n  if (length > state.limits.maxCollectionLength) {\n    streamError(\n      state,\n      \"limit\",\n      `collection exceeds ${state.limits.maxCollectionLength} values`,\n      path,\n    );\n  }\n}\n\nfunction stringLength(state, length, path) {\n  if (!Number.isSafeInteger(length) || length < 0) {\n    streamError(state, \"invalid\", \"string length must be a safe integer\", path);\n  }\n  if (length > state.limits.maxStringUnits) {\n    streamError(\n      state,\n      \"limit\",\n      `string exceeds ${state.limits.maxStringUnits} UTF-16 units`,\n      path,\n    );\n  }\n  state.stringUnits += length;\n  if (state.stringUnits > state.limits.maxTotalStringUnits) {\n    streamError(\n      state,\n      \"limit\",\n      `value stream exceeds ${state.limits.maxTotalStringUnits} string units`,\n      path,\n    );\n  }\n}\n\nfunction activate(state, value, path) {\n  if (state.active.has(value)) {\n    streamError(state, \"cycle\", \"cyclic values are not transportable\", path);\n  }\n  state.active.add(value);\n}\n\nfunction textPartEnd(value, start, maximumUnits) {\n  let end = Math.min(value.length, start + maximumUnits);\n  if (end < value.length && end > start) {\n    const previous = value.charCodeAt(end - 1);\n    const next = value.charCodeAt(end);\n    if (previous >= 0xd800 && previous <= 0xdbff &&\n        next >= 0xdc00 && next <= 0xdfff) {\n      end -= 1;\n    }\n  }\n  return end === start ? Math.min(value.length, start + 1) : end;\n}\n\nasync function* encodeText(value, state, path, signal) {\n  stringLength(state, value.length, path);\n  yield [\"text\", value.length];\n  for (let start = 0; start < value.length;) {\n    checkAbort(signal, path);\n    const end = textPartEnd(value, start, state.limits.maxTextPartUnits);\n    yield [\"text-part\", value.slice(start, end)];\n    start = end;\n  }\n}\n\nfunction plainObjectEntries(value, state, path) {\n  const prototype = Object.getPrototypeOf(value);\n  if (prototype !== Object.prototype && prototype !== null) {\n    streamError(\n      state,\n      \"unsupported\",\n      `unsupported object ${Object.prototype.toString.call(value)}`,\n      path,\n    );\n  }\n  const symbolKeys = Object.getOwnPropertySymbols(value).filter(\n    (key) => Object.prototype.propertyIsEnumerable.call(value, key),\n  );\n  if (symbolKeys.length > 0) {\n    streamError(\n      state,\n      \"unsupported\",\n      \"host objects with enumerable Symbol keys are not transportable\",\n      path,\n    );\n  }\n  const descriptors = Object.getOwnPropertyDescriptors(value);\n  const keys = Object.keys(descriptors).filter((key) => descriptors[key].enumerable);\n  collectionLength(state, keys.length, path);\n  return keys.map((key) => {\n    const descriptor = descriptors[key];\n    if (!(\"value\" in descriptor)) {\n      streamError(\n        state,\n        \"unsupported\",\n        \"host object accessors are not transportable\",\n        `${path}.${key}`,\n      );\n    }\n    return [key, descriptor.value];\n  });\n}\n\nasync function* encodeValue(value, state, depth, path, signal) {\n  checkAbort(signal, path);\n  visit(state, depth, path);\n  if (value === null || typeof value === \"boolean\") {\n    yield [\"value\", value];\n    return;\n  }\n  if (typeof value === \"string\") {\n    yield* encodeText(value, state, path, signal);\n    return;\n  }\n  if (value === undefined) {\n    yield [\"undefined\"];\n    return;\n  }\n  if (typeof value === \"number\") {\n    if (Number.isNaN(value)) yield [\"number\", \"nan\"];\n    else if (value === Number.POSITIVE_INFINITY) {\n      yield [\"number\", \"positive-infinity\"];\n    } else if (value === Number.NEGATIVE_INFINITY) {\n      yield [\"number\", \"negative-infinity\"];\n    } else if (Object.is(value, -0)) yield [\"number\", \"negative-zero\"];\n    else yield [\"value\", value];\n    return;\n  }\n  if (isKeyword(value)) {\n    yield [\"open\", \"keyword\", 2];\n    yield* encodeValue(value.namespace, state, depth + 1, `${path}.namespace`, signal);\n    yield* encodeValue(value.name, state, depth + 1, `${path}.name`, signal);\n    return;\n  }\n  if (isEliscriptSymbol(value)) {\n    activate(state, value, path);\n    try {\n      yield [\"open\", \"symbol\", 3];\n      yield* encodeValue(value.namespace, state, depth + 1, `${path}.namespace`, signal);\n      yield* encodeValue(value.name, state, depth + 1, `${path}.name`, signal);\n      yield* encodeValue(meta(value), state, depth + 1, `${path}.metadata`, signal);\n    } finally {\n      state.active.delete(value);\n    }\n    return;\n  }\n  if (isPersistentList(value) || isPersistentVector(value)) {\n    activate(state, value, path);\n    try {\n      collectionLength(state, value.count, path);\n      yield [\"open\", isPersistentList(value) ? \"list\" : \"vector\", value.count];\n      let index = 0;\n      for (const item of value) {\n        yield* encodeValue(item, state, depth + 1, `${path}[${index}]`, signal);\n        index += 1;\n      }\n      yield* encodeValue(meta(value), state, depth + 1, `${path}.metadata`, signal);\n    } finally {\n      state.active.delete(value);\n    }\n    return;\n  }\n  if (isPersistentHashMap(value)) {\n    activate(state, value, path);\n    try {\n      collectionLength(state, value.count, path);\n      yield [\"open\", \"map\", value.count];\n      let index = 0;\n      for (const [key, item] of value) {\n        yield* encodeValue(key, state, depth + 1, `${path}.keys[${index}]`, signal);\n        yield* encodeValue(item, state, depth + 1, `${path}.values[${index}]`, signal);\n        index += 1;\n      }\n      yield* encodeValue(meta(value), state, depth + 1, `${path}.metadata`, signal);\n    } finally {\n      state.active.delete(value);\n    }\n    return;\n  }\n  if (isPersistentHashSet(value)) {\n    activate(state, value, path);\n    try {\n      collectionLength(state, value.count, path);\n      yield [\"open\", \"set\", value.count];\n      let index = 0;\n      for (const item of value) {\n        yield* encodeValue(item, state, depth + 1, `${path}[${index}]`, signal);\n        index += 1;\n      }\n      yield* encodeValue(meta(value), state, depth + 1, `${path}.metadata`, signal);\n    } finally {\n      state.active.delete(value);\n    }\n    return;\n  }\n  if (Array.isArray(value)) {\n    activate(state, value, path);\n    try {\n      collectionLength(state, value.length, path);\n      yield [\"open\", \"array\", value.length];\n      for (let index = 0; index < value.length; index += 1) {\n        yield* encodeValue(value[index], state, depth + 1, `${path}[${index}]`, signal);\n      }\n    } finally {\n      state.active.delete(value);\n    }\n    return;\n  }\n  if (typeof value === \"object\") {\n    activate(state, value, path);\n    try {\n      const entries = plainObjectEntries(value, state, path);\n      yield [\"open\", \"object\", entries.length];\n      for (let index = 0; index < entries.length; index += 1) {\n        const [key, item] = entries[index];\n        yield* encodeValue(key, state, depth + 1, `${path}.keys[${index}]`, signal);\n        yield* encodeValue(item, state, depth + 1, `${path}.${key}`, signal);\n      }\n    } finally {\n      state.active.delete(value);\n    }\n    return;\n  }\n  streamError(state, \"unsupported\", `unsupported ${typeof value} value`, path);\n}\n\nexport async function* encodeWorkerValueEvents(value, options = {}) {\n  const { signal, ...limitOptions } = options;\n  const state = createState(\"encoding\", limitOptions);\n  yield* encodeValue(value, state, 0, \"$\", signal);\n}\n\nfunction eventBytes(event) {\n  return Buffer.byteLength(JSON.stringify(event), \"utf8\");\n}\n\nexport async function* encodeWorkerValueChunks(value, options = {}) {\n  const limits = normalizedLimits(options);\n  let events = [];\n  let bytes = 2;\n  for await (const event of encodeWorkerValueEvents(value, options)) {\n    const size = eventBytes(event);\n    if (size + 2 > limits.maxChunkBytes) {\n      throw new WorkerValueStreamError(\n        \"value-stream-encoding-limit\",\n        `one value event exceeds ${limits.maxChunkBytes} bytes`,\n      );\n    }\n    const added = size + (events.length === 0 ? 0 : 1);\n    if (events.length > 0 &&\n        (bytes + added > limits.maxChunkBytes ||\n         events.length >= limits.maxEventsPerChunk)) {\n      yield events;\n      await yieldToEventLoop();\n      events = [];\n      bytes = 2;\n    }\n    events.push(event);\n    bytes += size + (events.length === 1 ? 0 : 1);\n  }\n  if (events.length > 0) yield events;\n}\n\nfunction requireEvent(event, length, tag, path) {\n  if (!Array.isArray(event) || event.length !== length || event[0] !== tag) {\n    throw new WorkerValueStreamError(\n      \"value-stream-decoding-invalid\",\n      `${tag} event must contain ${length} fields`,\n      path,\n    );\n  }\n}\n\nfunction requireName(value, label, path, nullable = false) {\n  if (nullable && value === null) return null;\n  if (typeof value !== \"string\" || value.length === 0) {\n    throw new WorkerValueStreamError(\n      \"value-stream-decoding-invalid\",\n      `${label} must be a non-empty string${nullable ? \" or null\" : \"\"}`,\n      path,\n    );\n  }\n  return value;\n}\n\nfunction metadata(value, path) {\n  if (value === null) return null;\n  if (!isPersistentHashMap(value)) {\n    throw new WorkerValueStreamError(\n      \"value-stream-decoding-invalid\",\n      \"metadata must decode to a persistent Map\",\n      path,\n    );\n  }\n  return value;\n}\n\nfunction childPath(frame) {\n  const index = frame.received;\n  switch (frame.tag) {\n    case \"keyword\":\n    case \"symbol\":\n      return `${frame.path}.${[\"namespace\", \"name\", \"metadata\"][index]}`;\n    case \"list\":\n    case \"vector\":\n    case \"set\":\n      return index < frame.length\n        ? `${frame.path}[${index}]`\n        : `${frame.path}.metadata`;\n    case \"array\":\n      return `${frame.path}[${index}]`;\n    case \"map\":\n      if (index === frame.length * 2) return `${frame.path}.metadata`;\n      return index % 2 === 0\n        ? `${frame.path}.keys[${index / 2}]`\n        : `${frame.path}.values[${(index - 1) / 2}]`;\n    case \"object\":\n      return index % 2 === 0\n        ? `${frame.path}.keys[${index / 2}]`\n        : `${frame.path}.values[${(index - 1) / 2}]`;\n    default:\n      return frame.path;\n  }\n}\n\nfunction makeFrame(tag, length, path, state) {\n  if (typeof tag !== \"string\" || !Number.isSafeInteger(length) || length < 0) {\n    streamError(state, \"invalid\", \"open event tag and length are invalid\", path);\n  }\n  if (tag === \"keyword\" && length !== 2) {\n    streamError(state, \"invalid\", \"keyword open event must declare arity 2\", path);\n  }\n  if (tag === \"symbol\" && length !== 3) {\n    streamError(state, \"invalid\", \"symbol open event must declare arity 3\", path);\n  }\n  if (![\"keyword\", \"symbol\", \"list\", \"vector\", \"map\", \"set\", \"array\", \"object\"].includes(tag)) {\n    streamError(state, \"invalid\", `unknown open event tag ${tag}`, path);\n  }\n  if (![\"keyword\", \"symbol\"].includes(tag)) collectionLength(state, length, path);\n  const expected = tag === \"keyword\" || tag === \"symbol\"\n    ? length\n    : tag === \"map\" || tag === \"object\"\n      ? length * 2 + (tag === \"map\" ? 1 : 0)\n      : length + ([\"list\", \"vector\", \"set\"].includes(tag) ? 1 : 0);\n  const frame = { tag, length, path, expected, received: 0 };\n  if ([\"keyword\", \"symbol\"].includes(tag)) frame.values = [];\n  else if (tag === \"list\" || tag === \"array\") frame.values = [];\n  else if (tag === \"vector\") frame.builder = transient(persistentVector());\n  else if (tag === \"map\") frame.builder = transient(persistentHashMap());\n  else if (tag === \"set\") frame.builder = transient(persistentHashSet());\n  else if (tag === \"object\") {\n    frame.value = {};\n    frame.keys = new Set();\n  }\n  return frame;\n}\n\nfunction consumeFrame(frame, value) {\n  const index = frame.received;\n  switch (frame.tag) {\n    case \"keyword\":\n    case \"symbol\":\n      frame.values.push(value);\n      break;\n    case \"list\":\n    case \"array\":\n      if (index < frame.length) frame.values.push(value);\n      else frame.metadata = value;\n      break;\n    case \"vector\":\n      if (index < frame.length) frame.builder = conjBang(frame.builder, value);\n      else frame.metadata = value;\n      break;\n    case \"map\":\n      if (index === frame.length * 2) frame.metadata = value;\n      else if (index % 2 === 0) frame.key = value;\n      else frame.builder = assocBang(frame.builder, frame.key, value);\n      break;\n    case \"set\":\n      if (index < frame.length) frame.builder = conjBang(frame.builder, value);\n      else frame.metadata = value;\n      break;\n    case \"object\":\n      if (index % 2 === 0) {\n        const key = requireName(value, \"object key\", childPath(frame));\n        if (frame.keys.has(key)) {\n          throw new WorkerValueStreamError(\n            \"value-stream-decoding-invalid\",\n            `object contains duplicate key ${key}`,\n            childPath(frame),\n          );\n        }\n        frame.keys.add(key);\n        frame.key = key;\n      } else {\n        Object.defineProperty(frame.value, frame.key, {\n          configurable: true,\n          enumerable: true,\n          value,\n          writable: true,\n        });\n      }\n      break;\n  }\n  frame.received += 1;\n}\n\nfunction finalizeFrame(frame) {\n  switch (frame.tag) {\n    case \"keyword\": {\n      const namespace = requireName(\n        frame.values[0],\n        \"keyword namespace\",\n        `${frame.path}.namespace`,\n        true,\n      );\n      const name = requireName(frame.values[1], \"keyword name\", `${frame.path}.name`);\n      return namespace === null ? keyword(name) : keyword(namespace, name);\n    }\n    case \"symbol\": {\n      const namespace = requireName(\n        frame.values[0],\n        \"symbol namespace\",\n        `${frame.path}.namespace`,\n        true,\n      );\n      const name = requireName(frame.values[1], \"symbol name\", `${frame.path}.name`);\n      const result = namespace === null\n        ? eliscriptSymbol(name)\n        : eliscriptSymbol(namespace, name);\n      const valueMetadata = metadata(frame.values[2], `${frame.path}.metadata`);\n      return valueMetadata === null ? result : withMeta(result, valueMetadata);\n    }\n    case \"list\": {\n      let result = EMPTY_LIST;\n      for (let index = frame.values.length - 1; index >= 0; index -= 1) {\n        result = result.conj(frame.values[index]);\n      }\n      const valueMetadata = metadata(frame.metadata, `${frame.path}.metadata`);\n      return valueMetadata === null ? result : withMeta(result, valueMetadata);\n    }\n    case \"vector\": {\n      const result = persistentBang(frame.builder);\n      const valueMetadata = metadata(frame.metadata, `${frame.path}.metadata`);\n      return valueMetadata === null ? result : withMeta(result, valueMetadata);\n    }\n    case \"map\": {\n      const result = persistentBang(frame.builder);\n      if (result.count !== frame.length) {\n        throw new WorkerValueStreamError(\n          \"value-stream-decoding-invalid\",\n          \"map contains an equivalent duplicate key\",\n          frame.path,\n        );\n      }\n      const valueMetadata = metadata(frame.metadata, `${frame.path}.metadata`);\n      return valueMetadata === null ? result : withMeta(result, valueMetadata);\n    }\n    case \"set\": {\n      const result = persistentBang(frame.builder);\n      if (result.count !== frame.length) {\n        throw new WorkerValueStreamError(\n          \"value-stream-decoding-invalid\",\n          \"set contains an equivalent duplicate value\",\n          frame.path,\n        );\n      }\n      const valueMetadata = metadata(frame.metadata, `${frame.path}.metadata`);\n      return valueMetadata === null ? result : withMeta(result, valueMetadata);\n    }\n    case \"array\":\n      return frame.values;\n    case \"object\":\n      return frame.value;\n    default:\n      throw new WorkerValueStreamError(\n        \"value-stream-decoding-invalid\",\n        `cannot finalize unknown container ${frame.tag}`,\n        frame.path,\n      );\n  }\n}\n\nexport class WorkerValueStreamDecoder {\n  constructor(options = {}) {\n    this.state = createState(\"decoding\", options);\n    this.signal = options.signal;\n    this.stack = [];\n    this.text = undefined;\n    this.hasRoot = false;\n    this.root = undefined;\n    this.finished = false;\n  }\n\n  currentPath() {\n    const frame = this.stack.at(-1);\n    return frame ? childPath(frame) : \"$\";\n  }\n\n  accept(value) {\n    let completed = value;\n    while (true) {\n      const frame = this.stack.at(-1);\n      if (!frame) {\n        if (this.hasRoot) {\n          streamError(this.state, \"invalid\", \"value stream contains multiple roots\", \"$\");\n        }\n        this.root = completed;\n        this.hasRoot = true;\n        return;\n      }\n      consumeFrame(frame, completed);\n      if (frame.received < frame.expected) return;\n      this.stack.pop();\n      completed = finalizeFrame(frame);\n    }\n  }\n\n  startText(length, path) {\n    stringLength(this.state, length, path);\n    if (length === 0) {\n      this.accept(\"\");\n      return;\n    }\n    this.text = { path, remaining: length, parts: [] };\n  }\n\n  writeTextPart(event) {\n    requireEvent(event, 2, \"text-part\", this.text.path);\n    const part = event[1];\n    if (typeof part !== \"string\" || part.length === 0) {\n      streamError(this.state, \"invalid\", \"text-part payload must be non-empty\", this.text.path);\n    }\n    if (part.length > this.text.remaining) {\n      streamError(this.state, \"invalid\", \"text parts exceed declared string length\", this.text.path);\n    }\n    this.text.parts.push(part);\n    this.text.remaining -= part.length;\n    if (this.text.remaining === 0) {\n      const value = this.text.parts.join(\"\");\n      this.text = undefined;\n      this.accept(value);\n    }\n  }\n\n  writeEvent(event) {\n    checkAbort(this.signal, this.currentPath());\n    if (this.finished) {\n      streamError(this.state, \"invalid\", \"cannot write after stream completion\", \"$\");\n    }\n    if (this.text) {\n      this.writeTextPart(event);\n      return;\n    }\n    if (!Array.isArray(event) || event.length === 0 || typeof event[0] !== \"string\") {\n      streamError(this.state, \"invalid\", \"value event must be a tagged array\", this.currentPath());\n    }\n    const path = this.currentPath();\n    switch (event[0]) {\n      case \"value\":\n        requireEvent(event, 2, \"value\", path);\n        if (!(event[1] === null || typeof event[1] === \"boolean\" ||\n              (typeof event[1] === \"number\" && Number.isFinite(event[1])))) {\n          streamError(this.state, \"invalid\", \"value event contains an invalid scalar\", path);\n        }\n        visit(this.state, this.stack.length, path);\n        this.accept(event[1]);\n        break;\n      case \"undefined\":\n        requireEvent(event, 1, \"undefined\", path);\n        visit(this.state, this.stack.length, path);\n        this.accept(undefined);\n        break;\n      case \"number\":\n        requireEvent(event, 2, \"number\", path);\n        if (!SPECIAL_NUMBERS.has(event[1])) {\n          streamError(this.state, \"invalid\", `unknown special number ${String(event[1])}`, path);\n        }\n        visit(this.state, this.stack.length, path);\n        this.accept(SPECIAL_NUMBERS.get(event[1]));\n        break;\n      case \"text\":\n        requireEvent(event, 2, \"text\", path);\n        visit(this.state, this.stack.length, path);\n        this.startText(event[1], path);\n        break;\n      case \"open\": {\n        requireEvent(event, 3, \"open\", path);\n        visit(this.state, this.stack.length, path);\n        const frame = makeFrame(event[1], event[2], path, this.state);\n        this.stack.push(frame);\n        if (frame.expected === 0) {\n          this.stack.pop();\n          this.accept(finalizeFrame(frame));\n        }\n        break;\n      }\n      default:\n        streamError(this.state, \"invalid\", `unknown value event ${event[0]}`, path);\n    }\n  }\n\n  write(events) {\n    if (!Array.isArray(events)) {\n      streamError(this.state, \"invalid\", \"value chunk events must be an array\", this.currentPath());\n    }\n    let bytes;\n    try {\n      bytes = Buffer.byteLength(JSON.stringify(events), \"utf8\");\n    } catch (error) {\n      streamError(\n        this.state,\n        \"invalid\",\n        `value chunk is not JSON-serializable: ${error.message}`,\n        this.currentPath(),\n      );\n    }\n    if (bytes > this.state.limits.maxChunkBytes) {\n      streamError(\n        this.state,\n        \"limit\",\n        `value chunk exceeds ${this.state.limits.maxChunkBytes} bytes`,\n        this.currentPath(),\n      );\n    }\n    if (events.length > this.state.limits.maxEventsPerChunk) {\n      streamError(\n        this.state,\n        \"limit\",\n        `value chunk exceeds ${this.state.limits.maxEventsPerChunk} events`,\n        this.currentPath(),\n      );\n    }\n    for (const event of events) this.writeEvent(event);\n    return this;\n  }\n\n  finish() {\n    checkAbort(this.signal, this.currentPath());\n    if (this.finished) {\n      streamError(this.state, \"invalid\", \"value stream was already completed\", \"$\");\n    }\n    if (this.text) {\n      streamError(this.state, \"truncated\", \"value stream ended inside a string\", this.text.path);\n    }\n    if (this.stack.length > 0) {\n      streamError(this.state, \"truncated\", \"value stream ended inside a container\", this.currentPath());\n    }\n    if (!this.hasRoot) {\n      streamError(this.state, \"truncated\", \"value stream did not contain a root\", \"$\");\n    }\n    this.finished = true;\n    return this.root;\n  }\n}\n\nexport async function decodeWorkerValueChunks(chunks, options = {}) {\n  const decoder = new WorkerValueStreamDecoder(options);\n  for await (const events of chunks) decoder.write(events);\n  return decoder.finish();\n}\n"))
+(module eliscript.runtime.worker-value-stream
+  (import "node:timers/promises" setImmediate)
+  (import "./core/identifier.mjs"
+    eliscriptSymbol isEliscriptSymbol isKeyword keyword)
+  (import "./core/list.mjs" EMPTY_LIST isPersistentList)
+  (import "./core/map.mjs"
+    isPersistentHashMap persistentHashMap)
+  (import "./core/metadata.mjs" meta withMeta)
+  (import "./core/set.mjs"
+    isPersistentHashSet persistentHashSet)
+  (import "./core/transient.mjs"
+    assocBang conjBang persistentBang transient)
+  (import "./core/vector.mjs"
+    isPersistentVector persistentVector)
+
+  (defconst yieldToEventLoop setImmediate)
+  (defconst workerValueFraming "eliscript-value-chunks-v1")
+
+  (defconst workerValueStreamLimits
+    (Object/freeze
+      (js-object
+        :maxDepth 64
+        :maxNodes 8000000
+        :maxCollectionLength 4000000
+        :maxStringUnits 268435456
+        :maxTotalStringUnits 536870912
+        :maxChunkBytes 262144
+        :maxEventsPerChunk 512
+        :maxTextPartUnits 8192)))
+
+  (defconst SPECIAL_NUMBERS
+    (new globalThis.Map
+      (js-array
+        (js-array "nan" globalThis.Number.NaN)
+        (js-array "positive-infinity" globalThis.Number.POSITIVE_INFINITY)
+        (js-array "negative-infinity" globalThis.Number.NEGATIVE_INFINITY)
+        (js-array "negative-zero" -0.0))))
+
+  (defconst iterator-symbol globalThis.Symbol.iterator)
+  (defconst async-iterator-symbol globalThis.Symbol.asyncIterator)
+
+  (defconst host-async-generator
+    (js* "(step, cleanup) => (async function* () { try { for (;;) { const item = await step(); if (item.done) return item.value; yield item.value; } } finally { if (cleanup) await cleanup(); } })()"))
+
+  (defconst host-method
+    (js* "(fn, name) => ({ [name](...args) { return fn(this, ...args); } })[name]"))
+
+  (defun typeof-value (value)
+    (js* "typeof value"))
+
+  (defun WorkerValueStreamError (code message &rest __opt)
+    (let* ((path (aref __opt 0))
+           (resolved-path (if (undefined? path) "$" path))
+           (err (new globalThis.TypeError (str message " at " resolved-path))))
+      (Object/setPrototypeOf err (get WorkerValueStreamError :prototype))
+      (put err :name "WorkerValueStreamError")
+      (put err :code code)
+      (put err :path resolved-path)
+      err))
+  (Object/setPrototypeOf WorkerValueStreamError globalThis.TypeError)
+  (put WorkerValueStreamError :prototype (Object/create (get globalThis.TypeError :prototype)))
+  (Object/defineProperty (get WorkerValueStreamError :prototype) "constructor"
+    (js-object :value WorkerValueStreamError :writable t :configurable t))
+  (Object/defineProperty WorkerValueStreamError "name"
+    (js-object :value "WorkerValueStreamError" :configurable t))
+  (Object/defineProperty WorkerValueStreamError "length"
+    (js-object :value 2 :configurable t))
+
+  (defun normalizedLimits (&rest __opt)
+    (let* ((options (aref __opt 0))
+           (opts (if (undefined? options) (js-object) options))
+           (limits (Object/assign (js-object) workerValueStreamLimits opts))
+           (names (Object/keys workerValueStreamLimits))
+           (i 0))
+      (while (< i (js-length names))
+        (let* ((name (aref names i))
+               (val (aref limits name)))
+          (unless (and (Number/isSafeInteger val) (>= val 1))
+            (throw (new globalThis.TypeError (str name " must be a positive safe integer")))))
+        (setq i (1+ i)))
+      (when (< (get limits :maxTextPartUnits) 2)
+        (throw (new globalThis.TypeError "maxTextPartUnits must be at least 2")))
+      (when (> (get limits :maxTextPartUnits) (get limits :maxStringUnits))
+        (throw (new globalThis.TypeError "maxTextPartUnits cannot exceed maxStringUnits")))
+      limits))
+
+  (defun createState (mode options)
+    (js-object
+      :active (new globalThis.WeakSet)
+      :limits (normalizedLimits options)
+      :mode mode
+      :nodes 0
+      :stringUnits 0))
+
+  (defun streamError (state suffix message path)
+    (throw (new WorkerValueStreamError
+             (str "value-stream-" (get state :mode) "-" suffix)
+             message
+             path)))
+
+  (defun checkAbort (signal path)
+    (when (and (not (nullish? signal)) (funcall globalThis.Boolean (get signal :aborted)))
+      (throw (new WorkerValueStreamError
+               "value-stream-cancelled"
+               "value stream traversal was cancelled"
+               path))))
+
+  (defun visit (state depth path)
+    (put state :nodes (1+ (get state :nodes)))
+    (let ((limits (get state :limits)))
+      (when (> (get state :nodes) (get limits :maxNodes))
+        (streamError state "limit"
+          (str "value stream exceeds " (get limits :maxNodes) " nodes")
+          path))
+      (when (> depth (get limits :maxDepth))
+        (streamError state "limit"
+          (str "value stream exceeds depth " (get limits :maxDepth))
+          path))))
+
+  (defun collectionLength (state length path)
+    (when (or (not (Number/isSafeInteger length)) (< length 0))
+      (streamError state "invalid" "collection length must be a safe integer" path))
+    (let ((limits (get state :limits)))
+      (when (> length (get limits :maxCollectionLength))
+        (streamError state "limit"
+          (str "collection exceeds " (get limits :maxCollectionLength) " values")
+          path))))
+
+  (defun stringLength (state length path)
+    (when (or (not (Number/isSafeInteger length)) (< length 0))
+      (streamError state "invalid" "string length must be a safe integer" path))
+    (let ((limits (get state :limits)))
+      (when (> length (get limits :maxStringUnits))
+        (streamError state "limit"
+          (str "string exceeds " (get limits :maxStringUnits) " UTF-16 units")
+          path))
+      (put state :stringUnits (+ (get state :stringUnits) length))
+      (when (> (get state :stringUnits) (get limits :maxTotalStringUnits))
+        (streamError state "limit"
+          (str "value stream exceeds " (get limits :maxTotalStringUnits) " string units")
+          path))))
+
+  (defun activate (state value path)
+    (let ((active (get state :active)))
+      (when (js-call active :has value)
+        (streamError state "cycle" "cyclic values are not transportable" path))
+      (js-call active :add value)))
+
+  (defun textPartEnd (value start maximumUnits)
+    (let ((end (Math/min (js-length value) (+ start maximumUnits))))
+      (when (and (< end (js-length value)) (> end start))
+        (let ((previous (js-call value :charCodeAt (1- end)))
+              (next (js-call value :charCodeAt end)))
+          (when (and (>= previous 55296) (<= previous 56319)
+                     (>= next 56320) (<= next 57343))
+            (setq end (1- end)))))
+      (if (eq end start)
+          (Math/min (js-length value) (1+ start))
+        end)))
+
+  (defun plainObjectEntries (value state path)
+    (let ((prototype (Object/getPrototypeOf value)))
+      (when (and (not (eq prototype (get globalThis.Object :prototype)))
+                 (not (nil? prototype)))
+        (streamError state "unsupported"
+          (str "unsupported object "
+               (js-call (get (get globalThis.Object :prototype) :toString) :call value))
+          path))
+      (let ((symbolKeys
+              (js-call (Object/getOwnPropertySymbols value) :filter
+                (lambda (key)
+                  (js-call (get (get globalThis.Object :prototype) :propertyIsEnumerable)
+                           :call value key)))))
+        (when (> (js-length symbolKeys) 0)
+          (streamError state "unsupported"
+            "host objects with enumerable Symbol keys are not transportable"
+            path))
+        (let* ((descriptors (Object/getOwnPropertyDescriptors value))
+               (keys (js-call (Object/keys descriptors) :filter
+                       (lambda (key) (get (aref descriptors key) :enumerable)))))
+          (collectionLength state (js-length keys) path)
+          (js-call keys :map
+            (lambda (key)
+              (let ((descriptor (aref descriptors key)))
+                (unless (Reflect/has descriptor "value")
+                  (streamError state "unsupported"
+                    "host object accessors are not transportable"
+                    (str path "." key)))
+                (js-array key (get descriptor :value)))))))))
+
+  (defun encodeWorkerValueEvents (value &rest __opt)
+    (let* ((options (aref __opt 0))
+           (opts (if (undefined? options) (js-object) options))
+           (signal (get opts :signal))
+           (limit-options (Object/assign (js-object) opts)))
+      (Reflect/deleteProperty limit-options "signal")
+      (let ((state (createState "encoding" limit-options))
+            (stack (js-array (js-object :kind "value" :value value :depth 0 :path "$"))))
+        (letfn ((cleanup-stack ()
+                  (while (> (js-length stack) 0)
+                    (let ((task (js-call stack :pop)))
+                      (when (eq (get task :kind) "deactivate")
+                        (js-call (get state :active) :delete (get task :value)))
+                      (when (and (or (eq (get task :kind) "seq-iter")
+                                     (eq (get task :kind) "map-iter"))
+                                 (not (nullish? (get task :iterator)))
+                                 (eq (typeof-value (get (get task :iterator) :return)) "function"))
+                        (try (js-call (get task :iterator) :return) (catch _e nil))))))
+                (next-event ()
+                  (let ((emitted false)
+                        (event undefined))
+                    (try
+                      (while (and (> (js-length stack) 0) (not emitted))
+                        (let* ((task (js-call stack :pop))
+                               (kind (get task :kind)))
+                          (cond
+                            ((eq kind "deactivate")
+                             (js-call (get state :active) :delete (get task :value)))
+                            ((eq kind "text")
+                             (let ((str-val (get task :value))
+                                   (start (get task :start))
+                                   (path (get task :path)))
+                               (when (< start (js-length str-val))
+                                 (checkAbort signal path)
+                                 (let ((end (textPartEnd str-val start (get (get state :limits) :maxTextPartUnits))))
+                                   (when (< end (js-length str-val))
+                                     (put task :start end)
+                                     (js-call stack :push task))
+                                   (setq event (js-array "text-part" (js-call str-val :slice start end))
+                                         emitted t)))))
+                            ((eq kind "seq-iter")
+                             (let* ((iterator (get task :iterator))
+                                    (step (js-call iterator :next)))
+                               (if (funcall globalThis.Boolean (get step :done))
+                                   (put task :iterator nil)
+                                 (let ((index (get task :index))
+                                       (depth (get task :depth))
+                                       (path (get task :path)))
+                                   (put task :index (1+ index))
+                                   (js-call stack :push task)
+                                   (js-call stack :push
+                                     (js-object :kind "value"
+                                                :value (get step :value)
+                                                :depth depth
+                                                :path (str path "[" index "]")))))))
+                            ((eq kind "map-iter")
+                             (let* ((iterator (get task :iterator))
+                                    (step (js-call iterator :next)))
+                               (if (funcall globalThis.Boolean (get step :done))
+                                   (put task :iterator nil)
+                                 (let* ((pair (get step :value))
+                                        (key (aref pair 0))
+                                        (item (aref pair 1))
+                                        (index (get task :index))
+                                        (depth (get task :depth))
+                                        (path (get task :path)))
+                                   (put task :index (1+ index))
+                                   (js-call stack :push task)
+                                   (js-call stack :push
+                                     (js-object :kind "value"
+                                                :value item
+                                                :depth depth
+                                                :path (str path ".values[" index "]")))
+                                   (js-call stack :push
+                                     (js-object :kind "value"
+                                                :value key
+                                                :depth depth
+                                                :path (str path ".keys[" index "]")))))))
+                            ((eq kind "array-iter")
+                             (let ((arr (get task :array))
+                                   (index (get task :index))
+                                   (depth (get task :depth))
+                                   (path (get task :path)))
+                               (when (< index (js-length arr))
+                                 (put task :index (1+ index))
+                                 (js-call stack :push task)
+                                 (js-call stack :push
+                                   (js-object :kind "value"
+                                              :value (aref arr index)
+                                              :depth depth
+                                              :path (str path "[" index "]"))))))
+                            ((eq kind "object-iter")
+                             (let ((entries (get task :entries))
+                                   (index (get task :index))
+                                   (depth (get task :depth))
+                                   (path (get task :path)))
+                               (when (< index (js-length entries))
+                                 (let* ((pair (aref entries index))
+                                        (key (aref pair 0))
+                                        (item (aref pair 1)))
+                                   (put task :index (1+ index))
+                                   (js-call stack :push task)
+                                   (js-call stack :push
+                                     (js-object :kind "value"
+                                                :value item
+                                                :depth depth
+                                                :path (str path "." key)))
+                                   (js-call stack :push
+                                     (js-object :kind "value"
+                                                :value key
+                                                :depth depth
+                                                :path (str path ".keys[" index "]")))))))
+                            ((eq kind "value")
+                             (let* ((cur (get task :value))
+                                    (depth (get task :depth))
+                                    (path (get task :path))
+                                    (type (typeof-value cur)))
+                               (checkAbort signal path)
+                               (visit state depth path)
+                               (cond
+                                 ((or (nil? cur) (eq type "boolean"))
+                                  (setq event (js-array "value" cur)
+                                        emitted t))
+                                 ((eq type "string")
+                                  (stringLength state (js-length cur) path)
+                                  (when (> (js-length cur) 0)
+                                    (js-call stack :push
+                                      (js-object :kind "text" :value cur :start 0 :path path)))
+                                  (setq event (js-array "text" (js-length cur))
+                                        emitted t))
+                                 ((undefined? cur)
+                                  (setq event (js-array "undefined")
+                                        emitted t))
+                                 ((eq type "number")
+                                  (setq event
+                                        (cond
+                                          ((Number/isNaN cur) (js-array "number" "nan"))
+                                          ((eq cur globalThis.Number.POSITIVE_INFINITY)
+                                           (js-array "number" "positive-infinity"))
+                                          ((eq cur globalThis.Number.NEGATIVE_INFINITY)
+                                           (js-array "number" "negative-infinity"))
+                                          ((Object/is cur -0.0)
+                                           (js-array "number" "negative-zero"))
+                                          (t (js-array "value" cur)))
+                                        emitted t))
+                                 ((isKeyword cur)
+                                  (js-call stack :push
+                                    (js-object :kind "value"
+                                               :value (get cur :name)
+                                               :depth (1+ depth)
+                                               :path (str path ".name")))
+                                  (js-call stack :push
+                                    (js-object :kind "value"
+                                               :value (get cur :namespace)
+                                               :depth (1+ depth)
+                                               :path (str path ".namespace")))
+                                  (setq event (js-array "open" "keyword" 2)
+                                        emitted t))
+                                 ((isEliscriptSymbol cur)
+                                  (activate state cur path)
+                                  (js-call stack :push (js-object :kind "deactivate" :value cur))
+                                  (js-call stack :push
+                                    (js-object :kind "value"
+                                               :value (meta cur)
+                                               :depth (1+ depth)
+                                               :path (str path ".metadata")))
+                                  (js-call stack :push
+                                    (js-object :kind "value"
+                                               :value (get cur :name)
+                                               :depth (1+ depth)
+                                               :path (str path ".name")))
+                                  (js-call stack :push
+                                    (js-object :kind "value"
+                                               :value (get cur :namespace)
+                                               :depth (1+ depth)
+                                               :path (str path ".namespace")))
+                                  (setq event (js-array "open" "symbol" 3)
+                                        emitted t))
+                                 ((or (isPersistentList cur) (isPersistentVector cur))
+                                  (activate state cur path)
+                                  (js-call stack :push (js-object :kind "deactivate" :value cur))
+                                  (collectionLength state (get cur :count) path)
+                                  (js-call stack :push
+                                    (js-object :kind "value"
+                                               :value (meta cur)
+                                               :depth (1+ depth)
+                                               :path (str path ".metadata")))
+                                  (js-call stack :push
+                                    (js-object :kind "seq-iter"
+                                               :iterator (js-call (aref cur iterator-symbol) :call cur)
+                                               :index 0
+                                               :depth (1+ depth)
+                                               :path path))
+                                  (setq event (js-array "open"
+                                                        (if (isPersistentList cur) "list" "vector")
+                                                        (get cur :count))
+                                        emitted t))
+                                 ((isPersistentHashMap cur)
+                                  (activate state cur path)
+                                  (js-call stack :push (js-object :kind "deactivate" :value cur))
+                                  (collectionLength state (get cur :count) path)
+                                  (js-call stack :push
+                                    (js-object :kind "value"
+                                               :value (meta cur)
+                                               :depth (1+ depth)
+                                               :path (str path ".metadata")))
+                                  (js-call stack :push
+                                    (js-object :kind "map-iter"
+                                               :iterator (js-call (aref cur iterator-symbol) :call cur)
+                                               :index 0
+                                               :depth (1+ depth)
+                                               :path path))
+                                  (setq event (js-array "open" "map" (get cur :count))
+                                        emitted t))
+                                 ((isPersistentHashSet cur)
+                                  (activate state cur path)
+                                  (js-call stack :push (js-object :kind "deactivate" :value cur))
+                                  (collectionLength state (get cur :count) path)
+                                  (js-call stack :push
+                                    (js-object :kind "value"
+                                               :value (meta cur)
+                                               :depth (1+ depth)
+                                               :path (str path ".metadata")))
+                                  (js-call stack :push
+                                    (js-object :kind "seq-iter"
+                                               :iterator (js-call (aref cur iterator-symbol) :call cur)
+                                               :index 0
+                                               :depth (1+ depth)
+                                               :path path))
+                                  (setq event (js-array "open" "set" (get cur :count))
+                                        emitted t))
+                                 ((Array/isArray cur)
+                                  (activate state cur path)
+                                  (js-call stack :push (js-object :kind "deactivate" :value cur))
+                                  (collectionLength state (js-length cur) path)
+                                  (js-call stack :push
+                                    (js-object :kind "array-iter"
+                                               :array cur
+                                               :index 0
+                                               :depth (1+ depth)
+                                               :path path))
+                                  (setq event (js-array "open" "array" (js-length cur))
+                                        emitted t))
+                                 ((eq type "object")
+                                  (activate state cur path)
+                                  (js-call stack :push (js-object :kind "deactivate" :value cur))
+                                  (let ((entries (plainObjectEntries cur state path)))
+                                    (js-call stack :push
+                                      (js-object :kind "object-iter"
+                                                 :entries entries
+                                                 :index 0
+                                                 :depth (1+ depth)
+                                                 :path path))
+                                    (setq event (js-array "open" "object" (js-length entries))
+                                          emitted t)))
+                                 (t
+                                  (streamError state "unsupported"
+                                    (str "unsupported " type " value")
+                                    path))))))))
+                      (catch error
+                        (cleanup-stack)
+                        (throw error)))
+                    (if emitted
+                        (js-object :value event :done false)
+                      (js-object :value undefined :done t)))))
+          (funcall host-async-generator next-event cleanup-stack)))))
+  (Object/defineProperty encodeWorkerValueEvents "length" (js-object :value 1 :configurable t))
+
+  (defun eventBytes (event)
+    (js-call globalThis.Buffer :byteLength (JSON/stringify event) "utf8"))
+
+  (defun encodeWorkerValueChunks (value &rest __opt)
+    (let* ((options (aref __opt 0))
+           (opts (if (undefined? options) (js-object) options))
+           (limits (normalizedLimits opts))
+           (event-stream (encodeWorkerValueEvents value opts))
+           (iterator (js-call (aref event-stream async-iterator-symbol) :call event-stream))
+           (events (js-array))
+           (bytes 2)
+           (exhausted false)
+           (need-yield false))
+      (let ((cleanup
+              (async ()
+                (when (and (not exhausted)
+                           (eq (typeof-value (get iterator :return)) "function"))
+                  (await (js-call iterator :return)))))
+            (step
+              (async ()
+                (if need-yield
+                    (progn
+                      (setq need-yield false)
+                      (await (yieldToEventLoop))))
+                (let ((chunk-ready false)
+                      (chunk undefined))
+                  (while (and (not exhausted) (not chunk-ready))
+                    (let ((item (await (js-call iterator :next))))
+                      (if (funcall globalThis.Boolean (get item :done))
+                          (setq exhausted t)
+                        (let* ((event (get item :value))
+                               (size (eventBytes event)))
+                          (when (> (+ size 2) (get limits :maxChunkBytes))
+                            (throw (new WorkerValueStreamError
+                                     "value-stream-encoding-limit"
+                                     (str "one value event exceeds " (get limits :maxChunkBytes) " bytes"))))
+                          (let ((added (+ size (if (eq (js-length events) 0) 0 1))))
+                            (if (and (> (js-length events) 0)
+                                     (or (> (+ bytes added) (get limits :maxChunkBytes))
+                                         (>= (js-length events) (get limits :maxEventsPerChunk))))
+                                (progn
+                                  (setq chunk events
+                                        events (js-array event)
+                                        bytes (+ 2 size)
+                                        need-yield t
+                                        chunk-ready t))
+                              (progn
+                                (js-call events :push event)
+                                (setq bytes (+ bytes size (if (eq (js-length events) 1) 0 1))))))))))
+                  (cond
+                    (chunk-ready
+                     (js-object :value chunk :done false))
+                    ((> (js-length events) 0)
+                     (let ((final-chunk events))
+                       (setq events (js-array))
+                       (js-object :value final-chunk :done false)))
+                    (t
+                     (js-object :value undefined :done t)))))))
+        (funcall host-async-generator step cleanup))))
+  (Object/defineProperty encodeWorkerValueChunks "length" (js-object :value 1 :configurable t))
+
+  (defun requireEvent (event length tag path)
+    (when (or (not (Array/isArray event))
+              (not (eq (js-length event) length))
+              (not (eq (aref event 0) tag)))
+      (throw (new WorkerValueStreamError
+               "value-stream-decoding-invalid"
+               (str tag " event must contain " length " fields")
+               path))))
+
+  (defun requireName (value label path &rest __opt)
+    (let* ((nullable (aref __opt 0))
+           (allow-null (if (undefined? nullable) false nullable)))
+      (if (and allow-null (nil? value))
+          nil
+        (progn
+          (when (or (not (eq (typeof-value value) "string"))
+                    (eq (js-length value) 0))
+            (throw (new WorkerValueStreamError
+                     "value-stream-decoding-invalid"
+                     (str label " must be a non-empty string" (if allow-null " or null" ""))
+                     path)))
+          value))))
+
+  (defun metadata (value path)
+    (if (nil? value)
+        nil
+      (progn
+        (unless (isPersistentHashMap value)
+          (throw (new WorkerValueStreamError
+                   "value-stream-decoding-invalid"
+                   "metadata must decode to a persistent Map"
+                   path)))
+        value)))
+
+  (defconst symbol-field-names (js-array "namespace" "name" "metadata"))
+
+  (defun childPath (frame)
+    (let ((index (get frame :received))
+          (tag (get frame :tag))
+          (path (get frame :path))
+          (length (get frame :length)))
+      (cond
+        ((or (eq tag "keyword") (eq tag "symbol"))
+         (str path "." (aref symbol-field-names index)))
+        ((or (eq tag "list") (eq tag "vector") (eq tag "set"))
+         (if (< index length)
+             (str path "[" index "]")
+           (str path ".metadata")))
+        ((eq tag "array")
+         (str path "[" index "]"))
+        ((eq tag "map")
+         (if (eq index (* length 2))
+             (str path ".metadata")
+           (if (eq (% index 2) 0)
+               (str path ".keys[" (/ index 2) "]")
+             (str path ".values[" (/ (1- index) 2) "]"))))
+        ((eq tag "object")
+         (if (eq (% index 2) 0)
+             (str path ".keys[" (/ index 2) "]")
+           (str path ".values[" (/ (1- index) 2) "]")))
+        (t path))))
+
+  (defconst open-tags (js-array "keyword" "symbol" "list" "vector" "map" "set" "array" "object"))
+  (defconst kw-sym-tags (js-array "keyword" "symbol"))
+  (defconst seq-meta-tags (js-array "list" "vector" "set"))
+
+  (defun makeFrame (tag length path state)
+    (when (or (not (eq (typeof-value tag) "string"))
+              (not (Number/isSafeInteger length))
+              (< length 0))
+      (streamError state "invalid" "open event tag and length are invalid" path))
+    (when (and (eq tag "keyword") (not (eq length 2)))
+      (streamError state "invalid" "keyword open event must declare arity 2" path))
+    (when (and (eq tag "symbol") (not (eq length 3)))
+      (streamError state "invalid" "symbol open event must declare arity 3" path))
+    (unless (js-call open-tags :includes tag)
+      (streamError state "invalid" (str "unknown open event tag " tag) path))
+    (unless (js-call kw-sym-tags :includes tag)
+      (collectionLength state length path))
+    (let* ((expected (cond
+                       ((js-call kw-sym-tags :includes tag) length)
+                       ((or (eq tag "map") (eq tag "object"))
+                        (+ (* length 2) (if (eq tag "map") 1 0)))
+                       (t
+                        (+ length (if (js-call seq-meta-tags :includes tag) 1 0)))))
+           (frame (js-object :tag tag :length length :path path :expected expected :received 0)))
+      (cond
+        ((or (js-call kw-sym-tags :includes tag) (eq tag "list") (eq tag "array"))
+         (put frame :values (js-array)))
+        ((eq tag "vector")
+         (put frame :builder (transient (persistentVector))))
+        ((eq tag "map")
+         (put frame :builder (transient (persistentHashMap))))
+        ((eq tag "set")
+         (put frame :builder (transient (persistentHashSet))))
+        ((eq tag "object")
+         (put frame :value (js-object))
+         (put frame :keys (new globalThis.Set))))
+      frame))
+
+  (defun consumeFrame (frame value)
+    (let ((index (get frame :received))
+          (tag (get frame :tag))
+          (length (get frame :length)))
+      (cond
+        ((or (eq tag "keyword") (eq tag "symbol"))
+         (js-call (get frame :values) :push value))
+        ((or (eq tag "list") (eq tag "array"))
+         (if (< index length)
+             (js-call (get frame :values) :push value)
+           (put frame :metadata value)))
+        ((eq tag "vector")
+         (if (< index length)
+             (put frame :builder (conjBang (get frame :builder) value))
+           (put frame :metadata value)))
+        ((eq tag "map")
+         (cond
+           ((eq index (* length 2))
+            (put frame :metadata value))
+           ((eq (% index 2) 0)
+            (put frame :key value))
+           (t
+            (put frame :builder (assocBang (get frame :builder) (get frame :key) value)))))
+        ((eq tag "set")
+         (if (< index length)
+             (put frame :builder (conjBang (get frame :builder) value))
+           (put frame :metadata value)))
+        ((eq tag "object")
+         (if (eq (% index 2) 0)
+             (let ((key (requireName value "object key" (childPath frame))))
+               (when (js-call (get frame :keys) :has key)
+                 (throw (new WorkerValueStreamError
+                          "value-stream-decoding-invalid"
+                          (str "object contains duplicate key " key)
+                          (childPath frame))))
+               (js-call (get frame :keys) :add key)
+               (put frame :key key))
+           (Object/defineProperty (get frame :value) (get frame :key)
+             (js-object :configurable t
+                        :enumerable t
+                        :value value
+                        :writable t)))))
+      (put frame :received (1+ index))))
+
+  (defun finalizeFrame (frame)
+    (let ((tag (get frame :tag))
+          (path (get frame :path)))
+      (cond
+        ((eq tag "keyword")
+         (let ((namespace (requireName (aref (get frame :values) 0) "keyword namespace" (str path ".namespace") t))
+               (name (requireName (aref (get frame :values) 1) "keyword name" (str path ".name"))))
+           (if (nil? namespace) (keyword name) (keyword namespace name))))
+        ((eq tag "symbol")
+         (let* ((namespace (requireName (aref (get frame :values) 0) "symbol namespace" (str path ".namespace") t))
+                (name (requireName (aref (get frame :values) 1) "symbol name" (str path ".name")))
+                (result (if (nil? namespace) (eliscriptSymbol name) (eliscriptSymbol namespace name)))
+                (valueMetadata (metadata (aref (get frame :values) 2) (str path ".metadata"))))
+           (if (nil? valueMetadata) result (withMeta result valueMetadata))))
+        ((eq tag "list")
+         (let* ((values (get frame :values))
+                (result EMPTY_LIST)
+                (index (1- (js-length values))))
+           (while (>= index 0)
+             (setq result (js-call result :conj (aref values index))
+                   index (1- index)))
+           (let ((valueMetadata (metadata (get frame :metadata) (str path ".metadata"))))
+             (if (nil? valueMetadata) result (withMeta result valueMetadata)))))
+        ((eq tag "vector")
+         (let ((result (persistentBang (get frame :builder)))
+               (valueMetadata (metadata (get frame :metadata) (str path ".metadata"))))
+           (if (nil? valueMetadata) result (withMeta result valueMetadata))))
+        ((eq tag "map")
+         (let ((result (persistentBang (get frame :builder))))
+           (unless (eq (get result :count) (get frame :length))
+             (throw (new WorkerValueStreamError
+                      "value-stream-decoding-invalid"
+                      "map contains an equivalent duplicate key"
+                      path)))
+           (let ((valueMetadata (metadata (get frame :metadata) (str path ".metadata"))))
+             (if (nil? valueMetadata) result (withMeta result valueMetadata)))))
+        ((eq tag "set")
+         (let ((result (persistentBang (get frame :builder))))
+           (unless (eq (get result :count) (get frame :length))
+             (throw (new WorkerValueStreamError
+                      "value-stream-decoding-invalid"
+                      "set contains an equivalent duplicate value"
+                      path)))
+           (let ((valueMetadata (metadata (get frame :metadata) (str path ".metadata"))))
+             (if (nil? valueMetadata) result (withMeta result valueMetadata)))))
+        ((eq tag "array")
+         (get frame :values))
+        ((eq tag "object")
+         (get frame :value))
+        (t
+         (throw (new WorkerValueStreamError
+                  "value-stream-decoding-invalid"
+                  (str "cannot finalize unknown container " tag)
+                  path))))))
+
+  (defun decoder-current-path (self)
+    (let ((frame (js-call (get self :stack) :at -1)))
+      (if frame (childPath frame) "$")))
+
+  (defun decoder-accept (self value)
+    (let ((completed value)
+          (done false))
+      (while (not done)
+        (let ((frame (js-call (get self :stack) :at -1)))
+          (if (not frame)
+              (progn
+                (when (get self :hasRoot)
+                  (streamError (get self :state) "invalid" "value stream contains multiple roots" "$"))
+                (put self :root completed)
+                (put self :hasRoot t)
+                (setq done t))
+            (progn
+              (consumeFrame frame completed)
+              (if (< (get frame :received) (get frame :expected))
+                  (setq done t)
+                (progn
+                  (js-call (get self :stack) :pop)
+                  (setq completed (finalizeFrame frame))))))))))
+
+  (defun decoder-start-text (self length path)
+    (stringLength (get self :state) length path)
+    (if (eq length 0)
+        (decoder-accept self "")
+      (put self :text (js-object :path path :remaining length :parts (js-array)))))
+
+  (defun decoder-write-text-part (self event)
+    (let ((text-state (get self :text)))
+      (requireEvent event 2 "text-part" (get text-state :path))
+      (let ((part (aref event 1)))
+        (when (or (not (eq (typeof-value part) "string"))
+                  (eq (js-length part) 0))
+          (streamError (get self :state) "invalid" "text-part payload must be non-empty" (get text-state :path)))
+        (when (> (js-length part) (get text-state :remaining))
+          (streamError (get self :state) "invalid" "text parts exceed declared string length" (get text-state :path)))
+        (js-call (get text-state :parts) :push part)
+        (put text-state :remaining (- (get text-state :remaining) (js-length part)))
+        (when (eq (get text-state :remaining) 0)
+          (let ((value (js-call (get text-state :parts) :join "")))
+            (put self :text undefined)
+            (decoder-accept self value))))))
+
+  (defun decoder-write-event (self event)
+    (let ((state (get self :state)))
+      (checkAbort (get self :signal) (decoder-current-path self))
+      (when (get self :finished)
+        (streamError state "invalid" "cannot write after stream completion" "$"))
+      (if (get self :text)
+          (decoder-write-text-part self event)
+        (progn
+          (when (or (not (Array/isArray event))
+                    (eq (js-length event) 0)
+                    (not (eq (typeof-value (aref event 0)) "string")))
+            (streamError state "invalid" "value event must be a tagged array" (decoder-current-path self)))
+          (let ((path (decoder-current-path self))
+                (tag (aref event 0)))
+            (cond
+              ((eq tag "value")
+               (requireEvent event 2 "value" path)
+               (let ((val (aref event 1)))
+                 (unless (or (nil? val)
+                             (eq (typeof-value val) "boolean")
+                             (and (eq (typeof-value val) "number") (Number/isFinite val)))
+                   (streamError state "invalid" "value event contains an invalid scalar" path))
+                 (visit state (js-length (get self :stack)) path)
+                 (decoder-accept self val)))
+              ((eq tag "undefined")
+               (requireEvent event 1 "undefined" path)
+               (visit state (js-length (get self :stack)) path)
+               (decoder-accept self undefined))
+              ((eq tag "number")
+               (requireEvent event 2 "number" path)
+               (unless (js-call SPECIAL_NUMBERS :has (aref event 1))
+                 (streamError state "invalid"
+                   (str "unknown special number " (funcall globalThis.String (aref event 1)))
+                   path))
+               (visit state (js-length (get self :stack)) path)
+               (decoder-accept self (js-call SPECIAL_NUMBERS :get (aref event 1))))
+              ((eq tag "text")
+               (requireEvent event 2 "text" path)
+               (visit state (js-length (get self :stack)) path)
+               (decoder-start-text self (aref event 1) path))
+              ((eq tag "open")
+               (requireEvent event 3 "open" path)
+               (visit state (js-length (get self :stack)) path)
+               (let ((frame (makeFrame (aref event 1) (aref event 2) path state)))
+                 (js-call (get self :stack) :push frame)
+                 (when (eq (get frame :expected) 0)
+                   (js-call (get self :stack) :pop)
+                   (decoder-accept self (finalizeFrame frame)))))
+              (t
+               (streamError state "invalid" (str "unknown value event " tag) path))))))))
+
+  (defun decoder-write (self events)
+    (let ((state (get self :state)))
+      (unless (Array/isArray events)
+        (streamError state "invalid" "value chunk events must be an array" (decoder-current-path self)))
+      (let ((bytes 0))
+        (try
+          (setq bytes (js-call globalThis.Buffer :byteLength (JSON/stringify events) "utf8"))
+          (catch error
+            (streamError state "invalid"
+              (str "value chunk is not JSON-serializable: " (get error :message))
+              (decoder-current-path self))))
+        (let ((limits (get state :limits)))
+          (when (> bytes (get limits :maxChunkBytes))
+            (streamError state "limit"
+              (str "value chunk exceeds " (get limits :maxChunkBytes) " bytes")
+              (decoder-current-path self)))
+          (when (> (js-length events) (get limits :maxEventsPerChunk))
+            (streamError state "limit"
+              (str "value chunk exceeds " (get limits :maxEventsPerChunk) " events")
+              (decoder-current-path self)))))
+      (let ((index 0))
+        (while (< index (js-length events))
+          (decoder-write-event self (aref events index))
+          (setq index (1+ index))))
+      self))
+
+  (defun decoder-finish (self)
+    (let ((state (get self :state)))
+      (checkAbort (get self :signal) (decoder-current-path self))
+      (when (get self :finished)
+        (streamError state "invalid" "value stream was already completed" "$"))
+      (when (get self :text)
+        (streamError state "truncated" "value stream ended inside a string" (get (get self :text) :path)))
+      (when (> (js-length (get self :stack)) 0)
+        (streamError state "truncated" "value stream ended inside a container" (decoder-current-path self)))
+      (unless (get self :hasRoot)
+        (streamError state "truncated" "value stream did not contain a root" "$"))
+      (put self :finished t)
+      (get self :root)))
+
+  (defun WorkerValueStreamDecoder (&rest __opt)
+    (let* ((options (aref __opt 0))
+           (opts (if (undefined? options) (js-object) options))
+           (self (Object/create (get WorkerValueStreamDecoder :prototype))))
+      (put self :state (createState "decoding" opts))
+      (put self :signal (get opts :signal))
+      (put self :stack (js-array))
+      (put self :text undefined)
+      (put self :hasRoot false)
+      (put self :root undefined)
+      (put self :finished false)
+      self))
+  (let ((proto (get WorkerValueStreamDecoder :prototype)))
+    (Object/defineProperty proto "currentPath"
+      (js-object :value (funcall host-method decoder-current-path "currentPath")
+                 :writable t :configurable t))
+    (Object/defineProperty proto "accept"
+      (js-object :value (funcall host-method decoder-accept "accept")
+                 :writable t :configurable t))
+    (Object/defineProperty proto "startText"
+      (js-object :value (funcall host-method decoder-start-text "startText")
+                 :writable t :configurable t))
+    (Object/defineProperty proto "writeTextPart"
+      (js-object :value (funcall host-method decoder-write-text-part "writeTextPart")
+                 :writable t :configurable t))
+    (Object/defineProperty proto "writeEvent"
+      (js-object :value (funcall host-method decoder-write-event "writeEvent")
+                 :writable t :configurable t))
+    (Object/defineProperty proto "write"
+      (js-object :value (funcall host-method decoder-write "write")
+                 :writable t :configurable t))
+    (Object/defineProperty proto "finish"
+      (js-object :value (funcall host-method decoder-finish "finish")
+                 :writable t :configurable t)))
+  (Object/defineProperty WorkerValueStreamDecoder "name"
+    (js-object :value "WorkerValueStreamDecoder" :configurable t))
+
+  (defasync decodeWorkerValueChunks (chunks &rest __opt)
+    (let* ((options (aref __opt 0))
+           (opts (if (undefined? options) (js-object) options))
+           (decoder (new WorkerValueStreamDecoder opts))
+           (async-iter-fn (aref chunks async-iterator-symbol))
+           (sync-iter-fn (aref chunks iterator-symbol))
+           (iterator (if (eq (typeof-value async-iter-fn) "function")
+                         (js-call async-iter-fn :call chunks)
+                       (js-call sync-iter-fn :call chunks)))
+           (exhausted false))
+      (try
+        (while (not exhausted)
+          (let ((step (await (js-call iterator :next))))
+            (if (funcall globalThis.Boolean (get step :done))
+                (setq exhausted t)
+              (js-call decoder :write (get step :value)))))
+        (finally
+          (when (and (not exhausted)
+                     (eq (typeof-value (get iterator :return)) "function"))
+            (await (js-call iterator :return)))))
+      (js-call decoder :finish)))
+  (Object/defineProperty decodeWorkerValueChunks "length" (js-object :value 1 :configurable t))
+
+  (export workerValueFraming
+          workerValueStreamLimits
+          WorkerValueStreamError
+          encodeWorkerValueEvents
+          encodeWorkerValueChunks
+          WorkerValueStreamDecoder
+          decodeWorkerValueChunks))

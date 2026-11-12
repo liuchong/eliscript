@@ -10,7 +10,7 @@
   (defconst original (Object/assign (js-object) framework))
   (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update
     (readFileSync (resolve root "tests/retained-transient-refresh-test-ground.mjs"))) :digest "hex")
-    "ba396f3257659528e8cf0c80fea7e3f732ee095f51fe072fe48b578705c41906")
+    "0c8bfe1ae305106ada2a04412894e0c292bdb5b47bc0cb858a0e384625da6f43")
   (defconst registration (createDirectWasmRegistration original (js-object
     "fresh strict transient acceptance remains accepted when deferral is explicitly enabled" runFreshTransientCase)))
   (defvar restored false)

@@ -1,33 +1,23 @@
 (module tools.backends.compiler-corpus-raw-math-fixture
   (import "node:assert/strict" :default assert)
   (import "node:crypto" createHash)
-  (import "node:vm" runInNewContext)
-  (import "../../dist/bootstrap/compiler.mjs" compile-ir-string)
-  (import "../../dist/bootstrap/emitter.mjs" emit-expression)
   (import "./compiler-corpus-raw-fixture-observer.mjs" raw-scope)
-
-  (defun source-section (source begin end)
-    (let* ((start (js-call source :indexOf begin)) (finish (js-call source :indexOf end (+ start (js-length begin)))))
-      (unless (and (>= start 0) (> finish start)
-                   (let ((next (js-call source :indexOf begin (1+ start))))
-                     (or (= next -1) (>= next finish))))
-        (throw (new globalThis.TypeError "original Math model source boundaries changed")))
-      (js-call source :slice start finish)))
+  (import "../../tests/helpers/wasm-managed-math-node.mjs"
+    unary-names constants method-lengths primitives adjacent fround-boundaries fround-random
+    f16-model f16-boundaries sum-precise-model sum-samples sum-iterator-observation)
 
   (defun loadOriginalRawMathModels (input)
     (let* ((source (get input :source))
            (digest (js-call (js-call (createHash "sha256") :update source) :digest "hex")))
       (unless (= digest (get input :sourceSha256))
         (throw (new globalThis.TypeError "original Math model source identity mismatch")))
-      ;; Original source is authenticated data. Only the result expression is
-      ;; newly emitted, through the existing Eli compiler and emitter.
-      (let* ((program (compile-ir-string
-               "(js-object :unaryNames (js* \"unaryNames\") :constants (js* \"constants\") :methodLengths (js* \"methodLengths\") :primitives (js* \"primitives\") :adjacent (js* \"adjacent\") :froundBoundaries (js* \"froundBoundaries\") :froundRandom (js* \"froundRandom\") :f16Model (js* \"f16Model\") :f16Boundaries (js* \"f16Boundaries\") :sumPreciseModel (js* \"sumPreciseModel\") :sumSamples (js* \"sumSamples\") :sumIteratorObservation (js* \"sumIteratorObservation\"))"
-               "original-math-model-exports.eli"))
-             (expression (get (emit-expression (aref (get (aref (get program :body) 0) :children) 0)) :text))
-             (body (str (source-section source "const unaryNames =" "const sqrtSource =") "\n"
-                     (source-section source "function adjacent(" "function sumArray(") "\n(" expression ")")))
-        (runInNewContext body (js-object :assert assert) (js-object :filename "original-math-models")))))
+      ;; Import the maintained Eli models rather than evaluating detached JS
+      ;; source slices. The caller archives both helper source and artifact.
+      (js-object :unaryNames unary-names :constants constants :methodLengths method-lengths
+        :primitives primitives :adjacent adjacent :froundBoundaries fround-boundaries
+        :froundRandom fround-random :f16Model f16-model :f16Boundaries f16-boundaries
+        :sumPreciseModel sum-precise-model :sumSamples sum-samples
+        :sumIteratorObservation sum-iterator-observation)))
 
   (defun runOriginalRawMathFixtureHost (input)
     (let* ((runtime (get input :runtime)) (oracle (get input :oracle))

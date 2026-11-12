@@ -571,6 +571,11 @@
             (js-call seen :add node)
             (when (and (= (value-type (get node :kind nil)) "string") (js-call (get node :kind) :startsWith "managed-"))
               (managed-fail node "private managed initialization IR is not valid source input"))
+            ;; Source-text rendering also checks apply arity. Diagnose here
+            ;; first so an invalid source call retains its backend location.
+            (when (and (= (get node :kind nil) "apply-call")
+                       (Array/isArray (get node :children nil)) (< (js-length (get node :children)) 2))
+              (managed-fail node "managed apply requires a final iterable argument"))
             (when (= (get node :kind nil) "variable-declaration")
               (unless (and (= (value-type (get node :value nil)) "string") (> (js-length (get node :value)) 0)
                            (Array/isArray (get node :children nil)) (<= (js-length (get node :children)) 1)
@@ -1644,16 +1649,62 @@
           (js-call steps :push (get result :steps)) (put result :steps (word-sequence steps)) result))))
 
   (defun lower-managed-apply (node scope state functions)
-    (let ((children (get node :children)))
-      (unless (= (js-length children) 2) (managed-fail node "managed apply requires one iterable argument"))
+    (let* ((children (get node :children)) (last-index (1- (js-length children))))
+      (when (< last-index 1) (managed-fail node "managed apply requires a final iterable argument"))
       (put state :callable t)
-      (let* ((target (lower-managed-call-target (js-nth 0 children) scope state functions))
-             (input (snapshot-managed (lower-managed-expression (js-nth 1 children) scope state functions) state))
-             (arguments (managed-result state (runtime-call state "value-call-expand" (runtime-arguments state (js-array (get input :result)))) t))
-             (result (managed-result state (runtime-call state "value-source-invoke-with-this" (runtime-arguments state
-               (js-array (get target :callee) (get target :receiver) (get arguments :result)
-                 (runtime-call state "value-length" (runtime-arguments state (js-array (get arguments :result))))))) t)))
-        (put result :steps (word-sequence (js-array (get target :steps) (get input :steps) (get arguments :steps) (get result :steps)))) result)))
+      (let* ((target (lower-managed-call-target (aref children 0) scope state functions))
+             (steps (js-array (get target :steps))) (prefix (js-array)) (index 1))
+        ;; Evaluate the callee, all fixed arguments and the final list in source
+        ;; order. Snapshots keep earlier values alive across later callbacks.
+        (while (< index last-index)
+          (let ((value (snapshot-managed (lower-managed-expression (aref children index) scope state functions) state)))
+            (js-call steps :push (get value :steps))
+            (js-call prefix :push (get value :result)))
+          (setq index (1+ index)))
+        (let* ((input (snapshot-managed (lower-managed-expression (aref children last-index) scope state functions) state))
+               (empty (runtime-call state "value-refs" (runtime-arguments state (js-array (word-constant 7) (word-constant 0)))))
+               (expanded (managed-result state
+                 (word-if (word-compare (get input :result) (word-constant 0) "=") empty
+                   (word-if (word-compare (get input :result) (word-constant 3) "=") empty
+                     (runtime-call state "value-call-expand" (runtime-arguments state (js-array (get input :result)))))) t))
+               (arguments expanded))
+          (js-call steps :push (get input :steps) (get expanded :steps))
+          (when (> (js-length prefix) 0)
+            (let* ((count (new-managed-local state nil false))
+                   (cursor (new-managed-local state nil false))
+                   (offset (word-constant (js-length prefix))))
+              (js-call steps :push (managed-guard state (word-set count
+                (runtime-call state "value-length" (runtime-arguments state (js-array (get expanded :result)))))))
+              (setq arguments (managed-result state
+                (runtime-call state "value-refs" (runtime-arguments state
+                  (js-array (word-constant 7) (managed-raw-binary offset (word-local count) "+")))) t))
+              (js-call steps :push (get arguments :steps))
+              (setq index 0)
+              (while (< index (js-length prefix))
+                (js-call steps :push (checked-control state "value-set" (runtime-arguments state
+                  (js-array (get arguments :result) (word-constant index) (aref prefix index)))))
+                (setq index (1+ index)))
+              (js-call steps :push (managed-guard state (word-set cursor (word-constant 0)))
+                (managed-guard state
+                  (js-object :kind "while" :type "i32" :value nil :children
+                    (js-array
+                      ;; A word-if is a numeric u32 value: even zero is true in
+                      ;; Lisp. Expose a boolean comparison to the loop emitter.
+                      (word-compare
+                        (word-if (word-compare (word-local (get state :error)) (word-constant 0) "=")
+                          (word-compare (word-local cursor) (word-local count) "<") (word-constant 0))
+                        (word-constant 0) "/=")
+                      (word-sequence (js-array
+                        (checked-control state "value-set" (runtime-arguments state
+                          (js-array (get arguments :result) (managed-raw-binary offset (word-local cursor) "+")
+                            (runtime-call state "value-get" (runtime-arguments state
+                              (js-array (get expanded :result) (word-local cursor)))))))
+                        (managed-guard state (word-set cursor (managed-raw-binary (word-local cursor) (word-constant 1) "+")))))))))))
+          (let ((result (managed-result state (runtime-call state "value-source-invoke-with-this" (runtime-arguments state
+            (js-array (get target :callee) (get target :receiver) (get arguments :result)
+              (runtime-call state "value-length" (runtime-arguments state (js-array (get arguments :result))))))) t)))
+            (js-call steps :push (get result :steps))
+            (put result :steps (word-sequence steps)) result)))))
 
   (defun managed-bigint-literal (node)
     (let ((source (managed-static-reference node)))
@@ -4628,7 +4679,9 @@
             ((and (= name "protocol-exact-prototype") (= (get initializer :kind) "function-expression"))
               (Object/assign (js-object) node (js-object :children (js-array
                 (Object/assign (js-object) initializer (js-object :managedProtocolExactPrototype t))))))
-            ((and (= name "protocol-get-prototype") (= (get initializer :kind) "raw-javascript")
+            ((and (= name "protocol-get-prototype")
+                  (or (= (get initializer :kind) "raw-javascript")
+                      (= (get initializer :kind) "reference"))
                   (= (managed-static-reference initializer) "Object.getPrototypeOf"))
               ;; Preserve the original alias capture at module initialization.
               ;; Only its private result crosses the existing exact registry

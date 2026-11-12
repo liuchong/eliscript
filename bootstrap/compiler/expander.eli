@@ -12,23 +12,25 @@
     node-items)
 
   (defconst maximum-depth 100)
+  (defconst typeof-value (lambda (value) (js* "typeof value")))
   (defconst gensym-prefix-pattern
-    (js* "/^[A-Za-z_$][A-Za-z0-9_$?!*+=<>-]*$/"))
+    (new globalThis.RegExp "^[A-Za-z_$][A-Za-z0-9_$?!*+=<>-]*$"))
   (defconst raise-error
     (lambda (message)
-      (throw (new (js* "Error") message))))
+      (throw (new globalThis.Error message))))
   (defconst raise-diagnostic
     (lambda (diagnostic)
       (let* ((p (aref (aref diagnostic "location") "start"))
-             (error (new (js* "Error")
+             (Constructor globalThis.Error)
+             (error (new Constructor
                (let* ((file-value (aref (aref diagnostic "location") "file"))
-                      (file (js* "`${file_value}`"))
+                      (file (js-call "" :concat file-value))
                       (line-value (aref p "line"))
-                      (line (js* "`${line_value}`"))
+                      (line (js-call "" :concat line-value))
                       (column-value (aref p "column"))
-                      (column (js* "`${column_value}`"))
+                      (column (js-call "" :concat column-value))
                       (message-value (aref diagnostic "message"))
-                      (message (js* "`${message_value}`")))
+                      (message (js-call "" :concat message-value)))
                  (+ file ":" line ":" column ": " message)))))
         (put error :eliscriptDiagnostic diagnostic)
         (throw error))))
@@ -160,8 +162,8 @@
            ((null value) "nil")
            ((eq value t) "t")
            ((eq value false) "false")
-           ((= (js* "typeof value") "string")
-            (js-call (js* "JSON") :stringify value))
+           ((= (funcall typeof-value value) "string")
+            (JSON/stringify value))
            (t (str value)))))
       ((or (= (node-kind node) "list") (= (node-kind node) "vector"))
        (let* ((items (node-items node))
@@ -187,7 +189,7 @@
   (defun make-eval-scope (parent &optional context)
     (js-object
       :parent parent
-      :values (new (js* "Map"))
+      :values (new globalThis.Map)
       :context (or context (and parent (get parent :context)))))
 
   (defun scope-bind (scope name value)
@@ -227,7 +229,7 @@
            (cond
              ((symbol-node-p node) (node-name node))
              ((and (literal-node-p node)
-                   (= (js* "typeof node.value") "string"))
+                   (= (funcall typeof-value (get node :value)) "string"))
               (node-value node))
              (t (raise-error "gensym prefix must be a symbol or string")))))
       (when (or (not (js-call gensym-prefix-pattern :test prefix))
@@ -271,7 +273,7 @@
   (defun value-string (node)
     (cond
       ((and (literal-node-p node)
-            (= (js* "typeof node.value") "string"))
+            (= (funcall typeof-value (get node :value)) "string"))
        (node-value node))
       ((symbol-node-p node) (node-name node))
       ((keyword-node-p node) (str ":" (node-name node)))
@@ -281,7 +283,7 @@
 
   (defun require-number (node operator)
     (unless (and (literal-node-p node)
-                 (= (js* "typeof node.value") "number"))
+                 (= (funcall typeof-value (get node :value)) "number"))
       (raise-error
         (str operator " expects numbers, got " (node-display node))))
     (node-value node))
@@ -514,7 +516,7 @@
            ((not (eq items undefined))
             (literal-node (get items :length) nil))
            ((and (literal-node-p (js-nth 0 values))
-                 (= (js* "typeof values[0].value") "string"))
+                 (= (funcall typeof-value (get (js-nth 0 values) :value)) "string"))
             (literal-node (get (node-value (js-nth 0 values)) :length) nil))
            (t (raise-error "length expects a sequence")))))
       ((= operator "cons")
@@ -586,13 +588,13 @@
          (raise-error "stringp expects 1 argument"))
        (make-boolean
          (and (literal-node-p (js-nth 0 values))
-              (= (js* "typeof values[0].value") "string"))))
+              (= (funcall typeof-value (get (js-nth 0 values) :value)) "string"))))
       ((= operator "numberp")
        (unless (= (get values :length) 1)
          (raise-error "numberp expects 1 argument"))
        (make-boolean
          (and (literal-node-p (js-nth 0 values))
-              (= (js* "typeof values[0].value") "number"))))
+              (= (funcall typeof-value (get (js-nth 0 values) :value)) "number"))))
       ((= operator "atom")
        (unless (= (get values :length) 1)
          (raise-error "atom expects 1 argument"))
@@ -707,7 +709,7 @@
            (unless (= (get args :length) 1)
              (raise-error "` expects 1 argument"))
            (quasiquote-node
-             (js-nth 0 args) scope 1 (new (js* "Map"))))
+             (js-nth 0 args) scope 1 (new globalThis.Map)))
           ((= operator "if") (eval-if args scope))
           ((= operator "when")
            (if (and (> (get args :length) 0)
@@ -757,7 +759,7 @@
            (let* ((specifier-node (eval-form (js-nth 0 args) scope))
                   (context (get scope :context)))
              (unless (and (literal-node-p specifier-node)
-                          (= (js* "typeof specifier_node.value") "string")
+                          (= (funcall typeof-value (get specifier-node :value)) "string")
                           (> (get (node-value specifier-node) :length) 0))
                (raise-error "macro-read-file expects a non-empty string"))
              (let ((specifier (node-value specifier-node)))
@@ -792,7 +794,7 @@
               ((= operator "intern")
                 (unless (and (= (get values :length) 1)
                              (literal-node-p (js-nth 0 values))
-                             (= (js* "typeof values[0].value") "string"))
+                             (= (funcall typeof-value (get (js-nth 0 values) :value)) "string"))
                   (raise-error "intern expects a string"))
                 (let ((name (node-value (js-nth 0 values))))
                   (reserve-name scope name)
@@ -1009,7 +1011,7 @@
                        (or (keyword-node-p item)
                            (symbol-node-p item)
                            (and (literal-node-p item)
-                                (= (js* "typeof item.value") "string"))))
+                                (= (funcall typeof-value (get item :value)) "string"))))
               (setq expand false))
             (js-call result :push
               (if expand
@@ -1027,7 +1029,7 @@
             (if (and (= index 1)
                      (or (keyword-node-p item)
                          (and (literal-node-p item)
-                              (= (js* "typeof item.value") "string"))))
+                              (= (funcall typeof-value (get item :value)) "string"))))
                 item
               (expand-expression item environment depth context)))
           (setq index (1+ index))))
@@ -1367,7 +1369,7 @@
                (1- (get remaining :length))
                (get remaining :length)))
            (dispatch-name (fresh-name-node "case-value" context span))
-           (seen (new (js* "Set")))
+           (seen (new globalThis.Set))
            (cond-items (js-array))
            (index 0))
       (while (< index pair-limit)
@@ -1554,7 +1556,7 @@
     (when (< (get forms :length) 2)
       (expander-fail
         context span "multi-arity function requires at least two clauses"))
-    (let ((fixed (new (js* "Set")))
+    (let ((fixed (new globalThis.Set))
           (fixed-arities (js-array))
           (variadic false)
           (variadic-minimum nil)
@@ -1777,7 +1779,7 @@
         "defprotocol expects a name and at least one operation"))
     (let* ((name-node (js-nth 0 args))
            (operation-nodes (js-call args :slice 1))
-           (seen (new (js* "Set")))
+           (seen (new globalThis.Set))
            (operation-names (js-array))
            (forms (js-array)))
       (unless (symbol-node-p name-node)
@@ -1841,7 +1843,7 @@
         context span "defrecord expects a name and field vector"))
     (let* ((name-node (js-nth 0 args))
            (fields-node (js-nth 1 args))
-           (seen (new (js* "Set")))
+           (seen (new globalThis.Set))
            (field-nodes (js-array))
            (field-names (js-array))
            (forms (js-array)))
@@ -1960,7 +1962,7 @@
     (when (= (get method-nodes :length) 0)
       (expander-fail
         context span (str form-name " expects at least one method")))
-    (let ((seen (new (js* "Set")))
+    (let ((seen (new globalThis.Set))
           (object-items (js-array (symbol-node "js-object" span))))
       (js-call method-nodes :forEach
         (lambda (method-node)
@@ -2012,7 +2014,7 @@
       (expander-fail
         context span
         (str form-name " expects at least one protocol implementation")))
-    (let ((seen (new (js* "Set")))
+    (let ((seen (new globalThis.Set))
           (plans (js-array (symbol-node "js-array" span)))
           (index 0))
       (while (< index (get implementation-nodes :length))
@@ -2060,7 +2062,7 @@
         "deftype expects a name, field vector, and optional protocol implementations"))
     (let* ((name-node (js-nth 0 args))
            (fields-node (js-nth 1 args))
-           (seen (new (js* "Set")))
+           (seen (new globalThis.Set))
            (field-nodes (js-array))
            (field-names (js-array))
            (forms (js-array)))
@@ -2199,7 +2201,7 @@
     (let ((category-node (js-nth 0 args))
           (protocol-node (js-nth 1 args)))
       (unless (and (literal-node-p category-node)
-                   (= (value-type (node-value category-node)) "string")
+                   (= (funcall typeof-value (node-value category-node)) "string")
                    (> (get (node-value category-node) :length) 0))
         (expander-fail
           context span
@@ -2566,12 +2568,12 @@
     names)
 
   (defun expand-module-core (forms filename macro-context owned)
-    (let ((reserved-names (new (js* "Set"))))
+    (let ((reserved-names (new globalThis.Set)))
       (js-call forms :forEach
         (lambda (form) (collect-symbol-names form reserved-names)))
       (expand-top-level-sequence
         forms
-        (new (js* "Map"))
+        (new globalThis.Map)
         0
         (js-object
           :filename filename
@@ -2583,11 +2585,11 @@
           :capabilities
           (if macro-context
               (get macro-context :capabilities)
-            (new (js* "Set")))
+            (new globalThis.Set))
           :files
           (if macro-context
               (get macro-context :files)
-            (new (js* "Map")))))))
+            (new globalThis.Map))))))
 
   (defun expand-module (forms filename &optional macro-context)
     (expand-module-core forms filename macro-context false))

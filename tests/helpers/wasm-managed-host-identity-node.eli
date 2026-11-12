@@ -1,0 +1,92 @@
+(module tests.helpers.wasm-managed-host-identity-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:process" :default process)
+  (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+
+  (defun read-val (a v)
+    (if (and (not (nullish? v)) (= (funcall js-typeof v) "object"))
+      (let ((k (get v :kind)))
+        (cond
+          ((= k 4) (js-call a :readNumber v))
+          ((= k 5) (js-call a :readString v))
+          ((= k 14)
+           (let ((out (js-array))
+                 (len (js-call a :length v))
+                 (i 0))
+             (while (< i len)
+               (let ((child (js-call a :get v i)))
+                 (try
+                   (js-call out :push (read-val a child))
+                   (finally (js-call a :release child))))
+               (setq i (+ i 1)))
+             out))
+          (t v)))
+      v))
+
+  (defun invoke-val (a name &rest __host_default_arguments_1)
+    (let* ((args (aref __host_default_arguments_1 0)))
+    (let ((out (js-call a :invoke name (if (undefined? args) (js-array) args))))
+      (try
+        (read-val a out)
+        (finally (js-call a :release out))))))
+
+  (defun finish-heap (a values)
+    (try
+      (js-call values :forEach (lambda (v) (js-call a :release v)))
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+      (finally
+        (when (not (nullish? (get a :close)))
+          (js-call a :close)))))
+
+  (defasync run-main ()
+    (let ((mode (aref (get process :argv) 2)))
+      (cond
+        ((= mode "project")
+         (let* ((m (await (funcall dyn-import (aref (get process :argv) 3))))
+                (x (js-object))
+                (y (js-object)))
+           (js-call globalThis.console :log
+             (JSON/stringify
+               (js-object :values (js-call m :encounters x y)
+                          :same (eq (get m :left) (get m :left_copy)))))))
+        ((= mode "early-str")
+         (let ((m (await (funcall dyn-import (aref (get process :argv) 3)))))
+           (js-call globalThis.console :log (get m :early))))
+        ((= mode "early-json")
+         (let ((m (await (funcall dyn-import (aref (get process :argv) 3)))))
+           (js-call globalThis.console :log (JSON/stringify (get m :early)))))
+        ((= mode "wasm-encounters")
+         (let* ((bytes (readFileSync (aref (get process :argv) 3)))
+                (expected (JSON/parse (aref (get process :argv) 4)))
+                (options (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 16777216)))
+           (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+           (let* ((a (instantiateManagedRuntime bytes options))
+                  (x (js-call a :sourceObject (js-object)))
+                  (y (js-call a :sourceObject (js-object)))
+                  (left (js-call a :getExport "left"))
+                  (copy (js-call a :getExport "left_copy")))
+             (js-call a :auto 1)
+             (try
+               (js-call assert :equal (js-call a :keyEqual left copy) (get expected :same))
+               (js-call assert :deepEqual (invoke-val a "encounters" (js-array x y)) (get expected :values))
+               (js-call assert :deepEqual (get expected :values) (js-array 1 2 1 2 1 1 2))
+               (js-call assert :equal (invoke-val a "left" (js-array x)) 1)
+               (js-call assert :equal (invoke-val a "right" (js-array x)) 2)
+               (js-call assert :equal (invoke-val a "closure" (js-array x)) 1)
+               (js-call assert :equal (invoke-val a "own" (js-array x)) 2)
+               (finally
+                 (finish-heap a (js-array x y left copy)))))))
+        (t
+         (throw (globalThis.Error (str "unknown mode: " mode)))))))
+
+  (js-call (run-main) :catch
+    (lambda (err)
+      (js-call globalThis.console :error err)
+      (js-call process :exit 1))))

@@ -1,2 +1,58 @@
-(module capsules.runtime.testing.set
-  (js* "import {\n  SET_STATE,\n  TRANSIENT_SET_STATE,\n  readTransientSetMetrics,\n  resetTransientSetMetrics as resetTransientSetMetricsInternal,\n} from \"../core/set-internals.mjs\";\nimport {\n  inspectPersistentMap,\n  inspectTransientMap,\n  persistentMapMetrics,\n  resetPersistentMapMetrics,\n  resetTransientMapMetrics,\n  sharedPersistentMapNodes,\n  transientMapMetrics,\n} from \"./map.mjs\";\n\nfunction mapOf(set) {\n  const state = set?.[SET_STATE];\n  if (state === undefined) {\n    throw new TypeError(\"expected an Eliscript persistent hash set\");\n  }\n  return state.map;\n}\n\nexport function resetPersistentSetMetrics() {\n  resetPersistentMapMetrics();\n}\n\nexport function persistentSetMetrics() {\n  return persistentMapMetrics();\n}\n\nexport function resetTransientSetMetrics() {\n  resetTransientSetMetricsInternal();\n  resetTransientMapMetrics();\n}\n\nexport function transientSetMetrics() {\n  const set = readTransientSetMetrics();\n  return Object.freeze({\n    ...transientMapMetrics(),\n    setPersistentCalls: set.persistentCalls,\n    setInvalidCalls: set.invalidCalls,\n  });\n}\n\nexport function inspectTransientSet(set) {\n  const state = set?.[TRANSIENT_SET_STATE];\n  if (state === undefined) {\n    throw new TypeError(\"expected an Eliscript transient hash set\");\n  }\n  return inspectTransientMap(state.map);\n}\n\nexport function inspectPersistentSet(set) {\n  return inspectPersistentMap(mapOf(set));\n}\n\nexport function sharedPersistentSetNodes(left, right) {\n  return sharedPersistentMapNodes(mapOf(left), mapOf(right));\n}\n"))
+(module eliscript.runtime.testing.set
+  (import "../core/set-internals.mjs" :as set-internals)
+  (import "../core/set-internals.mjs"
+    SET_STATE
+    TRANSIENT_SET_STATE
+    readTransientSetMetrics)
+  (import "./map.mjs" :as map-testing)
+  (import "./map.mjs"
+    inspectPersistentMap
+    inspectTransientMap
+    persistentMapMetrics
+    resetPersistentMapMetrics
+    sharedPersistentMapNodes
+    transientMapMetrics)
+
+  (defun map-of (set)
+    (let ((state (if (nil? set) undefined (aref set SET_STATE))))
+      (when (undefined? state)
+        (throw (new globalThis/TypeError "expected an Eliscript persistent hash set")))
+      (get state :map)))
+
+  (defun resetPersistentSetMetrics ()
+    (resetPersistentMapMetrics))
+
+  (defun persistentSetMetrics ()
+    (persistentMapMetrics))
+
+  (defun resetTransientSetMetrics ()
+    (set-internals/resetTransientSetMetrics)
+    (map-testing/resetTransientMapMetrics))
+
+  (defun transientSetMetrics ()
+    (let ((set-metrics (readTransientSetMetrics))
+          (result (Object/assign (js-object) (transientMapMetrics))))
+      (put result "setPersistentCalls" (get set-metrics :persistentCalls))
+      (put result "setInvalidCalls" (get set-metrics :invalidCalls))
+      (Object/freeze result)))
+
+  (defun inspectTransientSet (set)
+    (let ((state (if (nil? set) undefined (aref set TRANSIENT_SET_STATE))))
+      (when (undefined? state)
+        (throw (new globalThis/TypeError "expected an Eliscript transient hash set")))
+      (inspectTransientMap (get state :map))))
+
+  (defun inspectPersistentSet (set)
+    (inspectPersistentMap (map-of set)))
+
+  (defun sharedPersistentSetNodes (left right)
+    (sharedPersistentMapNodes (map-of left) (map-of right)))
+
+  (export
+    resetPersistentSetMetrics
+    persistentSetMetrics
+    resetTransientSetMetrics
+    transientSetMetrics
+    inspectTransientSet
+    inspectPersistentSet
+    sharedPersistentSetNodes))

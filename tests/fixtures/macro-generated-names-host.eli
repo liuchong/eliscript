@@ -1,0 +1,12 @@
+(module tests.fixtures.macro-generated-names-host
+  (import "node:process" :default process)
+  (defun check (actual expected) (when (not (= actual expected)) (js-call process :exit 1)))
+  (defasync main ()
+    (let ((module (await (funcall (js* "(url) => import(url)") (aref (get process :argv) 2)))))
+      (check (JSON/stringify (Array/from (js-call module :source_collision 7))) "[8,1]")
+      (js-call module :reset_calls)
+      (check (JSON/stringify (Array/from (js-call module :duplicate_value 9))) "[9,9]")
+      (check (JSON/stringify (js-call (Array/from (get module :generated_names)) :map globalThis.String)) "[\"slot$G4\",\"slot$G5\"]")
+      (check (funcall globalThis.String (get module :default_name)) "G$G10")
+      (check (js-call module :deliberate_capture 4) 5)))
+  (main))

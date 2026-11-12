@@ -1,0 +1,18 @@
+(module tests.helpers.wasm-managed-core-modules-node
+  (defun dynamic-import (specifier)
+    (funcall (js* "(specifier) => import(specifier)") specifier))
+
+  (defconst cases
+    (js-array "aliases" "records" "types" "protocols" "collections" "dynamic-from" "class-callback-order" "patterns"))
+
+  (defasync main ()
+    (let* ((m (await (dynamic-import (aref (get globalThis.process :argv) 2))))
+           (out (js-object)))
+      (js-call cases :forEach
+        (lambda (name)
+          (put out name (js-call m (js-call name :replaceAll "-" "_")))))
+      (let ((held (js-call m :held_record)))
+        (put out :held (js-call m :inspect_held held)))
+      (js-call globalThis.console :log (JSON/stringify out))))
+
+  (main))

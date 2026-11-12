@@ -1,2 +1,687 @@
-(module capsules.tests.wasm-managed-host-identity.test
-  (js* "import {beforeAll,afterAll,test} from 'bun:test';import assert from 'node:assert/strict';\nimport {readFile,mkdtemp,rm,writeFile,mkdir} from 'node:fs/promises';import {resolve,dirname} from 'node:path';import {tmpdir} from 'node:os';import {pathToFileURL} from 'node:url';import {spawnSync} from 'node:child_process';\nimport {buildBackends} from '../tools/backends/build.mjs';import {instantiateManagedRuntime,instantiateManagedRuntimeWithHostModules} from '../tools/backends/managed-runtime.mjs';import {instantiateNativeManagedRuntime} from '../tools/backends/native-managed-runtime.mjs';\nimport {createManagedProjectFacades} from '../tools/backends/managed-module-graph.mjs';\nconst projectCases=JSON.parse(await readFile(new URL('./fixtures/managed-host-identity-projects.json',import.meta.url),'utf8'));\nlet b,rt,program,bytes,lowered,directory,reference;const options={maxSlots:2048,initialBytes:65536,maxBytes:16777216};\nbeforeAll(async()=>{directory=await mkdtemp(resolve(tmpdir(),'eliscript-host-token-'));b=await buildBackends({outputRoot:directory});rt=b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli');program=b.compiler.compile_ir_string(await readFile('tests/fixtures/wasm-managed-host-identity.eli','utf8'),'host-identity.eli');reference=await import('data:text/javascript;base64,'+Buffer.from(b.compiler.emit_ir_string(program)).toString('base64'));},120000);\nafterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});\nfunction artifact(){if(!bytes){const saved=JSON.stringify(program);lowered=b.managed.lower_managed_program(program,rt);bytes=Uint8Array.from(b.managed.emit_managed_wasm(program,rt));assert.equal(JSON.stringify(program),saved);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);}return bytes;}\nfunction read(a,v){if(v?.kind===4)return a.readNumber(v);if(v?.kind===5)return a.readString(v);if(v?.kind===14){const out=[];for(let i=0;i<a.length(v);i++){const child=a.get(v,i);try{out.push(read(a,child));}finally{a.release(child);}}return out;}return v;}\nfunction value(a,name,args=[]){const out=a.invoke(name,args);try{return read(a,out);}finally{a.release(out);}}\nfunction finish(a,values=[]){try{values.forEach(v=>a.release(v));a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}finally{a.close?.();}}\nfunction identities(a){a.auto(1);const x=a.sourceObject({}),y=a.sourceObject({});try{const first=value(a,'token',[x]);assert.equal(first,1);assert.equal(value(a,'alias',[x]),first);assert.equal(value(a,'nested',[x]),first);assert.equal(value(a,'token',[y]),2);for(let i=0;i<8;i++){a.collect();assert.equal(value(a,'token',[x]),first);}assert.deepEqual(value(a,'effects'),[true,[1,2]]);assert.deepEqual(value(a,'abrupt'),[true,[1]]);assert.deepEqual(value(a,'no-conversion'),[]);const symbols=value(a,'symbol-case');assert.equal(symbols[0],symbols[2]);assert.notEqual(symbols[0],symbols[1]);const functions=value(a,'function-case');assert.equal(functions[0],functions[2]);assert.notEqual(functions[0],functions[1]);}finally{finish(a,[x,y]);}}\ntest('Given the existing intrinsic when a module is lowered then its private identity table executes in zero-import WASM',()=>{identities(instantiateManagedRuntime(artifact(),options));});\ntest('Given scalar inputs when host identity is requested then original TypeError messages and later calls recover',()=>{const a=instantiateManagedRuntime(artifact(),options);a.auto(1);const values=[null,undefined,false,true,a.number(-0),a.number(NaN),a.string('')];try{for(const x of values){const raw=x?.kind===4?a.readNumber(x):x?.kind===5?a.readString(x):x;assert.equal(value(a,'safe',[x]),reference.safe(raw));}const object=a.sourceObject({});try{assert.equal(value(a,'token',[object]),1);}finally{a.release(object);}}finally{finish(a,values);}});\ntest('Given wrong source and IR arity when lowering then no operand is dropped or accepted',()=>{for(const source of['(host-identity-token)','(host-identity-token 1 2)'])assert.throws(()=>b.compiler.compile_string(source,'arity.eli'));for(const count of[0,2]){const p=b.compiler.compile_ir_string('(defun token (x) (host-identity-token x))','arity.eli'),node=p.body[0].children.at(-1);node.children=count===0?[]:[node.children[0],node.children[0]];assert.throws(()=>b.managed.lower_managed_program(p,rt),e=>e.eliscriptDiagnostic?.code==='ELI-B0001');}});\ntest('Given no intrinsic when an ordinary function is lowered then no hidden state or module ABI is allocated',()=>{const p=b.compiler.compile_ir_string('(defun identity (x) x) (export identity)','plain.eli'),out=b.managed.lower_managed_program(p,rt);assert.equal(out.descriptor.abi,'managed-control-v1');assert.equal(out.descriptor.module,undefined);});\nconst projectSources=projectCases.project;\nlet projectFixture;\nasync function project(){if(projectFixture)return projectFixture;const base=resolve(directory,'project');await mkdir(base);const modules=[];for(const[id,source]of Object.entries(projectSources)){const p=b.compiler.compile_ir_string(source,id.replace(/\\.mjs$/,'.eli'));modules.push({id,program:p});await writeFile(resolve(base,id),b.compiler.emit_ir_string(p));}const saved=JSON.stringify(modules),lowered=b.managed.lower_managed_project(modules,'main.mjs',rt),bytes=Uint8Array.from(b.managed.emit_managed_project_wasm(modules,'main.mjs',rt));assert.equal(JSON.stringify(modules),saved);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);assert.deepEqual(Uint8Array.from(b.managed.emit_managed_project_wasm([...modules].reverse(),'main.mjs',rt)),bytes);const child=spawnSync('node',['--input-type=module','-e','const m=await import(process.argv[1]);const x={},y={};console.log(JSON.stringify({values:m.encounters(x,y),same:m.left===m.left_copy}));',pathToFileURL(resolve(base,'main.mjs')).href],{encoding:'utf8',timeout:10000});assert.equal(child.status,0,child.stderr);return projectFixture={bytes,lowered,expected:JSON.parse(child.stdout)};}\nfunction encounters(a,p){a.auto(1);const x=a.sourceObject({}),y=a.sourceObject({}),left=a.getExport('left'),copy=a.getExport('left_copy');try{assert.equal(a.keyEqual(left,copy),p.expected.same);assert.deepEqual(value(a,'encounters',[x,y]),p.expected.values);assert.deepEqual(p.expected.values,[1,2,1,2,1,1,2]);assert.equal(value(a,'left',[x]),1);assert.equal(value(a,'right',[x]),2);assert.equal(value(a,'closure',[x]),1);assert.equal(value(a,'own',[x]),2);}finally{finish(a,[x,y,left,copy]);}}\ntest('Given linked modules with opposite encounter orders when imported aliases and closures are called then defining-module identity tables remain separate',async()=>{const p=await project();encounters(instantiateManagedRuntime(p.bytes,options),p);},30000);\nfunction heapIsolation(first,second){const x=first.sourceObject({}),y=second.sourceObject({});try{assert.equal(value(first,'token',[x]),1);assert.equal(value(second,'token',[y]),1);assert.equal(value(first,'token',[x]),1);assert.equal(value(second,'token',[y]),1);assert.throws(()=>first.invoke('token',[y]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');}finally{try{finish(first,[x]);}finally{finish(second,[y]);}}}\ntest('Given two heaps executing identical module bytes when encounter order differs then tokens remain heap-local',()=>{heapIsolation(instantiateManagedRuntime(artifact(),options),instantiateManagedRuntime(artifact(),options));});\ntest('Given an operand that collects or throws when identity is evaluated then exactly one evaluation and the original thrown identity survive',()=>{const a=instantiateManagedRuntime(artifact(),options);a.auto(1);try{assert.deepEqual(value(a,'effects'),[true,[1,2]]);assert.deepEqual(value(a,'abrupt'),[true,[1]]);}finally{finish(a);}});\ntest.skipIf(process.platform!=='darwin'||process.arch!=='arm64')('Given a true native module and linked project when the same identities are encountered then the WASM and original JS contracts agree',async()=>{artifact();const one=resolve(directory,'host-token.dylib');await writeFile(one,Uint8Array.from(b.native.emit_typed_native_memory_library(lowered.typed,'arm64-macos')));identities(await instantiateNativeManagedRuntime(one,lowered,options));heapIsolation(await instantiateNativeManagedRuntime(one,lowered,options),await instantiateNativeManagedRuntime(one,lowered,options));const p=await project(),many=resolve(directory,'host-token-project.dylib');await writeFile(many,Uint8Array.from(b.native.emit_typed_native_memory_library(p.lowered.typed,'arm64-macos')));encounters(await instantiateNativeManagedRuntime(many,p.lowered,options),p);},120000);\n\ntest('Given cyclic modules before the defining module evaluates when an exported function uses its helper then the original TDZ is preserved',async()=>{\n const sources=projectCases.cycle,base=resolve(directory,'cycle');await mkdir(base);const modules=[];for(const[id,source]of Object.entries(sources)){const p=b.compiler.compile_ir_string(source,id.replace(/\\.mjs$/,'.eli'));modules.push({id,program:p});await writeFile(resolve(base,id),b.compiler.emit_ir_string(p));}\n const child=spawnSync('node',['--input-type=module','-e','const m=await import(process.argv[1]);console.log(m.early);',pathToFileURL(resolve(base,'main.mjs')).href],{encoding:'utf8',timeout:10000});assert.equal(child.status,0,child.stderr);assert.equal(child.stdout.trim(),'ReferenceError');\n const a=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_project_wasm(modules,'main.mjs',rt)),options);try{const early=a.getExport('early');try{assert.equal(a.readString(early),child.stdout.trim());}finally{a.release(early);}}finally{finish(a);}\n},30000);\n\ntest('Given identical zero-import bytes when Node calls imported aliases then module identity behavior remains the same',async()=>{\n const p=await project(),path=resolve(directory,'host-token-project.wasm');await writeFile(path,p.bytes);\n const script=[\"import assert from 'node:assert/strict';import{readFileSync}from'node:fs';\",'const{instantiateManagedRuntime}=await import(process.argv[1]);const bytes=readFileSync(process.argv[2]);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);',read.toString(),value.toString(),finish.toString(),encounters.toString(),'const a=instantiateManagedRuntime(bytes,'+JSON.stringify(options)+');encounters(a,{expected:'+JSON.stringify(p.expected)+'});'].join('\\n');\n const child=spawnSync('node',['--input-type=module','-e',script,pathToFileURL(resolve('tools/backends/managed-runtime.mjs')).href,path],{encoding:'utf8',timeout:30000});assert.equal(child.status,0,child.stderr);\n},40000);\ntest('Given a cyclic early helper call when its operand has effects and throws then callee TDZ precedes every operand effect',async()=>{\n const sources={\n  'trace.mjs':'(defconst trace (js-array)) (export trace)',\n  'main.mjs':'(import \"./trace.mjs\" trace) (import \"./early.mjs\" early) (defun token () (host-identity-token (progn (js-call trace :push \"arg\") (throw \"operand\")))) (export early token)',\n  'early.mjs':'(import \"./main.mjs\" token) (import \"./trace.mjs\" trace) (defconst early (try (token) (catch error (js-array (get error :name) (= error \"operand\") trace)))) (export early)'\n },base=resolve(directory,'cycle-operands');await mkdir(base);const modules=[];for(const[id,source]of Object.entries(sources)){const p=b.compiler.compile_ir_string(source,id.replace(/\\.mjs$/,'.eli'));modules.push({id,program:p});await writeFile(resolve(base,id),b.compiler.emit_ir_string(p));}\n const child=spawnSync('node',['--input-type=module','-e','const m=await import(process.argv[1]);console.log(JSON.stringify(m.early));',pathToFileURL(resolve(base,'main.mjs')).href],{encoding:'utf8',timeout:10000});assert.equal(child.status,0,child.stderr);const expected=JSON.parse(child.stdout);assert.deepEqual(expected,['ReferenceError',false,[]]);\n const a=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_project_wasm(modules,'main.mjs',rt)),options);a.auto(1);try{const early=a.getExport('early');try{assert.deepEqual(read(a,early),expected);}finally{a.release(early);}}finally{finish(a);}\n},30000);\n\n// This helper serializes a real lowerer's product. It supplies no executable\n// implementation: private identity tables and initialization run in the bytes.\nfunction groupedIdentityProduct(input,groups){\n const lowered=b.managed.lower_managed_program(input,rt,false,undefined,undefined,groups);\n const binary=b.wasm.emit_typed_memory_wasm(lowered.typed);\n const bytes=Uint8Array.from(b.wasm.append_metadata_section(binary,'eliscript-managed-control',JSON.stringify(lowered.descriptor)));\n assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);\n return{bytes,lowered};\n}\nfunction firstIdentityNodes(input){\n const found=[],pending=[...input.body].reverse();\n while(pending.length){const node=pending.pop();if(node.kind==='intrinsic'&&node.value==='host-identity-token')found.push(node);pending.push(...[...node.children].reverse());}\n return found;\n}\nfunction identityBoundary(a){\n a.auto(1);const x=a.sourceObject({}),y=a.sourceObject({});\n try{assert.equal(value(a,'left',[x]),1);assert.equal(value(a,'right',[y]),2);assert.equal(value(a,'left',[y]),2);assert.equal(value(a,'right',[x]),1);a.collect();assert.equal(value(a,'left',[x]),1);}\n finally{finish(a,[x,y]);}\n}\nconst boundarySource='(defun left (x) (host-identity-token x)) (defun right (x) (host-identity-token x)) (export left right)';\ntest('Given only functions and no source globals when the default nil boundary is lowered then one private table initializes before the first call',()=>{\n const input=b.compiler.compile_ir_string(boundarySource,'function-only-identity.eli'),saved=JSON.stringify(input);\n const product=groupedIdentityProduct(input,undefined);assert.equal(JSON.stringify(input),saved);\n assert.equal(product.lowered.descriptor.module.bindingCount,1);\n identityBoundary(instantiateManagedRuntime(product.bytes,options));\n for(const before of[null,undefined]){\n  const explicit=groupedIdentityProduct(input,[{nodes:firstIdentityNodes(input),before}]);\n  assert.deepEqual(explicit.bytes,product.bytes);identityBoundary(instantiateManagedRuntime(explicit.bytes,options));\n }\n});\ntest('Given a first source initializer that invokes identity when module state is created then the private helper precedes source effects without changing global indices',()=>{\n const source='(defconst trace (js-array)) '+\n  '(defun encounter () (let ((item (js-object))) (js-call trace :push (host-identity-token item)))) '+\n  '(defconst first (encounter)) (defconst second (encounter)) '+\n  '(defun run () (js-array first second trace)) (export run)',input=b.compiler.compile_ir_string(source,'identity-first-initializer.eli');\n const product=groupedIdentityProduct(input,undefined),a=instantiateManagedRuntime(product.bytes,options);\n assert.equal(product.lowered.descriptor.module.bindingCount,4);\n try{assert.deepEqual(value(a,'run'),[1,2,[1,2]]);a.collect();assert.deepEqual(value(a,'run'),[1,2,[1,2]]);}finally{finish(a);}\n});\ntest('Given multiple explicit groups at one empty-global boundary when functions execute then group-index insertion retains separate monotonic identity tables',()=>{\n const input=b.compiler.compile_ir_string(boundarySource,'identity-shared-boundary.eli'),nodes=firstIdentityNodes(input);\n const product=groupedIdentityProduct(input,[{nodes:[nodes[0]],before:input.body[0]},{nodes:[nodes[1]],before:input.body[1]}]);\n assert.equal(product.lowered.descriptor.module.bindingCount,2);const a=instantiateManagedRuntime(product.bytes,options);a.auto(1);\n const x=a.sourceObject({}),y=a.sourceObject({});\n try{assert.equal(value(a,'left',[x]),1);assert.equal(value(a,'left',[y]),2);assert.equal(value(a,'right',[y]),1);assert.equal(value(a,'right',[x]),2);a.collect();assert.equal(value(a,'left',[x]),1);assert.equal(value(a,'right',[y]),1);}\n finally{finish(a,[x,y]);}\n});\ntest('Given malformed group records or a foreign before node when lowering then structured ownership rejection precedes any metadata dereference',()=>{\n const input=b.compiler.compile_ir_string(boundarySource,'identity-invalid-boundary.eli'),nodes=firstIdentityNodes(input);\n const invalid=[null,false,'group',[],{}, {nodes:[]},{nodes:[],before:null},\n  {nodes,before:false},{nodes,before:0},{nodes,before:'not-a-node'},{nodes,before:{}},\n  {nodes,before:structuredClone(input.body[0])}];\n for(const record of invalid)assert.throws(()=>b.managed.lower_managed_program(input,rt,false,undefined,undefined,[record]),\n  error=>error.eliscriptDiagnostic?.code==='ELI-B0001'&&error.message==='invalid managed host identity group');\n for(const groups of[[],[{nodes:[nodes[0]],before:null}],\n  [{nodes,before:null},{nodes:[nodes[0]],before:null}],\n  [{nodes:[structuredClone(nodes[0])],before:null}]])\n  assert.throws(()=>b.managed.lower_managed_program(input,rt,false,undefined,undefined,groups),error=>error.eliscriptDiagnostic?.code==='ELI-B0001');\n identityBoundary(instantiateManagedRuntime(groupedIdentityProduct(input,undefined).bytes,options));\n});\ntest('Given malformed identity IR when the independent source prepass rejects it then direct lowering retains the original Error message and exact structured node span',()=>{\n const source=';; 中😀\\n(defun token (x)\\n (host-identity-token x)) (export token)';\n for(const count of[0,2]){\n  const input=b.compiler.compile_ir_string(source,'identity-arity-中.eli'),node=firstIdentityNodes(input)[0],operand=node.children[0];\n  node.children=count===0?[]:[operand,structuredClone(operand)];\n  assert.throws(()=>b.managed.lower_managed_program(input,rt),error=>{\n   const diagnostic=error.eliscriptDiagnostic;assert.equal(error.name,'Error');assert.equal(diagnostic?.code,'ELI-B0001');\n   assert.equal(diagnostic.phase,'managed-backend');assert.equal(diagnostic.message,error.message);\n   assert.equal(error.message,'host-identity-token expects 1 argument, got '+count);\n   assert.equal(error.eliscriptIRSpan,node.span);\n   assert.deepEqual(diagnostic.location,{file:'identity-arity-中.eli',\n    start:{offset:node.span.start,line:node.span.line,column:node.span.column},\n    end:{offset:node.span.end,line:node.span.endLine,column:node.span.endColumn}});return true;\n  });\n }\n});\ntest.skipIf(process.arch!=='arm64'||!['darwin','linux'].includes(process.platform))('Given a true native function-only module when its absent project boundary initializes then native preserves the same one-table token order',async()=>{\n const product=groupedIdentityProduct(b.compiler.compile_ir_string(boundarySource,'identity-native-boundary.eli'),undefined);\n const target=process.platform==='linux'?'arm64-linux':'arm64-macos',path=resolve(directory,'identity-native-boundary'+(process.platform==='linux'?'.so':'.dylib'));\n await writeFile(path,Uint8Array.from(b.native.emit_typed_native_memory_library(product.lowered.typed,target)));\n identityBoundary(await instantiateNativeManagedRuntime(path,product.lowered,options));\n},120000);\ntest('Given phased projects when each defining module reaches its evaluation boundary then private helpers stay out of preparation and cyclic TDZ still precedes operand effects',async()=>{\n for(const name of['project','cycle','cycleOperands']){\n  const modules=Object.entries(projectCases[name]).map(([id,source])=>({id,program:b.compiler.compile_ir_string(source,id.replace(/\\.mjs$/,'.eli'))}));\n  const saved=JSON.stringify(modules),lowered=b.managed.lower_managed_project(modules,'main.mjs',rt,{phased:true});\n  assert.equal(JSON.stringify(modules),saved);assert(lowered.descriptor.project);\n  if(name==='project')for(const id of['a.mjs','b.mjs']){\n   const module=lowered.descriptor.project.modules.find(module=>module.id===id);assert(module);\n   assert.equal(module.steps.length,1,'function-only module retains its own helper evaluation step');\n  }\n  const bytes=Uint8Array.from(b.wasm.append_metadata_section(b.wasm.emit_typed_memory_wasm(lowered.typed),\n   'eliscript-managed-control',JSON.stringify(lowered.descriptor)));\n  const deployment=resolve(directory,'phased-'+name);\n  for(const file of createManagedProjectFacades(lowered.descriptor,{entry:'main.mjs'}).files){\n   const filename=resolve(deployment,file.id);await mkdir(dirname(filename),{recursive:true});await writeFile(filename,file.source);\n  }\n  const a=await instantiateManagedRuntimeWithHostModules(bytes,{...options,\n   projectModuleBaseURL:pathToFileURL(deployment+'/').href});a.auto(1);\n  if(name==='project'){\n   const p=await project();encounters(a,p);\n  }else{\n   try{const early=a.getExport('early');try{\n    assert.deepEqual(read(a,early),name==='cycle'?'ReferenceError':['ReferenceError',false,[]]);\n   }finally{a.release(early);}}finally{finish(a);}\n  }\n }\n},120000);\n\ntest('Given finite JSON identity domains when linking without serialization then escaped keys values and normalized binding spellings choose the original exact salt',async()=>{\n const {binding_name}=await import(pathToFileURL(resolve(directory,'bootstrap/symbol.mjs')).href);\n const bindingKinds=new Set(['function-declaration','variable-declaration','parameter-binding','lexical-binding',\n  'binding-name','catch-binding','import-named','import-default','import-namespace']);\n function originalPrefix(modules){\n  let identity=JSON.stringify(modules);const pending=modules.flatMap(module=>module.program.body);\n  while(pending.length){const node=pending.pop();if(bindingKinds.has(node.kind)){\n   let key=node.value;try{key=binding_name(key);}catch{}\n   identity+=' '+key;\n  }pending.push(...node.children);}\n  let salt=0;while(identity.includes('$eliscript_link_'+salt+'_'))salt++;\n  return'$eliscript_link_'+salt+'_';\n }\n const payloads=[{},\n  {text:'$eliscript_link_0_'},\n  {'quoted\"\\\\\\n$eliscript_link_1_':'$eliscript_link_0_'},\n  {text:'$eliscript_link_00_ $eliscript_link_000_ $eliscript_link_999999999999999999999999999999999999999999999999_'},\n  {text:Array.from({length:24},(_,index)=>'$eliscript_link_'+index+'_').join(' '),\n   nested:[{'$eliscript_link_24_':'\\u0000😀\\ud800$eliscript_link_25_'}]},\n ];\n for(const name of['token','$eliscript-link-0-'])for(const payload of payloads){\n  const p=b.compiler.compile_ir_string(`(defun ${name} () 1) (export ${name})`,'prefix-中.eli');\n  Object.assign(p.body[0].properties,structuredClone(payload));\n  const modules=[{id:'main.mjs',program:p}],saved=JSON.stringify(modules),prefix=originalPrefix(modules);\n  const linked=b.managed.link_managed_project(modules,'main.mjs');\n  assert.equal(linked.exports.length,1);assert.equal(linked.exports[0].internalName,prefix+'0');\n  assert.equal(JSON.stringify(modules),saved);\n }\n const p=b.compiler.compile_ir_string('(defun token () 1) (export token)','invalid-prefix.eli');\n p.body[0].properties['$eliscript_link_0_']=undefined;\n assert.throws(()=>b.managed.link_managed_project([{id:'main.mjs',program:p}],'main.mjs'),\n  error=>error.eliscriptDiagnostic?.code==='ELI-I0001'&&/unsupported JSON type undefined/.test(error.message));\n const first=b.compiler.compile_ir_string('(defun first () 1)','first-invalid.eli');\n first.body[0].properties.bad=NaN;\n assert.throws(()=>b.managed.link_managed_project([{id:'first.mjs',program:first},{id:'later.mjs',program:p}],'first.mjs'),\n  error=>error.eliscriptDiagnostic?.code==='ELI-I0001'&&/finite numbers/.test(error.message));\n});\n\ntest('Given exported reachable namespaces and unused imported namespaces when linking then only actual module order owns namespace bindings independent of input order',()=>{\n const sources={\n  'main.mjs':'(import \"./a.mjs\" :as a) (export a)',\n  'a.mjs':'(defun token (x) (host-identity-token x)) (export token)',\n  'unused.mjs':'(import \"./hidden.mjs\" :as hidden) (export hidden)',\n  'hidden.mjs':'(defconst value \"$eliscript_link_0_\") (export value)',\n };\n const modules=Object.entries(sources).map(([id,source])=>({id,program:b.compiler.compile_ir_string(source,id+'.eli')}));\n const saved=JSON.stringify(modules),linked=b.managed.link_managed_project(modules,'main.mjs');\n assert.deepEqual(linked.modules,['a.mjs','main.mjs']);assert.equal(linked.namespaces.length,1);\n assert.deepEqual(linked.namespaces[0].entries.map(entry=>entry.name),['token']);\n assert.deepEqual(linked.exports.map(entry=>entry.name),['a']);\n assert(linked.program.body.some(node=>node.kind==='variable-declaration'&&node.value===linked.exports[0].internalName&&node.children[0]?.kind==='managed-module-namespace'));\n const reversed=b.managed.link_managed_project([...modules].reverse(),'main.mjs');\n assert.deepEqual(reversed,linked);assert.equal(JSON.stringify(modules),saved);\n});\n"))
+(module tests.wasm-managed-host-identity.test
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:buffer" Buffer)
+  (import "node:fs/promises" readFile mkdtemp rm writeFile mkdir)
+  (import "node:path" resolve dirname)
+  (import "node:os" tmpdir)
+  (import "node:process" :default process)
+  (import "node:url" pathToFileURL)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime instantiateManagedRuntimeWithHostModules)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "../tools/backends/managed-module-graph.mjs" createManagedProjectFacades)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+
+  (defvar projectCases nil)
+  (defvar b nil)
+  (defvar rt nil)
+  (defvar program nil)
+  (defvar bytes nil)
+  (defvar lowered nil)
+  (defvar directory nil)
+  (defvar reference nil)
+  (defvar projectFixture nil)
+
+  (defconst options (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 16777216))
+  (defconst boundarySource "(defun left (x) (host-identity-token x)) (defun right (x) (host-identity-token x)) (export left right)")
+
+  (beforeAll
+    (async ()
+      (setq projectCases
+        (JSON/parse (await (readFile (new globalThis.URL "./fixtures/managed-host-identity-projects.json" (js* "import.meta.url")) "utf8"))))
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-host-token-"))))
+      (setq b (await (buildBackends (js-object :outputRoot directory))))
+      (setq rt
+        (js-call (get b :compiler) :compile_ir_string
+                 (await (readFile "bootstrap/runtime/memory.eli" "utf8"))
+                 "runtime.eli"))
+      (setq program
+        (js-call (get b :compiler) :compile_ir_string
+                 (await (readFile "tests/fixtures/wasm-managed-host-identity.eli" "utf8"))
+                 "host-identity.eli"))
+      (setq reference
+        (await (funcall dyn-import
+                        (str "data:text/javascript;base64,"
+                             (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string program))
+                                      :toString "base64"))))))
+    120000)
+
+  (afterAll
+    (async ()
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun helper-runner ()
+    (resolve "tests/helpers/wasm-managed-host-identity-node.mjs"))
+
+  (defun diag-code? (e code)
+    (let ((diag (if (and (not (nullish? e)) (= (funcall js-typeof e) "object"))
+                  (get e :eliscriptDiagnostic)
+                  nil)))
+      (and (not (nullish? diag)) (= (get diag :code) code))))
+
+  (defun artifact ()
+    (when (nullish? bytes)
+      (let ((saved (JSON/stringify program)))
+        (setq lowered (js-call (get b :managed) :lower_managed_program program rt))
+        (setq bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program rt)))
+        (js-call assert :equal (JSON/stringify program) saved)
+        (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module bytes)) (js-array))))
+    bytes)
+
+  (defun read-val (a v)
+    (if (and (not (nullish? v)) (= (funcall js-typeof v) "object"))
+      (let ((k (get v :kind)))
+        (cond
+          ((= k 4) (js-call a :readNumber v))
+          ((= k 5) (js-call a :readString v))
+          ((= k 14)
+           (let ((out (js-array))
+                 (len (js-call a :length v))
+                 (i 0))
+             (while (< i len)
+               (let ((child (js-call a :get v i)))
+                 (try
+                   (js-call out :push (read-val a child))
+                   (finally (js-call a :release child))))
+               (setq i (+ i 1)))
+             out))
+          (t v)))
+      v))
+
+  (defun invoke-val (a name &rest __host_default_arguments_1)
+    (let* ((args (aref __host_default_arguments_1 0)))
+    (let ((out (js-call a :invoke name (if (undefined? args) (js-array) args))))
+      (try
+        (read-val a out)
+        (finally (js-call a :release out))))))
+
+  (defun finish-heap (a &rest __host_default_arguments_2)
+    (let* ((values (aref __host_default_arguments_2 0)))
+    (try
+      (when (not (undefined? values))
+        (js-call values :forEach (lambda (v) (js-call a :release v))))
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+      (finally
+        (when (not (nullish? (get a :close)))
+          (js-call a :close))))))
+
+  (defun check-identities (a)
+    (js-call a :auto 1)
+    (let ((x (js-call a :sourceObject (js-object)))
+          (y (js-call a :sourceObject (js-object))))
+      (try
+        (let ((first-tok (invoke-val a "token" (js-array x)))
+              (i 0))
+          (js-call assert :equal first-tok 1)
+          (js-call assert :equal (invoke-val a "alias" (js-array x)) first-tok)
+          (js-call assert :equal (invoke-val a "nested" (js-array x)) first-tok)
+          (js-call assert :equal (invoke-val a "token" (js-array y)) 2)
+          (while (< i 8)
+            (js-call a :collect)
+            (js-call assert :equal (invoke-val a "token" (js-array x)) first-tok)
+            (setq i (+ i 1)))
+          (js-call assert :deepEqual (invoke-val a "effects") (js-array t (js-array 1 2)))
+          (js-call assert :deepEqual (invoke-val a "abrupt") (js-array t (js-array 1)))
+          (js-call assert :deepEqual (invoke-val a "no-conversion") (js-array))
+          (let ((symbols (invoke-val a "symbol-case"))
+                (functions (invoke-val a "function-case")))
+            (js-call assert :equal (aref symbols 0) (aref symbols 2))
+            (js-call assert :notEqual (aref symbols 0) (aref symbols 1))
+            (js-call assert :equal (aref functions 0) (aref functions 2))
+            (js-call assert :notEqual (aref functions 0) (aref functions 1))))
+        (finally
+          (finish-heap a (js-array x y))))))
+
+  (test "Given the existing intrinsic when a module is lowered then its private identity table executes in zero-import WASM"
+    (lambda ()
+      (check-identities (instantiateManagedRuntime (artifact) options))))
+
+  (test "Given scalar inputs when host identity is requested then original TypeError messages and later calls recover"
+    (lambda ()
+      (let* ((a (instantiateManagedRuntime (artifact) options))
+             (values (js-array nil undefined false t (js-call a :number -0.0) (js-call a :number globalThis.NaN) (js-call a :string ""))))
+        (js-call a :auto 1)
+        (try
+          (js-call values :forEach
+            (lambda (x)
+              (let ((raw (if (and (not (nullish? x)) (= (funcall js-typeof x) "object"))
+                           (let ((k (get x :kind)))
+                             (cond
+                               ((= k 4) (js-call a :readNumber x))
+                               ((= k 5) (js-call a :readString x))
+                               (t x)))
+                           x)))
+                (js-call assert :equal (invoke-val a "safe" (js-array x)) (js-call reference :safe raw)))))
+          (let ((obj (js-call a :sourceObject (js-object))))
+            (try
+              (js-call assert :equal (invoke-val a "token" (js-array obj)) 1)
+              (finally (js-call a :release obj))))
+          (finally
+            (finish-heap a values))))))
+
+  (test "Given wrong source and IR arity when lowering then no operand is dropped or accepted"
+    (lambda ()
+      (js-call (js-array "(host-identity-token)" "(host-identity-token 1 2)") :forEach
+        (lambda (src)
+          (js-call assert :throws (lambda () (js-call (get b :compiler) :compile_string src "arity.eli")))))
+      (js-call (js-array 0 2) :forEach
+        (lambda (cnt)
+          (let* ((p (js-call (get b :compiler) :compile_ir_string "(defun token (x) (host-identity-token x))" "arity.eli"))
+                 (node (js-call (get (aref (get p :body) 0) :children) :at -1)))
+            (put node "children"
+                 (if (= cnt 0)
+                   (js-array)
+                   (js-array (aref (get node :children) 0) (aref (get node :children) 0))))
+            (js-call assert :throws
+              (lambda () (js-call (get b :managed) :lower_managed_program p rt))
+              (lambda (e) (diag-code? e "ELI-B0001"))))))))
+
+  (test "Given no intrinsic when an ordinary function is lowered then no hidden state or module ABI is allocated"
+    (lambda ()
+      (let* ((p (js-call (get b :compiler) :compile_ir_string "(defun identity (x) x) (export identity)" "plain.eli"))
+             (out (js-call (get b :managed) :lower_managed_program p rt)))
+        (js-call assert :equal (get (get out :descriptor) :abi) "managed-control-v1")
+        (js-call assert :equal (get (get out :descriptor) :module) undefined))))
+
+  (defasync get-project ()
+    (if (not (nullish? projectFixture))
+      projectFixture
+      (let* ((project-sources (get projectCases :project))
+             (base (resolve directory "project"))
+             (entries (Object/entries project-sources))
+             (modules (js-array))
+             (i 0))
+        (await (mkdir base))
+        (while (< i (get entries :length))
+          (let* ((entry (aref entries i))
+                 (id (aref entry 0))
+                 (src (aref entry 1))
+                 (p (js-call (get b :compiler) :compile_ir_string src (js-call id :replace (new globalThis.RegExp "\\.mjs$") ".eli"))))
+            (js-call modules :push (js-object :id id :program p))
+            (await (writeFile (resolve base id) (js-call (get b :compiler) :emit_ir_string p))))
+          (setq i (+ i 1)))
+        (let* ((saved (JSON/stringify modules))
+               (proj-lowered (js-call (get b :managed) :lower_managed_project modules "main.mjs" rt))
+               (proj-bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_project_wasm modules "main.mjs" rt)))
+               (rev-modules (js-call (Array/from modules) :reverse)))
+          (js-call assert :equal (JSON/stringify modules) saved)
+          (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module proj-bytes)) (js-array))
+          (js-call assert :deepEqual (Uint8Array/from (js-call (get b :managed) :emit_managed_project_wasm rev-modules "main.mjs" rt)) proj-bytes)
+          (let ((child (spawnSync "node"
+                                  (js-array (helper-runner) "project" (get (pathToFileURL (resolve base "main.mjs")) :href))
+                                  (js-object :encoding "utf8" :timeout 10000))))
+            (js-call assert :equal (get child :status) 0 (get child :stderr))
+            (setq projectFixture
+              (js-object :bytes proj-bytes
+                         :lowered proj-lowered
+                         :expected (JSON/parse (get child :stdout))))
+            projectFixture)))))
+
+  (defun check-encounters (a p)
+    (js-call a :auto 1)
+    (let ((x (js-call a :sourceObject (js-object)))
+          (y (js-call a :sourceObject (js-object)))
+          (left (js-call a :getExport "left"))
+          (copy (js-call a :getExport "left_copy"))
+          (exp (get p :expected)))
+      (try
+        (js-call assert :equal (js-call a :keyEqual left copy) (get exp :same))
+        (js-call assert :deepEqual (invoke-val a "encounters" (js-array x y)) (get exp :values))
+        (js-call assert :deepEqual (get exp :values) (js-array 1 2 1 2 1 1 2))
+        (js-call assert :equal (invoke-val a "left" (js-array x)) 1)
+        (js-call assert :equal (invoke-val a "right" (js-array x)) 2)
+        (js-call assert :equal (invoke-val a "closure" (js-array x)) 1)
+        (js-call assert :equal (invoke-val a "own" (js-array x)) 2)
+        (finally
+          (finish-heap a (js-array x y left copy))))))
+
+  (test "Given linked modules with opposite encounter orders when imported aliases and closures are called then defining-module identity tables remain separate"
+    (async ()
+      (let ((p (await (get-project))))
+        (check-encounters (instantiateManagedRuntime (get p :bytes) options) p)))
+    30000)
+
+  (defun check-heap-isolation (first-inst second-inst)
+    (let ((x (js-call first-inst :sourceObject (js-object)))
+          (y (js-call second-inst :sourceObject (js-object))))
+      (try
+        (js-call assert :equal (invoke-val first-inst "token" (js-array x)) 1)
+        (js-call assert :equal (invoke-val second-inst "token" (js-array y)) 1)
+        (js-call assert :equal (invoke-val first-inst "token" (js-array x)) 1)
+        (js-call assert :equal (invoke-val second-inst "token" (js-array y)) 1)
+        (js-call assert :throws
+          (lambda () (js-call first-inst :invoke "token" (js-array y)))
+          (lambda (e) (diag-code? e "ELI-RT0001")))
+        (finally
+          (try
+            (finish-heap first-inst (js-array x))
+            (finally
+              (finish-heap second-inst (js-array y))))))))
+
+  (test "Given two heaps executing identical module bytes when encounter order differs then tokens remain heap-local"
+    (lambda ()
+      (check-heap-isolation (instantiateManagedRuntime (artifact) options)
+                            (instantiateManagedRuntime (artifact) options))))
+
+  (test "Given an operand that collects or throws when identity is evaluated then exactly one evaluation and the original thrown identity survive"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime (artifact) options)))
+        (js-call a :auto 1)
+        (try
+          (js-call assert :deepEqual (invoke-val a "effects") (js-array t (js-array 1 2)))
+          (js-call assert :deepEqual (invoke-val a "abrupt") (js-array t (js-array 1)))
+          (finally
+            (finish-heap a))))))
+
+  (funcall (js-call test :skipIf (or (/= (get process :platform) "darwin") (/= (get process :arch) "arm64")))
+    "Given a true native module and linked project when the same identities are encountered then the WASM and original JS contracts agree"
+    (async ()
+      (artifact)
+      (let ((one (resolve directory "host-token.dylib")))
+        (await (writeFile one (Uint8Array/from (js-call (get b :native) :emit_typed_native_memory_library (get lowered :typed) "arm64-macos"))))
+        (check-identities (await (instantiateNativeManagedRuntime one lowered options)))
+        (check-heap-isolation (await (instantiateNativeManagedRuntime one lowered options))
+                              (await (instantiateNativeManagedRuntime one lowered options))))
+      (let* ((p (await (get-project)))
+             (many (resolve directory "host-token-project.dylib")))
+        (await (writeFile many (Uint8Array/from (js-call (get b :native) :emit_typed_native_memory_library (get (get p :lowered) :typed) "arm64-macos"))))
+        (check-encounters (await (instantiateNativeManagedRuntime many (get p :lowered) options)) p)))
+    120000)
+
+  (test "Given cyclic modules before the defining module evaluates when an exported function uses its helper then the original TDZ is preserved"
+    (async ()
+      (let* ((sources (get projectCases :cycle))
+             (base (resolve directory "cycle"))
+             (entries (Object/entries sources))
+             (modules (js-array))
+             (i 0))
+        (await (mkdir base))
+        (while (< i (get entries :length))
+          (let* ((entry (aref entries i))
+                 (id (aref entry 0))
+                 (src (aref entry 1))
+                 (p (js-call (get b :compiler) :compile_ir_string src (js-call id :replace (new globalThis.RegExp "\\.mjs$") ".eli"))))
+            (js-call modules :push (js-object :id id :program p))
+            (await (writeFile (resolve base id) (js-call (get b :compiler) :emit_ir_string p))))
+          (setq i (+ i 1)))
+        (let ((child (spawnSync "node"
+                                (js-array (helper-runner) "early-str" (get (pathToFileURL (resolve base "main.mjs")) :href))
+                                (js-object :encoding "utf8" :timeout 10000))))
+          (js-call assert :equal (get child :status) 0 (get child :stderr))
+          (js-call assert :equal (js-call (get child :stdout) :trim) "ReferenceError")
+          (let ((a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_project_wasm modules "main.mjs" rt)) options)))
+            (try
+              (let ((early (js-call a :getExport "early")))
+                (try
+                  (js-call assert :equal (js-call a :readString early) (js-call (get child :stdout) :trim))
+                  (finally (js-call a :release early))))
+              (finally (finish-heap a)))))))
+    30000)
+
+  (test "Given identical zero-import bytes when Node calls imported aliases then module identity behavior remains the same"
+    (async ()
+      (let* ((p (await (get-project)))
+             (wasm-path (resolve directory "host-token-project.wasm")))
+        (await (writeFile wasm-path (get p :bytes)))
+        (let ((child (spawnSync "node"
+                                (js-array (helper-runner) "wasm-encounters" wasm-path (JSON/stringify (get p :expected)))
+                                (js-object :encoding "utf8" :timeout 30000))))
+          (js-call assert :equal (get child :status) 0 (get child :stderr)))))
+    40000)
+
+  (test "Given a cyclic early helper call when its operand has effects and throws then callee TDZ precedes every operand effect"
+    (async ()
+      (let* ((sources (js-object
+                        "trace.mjs" "(defconst trace (js-array)) (export trace)"
+                        "main.mjs" "(import \"./trace.mjs\" trace) (import \"./early.mjs\" early) (defun token () (host-identity-token (progn (js-call trace :push \"arg\") (throw \"operand\")))) (export early token)"
+                        "early.mjs" "(import \"./main.mjs\" token) (import \"./trace.mjs\" trace) (defconst early (try (token) (catch error (js-array (get error :name) (= error \"operand\") trace)))) (export early)"))
+             (base (resolve directory "cycle-operands"))
+             (entries (Object/entries sources))
+             (modules (js-array))
+             (i 0))
+        (await (mkdir base))
+        (while (< i (get entries :length))
+          (let* ((entry (aref entries i))
+                 (id (aref entry 0))
+                 (src (aref entry 1))
+                 (p (js-call (get b :compiler) :compile_ir_string src (js-call id :replace (new globalThis.RegExp "\\.mjs$") ".eli"))))
+            (js-call modules :push (js-object :id id :program p))
+            (await (writeFile (resolve base id) (js-call (get b :compiler) :emit_ir_string p))))
+          (setq i (+ i 1)))
+        (let ((child (spawnSync "node"
+                                (js-array (helper-runner) "early-json" (get (pathToFileURL (resolve base "main.mjs")) :href))
+                                (js-object :encoding "utf8" :timeout 10000))))
+          (js-call assert :equal (get child :status) 0 (get child :stderr))
+          (let ((expected (JSON/parse (get child :stdout))))
+            (js-call assert :deepEqual expected (js-array "ReferenceError" false (js-array)))
+            (let ((a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_project_wasm modules "main.mjs" rt)) options)))
+              (js-call a :auto 1)
+              (try
+                (let ((early (js-call a :getExport "early")))
+                  (try
+                    (js-call assert :deepEqual (read-val a early) expected)
+                    (finally (js-call a :release early))))
+                (finally (finish-heap a))))))))
+    30000)
+
+  ;; This helper serializes a real lowerer's product. It supplies no executable
+  ;; implementation: private identity tables and initialization run in the bytes.
+  (defun grouped-identity-product (input groups)
+    (let* ((low (js-call (get b :managed) :lower_managed_program input rt false undefined undefined groups))
+           (binary (js-call (get b :wasm) :emit_typed_memory_wasm (get low :typed)))
+           (prod-bytes (Uint8Array/from
+                         (js-call (get b :wasm) :append_metadata_section
+                                  binary "eliscript-managed-control" (JSON/stringify (get low :descriptor))))))
+      (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module prod-bytes)) (js-array))
+      (js-object :bytes prod-bytes :lowered low)))
+
+  (defun collect-identity-nodes (input)
+    (let ((found (js-array))
+          (pending (js-call (Array/from (get input :body)) :reverse)))
+      (while (> (get pending :length) 0)
+        (let ((node (js-call pending :pop)))
+          (when (and (= (get node :kind) "intrinsic") (= (get node :value) "host-identity-token"))
+            (js-call found :push node))
+          (js-call (js-call (Array/from (get node :children)) :reverse) :forEach
+            (lambda (child) (js-call pending :push child)))))
+      found))
+
+  (defun check-identity-boundary (a)
+    (js-call a :auto 1)
+    (let ((x (js-call a :sourceObject (js-object)))
+          (y (js-call a :sourceObject (js-object))))
+      (try
+        (js-call assert :equal (invoke-val a "left" (js-array x)) 1)
+        (js-call assert :equal (invoke-val a "right" (js-array y)) 2)
+        (js-call assert :equal (invoke-val a "left" (js-array y)) 2)
+        (js-call assert :equal (invoke-val a "right" (js-array x)) 1)
+        (js-call a :collect)
+        (js-call assert :equal (invoke-val a "left" (js-array x)) 1)
+        (finally (finish-heap a (js-array x y))))))
+
+  (test "Given only functions and no source globals when the default nil boundary is lowered then one private table initializes before the first call"
+    (lambda ()
+      (let* ((input (js-call (get b :compiler) :compile_ir_string boundarySource "function-only-identity.eli"))
+             (saved (JSON/stringify input))
+             (product (grouped-identity-product input undefined)))
+        (js-call assert :equal (JSON/stringify input) saved)
+        (js-call assert :equal (get (get (get (get product :lowered) :descriptor) :module) :bindingCount) 1)
+        (check-identity-boundary (instantiateManagedRuntime (get product :bytes) options))
+        (js-call (js-array nil undefined) :forEach
+          (lambda (before)
+            (let ((explicit (grouped-identity-product input (js-array (js-object :nodes (collect-identity-nodes input) :before before)))))
+              (js-call assert :deepEqual (get explicit :bytes) (get product :bytes))
+              (check-identity-boundary (instantiateManagedRuntime (get explicit :bytes) options))))))))
+
+  (test "Given a first source initializer that invokes identity when module state is created then the private helper precedes source effects without changing global indices"
+    (lambda ()
+      (let* ((src (str "(defconst trace (js-array)) "
+                       "(defun encounter () (let ((item (js-object))) (js-call trace :push (host-identity-token item)))) "
+                       "(defconst first (encounter)) (defconst second (encounter)) "
+                       "(defun run () (js-array first second trace)) (export run)"))
+             (input (js-call (get b :compiler) :compile_ir_string src "identity-first-initializer.eli"))
+             (product (grouped-identity-product input undefined))
+             (a (instantiateManagedRuntime (get product :bytes) options)))
+        (js-call assert :equal (get (get (get (get product :lowered) :descriptor) :module) :bindingCount) 4)
+        (try
+          (js-call assert :deepEqual (invoke-val a "run") (js-array 1 2 (js-array 1 2)))
+          (js-call a :collect)
+          (js-call assert :deepEqual (invoke-val a "run") (js-array 1 2 (js-array 1 2)))
+          (finally (finish-heap a))))))
+
+  (test "Given multiple explicit groups at one empty-global boundary when functions execute then group-index insertion retains separate monotonic identity tables"
+    (lambda ()
+      (let* ((input (js-call (get b :compiler) :compile_ir_string boundarySource "identity-shared-boundary.eli"))
+             (nodes (collect-identity-nodes input))
+             (product (grouped-identity-product input
+                        (js-array (js-object :nodes (js-array (aref nodes 0)) :before (aref (get input :body) 0))
+                                  (js-object :nodes (js-array (aref nodes 1)) :before (aref (get input :body) 1)))))
+             (a (instantiateManagedRuntime (get product :bytes) options))
+             (x (js-call a :sourceObject (js-object)))
+             (y (js-call a :sourceObject (js-object))))
+        (js-call assert :equal (get (get (get (get product :lowered) :descriptor) :module) :bindingCount) 2)
+        (js-call a :auto 1)
+        (try
+          (js-call assert :equal (invoke-val a "left" (js-array x)) 1)
+          (js-call assert :equal (invoke-val a "left" (js-array y)) 2)
+          (js-call assert :equal (invoke-val a "right" (js-array y)) 1)
+          (js-call assert :equal (invoke-val a "right" (js-array x)) 2)
+          (js-call a :collect)
+          (js-call assert :equal (invoke-val a "left" (js-array x)) 1)
+          (js-call assert :equal (invoke-val a "right" (js-array y)) 1)
+          (finally (finish-heap a (js-array x y)))))))
+
+  (test "Given malformed group records or a foreign before node when lowering then structured ownership rejection precedes any metadata dereference"
+    (lambda ()
+      (let* ((input (js-call (get b :compiler) :compile_ir_string boundarySource "identity-invalid-boundary.eli"))
+             (nodes (collect-identity-nodes input))
+             (invalid (js-array nil false "group" (js-array) (js-object)
+                                (js-object :nodes (js-array))
+                                (js-object :nodes (js-array) :before nil)
+                                (js-object :nodes nodes :before false)
+                                (js-object :nodes nodes :before 0)
+                                (js-object :nodes nodes :before "not-a-node")
+                                (js-object :nodes nodes :before (js-object))
+                                (js-object :nodes nodes :before (globalThis.structuredClone (aref (get input :body) 0))))))
+        (js-call invalid :forEach
+          (lambda (record)
+            (js-call assert :throws
+              (lambda () (js-call (get b :managed) :lower_managed_program input rt false undefined undefined (js-array record)))
+              (lambda (err)
+                (and (diag-code? err "ELI-B0001")
+                     (= (get err :message) "invalid managed host identity group"))))))
+        (js-call (js-array (js-array)
+                           (js-array (js-object :nodes (js-array (aref nodes 0)) :before nil))
+                           (js-array (js-object :nodes nodes :before nil) (js-object :nodes (js-array (aref nodes 0)) :before nil))
+                           (js-array (js-object :nodes (js-array (globalThis.structuredClone (aref nodes 0))) :before nil))) :forEach
+          (lambda (groups)
+            (js-call assert :throws
+              (lambda () (js-call (get b :managed) :lower_managed_program input rt false undefined undefined groups))
+              (lambda (err) (diag-code? err "ELI-B0001")))))
+        (check-identity-boundary (instantiateManagedRuntime (get (grouped-identity-product input undefined) :bytes) options)))))
+
+  (test "Given malformed identity IR when the independent source prepass rejects it then direct lowering retains the original Error message and exact structured node span"
+    (lambda ()
+      (let ((src ";; 中😀\n(defun token (x)\n (host-identity-token x)) (export token)"))
+        (js-call (js-array 0 2) :forEach
+          (lambda (cnt)
+            (let* ((input (js-call (get b :compiler) :compile_ir_string src "identity-arity-中.eli"))
+                   (node (aref (collect-identity-nodes input) 0))
+                   (operand (aref (get node :children) 0)))
+              (put node "children"
+                   (if (= cnt 0)
+                     (js-array)
+                     (js-array operand (globalThis.structuredClone operand))))
+              (js-call assert :throws
+                (lambda () (js-call (get b :managed) :lower_managed_program input rt))
+                (lambda (err)
+                  (let ((diagnostic (get err :eliscriptDiagnostic)))
+                    (js-call assert :equal (get err :name) "Error")
+                    (js-call assert :equal (if (nullish? diagnostic) undefined (get diagnostic :code)) "ELI-B0001")
+                    (js-call assert :equal (get diagnostic :phase) "managed-backend")
+                    (js-call assert :equal (get diagnostic :message) (get err :message))
+                    (js-call assert :equal (get err :message) (str "host-identity-token expects 1 argument, got " cnt))
+                    (js-call assert :equal (get err :eliscriptIRSpan) (get node :span))
+                    (js-call assert :deepEqual (get diagnostic :location)
+                      (js-object
+                        :file "identity-arity-中.eli"
+                        :start (js-object :offset (get (get node :span) :start)
+                                          :line (get (get node :span) :line)
+                                          :column (get (get node :span) :column))
+                        :end (js-object :offset (get (get node :span) :end)
+                                        :line (get (get node :span) :endLine)
+                                        :column (get (get node :span) :endColumn))))
+                    t)))))))))
+
+  (funcall (js-call test :skipIf (or (/= (get process :arch) "arm64")
+                                     (not (js-call (js-array "darwin" "linux") :includes (get process :platform)))))
+    "Given a true native function-only module when its absent project boundary initializes then native preserves the same one-table token order"
+    (async ()
+      (let* ((product (grouped-identity-product (js-call (get b :compiler) :compile_ir_string boundarySource "identity-native-boundary.eli") undefined))
+             (target (if (= (get process :platform) "linux") "arm64-linux" "arm64-macos"))
+             (lib-path (resolve directory (str "identity-native-boundary" (if (= (get process :platform) "linux") ".so" ".dylib")))))
+        (await (writeFile lib-path (Uint8Array/from (js-call (get b :native) :emit_typed_native_memory_library (get (get product :lowered) :typed) target))))
+        (check-identity-boundary (await (instantiateNativeManagedRuntime lib-path (get product :lowered) options)))))
+    120000)
+
+  (test "Given phased projects when each defining module reaches its evaluation boundary then private helpers stay out of preparation and cyclic TDZ still precedes operand effects"
+    (async ()
+      (let ((names (js-array "project" "cycle" "cycleOperands"))
+            (idx 0))
+        (while (< idx (get names :length))
+          (let* ((name (aref names idx))
+                 (modules (js-call (Object/entries (aref projectCases name))
+                            :map (lambda (entry)
+                                   (let ((id (aref entry 0))
+                                         (src (aref entry 1)))
+                                     (js-object :id id
+                                                :program (js-call (get b :compiler) :compile_ir_string src (js-call id :replace (new globalThis.RegExp "\\.mjs$") ".eli")))))))
+                 (saved (JSON/stringify modules))
+                 (low (js-call (get b :managed) :lower_managed_project modules "main.mjs" rt (js-object :phased t))))
+            (js-call assert :equal (JSON/stringify modules) saved)
+            (funcall assert (get (get low :descriptor) :project))
+            (when (= name "project")
+              (js-call (js-array "a.mjs" "b.mjs") :forEach
+                (lambda (id)
+                  (let ((m (js-call (get (get (get low :descriptor) :project) :modules) :find (lambda (mod) (= (get mod :id) id)))))
+                    (funcall assert m)
+                    (js-call assert :equal (get (get m :steps) :length) 1 "function-only module retains its own helper evaluation step")))))
+            (let* ((phased-bytes (Uint8Array/from
+                                   (js-call (get b :wasm) :append_metadata_section
+                                            (js-call (get b :wasm) :emit_typed_memory_wasm (get low :typed))
+                                            "eliscript-managed-control"
+                                            (JSON/stringify (get low :descriptor)))))
+                   (deployment (resolve directory (str "phased-" name)))
+                   (files (get (createManagedProjectFacades (get low :descriptor) (js-object :entry "main.mjs")) :files))
+                   (fi 0))
+              (while (< fi (get files :length))
+                (let* ((file (aref files fi))
+                       (filename (resolve deployment (get file :id))))
+                  (await (mkdir (dirname filename) (js-object :recursive t)))
+                  (await (writeFile filename (get file :source))))
+                (setq fi (+ fi 1)))
+              (let ((a (await (instantiateManagedRuntimeWithHostModules phased-bytes
+                                (Object/assign (js-object) options
+                                  (js-object :projectModuleBaseURL (get (pathToFileURL (str deployment "/")) :href)))))))
+                (js-call a :auto 1)
+                (if (= name "project")
+                  (let ((p (await (get-project))))
+                    (check-encounters a p))
+                  (try
+                    (let ((early (js-call a :getExport "early")))
+                      (try
+                        (js-call assert :deepEqual (read-val a early)
+                          (if (= name "cycle") "ReferenceError" (js-array "ReferenceError" false (js-array))))
+                        (finally (js-call a :release early))))
+                    (finally (finish-heap a)))))))
+          (setq idx (+ idx 1)))))
+    120000)
+
+  (test "Given finite JSON identity domains when linking without serialization then escaped keys values and normalized binding spellings choose the original exact salt"
+    (async ()
+      (let* ((sym-mod (await (funcall dyn-import (get (pathToFileURL (resolve directory "bootstrap/symbol.mjs")) :href))))
+             (binding-name-fn (get sym-mod :binding_name))
+             (binding-kinds (new globalThis.Set
+                              (js-array "function-declaration" "variable-declaration" "parameter-binding" "lexical-binding"
+                                        "binding-name" "catch-binding" "import-named" "import-default" "import-namespace")))
+             (original-prefix (lambda (modules)
+                                (let ((identity (JSON/stringify modules))
+                                      (pending (js-call modules :flatMap (lambda (m) (get (get m :program) :body))))
+                                      (salt 0))
+                                  (while (> (get pending :length) 0)
+                                    (let ((node (js-call pending :pop)))
+                                      (when (js-call binding-kinds :has (get node :kind))
+                                        (let ((key (get node :value)))
+                                          (try
+                                            (setq key (funcall binding-name-fn key))
+                                            (catch _ignored nil))
+                                          (setq identity (str identity " " key))))
+                                      (js-call (get node :children) :forEach
+                                        (lambda (c) (js-call pending :push c)))))
+                                  (while (js-call identity :includes (str "$eliscript_link_" salt "_"))
+                                    (setq salt (+ salt 1)))
+                                  (str "$eliscript_link_" salt "_"))))
+             (special-obj (js-object))
+             (nested-obj (js-object))
+             (payloads nil))
+        (put special-obj "quoted\"\\\n$eliscript_link_1_" "$eliscript_link_0_")
+        (put nested-obj "$eliscript_link_24_" (str (String/fromCharCode 0) "😀" (String/fromCharCode 55296) "$eliscript_link_25_"))
+        (setq payloads
+          (js-array (js-object)
+                    (js-object :text "$eliscript_link_0_")
+                    special-obj
+                    (js-object :text "$eliscript_link_00_ $eliscript_link_000_ $eliscript_link_999999999999999999999999999999999999999999999999_")
+                    (js-object :text (js-call (Array/from (js-object :length 24) (lambda (_ index) (str "$eliscript_link_" index "_"))) :join " ")
+                               :nested (js-array nested-obj))))
+        (js-call (js-array "token" "$eliscript-link-0-") :forEach
+          (lambda (name)
+            (js-call payloads :forEach
+              (lambda (payload)
+                (let ((p (js-call (get b :compiler) :compile_ir_string (str "(defun " name " () 1) (export " name ")") "prefix-中.eli")))
+                  (Object/assign (get (aref (get p :body) 0) :properties) (globalThis.structuredClone payload))
+                  (let* ((modules (js-array (js-object :id "main.mjs" :program p)))
+                         (saved (JSON/stringify modules))
+                         (prefix (funcall original-prefix modules))
+                         (linked (js-call (get b :managed) :link_managed_project modules "main.mjs")))
+                    (js-call assert :equal (get (get linked :exports) :length) 1)
+                    (js-call assert :equal (get (aref (get linked :exports) 0) :internalName) (str prefix "0"))
+                    (js-call assert :equal (JSON/stringify modules) saved)))))))
+        (let ((p (js-call (get b :compiler) :compile_ir_string "(defun token () 1) (export token)" "invalid-prefix.eli")))
+          (put (get (aref (get p :body) 0) :properties) "$eliscript_link_0_" undefined)
+          (js-call assert :throws
+            (lambda () (js-call (get b :managed) :link_managed_project (js-array (js-object :id "main.mjs" :program p)) "main.mjs"))
+            (lambda (err)
+              (and (diag-code? err "ELI-I0001")
+                   (js-call (new globalThis.RegExp "unsupported JSON type undefined") :test (get err :message)))))
+          (let ((first-mod (js-call (get b :compiler) :compile_ir_string "(defun first () 1)" "first-invalid.eli")))
+            (put (get (aref (get first-mod :body) 0) :properties) "bad" globalThis.NaN)
+            (js-call assert :throws
+              (lambda ()
+                (js-call (get b :managed) :link_managed_project
+                         (js-array (js-object :id "first.mjs" :program first-mod)
+                                   (js-object :id "later.mjs" :program p))
+                         "first.mjs"))
+              (lambda (err)
+                (and (diag-code? err "ELI-I0001")
+                     (js-call (new globalThis.RegExp "finite numbers") :test (get err :message))))))))))
+
+  (test "Given exported reachable namespaces and unused imported namespaces when linking then only actual module order owns namespace bindings independent of input order"
+    (lambda ()
+      (let* ((sources (js-object
+                        "main.mjs" "(import \"./a.mjs\" :as a) (export a)"
+                        "a.mjs" "(defun token (x) (host-identity-token x)) (export token)"
+                        "unused.mjs" "(import \"./hidden.mjs\" :as hidden) (export hidden)"
+                        "hidden.mjs" "(defconst value \"$eliscript_link_0_\") (export value)"))
+             (modules (js-call (Object/entries sources)
+                        :map (lambda (entry)
+                               (let ((id (aref entry 0))
+                                     (src (aref entry 1)))
+                                 (js-object :id id :program (js-call (get b :compiler) :compile_ir_string src (str id ".eli")))))))
+             (saved (JSON/stringify modules))
+             (linked (js-call (get b :managed) :link_managed_project modules "main.mjs")))
+        (js-call assert :deepEqual (get linked :modules) (js-array "a.mjs" "main.mjs"))
+        (js-call assert :equal (get (get linked :namespaces) :length) 1)
+        (js-call assert :deepEqual
+          (js-call (get (aref (get linked :namespaces) 0) :entries) :map (lambda (entry) (get entry :name)))
+          (js-array "token"))
+        (js-call assert :deepEqual
+          (js-call (get linked :exports) :map (lambda (entry) (get entry :name)))
+          (js-array "a"))
+        (funcall assert
+          (js-call (get (get linked :program) :body) :some
+            (lambda (node)
+              (and (= (get node :kind) "variable-declaration")
+                   (= (get node :value) (get (aref (get linked :exports) 0) :internalName))
+                   (not (nullish? (aref (get node :children) 0)))
+                   (= (get (aref (get node :children) 0) :kind) "managed-module-namespace")))))
+        (let ((reversed (js-call (get b :managed) :link_managed_project (js-call (Array/from modules) :reverse) "main.mjs")))
+          (js-call assert :deepEqual reversed linked)
+          (js-call assert :equal (JSON/stringify modules) saved))))))

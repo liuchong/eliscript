@@ -1,2 +1,24 @@
-(module capsules.tests.fixtures.collection-adapter-isolation
-  (js* "const prototypes = [Array.prototype, Map.prototype, Set.prototype];\nconst before = prototypes.map((prototype) => Reflect.ownKeys(prototype));\n\nconst {\n  IAssociative,\n  IConj,\n  ICounted,\n  IEmptyable,\n  IIndexed,\n  ILookup,\n  IMap,\n  IReduce,\n  IReversible,\n  ISet,\n  ISeqable,\n  IStack,\n} = await import(\"../../runtime/core/collection.mjs\");\nconst { protocolSlot } = await import(\"../../runtime/core/protocol.mjs\");\n\nconst after = prototypes.map((prototype) => Reflect.ownKeys(prototype));\nconst slots = [\n  protocolSlot(ICounted, \"count\"),\n  protocolSlot(IEmptyable, \"empty\"),\n  protocolSlot(IConj, \"conj\"),\n  protocolSlot(ILookup, \"get\"),\n  protocolSlot(IIndexed, \"nth\"),\n  protocolSlot(ISeqable, \"seq\"),\n  protocolSlot(IReduce, \"reduce\"),\n  protocolSlot(IAssociative, \"assoc\"),\n  protocolSlot(IAssociative, \"contains\"),\n  protocolSlot(IMap, \"dissoc\"),\n  protocolSlot(ISet, \"disj\"),\n  protocolSlot(IStack, \"peek\"),\n  protocolSlot(IStack, \"pop\"),\n  protocolSlot(IReversible, \"rseq\"),\n];\n\nconsole.log(JSON.stringify({\n  unchanged: before.map((keys, index) =>\n    keys.length === after[index].length &&\n    keys.every((key, keyIndex) => key === after[index][keyIndex])),\n  protocolSlotsAbsent: prototypes.map((prototype) =>\n    slots.every((slot) => !Object.prototype.hasOwnProperty.call(prototype, slot))),\n}));\n"))
+(module tests.fixtures.collection-adapter-isolation
+  (defconst load-module (js* "(specifier) => import(specifier)"))
+  (defconst prototypes (js-array globalThis.Array.prototype globalThis.Map.prototype globalThis.Set.prototype))
+  (defconst before (js-call prototypes :map (lambda (prototype) (Reflect/ownKeys prototype))))
+  (defvar collection undefined)
+  (defvar protocol undefined)
+  (defvar after undefined)
+  (defvar slots undefined)
+  (defasync run-host-main ()
+    (setq collection (await (funcall load-module "../../runtime/core/collection.mjs")))
+    (setq protocol (await (funcall load-module "../../runtime/core/protocol.mjs")))
+    (setq after (js-call prototypes :map (lambda (prototype) (Reflect/ownKeys prototype))))
+    (setq slots (js-call (js-array (js-array "ICounted" "count") (js-array "IEmptyable" "empty") (js-array "IConj" "conj")
+      (js-array "ILookup" "get") (js-array "IIndexed" "nth") (js-array "ISeqable" "seq") (js-array "IReduce" "reduce")
+      (js-array "IAssociative" "assoc") (js-array "IAssociative" "contains") (js-array "IMap" "dissoc") (js-array "ISet" "disj")
+      (js-array "IStack" "peek") (js-array "IStack" "pop") (js-array "IReversible" "rseq")) :map
+      (lambda (entry) (js-call protocol :protocolSlot (get collection (aref entry 0)) (aref entry 1)))))
+    (js-call globalThis.console :log (JSON/stringify (js-object
+    :unchanged (js-call before :map (lambda (keys index) (and (= (js-length keys) (js-length (aref after index)))
+      (js-call keys :every (lambda (key keyIndex) (= key (aref (aref after index) keyIndex)))))))
+    :protocolSlotsAbsent (js-call prototypes :map (lambda (prototype)
+      (js-call slots :every (lambda (slot) (not (Reflect/apply globalThis.Object.prototype.hasOwnProperty prototype (js-array slot)))))))))))
+  (run-host-main)
+)

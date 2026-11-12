@@ -1,0 +1,20 @@
+(module tests.helpers.response-events-private
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile writeFile)
+  (import "node:path" resolve)
+  (import "node:url" fileURLToPath pathToFileURL)
+  (import "node:child_process" spawnSync)
+  (import "../../tools/compiler/controlled-baseline.mjs" definition)
+  ; Private small-limit tests compile the exact maintained Eli definitions.
+  ; No generated JavaScript body extraction or replacement normalizer is used.
+  (defasync ownedNormalizerUnit (directory)
+    (let* ((text (await (readFile (new globalThis.URL "../../tools/backends/compiler-session.eli" (js* "import.meta.url")) "utf8")))
+      (source (str "(module tests.private.response-owned-data\n" (definition text "compilerOwnedDataMemo ") "\n" (definition text "ownedCompilerDataNormalizer ")
+        "\n(export compilerOwnedDataMemo ownedCompilerDataNormalizer))"))
+      (input (resolve directory "response-owned-data.eli")) (output (resolve directory "response-owned-data.mjs"))
+      (seed (fileURLToPath (new globalThis.URL "../../bin/eliscript-seed" (js* "import.meta.url")))))
+      (await (writeFile input source))
+      (let ((child (spawnSync seed (js-array "--output" output input) (js-object :encoding "utf8" :timeout 30000 :maxBuffer 1048576))))
+        (js-call assert :equal (get child :error) undefined) (js-call assert :equal (get child :signal) nil) (js-call assert :equal (get child :status) 0 (get child :stderr)))
+      (await (funcall (js* "(specifier) => import(specifier)") (get (pathToFileURL output) :href)))))
+  (export ownedNormalizerUnit))

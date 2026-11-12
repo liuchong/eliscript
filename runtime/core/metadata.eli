@@ -1,2 +1,63 @@
-(module capsules.runtime.core.metadata
-  (js* "import { isPersistentHashMap } from \"./map.mjs\";\nimport {\n  I_META,\n  I_WITH_META,\n  METADATA_READ,\n  METADATA_WITH,\n  dispatchMetadataRead,\n  dispatchMetadataWith,\n} from \"./metadata-internals.mjs\";\nimport { implementsProtocolOperation } from \"./protocol.mjs\";\n\nexport const IMeta = I_META;\nexport const IWithMeta = I_WITH_META;\n\nfunction validateMetadata(metadata) {\n  if (metadata !== null && !isPersistentHashMap(metadata)) {\n    throw new TypeError(\"metadata must be null or a persistent hash map\");\n  }\n  return metadata;\n}\n\nexport function supportsMetadata(value) {\n  return implementsProtocolOperation(IMeta, \"meta\", value) &&\n    implementsProtocolOperation(IWithMeta, \"withMeta\", value);\n}\n\nexport function meta(value) {\n  if (value !== null && value !== undefined) {\n    const direct = value[METADATA_READ];\n    if (typeof direct === \"function\") {\n      return direct.call(value);\n    }\n  }\n  return implementsProtocolOperation(IMeta, \"meta\", value)\n    ? dispatchMetadataRead(value)\n    : null;\n}\n\nexport function withMeta(value, metadata) {\n  validateMetadata(metadata);\n  if (value !== null && value !== undefined) {\n    const direct = value[METADATA_WITH];\n    if (typeof direct === \"function\") {\n      return direct.call(value, metadata);\n    }\n  }\n  if (!implementsProtocolOperation(IWithMeta, \"withMeta\", value)) {\n    throw new TypeError(\"value does not support metadata\");\n  }\n  return dispatchMetadataWith(value, metadata);\n}\n\nexport function varyMeta(value, transform, ...arguments_) {\n  if (typeof transform !== \"function\") {\n    throw new TypeError(\"metadata transform must be a function\");\n  }\n  return withMeta(value, transform(meta(value), ...arguments_));\n}\n"))
+(module eliscript.runtime.core.metadata
+  (import "./map.mjs" isPersistentHashMap)
+  (import "./metadata-internals.mjs"
+    I_META
+    I_WITH_META
+    METADATA_READ
+    METADATA_WITH
+    dispatchMetadataRead
+    dispatchMetadataWith)
+  (import "./protocol.mjs" implementsProtocolOperation)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst IMeta I_META)
+  (defconst IWithMeta I_WITH_META)
+
+  (defun validate-metadata (metadata)
+    (when (and (not (nil? metadata)) (not (isPersistentHashMap metadata)))
+      (throw (new globalThis/TypeError "metadata must be null or a persistent hash map")))
+    metadata)
+
+  (defun supportsMetadata (value)
+    (and (implementsProtocolOperation IMeta "meta" value)
+         (implementsProtocolOperation IWithMeta "withMeta" value)))
+
+  (defun meta (value)
+    (if (not (nullish? value))
+        (let ((direct (aref value METADATA_READ)))
+          (if (= (funcall typeof-value direct) "function")
+              (js-call direct :call value)
+              (if (implementsProtocolOperation IMeta "meta" value)
+                  (dispatchMetadataRead value)
+                  nil)))
+        (if (implementsProtocolOperation IMeta "meta" value)
+            (dispatchMetadataRead value)
+            nil)))
+
+  (defun withMeta (value metadata)
+    (validate-metadata metadata)
+    (if (not (nullish? value))
+        (let ((direct (aref value METADATA_WITH)))
+          (if (= (funcall typeof-value direct) "function")
+              (js-call direct :call value metadata)
+              (progn
+                (unless (implementsProtocolOperation IWithMeta "withMeta" value)
+                  (throw (new globalThis/TypeError "value does not support metadata")))
+                (dispatchMetadataWith value metadata))))
+        (progn
+          (unless (implementsProtocolOperation IWithMeta "withMeta" value)
+            (throw (new globalThis/TypeError "value does not support metadata")))
+          (dispatchMetadataWith value metadata))))
+
+  (defun varyMeta (value transform &rest arguments)
+    (unless (= (funcall typeof-value transform) "function")
+      (throw (new globalThis/TypeError "metadata transform must be a function")))
+    (withMeta value (apply transform (js-call (js-array (meta value)) :concat arguments))))
+
+  (export
+    IMeta
+    IWithMeta
+    supportsMetadata
+    meta
+    withMeta
+    varyMeta))

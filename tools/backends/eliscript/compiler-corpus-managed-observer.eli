@@ -1,0 +1,17 @@
+(module tools.backends.compiler-corpus-managed-observer
+  (defconst import-module (js* "(specifier) => import(specifier)"))
+  (defasync observeOriginalManagedReference (kind entry configuration)
+    (let* ((module (await (funcall import-module entry))) (out (js-object)))
+      (cond
+        ((= kind "core-modules")
+          (js-call (get configuration :cases) :forEach (lambda (name)
+            (put out name (Reflect/apply (get module (js-call name :replaceAll "-" "_")) module (js-array)))))
+          (let ((held (js-call module :held_record))) (put out :held (js-call module :inspect_held held)))
+          (js-call globalThis.console :log (JSON/stringify out)))
+        ((= kind "sequence-data")
+          (let ((observer (await (funcall import-module (get configuration :observer)))))
+            (js-call (get configuration :observations) :forEach (lambda (name)
+              (put out name (Reflect/apply (get module name) module (js-array)))))
+            (js-call globalThis.console :log (js-call observer :observation_json out))))
+        (t (throw (new globalThis.TypeError "unregistered original managed reference observation"))))))
+  (export observeOriginalManagedReference))

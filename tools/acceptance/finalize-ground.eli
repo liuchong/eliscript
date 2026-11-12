@@ -1,2 +1,509 @@
-(module capsules.tools.acceptance.finalize-ground
-  (js* "\nimport { createHash } from \"node:crypto\";\nimport { mkdir, readFile, stat, writeFile } from \"node:fs/promises\";\nimport path from \"node:path\";\nimport process from \"node:process\";\nimport { fileURLToPath } from \"node:url\";\n\nimport { verifyAcceptanceRun } from \"./check.mjs\";\nimport { validateRefreshedWorkerSoak } from \"./retained-soak.mjs\";\nimport { validateRefreshedTransientBuilder } from \"./retained-transient.mjs\";\n\nconst TOOL_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));\nexport const DEFAULT_ROOT = path.resolve(TOOL_DIRECTORY, \"../..\");\nconst CONTRACT_FILE = \"contracts/final-acceptance.json\";\nconst EXPECTED_SOURCE = {\n  run: \"acceptance/runs/m13-01.json\",\n  report: \"acceptance/runs/m13-01.md\",\n};\nconst EXPECTED_OUTPUTS = {\n  manifest: \"acceptance/manifest.json\",\n  report: \"acceptance/report.md\",\n};\nconst EXPECTED_GROUPS = [\"benchmark\", \"fuzz\", \"scale\", \"soak\", \"test\"];\nconst DEFECT_CLASSES = new Set([\n  \"bootstrap\",\n  \"compatibility\",\n  \"correctness\",\n  \"data-loss\",\n  \"security\",\n]);\n\nexport class FinalAcceptanceError extends Error {\n  constructor(errors) {\n    super(`final acceptance validation failed:\\n- ${errors.join(\"\\n- \")}`);\n    this.name = \"FinalAcceptanceError\";\n    this.errors = errors;\n  }\n}\n\nfunction isPlainObject(value) {\n  return value !== null && typeof value === \"object\" && !Array.isArray(value);\n}\n\nfunction equal(left, right) {\n  return JSON.stringify(left) === JSON.stringify(right);\n}\n\nfunction sha256(value) {\n  return createHash(\"sha256\").update(value).digest(\"hex\");\n}\n\nfunction safeRelativePath(value) {\n  return typeof value === \"string\" && value.length > 0 &&\n    !path.isAbsolute(value) && !value.split(\"/\").includes(\"..\") &&\n    path.posix.normalize(value) === value;\n}\n\nfunction sortedUniqueStrings(values) {\n  return Array.isArray(values) && values.length > 0 &&\n    values.every((value) => typeof value === \"string\" && value.length > 0) &&\n    new Set(values).size === values.length &&\n    equal(values, [...values].sort());\n}\n\nasync function readJson(root, file) {\n  return JSON.parse(await readFile(path.join(root, file), \"utf8\"));\n}\n\nasync function regularFile(root, file) {\n  try {\n    return (await stat(path.join(root, file))).isFile();\n  } catch {\n    return false;\n  }\n}\n\nexport async function validateFinalAcceptanceContract(contract, run, options = {}) {\n  const root = path.resolve(options.root ?? DEFAULT_ROOT);\n  const errors = [];\n  if (!isPlainObject(contract) || contract.schemaVersion !== 1 ||\n      contract.format !== \"eliscript-final-acceptance-contract\" ||\n      contract.version !== 1) {\n    throw new FinalAcceptanceError([\n      \"contract must use eliscript-final-acceptance-contract version 1\",\n    ]);\n  }\n  if (!equal(contract.source, EXPECTED_SOURCE)) {\n    errors.push(\"contract source must identify the retained core run and report\");\n  }\n  if (contract.defects !== \"acceptance/defects.json\") {\n    errors.push(\"contract defects must identify acceptance/defects.json\");\n  }\n  if (!equal(contract.outputs, EXPECTED_OUTPUTS)) {\n    errors.push(\"contract outputs must be the canonical acceptance artifacts\");\n  }\n  if (!equal(contract.blockingSeverities, [1, 2])) {\n    errors.push(\"blocking severities must be exactly 1 and 2\");\n  }\n\n  const groups = Array.isArray(contract.evidenceGroups)\n    ? contract.evidenceGroups\n    : [];\n  if (!equal(groups.map((group) => group?.id), EXPECTED_GROUPS)) {\n    errors.push(\"evidence groups must be exactly benchmark fuzz scale soak and test\");\n  }\n  const criterionIds = new Set(run.criteria.map((criterion) => criterion.id));\n  const runArtifacts = new Map(run.artifacts.map((artifact) => [\n    artifact.file,\n    artifact.sha256,\n  ]));\n  for (const [index, group] of groups.entries()) {\n    const label = group?.id ?? `evidence group ${index}`;\n    if (!isPlainObject(group) || !sortedUniqueStrings(group.criteria) ||\n        !sortedUniqueStrings(group.artifacts)) {\n      errors.push(`${label} must declare sorted unique criteria and artifacts`);\n      continue;\n    }\n    if (group.criteria.includes(\"*\") && !equal(group.criteria, [\"*\"])) {\n      errors.push(`${label} wildcard criterion must be the only criterion`);\n    }\n    for (const id of group.criteria) {\n      if (id !== \"*\" && !criterionIds.has(id)) {\n        errors.push(`${label} references unknown criterion ${id}`);\n      }\n    }\n    for (const file of group.artifacts) {\n      if (!safeRelativePath(file)) {\n        errors.push(`${label} has unsafe artifact path ${JSON.stringify(file)}`);\n        continue;\n      }\n      if (!runArtifacts.has(file)) {\n        errors.push(`${label} artifact is not bound by the source run: ${file}`);\n        continue;\n      }\n      if (!await regularFile(root, file)) {\n        errors.push(`${label} artifact is missing: ${file}`);\n        continue;\n      }\n      const currentBytes = await readFile(path.join(root, file));\n      const digest = sha256(currentBytes);\n      if (digest !== runArtifacts.get(file)) {\n        const refreshOptions = {\n          deferPerformanceAcceptance: options.deferPerformanceAcceptance === true,\n        };\n        const recordRefresh = (result) => {\n          if (result !== true && Array.isArray(options.deferredPerformanceAcceptance) &&\n              !options.deferredPerformanceAcceptance.some((item) => item.report === result.report)) {\n            options.deferredPerformanceAcceptance.push(result);\n          }\n        };\n        if (file === \"benchmarks/worker-lifecycle-soak-macos-arm64.json\") {\n          try { recordRefresh(await validateRefreshedWorkerSoak(root, file, currentBytes, run, refreshOptions)); }\n          catch (error) { errors.push(`${label} artifact changed after the source run: ${file}: ${error.message}`); }\n        } else if (file === \"benchmarks/transient-builder-macos-arm64.json\") {\n          try { recordRefresh(await validateRefreshedTransientBuilder(root, file, currentBytes, run, refreshOptions)); }\n          catch (error) { errors.push(`${label} artifact changed after the source run: ${file}: ${error.message}`); }\n        } else {\n          errors.push(`${label} artifact changed after the source run: ${file}`);\n        }\n      }\n    }\n  }\n  if (errors.length > 0) throw new FinalAcceptanceError(errors);\n  return contract;\n}\n\nexport async function validateDefectRegister(register, options = {}) {\n  const root = path.resolve(options.root ?? DEFAULT_ROOT);\n  const errors = [];\n  if (!isPlainObject(register) || register.schemaVersion !== 1 ||\n      register.format !== \"eliscript-acceptance-defect-register\" ||\n      register.version !== 1 || !Array.isArray(register.unresolved)) {\n    throw new FinalAcceptanceError([\n      \"defect register must use eliscript-acceptance-defect-register version 1\",\n    ]);\n  }\n  const ids = [];\n  for (const [index, defect] of register.unresolved.entries()) {\n    const label = defect?.id ?? `defect ${index}`;\n    if (!isPlainObject(defect) || !/^[A-Z][A-Z0-9-]+$/u.test(defect.id ?? \"\") ||\n        !Number.isInteger(defect.severity) || defect.severity < 1 ||\n        defect.severity > 4 || !DEFECT_CLASSES.has(defect.class) ||\n        typeof defect.title !== \"string\" || defect.title.length === 0 ||\n        !sortedUniqueStrings(defect.evidence)) {\n      errors.push(`${label} must declare id severity class title and evidence`);\n      continue;\n    }\n    ids.push(defect.id);\n    for (const file of defect.evidence) {\n      if (!safeRelativePath(file) || !await regularFile(root, file)) {\n        errors.push(`${label} has missing or unsafe evidence ${JSON.stringify(file)}`);\n      }\n    }\n  }\n  if (new Set(ids).size !== ids.length || !equal(ids, [...ids].sort())) {\n    errors.push(\"unresolved defect ids must be unique and sorted\");\n  }\n  if (errors.length > 0) throw new FinalAcceptanceError(errors);\n  return register;\n}\n\nfunction resultCounts(criteria) {\n  const result = { pass: 0, incomplete: 0, fail: 0, total: criteria.length };\n  for (const criterion of criteria) result[criterion.result] += 1;\n  return result;\n}\n\nfunction evidenceRecords(contract, run) {\n  const allCriteria = run.criteria.map((criterion) => criterion.id);\n  const criteria = new Map(run.criteria.map((criterion) => [\n    criterion.id,\n    criterion.result,\n  ]));\n  const artifacts = new Map(run.artifacts.map((artifact) => [\n    artifact.file,\n    artifact.sha256,\n  ]));\n  return contract.evidenceGroups.map((group) => {\n    const ids = equal(group.criteria, [\"*\"]) ? allCriteria : group.criteria;\n    return {\n      id: group.id,\n      complete: true,\n      criteria: ids.map((id) => ({ id, result: criteria.get(id) })),\n      artifacts: group.artifacts.map((file) => ({\n        file,\n        sha256: artifacts.get(file),\n      })),\n    };\n  });\n}\n\nexport async function buildFinalAcceptance(options = {}) {\n  const root = path.resolve(options.root ?? DEFAULT_ROOT);\n  const contract = options.contract ?? await readJson(root, CONTRACT_FILE);\n  const run = options.run ?? await verifyAcceptanceRun(contract.source.run, {\n    root,\n    markdownFile: contract.source.report,\n  });\n  await validateFinalAcceptanceContract(contract, run, {\n    root,\n    deferPerformanceAcceptance: options.deferPerformanceAcceptance === true,\n    deferredPerformanceAcceptance: options.deferredPerformanceAcceptance,\n  });\n  const defects = await validateDefectRegister(\n    options.defects ?? await readJson(root, contract.defects),\n    { root },\n  );\n  const sourceRunBytes = await readFile(path.join(root, contract.source.run));\n  const sourceReportBytes = await readFile(path.join(root, contract.source.report));\n  const defectBytes = options.defects\n    ? Buffer.from(`${JSON.stringify(defects, null, 2)}\\n`)\n    : await readFile(path.join(root, contract.defects));\n  const evidence = evidenceRecords(contract, run);\n  const contractBytes = await readFile(path.join(root, CONTRACT_FILE));\n  const blockingDefects = defects.unresolved.filter((defect) =>\n    contract.blockingSeverities.includes(defect.severity)).length;\n  const evidenceComplete = evidence.every((group) => group.complete);\n  const criteria = resultCounts(run.criteria);\n  return {\n    schemaVersion: 1,\n    format: \"eliscript-1.0-acceptance-manifest\",\n    version: 1,\n    generatedAt: run.generatedAt,\n    source: run.source,\n    environment: run.environment,\n    contract: {\n      file: CONTRACT_FILE,\n      sha256: sha256(contractBytes),\n    },\n    sourceRun: {\n      json: contract.source.run,\n      jsonSha256: sha256(sourceRunBytes),\n      markdown: contract.source.report,\n      markdownSha256: sha256(sourceReportBytes),\n    },\n    commands: run.commands,\n    criteria: run.criteria,\n    artifacts: run.artifacts,\n    evidence,\n    defects: {\n      register: contract.defects,\n      registerSha256: sha256(defectBytes),\n      blockingSeverities: contract.blockingSeverities,\n      unresolved: defects.unresolved,\n      blockingCount: blockingDefects,\n    },\n    applications: run.applications,\n    summary: {\n      criteria,\n      corpusComplete: run.summary.corpusComplete,\n      operationalSuccess: run.summary.operationalSuccess,\n      evidenceComplete,\n      blockingDefects,\n      acceptancePass: run.summary.acceptancePass && evidenceComplete &&\n        blockingDefects === 0,\n    },\n  };\n}\n\nfunction markdownCell(value) {\n  return String(value).replaceAll(\"|\", \"\\\\|\").replaceAll(\"\\n\", \" \");\n}\n\nexport function humanFinalAcceptanceReport(manifest) {\n  const lines = [\n    \"# Eliscript 1.0 Acceptance Report\",\n    \"\",\n    `- Source commit: \\`${manifest.source.commit}\\``,\n    `- Source tree: \\`${manifest.source.tree}\\``,\n    `- Contract: \\`${manifest.contract.file}\\` (\\`${manifest.contract.sha256}\\`)`,\n    `- Generated: ${manifest.generatedAt}`,\n    `- Environment: ${manifest.environment.operatingSystem}; ${manifest.environment.architecture}; Bun ${manifest.environment.bunVersion}; Node ${manifest.environment.nodeVersion}; Emacs ${manifest.environment.emacsVersion}`,\n    `- Corpus complete: ${manifest.summary.corpusComplete ? \"yes\" : \"no\"}`,\n    `- Operational success: ${manifest.summary.operationalSuccess ? \"yes\" : \"no\"}`,\n    `- Evidence complete: ${manifest.summary.evidenceComplete ? \"yes\" : \"no\"}`,\n    `- Blocking defects: ${manifest.summary.blockingDefects}`,\n    `- Final acceptance: ${manifest.summary.acceptancePass ? \"pass\" : \"not reached\"}`,\n    \"\",\n    manifest.summary.acceptancePass\n      ? \"Every mandatory core criterion and final gate passed in the source run.\"\n      : \"This is the canonical candidate report. It does not declare Eliscript 1.0 accepted while mandatory criteria remain incomplete.\",\n    \"\",\n    \"## Mandatory Criteria\",\n    \"\",\n    `Results: ${manifest.summary.criteria.pass} pass, ${manifest.summary.criteria.incomplete} incomplete, ${manifest.summary.criteria.fail} fail, ${manifest.summary.criteria.total} total.`,\n    \"\",\n    \"| Criterion | Result | Declared state | Remaining work |\",\n    \"| --- | --- | --- | --- |\",\n    ...manifest.criteria.map((criterion) =>\n      `| ${criterion.id} ${markdownCell(criterion.title)} | ${criterion.result} | ${criterion.declaredStatus} | ${markdownCell(criterion.remaining ?? \"-\")} |`),\n    \"\",\n    \"## Evidence Summaries\",\n    \"\",\n    \"| Group | Complete | Criteria | Artifacts |\",\n    \"| --- | --- | ---: | ---: |\",\n    ...manifest.evidence.map((group) =>\n      `| ${group.id} | ${group.complete ? \"yes\" : \"no\"} | ${group.criteria.length} | ${group.artifacts.length} |`),\n    \"\",\n    \"## Unresolved Defects\",\n    \"\",\n    ...(manifest.defects.unresolved.length === 0\n      ? [\"No unresolved defects are recorded.\"]\n      : [\n        \"| ID | Severity | Class | Title |\",\n        \"| --- | ---: | --- | --- |\",\n        ...manifest.defects.unresolved.map((defect) =>\n          `| ${defect.id} | ${defect.severity} | ${defect.class} | ${markdownCell(defect.title)} |`),\n      ]),\n    \"\",\n    \"## Application Validation\",\n    \"\",\n    \"| Criterion | Result | Core contribution |\",\n    \"| --- | --- | --- |\",\n    ...manifest.applications.map((application) =>\n      `| ${application.id} ${markdownCell(application.title)} | ${application.result} | no |`),\n    \"\",\n    \"## Commands\",\n    \"\",\n    \"| Probe | Command | Result | Exit | Duration (ms) | Output SHA-256 |\",\n    \"| --- | --- | --- | ---: | ---: | --- |\",\n    ...manifest.commands.map((command) =>\n      `| ${command.id} | \\`${markdownCell(command.argv.join(\" \"))}\\` | ${command.status} | ${command.exitCode} | ${command.durationMs} | \\`${command.outputSha256}\\` |`),\n    \"\",\n    \"## Artifact Digests\",\n    \"\",\n    \"| File | SHA-256 |\",\n    \"| --- | --- |\",\n    ...manifest.artifacts.map((artifact) =>\n      `| \\`${artifact.file}\\` | \\`${artifact.sha256}\\` |`),\n  ];\n  return `${lines.join(\"\\n\")}\\n`;\n}\n\nexport function validateFinalManifest(manifest, expected) {\n  const errors = [];\n  if (!isPlainObject(manifest) || manifest.schemaVersion !== 1 ||\n      manifest.format !== \"eliscript-1.0-acceptance-manifest\" ||\n      manifest.version !== 1) {\n    errors.push(\"manifest must use eliscript-1.0-acceptance-manifest version 1\");\n  }\n  if (!equal(manifest?.summary, expected.summary)) {\n    errors.push(\"final acceptance summary is not derived from its source evidence\");\n  }\n  if (!equal(manifest, expected)) {\n    errors.push(\"final acceptance manifest does not match its verified source run\");\n  }\n  if (errors.length > 0) throw new FinalAcceptanceError(errors);\n  return manifest;\n}\n\nexport async function generateFinalAcceptance(options = {}) {\n  if (options.deferPerformanceAcceptance === true) {\n    throw new FinalAcceptanceError([\n      \"cannot generate acceptance artifacts while current performance acceptance is deferred\",\n    ]);\n  }\n  const root = path.resolve(options.root ?? DEFAULT_ROOT);\n  const contract = options.contract ?? await readJson(root, CONTRACT_FILE);\n  const manifest = await buildFinalAcceptance({ ...options, root, contract });\n  await mkdir(path.dirname(path.join(root, contract.outputs.manifest)), {\n    recursive: true,\n  });\n  await writeFile(\n    path.join(root, contract.outputs.manifest),\n    `${JSON.stringify(manifest, null, 2)}\\n`,\n  );\n  await writeFile(\n    path.join(root, contract.outputs.report),\n    humanFinalAcceptanceReport(manifest),\n  );\n  return manifest;\n}\n\nexport async function verifyFinalAcceptance(options = {}) {\n  const root = path.resolve(options.root ?? DEFAULT_ROOT);\n  const contract = options.contract ?? await readJson(root, CONTRACT_FILE);\n  const expected = await buildFinalAcceptance({ ...options, root, contract });\n  const manifest = options.manifest ??\n    await readJson(root, contract.outputs.manifest);\n  validateFinalManifest(manifest, expected);\n  const markdown = options.markdown ??\n    await readFile(path.join(root, contract.outputs.report), \"utf8\");\n  if (markdown !== humanFinalAcceptanceReport(manifest)) {\n    throw new FinalAcceptanceError([\n      \"human acceptance report does not match the machine-readable manifest\",\n    ]);\n  }\n  if (options.requirePass && !manifest.summary.acceptancePass) {\n    throw new FinalAcceptanceError([\n      \"the canonical artifacts are valid, but final acceptance has not been reached\",\n    ]);\n  }\n  if (options.requirePass && options.deferPerformanceAcceptance === true) {\n    throw new FinalAcceptanceError([\n      \"current performance acceptance is deferred and has not passed\",\n    ]);\n  }\n  return manifest;\n}\n\nexport function humanFinalAcceptanceSummary(manifest) {\n  return [\n    `Final acceptance artifacts: ${manifest.source.commit}`,\n    `Criteria: ${manifest.summary.criteria.pass}/${manifest.summary.criteria.total} pass, ${manifest.summary.criteria.incomplete} incomplete, ${manifest.summary.criteria.fail} fail`,\n    `Evidence groups: ${manifest.evidence.length}/${manifest.evidence.length} complete`,\n    `Blocking defects: ${manifest.summary.blockingDefects}`,\n    `Final acceptance: ${manifest.summary.acceptancePass ? \"pass\" : \"not reached\"}`,\n  ].join(\"\\n\");\n}\n\nfunction parseArguments(argv) {\n  const options = {};\n  for (const argument of argv) {\n    if (argument === \"--generate\") options.generate = true;\n    else if (argument === \"--verify\") options.verify = true;\n    else if (argument === \"--require-pass\") options.requirePass = true;\n    else throw new FinalAcceptanceError([`unknown argument ${argument}`]);\n  }\n  if (options.generate === options.verify) {\n    throw new FinalAcceptanceError([\n      \"choose exactly one of --generate or --verify\",\n    ]);\n  }\n  return options;\n}\n\nasync function main() {\n  const options = parseArguments(process.argv.slice(2));\n  options.deferPerformanceAcceptance = process.env.ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE === \"1\";\n  options.deferredPerformanceAcceptance = [];\n  const manifest = options.generate\n    ? await generateFinalAcceptance(options)\n    : await verifyFinalAcceptance(options);\n  const summary = humanFinalAcceptanceSummary(manifest);\n  process.stdout.write(`${options.deferPerformanceAcceptance\n    ? summary.replace(/^Final acceptance:/mu, \"Historical final acceptance:\")\n    : summary}\\n`);\n  if (options.deferPerformanceAcceptance) {\n    process.stdout.write(\"Current performance acceptance: DEFERRED / NOT ACCEPTED\\n\");\n    for (const item of options.deferredPerformanceAcceptance) {\n      process.stdout.write(`  ${item.report}: measured Git snapshot ${item.measuredSource.commit} verified; current source comparison not performed\\n`);\n    }\n  }\n  if (options.requirePass && !manifest.summary.acceptancePass) {\n    throw new FinalAcceptanceError([\n      \"the canonical artifacts are valid, but final acceptance has not been reached\",\n    ]);\n  }\n}\n\nif (import.meta.main) {\n  try {\n    await main();\n  } catch (error) {\n    process.stderr.write(`${error.stack ?? error}\\n`);\n    process.exitCode = 1;\n  }\n}\n"))
+(module tools.acceptance.finalize-ground
+  (import "node:crypto" createHash)
+  (import "node:fs/promises" mkdir readFile stat writeFile)
+  (import "node:path" :as path)
+  (import "node:url" fileURLToPath)
+  (import "./check.mjs" verifyAcceptanceRun)
+  (import "./retained-soak.mjs" validateRefreshedWorkerSoak)
+  (import "./retained-transient.mjs" validateRefreshedTransientBuilder)
+
+  (defconst module-directory (js-call path :dirname (fileURLToPath (js* "import.meta.url"))))
+  (defconst DEFAULT_ROOT (js-call path :resolve module-directory "../.."))
+  (defconst contract-file "contracts/final-acceptance.json")
+  (defconst expected-source (js-object :run "acceptance/runs/m13-01.json" :report "acceptance/runs/m13-01.md"))
+  (defconst expected-outputs (js-object :manifest "acceptance/manifest.json" :report "acceptance/report.md"))
+  (defconst expected-groups (js-array "benchmark" "fuzz" "scale" "soak" "test"))
+  (defconst defect-classes (new globalThis.Set (js-array "bootstrap" "compatibility" "correctness" "data-loss" "security")))
+  (defconst defect-id-pattern "^[A-Z][A-Z0-9-]+$")
+  (defconst summary-heading-pattern "^Final acceptance:")
+
+  (defun final-error-message (errors)
+    (str "final acceptance validation failed:\n- " (js-call errors :join "\n- ")))
+  (defun final-error-fields (self errors)
+    (put self :name "FinalAcceptanceError")
+    (put self :errors errors)
+    self)
+  (defconst FinalAcceptanceError
+    (funcall
+      (js* "(message, fields) => class FinalAcceptanceError extends Error { constructor(errors) { const self = super(message(errors)); return fields(self, errors); } }")
+      final-error-message final-error-fields))
+
+  (defun host-type (value) (funcall (js* "(value) => typeof value") value))
+  (defun host-truthy (value) (funcall (js* "(value) => !!value") value))
+  (defun host-get (value key) (if (nullish? value) undefined (get value key)))
+  (defun call-options (supplied)
+    (if (or (= (js-length supplied) 0) (undefined? (aref supplied 0))) (js-object) (aref supplied 0)))
+  (defun plain-object? (value)
+    (and (not (nil? value)) (= (host-type value) "object") (not (Array/isArray value))))
+  (defun json-equal (left right) (= (JSON/stringify left) (JSON/stringify right)))
+  (defun sha256 (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
+
+  (defun safe-relative-path (value)
+    (and (= (host-type value) "string") (> (js-length value) 0)
+         (not (js-call path :isAbsolute value))
+         (not (js-call (js-call value :split "/") :includes ".."))
+         (= (js-call (get path :posix) :normalize value) value)))
+
+  (defun every-text (values)
+    (let ((index 0) (ok t))
+      (while (and ok (< index (js-length values)))
+        (let ((value (aref values index)))
+          (unless (and (= (host-type value) "string") (> (js-length value) 0))
+            (setq ok nil)))
+        (setq index (1+ index)))
+      ok))
+
+  (defun sorted-unique-strings (values)
+    (and (Array/isArray values) (> (js-length values) 0) (every-text values)
+         (= (get (new globalThis.Set values) :size) (js-length values))
+         (json-equal values (js-call (Array/from values) :sort))))
+
+  (defasync read-json (root file)
+    (JSON/parse (await (readFile (js-call path :join root file) "utf8"))))
+
+  (defasync regular-file (root file)
+    (try
+      (js-call (await (stat (js-call path :join root file))) :isFile)
+      (catch ignored false)))
+
+  (defun already-deferred (items result)
+    (let ((index 0) (found nil))
+      (while (and (not found) (< index (js-length items)))
+        (when (= (get (aref items index) :report) (get result :report))
+          (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  (defun record-refresh (options result)
+    (when (and (not (= result t))
+               (Array/isArray (get options :deferredPerformanceAcceptance))
+               (not (already-deferred (get options :deferredPerformanceAcceptance) result)))
+      (js-call (get options :deferredPerformanceAcceptance) :push result)))
+
+  (defasync validateFinalAcceptanceContract (contract run &rest supplied)
+    (let* ((options (call-options supplied))
+           (root (js-call path :resolve (get options :root DEFAULT_ROOT)))
+           (errors (js-array)))
+      (unless (and (plain-object? contract) (= (get contract :schemaVersion) 1)
+                   (= (get contract :format) "eliscript-final-acceptance-contract")
+                   (= (get contract :version) 1))
+        (throw (new FinalAcceptanceError (js-array "contract must use eliscript-final-acceptance-contract version 1"))))
+      (unless (json-equal (get contract :source) expected-source)
+        (js-call errors :push "contract source must identify the retained core run and report"))
+      (unless (= (get contract :defects) "acceptance/defects.json")
+        (js-call errors :push "contract defects must identify acceptance/defects.json"))
+      (unless (json-equal (get contract :outputs) expected-outputs)
+        (js-call errors :push "contract outputs must be the canonical acceptance artifacts"))
+      (unless (json-equal (get contract :blockingSeverities) (js-array 1 2))
+        (js-call errors :push "blocking severities must be exactly 1 and 2"))
+      (let* ((groups (if (Array/isArray (get contract :evidenceGroups)) (get contract :evidenceGroups) (js-array)))
+             (group-ids (js-call groups :map (lambda (group) (host-get group "id"))))
+             (criterion-ids (new globalThis.Set (js-call (get run :criteria) :map (lambda (criterion) (get criterion :id)))))
+             (run-artifacts (new globalThis.Map (js-call (get run :artifacts) :map
+                                                   (lambda (artifact) (js-array (get artifact :file) (get artifact :sha256))))))
+             (index 0))
+        (unless (json-equal group-ids expected-groups)
+          (js-call errors :push "evidence groups must be exactly benchmark fuzz scale soak and test"))
+        (while (< index (js-length groups))
+          (let* ((group (aref groups index))
+                 (group-id (host-get group "id"))
+                 (label (if (nullish? group-id) (str "evidence group " index) group-id)))
+            (if (or (not (plain-object? group)) (not (sorted-unique-strings (get group :criteria)))
+                    (not (sorted-unique-strings (get group :artifacts))))
+              (js-call errors :push (str label " must declare sorted unique criteria and artifacts"))
+              (progn
+                (when (and (js-call (get group :criteria) :includes "*")
+                           (not (json-equal (get group :criteria) (js-array "*"))))
+                  (js-call errors :push (str label " wildcard criterion must be the only criterion")))
+                (let ((cursor 0))
+                  (while (< cursor (js-length (get group :criteria)))
+                    (let ((id (aref (get group :criteria) cursor)))
+                      (when (and (not (= id "*")) (not (js-call criterion-ids :has id)))
+                        (js-call errors :push (str label " references unknown criterion " id))))
+                    (setq cursor (1+ cursor)))
+                  (setq cursor 0)
+                  (while (< cursor (js-length (get group :artifacts)))
+                  (let ((file (aref (get group :artifacts) cursor)))
+                    (if (not (safe-relative-path file))
+                      (js-call errors :push (str label " has unsafe artifact path " (JSON/stringify file)))
+                      (if (not (js-call run-artifacts :has file))
+                        (js-call errors :push (str label " artifact is not bound by the source run: " file))
+                        (if (not (await (regular-file root file)))
+                          (js-call errors :push (str label " artifact is missing: " file))
+                          (let* ((current (await (readFile (js-call path :join root file))))
+                                 (digest (sha256 current)))
+                            (unless (= digest (js-call run-artifacts :get file))
+                              (let ((refresh (js-object :deferPerformanceAcceptance
+                                                (= (get options :deferPerformanceAcceptance) t))))
+                                (if (= file "benchmarks/worker-lifecycle-soak-macos-arm64.json")
+                                  (try
+                                    (record-refresh options
+                                      (await (validateRefreshedWorkerSoak root file current run refresh)))
+                                    (catch error
+                                      (js-call errors :push
+                                        (str label " artifact changed after the source run: " file ": " (get error :message)))))
+                                  (if (= file "benchmarks/transient-builder-macos-arm64.json")
+                                    (try
+                                      (record-refresh options
+                                        (await (validateRefreshedTransientBuilder root file current run refresh)))
+                                      (catch error
+                                        (js-call errors :push
+                                          (str label " artifact changed after the source run: " file ": " (get error :message)))))
+                                    (js-call errors :push
+                                      (str label " artifact changed after the source run: " file)))))))))))
+                  (setq cursor (1+ cursor)))))))
+          (setq index (1+ index))))
+      (when (> (js-length errors) 0) (throw (new FinalAcceptanceError errors)))
+      contract))
+
+  (defasync validateDefectRegister (register &rest supplied)
+    (let* ((options (call-options supplied))
+           (root (js-call path :resolve (get options :root DEFAULT_ROOT)))
+           (errors (js-array)))
+      (unless (and (plain-object? register) (= (get register :schemaVersion) 1)
+                   (= (get register :format) "eliscript-acceptance-defect-register")
+                   (= (get register :version) 1) (Array/isArray (get register :unresolved)))
+        (throw (new FinalAcceptanceError
+                 (js-array "defect register must use eliscript-acceptance-defect-register version 1"))))
+      (let ((ids (js-array)) (index 0) (defects (get register :unresolved)))
+        (while (< index (js-length defects))
+          (let* ((defect (aref defects index))
+                 (defect-id (host-get defect "id"))
+                 (label (if (nullish? defect-id) (str "defect " index) defect-id)))
+            (if (or (not (plain-object? defect))
+                    (not (js-call (new globalThis.RegExp defect-id-pattern "u") :test (get defect :id "")))
+                    (not (js-call globalThis.Number :isInteger (get defect :severity)))
+                    (< (get defect :severity) 1) (> (get defect :severity) 4)
+                    (not (js-call defect-classes :has (get defect :class)))
+                    (not (= (host-type (get defect :title)) "string"))
+                    (= (js-length (get defect :title)) 0)
+                    (not (sorted-unique-strings (get defect :evidence))))
+              (js-call errors :push (str label " must declare id severity class title and evidence"))
+              (progn
+                (js-call ids :push (get defect :id))
+                (let ((cursor 0))
+                  (while (< cursor (js-length (get defect :evidence)))
+                    (let ((file (aref (get defect :evidence) cursor)))
+                      (unless (and (safe-relative-path file) (await (regular-file root file)))
+                        (js-call errors :push (str label " has missing or unsafe evidence " (JSON/stringify file)))))
+                    (setq cursor (1+ cursor)))))))
+          (setq index (1+ index)))
+        (unless (and (= (get (new globalThis.Set ids) :size) (js-length ids))
+                     (json-equal ids (js-call (Array/from ids) :sort)))
+          (js-call errors :push "unresolved defect ids must be unique and sorted")))
+      (when (> (js-length errors) 0) (throw (new FinalAcceptanceError errors)))
+      register))
+
+  (defun result-counts (criteria)
+    (let ((result (js-object :pass 0 :incomplete 0 :fail 0 :total (js-length criteria))) (index 0))
+      (while (< index (js-length criteria))
+        (let ((name (get (aref criteria index) :result)))
+          (put result name (1+ (get result name))))
+        (setq index (1+ index)))
+      result))
+
+  (defun evidence-records (contract run)
+    (let ((all-criteria (js-call (get run :criteria) :map (lambda (criterion) (get criterion :id))))
+          (criteria (new globalThis.Map (js-call (get run :criteria) :map
+                                           (lambda (criterion) (js-array (get criterion :id) (get criterion :result))))))
+          (artifacts (new globalThis.Map (js-call (get run :artifacts) :map
+                                            (lambda (artifact) (js-array (get artifact :file) (get artifact :sha256)))))))
+      (js-call (get contract :evidenceGroups) :map
+        (lambda (group)
+          (let ((ids (if (json-equal (get group :criteria) (js-array "*")) all-criteria (get group :criteria))))
+            (js-object :id (get group :id) :complete t
+              :criteria (js-call ids :map (lambda (id) (js-object :id id :result (js-call criteria :get id))))
+              :artifacts (js-call (get group :artifacts) :map
+                           (lambda (file) (js-object :file file :sha256 (js-call artifacts :get file))))))))))
+
+  (defun count-blocking (defects severities)
+    (js-length (js-call (get defects :unresolved) :filter
+                 (lambda (defect) (js-call severities :includes (get defect :severity))))))
+
+  (defun every-complete (evidence)
+    (let ((index 0) (ok t))
+      (while (and ok (< index (js-length evidence)))
+        (unless (get (aref evidence index) :complete) (setq ok nil))
+        (setq index (1+ index)))
+      ok))
+
+  (defasync buildFinalAcceptance (&rest supplied)
+    (let* ((options (call-options supplied))
+           (root (js-call path :resolve (get options :root DEFAULT_ROOT)))
+           (contract (if (nullish? (get options :contract))
+                       (await (read-json root contract-file))
+                       (get options :contract)))
+           (run (if (nullish? (get options :run))
+                  (await (verifyAcceptanceRun (get (get contract :source) :run)
+                           (js-object :root root :markdownFile (get (get contract :source) :report))))
+                  (get options :run))))
+      (await (validateFinalAcceptanceContract contract run
+               (js-object :root root
+                 :deferPerformanceAcceptance (= (get options :deferPerformanceAcceptance) t)
+                 :deferredPerformanceAcceptance (get options :deferredPerformanceAcceptance))))
+      (let* ((defects (await (validateDefectRegister
+                               (if (nullish? (get options :defects))
+                                 (await (read-json root (get contract :defects)))
+                                 (get options :defects))
+                               (js-object :root root))))
+             (source-run (await (readFile (js-call path :join root (get (get contract :source) :run)))))
+             (source-report (await (readFile (js-call path :join root (get (get contract :source) :report)))))
+             (defect-bytes (if (host-truthy (get options :defects))
+                             (js-call globalThis.Buffer :from
+                               (str (JSON/stringify defects nil 2) "\n"))
+                             (await (readFile (js-call path :join root (get contract :defects))))))
+             (evidence (evidence-records contract run))
+             (contract-bytes (await (readFile (js-call path :join root contract-file))))
+             (blocking (count-blocking defects (get contract :blockingSeverities)))
+             (complete (every-complete evidence))
+             (criteria (result-counts (get run :criteria))))
+        (js-object :schemaVersion 1 :format "eliscript-1.0-acceptance-manifest" :version 1
+          :generatedAt (get run :generatedAt) :source (get run :source) :environment (get run :environment)
+          :contract (js-object :file contract-file :sha256 (sha256 contract-bytes))
+          :sourceRun (js-object :json (get (get contract :source) :run) :jsonSha256 (sha256 source-run)
+                       :markdown (get (get contract :source) :report) :markdownSha256 (sha256 source-report))
+          :commands (get run :commands) :criteria (get run :criteria) :artifacts (get run :artifacts)
+          :evidence evidence
+          :defects (js-object :register (get contract :defects) :registerSha256 (sha256 defect-bytes)
+                     :blockingSeverities (get contract :blockingSeverities)
+                     :unresolved (get defects :unresolved) :blockingCount blocking)
+          :applications (get run :applications)
+          :summary (js-object :criteria criteria
+                     :corpusComplete (get (get run :summary) :corpusComplete)
+                     :operationalSuccess (get (get run :summary) :operationalSuccess)
+                     :evidenceComplete complete :blockingDefects blocking
+                     :acceptancePass (and (get (get run :summary) :acceptancePass) complete (= blocking 0)))))))
+
+  (defun markdown-cell (value)
+    (js-call (js-call (funcall globalThis.String value) :replaceAll "|" "\\|") :replaceAll "\n" " "))
+
+  (defun yes-no (value) (if (host-truthy value) "yes" "no"))
+
+  (defun humanFinalAcceptanceReport (manifest)
+    (let ((lines (js-array "# Eliscript 1.0 Acceptance Report" ""
+                   (str "- Source commit: `" (get (get manifest :source) :commit) "`")
+                   (str "- Source tree: `" (get (get manifest :source) :tree) "`")
+                   (str "- Contract: `" (get (get manifest :contract) :file) "` (`" (get (get manifest :contract) :sha256) "`)")
+                   (str "- Generated: " (get manifest :generatedAt))
+                   (str "- Environment: " (get (get manifest :environment) :operatingSystem) "; "
+                        (get (get manifest :environment) :architecture) "; Bun "
+                        (get (get manifest :environment) :bunVersion) "; Node "
+                        (get (get manifest :environment) :nodeVersion) "; Emacs "
+                        (get (get manifest :environment) :emacsVersion))
+                   (str "- Corpus complete: " (yes-no (get (get manifest :summary) :corpusComplete)))
+                   (str "- Operational success: " (yes-no (get (get manifest :summary) :operationalSuccess)))
+                   (str "- Evidence complete: " (yes-no (get (get manifest :summary) :evidenceComplete)))
+                   (str "- Blocking defects: " (get (get manifest :summary) :blockingDefects))
+                   (str "- Final acceptance: "
+                        (if (host-truthy (get (get manifest :summary) :acceptancePass)) "pass" "not reached"))
+                   ""
+                   (if (host-truthy (get (get manifest :summary) :acceptancePass))
+                     "Every mandatory core criterion and final gate passed in the source run."
+                     "This is the canonical candidate report. It does not declare Eliscript 1.0 accepted while mandatory criteria remain incomplete.")
+                   "" "## Mandatory Criteria" ""
+                   (str "Results: " (get (get (get manifest :summary) :criteria) :pass) " pass, "
+                        (get (get (get manifest :summary) :criteria) :incomplete) " incomplete, "
+                        (get (get (get manifest :summary) :criteria) :fail) " fail, "
+                        (get (get (get manifest :summary) :criteria) :total) " total.")
+                   "" "| Criterion | Result | Declared state | Remaining work |"
+                   "| --- | --- | --- | --- |"))
+          (index 0))
+      (while (< index (js-length (get manifest :criteria)))
+        (let ((criterion (aref (get manifest :criteria) index)))
+          (js-call lines :push
+            (str "| " (get criterion :id) " " (markdown-cell (get criterion :title)) " | "
+                 (get criterion :result) " | " (get criterion :declaredStatus) " | "
+                 (markdown-cell (get criterion :remaining "-")) " |")))
+        (setq index (1+ index)))
+      (js-call lines :push "")
+      (js-call lines :push "## Evidence Summaries")
+      (js-call lines :push "")
+      (js-call lines :push "| Group | Complete | Criteria | Artifacts |")
+      (js-call lines :push "| --- | --- | ---: | ---: |")
+      (setq index 0)
+      (while (< index (js-length (get manifest :evidence)))
+        (let ((group (aref (get manifest :evidence) index)))
+          (js-call lines :push
+            (str "| " (get group :id) " | " (yes-no (get group :complete)) " | "
+                 (js-length (get group :criteria)) " | " (js-length (get group :artifacts)) " |")))
+        (setq index (1+ index)))
+      (js-call lines :push "")
+      (js-call lines :push "## Unresolved Defects")
+      (js-call lines :push "")
+      (if (= (js-length (get (get manifest :defects) :unresolved)) 0)
+        (js-call lines :push "No unresolved defects are recorded.")
+        (progn
+          (js-call lines :push "| ID | Severity | Class | Title |")
+          (js-call lines :push "| --- | ---: | --- | --- |")
+          (setq index 0)
+          (while (< index (js-length (get (get manifest :defects) :unresolved)))
+            (let ((defect (aref (get (get manifest :defects) :unresolved) index)))
+              (js-call lines :push
+                (str "| " (get defect :id) " | " (get defect :severity) " | " (get defect :class)
+                     " | " (markdown-cell (get defect :title)) " |")))
+            (setq index (1+ index)))))
+      (js-call lines :push "")
+      (js-call lines :push "## Application Validation")
+      (js-call lines :push "")
+      (js-call lines :push "| Criterion | Result | Core contribution |")
+      (js-call lines :push "| --- | --- | --- |")
+      (setq index 0)
+      (while (< index (js-length (get manifest :applications)))
+        (let ((application (aref (get manifest :applications) index)))
+          (js-call lines :push
+            (str "| " (get application :id) " " (markdown-cell (get application :title)) " | "
+                 (get application :result) " | no |")))
+        (setq index (1+ index)))
+      (js-call lines :push "")
+      (js-call lines :push "## Commands")
+      (js-call lines :push "")
+      (js-call lines :push "| Probe | Command | Result | Exit | Duration (ms) | Output SHA-256 |")
+      (js-call lines :push "| --- | --- | --- | ---: | ---: | --- |")
+      (setq index 0)
+      (while (< index (js-length (get manifest :commands)))
+        (let ((command (aref (get manifest :commands) index)))
+          (js-call lines :push
+            (str "| " (get command :id) " | `" (markdown-cell (js-call (get command :argv) :join " ")) "` | "
+                 (get command :status) " | " (get command :exitCode) " | " (get command :durationMs)
+                 " | `" (get command :outputSha256) "` |")))
+        (setq index (1+ index)))
+      (js-call lines :push "")
+      (js-call lines :push "## Artifact Digests")
+      (js-call lines :push "")
+      (js-call lines :push "| File | SHA-256 |")
+      (js-call lines :push "| --- | --- |")
+      (setq index 0)
+      (while (< index (js-length (get manifest :artifacts)))
+        (let ((artifact (aref (get manifest :artifacts) index)))
+          (js-call lines :push (str "| `" (get artifact :file) "` | `" (get artifact :sha256) "` |")))
+        (setq index (1+ index)))
+      (str (js-call lines :join "\n") "\n")))
+
+  (defun validateFinalManifest (manifest expected)
+    (let ((errors (js-array)))
+      (when (or (not (plain-object? manifest)) (not (= (get manifest :schemaVersion) 1))
+                (not (= (get manifest :format) "eliscript-1.0-acceptance-manifest"))
+                (not (= (get manifest :version) 1)))
+        (js-call errors :push "manifest must use eliscript-1.0-acceptance-manifest version 1"))
+      (unless (json-equal (host-get manifest "summary") (get expected :summary))
+        (js-call errors :push "final acceptance summary is not derived from its source evidence"))
+      (unless (json-equal manifest expected)
+        (js-call errors :push "final acceptance manifest does not match its verified source run"))
+      (when (> (js-length errors) 0) (throw (new FinalAcceptanceError errors)))
+      manifest))
+
+  (defasync generateFinalAcceptance (&rest supplied)
+    (let ((options (call-options supplied)))
+      (when (= (get options :deferPerformanceAcceptance) t)
+        (throw (new FinalAcceptanceError
+                 (js-array "cannot generate acceptance artifacts while current performance acceptance is deferred"))))
+      (let* ((root (js-call path :resolve (get options :root DEFAULT_ROOT)))
+             (contract (if (nullish? (get options :contract))
+                         (await (read-json root contract-file))
+                         (get options :contract)))
+             (manifest (await (buildFinalAcceptance
+                                (js-call globalThis.Object :assign (js-object) options
+                                  (js-object :root root :contract contract))))))
+        (await (mkdir (js-call path :dirname (js-call path :join root (get (get contract :outputs) :manifest)))
+                 (js-object :recursive t)))
+        (await (writeFile (js-call path :join root (get (get contract :outputs) :manifest))
+                 (str (JSON/stringify manifest nil 2) "\n")))
+        (await (writeFile (js-call path :join root (get (get contract :outputs) :report))
+                 (humanFinalAcceptanceReport manifest)))
+        manifest)))
+
+  (defasync verifyFinalAcceptance (&rest supplied)
+    (let* ((options (call-options supplied))
+           (root (js-call path :resolve (get options :root DEFAULT_ROOT)))
+           (contract (if (nullish? (get options :contract))
+                       (await (read-json root contract-file))
+                       (get options :contract)))
+           (expected (await (buildFinalAcceptance
+                              (js-call globalThis.Object :assign (js-object) options
+                                (js-object :root root :contract contract)))))
+           (manifest (if (nullish? (get options :manifest))
+                       (await (read-json root (get (get contract :outputs) :manifest)))
+                       (get options :manifest)))
+           (markdown (if (nullish? (get options :markdown))
+                       (await (readFile (js-call path :join root (get (get contract :outputs) :report)) "utf8"))
+                       (get options :markdown))))
+      (validateFinalManifest manifest expected)
+      (unless (= markdown (humanFinalAcceptanceReport manifest))
+        (throw (new FinalAcceptanceError (js-array "human acceptance report does not match the machine-readable manifest"))))
+      (when (and (host-truthy (get options :requirePass))
+                 (not (host-truthy (get (get manifest :summary) :acceptancePass))))
+        (throw (new FinalAcceptanceError
+                 (js-array "the canonical artifacts are valid, but final acceptance has not been reached"))))
+      (when (and (host-truthy (get options :requirePass)) (= (get options :deferPerformanceAcceptance) t))
+        (throw (new FinalAcceptanceError
+                 (js-array "current performance acceptance is deferred and has not passed"))))
+      manifest))
+
+  (defun humanFinalAcceptanceSummary (manifest)
+    (js-call (js-array
+               (str "Final acceptance artifacts: " (get (get manifest :source) :commit))
+               (str "Criteria: " (get (get (get manifest :summary) :criteria) :pass) "/"
+                    (get (get (get manifest :summary) :criteria) :total) " pass, "
+                    (get (get (get manifest :summary) :criteria) :incomplete) " incomplete, "
+                    (get (get (get manifest :summary) :criteria) :fail) " fail")
+               (str "Evidence groups: " (js-length (get manifest :evidence)) "/"
+                    (js-length (get manifest :evidence)) " complete")
+               (str "Blocking defects: " (get (get manifest :summary) :blockingDefects))
+               (str "Final acceptance: "
+                    (if (host-truthy (get (get manifest :summary) :acceptancePass)) "pass" "not reached")))
+      :join "\n"))
+
+  (defun parse-arguments (argv)
+    (let ((options (js-object)) (index 0))
+      (while (< index (js-length argv))
+        (let ((argument (aref argv index)))
+          (cond
+            ((= argument "--generate") (put options :generate t))
+            ((= argument "--verify") (put options :verify t))
+            ((= argument "--require-pass") (put options :requirePass t))
+            (t (throw (new FinalAcceptanceError (js-array (str "unknown argument " argument)))))))
+        (setq index (1+ index)))
+      (when (= (get options :generate) (get options :verify))
+        (throw (new FinalAcceptanceError (js-array "choose exactly one of --generate or --verify"))))
+      options))
+
+  (defasync main ()
+    (let ((options (parse-arguments (js-call (get globalThis.process :argv) :slice 2))))
+      (put options :deferPerformanceAcceptance
+        (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1"))
+      (put options :deferredPerformanceAcceptance (js-array))
+      (let* ((manifest (if (host-truthy (get options :generate))
+                         (await (generateFinalAcceptance options))
+                         (await (verifyFinalAcceptance options))))
+             (summary (humanFinalAcceptanceSummary manifest)))
+        (js-call (get globalThis.process :stdout) :write
+          (str (if (get options :deferPerformanceAcceptance)
+                 (js-call summary :replace (new globalThis.RegExp summary-heading-pattern "mu")
+                   "Historical final acceptance:")
+                 summary)
+               "\n"))
+        (when (get options :deferPerformanceAcceptance)
+          (js-call (get globalThis.process :stdout) :write "Current performance acceptance: DEFERRED / NOT ACCEPTED\n")
+          (let ((index 0) (items (get options :deferredPerformanceAcceptance)))
+            (while (< index (js-length items))
+              (let ((item (aref items index)))
+                (js-call (get globalThis.process :stdout) :write
+                  (str "  " (get item :report) ": measured Git snapshot "
+                       (get (get item :measuredSource) :commit)
+                       " verified; current source comparison not performed\n")))
+              (setq index (1+ index)))))
+        (when (and (host-truthy (get options :requirePass))
+                   (not (host-truthy (get (get manifest :summary) :acceptancePass))))
+          (throw (new FinalAcceptanceError
+                   (js-array "the canonical artifacts are valid, but final acceptance has not been reached")))))))
+
+  (when (js* "import.meta.main")
+    (js-call (main) :catch
+      (lambda (error)
+        (let ((stack (get error :stack)))
+          (js-call (get globalThis.process :stderr) :write (str (if (nullish? stack) error stack) "\n")))
+        (put globalThis.process :exitCode 1))))
+
+  (export DEFAULT_ROOT FinalAcceptanceError validateFinalAcceptanceContract validateDefectRegister
+    buildFinalAcceptance humanFinalAcceptanceReport validateFinalManifest generateFinalAcceptance
+    verifyFinalAcceptance humanFinalAcceptanceSummary))

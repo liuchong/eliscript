@@ -38,7 +38,7 @@
           ((= path "/") (new globalThis.Response "<!doctype html><title>Managed language acceptance</title><script type=\"importmap\">{\"imports\":{\"eliscript/runtime/\":\"/runtime/\"}}</script><script type=\"module\" src=\"/page.mjs\"></script>" (js-object :headers (js-object "content-type" "text/html"))))
           ((= path "/page.mjs") (new globalThis.Response bundle headers))
           ((= path "/oracle.mjs") (new globalThis.Response oracle-source headers))
-          ((js-call (js-array "/runtime/unicode-case.mjs" "/runtime/unicode-case-data.mjs") :includes path)
+          ((js-call (js-array "/runtime/array-text.mjs" "/runtime/binding.mjs" "/runtime/errors.mjs" "/runtime/math.mjs" "/runtime/number-radix.mjs" "/runtime/prelude.mjs" "/runtime/primitives.mjs" "/runtime/unicode-case.mjs" "/runtime/unicode-case-data.mjs") :includes path)
             (new globalThis.Response (await (readFile (resolve root (js-call path :slice 1)))) headers))
           (t (new globalThis.Response "Not found" (js-object :status 404)))))))))
   (export writeManagedReference loadManagedReference runManagedNode bundleManagedBrowserPage serveManagedBrowserPage)

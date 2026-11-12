@@ -1,0 +1,7 @@
+(module tests.fixtures.session-tools-build-host
+  (import "node:process" :default process)
+  (import "../../tools/backends/compiler-build.mjs" buildIndependentCompiler)
+  (defasync main ()
+    (let ((artifact (await (buildIndependentCompiler (js-object :host "javascript" :outputRoot (aref (get process :argv) 2))))))
+      (js-call (get process :stdout) :write (JSON/stringify (js-object :host (get artifact :host))))))
+  (main))

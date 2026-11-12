@@ -1,0 +1,10 @@
+(module tests.fixtures.corpus-arguments-asset-driver
+  ;; Recording protocol stub for asset transport; not a compiler algorithm.
+  (defun compiler_session_new () (js-object :calls 0))
+  (defun compiler_session_close (state) (put state :closed t))
+  (defun compiler_session_request (state text)
+    (let ((input (JSON/parse text)))
+      (put state :calls (1+ (get state :calls)))
+      (JSON/stringify (js-object :calls (get state :calls) :operation (get input :operation) :source (get input :source)
+        :filename (get input :filename) :ownSource (Object/hasOwn input "source")))))
+  (export compiler_session_new compiler_session_close compiler_session_request))

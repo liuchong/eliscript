@@ -1,2 +1,484 @@
-(module capsules.tests.wasm-managed-builtins-test-ground
-  (js* "import {beforeAll, afterAll, test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {mkdtemp, readFile, writeFile, rm} from 'node:fs/promises';\nimport {tmpdir} from 'node:os';\nimport {resolve} from 'node:path';\nimport {pathToFileURL} from 'node:url';\nimport {spawnSync} from 'node:child_process';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\n\nlet directory, b, runtime, program, js, javascript;\nbeforeAll(async () => {\n  directory = await mkdtemp(resolve(tmpdir(), 'eliscript-builtins-'));\n  b = await buildBackends({outputRoot: directory});\n  runtime = b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli', 'utf8'), 'runtime.eli');\n  program = b.compiler.compile_ir_string(await readFile('tests/fixtures/wasm-managed-builtins.eli', 'utf8'), 'builtins.eli');\n  javascript = b.compiler.emit_ir_string(program);\n  js = await import('data:text/javascript;base64,' + Buffer.from(javascript).toString('base64'));\n}, 120000);\nafterAll(async () => {if (directory) await rm(directory, {recursive: true, force: true});});\nconst box = (a, value) => typeof value === 'number' ? a.number(value) : typeof value === 'string' ? a.string(value) : value;\nconst read = (a, value) => value?.kind === 4 ? a.readNumber(value) : value?.kind === 5 ? a.readString(value) : value;\nfunction instance(options) {\n  const before = JSON.stringify(program), bytes = Uint8Array.from(b.managed.emit_managed_wasm(program, runtime));\n  assert.equal(JSON.stringify(program), before);\n  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);\n  const a = instantiateManagedRuntime(bytes, options); a.auto(1); return {a, bytes};\n}\nfunction finish(a, values = [], module = true) {\n  for (const value of values) a.release(value);\n  if (module) a.closeModule();\n  a.collect(); assert.equal(a.live(), 0); assert.equal(a.stats().frameDepth, 0);\n}\nfunction check(a, name, value, expected) {\n  const input = box(a, value), out = a.invoke(name, [input]);\n  assert(Object.is(read(a, out), expected), name + ': ' + String(value));\n  a.release(input); a.release(out); a.collect(); assert.equal(a.stats().frameDepth, 0);\n}\nconst primitives = [undefined, null, false, true, '', ' ', '-0', '0x10', '1.e2', 'x', '\\ud800',\n  '\\u2028.5\\ufeff', NaN, Infinity, -Infinity, -0, 0, Number.MIN_VALUE, -Number.MIN_VALUE,\n  Number.MAX_VALUE, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER + 1, 1.5, -1.5];\n\ntest('independent Node confirms the original global calls before WASM lowering', async () => {\n  const file = resolve(directory, 'source.mjs'); await writeFile(file, javascript);\n  const child = spawnSync('node', ['--input-type=module', '-e', `\n    import assert from 'node:assert/strict'; const m = await import(process.argv[1]);\n    assert(Object.is(m.number_call('-0'), -0)); assert.equal(m.number_empty(), 0);\n    assert.equal(m.string_empty(), ''); assert.equal(m.boolean_call(0), false);\n    assert.equal(m.finite_call('1'), false); assert.equal(m.integer_call(-0), true);\n    assert.equal(m.same_number(), true); assert.equal(m.same_finite(), true);\n  `, pathToFileURL(file).href], {encoding: 'utf8', timeout: 30000});\n  assert.equal(child.status, 0, child.stderr);\n});\n\ntest('raw Number and primitive constructors retain missing arguments, ignored effects and exact conversions', () => {\n  const {a} = instance();\n  for (const x of primitives) {\n    check(a, 'number-call', x, js.number_call(x));\n    check(a, 'string-call', x, js.string_call(x));\n    check(a, 'boolean-call', x, js.boolean_call(x));\n  }\n  for (const name of ['number-empty', 'string-empty', 'boolean-empty']) {\n    const out = a.invoke(name); assert(Object.is(read(a, out), js[name.replaceAll('-', '_')]())); a.release(out);\n  }\n  const text = a.string('42'), trace = a.sourceObject({}), out = a.invoke('number-extra', [text, trace]);\n  assert.equal(a.readNumber(out), 42); const key = a.string('visited'), visited = a.objectGet(trace, key);\n  assert.equal(a.readNumber(visited), 7); finish(a, [text, trace, out, key, visited]);\n});\n\ntest('Number predicates never coerce while global isFinite and isNaN do, including IEEE boundaries', () => {\n  const {a} = instance();\n  const methods = ['finite-call', 'nan-call', 'integer-call', 'safe-call', 'coercive-finite', 'coercive-nan'];\n  const bits = new DataView(new ArrayBuffer(8)); let seed = 0x7c1203a5;\n  const next = () => seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;\n  const inputs = [...primitives, 2 ** 31, 2 ** 32, 2 ** 52, 2 ** 53, -(2 ** 53), 1 - 2 ** -53, 2 ** -52];\n  for (let i = 0; i < 2048; i++) {bits.setUint32(0, next(), true); bits.setUint32(4, next(), true); inputs.push(bits.getFloat64(0, true));}\n  for (const x of inputs) for (const name of methods) check(a, name, x, js[name.replaceAll('-', '_')](x));\n  const array = a.sourceArray([]), object = a.sourceObject({}), f = a.getExport('number-value');\n  for (const value of [array, object, f]) {\n    for (const name of ['finite-call', 'nan-call', 'integer-call', 'safe-call']) assert.equal(a.invoke(name, [value]), false);\n    assert.equal(a.invoke('boolean-call', [value]), true);\n  }\n  finish(a, [array, object, f]);\n});\n\ntest('first-class builtins preserve identity, captures, apply and callback extra arguments through GC', () => {\n  const {a} = instance(), closure = a.invoke('held-number'), text = a.string('-0');\n  assert.equal(a.invoke('same-number'), true); assert.equal(a.invoke('same-finite'), true);\n  a.collect(); const converted = a.invoke('invoke-one', [closure, text]); assert(Object.is(a.readNumber(converted), -0));\n  const values = a.sourceArray([text, true, null]), mapped = a.invoke('number-map', [values]);\n  for (const [index, expected] of [-0, 1, 0].entries()) {const x = a.get(mapped, index); assert(Object.is(a.readNumber(x), expected)); a.release(x);}\n  const finite = a.invoke('finite-map', [values]); for (let i = 0; i < 3; i++) assert.equal(a.get(finite, i), false);\n  const empty = a.sourceArray([]), zero = a.invoke('number-apply', [empty]); assert.equal(a.readNumber(zero), 0);\n  const args = a.sourceArray([undefined]), nan = a.invoke('number-apply', [args]); assert(Number.isNaN(a.readNumber(nan)));\n  assert.equal(a.invoke('array-call', [values]), true); assert.equal(a.invoke('array-call', [text]), false);\n  finish(a, [closure, text, converted, values, mapped, finite, empty, zero, args, nan]);\n});\n\ntest('lexical and project shadows retain the original bindings instead of invoking global builtins', async () => {\n  const source = '(defconst Number (lambda (x) 17)) (defun f (x) (funcall (js* \"Number\") x)) (defun local (x) (let ((Number (lambda (x) 23))) (funcall (js* \"Number\") x))) (defun predicate (Number x) (funcall (js* \"Number.isFinite\") x)) (export f local predicate)';\n  const p = b.compiler.compile_ir_string(source, 'shadow.eli');\n  const reference = await import('data:text/javascript;base64,' + Buffer.from(b.compiler.emit_ir_string(p)).toString('base64'));\n  assert.equal(reference.f('x'), 17); assert.equal(reference.local('x'), 23); assert.equal(reference.predicate({isFinite: () => 31}, 'x'), 31);\n  const entry = b.compiler.compile_ir_string('(module main (import \"./shadow.mjs\" f local predicate) (export f local predicate))', 'entry.eli');\n  for (const bytes of [b.managed.emit_managed_wasm(p, runtime), b.managed.emit_managed_project_wasm([{id: 'shadow.mjs', program: p}, {id: 'entry.mjs', program: entry}], 'entry.mjs', runtime)]) {\n    const a = instantiateManagedRuntime(Uint8Array.from(bytes)); a.auto(1); const x = a.string('x');\n    for (const [name, expected] of [['f', 17], ['local', 23]]) {const out = a.invoke(name, [x]); assert.equal(a.readNumber(out), expected); a.release(out);}\n    finish(a, [x]);\n  }\n});\n\ntest('shadowed static methods capture lookup before argument effects and preserve nullish failure order', async () => {\n  const source = '(defun factory () (lambda (x extra) extra)) (defun method (Number x trace) (js-call Number :isFinite x (progn (put trace :visited 7) (put Number :isFinite false)))) (defun missing (Number trace) (js-call Number :isFinite (put trace :visited 9))) (defun raw (Number trace) (funcall (js* \"Number.isFinite\") (put trace :visited 11))) (export factory method missing raw)';\n  const p = b.compiler.compile_ir_string(source, 'order.eli');\n  const ref = await import('data:text/javascript;base64,' + Buffer.from(b.compiler.emit_ir_string(p)).toString('base64'));\n  const target = {isFinite: ref.factory()}, effects = {}; assert.equal(ref.method(target, 0, effects), false);\n  for (const name of ['missing', 'raw']) for (const receiver of [false, null]) {\n    const trace = {}; assert.throws(() => ref[name](receiver, trace), TypeError);\n    assert.equal(trace.visited, receiver === null ? undefined : name === 'missing' ? 9 : 11);\n  }\n  const entry = b.compiler.compile_ir_string('(module entry (import \"./order.mjs\" factory method missing raw) (export factory method missing raw))', 'entry.eli');\n  for (const [index, bytes] of [b.managed.emit_managed_wasm(p, runtime), b.managed.emit_managed_project_wasm([{id: 'order.mjs', program: p}, {id: 'entry.mjs', program: entry}], 'entry.mjs', runtime)].entries()) {\n    const a = instantiateManagedRuntime(Uint8Array.from(bytes)); a.auto(1);\n    const f = a.invoke('factory'), object = a.sourceObject({isFinite: f}), x = a.number(0), trace = a.sourceObject({});\n    assert.equal(a.invoke('method', [object, x, trace]), false);\n    const key = a.string('visited');\n    for (const name of ['missing', 'raw']) for (const receiver of [false, null]) {\n      const seen = a.sourceObject({}); assert.throws(() => a.invoke(name, [receiver, seen]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');\n      const out = a.objectGet(seen, key); assert.equal(read(a, out), receiver === null ? undefined : name === 'missing' ? 9 : 11);\n      a.release(seen); a.release(out);\n    }\n    finish(a, [f, object, x, trace, key], index === 1);\n  }\n});\n\ntest('boxed primitive tests do not confuse source arrays, objects, functions and the Lisp truth rule', () => {\n  const {a} = instance(), object = a.sourceObject({}), array = a.sourceArray([]), f = a.getExport('number-value');\n  for (const value of [null, undefined, true, false, object, f]) assert.equal(a.invoke('array-call', [value]), false);\n  assert.equal(a.invoke('array-call', [array]), true);\n  const zero = a.number(0), text = a.string('');\n  assert.equal(a.truth(zero), true); assert.equal(a.truth(text), true);\n  assert.equal(a.invoke('boolean-call', [zero]), false); assert.equal(a.invoke('boolean-call', [text]), false);\n  for (const value of [array, object, f]) assert.equal(a.invoke('boolean-call', [value]), true);\n  finish(a, [object, array, f, zero, text]);\n});\n\ntest('unsupported object conversion and actual builtin traps preserve effects, caller roots and original failures', async () => {\n  const {a} = instance(), object = a.sourceObject({toString:false,valueOf:false}), trace = a.sourceObject({}), held = a.number(-0), frame = a.frame(1);\n  a.frameSet(frame, 0, held);\n  const plain = a.sourceObject({}), plainTrace = a.sourceObject({}), ordinary = a.invoke('number-extra', [plain, plainTrace]), control = {};\n  assert(Object.is(a.readNumber(ordinary), js.number_extra({}, control)));assert.equal(control.visited, 7);\n  const ordinaryKey = a.string('visited'), ordinarySeen = a.objectGet(plainTrace, ordinaryKey);assert.equal(a.readNumber(ordinarySeen), control.visited);\n  for (const value of [ordinary, plain, plainTrace, ordinaryKey, ordinarySeen]) a.release(value);\n  assert.throws(() => js.number_extra({toString:false,valueOf:false}, {}), TypeError);\n  assert.throws(() => a.invoke('number-extra', [object, trace]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');\n  assert.equal(a.stats().frameDepth, 1); assert(Object.is(a.readNumber(held), -0));\n  const key = a.string('visited'), seen = a.objectGet(trace, key); assert.equal(a.readNumber(seen), 7);\n  a.leaveFrame(frame); finish(a, [object, trace, held, key, seen]);\n\n  const source = await readFile('bootstrap/runtime/memory.eli', 'utf8');\n  const start = source.indexOf('  (defun value-builtin-primitive '), end = source.indexOf('  ;; Shortest decimal generation', start);\n  assert(start >= 0 && end > start);\n  const injected = b.compiler.compile_ir_string(source.slice(0, start) + '  (defun value-builtin-primitive (heap input count operation) (load-u32 4294967295))\\n' + source.slice(end), 'trap.eli');\n  const t = instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(program, injected))); t.auto(1);\n  const x = t.string('42'), saved = t.number(-0), outer = t.frame(1); t.frameSet(outer, 0, saved);\n  assert.throws(() => t.invoke('number-call', [x]), WebAssembly.RuntimeError);\n  assert.equal(t.stats().frameDepth, 1); assert.equal(t.readString(x), '42'); assert(Object.is(t.readNumber(saved), -0));\n  t.leaveFrame(outer); finish(t, [x, saved]);\n});\n\ntest('capacity failures during builtin conversion leave the module and caller frame usable', () => {\n  const {a} = instance({maxSlots: 128, initialBytes: 4096, maxBytes: 16384});\n  const input = '1.' + '0'.repeat(2000) + '1', text = a.string(input), saved = a.number(-0), frame = a.frame(1); a.frameSet(frame, 0, saved);\n  const remaining = 16384 - a.stats().usedBytes - 512; assert(remaining > 0);\n  const pressure = a.bytes(new Uint8Array(remaining));\n  assert.throws(() => a.invoke('number-call', [text]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0002');\n  assert.equal(a.stats().frameDepth, 1); assert.equal(a.readString(text), input); assert(Object.is(a.readNumber(saved), -0));\n  a.leaveFrame(frame); a.release(text); a.release(pressure); a.collect();\n  const out = a.invoke('number-empty'); assert.equal(a.readNumber(out), 0); finish(a, [saved, out]);\n});\n\ntest('Node executes the identical independent builtin WASM including aliases and predicate boundaries', async () => {\n  const {a, bytes} = instance(); finish(a); const file = resolve(directory, 'builtins.wasm'); await writeFile(file, bytes);\n  const child = spawnSync('node', ['--input-type=module', '-e', `\n    import assert from 'node:assert/strict'; import {readFileSync} from 'node:fs';\n    const {instantiateManagedRuntime} = await import(process.argv[1]);\n    const a = instantiateManagedRuntime(readFileSync(process.argv[2])); a.auto(1);\n    const text = a.string('-0'), out = a.invoke('number-call', [text]); assert(Object.is(a.readNumber(out), -0));\n    const unsafe = a.number(2 ** 53); assert.equal(a.invoke('integer-call', [unsafe]), true); assert.equal(a.invoke('safe-call', [unsafe]), false);\n    const nil = a.sourceArray([]); assert.equal(a.invoke('array-call', [nil]), true); assert.equal(a.invoke('same-number'), true);\n    for (const x of [text, out, unsafe, nil]) a.release(x); a.closeModule(); a.collect(); assert.equal(a.live(), 0); assert.equal(a.stats().frameDepth, 0);\n  `, pathToFileURL(resolve('tools/backends/managed-runtime.mjs')).href, file], {encoding: 'utf8', timeout: 30000});\n  assert.equal(child.status, 0, child.stderr);\n});\n\ntest('unimplemented constructors, mutable builtin properties and malformed raw IR stay explicitly refused', () => {\n  for (const source of ['(defun f (x) (new (js* \"Number\") x))', '(defun f () (js* \"Number.parseInt\"))',\n    '(defun f () (put (js* \"Number\") :isFinite false))', '(defun f () (js* \"Number /* comment */\"))']) {\n    const p = b.compiler.compile_ir_string(source, 'unsupported-builtins.eli');\n    assert.throws(() => b.managed.emit_managed_wasm(p, runtime), e => e.eliscriptDiagnostic?.code === 'ELI-B0001');\n  }\n  const p = b.compiler.compile_ir_string('(defun f () (js* \"Number\"))', 'bad-builtins.eli');\n  p.body[0].children[0].children = [null];\n  assert.throws(() => b.managed.emit_managed_wasm(p, runtime), e => e.eliscriptDiagnostic?.code === 'ELI-B0001');\n});\n\ntest('explicit globalThis paths respect shadowed host objects in standalone and linked projects', async () => {\n  const source = '(defun factory () (lambda (x) 37)) (defun f (globalThis x) (funcall (js* \"globalThis.Number\") x)) (defun g (globalThis x) (js-call globalThis.Number :isFinite x)) (export factory f g)';\n  const p = b.compiler.compile_ir_string(source, 'host-shadow.eli');\n  const reference = await import('data:text/javascript;base64,' + Buffer.from(b.compiler.emit_ir_string(p)).toString('base64'));\n  assert.equal(reference.f({Number: reference.factory()}, 'x'), 37);\n  assert.equal(reference.g({Number: {isFinite: reference.factory()}}, 'x'), 37);\n  const entry = b.compiler.compile_ir_string('(module main (import \"./host.mjs\" factory f g) (export factory f g))', 'entry.eli');\n  for (const [index, bytes] of [b.managed.emit_managed_wasm(p, runtime), b.managed.emit_managed_project_wasm([{id: 'host.mjs', program: p}, {id: 'entry.mjs', program: entry}], 'entry.mjs', runtime)].entries()) {\n    const a = instantiateManagedRuntime(Uint8Array.from(bytes)); a.auto(1);\n    const f = a.invoke('factory'), Number = a.sourceObject({isFinite: f}), host = a.sourceObject({Number: f}), nested = a.sourceObject({Number}), x = a.string('x');\n    for (const [name, receiver] of [['f', host], ['g', nested]]) {const out = a.invoke(name, [receiver, x]); assert.equal(a.readNumber(out), 37); a.release(out);}\n    finish(a, [f, Number, host, nested, x], index === 1);\n  }\n});\n"))
+(module tests.wasm-managed-builtins-test-ground
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:buffer" Buffer)
+  (import "node:fs/promises" mkdtemp readFile writeFile rm)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+  (defconst node-helper (resolve "tests/helpers/wasm-managed-builtins-node.mjs"))
+
+  (defvar directory nil)
+  (defvar b nil)
+  (defvar runtime nil)
+  (defvar program nil)
+  (defvar js nil)
+  (defvar javascript nil)
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-builtins-"))))
+      (setq b (await (buildBackends (js-object :outputRoot directory))))
+      (setq runtime (js-call (get b :compiler) :compile_ir_string
+                      (await (readFile "bootstrap/runtime/memory.eli" "utf8"))
+                      "runtime.eli"))
+      (setq program (js-call (get b :compiler) :compile_ir_string
+                      (await (readFile "tests/fixtures/wasm-managed-builtins.eli" "utf8"))
+                      "builtins.eli"))
+      (setq javascript (js-call (get b :compiler) :emit_ir_string program))
+      (setq js (await (funcall dyn-import
+                        (str "data:text/javascript;base64,"
+                             (js-call (Buffer/from javascript) :toString "base64"))))))
+    120000)
+
+  (afterAll
+    (async ()
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun box (a value)
+    (let ((ty (funcall js-typeof value)))
+      (cond
+        ((= ty "number") (js-call a :number value))
+        ((= ty "string") (js-call a :string value))
+        (t value))))
+
+  (defun read-val (a value)
+    (let ((kind (if (nullish? value) undefined (get value :kind))))
+      (cond
+        ((= kind 4) (js-call a :readNumber value))
+        ((= kind 5) (js-call a :readString value))
+        (t value))))
+
+  (defun instance (&rest __host_forwarded_arguments_1)
+    (let* ((options (aref __host_forwarded_arguments_1 0)))
+    (let* ((before (JSON/stringify program))
+           (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program runtime)))
+           (a (instantiateManagedRuntime bytes options)))
+      (js-call assert :equal (JSON/stringify program) before)
+      (js-call assert :deepEqual
+        (WebAssembly.Module/imports (new WebAssembly.Module bytes))
+        (js-array))
+      (js-call a :auto 1)
+      (js-object :a a :bytes bytes))))
+
+  (defun finish (a &rest __host_default_arguments_1)
+    (let* ((values (aref __host_default_arguments_1 0)) (close-mod (aref __host_default_arguments_1 1)))
+    (let ((vals (if (undefined? values) (js-array) values))
+          (do-close (if (undefined? close-mod) t close-mod)))
+      (js-call vals :forEach (lambda (value) (js-call a :release value)))
+      (when do-close
+        (js-call a :closeModule))
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
+
+  (defun check (a name value expected)
+    (let* ((input (box a value))
+           (out (js-call a :invoke name (js-array input))))
+      (funcall assert
+        (Object/is (read-val a out) expected)
+        (str name ": " (globalThis.String value)))
+      (js-call a :release input)
+      (js-call a :release out)
+      (js-call a :collect)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))
+
+  (defconst primitives
+    (js-array
+      undefined nil false t "" " " "-0" "0x10" "1.e2" "x"
+      (String/fromCharCode 55296)
+      (str (String/fromCharCode 8232) ".5" (String/fromCharCode 65279))
+      globalThis.NaN globalThis.Infinity (- globalThis.Infinity) -0 0
+      (get globalThis.Number :MIN_VALUE)
+      (- (get globalThis.Number :MIN_VALUE))
+      (get globalThis.Number :MAX_VALUE)
+      (get globalThis.Number :MAX_SAFE_INTEGER)
+      (+ (get globalThis.Number :MAX_SAFE_INTEGER) 1)
+      1.5 -1.5))
+
+  (test "independent Node confirms the original global calls before WASM lowering"
+    (async ()
+      (let ((file (resolve directory "source.mjs")))
+        (await (writeFile file javascript))
+        (let ((child (spawnSync "node"
+                       (js-array node-helper "js" (get (pathToFileURL file) :href))
+                       (js-object :encoding "utf8" :timeout 30000))))
+          (js-call assert :equal (get child :status) 0 (get child :stderr))))))
+
+  (test "raw Number and primitive constructors retain missing arguments, ignored effects and exact conversions"
+    (lambda ()
+      (let* ((inst (instance))
+             (a (get inst :a)))
+        (js-call primitives :forEach
+          (lambda (x)
+            (check a "number-call" x (js-call js :number_call x))
+            (check a "string-call" x (js-call js :string_call x))
+            (check a "boolean-call" x (js-call js :boolean_call x))))
+        (js-call (js-array "number-empty" "string-empty" "boolean-empty") :forEach
+          (lambda (name)
+            (let ((out (js-call a :invoke name))
+                  (js-fn (get js (js-call name :replaceAll "-" "_"))))
+              (funcall assert (Object/is (read-val a out) (funcall js-fn)))
+              (js-call a :release out))))
+        (let* ((text (js-call a :string "42"))
+               (trace (js-call a :sourceObject (js-object)))
+               (out (js-call a :invoke "number-extra" (js-array text trace)))
+               (key (js-call a :string "visited"))
+               (visited (js-call a :objectGet trace key)))
+          (js-call assert :equal (js-call a :readNumber out) 42)
+          (js-call assert :equal (js-call a :readNumber visited) 7)
+          (finish a (js-array text trace out key visited))))))
+
+  (test "Number predicates never coerce while global isFinite and isNaN do, including IEEE boundaries"
+    (lambda ()
+      (let* ((inst (instance))
+             (a (get inst :a))
+             (methods (js-array "finite-call" "nan-call" "integer-call" "safe-call" "coercive-finite" "coercive-nan"))
+             (bits (new globalThis.DataView (new globalThis.ArrayBuffer 8)))
+             (seed 2081555365)
+             (next-u32 (lambda ()
+                         (setq seed (unsigned-bit-shift-right (+ (Math/imul seed 1664525) 1013904223) 0))
+                         seed))
+             (inputs (js-call primitives :concat
+                       (js-array
+                         (Math/pow 2 31)
+                         (Math/pow 2 32)
+                         (Math/pow 2 52)
+                         (Math/pow 2 53)
+                         (- (Math/pow 2 53))
+                         (- 1 (Math/pow 2 -53))
+                         (Math/pow 2 -52))))
+             (i 0))
+        (while (< i 2048)
+          (js-call bits :setUint32 0 (funcall next-u32) t)
+          (js-call bits :setUint32 4 (funcall next-u32) t)
+          (js-call inputs :push (js-call bits :getFloat64 0 t))
+          (setq i (+ i 1)))
+        (js-call inputs :forEach
+          (lambda (x)
+            (js-call methods :forEach
+              (lambda (name)
+                (let ((js-fn (get js (js-call name :replaceAll "-" "_"))))
+                  (check a name x (funcall js-fn x)))))))
+        (let ((array (js-call a :sourceArray (js-array)))
+              (object (js-call a :sourceObject (js-object)))
+              (f (js-call a :getExport "number-value")))
+          (js-call (js-array array object f) :forEach
+            (lambda (value)
+              (js-call (js-array "finite-call" "nan-call" "integer-call" "safe-call") :forEach
+                (lambda (name)
+                  (js-call assert :equal (js-call a :invoke name (js-array value)) false)))
+              (js-call assert :equal (js-call a :invoke "boolean-call" (js-array value)) t)))
+          (finish a (js-array array object f))))))
+
+  (test "first-class builtins preserve identity, captures, apply and callback extra arguments through GC"
+    (lambda ()
+      (let* ((inst (instance))
+             (a (get inst :a))
+             (closure (js-call a :invoke "held-number"))
+             (text (js-call a :string "-0")))
+        (js-call assert :equal (js-call a :invoke "same-number") t)
+        (js-call assert :equal (js-call a :invoke "same-finite") t)
+        (js-call a :collect)
+        (let* ((converted (js-call a :invoke "invoke-one" (js-array closure text)))
+               (values (js-call a :sourceArray (js-array text t nil)))
+               (mapped (js-call a :invoke "number-map" (js-array values)))
+               (expected-nums (js-array -0 1 0))
+               (finite (js-call a :invoke "finite-map" (js-array values)))
+               (empty (js-call a :sourceArray (js-array)))
+               (zero (js-call a :invoke "number-apply" (js-array empty)))
+               (args (js-call a :sourceArray (js-array undefined)))
+               (nan (js-call a :invoke "number-apply" (js-array args))))
+          (funcall assert (Object/is (js-call a :readNumber converted) -0))
+          (js-call expected-nums :forEach
+            (lambda (expected index)
+              (let ((x (js-call a :get mapped index)))
+                (funcall assert (Object/is (js-call a :readNumber x) expected))
+                (js-call a :release x))))
+          (let ((i 0))
+            (while (< i 3)
+              (js-call assert :equal (js-call a :get finite i) false)
+              (setq i (+ i 1))))
+          (js-call assert :equal (js-call a :readNumber zero) 0)
+          (funcall assert (Number/isNaN (js-call a :readNumber nan)))
+          (js-call assert :equal (js-call a :invoke "array-call" (js-array values)) t)
+          (js-call assert :equal (js-call a :invoke "array-call" (js-array text)) false)
+          (finish a (js-array closure text converted values mapped finite empty zero args nan))))))
+
+  (test "lexical and project shadows retain the original bindings instead of invoking global builtins"
+    (async ()
+      (let* ((source "(defconst Number (lambda (x) 17)) (defun f (x) (funcall (js* \"Number\") x)) (defun local (x) (let ((Number (lambda (x) 23))) (funcall (js* \"Number\") x))) (defun predicate (Number x) (funcall (js* \"Number.isFinite\") x)) (export f local predicate)")
+             (p (js-call (get b :compiler) :compile_ir_string source "shadow.eli"))
+             (reference (await (funcall dyn-import
+                                 (str "data:text/javascript;base64,"
+                                      (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string p)) :toString "base64")))))
+             (entry (js-call (get b :compiler) :compile_ir_string
+                      "(module main (import \"./shadow.mjs\" f local predicate) (export f local predicate))"
+                      "entry.eli"))
+             (candidates (js-array
+                           (js-call (get b :managed) :emit_managed_wasm p runtime)
+                           (js-call (get b :managed) :emit_managed_project_wasm
+                             (js-array
+                               (js-object :id "shadow.mjs" :program p)
+                               (js-object :id "entry.mjs" :program entry))
+                             "entry.mjs" runtime))))
+        (js-call assert :equal (js-call reference :f "x") 17)
+        (js-call assert :equal (js-call reference :local "x") 23)
+        (js-call assert :equal (js-call reference :predicate (js-object :isFinite (lambda () 31)) "x") 31)
+        (js-call candidates :forEach
+          (lambda (bytes)
+            (let* ((a (instantiateManagedRuntime (Uint8Array/from bytes)))
+                   (x (progn (js-call a :auto 1) (js-call a :string "x"))))
+              (js-call (js-array (js-array "f" 17) (js-array "local" 23)) :forEach
+                (lambda (pair)
+                  (let* ((name (aref pair 0))
+                         (expected (aref pair 1))
+                         (out (js-call a :invoke name (js-array x))))
+                    (js-call assert :equal (js-call a :readNumber out) expected)
+                    (js-call a :release out))))
+              (finish a (js-array x))))))))
+
+  (test "shadowed static methods capture lookup before argument effects and preserve nullish failure order"
+    (async ()
+      (let* ((source "(defun factory () (lambda (x extra) extra)) (defun method (Number x trace) (js-call Number :isFinite x (progn (put trace :visited 7) (put Number :isFinite false)))) (defun missing (Number trace) (js-call Number :isFinite (put trace :visited 9))) (defun raw (Number trace) (funcall (js* \"Number.isFinite\") (put trace :visited 11))) (export factory method missing raw)")
+             (p (js-call (get b :compiler) :compile_ir_string source "order.eli"))
+             (ref (await (funcall dyn-import
+                           (str "data:text/javascript;base64,"
+                                (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string p)) :toString "base64")))))
+             (target (js-object :isFinite (js-call ref :factory)))
+             (effects (js-object)))
+        (js-call assert :equal (js-call ref :method target 0 effects) false)
+        (js-call (js-array "missing" "raw") :forEach
+          (lambda (name)
+            (js-call (js-array false nil) :forEach
+              (lambda (receiver)
+                (let ((trace (js-object))
+                      (fn (get ref name)))
+                  (js-call assert :throws (lambda () (funcall fn receiver trace)) globalThis.TypeError)
+                  (js-call assert :equal (get trace :visited)
+                    (if (nil? receiver) undefined (if (= name "missing") 9 11))))))))
+        (let* ((entry (js-call (get b :compiler) :compile_ir_string
+                        "(module entry (import \"./order.mjs\" factory method missing raw) (export factory method missing raw))"
+                        "entry.eli"))
+               (candidates (js-array
+                             (js-call (get b :managed) :emit_managed_wasm p runtime)
+                             (js-call (get b :managed) :emit_managed_project_wasm
+                               (js-array
+                                 (js-object :id "order.mjs" :program p)
+                                 (js-object :id "entry.mjs" :program entry))
+                               "entry.mjs" runtime))))
+          (js-call candidates :forEach
+            (lambda (bytes index)
+              (let* ((a (instantiateManagedRuntime (Uint8Array/from bytes)))
+                     (f (progn (js-call a :auto 1) (js-call a :invoke "factory")))
+                     (object (js-call a :sourceObject (js-object :isFinite f)))
+                     (x (js-call a :number 0))
+                     (trace (js-call a :sourceObject (js-object)))
+                     (key (js-call a :string "visited")))
+                (js-call assert :equal (js-call a :invoke "method" (js-array object x trace)) false)
+                (js-call (js-array "missing" "raw") :forEach
+                  (lambda (name)
+                    (js-call (js-array false nil) :forEach
+                      (lambda (receiver)
+                        (let ((seen (js-call a :sourceObject (js-object))))
+                          (js-call assert :throws
+                            (lambda () (js-call a :invoke name (js-array receiver seen)))
+                            (lambda (e)
+                              (let ((diag (get e :eliscriptDiagnostic)))
+                                (= (if diag (get diag :code) undefined) "ELI-RT0003"))))
+                          (let ((out (js-call a :objectGet seen key)))
+                            (js-call assert :equal (read-val a out)
+                              (if (nil? receiver) undefined (if (= name "missing") 9 11)))
+                            (js-call a :release seen)
+                            (js-call a :release out)))))))
+                (finish a (js-array f object x trace key) (= index 1)))))))))
+
+  (test "boxed primitive tests do not confuse source arrays, objects, functions and the Lisp truth rule"
+    (lambda ()
+      (let* ((inst (instance))
+             (a (get inst :a))
+             (object (js-call a :sourceObject (js-object)))
+             (array (js-call a :sourceArray (js-array)))
+             (f (js-call a :getExport "number-value"))
+             (zero (js-call a :number 0))
+             (text (js-call a :string "")))
+        (js-call (js-array nil undefined t false object f) :forEach
+          (lambda (value)
+            (js-call assert :equal (js-call a :invoke "array-call" (js-array value)) false)))
+        (js-call assert :equal (js-call a :invoke "array-call" (js-array array)) t)
+        (js-call assert :equal (js-call a :truth zero) t)
+        (js-call assert :equal (js-call a :truth text) t)
+        (js-call assert :equal (js-call a :invoke "boolean-call" (js-array zero)) false)
+        (js-call assert :equal (js-call a :invoke "boolean-call" (js-array text)) false)
+        (js-call (js-array array object f) :forEach
+          (lambda (value)
+            (js-call assert :equal (js-call a :invoke "boolean-call" (js-array value)) t)))
+        (finish a (js-array object array f zero text)))))
+
+  (test "unsupported object conversion and actual builtin traps preserve effects, caller roots and original failures"
+    (async ()
+      (let* ((inst (instance))
+             (a (get inst :a))
+             (object (js-call a :sourceObject (js-object :toString false :valueOf false)))
+             (trace (js-call a :sourceObject (js-object)))
+             (held (js-call a :number -0))
+             (frame (js-call a :frame 1)))
+        (js-call a :frameSet frame 0 held)
+        (let* ((plain (js-call a :sourceObject (js-object)))
+               (plain-trace (js-call a :sourceObject (js-object)))
+               (ordinary (js-call a :invoke "number-extra" (js-array plain plain-trace)))
+               (control (js-object))
+               (ordinary-key (js-call a :string "visited"))
+               (ordinary-seen (js-call a :objectGet plain-trace ordinary-key)))
+          (funcall assert (Object/is (js-call a :readNumber ordinary) (js-call js :number_extra (js-object) control)))
+          (js-call assert :equal (get control :visited) 7)
+          (js-call assert :equal (js-call a :readNumber ordinary-seen) (get control :visited))
+          (js-call (js-array ordinary plain plain-trace ordinary-key ordinary-seen) :forEach
+            (lambda (value) (js-call a :release value))))
+        (js-call assert :throws
+          (lambda () (js-call js :number_extra (js-object :toString false :valueOf false) (js-object)))
+          globalThis.TypeError)
+        (js-call assert :throws
+          (lambda () (js-call a :invoke "number-extra" (js-array object trace)))
+          (lambda (e)
+            (let ((diag (get e :eliscriptDiagnostic)))
+              (= (if diag (get diag :code) undefined) "ELI-RT0003"))))
+        (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+        (funcall assert (Object/is (js-call a :readNumber held) -0))
+        (let* ((key (js-call a :string "visited"))
+               (seen (js-call a :objectGet trace key)))
+          (js-call assert :equal (js-call a :readNumber seen) 7)
+          (js-call a :leaveFrame frame)
+          (finish a (js-array object trace held key seen))))
+      (let* ((source (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
+             (start (js-call source :indexOf "  (defun value-builtin-primitive "))
+             (end (js-call source :indexOf "  ;; Shortest decimal generation" start)))
+        (funcall assert (and (>= start 0) (> end start)))
+        (let* ((injected (js-call (get b :compiler) :compile_ir_string
+                           (str (js-call source :slice 0 start)
+                                "  (defun value-builtin-primitive (heap input count operation) (load-u32 4294967295))\n"
+                                (js-call source :slice end))
+                           "trap.eli"))
+               (trap-rt (instantiateManagedRuntime
+                          (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program injected))))
+               (x (progn (js-call trap-rt :auto 1) (js-call trap-rt :string "42")))
+               (saved (js-call trap-rt :number -0))
+               (outer (js-call trap-rt :frame 1)))
+          (js-call trap-rt :frameSet outer 0 saved)
+          (js-call assert :throws
+            (lambda () (js-call trap-rt :invoke "number-call" (js-array x)))
+            WebAssembly.RuntimeError)
+          (js-call assert :equal (get (js-call trap-rt :stats) :frameDepth) 1)
+          (js-call assert :equal (js-call trap-rt :readString x) "42")
+          (funcall assert (Object/is (js-call trap-rt :readNumber saved) -0))
+          (js-call trap-rt :leaveFrame outer)
+          (finish trap-rt (js-array x saved))))))
+
+  (test "capacity failures during builtin conversion leave the module and caller frame usable"
+    (lambda ()
+      (let* ((inst (instance (js-object :maxSlots 128 :initialBytes 4096 :maxBytes 16384)))
+             (a (get inst :a))
+             (input (str "1." (js-call "0" :repeat 2000) "1"))
+             (text (js-call a :string input))
+             (saved (js-call a :number -0))
+             (frame (js-call a :frame 1)))
+        (js-call a :frameSet frame 0 saved)
+        (let ((remaining (- 16384 (get (js-call a :stats) :usedBytes) 512)))
+          (funcall assert (> remaining 0))
+          (let ((pressure (js-call a :bytes (new globalThis.Uint8Array remaining))))
+            (js-call assert :throws
+              (lambda () (js-call a :invoke "number-call" (js-array text)))
+              (lambda (e)
+                (let ((diag (get e :eliscriptDiagnostic)))
+                  (= (if diag (get diag :code) undefined) "ELI-RT0002"))))
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+            (js-call assert :equal (js-call a :readString text) input)
+            (funcall assert (Object/is (js-call a :readNumber saved) -0))
+            (js-call a :leaveFrame frame)
+            (js-call a :release text)
+            (js-call a :release pressure)
+            (js-call a :collect)
+            (let ((out (js-call a :invoke "number-empty")))
+              (js-call assert :equal (js-call a :readNumber out) 0)
+              (finish a (js-array saved out))))))))
+
+  (test "Node executes the identical independent builtin WASM including aliases and predicate boundaries"
+    (async ()
+      (let* ((inst (instance))
+             (a (get inst :a))
+             (bytes (get inst :bytes))
+             (file (resolve directory "builtins.wasm")))
+        (finish a)
+        (await (writeFile file bytes))
+        (let ((child (spawnSync "node"
+                       (js-array node-helper "wasm"
+                         (get (pathToFileURL (resolve "tools/backends/managed-runtime.mjs")) :href)
+                         file)
+                       (js-object :encoding "utf8" :timeout 30000))))
+          (js-call assert :equal (get child :status) 0 (get child :stderr))))))
+
+  (test "unimplemented constructors, mutable builtin properties and malformed raw IR stay explicitly refused"
+    (lambda ()
+      (js-call (js-array
+                 "(defun f (x) (new (js* \"Number\") x))"
+                 "(defun f () (js* \"Number.parseInt\"))"
+                 "(defun f () (put (js* \"Number\") :isFinite false))"
+                 "(defun f () (js* \"Number /* comment */\"))")
+        :forEach
+        (lambda (source)
+          (let ((p (js-call (get b :compiler) :compile_ir_string source "unsupported-builtins.eli")))
+            (js-call assert :throws
+              (lambda () (js-call (get b :managed) :emit_managed_wasm p runtime))
+              (lambda (e)
+                (let ((diag (get e :eliscriptDiagnostic)))
+                  (= (if diag (get diag :code) undefined) "ELI-B0001")))))))
+      (let ((p (js-call (get b :compiler) :compile_ir_string "(defun f () (js* \"Number\"))" "bad-builtins.eli")))
+        (put (aref (get (aref (get p :body) 0) :children) 0) :children (js-array nil))
+        (js-call assert :throws
+          (lambda () (js-call (get b :managed) :emit_managed_wasm p runtime))
+          (lambda (e)
+            (let ((diag (get e :eliscriptDiagnostic)))
+              (= (if diag (get diag :code) undefined) "ELI-B0001")))))))
+
+  (test "explicit globalThis paths respect shadowed host objects in standalone and linked projects"
+    (async ()
+      (let* ((source "(defun factory () (lambda (x) 37)) (defun f (globalThis x) (funcall (js* \"globalThis.Number\") x)) (defun g (globalThis x) (js-call globalThis.Number :isFinite x)) (export factory f g)")
+             (p (js-call (get b :compiler) :compile_ir_string source "host-shadow.eli"))
+             (reference (await (funcall dyn-import
+                                 (str "data:text/javascript;base64,"
+                                      (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string p)) :toString "base64")))))
+             (entry (js-call (get b :compiler) :compile_ir_string
+                      "(module main (import \"./host.mjs\" factory f g) (export factory f g))"
+                      "entry.eli"))
+             (candidates (js-array
+                           (js-call (get b :managed) :emit_managed_wasm p runtime)
+                           (js-call (get b :managed) :emit_managed_project_wasm
+                             (js-array
+                               (js-object :id "host.mjs" :program p)
+                               (js-object :id "entry.mjs" :program entry))
+                             "entry.mjs" runtime))))
+        (js-call assert :equal (js-call reference :f (js-object :Number (js-call reference :factory)) "x") 37)
+        (js-call assert :equal (js-call reference :g (js-object :Number (js-object :isFinite (js-call reference :factory))) "x") 37)
+        (js-call candidates :forEach
+          (lambda (bytes index)
+            (let* ((a (instantiateManagedRuntime (Uint8Array/from bytes)))
+                   (f (progn (js-call a :auto 1) (js-call a :invoke "factory")))
+                   (num-obj (js-call a :sourceObject (js-object :isFinite f)))
+                   (host (js-call a :sourceObject (js-object :Number f)))
+                   (nested (js-call a :sourceObject (js-object :Number num-obj)))
+                   (x (js-call a :string "x")))
+              (js-call (js-array (js-array "f" host) (js-array "g" nested)) :forEach
+                (lambda (pair)
+                  (let* ((name (aref pair 0))
+                         (receiver (aref pair 1))
+                         (out (js-call a :invoke name (js-array receiver x))))
+                    (js-call assert :equal (js-call a :readNumber out) 37)
+                    (js-call a :release out))))
+              (finish a (js-array f num-obj host nested x) (= index 1)))))))))

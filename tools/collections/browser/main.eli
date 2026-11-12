@@ -1,2 +1,51 @@
-(module capsules.tools.collections.browser.main
-  (js* "import {\n  DEFAULT_OCCUPANCIES,\n  runLayoutHostBenchmark,\n} from \"../layout-benchmark.mjs\";\n\nfunction positiveParameter(parameters, name, fallback) {\n  const text = parameters.get(name);\n  if (text === null) {\n    return fallback;\n  }\n  const value = Number(text);\n  if (!Number.isSafeInteger(value) || value <= 0) {\n    throw new TypeError(`${name} must be a positive safe integer`);\n  }\n  return value;\n}\n\nfunction occupanciesParameter(parameters) {\n  const text = parameters.get(\"occupancies\");\n  return text === null\n    ? DEFAULT_OCCUPANCIES\n    : text.split(\",\").map((value) => Number(value.trim()));\n}\n\nconst parameters = new URLSearchParams(location.search);\nconst result = document.querySelector(\"#result\");\n\ntry {\n  const report = await runLayoutHostBenchmark({\n    host: {\n      id: \"chrome\",\n      runtime: \"browser\",\n      runtimeVersion: navigator.userAgent,\n      engine: \"V8\",\n      platform: navigator.platform,\n      architecture: navigator.userAgentData?.architecture ?? \"unknown\",\n    },\n    occupancies: occupanciesParameter(parameters),\n    lookupIterations: positiveParameter(parameters, \"iterations\", 250_000),\n    mutationIterations: positiveParameter(parameters, \"mutationIterations\", 50_000),\n    timingSamples: positiveParameter(parameters, \"timingSamples\", 7),\n    memoryNodeCount: positiveParameter(parameters, \"memoryNodes\", 20_000),\n    memorySamples: positiveParameter(parameters, \"memorySamples\", 3),\n    collectGarbage: typeof globalThis.gc === \"function\"\n      ? () => globalThis.gc()\n      : undefined,\n    heapUsed: performance.memory === undefined\n      ? undefined\n      : () => performance.memory.usedJSHeapSize,\n  });\n  result.textContent = `ELISCRIPT_LAYOUT_RESULT:${JSON.stringify(report)}`;\n} catch (error) {\n  result.textContent = `ELISCRIPT_LAYOUT_ERROR:${error.stack ?? error.message}`;\n}\n"))
+(module tools.collections.browser.main
+  (import "../layout-benchmark.mjs" DEFAULT_OCCUPANCIES runLayoutHostBenchmark)
+
+  (defun positive-parameter (parameters name fallback)
+    (let ((text (js-call parameters :get name)))
+      (if (eq text nil)
+        fallback
+        (let ((value (funcall globalThis.Number text)))
+          (when (or (not (Number/isSafeInteger value)) (<= value 0))
+            (throw (new globalThis.TypeError (str name " must be a positive safe integer"))))
+          value))))
+
+  (defun occupancies-parameter (parameters)
+    (let ((text (js-call parameters :get "occupancies")))
+      (if (eq text nil)
+        DEFAULT_OCCUPANCIES
+        (js-call (js-call text :split ",") :map (lambda (value) (funcall globalThis.Number (js-call value :trim)))))))
+
+  (defasync main ()
+    (let ((parameters (new globalThis.URLSearchParams (get globalThis.location :search)))
+          (result (js-call globalThis.document :querySelector "#result")))
+      (try
+        (let* ((nav globalThis.navigator)
+               (ua-data (get nav :userAgentData))
+               (arch (or (and ua-data (get ua-data :architecture)) "unknown"))
+               (report (await (runLayoutHostBenchmark (js-object
+                         :host (js-object
+                                 :id "chrome"
+                                 :runtime "browser"
+                                 :runtimeVersion (get nav :userAgent)
+                                 :engine "V8"
+                                 :platform (get nav :platform)
+                                 :architecture arch)
+                         :occupancies (occupancies-parameter parameters)
+                         :lookupIterations (positive-parameter parameters "iterations" 250000)
+                         :mutationIterations (positive-parameter parameters "mutationIterations" 50000)
+                         :timingSamples (positive-parameter parameters "timingSamples" 7)
+                         :memoryNodeCount (positive-parameter parameters "memoryNodes" 20000)
+                         :memorySamples (positive-parameter parameters "memorySamples" 3)
+                         :collectGarbage (if (= (value-type globalThis.gc) "function")
+                                           (lambda () (funcall globalThis.gc))
+                                           undefined)
+                         :heapUsed (if (undefined? (get globalThis.performance :memory))
+                                     undefined
+                                     (lambda () (get (get globalThis.performance :memory) :usedJSHeapSize))))))))
+          (put result :textContent (str "ELISCRIPT_LAYOUT_RESULT:" (JSON/stringify report))))
+        (catch error
+          (put result :textContent (str "ELISCRIPT_LAYOUT_ERROR:" (or (get error :stack) (get error :message))))))))
+
+  (js-call (main) :catch (lambda (error)
+    (js-call globalThis.console :error error))))

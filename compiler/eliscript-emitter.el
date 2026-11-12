@@ -19,27 +19,7 @@
 (declare-function eliscript-ir-emitter--children "eliscript-ir-emitter" (node))
 (declare-function eliscript-ir-emitter--split-counted-children "eliscript-ir-emitter" (node property))
 
-;; Identical capsules share cycle guards and deterministic Number method
-;; formatting without replacing global prototypes or native function values.
-(defconst eliscript-emitter--array-text-import
-  "import { c as __eliscript_at, d as __eliscript_at_direct } from \"data:text/javascript;base64,dmFyIG09UmVmbGVjdC5hcHBseSx0dD1OdW1iZXIucHJvdG90eXBlLnZhbHVlT2Ysaj1OdW1iZXIucHJvdG90eXBlLnRvU3RyaW5nLFU9TnVtYmVyLG50PU9iamVjdC5jcmVhdGUsaD1CaWdJbnQsZXQ9RGF0YVZpZXcsb3Q9QXJyYXlCdWZmZXIsaXQ9RGF0YVZpZXcucHJvdG90eXBlLnNldEZsb2F0NjQsSj1EYXRhVmlldy5wcm90b3R5cGUuZ2V0VWludDMyLHJ0PVJhbmdlRXJyb3I7ZnVuY3Rpb24gY3QodCxuKXtsZXQgZT1oKG4pLG89aCh0KSxpPSIiO2lmKG88MG4pbz0tbztkb3tsZXQgZj1vJWU7aT0iMDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6IltVKGYpXStpLG8vPWV9d2hpbGUobyE9PTBuKTtyZXR1cm4gdDwwPyItIitpOml9ZnVuY3Rpb24gc3QodCxuKXtsZXQgZT1uZXcgZXQobmV3IG90KDgpKTttKGl0LGUsWzAsdCwhMV0pO2xldCBvPW0oSixlLFswLCExXSksaT1tKEosZSxbNCwhMV0pLGY9bz4+PjIwJjIwNDcsYj1vJjEwNDg1NzUscD1vPj4+MzEscj1oKGIpPDwzMm58aChpKTtpZihmIT09MClyKz0xbjw8NTJuO3I8PD0ybjtsZXQgbD00bix1PWY+MSYmYj09PTAmJmk9PT0wPzFuOjJuLGs9Mm47aWYoZj49MTA3NSl7bGV0IGM9aChmLTEwNzUpO3I8PD1jLHU8PD1jLGs8PD1jfWVsc2UgbDw8PWgoZj09PTA/MTA3NDoxMDc1LWYpO2xldCBkPWgobiksZz1udChudWxsKSxhPTAsUz0wLEQ9MDtpZihyPGwpd2hpbGUocjxsKXtpZihyKjJuPmwmJnIraz5sKWJyZWFrO3IqPWQsdSo9ZCxrKj1kLFMtLX1lbHNlIHdoaWxlKHI+PWwqZClsKj1kLFMrKztmb3IoOzspe2xldCBjPVUoci9sKTtyJT1sO2xldCBJPXI8dSx4PXIraz5sO2dbYSsrXT1jLEQ9RCoobiYxKStjJjE7bGV0IHE9cioybixQPXE+bHx8cT09PWwmJkQ9PT0xO2lmKFAmJnh8fCFQJiZJKXtpZihQKXtsZXQgUj1hLEI9ITA7d2hpbGUoUj4wJiZCKXtSLS07bGV0IEg9Z1tSXSsxO2lmKEg9PT1uKWdbUl09MDtlbHNlIGdbUl09SCxCPSExfWlmKEIpZ1swXT0xLFMrK31icmVha31pZihhPj02NCl0aHJvdyBuZXcgcnQoIm51bWJlciByYWRpeCBmb3JtYXR0aW5nIGRpZCBub3QgY29udmVyZ2UiKTtyKj1kLHUqPWQsayo9ZH13aGlsZShhPjEmJmdbYS0xXT09PTApYS0tO2xldCB3PSIiO2lmKFM8MCl7dz0iMC4iO2ZvcihsZXQgYz0wO2M8LTEtUztjKyspdys9IjAiO2ZvcihsZXQgYz0wO2M8YTtjKyspdys9IjAxMjM0NTY3ODlhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5eiJbZ1tjXV19ZWxzZXtsZXQgYz1TKzEsST1jPmE/YzphO2ZvcihsZXQgeD0wO3g8STt4Kyspe2lmKHg9PT1jJiZjPGEpdys9Ii4iO3crPXg8YT8iMDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6IltnW3hdXToiMCJ9fXJldHVybiBwPyItIit3Ond9ZnVuY3Rpb24gRyh0LG4pe2xldCBlO3RyeXtlPW0odHQsdCxbXSl9Y2F0Y2h7cmV0dXJuIG0oaix0LFtuXSl9bGV0IG89MTA7aWYobiE9PXZvaWQgMCl7bGV0IGk9K247aWYobz1pIT09aT8wOmktaSUxLG88Mnx8bz4zNnx8byE9PW8pcmV0dXJuIG0oaixlLFtvXSl9aWYobz09PTEwfHxlPT09MHx8ZSE9PWV8fGU9PT0xLzB8fGU9PT0tMS8wKXJldHVybiBtKGosZSxbMTBdKTtyZXR1cm4gZSUxPT09MD9jdChlLG8pOnN0KGUsbyl9dmFyIHM9UmVmbGVjdC5hcHBseSxNPUZ1bmN0aW9uLnByb3RvdHlwZS5jYWxsLE49RnVuY3Rpb24ucHJvdG90eXBlLmFwcGx5LEU9RnVuY3Rpb24ucHJvdG90eXBlLmJpbmQsVD1PYmplY3QuZGVmaW5lUHJvcGVydHksbHQ9T2JqZWN0LmdldE93blByb3BlcnR5RGVzY3JpcHRvcixmdD1PYmplY3QuZ2V0UHJvdG90eXBlT2YsdXQ9T2JqZWN0LnNldFByb3RvdHlwZU9mLGF0PVJlZmxlY3Qub3duS2V5cyxwdD1TeW1ib2wuaGFzSW5zdGFuY2UsVj1BcnJheS5pc0FycmF5LEs9QXJyYXkucHJvdG90eXBlLmpvaW4sej1BcnJheS5wcm90b3R5cGUudG9TdHJpbmcseXQ9T2JqZWN0LnByb3RvdHlwZS50b1N0cmluZyxidD1TdHJpbmcsQz1UeXBlRXJyb3IsZHQ9U3ltYm9sLnRvUHJpbWl0aXZlLGd0PVdlYWtTZXQucHJvdG90eXBlLmhhcyx3dD1XZWFrU2V0LnByb3RvdHlwZS5hZGQseHQ9V2Vha1NldC5wcm90b3R5cGUuZGVsZXRlLEY9bmV3IFdlYWtTZXQsTz1udWxsLFc9KHQpPT50IT09bnVsbCYmKHR5cGVvZiB0PT09Im9iamVjdCJ8fHR5cGVvZiB0PT09ImZ1bmN0aW9uInx8dHlwZW9mIHQ+InUiJiZ0IT09dm9pZCAwKSxBPSh0KT0+dHlwZW9mIHQ9PT0iZnVuY3Rpb24ifHx0eXBlb2YgdD4idSImJnQhPT12b2lkIDA7ZnVuY3Rpb24gaHQoKXtsZXQgbj1uZXcgQygiY3ljbGljIGFycmF5IHRleHQgY29udmVyc2lvbiIpO3Rocm93IG4uZWxpc2NyaXB0RGlhZ25vc3RpYz17Zm9ybWF0OiJlbGlzY3JpcHQtZGlhZ25vc3RpYyIsdmVyc2lvbjoxLGNvZGU6IkVMSS1SVDAwMDkiLHNldmVyaXR5OiJlcnJvciIscGhhc2U6InJ1bnRpbWUiLG1lc3NhZ2U6ImN5Y2xpYyBhcnJheSB0ZXh0IGNvbnZlcnNpb24ifSxufWZ1bmN0aW9uIG10KHQpe2lmKCFXKHQpKXJldHVybiB0O2xldCBuPXRbZHRdO2lmKG4hPT12b2lkIDAmJm4hPT1udWxsKXtsZXQgZT1zKG4sdCxbInN0cmluZyJdKTtpZighVyhlKSlyZXR1cm4gZTt0aHJvdyBuZXcgQygiQ2Fubm90IGNvbnZlcnQgb2JqZWN0IHRvIHByaW1pdGl2ZSB2YWx1ZSIpfWZvcihsZXQgZT0wO2U8MjtlKyspe2xldCBvPXRbZT09PTA/InRvU3RyaW5nIjoidmFsdWVPZiJdO2lmKEEobykpe2xldCBpPW89PT16JiZWKHQpP3YodCk6cyhvLHQsW10pO2lmKCFXKGkpKXJldHVybiBpfX10aHJvdyBuZXcgQygiQ2Fubm90IGNvbnZlcnQgb2JqZWN0IHRvIHByaW1pdGl2ZSB2YWx1ZSIpfWZ1bmN0aW9uIFEodCl7bGV0IG49bXQodCk7aWYodHlwZW9mIG49PT0ic3ltYm9sIil0aHJvdyBuZXcgQygiQ2Fubm90IGNvbnZlcnQgYSBTeW1ib2wgdmFsdWUgdG8gYSBzdHJpbmciKTtyZXR1cm4gYnQobil9ZnVuY3Rpb24gXyh0LG4pe2xldCBlPSt0Lmxlbmd0aCxvPWUhPT1lfHxlPD0wPzA6ZT49OTAwNzE5OTI1NDc0MDk5MT85MDA3MTk5MjU0NzQwOTkxOmUtZSUxLGk9bj09PXZvaWQgMD8iLCI6UShuKSxmPU89PT1udWxsO2lmKGYpTz10O2Vsc2V7aWYodD09PU98fHMoZ3QsRixbdF0pKWh0KCk7cyh3dCxGLFt0XSl9dHJ5e2xldCBiPSIiO2ZvcihsZXQgcD0wO3A8bztwKyspe2lmKHApYis9aTtsZXQgcj10W3BdO2lmKHIhPT1udWxsJiZyIT09dm9pZCAwKWIrPVEocil9cmV0dXJuIGJ9ZmluYWxseXtpZihmKU89bnVsbDtlbHNlIHMoeHQsRixbdF0pfX1mdW5jdGlvbiB2KHQpe2xldCBuPXQuam9pbjtyZXR1cm4gQShuKT9uPT09Sz9fKHQsdm9pZCAwKTpzKG4sdCxbXSk6cyh5dCx0LFtdKX1mdW5jdGlvbiB5KHQsbil7cmV0dXJuIG48dC5sZW5ndGg/dFtuXTp2b2lkIDB9ZnVuY3Rpb24gWCh0LG4pe2xldCBlPVtdO2ZvcihsZXQgbz1uO288dC5sZW5ndGg7bysrKVQoZSxlLmxlbmd0aCx7dmFsdWU6dFtvXSx3cml0YWJsZTohMCxlbnVtZXJhYmxlOiEwLGNvbmZpZ3VyYWJsZTohMH0pO3JldHVybiBlfWZ1bmN0aW9uIFN0KHQsbil7bGV0IGU9W107Zm9yKGxldCBvPTA7bzx0Lmxlbmd0aCtuLmxlbmd0aDtvKyspVChlLG8se3ZhbHVlOm88dC5sZW5ndGg/dFtvXTpuW28tdC5sZW5ndGhdLHdyaXRhYmxlOiEwLGVudW1lcmFibGU6ITAsY29uZmlndXJhYmxlOiEwfSk7cmV0dXJuIGV9ZnVuY3Rpb24gWSguLi50KXtyZXR1cm4gdH1mdW5jdGlvbiBaKHQsbil7cmV0dXJuIG4/cyhOLFksW3ZvaWQgMCx0XSk6cyhZLHZvaWQgMCx0KX1mdW5jdGlvbiBMKHQsbixlKXtmb3IoOzspe2lmKHQ9PT1qKXJldHVybiBHKG4seShlLDApKTtpZih0PT09SyYmVihuKSlyZXR1cm4gXyhuLHkoZSwwKSk7aWYodD09PXomJlYobikpcmV0dXJuIHYobik7aWYodD09PU0pe2lmKCFBKG4pKXJldHVybiBzKHQsbixlKTtsZXQgbz1uLGk9eShlLDApO2U9WChlLDEpLHQ9byxuPWk7Y29udGludWV9aWYodD09PU4pe2lmKCFBKG4pKXJldHVybiBzKHQsbixlKTtsZXQgbz1uLGk9eShlLDApO2U9Wih5KGUsMSksITApLHQ9byxuPWk7Y29udGludWV9aWYodD09PXMpe2xldCBvPXkoZSwwKSxpPXkoZSwxKTtpZighQShvKSlyZXR1cm4gcyh0LG4sZSk7ZT1aKHkoZSwyKSwhMSksdD1vLG49aTtjb250aW51ZX1pZih0PT09RSl7bGV0IG89cyh0LG4sZSk7aWYobiE9PWomJm4hPT1LJiZuIT09eiYmbiE9PU0mJm4hPT1OJiZuIT09cyYmbiE9PUUpcmV0dXJuIG87bGV0IGk9bixmPXkoZSwwKSxiPVgoZSwxKSxwPSguLi51KT0+TChpLGYsU3QoYix1KSk7VChwLHB0LHt2YWx1ZToodSk9PnUgaW5zdGFuY2VvZiBpLGNvbmZpZ3VyYWJsZTohMH0pO2xldCByPXMoRSxwLFt2b2lkIDBdKTt1dChyLGZ0KG8pKTtsZXQgbD1hdChvKTtmb3IobGV0IHU9MDt1PGwubGVuZ3RoO3UrKylUKHIsbFt1XSxsdChvLGxbdV0pKTtyZXR1cm4gcn1yZXR1cm4gcyh0LG4sZSl9fWZ1bmN0aW9uIFJ0KHQsbil7bGV0IGU9dFtuXTtyZXR1cm4oLi4ubyk9PkwoZSx0LG8pfWZ1bmN0aW9uIEF0KHQsbiwuLi5lKXtsZXQgbz10W25dO3JldHVybiBMKG8sdCxlKX1leHBvcnR7UnQgYXMgYyxBdCBhcyBkfTs=\";\n")
-
-(defconst eliscript-emitter--number-conversion-intrinsics
-    "const __eliscript_number_intrinsic = globalThis.Number;\nconst __eliscript_bigint_intrinsic = globalThis.BigInt;\nconst __eliscript_numeric_apply = globalThis.Reflect.apply;\nconst __eliscript_numeric_symbol = globalThis.Symbol.toPrimitive;\nconst __eliscript_numeric_error = globalThis.TypeError;\nconst __eliscript_numeric_trim = globalThis.String.prototype.trim;\nconst __eliscript_numeric_slice = globalThis.String.prototype.slice;\nconst __eliscript_numeric_exec = globalThis.RegExp.prototype.exec;\n")
-  (defconst eliscript-emitter--number-conversion-body
-    "const __eliscript_numeric_radix = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;\nconst __eliscript_numeric_object = (value) => value !== null && (typeof value === \"object\" || typeof value === \"function\" || (typeof value === \"undefined\" && value !== void 0));\nconst __eliscript_numeric_primitive = (value) => {\n  if (!__eliscript_numeric_object(value)) return value;\n  const exotic = value[__eliscript_numeric_symbol];\n  if (exotic !== void 0 && exotic !== null) {\n    const result = __eliscript_numeric_apply(exotic, value, [\"number\"]);\n    if (!__eliscript_numeric_object(result)) return result;\n    throw new __eliscript_numeric_error(\"Cannot convert object to primitive value\");\n  }\n  for (let index = 0; index < 2; index++) {\n    const method = value[index === 0 ? \"valueOf\" : \"toString\"];\n    if (typeof method === \"function\" || (typeof method === \"undefined\" && method !== void 0)) {\n      const result = __eliscript_numeric_apply(method, value, []);\n      if (!__eliscript_numeric_object(result)) return result;\n    }\n  }\n  throw new __eliscript_numeric_error(\"Cannot convert object to primitive value\");\n};\nconst __eliscript_to_number = (value) => {\n  const primitive = __eliscript_numeric_primitive(value);\n  if (typeof primitive === \"string\") {\n    const text = __eliscript_numeric_apply(__eliscript_numeric_trim, primitive, []);\n    if (__eliscript_numeric_apply(__eliscript_numeric_exec, __eliscript_numeric_radix, [text]) !== null) {\n      let first = 2;\n      while (first < text.length && text[first] === \"0\") first++;\n      if (first === text.length) return 0;\n      const prefix = text[1];\n      const limit = prefix === \"x\" || prefix === \"X\" ? 256 : prefix === \"b\" || prefix === \"B\" ? 1024 : 342;\n      if (text.length - first > limit) return 1 / 0;\n      const token = __eliscript_numeric_apply(__eliscript_numeric_slice, text, [0, 2]) + __eliscript_numeric_apply(__eliscript_numeric_slice, text, [first]);\n      return __eliscript_number_intrinsic(__eliscript_bigint_intrinsic(token));\n    }\n  }\n  return __eliscript_number_intrinsic(primitive);\n};\n")
-  (defconst eliscript-emitter--number-conversion-helper
-    (concat eliscript-emitter--number-conversion-intrinsics eliscript-emitter--number-conversion-body)
-  "Generated helper for exact nondecimal Number conversion across JS hosts.")
-(defconst eliscript-emitter--numeric-operator-helper
-  "const __eliscript_numeric = (value) => {\n  if (typeof value === \"number\" || typeof value === \"bigint\") return value;\n  const primitive = __eliscript_numeric_primitive(value);\n  if (typeof primitive === \"number\" || typeof primitive === \"bigint\") return primitive;\n  return typeof primitive === \"string\" ? __eliscript_to_number(primitive) : +primitive;\n};\nconst __eliscript_implicit_number = (value) => {\n  if (typeof value === \"number\") return value;\n  const primitive = __eliscript_numeric_primitive(value);\n  if (typeof primitive === \"bigint\") throw new __eliscript_numeric_error(\"Cannot convert a BigInt value to a number\");\n  return typeof primitive === \"string\" ? __eliscript_to_number(primitive) : +primitive;\n};\nconst __eliscript_numeric_decrement = (value) => __eliscript_implicit_number(value) - 1;\nconst __eliscript_numeric_sub = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a - b; return __eliscript_numeric(a) - __eliscript_numeric(b); };\nconst __eliscript_numeric_mul = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a * b; return __eliscript_numeric(a) * __eliscript_numeric(b); };\nconst __eliscript_numeric_div = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a / b; return __eliscript_numeric(a) / __eliscript_numeric(b); };\nconst __eliscript_numeric_rem = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a % b; return __eliscript_numeric(a) % __eliscript_numeric(b); };\nconst __eliscript_numeric_and = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a & b; return __eliscript_numeric(a) & __eliscript_numeric(b); };\nconst __eliscript_numeric_or = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a | b; return __eliscript_numeric(a) | __eliscript_numeric(b); };\nconst __eliscript_numeric_xor = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a ^ b; return __eliscript_numeric(a) ^ __eliscript_numeric(b); };\nconst __eliscript_numeric_shl = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a << b; return __eliscript_numeric(a) << __eliscript_numeric(b); };\nconst __eliscript_numeric_shr = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a >> b; return __eliscript_numeric(a) >> __eliscript_numeric(b); };\nconst __eliscript_numeric_ushr = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a >>> b; return __eliscript_numeric(a) >>> __eliscript_numeric(b); };\nconst __eliscript_numeric_neg = (a) => typeof a === \"number\" ? -a : -__eliscript_numeric(a);\nconst __eliscript_numeric_int32 = (a) => typeof a === \"number\" ? a | 0 : __eliscript_numeric(a) | 0;\nconst __eliscript_numeric_uint32 = (a) => typeof a === \"number\" ? a >>> 0 : __eliscript_numeric(a) >>> 0;\nconst __eliscript_numeric_not = (a) => typeof a === \"number\" ? ~a : ~__eliscript_numeric(a);\nconst __eliscript_numeric_relation = (operator, left, right) => {\n  if (typeof left === \"number\" && typeof right === \"number\") {\n    if (operator === \"<\") return left < right;\n    if (operator === \"<=\") return left <= right;\n    if (operator === \">\") return left > right;\n    return left >= right;\n  }\n  let a = __eliscript_numeric_primitive(left);\n  let b = __eliscript_numeric_primitive(right);\n  const x = typeof a, y = typeof b;\n  if (!((x === \"string\" && y === \"string\") || (x === \"bigint\" && y === \"string\") || (x === \"string\" && y === \"bigint\"))) {\n    a = __eliscript_numeric(a);\n    b = __eliscript_numeric(b);\n  }\n  if (operator === \"<\") return a < b;\n  if (operator === \"<=\") return a <= b;\n  if (operator === \">\") return a > b;\n  return a >= b;\n};\n"
-  "Generated primitive numeric operators with exact coercion ordering.")
-  (defconst eliscript-emitter--imul-intrinsic
-    "const __eliscript_numeric_imul_intrinsic = globalThis.Math.imul;\n")
-  (defconst eliscript-emitter--imul-operator-helper
-    "const __eliscript_numeric_imul = (a, b) => __eliscript_numeric_imul_intrinsic(__eliscript_implicit_number(a), __eliscript_implicit_number(b));\n")
-;; One compiled runtime module owns every shared helper. Its own module scope
-;; never binds globalThis, so captured intrinsics need no separate capsule.
+;; Shared runtime algorithms are maintained in ordinary Eli modules.
 (defconst eliscript-emitter--prelude-array-text-names
   '("__eliscript_at" "__eliscript_at_direct"))
 (defconst eliscript-emitter--prelude-number-conversion-names
@@ -53,20 +33,7 @@
     "__eliscript_numeric_uint32" "__eliscript_numeric_not"))
 (defconst eliscript-emitter--prelude-imul-names
   '("__eliscript_numeric_imul"))
-(defconst eliscript-emitter--prelude-module
-  (concat
-   "// Generated by Eliscript. Do not edit.\n"
-   "export" (substring eliscript-emitter--array-text-import (length "import"))
-   eliscript-emitter--number-conversion-helper
-   eliscript-emitter--numeric-operator-helper
-   eliscript-emitter--imul-intrinsic
-   eliscript-emitter--imul-operator-helper
-   "export { "
-   (string-join (append eliscript-emitter--prelude-number-conversion-names
-                        eliscript-emitter--prelude-numeric-coercion-names
-                        eliscript-emitter--prelude-imul-names) ", ")
-   " };\n")
-  "Complete generated module for runtime/prelude.eli.")
+
 (defun eliscript-emitter--prelude-import (array-text number-conversion numeric-coercion imul)
   "Import the shared helpers selected by each runtime requirement."
   (let ((names (append (and array-text eliscript-emitter--prelude-array-text-names)
@@ -77,8 +44,8 @@
         (concat "import { " (string-join names ", ") " } from \"eliscript/runtime/prelude.mjs\";\n")
       "")))
 (defconst eliscript-emitter--host-identity-token-helper
-  "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n"
-  "Generated module helper for process-local opaque host identities.")
+  "import { createHostIdentityToken as __eliscript_create_host_identity_token } from \"eliscript/runtime/primitives.mjs\";\nconst __eliscript_host_identity_token = __eliscript_create_host_identity_token();\n"
+  "Instantiate a private identity allocator implemented in maintained Eli.")
 (defconst eliscript-emitter--literal-runtime-import
   "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, queue as __eliscript_queue, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n"
   "Generated import for canonical language literal construction.")
@@ -101,7 +68,8 @@
   #'eliscript-symbol-reference-name)
 
 (defvar eliscript-emitter--temporary-counter 0)
-(defconst eliscript-emitter--tdz-import "import { tdz as __eliscript_tdz_error, immutable as __eliscript_const_error } from \"data:text/javascript;base64,Y29uc3QgRSA9IFJlZmVyZW5jZUVycm9yOyBjb25zdCBUID0gVHlwZUVycm9yOyBleHBvcnQgZnVuY3Rpb24gdGR6KG5hbWUpIHsgdGhyb3cgbmV3IEUoIkNhbm5vdCBhY2Nlc3MgJyIgKyBuYW1lICsgIicgYmVmb3JlIGluaXRpYWxpemF0aW9uIik7IH0gZXhwb3J0IGZ1bmN0aW9uIGltbXV0YWJsZSgpIHsgdGhyb3cgbmV3IFQoIkFzc2lnbm1lbnQgdG8gY29uc3RhbnQgdmFyaWFibGUuIik7IH0K\";\n")
+(defconst eliscript-emitter--tdz-import
+  "import { tdz as __eliscript_tdz_error, immutable as __eliscript_const_error } from \"eliscript/runtime/errors.mjs\";\n")
 ;; Private module initialization state is separate from public ESM bindings.
 (defvar eliscript-emitter--tdz-state nil)
 (defconst eliscript-emitter--tdz-read-tag (make-symbol "eliscript-tdz-read"))
@@ -1897,9 +1865,8 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
         "unsigned-bit-shift-right" arguments ">>>"))
       ('value-type
        (eliscript-emitter--require-arity "value-type" arguments 1 1)
-       (format
-        "((__eliscript_value) => { if (__eliscript_value === null) return \"null\"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== \"object\" && __eliscript_host_type !== \"function\") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for(\"eliscript.value.type\")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, \"value\") && (__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, \"kind\"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, \"value\")) { if (__eliscript_kind.value === \"eliscript/keyword\") return \"keyword\"; if (__eliscript_kind.value === \"eliscript/symbol\") return \"symbol\"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(%s)"
-        (eliscript-emitter-emit-expression (car arguments))))
+       (format "__eliscript_value_type(%s)"
+               (eliscript-emitter-emit-expression (car arguments))))
       ('host-identity-token
        (eliscript-emitter--require-arity
         "host-identity-token" arguments 1 1)
@@ -1923,13 +1890,13 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
       ('string-to-bigint
        (eliscript-emitter--require-arity "string-to-bigint" arguments 1 1)
        (format
-        "((__eliscript_text) => { try { return BigInt(__eliscript_text); } catch { return null; } })(%s)"
+        "__eliscript_string_to_bigint(%s)"
         (eliscript-emitter-emit-expression (car arguments))))
       ('number-float64-words
        (eliscript-emitter--require-arity
         "number-float64-words" arguments 1 1)
        (format
-        "((__eliscript_number) => { const __eliscript_bytes = new DataView(new ArrayBuffer(8)); __eliscript_bytes.setFloat64(0, __eliscript_number === 0 ? 0 : __eliscript_number, true); return [__eliscript_bytes.getUint32(0, true), __eliscript_bytes.getUint32(4, true)]; })(%s)"
+        "__eliscript_number_float64_words(%s)"
         (eliscript-emitter-emit-expression (car arguments))))
       ('= (eliscript-emitter--emit-comparison "=" arguments "==="))
       ((or '/= 'not=)
@@ -2002,7 +1969,7 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
                (eliscript-emitter-emit-expression (nth 1 arguments))))
       ('__eliscript_array_build
        (eliscript-emitter--require-arity "__eliscript_array_build" arguments 2 2)
-       (format "((count, build) => { if (!Number.isInteger(count) || count < 0 || count > 67108854 || typeof build !== 'function') throw new TypeError('invalid private array builder'); return Array.from({length: count}, (_, index) => build(index)); })(%s, %s)"
+       (format "__eliscript_array_build(%s, %s)"
                (eliscript-emitter-emit-expression (nth 0 arguments))
                (eliscript-emitter-emit-expression (nth 1 arguments))))
       ('js-cons
@@ -2037,7 +2004,7 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
        (eliscript-emitter--require-arity
         "__eliscript_arity_error" arguments 2 2)
        (format
-        "((label, arity) => { throw new TypeError(label + \" received unsupported arity: \" + arity); })(%s, %s)"
+        "__eliscript_arity_error(%s, %s)"
         (eliscript-emitter-emit-expression (nth 0 arguments))
         (eliscript-emitter-emit-expression (nth 1 arguments))))
       ('object-keys
@@ -2093,10 +2060,15 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
                (eliscript-emitter--emit-callee (car arguments))
                (eliscript-emitter--emit-arguments (cdr arguments))))
       ('apply
-       (eliscript-emitter--require-arity "apply" arguments 2 2)
-       (format "%s(...%s)"
-               (eliscript-emitter--emit-callee (car arguments))
-               (eliscript-emitter-emit-expression (cadr arguments))))
+       (eliscript-emitter--require-arity "apply" arguments 2)
+       (let ((fixed (butlast (cdr arguments)))
+             (tail (car (last arguments))))
+         (format "%s(%s...(%s ?? []))"
+                 (eliscript-emitter--emit-callee (car arguments))
+                 (if fixed
+                     (concat (eliscript-emitter--emit-arguments fixed) ", ")
+                   "")
+                 (eliscript-emitter-emit-expression tail))))
       (_
        (when (memq operator '(defun defn defvar defconst export import module))
          (eliscript-emitter--fail "%s is only valid at module top level" operator))
@@ -2252,6 +2224,22 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
                        (eliscript-emitter--numeric-coercion-p (car node))
                        (or (not (eq (car node) '*)) (> (length (cdr node)) 1)))) '(quote)))
 
+(defconst eliscript-emitter--primitive-runtime-import
+  "import { stringToBigint as __eliscript_string_to_bigint, float64Words as __eliscript_number_float64_words, buildArray as __eliscript_array_build, unsupportedArity as __eliscript_arity_error } from \"eliscript/runtime/primitives.mjs\";\n")
+(defun eliscript-emitter--uses-primitive-runtime-p (forms)
+  "Find native conversion and private runtime calls in active forms."
+  (eliscript-emitter--some-form forms
+    (lambda (node) (and (consp node)
+                       (memq (car node) '(string-to-bigint number-float64-words
+                                         __eliscript_array_build __eliscript_arity_error)))) '(quote)))
+
+(defconst eliscript-emitter--value-type-import
+  "import { valueType as __eliscript_value_type } from \"eliscript/runtime/primitives.mjs\";\n")
+(defun eliscript-emitter--uses-value-type-p (forms)
+  "Find active value-type calls without traversing quoted fixture data."
+  (eliscript-emitter--some-form forms
+    (lambda (node) (and (consp node) (eq (car node) 'value-type))) '(quote)))
+
 (defun eliscript-emitter--uses-host-identity-token-p (forms)
   "Retain the original host-token scan, including its quoted-form traversal."
   (eliscript-emitter--some-form forms
@@ -2330,12 +2318,28 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
   (eliscript-emitter--runtime-capsule-p
    filename module-name
    '(("runtime/unicode-case.eli" . "eliscript.runtime.unicode-case")
-     ("runtime/unicode-case-data.eli" . "eliscript.runtime.unicode-case-data"))))
+     ("runtime/unicode-case-data.eli" . "eliscript.runtime.unicode-case-data")
+     ("runtime/number-radix.eli" . "eliscript.runtime.number-radix")
+     ("runtime/array-text.eli" . "eliscript.runtime.array-text")
+     ("runtime/prelude.eli" . "eliscript.runtime.prelude")
+     ("runtime/primitives.eli" . "eliscript.runtime.primitives")
+     ("runtime/errors.eli" . "eliscript.runtime.errors")
+     ("runtime/binding.eli" . "eliscript.runtime.binding"))))
 
-(defun eliscript-emitter--prelude-capsule-p (filename module-name)
-  "Recognize the shared helper module by full source and module identity."
+(defun eliscript-emitter--array-text-capsule-p (filename module-name)
+  "Recognize array-text bootstrap modules that emit raw numeric operators."
   (eliscript-emitter--runtime-capsule-p
-   filename module-name '(("runtime/prelude.eli" . "eliscript.runtime.prelude"))))
+   filename module-name
+   '(("runtime/number-radix.eli" . "eliscript.runtime.number-radix")
+     ("runtime/array-text.eli" . "eliscript.runtime.array-text"))))
+
+(defun eliscript-emitter--forms-array-text-capsule-p (forms filename)
+  "Require a single exact array-text bootstrap module and its source context."
+  (and (= (length forms) 1) (consp (car forms))
+       (eq (caar forms) 'module)
+       (eliscript-emitter--array-text-capsule-p filename (cadar forms))))
+
+
 
 (defun eliscript-emitter--forms-unicode-capsule-p (forms filename)
   "Require a single exact module as well as its compilation source context."
@@ -2343,11 +2347,7 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
        (eq (caar forms) 'module)
        (eliscript-emitter--unicode-capsule-p filename (cadar forms))))
 
-(defun eliscript-emitter--forms-prelude-p (forms filename)
-  "Require the exact empty prelude module and its compilation source context."
-  (and (equal (length forms) 1) (consp (car forms))
-       (eq (caar forms) 'module) (null (cddar forms))
-       (eliscript-emitter--prelude-capsule-p filename (cadar forms))))
+
 
 (defconst eliscript-emitter--math-runtime-import
   "import \"eliscript/runtime/math.mjs\";\n")
@@ -2385,29 +2385,34 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
   (let* ((eliscript-emitter--tdz-state (eliscript-emitter--tdz-state-create))
          (scope (make-hash-table :test #'equal)))
     (eliscript-emitter--tdz-ground-predeclare forms scope eliscript-emitter--tdz-state)
-    (if (eliscript-emitter--forms-prelude-p forms filename)
-        eliscript-emitter--prelude-module
-      (eliscript-emitter--emit-module-ready
+    (eliscript-emitter--emit-module-ready
        (if (plist-get eliscript-emitter--tdz-state :variables)
            (eliscript-emitter--tdz-ground-rewrite forms scope eliscript-emitter--tdz-state)
          forms)
-       forms filename))))
+       forms filename)))
 
 (defun eliscript-emitter--emit-module-ready (forms &optional source-forms filename)
-  (let ((eliscript-emitter--temporary-counter 0)
-        (prologue-forms (or source-forms forms)))
+  (let* ((eliscript-emitter--temporary-counter 0)
+         (prologue-forms (or source-forms forms))
+         (eliscript-emitter--numeric-profile
+          (or eliscript-emitter--numeric-profile
+              (eliscript-emitter--forms-array-text-capsule-p prologue-forms filename))))
     (concat
      "// Generated by Eliscript. Do not edit.\n"
      (eliscript-emitter--tdz-prologue eliscript-emitter--tdz-state)
      (if (eliscript-emitter--forms-unicode-capsule-p prologue-forms filename)
          "" eliscript-emitter--unicode-runtime-import)
      (if (eliscript-emitter--uses-math-runtime-p prologue-forms) eliscript-emitter--math-runtime-import "")
-     (let ((numeric-coercion (eliscript-emitter--uses-numeric-coercion-p prologue-forms)))
+     (let ((numeric-coercion (and (not eliscript-emitter--numeric-profile)
+                                  (eliscript-emitter--uses-numeric-coercion-p prologue-forms))))
        (eliscript-emitter--prelude-import
-        (eliscript-emitter--uses-array-text-p prologue-forms)
-        (or numeric-coercion (eliscript-emitter--uses-number-conversion-p prologue-forms))
+        (and (not (eliscript-emitter--forms-array-text-capsule-p prologue-forms filename))
+             (eliscript-emitter--uses-array-text-p prologue-forms))
+        (and (not eliscript-emitter--numeric-profile)
+             (or numeric-coercion (eliscript-emitter--uses-number-conversion-p prologue-forms)))
         numeric-coercion
-        (eliscript-emitter--uses-imul-p prologue-forms)))
+        (and (not eliscript-emitter--numeric-profile)
+             (eliscript-emitter--uses-imul-p prologue-forms))))
      (if (eliscript-emitter--uses-literal-runtime-p prologue-forms)
          eliscript-emitter--literal-runtime-import
        "")
@@ -2420,6 +2425,10 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
      (if (eliscript-emitter--uses-value-runtime-p prologue-forms)
          eliscript-emitter--value-runtime-import
        "")
+     (if (eliscript-emitter--uses-primitive-runtime-p prologue-forms)
+         eliscript-emitter--primitive-runtime-import "")
+     (if (eliscript-emitter--uses-value-type-p prologue-forms)
+         eliscript-emitter--value-type-import "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
      (if (eliscript-emitter--uses-host-identity-token-p prologue-forms)
          eliscript-emitter--host-identity-token-helper

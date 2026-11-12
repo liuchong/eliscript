@@ -1,0 +1,9 @@
+(module tests.fixtures.package-close-failure
+  (import "./real-session-delegate.mjs" :as driver)
+  (defconst closeFailure (new globalThis.Error "original real-driver cleanup failure"))
+  (defvar closedCount 0)
+  (defun compiler_session_close (state)
+    (setq closedCount (+ closedCount 1))
+    (js-call driver :compiler_session_close state)
+    (throw closeFailure))
+  (export closeFailure closedCount compiler_session_close))

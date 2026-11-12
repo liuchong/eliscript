@@ -1,0 +1,10 @@
+(module tests.helpers.wasm-managed-primitive-own-runtime-node
+  (import "node:fs" readFileSync)
+  (import "node:process" :default process)
+
+  (defun run-main ()
+    (let* ((cases (JSON/parse (readFileSync 0 "utf8")))
+           (out (js-call cases :map (lambda (pair) (Object/hasOwn (aref pair 0) (aref pair 1))))))
+      (js-call (get process :stdout) :write (str (JSON/stringify out) "\n"))))
+
+  (run-main))

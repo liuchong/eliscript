@@ -11,15 +11,16 @@
   (import "node:url" pathToFileURL)
   (import "../../dist/bootstrap/compiler.mjs" compile-string compile-ir-string)
   (import "../../dist/bootstrap/emitter.mjs" emit-top-level emit-expression)
+  (import "./maintained-suite-source.mjs" maintainedSuiteSource sourceCall sourceFormText rewriteSourceForms compileMaintainedSuite)
   (defconst suite "tests/wasm-managed-initializer-outlining.test.mjs")
-  (defconst source-sha "e3d2cd7d8e3d5f28a08f20401cf8cfa48ed10743136a2e39ef9b895bbd5e074e")
+  (defconst source-sha "a391042184e2b3483738ffc4d7450222daa20f061238c03ae5ae5ad3c9642633")
   (defconst currentExpectationPlans (js-array
-    (js-object :suite "tests/wasm-managed-function-properties.test.mjs" :sha256 "6d587e122fdc20fd7c7da85aa30cf0e07e31fca0964256058484d87bbff1ae15" :kind "host-builtin-order")
-    (js-object :suite "tests/wasm-managed-text-format.test.mjs" :sha256 "2945da75430983eaad1df2f8f40a2d1d7f380ee8da74443f2fe9af020f768a7b" :kind "nullish-text-diagnostic")
-    (js-object :suite "tests/compiler-js-array-text-call.test.mjs" :sha256 "d3cf04e0986c626b178c50da5db0b43963b0ed3ade58f7bd05a8f787fef60560" :kind "dispatch-import")
-    (js-object :suite "tests/wasm-managed-string-code-unit.test.mjs" :sha256 "8c96894a88bf957ac26ca06eb884ac2e57ffffbd3ece87ad356d0ec0bd1173d7" :kind "nullish-diagnostic")
-    (js-object :suite "tests/wasm-managed-strings.test.mjs" :sha256 "33da413ad48d3b359663aa6109ca390eee68a5124d9a8634ac02a91988b06507" :kind "string-properties")
-    (js-object :suite "tests/wasm-managed-regexp-unicode-sets.test.mjs" :sha256 "af89394f5e7fe60a6cb4b6c5884f26747e1b6685a053bf1516d57671ab39d050" :kind "manual-capacity")))
+    (js-object :suite "tests/wasm-managed-function-properties.test.mjs" :sha256 "acecc8e15b6ddf408361e0511862ae77157f1dd16c95f263af9b27ee33dcd955" :kind "host-builtin-order")
+    (js-object :suite "tests/wasm-managed-text-format.test.mjs" :sha256 "8b62c141ef237afe3f2153115a49178fb43f5686a201ac1c8882e583f8d80186" :kind "nullish-text-diagnostic")
+    (js-object :suite "tests/compiler-js-array-text-call.test.mjs" :sha256 "3e6f6815f17df6931902882b64436b83d440d9405982097511fa63d4f5f44854" :kind "dispatch-import")
+    (js-object :suite "tests/wasm-managed-string-code-unit.test.mjs" :sha256 "2638e36ea7f8b17c057033274baa98b6693be7627fea9cb8e5065cc621b9f7fd" :kind "nullish-diagnostic")
+    (js-object :suite "tests/wasm-managed-strings.test.mjs" :sha256 "2b1becfabbbe4ec6b1f298ab41d4546cd275492d229dfe854f64526207d62f0a" :kind "string-properties")
+    (js-object :suite "tests/wasm-managed-regexp-unicode-sets.test.mjs" :sha256 "50bffc80dd6a86797c681b122bbd925d14c877fed75f0743cca75330aba6ef6c" :kind "manual-capacity")))
   (defconst initializerArrayMethods (js-array
     (js-array "push" 1) (js-array "pop" 0) (js-array "slice" 2) (js-array "map" 1)
     (js-array "filter" 1) (js-array "forEach" 1) (js-array "some" 1) (js-array "every" 1)
@@ -160,86 +161,86 @@
         (js-call assert :strictEqual (js-call a :keyEqual first second) t)
         (finally (js-call (js-array first second key) :forEach (lambda (token)
           (unless (undefined? token) (js-call a :release token))))))))
-  (defun projectCurrentSourceExpectations (root selected source)
+    (defun projectCurrentSourceExpectations (root selected source)
     (let ((plan (js-call currentExpectationPlans :find (lambda (entry) (= (get entry :suite) selected)))))
       (unless plan (throw (new globalThis.TypeError "unknown current-source expectation suite")))
       (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update source) :digest "hex") (get plan :sha256))
-      (let* ((kind (get plan :kind))
-             (definitions (cond
-               ((= kind "host-builtin-order")
-                 (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/testing/managed-function-properties-repairs.mjs")) :href)) " currentHostBuiltinShape)\n"
-                   "(defun reviewBuiltinShape (mode) (currentHostBuiltinShape mode))"))
-               ((= kind "nullish-text-diagnostic")
-                 "(defun reviewTextNullish (assert a value trace) (js-call assert :throws (lambda () (js-call a :invoke \"f\" (js-array value trace))) (lambda (error) (and (js-call globalThis.TypeError Symbol.hasInstance error) (= (get (get error :eliscriptDiagnostic) :code) \"ELI-RT0001\")))))")
-               ((= kind "dispatch-import")
-                 "(defun reviewImport (assert javascript) (progn (js-call assert :ok (js-call javascript :includes \"from \\\"eliscript/runtime/prelude.mjs\\\";\")) (js-call assert :ok (js-call javascript :includes \"__eliscript_at\"))))")
-               ((= kind "nullish-diagnostic")
-                 "(defun reviewNullish (assert a input trace value) (js-call assert :throws (lambda () (js-call a :invoke \"receiver-order\" (js-array input trace))) (lambda (error) (and (js-call globalThis.TypeError Symbol.hasInstance error) (= (get (get error :eliscriptDiagnostic) :code) (if (nullish? value) \"ELI-RT0001\" \"ELI-RT0003\"))))))")
-               ((= kind "string-properties")
-                 (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/testing/initializer-array-fixture.mjs")) :href)) " verifyTextPropertyReads)\n"
-                   "(defun reviewProperties (a s opaque fraction position js invoke) (verifyTextPropertyReads a s opaque fraction position js invoke))\n"
-                   "(defun reviewTextCleanup (a s opaque fraction position assert) (js-call (js-array s opaque fraction position) :forEach (lambda (x) (js-call a :release x))) (js-call a :closeModule) (js-call a :collect) (js-call assert :strictEqual (js-call a :live) 0) (js-call assert :throws (lambda () (js-call a :invoke \"trim\" (js-array s))) (lambda (error) (= (get (get error :eliscriptDiagnostic) :code) \"ELI-RT0001\"))))"))
-               (t "(defun reviewCapacity (call) (while (< (funcall call \"heap-live\") 256) (funcall call \"value-number\" 0 0)))")))
-             (compiled (repair-fragments definitions)) (fragments (get compiled :fragments)))
-        (cond
-          ((= kind "host-builtin-order")
-            (setq source (replace-boundary source "oracle.builtins[mode].shape" (get (get fragments :reviewBuiltinShape) :expression))))
-          ((= kind "nullish-text-diagnostic")
-            (setq source (replace-boundary source
-              "assert.throws(() => a.invoke('f', [value, trace]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');"
-              (str (get (get fragments :reviewTextNullish) :expression) ";"))))
-          ((= kind "dispatch-import")
-            (setq source (replace-boundary source
-              " assert(javascript.includes('c as __eliscript_at'),'qualified calls alone require the shared dispatch import');"
-              (str (get (get fragments :reviewImport) :expression) ";"))))
-          ((= kind "nullish-diagnostic")
-            (setq source (replace-boundary source
-              "assert.throws(()=>a.invoke('receiver-order',[input,trace]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');"
-              (str (get (get fragments :reviewNullish) :expression) ";"))))
-          ((= kind "string-properties")
-            (let* ((start (boundary source "for(const [name,args]of[['char-at',[s,opaque]]" 0))
-                   (end (boundary source "\n for(const x of[s,opaque,fraction,position])" start)))
-              (setq source (str (js-call source :slice 0 start)
-                (get (get fragments :reviewProperties) :expression) ";" (js-call source :slice end))))
-            (let* ((start (boundary source " for(const x of[s,opaque,fraction,position])" 0))
-                   (end (boundary source "\n});\ntest('native initialization root-range" start)))
-              (setq source (str (js-call source :slice 0 start)
-                (get (get fragments :reviewTextCleanup) :body) (js-call source :slice end)))))
-          (t
-            (let ((start (boundary source "  // The raw API starts in manual-GC mode." 0))
-                  (run (boundary source "  e['value-regexp-run'](heap, regex, input, 0);" 0)))
-              (setq source (str (js-call source :slice 0 start)
-                ;; Deliberately fill the same 256-slot manual heap with real
-                ;; collectible values; algorithmic improvements must not turn
-                ;; an allocation-count guess into a false refusal assertion.
-                (get (get fragments :reviewCapacity) :expression) ";\n" (js-call source :slice run))))))
-        (str (get compiled :prefix) source))))
-  (defun projectInitializerArraySuite (root source)
+      (let* ((kind (get plan :kind)) (maintained (maintainedSuiteSource root selected source)) (count 0))
+        (if (or (= kind "host-builtin-order") (= kind "string-properties"))
+          (progn
+            ;; These two repairs are already explicit maintained Eli calls.
+            ;; Preserve the authenticated artifact instead of applying them twice.
+            (js-call assert :ok (js-call maintained :includes
+              (if (= kind "host-builtin-order") "(currentHostBuiltinShape mode)" "(verifyTextPropertyReads a s opaque fraction position js invoke-val)")))
+            source)
+          (let ((projected (rewriteSourceForms maintained
+            (lambda (node node-text)
+              (let ((text (funcall node-text node)) (replacement undefined))
+                (cond
+                  ((and (= kind "nullish-text-diagnostic") (sourceCall node "js-call")
+                        (js-call text :startsWith "(js-call assert :throws")
+                        (js-call text :includes "(js-call a :invoke \"f\" (js-array value trace))"))
+                    (setq replacement "(js-call assert :throws (lambda () (js-call a :invoke \"f\" (js-array value trace))) (lambda (error) (and (js-call globalThis.TypeError Symbol.hasInstance error) (= (get (get error :eliscriptDiagnostic) :code) \"ELI-RT0001\"))))"))
+                  ((and (= kind "dispatch-import") (sourceCall node "contains")
+                        (js-call text :includes "\"c as __eliscript_at\""))
+                    (setq replacement "(progn (js-call assert :ok (js-call javascript :includes (str \"from \" (JSON/stringify \"eliscript/runtime/prelude.mjs\") \";\"))) (js-call assert :ok (js-call javascript :includes \"__eliscript_at\")))"))
+                  ((and (= kind "nullish-diagnostic") (sourceCall node "js-call")
+                        (js-call text :startsWith "(js-call assert :throws")
+                        (js-call text :includes "(js-call a :invoke \"receiver-order\" (js-array input trace))"))
+                    (setq replacement "(js-call assert :throws (lambda () (js-call a :invoke \"receiver-order\" (js-array input trace))) (lambda (error) (and (js-call globalThis.TypeError Symbol.hasInstance error) (= (get (get error :eliscriptDiagnostic) :code) (if (nullish? value) \"ELI-RT0001\" \"ELI-RT0003\")))))"))
+                  ((and (= kind "manual-capacity") (sourceCall node "funcall")
+                        (= text "(funcall (get e \"value-regexp-run\") heap regex input 0)"))
+                    (setq replacement (str "(progn (while (< (funcall call-raw \"heap-live\") 256) (funcall call-raw \"value-number\" 0 0)) " text ")"))))
+                (unless (undefined? replacement) (setq count (1+ count)))
+                replacement)))))
+            (js-call assert :strictEqual count 1 "current expectation owns exactly one complete source expression")
+            (compileMaintainedSuite (get projected :source) selected ""))))))
+
+    (defun projectInitializerArraySource (root source)
     (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex") source-sha)
       (throw (new globalThis.TypeError "complete original initializer suite source changed")))
-    (let* ((begin (boundary source "function assertArrayRegistrationAdvances(){" 0))
-           (end (boundary source "\ntest('the actual runtime IR" begin))
-           (table (boundary source " const methods=[[" end))
-           (finish (+ (js-call source :indexOf "];" table) 2))
-           (compiled (repair-fragments (str "(import "
-             (JSON/stringify (get (pathToFileURL (resolve root "tools/testing/initializer-array-fixture.mjs")) :href))
-             " assertInitializerArrayRegistration verifyInitializerShape sourceInitializerPart)\n"
-             "(defun assertArrayRegistrationAdvances () (assertInitializerArrayRegistration (js* \"runtime\")))\n"
-             "(defun reviewInitializerShape (lowered count width) (verifyInitializerShape lowered count width))\n"
-             "(defun reviewLaterInitializer (lowered) (sourceInitializerPart lowered 2))")))
-           (fragments (get compiled :fragments)))
-      (unless (> finish table) (throw (new globalThis.TypeError "original initializer method table is incomplete")))
-      (setq source (str (js-call source :slice 0 begin)
-        (js-call source :slice end table)
-        (js-call source :slice table (+ table (js-length " const methods=")))
-        (JSON/stringify initializerArrayMethods) ";" (js-call source :slice finish)))
-      (let* ((start (boundary source "  const parts=functions.filter(fn=>fn.name.startsWith(partPrefix)),coordinator=functions.find(fn=>fn.name==='__eliscript_module_body');" 0))
-             (end (boundary source "\n }\n const scalar=" start)))
-        (setq source (str (js-call source :slice 0 start)
-          (get (get fragments :reviewInitializerShape) :body) (js-call source :slice end))))
-      (setq source (replace-boundary source "lowered.typed.functions.find(fn=>fn.name===partPrefix+'2')"
-        (get (get fragments :reviewLaterInitializer) :expression)))
-      (str (get compiled :prefix) source)))
+    (let* ((maintained (maintainedSuiteSource root suite source))
+           (seen (new globalThis.Set))
+           (projected (rewriteSourceForms maintained
+             (lambda (node node-text)
+               (let ((items (get node :items)) (kind undefined) (replacement undefined))
+                 (cond
+                   ((and (sourceCall node "defun") (= (get (aref items 1) :name) "assert-array-registration-advances"))
+                    (setq kind "registration" replacement "(defun assert-array-registration-advances () (assertInitializerArrayRegistration runtime))"))
+                   ((and (sourceCall node "lambda")
+                         (= (funcall node-text (aref items 1)) "(count width)"))
+                    (let* ((body (aref items 2)) (parts (get body :items))
+                           (bindings (get (aref parts 1) :items)))
+                      (unless (and (= (js-length items) 3) (sourceCall body "let*")
+                                   (= (js-length bindings) 6)
+                                   (= (get (aref (get (aref bindings 2) :items) 0) :name) "lowered"))
+                        (throw (new globalThis.TypeError "initializer shape source bindings changed")))
+                      (setq kind "shape" replacement
+                        (str "(lambda (count width) (let* ("
+                          (js-call (js-call (js-call bindings :slice 0 3) :map (lambda (binding) (funcall node-text binding))) :join "\n")
+                          ") (verifyInitializerShape lowered count width)))"))))
+                   ((and (sourceCall node "js-array") (= (js-length items) 28)
+                         (sourceCall (aref items 1) "js-array")
+                         (= (get (aref (get (aref items 1) :items) 1) :value) "push")
+                         (= (get (aref (get (aref items 27) :items) 1) :value) "at"))
+                    (setq kind "methods" replacement
+                      (str "(js-array " (js-call (js-call initializerArrayMethods :map (lambda (entry)
+                        (str "(js-array " (JSON/stringify (aref entry 0)) " " (aref entry 1) ")"))) :join " ") ")")))
+                   ((and (Array/isArray items) (= (js-length items) 2)
+                         (= (get (aref items 0) :name) "later")
+                         (js-call (funcall node-text (aref items 1)) :includes "part-prefix"))
+                    (setq kind "later" replacement "(later (sourceInitializerPart lowered 2))")))
+                 (unless (undefined? kind)
+                   (when (js-call seen :has kind) (throw (new globalThis.TypeError "initializer projection source is ambiguous")))
+                   (js-call seen :add kind))
+                 replacement)))))
+      (unless (= (get seen :size) 4) (throw (new globalThis.TypeError "original initializer source boundary changed")))
+      (put projected :original maintained) projected))
+  (defun projectInitializerArraySuite (root source)
+    (compileMaintainedSuite (get (projectInitializerArraySource root source) :source) suite
+      (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/testing/initializer-array-fixture.mjs")) :href))
+        " assertInitializerArrayRegistration verifyInitializerShape sourceInitializerPart)")))
+
   (defun prepareInitializerFixtureArguments (arguments root environment)
     (let ((selected (js-call (js-call (js-array suite "tests/wasm-managed-primitive-own-runtime.test.mjs"
                      "tests/wasm-managed-operand-conversion.test.mjs" "tests/wasm-managed-persistent-literals.test.mjs"
@@ -286,5 +287,5 @@
               (projectCurrentSourceExpectations root selected source)
               (transformOriginalPrimitiveRuntimeSuite source selected))))))))
           (js-call arguments :map (lambda (argument) (if (= (resolve root argument) (resolve root selected)) target argument))))))))
-  (export initializerArrayMethods assertInitializerArrayRegistration projectInitializerArraySuite prepareInitializerFixtureArguments
+  (export projectInitializerArraySource initializerArrayMethods assertInitializerArrayRegistration projectInitializerArraySuite prepareInitializerFixtureArguments
     currentExpectationPlans projectCurrentSourceExpectations verifyInitializerShape sourceInitializerPart verifyTextPropertyReads))

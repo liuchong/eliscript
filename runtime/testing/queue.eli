@@ -1,2 +1,48 @@
-(module capsules.runtime.testing.queue
-  (js* "import {\n  QUEUE_STATE,\n  readQueueMetrics,\n  resetQueueMetrics,\n} from \"../core/queue-internals.mjs\";\nimport { sharedPersistentVectorNodes } from \"./vector.mjs\";\n\nfunction stateOf(queue) {\n  const state = queue?.[QUEUE_STATE];\n  if (state === undefined) {\n    throw new TypeError(\"expected an Eliscript persistent queue\");\n  }\n  return state;\n}\n\nexport function resetPersistentQueueMetrics() {\n  resetQueueMetrics();\n}\n\nexport function persistentQueueMetrics() {\n  return readQueueMetrics();\n}\n\nexport function inspectPersistentQueue(queue) {\n  const state = stateOf(queue);\n  return Object.freeze({\n    count: state.count,\n    frontCount: state.front.count,\n    rearCount: state.rear.count,\n  });\n}\n\nexport function sharedPersistentQueueParts(left, right) {\n  const leftState = stateOf(left);\n  const rightState = stateOf(right);\n  return Object.freeze({\n    frontIdentity: leftState.front === rightState.front,\n    rearIdentity: leftState.rear === rightState.rear,\n    rearPromotedToFront: leftState.rear === rightState.front,\n    sharedFrontNodes: sharedPersistentVectorNodes(\n      leftState.front,\n      rightState.front,\n    ),\n    sharedRearNodes: sharedPersistentVectorNodes(\n      leftState.rear,\n      rightState.rear,\n    ),\n  });\n}\n"))
+(module eliscript.runtime.testing.queue
+  (import "../core/queue-internals.mjs"
+    QUEUE_STATE
+    readQueueMetrics
+    resetQueueMetrics)
+  (import "./vector.mjs"
+    sharedPersistentVectorNodes)
+
+  (defun state-of (queue)
+    (let ((state (if (nil? queue) undefined (aref queue QUEUE_STATE))))
+      (when (undefined? state)
+        (throw (new globalThis/TypeError "expected an Eliscript persistent queue")))
+      state))
+
+  (defun resetPersistentQueueMetrics ()
+    (resetQueueMetrics))
+
+  (defun persistentQueueMetrics ()
+    (readQueueMetrics))
+
+  (defun inspectPersistentQueue (queue)
+    (let ((state (state-of queue)))
+      (Object/freeze
+        (js-object
+          :count (get state :count)
+          :frontCount (get (get state :front) :count)
+          :rearCount (get (get state :rear) :count)))))
+
+  (defun sharedPersistentQueueParts (left right)
+    (let ((left-state (state-of left))
+          (right-state (state-of right)))
+      (Object/freeze
+        (js-object
+          :frontIdentity (eq (get left-state :front) (get right-state :front))
+          :rearIdentity (eq (get left-state :rear) (get right-state :rear))
+          :rearPromotedToFront (eq (get left-state :rear) (get right-state :front))
+          :sharedFrontNodes (sharedPersistentVectorNodes
+                              (get left-state :front)
+                              (get right-state :front))
+          :sharedRearNodes (sharedPersistentVectorNodes
+                             (get left-state :rear)
+                             (get right-state :rear))))))
+
+  (export
+    resetPersistentQueueMetrics
+    persistentQueueMetrics
+    inspectPersistentQueue
+    sharedPersistentQueueParts))

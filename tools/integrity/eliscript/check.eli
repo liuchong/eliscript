@@ -22,6 +22,44 @@
   ;; These are the existing deterministic source-output inventories. The
   ;; bootstrap tool outputs live outside this registry and remain generated.
   (defconst generated-directories (js-array "runtime/core" "tests/snapshots"))
+  (defconst bootstrap-runtime-core-outputs
+    (new globalThis.Set
+      (js-array
+        "runtime/core/collection-internals.mjs"
+        "runtime/core/data-text.mjs"
+        "runtime/core/data.mjs"
+        "runtime/core/identifier.mjs"
+        "runtime/core/lazy-sequence.mjs"
+        "runtime/core/list-internals.mjs"
+        "runtime/core/list.mjs"
+        "runtime/core/map-internals.mjs"
+        "runtime/core/map.mjs"
+        "runtime/core/metadata-internals.mjs"
+        "runtime/core/metadata.mjs"
+        "runtime/core/object.mjs"
+        "runtime/core/order.mjs"
+        "runtime/core/persistent-kind.mjs"
+        "runtime/core/protocol-error.mjs"
+        "runtime/core/queue-internals.mjs"
+        "runtime/core/queue.mjs"
+        "runtime/core/record.mjs"
+        "runtime/core/regex.mjs"
+        "runtime/core/sequence.mjs"
+        "runtime/core/set-algebra.mjs"
+        "runtime/core/set-internals.mjs"
+        "runtime/core/set.mjs"
+        "runtime/core/sorted-internals.mjs"
+        "runtime/core/sorted.mjs"
+        "runtime/core/text.mjs"
+        "runtime/core/transducer.mjs"
+        "runtime/core/transient-internals.mjs"
+        "runtime/core/transient.mjs"
+        "runtime/core/truth.mjs"
+        "runtime/core/type.mjs"
+        "runtime/core/value-internals.mjs"
+        "runtime/core/value.mjs"
+        "runtime/core/vector-internals.mjs"
+        "runtime/core/vector.mjs")))
 
   (defun call-options (arguments)
     (if (or (= (js-length arguments) 0) (eq (aref arguments 0) undefined))
@@ -105,7 +143,10 @@
           (try
             (let ((files (await (readdir (js-call path :join directory prefix)))))
               (js-call files :forEach (lambda (file)
-                (when (js-call file :endsWith ".mjs") (js-call candidates :add (+ prefix "/" file))))))
+                (when (js-call file :endsWith ".mjs")
+                  (let ((candidate (+ prefix "/" file)))
+                    (unless (js-call bootstrap-runtime-core-outputs :has candidate)
+                      (js-call candidates :add candidate)))))))
             (catch error (unless (= (get error :code) "ENOENT") (throw error)))))
         (setq index (1+ index)))
       (let ((files (js-call (Array/from candidates) :sort)) (position 0))
@@ -193,36 +234,23 @@
     (let ((value (get options :compiler)))
       (if (or (eq value undefined) (eq value nil)) (await (load-compiler directory)) value)))
 
-  (defasync augment-capsule-tracked-files (directory tracked-files)
-    (if (not (Array/isArray tracked-files))
-      tracked-files
-      (let ((expanded (new globalThis.Set)) (index 0))
-        (while (< index (js-length tracked-files))
-          (let ((file (aref tracked-files index)))
-            (if (and (= (value-type file) "string") (js-call file :endsWith ".eli"))
-              (let ((is-capsule false))
-                (try
-                  (let ((text (await (readFile (js-call path :join directory file) "utf8"))))
-                    (setq is-capsule (js-call text :startsWith "(module capsules.")))
-                  (catch error (setq is-capsule false)))
-                (if is-capsule
-                  (js-call expanded :add (+ (js-call file :slice 0 -4) ".mjs"))
-                  (js-call expanded :add file)))
-              (js-call expanded :add file)))
-          (setq index (1+ index)))
-        (js-call (Array/from expanded) :sort))))
-
   (defasync checkDependencyBoundaries (&rest arguments)
     (let* ((options (call-options arguments))
            (directory (js-call path :resolve (nullish (get options :root) DEFAULT_ROOT)))
-           (tracked (await (augment-capsule-tracked-files directory (await (read-tracked options directory))))))
+           (tracked (await (read-tracked options directory))))
       (await (groundCheckDependencyBoundaries
         (Object/assign (js-object) options (js-object :root directory :trackedFiles tracked))))))
 
   (defasync validateBenchmarkSource (directory tracked-files filename report)
-    (let ((augmented (await (augment-capsule-tracked-files directory tracked-files))))
+    (let ((augmented tracked-files))
       (when (Array/isArray augmented)
-        (let ((known (new globalThis.Set augmented)))
+        (let ((known (new globalThis.Set augmented))
+              (index 0))
+          (while (< index (js-length tracked-files))
+            (let ((file (aref tracked-files index)))
+              (when (and (= (value-type file) "string") (js-call file :endsWith ".eli"))
+                (js-call known :add (+ (js-call file :slice 0 -4) ".mjs"))))
+            (setq index (1+ index)))
           (js-call (js-array
             (js-array "tools/project/project.eli" "bootstrap/host/project.mjs")
             (js-array "stdlib/core/object.eli" "runtime/core/object-impl.mjs")

@@ -1,2 +1,356 @@
-(module capsules.tools.backends.compiler-corpus-source-archive
-  (js* "import {createHash} from 'node:crypto';\nimport {mkdir,lstat,open} from 'node:fs/promises';\nimport {writeSync} from 'node:fs';\nimport {resolve,dirname} from 'node:path';\nimport {encodeCompilerIR,forEachCompilerIRChunk,compilerSourceAssetEncoding} from './compiler-session.mjs';\nimport {createCompilerMetadataDecoder} from './compiler-metadata.mjs';\nimport {cloneCompilerCorpusData} from './compiler-corpus.mjs';\n\nfunction utf16Identity(source) {\n  const hash=createHash('sha256');\n  // UTF16 hashes code units, so splitting a surrogate pair is lossless here.\n  for(let at=0;at<source.length;at+=32768)hash.update(source.slice(at,at+32768),'utf16le');\n  return {encoding:'utf16le',bytes:source.length*2,sha256:hash.digest('hex')};\n}\n\nfunction jsonChunks(value,consume) {forEachCompilerIRChunk(value,consume);consume('\\n');}\nfunction sourceChunks(source,encoding,consume) {\n  if(encoding==='json-utf16'){forEachCompilerIRChunk(source,consume);return;}\n  for(let start=0;start<source.length;) {\n    let end=Math.min(start+32768,source.length);\n    if(end<source.length&&source.charCodeAt(end-1)>=0xd800&&source.charCodeAt(end-1)<=0xdbff&&\n      source.charCodeAt(end)>=0xdc00&&source.charCodeAt(end)<=0xdfff)end--;\n    consume(source.slice(start,end));start=end;\n  }\n}\nfunction chunkIdentity(visit) {\n  const hash=createHash('sha256');let bytes=0;\n  visit(chunk=>{bytes+=Buffer.byteLength(chunk,'utf8');hash.update(chunk,'utf8');});\n  return {bytes,sha256:hash.digest('hex')};\n}\nfunction normalizeIR(value) {\n  const decoder=createCompilerMetadataDecoder();\n  forEachCompilerIRChunk(value,chunk=>decoder.write(chunk));return decoder.finish();\n}\nasync function writeOwnedChunks(path,visit) {\n  // The caller already owns a complete snapshot and checked it before I/O.\n  // Never retain its full escaped text or buffers for other pending assets.\n  const file=await open(path,'wx');let failed=false;\n  try {\n    visit(chunk=>{\n      const bytes=Buffer.from(chunk,'utf8');let offset=0;\n      while(offset<bytes.length) {\n        const count=writeSync(file.fd,bytes,offset,bytes.length-offset);\n        if(!Number.isInteger(count)||count<1||count>bytes.length-offset)\n          throw new Error('original source archive write did not advance');\n        offset+=count;\n      }\n    });\n  } catch(error){failed=true;throw error;}\n  finally{try{await file.close();}catch(error){if(!failed)throw error;}}\n}\n\nfunction localFile(directory,path) {\n  if(typeof path!=='string'||!path||/[\\\\:\\u0000]/.test(path)||\n      path.split('/').some(part=>!part||part==='.'||part==='..')) {\n    throw new TypeError('original source archive requires a relative asset path');\n  }\n  return resolve(directory,...path.split('/'));\n}\n\nasync function readAsset(directory,path,encoding='json',identity,mismatch) {\n  const file=localFile(directory,path);\n  let parent=resolve(directory);\n  const root=await lstat(parent);\n  if(root.isSymbolicLink()||!root.isDirectory())throw new TypeError('original source archive directory must be a real directory');\n  for(const part of path.split('/')) {\n    parent=resolve(parent,part);\n    const info=await lstat(parent);\n    if(info.isSymbolicLink())throw new TypeError('original source archive traverses a filesystem alias');\n    if(parent===file ? !info.isFile() : !info.isDirectory())throw new TypeError('original source archive asset has the wrong file type');\n  }\n  const input=await open(file,'r'),buffer=new Uint8Array(65536),hash=createHash('sha256');\n  const decoder=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true});\n  let parser=encoding==='json'||encoding==='json-utf16'?createCompilerMetadataDecoder():undefined;\n  let parts=encoding==='utf8'?[]:undefined,bytes=0,decodeError,decodeFailed=false,result,failed=false;\n  if(!['json','json-utf16','utf8'].includes(encoding)) {\n    decodeError=new TypeError('unsupported compiler source asset encoding');decodeFailed=true;\n  }\n  const accept=text=>{if(parser)parser.write(text);else parts.push(text);};\n  try {\n    for(;;) {\n      const {bytesRead}=await input.read(buffer,0,buffer.length,null);\n      if(!Number.isInteger(bytesRead)||bytesRead<0||bytesRead>buffer.length)\n        throw new Error('original source archive read returned an invalid byte count');\n      if(bytesRead===0)break;\n      const chunk=buffer.subarray(0,bytesRead);bytes+=bytesRead;hash.update(chunk);\n      if(!decodeFailed) {\n        try{accept(decoder.decode(chunk,{stream:true}));}\n        catch(error){decodeError=error;decodeFailed=true;parser=undefined;parts=undefined;}\n      }\n    }\n    if(!decodeFailed) {\n      try {\n        accept(decoder.decode());result=parser?parser.finish():parts.join('');\n        if(encoding==='json-utf16'&&typeof result!=='string')\n          throw new TypeError('encoded compiler source asset must contain a JSON string');\n      }catch(error){decodeError=error;decodeFailed=true;}\n    }\n    const sha256=hash.digest('hex');\n    // The original boundary checks complete file identity BEFORE decoding.\n    // Defer any streaming parse/UTF8 failure until that same check succeeds.\n    if(identity&&(bytes!==identity.bytes||sha256!==identity.sha256))throw new Error(mismatch);\n    if(decodeFailed)throw decodeError;\n    return result;\n  }catch(error){failed=true;throw error;}\n  finally{try{await input.close();}catch(error){if(!failed)throw error;}}\n}\n\nfunction sourceRecord(value,label) {\n  if(value===null||typeof value!=='object'||typeof value.source!=='string'||\n      typeof value.filename!=='string')throw new TypeError(label+' requires its exact source and filename');\n  return value;\n}\n\n// A case archive is replay input, not only a display copy. Keep the entire\n// request/expected/execution recipe and its IEEE values, and store source text\n// without UTF-8 replacement of lone UTF-16 surrogates. Ordinal disk paths avoid\n// making virtual module identities depend on the host filesystem's encoding.\nexport async function archiveCompilerCorpusSources(record,directory) {\n  const snapshot=cloneCompilerCorpusData(record);\n  if(snapshot===null||typeof snapshot!=='object'||Array.isArray(snapshot)||typeof snapshot.id!=='string') {\n    throw new TypeError('original source archive requires a corpus case');\n  }\n  if(snapshot.modules!==undefined&&!Array.isArray(snapshot.modules))throw new TypeError('original source modules must be an array');\n  const modules=snapshot.modules??[],ids=new Set();\n  for(const module of modules) {\n    sourceRecord(module,'original source module');\n    if(typeof module.id!=='string'||ids.has(module.id))throw new TypeError('original source module identities must be unique strings');\n    ids.add(module.id);\n  }\n  if(snapshot.kind==='stage')sourceRecord(snapshot.request,'original stage request');\n  // Finish the immutable in-memory snapshot before the first asynchronous I/O.\n  const recordIdentity=chunkIdentity(consume=>jsonChunks(snapshot,consume)),assets=[];\n  function prepare(source,name) {\n    const encoding=compilerSourceAssetEncoding(source),path=name+(encoding==='utf8'?'.eli':'.eli.json');\n    const asset={path,encoding,...chunkIdentity(consume=>sourceChunks(source,encoding,consume))};\n    assets.push({asset,source});\n    return {...utf16Identity(source),asset};\n  }\n  const archivedModules=modules.map((module,index)=>({id:module.id,filename:module.filename,\n    ...prepare(module.source,'modules/'+String(index).padStart(6,'0'))}));\n  const stage=snapshot.kind==='stage'?{filename:snapshot.request.filename,\n    ...prepare(snapshot.request.source,'stage-input'),macroContext:snapshot.request.macroContext}:undefined;\n  const identity={format:'eliscript-original-case-sources',version:1,id:snapshot.id,\n    kind:snapshot.kind,entry:snapshot.entry,modules:archivedModules,stage,\n    coverage:snapshot.coverage,original:snapshot.original,suite:snapshot.suite,steps:snapshot.steps,\n    record:{path:'record.json',encoding:'json',...recordIdentity}};\n  // Normalize optional fields exactly as they appear in the retained JSON.\n  const body=normalizeIR(identity);\n  const result={...body,sha256:chunkIdentity(consume=>jsonChunks(body,consume)).sha256};\n  await mkdir(directory,{recursive:true});\n  const root=await lstat(directory);\n  if(root.isSymbolicLink()||!root.isDirectory())throw new TypeError('original source archive directory must be a real directory');\n  for(const {asset,source} of assets) {\n    const path=localFile(directory,asset.path);await mkdir(dirname(path),{recursive:true});\n    const parent=await lstat(dirname(path));\n    if(parent.isSymbolicLink()||!parent.isDirectory())throw new TypeError('original source archive traverses a filesystem alias');\n    await writeOwnedChunks(path,consume=>sourceChunks(source,asset.encoding,consume));\n  }\n  await writeOwnedChunks(localFile(directory,'record.json'),consume=>jsonChunks(snapshot,consume));\n  await writeOwnedChunks(localFile(directory,'source-identity.json'),consume=>jsonChunks(result,consume));\n  return result;\n}\n\nexport async function readArchivedCompilerCorpusSources(directory,{expectedIdentity}={}) {\n  const identity=await readAsset(directory,'source-identity.json');\n  const {sha256,...body}=identity;\n  if(identity.format!=='eliscript-original-case-sources'||identity.version!==1||\n      sha256!==chunkIdentity(consume=>jsonChunks(body,consume)).sha256||expectedIdentity!==undefined&&sha256!==expectedIdentity) {\n    throw new Error('original source archive identity differs');\n  }\n  const recordAsset=identity.record;\n  if(recordAsset?.path!=='record.json'||recordAsset.encoding!=='json')throw new TypeError('original source archive has no complete case recipe');\n  const record=await readAsset(directory,recordAsset.path,'json',recordAsset,'original source case recipe bytes changed');\n  if(record.id!==identity.id||record.kind!==identity.kind||record.entry!==identity.entry||\n      !Array.isArray(identity.modules)||(record.modules??[]).length!==identity.modules.length) {\n    throw new Error('original source archive case inventory differs');\n  }\n  const paths=new Set(['record.json','source-identity.json']);\n  async function check(archived,source) {\n    if(archived?.encoding!=='utf16le'||archived.filename!==source.filename||\n        archived.bytes!==source.source.length*2||archived.sha256!==utf16Identity(source.source).sha256) {\n      throw new Error('original source archive does not bind the exact UTF16 source');\n    }\n    const asset=archived.asset;\n    if(!asset||paths.has(asset.path))throw new Error('original source archive repeats an asset');\n    paths.add(asset.path);\n    const text=await readAsset(directory,asset.path,asset.encoding===undefined?'utf8':asset.encoding,\n      asset,'original source archive asset bytes changed');\n    if(text!==source.source)throw new Error('original source archive text differs from its case recipe');\n  }\n  for(let index=0;index<identity.modules.length;index++) {\n    const archived=identity.modules[index],module=sourceRecord(record.modules[index],'archived source module');\n    if(archived.id!==module.id)throw new Error('original source module order or identity changed');\n    await check(archived,module);\n  }\n  if(record.kind==='stage') {\n    await check(identity.stage,sourceRecord(record.request,'archived stage request'));\n    if(encodeCompilerIR({value:identity.stage.macroContext})!==encodeCompilerIR({value:record.request.macroContext}))throw new Error('original stage archive changed its macro context');\n  }\n  else if(identity.stage!==undefined)throw new Error('original source archive added a stage request');\n  for(const field of ['coverage','original','suite','steps']) {\n    if(encodeCompilerIR({value:identity[field]})!==encodeCompilerIR({value:record[field]}))throw new Error('original source archive recipe metadata differs');\n  }\n  return record;\n}\n"))
+(module tools.backends.compiler-corpus-source-archive
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "node:fs/promises" mkdir lstat open)
+  (import "node:fs" writeSync)
+  (import "node:path" resolve dirname)
+  (import "./compiler-session.mjs" encodeCompilerIR forEachCompilerIRChunk compilerSourceAssetEncoding)
+  (import "./compiler-metadata.mjs" createCompilerMetadataDecoder)
+  (import "./compiler-corpus.mjs" cloneCompilerCorpusData)
+
+  (defun utf16-identity (source)
+    (let ((hash (createHash "sha256"))
+          (at 0)
+          (len (js-length source)))
+      ;; UTF16 hashes code units, so splitting a surrogate pair is lossless here.
+      (while (< at len)
+        (js-call hash :update (js-call source :slice at (+ at 32768)) "utf16le")
+        (setq at (+ at 32768)))
+      (js-object
+        :encoding "utf16le"
+        :bytes (* len 2)
+        :sha256 (js-call hash :digest "hex"))))
+
+  (defun json-chunks (value consume)
+    (forEachCompilerIRChunk value consume)
+    (funcall consume "\n"))
+
+  (defun source-chunks (source encoding consume)
+    (if (= encoding "json-utf16")
+      (forEachCompilerIRChunk source consume)
+      (let ((start 0)
+            (len (js-length source)))
+        (while (< start len)
+          (let ((end (Math/min (+ start 32768) len)))
+            (when (and (< end len)
+                       (>= (js-call source :charCodeAt (1- end)) 55296)
+                       (<= (js-call source :charCodeAt (1- end)) 56319)
+                       (>= (js-call source :charCodeAt end) 56320)
+                       (<= (js-call source :charCodeAt end) 57343))
+              (setq end (1- end)))
+            (funcall consume (js-call source :slice start end))
+            (setq start end))))))
+
+  (defun chunk-identity (visit)
+    (let ((hash (createHash "sha256"))
+          (bytes 0))
+      (funcall visit
+        (lambda (chunk)
+          (setq bytes (+ bytes (js-call Buffer :byteLength chunk "utf8")))
+          (js-call hash :update chunk "utf8")))
+      (js-object :bytes bytes :sha256 (js-call hash :digest "hex"))))
+
+  (defun normalize-ir (value)
+    (let ((decoder (createCompilerMetadataDecoder)))
+      (forEachCompilerIRChunk value (lambda (chunk) (js-call decoder :write chunk)))
+      (js-call decoder :finish)))
+
+  (defasync write-owned-chunks (path visit)
+    ;; The caller already owns a complete snapshot and checked it before I/O.
+    ;; Never retain its full escaped text or buffers for other pending assets.
+    (let ((file (await (open path "wx")))
+          (failed false))
+      (try
+        (funcall visit
+          (lambda (chunk)
+            (let ((bytes (js-call Buffer :from chunk "utf8"))
+                  (offset 0))
+              (while (< offset (js-length bytes))
+                (let ((count (writeSync (get file :fd) bytes offset (- (js-length bytes) offset))))
+                  (when (or (not (Number/isInteger count))
+                            (< count 1)
+                            (> count (- (js-length bytes) offset)))
+                    (throw (new globalThis.Error "original source archive write did not advance")))
+                  (setq offset (+ offset count)))))))
+        (catch error
+          (setq failed t)
+          (throw error))
+        (finally
+          (try
+            (await (js-call file :close))
+            (catch error
+              (unless failed
+                (throw error))))))))
+
+  (defun local-file (directory path)
+    (when (or (/= (value-type path) "string")
+              (= path "")
+              (js-call (new globalThis.RegExp "[\\\\:\\u0000]") :test path)
+              (js-call (js-call path :split "/") :some
+                (lambda (part) (or (= part "") (= part ".") (= part "..")))))
+      (throw (new globalThis.TypeError "original source archive requires a relative asset path")))
+    (Reflect/apply resolve nil (js-call (js-array directory) :concat (js-call path :split "/"))))
+
+  (defasync read-asset (directory path &rest __opt)
+    (let* ((encoding (aref __opt 0))
+           (identity (aref __opt 1))
+           (mismatch (aref __opt 2))
+           (enc (if (undefined? encoding) "json" encoding))
+           (file (local-file directory path))
+           (parent (resolve directory))
+           (root (await (lstat parent))))
+      (when (or (js-call root :isSymbolicLink) (not (js-call root :isDirectory)))
+        (throw (new globalThis.TypeError "original source archive directory must be a real directory")))
+      (let ((parts (js-call path :split "/"))
+            (p-idx 0))
+        (while (< p-idx (js-length parts))
+          (setq parent (resolve parent (aref parts p-idx)))
+          (let ((info (await (lstat parent))))
+            (when (js-call info :isSymbolicLink)
+              (throw (new globalThis.TypeError "original source archive traverses a filesystem alias")))
+            (when (if (= parent file) (not (js-call info :isFile)) (not (js-call info :isDirectory)))
+              (throw (new globalThis.TypeError "original source archive asset has the wrong file type"))))
+          (setq p-idx (1+ p-idx))))
+      (let ((input (await (open file "r")))
+            (buffer (new globalThis.Uint8Array 65536))
+            (hash (createHash "sha256"))
+            (decoder (new globalThis.TextDecoder "utf-8" (js-object :fatal t :ignoreBOM t)))
+            (parser (if (or (= enc "json") (= enc "json-utf16")) (createCompilerMetadataDecoder) undefined))
+            (parts (if (= enc "utf8") (js-array) undefined))
+            (bytes 0)
+            (decode-error undefined)
+            (decode-failed false)
+            (result undefined)
+            (failed false))
+        (unless (js-call (js-array "json" "json-utf16" "utf8") :includes enc)
+          (setq decode-error (new globalThis.TypeError "unsupported compiler source asset encoding"))
+          (setq decode-failed t))
+        (let ((accept
+                (lambda (text)
+                  (if parser
+                    (js-call parser :write text)
+                    (js-call parts :push text)))))
+          (try
+            (let ((reading t))
+              (while reading
+                (let* ((read-res (await (js-call input :read buffer 0 (js-length buffer) nil)))
+                       (bytes-read (get read-res :bytesRead)))
+                  (when (or (not (Number/isInteger bytes-read))
+                            (< bytes-read 0)
+                            (> bytes-read (js-length buffer)))
+                    (throw (new globalThis.Error "original source archive read returned an invalid byte count")))
+                  (if (= bytes-read 0)
+                    (setq reading false)
+                    (let ((chunk (js-call buffer :subarray 0 bytes-read)))
+                      (setq bytes (+ bytes bytes-read))
+                      (js-call hash :update chunk)
+                      (unless decode-failed
+                        (try
+                          (funcall accept (js-call decoder :decode chunk (js-object :stream t)))
+                          (catch error
+                            (setq decode-error error)
+                            (setq decode-failed t)
+                            (setq parser undefined)
+                            (setq parts undefined)))))))))
+            (unless decode-failed
+              (try
+                (funcall accept (js-call decoder :decode))
+                (setq result (if parser (js-call parser :finish) (js-call parts :join "")))
+                (when (and (= enc "json-utf16") (/= (value-type result) "string"))
+                  (throw (new globalThis.TypeError "encoded compiler source asset must contain a JSON string")))
+                (catch error
+                  (setq decode-error error)
+                  (setq decode-failed t))))
+            (let ((sha256 (js-call hash :digest "hex")))
+              ;; The original boundary checks complete file identity BEFORE decoding.
+              ;; Defer any streaming parse/UTF8 failure until that same check succeeds.
+              (when (and identity
+                         (or (/= bytes (get identity :bytes))
+                             (/= sha256 (get identity :sha256))))
+                (throw (new globalThis.Error mismatch)))
+              (when decode-failed
+                (throw decode-error))
+              result)
+            (catch error
+              (setq failed t)
+              (throw error))
+            (finally
+              (try
+                (await (js-call input :close))
+                (catch error
+                  (unless failed
+                    (throw error))))))))))
+
+  (defun source-record (value label)
+    (when (or (nil? value)
+              (/= (value-type value) "object")
+              (/= (value-type (get value :source)) "string")
+              (/= (value-type (get value :filename)) "string"))
+      (throw (new globalThis.TypeError (str label " requires its exact source and filename"))))
+    value)
+
+  ;; A case archive is replay input, not only a display copy. Keep the entire
+  ;; request/expected/execution recipe and its IEEE values, and store source text
+  ;; without UTF-8 replacement of lone UTF-16 surrogates. Ordinal disk paths avoid
+  ;; making virtual module identities depend on the host filesystem's encoding.
+  (defasync archiveCompilerCorpusSources (record directory)
+    (let ((snapshot (cloneCompilerCorpusData record)))
+      (when (or (nil? snapshot)
+                (/= (value-type snapshot) "object")
+                (Array/isArray snapshot)
+                (/= (value-type (get snapshot :id)) "string"))
+        (throw (new globalThis.TypeError "original source archive requires a corpus case")))
+      (when (and (not (undefined? (get snapshot :modules)))
+                 (not (Array/isArray (get snapshot :modules))))
+        (throw (new globalThis.TypeError "original source modules must be an array")))
+      (let ((modules (let ((m (get snapshot :modules))) (if (nullish? m) (js-array) m)))
+            (ids (new globalThis.Set))
+            (m-idx 0))
+        (while (< m-idx (js-length modules))
+          (let ((module (aref modules m-idx)))
+            (source-record module "original source module")
+            (when (or (/= (value-type (get module :id)) "string")
+                      (js-call ids :has (get module :id)))
+              (throw (new globalThis.TypeError "original source module identities must be unique strings")))
+            (js-call ids :add (get module :id)))
+          (setq m-idx (1+ m-idx)))
+        (when (= (get snapshot :kind) "stage")
+          (source-record (get snapshot :request) "original stage request"))
+        ;; Finish the immutable in-memory snapshot before the first asynchronous I/O.
+        (let* ((record-identity (chunk-identity (lambda (consume) (json-chunks snapshot consume))))
+               (assets (js-array))
+               (prepare
+                 (lambda (source name)
+                   (let* ((encoding (compilerSourceAssetEncoding source))
+                          (path (str name (if (= encoding "utf8") ".eli" ".eli.json")))
+                          (asset (Object/assign
+                                   (js-object :path path :encoding encoding)
+                                   (chunk-identity (lambda (consume) (source-chunks source encoding consume))))))
+                     (js-call assets :push (js-object :asset asset :source source))
+                     (Object/assign (utf16-identity source) (js-object :asset asset)))))
+               (archived-modules
+                 (js-call modules :map
+                   (lambda (module index)
+                     (Object/assign
+                       (js-object :id (get module :id) :filename (get module :filename))
+                       (funcall prepare (get module :source)
+                         (str "modules/" (js-call (globalThis.String index) :padStart 6 "0")))))))
+               (stage
+                 (if (= (get snapshot :kind) "stage")
+                   (Object/assign
+                     (js-object :filename (get (get snapshot :request) :filename))
+                     (funcall prepare (get (get snapshot :request) :source) "stage-input")
+                     (js-object :macroContext (get (get snapshot :request) :macroContext)))
+                   undefined))
+               (identity
+                 (js-object
+                   :format "eliscript-original-case-sources"
+                   :version 1
+                   :id (get snapshot :id)
+                   :kind (get snapshot :kind)
+                   :entry (get snapshot :entry)
+                   :modules archived-modules
+                   :stage stage
+                   :coverage (get snapshot :coverage)
+                   :original (get snapshot :original)
+                   :suite (get snapshot :suite)
+                   :steps (get snapshot :steps)
+                   :record (Object/assign (js-object :path "record.json" :encoding "json") record-identity)))
+               ;; Normalize optional fields exactly as they appear in the retained JSON.
+               (body (normalize-ir identity))
+               (result
+                 (Object/assign (js-object) body
+                   (js-object :sha256 (get (chunk-identity (lambda (consume) (json-chunks body consume))) :sha256)))))
+          (await (mkdir directory (js-object :recursive t)))
+          (let ((root (await (lstat directory))))
+            (when (or (js-call root :isSymbolicLink) (not (js-call root :isDirectory)))
+              (throw (new globalThis.TypeError "original source archive directory must be a real directory"))))
+          (let ((a-idx 0))
+            (while (< a-idx (js-length assets))
+              (let* ((item (aref assets a-idx))
+                     (asset (get item :asset))
+                     (source (get item :source))
+                     (path (local-file directory (get asset :path))))
+                (await (mkdir (dirname path) (js-object :recursive t)))
+                (let ((parent (await (lstat (dirname path)))))
+                  (when (or (js-call parent :isSymbolicLink) (not (js-call parent :isDirectory)))
+                    (throw (new globalThis.TypeError "original source archive traverses a filesystem alias"))))
+                (await (write-owned-chunks path
+                         (lambda (consume) (source-chunks source (get asset :encoding) consume)))))
+              (setq a-idx (1+ a-idx))))
+          (await (write-owned-chunks (local-file directory "record.json")
+                   (lambda (consume) (json-chunks snapshot consume))))
+          (await (write-owned-chunks (local-file directory "source-identity.json")
+                   (lambda (consume) (json-chunks result consume))))
+          result))))
+
+  (defasync readArchivedCompilerCorpusSources (directory &optional options)
+    (let* ((expected-identity (if (nullish? options) undefined (get options :expectedIdentity)))
+           (identity (await (read-asset directory "source-identity.json")))
+           (sha256 (get identity :sha256))
+           (body (Object/assign (js-object) identity)))
+      (Reflect/deleteProperty body "sha256")
+      (when (or (/= (get identity :format) "eliscript-original-case-sources")
+                (/= (get identity :version) 1)
+                (/= sha256 (get (chunk-identity (lambda (consume) (json-chunks body consume))) :sha256))
+                (and (not (undefined? expected-identity))
+                     (/= sha256 expected-identity)))
+        (throw (new globalThis.Error "original source archive identity differs")))
+      (let ((record-asset (get identity :record)))
+        (when (or (nullish? record-asset)
+                  (/= (get record-asset :path) "record.json")
+                  (/= (get record-asset :encoding) "json"))
+          (throw (new globalThis.TypeError "original source archive has no complete case recipe")))
+        (let* ((record (await (read-asset directory (get record-asset :path) "json" record-asset "original source case recipe bytes changed")))
+               (rec-mods (let ((m (get record :modules))) (if (nullish? m) (js-array) m))))
+          (when (or (/= (get record :id) (get identity :id))
+                    (/= (get record :kind) (get identity :kind))
+                    (/= (get record :entry) (get identity :entry))
+                    (not (Array/isArray (get identity :modules)))
+                    (/= (js-length rec-mods) (js-length (get identity :modules))))
+            (throw (new globalThis.Error "original source archive case inventory differs")))
+          (let* ((paths (new globalThis.Set (js-array "record.json" "source-identity.json")))
+                 (check
+                   (async (archived source)
+                     (when (or (nullish? archived)
+                               (/= (get archived :encoding) "utf16le")
+                               (/= (get archived :filename) (get source :filename))
+                               (/= (get archived :bytes) (* (js-length (get source :source)) 2))
+                               (/= (get archived :sha256) (get (utf16-identity (get source :source)) :sha256)))
+                       (throw (new globalThis.Error "original source archive does not bind the exact UTF16 source")))
+                     (let ((asset (get archived :asset)))
+                       (when (or (not asset) (js-call paths :has (get asset :path)))
+                         (throw (new globalThis.Error "original source archive repeats an asset")))
+                       (js-call paths :add (get asset :path))
+                       (let ((text (await (read-asset directory (get asset :path)
+                                            (if (undefined? (get asset :encoding)) "utf8" (get asset :encoding))
+                                            asset "original source archive asset bytes changed"))))
+                         (when (/= text (get source :source))
+                           (throw (new globalThis.Error "original source archive text differs from its case recipe")))))))
+                 (index 0))
+            (while (< index (js-length (get identity :modules)))
+              (let ((archived (aref (get identity :modules) index))
+                    (module (source-record (aref rec-mods index) "archived source module")))
+                (when (/= (get archived :id) (get module :id))
+                  (throw (new globalThis.Error "original source module order or identity changed")))
+                (await (funcall check archived module)))
+              (setq index (1+ index)))
+            (if (= (get record :kind) "stage")
+              (progn
+                (await (funcall check (get identity :stage) (source-record (get record :request) "archived stage request")))
+                (when (/= (encodeCompilerIR (js-object :value (get (get identity :stage) :macroContext)))
+                          (encodeCompilerIR (js-object :value (get (get record :request) :macroContext))))
+                  (throw (new globalThis.Error "original stage archive changed its macro context"))))
+              (unless (undefined? (get identity :stage))
+                (throw (new globalThis.Error "original source archive added a stage request"))))
+            (let ((fields (js-array "coverage" "original" "suite" "steps"))
+                  (f-idx 0))
+              (while (< f-idx (js-length fields))
+                (let ((field (aref fields f-idx)))
+                  (when (/= (encodeCompilerIR (js-object :value (get identity field)))
+                            (encodeCompilerIR (js-object :value (get record field))))
+                    (throw (new globalThis.Error "original source archive recipe metadata differs"))))
+                (setq f-idx (1+ f-idx))))
+            record)))))
+
+  (export archiveCompilerCorpusSources readArchivedCompilerCorpusSources))

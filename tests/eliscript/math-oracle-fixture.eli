@@ -40,15 +40,14 @@
             (finally
               (unless (undefined? value) (js-call runtime :release value))
               (js-call runtime :release argument)))))) result))
-  (test "authenticated Math fixture repair retains the complete original lambda program and changes only the intended ordinary conversion hook"
+  (test "authenticated Math fixture transport retains the complete maintained ordinary receiver program"
     (async ()
       (let* ((suite (await (readFile (resolve root "tests/wasm-managed-math.test.mjs") "utf8")))
              (original (readOriginalMathSqrtSource suite))
              (receiver-form (readOriginalMathThisForm suite))
              (projected (projectMathSqrtSource suite original "sqrt-math.eli")))
-        (js-call assert :ok (js-call original :includes
-          (str "(lambda (hint) (js-call trace :push hint (eq " receiver-form " input))")))
-        (js-call assert :ok (js-call projected :includes (str "(receiver " receiver-form ")")))
+        (js-call assert :ok (js-call original :includes (str "(receiver " receiver-form ")")))
+        (js-call assert :strictEqual projected original)
         (js-call assert :throws (lambda () (readOriginalMathThisForm (str suite "\n"))) globalThis.TypeError)
         (js-call assert :ok (js-call projected :includes "(defun original-sqrt-primitive-hook (hint)"))
         (js-call assert :ok (js-call projected :includes "(eq receiver (get state :input))"))
@@ -57,7 +56,7 @@
         (js-call assert :throws (lambda () (readOriginalMathSqrtSource (str suite "\n"))) globalThis.TypeError)
         (js-call assert :throws (lambda () (projectMathSqrtSource suite (str original "\n") "sqrt-math.eli")) globalThis.TypeError)
         (js-call assert :strictEqual (await (readFile (resolve root "tests/wasm-managed-math.test.mjs") "utf8")) suite))))
-  (test "the complete original sqrt lambda and maintained ordinary hook each match independent Emacs JavaScript on WASM and native without changing their receiver goldens"
+  (test "the complete maintained sqrt source and authenticated transport match independent Emacs JavaScript on WASM and native with identical receiver goldens"
     (js-object :timeout 120000)
     (async ()
       (let ((parent (resolve root "_worktree/evidence/math-oracle-source-contract")))
@@ -94,7 +93,7 @@
                       (js-call assert :strictEqual (get seed :status) 0 (get seed :stderr)))))
                   (let* ((node (spawnSync (or (get (get globalThis.process :env) :NODE) "node") (js-array driver-output)
                                 (js-object :cwd root :encoding "utf8")))
-                         (receiver (= index 1))
+                         (receiver t)
                          (expected (js-array (js-array 9 (js-array "primitive.get" "number" receiver))
                            (js-array "marker" (js-array "primitive.get" "number" receiver))
                            (js-array "TypeError" (js-array "primitive.get" "number" receiver))
@@ -134,9 +133,12 @@
           (try
             (await (mkdir (resolve directory "runtime")))
             (await (mkdir (resolve directory "tests")))
-            (await (writeFile (resolve directory "tests/wasm-managed-math.test.mjs")
-              (await (readFile (resolve root "tests/wasm-managed-math.test.mjs")))))
-            (let ((names (js-array "prelude" "unicode-case-data" "unicode-case" "math")) (index 0)
+            (let ((suffixes (js-array ".eli" ".mjs" ".mjs.map")) (position 0))
+              (while (< position (js-length suffixes))
+                (let ((file (str "tests/wasm-managed-math.test" (aref suffixes position))))
+                  (await (writeFile (resolve directory file) (await (readFile (resolve root file))))))
+                (setq position (1+ position))))
+            (let ((names (js-array "errors" "number-radix" "primitives" "array-text" "prelude" "unicode-case-data" "unicode-case" "math" "binding")) (index 0)
                   ;; Isolate provenance here; the complete static capsule
                   ;; transport is retained below and in the original suite.
                   (scan (lambda (source) (js-array))))

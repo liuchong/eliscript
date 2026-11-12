@@ -11,34 +11,29 @@
   ;; original host gate, never evidence of selected-compiler execution.
   (defconst host-plans (new globalThis.Map (js-array
     (js-array "tests/collection-layout-benchmark.test.mjs"
-      (plan (js-array "./helpers/performance-acceptance.mjs" "bun:test" "node:fs/promises" "node:url"
-              "../tools/collections/layout-benchmark.mjs" "../tools/collections/benchmark.mjs")
-        (js-array "tools/collections/layout-host.mjs" "benchmarks/hamt-layout-macos-arm64.json")
+      (plan (js-array "eliscript/runtime/unicode-case.mjs" "eliscript/runtime/prelude.mjs" "node:process" "./helpers/performance-acceptance.mjs" "bun:test" "node:fs/promises" "node:url" "../tools/collections/layout-benchmark.mjs" "../tools/collections/benchmark.mjs")
+        (js-array "tools/collections/layout-host.mjs" "tools/collections/benchmark.eli"
+          "benchmarks/hamt-layout-macos-arm64.json" "runtime/unicode-case.mjs" "runtime/prelude.mjs")
         (js-array
           (js-array "HAMT layout core validates equivalent real node operations" "original-host-runtime-case")
           (js-array "HAMT layout host adapters agree under Bun and Node" "original-host-runtime-case")
           (js-array "HAMT browser benchmark uses copied native ESM without a bundler" "original-source-inventory-case")
           (js-array "committed HAMT layout baseline proves the 32/24 threshold decision" "original-retained-report-case"))))
     (js-array "tests/transient-builder-benchmark.test.mjs"
-      (plan (js-array "./helpers/performance-acceptance.mjs" "bun:test" "node:fs/promises" "node:path"
-              "../tools/collections/transient-builder-benchmark.mjs")
-        (js-array "benchmarks/transient-builder-macos-arm64.json")
+      (plan (js-array "eliscript/runtime/errors.mjs" "eliscript/runtime/unicode-case.mjs" "eliscript/runtime/prelude.mjs" "./helpers/performance-acceptance.mjs" "bun:test" "node:fs/promises" "node:path" "node:url" "../tools/collections/transient-builder-benchmark.mjs")
+        (js-array "benchmarks/transient-builder-macos-arm64.json" "runtime/errors.eli" "runtime/errors.mjs" "runtime/unicode-case.mjs" "runtime/prelude.mjs")
         (js-array
           (js-array "committed transient builder report matches core runtime sources" "original-current-source-report-case")
           (js-array "transient builder report validator rejects incomplete evidence" "original-retained-report-case"))))
     (js-array "tests/public-surface.test.mjs"
-      (plan (js-array "eliscript/runtime/unicode-case.mjs" "eliscript/runtime/prelude.mjs"
-              "bun:test" "node:fs/promises" "node:path" "../tools/backends/build.mjs" "../tools/surface/check.mjs")
+      (plan (js-array "eliscript/runtime/unicode-case.mjs" "eliscript/runtime/prelude.mjs" "bun:test" "node:fs/promises" "node:path" "../tools/backends/build.mjs" "../tools/surface/check.mjs")
         (js-array "contracts/public-surface.json" "runtime/unicode-case.mjs" "runtime/prelude.mjs")
         (js-array
           (js-array "repository public surface matches every tracked implementation" "original-source-inventory-case")
           (js-array "public surface checker follows aliased runtime re-exports" "original-source-inventory-case"))))
     (js-array "tests/worker-value-codec.test.mjs"
-      (plan (js-array "bun:test" "../runtime/core/identifier.mjs" "../runtime/core/list.mjs" "../runtime/core/map.mjs"
-              "../runtime/core/metadata.mjs" "../runtime/core/protocol.mjs" "../runtime/core/set.mjs"
-              "../runtime/core/transient.mjs" "../runtime/core/value.mjs" "../runtime/core/vector.mjs"
-              "../runtime/worker-value-codec.mjs")
-        (js-array) (js-array
+      (plan (js-array "eliscript/runtime/unicode-case.mjs" "bun:test" "../runtime/core/identifier.mjs" "../runtime/core/list.mjs" "../runtime/core/map.mjs" "../runtime/core/metadata.mjs" "../runtime/core/protocol.mjs" "../runtime/core/set.mjs" "../runtime/core/transient.mjs" "../runtime/core/value.mjs" "../runtime/core/vector.mjs" "../runtime/worker-value-codec.mjs")
+        (js-array "runtime/unicode-case.mjs") (js-array
           (js-array "worker value codec transports protocol definitions without runtime identity" "original-host-runtime-case")))))))
   (defun source-imports (source)
     (js-call (Array/from (js-call source :matchAll (new globalThis.RegExp
@@ -62,14 +57,16 @@
                             (lambda (item) (= (get item :contains) (get locator :contains)))))
                    (selected (unless (nullish? found) (get found :originalCase))))
               (when (and (nullish? selected) (= (get locator :file) "tests/transient-builder-benchmark.test.mjs"))
-                (let* ((prefix (+ "currentPerformanceTest(test)(" (JSON/stringify (get locator :contains)) ", async () => {"))
-                       (start (js-call source :indexOf prefix)))
+                (let* ((prefix (+ "(currentPerformanceTest(test))(" (JSON/stringify (get locator :contains)) ", (async () => {"))
+                       (start (js-call source :indexOf prefix))
+                       (code (js-call source :replace (new globalThis.RegExp "\\n?//# sourceMappingURL=[^\\r\\n]*\\r?\\n?$") "\n"))
+                       (finish (js-length (js-call code :trimEnd))))
                   (unless (and (>= start 0) (< (js-call source :indexOf prefix (+ start (js-length prefix))) 0)
-                               (js-call (js-call (js-call source :slice start) :trimEnd) :endsWith "});"))
+                               (js-call (js-call code :slice start finish) :endsWith "}));"))
                     (throw (new globalThis.TypeError "original current-source report gate boundary changed")))
-                  (setq selected (js-object :title (get locator :contains) :span (js-object :start start :end (js-length source))
-                    :byteStart (Buffer/byteLength (js-call source :slice 0 start)) :byteEnd (Buffer/byteLength source)
-                    :sha256 (digest (js-call source :slice start)) :registration "currentPerformanceTest(test)" :timeoutMs 5000))))
+                  (setq selected (js-object :title (get locator :contains) :span (js-object :start start :end finish)
+                    :byteStart (Buffer/byteLength (js-call source :slice 0 start)) :byteEnd (Buffer/byteLength (js-call source :slice 0 finish))
+                    :sha256 (digest (js-call source :slice start finish)) :registration "currentPerformanceTest(test)" :timeoutMs 5000))))
               (when (nullish? selected)
                 (throw (new globalThis.TypeError (+ "original tools gate case boundary changed: " (get locator :contains)))))
               (let ((dependencies (js-array)) (paths (new globalThis.Set (get entry :dependencies))))

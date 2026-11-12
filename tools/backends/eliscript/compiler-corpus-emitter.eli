@@ -6,7 +6,7 @@
   (import "./compiler-corpus-ground.mjs" createOriginalCorpusSourceReader)
   (defconst id "original-program:compiler-module-bootstrap-emitter")
   (defconst suite "tests/bootstrap-emitter.test.mjs")
-  (defconst suite-sha "1fb3dc7ac20d64c2b6cd392fa6980451d01269f4dbd3f2c91483bb3e6fda6ed0")
+  (defconst suite-sha "fa39c912b4d5bd3cc0a143f79432cf6fc96893144c8f3c21e2f239bc5d587450")
   (defconst actual-suite "tests/bootstrap-emitter-selfhosted.test.mjs")
   (defconst title "bootstrapped emitter matches seed ESM and Source Map output")
   (defconst pairs (js-array
@@ -48,8 +48,8 @@
         (let* ((record (aref records 0)) (original (get record :original)) (execution (get record :execution))
                (reader (createOriginalCorpusSourceReader (js-object :sourceRoot (get options :sourceRoot root))))
                (source (await (js-call reader :text suite))) (proofs (js-array))
-               (regions (js-array (region source "async function run(" "\ntest(")
-                 (region source "    const module = async (name) => import(" "\n  } finally {")))
+               (regions (js-array (region source "const fixturePath = " "\ntest(")
+                 (region source "        return (await (async (modules) => {" "\n      } finally {")))
                (files (js-array suite "tests/fixtures/bootstrap-ir.json" "tests/bootstrap-emitter-oracle.el"
                  "tools/backends/eliscript/compiler-corpus-emitter.eli")) (index 0))
           (unless (and (= (hash source) suite-sha) (= (get original :sourceSha256) suite-sha)

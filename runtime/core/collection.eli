@@ -1,19 +1,728 @@
 (module eliscript.runtime.core.collection
-  (import "./collection-internals.mjs" :as CollectionInternals)
-  ;; Unchanged foreign capabilities remain in the existing source capsule.
-  ;; Association is maintained in Eli and shares the protocol's single read.
-  (js* "import {\n  extendProtocolCategory,\n  extendProtocolType,\n  implementsProtocol,\n} from \"./protocol.mjs\";\nimport {\n  COLLECTION_ASSOC,\n  COLLECTION_CONJ,\n  COLLECTION_COUNT,\n  COLLECTION_EMPTY,\n  COLLECTION_GET,\n  COLLECTION_NTH,\n  COLLECTION_PEEK,\n  COLLECTION_POP,\n  COLLECTION_REDUCE,\n  COLLECTION_REDUCE_KV,\n  I_COUNTED,\n  I_EMPTYABLE,\n  I_CONJ,\n  I_INDEXED,\n  I_LOOKUP,\n  I_ASSOCIATIVE,\n  I_REDUCE,\n  I_KV_REDUCE,\n  I_MAP,\n  I_SET,\n  I_STACK,\n  I_REVERSIBLE,\n  I_SEQABLE,\n  ReductionView as InternalReductionView,\n  MemoizedSequenceView as InternalMemoizedSequenceView,\n  SequenceView as InternalSequenceView,\n  dispatchCollectionCount,\n  dispatchCollectionEmpty,\n  dispatchCollectionConj,\n  dispatchCollectionGet,\n  dispatchCollectionAssoc,\n  dispatchCollectionContains,\n  dispatchCollectionNth,\n  dispatchCollectionReduce,\n  dispatchCollectionReduceKV,\n  dispatchCollectionDissoc,\n  dispatchCollectionDisj,\n  dispatchCollectionPeek,\n  dispatchCollectionPop,\n  dispatchCollectionRseq,\n  dispatchCollectionSeq,\n  isReducedValue,\n  readCollectionEntry,\n  reduceIterable,\n  reducedValue,\n  reductionView as createReductionView,\n  memoizedSequenceView as createMemoizedSequenceView,\n  sequenceView as createSequenceView,\n  unboundedSequenceView as createUnboundedSequenceView,\n  unreducedValue,\n  validateCollectionCount,\n} from \"./collection-internals.mjs\";\nimport { isPersistentList } from \"./list.mjs\";\nimport { isPersistentQueue } from \"./queue.mjs\";\nimport { isRecord } from \"./record.mjs\";\nimport { isPersistentMapValue, isPersistentSetValue } from \"./persistent-kind.mjs\";\nimport { EMPTY_SET } from \"./set.mjs\";\nimport { isPersistentVector } from \"./vector.mjs\";\n\nconst MISSING = Symbol(\"eliscript.collection.missing\");\n\nfunction indexedValue(values, index, notFound = MISSING) {\n  if (Number.isInteger(index) && index >= 0 && index < values.length) {\n    return values[index];\n  }\n  if (notFound !== MISSING) {\n    return notFound;\n  }\n  throw new RangeError(`nth index ${String(index)} is outside collection bounds`);\n}\n\nfunction indexedAssoc(values, index, value) {\n  if (!Number.isInteger(index) || index < 0 || index > values.length) {\n    throw new RangeError(\n      `assoc index ${String(index)} is outside collection bounds`,\n    );\n  }\n  const result = values.slice();\n  result[index] = value;\n  return result;\n}\n\nfunction indexedContains(values, index) {\n  return Number.isInteger(index) && index >= 0 && index < values.length;\n}\n\nfunction mapConj(values, entry) {\n  const [key, value] = readCollectionEntry(entry);\n  const result = new Map(values);\n  result.set(key, value);\n  return result;\n}\n\nfunction mapAssoc(values, key, value) {\n  const result = new Map(values);\n  result.set(key, value);\n  return result;\n}\n\nfunction mapDissoc(values, key) {\n  const result = new Map(values);\n  result.delete(key);\n  return result;\n}\n\nfunction setConj(values, value) {\n  const result = new Set(values);\n  result.add(value);\n  return result;\n}\n\nfunction setDisj(values, value) {\n  const result = new Set(values);\n  result.delete(value);\n  return result;\n}\n\nfunction objectAssoc(values, key, value) {\n  if (typeof key !== \"string\") {\n    throw new TypeError(\"plain object association keys must be strings\");\n  }\n  return { ...values, [key]: value };\n}\n\nfunction objectConj(values, entry) {\n  const [key, value] = readCollectionEntry(entry);\n  return objectAssoc(values, key, value);\n}\n\nfunction objectDissoc(values, key) {\n  if (typeof key !== \"string\") {\n    throw new TypeError(\"plain object dissociation keys must be strings\");\n  }\n  const result = { ...values };\n  delete result[key];\n  return result;\n}\n\nfunction arrayPeek(values) {\n  return values.length === 0 ? null : values[values.length - 1];\n}\n\nfunction arrayPop(values) {\n  if (values.length === 0) {\n    throw new RangeError(\"cannot pop an empty array\");\n  }\n  return values.slice(0, -1);\n}\n\nfunction indexedReverseSequence(values) {\n  return values.length === 0\n    ? null\n    : createSequenceView(\n      () => {\n        let index = values.length;\n        return {\n          next() {\n            if (index === 0) return { value: undefined, done: true };\n            index -= 1;\n            return { value: values[index], done: false };\n          },\n        };\n      },\n      () => values.length,\n    );\n}\n\nfunction arraySequence(values) {\n  return values.length === 0\n    ? null\n    : createSequenceView(() => values[Symbol.iterator](), () => values.length);\n}\n\nfunction mapSequence(values) {\n  if (values.size === 0) {\n    return null;\n  }\n  return createSequenceView(\n    () => (function* entries() {\n      for (const entry of values) {\n        yield Object.freeze([entry[0], entry[1]]);\n      }\n    })(),\n    () => values.size,\n  );\n}\n\nfunction setSequence(values) {\n  return values.size === 0\n    ? null\n    : createSequenceView(() => values[Symbol.iterator](), () => values.size);\n}\n\nfunction stringSequence(value) {\n  return value.length === 0\n    ? null\n    : createSequenceView(\n      () => (function* codeUnits() {\n        for (let index = 0; index < value.length; index += 1) {\n          yield value[index];\n        }\n      })(),\n      () => value.length,\n    );\n}\n\nfunction objectSequence(value) {\n  const keys = Object.keys(value);\n  return keys.length === 0\n    ? null\n    : createSequenceView(\n      () => (function* entries() {\n        for (const key of Object.keys(value)) {\n          yield Object.freeze([key, value[key]]);\n        }\n      })(),\n      () => Object.keys(value).length,\n    );\n}\n\nfunction reduceIndexedValues(values, reducer, initial) {\n  let result = initial;\n  for (let index = 0; index < values.length; index += 1) {\n    result = reducer(result, index, values[index]);\n    if (isReducedValue(result)) return unreducedValue(result);\n  }\n  return result;\n}\n\nfunction reduceMapValues(values, reducer, initial) {\n  let result = initial;\n  for (const [key, value] of values) {\n    result = reducer(result, key, value);\n    if (isReducedValue(result)) return unreducedValue(result);\n  }\n  return result;\n}\n\nfunction reduceObjectValues(value, reducer, initial) {\n  let result = initial;\n  for (const key of Object.keys(value)) {\n    result = reducer(result, key, value[key]);\n    if (isReducedValue(result)) return unreducedValue(result);\n  }\n  return result;\n}\n\nextendProtocolCategory(I_COUNTED, \"string\", {\n  count: (value) => value.length,\n});\nextendProtocolCategory(I_EMPTYABLE, \"string\", { empty: () => \"\" });\nextendProtocolCategory(I_LOOKUP, \"string\", {\n  get: (value, index, notFound = null) => indexedValue(value, index, notFound),\n});\nextendProtocolCategory(I_INDEXED, \"string\", { nth: indexedValue });\nextendProtocolCategory(I_SEQABLE, \"string\", { seq: stringSequence });\nextendProtocolCategory(I_REDUCE, \"string\", {\n  reduce: (value, reducer, ...initial) =>\n    reduceIterable(stringSequence(value) ?? [], reducer, ...initial),\n});\nextendProtocolCategory(I_REVERSIBLE, \"string\", {\n  rseq: indexedReverseSequence,\n});\n\nextendProtocolType(I_COUNTED, Object, {\n  count: (value) => Object.keys(value).length,\n});\nextendProtocolType(I_EMPTYABLE, Object, { empty: () => ({}) });\nextendProtocolType(I_CONJ, Object, { conj: objectConj });\nextendProtocolType(I_LOOKUP, Object, {\n  get: (value, key, notFound = null) =>\n    typeof key === \"string\" && Object.hasOwn(value, key)\n      ? value[key]\n      : notFound,\n});\nextendProtocolType(I_ASSOCIATIVE, Object, {\n  assoc: objectAssoc,\n  contains: (value, key) =>\n    typeof key === \"string\" && Object.hasOwn(value, key),\n});\nextendProtocolType(I_SEQABLE, Object, { seq: objectSequence });\nextendProtocolType(I_REDUCE, Object, {\n  reduce: (value, reducer, ...initial) =>\n    reduceIterable(objectSequence(value) ?? [], reducer, ...initial),\n});\nextendProtocolType(I_KV_REDUCE, Object, { reduceKV: reduceObjectValues });\nextendProtocolType(I_MAP, Object, { dissoc: objectDissoc });\n\nextendProtocolType(I_COUNTED, Array, { count: (values) => values.length });\nextendProtocolType(I_EMPTYABLE, Array, { empty: () => [] });\nextendProtocolType(I_CONJ, Array, {\n  conj: (values, value) => [...values, value],\n});\nextendProtocolType(I_LOOKUP, Array, {\n  get: (values, index, notFound = null) => indexedValue(values, index, notFound),\n});\nextendProtocolType(I_ASSOCIATIVE, Array, {\n  assoc: indexedAssoc,\n  contains: indexedContains,\n});\nextendProtocolType(I_INDEXED, Array, { nth: indexedValue });\nextendProtocolType(I_SEQABLE, Array, { seq: arraySequence });\nextendProtocolType(I_REDUCE, Array, { reduce: reduceIterable });\nextendProtocolType(I_KV_REDUCE, Array, { reduceKV: reduceIndexedValues });\nextendProtocolType(I_STACK, Array, { peek: arrayPeek, pop: arrayPop });\nextendProtocolType(I_REVERSIBLE, Array, { rseq: indexedReverseSequence });\n\nextendProtocolType(I_COUNTED, Map, { count: (values) => values.size });\nextendProtocolType(I_EMPTYABLE, Map, { empty: () => new Map() });\nextendProtocolType(I_CONJ, Map, { conj: mapConj });\nextendProtocolType(I_LOOKUP, Map, {\n  get: (values, key, notFound = null) =>\n    values.has(key) ? values.get(key) : notFound,\n});\nextendProtocolType(I_ASSOCIATIVE, Map, {\n  assoc: mapAssoc,\n  contains: (values, key) => values.has(key),\n});\nextendProtocolType(I_SEQABLE, Map, { seq: mapSequence });\nextendProtocolType(I_REDUCE, Map, {\n  reduce: (values, reducer, ...initial) =>\n    reduceIterable(mapSequence(values) ?? [], reducer, ...initial),\n});\nextendProtocolType(I_KV_REDUCE, Map, { reduceKV: reduceMapValues });\nextendProtocolType(I_MAP, Map, { dissoc: mapDissoc });\n\nextendProtocolType(I_COUNTED, Set, { count: (values) => values.size });\nextendProtocolType(I_EMPTYABLE, Set, { empty: () => new Set() });\nextendProtocolType(I_CONJ, Set, { conj: setConj });\nextendProtocolType(I_LOOKUP, Set, {\n  get: (values, key, notFound = null) => values.has(key) ? key : notFound,\n});\nextendProtocolType(I_ASSOCIATIVE, Set, {\n  contains: (values, key) => values.has(key),\n});\nextendProtocolType(I_SEQABLE, Set, { seq: setSequence });\nextendProtocolType(I_REDUCE, Set, { reduce: reduceIterable });\nextendProtocolType(I_SET, Set, { disj: setDisj });\n\nextendProtocolCategory(I_COUNTED, \"null\", { count: () => 0 });\nextendProtocolCategory(I_EMPTYABLE, \"null\", { empty: () => null });\nextendProtocolCategory(I_SEQABLE, \"null\", { seq: () => null });\nextendProtocolCategory(I_REDUCE, \"null\", {\n  reduce: (_value, reducer, ...initial) => reduceIterable([], reducer, ...initial),\n});\nextendProtocolCategory(I_KV_REDUCE, \"null\", {\n  reduceKV: (_value, _reducer, initial) => initial,\n});\nextendProtocolCategory(I_MAP, \"null\", { dissoc: () => null });\nextendProtocolCategory(I_SET, \"null\", { disj: () => null });\nextendProtocolCategory(I_STACK, \"null\", { peek: () => null, pop: () => null });\nextendProtocolCategory(I_REVERSIBLE, \"null\", { rseq: () => null });\n\nexport const ICounted = I_COUNTED;\nexport const IEmptyable = I_EMPTYABLE;\nexport const IConj = I_CONJ;\nexport const ILookup = I_LOOKUP;\nexport const IAssociative = I_ASSOCIATIVE;\nexport const IIndexed = I_INDEXED;\nexport const ISeqable = I_SEQABLE;\nexport const IReduce = I_REDUCE;\nexport const IKVReduce = I_KV_REDUCE;\nexport const IMap = I_MAP;\nexport const ISet = I_SET;\nexport const IStack = I_STACK;\nexport const IReversible = I_REVERSIBLE;\n\nexport const ReductionView = InternalReductionView;\nexport const MemoizedSequenceView = InternalMemoizedSequenceView;\nexport const SequenceView = InternalSequenceView;\n\nexport function reductionView(reduceFunction) {\n  return createReductionView(reduceFunction);\n}\n\nexport function memoizedSequenceView(factory, count = null) {\n  return createMemoizedSequenceView(factory, count);\n}\n\nexport function sequenceView(factory, count = null) {\n  return createSequenceView(factory, count);\n}\n\nexport function unboundedSequenceView(factory) {\n  return createUnboundedSequenceView(factory);\n}\n\nexport function count(collection) {\n  if (collection !== null && collection !== undefined) {\n    const direct = collection[COLLECTION_COUNT];\n    if (typeof direct === \"function\") {\n      return validateCollectionCount(direct.call(collection));\n    }\n  }\n  return validateCollectionCount(dispatchCollectionCount(collection));\n}\n\nexport function isCounted(collection) {\n  return implementsProtocol(ICounted, collection);\n}\n\nexport function isIndexed(collection) {\n  return implementsProtocol(IIndexed, collection);\n}\n\nexport function isSeqable(collection) {\n  return implementsProtocol(ISeqable, collection);\n}\n\nexport function isReducible(collection) {\n  return implementsProtocol(IReduce, collection);\n}\n\nexport function isReversible(collection) {\n  return implementsProtocol(IReversible, collection);\n}\n\nexport function isAssociative(collection) {\n  return implementsProtocol(IAssociative, collection);\n}\n\nexport function isCollection(value) {\n  return value instanceof InternalSequenceView ||\n    value instanceof InternalMemoizedSequenceView ||\n    isPersistentList(value) ||\n    isPersistentQueue(value) ||\n    isPersistentVector(value) ||\n    isPersistentMapValue(value) ||\n    isRecord(value) ||\n    isPersistentSetValue(value);\n}\n\nexport function isList(value) {\n  return isPersistentList(value);\n}\n\nexport function isVector(value) {\n  return isPersistentVector(value);\n}\n\nexport function isQueue(value) {\n  return isPersistentQueue(value);\n}\n\nexport function isMap(value) {\n  return isPersistentMapValue(value) || isRecord(value);\n}\n\nexport function isSet(value) {\n  return isPersistentSetValue(value);\n}\n\nexport function isSequential(value) {\n  return value instanceof InternalSequenceView ||\n    value instanceof InternalMemoizedSequenceView ||\n    isPersistentList(value) ||\n    isPersistentQueue(value) ||\n    isPersistentVector(value);\n}\n\nexport function isSequence(value) {\n  return value instanceof InternalSequenceView ||\n    value instanceof InternalMemoizedSequenceView ||\n    isPersistentList(value);\n}\n\nexport function boundedCount(limit, collection) {\n  if (!Number.isSafeInteger(limit) || limit < 0) {\n    throw new TypeError(\"boundedCount limit must be a non-negative safe integer\");\n  }\n  if (limit === 0) return 0;\n\n  const sequence = seq(collection);\n  if (sequence === null) return 0;\n  const iterator = sequence[Symbol.iterator]();\n  let result = 0;\n  let complete = false;\n  try {\n    while (result < limit && !iterator.next().done) {\n      result += 1;\n    }\n    complete = true;\n  } finally {\n    if (\n      (!complete || result === limit) &&\n      typeof iterator.return === \"function\"\n    ) {\n      iterator.return();\n    }\n  }\n  return result;\n}\n\nexport function areDistinct(...values) {\n  let seen = EMPTY_SET;\n  for (const value of values) {\n    if (seen.has(value)) return false;\n    seen = seen.conj(value);\n  }\n  return true;\n}\n\nexport function empty(collection) {\n  if (collection !== null && collection !== undefined) {\n    const direct = collection[COLLECTION_EMPTY];\n    if (typeof direct === \"function\") {\n      return direct.call(collection);\n    }\n  }\n  return dispatchCollectionEmpty(collection);\n}\n\nexport function conj(collection, value) {\n  const argCount = arguments.length;\n  if (argCount <= 1) return collection;\n  if (argCount === 2) {\n    if (collection !== null && collection !== undefined) {\n      const direct = collection[COLLECTION_CONJ];\n      if (typeof direct === \"function\") {\n        return direct.call(collection, value);\n      }\n    }\n    return dispatchCollectionConj(collection, value);\n  }\n  let result = collection;\n  for (let index = 1; index < argCount; index += 1) {\n    const nextValue = arguments[index];\n    if (result !== null && result !== undefined) {\n      const direct = result[COLLECTION_CONJ];\n      if (typeof direct === \"function\") {\n        result = direct.call(result, nextValue);\n        continue;\n      }\n    }\n    result = dispatchCollectionConj(result, nextValue);\n  }\n  return result;\n}\n\nexport function get(collection, key, notFound = null) {\n  if (collection !== null && collection !== undefined) {\n    const direct = collection[COLLECTION_GET];\n    if (typeof direct === \"function\") {\n      return direct.call(collection, key, notFound);\n    }\n  }\n  return dispatchCollectionGet(collection, key, notFound);\n}\n\nexport function contains(collection, key) {\n  const result = dispatchCollectionContains(collection, key);\n  if (typeof result !== \"boolean\") {\n    throw new TypeError(\"IAssociative/contains must return a boolean\");\n  }\n  return result;\n}\n\nexport function nth(collection, index, notFound) {\n  const hasNotFound = arguments.length >= 3;\n  if (collection !== null && collection !== undefined) {\n    const direct = collection[COLLECTION_NTH];\n    if (typeof direct === \"function\") {\n      return hasNotFound\n        ? direct.call(collection, index, notFound)\n        : direct.call(collection, index);\n    }\n  }\n  return hasNotFound\n    ? dispatchCollectionNth(collection, index, notFound)\n    : dispatchCollectionNth(collection, index);\n}\n\nexport function seq(collection) {\n  const result = dispatchCollectionSeq(collection);\n  if (result === null) {\n    return null;\n  }\n  if (result === undefined || typeof result[Symbol.iterator] !== \"function\") {\n    throw new TypeError(\"ISeqable/seq must return null or an iterable sequence view\");\n  }\n  return result;\n}\n\nexport function isEmpty(collection) {\n  return seq(collection) === null;\n}\n\nexport function notEmpty(collection) {\n  return isEmpty(collection) ? null : collection;\n}\n\nexport function reduce(collection, reducer, initial) {\n  if (typeof reducer !== \"function\") {\n    throw new TypeError(\"collection reducer must be a function\");\n  }\n  const hasInitial = arguments.length >= 3;\n  if (collection !== null && collection !== undefined) {\n    const direct = collection[COLLECTION_REDUCE];\n    if (typeof direct === \"function\") {\n      return unreducedValue(\n        hasInitial\n          ? direct.call(collection, reducer, initial)\n          : direct.call(collection, reducer),\n      );\n    }\n  }\n  return unreducedValue(\n    hasInitial\n      ? dispatchCollectionReduce(collection, reducer, initial)\n      : dispatchCollectionReduce(collection, reducer),\n  );\n}\n\nexport function reduceKV(collection, reducer, initial) {\n  if (arguments.length !== 3) {\n    throw new TypeError(\"reduceKV requires a collection, reducer, and initial value\");\n  }\n  if (typeof reducer !== \"function\") {\n    throw new TypeError(\"key/value reducer must be a function\");\n  }\n  if (collection !== null && collection !== undefined) {\n    const direct = collection[COLLECTION_REDUCE_KV];\n    if (typeof direct === \"function\") {\n      return unreducedValue(direct.call(collection, reducer, initial));\n    }\n  }\n  return unreducedValue(dispatchCollectionReduceKV(collection, reducer, initial));\n}\n\nexport function dissoc(collection, ...keys) {\n  let result = collection;\n  for (const key of keys) {\n    result = dispatchCollectionDissoc(result, key);\n  }\n  return result;\n}\n\nexport function disj(collection, ...values) {\n  let result = collection;\n  for (const value of values) {\n    result = dispatchCollectionDisj(result, value);\n  }\n  return result;\n}\n\nexport function peek(collection) {\n  if (arguments.length !== 1) {\n    throw new TypeError(\"peek requires exactly one collection\");\n  }\n  return dispatchCollectionPeek(collection);\n}\n\nexport function pop(collection) {\n  if (arguments.length !== 1) {\n    throw new TypeError(\"pop requires exactly one collection\");\n  }\n  return dispatchCollectionPop(collection);\n}\n\nexport function rseq(collection) {\n  if (arguments.length !== 1) {\n    throw new TypeError(\"rseq requires exactly one collection\");\n  }\n  const result = dispatchCollectionRseq(collection);\n  if (result === null) {\n    return null;\n  }\n  if (result === undefined || typeof result[Symbol.iterator] !== \"function\") {\n    throw new TypeError(\n      \"IReversible/rseq must return null or an iterable sequence view\",\n    );\n  }\n  return result;\n}\n\nexport function reduced(value) {\n  return reducedValue(value);\n}\n\nexport function isReduced(value) {\n  return isReducedValue(value);\n}\n\nexport function unreduced(value) {\n  return unreducedValue(value);\n}\n\nexport function isSequenceView(value) {\n  return value instanceof InternalSequenceView ||\n    value instanceof InternalMemoizedSequenceView;\n}\n\nexport function isReductionView(value) {\n  return value instanceof InternalReductionView;\n}\n")
+  (import "./protocol.mjs"
+    extendProtocolCategory extendProtocolType implementsProtocol)
+  (import "./collection-internals.mjs"
+    COLLECTION_ASSOC COLLECTION_CONJ COLLECTION_COUNT COLLECTION_EMPTY
+    COLLECTION_GET COLLECTION_NTH COLLECTION_PEEK COLLECTION_POP
+    COLLECTION_REDUCE COLLECTION_REDUCE_KV
+    I_COUNTED I_EMPTYABLE I_CONJ I_INDEXED I_LOOKUP I_ASSOCIATIVE
+    I_REDUCE I_KV_REDUCE I_MAP I_SET I_STACK I_REVERSIBLE I_SEQABLE
+    ReductionView MemoizedSequenceView SequenceView
+    dispatchCollectionCount dispatchCollectionEmpty dispatchCollectionConj
+    dispatchCollectionGet dispatchCollectionAssoc dispatchCollectionContains
+    dispatchCollectionNth dispatchCollectionReduce dispatchCollectionReduceKV
+    dispatchCollectionDissoc dispatchCollectionDisj dispatchCollectionPeek
+    dispatchCollectionPop dispatchCollectionRseq dispatchCollectionSeq
+    isReducedValue readCollectionEntry reduceIterable reducedValue
+    reductionView memoizedSequenceView sequenceView unboundedSequenceView
+    unreducedValue validateCollectionCount)
+  (import "./list.mjs" isPersistentList)
+  (import "./queue.mjs" isPersistentQueue)
+  (import "./record.mjs" isRecord)
+  (import "./persistent-kind.mjs" isPersistentMapValue isPersistentSetValue)
+  (import "./set.mjs" EMPTY_SET)
+  (import "./vector.mjs" isPersistentVector)
+
+  (defconst MISSING (funcall globalThis.Symbol "eliscript.collection.missing"))
+  (defconst iterator-symbol globalThis.Symbol.iterator)
+  (defconst host-generator
+    (js* "(stepFactory) => (function* () { const next = stepFactory(); for (;;) { const item = next(); if (item.done) return; yield item.value; } })()"))
+
+  (defun typeof-value (value)
+    (js* "typeof value"))
+
+  (defun instance-of-p (value constructor)
+    (js* "value instanceof constructor"))
+
+  (defun clone-plain-object (source)
+    (let ((result (js-object))
+          (keys (Reflect/ownKeys source))
+          (index 0))
+      (while (< index (js-length keys))
+        (let* ((key (aref keys index))
+               (descriptor (Object/getOwnPropertyDescriptor source key)))
+          (when (and (not (undefined? descriptor))
+                     (funcall globalThis.Boolean (aref descriptor "enumerable")))
+            (Object/defineProperty result key
+              (js-object :value (aref source key) :writable t :enumerable t :configurable t))))
+        (setq index (1+ index)))
+      result))
+
+  (defun indexedValue (values index &rest __opt)
+    (let* ((notFound (aref __opt 0))
+           (fallback (if (undefined? notFound) MISSING notFound)))
+      (if (and (Number/isInteger index) (>= index 0) (< index (js-length values)))
+          (aref values index)
+        (if (not (eq fallback MISSING))
+            fallback
+          (throw (new globalThis.RangeError
+                   (str "nth index " (funcall globalThis.String index) " is outside collection bounds")))))))
+  (Object/defineProperty indexedValue "length" (js-object :value 2 :configurable t))
+
+  (defun indexedAssoc (values index value)
+    (unless (and (Number/isInteger index) (>= index 0) (<= index (js-length values)))
+      (throw (new globalThis.RangeError
+               (str "assoc index " (funcall globalThis.String index) " is outside collection bounds"))))
+    (let ((result (js-call values :slice)))
+      (put result index value)
+      result))
+
+  (defun indexedContains (values index)
+    (and (Number/isInteger index) (>= index 0) (< index (js-length values))))
+
+  (defun mapConj (values entry)
+    (let* ((pair (readCollectionEntry entry))
+           (result (new globalThis.Map values)))
+      (js-call result :set (aref pair 0) (aref pair 1))
+      result))
+
+  (defun mapAssoc (values key value)
+    (let ((result (new globalThis.Map values)))
+      (js-call result :set key value)
+      result))
+
+  (defun mapDissoc (values key)
+    (let ((result (new globalThis.Map values)))
+      (js-call result :delete key)
+      result))
+
+  (defun setConj (values value)
+    (let ((result (new globalThis.Set values)))
+      (js-call result :add value)
+      result))
+
+  (defun setDisj (values value)
+    (let ((result (new globalThis.Set values)))
+      (js-call result :delete value)
+      result))
+
+  (defun objectAssoc (values key value)
+    (unless (eq (typeof-value key) "string")
+      (throw (new globalThis.TypeError "plain object association keys must be strings")))
+    (let ((result (clone-plain-object values)))
+      (Object/defineProperty result key
+        (js-object :value value :writable t :enumerable t :configurable t))
+      result))
+
+  (defun objectConj (values entry)
+    (let ((pair (readCollectionEntry entry)))
+      (objectAssoc values (aref pair 0) (aref pair 1))))
+
+  (defun objectDissoc (values key)
+    (unless (eq (typeof-value key) "string")
+      (throw (new globalThis.TypeError "plain object dissociation keys must be strings")))
+    (let ((result (clone-plain-object values)))
+      (Reflect/deleteProperty result key)
+      result))
+
+  (defun arrayConj (values value)
+    (let ((result (reduceIterable values
+                    (lambda (acc item)
+                      (Object/defineProperty acc (js-length acc)
+                        (js-object :value item :writable t :enumerable t :configurable t))
+                      acc)
+                    (js-array))))
+      (Object/defineProperty result (js-length result)
+        (js-object :value value :writable t :enumerable t :configurable t))
+      result))
+
+  (defun arrayPeek (values)
+    (if (eq (js-length values) 0)
+        nil
+      (aref values (1- (js-length values)))))
+
+  (defun arrayPop (values)
+    (when (eq (js-length values) 0)
+      (throw (new globalThis.RangeError "cannot pop an empty array")))
+    (js-call values :slice 0 -1))
+
+  (defun indexedReverseSequence (values)
+    (if (eq (js-length values) 0)
+        nil
+      (sequenceView
+        (lambda ()
+          (let ((index (js-length values)))
+            (js-object
+              :next (lambda ()
+                      (if (eq index 0)
+                          (js-object :value undefined :done t)
+                        (progn
+                          (setq index (1- index))
+                          (js-object :value (aref values index) :done false)))))))
+        (lambda () (js-length values)))))
+
+  (defun arraySequence (values)
+    (if (eq (js-length values) 0)
+        nil
+      (sequenceView
+        (lambda () (js-call (aref values iterator-symbol) :call values))
+        (lambda () (js-length values)))))
+
+  (defun mapSequence (values)
+    (if (eq (aref values "size") 0)
+        nil
+      (sequenceView
+        (lambda ()
+          (funcall host-generator
+            (lambda ()
+              (let ((iterator (js-call (aref values iterator-symbol) :call values)))
+                (lambda ()
+                  (let ((step (js-call iterator :next)))
+                    (if (funcall globalThis.Boolean (aref step "done"))
+                        (js-object :value undefined :done t)
+                      (let ((entry (aref step "value")))
+                        (js-object :value (Object/freeze (js-array (aref entry 0) (aref entry 1)))
+                                   :done false)))))))))
+        (lambda () (aref values "size")))))
+
+  (defun setSequence (values)
+    (if (eq (aref values "size") 0)
+        nil
+      (sequenceView
+        (lambda () (js-call (aref values iterator-symbol) :call values))
+        (lambda () (aref values "size")))))
+
+  (defun stringSequence (value)
+    (if (eq (js-length value) 0)
+        nil
+      (sequenceView
+        (lambda ()
+          (funcall host-generator
+            (lambda ()
+              (let ((index 0))
+                (lambda ()
+                  (if (>= index (js-length value))
+                      (js-object :value undefined :done t)
+                    (let ((unit (aref value index)))
+                      (setq index (1+ index))
+                      (js-object :value unit :done false))))))))
+        (lambda () (js-length value)))))
+
+  (defun objectSequence (value)
+    (let ((initial-keys (Object/keys value)))
+      (if (eq (js-length initial-keys) 0)
+          nil
+        (sequenceView
+          (lambda ()
+            (funcall host-generator
+              (lambda ()
+                (let ((keys (Object/keys value))
+                      (index 0))
+                  (lambda ()
+                    (if (>= index (js-length keys))
+                        (js-object :value undefined :done t)
+                      (let ((key (aref keys index)))
+                        (setq index (1+ index))
+                        (js-object :value (Object/freeze (js-array key (aref value key)))
+                                   :done false))))))))
+          (lambda () (js-length (Object/keys value)))))))
+
+  (defun reduceIndexedValues (values reducer initial)
+    (let ((result initial)
+          (index 0)
+          (done false)
+          (output initial))
+      (while (and (< index (js-length values)) (not done))
+        (setq result (funcall reducer result index (aref values index)))
+        (if (isReducedValue result)
+            (setq output (unreducedValue result) done t)
+          (setq output result))
+        (setq index (1+ index)))
+      output))
+
+  (defun reduceMapValues (values reducer initial)
+    (let ((iterator (js-call (aref values iterator-symbol) :call values))
+          (result initial)
+          (output initial)
+          (done false)
+          (exhausted false))
+      (try
+        (while (and (not done) (not exhausted))
+          (let ((step (js-call iterator :next)))
+            (if (funcall globalThis.Boolean (aref step "done"))
+                (setq exhausted t)
+              (let* ((entry (aref step "value"))
+                     (key (aref entry 0))
+                     (val (aref entry 1)))
+                (setq result (funcall reducer result key val))
+                (if (isReducedValue result)
+                    (setq output (unreducedValue result) done t)
+                  (setq output result))))))
+        (finally
+          (when (and (not exhausted) (eq (typeof-value (aref iterator "return")) "function"))
+            (js-call iterator :return))))
+      output))
+
+  (defun reduceObjectValues (value reducer initial)
+    (let ((keys (Object/keys value))
+          (index 0)
+          (result initial)
+          (output initial)
+          (done false))
+      (while (and (< index (js-length keys)) (not done))
+        (let ((key (aref keys index)))
+          (setq result (funcall reducer result key (aref value key)))
+          (if (isReducedValue result)
+              (setq output (unreducedValue result) done t)
+            (setq output result)))
+        (setq index (1+ index)))
+      output))
+
+  (extendProtocolCategory I_COUNTED "string"
+    (js-object :count (lambda (value) (js-length value))))
+  (extendProtocolCategory I_EMPTYABLE "string"
+    (js-object :empty (lambda () "")))
+  (extendProtocolCategory I_LOOKUP "string"
+    (js-object :get (lambda (value index &optional notFound)
+                      (indexedValue value index (if (undefined? notFound) nil notFound)))))
+  (extendProtocolCategory I_INDEXED "string"
+    (js-object :nth indexedValue))
+  (extendProtocolCategory I_SEQABLE "string"
+    (js-object :seq stringSequence))
+  (extendProtocolCategory I_REDUCE "string"
+    (js-object :reduce (lambda (value reducer &rest initial)
+                         (apply reduceIterable
+                                (or (stringSequence value) (js-array))
+                                reducer
+                                initial))))
+  (extendProtocolCategory I_REVERSIBLE "string"
+    (js-object :rseq indexedReverseSequence))
+
+  (extendProtocolType I_COUNTED globalThis.Object
+    (js-object :count (lambda (value) (js-length (Object/keys value)))))
+  (extendProtocolType I_EMPTYABLE globalThis.Object
+    (js-object :empty (lambda () (js-object))))
+  (extendProtocolType I_CONJ globalThis.Object
+    (js-object :conj objectConj))
+  (extendProtocolType I_LOOKUP globalThis.Object
+    (js-object :get (lambda (value key &optional notFound)
+                      (let ((fallback (if (undefined? notFound) nil notFound)))
+                        (if (and (eq (typeof-value key) "string") (Object/hasOwn value key))
+                            (aref value key)
+                          fallback)))))
+  (extendProtocolType I_ASSOCIATIVE globalThis.Object
+    (js-object :assoc objectAssoc
+               :contains (lambda (value key)
+                           (and (eq (typeof-value key) "string") (Object/hasOwn value key)))))
+  (extendProtocolType I_SEQABLE globalThis.Object
+    (js-object :seq objectSequence))
+  (extendProtocolType I_REDUCE globalThis.Object
+    (js-object :reduce (lambda (value reducer &rest initial)
+                         (apply reduceIterable
+                                (or (objectSequence value) (js-array))
+                                reducer
+                                initial))))
+  (extendProtocolType I_KV_REDUCE globalThis.Object
+    (js-object :reduceKV reduceObjectValues))
+  (extendProtocolType I_MAP globalThis.Object
+    (js-object :dissoc objectDissoc))
+
+  (extendProtocolType I_COUNTED globalThis.Array
+    (js-object :count (lambda (values) (js-length values))))
+  (extendProtocolType I_EMPTYABLE globalThis.Array
+    (js-object :empty (lambda () (js-array))))
+  (extendProtocolType I_CONJ globalThis.Array
+    (js-object :conj arrayConj))
+  (extendProtocolType I_LOOKUP globalThis.Array
+    (js-object :get (lambda (values index &optional notFound)
+                      (indexedValue values index (if (undefined? notFound) nil notFound)))))
+  (extendProtocolType I_ASSOCIATIVE globalThis.Array
+    (js-object :assoc indexedAssoc :contains indexedContains))
+  (extendProtocolType I_INDEXED globalThis.Array
+    (js-object :nth indexedValue))
+  (extendProtocolType I_SEQABLE globalThis.Array
+    (js-object :seq arraySequence))
+  (extendProtocolType I_REDUCE globalThis.Array
+    (js-object :reduce reduceIterable))
+  (extendProtocolType I_KV_REDUCE globalThis.Array
+    (js-object :reduceKV reduceIndexedValues))
+  (extendProtocolType I_STACK globalThis.Array
+    (js-object :peek arrayPeek :pop arrayPop))
+  (extendProtocolType I_REVERSIBLE globalThis.Array
+    (js-object :rseq indexedReverseSequence))
+
+  (extendProtocolType I_COUNTED globalThis.Map
+    (js-object :count (lambda (values) (aref values "size"))))
+  (extendProtocolType I_EMPTYABLE globalThis.Map
+    (js-object :empty (lambda () (new globalThis.Map))))
+  (extendProtocolType I_CONJ globalThis.Map
+    (js-object :conj mapConj))
+  (extendProtocolType I_LOOKUP globalThis.Map
+    (js-object :get (lambda (values key &optional notFound)
+                      (let ((fallback (if (undefined? notFound) nil notFound)))
+                        (if (js-call values :has key)
+                            (js-call values :get key)
+                          fallback)))))
+  (extendProtocolType I_ASSOCIATIVE globalThis.Map
+    (js-object :assoc mapAssoc
+               :contains (lambda (values key) (js-call values :has key))))
+  (extendProtocolType I_SEQABLE globalThis.Map
+    (js-object :seq mapSequence))
+  (extendProtocolType I_REDUCE globalThis.Map
+    (js-object :reduce (lambda (values reducer &rest initial)
+                         (apply reduceIterable
+                                (or (mapSequence values) (js-array))
+                                reducer
+                                initial))))
+  (extendProtocolType I_KV_REDUCE globalThis.Map
+    (js-object :reduceKV reduceMapValues))
+  (extendProtocolType I_MAP globalThis.Map
+    (js-object :dissoc mapDissoc))
+
+  (extendProtocolType I_COUNTED globalThis.Set
+    (js-object :count (lambda (values) (aref values "size"))))
+  (extendProtocolType I_EMPTYABLE globalThis.Set
+    (js-object :empty (lambda () (new globalThis.Set))))
+  (extendProtocolType I_CONJ globalThis.Set
+    (js-object :conj setConj))
+  (extendProtocolType I_LOOKUP globalThis.Set
+    (js-object :get (lambda (values key &optional notFound)
+                      (let ((fallback (if (undefined? notFound) nil notFound)))
+                        (if (js-call values :has key) key fallback)))))
+  (extendProtocolType I_ASSOCIATIVE globalThis.Set
+    (js-object :contains (lambda (values key) (js-call values :has key))))
+  (extendProtocolType I_SEQABLE globalThis.Set
+    (js-object :seq setSequence))
+  (extendProtocolType I_REDUCE globalThis.Set
+    (js-object :reduce reduceIterable))
+  (extendProtocolType I_SET globalThis.Set
+    (js-object :disj setDisj))
+
+  (extendProtocolCategory I_COUNTED "null"
+    (js-object :count (lambda () 0)))
+  (extendProtocolCategory I_EMPTYABLE "null"
+    (js-object :empty (lambda () nil)))
+  (extendProtocolCategory I_SEQABLE "null"
+    (js-object :seq (lambda () nil)))
+  (extendProtocolCategory I_REDUCE "null"
+    (js-object :reduce (lambda (_value reducer &rest initial)
+                         (apply reduceIterable (js-array) reducer initial))))
+  (extendProtocolCategory I_KV_REDUCE "null"
+    (js-object :reduceKV (lambda (_value _reducer initial) initial)))
+  (extendProtocolCategory I_MAP "null"
+    (js-object :dissoc (lambda () nil)))
+  (extendProtocolCategory I_SET "null"
+    (js-object :disj (lambda () nil)))
+  (extendProtocolCategory I_STACK "null"
+    (js-object :peek (lambda () nil) :pop (lambda () nil)))
+  (extendProtocolCategory I_REVERSIBLE "null"
+    (js-object :rseq (lambda () nil)))
+
+  (defconst ICounted I_COUNTED)
+  (defconst IEmptyable I_EMPTYABLE)
+  (defconst IConj I_CONJ)
+  (defconst ILookup I_LOOKUP)
+  (defconst IAssociative I_ASSOCIATIVE)
+  (defconst IIndexed I_INDEXED)
+  (defconst ISeqable I_SEQABLE)
+  (defconst IReduce I_REDUCE)
+  (defconst IKVReduce I_KV_REDUCE)
+  (defconst IMap I_MAP)
+  (defconst ISet I_SET)
+  (defconst IStack I_STACK)
+  (defconst IReversible I_REVERSIBLE)
+
+  (defun count (collection)
+    (if (not (nullish? collection))
+        (let ((direct (aref collection COLLECTION_COUNT)))
+          (if (eq (typeof-value direct) "function")
+              (validateCollectionCount (js-call direct :call collection))
+            (validateCollectionCount (dispatchCollectionCount collection))))
+      (validateCollectionCount (dispatchCollectionCount collection))))
+
+  (defun isCounted (collection)
+    (implementsProtocol ICounted collection))
+
+  (defun isIndexed (collection)
+    (implementsProtocol IIndexed collection))
+
+  (defun isSeqable (collection)
+    (implementsProtocol ISeqable collection))
+
+  (defun isReducible (collection)
+    (implementsProtocol IReduce collection))
+
+  (defun isReversible (collection)
+    (implementsProtocol IReversible collection))
+
+  (defun isAssociative (collection)
+    (implementsProtocol IAssociative collection))
+
+  (defun isCollection (value)
+    (or (instance-of-p value SequenceView)
+        (instance-of-p value MemoizedSequenceView)
+        (isPersistentList value)
+        (isPersistentQueue value)
+        (isPersistentVector value)
+        (isPersistentMapValue value)
+        (isRecord value)
+        (isPersistentSetValue value)))
+
+  (defun isList (value)
+    (isPersistentList value))
+
+  (defun isVector (value)
+    (isPersistentVector value))
+
+  (defun isQueue (value)
+    (isPersistentQueue value))
+
+  (defun isMap (value)
+    (or (isPersistentMapValue value) (isRecord value)))
+
+  (defun isSet (value)
+    (isPersistentSetValue value))
+
+  (defun isSequential (value)
+    (or (instance-of-p value SequenceView)
+        (instance-of-p value MemoizedSequenceView)
+        (isPersistentList value)
+        (isPersistentQueue value)
+        (isPersistentVector value)))
+
+  (defun isSequence (value)
+    (or (instance-of-p value SequenceView)
+        (instance-of-p value MemoizedSequenceView)
+        (isPersistentList value)))
+
+  (defun seq (collection)
+    (let ((result (dispatchCollectionSeq collection)))
+      (if (nil? result)
+          nil
+        (progn
+          (when (or (undefined? result)
+                    (not (eq (typeof-value (aref result iterator-symbol)) "function")))
+            (throw (new globalThis.TypeError "ISeqable/seq must return null or an iterable sequence view")))
+          result))))
+
+  (defun boundedCount (limit collection)
+    (unless (and (Number/isSafeInteger limit) (>= limit 0))
+      (throw (new globalThis.TypeError "boundedCount limit must be a non-negative safe integer")))
+    (if (eq limit 0)
+        0
+      (let ((sequence (seq collection)))
+        (if (nil? sequence)
+            0
+          (let ((iterator (js-call (aref sequence iterator-symbol) :call sequence))
+                (result 0)
+                (complete false))
+            (try
+              (while (and (< result limit)
+                          (not (funcall globalThis.Boolean (aref (js-call iterator :next) "done"))))
+                (setq result (1+ result)))
+              (setq complete t)
+              (finally
+                (when (and (or (not complete) (eq result limit))
+                           (eq (typeof-value (aref iterator "return")) "function"))
+                  (js-call iterator :return))))
+            result)))))
+
+  (defun areDistinct (&rest values)
+    (let ((seen EMPTY_SET)
+          (index 0)
+          (distinct t))
+      (while (and distinct (< index (js-length values)))
+        (let ((value (aref values index)))
+          (if (js-call seen :has value)
+              (setq distinct false)
+            (setq seen (js-call seen :conj value))))
+        (setq index (1+ index)))
+      distinct))
+
+  (defun empty (collection)
+    (if (not (nullish? collection))
+        (let ((direct (aref collection COLLECTION_EMPTY)))
+          (if (eq (typeof-value direct) "function")
+              (js-call direct :call collection)
+            (dispatchCollectionEmpty collection)))
+      (dispatchCollectionEmpty collection)))
+
+  (defun conj (&rest arguments)
+    (let ((arg-count (js-length arguments)))
+      (cond
+        ((<= arg-count 0) undefined)
+        ((eq arg-count 1) (aref arguments 0))
+        ((eq arg-count 2)
+         (let ((collection (aref arguments 0))
+               (value (aref arguments 1)))
+           (if (not (nullish? collection))
+               (let ((direct (aref collection COLLECTION_CONJ)))
+                 (if (eq (typeof-value direct) "function")
+                     (js-call direct :call collection value)
+                   (dispatchCollectionConj collection value)))
+             (dispatchCollectionConj collection value))))
+        (t
+         (let ((result (aref arguments 0))
+               (index 1))
+           (while (< index arg-count)
+             (let ((next-value (aref arguments index)))
+               (if (not (nullish? result))
+                   (let ((direct (aref result COLLECTION_CONJ)))
+                     (if (eq (typeof-value direct) "function")
+                         (setq result (js-call direct :call result next-value))
+                       (setq result (dispatchCollectionConj result next-value))))
+                 (setq result (dispatchCollectionConj result next-value))))
+             (setq index (1+ index)))
+           result)))))
+  (Object/defineProperty conj "length" (js-object :value 2 :configurable t))
+
+  (defun get (collection key &rest __opt)
+    (let* ((notFound (aref __opt 0))
+           (fallback (if (undefined? notFound) nil notFound)))
+      (if (not (nullish? collection))
+          (let ((direct (aref collection COLLECTION_GET)))
+            (if (eq (typeof-value direct) "function")
+                (js-call direct :call collection key fallback)
+              (dispatchCollectionGet collection key fallback)))
+        (dispatchCollectionGet collection key fallback))))
+  (Object/defineProperty get "length" (js-object :value 2 :configurable t))
+
   (defun assoc (&rest arguments)
     (unless (and (>= (js-length arguments) 3)
-                 (= (% (- (js-length arguments) 1) 2) 0))
-      (throw (new globalThis/TypeError
-        "assoc requires a collection followed by one or more key/value pairs")))
+                 (eq (% (- (js-length arguments) 1) 2) 0))
+      (throw (new globalThis.TypeError
+               "assoc requires a collection followed by one or more key/value pairs")))
     (let ((result (aref arguments 0)) (index 1))
       (while (< index (js-length arguments))
-        (setq result (CollectionInternals/dispatchCollectionAssoc result
-          (aref arguments index) (aref arguments (1+ index)))
-          index (+ index 2)))
+        (setq result (dispatchCollectionAssoc result
+                       (aref arguments index) (aref arguments (1+ index)))
+              index (+ index 2)))
       result))
-  ;; Validate the actual argument vector while retaining the public JS arity.
-  (js-call globalThis/Object :defineProperty assoc "length" (js-object :value 3))
-  (export assoc))
+  (Object/defineProperty assoc "length" (js-object :value 3 :configurable t))
+
+  (defun contains (collection key)
+    (let ((result (dispatchCollectionContains collection key)))
+      (unless (eq (typeof-value result) "boolean")
+        (throw (new globalThis.TypeError "IAssociative/contains must return a boolean")))
+      result))
+
+  (defun nth (&rest arguments)
+    (let ((collection (aref arguments 0))
+          (index (aref arguments 1))
+          (not-found (aref arguments 2))
+          (has-not-found (>= (js-length arguments) 3)))
+      (if (not (nullish? collection))
+          (let ((direct (aref collection COLLECTION_NTH)))
+            (if (eq (typeof-value direct) "function")
+                (if has-not-found
+                    (js-call direct :call collection index not-found)
+                  (js-call direct :call collection index))
+              (if has-not-found
+                  (dispatchCollectionNth collection index not-found)
+                (dispatchCollectionNth collection index))))
+        (if has-not-found
+            (dispatchCollectionNth collection index not-found)
+          (dispatchCollectionNth collection index)))))
+  (Object/defineProperty nth "length" (js-object :value 3 :configurable t))
+
+  (defun isEmpty (collection)
+    (nil? (seq collection)))
+
+  (defun notEmpty (collection)
+    (if (isEmpty collection) nil collection))
+
+  (defun reduce (&rest arguments)
+    (let ((collection (aref arguments 0))
+          (reducer (aref arguments 1))
+          (initial (aref arguments 2))
+          (has-initial (>= (js-length arguments) 3)))
+      (unless (eq (typeof-value reducer) "function")
+        (throw (new globalThis.TypeError "collection reducer must be a function")))
+      (if (not (nullish? collection))
+          (let ((direct (aref collection COLLECTION_REDUCE)))
+            (if (eq (typeof-value direct) "function")
+                (unreducedValue
+                  (if has-initial
+                      (js-call direct :call collection reducer initial)
+                    (js-call direct :call collection reducer)))
+              (unreducedValue
+                (if has-initial
+                    (dispatchCollectionReduce collection reducer initial)
+                  (dispatchCollectionReduce collection reducer)))))
+        (unreducedValue
+          (if has-initial
+              (dispatchCollectionReduce collection reducer initial)
+            (dispatchCollectionReduce collection reducer))))))
+  (Object/defineProperty reduce "length" (js-object :value 3 :configurable t))
+
+  (defun reduceKV (&rest arguments)
+    (unless (eq (js-length arguments) 3)
+      (throw (new globalThis.TypeError "reduceKV requires a collection, reducer, and initial value")))
+    (let ((collection (aref arguments 0))
+          (reducer (aref arguments 1))
+          (initial (aref arguments 2)))
+      (unless (eq (typeof-value reducer) "function")
+        (throw (new globalThis.TypeError "key/value reducer must be a function")))
+      (if (not (nullish? collection))
+          (let ((direct (aref collection COLLECTION_REDUCE_KV)))
+            (if (eq (typeof-value direct) "function")
+                (unreducedValue (js-call direct :call collection reducer initial))
+              (unreducedValue (dispatchCollectionReduceKV collection reducer initial))))
+        (unreducedValue (dispatchCollectionReduceKV collection reducer initial)))))
+  (Object/defineProperty reduceKV "length" (js-object :value 3 :configurable t))
+
+  (defun dissoc (collection &rest keys)
+    (let ((result collection) (index 0))
+      (while (< index (js-length keys))
+        (setq result (dispatchCollectionDissoc result (aref keys index))
+              index (1+ index)))
+      result))
+
+  (defun disj (collection &rest values)
+    (let ((result collection) (index 0))
+      (while (< index (js-length values))
+        (setq result (dispatchCollectionDisj result (aref values index))
+              index (1+ index)))
+      result))
+
+  (defun peek (&rest arguments)
+    (unless (eq (js-length arguments) 1)
+      (throw (new globalThis.TypeError "peek requires exactly one collection")))
+    (dispatchCollectionPeek (aref arguments 0)))
+  (Object/defineProperty peek "length" (js-object :value 1 :configurable t))
+
+  (defun pop (&rest arguments)
+    (unless (eq (js-length arguments) 1)
+      (throw (new globalThis.TypeError "pop requires exactly one collection")))
+    (dispatchCollectionPop (aref arguments 0)))
+  (Object/defineProperty pop "length" (js-object :value 1 :configurable t))
+
+  (defun rseq (&rest arguments)
+    (unless (eq (js-length arguments) 1)
+      (throw (new globalThis.TypeError "rseq requires exactly one collection")))
+    (let ((result (dispatchCollectionRseq (aref arguments 0))))
+      (if (nil? result)
+          nil
+        (progn
+          (when (or (undefined? result)
+                    (not (eq (typeof-value (aref result iterator-symbol)) "function")))
+            (throw (new globalThis.TypeError
+                     "IReversible/rseq must return null or an iterable sequence view")))
+          result))))
+  (Object/defineProperty rseq "length" (js-object :value 1 :configurable t))
+
+  (defun reduced (value)
+    (reducedValue value))
+
+  (defun isReduced (value)
+    (isReducedValue value))
+
+  (defun unreduced (value)
+    (unreducedValue value))
+
+  (defun isSequenceView (value)
+    (or (instance-of-p value SequenceView)
+        (instance-of-p value MemoizedSequenceView)))
+
+  (defun isReductionView (value)
+    (instance-of-p value ReductionView))
+
+  (export ICounted IEmptyable IConj ILookup IAssociative IIndexed ISeqable
+          IReduce IKVReduce IMap ISet IStack IReversible
+          ReductionView MemoizedSequenceView SequenceView
+          reductionView memoizedSequenceView sequenceView unboundedSequenceView
+          count isCounted isIndexed isSeqable isReducible isReversible isAssociative
+          isCollection isList isVector isQueue isMap isSet isSequential isSequence
+          boundedCount areDistinct empty conj get assoc contains nth seq isEmpty notEmpty
+          reduce reduceKV dissoc disj peek pop rseq reduced isReduced unreduced
+          isSequenceView isReductionView))

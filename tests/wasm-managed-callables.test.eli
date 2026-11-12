@@ -1,2 +1,1259 @@
-(module capsules.tests.wasm-managed-callables.test
-  (js* "import { afterAll, beforeAll, test } from \"bun:test\";\nimport assert from \"node:assert/strict\";\nimport { spawnSync } from \"node:child_process\";\nimport { mkdtemp, readFile, rm, writeFile } from \"node:fs/promises\";\nimport { tmpdir } from \"node:os\";\nimport { resolve } from \"node:path\";\nimport { pathToFileURL } from \"node:url\";\nimport { buildBackends } from \"../tools/backends/build.mjs\";\nimport { instantiateManagedRuntime } from \"../tools/backends/managed-runtime.mjs\";\n\nlet directory, backends, runtime, program, javascript, generatedClosureCases;\nbeforeAll(async () => {\n  directory = await mkdtemp(resolve(tmpdir(), \"eliscript-callables-\"));\n  backends = await buildBackends({ outputRoot: directory });\n  runtime = backends.compiler.compile_ir_string(await readFile(\"bootstrap/runtime/memory.eli\", \"utf8\"), \"runtime.eli\");\n  program = backends.compiler.compile_ir_string(await readFile(\"tests/fixtures/wasm-managed-callables.eli\", \"utf8\"), \"callables.eli\");\n  javascript = await import(\"data:text/javascript;base64,\" + Buffer.from(backends.compiler.emit_ir_string(program)).toString(\"base64\"));\n  const preparedAt = performance.now();\n  generatedClosureCases = prepareGeneratedClosureCases();\n  console.info(`[managed-callables] prepared ${generatedClosureCases.length} full-runtime artifacts in ${(performance.now() - preparedAt).toFixed(2)}ms`);\n}, 120_000);\nafterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });\n\nfunction instance() {\n  const bytes = Uint8Array.from(backends.managed.emit_managed_wasm(program, runtime));\n  assert(WebAssembly.validate(bytes));\n  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);\n  const heap = instantiateManagedRuntime(bytes);\n  heap.auto(1);\n  return heap;\n}\nfunction number(heap, name, args = []) {\n  const result = heap.invoke(name, args);\n  try { return heap.readNumber(result); } finally { heap.release(result); }\n}\nfunction finish(heap, values) {\n  for (const value of values) heap.release(value);\n  heap.collect();\n  assert.equal(heap.live(), 0);\n  assert.equal(heap.stats().frameDepth, 0);\n}\n\ntest(\"escaping, nested and recursive closures execute inside WASM with exact shared captures\", () => {\n  assert.equal(javascript.make_adder(4)(5), 9);\n  assert.equal(javascript.nested(4)(5)(6), 15);\n  assert.equal(javascript.recursive()(24), 24);\n  const heap = instance(), four = heap.number(4), five = heap.number(5), six = heap.number(6), count = heap.number(24);\n  const adder = heap.invoke(\"make-adder\", [four]);\n  heap.collect();\n  assert.equal(number(heap, \"apply-one\", [adder, five]), javascript.make_adder(4)(5));\n  const first = heap.invoke(\"nested\", [four]), second = heap.invoke(\"apply-one\", [first, five]);\n  assert.equal(number(heap, \"apply-one\", [second, six]), javascript.nested(4)(5)(6));\n  const recursive = heap.invoke(\"recursive\");\n  assert.equal(number(heap, \"apply-one\", [recursive, count]), javascript.recursive()(24));\n  const written = heap.invoke(\"outer-write\", [four]), shadow = heap.invoke(\"shadow\", [four]);\n  assert.equal(number(heap, \"apply-zero\", [written]), javascript.outer_write(4)());\n  assert.equal(number(heap, \"apply-zero\", [shadow]), javascript.shadow(4)());\n  finish(heap, [four, five, six, count, adder, first, second, recursive, written, shadow]);\n});\n\ntest(\"sibling closures share mutable cells while loop bindings and function identities stay distinct\", () => {\n  const reference = javascript.make_pair(4);\n  assert.equal(reference[0](), 5);\n  assert.equal(reference[1](), 5);\n  assert.deepEqual(javascript.capture_each(4).map(f => f()), [0, 1, 2, 3]);\n  assert.equal(javascript.named_same(), true);\n  assert.equal(javascript.fresh_same(), false);\n  const heap = instance(), four = heap.number(4), pair = heap.invoke(\"make-pair\", [four]);\n  const increment = heap.get(pair, 0), current = heap.get(pair, 1);\n  for (let i = 0; i < 32; i++) {\n    assert.equal(number(heap, \"apply-zero\", [increment]), 5 + i);\n    heap.collect();\n    assert.equal(number(heap, \"apply-zero\", [current]), 5 + i);\n  }\n  const items = heap.invoke(\"capture-each\", [four]);\n  for (let i = 0; i < 4; i++) {\n    const f = heap.get(items, i);\n    try { assert.equal(number(heap, \"apply-zero\", [f]), i); } finally { heap.release(f); }\n  }\n  assert.equal(heap.invoke(\"named-same\"), true);\n  assert.equal(heap.invoke(\"fresh-same\"), false);\n  assert.equal(heap.invoke(\"repeated-same\"), false);\n  const freshA = heap.invoke(\"fresh-function\"), freshB = heap.invoke(\"fresh-function\");\n  assert(!heap.keyEqual(freshA, freshB)); heap.release(freshA); heap.release(freshB);\n  const named = heap.invoke(\"named-value\"), another = heap.invoke(\"named-value\");\n  assert(heap.keyEqual(named, another));\n  assert.equal(number(heap, \"apply-one\", [named, four]), 4);\n  assert.equal(number(heap, \"from-slot\", [pair]), 37);\n  finish(heap, [four, pair, increment, current, items, named, another]);\n});\n\ntest(\"dynamic calls capture callees before arguments and evaluate extras before noncallable failure\", () => {\n  assert.equal(javascript.callee_order(), 1);\n  const referenceMarker = [false];\n  assert.throws(() => javascript.invoke_order(false, referenceMarker), TypeError);\n  assert.deepEqual(referenceMarker, [2]);\n  const heap = instance(), identity = heap.invoke(\"named-value\"), marker = heap.sourceArray([false]);\n  assert.equal(number(heap, \"callee-order\"), 1);\n  assert.equal(number(heap, \"apply-extra\", [identity, marker]), 7);\n  const effect = heap.get(marker, 0);\n  try { assert.equal(heap.readNumber(effect), 9); } finally { heap.release(effect); }\n  const missing = heap.invoke(\"apply-zero\", [identity]);\n  assert.equal(missing, undefined);\n  const rejected = [null, undefined, false, true, -0, 0, NaN, Infinity, \"\", \"中😀\", [], {}];\n  for (const value of rejected) {\n    const referenceTrace = [false];\n    assert.throws(() => javascript.invoke_order(value, referenceTrace), TypeError);\n    assert.deepEqual(referenceTrace, [2]);\n    const input = typeof value === \"number\" ? heap.number(value)\n      : typeof value === \"string\" ? heap.string(value)\n      : Array.isArray(value) ? heap.sourceArray([])\n      : value !== null && typeof value === \"object\" ? heap.sourceObject({}) : value;\n    try {\n      assert.throws(() => heap.invoke(\"invoke-order\", [input, marker]),\n        error => error instanceof TypeError && error.eliscriptDiagnostic?.code === \"ELI-RT0003\");\n      const failedEffect = heap.get(marker, 0);\n      try { assert.equal(heap.readNumber(failedEffect), 2); } finally { heap.release(failedEffect); }\n      heap.collect(); assert.equal(heap.stats().frameDepth, 0);\n      assert.equal(heap.invoke(\"apply-zero\", [identity]), undefined);\n    } finally { heap.release(input); }\n  }\n  finish(heap, [identity, marker]);\n});\n\nfunction indirectProgram() {\n  const local = index => ({ kind: \"local\", type: \"u32\", children: [], value: index });\n  const literal = value => ({ kind: \"literal\", type: \"u32\", children: [], value });\n  const function_ = (name, index, arity, body) => ({ name, index, arity, locals: Array.from({ length: arity }, (_, index) => ({ name: `p${index}`, index, type: \"u32\" })), body });\n  return { abi: \"memory-u32\", filename: \"indirect.eli\", exports: [\"dispatch\", \"mismatch\"], table: [1, 0], functions: [\n    function_(\"identity\", 0, 1, local(0)),\n    function_(\"increment\", 1, 1, { kind: \"int-add\", type: \"u32\", value: null, children: [local(0), literal(1)] }),\n    function_(\"dispatch\", 2, 2, { kind: \"call-indirect\", type: \"u32\", value: 1, children: [local(1), local(0)] }),\n    function_(\"mismatch\", 3, 1, { kind: \"call-indirect\", type: \"u32\", value: 2, children: [literal(11), literal(22), local(0)] }),\n  ] };\n}\n\ntest(\"typed WASM indirect calls select actual table entries and retain engine type and bounds traps\", () => {\n  const program = indirectProgram();\n  const bytes = Uint8Array.from(backends.wasm.emit_typed_memory_wasm(program));\n  assert(WebAssembly.validate(bytes));\n  const module = new WebAssembly.Module(bytes);\n  assert.deepEqual(WebAssembly.Module.imports(module), []);\n  const e = new WebAssembly.Instance(module).exports;\n  assert.equal(e.dispatch(0, 41), 42);\n  assert.equal(e.dispatch(1, 41), 41);\n  assert.equal(e.dispatch(0, 0xffffffff), 0);\n  assert.throws(() => e.dispatch(2, 0), WebAssembly.RuntimeError);\n  assert.throws(() => e.dispatch(0xffffffff, 0), WebAssembly.RuntimeError);\n  assert.throws(() => e.mismatch(0), WebAssembly.RuntimeError);\n});\n\ntest(\"typed WASM indirect calls reject missing tables, invalid entries and inconsistent call shapes\", () => {\n  for (const mutate of [p => { delete p.table; }, p => { p.table = [-1]; }, p => { p.table = [999]; },\n    p => { p.functions[2].body.children.pop(); }, p => { p.functions[2].body.value = 7; }]) {\n    const program = indirectProgram(); mutate(program);\n    assert.throws(() => backends.wasm.emit_typed_memory_wasm(program), e => e.eliscriptDiagnostic?.code === \"ELI-B0001\");\n  }\n});\n\nfunction rawCallableHeap(options = {}) {\n  const names = [\"value-cell-new\", \"value-cell-get\", \"value-cell-set\", \"value-function-new\", \"value-function-named\", \"value-function-code\", \"value-function-capture-get\", \"value-function-capture-set\"];\n  const program = structuredClone(runtime);\n  program.body.push({ kind: \"export-declaration\", value: null, children: names.map(value => ({ kind: \"reference\", value, children: [] })) });\n  const bytes = Uint8Array.from(backends.wasm.emit_memory_wasm(program));\n  const module = new WebAssembly.Module(bytes); assert.deepEqual(WebAssembly.Module.imports(module), []);\n  const e = new WebAssembly.Instance(module).exports;\n  const heap = e[\"heap-new\"](128, 4096, options.maxBytes ?? 32768);\n  const call = (name, ...args) => { const result = e[name](heap, ...args) >>> 0; assert.equal(e[\"last-error\"](), 0, name); return result; };\n  call(\"heap-auto\", 1);\n  return { e, heap, call, bytes };\n}\n\ntest(\"callable heap cells retain cycles and exact captures through forced GC and pool growth\", () => {\n  const { e, heap, call } = rawCallableHeap();\n  const cell = call(\"value-cell-new\", 2); call(\"heap-pin\", cell);\n  const closure = call(\"value-function-new\", 7, 1); call(\"heap-pin\", closure);\n  call(\"value-function-capture-set\", closure, 0, cell);\n  call(\"value-cell-set\", cell, closure);\n  call(\"heap-release\", cell); call(\"heap-collect\");\n  assert.equal(call(\"value-function-code\", closure), 7);\n  const keep = [];\n  for (let i = 0; i < 50; i++) { const n = call(\"value-number\", i, 0); call(\"heap-pin\", n); keep.push(n); }\n  assert(call(\"heap-capacity\") > 4096);\n  assert.equal(call(\"value-function-capture-get\", closure, 0), cell);\n  assert.equal(call(\"value-cell-get\", cell), closure);\n  call(\"value-cell-set\", cell, 1); assert.equal(call(\"value-cell-get\", cell), 1);\n  for (const n of keep) call(\"heap-release\", n);\n  call(\"heap-release\", closure); call(\"heap-collect\");\n  assert.equal(call(\"heap-live\"), 0); assert.equal(call(\"frame-depth\"), 0);\n  e[\"value-function-code\"](heap, closure); assert.equal(e[\"last-error\"](), 1);\n  e[\"value-cell-get\"](heap, cell); assert.equal(e[\"last-error\"](), 1);\n  e[\"value-function-code\"](heap, 1); assert.equal(e[\"last-error\"](), 3);\n});\n\ntest(\"named callable identities are shared only while alive and fresh functions stay distinct\", () => {\n  const { call } = rawCallableHeap();\n  const a = call(\"value-function-named\", 11); call(\"heap-pin\", a);\n  assert.equal(call(\"value-function-named\", 11), a);\n  const b = call(\"value-function-new\", 11, 0); call(\"heap-pin\", b);\n  assert.notEqual(a, b); assert.equal(call(\"value-key-equal\", a, b), 0);\n  assert.equal(call(\"value-key-equal\", a, a), 1);\n  const hash = call(\"value-key-hash\", a); call(\"heap-collect\"); assert.equal(call(\"value-key-hash\", a), hash);\n  call(\"heap-release\", a); call(\"heap-release\", b); call(\"heap-collect\");\n  assert.equal(call(\"heap-live\"), 0);\n  const c = call(\"value-function-named\", 11); call(\"heap-pin\", c); assert.notEqual(c, a);\n  call(\"heap-release\", c); call(\"heap-collect\"); assert.equal(call(\"heap-live\"), 0);\n});\n\ntest(\"callable heap capacity failure preserves captures and returns temporary borrowed roots\", () => {\n  const { e, heap, call } = rawCallableHeap({ maxBytes: 4096 });\n  const cell = call(\"value-cell-new\", 0); call(\"heap-pin\", cell);\n  const closure = call(\"value-function-new\", 3, 1); call(\"heap-pin\", closure);\n  call(\"value-function-capture-set\", closure, 0, cell); call(\"value-cell-set\", cell, closure);\n  call(\"heap-release\", cell);\n  const keep = []; let exhausted = false;\n  for (let i = 0; i < 128; i++) {\n    const n = e[\"value-number\"](heap, i, 0) >>> 0;\n    if (!n) { assert.equal(e[\"last-error\"](), 2); exhausted = true; break; }\n    call(\"heap-pin\", n); keep.push(n);\n  }\n  assert(exhausted);\n  assert.equal(e[\"value-cell-new\"](heap, closure), 0); assert.equal(e[\"last-error\"](), 2);\n  assert.equal(call(\"value-function-capture-get\", closure, 0), cell);\n  assert.equal(call(\"value-cell-get\", cell), closure);\n  e[\"value-function-capture-get\"](heap, closure, 1); assert.equal(e[\"last-error\"](), 3);\n  e[\"value-function-capture-set\"](heap, closure, 0, closure); assert.equal(e[\"last-error\"](), 1);\n  assert.equal(call(\"value-function-capture-get\", closure, 0), cell);\n  for (const n of keep) call(\"heap-release\", n);\n  call(\"heap-release\", closure); call(\"heap-collect\");\n  assert.equal(call(\"heap-live\"), 0); assert.equal(call(\"frame-depth\"), 0);\n});\n\ntest(\"Node executes the same indirect-call and callable-heap artifacts with exact cleanup\", async () => {\n  const { bytes } = rawCallableHeap();\n  const heapFile = resolve(directory, \"callable-heap.wasm\"), tableFile = resolve(directory, \"callable-table.wasm\");\n  await writeFile(heapFile, bytes);\n  await writeFile(tableFile, Uint8Array.from(backends.wasm.emit_typed_memory_wasm(indirectProgram())));\n  const node = spawnSync(process.env.NODE ?? \"node\", [\"--input-type=module\", \"-e\", `\n    import assert from 'node:assert/strict'; import { readFile } from 'node:fs/promises';\n    const instances=[];\n    for(const path of process.argv.slice(1)){const m=new WebAssembly.Module(await readFile(path));assert.deepEqual(WebAssembly.Module.imports(m),[]);instances.push(new WebAssembly.Instance(m).exports);}\n    const[e,t]=instances;assert.equal(t.dispatch(0,41),42);assert.equal(t.dispatch(1,41),41);\n    assert.throws(()=>t.dispatch(2,0),WebAssembly.RuntimeError);assert.throws(()=>t.mismatch(0),WebAssembly.RuntimeError);\n    const h=e['heap-new'](128,4096,32768), c=(name,...args)=>{const r=e[name](h,...args)>>>0;assert.equal(e['last-error'](),0,name);return r;};\n    c('heap-auto',1);const cell=c('value-cell-new',2);c('heap-pin',cell);\n    const f=c('value-function-new',7,1);c('heap-pin',f);c('value-function-capture-set',f,0,cell);c('value-cell-set',cell,f);c('heap-release',cell);\n    const keep=[];for(let i=0;i<50;i++){const n=c('value-number',i,0);c('heap-pin',n);keep.push(n);}\n    c('heap-collect');assert(c('heap-capacity')>4096);assert.equal(c('value-function-code',f),7);assert.equal(c('value-cell-get',c('value-function-capture-get',f,0)),f);\n    for(const n of keep)c('heap-release',n);c('heap-release',f);c('heap-collect');assert.equal(c('heap-live'),0);assert.equal(c('frame-depth'),0);\n  `, heapFile, tableFile], { encoding: \"utf8\", timeout: 30_000 });\n  assert.equal(node.status, 0, node.stderr || String(node.error));\n});\n\ntest(\"discarded indirect results retain call traps and programs without indirect calls need no table\", () => {\n  const program = indirectProgram(), original = program.functions[2].body;\n  program.functions[2].body = { kind: \"sequence\", type: \"u32\", value: null, children: [original, { kind: \"literal\", type: \"u32\", children: [], value: 99 }] };\n  const e = new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(backends.wasm.emit_typed_memory_wasm(program)))).exports;\n  assert.equal(e.dispatch(0, 41), 99);\n  assert.throws(() => e.dispatch(2, 41), WebAssembly.RuntimeError);\n  const plain = indirectProgram(); delete plain.table; plain.functions.splice(2); plain.exports = [\"identity\"];\n  const bytes = Uint8Array.from(backends.wasm.emit_typed_memory_wasm(plain)), sections = [];\n  let cursor = 8;\n  while (cursor < bytes.length) {\n    const id = bytes[cursor++]; let length = 0, shift = 0, byte;\n    do { byte = bytes[cursor++]; length += (byte & 127) * 2 ** shift; shift += 7; } while (byte & 128);\n    sections.push(id); cursor += length;\n  }\n  assert(!sections.includes(4)); assert(!sections.includes(9));\n  assert.equal(new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports.identity(17), 17);\n});\n\ntest(\"captured unrooted Numbers preserve IEEE words across allocation safepoints and pool movement\", () => {\n  const { e, call } = rawCallableHeap();\n  const patterns = [[0, 0], [0, 0x80000000], [0, 0x7ff00000], [0, 0xfff00000], [1, 0x7ff80000],\n    [1, 0], [0xffffffff, 0x000fffff], [0, 0x00100000], [0xffffffff, 0x7fefffff]];\n  let seed = 0x63a791ef;\n  const word = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0);\n  for (let i = 0; i < 32; i++) patterns.push([word(), word()]);\n  const cells = [];\n  for (const [low, high] of patterns) {\n    const value = call(\"value-number\", low, high);\n    // The Number has no host pin. Cell construction must protect this borrowed\n    // operand before its own allocation triggers collection.\n    const cell = call(\"value-cell-new\", value); call(\"heap-pin\", cell); cells.push(cell);\n  }\n  assert(call(\"heap-capacity\") > 4096); call(\"heap-collect\");\n  for (let i = 0; i < cells.length; i++) {\n    const value = call(\"value-cell-get\", cells[i]), offset = call(\"value-data\", value, 4), view = new DataView(e.memory.buffer);\n    assert.equal(view.getUint32(offset, true), patterns[i][0]);\n    assert.equal(view.getUint32(offset + 4, true), patterns[i][1]);\n  }\n  for (const cell of cells) call(\"heap-release\", cell);\n  call(\"heap-collect\"); assert.equal(call(\"heap-live\"), 0); assert.equal(call(\"frame-depth\"), 0);\n});\n\ntest(\"source shared cells preserve exact Numbers under repeated writes, alias reads and collection\", () => {\n  const heap = instance(), initial = heap.number(4), pair = heap.invoke(\"make-box\", [initial]);\n  const write = heap.get(pair, 0), read = heap.get(pair, 1), reference = javascript.make_box(4);\n  const values = [-0, 0, NaN, Infinity, -Infinity, Number.MIN_VALUE, -Number.MIN_VALUE, Number.MAX_VALUE];\n  let seed = 0x415f930d; const bits = new DataView(new ArrayBuffer(8));\n  for (let i = 0; i < 192; i++) {\n    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; bits.setUint32(0, seed, true);\n    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; bits.setUint32(4, seed, true); values.push(bits.getFloat64(0, true));\n  }\n  for (const value of values) {\n    const input = heap.number(value), output = heap.invoke(\"apply-one\", [write, input]);\n    assert(Object.is(heap.readNumber(output), reference[0](value))); assert(heap.keyEqual(input, output));\n    heap.release(input); heap.release(output); heap.collect();\n    assert(Object.is(number(heap, \"apply-zero\", [read]), reference[1]()));\n  }\n  finish(heap, [initial, pair, write, read]);\n});\n\ntest(\"failed closure calls preserve shared state, first-error order and caller-owned frames\", () => {\n  const markerReference = [false], reference = javascript.guarded_box(4);\n  assert.throws(() => reference[0](false, markerReference), TypeError); assert.equal(reference[1](), 4); assert.equal(markerReference[0], 7);\n  const heap = instance(), four = heap.number(4), pair = heap.invoke(\"guarded-box\", [four]);\n  const write = heap.get(pair, 0), read = heap.get(pair, 1), marker = heap.sourceArray([false]);\n  const frame = heap.frame(1); heap.frameSet(frame, 0, marker);\n  assert.throws(() => heap.invoke(\"apply-two\", [write, false, marker]), e => e.eliscriptDiagnostic?.code === \"ELI-RT0003\");\n  assert.equal(heap.stats().frameDepth, 1); assert.equal(number(heap, \"apply-zero\", [read]), 4);\n  const changed = heap.get(marker, 0); assert.equal(heap.readNumber(changed), 7); heap.release(changed);\n  const identity = heap.invoke(\"named-value\"), untouched = heap.sourceArray([false]);\n  assert.throws(() => javascript.earlier_failure(x => x, [false]), TypeError);\n  assert.throws(() => heap.invoke(\"earlier-failure\", [identity, untouched]), e => e.eliscriptDiagnostic?.code === \"ELI-RT0003\");\n  assert.equal(heap.get(untouched, 0), false); assert.equal(heap.stats().frameDepth, 1);\n  const alias = heap.frameGet(frame, 0); assert(heap.keyEqual(alias, marker)); heap.release(alias);\n  heap.leaveFrame(frame); finish(heap, [four, pair, write, read, marker, identity, untouched]);\n});\n\ntest(\"direct and indirect calls preserve omitted arguments and effects of extras and ignored constructor operands\", () => {\n  const heap = instance(), marker = heap.sourceArray([false]), f = heap.invoke(\"lambda-identity\");\n  assert.equal(javascript.direct_missing(), undefined); assert.equal(heap.invoke(\"direct-missing\"), undefined);\n  assert.equal(heap.invoke(\"apply-zero\", [f]), undefined);\n  assert.equal(number(heap, \"direct-extra\", [marker]), 7);\n  let changed = heap.get(marker, 0); assert.equal(heap.readNumber(changed), 12); heap.release(changed);\n  assert.equal(number(heap, \"apply-extra\", [f, marker]), 7);\n  const map = heap.invoke(\"ignored-constructor\", [marker]); heap.release(map);\n  const callback = heap.get(marker, 0); assert.equal(number(heap, \"apply-zero\", [callback]), 7);\n  const reference = [false]; assert(javascript.ignored_constructor(reference) instanceof Map); assert.equal(reference[0](), 7);\n  finish(heap, [marker, f, callback]);\n});\n\ntest(\"mutually recursive local functions and source Map function keys retain identity through GC\", () => {\n  const heap = instance(), pair = heap.invoke(\"parity-functions\"), even = heap.get(pair, 0), odd = heap.get(pair, 1);\n  const reference = javascript.parity_functions();\n  for (let i = 0; i < 33; i++) {\n    const n = heap.number(i); assert.equal(heap.invoke(\"apply-one\", [even, n]), reference[0](i));\n    assert.equal(heap.invoke(\"apply-one\", [odd, n]), reference[1](i)); heap.release(n); heap.collect();\n  }\n  const keys = heap.invoke(\"function-keys\"), seven = heap.get(keys, 0);\n  assert.equal(heap.readNumber(seven), javascript.function_keys()[0]);\n  assert.equal(heap.get(keys, 1), false); assert.equal(heap.get(keys, 2), true);\n  finish(heap, [pair, even, odd, keys, seven]);\n});\n\ntest(\"source closure allocation failure releases partial environments and preserves caller frames\", () => {\n  const bytes = Uint8Array.from(backends.managed.emit_managed_wasm(program, runtime));\n  const heap = instantiateManagedRuntime(bytes, { maxSlots: 128, initialBytes: 4096, maxBytes: 16384 }); heap.auto(1);\n  const marker = heap.sourceArray([false]), n = heap.number(10000), four = heap.number(4), five = heap.number(5);\n  const adder = heap.invoke(\"make-adder\", [four]), frame = heap.frame(1); heap.frameSet(frame, 0, marker);\n  assert.throws(() => heap.invoke(\"retain-closures\", [marker, n]), e => e.eliscriptDiagnostic?.code === \"ELI-RT0002\");\n  assert.equal(heap.stats().frameDepth, 1); heap.collect();\n  const last = heap.get(marker, 0); assert(Number.isInteger(heap.readNumber(last))); assert(heap.readNumber(last) < 10000); heap.release(last);\n  assert.equal(number(heap, \"apply-one\", [adder, five]), 9);\n  heap.leaveFrame(frame); finish(heap, [marker, n, four, five, adder]);\n});\n\ntest(\"a real trap inside a captured read unwinds dynamic callers and retains preexisting roots\", async () => {\n  const source = await readFile(\"bootstrap/runtime/memory.eli\", \"utf8\"), start = source.indexOf(\"  (defun value-cell-get (heap cell)\"), end = source.indexOf(\"  (defun value-cell-set\", start);\n  assert(start >= 0 && end > start);\n  const faulty = source.slice(0, start) + \"  (defun value-cell-get (heap cell) (load-u32 4294967295))\\n\" + source.slice(end);\n  const injected = backends.compiler.compile_ir_string(faulty, \"trap-cell-runtime.eli\");\n  const bytes = Uint8Array.from(backends.managed.emit_managed_wasm(program, injected));\n  const heap = instantiateManagedRuntime(bytes); heap.auto(1);\n  const four = heap.number(4), five = heap.number(5), f = heap.invoke(\"make-adder\", [four]);\n  const frame = heap.frame(1); heap.frameSet(frame, 0, four);\n  assert.throws(() => heap.invoke(\"apply-one\", [f, five]), WebAssembly.RuntimeError);\n  assert.equal(heap.stats().frameDepth, 1);\n  const alias = heap.frameGet(frame, 0); assert.equal(heap.readNumber(alias), 4); heap.release(alias);\n  heap.leaveFrame(frame); finish(heap, [four, five, f]);\n});\n\ntest(\"unsupported callable forms are source-bound refusals even in dead code and leave input IR untouched\", async () => {\n  const before = JSON.stringify(program), runtimeBefore = JSON.stringify(runtime);\n  const dead = backends.compiler.compile_ir_string(\"(defun f (x) (if false (lambda () x) x)) (export f)\", \"dead-supported-lambda.eli\");\n  const heap = instantiateManagedRuntime(Uint8Array.from(backends.managed.emit_managed_wasm(dead, runtime)));\n  const input = heap.number(4), output = heap.invoke(\"f\", [input]); assert.equal(heap.readNumber(output), 4); finish(heap, [input, output]);\n  backends.managed.emit_managed_wasm(program, runtime);\n  assert.equal(JSON.stringify(program), before); assert.equal(JSON.stringify(runtime), runtimeBefore);\n  const supported = backends.compiler.compile_ir_string(\"(defun f () (if false (async () 1) 0)) (export f)\", \"supported-async-callable.eli\");\n  const supportedBefore = JSON.stringify(supported);\n  const supportedBytes = Uint8Array.from(backends.managed.emit_managed_wasm(supported, runtime));\n  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(supportedBytes)), []);\n  const supportedHeap = instantiateManagedRuntime(supportedBytes); supportedHeap.auto(1);\n  const supportedResult = supportedHeap.invoke(\"f\", []);\n  assert.equal(supportedHeap.readNumber(supportedResult), 0);\n  supportedHeap.release(supportedResult); supportedHeap.collect(); assert.equal(supportedHeap.live(), 0);\n  assert.equal(JSON.stringify(supported), supportedBefore);\n  const shadowedSource = \"(defun f () (let ((globalThis nil)) (lambda () (new globalThis.Map)))) (defun call-closure (fn) (funcall fn)) (export f call-closure)\";\n  const shadowed = backends.compiler.compile_ir_string(shadowedSource, \"shadowed-constructor.eli\"), shadowedBefore = JSON.stringify(shadowed);\n  const shadowedReference = backends.compiler.emit_ir_string(shadowed);\n  const shadowedBytes = Uint8Array.from(backends.managed.emit_managed_wasm(shadowed, runtime));\n  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(shadowedBytes)), []);\n  const shadowedHeap = instantiateManagedRuntime(shadowedBytes); shadowedHeap.auto(1);\n  const closure = shadowedHeap.invoke(\"f\", []);\n  assert.throws(() => shadowedHeap.invoke(\"call-closure\", [closure]), error => error instanceof TypeError && error.eliscriptDiagnostic?.code === \"ELI-RT0001\");\n  shadowedHeap.release(closure); shadowedHeap.collect(); assert.equal(shadowedHeap.live(), 0);\n  assert.equal(JSON.stringify(shadowed), shadowedBefore);\n  const reference = spawnSync(\"node\", [\"--input-type=module\", \"-e\", `import assert from 'node:assert/strict';const reference=await import('data:text/javascript;base64,'+${JSON.stringify(Buffer.from(shadowedReference).toString(\"base64\"))});assert.throws(()=>reference.call_closure(reference.f()),TypeError);`], { encoding: \"utf8\", timeout: 30000 });\n  assert.equal(reference.status, 0, reference.stderr);\n  for (const source of [\"(defun f () (lambda ([x]) x))\", \"(defun f () (lambda (&optional [x]) x))\"]) {\n    // These original inputs now belong to the implemented parameter-pattern\n    // profile. Preserve both sources and prove their real callable behavior.\n    const ir = backends.compiler.compile_ir_string(source +\n      \" (defun call-pattern (fn value) (funcall fn value)) (export f call-pattern)\", \"supported-callable-pattern.eli\");\n    const saved = JSON.stringify(ir), bytes = Uint8Array.from(backends.managed.emit_managed_wasm(ir, runtime));\n    assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);assert.equal(JSON.stringify(ir), saved);\n    const js = await import(\"data:text/javascript;base64,\" + Buffer.from(backends.compiler.emit_ir_string(ir)).toString(\"base64\"));\n    const a = instantiateManagedRuntime(bytes);a.auto(1);const fn = a.invoke(\"f\"), expected = js.f();\n    try {\n      for (const value of [-0, 37, undefined, null, false]) {\n        const element = typeof value === \"number\" ? a.number(value) : value;\n        const input = a.sourceArray([element]);let result;\n        try {\n          a.collect();result = a.invoke(\"call-pattern\", [fn, input]);\n          const actual = result?.kind === 4 ? a.readNumber(result) : result;\n          assert(Object.is(actual, expected([value])), \"the original pattern source retains the exact JS value under GC\");\n        } finally {a.release(result);a.release(input);a.release(element);}\n        a.collect();assert.equal(a.stats().frameDepth, 0);\n      }\n    } finally {a.release(fn);a.closeModule();finish(a, []);}\n    assert.equal(JSON.stringify(ir), saved);\n  }\n  for (const source of [\"(defun f (g) (apply g (js* \\\"[]\\\")))\"]) {\n    const ir = backends.compiler.compile_ir_string(source + \" (export f)\", \"unsupported-callable.eli\"), saved = JSON.stringify(ir);\n    assert.throws(() => backends.managed.emit_managed_wasm(ir, runtime), e => e.eliscriptDiagnostic?.code === \"ELI-B0001\" && e.eliscriptDiagnostic.location.file === \"unsupported-callable.eli\", source);\n    assert.equal(JSON.stringify(ir), saved);\n  }\n});\n\ntest(\"local and captured host constructors preserve real lookup argument order and GC in standalone and linked WASM\", async () => {\n  const body = `(new globalThis.Map\n    (progn (put trace 1 (aref trace 0))\n      (Object/defineProperty globalThis \"Map\" (js-object :value false :configurable t)) undefined)\n    (put trace 2 (1+ (aref trace 2))))`;\n  const source = `(defun makehost (trace)\n    (let ((host (js-object)) (constructor (js* \"Map\")))\n      (Object/defineProperty host \"Map\" (js-object :configurable t\n        :get (lambda () (put trace 0 (1+ (aref trace 0))) constructor))) host))\n    (defun throwhost (trace)\n      (Object/defineProperty (js-object) \"Map\" (js-object :configurable t\n        :get (lambda () (put trace 0 1) (throw false)))))\n    (defun localnew (globalThis trace) ${body})\n    (defun capturenew (globalThis trace) (lambda () ${body}))\n    (defun invokeclosure (closure) (funcall closure))\n    (defun mapsize (map) (get map :size))\n    (export makehost throwhost localnew capturenew invokeclosure mapsize)`;\n  const ir = backends.compiler.compile_ir_string(source, \"local-constructors.eli\"), saved = JSON.stringify(ir);\n  const reference = await import(\"data:text/javascript;base64,\" + Buffer.from(backends.compiler.emit_ir_string(ir)).toString(\"base64\"));\n  for (const linked of [false, true]) {\n    const bytes = Uint8Array.from(linked\n      ? backends.managed.emit_managed_project_wasm([{id: \"constructors.mjs\", program: ir}], \"constructors.mjs\", runtime)\n      : backends.managed.emit_managed_wasm(ir, runtime));\n    assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);assert.equal(JSON.stringify(ir), saved);\n    const heap = instantiateManagedRuntime(bytes);heap.auto(1);const held = [];\n    const own = value => {held.push(value);return value;};\n    const makeTrace = () => {\n      const zero = heap.number(0);\n      try {return own(heap.sourceArray([zero, zero, zero]));} finally {heap.release(zero);}\n    };\n    const traceValues = trace => Array.from({length: heap.length(trace)}, (_, index) => {\n      const value = heap.get(trace, index);try {return heap.readNumber(value);} finally {heap.release(value);}\n    });\n    try {\n      for (const captured of [false, true]) {\n        const trace = makeTrace(), host = own(heap.invoke(\"makehost\", [trace]));\n        const expectedTrace = [0, 0, 0], expectedHost = reference.makehost(expectedTrace);\n        const closure = captured ? own(heap.invoke(\"capturenew\", [host, trace])) : undefined;\n        const expectedCall = captured ? reference.capturenew(expectedHost, expectedTrace) : () => reference.localnew(expectedHost, expectedTrace);\n        const call = () => captured ? heap.invoke(\"invokeclosure\", [closure]) : heap.invoke(\"localnew\", [host, trace]);\n        heap.collect();const expected = expectedCall(), map = own(call());\n        assert.equal(number(heap, \"mapsize\", [map]), expected.size);assert.deepEqual(traceValues(trace), expectedTrace);\n        assert.deepEqual(expectedTrace, [1, 1, 1]);\n        // The callee was captured before the first argument replaced its\n        // property. A later call observes false, after evaluating both args.\n        assert.throws(expectedCall, TypeError);assert.throws(call, TypeError);\n        assert.deepEqual(traceValues(trace), expectedTrace);assert.deepEqual(expectedTrace, [1, 1, 2]);\n        heap.collect();assert.equal(number(heap, \"mapsize\", [map]), 0);\n        const empty = makeTrace(), expectedEmpty = [0, 0, 0];\n        const missing = captured ? own(heap.invoke(\"capturenew\", [null, empty])) : undefined;\n        heap.collect();assert.throws(() => captured ? heap.invoke(\"invokeclosure\", [missing]) : heap.invoke(\"localnew\", [null, empty]),\n          error => error instanceof TypeError && error.eliscriptDiagnostic?.code === \"ELI-RT0001\");\n        assert.throws(() => captured ? reference.capturenew(null, expectedEmpty)() : reference.localnew(null, expectedEmpty), TypeError);\n        assert.deepEqual(traceValues(empty), expectedEmpty);assert.deepEqual(expectedEmpty, [0, 0, 0]);\n        const thrownTrace = makeTrace(), throwing = own(heap.invoke(\"throwhost\", [thrownTrace]));\n        const throwingClosure = captured ? own(heap.invoke(\"capturenew\", [throwing, thrownTrace])) : undefined;\n        let threw = false;\n        try {captured ? heap.invoke(\"invokeclosure\", [throwingClosure]) : heap.invoke(\"localnew\", [throwing, thrownTrace]);}\n        catch (error) {threw = true;assert.strictEqual(error, false);}\n        assert(threw);assert.deepEqual(traceValues(thrownTrace), [1, 0, 0]);\n        const jsTrace = [0, 0, 0], jsHost = reference.throwhost(jsTrace);let jsThrew = false;\n        try {captured ? reference.capturenew(jsHost, jsTrace)() : reference.localnew(jsHost, jsTrace);}\n        catch (error) {jsThrew = true;assert.strictEqual(error, false);}\n        assert(jsThrew);assert.deepEqual(traceValues(thrownTrace), jsTrace);\n        heap.collect();assert.equal(heap.stats().frameDepth, 0);\n      }\n    } finally {for (const value of held) heap.release(value);heap.closeModule();finish(heap, []);}\n  }\n}, 30000);\n\ntest(\"parallel and sequential captures preserve shadowing and hygiene of internal ABI names\", () => {\n  const heap = instance(), four = heap.number(4), five = heap.number(5), f = heap.invoke(\"parallel-capture\", [four]);\n  assert.equal(number(heap, \"apply-zero\", [f]), javascript.parallel_capture(4)());\n  const pair = heap.invoke(\"sequential-captures\", [four]), old = heap.get(pair, 0), next = heap.get(pair, 1), reference = javascript.sequential_captures(4);\n  assert.equal(number(heap, \"apply-zero\", [old]), reference[0]()); assert.equal(number(heap, \"apply-zero\", [next]), reference[1]());\n  const hygienic = heap.invoke(\"hygienic-capture\", [four, five, four, five, four]);\n  assert.equal(number(heap, \"apply-zero\", [hygienic]), javascript.hygienic_capture(4, 5, 4, 5, 4)());\n  finish(heap, [four, five, f, pair, old, next, hygienic]);\n});\n\ntest(\"uniform dynamic ABI preserves many required parameters for both named and lifted functions\", () => {\n  const heap = instance(), named = heap.invoke(\"many-value\"), lambda = heap.invoke(\"many-lambda\"), marker = heap.sourceArray([false]);\n  for (const f of [named, lambda]) {\n    assert.equal(number(heap, \"many-extra\", [f, marker]), javascript.many_extra(javascript.many, [false]));\n    assert(Number.isNaN(number(heap, \"apply-zero\", [f])));\n    const effect = heap.get(marker, 0); assert.equal(heap.readNumber(effect), 123); heap.release(effect); heap.collect();\n  }\n  finish(heap, [named, lambda, marker]);\n});\n\ntest(\"Node executes source closures, shared writes and failure cleanup against independent generated JS\", async () => {\n  const wasm = resolve(directory, \"source-callables.wasm\"), js = resolve(directory, \"source-callables.mjs\");\n  await writeFile(wasm, Uint8Array.from(backends.managed.emit_managed_wasm(program, runtime)));\n  await writeFile(js, backends.compiler.emit_ir_string(program));\n  const result = spawnSync(process.env.NODE ?? \"node\", [\"--input-type=module\", \"-e\", `\n    import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';\n    const{instantiateManagedRuntime}=await import(process.argv[3]),ref=await import(process.argv[2]);\n    const bytes=await readFile(process.argv[1]);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);\n    const a=instantiateManagedRuntime(bytes);a.auto(1);\n    const num=(name,args=[])=>{const r=a.invoke(name,args);try{return a.readNumber(r);}finally{a.release(r);}};\n    const four=a.number(4),five=a.number(5),adder=a.invoke('make-adder',[four]);assert.equal(num('apply-one',[adder,five]),ref.make_adder(4)(5));\n    const pair=a.invoke('make-box',[four]),write=a.get(pair,0),read=a.get(pair,1),reference=ref.make_box(4);\n    for(const value of[-0,NaN,Infinity,-Infinity,Number.MIN_VALUE,-Number.MIN_VALUE,Number.MAX_VALUE]){const n=a.number(value),out=a.invoke('apply-one',[write,n]);assert(Object.is(a.readNumber(out),reference[0](value)));a.release(n);a.release(out);a.collect();assert(Object.is(num('apply-zero',[read]),reference[1]()));}\n    const nested=a.invoke('nested',[four]),inner=a.invoke('apply-one',[nested,five]);assert.equal(num('apply-one',[inner,four]),ref.nested(4)(5)(4));\n    const recursive=a.invoke('recursive'),count=a.number(24);assert.equal(num('apply-one',[recursive,count]),ref.recursive()(24));\n    const marker=a.sourceArray([false]),identity=a.invoke('named-value');assert.throws(()=>a.invoke('invoke-order',[false,marker]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');\n    const changed=a.get(marker,0);assert.equal(a.readNumber(changed),2);a.release(changed);assert.equal(a.invoke('apply-zero',[identity]),undefined);\n    assert.equal(a.invoke('named-same'),true);assert.equal(a.invoke('fresh-same'),false);assert.equal(a.invoke('repeated-same'),false);assert.equal(num('callee-order'),1);assert.equal(num('funcall-one',[adder,five]),9);assert.equal(a.invoke('funcall-zero',[identity]),undefined);\n    const items=a.invoke('capture-each',[four]);for(let i=0;i<4;i++){const f=a.get(items,i);assert.equal(num('apply-zero',[f]),i);a.release(f);}\n    for(const v of[four,five,adder,pair,write,read,nested,inner,recursive,count,marker,identity,items])a.release(v);\n    a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);\n  `, wasm, pathToFileURL(js).href, pathToFileURL(resolve(\"tools/backends/managed-runtime.mjs\")).href], { encoding: \"utf8\", timeout: 30_000 });\n  assert.equal(result.status, 0, result.stderr || String(result.error));\n});\n\ntest(\"captured opaque values retain alias identity and source cycles collect without permanent roots\", () => {\n  const heap = instance(), pair = heap.invoke(\"make-box\", [false]), write = heap.get(pair, 0), read = heap.get(pair, 1);\n  const text = heap.string(\"中😀\\ud800\"), bytes = heap.bytes(new Uint8Array([0, 255])), array = heap.sourceArray([text]);\n  const object = heap.sourceObject({ value: array }), fn = heap.invoke(\"named-value\");\n  for (const value of [null, false, true, undefined, text, bytes, array, object, fn, pair]) {\n    const out = heap.invoke(\"apply-one\", [write, value]); assert(heap.keyEqual(out, value)); heap.release(out); heap.collect();\n    const alias = heap.invoke(\"apply-zero\", [read]); assert(heap.keyEqual(alias, value)); heap.release(alias);\n  }\n  finish(heap, [pair, write, read, text, bytes, array, object, fn]);\n});\n\ntest(\"foreign, forged and collected function handles cannot enter a dynamic call or disturb caller roots\", () => {\n  const heap = instance(), other = instance(), foreign = other.invoke(\"named-value\"), four = heap.number(4);\n  const frame = heap.frame(1); heap.frameSet(frame, 0, four);\n  for (const f of [foreign, Object.freeze({ kind: 18 })]) assert.throws(() => heap.invoke(\"apply-one\", [f, four]), e => e.eliscriptDiagnostic?.code === \"ELI-RT0001\");\n  const stale = heap.invoke(\"named-value\"); heap.release(stale); heap.collect();\n  assert.throws(() => heap.invoke(\"apply-one\", [stale, four]), e => e.eliscriptDiagnostic?.code === \"ELI-RT0001\");\n  assert.equal(heap.stats().frameDepth, 1); const alias = heap.frameGet(frame, 0); assert.equal(heap.readNumber(alias), 4); heap.release(alias);\n  heap.leaveFrame(frame); finish(heap, [four]); finish(other, [foreign]);\n});\n\ntest(\"funcall shares dynamic callee ordering, omitted arguments and required ABI with ordinary calls\", () => {\n  const heap = instance(), four = heap.number(4), five = heap.number(5), adder = heap.invoke(\"make-adder\", [four]);\n  assert.equal(number(heap, \"funcall-one\", [adder, five]), javascript.funcall_one(javascript.make_adder(4), 5));\n  const identity = heap.invoke(\"named-value\"), marker = heap.sourceArray([false]);\n  assert.equal(heap.invoke(\"funcall-zero\", [identity]), undefined);\n  assert.throws(() => heap.invoke(\"funcall-order\", [false, marker]), e => e.eliscriptDiagnostic?.code === \"ELI-RT0003\");\n  const last = heap.get(marker, 0); assert.equal(heap.readNumber(last), 2); heap.release(last);\n  finish(heap, [four, five, adder, identity, marker]);\n});\n\ntest(\"malformed callable parameters cannot hide unsupported IR, duplicate bindings or invalid counts\", () => {\n  const find = nodes => { for (const n of nodes) { if (n.kind === \"function-expression\") return n; const child = find(n.children ?? []); if (child) return child; } };\n  for (const mutate of [n => { n.properties.parameterCount = -1; }, n => { n.properties.parameterCount = \"2\"; },\n    n => { n.children[0].children = [{ kind: \"raw-javascript\", value: \"js*\", children: [], span: {...n.children[0].span} }]; },\n    n => { n.children[1].value = n.children[0].value; }, n => { n.children[0].value = \"\"; }]) {\n    const ir = backends.compiler.compile_ir_string(\"(defun f () (lambda (x y) 7)) (export f)\", \"malformed-callable.eli\");\n    mutate(find(ir.body)); const saved = JSON.stringify(ir);\n    assert.throws(() => backends.managed.emit_managed_wasm(ir, runtime), e => e.eliscriptDiagnostic?.code === \"ELI-B0001\" && e.eliscriptDiagnostic.location.file === \"malformed-callable.eli\");\n    assert.equal(JSON.stringify(ir), saved);\n  }\n});\n\ntest(\"a callable child without its required source span is rejected by the IR schema before backend lowering\", () => {\n  const ir = backends.compiler.compile_ir_string(\"(defun f () (lambda (x y) 7)) (export f)\", \"missing-callable-span.eli\");\n  const pending = [...ir.body];let callable;\n  while (pending.length) {const node = pending.pop();if (node.kind === \"function-expression\") {callable = node;break;}pending.push(...node.children);}\n  assert(callable);callable.children[0].children = [{kind: \"raw-javascript\", value: \"js*\", children: []}];\n  const saved = JSON.stringify(ir);\n  assert.throws(() => backends.managed.emit_managed_wasm(ir, runtime), error => {\n    assert.equal(error.eliscriptDiagnostic?.code, \"ELI-I0001\");assert.equal(error.eliscriptDiagnostic?.phase, \"ir-schema\");\n    assert.equal(error.message, \"IR node has unknown or missing fields\");\n    assert.equal(error.eliscriptDiagnostic.message, error.message);return true;\n  });\n  assert.equal(JSON.stringify(ir), saved);\n});\n\ntest(\"captured arguments are snapshotted before later writes replace their shared cell\", () => {\n  const heap = instance(), four = heap.number(4), result = heap.invoke(\"captured-arguments\", [four]);\n  const first = heap.get(result, 0), second = heap.get(result, 1), reference = javascript.captured_arguments(4);\n  assert.equal(heap.readNumber(first), reference[0]); assert.equal(heap.readNumber(first), 45);\n  assert.equal(heap.readNumber(second), reference[1]); assert.equal(heap.readNumber(second), 5);\n  finish(heap, [four, result, first, second]);\n});\n\nfunction prepareGeneratedClosureCases() {\n  const names = [\"x\", \"heap\", \"frame\", \"error\", \"arguments\", \"function\"], operators = [\"+\", \"-\", \"*\", \"/\"];\n  let seed = 0x3fd8a157; const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0);\n  const cases = [];\n  for (const name of names) for (const sequential of [false, true]) for (const op of operators) {\n    const salt = ((random() % 2001) - 1000) / 16, outer = cases.length % 3 === 0 ? -0 : cases.length % 3 === 1 ? NaN : 7.25;\n    const bindings = sequential ? `((${name} ${salt}) (before (lambda () ${name})))` : `((before (lambda () ${name})) (${name} ${salt}))`;\n    const source = `(defun make (${name}) (${sequential ? \"let*\" : \"let\"} ${bindings}\n      (js-array (lambda (delta) (setq ${name} (${op} ${name} delta)) ${name}) (lambda () ${name}) before)))\n      (defun update (f delta) (funcall f delta)) (defun read (f) (funcall f)) (export make update read)`;\n    const ir = backends.compiler.compile_ir_string(source, `generated-capture-${cases.length}.eli`);\n    const before = JSON.stringify(ir), bytes = Uint8Array.from(backends.managed.emit_managed_wasm(ir, runtime));\n    assert.equal(JSON.stringify(ir), before);\n    cases.push({ name, sequential, op, salt, outer, bytes });\n  }\n  assert.equal(cases.length, 48);\n  return cases;\n}\n\ntest(\"generated closure programs match an independent lexical and IEEE model across shadowing and updates\", () => {\n  const update = { \"+\": (a, b) => a + b, \"-\": (a, b) => a - b, \"*\": (a, b) => a * b, \"/\": (a, b) => a / b };\n  let count = 0;\n  for (const { name, sequential, op, salt, outer, bytes } of generatedClosureCases) {\n    const heap = instantiateManagedRuntime(bytes); heap.auto(1);\n    const input = heap.number(outer), pair = heap.invoke(\"make\", [input]), writer = heap.get(pair, 0), reader = heap.get(pair, 1), before = heap.get(pair, 2);\n    let expected = salt;\n    for (const delta of [0.5, -0, 3.25, -2, Infinity, Number.MIN_VALUE, NaN]) {\n      const argument = heap.number(delta), result = heap.invoke(\"update\", [writer, argument]); expected = update[op](expected, delta);\n      assert(Object.is(heap.readNumber(result), expected), `${name} ${sequential} ${op} write`); heap.release(result); heap.release(argument); heap.collect();\n      for (const [f, value] of [[reader, expected], [before, sequential ? expected : outer]]) {\n        const out = heap.invoke(\"read\", [f]); assert(Object.is(heap.readNumber(out), value), `${name} ${sequential} ${op} read`); heap.release(out);\n      }\n    }\n    finish(heap, [input, pair, writer, reader, before]); count++;\n  }\n  assert.equal(count, 48);\n});\n"))
+(module tests.wasm-managed-callables.test
+  (import "bun:test" afterAll beforeAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:child_process" spawnSync)
+  (import "node:fs/promises" mkdtemp readFile rm writeFile)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "node:url" fileURLToPath pathToFileURL)
+  (import "node:buffer" Buffer)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+  (defconst to-uint32 (js* "(x) => x >>> 0"))
+  (defconst bit-and (js* "(a, b) => a & b"))
+  (defconst js-instanceof (js* "(a, b) => a instanceof b"))
+  (defconst callables-node-helper-path
+    (fileURLToPath (new globalThis.URL "./helpers/wasm-managed-callables-node.mjs" (get (js* "import.meta") :url))))
+
+  (defvar directory undefined)
+  (defvar backends undefined)
+  (defvar runtime undefined)
+  (defvar program undefined)
+  (defvar javascript undefined)
+  (defvar generated-closure-cases undefined)
+
+  (defun prepare-generated-closure-cases ()
+    (let* ((names (js-array "x" "heap" "frame" "error" "arguments" "function"))
+           (operators (js-array "+" "-" "*" "/"))
+           (seed 1071161687)
+           (next-random (lambda ()
+                          (setq seed (funcall to-uint32 (+ (Math/imul seed 1664525) 1013904223)))
+                          seed))
+           (cases (js-array)))
+      (js-call names :forEach
+        (lambda (name)
+          (js-call (js-array false t) :forEach
+            (lambda (sequential)
+              (js-call operators :forEach
+                (lambda (op)
+                  (let* ((salt (/ (- (% (funcall next-random) 2001) 1000) 16))
+                         (idx (get cases :length))
+                         (outer (cond
+                                  ((= (% idx 3) 0) -0.0)
+                                  ((= (% idx 3) 1) (get globalThis.Number :NaN))
+                                  (t 7.25)))
+                         (bindings (if sequential
+                                     (str "((" name " " salt ") (before (lambda () " name ")))")
+                                     (str "((before (lambda () " name ")) (" name " " salt "))")))
+                         (source (str "(defun make (" name ") (" (if sequential "let*" "let") " " bindings "\n"
+                                      "      (js-array (lambda (delta) (setq " name " (" op " " name " delta)) " name ") (lambda () " name ") before)))\n"
+                                      "      (defun update (f delta) (funcall f delta)) (defun read (f) (funcall f)) (export make update read)"))
+                         (ir (js-call (get backends :compiler) :compile_ir_string source
+                               (str "generated-capture-" idx ".eli")))
+                         (before (JSON/stringify ir))
+                         (bytes (globalThis.Uint8Array.from
+                                  (js-call (get backends :managed) :emit_managed_wasm ir runtime))))
+                    (js-call assert :equal (JSON/stringify ir) before)
+                    (js-call cases :push
+                      (js-object :name name :sequential sequential :op op
+                                 :salt salt :outer outer :bytes bytes)))))))))
+      (js-call assert :equal (get cases :length) 48)
+      cases))
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-callables-"))))
+      (setq backends (await (buildBackends (js-object :outputRoot directory))))
+      (setq runtime (js-call (get backends :compiler) :compile_ir_string
+                      (await (readFile "bootstrap/runtime/memory.eli" "utf8"))
+                      "runtime.eli"))
+      (setq program (js-call (get backends :compiler) :compile_ir_string
+                      (await (readFile "tests/fixtures/wasm-managed-callables.eli" "utf8"))
+                      "callables.eli"))
+      (setq javascript
+        (await (funcall dynamic-import
+                 (str "data:text/javascript;base64,"
+                      (js-call (Buffer/from (js-call (get backends :compiler) :emit_ir_string program))
+                               :toString "base64")))))
+      (let ((prepared-at (js-call globalThis.performance :now)))
+        (setq generated-closure-cases (prepare-generated-closure-cases))
+        (js-call globalThis.console :info
+          (str "[managed-callables] prepared " (get generated-closure-cases :length)
+               " full-runtime artifacts in "
+               (js-call (- (js-call globalThis.performance :now) prepared-at) :toFixed 2)
+               "ms"))))
+    120000)
+
+  (afterAll
+    (async ()
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun instance ()
+    (let* ((bytes (globalThis.Uint8Array.from
+                    (js-call (get backends :managed) :emit_managed_wasm program runtime)))
+           (_1 (funcall assert (js-call globalThis.WebAssembly :validate bytes)))
+           (_2 (js-call assert :deepEqual
+                 (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes))
+                 (js-array)))
+           (heap (instantiateManagedRuntime bytes)))
+      (js-call heap :auto 1)
+      heap))
+
+  (defun read-num (heap name &rest __host_default_arguments_1)
+    (let* ((args (aref __host_default_arguments_1 0)))
+    (let ((result (js-call heap :invoke name (if (undefined? args) (js-array) args))))
+      (try
+        (js-call heap :readNumber result)
+        (finally (js-call heap :release result))))))
+
+  (defun finish (heap values)
+    (js-call values :forEach (lambda (value) (js-call heap :release value)))
+    (js-call heap :collect)
+    (js-call assert :equal (js-call heap :live) 0)
+    (js-call assert :equal (get (js-call heap :stats) :frameDepth) 0))
+
+  (test "escaping, nested and recursive closures execute inside WASM with exact shared captures"
+    (lambda ()
+      (js-call assert :equal (funcall (js-call javascript :make_adder 4) 5) 9)
+      (js-call assert :equal (funcall (funcall (js-call javascript :nested 4) 5) 6) 15)
+      (js-call assert :equal (funcall (js-call javascript :recursive) 24) 24)
+      (let* ((heap (instance))
+             (four (js-call heap :number 4))
+             (five (js-call heap :number 5))
+             (six (js-call heap :number 6))
+             (cnt (js-call heap :number 24))
+             (adder (js-call heap :invoke "make-adder" (js-array four))))
+        (js-call heap :collect)
+        (js-call assert :equal
+          (read-num heap "apply-one" (js-array adder five))
+          (funcall (js-call javascript :make_adder 4) 5))
+        (let* ((first (js-call heap :invoke "nested" (js-array four)))
+               (second (js-call heap :invoke "apply-one" (js-array first five))))
+          (js-call assert :equal
+            (read-num heap "apply-one" (js-array second six))
+            (funcall (funcall (js-call javascript :nested 4) 5) 6))
+          (let ((rec (js-call heap :invoke "recursive" (js-array))))
+            (js-call assert :equal
+              (read-num heap "apply-one" (js-array rec cnt))
+              (funcall (js-call javascript :recursive) 24))
+            (let ((written (js-call heap :invoke "outer-write" (js-array four)))
+                  (shadow (js-call heap :invoke "shadow" (js-array four))))
+              (js-call assert :equal
+                (read-num heap "apply-zero" (js-array written))
+                (funcall (js-call javascript :outer_write 4)))
+              (js-call assert :equal
+                (read-num heap "apply-zero" (js-array shadow))
+                (funcall (js-call javascript :shadow 4)))
+              (finish heap (js-array four five six cnt adder first second rec written shadow))))))))
+
+  (test "sibling closures share mutable cells while loop bindings and function identities stay distinct"
+    (lambda ()
+      (let ((reference (js-call javascript :make_pair 4)))
+        (js-call assert :equal (funcall (aref reference 0)) 5)
+        (js-call assert :equal (funcall (aref reference 1)) 5))
+      (js-call assert :deepEqual
+        (js-call (js-call javascript :capture_each 4) :map (lambda (f) (funcall f)))
+        (js-array 0 1 2 3))
+      (js-call assert :equal (js-call javascript :named_same) t)
+      (js-call assert :equal (js-call javascript :fresh_same) false)
+      (let* ((heap (instance))
+             (four (js-call heap :number 4))
+             (pair (js-call heap :invoke "make-pair" (js-array four)))
+             (increment (js-call heap :get pair 0))
+             (current (js-call heap :get pair 1))
+             (i 0))
+        (while (< i 32)
+          (js-call assert :equal (read-num heap "apply-zero" (js-array increment)) (+ 5 i))
+          (js-call heap :collect)
+          (js-call assert :equal (read-num heap "apply-zero" (js-array current)) (+ 5 i))
+          (setq i (1+ i)))
+        (let ((items (js-call heap :invoke "capture-each" (js-array four)))
+              (j 0))
+          (while (< j 4)
+            (let ((f (js-call heap :get items j)))
+              (try
+                (js-call assert :equal (read-num heap "apply-zero" (js-array f)) j)
+                (finally (js-call heap :release f))))
+            (setq j (1+ j)))
+          (js-call assert :equal (js-call heap :invoke "named-same") t)
+          (js-call assert :equal (js-call heap :invoke "fresh-same") false)
+          (js-call assert :equal (js-call heap :invoke "repeated-same") false)
+          (let ((fresh-a (js-call heap :invoke "fresh-function"))
+                (fresh-b (js-call heap :invoke "fresh-function")))
+            (funcall assert (not (js-call heap :keyEqual fresh-a fresh-b)))
+            (js-call heap :release fresh-a)
+            (js-call heap :release fresh-b))
+          (let ((named (js-call heap :invoke "named-value"))
+                (another (js-call heap :invoke "named-value")))
+            (funcall assert (js-call heap :keyEqual named another))
+            (js-call assert :equal (read-num heap "apply-one" (js-array named four)) 4)
+            (js-call assert :equal (read-num heap "from-slot" (js-array pair)) 37)
+            (finish heap (js-array four pair increment current items named another)))))))
+
+  (test "dynamic calls capture callees before arguments and evaluate extras before noncallable failure"
+    (lambda ()
+      (js-call assert :equal (js-call javascript :callee_order) 1)
+      (let ((reference-marker (js-array false)))
+        (js-call assert :throws
+          (lambda () (js-call javascript :invoke_order false reference-marker))
+          globalThis.TypeError)
+        (js-call assert :deepEqual reference-marker (js-array 2)))
+      (let* ((heap (instance))
+             (identity (js-call heap :invoke "named-value"))
+             (marker (js-call heap :sourceArray (js-array false))))
+        (js-call assert :equal (read-num heap "callee-order") 1)
+        (js-call assert :equal (read-num heap "apply-extra" (js-array identity marker)) 7)
+        (let ((effect (js-call heap :get marker 0)))
+          (try
+            (js-call assert :equal (js-call heap :readNumber effect) 9)
+            (finally (js-call heap :release effect))))
+        (let ((missing (js-call heap :invoke "apply-zero" (js-array identity))))
+          (js-call assert :equal missing undefined))
+        (let ((rejected (js-array nil undefined false t -0.0 0
+                                  (get globalThis.Number :NaN)
+                                  (get globalThis.Number :POSITIVE_INFINITY)
+                                  "" "中😀" (js-array) (js-object))))
+          (js-call rejected :forEach
+            (lambda (value)
+              (let ((reference-trace (js-array false)))
+                (js-call assert :throws
+                  (lambda () (js-call javascript :invoke_order value reference-trace))
+                  globalThis.TypeError)
+                (js-call assert :deepEqual reference-trace (js-array 2)))
+              (let ((input (cond
+                             ((= (value-type value) "number") (js-call heap :number value))
+                             ((= (value-type value) "string") (js-call heap :string value))
+                             ((Array/isArray value) (js-call heap :sourceArray (js-array)))
+                             ((and (not (nil? value)) (= (value-type value) "object"))
+                              (js-call heap :sourceObject (js-object)))
+                             (t value))))
+                (try
+                  (js-call assert :throws
+                    (lambda () (js-call heap :invoke "invoke-order" (js-array input marker)))
+                    (lambda (error)
+                      (let ((diag (get error :eliscriptDiagnostic)))
+                        (and (funcall js-instanceof error globalThis.TypeError)
+                             (not (nullish? diag))
+                             (= (get diag :code) "ELI-RT0003")))))
+                  (let ((failed-effect (js-call heap :get marker 0)))
+                    (try
+                      (js-call assert :equal (js-call heap :readNumber failed-effect) 2)
+                      (finally (js-call heap :release failed-effect))))
+                  (js-call heap :collect)
+                  (js-call assert :equal (get (js-call heap :stats) :frameDepth) 0)
+                  (js-call assert :equal (js-call heap :invoke "apply-zero" (js-array identity)) undefined)
+                  (finally (js-call heap :release input)))))))
+        (finish heap (js-array identity marker)))))
+
+  (defun indirect-program ()
+    (let* ((mk-local (lambda (index) (js-object :kind "local" :type "u32" :children (js-array) :value index)))
+           (mk-lit (lambda (value) (js-object :kind "literal" :type "u32" :children (js-array) :value value)))
+           (mk-fn (lambda (name index arity body)
+                    (js-object
+                      :name name :index index :arity arity
+                      :locals (globalThis.Array.from (js-object :length arity)
+                                (lambda (_ idx) (js-object :name (str "p" idx) :index idx :type "u32")))
+                      :body body))))
+      (js-object
+        :abi "memory-u32"
+        :filename "indirect.eli"
+        :exports (js-array "dispatch" "mismatch")
+        :table (js-array 1 0)
+        :functions (js-array
+                     (funcall mk-fn "identity" 0 1 (funcall mk-local 0))
+                     (funcall mk-fn "increment" 1 1
+                       (js-object :kind "int-add" :type "u32" :value nil
+                                  :children (js-array (funcall mk-local 0) (funcall mk-lit 1))))
+                     (funcall mk-fn "dispatch" 2 2
+                       (js-object :kind "call-indirect" :type "u32" :value 1
+                                  :children (js-array (funcall mk-local 1) (funcall mk-local 0))))
+                     (funcall mk-fn "mismatch" 3 1
+                       (js-object :kind "call-indirect" :type "u32" :value 2
+                                  :children (js-array (funcall mk-lit 11) (funcall mk-lit 22) (funcall mk-local 0))))))))
+
+  (test "typed WASM indirect calls select actual table entries and retain engine type and bounds traps"
+    (lambda ()
+      (let* ((prog (indirect-program))
+             (bytes (globalThis.Uint8Array.from (js-call (get backends :wasm) :emit_typed_memory_wasm prog)))
+             (_ (funcall assert (js-call globalThis.WebAssembly :validate bytes)))
+             (mod (new globalThis.WebAssembly.Module bytes)))
+        (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports mod) (js-array))
+        (let ((e (get (new globalThis.WebAssembly.Instance mod) :exports)))
+          (js-call assert :equal (js-call e :dispatch 0 41) 42)
+          (js-call assert :equal (js-call e :dispatch 1 41) 41)
+          (js-call assert :equal (js-call e :dispatch 0 4294967295) 0)
+          (js-call assert :throws (lambda () (js-call e :dispatch 2 0)) globalThis.WebAssembly.RuntimeError)
+          (js-call assert :throws (lambda () (js-call e :dispatch 4294967295 0)) globalThis.WebAssembly.RuntimeError)
+          (js-call assert :throws (lambda () (js-call e :mismatch 0)) globalThis.WebAssembly.RuntimeError)))))
+
+  (test "typed WASM indirect calls reject missing tables, invalid entries and inconsistent call shapes"
+    (lambda ()
+      (js-call (js-array
+                 (lambda (p) (Reflect/deleteProperty p "table"))
+                 (lambda (p) (put p :table (js-array -1)))
+                 (lambda (p) (put p :table (js-array 999)))
+                 (lambda (p) (js-call (get (get (aref (get p :functions) 2) :body) :children) :pop))
+                 (lambda (p) (put (get (aref (get p :functions) 2) :body) :value 7)))
+        :forEach
+        (lambda (mutate)
+          (let ((prog (indirect-program)))
+            (funcall mutate prog)
+            (js-call assert :throws
+              (lambda () (js-call (get backends :wasm) :emit_typed_memory_wasm prog))
+              (lambda (e)
+                (let ((diag (get e :eliscriptDiagnostic)))
+                  (and (not (nullish? diag)) (= (get diag :code) "ELI-B0001"))))))))))
+
+  (defun raw-callable-heap (&rest __host_default_arguments_2)
+    (let* ((options (aref __host_default_arguments_2 0)))
+    (let* ((opts (if (undefined? options) (js-object) options))
+           (max-bytes (let ((mb (get opts :maxBytes))) (if (nullish? mb) 32768 mb)))
+           (names (js-array "value-cell-new" "value-cell-get" "value-cell-set"
+                            "value-function-new" "value-function-named" "value-function-code"
+                            "value-function-capture-get" "value-function-capture-set"))
+           (prog (globalThis.structuredClone runtime)))
+      (js-call (get prog :body) :push
+        (js-object :kind "export-declaration" :value nil
+                   :children (js-call names :map
+                               (lambda (value) (js-object :kind "reference" :value value :children (js-array))))))
+      (let* ((bytes (globalThis.Uint8Array.from (js-call (get backends :wasm) :emit_memory_wasm prog)))
+             (mod (new globalThis.WebAssembly.Module bytes))
+             (_ (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports mod) (js-array)))
+             (e (get (new globalThis.WebAssembly.Instance mod) :exports))
+             (heap (funcall (get e "heap-new") 128 4096 max-bytes))
+             (call (lambda (name &rest args)
+                     (let ((result (funcall to-uint32
+                                     (Reflect/apply (get e name) e (js-call (js-array heap) :concat args)))))
+                       (js-call assert :equal (funcall (get e "last-error")) 0 name)
+                       result))))
+        (funcall call "heap-auto" 1)
+        (js-object :e e :heap heap :call call :bytes bytes)))))
+
+  (test "callable heap cells retain cycles and exact captures through forced GC and pool growth"
+    (lambda ()
+      (let* ((raw (raw-callable-heap))
+             (e (get raw :e))
+             (heap (get raw :heap))
+             (call (get raw :call))
+             (cell (funcall call "value-cell-new" 2))
+             (_cell-root (funcall call "heap-pin" cell))
+             (closure (funcall call "value-function-new" 7 1))
+             (keep (js-array))
+             (i 0))
+        (funcall call "heap-pin" closure)
+        (funcall call "value-function-capture-set" closure 0 cell)
+        (funcall call "value-cell-set" cell closure)
+        (funcall call "heap-release" cell)
+        (funcall call "heap-collect")
+        (js-call assert :equal (funcall call "value-function-code" closure) 7)
+        (while (< i 50)
+          (let ((n (funcall call "value-number" i 0)))
+            (funcall call "heap-pin" n)
+            (js-call keep :push n))
+          (setq i (1+ i)))
+        (funcall assert (> (funcall call "heap-capacity") 4096))
+        (js-call assert :equal (funcall call "value-function-capture-get" closure 0) cell)
+        (js-call assert :equal (funcall call "value-cell-get" cell) closure)
+        (funcall call "value-cell-set" cell 1)
+        (js-call assert :equal (funcall call "value-cell-get" cell) 1)
+        (js-call keep :forEach (lambda (n) (funcall call "heap-release" n)))
+        (funcall call "heap-release" closure)
+        (funcall call "heap-collect")
+        (js-call assert :equal (funcall call "heap-live") 0)
+        (js-call assert :equal (funcall call "frame-depth") 0)
+        (funcall (get e "value-function-code") heap closure)
+        (js-call assert :equal (funcall (get e "last-error")) 1)
+        (funcall (get e "value-cell-get") heap cell)
+        (js-call assert :equal (funcall (get e "last-error")) 1)
+        (funcall (get e "value-function-code") heap 1)
+        (js-call assert :equal (funcall (get e "last-error")) 3))))
+
+  (test "named callable identities are shared only while alive and fresh functions stay distinct"
+    (lambda ()
+      (let* ((raw (raw-callable-heap))
+             (call (get raw :call))
+             (a (funcall call "value-function-named" 11)))
+        (funcall call "heap-pin" a)
+        (js-call assert :equal (funcall call "value-function-named" 11) a)
+        (let ((b (funcall call "value-function-new" 11 0)))
+          (funcall call "heap-pin" b)
+          (js-call assert :notEqual a b)
+          (js-call assert :equal (funcall call "value-key-equal" a b) 0)
+          (js-call assert :equal (funcall call "value-key-equal" a a) 1)
+          (let ((h (funcall call "value-key-hash" a)))
+            (funcall call "heap-collect")
+            (js-call assert :equal (funcall call "value-key-hash" a) h))
+          (funcall call "heap-release" a)
+          (funcall call "heap-release" b)
+          (funcall call "heap-collect")
+          (js-call assert :equal (funcall call "heap-live") 0)
+          (let ((c (funcall call "value-function-named" 11)))
+            (funcall call "heap-pin" c)
+            (js-call assert :notEqual c a)
+            (funcall call "heap-release" c)
+            (funcall call "heap-collect")
+            (js-call assert :equal (funcall call "heap-live") 0))))))
+
+  (test "callable heap capacity failure preserves captures and returns temporary borrowed roots"
+    (lambda ()
+      (let* ((raw (raw-callable-heap (js-object :maxBytes 4096)))
+             (e (get raw :e))
+             (heap (get raw :heap))
+             (call (get raw :call))
+             (cell (funcall call "value-cell-new" 0))
+             (_cell-root (funcall call "heap-pin" cell))
+             (closure (funcall call "value-function-new" 3 1))
+             (keep (js-array))
+             (exhausted false)
+             (i 0))
+        (funcall call "heap-pin" closure)
+        (funcall call "value-function-capture-set" closure 0 cell)
+        (funcall call "value-cell-set" cell closure)
+        (funcall call "heap-release" cell)
+        (while (and (< i 128) (not exhausted))
+          (let ((n (funcall to-uint32 (funcall (get e "value-number") heap i 0))))
+            (if (= n 0)
+              (progn
+                (js-call assert :equal (funcall (get e "last-error")) 2)
+                (setq exhausted t))
+              (progn
+                (funcall call "heap-pin" n)
+                (js-call keep :push n))))
+          (setq i (1+ i)))
+        (funcall assert exhausted)
+        (js-call assert :equal (funcall (get e "value-cell-new") heap closure) 0)
+        (js-call assert :equal (funcall (get e "last-error")) 2)
+        (js-call assert :equal (funcall call "value-function-capture-get" closure 0) cell)
+        (js-call assert :equal (funcall call "value-cell-get" cell) closure)
+        (funcall (get e "value-function-capture-get") heap closure 1)
+        (js-call assert :equal (funcall (get e "last-error")) 3)
+        (funcall (get e "value-function-capture-set") heap closure 0 closure)
+        (js-call assert :equal (funcall (get e "last-error")) 1)
+        (js-call assert :equal (funcall call "value-function-capture-get" closure 0) cell)
+        (js-call keep :forEach (lambda (n) (funcall call "heap-release" n)))
+        (funcall call "heap-release" closure)
+        (funcall call "heap-collect")
+        (js-call assert :equal (funcall call "heap-live") 0)
+        (js-call assert :equal (funcall call "frame-depth") 0))))
+
+  (test "Node executes the same indirect-call and callable-heap artifacts with exact cleanup"
+    (async ()
+      (let* ((raw (raw-callable-heap))
+             (bytes (get raw :bytes))
+             (heap-file (resolve directory "callable-heap.wasm"))
+             (table-file (resolve directory "callable-table.wasm"))
+             (node-cmd (let ((nv (get (get globalThis.process :env) :NODE)))
+                         (if (nullish? nv) "node" nv))))
+        (await (writeFile heap-file bytes))
+        (await (writeFile table-file
+                 (globalThis.Uint8Array.from
+                   (js-call (get backends :wasm) :emit_typed_memory_wasm (indirect-program)))))
+        (let ((node (spawnSync node-cmd
+                      (js-array callables-node-helper-path "--check-raw" heap-file table-file)
+                      (js-object :encoding "utf8" :timeout 30000))))
+          (js-call assert :equal (get node :status) 0
+            (let ((err-txt (get node :stderr)))
+              (if (> (get err-txt :length) 0) err-txt (globalThis.String (get node :error)))))))))
+
+  (test "discarded indirect results retain call traps and programs without indirect calls need no table"
+    (lambda ()
+      (let* ((prog (indirect-program))
+             (original (get (aref (get prog :functions) 2) :body)))
+        (put (aref (get prog :functions) 2) :body
+          (js-object :kind "sequence" :type "u32" :value nil
+                     :children (js-array original
+                                         (js-object :kind "literal" :type "u32" :children (js-array) :value 99))))
+        (let ((e (get (new globalThis.WebAssembly.Instance
+                        (new globalThis.WebAssembly.Module
+                          (globalThis.Uint8Array.from
+                            (js-call (get backends :wasm) :emit_typed_memory_wasm prog))))
+                      :exports)))
+          (js-call assert :equal (js-call e :dispatch 0 41) 99)
+          (js-call assert :throws (lambda () (js-call e :dispatch 2 41)) globalThis.WebAssembly.RuntimeError)))
+      (let ((plain (indirect-program)))
+        (Reflect/deleteProperty plain "table")
+        (js-call (get plain :functions) :splice 2)
+        (put plain :exports (js-array "identity"))
+        (let ((bytes (globalThis.Uint8Array.from (js-call (get backends :wasm) :emit_typed_memory_wasm plain)))
+              (sections (js-array))
+              (cursor 8))
+          (while (< cursor (get bytes :length))
+            (let ((id (aref bytes cursor))
+                  (len 0)
+                  (shift 0)
+                  (more t))
+              (setq cursor (1+ cursor))
+              (while more
+                (let ((b (aref bytes cursor)))
+                  (setq cursor (1+ cursor))
+                  (setq len (+ len (* (funcall bit-and b 127) (Math/pow 2 shift))))
+                  (setq shift (+ shift 7))
+                  (when (= (funcall bit-and b 128) 0)
+                    (setq more false))))
+              (js-call sections :push id)
+              (setq cursor (+ cursor len))))
+          (funcall assert (not (js-call sections :includes 4)))
+          (funcall assert (not (js-call sections :includes 9)))
+          (js-call assert :equal
+            (js-call (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports)
+                     :identity 17)
+            17)))))
+
+  (test "captured unrooted Numbers preserve IEEE words across allocation safepoints and pool movement"
+    (lambda ()
+      (let* ((raw (raw-callable-heap))
+             (e (get raw :e))
+             (call (get raw :call))
+             (patterns (js-array (js-array 0 0) (js-array 0 2147483648) (js-array 0 2146435072)
+                                 (js-array 0 4293918720) (js-array 1 2146959360) (js-array 1 0)
+                                 (js-array 4294967295 1048575) (js-array 0 1048576)
+                                 (js-array 4294967295 2146435071)))
+             (seed 1671926255)
+             (next-word (lambda ()
+                          (setq seed (funcall to-uint32 (+ (Math/imul seed 1664525) 1013904223)))
+                          seed))
+             (i 0))
+        (while (< i 32)
+          (js-call patterns :push (js-array (funcall next-word) (funcall next-word)))
+          (setq i (1+ i)))
+        (let ((cells (js-array)))
+          (js-call patterns :forEach
+            (lambda (pair)
+              (let ((value (funcall call "value-number" (aref pair 0) (aref pair 1))))
+                ;; The Number has no host pin. Cell construction must protect this borrowed
+                ;; operand before its own allocation triggers collection.
+                (let ((cell (funcall call "value-cell-new" value)))
+                  (funcall call "heap-pin" cell)
+                  (js-call cells :push cell)))))
+          (funcall assert (> (funcall call "heap-capacity") 4096))
+          (funcall call "heap-collect")
+          (let ((j 0))
+            (while (< j (get cells :length))
+              (let* ((value (funcall call "value-cell-get" (aref cells j)))
+                     (offset (funcall call "value-data" value 4))
+                     (view (new globalThis.DataView (get (get e :memory) :buffer)))
+                     (pat (aref patterns j)))
+                (js-call assert :equal (js-call view :getUint32 offset t) (aref pat 0))
+                (js-call assert :equal (js-call view :getUint32 (+ offset 4) t) (aref pat 1)))
+              (setq j (1+ j))))
+          (js-call cells :forEach (lambda (cell) (funcall call "heap-release" cell)))
+          (funcall call "heap-collect")
+          (js-call assert :equal (funcall call "heap-live") 0)
+          (js-call assert :equal (funcall call "frame-depth") 0)))))
+
+  (test "source shared cells preserve exact Numbers under repeated writes, alias reads and collection"
+    (lambda ()
+      (let* ((heap (instance))
+             (initial (js-call heap :number 4))
+             (pair (js-call heap :invoke "make-box" (js-array initial)))
+             (write (js-call heap :get pair 0))
+             (read (js-call heap :get pair 1))
+             (reference (js-call javascript :make_box 4))
+             (values (js-array -0.0 0
+                               (get globalThis.Number :NaN)
+                               (get globalThis.Number :POSITIVE_INFINITY)
+                               (get globalThis.Number :NEGATIVE_INFINITY)
+                               (get globalThis.Number :MIN_VALUE)
+                               (- 0 (get globalThis.Number :MIN_VALUE))
+                               (get globalThis.Number :MAX_VALUE)))
+             (seed 1096782605)
+             (bits (new globalThis.DataView (new globalThis.ArrayBuffer 8)))
+             (i 0))
+        (while (< i 192)
+          (setq seed (funcall to-uint32 (+ (Math/imul seed 1664525) 1013904223)))
+          (js-call bits :setUint32 0 seed t)
+          (setq seed (funcall to-uint32 (+ (Math/imul seed 1664525) 1013904223)))
+          (js-call bits :setUint32 4 seed t)
+          (js-call values :push (js-call bits :getFloat64 0 t))
+          (setq i (1+ i)))
+        (js-call values :forEach
+          (lambda (value)
+            (let* ((input (js-call heap :number value))
+                   (output (js-call heap :invoke "apply-one" (js-array write input))))
+              (funcall assert (Object/is (js-call heap :readNumber output) (funcall (aref reference 0) value)))
+              (funcall assert (js-call heap :keyEqual input output))
+              (js-call heap :release input)
+              (js-call heap :release output)
+              (js-call heap :collect)
+              (funcall assert (Object/is (read-num heap "apply-zero" (js-array read)) (funcall (aref reference 1)))))))
+        (finish heap (js-array initial pair write read)))))
+
+  (test "failed closure calls preserve shared state, first-error order and caller-owned frames"
+    (lambda ()
+      (let ((marker-reference (js-array false))
+            (reference (js-call javascript :guarded_box 4)))
+        (js-call assert :throws (lambda () (funcall (aref reference 0) false marker-reference)) globalThis.TypeError)
+        (js-call assert :equal (funcall (aref reference 1)) 4)
+        (js-call assert :equal (aref marker-reference 0) 7))
+      (let* ((heap (instance))
+             (four (js-call heap :number 4))
+             (pair (js-call heap :invoke "guarded-box" (js-array four)))
+             (write (js-call heap :get pair 0))
+             (read (js-call heap :get pair 1))
+             (marker (js-call heap :sourceArray (js-array false)))
+             (frame (js-call heap :frame 1)))
+        (js-call heap :frameSet frame 0 marker)
+        (js-call assert :throws
+          (lambda () (js-call heap :invoke "apply-two" (js-array write false marker)))
+          (lambda (e)
+            (let ((diag (get e :eliscriptDiagnostic)))
+              (and (not (nullish? diag)) (= (get diag :code) "ELI-RT0003")))))
+        (js-call assert :equal (get (js-call heap :stats) :frameDepth) 1)
+        (js-call assert :equal (read-num heap "apply-zero" (js-array read)) 4)
+        (let ((changed (js-call heap :get marker 0)))
+          (js-call assert :equal (js-call heap :readNumber changed) 7)
+          (js-call heap :release changed))
+        (let ((identity (js-call heap :invoke "named-value"))
+              (untouched (js-call heap :sourceArray (js-array false))))
+          (js-call assert :throws
+            (lambda () (js-call javascript :earlier_failure (lambda (x) x) (js-array false)))
+            globalThis.TypeError)
+          (js-call assert :throws
+            (lambda () (js-call heap :invoke "earlier-failure" (js-array identity untouched)))
+            (lambda (e)
+              (let ((diag (get e :eliscriptDiagnostic)))
+                (and (not (nullish? diag)) (= (get diag :code) "ELI-RT0003")))))
+          (js-call assert :equal (js-call heap :get untouched 0) false)
+          (js-call assert :equal (get (js-call heap :stats) :frameDepth) 1)
+          (let ((alias (js-call heap :frameGet frame 0)))
+            (funcall assert (js-call heap :keyEqual alias marker))
+            (js-call heap :release alias))
+          (js-call heap :leaveFrame frame)
+          (finish heap (js-array four pair write read marker identity untouched))))))
+
+  (test "direct and indirect calls preserve omitted arguments and effects of extras and ignored constructor operands"
+    (lambda ()
+      (let* ((heap (instance))
+             (marker (js-call heap :sourceArray (js-array false)))
+             (f (js-call heap :invoke "lambda-identity")))
+        (js-call assert :equal (js-call javascript :direct_missing) undefined)
+        (js-call assert :equal (js-call heap :invoke "direct-missing") undefined)
+        (js-call assert :equal (js-call heap :invoke "apply-zero" (js-array f)) undefined)
+        (js-call assert :equal (read-num heap "direct-extra" (js-array marker)) 7)
+        (let ((changed (js-call heap :get marker 0)))
+          (js-call assert :equal (js-call heap :readNumber changed) 12)
+          (js-call heap :release changed))
+        (js-call assert :equal (read-num heap "apply-extra" (js-array f marker)) 7)
+        (let ((m (js-call heap :invoke "ignored-constructor" (js-array marker))))
+          (js-call heap :release m))
+        (let ((callback (js-call heap :get marker 0)))
+          (js-call assert :equal (read-num heap "apply-zero" (js-array callback)) 7)
+          (let ((reference (js-array false)))
+            (funcall assert (funcall js-instanceof (js-call javascript :ignored_constructor reference) globalThis.Map))
+            (js-call assert :equal (funcall (aref reference 0)) 7))
+          (finish heap (js-array marker f callback))))))
+
+  (test "mutually recursive local functions and source Map function keys retain identity through GC"
+    (lambda ()
+      (let* ((heap (instance))
+             (pair (js-call heap :invoke "parity-functions"))
+             (even (js-call heap :get pair 0))
+             (odd (js-call heap :get pair 1))
+             (reference (js-call javascript :parity_functions))
+             (i 0))
+        (while (< i 33)
+          (let ((n (js-call heap :number i)))
+            (js-call assert :equal (js-call heap :invoke "apply-one" (js-array even n)) (funcall (aref reference 0) i))
+            (js-call assert :equal (js-call heap :invoke "apply-one" (js-array odd n)) (funcall (aref reference 1) i))
+            (js-call heap :release n)
+            (js-call heap :collect))
+          (setq i (1+ i)))
+        (let* ((keys (js-call heap :invoke "function-keys"))
+               (seven (js-call heap :get keys 0)))
+          (js-call assert :equal (js-call heap :readNumber seven) (aref (js-call javascript :function_keys) 0))
+          (js-call assert :equal (js-call heap :get keys 1) false)
+          (js-call assert :equal (js-call heap :get keys 2) t)
+          (finish heap (js-array pair even odd keys seven))))))
+
+  (test "source closure allocation failure releases partial environments and preserves caller frames"
+    (lambda ()
+      (let* ((bytes (globalThis.Uint8Array.from
+                      (js-call (get backends :managed) :emit_managed_wasm program runtime)))
+             (heap (instantiateManagedRuntime bytes
+                     (js-object :maxSlots 128 :initialBytes 4096 :maxBytes 16384)))
+             (_ (js-call heap :auto 1))
+             (marker (js-call heap :sourceArray (js-array false)))
+             (n (js-call heap :number 10000))
+             (four (js-call heap :number 4))
+             (five (js-call heap :number 5))
+             (adder (js-call heap :invoke "make-adder" (js-array four)))
+             (frame (js-call heap :frame 1)))
+        (js-call heap :frameSet frame 0 marker)
+        (js-call assert :throws
+          (lambda () (js-call heap :invoke "retain-closures" (js-array marker n)))
+          (lambda (e)
+            (let ((diag (get e :eliscriptDiagnostic)))
+              (and (not (nullish? diag)) (= (get diag :code) "ELI-RT0002")))))
+        (js-call assert :equal (get (js-call heap :stats) :frameDepth) 1)
+        (js-call heap :collect)
+        (let ((last (js-call heap :get marker 0)))
+          (funcall assert (Number/isInteger (js-call heap :readNumber last)))
+          (funcall assert (< (js-call heap :readNumber last) 10000))
+          (js-call heap :release last))
+        (js-call assert :equal (read-num heap "apply-one" (js-array adder five)) 9)
+        (js-call heap :leaveFrame frame)
+        (finish heap (js-array marker n four five adder)))))
+
+  (test "a real trap inside a captured read unwinds dynamic callers and retains preexisting roots"
+    (async ()
+      (let* ((source (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
+             (start (js-call source :indexOf "  (defun value-cell-get (heap cell)"))
+             (end (js-call source :indexOf "  (defun value-cell-set" start)))
+        (funcall assert (and (>= start 0) (> end start)))
+        (let* ((faulty (str (js-call source :slice 0 start)
+                            "  (defun value-cell-get (heap cell) (load-u32 4294967295))\n"
+                            (js-call source :slice end)))
+               (injected (js-call (get backends :compiler) :compile_ir_string faulty "trap-cell-runtime.eli"))
+               (bytes (globalThis.Uint8Array.from
+                        (js-call (get backends :managed) :emit_managed_wasm program injected)))
+               (heap (instantiateManagedRuntime bytes))
+               (_ (js-call heap :auto 1))
+               (four (js-call heap :number 4))
+               (five (js-call heap :number 5))
+               (f (js-call heap :invoke "make-adder" (js-array four)))
+               (frame (js-call heap :frame 1)))
+          (js-call heap :frameSet frame 0 four)
+          (js-call assert :throws
+            (lambda () (js-call heap :invoke "apply-one" (js-array f five)))
+            globalThis.WebAssembly.RuntimeError)
+          (js-call assert :equal (get (js-call heap :stats) :frameDepth) 1)
+          (let ((alias (js-call heap :frameGet frame 0)))
+            (js-call assert :equal (js-call heap :readNumber alias) 4)
+            (js-call heap :release alias))
+          (js-call heap :leaveFrame frame)
+          (finish heap (js-array four five f))))))
+
+  (test "unsupported callable forms are source-bound refusals even in dead code and leave input IR untouched"
+    (async ()
+      (let* ((before (JSON/stringify program))
+             (runtime-before (JSON/stringify runtime))
+             (dead (js-call (get backends :compiler) :compile_ir_string
+                     "(defun f (x) (if false (lambda () x) x)) (export f)" "dead-supported-lambda.eli"))
+             (heap (instantiateManagedRuntime
+                     (globalThis.Uint8Array.from
+                       (js-call (get backends :managed) :emit_managed_wasm dead runtime))))
+             (input (js-call heap :number 4))
+             (output (js-call heap :invoke "f" (js-array input))))
+        (js-call assert :equal (js-call heap :readNumber output) 4)
+        (finish heap (js-array input output))
+        (js-call (get backends :managed) :emit_managed_wasm program runtime)
+        (js-call assert :equal (JSON/stringify program) before)
+        (js-call assert :equal (JSON/stringify runtime) runtime-before)
+        (let* ((supported (js-call (get backends :compiler) :compile_ir_string
+                            "(defun f () (if false (async () 1) 0)) (export f)" "supported-async-callable.eli"))
+               (supported-before (JSON/stringify supported))
+               (supported-bytes (globalThis.Uint8Array.from
+                                  (js-call (get backends :managed) :emit_managed_wasm supported runtime))))
+          (js-call assert :deepEqual
+            (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module supported-bytes))
+            (js-array))
+          (let ((supported-heap (instantiateManagedRuntime supported-bytes)))
+            (js-call supported-heap :auto 1)
+            (let ((supported-result (js-call supported-heap :invoke "f" (js-array))))
+              (js-call assert :equal (js-call supported-heap :readNumber supported-result) 0)
+              (js-call supported-heap :release supported-result)
+              (js-call supported-heap :collect)
+              (js-call assert :equal (js-call supported-heap :live) 0)))
+          (js-call assert :equal (JSON/stringify supported) supported-before))
+        (let* ((shadowed-source "(defun f () (let ((globalThis nil)) (lambda () (new globalThis.Map)))) (defun call-closure (fn) (funcall fn)) (export f call-closure)")
+               (shadowed (js-call (get backends :compiler) :compile_ir_string shadowed-source "shadowed-constructor.eli"))
+               (shadowed-before (JSON/stringify shadowed))
+               (shadowed-reference (js-call (get backends :compiler) :emit_ir_string shadowed))
+               (shadowed-bytes (globalThis.Uint8Array.from
+                                 (js-call (get backends :managed) :emit_managed_wasm shadowed runtime))))
+          (js-call assert :deepEqual
+            (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module shadowed-bytes))
+            (js-array))
+          (let ((shadowed-heap (instantiateManagedRuntime shadowed-bytes)))
+            (js-call shadowed-heap :auto 1)
+            (let ((closure (js-call shadowed-heap :invoke "f" (js-array))))
+              (js-call assert :throws
+                (lambda () (js-call shadowed-heap :invoke "call-closure" (js-array closure)))
+                (lambda (error)
+                  (let ((diag (get error :eliscriptDiagnostic)))
+                    (and (funcall js-instanceof error globalThis.TypeError)
+                         (not (nullish? diag))
+                         (= (get diag :code) "ELI-RT0001")))))
+              (js-call shadowed-heap :release closure)
+              (js-call shadowed-heap :collect)
+              (js-call assert :equal (js-call shadowed-heap :live) 0)))
+          (js-call assert :equal (JSON/stringify shadowed) shadowed-before)
+          (let ((reference (spawnSync "node"
+                             (js-array callables-node-helper-path "--check-shadowed")
+                             (js-object :input shadowed-reference :encoding "utf8" :timeout 30000))))
+            (js-call assert :equal (get reference :status) 0 (get reference :stderr))))
+        (let ((pattern-sources (js-array "(defun f () (lambda ([x]) x))"
+                                         "(defun f () (lambda (&optional [x]) x))"))
+              (ps-idx 0))
+          (while (< ps-idx (get pattern-sources :length))
+            ;; These original inputs now belong to the implemented parameter-pattern
+            ;; profile. Preserve both sources and prove their real callable behavior.
+            (let* ((src (aref pattern-sources ps-idx))
+                   (ir (js-call (get backends :compiler) :compile_ir_string
+                         (str src " (defun call-pattern (fn value) (funcall fn value)) (export f call-pattern)")
+                         "supported-callable-pattern.eli"))
+                   (saved (JSON/stringify ir))
+                   (bytes (globalThis.Uint8Array.from
+                            (js-call (get backends :managed) :emit_managed_wasm ir runtime))))
+              (js-call assert :deepEqual
+                (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes))
+                (js-array))
+              (js-call assert :equal (JSON/stringify ir) saved)
+              (let* ((js (await (funcall dynamic-import
+                                  (str "data:text/javascript;base64,"
+                                       (js-call (Buffer/from (js-call (get backends :compiler) :emit_ir_string ir))
+                                                :toString "base64")))))
+                     (a (instantiateManagedRuntime bytes))
+                     (_ (js-call a :auto 1))
+                     (fn (js-call a :invoke "f"))
+                     (expected (js-call js :f)))
+                (try
+                  (js-call (js-array -0.0 37 undefined nil false) :forEach
+                    (lambda (value)
+                      (let ((element (if (= (value-type value) "number") (js-call a :number value) value))
+                            (result undefined))
+                        (let ((input (js-call a :sourceArray (js-array element))))
+                          (try
+                            (js-call a :collect)
+                            (setq result (js-call a :invoke "call-pattern" (js-array fn input)))
+                            (let ((actual (if (and (not (nullish? result)) (= (get result :kind) 4))
+                                            (js-call a :readNumber result)
+                                            result)))
+                              (funcall assert (Object/is actual (funcall expected (js-array value)))
+                                "the original pattern source retains the exact JS value under GC"))
+                            (finally
+                              (js-call a :release result)
+                              (js-call a :release input)
+                              (js-call a :release element))))
+                        (js-call a :collect)
+                        (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
+                  (finally
+                    (js-call a :release fn)
+                    (js-call a :closeModule)
+                    (finish a (js-array)))))
+              (js-call assert :equal (JSON/stringify ir) saved))
+            (setq ps-idx (1+ ps-idx))))
+        (js-call (js-array "(defun f (g) (apply g (js* \"[]\")))") :forEach
+          (lambda (src)
+            (let* ((ir (js-call (get backends :compiler) :compile_ir_string
+                         (str src " (export f)") "unsupported-callable.eli"))
+                   (saved (JSON/stringify ir)))
+              (js-call assert :throws
+                (lambda () (js-call (get backends :managed) :emit_managed_wasm ir runtime))
+                (lambda (e)
+                  (let ((diag (get e :eliscriptDiagnostic)))
+                    (and (not (nullish? diag))
+                         (= (get diag :code) "ELI-B0001")
+                         (= (get (get diag :location) :file) "unsupported-callable.eli"))))
+                src)
+              (js-call assert :equal (JSON/stringify ir) saved)))))))
+
+  (test "local and captured host constructors preserve real lookup argument order and GC in standalone and linked WASM"
+    (async ()
+      (let* ((body (str "(new globalThis.Map\n"
+                        "    (progn (put trace 1 (aref trace 0))\n"
+                        "      (Object/defineProperty globalThis \"Map\" (js-object :value false :configurable t)) undefined)\n"
+                        "    (put trace 2 (1+ (aref trace 2))))"))
+             (source (str "(defun makehost (trace)\n"
+                          "    (let ((host (js-object)) (constructor (js* \"Map\")))\n"
+                          "      (Object/defineProperty host \"Map\" (js-object :configurable t\n"
+                          "        :get (lambda () (put trace 0 (1+ (aref trace 0))) constructor))) host))\n"
+                          "    (defun throwhost (trace)\n"
+                          "      (Object/defineProperty (js-object) \"Map\" (js-object :configurable t\n"
+                          "        :get (lambda () (put trace 0 1) (throw false)))))\n"
+                          "    (defun localnew (globalThis trace) " body ")\n"
+                          "    (defun capturenew (globalThis trace) (lambda () " body "))\n"
+                          "    (defun invokeclosure (closure) (funcall closure))\n"
+                          "    (defun mapsize (map) (get map :size))\n"
+                          "    (export makehost throwhost localnew capturenew invokeclosure mapsize)"))
+             (ir (js-call (get backends :compiler) :compile_ir_string source "local-constructors.eli"))
+             (saved (JSON/stringify ir))
+             (reference (await (funcall dynamic-import
+                                 (str "data:text/javascript;base64,"
+                                      (js-call (Buffer/from (js-call (get backends :compiler) :emit_ir_string ir))
+                                               :toString "base64"))))))
+        (js-call (js-array false t) :forEach
+          (lambda (linked)
+            (let* ((bytes (globalThis.Uint8Array.from
+                            (if linked
+                              (js-call (get backends :managed) :emit_managed_project_wasm
+                                (js-array (js-object :id "constructors.mjs" :program ir))
+                                "constructors.mjs" runtime)
+                              (js-call (get backends :managed) :emit_managed_wasm ir runtime))))
+                   (_1 (js-call assert :deepEqual
+                         (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes))
+                         (js-array)))
+                   (_2 (js-call assert :equal (JSON/stringify ir) saved))
+                   (heap (instantiateManagedRuntime bytes))
+                   (_3 (js-call heap :auto 1))
+                   (held (js-array))
+                   (own (lambda (value) (js-call held :push value) value))
+                   (make-trace (lambda ()
+                                 (let ((zero (js-call heap :number 0)))
+                                   (try
+                                     (funcall own (js-call heap :sourceArray (js-array zero zero zero)))
+                                     (finally (js-call heap :release zero))))))
+                   (trace-values (lambda (tr)
+                                   (globalThis.Array.from (js-object :length (js-call heap :length tr))
+                                     (lambda (_ index)
+                                       (let ((value (js-call heap :get tr index)))
+                                         (try
+                                           (js-call heap :readNumber value)
+                                           (finally (js-call heap :release value)))))))))
+              (try
+                (js-call (js-array false t) :forEach
+                  (lambda (captured)
+                    (let* ((trace (funcall make-trace))
+                           (host (funcall own (js-call heap :invoke "makehost" (js-array trace))))
+                           (expected-trace (js-array 0 0 0))
+                           (expected-host (js-call reference :makehost expected-trace))
+                           (closure (if captured
+                                      (funcall own (js-call heap :invoke "capturenew" (js-array host trace)))
+                                      undefined))
+                           (expected-call (if captured
+                                            (js-call reference :capturenew expected-host expected-trace)
+                                            (lambda () (js-call reference :localnew expected-host expected-trace))))
+                           (call (lambda ()
+                                   (if captured
+                                     (js-call heap :invoke "invokeclosure" (js-array closure))
+                                     (js-call heap :invoke "localnew" (js-array host trace))))))
+                      (js-call heap :collect)
+                      (let ((expected (funcall expected-call))
+                            (mp (funcall own (funcall call))))
+                        (js-call assert :equal (read-num heap "mapsize" (js-array mp)) (get expected :size))
+                        (js-call assert :deepEqual (funcall trace-values trace) expected-trace)
+                        (js-call assert :deepEqual expected-trace (js-array 1 1 1))
+                        ;; The callee was captured before the first argument replaced its
+                        ;; property. A later call observes false, after evaluating both args.
+                        (js-call assert :throws expected-call globalThis.TypeError)
+                        (js-call assert :throws call globalThis.TypeError)
+                        (js-call assert :deepEqual (funcall trace-values trace) expected-trace)
+                        (js-call assert :deepEqual expected-trace (js-array 1 1 2))
+                        (js-call heap :collect)
+                        (js-call assert :equal (read-num heap "mapsize" (js-array mp)) 0))
+                      (let* ((empty (funcall make-trace))
+                             (expected-empty (js-array 0 0 0))
+                             (missing (if captured
+                                        (funcall own (js-call heap :invoke "capturenew" (js-array nil empty)))
+                                        undefined)))
+                        (js-call heap :collect)
+                        (js-call assert :throws
+                          (lambda ()
+                            (if captured
+                              (js-call heap :invoke "invokeclosure" (js-array missing))
+                              (js-call heap :invoke "localnew" (js-array nil empty))))
+                          (lambda (error)
+                            (let ((diag (get error :eliscriptDiagnostic)))
+                              (and (funcall js-instanceof error globalThis.TypeError)
+                                   (not (nullish? diag))
+                                   (= (get diag :code) "ELI-RT0001")))))
+                        (js-call assert :throws
+                          (lambda ()
+                            (if captured
+                              (funcall (js-call reference :capturenew nil expected-empty))
+                              (js-call reference :localnew nil expected-empty)))
+                          globalThis.TypeError)
+                        (js-call assert :deepEqual (funcall trace-values empty) expected-empty)
+                        (js-call assert :deepEqual expected-empty (js-array 0 0 0)))
+                      (let* ((thrown-trace (funcall make-trace))
+                             (throwing (funcall own (js-call heap :invoke "throwhost" (js-array thrown-trace))))
+                             (throwing-closure (if captured
+                                                 (funcall own (js-call heap :invoke "capturenew"
+                                                                (js-array throwing thrown-trace)))
+                                                 undefined))
+                             (threw false))
+                        (try
+                          (if captured
+                            (js-call heap :invoke "invokeclosure" (js-array throwing-closure))
+                            (js-call heap :invoke "localnew" (js-array throwing thrown-trace)))
+                          (catch error
+                            (setq threw t)
+                            (js-call assert :strictEqual error false)))
+                        (funcall assert threw)
+                        (js-call assert :deepEqual (funcall trace-values thrown-trace) (js-array 1 0 0))
+                        (let ((js-trace (js-array 0 0 0))
+                              (js-threw false))
+                          (let ((js-host (js-call reference :throwhost js-trace)))
+                            (try
+                              (if captured
+                                (funcall (js-call reference :capturenew js-host js-trace))
+                                (js-call reference :localnew js-host js-trace))
+                              (catch error
+                                (setq js-threw t)
+                                (js-call assert :strictEqual error false))))
+                          (funcall assert js-threw)
+                          (js-call assert :deepEqual (funcall trace-values thrown-trace) js-trace))
+                        (js-call heap :collect)
+                        (js-call assert :equal (get (js-call heap :stats) :frameDepth) 0)))))
+                (finally
+                  (js-call held :forEach (lambda (value) (js-call heap :release value)))
+                  (js-call heap :closeModule)
+                  (finish heap (js-array)))))))))
+    30000)
+
+  (test "parallel and sequential captures preserve shadowing and hygiene of internal ABI names"
+    (lambda ()
+      (let* ((heap (instance))
+             (four (js-call heap :number 4))
+             (five (js-call heap :number 5))
+             (f (js-call heap :invoke "parallel-capture" (js-array four))))
+        (js-call assert :equal (read-num heap "apply-zero" (js-array f)) (funcall (js-call javascript :parallel_capture 4)))
+        (let* ((pair (js-call heap :invoke "sequential-captures" (js-array four)))
+               (old (js-call heap :get pair 0))
+               (next (js-call heap :get pair 1))
+               (reference (js-call javascript :sequential_captures 4)))
+          (js-call assert :equal (read-num heap "apply-zero" (js-array old)) (funcall (aref reference 0)))
+          (js-call assert :equal (read-num heap "apply-zero" (js-array next)) (funcall (aref reference 1)))
+          (let ((hygienic (js-call heap :invoke "hygienic-capture" (js-array four five four five four))))
+            (js-call assert :equal
+              (read-num heap "apply-zero" (js-array hygienic))
+              (funcall (js-call javascript :hygienic_capture 4 5 4 5 4)))
+            (finish heap (js-array four five f pair old next hygienic)))))))
+
+  (test "uniform dynamic ABI preserves many required parameters for both named and lifted functions"
+    (lambda ()
+      (let* ((heap (instance))
+             (named (js-call heap :invoke "many-value"))
+             (lam (js-call heap :invoke "many-lambda"))
+             (marker (js-call heap :sourceArray (js-array false))))
+        (js-call (js-array named lam) :forEach
+          (lambda (f)
+            (js-call assert :equal
+              (read-num heap "many-extra" (js-array f marker))
+              (js-call javascript :many_extra (get javascript :many) (js-array false)))
+            (funcall assert (Number/isNaN (read-num heap "apply-zero" (js-array f))))
+            (let ((effect (js-call heap :get marker 0)))
+              (js-call assert :equal (js-call heap :readNumber effect) 123)
+              (js-call heap :release effect)
+              (js-call heap :collect))))
+        (finish heap (js-array named lam marker)))))
+
+  (test "Node executes source closures, shared writes and failure cleanup against independent generated JS"
+    (async ()
+      (let* ((wasm (resolve directory "source-callables.wasm"))
+             (js (resolve directory "source-callables.mjs"))
+             (node-cmd (let ((nv (get (get globalThis.process :env) :NODE)))
+                         (if (nullish? nv) "node" nv))))
+        (await (writeFile wasm
+                 (globalThis.Uint8Array.from
+                   (js-call (get backends :managed) :emit_managed_wasm program runtime))))
+        (await (writeFile js (js-call (get backends :compiler) :emit_ir_string program)))
+        (let ((result (spawnSync node-cmd
+                        (js-array callables-node-helper-path "--check-source"
+                                  wasm (get (pathToFileURL js) :href))
+                        (js-object :encoding "utf8" :timeout 30000))))
+          (js-call assert :equal (get result :status) 0
+            (let ((err-txt (get result :stderr)))
+              (if (> (get err-txt :length) 0) err-txt (globalThis.String (get result :error)))))))))
+
+  (test "captured opaque values retain alias identity and source cycles collect without permanent roots"
+    (lambda ()
+      (let* ((heap (instance))
+             (pair (js-call heap :invoke "make-box" (js-array false)))
+             (write (js-call heap :get pair 0))
+             (read (js-call heap :get pair 1))
+             (text (js-call heap :string (str "中😀" (String/fromCharCode 55296))))
+             (bytes (js-call heap :bytes (new globalThis.Uint8Array (js-array 0 255))))
+             (arr (js-call heap :sourceArray (js-array text)))
+             (obj (js-call heap :sourceObject (js-object :value arr)))
+             (fn (js-call heap :invoke "named-value")))
+        (js-call (js-array nil false t undefined text bytes arr obj fn pair) :forEach
+          (lambda (value)
+            (let ((out (js-call heap :invoke "apply-one" (js-array write value))))
+              (funcall assert (js-call heap :keyEqual out value))
+              (js-call heap :release out)
+              (js-call heap :collect))
+            (let ((alias (js-call heap :invoke "apply-zero" (js-array read))))
+              (funcall assert (js-call heap :keyEqual alias value))
+              (js-call heap :release alias))))
+        (finish heap (js-array pair write read text bytes arr obj fn)))))
+
+  (test "foreign, forged and collected function handles cannot enter a dynamic call or disturb caller roots"
+    (lambda ()
+      (let* ((heap (instance))
+             (other (instance))
+             (foreign (js-call other :invoke "named-value"))
+             (four (js-call heap :number 4))
+             (frame (js-call heap :frame 1)))
+        (js-call heap :frameSet frame 0 four)
+        (js-call (js-array foreign (Object/freeze (js-object :kind 18))) :forEach
+          (lambda (f)
+            (js-call assert :throws
+              (lambda () (js-call heap :invoke "apply-one" (js-array f four)))
+              (lambda (e)
+                (let ((diag (get e :eliscriptDiagnostic)))
+                  (and (not (nullish? diag)) (= (get diag :code) "ELI-RT0001")))))))
+        (let ((stale (js-call heap :invoke "named-value")))
+          (js-call heap :release stale)
+          (js-call heap :collect)
+          (js-call assert :throws
+            (lambda () (js-call heap :invoke "apply-one" (js-array stale four)))
+            (lambda (e)
+              (let ((diag (get e :eliscriptDiagnostic)))
+                (and (not (nullish? diag)) (= (get diag :code) "ELI-RT0001"))))))
+        (js-call assert :equal (get (js-call heap :stats) :frameDepth) 1)
+        (let ((alias (js-call heap :frameGet frame 0)))
+          (js-call assert :equal (js-call heap :readNumber alias) 4)
+          (js-call heap :release alias))
+        (js-call heap :leaveFrame frame)
+        (finish heap (js-array four))
+        (finish other (js-array foreign)))))
+
+  (test "funcall shares dynamic callee ordering, omitted arguments and required ABI with ordinary calls"
+    (lambda ()
+      (let* ((heap (instance))
+             (four (js-call heap :number 4))
+             (five (js-call heap :number 5))
+             (adder (js-call heap :invoke "make-adder" (js-array four))))
+        (js-call assert :equal
+          (read-num heap "funcall-one" (js-array adder five))
+          (js-call javascript :funcall_one (js-call javascript :make_adder 4) 5))
+        (let ((identity (js-call heap :invoke "named-value"))
+              (marker (js-call heap :sourceArray (js-array false))))
+          (js-call assert :equal (js-call heap :invoke "funcall-zero" (js-array identity)) undefined)
+          (js-call assert :throws
+            (lambda () (js-call heap :invoke "funcall-order" (js-array false marker)))
+            (lambda (e)
+              (let ((diag (get e :eliscriptDiagnostic)))
+                (and (not (nullish? diag)) (= (get diag :code) "ELI-RT0003")))))
+          (let ((last (js-call heap :get marker 0)))
+            (js-call assert :equal (js-call heap :readNumber last) 2)
+            (js-call heap :release last))
+          (finish heap (js-array four five adder identity marker))))))
+
+  (test "malformed callable parameters cannot hide unsupported IR, duplicate bindings or invalid counts"
+    (lambda ()
+      (letfn ((find-fn (nodes-list)
+                (let ((idx 0)
+                      (found undefined))
+                  (while (and (< idx (get nodes-list :length)) (undefined? found))
+                    (let ((n (aref nodes-list idx)))
+                      (if (= (get n :kind) "function-expression")
+                        (setq found n)
+                        (let* ((ch (get n :children))
+                               (sub (find-fn (if (nullish? ch) (js-array) ch))))
+                          (when (not (undefined? sub))
+                            (setq found sub)))))
+                    (setq idx (1+ idx)))
+                  found)))
+        (js-call (js-array
+                   (lambda (n) (put (get n :properties) :parameterCount -1))
+                   (lambda (n) (put (get n :properties) :parameterCount "2"))
+                   (lambda (n)
+                     (put (aref (get n :children) 0) :children
+                       (js-array (js-object :kind "raw-javascript" :value "js*" :children (js-array)
+                                            :span (Object/assign (js-object) (get (aref (get n :children) 0) :span))))))
+                   (lambda (n)
+                     (put (aref (get n :children) 1) :value (get (aref (get n :children) 0) :value)))
+                   (lambda (n)
+                     (put (aref (get n :children) 0) :value "")))
+          :forEach
+          (lambda (mutate)
+            (let ((ir (js-call (get backends :compiler) :compile_ir_string
+                        "(defun f () (lambda (x y) 7)) (export f)" "malformed-callable.eli")))
+              (funcall mutate (find-fn (get ir :body)))
+              (let ((saved (JSON/stringify ir)))
+                (js-call assert :throws
+                  (lambda () (js-call (get backends :managed) :emit_managed_wasm ir runtime))
+                  (lambda (e)
+                    (let ((diag (get e :eliscriptDiagnostic)))
+                      (and (not (nullish? diag))
+                           (= (get diag :code) "ELI-B0001")
+                           (= (get (get diag :location) :file) "malformed-callable.eli")))))
+                (js-call assert :equal (JSON/stringify ir) saved))))))))
+
+  (test "a callable child without its required source span is rejected by the IR schema before backend lowering"
+    (lambda ()
+      (let* ((ir (js-call (get backends :compiler) :compile_ir_string
+                   "(defun f () (lambda (x y) 7)) (export f)" "missing-callable-span.eli"))
+             (pending (globalThis.Array.from (get ir :body)))
+             (callable undefined))
+        (while (and (> (get pending :length) 0) (undefined? callable))
+          (let ((node (js-call pending :pop)))
+            (if (= (get node :kind) "function-expression")
+              (setq callable node)
+              (js-call (get node :children) :forEach (lambda (child) (js-call pending :push child))))))
+        (funcall assert callable)
+        (put (aref (get callable :children) 0) :children
+          (js-array (js-object :kind "raw-javascript" :value "js*" :children (js-array))))
+        (let ((saved (JSON/stringify ir)))
+          (js-call assert :throws
+            (lambda () (js-call (get backends :managed) :emit_managed_wasm ir runtime))
+            (lambda (error)
+              (let ((diag (get error :eliscriptDiagnostic)))
+                (js-call assert :equal (if (nullish? diag) undefined (get diag :code)) "ELI-I0001")
+                (js-call assert :equal (if (nullish? diag) undefined (get diag :phase)) "ir-schema")
+                (js-call assert :equal (get error :message) "IR node has unknown or missing fields")
+                (js-call assert :equal (get diag :message) (get error :message))
+                t)))
+          (js-call assert :equal (JSON/stringify ir) saved)))))
+
+  (test "captured arguments are snapshotted before later writes replace their shared cell"
+    (lambda ()
+      (let* ((heap (instance))
+             (four (js-call heap :number 4))
+             (result (js-call heap :invoke "captured-arguments" (js-array four)))
+             (first (js-call heap :get result 0))
+             (second (js-call heap :get result 1))
+             (reference (js-call javascript :captured_arguments 4)))
+        (js-call assert :equal (js-call heap :readNumber first) (aref reference 0))
+        (js-call assert :equal (js-call heap :readNumber first) 45)
+        (js-call assert :equal (js-call heap :readNumber second) (aref reference 1))
+        (js-call assert :equal (js-call heap :readNumber second) 5)
+        (finish heap (js-array four result first second)))))
+
+  (test "generated closure programs match an independent lexical and IEEE model across shadowing and updates"
+    (lambda ()
+      (let ((update (let ((u (js-object)))
+                      (put u "+" (lambda (a b) (+ a b)))
+                      (put u "-" (lambda (a b) (- a b)))
+                      (put u "*" (lambda (a b) (* a b)))
+                      (put u "/" (lambda (a b) (/ a b)))
+                      u))
+            (deltas (js-array 0.5 -0.0 3.25 -2
+                              (get globalThis.Number :POSITIVE_INFINITY)
+                              (get globalThis.Number :MIN_VALUE)
+                              (get globalThis.Number :NaN)))
+            (cnt 0))
+        (js-call generated-closure-cases :forEach
+          (lambda (item)
+            (let* ((name (get item :name))
+                   (sequential (get item :sequential))
+                   (op (get item :op))
+                   (salt (get item :salt))
+                   (outer (get item :outer))
+                   (bytes (get item :bytes))
+                   (heap (instantiateManagedRuntime bytes))
+                   (_ (js-call heap :auto 1))
+                   (input (js-call heap :number outer))
+                   (pair (js-call heap :invoke "make" (js-array input)))
+                   (writer (js-call heap :get pair 0))
+                   (reader (js-call heap :get pair 1))
+                   (before (js-call heap :get pair 2))
+                   (expected salt))
+              (js-call deltas :forEach
+                (lambda (delta)
+                  (let* ((argument (js-call heap :number delta))
+                         (result (js-call heap :invoke "update" (js-array writer argument))))
+                    (setq expected (funcall (get update op) expected delta))
+                    (funcall assert (Object/is (js-call heap :readNumber result) expected)
+                      (str name " " sequential " " op " write"))
+                    (js-call heap :release result)
+                    (js-call heap :release argument)
+                    (js-call heap :collect)
+                    (js-call (js-array (js-array reader expected)
+                                       (js-array before (if sequential expected outer)))
+                      :forEach
+                      (lambda (check-pair)
+                        (let ((f (aref check-pair 0))
+                              (val (aref check-pair 1))
+                              (out (js-call heap :invoke "read" (js-array (aref check-pair 0)))))
+                          (funcall assert (Object/is (js-call heap :readNumber out) val)
+                            (str name " " sequential " " op " read"))
+                          (js-call heap :release out)))))))
+              (finish heap (js-array input pair writer reader before))
+              (setq cnt (1+ cnt)))))
+        (js-call assert :equal cnt 48)))))

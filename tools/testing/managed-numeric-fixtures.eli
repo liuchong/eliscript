@@ -60,7 +60,7 @@
         ;; captured intrinsics cannot be probed by replacing globalThis.BigInt.
         ;; Import byte-identical runtime modules at fresh physical identities.
         (await (mkdir (resolve directory "runtime")))
-        (let ((files (js-array "prelude" "unicode-case" "unicode-case-data")) (index 0))
+        (let ((files (js-array "array-text" "binding" "errors" "math" "number-radix" "prelude" "primitives" "unicode-case" "unicode-case-data")) (index 0))
           (while (< index (js-length files))
             (let* ((name (str (aref files index) ".mjs")) (input (resolve root "runtime" name))
                    (output (resolve directory "runtime" name)))
@@ -69,8 +69,15 @@
             (setq index (1+ index))))
         (await (writeFile (resolve directory "package.json") (JSON/stringify (js-object
           :name "eliscript" :type "module" :private t :exports (js-object
+            "./runtime/array-text.mjs" "./runtime/array-text.mjs"
+                "./runtime/binding.mjs" "./runtime/binding.mjs"
+            "./runtime/errors.mjs" "./runtime/errors.mjs"
+            "./runtime/math.mjs" "./runtime/math.mjs"
+            "./runtime/number-radix.mjs" "./runtime/number-radix.mjs"
             "./runtime/prelude.mjs" "./runtime/prelude.mjs"
-            "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs")))))
+            "./runtime/primitives.mjs" "./runtime/primitives.mjs"
+            "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
+            "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs")))))
         (await (writeFile (resolve directory "compiler.mjs") (js-call compiler :emit_ir_string program)))
         (try
           (put globalThis.globalThis :BigInt (lambda () (setq calls (1+ calls)) (throw (new globalThis.Error "integer parser called"))))

@@ -1,2 +1,330 @@
-(module capsules.tests.wasm-managed-replacement.test
-  (js* "import {beforeAll, afterAll, test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {readFile, writeFile, mkdtemp, rm} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {pathToFileURL} from 'node:url';\nimport {spawnSync} from 'node:child_process';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nlet b, runtime, directory;\nbeforeAll(async () => {\n  directory = await mkdtemp(resolve(tmpdir(), 'eliscript-managed-replacement-'));\n  b = await buildBackends({outputRoot: directory});\n  runtime = b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli', 'utf8'), 'runtime.eli');\n}, 120000);\nafterAll(async () => {if (directory) await rm(directory, {recursive: true, force: true});});\nasync function compile(source) {\n  const p = b.compiler.compile_ir_string(source, 'replacement.eli'), javascript = b.compiler.emit_ir_string(p);\n  return {p, javascript, js: await import('data:text/javascript;base64,' + Buffer.from(javascript).toString('base64')), emit() {\n    const before = JSON.stringify(p), bytes = Uint8Array.from(b.managed.emit_managed_wasm(p, runtime));\n    assert.equal(JSON.stringify(p), before); assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);\n    return bytes;\n  }};\n}\nconst moduleInstances = new WeakSet();\nfunction instance(c, options) {\n  const bytes = c.emit(), module = new WebAssembly.Module(bytes), a = instantiateManagedRuntime(bytes, options);\n  if (WebAssembly.Module.exports(module).some(item => item.name === '__eliscript_module_close')) moduleInstances.add(a);\n  return a;\n}\nconst box = (a, x) => typeof x === 'string' ? a.string(x) : typeof x === 'number' ? a.number(x) : x;\nfunction check(a, c, name, inputs) {\n  const args = inputs.map(x => box(a, x)), expected = c.js[name.replaceAll('-', '_')](...inputs), out = a.invoke(name, args);\n  assert.equal(a.readString(out), expected, JSON.stringify(inputs));\n  for (const value of [...args, out]) a.release(value); a.collect(); assert.equal(a.stats().frameDepth, 0);\n}\nfunction finish(a, values = []) {for (const value of values) a.release(value); if (moduleInstances.has(a)) a.closeModule(); a.collect(); assert.equal(a.live(), 0); assert.equal(a.stats().frameDepth, 0);}\nconst ordinary = '(defun f (text search replacement) (js-call text :replace search replacement)) (export f)';\ntest('independent Node executes the original ordinary replacement and formatter-style regular expression', async () => {\n  const c = await compile(ordinary + ' (defun trim-comment (text) (js-call text :replace (js* \"/[ \\\\t]+$/u\") \"\")) (export trim-comment)');\n  const file = resolve(directory, 'reference.mjs'); await writeFile(file, c.javascript);\n  const child = spawnSync('node', ['--input-type=module', '-e', `import assert from 'node:assert/strict';const m=await import(process.argv[1]);assert.equal(m.f('aba','a',\"[$&][$\\x60][$']$$$1\"),\"[a][][ba]$$1ba\");assert.equal(m.trim_comment(';中文😀 \\t'),';中文😀');`, pathToFileURL(file).href], {encoding: 'utf8', timeout: 30000});\n  assert.equal(child.status, 0, child.stderr);\n});\ntest('ordinary replacement preserves first occurrence, empty matches, exact primitive conversions and template literals', async () => {\n  const c = await compile(ordinary), a = instance(c); a.auto(1);\n  for (const text of ['', 'ababa', '中😀\\ud800x\\udfff', 'undefinednulltruefalse0NaNInfinity'])\n    for (const search of ['', 'a', 'missing', '😀', '\\ud800', undefined, null, true, false, -0, .5, NaN, Infinity])\n      for (const replacement of ['', 'X', \"$$:$&:$`:$':$0:$1:$01:$99:$<name>\", undefined, null, true, .5, -0, NaN]) check(a, c, 'f', [text, search, replacement]);\n  finish(a);\n});\ntest('existing regular expressions replace exact captures including absent groups and two-digit template fallback', async () => {\n  for (const pattern of ['/[ \\\\t]+$/u', '/(a)|(b)/', '/(a)(b)?/', '/(?:)/u', '/😀/u', '/(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)/']) {\n    const c = await compile(`(defconst pattern (js* ${JSON.stringify(pattern)})) (defun f (text replacement) (js-call text :replace pattern replacement)) (export f)`), a = instance(c); a.auto(1);\n    for (const text of ['', 'zzab', 'a', 'b', ';中😀 \\t', '😀\\ud800', 'x\\n', 'zzabcdefghij!']) for (const replacement of ['', \"$&:$1:$2:$01:$02:$10:$20:$99:$`:$':$$\", undefined, -0]) check(a, c, 'f', [text, replacement]);\n    finish(a);\n  }\n});\ntest('replacement callbacks receive captured text, absent values, exact UTF16 offsets and original input through the ordinary ABI', async () => {\n  const c = await compile('(defun f (text search) (js-call text :replace search (lambda (match index original) (str \"<\" match \":\" index \":\" original \">\")))) (defun g (text) (js-call text :replace (js* \"/(a)|(b)/\") (lambda (match one two index original) (str \"<\" match \":\" one \":\" two \":\" index \":\" original \">\")))) (export f g)'), a = instance(c); a.auto(1);\n  for (const text of ['', 'ababa', '😀b', '中a\\ud800']) {for (const search of ['', 'a', 'missing', '😀']) check(a, c, 'f', [text, search]); check(a, c, 'g', [text]);}\n  finish(a);\n});\n\ntest('callback replacements execute exactly once only after a match, preserve closures and stringify results without interpreting templates', async () => {\n  const c = await compile('(defun f (text search replacement trace) (js-call text :replace search replacement (put trace :extra 7))) (defun factory (trace value) (lambda (match index original) (put trace :calls (1+ (get trace :calls 0))) (put trace :match match) (put trace :index index) (put trace :original original) value)) (export f factory)'), a = instance(c); a.auto(1);\n  for (const returned of [undefined, null, true, -0, .5, NaN, Infinity, \"$&$1$`$'\"]) {\n    const trace = a.sourceObject({}), value = box(a, returned), fn = a.invoke('factory', [trace, value]), input = a.string('😀aba'), search = a.string('a');\n    const out = a.invoke('f', [input, search, fn, trace]); assert.equal(a.readString(out), '😀aba'.replace('a', () => returned));\n    for (const [key, expected] of [['extra', 7], ['calls', 1], ['match', 'a'], ['index', 2], ['original', '😀aba']]) {\n      const k = a.string(key), got = a.objectGet(trace, k); assert.equal(got.kind === 4 ? a.readNumber(got) : a.readString(got), expected); a.release(k); a.release(got);\n    }\n    const absent = a.string('missing'), unchanged = a.invoke('f', [input, absent, fn, trace]); assert.equal(a.readString(unchanged), '😀aba');\n    const key = a.string('calls'), count = a.objectGet(trace, key); assert.equal(a.readNumber(count), 1);\n    for (const x of [trace, value, fn, input, search, out, absent, unchanged, key, count]) a.release(x); a.collect(); assert.equal(a.stats().frameDepth, 0);\n  }\n  finish(a);\n});\n\ntest('same-named object methods are captured before all argument effects and missing noncallable methods fail afterwards', async () => {\n  const c = await compile('(defun factory () (js-object :replace (lambda (one two) two))) (defun f (object trace) (js-call object :replace (put object :replace (lambda (one two) 99)) (put trace :visited 11))) (defun g (object trace) (js-call object :replace (put trace :visited 17) \"x\")) (export factory f g)'), a = instance(c); a.auto(1);\n  const ref = {}, object = c.js.factory(); assert.equal(c.js.f(object, ref), 11); assert.equal(ref.visited, 11);\n  const o = a.invoke('factory'), trace = a.sourceObject({}), out = a.invoke('f', [o, trace]); assert.equal(a.readNumber(out), 11);\n  for (const value of [null, undefined, true, false, 1, {}]) {\n    const v = value && typeof value === 'object' ? a.sourceObject({}) : box(a, value), seen = a.sourceObject({});\n    assert.throws(() => a.invoke('g', [v, seen]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');\n    const key = a.string('visited'), got = a.objectGet(seen, key); assert.equal(got === undefined ? undefined : a.readNumber(got), value === null || value === undefined ? undefined : 17);\n    for (const x of [v, seen, key, got]) a.release(x); assert.equal(a.stats().frameDepth, 0);\n  }\n  finish(a, [o, trace, out]);\n});\n\ntest('deterministic UTF16 replacement inputs agree with the unchanged JS source under collecting GC', async () => {\n  const c = await compile(ordinary), a = instance(c); a.auto(1); let state = 0x49a61e23;\n  const next = () => state = (Math.imul(state, 1664525) + 1013904223) >>> 0;\n  for (let i = 0; i < 512; i++) {\n    const text = String.fromCharCode(...Array.from({length: next() % 64}, () => next() >>> 16));\n    const first = next() % (text.length + 1), search = i % 3 ? text.slice(first, first + next() % 9) : String.fromCharCode(next() >>> 16);\n    const replacement = ['$$', '$&', \"$`\", \"$'\", '$0$01$10$99$<x>', '\\ud800😀', String.fromCharCode(next() >>> 16)][next() % 7]; check(a, c, 'f', [text, search, replacement]);\n  }\n  finish(a);\n});\n\ntest('replacement grows actual memory and capacity failures retain exact text and caller-owned roots', async () => {\n  const c = await compile(ordinary), a = instance(c, {maxSlots: 4096, initialBytes: 131072, maxBytes: 4194304}); a.auto(1);\n  const original = '中😀\\ud800'.repeat(10000), text = a.string(original), search = a.string('😀'), replacement = a.string(\"$`$&$'\"), before = a.stats().capacityBytes;\n  const out = a.invoke('f', [text, search, replacement]); assert.equal(a.readString(out), original.replace('😀', \"$`$&$'\")); assert(a.stats().capacityBytes > before); assert(a.stats().collections > 0);\n  finish(a, [text, search, replacement, out]);\n  const small = instance(c, {maxSlots: 64, initialBytes: 8192, maxBytes: 8192}); small.auto(1);\n  const s = small.string('held😀\\ud800'), needle = small.string('held'), insert = small.string('x'.repeat(1024)), held = small.number(-0), outer = small.frame(1); small.frameSet(outer, 0, held);\n  assert.throws(() => small.invoke('f', [s, needle, insert]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0002'); assert.equal(small.stats().frameDepth, 1); assert.equal(small.readString(s), 'held😀\\ud800'); assert(Object.is(small.readNumber(held), -0)); small.leaveFrame(outer); finish(small, [s, needle, insert, held]);\n});\n\ntest('actual matching and output WASM traps unwind private frames and retain preceding conversion failures', async () => {\n  const source = await readFile('bootstrap/runtime/memory.eli', 'utf8'), c = await compile(ordinary);\n  for (const [name, formals] of [['heap-text-search-unit', 'data length index reverse'], ['heap-replacement-write-range', 'heap builder text first last']]) {\n    const start = source.indexOf('  (defun ' + name + ' '), end = source.indexOf('  (defun ', start + 3); assert(start >= 0 && end > start);\n    const ir = b.compiler.compile_ir_string(source.slice(0, start) + `(defun ${name} (${formals}) (load-u16 4294967295))\\n` + source.slice(end), 'replacement-trap.eli');\n    const a = instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(c.p, ir))); a.auto(1);\n    const text = a.string('xxx'), search = a.string('x'), insert = a.string('y'), bad = a.sourceObject({}), held = a.number(-0), outer = a.frame(1); a.frameSet(outer, 0, held);\n    for (const args of [[text, bad, insert], [text, search, bad]]) {assert.throws(() => a.invoke('f', args), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003'); assert.equal(a.stats().frameDepth, 1);}\n    assert.throws(() => a.invoke('f', [text, search, insert]), WebAssembly.RuntimeError); assert.equal(a.stats().frameDepth, 1); assert.equal(a.readString(text), 'xxx'); assert(Object.is(a.readNumber(held), -0)); a.leaveFrame(outer); finish(a, [text, search, insert, bad, held]);\n  }\n});\n\ntest('Node independently executes the identical zero-import replacement WASM including closure callback captures', async () => {\n  const c = await compile('(defconst pattern (js* \"/(a)|(b)/\")) (defun f (s r) (js-call s :replace pattern r)) (defun g (s) (js-call s :replace pattern (lambda (match one two index original) (str match \":\" one \":\" two \":\" index \":\" original)))) (export f g)'), wasm = resolve(directory, 'replacement.wasm'); await writeFile(wasm, c.emit());\n  const child = spawnSync('node', ['--input-type=module', '-e', `import assert from 'node:assert/strict';import{readFileSync}from'node:fs';const{instantiateManagedRuntime}=await import(process.argv[1]),a=instantiateManagedRuntime(readFileSync(process.argv[2]));a.auto(1);const s=a.string('😀b'),r=a.string(\"$1:$2:$01:$20:$&\");const out=a.invoke('f',[s,r]);assert.equal(a.readString(out),'😀b'.replace(/(a)|(b)/,\"$1:$2:$01:$20:$&\"));const callback=a.invoke('g',[s]);assert.equal(a.readString(callback),'😀b'.replace(/(a)|(b)/,(m,a,b,i,s)=>m+':'+a+':'+b+':'+i+':'+s));for(const x of[s,r,out,callback])a.release(x);a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);`, pathToFileURL(resolve('tools/backends/managed-runtime.mjs')).href, wasm], {encoding: 'utf8', timeout: 30000}); assert.equal(child.status, 0, child.stderr);\n});\n"))
+(module tests.wasm-managed-replacement.test
+  (import "bun:test" afterAll beforeAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:buffer" Buffer)
+  (import "node:fs/promises" mkdtemp readFile rm writeFile)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:url" pathToFileURL)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defvar b nil)
+  (defvar runtime nil)
+  (defvar directory nil)
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-managed-replacement-"))))
+      (setq b (await (buildBackends (js-object :outputRoot directory))))
+      (setq runtime (js-call (get b :compiler) :compile_ir_string (await (readFile "bootstrap/runtime/memory.eli" "utf8")) "runtime.eli")))
+    120000)
+
+  (afterAll
+    (async ()
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defasync compile-case (source)
+    (let* ((p (js-call (get b :compiler) :compile_ir_string source "replacement.eli"))
+           (javascript (js-call (get b :compiler) :emit_ir_string p))
+           (js (await (funcall dynamic-import
+                        (str "data:text/javascript;base64,"
+                             (js-call (Buffer/from javascript) :toString "base64"))))))
+      (js-object
+        :p p
+        :javascript javascript
+        :js js
+        :emit (lambda ()
+                (let* ((before (JSON/stringify p))
+                       (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime))))
+                  (js-call assert :equal (JSON/stringify p) before)
+                  (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+                  bytes)))))
+
+  (defconst module-instances (new globalThis.WeakSet))
+
+  (defun make-instance (c &rest __host_forwarded_arguments_1)
+    (let* ((options (aref __host_forwarded_arguments_1 0)))
+    (let* ((bytes (js-call c :emit))
+           (mod (new globalThis.WebAssembly.Module bytes))
+           (a (instantiateManagedRuntime bytes options)))
+      (when (js-call (WebAssembly.Module/exports mod) :some (lambda (item) (= (get item :name) "__eliscript_module_close")))
+        (js-call module-instances :add a))
+      a)))
+
+  (defun box-val (a x)
+    (let ((ty (funcall js-typeof x)))
+      (cond
+        ((= ty "string") (js-call a :string x))
+        ((= ty "number") (js-call a :number x))
+        (t x))))
+
+  (defun check-call (a c name inputs)
+    (let* ((args (js-call inputs :map (lambda (x) (box-val a x))))
+           (js-fn (aref (get c :js) (js-call name :replaceAll "-" "_")))
+           (expected (js-call js-fn :apply nil inputs))
+           (out (js-call a :invoke name args)))
+      (js-call assert :equal (js-call a :readString out) expected (JSON/stringify inputs))
+      (js-call args :forEach (lambda (v) (js-call a :release v)))
+      (js-call a :release out)
+      (js-call a :collect)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))
+
+  (defun finish (a &rest __host_default_arguments_1)
+    (let* ((values (aref __host_default_arguments_1 0)))
+    (let ((owned (if (undefined? values) (js-array) values)))
+      (js-call owned :forEach (lambda (v) (js-call a :release v)))
+      (when (js-call module-instances :has a)
+        (js-call a :closeModule))
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
+
+  (defun diag-code? (e code)
+    (let ((diag (if (and (not (nullish? e)) (= (funcall js-typeof e) "object"))
+                  (get e :eliscriptDiagnostic)
+                  nil)))
+      (and (not (nullish? diag)) (= (get diag :code) code))))
+
+  (defconst ordinary "(defun f (text search replacement) (js-call text :replace search replacement)) (export f)")
+
+  (test "independent Node executes the original ordinary replacement and formatter-style regular expression"
+    (async ()
+      (let* ((c (await (compile-case (str ordinary " (defun trim-comment (text) (js-call text :replace (js* \"/[ \\\\t]+$/u\") \"\")) (export trim-comment)"))))
+             (file (resolve directory "reference.mjs"))
+             (runner (resolve "tests/helpers/wasm-managed-replacement-node.mjs")))
+        (await (writeFile file (get c :javascript)))
+        (let ((child (spawnSync "node"
+                       (js-array runner "js" (get (pathToFileURL file) :href))
+                       (js-object :encoding "utf8" :timeout 30000))))
+          (js-call assert :equal (get child :status) 0 (get child :stderr))))))
+
+  (test "ordinary replacement preserves first occurrence, empty matches, exact primitive conversions and template literals"
+    (async ()
+      (let* ((c (await (compile-case ordinary)))
+             (a (make-instance c))
+             (texts (js-array "" "ababa" "中😀\ud800x\udfff" "undefinednulltruefalse0NaNInfinity"))
+             (searches (js-array "" "a" "missing" "😀" "\ud800" undefined nil t false -0.0 0.5 globalThis.NaN globalThis.Infinity))
+             (replacements (js-array "" "X" "$$:$&:$`:$':$0:$1:$01:$99:$<name>" undefined nil t 0.5 -0.0 globalThis.NaN)))
+        (js-call a :auto 1)
+        (js-call texts :forEach
+          (lambda (text)
+            (js-call searches :forEach
+              (lambda (search)
+                (js-call replacements :forEach
+                  (lambda (replacement)
+                    (check-call a c "f" (js-array text search replacement))))))))
+        (finish a))))
+
+  (test "existing regular expressions replace exact captures including absent groups and two-digit template fallback"
+    (async ()
+      (let ((patterns (js-array "/[ \\t]+$/u" "/(a)|(b)/" "/(a)(b)?/" "/(?:)/u" "/😀/u" "/(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)/"))
+            (texts (js-array "" "zzab" "a" "b" ";中😀 \t" "😀\ud800" "x\n" "zzabcdefghij!"))
+            (replacements (js-array "" "$&:$1:$2:$01:$02:$10:$20:$99:$`:$':$$" undefined -0.0))
+            (i 0))
+        (while (< i (length patterns))
+          (let* ((pattern (aref patterns i))
+                 (c (await (compile-case (str "(defconst pattern (js* " (JSON/stringify pattern) ")) (defun f (text replacement) (js-call text :replace pattern replacement)) (export f)"))))
+                 (a (make-instance c)))
+            (js-call a :auto 1)
+            (js-call texts :forEach
+              (lambda (text)
+                (js-call replacements :forEach
+                  (lambda (replacement)
+                    (check-call a c "f" (js-array text replacement))))))
+            (finish a))
+          (setq i (+ i 1))))))
+
+  (test "replacement callbacks receive captured text, absent values, exact UTF16 offsets and original input through the ordinary ABI"
+    (async ()
+      (let* ((c (await (compile-case "(defun f (text search) (js-call text :replace search (lambda (match index original) (str \"<\" match \":\" index \":\" original \">\")))) (defun g (text) (js-call text :replace (js* \"/(a)|(b)/\") (lambda (match one two index original) (str \"<\" match \":\" one \":\" two \":\" index \":\" original \">\")))) (export f g)")))
+             (a (make-instance c))
+             (texts (js-array "" "ababa" "😀b" "中a\ud800"))
+             (searches (js-array "" "a" "missing" "😀")))
+        (js-call a :auto 1)
+        (js-call texts :forEach
+          (lambda (text)
+            (js-call searches :forEach
+              (lambda (search) (check-call a c "f" (js-array text search))))
+            (check-call a c "g" (js-array text))))
+        (finish a))))
+
+  (test "callback replacements execute exactly once only after a match, preserve closures and stringify results without interpreting templates"
+    (async ()
+      (let* ((c (await (compile-case "(defun f (text search replacement trace) (js-call text :replace search replacement (put trace :extra 7))) (defun factory (trace value) (lambda (match index original) (put trace :calls (1+ (get trace :calls 0))) (put trace :match match) (put trace :index index) (put trace :original original) value)) (export f factory)")))
+             (a (make-instance c)))
+        (js-call a :auto 1)
+        (js-call (js-array undefined nil t -0.0 0.5 globalThis.NaN globalThis.Infinity "$&$1$`$'") :forEach
+          (lambda (returned)
+            (let* ((trace (js-call a :sourceObject (js-object)))
+                   (value (box-val a returned))
+                   (fn (js-call a :invoke "factory" (js-array trace value)))
+                   (input (js-call a :string "😀aba"))
+                   (search (js-call a :string "a"))
+                   (out (js-call a :invoke "f" (js-array input search fn trace))))
+              (js-call assert :equal (js-call a :readString out) (js-call "😀aba" :replace "a" (lambda () returned)))
+              (js-call (js-array (js-array "extra" 7) (js-array "calls" 1) (js-array "match" "a") (js-array "index" 2) (js-array "original" "😀aba")) :forEach
+                (lambda (pair)
+                  (let* ((k (js-call a :string (aref pair 0)))
+                         (got (js-call a :objectGet trace k)))
+                    (js-call assert :equal
+                      (if (= (get got :kind) 4) (js-call a :readNumber got) (js-call a :readString got))
+                      (aref pair 1))
+                    (js-call a :release k)
+                    (js-call a :release got))))
+              (let* ((absent (js-call a :string "missing"))
+                     (unchanged (js-call a :invoke "f" (js-array input absent fn trace)))
+                     (key (js-call a :string "calls"))
+                     (count (js-call a :objectGet trace key)))
+                (js-call assert :equal (js-call a :readString unchanged) "😀aba")
+                (js-call assert :equal (js-call a :readNumber count) 1)
+                (js-call (js-array trace value fn input search out absent unchanged key count) :forEach (lambda (x) (js-call a :release x)))
+                (js-call a :collect)
+                (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))
+        (finish a))))
+
+  (test "same-named object methods are captured before all argument effects and missing noncallable methods fail afterwards"
+    (async ()
+      (let* ((c (await (compile-case "(defun factory () (js-object :replace (lambda (one two) two))) (defun f (object trace) (js-call object :replace (put object :replace (lambda (one two) 99)) (put trace :visited 11))) (defun g (object trace) (js-call object :replace (put trace :visited 17) \"x\")) (export factory f g)")))
+             (a (make-instance c)))
+        (js-call a :auto 1)
+        (let ((ref (js-object))
+              (obj (js-call (get c :js) :factory)))
+          (js-call assert :equal (js-call (get c :js) :f obj ref) 11)
+          (js-call assert :equal (get ref :visited) 11))
+        (let* ((o (js-call a :invoke "factory"))
+               (trace (js-call a :sourceObject (js-object)))
+               (out (js-call a :invoke "f" (js-array o trace))))
+          (js-call assert :equal (js-call a :readNumber out) 11)
+          (js-call (js-array nil undefined t false 1 (js-object)) :forEach
+            (lambda (value)
+              (let ((v (if (and (not (nullish? value)) (= (funcall js-typeof value) "object"))
+                         (js-call a :sourceObject (js-object))
+                         (box-val a value)))
+                    (seen (js-call a :sourceObject (js-object))))
+                (js-call assert :throws
+                  (lambda () (js-call a :invoke "g" (js-array v seen)))
+                  (lambda (e) (diag-code? e "ELI-RT0003")))
+                (let* ((key (js-call a :string "visited"))
+                       (got (js-call a :objectGet seen key)))
+                  (js-call assert :equal
+                    (if (undefined? got) undefined (js-call a :readNumber got))
+                    (if (nullish? value) undefined 17))
+                  (js-call (js-array v seen key got) :forEach (lambda (x) (js-call a :release x)))
+                  (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))
+          (finish a (js-array o trace out))))))
+
+  (test "deterministic UTF16 replacement inputs agree with the unchanged JS source under collecting GC"
+    (async ()
+      (let* ((c (await (compile-case ordinary)))
+             (a (make-instance c))
+             (state 1235623459)
+             (next (lambda ()
+                     (setq state (unsigned-bit-shift-right (+ (Math/imul state 1664525) 1013904223) 0))
+                     state))
+             (i 0))
+        (js-call a :auto 1)
+        (while (< i 512)
+          (let* ((len (% (funcall next) 64))
+                 (codes (Array/from (js-object :length len) (lambda () (unsigned-bit-shift-right (funcall next) 16))))
+                 (text (js-call globalThis.String.fromCharCode :apply nil codes))
+                 (first (% (funcall next) (+ (length text) 1)))
+                 (search (if (/= (% i 3) 0)
+                           (js-call text :slice first (+ first (% (funcall next) 9)))
+                           (String/fromCharCode (unsigned-bit-shift-right (funcall next) 16))))
+                 (choices (js-array "$$" "$&" "$`" "$'" "$0$01$10$99$<x>" "\ud800😀" (String/fromCharCode (unsigned-bit-shift-right (funcall next) 16))))
+                 (replacement (aref choices (% (funcall next) 7))))
+            (check-call a c "f" (js-array text search replacement)))
+          (setq i (+ i 1)))
+        (finish a))))
+
+  (test "replacement grows actual memory and capacity failures retain exact text and caller-owned roots"
+    (async ()
+      (let* ((c (await (compile-case ordinary)))
+             (a (make-instance c (js-object :maxSlots 4096 :initialBytes 131072 :maxBytes 4194304))))
+        (js-call a :auto 1)
+        (let* ((original (js-call "中😀\ud800" :repeat 10000))
+               (text (js-call a :string original))
+               (search (js-call a :string "😀"))
+               (replacement (js-call a :string "$`$&$'"))
+               (before (get (js-call a :stats) :capacityBytes))
+               (out (js-call a :invoke "f" (js-array text search replacement))))
+          (js-call assert :equal (js-call a :readString out) (js-call original :replace "😀" "$`$&$'"))
+          (funcall assert (> (get (js-call a :stats) :capacityBytes) before))
+          (funcall assert (> (get (js-call a :stats) :collections) 0))
+          (finish a (js-array text search replacement out)))
+        (let ((small (make-instance c (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 8192))))
+          (js-call small :auto 1)
+          (let* ((s (js-call small :string "held😀\ud800"))
+                 (needle (js-call small :string "held"))
+                 (insert (js-call small :string (js-call "x" :repeat 1024)))
+                 (held (js-call small :number -0.0))
+                 (outer (js-call small :frame 1)))
+            (js-call small :frameSet outer 0 held)
+            (js-call assert :throws
+              (lambda () (js-call small :invoke "f" (js-array s needle insert)))
+              (lambda (e) (diag-code? e "ELI-RT0002")))
+            (js-call assert :equal (get (js-call small :stats) :frameDepth) 1)
+            (js-call assert :equal (js-call small :readString s) "held😀\ud800")
+            (funcall assert (Object/is (js-call small :readNumber held) -0.0))
+            (js-call small :leaveFrame outer)
+            (finish small (js-array s needle insert held)))))))
+
+  (test "actual matching and output WASM traps unwind private frames and retain preceding conversion failures"
+    (async ()
+      (let ((source (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
+            (c (await (compile-case ordinary))))
+        (js-call
+          (js-array
+            (js-array "heap-text-search-unit" "data length index reverse")
+            (js-array "heap-replacement-write-range" "heap builder text first last"))
+          :forEach
+          (lambda (pair)
+            (let* ((name (aref pair 0))
+                   (formals (aref pair 1))
+                   (start (js-call source :indexOf (str "  (defun " name " ")))
+                   (end (js-call source :indexOf "  (defun " (+ start 3))))
+              (funcall assert (and (>= start 0) (> end start)))
+              (let* ((ir (js-call (get b :compiler) :compile_ir_string
+                           (str (js-call source :slice 0 start) "(defun " name " (" formals ") (load-u16 4294967295))\n" (js-call source :slice end))
+                           "replacement-trap.eli"))
+                     (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm (get c :p) ir)))))
+                (js-call a :auto 1)
+                (let* ((text (js-call a :string "xxx"))
+                       (search (js-call a :string "x"))
+                       (insert (js-call a :string "y"))
+                       (bad (js-call a :sourceObject (js-object)))
+                       (held (js-call a :number -0.0))
+                       (outer (js-call a :frame 1)))
+                  (js-call a :frameSet outer 0 held)
+                  (js-call (js-array (js-array text bad insert) (js-array text search bad)) :forEach
+                    (lambda (args)
+                      (js-call assert :throws
+                        (lambda () (js-call a :invoke "f" args))
+                        (lambda (e) (diag-code? e "ELI-RT0003")))
+                      (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)))
+                  (js-call assert :throws
+                    (lambda () (js-call a :invoke "f" (js-array text search insert)))
+                    globalThis.WebAssembly.RuntimeError)
+                  (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+                  (js-call assert :equal (js-call a :readString text) "xxx")
+                  (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+                  (js-call a :leaveFrame outer)
+                  (finish a (js-array text search insert bad held))))))))))
+
+  (test "Node independently executes the identical zero-import replacement WASM including closure callback captures"
+    (async ()
+      (let* ((c (await (compile-case "(defconst pattern (js* \"/(a)|(b)/\")) (defun f (s r) (js-call s :replace pattern r)) (defun g (s) (js-call s :replace pattern (lambda (match one two index original) (str match \":\" one \":\" two \":\" index \":\" original)))) (export f g)")))
+             (wasm (resolve directory "replacement.wasm"))
+             (runner (resolve "tests/helpers/wasm-managed-replacement-node.mjs"))
+             (rt-href (get (pathToFileURL (resolve "tools/backends/managed-runtime.mjs")) :href)))
+        (await (writeFile wasm (js-call c :emit)))
+        (let ((child (spawnSync "node"
+                       (js-array runner "wasm" rt-href wasm)
+                       (js-object :encoding "utf8" :timeout 30000))))
+          (js-call assert :equal (get child :status) 0 (get child :stderr)))))))

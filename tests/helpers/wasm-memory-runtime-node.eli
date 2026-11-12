@@ -1,0 +1,65 @@
+(module tests.helpers.wasm-memory-runtime-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:crypto" createHash)
+  (import "node:process" :default process)
+
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+
+  (defasync run-node-memory-check (runtime-url artifact-path expected-sha)
+    (let* ((mod (await (funcall dyn-import runtime-url)))
+           (instantiateMemoryRuntime (get mod :instantiateMemoryRuntime))
+           (bytes (readFileSync artifact-path))
+           (actual-sha (js-call (js-call (createHash "sha256") :update bytes) :digest "hex")))
+      (js-call assert :equal actual-sha expected-sha)
+      (let* ((a (funcall instantiateMemoryRuntime bytes))
+             (state 392539085)
+             (next (lambda ()
+                     (setq state (bit-xor state (bit-shift-left state 13)))
+                     (setq state (bit-xor state (unsigned-bit-shift-right state 17)))
+                     (setq state (bit-xor state (bit-shift-left state 5)))
+                     (unsigned-bit-shift-right state 0)))
+             (encoder (new globalThis.TextEncoder))
+             (round 0))
+        (while (< round 512)
+          (let* ((text-len (% (funcall next) 64))
+                 (codes (Array/from (js-object :length text-len) (lambda () (bit-and (funcall next) 65535))))
+                 (text (apply String/fromCharCode codes)))
+            (js-call assert :deepEqual
+              (js-call a :bytes (js-call a :encode (js-call a :string text)))
+              (js-call encoder :encode text))
+            (let* ((byte-len (% (funcall next) 96))
+                   (input (Uint8Array/from (js-object :length byte-len) (lambda () (bit-and (funcall next) 255))))
+                   (p (js-call a :buffer input)))
+              (js-call (js-array false t) :forEach
+                (lambda (preserveBOM)
+                  (let ((decoder (new globalThis.TextDecoder "utf-8" (js-object :ignoreBOM preserveBOM))))
+                    (js-call assert :equal
+                      (js-call a :text (js-call a :decode p (js-object :preserveBOM preserveBOM)))
+                      (js-call decoder :decode input)))
+                  (let ((expected undefined))
+                    (try
+                      (let ((fatal-decoder (new globalThis.TextDecoder "utf-8" (js-object :fatal t :ignoreBOM preserveBOM))))
+                        (setq expected (js-call fatal-decoder :decode input)))
+                      (catch _err nil))
+                    (if (undefined? expected)
+                        (js-call assert :throws
+                          (lambda () (js-call a :decode p (js-object :strict t :preserveBOM preserveBOM)))
+                          (lambda (e)
+                            (let ((diag (get e :eliscriptDiagnostic)))
+                              (and (not (nullish? diag))
+                                   (= (get diag :code) "ELI-RT0004")))))
+                        (js-call assert :equal
+                          (js-call a :text (js-call a :decode p (js-object :strict t :preserveBOM preserveBOM)))
+                          expected))))))
+            (js-call a :retire))
+          (setq round (+ round 1))))))
+
+  (when (= (aref (get process :argv) 2) "--run-node-check")
+    (let ((argv (get process :argv)))
+      (js-call (run-node-memory-check (aref argv 3) (aref argv 4) (aref argv 5)) :catch
+        (lambda (err)
+          (console/error err)
+          (js-call process :exit 1)))))
+
+  (export run-node-memory-check))

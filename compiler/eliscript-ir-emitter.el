@@ -178,11 +178,7 @@
   "Generated import for canonical language value equality.")
 
 (defconst eliscript-ir-emitter--binding-runtime
-  (concat
-   "import { get as __eliscript_get } from \"eliscript/runtime/core/collection.mjs\";\n"
-   "const __eliscript_binding_missing = Symbol(\"eliscript.binding.missing\");\n"
-   "const __eliscript_binding_get = (value, key, notFound) => { if (value == null) return notFound; const prototype = typeof value === \"object\" ? Object.getPrototypeOf(value) : undefined; if (prototype === Object.prototype || prototype === null) { const type = key && Object.getOwnPropertyDescriptor(key, Symbol.for(\"eliscript.value.type\")); if (type?.value === \"keyword\" || type?.value === \"symbol\") key = key.qualifiedName; } return __eliscript_get(value, key, notFound); };\n")
-  "Generated runtime support for protocol-driven map binding patterns.")
+    "import { bindingGet as __eliscript_binding_get } from \"eliscript/runtime/binding.mjs\";\nconst __eliscript_binding_missing = Symbol(\"eliscript.binding.missing\");\n")
 
 (defun eliscript-ir-emitter--locate (node output)
   "Mark OUTPUT with NODE's source span when source-map recording is active."
@@ -1388,9 +1384,8 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
        (eliscript-ir-emitter--emit-binary-infix node ">>>"))
       ('value-type
        (eliscript-ir-emitter--require-arity node 1 1)
-       (format
-        "((__eliscript_value) => { if (__eliscript_value === null) return \"null\"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== \"object\" && __eliscript_host_type !== \"function\") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for(\"eliscript.value.type\")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, \"value\") && (__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, \"kind\"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, \"value\")) { if (__eliscript_kind.value === \"eliscript/keyword\") return \"keyword\"; if (__eliscript_kind.value === \"eliscript/symbol\") return \"symbol\"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(%s)"
-        (eliscript-ir-emitter-emit-expression (car nodes))))
+       (format "__eliscript_value_type(%s)"
+               (eliscript-ir-emitter-emit-expression (car nodes))))
       ('host-identity-token
        (eliscript-ir-emitter--require-arity node 1 1)
        (format "__eliscript_host_identity_token(%s)"
@@ -1411,12 +1406,12 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
       ('string-to-bigint
        (eliscript-ir-emitter--require-arity node 1 1)
        (format
-        "((__eliscript_text) => { try { return BigInt(__eliscript_text); } catch { return null; } })(%s)"
+        "__eliscript_string_to_bigint(%s)"
         (eliscript-ir-emitter-emit-expression (car nodes))))
       ('number-float64-words
        (eliscript-ir-emitter--require-arity node 1 1)
        (format
-        "((__eliscript_number) => { const __eliscript_bytes = new DataView(new ArrayBuffer(8)); __eliscript_bytes.setFloat64(0, __eliscript_number === 0 ? 0 : __eliscript_number, true); return [__eliscript_bytes.getUint32(0, true), __eliscript_bytes.getUint32(4, true)]; })(%s)"
+        "__eliscript_number_float64_words(%s)"
         (eliscript-ir-emitter-emit-expression (car nodes))))
       ('= (eliscript-ir-emitter--emit-comparison "=" nodes "==="))
       ((or '/= 'not=)
@@ -1471,7 +1466,7 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
                (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
       ('__eliscript_array_build
        (eliscript-ir-emitter--require-arity node 2 2)
-       (format "((count, build) => { if (!Number.isInteger(count) || count < 0 || count > 67108854 || typeof build !== 'function') throw new TypeError('invalid private array builder'); return Array.from({length: count}, (_, index) => build(index)); })(%s, %s)"
+       (format "__eliscript_array_build(%s, %s)"
                (eliscript-ir-emitter-emit-expression (nth 0 nodes))
                (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
       ('js-cons
@@ -1505,7 +1500,7 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
       ('__eliscript_arity_error
        (eliscript-ir-emitter--require-arity node 2 2)
        (format
-        "((label, arity) => { throw new TypeError(label + \" received unsupported arity: \" + arity); })(%s, %s)"
+        "__eliscript_arity_error(%s, %s)"
         (eliscript-ir-emitter-emit-expression (nth 0 nodes))
         (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
       ('object-keys
@@ -1702,9 +1697,15 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
                (eliscript-ir-emitter--emit-callee (car children))
                (eliscript-ir-emitter--emit-arguments (cdr children))))
       ('apply-call
-       (format "%s(...%s)"
-               (eliscript-ir-emitter--emit-callee (car children))
-               (eliscript-ir-emitter-emit-expression (nth 1 children))))
+       (eliscript-ir-emitter--require-arity node 2)
+       (let ((fixed (butlast (cdr children)))
+             (tail (car (last children))))
+         (format "%s(%s...(%s ?? []))"
+                 (eliscript-ir-emitter--emit-callee (car children))
+                 (if fixed
+                     (concat (eliscript-ir-emitter--emit-arguments fixed) ", ")
+                   "")
+                 (eliscript-ir-emitter-emit-expression tail))))
       ('call
        (format "%s(%s)"
                (eliscript-ir-emitter--emit-callee (car children))
@@ -1843,17 +1844,10 @@ JavaScript property or tag string rather than an Eliscript value."
   "Emit IR PROGRAM, retaining source marks when recording is active."
   (unless (eliscript-ir-program-p program)
     (eliscript-emitter--fail "expected an IR program: %S" program))
-  (if (let ((body (eliscript-ir-program-body program)))
-        (and (equal (length body) 1)
-             (eq (eliscript-ir-node-kind (car body)) 'module-declaration)
-             (null (eliscript-ir-node-children (car body)))
-             (eliscript-emitter--prelude-capsule-p
-              (eliscript-ir-program-filename program) (eliscript-ir-node-value (car body)))))
-      eliscript-emitter--prelude-module
-    (eliscript-ir-emitter--emit-ordinary-module program)))
+  (eliscript-ir-emitter--emit-ordinary-module program))
 
 (defun eliscript-ir-emitter--emit-ordinary-module (program)
-  "Emit every IR PROGRAM except the shared helper module."
+  "Emit an IR PROGRAM through the ordinary module pipeline."
   (let ((eliscript-emitter--temporary-counter 0)
         (eliscript-ir-emitter--binding-temporaries nil)
         ;; IR is immutable during emission. Rechecking each synchronous if/let
@@ -1866,6 +1860,8 @@ JavaScript property or tag string rather than an Eliscript value."
         uses-list-runtime
         uses-value-runtime
         uses-host-identity-token
+        uses-value-type
+        uses-primitive-runtime
         uses-number-conversion
         uses-numeric-coercion
         uses-imul
@@ -1912,6 +1908,13 @@ JavaScript property or tag string rather than an Eliscript value."
                   (eq (eliscript-ir-node-value node) 'string-to-number))
          (setq uses-number-conversion t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
+                  (memq (eliscript-ir-node-value node)
+                        '(string-to-bigint number-float64-words __eliscript_array_build __eliscript_arity_error)))
+         (setq uses-primitive-runtime t))
+       (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
+                  (eq (eliscript-ir-node-value node) 'value-type))
+         (setq uses-value-type t))
+       (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (eq (eliscript-ir-node-value node) 'host-identity-token))
          (setq uses-host-identity-token t))
        (when (and (eq (eliscript-ir-node-kind node) 'function-declaration)
@@ -1924,67 +1927,79 @@ JavaScript property or tag string rather than an Eliscript value."
           (cl-some #'eliscript-ir-emitter--node-uses-literal-runtime-p
                    (eliscript-ir-program-body program)))
     (setq portable-functions (nreverse portable-functions))
-    (concat
-     "// Generated by Eliscript. Do not edit.\n"
-     (eliscript-emitter--tdz-prologue eliscript-ir-emitter--tdz-state)
-     (if (let ((body (eliscript-ir-program-body program)))
-           (and (= (length body) 1)
+    (let* ((body (eliscript-ir-program-body program))
+           (array-text-capsule
+            (and (= (length body) 1)
+                 (eq (eliscript-ir-node-kind (car body)) 'module-declaration)
+                 (eliscript-emitter--array-text-capsule-p
+                  (eliscript-ir-program-filename program) (eliscript-ir-node-value (car body)))))
+           (eliscript-emitter--numeric-profile
+            (or eliscript-emitter--numeric-profile array-text-capsule)))
+      (concat
+       "// Generated by Eliscript. Do not edit.\n"
+       (eliscript-emitter--tdz-prologue eliscript-ir-emitter--tdz-state)
+       (if (and (= (length body) 1)
                 (eq (eliscript-ir-node-kind (car body)) 'module-declaration)
                 (eliscript-emitter--unicode-capsule-p
-                 (eliscript-ir-program-filename program) (eliscript-ir-node-value (car body)))))
-         "" eliscript-emitter--unicode-runtime-import)
-     (if uses-math-runtime eliscript-emitter--math-runtime-import "")
-     (eliscript-emitter--prelude-import
-      uses-array-text (or uses-number-conversion uses-numeric-coercion)
-      uses-numeric-coercion uses-imul)
-     (if uses-literal-runtime
-         eliscript-ir-emitter--literal-runtime-import
-       "")
-     (if uses-collection-runtime
-         eliscript-ir-emitter--collection-runtime-import
-       "")
-     (if uses-binding-runtime
-         eliscript-ir-emitter--binding-runtime
-       "")
-     (if uses-list-runtime
-         eliscript-ir-emitter--list-runtime-import
-       "")
-     (if uses-value-runtime
-         eliscript-ir-emitter--value-runtime-import
-       "")
-     "const __eliscript_truthy = (value) => value !== false && value != null;\n"
-     (if uses-host-identity-token
-         eliscript-emitter--host-identity-token-helper
-       "")
-     "\n"
-     (mapconcat #'eliscript-ir-emitter-emit-top-level
-                (eliscript-ir-program-body program)
-                "\n\n")
-     (when portable-functions
-       (let ((implicit
-              (cl-remove-if
-               (lambda (node)
-                 (memq (eliscript-ir-node-value node) exported-bindings))
-               portable-functions)))
-         (concat
-          (when implicit
-            (format "\n\nexport {%s};"
-                    (mapconcat
-                     (lambda (node)
+                 (eliscript-ir-program-filename program) (eliscript-ir-node-value (car body))))
+           "" eliscript-emitter--unicode-runtime-import)
+       (if uses-math-runtime eliscript-emitter--math-runtime-import "")
+       (eliscript-emitter--prelude-import
+        (and (not array-text-capsule) uses-array-text)
+        (and (not eliscript-emitter--numeric-profile)
+             (or uses-number-conversion uses-numeric-coercion))
+        (and (not eliscript-emitter--numeric-profile) uses-numeric-coercion)
+        (and (not eliscript-emitter--numeric-profile) uses-imul))
+       (if uses-literal-runtime
+           eliscript-ir-emitter--literal-runtime-import
+         "")
+       (if uses-collection-runtime
+           eliscript-ir-emitter--collection-runtime-import
+         "")
+       (if uses-binding-runtime
+           eliscript-ir-emitter--binding-runtime
+         "")
+       (if uses-list-runtime
+           eliscript-ir-emitter--list-runtime-import
+         "")
+       (if uses-value-runtime
+           eliscript-ir-emitter--value-runtime-import
+         "")
+       (if uses-primitive-runtime eliscript-emitter--primitive-runtime-import "")
+       (if uses-value-type eliscript-emitter--value-type-import "")
+       "const __eliscript_truthy = (value) => value !== false && value != null;\n"
+       (if uses-host-identity-token
+           eliscript-emitter--host-identity-token-helper
+         "")
+       "\n"
+       (mapconcat #'eliscript-ir-emitter-emit-top-level
+                  (eliscript-ir-program-body program)
+                  "\n\n")
+       (when portable-functions
+         (let ((implicit
+                (cl-remove-if
+                 (lambda (node)
+                   (memq (eliscript-ir-node-value node) exported-bindings))
+                 portable-functions)))
+           (concat
+            (when implicit
+              (format "\n\nexport {%s};"
+                      (mapconcat
+                       (lambda (node)
+                         (eliscript-emitter--binding-name
+                          (eliscript-ir-node-value node)))
+                       implicit ", ")))
+            "\nexport const __eliscript_portable__ = Object.freeze(Object.fromEntries(["
+            (mapconcat
+             (lambda (node)
+               (format "[%s, %s]"
+                       (eliscript-emitter--json-string
+                        (symbol-name (eliscript-ir-node-value node)))
                        (eliscript-emitter--binding-name
-                        (eliscript-ir-node-value node)))
-                     implicit ", ")))
-          "\nexport const __eliscript_portable__ = Object.freeze(Object.fromEntries(["
-          (mapconcat
-           (lambda (node)
-             (format "[%s, %s]"
-                     (eliscript-emitter--json-string
-                      (symbol-name (eliscript-ir-node-value node)))
-                     (eliscript-emitter--binding-name
-                      (eliscript-ir-node-value node))))
-           portable-functions ", ")
-          "]));")))
-     "\n")))
+                        (eliscript-ir-node-value node))))
+             portable-functions ", ")
+            "]));")))
+       "\n"))))
 
 (defun eliscript-emit-ir-module (program)
   "Emit analyzed IR PROGRAM directly as one ECMAScript module."

@@ -1,2 +1,86 @@
-(module capsules.runtime.testing.sorted
-  (js* "import {\n  SORTED_MAP_STATE,\n  SORTED_SET_STATE,\n  SortedNode,\n  readSortedMetrics,\n  resetSortedMetrics as resetMetrics,\n} from \"../core/sorted-internals.mjs\";\n\nfunction mapState(value) {\n  if (value?.[SORTED_MAP_STATE] !== undefined) {\n    return value[SORTED_MAP_STATE];\n  }\n  if (value?.[SORTED_SET_STATE] !== undefined) {\n    return value[SORTED_SET_STATE].map[SORTED_MAP_STATE];\n  }\n  throw new TypeError(\"expected an Eliscript persistent sorted collection\");\n}\n\nfunction inspectNode(node, comparison, minimum, maximum, nodes, result) {\n  if (node === null) return { height: 0, size: 0 };\n  if (!(node instanceof SortedNode) || nodes.has(node)) {\n    throw new TypeError(\"persistent sorted collection contains an invalid tree\");\n  }\n  nodes.add(node);\n  if (minimum !== null && comparison(node.key, minimum) <= 0) {\n    throw new TypeError(\"persistent sorted collection violates lower ordering\");\n  }\n  if (maximum !== null && comparison(node.key, maximum) >= 0) {\n    throw new TypeError(\"persistent sorted collection violates upper ordering\");\n  }\n  const left = inspectNode(\n    node.left,\n    comparison,\n    minimum,\n    node.key,\n    nodes,\n    result,\n  );\n  const right = inspectNode(\n    node.right,\n    comparison,\n    node.key,\n    maximum,\n    nodes,\n    result,\n  );\n  const height = Math.max(left.height, right.height) + 1;\n  const size = left.size + right.size + 1;\n  if (node.height !== height || node.size !== size ||\n      Math.abs(left.height - right.height) > 1) {\n    throw new TypeError(\"persistent sorted collection violates AVL balance\");\n  }\n  result.maxBalance = Math.max(\n    result.maxBalance,\n    Math.abs(left.height - right.height),\n  );\n  return { height, size };\n}\n\nfunction collectNodes(node, result) {\n  if (node === null || result.has(node)) return;\n  result.add(node);\n  collectNodes(node.left, result);\n  collectNodes(node.right, result);\n}\n\nexport function inspectPersistentSortedCollection(value) {\n  const state = mapState(value);\n  const nodes = new Set();\n  const result = { maxBalance: 0 };\n  const tree = inspectNode(\n    state.root,\n    state.comparison,\n    null,\n    null,\n    nodes,\n    result,\n  );\n  return Object.freeze({\n    count: tree.size,\n    height: tree.height,\n    nodes: nodes.size,\n    maxBalance: result.maxBalance,\n  });\n}\n\nexport function sharedPersistentSortedNodes(left, right) {\n  const leftNodes = new Set();\n  const rightNodes = new Set();\n  collectNodes(mapState(left).root, leftNodes);\n  collectNodes(mapState(right).root, rightNodes);\n  let shared = 0;\n  for (const node of leftNodes) {\n    if (rightNodes.has(node)) shared += 1;\n  }\n  return shared;\n}\n\nexport function resetSortedMetrics() {\n  resetMetrics();\n}\n\nexport function sortedMetrics() {\n  return readSortedMetrics();\n}\n"))
+(module eliscript.runtime.testing.sorted
+  (import "../core/sorted-internals.mjs" :as sorted-internals)
+  (import "../core/sorted-internals.mjs"
+    SORTED_MAP_STATE
+    SORTED_SET_STATE
+    SortedNode
+    readSortedMetrics)
+
+  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+
+  (defun map-state (value)
+    (cond
+      ((and (not (nil? value)) (not (undefined? (aref value SORTED_MAP_STATE))))
+       (aref value SORTED_MAP_STATE))
+      ((and (not (nil? value)) (not (undefined? (aref value SORTED_SET_STATE))))
+       (aref (get (aref value SORTED_SET_STATE) :map) SORTED_MAP_STATE))
+      (t
+       (throw (new globalThis/TypeError "expected an Eliscript persistent sorted collection")))))
+
+  (defun inspect-node (node comparison minimum maximum nodes result)
+    (if (eq node nil)
+        (js-object :height 0 :size 0)
+        (progn
+          (when (or (not (funcall instance-of? node SortedNode))
+                    (js-call nodes :has node))
+            (throw (new globalThis/TypeError "persistent sorted collection contains an invalid tree")))
+          (js-call nodes :add node)
+          (when (and (not (eq minimum nil))
+                     (<= (funcall comparison (get node :key) minimum) 0))
+            (throw (new globalThis/TypeError "persistent sorted collection violates lower ordering")))
+          (when (and (not (eq maximum nil))
+                     (>= (funcall comparison (get node :key) maximum) 0))
+            (throw (new globalThis/TypeError "persistent sorted collection violates upper ordering")))
+          (let* ((left (inspect-node (get node :left) comparison minimum (get node :key) nodes result))
+                 (right (inspect-node (get node :right) comparison (get node :key) maximum nodes result))
+                 (height (+ (Math/max (get left :height) (get right :height)) 1))
+                 (size (+ (get left :size) (get right :size) 1))
+                 (balance (Math/abs (- (get left :height) (get right :height)))))
+            (when (or (not (= (get node :height) height))
+                      (not (= (get node :size) size))
+                      (> balance 1))
+              (throw (new globalThis/TypeError "persistent sorted collection violates AVL balance")))
+            (put result "maxBalance" (Math/max (get result :maxBalance) balance))
+            (js-object :height height :size size)))))
+
+  (defun collect-nodes (node result)
+    (unless (or (eq node nil) (js-call result :has node))
+      (js-call result :add node)
+      (collect-nodes (get node :left) result)
+      (collect-nodes (get node :right) result)))
+
+  (defun inspectPersistentSortedCollection (value)
+    (let* ((state (map-state value))
+           (nodes (new globalThis/Set))
+           (result (js-object :maxBalance 0))
+           (tree (inspect-node (get state :root) (get state :comparison) nil nil nodes result)))
+      (Object/freeze
+        (js-object
+          :count (get tree :size)
+          :height (get tree :height)
+          :nodes (get nodes :size)
+          :maxBalance (get result :maxBalance)))))
+
+  (defun sharedPersistentSortedNodes (left right)
+    (let ((left-nodes (new globalThis/Set))
+          (right-nodes (new globalThis/Set))
+          (shared 0))
+      (collect-nodes (get (map-state left) :root) left-nodes)
+      (collect-nodes (get (map-state right) :root) right-nodes)
+      (js-call left-nodes :forEach
+        (lambda (node)
+          (when (js-call right-nodes :has node)
+            (setq shared (+ shared 1)))))
+      shared))
+
+  (defun resetSortedMetrics ()
+    (sorted-internals/resetSortedMetrics))
+
+  (defun sortedMetrics ()
+    (readSortedMetrics))
+
+  (export
+    inspectPersistentSortedCollection
+    sharedPersistentSortedNodes
+    resetSortedMetrics
+    sortedMetrics))

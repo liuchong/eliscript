@@ -2,6 +2,9 @@
   (import "node:crypto" createHash)
   (import "node:fs" readdirSync readFileSync)
   (import "node:path" resolve)
+  (import "node:process" :default process)
+  (import "./compiler-corpus-cli-transport.mjs" installOriginalCLICompiler)
+  (import "./compiler-host-record.mjs" copyHostRecord)
   (import "../../bootstrap/host/project.mjs" :as project)
 
   (defun selected-directory-digest (directory)
@@ -40,4 +43,120 @@
               (if (undefined? supplied)
                 (selected-directory-digest (get options :moduleDirectory)) supplied)))))
         (await (js-call project :buildProject forwarded)))))
-  (export buildProject))
+  (defasync runOriginalProjectCases (cases &rest supplied)
+    (let ((hooks (if (undefined? (aref supplied 0)) (js-array) (aref supplied 0))) (index 0))
+      (while (< index (js-length hooks))
+        (await (js-call (Promise/resolve) :then (aref hooks index)))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (js-length cases))
+        (let* ((record (aref cases index)) (timeout (get record :timeout)) (timer undefined))
+          (unless (and (= (value-type (get record :name)) "string")
+                       (= (value-type (get record :body)) "function")
+                       (Number/isSafeInteger timeout) (> timeout 0))
+            (throw (new globalThis.TypeError "original project case must retain its explicit timeout")))
+          (try
+            (await (Promise/race (js-array
+              (js-call (Promise/resolve) :then (get record :body))
+              (new globalThis.Promise (lambda (_ reject)
+                (setq timer (globalThis.setTimeout
+                  (lambda () (funcall reject (new globalThis.Error
+                    (str (get record :name) " exceeded its original " timeout " ms timeout")))) timeout)))))))
+            (finally (globalThis.clearTimeout timer))))
+        (setq index (1+ index)))))
+
+  (defun host-truth (value) (js* "!!value"))
+  (defun supplied (options key fallback)
+    (let ((value (get options key))) (if (undefined? value) fallback value)))
+  (defun command-environment (options)
+    (if (nullish? options) undefined (get options :env)))
+  (defun compiler-options (options directory inherit-process)
+    ;; Preserve spread order and define own data properties, including a
+    ;; caller's __proto__ key. Read option getters at their original boundary.
+    (let* ((output (copyHostRecord options))
+           (environment (copyHostRecord (if inherit-process (get process :env) undefined))))
+      (copyHostRecord output (js-object :env
+        (copyHostRecord environment (command-environment options)
+          (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR directory))))))
+
+  (defun createOriginalProjectTransport (names bootstrap &rest configuration)
+    (let* ((config (if (undefined? (aref configuration 0)) (js-object) (aref configuration 0)))
+           (cases (js-array)) (hooks (js-array))
+           (source (resolve (aref (get process :argv) 2) "bootstrap/compiler"))
+           (reference
+             (when (get config :referenceRequired)
+               (let ((root (get (get process :env) :ELISCRIPT_ORIGINAL_REFERENCE_PRODUCT_ROOT)))
+                 (unless (host-truth root)
+                   (throw (new globalThis.Error (get config :referenceError))))
+                 (resolve root "bootstrap/compiler"))))
+           (install (async (directory)
+             (unless (and (= (value-type directory) "string") (/= directory ""))
+               (throw (new globalThis.TypeError (supplied config :directoryError
+                 "original bootstrap setup requires its output directory"))))
+             (await (installOriginalCLICompiler source directory names))
+             (if (get config :returnDirectory) (resolve directory) undefined))))
+      (js-object :cases cases :hooks hooks :selected source :reference reference
+        :register (lambda (name body &rest arguments)
+          (let ((timeout (if (undefined? (aref arguments 0)) (get config :defaultTimeout) (aref arguments 0))))
+            (unless (and (= (value-type name) "string") (= (value-type body) "function")
+                         (Number/isSafeInteger timeout) (> timeout 0)
+                         (or (undefined? (get config :title)) (= name (get config :title)))
+                         (or (undefined? (get config :timeout)) (= timeout (get config :timeout))))
+              (throw (new globalThis.TypeError (supplied config :registrationError
+                "original project case must retain its explicit timeout"))))
+            (js-call cases :push (js-object :name name :body body :timeout timeout)) undefined))
+        :beforeAll (lambda (body)
+          (unless (= (value-type body) "function")
+            (throw (new globalThis.TypeError "original source debugging beforeAll hook changed")))
+          (js-call hooks :push body) undefined)
+        :install install
+        :runFrontend (async (run command options paths)
+          (if (= (aref command 0) (get paths :build))
+            (progn
+              (unless (= (js-length command) 1)
+                (throw (new globalThis.TypeError "original loop bootstrap command changed")))
+              (let ((environment (command-environment options)))
+                (await (funcall install (if (nullish? environment) undefined
+                  (get environment :ELISCRIPT_BOOTSTRAP_OUT_DIR))))) "")
+            (await (funcall run command
+              (if (= (aref command 0) (get paths :seed))
+                  (compiler-options options reference t) options)))))
+        :runInterop (async (run command options root)
+          (let ((forwarded options))
+            (when (= (aref command 0) (resolve root "bin/eliscript-build"))
+              (let* ((output (copyHostRecord options))
+                     (environment (copyHostRecord (command-environment options)))
+                     (declared (command-environment options))
+                     (directory (if (nullish? declared) undefined (get declared :ELISCRIPT_BOOTSTRAP_MODULE_DIR))))
+                (setq forwarded (copyHostRecord output (js-object :env
+                  (copyHostRecord environment (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR
+                    (if (nullish? directory) source directory))))))))
+            (await (funcall run command forwarded))))
+        :runLiteral (async (run command environment allow-failure paths)
+          (if (= (aref command 0) (get paths :build))
+            (progn
+              (unless (= (js-length command) 1)
+                (throw (new globalThis.TypeError "original literal bootstrap command changed")))
+              (await (funcall install (get environment :ELISCRIPT_BOOTSTRAP_OUT_DIR)))
+              (js-object :exitCode 0 :stdout "" :stderr ""))
+            (let ((forwarded environment))
+              (cond
+                ((= (aref command 0) (get paths :seed))
+                  (setq forwarded (copyHostRecord environment (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR reference))))
+                ((= (aref command 0) (get paths :portable))
+                  (let* ((output (copyHostRecord environment)) (directory (get environment :ELISCRIPT_BOOTSTRAP_MODULE_DIR)))
+                    (setq forwarded (copyHostRecord output (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR
+                      (if (nullish? directory) source directory)))))))
+              (await (funcall run command forwarded allow-failure)))))
+        :runDebug (async (run command options)
+          (await (funcall run command
+            (if (= (aref command 0) "./bin/eliscript") (compiler-options options source t) options))))
+        :setup (async (command options)
+          (if (or (not (Array/isArray command)) (/= (aref command 0) (funcall bootstrap))) false
+            (let* ((environment (if (nullish? options) undefined (get options :env)))
+                   (directory (if (nullish? environment) undefined (get environment :ELISCRIPT_BOOTSTRAP_OUT_DIR))))
+              (unless (and (= (js-length command) 1) (funcall (js* "(value) => !!value") directory))
+                (throw (new globalThis.TypeError "original bootstrap setup command shape changed")))
+              (await (funcall install directory)) t))))))
+
+  (export buildProject createOriginalProjectTransport runOriginalProjectCases))

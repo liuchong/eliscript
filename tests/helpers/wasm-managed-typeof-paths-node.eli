@@ -1,0 +1,33 @@
+(module tests.helpers.wasm-managed-typeof-paths-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:process" :default process)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defasync run-main ()
+    (let* ((js (await (funcall dynamic-import (aref (get process :argv) 2))))
+           (rt-mod (await (funcall dynamic-import (aref (get process :argv) 3))))
+           (instantiate (get rt-mod :instantiateManagedRuntime))
+           (a (funcall instantiate (readFileSync (aref (get process :argv) 4))))
+           (values (js-array nil undefined false -0.0 globalThis.NaN globalThis.Number.MIN_VALUE "中😀\ud800")))
+      (js-call a :auto 1)
+      (js-call values :forEach
+        (lambda (value)
+          (let* ((ty (funcall js-typeof value))
+                 (v (cond
+                      ((= ty "number") (js-call a :number value))
+                      ((= ty "string") (js-call a :string value))
+                      (t value)))
+                 (obj (js-call a :sourceObject (js-object :item v)))
+                 (arr (js-call a :sourceArray (js-array obj)))
+                 (out (js-call a :invoke "f" (js-array arr))))
+            (js-call assert :equal (js-call a :readString out) (js-call js :f (js-array (js-object :item value))))
+            (js-call (js-array v obj arr out) :forEach (lambda (x) (js-call a :release x))))))
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))
+
+  (run-main))

@@ -1,2 +1,1050 @@
-(module capsules.bootstrap.host.project-ground
-  (js* "import { createHash } from \"node:crypto\";\nimport {\n  lstatSync,\n  mkdirSync,\n  readFileSync,\n  readdirSync,\n  realpathSync,\n  statSync,\n  writeFileSync,\n} from \"node:fs\";\nimport {\n  basename,\n  dirname,\n  isAbsolute,\n  relative,\n  resolve,\n  sep,\n} from \"node:path\";\nimport { fileURLToPath } from \"node:url\";\n\nimport { loadCompiler } from \"./bun.mjs\";\n\nconst manifestFilename = \"eliscript-project.json\";\nconst cacheFormat = \"eliscript-project-cache\";\nconst cacheVersion = 2;\nconst hostDirectory = dirname(fileURLToPath(import.meta.url));\n\nfunction projectError(message, filename) {\n  const error = new Error(message);\n  error.eliscriptDiagnostic = {\n    format: \"eliscript-diagnostic\",\n    version: 1,\n    code: \"ELI-B0001\",\n    severity: \"error\",\n    phase: \"project-build\",\n    message,\n    ...(filename ? { location: { file: filename } } : {}),\n  };\n  throw error;\n}\n\nfunction canonicalDirectory(path, label) {\n  const expanded = resolve(path);\n  let attributes;\n  try {\n    attributes = statSync(expanded);\n  } catch {\n    projectError(`${label} is not a directory`, expanded);\n  }\n  if (!attributes.isDirectory()) {\n    projectError(`${label} is not a directory`, expanded);\n  }\n  return realpathSync(expanded);\n}\n\nfunction pathOption(value, label) {\n  if (typeof value !== \"string\" || value.length === 0) {\n    projectError(`${label} must be a non-empty path`);\n  }\n  return value;\n}\n\nfunction insideRoot(root, candidate) {\n  const path = relative(root, candidate);\n  return path === \"\" || (!isAbsolute(path) && path !== \"..\" &&\n    !path.startsWith(`..${sep}`));\n}\n\nfunction canonicalSource(path, root, importer) {\n  const expanded = resolve(path);\n  let attributes;\n  try {\n    attributes = statSync(expanded);\n  } catch {\n    projectError(`local Eliscript module does not exist: ${path}`, importer);\n  }\n  if (!attributes.isFile()) {\n    projectError(`local Eliscript module does not exist: ${path}`, importer);\n  }\n  const canonical = realpathSync(expanded);\n  if (!insideRoot(root, canonical)) {\n    projectError(`local Eliscript module escapes project root: ${path}`, importer);\n  }\n  return canonical;\n}\n\nfunction macroDependency(specifier, root, importer) {\n  const expanded = resolve(root, specifier);\n  let attributes;\n  try {\n    attributes = statSync(expanded);\n  } catch {\n    projectError(`macro file dependency does not exist: ${specifier}`, importer);\n  }\n  if (!attributes.isFile()) {\n    projectError(`macro file dependency does not exist: ${specifier}`, importer);\n  }\n  const source = realpathSync(expanded);\n  if (!insideRoot(root, source)) {\n    projectError(\n      `macro file dependency escapes project root: ${specifier}`,\n      importer,\n    );\n  }\n  const bytes = readFileSync(source);\n  return {\n    specifier,\n    source,\n    digest: createHash(\"sha256\").update(bytes).digest(\"hex\"),\n    content: (() => {\n      try {\n        return new TextDecoder(\"utf-8\", { fatal: true }).decode(bytes);\n      } catch {\n        projectError(\n          `macro file dependency is not valid UTF-8: ${specifier}`,\n          importer,\n        );\n      }\n    })(),\n  };\n}\n\nfunction macroInputs(request, root, importer) {\n  const dependencies = [...request.macroFileDependencies]\n    .map((specifier) => macroDependency(specifier, root, importer));\n  const canonical = new Set(dependencies.map(({ source }) => source));\n  if (canonical.size !== dependencies.length) {\n    projectError(\"macro file dependencies resolve to duplicates\", importer);\n  }\n  return {\n    dependencies,\n    context: {\n      capabilities: new Set(request.macroCapabilities),\n      files: new Map(dependencies.map(({ specifier, content }) =>\n        [specifier, content])),\n    },\n  };\n}\n\nfunction macroDependencyRecords(dependencies, root) {\n  return dependencies.map(({ source, digest }) => ({\n    path: relative(root, source),\n    digest,\n  }));\n}\n\nfunction outputFor(source, root, outDir) {\n  const sourcePath = relative(root, source);\n  return resolve(outDir, `${sourcePath.slice(0, -4)}.mjs`);\n}\n\nfunction physicalWritePath(path) {\n  const expanded = resolve(path);\n  const suffix = [];\n  let cursor = expanded;\n  while (true) {\n    try {\n      lstatSync(cursor);\n      let canonical;\n      try {\n        canonical = realpathSync(cursor);\n      } catch {\n        projectError(`generated artifact contains an unresolved symlink: ${expanded}`);\n      }\n      return resolve(canonical, ...suffix.reverse());\n    } catch (error) {\n      if (error?.eliscriptDiagnostic) throw error;\n      if (error?.code !== \"ENOENT\") {\n        projectError(`generated artifact path cannot be resolved: ${expanded}`);\n      }\n      const parent = dirname(cursor);\n      if (parent === cursor) {\n        projectError(`generated artifact path cannot be resolved: ${expanded}`);\n      }\n      suffix.push(basename(cursor));\n      cursor = parent;\n    }\n  }\n}\n\nfunction existingFileIdentity(path) {\n  try {\n    const attributes = statSync(path);\n    return attributes.isFile() ? `${attributes.dev}:${attributes.ino}` : null;\n  } catch {\n    return null;\n  }\n}\n\nfunction validateOutputIsolation({ sources, macroDependencies, root, outDir }) {\n  const protectedPaths = [\n    ...sources,\n    ...macroDependencies.map(({ source }) => source),\n  ];\n  const protectedCanonical = new Set(protectedPaths.map((path) =>\n    realpathSync(path)));\n  const protectedIdentities = new Set(protectedPaths\n    .map(existingFileIdentity)\n    .filter((identity) => identity !== null));\n  const artifacts = [\n    ...sources.flatMap((source) => {\n      const output = outputFor(source, root, outDir);\n      return [output, `${output}.map`];\n    }),\n    resolve(outDir, manifestFilename),\n  ];\n  const artifactCanonical = new Set();\n  const artifactIdentities = new Set();\n  for (const artifact of artifacts) {\n    const physical = physicalWritePath(artifact);\n    const identity = existingFileIdentity(artifact);\n    if (!insideRoot(outDir, physical)) {\n      projectError(`generated artifact escapes output directory: ${artifact}`);\n    }\n    if (protectedCanonical.has(physical) ||\n        (identity !== null && protectedIdentities.has(identity))) {\n      projectError(`generated artifact would overwrite an input: ${artifact}`);\n    }\n    if (artifactCanonical.has(physical) ||\n        (identity !== null && artifactIdentities.has(identity))) {\n      projectError(`generated artifacts resolve to the same file: ${artifact}`);\n    }\n    artifactCanonical.add(physical);\n    if (identity !== null) artifactIdentities.add(identity);\n  }\n}\n\nfunction localSourceImport(specifier) {\n  return specifier.endsWith(\".eli\") &&\n    (specifier.startsWith(\"./\") || specifier.startsWith(\"../\"));\n}\n\nfunction relativeImport(target, importer) {\n  const path = relative(dirname(importer), target);\n  return path.startsWith(\"./\") || path.startsWith(\"../\") ? path : `./${path}`;\n}\n\nfunction walkProgram(program, visit) {\n  const pending = [...program.body];\n  while (pending.length > 0) {\n    const node = pending.pop();\n    visit(node);\n    for (let index = node.children.length - 1; index >= 0; index -= 1) {\n      pending.push(node.children[index]);\n    }\n  }\n}\n\nfunction projectImports(program, source, root, portable) {\n  const imports = [];\n  walkProgram(program, (node) => {\n    if (node.kind !== \"import-declaration\") return;\n    const specifier = node.value;\n    if (portable && node.properties?.portable !== true) {\n      projectError(\"portable project contains a non-portable import\", source);\n    }\n    if (!localSourceImport(specifier)) {\n      if (portable || specifier.endsWith(\".eli\")) {\n        const kind = portable ? \"portable import\" : \"Eliscript source import\";\n        projectError(`${kind} must be a relative .eli module: ${specifier}`, source);\n      }\n      return;\n    }\n    const dependency = canonicalSource(\n      resolve(dirname(source), specifier),\n      root,\n      source,\n    );\n    imports.push({\n      dependency,\n      entries: node.children\n        .filter((child) => child.kind === \"import-named\")\n        .map((child) => child.value),\n      node,\n    });\n  });\n  return imports;\n}\n\nfunction rewriteLocalImports(program, source, root, outDir) {\n  const outputPath = outputFor(source, root, outDir);\n  walkProgram(program, (node) => {\n    if (node.kind !== \"import-declaration\" || !localSourceImport(node.value)) {\n      return;\n    }\n    const dependency = canonicalSource(\n      resolve(dirname(source), node.value),\n      root,\n      source,\n    );\n    node.value = relativeImport(outputFor(dependency, root, outDir), outputPath);\n  });\n}\n\nfunction digestBytes(bytes) {\n  return createHash(\"sha256\").update(bytes).digest(\"hex\");\n}\n\nfunction digestFile(filename) {\n  return digestBytes(readFileSync(filename));\n}\n\nfunction regularFile(filename) {\n  try {\n    return statSync(filename).isFile();\n  } catch (error) {\n    if (error?.code === \"ENOENT\") return false;\n    throw error;\n  }\n}\n\nfunction compilerModuleDirectory(moduleDirectory) {\n  return resolve(\n    moduleDirectory ??\n      process.env.ELISCRIPT_BOOTSTRAP_MODULE_DIR ??\n      resolve(hostDirectory, \"../../dist/bootstrap\"),\n  );\n}\n\nfunction compilerDirectoryDigest(directory) {\n  const filenames = readdirSync(directory, { withFileTypes: true })\n    .filter((entry) => entry.isFile() &&\n      (entry.name.endsWith(\".mjs\") || entry.name.endsWith(\".mjs.map\")))\n    .map((entry) => entry.name)\n    .sort();\n  if (!filenames.includes(\"compiler.mjs\")) {\n    projectError(\"generated compiler directory is incomplete\", directory);\n  }\n  const hash = createHash(\"sha256\");\n  for (const filename of filenames) {\n    hash.update(filename);\n    hash.update(\"\\0\");\n    hash.update(readFileSync(resolve(directory, filename)));\n    hash.update(\"\\0\");\n  }\n  return hash.digest(\"hex\");\n}\n\nfunction compilerDigestOption(value) {\n  if (typeof value !== \"string\" || !/^[0-9a-f]{64}$/u.test(value)) {\n    projectError(\"injected compiler requires a lowercase SHA-256 compilerDigest\");\n  }\n  return value;\n}\n\nfunction writeModule({\n  compiler,\n  program,\n  source,\n  sourceText,\n  root,\n  outDir,\n  dependencies,\n  macroDependencies,\n  portableEntries,\n  reason,\n  sourceMapReference,\n}) {\n  const output = outputFor(source, root, outDir);\n  const sourceMap = `${output}.map`;\n  rewriteLocalImports(program, source, root, outDir);\n  const emission = compiler.emit_ir_string_with_source_map(\n    program,\n    sourceText,\n    basename(output),\n    relative(dirname(sourceMap), source),\n  );\n  const javascript = sourceMapReference\n    ? `${emission.javascript}//# sourceMappingURL=${basename(sourceMap)}\\n`\n    : emission.javascript;\n  mkdirSync(dirname(output), { recursive: true });\n  writeFileSync(sourceMap, emission.sourceMap);\n  writeFileSync(output, javascript);\n  return {\n    source,\n    output,\n    sourceMap,\n    sourceDigest: digestBytes(sourceText),\n    outputDigest: digestFile(output),\n    sourceMapDigest: digestFile(sourceMap),\n    dependencies,\n    macroDependencies,\n    portableEntries,\n    reused: false,\n    reason,\n  };\n}\n\nfunction reportModule(module, root, outDir) {\n  return {\n    source: relative(root, module.source),\n    output: relative(outDir, module.output),\n    sourceMap: relative(outDir, module.sourceMap),\n    status: module.reused ? \"reused\" : \"compiled\",\n    reason: module.reason,\n    dependencies: module.dependencies.map((dependency) => relative(root, dependency)),\n    ...(module.macroDependencies.length > 0\n      ? { macroDependencies: macroDependencyRecords(module.macroDependencies, root) }\n      : {}),\n    portableEntries: [...module.portableEntries],\n  };\n}\n\nfunction manifestRecord(module, root, outDir) {\n  return {\n    source: relative(root, module.source),\n    output: relative(outDir, module.output),\n    sourceMap: relative(outDir, module.sourceMap),\n    sourceDigest: module.sourceDigest,\n    outputDigest: module.outputDigest,\n    sourceMapDigest: module.sourceMapDigest,\n    ...(module.macroDependencies.length > 0\n      ? { macroDependencies: macroDependencyRecords(module.macroDependencies, root) }\n      : {}),\n  };\n}\n\nfunction cacheMetadataRecord(module, root) {\n  return {\n    source: relative(root, module.source),\n    dependencies: module.dependencies.map((dependency) => relative(root, dependency)),\n    ...(module.macroDependencies.length > 0\n      ? { macroDependencies: macroDependencyRecords(module.macroDependencies, root) }\n      : {}),\n    portableEntries: [...module.portableEntries],\n  };\n}\n\nfunction cacheIdentityModule(record) {\n  return {\n    source: record.source,\n    dependencies: record.dependencies,\n    ...(record.macroDependencies === undefined\n      ? {}\n      : { macroDependencies: record.macroDependencies }),\n    portableEntries: record.portableEntries,\n  };\n}\n\nfunction cacheIdentity(value) {\n  if (!value || !Array.isArray(value.modules)) return undefined;\n  const modules = value.modules.map(cacheIdentityModule);\n  if (value.format === undefined && value.version === 1) {\n    return {\n      version: 1,\n      compilerDigest: value.compilerDigest,\n      mode: value.mode,\n      portableEntries: value.portableEntries,\n      modules,\n    };\n  }\n  return {\n    format: value.format,\n    version: value.version,\n    compilerDigest: value.compilerDigest,\n    mode: value.mode,\n    portableEntries: value.portableEntries,\n    modules,\n  };\n}\n\nfunction writeManifest(\n  entryOutputs,\n  modules,\n  root,\n  outDir,\n  mode,\n  portableEntries,\n  compilerDigest,\n) {\n  const outputEntries = entryOutputs.map((entryOutput) =>\n    relative(outDir, entryOutput));\n  const identity = outputEntries.length === 1\n    ? {\n      format: \"eliscript-project\",\n      version: 1,\n      entry: outputEntries[0],\n      modules: modules.map((module) => manifestRecord(module, root, outDir)),\n    }\n    : {\n      format: \"eliscript-project\",\n      version: 2,\n      entries: outputEntries,\n      modules: modules.map((module) => manifestRecord(module, root, outDir)),\n    };\n  const digest = digestBytes(JSON.stringify(identity));\n  const cache = {\n    format: cacheFormat,\n    version: cacheVersion,\n    compilerDigest,\n    mode,\n    portableEntries,\n    modules: modules.map((module) => cacheMetadataRecord(module, root)),\n  };\n  const cacheDigest = digestBytes(JSON.stringify(cache));\n  const manifest = resolve(outDir, manifestFilename);\n  mkdirSync(outDir, { recursive: true });\n  writeFileSync(manifest, `${JSON.stringify({\n    ...identity,\n    digest,\n    cache: { ...cache, digest: cacheDigest },\n  })}\\n`);\n  return { manifest: realpathSync(manifest), digest };\n}\n\nfunction readCache({\n  compiler,\n  enabled,\n  outDir,\n  entryOutputs,\n  mode,\n  portableEntries,\n  compilerDigest,\n}) {\n  const manifestPath = resolve(outDir, manifestFilename);\n  if (!enabled) {\n    return compiler.project_cache_lookup({\n      enabled: false,\n      manifestStatus: \"missing\",\n    });\n  }\n  if (!regularFile(manifestPath)) {\n    return compiler.project_cache_lookup({\n      enabled: true,\n      manifestStatus: \"missing\",\n    });\n  }\n  try {\n    const manifest = JSON.parse(readFileSync(manifestPath, \"utf8\"));\n    const graphIdentity = manifest?.version === 2\n      ? {\n        format: manifest?.format,\n        version: manifest?.version,\n        entries: manifest?.entries,\n        modules: manifest?.modules,\n      }\n      : {\n        format: manifest?.format,\n        version: manifest?.version,\n        entry: manifest?.entry,\n        modules: manifest?.modules,\n      };\n    const privateIdentity = cacheIdentity(manifest?.cache);\n    return compiler.project_cache_lookup({\n      enabled: true,\n      manifestStatus: \"readable\",\n      manifest,\n      expectedEntry: entryOutputs.length === 1\n        ? relative(outDir, entryOutputs[0])\n        : undefined,\n      expectedEntries: entryOutputs.map((entryOutput) =>\n        relative(outDir, entryOutput)),\n      graphDigestValid: manifest?.digest ===\n        digestBytes(JSON.stringify(graphIdentity)),\n      cacheDigestValid: privateIdentity !== undefined &&\n        manifest.cache?.digest === digestBytes(JSON.stringify(privateIdentity)),\n      compilerDigest,\n      mode,\n      portableEntries,\n    });\n  } catch {\n    return compiler.project_cache_lookup({\n      enabled: true,\n      manifestStatus: \"unreadable\",\n    });\n  }\n}\n\nfunction cachedRecords(lookup) {\n  return new Map((lookup.cache?.records ?? []).map((record) =>\n    [record.source, record]));\n}\n\nfunction cachedModule({\n  compiler,\n  source,\n  root,\n  outDir,\n  record,\n  expectedPortableEntries,\n  expectedMacroDependencies = [],\n}) {\n  const output = outputFor(source, root, outDir);\n  const sourceMap = `${output}.map`;\n  let sourceDigest;\n  let outputDigest;\n  let sourceMapDigest;\n  let outputExists = false;\n  let sourceMapExists = false;\n  let artifactFailure;\n  try {\n    sourceDigest = digestFile(source);\n    outputExists = regularFile(output);\n    sourceMapExists = regularFile(sourceMap);\n    if (outputExists) outputDigest = digestFile(output);\n    if (sourceMapExists) sourceMapDigest = digestFile(sourceMap);\n  } catch {\n    artifactFailure = \"artifact-unreadable\";\n  }\n  let dependencies = [];\n  let dependenciesValid = true;\n  const expectedMacroRecords = macroDependencyRecords(\n    expectedMacroDependencies,\n    root,\n  );\n  let macroDependenciesMatch = false;\n  try {\n    if (!Array.isArray(record?.metadata?.dependencies) ||\n        !Array.isArray(record?.metadata?.portableEntries)) {\n      throw new TypeError(\"cache module metadata is invalid\");\n    }\n    dependencies = record.metadata.dependencies.map((dependency) =>\n      canonicalSource(resolve(root, dependency), root, source));\n    const recordedMacroDependencies = record.metadata.macroDependencies ?? [];\n    macroDependenciesMatch =\n      JSON.stringify(recordedMacroDependencies) ===\n      JSON.stringify(expectedMacroRecords);\n  } catch {\n    dependenciesValid = false;\n  }\n  const decision = compiler.project_cache_decision({\n    record,\n    output: relative(outDir, output),\n    sourceMap: relative(outDir, sourceMap),\n    expectedPortableEntries,\n    macroDependenciesMatch,\n    sourceDigest,\n    outputExists,\n    sourceMapExists,\n    outputDigest,\n    sourceMapDigest,\n    dependenciesValid,\n    artifactFailure,\n  });\n  return {\n    decision,\n    module: decision.reused\n      ? {\n          source,\n          output,\n          sourceMap,\n          sourceDigest,\n          outputDigest,\n          sourceMapDigest,\n          dependencies,\n          macroDependencies: expectedMacroDependencies,\n          portableEntries: [...record.metadata.portableEntries],\n          reused: true,\n          reason: \"verified\",\n        }\n      : undefined,\n  };\n}\n\nfunction standardPlan(\n  compiler,\n  entries,\n  root,\n  outDir,\n  sourceCache,\n  programCache,\n  records,\n  decisions,\n  sourceOverrides,\n  macroContext,\n  macroDependencies,\n) {\n  return compiler.project_plan(entries, (source) => {\n    const cached = cachedModule({\n      compiler,\n      source,\n      root,\n      outDir,\n      record: records.get(relative(root, source)),\n      expectedPortableEntries: [],\n      expectedMacroDependencies: macroDependencies,\n    });\n    decisions.set(source, cached);\n    if (cached.module !== undefined) return cached.module.dependencies;\n    const sourceText = sourceOverrides.get(source) ?? readFileSync(source, \"utf8\");\n    const program = compiler.compile_ir_string(sourceText, source, macroContext);\n    sourceCache.set(source, sourceText);\n    programCache.set(source, program);\n    return projectImports(program, source, root, false)\n      .map(({ dependency }) => dependency);\n  });\n}\n\nfunction portablePlan(\n  compiler,\n  entry,\n  entries,\n  root,\n  sourceCache,\n  programCache,\n  sourceOverrides,\n  macroContext,\n) {\n  return compiler.portable_project_plan([{ id: entry, entries }],\n    (source, requestedEntries) => {\n      const sourceText = sourceOverrides.get(source) ?? readFileSync(source, \"utf8\");\n      const program = compiler.compile_project_portable_ir_string(\n        sourceText,\n        requestedEntries,\n        source,\n        macroContext,\n      );\n      sourceCache.set(source, sourceText);\n      programCache.set(source, program);\n      return projectImports(program, source, root, true).map((dependency) => ({\n        id: dependency.dependency,\n        entries: dependency.entries,\n      }));\n    });\n}\n\nfunction sourceOverridesOption(values, root) {\n  if (values === undefined) return new Map();\n  const entries = values instanceof Map\n    ? [...values.entries()]\n    : Object.entries(values);\n  const overrides = new Map();\n  for (const [filename, sourceText] of entries) {\n    if (typeof sourceText !== \"string\") {\n      projectError(\"project source override must be a string\", filename);\n    }\n    const source = canonicalSource(\n      pathOption(filename, \"project source override\"),\n      root,\n      filename,\n    );\n    if (overrides.has(source)) {\n      projectError(\"project source overrides resolve to duplicates\", source);\n    }\n    overrides.set(source, sourceText);\n  }\n  return overrides;\n}\n\nfunction validateSourceOverrides(sourceOverrides, plan) {\n  const plannedSources = new Set(plan.modules.map((record) => record.id));\n  for (const source of sourceOverrides.keys()) {\n    if (!plannedSources.has(source)) {\n      projectError(\"project source override is outside the project graph\", source);\n    }\n  }\n}\n\nfunction checkStandardPlan(\n  compiler,\n  entries,\n  root,\n  sourceOverrides,\n  macroContext,\n) {\n  return compiler.project_plan(entries, (source) => {\n    const sourceText = sourceOverrides.get(source) ?? readFileSync(source, \"utf8\");\n    const program = compiler.compile_ir_string(sourceText, source, macroContext);\n    return projectImports(program, source, root, false)\n      .map(({ dependency }) => dependency);\n  });\n}\n\nfunction checkPortablePlan(\n  compiler,\n  entry,\n  entries,\n  root,\n  sourceOverrides,\n  macroContext,\n) {\n  return compiler.portable_project_plan([{ id: entry, entries }],\n    (source, requestedEntries) => {\n      const sourceText = sourceOverrides.get(source) ?? readFileSync(source, \"utf8\");\n      const program = compiler.compile_project_portable_ir_string(\n        sourceText,\n        requestedEntries,\n        source,\n        macroContext,\n      );\n      return projectImports(program, source, root, true).map((dependency) => ({\n        id: dependency.dependency,\n        entries: dependency.entries,\n      }));\n    });\n}\n\nexport async function checkProject(options) {\n  if (!options || typeof options !== \"object\") {\n    projectError(\"project check options must be an object\");\n  }\n  if (options.entry === undefined && options.entries === undefined) {\n    projectError(\"project check requires entry or entries\");\n  }\n  const moduleDirectory = compilerModuleDirectory(options.moduleDirectory);\n  const compiler = options.compiler ?? await loadCompiler(moduleDirectory);\n  const request = compiler.check_operation_request({\n    entry: options.entry,\n    entries: options.entries,\n    root: options.root ?? null,\n    portableEntries: options.portableEntries ?? [],\n    macroCapabilities: options.macroCapabilities ?? [],\n    macroFileDependencies: options.macroFileDependencies ?? [],\n  });\n  const entryPaths = request.entries.map((entry) =>\n    resolve(pathOption(entry, \"entry\")));\n  if (entryPaths.length > 1 && request.root === null) {\n    projectError(\"multi-entry project checks require an explicit project root\");\n  }\n  const root = canonicalDirectory(\n    request.root === null\n      ? dirname(entryPaths[0])\n      : pathOption(request.root, \"project root\"),\n    \"project root\",\n  );\n  const entries = entryPaths.map((entryPath) => {\n    const entry = canonicalSource(entryPath, root, entryPath);\n    if (!entry.endsWith(\".eli\")) {\n      projectError(\"entry file must use the .eli extension\", entry);\n    }\n    return entry;\n  }).sort();\n  if (new Set(entries).size !== entries.length) {\n    projectError(\"project entries resolve to duplicate sources\");\n  }\n  const macro = macroInputs(request, root, entries[0]);\n  const sourceOverrides = sourceOverridesOption(options.sourceOverrides, root);\n  const portableEntries = [...request.portableEntries];\n  const plan = portableEntries.length > 0\n    ? checkPortablePlan(\n      compiler,\n      entries[0],\n      portableEntries,\n      root,\n      sourceOverrides,\n      macro.context,\n    )\n    : checkStandardPlan(\n      compiler,\n      entries,\n      root,\n      sourceOverrides,\n      macro.context,\n    );\n  validateSourceOverrides(sourceOverrides, plan);\n  const mode = plan.mode;\n  const modules = plan.modules.map((record) => ({\n    source: relative(root, record.id),\n    dependencies: record.dependencies.map((dependency) =>\n      relative(root, typeof dependency === \"string\" ? dependency : dependency.id)),\n    portableEntries: record.entries === undefined ? [] : [...record.entries],\n  }));\n  const report = compiler.project_check_report({\n    mode,\n    root,\n    entries: entries.map((entry) => relative(root, entry)),\n    portableEntries,\n    modules,\n  });\n  return Object.freeze({\n    format: \"eliscript-project-check\",\n    version: 1,\n    root,\n    entries: Object.freeze(entries),\n    mode,\n    portableEntries: Object.freeze(portableEntries),\n    macroCapabilities: request.macroCapabilities,\n    macroFileDependencies: Object.freeze(macro.dependencies),\n    report,\n    plan,\n  });\n}\n\nexport async function buildProject(options) {\n  const startedAt = performance.now();\n  if (!options || typeof options !== \"object\") {\n    projectError(\"project build options must be an object\");\n  }\n  if ((options.entry === undefined && options.entries === undefined) ||\n      options.outDir === undefined) {\n    projectError(\"project build requires entry or entries and outDir\");\n  }\n  const moduleDirectory = compilerModuleDirectory(options.moduleDirectory);\n  const compiler = options.compiler ?? await loadCompiler(moduleDirectory);\n  const request = compiler.build_operation_request({\n    mode: \"project\",\n    entry: options.entry,\n    entries: options.entries,\n    outDir: options.outDir,\n    root: options.root ?? null,\n    portableEntries: options.portableEntries ?? [],\n    macroCapabilities: options.macroCapabilities ?? [],\n    macroFileDependencies: options.macroFileDependencies ?? [],\n    useCache: options.useCache === undefined ? true : options.useCache,\n  });\n  const requestedEntries = request.version === 2\n    ? [...request.entries]\n    : [request.entry];\n  if (requestedEntries.length > 1 && request.root === null) {\n    projectError(\"multi-entry project builds require an explicit project root\");\n  }\n  const entryPaths = requestedEntries.map((entry) =>\n    resolve(pathOption(entry, \"entry\")));\n  const root = canonicalDirectory(\n    request.root === null\n      ? dirname(entryPaths[0])\n      : pathOption(request.root, \"project root\"),\n    \"project root\",\n  );\n  const entries = entryPaths.map((entryPath) => {\n    const entry = canonicalSource(entryPath, root, entryPath);\n    if (!entry.endsWith(\".eli\")) {\n      projectError(\"entry file must use the .eli extension\", entry);\n    }\n    return entry;\n  }).sort();\n  if (new Set(entries).size !== entries.length) {\n    projectError(\"project entries resolve to duplicate sources\");\n  }\n  const macro = macroInputs(request, root, entries[0]);\n  const sourceOverrides = sourceOverridesOption(options.sourceOverrides, root);\n  const requestedOutDir = resolve(pathOption(request.outDir, \"output\"));\n  try {\n    const attributes = statSync(requestedOutDir);\n    if (!attributes.isDirectory()) {\n      projectError(\"output path is not a directory\", requestedOutDir);\n    }\n  } catch (error) {\n    if (error?.eliscriptDiagnostic) throw error;\n    mkdirSync(requestedOutDir, { recursive: true });\n  }\n  const outDir = realpathSync(requestedOutDir);\n  const sourceMapReference = options.sourceMapReference !== false;\n  const useCache = request.useCache && sourceOverrides.size === 0 &&\n    sourceMapReference;\n  const compilerDigest = options.compiler === undefined\n    ? compilerDirectoryDigest(moduleDirectory)\n    : compilerDigestOption(options.compilerDigest);\n  const requestedPortableEntries = [...request.portableEntries];\n  const mode = requestedPortableEntries.length > 0 ? \"portable\" : \"standard\";\n  const entryOutputs = entries.map((entry) => outputFor(entry, root, outDir));\n  const cacheStartedAt = performance.now();\n  const cacheLookup = readCache({\n    compiler,\n    enabled: useCache,\n    outDir,\n    entryOutputs,\n    mode,\n    portableEntries: requestedPortableEntries,\n    compilerDigest,\n  });\n  const cacheReadMs = performance.now() - cacheStartedAt;\n  const records = cachedRecords(cacheLookup);\n  const sourceCache = new Map();\n  const programCache = new Map();\n  const decisions = new Map();\n  const plan = mode === \"portable\"\n    ? portablePlan(\n      compiler,\n      entries[0],\n      requestedPortableEntries,\n      root,\n      sourceCache,\n      programCache,\n      sourceOverrides,\n      macro.context,\n    )\n    : standardPlan(\n      compiler,\n      entries,\n      root,\n      outDir,\n      sourceCache,\n      programCache,\n      records,\n      decisions,\n      sourceOverrides,\n      macro.context,\n      macro.dependencies,\n    );\n  validateSourceOverrides(sourceOverrides, plan);\n  validateOutputIsolation({\n    sources: plan.modules.map(({ id }) => id),\n    macroDependencies: macro.dependencies,\n    root,\n    outDir,\n  });\n  const normalizedPortableEntries = plan.mode === \"portable\"\n    ? [...plan.entries[0].entries]\n    : [];\n  const modules = plan.modules.map((record) => {\n    const dependencies = record.dependencies.map((dependency) =>\n      typeof dependency === \"string\" ? dependency : dependency.id);\n    const modulePortableEntries = record.entries === undefined\n      ? []\n      : [...record.entries];\n    const cached = plan.mode === \"standard\"\n      ? decisions.get(record.id)\n      : cachedModule({\n        compiler,\n        source: record.id,\n        root,\n        outDir,\n        record: records.get(relative(root, record.id)),\n        expectedPortableEntries: modulePortableEntries,\n        expectedMacroDependencies: macro.dependencies,\n      });\n    if (cached?.module !== undefined) return cached.module;\n    return writeModule({\n      compiler,\n      program: programCache.get(record.id),\n      source: record.id,\n      sourceText: sourceCache.get(record.id),\n      root,\n      outDir,\n      dependencies,\n      macroDependencies: macro.dependencies,\n      portableEntries: modulePortableEntries,\n      reason: cacheLookup.cache === null\n        ? cacheLookup.reason\n        : cached.decision.reason,\n      sourceMapReference,\n    });\n  });\n  const workFinishedAt = performance.now();\n  const manifestData = writeManifest(\n    entryOutputs,\n    modules,\n    root,\n    outDir,\n    plan.mode,\n    normalizedPortableEntries,\n    compilerDigest,\n  );\n  const manifestFinishedAt = performance.now();\n  const reportInput = {\n    mode: plan.mode,\n    root,\n    outDir,\n    manifest: relative(outDir, manifestData.manifest),\n    digest: manifestData.digest,\n    portableEntries: normalizedPortableEntries,\n    cache: { enabled: useCache, reason: cacheLookup.reason },\n    timings: {\n      cacheReadMs,\n      workMs: Math.max(0, workFinishedAt - startedAt - cacheReadMs),\n      manifestWriteMs: manifestFinishedAt - workFinishedAt,\n      totalMs: manifestFinishedAt - startedAt,\n    },\n    modules: modules.map((module) => reportModule(module, root, outDir)),\n  };\n  if (entries.length === 1) {\n    reportInput.entry = relative(root, entries[0]);\n    reportInput.entryOutput = relative(outDir, entryOutputs[0]);\n  } else {\n    reportInput.entries = entries.map((entry) => relative(root, entry));\n    reportInput.entryOutputs = entryOutputs.map((entryOutput) =>\n      relative(outDir, entryOutput));\n  }\n  const report = compiler.project_build_report(reportInput);\n  return Object.freeze({\n    format: \"eliscript-project-build\",\n    version: entries.length === 1 ? 1 : 2,\n    root,\n    outDir,\n    entry: entries.length === 1 ? entries[0] : undefined,\n    entryOutput: entries.length === 1 ? entryOutputs[0] : undefined,\n    entries: Object.freeze(entries),\n    entryOutputs: Object.freeze(entryOutputs),\n    mode: plan.mode,\n    portableEntries: Object.freeze(normalizedPortableEntries),\n    macroCapabilities: request.macroCapabilities,\n    macroFileDependencies: Object.freeze(macro.dependencies),\n    modules: Object.freeze(modules.map((module) => Object.freeze(module))),\n    manifest: manifestData.manifest,\n    digest: manifestData.digest,\n    report,\n    plan,\n  });\n}\n"))
+(module bootstrap.host.project-ground
+  (import "node:crypto" createHash)
+  (import "node:fs" lstatSync mkdirSync readFileSync readdirSync realpathSync statSync writeFileSync)
+  (import "node:path" basename dirname isAbsolute relative resolve sep)
+  (import "node:perf_hooks" performance)
+  (import "node:url" fileURLToPath)
+  (import "./bun.mjs" loadCompiler)
+
+  (defconst manifestFilename "eliscript-project.json")
+  (defconst cacheFormat "eliscript-project-cache")
+  (defconst cacheVersion 2)
+  (defconst hostDirectory (dirname (fileURLToPath (js* "import.meta.url"))))
+  (defconst sha256-pattern (new globalThis.RegExp "^[0-9a-f]{64}$" "u"))
+
+  (defun host-typeof (value)
+    (js* "typeof value"))
+
+  (defun host-map-instance? (value)
+    (js* "value instanceof globalThis.Map"))
+
+  (defun projectError (message &optional filename)
+    (let ((error (new globalThis.Error message))
+          (diag (js-object
+                  :format "eliscript-diagnostic"
+                  :version 1
+                  :code "ELI-B0001"
+                  :severity "error"
+                  :phase "project-build"
+                  :message message)))
+      (when (and filename (not (undefined? filename)))
+        (put diag :location (js-object :file filename)))
+      (put error :eliscriptDiagnostic diag)
+      (throw error)))
+
+  (defun canonicalDirectory (path label)
+    (let ((expanded (resolve path))
+          (attributes nil))
+      (try
+        (setq attributes (statSync expanded))
+        (catch _err
+          (projectError (str label " is not a directory") expanded)))
+      (unless (js-call attributes :isDirectory)
+        (projectError (str label " is not a directory") expanded))
+      (realpathSync expanded)))
+
+  (defun pathOption (value label)
+    (when (or (not (= (host-typeof value) "string")) (= (js-length value) 0))
+      (projectError (str label " must be a non-empty path")))
+    value)
+
+  (defun insideRoot (root candidate)
+    (let ((path (relative root candidate)))
+      (or (= path "")
+          (and (not (isAbsolute path))
+               (not (= path ".."))
+               (not (js-call path :startsWith (str ".." sep)))))))
+
+  (defun canonicalSource (path root importer)
+    (let ((expanded (resolve path))
+          (attributes nil))
+      (try
+        (setq attributes (statSync expanded))
+        (catch _err
+          (projectError (str "local Eliscript module does not exist: " path) importer)))
+      (unless (js-call attributes :isFile)
+        (projectError (str "local Eliscript module does not exist: " path) importer))
+      (let ((canonical (realpathSync expanded)))
+        (unless (insideRoot root canonical)
+          (projectError (str "local Eliscript module escapes project root: " path) importer))
+        canonical)))
+
+  (defun macroDependency (specifier root importer)
+    (let ((expanded (resolve root specifier))
+          (attributes nil))
+      (try
+        (setq attributes (statSync expanded))
+        (catch _err
+          (projectError (str "macro file dependency does not exist: " specifier) importer)))
+      (unless (js-call attributes :isFile)
+        (projectError (str "macro file dependency does not exist: " specifier) importer))
+      (let ((source (realpathSync expanded)))
+        (unless (insideRoot root source)
+          (projectError (str "macro file dependency escapes project root: " specifier) importer))
+        (let ((bytes (readFileSync source))
+              (content nil))
+          (try
+            (setq content
+              (js-call (new globalThis.TextDecoder "utf-8" (js-object :fatal t)) :decode bytes))
+            (catch _err
+              (projectError (str "macro file dependency is not valid UTF-8: " specifier) importer)))
+          (js-object
+            :specifier specifier
+            :source source
+            :digest (js-call (js-call (createHash "sha256") :update bytes) :digest "hex")
+            :content content)))))
+
+  (defun macroInputs (request root importer)
+    (let* ((dependencies
+             (js-call (Array/from (get request :macroFileDependencies)) :map
+               (lambda (specifier) (macroDependency specifier root importer))))
+           (canonical
+             (new globalThis.Set
+               (js-call dependencies :map (lambda (dep) (get dep :source))))))
+      (unless (= (get canonical :size) (js-length dependencies))
+        (projectError "macro file dependencies resolve to duplicates" importer))
+      (js-object
+        :dependencies dependencies
+        :context
+          (js-object
+            :capabilities (new globalThis.Set (get request :macroCapabilities))
+            :files
+              (new globalThis.Map
+                (js-call dependencies :map
+                  (lambda (dep) (js-array (get dep :specifier) (get dep :content)))))))))
+
+  (defun macroDependencyRecords (dependencies root)
+    (js-call dependencies :map
+      (lambda (dep)
+        (js-object
+          :path (relative root (get dep :source))
+          :digest (get dep :digest)))))
+
+  (defun outputFor (source root outDir)
+    (let ((sourcePath (relative root source)))
+      (resolve outDir (str (js-call sourcePath :slice 0 -4) ".mjs"))))
+
+  (defun physicalWritePath (path)
+    (let ((expanded (resolve path))
+          (suffix (js-array))
+          (cursor (resolve path))
+          (resolved nil))
+      (while (nil? resolved)
+        (try
+          (lstatSync cursor)
+          (let ((canonical nil))
+            (try
+              (setq canonical (realpathSync cursor))
+              (catch _err
+                (projectError (str "generated artifact contains an unresolved symlink: " expanded))))
+            (setq resolved
+              (js-call resolve :apply nil
+                (js-call (js-array canonical) :concat
+                  (js-call (Array/from suffix) :reverse)))))
+          (catch error
+            (when (and error (get error :eliscriptDiagnostic))
+              (throw error))
+            (unless (= (if error (get error :code) nil) "ENOENT")
+              (projectError (str "generated artifact path cannot be resolved: " expanded)))
+            (let ((parent (dirname cursor)))
+              (when (= parent cursor)
+                (projectError (str "generated artifact path cannot be resolved: " expanded)))
+              (js-call suffix :push (basename cursor))
+              (setq cursor parent)))))
+      resolved))
+
+  (defun existingFileIdentity (path)
+    (try
+      (let ((attributes (statSync path)))
+        (if (js-call attributes :isFile)
+          (str (get attributes :dev) ":" (get attributes :ino))
+          nil))
+      (catch _err
+        nil)))
+
+  (defun validateOutputIsolation (options)
+    (let* ((sources (get options :sources))
+           (macroDependencies (get options :macroDependencies))
+           (root (get options :root))
+           (outDir (get options :outDir))
+           (protectedPaths
+             (js-call (Array/from sources) :concat
+               (js-call macroDependencies :map (lambda (dep) (get dep :source)))))
+           (protectedCanonical
+             (new globalThis.Set
+               (js-call protectedPaths :map (lambda (p) (realpathSync p)))))
+           (protectedIdentities
+             (new globalThis.Set
+               (js-call (js-call protectedPaths :map existingFileIdentity) :filter
+                 (lambda (id) (not (nil? id))))))
+           (artifacts
+             (js-call
+               (js-call sources :flatMap
+                 (lambda (source)
+                   (let ((output (outputFor source root outDir)))
+                     (js-array output (str output ".map")))))
+               :concat
+               (js-array (resolve outDir manifestFilename))))
+           (artifactCanonical (new globalThis.Set))
+           (artifactIdentities (new globalThis.Set))
+           (idx 0))
+      (while (< idx (js-length artifacts))
+        (let* ((artifact (aref artifacts idx))
+               (physical (physicalWritePath artifact))
+               (identity (existingFileIdentity artifact)))
+          (unless (insideRoot outDir physical)
+            (projectError (str "generated artifact escapes output directory: " artifact)))
+          (when (or (js-call protectedCanonical :has physical)
+                    (and (not (nil? identity)) (js-call protectedIdentities :has identity)))
+            (projectError (str "generated artifact would overwrite an input: " artifact)))
+          (when (or (js-call artifactCanonical :has physical)
+                    (and (not (nil? identity)) (js-call artifactIdentities :has identity)))
+            (projectError (str "generated artifacts resolve to the same file: " artifact)))
+          (js-call artifactCanonical :add physical)
+          (unless (nil? identity)
+            (js-call artifactIdentities :add identity)))
+        (setq idx (+ idx 1)))))
+
+  (defun localSourceImport (specifier)
+    (and (js-call specifier :endsWith ".eli")
+         (or (js-call specifier :startsWith "./")
+             (js-call specifier :startsWith "../"))))
+
+  (defun relativeImport (target importer)
+    (let ((path (relative (dirname importer) target)))
+      (if (or (js-call path :startsWith "./") (js-call path :startsWith "../"))
+        path
+        (str "./" path))))
+
+  (defun walkProgram (program visit)
+    (let ((pending (Array/from (get program :body))))
+      (while (> (js-length pending) 0)
+        (let* ((node (js-call pending :pop))
+               (index (- (js-length (get node :children)) 1)))
+          (funcall visit node)
+          (while (>= index 0)
+            (js-call pending :push (aref (get node :children) index))
+            (setq index (- index 1)))))))
+
+  (defun projectImports (program source root portable)
+    (let ((imports (js-array)))
+      (walkProgram
+        program
+        (lambda (node)
+          (when (= (get node :kind) "import-declaration")
+            (let ((specifier (get node :value))
+                  (props (get node :properties)))
+              (when (and portable (not (= (if props (get props :portable) nil) t)))
+                (projectError "portable project contains a non-portable import" source))
+              (if (not (localSourceImport specifier))
+                (when (or portable (js-call specifier :endsWith ".eli"))
+                  (let ((kind (if portable "portable import" "Eliscript source import")))
+                    (projectError (str kind " must be a relative .eli module: " specifier) source)))
+                (let ((dependency (canonicalSource (resolve (dirname source) specifier) root source)))
+                  (js-call imports :push
+                    (js-object
+                      :dependency dependency
+                      :entries
+                        (js-call
+                          (js-call (get node :children) :filter
+                            (lambda (child) (= (get child :kind) "import-named")))
+                          :map
+                          (lambda (child) (get child :value)))
+                      :node node))))))))
+      imports))
+
+  (defun rewriteLocalImports (program source root outDir)
+    (let ((outputPath (outputFor source root outDir)))
+      (walkProgram
+        program
+        (lambda (node)
+          (when (and (= (get node :kind) "import-declaration")
+                     (localSourceImport (get node :value)))
+            (let ((dependency (canonicalSource (resolve (dirname source) (get node :value)) root source)))
+              (put node :value
+                (relativeImport (outputFor dependency root outDir) outputPath))))))))
+
+  (defun digestBytes (bytes)
+    (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+
+  (defun digestFile (filename)
+    (digestBytes (readFileSync filename)))
+
+  (defun regularFile (filename)
+    (try
+      (js-call (statSync filename) :isFile)
+      (catch error
+        (if (= (if error (get error :code) nil) "ENOENT")
+          false
+          (throw error)))))
+
+  (defun compilerModuleDirectory (moduleDirectory)
+    (resolve
+      (if (and (not (nil? moduleDirectory)) (not (undefined? moduleDirectory)))
+        moduleDirectory
+        (let ((env-dir (get (get globalThis.process :env) :ELISCRIPT_BOOTSTRAP_MODULE_DIR)))
+          (if (and env-dir (not (undefined? env-dir)))
+            env-dir
+            (resolve hostDirectory "../../dist/bootstrap"))))))
+
+  (defun compilerDirectoryDigest (directory)
+    (let ((filenames
+            (js-call
+              (js-call
+                (js-call (readdirSync directory (js-object :withFileTypes t)) :filter
+                  (lambda (entry)
+                    (and (js-call entry :isFile)
+                         (or (js-call (get entry :name) :endsWith ".mjs")
+                             (js-call (get entry :name) :endsWith ".mjs.map")))))
+                :map
+                (lambda (entry) (get entry :name)))
+              :sort)))
+      (unless (js-call filenames :includes "compiler.mjs")
+        (projectError "generated compiler directory is incomplete" directory))
+      (let ((hash (createHash "sha256"))
+            (idx 0))
+        (while (< idx (js-length filenames))
+          (let ((filename (aref filenames idx)))
+            (js-call hash :update filename)
+            (js-call hash :update "\0")
+            (js-call hash :update (readFileSync (resolve directory filename)))
+            (js-call hash :update "\0"))
+          (setq idx (+ idx 1)))
+        (js-call hash :digest "hex"))))
+
+  (defun compilerDigestOption (value)
+    (when (or (not (= (host-typeof value) "string"))
+              (not (js-call sha256-pattern :test value)))
+      (projectError "injected compiler requires a lowercase SHA-256 compilerDigest"))
+    value)
+
+  (defun writeModule (options)
+    (let* ((compiler (get options :compiler))
+           (program (get options :program))
+           (source (get options :source))
+           (sourceText (get options :sourceText))
+           (root (get options :root))
+           (outDir (get options :outDir))
+           (dependencies (get options :dependencies))
+           (macroDependencies (get options :macroDependencies))
+           (portableEntries (get options :portableEntries))
+           (reason (get options :reason))
+           (sourceMapReference (get options :sourceMapReference))
+           (output (outputFor source root outDir))
+           (sourceMap (str output ".map")))
+      (rewriteLocalImports program source root outDir)
+      (let* ((emission
+               (js-call compiler :emit_ir_string_with_source_map
+                 program
+                 sourceText
+                 (basename output)
+                 (relative (dirname sourceMap) source)))
+             (javascript
+               (if sourceMapReference
+                 (str (get emission :javascript) "//# sourceMappingURL=" (basename sourceMap) "\n")
+                 (get emission :javascript))))
+        (mkdirSync (dirname output) (js-object :recursive t))
+        (writeFileSync sourceMap (get emission :sourceMap))
+        (writeFileSync output javascript)
+        (js-object
+          :source source
+          :output output
+          :sourceMap sourceMap
+          :sourceDigest (digestBytes sourceText)
+          :outputDigest (digestFile output)
+          :sourceMapDigest (digestFile sourceMap)
+          :dependencies dependencies
+          :macroDependencies macroDependencies
+          :portableEntries portableEntries
+          :reused false
+          :reason reason))))
+
+  (defun reportModule (moduleRecord root outDir)
+    (let ((out
+            (js-object
+              :source (relative root (get moduleRecord :source))
+              :output (relative outDir (get moduleRecord :output))
+              :sourceMap (relative outDir (get moduleRecord :sourceMap))
+              :status (if (get moduleRecord :reused) "reused" "compiled")
+              :reason (get moduleRecord :reason)
+              :dependencies
+                (js-call (get moduleRecord :dependencies) :map
+                  (lambda (dependency) (relative root dependency))))))
+      (when (> (js-length (get moduleRecord :macroDependencies)) 0)
+        (put out :macroDependencies
+          (macroDependencyRecords (get moduleRecord :macroDependencies) root)))
+      (put out :portableEntries (Array/from (get moduleRecord :portableEntries)))
+      out))
+
+  (defun manifestRecord (moduleRecord root outDir)
+    (let ((out
+            (js-object
+              :source (relative root (get moduleRecord :source))
+              :output (relative outDir (get moduleRecord :output))
+              :sourceMap (relative outDir (get moduleRecord :sourceMap))
+              :sourceDigest (get moduleRecord :sourceDigest)
+              :outputDigest (get moduleRecord :outputDigest)
+              :sourceMapDigest (get moduleRecord :sourceMapDigest))))
+      (when (> (js-length (get moduleRecord :macroDependencies)) 0)
+        (put out :macroDependencies
+          (macroDependencyRecords (get moduleRecord :macroDependencies) root)))
+      out))
+
+  (defun cacheMetadataRecord (moduleRecord root)
+    (let ((out
+            (js-object
+              :source (relative root (get moduleRecord :source))
+              :dependencies
+                (js-call (get moduleRecord :dependencies) :map
+                  (lambda (dependency) (relative root dependency))))))
+      (when (> (js-length (get moduleRecord :macroDependencies)) 0)
+        (put out :macroDependencies
+          (macroDependencyRecords (get moduleRecord :macroDependencies) root)))
+      (put out :portableEntries (Array/from (get moduleRecord :portableEntries)))
+      out))
+
+  (defun cacheIdentityModule (record)
+    (let ((out
+            (js-object
+              :source (get record :source)
+              :dependencies (get record :dependencies))))
+      (unless (undefined? (get record :macroDependencies))
+        (put out :macroDependencies (get record :macroDependencies)))
+      (put out :portableEntries (get record :portableEntries))
+      out))
+
+  (defun cacheIdentity (value)
+    (if (or (not value) (not (Array/isArray (get value :modules))))
+      undefined
+      (let ((modules (js-call (get value :modules) :map cacheIdentityModule)))
+        (if (and (undefined? (get value :format)) (= (get value :version) 1))
+          (js-object
+            :version 1
+            :compilerDigest (get value :compilerDigest)
+            :mode (get value :mode)
+            :portableEntries (get value :portableEntries)
+            :modules modules)
+          (js-object
+            :format (get value :format)
+            :version (get value :version)
+            :compilerDigest (get value :compilerDigest)
+            :mode (get value :mode)
+            :portableEntries (get value :portableEntries)
+            :modules modules)))))
+
+  (defun writeManifest (entryOutputs modules root outDir mode portableEntries compilerDigest)
+    (let* ((outputEntries
+             (js-call entryOutputs :map (lambda (entryOutput) (relative outDir entryOutput))))
+           (manifestModules
+             (js-call modules :map (lambda (mod) (manifestRecord mod root outDir))))
+           (identity
+             (if (= (js-length outputEntries) 1)
+               (js-object
+                 :format "eliscript-project"
+                 :version 1
+                 :entry (aref outputEntries 0)
+                 :modules manifestModules)
+               (js-object
+                 :format "eliscript-project"
+                 :version 2
+                 :entries outputEntries
+                 :modules manifestModules)))
+           (digest (digestBytes (JSON/stringify identity)))
+           (cache
+             (js-object
+               :format cacheFormat
+               :version cacheVersion
+               :compilerDigest compilerDigest
+               :mode mode
+               :portableEntries portableEntries
+               :modules (js-call modules :map (lambda (mod) (cacheMetadataRecord mod root)))))
+           (cacheDigest (digestBytes (JSON/stringify cache)))
+           (manifest (resolve outDir manifestFilename))
+           (fullManifest
+             (Object/assign
+               (js-object)
+               identity
+               (js-object
+                 :digest digest
+                 :cache (Object/assign (js-object) cache (js-object :digest cacheDigest))))))
+      (mkdirSync outDir (js-object :recursive t))
+      (writeFileSync manifest (str (JSON/stringify fullManifest) "\n"))
+      (js-object
+        :manifest (realpathSync manifest)
+        :digest digest)))
+
+  (defun readCache (options)
+    (let* ((compiler (get options :compiler))
+           (enabled (get options :enabled))
+           (outDir (get options :outDir))
+           (entryOutputs (get options :entryOutputs))
+           (mode (get options :mode))
+           (portableEntries (get options :portableEntries))
+           (compilerDigest (get options :compilerDigest))
+           (manifestPath (resolve outDir manifestFilename)))
+      (cond
+        ((not enabled)
+         (js-call compiler :project_cache_lookup (js-object :enabled false :manifestStatus "missing")))
+        ((not (regularFile manifestPath))
+         (js-call compiler :project_cache_lookup (js-object :enabled t :manifestStatus "missing")))
+        (t
+         (try
+           (let* ((manifest (JSON/parse (readFileSync manifestPath "utf8")))
+                  (graphIdentity
+                    (if (= (if manifest (get manifest :version) nil) 2)
+                      (js-object
+                        :format (if manifest (get manifest :format) undefined)
+                        :version (if manifest (get manifest :version) undefined)
+                        :entries (if manifest (get manifest :entries) undefined)
+                        :modules (if manifest (get manifest :modules) undefined))
+                      (js-object
+                        :format (if manifest (get manifest :format) undefined)
+                        :version (if manifest (get manifest :version) undefined)
+                        :entry (if manifest (get manifest :entry) undefined)
+                        :modules (if manifest (get manifest :modules) undefined))))
+                  (privateIdentity (cacheIdentity (if manifest (get manifest :cache) undefined))))
+             (js-call compiler :project_cache_lookup
+               (js-object
+                 :enabled t
+                 :manifestStatus "readable"
+                 :manifest manifest
+                 :expectedEntry
+                   (if (= (js-length entryOutputs) 1)
+                     (relative outDir (aref entryOutputs 0))
+                     undefined)
+                 :expectedEntries
+                   (js-call entryOutputs :map (lambda (entryOutput) (relative outDir entryOutput)))
+                 :graphDigestValid
+                   (= (if manifest (get manifest :digest) undefined)
+                      (digestBytes (JSON/stringify graphIdentity)))
+                 :cacheDigestValid
+                   (and (not (undefined? privateIdentity))
+                        (= (if (and manifest (get manifest :cache))
+                             (get (get manifest :cache) :digest)
+                             undefined)
+                           (digestBytes (JSON/stringify privateIdentity))))
+                 :compilerDigest compilerDigest
+                 :mode mode
+                 :portableEntries portableEntries)))
+           (catch _err
+             (js-call compiler :project_cache_lookup (js-object :enabled t :manifestStatus "unreadable"))))))))
+
+  (defun cachedRecords (lookup)
+    (let ((records (if (and (get lookup :cache) (get (get lookup :cache) :records))
+                     (get (get lookup :cache) :records)
+                     (js-array))))
+      (new globalThis.Map
+        (js-call records :map (lambda (record) (js-array (get record :source) record))))))
+
+  (defun cachedModule (options)
+    (let* ((compiler (get options :compiler))
+           (source (get options :source))
+           (root (get options :root))
+           (outDir (get options :outDir))
+           (record (get options :record))
+           (expectedPortableEntries (get options :expectedPortableEntries))
+           (expectedMacroDependencies
+             (if (or (nil? (get options :expectedMacroDependencies))
+                     (undefined? (get options :expectedMacroDependencies)))
+               (js-array)
+               (get options :expectedMacroDependencies)))
+           (output (outputFor source root outDir))
+           (sourceMap (str output ".map"))
+           (sourceDigest undefined)
+           (outputDigest undefined)
+           (sourceMapDigest undefined)
+           (outputExists false)
+           (sourceMapExists false)
+           (artifactFailure undefined))
+      (try
+        (setq sourceDigest (digestFile source))
+        (setq outputExists (regularFile output))
+        (setq sourceMapExists (regularFile sourceMap))
+        (when outputExists
+          (setq outputDigest (digestFile output)))
+        (when sourceMapExists
+          (setq sourceMapDigest (digestFile sourceMap)))
+        (catch _err
+          (setq artifactFailure "artifact-unreadable")))
+      (let ((dependencies (js-array))
+            (dependenciesValid t)
+            (expectedMacroRecords (macroDependencyRecords expectedMacroDependencies root))
+            (macroDependenciesMatch false))
+        (try
+          (let ((metadata (if record (get record :metadata) nil)))
+            (when (or (not metadata)
+                      (not (Array/isArray (get metadata :dependencies)))
+                      (not (Array/isArray (get metadata :portableEntries))))
+              (throw (new globalThis.TypeError "cache module metadata is invalid")))
+            (setq dependencies
+              (js-call (get metadata :dependencies) :map
+                (lambda (dependency)
+                  (canonicalSource (resolve root dependency) root source))))
+            (let ((recordedMacroDependencies
+                    (if (or (nil? (get metadata :macroDependencies))
+                            (undefined? (get metadata :macroDependencies)))
+                      (js-array)
+                      (get metadata :macroDependencies))))
+              (setq macroDependenciesMatch
+                (= (JSON/stringify recordedMacroDependencies)
+                   (JSON/stringify expectedMacroRecords)))))
+          (catch _err
+            (setq dependenciesValid false)))
+        (let ((decision
+                (js-call compiler :project_cache_decision
+                  (js-object
+                    :record record
+                    :output (relative outDir output)
+                    :sourceMap (relative outDir sourceMap)
+                    :expectedPortableEntries expectedPortableEntries
+                    :macroDependenciesMatch macroDependenciesMatch
+                    :sourceDigest sourceDigest
+                    :outputExists outputExists
+                    :sourceMapExists sourceMapExists
+                    :outputDigest outputDigest
+                    :sourceMapDigest sourceMapDigest
+                    :dependenciesValid dependenciesValid
+                    :artifactFailure artifactFailure))))
+          (js-object
+            :decision decision
+            :module
+              (if (get decision :reused)
+                (js-object
+                  :source source
+                  :output output
+                  :sourceMap sourceMap
+                  :sourceDigest sourceDigest
+                  :outputDigest outputDigest
+                  :sourceMapDigest sourceMapDigest
+                  :dependencies dependencies
+                  :macroDependencies expectedMacroDependencies
+                  :portableEntries (Array/from (get (get record :metadata) :portableEntries))
+                  :reused t
+                  :reason "verified")
+                undefined))))))
+
+  (defun standardPlan (compiler entries root outDir sourceCache programCache records decisions sourceOverrides macroContext macroDependencies)
+    (js-call compiler :project_plan
+      entries
+      (lambda (source)
+        (let ((cached
+                (cachedModule
+                  (js-object
+                    :compiler compiler
+                    :source source
+                    :root root
+                    :outDir outDir
+                    :record (js-call records :get (relative root source))
+                    :expectedPortableEntries (js-array)
+                    :expectedMacroDependencies macroDependencies))))
+          (js-call decisions :set source cached)
+          (if (not (undefined? (get cached :module)))
+            (get (get cached :module) :dependencies)
+            (let* ((overrideText (js-call sourceOverrides :get source))
+                   (sourceText (if (not (undefined? overrideText))
+                                 overrideText
+                                 (readFileSync source "utf8")))
+                   (program (js-call compiler :compile_ir_string sourceText source macroContext)))
+              (js-call sourceCache :set source sourceText)
+              (js-call programCache :set source program)
+              (js-call (projectImports program source root false) :map
+                (lambda (imp) (get imp :dependency)))))))))
+
+  (defun portablePlan (compiler entry entries root sourceCache programCache sourceOverrides macroContext)
+    (js-call compiler :portable_project_plan
+      (js-array (js-object :id entry :entries entries))
+      (lambda (source requestedEntries)
+        (let* ((overrideText (js-call sourceOverrides :get source))
+               (sourceText (if (not (undefined? overrideText))
+                             overrideText
+                             (readFileSync source "utf8")))
+               (program
+                 (js-call compiler :compile_project_portable_ir_string
+                   sourceText
+                   requestedEntries
+                   source
+                   macroContext)))
+          (js-call sourceCache :set source sourceText)
+          (js-call programCache :set source program)
+          (js-call (projectImports program source root t) :map
+            (lambda (dependency)
+              (js-object
+                :id (get dependency :dependency)
+                :entries (get dependency :entries))))))))
+
+  (defun sourceOverridesOption (values root)
+    (if (undefined? values)
+      (new globalThis.Map)
+      (let ((entries (if (host-map-instance? values)
+                       (Array/from (js-call values :entries))
+                       (Object/entries values)))
+            (overrides (new globalThis.Map))
+            (idx 0))
+        (while (< idx (js-length entries))
+          (let* ((pair (aref entries idx))
+                 (filename (aref pair 0))
+                 (sourceText (aref pair 1)))
+            (unless (= (host-typeof sourceText) "string")
+              (projectError "project source override must be a string" filename))
+            (let ((source (canonicalSource (pathOption filename "project source override") root filename)))
+              (when (js-call overrides :has source)
+                (projectError "project source overrides resolve to duplicates" source))
+              (js-call overrides :set source sourceText)))
+          (setq idx (+ idx 1)))
+        overrides)))
+
+  (defun validateSourceOverrides (sourceOverrides plan)
+    (let ((plannedSources
+            (new globalThis.Set
+              (js-call (get plan :modules) :map (lambda (record) (get record :id))))))
+      (js-call sourceOverrides :forEach
+        (lambda (_text source)
+          (unless (js-call plannedSources :has source)
+            (projectError "project source override is outside the project graph" source))))))
+
+  (defun checkStandardPlan (compiler entries root sourceOverrides macroContext)
+    (js-call compiler :project_plan
+      entries
+      (lambda (source)
+        (let* ((overrideText (js-call sourceOverrides :get source))
+               (sourceText (if (not (undefined? overrideText))
+                             overrideText
+                             (readFileSync source "utf8")))
+               (program (js-call compiler :compile_ir_string sourceText source macroContext)))
+          (js-call (projectImports program source root false) :map
+            (lambda (imp) (get imp :dependency)))))))
+
+  (defun checkPortablePlan (compiler entry entries root sourceOverrides macroContext)
+    (js-call compiler :portable_project_plan
+      (js-array (js-object :id entry :entries entries))
+      (lambda (source requestedEntries)
+        (let* ((overrideText (js-call sourceOverrides :get source))
+               (sourceText (if (not (undefined? overrideText))
+                             overrideText
+                             (readFileSync source "utf8")))
+               (program
+                 (js-call compiler :compile_project_portable_ir_string
+                   sourceText
+                   requestedEntries
+                   source
+                   macroContext)))
+          (js-call (projectImports program source root t) :map
+            (lambda (dependency)
+              (js-object
+                :id (get dependency :dependency)
+                :entries (get dependency :entries))))))))
+
+  (defasync checkProject (options)
+    (when (or (not options) (not (= (host-typeof options) "object")))
+      (projectError "project check options must be an object"))
+    (when (and (undefined? (get options :entry))
+               (undefined? (get options :entries)))
+      (projectError "project check requires entry or entries"))
+    (let* ((moduleDirectory (compilerModuleDirectory (get options :moduleDirectory)))
+           (compiler (if (not (undefined? (get options :compiler)))
+                       (get options :compiler)
+                       (await (loadCompiler moduleDirectory))))
+           (request
+             (js-call compiler :check_operation_request
+               (js-object
+                 :entry (get options :entry)
+                 :entries (get options :entries)
+                 :root (if (or (nil? (get options :root)) (undefined? (get options :root)))
+                         nil
+                         (get options :root))
+                 :portableEntries
+                   (if (or (nil? (get options :portableEntries)) (undefined? (get options :portableEntries)))
+                     (js-array)
+                     (get options :portableEntries))
+                 :macroCapabilities
+                   (if (or (nil? (get options :macroCapabilities)) (undefined? (get options :macroCapabilities)))
+                     (js-array)
+                     (get options :macroCapabilities))
+                 :macroFileDependencies
+                   (if (or (nil? (get options :macroFileDependencies)) (undefined? (get options :macroFileDependencies)))
+                     (js-array)
+                     (get options :macroFileDependencies)))))
+           (entryPaths
+             (js-call (get request :entries) :map
+               (lambda (entry) (resolve (pathOption entry "entry"))))))
+      (when (and (> (js-length entryPaths) 1) (nil? (get request :root)))
+        (projectError "multi-entry project checks require an explicit project root"))
+      (let* ((root
+               (canonicalDirectory
+                 (if (nil? (get request :root))
+                   (dirname (aref entryPaths 0))
+                   (pathOption (get request :root) "project root"))
+                 "project root"))
+             (entries
+               (js-call
+                 (js-call entryPaths :map
+                   (lambda (entryPath)
+                     (let ((entry (canonicalSource entryPath root entryPath)))
+                       (unless (js-call entry :endsWith ".eli")
+                         (projectError "entry file must use the .eli extension" entry))
+                       entry)))
+                 :sort)))
+        (unless (= (get (new globalThis.Set entries) :size) (js-length entries))
+          (projectError "project entries resolve to duplicate sources"))
+        (let* ((macro (macroInputs request root (aref entries 0)))
+               (sourceOverrides (sourceOverridesOption (get options :sourceOverrides) root))
+               (portableEntries (Array/from (get request :portableEntries)))
+               (plan (if (> (js-length portableEntries) 0)
+                       (checkPortablePlan compiler (aref entries 0) portableEntries root sourceOverrides (get macro :context))
+                       (checkStandardPlan compiler entries root sourceOverrides (get macro :context)))))
+          (validateSourceOverrides sourceOverrides plan)
+          (let* ((mode (get plan :mode))
+                 (modules
+                   (js-call (get plan :modules) :map
+                     (lambda (record)
+                       (js-object
+                         :source (relative root (get record :id))
+                         :dependencies
+                           (js-call (get record :dependencies) :map
+                             (lambda (dependency)
+                               (relative root
+                                 (if (= (host-typeof dependency) "string")
+                                   dependency
+                                   (get dependency :id)))))
+                         :portableEntries
+                           (if (undefined? (get record :entries))
+                             (js-array)
+                             (Array/from (get record :entries)))))))
+                 (report
+                   (js-call compiler :project_check_report
+                     (js-object
+                       :mode mode
+                       :root root
+                       :entries (js-call entries :map (lambda (entry) (relative root entry)))
+                       :portableEntries portableEntries
+                       :modules modules))))
+            (Object/freeze
+              (js-object
+                :format "eliscript-project-check"
+                :version 1
+                :root root
+                :entries (Object/freeze entries)
+                :mode mode
+                :portableEntries (Object/freeze portableEntries)
+                :macroCapabilities (get request :macroCapabilities)
+                :macroFileDependencies (Object/freeze (get macro :dependencies))
+                :report report
+                :plan plan)))))))
+
+  (defasync buildProject (options)
+    (let ((startedAt (js-call performance :now)))
+      (when (or (not options) (not (= (host-typeof options) "object")))
+        (projectError "project build options must be an object"))
+      (when (or (and (undefined? (get options :entry))
+                     (undefined? (get options :entries)))
+                (undefined? (get options :outDir)))
+        (projectError "project build requires entry or entries and outDir"))
+      (let* ((moduleDirectory (compilerModuleDirectory (get options :moduleDirectory)))
+             (compiler (if (not (undefined? (get options :compiler)))
+                         (get options :compiler)
+                         (await (loadCompiler moduleDirectory))))
+             (request
+               (js-call compiler :build_operation_request
+                 (js-object
+                   :mode "project"
+                   :entry (get options :entry)
+                   :entries (get options :entries)
+                   :outDir (get options :outDir)
+                   :root (if (or (nil? (get options :root)) (undefined? (get options :root)))
+                           nil
+                           (get options :root))
+                   :portableEntries
+                     (if (or (nil? (get options :portableEntries)) (undefined? (get options :portableEntries)))
+                       (js-array)
+                       (get options :portableEntries))
+                   :macroCapabilities
+                     (if (or (nil? (get options :macroCapabilities)) (undefined? (get options :macroCapabilities)))
+                       (js-array)
+                       (get options :macroCapabilities))
+                   :macroFileDependencies
+                     (if (or (nil? (get options :macroFileDependencies)) (undefined? (get options :macroFileDependencies)))
+                       (js-array)
+                       (get options :macroFileDependencies))
+                   :useCache
+                     (if (undefined? (get options :useCache))
+                       t
+                       (get options :useCache)))))
+             (requestedEntries
+               (if (= (get request :version) 2)
+                 (Array/from (get request :entries))
+                 (js-array (get request :entry)))))
+        (when (and (> (js-length requestedEntries) 1) (nil? (get request :root)))
+          (projectError "multi-entry project builds require an explicit project root"))
+        (let* ((entryPaths
+                 (js-call requestedEntries :map
+                   (lambda (entry) (resolve (pathOption entry "entry")))))
+               (root
+                 (canonicalDirectory
+                   (if (nil? (get request :root))
+                     (dirname (aref entryPaths 0))
+                     (pathOption (get request :root) "project root"))
+                   "project root"))
+               (entries
+                 (js-call
+                   (js-call entryPaths :map
+                     (lambda (entryPath)
+                       (let ((entry (canonicalSource entryPath root entryPath)))
+                         (unless (js-call entry :endsWith ".eli")
+                           (projectError "entry file must use the .eli extension" entry))
+                         entry)))
+                   :sort)))
+          (unless (= (get (new globalThis.Set entries) :size) (js-length entries))
+            (projectError "project entries resolve to duplicate sources"))
+          (let* ((macro (macroInputs request root (aref entries 0)))
+                 (sourceOverrides (sourceOverridesOption (get options :sourceOverrides) root))
+                 (requestedOutDir (resolve (pathOption (get request :outDir) "output"))))
+            (try
+              (let ((attributes (statSync requestedOutDir)))
+                (unless (js-call attributes :isDirectory)
+                  (projectError "output path is not a directory" requestedOutDir)))
+              (catch error
+                (when (and error (get error :eliscriptDiagnostic))
+                  (throw error))
+                (mkdirSync requestedOutDir (js-object :recursive t))))
+            (let* ((outDir (realpathSync requestedOutDir))
+                   (sourceMapReference (not (= (get options :sourceMapReference) false)))
+                   (useCache
+                     (globalThis.Boolean
+                       (and (get request :useCache)
+                            (= (get sourceOverrides :size) 0)
+                            sourceMapReference)))
+                   (compilerDigest
+                     (if (undefined? (get options :compiler))
+                       (compilerDirectoryDigest moduleDirectory)
+                       (compilerDigestOption (get options :compilerDigest))))
+                   (requestedPortableEntries (Array/from (get request :portableEntries)))
+                   (mode (if (> (js-length requestedPortableEntries) 0) "portable" "standard"))
+                   (entryOutputs
+                     (js-call entries :map (lambda (entry) (outputFor entry root outDir))))
+                   (cacheStartedAt (js-call performance :now))
+                   (cacheLookup
+                     (readCache
+                       (js-object
+                         :compiler compiler
+                         :enabled useCache
+                         :outDir outDir
+                         :entryOutputs entryOutputs
+                         :mode mode
+                         :portableEntries requestedPortableEntries
+                         :compilerDigest compilerDigest)))
+                   (cacheReadMs (- (js-call performance :now) cacheStartedAt))
+                   (records (cachedRecords cacheLookup))
+                   (sourceCache (new globalThis.Map))
+                   (programCache (new globalThis.Map))
+                   (decisions (new globalThis.Map))
+                   (plan
+                     (if (= mode "portable")
+                       (portablePlan compiler (aref entries 0) requestedPortableEntries root sourceCache programCache sourceOverrides (get macro :context))
+                       (standardPlan compiler entries root outDir sourceCache programCache records decisions sourceOverrides (get macro :context) (get macro :dependencies)))))
+              (validateSourceOverrides sourceOverrides plan)
+              (validateOutputIsolation
+                (js-object
+                  :sources (js-call (get plan :modules) :map (lambda (rec) (get rec :id)))
+                  :macroDependencies (get macro :dependencies)
+                  :root root
+                  :outDir outDir))
+              (let* ((normalizedPortableEntries
+                       (if (= (get plan :mode) "portable")
+                         (Array/from (get (aref (get plan :entries) 0) :entries))
+                         (js-array)))
+                     (modules
+                       (js-call (get plan :modules) :map
+                         (lambda (record)
+                           (let* ((dependencies
+                                    (js-call (get record :dependencies) :map
+                                      (lambda (dependency)
+                                        (if (= (host-typeof dependency) "string")
+                                          dependency
+                                          (get dependency :id)))))
+                                  (modulePortableEntries
+                                    (if (undefined? (get record :entries))
+                                      (js-array)
+                                      (Array/from (get record :entries))))
+                                  (cached
+                                    (if (= (get plan :mode) "standard")
+                                      (js-call decisions :get (get record :id))
+                                      (cachedModule
+                                        (js-object
+                                          :compiler compiler
+                                          :source (get record :id)
+                                          :root root
+                                          :outDir outDir
+                                          :record (js-call records :get (relative root (get record :id)))
+                                          :expectedPortableEntries modulePortableEntries
+                                          :expectedMacroDependencies (get macro :dependencies))))))
+                             (if (and cached (not (undefined? (get cached :module))))
+                               (get cached :module)
+                               (writeModule
+                                 (js-object
+                                   :compiler compiler
+                                   :program (js-call programCache :get (get record :id))
+                                   :source (get record :id)
+                                   :sourceText (js-call sourceCache :get (get record :id))
+                                   :root root
+                                   :outDir outDir
+                                   :dependencies dependencies
+                                   :macroDependencies (get macro :dependencies)
+                                   :portableEntries modulePortableEntries
+                                   :reason (if (nil? (get cacheLookup :cache))
+                                             (get cacheLookup :reason)
+                                             (get (get cached :decision) :reason))
+                                   :sourceMapReference sourceMapReference)))))))
+                     (workFinishedAt (js-call performance :now))
+                     (manifestData
+                       (writeManifest entryOutputs modules root outDir (get plan :mode) normalizedPortableEntries compilerDigest))
+                     (manifestFinishedAt (js-call performance :now))
+                     (reportInput
+                       (js-object
+                         :mode (get plan :mode)
+                         :root root
+                         :outDir outDir
+                         :manifest (relative outDir (get manifestData :manifest))
+                         :digest (get manifestData :digest)
+                         :portableEntries normalizedPortableEntries
+                         :cache (js-object :enabled useCache :reason (get cacheLookup :reason))
+                         :timings
+                           (js-object
+                             :cacheReadMs cacheReadMs
+                             :workMs (Math/max 0 (- (- workFinishedAt startedAt) cacheReadMs))
+                             :manifestWriteMs (- manifestFinishedAt workFinishedAt)
+                             :totalMs (- manifestFinishedAt startedAt))
+                         :modules
+                           (js-call modules :map (lambda (mod) (reportModule mod root outDir))))))
+                (if (= (js-length entries) 1)
+                  (progn
+                    (put reportInput :entry (relative root (aref entries 0)))
+                    (put reportInput :entryOutput (relative outDir (aref entryOutputs 0))))
+                  (progn
+                    (put reportInput :entries
+                      (js-call entries :map (lambda (entry) (relative root entry))))
+                    (put reportInput :entryOutputs
+                      (js-call entryOutputs :map (lambda (entryOutput) (relative outDir entryOutput))))))
+                (let ((report (js-call compiler :project_build_report reportInput)))
+                  (Object/freeze
+                    (js-object
+                      :format "eliscript-project-build"
+                      :version (if (= (js-length entries) 1) 1 2)
+                      :root root
+                      :outDir outDir
+                      :entry (if (= (js-length entries) 1) (aref entries 0) undefined)
+                      :entryOutput (if (= (js-length entries) 1) (aref entryOutputs 0) undefined)
+                      :entries (Object/freeze entries)
+                      :entryOutputs (Object/freeze entryOutputs)
+                      :mode (get plan :mode)
+                      :portableEntries (Object/freeze normalizedPortableEntries)
+                      :macroCapabilities (get request :macroCapabilities)
+                      :macroFileDependencies (Object/freeze (get macro :dependencies))
+                      :modules
+                        (Object/freeze
+                          (js-call modules :map (lambda (mod) (Object/freeze mod))))
+                      :manifest (get manifestData :manifest)
+                      :digest (get manifestData :digest)
+                      :report report
+                      :plan plan))))))))))
+
+  (export checkProject buildProject))

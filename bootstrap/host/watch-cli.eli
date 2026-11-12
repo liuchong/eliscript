@@ -1,2 +1,130 @@
-(module capsules.bootstrap.host.watch-cli
-  (js* "#!/usr/bin/env node\n\nimport { resolve } from \"node:path\";\nimport { fileURLToPath } from \"node:url\";\n\nimport {\n  diagnosticFromError,\n  loadCompiler,\n  renderDiagnostic,\n} from \"./bun.mjs\";\nimport { readProjectConfiguration } from \"./project-cli.mjs\";\nimport {\n  defaultWatchInterval,\n  maximumWatchInterval,\n  minimumWatchInterval,\n  ProjectWatcher,\n} from \"./watch.mjs\";\n\nconst usage = `Usage: eliscript-watch (--root DIRECTORY | --config FILE) [OPTIONS]\n\nOptions:\n  --root DIRECTORY  Observe regular .eli files below DIRECTORY\n  --config FILE     Resolve and observe a versioned project configuration\n  --interval MS     Poll every ${defaultWatchInterval} ms by default (${minimumWatchInterval}-${maximumWatchInterval})\n  --json            Emit one versioned JSON event per line\n  -h, --help        Show this help\n`;\n\nexport function parseArguments(arguments_) {\n  const argumentsList = [...arguments_];\n  let root;\n  let configuration;\n  let interval = defaultWatchInterval;\n  let json = false;\n  while (argumentsList.length > 0) {\n    const argument = argumentsList.shift();\n    if (argument === \"-h\" || argument === \"--help\") return { help: true };\n    if (argument === \"--root\") {\n      if (argumentsList.length === 0) throw new Error(\"--root requires a directory\");\n      root = argumentsList.shift();\n    } else if (argument === \"--config\") {\n      if (argumentsList.length === 0) throw new Error(\"--config requires a file\");\n      configuration = argumentsList.shift();\n    } else if (argument === \"--interval\") {\n      if (argumentsList.length === 0) throw new Error(\"--interval requires milliseconds\");\n      const text = argumentsList.shift();\n      if (!/^[0-9]+$/u.test(text)) throw new Error(\"--interval requires an integer\");\n      interval = Number(text);\n    } else if (argument === \"--json\") {\n      json = true;\n    } else {\n      throw new Error(`unknown option: ${argument}`);\n    }\n  }\n  if ((root === undefined) === (configuration === undefined)) {\n    throw new Error(\"choose exactly one of --root or --config\");\n  }\n  return { root, configuration, interval, json };\n}\n\nfunction writeEvent(event, json) {\n  if (json) {\n    process.stdout.write(`${JSON.stringify(event)}\\n`);\n    return;\n  }\n  if (event.event === \"ready\") {\n    process.stdout.write(`watching ${event.root}\\n`);\n  } else if (event.event === \"error\") {\n    process.stdout.write(`watch error: ${renderDiagnostic(event.diagnostic)}\\n`);\n  } else {\n    for (const change of event.changes) {\n      process.stdout.write(`${change.kind} ${change.path ?? change.file}\\n`);\n    }\n  }\n}\n\nasync function watchOptions(parsed, options) {\n  if (parsed.configuration === undefined) {\n    return { root: parsed.root, configuration: null, interval: parsed.interval };\n  }\n  const compiler = await loadCompiler(options.moduleDirectory);\n  const request = await readProjectConfiguration(parsed.configuration, compiler);\n  return {\n    root: request.root,\n    configuration: request.configuration,\n    interval: parsed.interval,\n  };\n}\n\nexport async function execute(arguments_, options = {}) {\n  const parsed = parseArguments(arguments_);\n  if (parsed.help) return { help: true };\n  const watcher = await ProjectWatcher.create(await watchOptions(parsed, options));\n  return { watcher, json: parsed.json };\n}\n\nexport async function main(arguments_ = process.argv.slice(2)) {\n  const execution = await execute(arguments_);\n  if (execution.help) {\n    process.stdout.write(usage);\n    return;\n  }\n  const { watcher, json } = execution;\n  let stop;\n  const stopped = new Promise((resolveStopped) => {\n    stop = resolveStopped;\n  });\n  const handleSignal = () => stop();\n  process.once(\"SIGINT\", handleSignal);\n  process.once(\"SIGTERM\", handleSignal);\n  try {\n    watcher.start((event) => writeEvent(event, json));\n    await stopped;\n  } finally {\n    process.removeListener(\"SIGINT\", handleSignal);\n    process.removeListener(\"SIGTERM\", handleSignal);\n    await watcher.close();\n  }\n}\n\nconst isMain = process.argv[1] !== undefined &&\n  resolve(process.argv[1]) === fileURLToPath(import.meta.url);\nif (isMain) {\n  main().catch((error) => {\n    const diagnostic = diagnosticFromError(error);\n    console.error(`eliscript-watch: ${renderDiagnostic(diagnostic)}`);\n    process.exitCode = 1;\n  });\n}\n"))
+(module bootstrap.host.watch-cli
+  (import "node:path" resolve)
+  (import "node:url" fileURLToPath)
+  (import "./bun.mjs" diagnosticFromError loadCompiler renderDiagnostic)
+  (import "./project-cli.mjs" readProjectConfiguration)
+  (import "./watch.mjs"
+    ProjectWatcher defaultWatchInterval maximumWatchInterval minimumWatchInterval)
+
+  (defconst usage
+    (str "Usage: eliscript-watch (--root DIRECTORY | --config FILE) [OPTIONS]\n\n"
+         "Options:\n"
+         "  --root DIRECTORY  Observe regular .eli files below DIRECTORY\n"
+         "  --config FILE     Resolve and observe a versioned project configuration\n"
+         "  --interval MS     Poll every " defaultWatchInterval " ms by default (" minimumWatchInterval "-" maximumWatchInterval ")\n"
+         "  --json            Emit one versioned JSON event per line\n"
+         "  -h, --help        Show this help\n"))
+
+  (defconst digits-pattern (new globalThis.RegExp "^[0-9]+$" "u"))
+
+  (defun parseArguments (arguments_)
+    (let ((argumentsList (Array/from arguments_))
+          (root undefined)
+          (configuration undefined)
+          (interval defaultWatchInterval)
+          (json false)
+          (helpResult nil))
+      (while (and (nil? helpResult) (> (js-length argumentsList) 0))
+        (let ((argument (js-call argumentsList :shift)))
+          (cond
+            ((or (= argument "-h") (= argument "--help"))
+              (setq helpResult (js-object :help t)))
+            ((= argument "--root")
+              (when (= (js-length argumentsList) 0)
+                (throw (new globalThis.Error "--root requires a directory")))
+              (setq root (js-call argumentsList :shift)))
+            ((= argument "--config")
+              (when (= (js-length argumentsList) 0)
+                (throw (new globalThis.Error "--config requires a file")))
+              (setq configuration (js-call argumentsList :shift)))
+            ((= argument "--interval")
+              (when (= (js-length argumentsList) 0)
+                (throw (new globalThis.Error "--interval requires milliseconds")))
+              (let ((text (js-call argumentsList :shift)))
+                (unless (js-call digits-pattern :test text)
+                  (throw (new globalThis.Error "--interval requires an integer")))
+                (setq interval (globalThis.Number text))))
+            ((= argument "--json")
+              (setq json t))
+            (t
+              (throw (new globalThis.Error (str "unknown option: " argument)))))))
+      (if helpResult
+        helpResult
+        (progn
+          (when (= (undefined? root) (undefined? configuration))
+            (throw (new globalThis.Error "choose exactly one of --root or --config")))
+          (js-object :root root :configuration configuration :interval interval :json json)))))
+
+  (defun writeEvent (event json)
+    (if json
+      (js-call (get globalThis.process :stdout) :write (str (JSON/stringify event) "\n"))
+      (cond
+        ((= (get event :event) "ready")
+          (js-call (get globalThis.process :stdout) :write (str "watching " (get event :root) "\n")))
+        ((= (get event :event) "error")
+          (js-call (get globalThis.process :stdout) :write
+            (str "watch error: " (renderDiagnostic (get event :diagnostic)) "\n")))
+        (t
+          (let ((changes (get event :changes))
+                (index 0))
+            (while (< index (js-length changes))
+              (let* ((change (aref changes index))
+                     (path (if (nullish? (get change :path)) (get change :file) (get change :path))))
+                (js-call (get globalThis.process :stdout) :write
+                  (str (get change :kind) " " path "\n")))
+              (setq index (1+ index))))))))
+
+  (defasync watchOptions (parsed options)
+    (if (undefined? (get parsed :configuration))
+      (js-object :root (get parsed :root)
+        :configuration nil
+        :interval (get parsed :interval))
+      (let* ((compiler (await (loadCompiler (get options :moduleDirectory))))
+             (request (await (readProjectConfiguration (get parsed :configuration) compiler))))
+        (js-object :root (get request :root)
+          :configuration (get request :configuration)
+          :interval (get parsed :interval)))))
+
+  (defasync execute (arguments_ &rest __opt)
+    (let* ((options (aref __opt 0))
+           (actual-options (if (undefined? options) (js-object) options))
+           (parsed (parseArguments arguments_)))
+      (if (get parsed :help)
+        (js-object :help t)
+        (let ((watcher (await (js-call ProjectWatcher :create (await (watchOptions parsed actual-options))))))
+          (js-object :watcher watcher :json (get parsed :json))))))
+
+  (defasync main (&rest __opt)
+    (let* ((arguments_ (aref __opt 0))
+           (actual-args (if (undefined? arguments_)
+                          (js-call (get globalThis.process :argv) :slice 2)
+                          arguments_))
+           (execution (await (execute actual-args))))
+      (if (get execution :help)
+        (js-call (get globalThis.process :stdout) :write usage)
+        (let* ((watcher (get execution :watcher))
+               (json (get execution :json))
+               (stop nil)
+               (stopped (new globalThis.Promise (lambda (resolveStopped) (setq stop resolveStopped))))
+               (handleSignal (lambda () (funcall stop))))
+          (js-call globalThis.process :once "SIGINT" handleSignal)
+          (js-call globalThis.process :once "SIGTERM" handleSignal)
+          (try
+            (progn
+              (js-call watcher :start (lambda (event) (writeEvent event json)))
+              (await stopped))
+            (finally
+              (js-call globalThis.process :removeListener "SIGINT" handleSignal)
+              (js-call globalThis.process :removeListener "SIGTERM" handleSignal)
+              (await (js-call watcher :close))))))))
+
+  (let ((entry (aref (get globalThis.process :argv) 1)))
+    (when (and (not (undefined? entry))
+               (= (resolve entry) (fileURLToPath (js* "import.meta.url"))))
+      (js-call (main) :catch
+        (lambda (error)
+          (let ((diagnostic (diagnosticFromError error)))
+            (console/error (str "eliscript-watch: " (renderDiagnostic diagnostic)))
+            (put globalThis.process :exitCode 1))))))
+
+  (export execute main parseArguments))

@@ -5,8 +5,8 @@
   (import "node:url" pathToFileURL)
   (import "../../dist/bootstrap/reader.mjs" read-string)
   (import "../../dist/bootstrap/compiler.mjs" compile-string compile-ir-string)
-  (import "../../dist/bootstrap/emitter.mjs" emit-top-level)
-  (import "./compiler-build.mjs" independentCompilerResources)
+  (import "../../dist/bootstrap/emitter.mjs" emit-top-level emit-expression)
+  (import "./compiler-build.mjs" independentCompilerResources compilerFunctionalRuntimeProfile)
   (import "./compiler-corpus-host-context.mjs" originalInteropFullRuntimeRecipe)
   (import "./build.mjs" root)
   (import "./compiler-corpus-ground.mjs" :as ground)
@@ -41,6 +41,20 @@
                         "numeric" "json" "result" "metadata" "data-text" "value-semantics") :forEach (lambda (name)
         (js-call plans :set (+ "original-program:portable-" name "-complete-hosts")
           (js-array (+ (if (= name "value-semantics") "value" name) ".mjs") "stdlib"))))
+      (js-call (js-array (js-array "value" 4) (js-array "persistent-list" 2)
+                        (js-array "persistent-vector" 2) (js-array "persistent-map" 3)
+                        (js-array "persistent-set" 3)) :forEach (lambda (entry)
+        (let ((name (aref entry 0)) (index 0))
+          (while (< index (aref entry 1))
+            (js-call plans :set (str "original-program:portable-" name "-" index)
+              (js-array (str name ".mjs") "stdlib"))
+            (setq index (1+ index))))))
+      (js-call (js-array "vector" "map" "set") :forEach (lambda (name)
+        (let ((entry (str "persistent-" name ".mjs")))
+          (js-call plans :set (str "stable-compatibility:program:stdlib/persistent-" name ".eli")
+            (js-array entry "stdlib"))
+          (js-call plans :set (str "stable-compatibility:program:persistent-core-exit-" name)
+            (js-array entry "stdlib")))))
       (js-call plans :set "original-managed-suite:complete-fixture-suites" (js-array "host/compiler-session.mjs" "compiler"))
       (js-call plans :set "original-tools-artifact:worker-source-mapping:bun" (js-array "host/compiler-session.mjs" "compiler"))
       (js-call (js-array "node" "bun") :forEach (lambda (engine)
@@ -122,7 +136,8 @@
 
   (defun complete-request-sources (record request options &optional independent-seed)
     (let ((plan (or (js-call request-layouts :get (get record :id))
-                    (when independent-seed (js-array (get record :entry) "stdlib")))))
+                    (when (and independent-seed (originalSequenceNativeInteropP record))
+                      (js-array (get record :entry) "stdlib")))))
       (when (and request plan (= (get record :entry) (aref plan 0)))
         (let ((modules (get request :modules)) (layout (aref plan 1)))
           (js-call modules :forEach (lambda (module)
@@ -171,17 +186,47 @@
                           (js-call modules :push module))
                         (js-call aliases :set id module) (js-call aliases :set filename module)))))
                   (setq index (1+ index)))
+                ;; runtime/core/{map,value}-internals.mjs import ../../stdlib/bit.mjs.
+                ;; When the project itself does not emit stdlib/bit.mjs, bind the
+                ;; archived provider explicitly instead of falling back at runtime.
+                (when (and (/= layout "compiler")
+                           (js-call assets :has "stdlib/bit.mjs")
+                           (or (js-call aliases :has "runtime/core/value-internals.mjs")
+                               (js-call aliases :has "runtime/core/map-internals.mjs"))
+                           (not (js-call aliases :has "stdlib/bit.mjs")))
+                  (let ((provider (js-object :id "stdlib/bit.mjs" :filename "stdlib/bit.mjs"
+                                    :source (request-source assets "stdlib/bit.mjs"))))
+                    (js-call hosts :push provider) (js-call aliases :set "stdlib/bit.mjs" provider)))
                 (when (or (> (js-length hosts) 0) (Object/hasOwn request "hostSources"))
                   (put request :hostSources hosts)))))))
       request))
 
   (defun prepareOriginalSeedSources (record options)
-    ;; Independent Seed needs the same authenticated dependency declarations
-    ;; even for recipes whose selected session already registered its literals.
-    ;; This does not change the public request or invent a different record ID.
+    ;; Preserve the selected request's declarations and reachable source graph.
+    ;; Only the authenticated sequence interop recipe needs its established
+    ;; post-transport native runtime providers. An unknown recipe must not
+    ;; acquire a partial local runtime or overwrite a pruned Seed output.
     (let ((request (compilerCorpusRequest record "javascript" options)))
-      (if (js-call request-layouts :has (get record :id)) request
-        (complete-request-sources record request options t))))
+      (if (originalSequenceNativeInteropP record)
+        (complete-request-sources record request options t)
+        (progn
+          ;; An explicitly declared local provider graph still authenticates
+          ;; managed source names before the Seed compiler assigns paths.
+          ;; This does not add providers to an undeclared or self-contained graph.
+          (when (and request options (Array/isArray (get options :sourceAssets))
+                     (js-call (get request :hostSources (js-array)) :some
+                       (lambda (provider)
+                         (and (js-call (get provider :id) :startsWith "runtime/")
+                              (js-call (get provider :id) :endsWith ".mjs")))))
+            (let ((assets (new globalThis.Map)))
+              (js-call (get options :sourceAssets) :forEach (lambda (asset)
+                (let* ((filename (get asset :file)) (previous (js-call assets :get filename)))
+                  (when (and previous (or (/= (get previous :sha256) (get asset :sha256))
+                                         (/= (get previous :content) (get asset :content))))
+                    (throw (new globalThis.TypeError (+ "original recipe has conflicting source assets: " filename))))
+                  (js-call assets :set filename asset))))
+              (request-canonical-library-filenames (get request :modules) options assets)))
+          request))))
 
   (defun originalSequenceNativeInteropP (record)
     (and (not (nullish? record)) (not (nullish? (get record :original)))
@@ -192,7 +237,8 @@
   (defun transportOriginalSequenceRuntime (record libraries)
     (if (not (originalSequenceNativeInteropP record)) record
       (let ((canonical (new globalThis.Map)) (proofs (new globalThis.Map))
-            (modules (js-array)) (evidence (js-array)))
+            (modules (js-array)) (evidence (js-array)) (retained (new globalThis.Set))
+            (by-id (new globalThis.Map)) (queue (js-array)))
         (unless (Array/isArray libraries)
           (throw (new globalThis.TypeError "original sequence runtime import transport requires real literal sources")))
         (js-call (get (get record :original) :sourceAssets) :forEach
@@ -201,10 +247,52 @@
           (unless (= (js-call proofs :get (get library :filename)) (corpus-hash (get library :source)))
             (throw (new globalThis.TypeError "original sequence runtime source identity differs")))
           (js-call canonical :set (get library :id) library)))
+        ;; Restore the original JS graph, not the managed-only closure added
+        ;; beneath runtime imports. Keep every explicit project module/entry;
+        ;; follow its actual relative imports without entering relocated runtime
+        ;; providers. Only authenticated, unreachable canonical library modules
+        ;; may be omitted. Otherwise their imports would recreate an orphan bit
+        ;; declaration during the subsequent independent Seed source binding.
+        (js-call (get record :modules) :forEach (lambda (module)
+          (let* ((id (get module :id)) (library (js-call canonical :get id))
+                 (request (get record :request)) (entries (get request :entries))
+                 (runtime (and (js-call id :startsWith "runtime/") (not (nullish? library))))
+                 (owned (and (not (nullish? library)) (= (get module :filename) (get library :filename))))
+                 (explicit (or (= id (get record :entry)) (= id (get request :entry))
+                   (and (Array/isArray entries) (js-call entries :includes id)))))
+            (when (js-call by-id :has id)
+              (throw (new globalThis.TypeError "original sequence runtime repeats a source module")))
+            (js-call by-id :set id module)
+            (when (and (not runtime) (or (not owned) explicit))
+              (js-call retained :add id) (js-call queue :push id)))))
+        (let ((index 0))
+          (while (< index (js-length queue))
+            (let* ((id (aref queue index)) (module (js-call by-id :get id))
+                   (pending (read-string (get module :source) (get module :filename))))
+              (while (> (js-length pending) 0)
+                (let* ((form (js-call pending :shift)) (items (get form :items))
+                       (head (and items (> (js-length items) 0) (get (aref items 0) :name))))
+                  (cond
+                    ((= head "module") (Reflect/apply (get pending :push) pending (js-call items :slice 2)))
+                    ((or (= head "import") (= head "import-portable"))
+                     (let ((specifier (get (aref items 1) :value)))
+                       (when (and (= (value-type specifier) "string") (js-call specifier :startsWith "."))
+                         (let ((target (js-call posix :normalize (js-call posix :join (js-call posix :dirname id) specifier))))
+                           (when (js-call target :endsWith ".eli")
+                             (setq target (str (js-call target :slice 0 -4) ".mjs")))
+                           (unless (or (and (js-call target :startsWith "runtime/") (js-call canonical :has target))
+                                       (js-call retained :has target) (not (js-call by-id :has target)))
+                             (js-call retained :add target) (js-call queue :push target))))))))))
+            (setq index (1+ index))))
         (js-call (get record :modules) :forEach (lambda (module)
           (let* ((id (get module :id)) (source (get module :source))
-                 (library (js-call canonical :get id)))
-            (if (and (js-call id :startsWith "runtime/") library)
+                 (library (js-call canonical :get id))
+                 (bit (and (= id "stdlib/bit.mjs") (= (get module :filename) "stdlib/bit.eli") library))
+                 (orphan-library (and (not (nullish? library)) (= (get module :filename) (get library :filename))
+                   (not (js-call retained :has id)))))
+            (when (and bit (not (= source (get library :source))))
+              (throw (new globalThis.TypeError "original sequence runtime source identity differs")))
+            (if (or (and (js-call id :startsWith "runtime/") (not (nullish? library))) orphan-library)
               (unless (= source (get library :source))
                 (throw (new globalThis.TypeError "original sequence runtime source identity differs")))
               (let ((pending (read-string source (get module :filename))) (changes (js-array)))
@@ -220,9 +308,10 @@
                       ((or (= head "import") (= head "import-portable"))
                        (let* ((token (aref items 1)) (specifier (get token :value)))
                          (when (and (= (value-type specifier) "string") (js-call specifier :startsWith "."))
-                           (let* ((target (js-call posix :normalize (js-call posix :join (js-call posix :dirname id) specifier)))
+                           (let* ((target (let ((path (js-call posix :normalize (js-call posix :join (js-call posix :dirname id) specifier))))
+                                    (if (js-call path :endsWith ".eli") (+ (js-call path :slice 0 -4) ".mjs") path)))
                                   (provider (js-call canonical :get target)))
-                             (when (and provider (js-call target :startsWith "runtime/"))
+                             (when (and (not (nullish? provider)) (js-call target :startsWith "runtime/"))
                                (js-call changes :push (js-object
                                  :start (get (get token :span) :start)
                                  :end (get (get token :span) :end)
@@ -246,6 +335,22 @@
           (js-object :kind "original-sequence-native-provider-imports" :modules evidence))))))
 
   (defun resource-field (value key) (if (nullish? value) undefined (get value key)))
+  (defun resource-assertion-titles (original)
+    ;; Current source-region adapters can bind one title or the full title list.
+    ;; Preserve that original representation in the input identity; admission
+    ;; only reads the nonempty exact strings, without rewriting the record.
+    (let ((value (resource-field original "originalAssertion")))
+      (cond ((Array/isArray value) value)
+            ((= (value-type value) "string") (js-array value))
+            (t (js-array)))))
+  (defun resource-single-assertion-p (original expected)
+    (let ((titles (resource-assertion-titles original)))
+      (and (= (js-length titles) 1) (= (aref titles 0) expected))))
+  (defconst million-value-source-pattern
+    (new globalThis.RegExp "(?:^|[^A-Za-z0-9_$])(?:1_000_000|1000000)(?:$|[^A-Za-z0-9_$])"))
+  (defun million-value-source-p (source)
+    (and (= (value-type source) "string") (js-call million-value-source-pattern :test source)))
+
   (defun resource-budget-specified-p (value)
     (and (not (nullish? value))
       (js-call (js-array "maxSlots" "initialBytes" "maxBytes") :some
@@ -310,84 +415,33 @@
       (and (js-call (js-array "stable-compatibility:program:tests/fixtures/persistent-tree-walk.eli"
                    "original-program:persistent-tree-walk-complete-hosts") :includes (resource-field record "id"))
            (= (resource-field original "manifest") "stable-compatibility")
-           (= (resource-field original "fixture") fixture)
-           (= (resource-field original "host") "tests/fixtures/persistent-tree-walk-host.mjs")
+           (complete-library-functional-resource-recipe-p record)
            entry (= (get entry :filename) fixture) (= (value-type (get entry :source)) "string")
            (js-call (get entry :source) :includes "(depth 12000)"))))
-  (defun retained-original-graph-resource-recipe-p (record)
-    ;; These original synchronous jobs retain their source views until the job
-    ;; ends. They still execute every assertion; only their functional heap
-    ;; selection differs from the original capacity acceptance.
-    (let* ((id (resource-field record "id")) (original (resource-field record "original"))
-           (execution (resource-field record "execution"))
-           (rows (js-array
-             (js-array "original-program:portable-value-2" "tests/portable-value-semantics.test.mjs" "stdlib/value.eli"
-               "ec84ada97c91d4c0469e39805647f6d18070ce4e764c93c7d79abe8c36c6f275"
-               "162efa2783a29fa34292eacbf65e6d184b1b4876d3d881d2d0d93cdb2108ad73"
-               "bb2616efda941ef7030f6ef5c7835b8fca44ce1b9034698b319e22683e34a2bd"
-               "Eliscript-authored value semantics preserve generated cross-family invariants")
-             (js-array "original-program:portable-persistent-list-1" "tests/portable-persistent-list.test.mjs" "stdlib/persistent-list.eli"
-               "c4003467e353f98c384d547249d47a0c8316344dd27c90aac22d33666fc22e3b"
-               "1166d68ce08c8a22c1ec56452d9e009cd498a8aba241dcd3e7966c49e9c5e970"
-               "192c860e81292669ba31e35a523ff674bddf38d09f3b5666ffced7c3ae415cfa"
-               "Eliscript-authored persistent list shares a million-node suffix")))
-           (row (js-call rows :find (lambda (item) (= (aref item 0) id))))
-           (modules (resource-field record "modules"))
-           (entry (when (Array/isArray modules) (js-call modules :find
-             (lambda (item) (= (get item :id) (get record :entry))))))
-           (host (resource-field execution "hostSource")))
-      (and row entry (= (resource-field original "manifest") "stable-compatibility")
-        (= (resource-field original "suite") (aref row 1))
-        (= (resource-field original "host") (aref row 1))
-        (= (resource-field original "fixture") (aref row 2))
-        (= (get entry :filename) (aref row 2))
-        (= (resource-field original "sourceSha256") (aref row 3))
-        (= (resource-field original "originalAssertion") (aref row 6))
-        (= (value-type host) "string") (= (corpus-hash host) (aref row 4))
-        (= (value-type (get entry :source)) "string") (= (corpus-hash (get entry :source)) (aref row 5)))))
   (defun retained-original-zipper-resource-coordinate-p (record)
-    ;; These are the complete original assertions, not reduced depth recipes.
-    ;; Their immutable paths and ancestor vectors remain live through ascent.
-    ;; Authenticate their original bytes before binding the entire current
-    ;; request; a functional heap does not accept the original small capacity.
+    ;; The current maintained suite binds its complete emitted assertion region.
+    ;; Admission selects only these two exact source coordinates; the complete
+    ;; suite, every module and the final observer are authenticated below.
     (let* ((original (resource-field record "original"))
-           (execution (resource-field record "execution"))
-           (rows (js-array
-             (js-array "original-program:persistent-zipper-complete-hosts"
-               "tests/fixtures/persistent-zipper-host.mjs"
-               "tests/__eliscript_original_persistent-zipper.mjs"
-               "5dc962e505dc5bdc89d6416c21f2448ea47e0563a606c78daca883edda2687dd"
-               "persistent zippers navigate edit and rebuild stack-safe trees"
-               4123 5340 "cd44b17cad6b04f9a73834ead06d4b8b7603e50724f70cd20bfbd417fd44b930")
-             (js-array "original-program:persistent-zipper-indexed-ascent"
-               "tests/persistent-zipper.test.mjs"
-               "tests/__eliscript_original_zipper_indexed_ascent.mjs"
-               "1fec4936176e487244c3edfff95d7af8ae142dcb654517c761c30ff25e88edb1"
-               "deep zipper ascent reads indexed ancestor slots without reducing wide parent vectors"
-               5735 7774 "621879f188e742007f2c2e01cb71da5598592401a3bb7ba786731c2028f6640b")))
-           (row (js-call rows :find (lambda (item) (= (aref item 0) (resource-field record "id")))))
+           (id (resource-field record "id"))
+           (title (cond
+             ((= id "original-program:persistent-zipper-complete-hosts")
+               "persistent zippers navigate edit and rebuild stack-safe trees")
+             ((= id "original-program:persistent-zipper-indexed-ascent")
+               "deep zipper ascent reads indexed ancestor slots without reducing wide parent vectors")
+             (t undefined)))
            (modules (resource-field record "modules"))
            (entry (when (Array/isArray modules) (js-call modules :find
-             (lambda (item) (= (get item :id) (get record :entry))))))
-           (regions (resource-field original "regions"))
-           (region (when (and (Array/isArray regions) (= (js-length regions) 1)) (aref regions 0)))
-           (host (resource-field execution "hostSource")))
-      (and row entry region
+             (lambda (item) (= (get item :id) (get record :entry)))))))
+      (and (not (undefined? title)) entry
         (= (resource-field original "manifest") "stable-compatibility")
         (= (resource-field original "suite") "tests/persistent-zipper.test.mjs")
-        (= (resource-field original "fixture") "tests/fixtures/persistent-zipper.eli")
-        (= (resource-field original "host") (aref row 1))
-        (= (resource-field original "sourceSha256") "70e2fbd82e1b5210daeeb4cdbb329d92cb470d7f30d6e59ff195147645b2180c")
-        (= (resource-field original "originalAssertion") (aref row 4))
+        (= (resource-field original "host") "tests/persistent-zipper.test.mjs")
+        (or (undefined? (resource-field original "fixture"))
+          (= (get original :fixture) "tests/fixtures/persistent-zipper.eli"))
+        (resource-single-assertion-p original title)
         (= (get record :entry) "tests/fixtures/persistent-zipper.mjs")
-        (= (get entry :filename) "tests/fixtures/persistent-zipper.eli")
-        (= (value-type (get entry :source)) "string")
-        (= (corpus-hash (get entry :source)) "10234df36146cfe881ef33678acc6274ad95c2f775fed51f081dee654ac102cf")
-        (= (resource-field execution "host") (aref row 2))
-        (= (value-type host) "string") (= (corpus-hash host) (aref row 3))
-        (= (resource-field region "start") (aref row 5)) (= (resource-field region "byteStart") (aref row 5))
-        (= (resource-field region "end") (aref row 6)) (= (resource-field region "byteEnd") (aref row 6))
-        (= (resource-field region "sha256") (aref row 7)))))
+        (= (get entry :filename) "tests/fixtures/persistent-zipper.eli"))))
   (defun retained-original-library-resource-coordinate-p (record)
     (let* ((original (resource-field record "original"))
            (modules (resource-field record "modules"))
@@ -401,13 +455,16 @@
         (= (resource-field (resource-field record "expected") "kind") "seed-program")
         (= (resource-field (resource-field record "execution") "kind") "original-program")
         (= (value-type (resource-field original "suite")) "string")
-        (= (value-type (resource-field original "originalAssertion")) "string")
+        (> (js-length (resource-assertion-titles original)) 0)
+        (js-call (resource-assertion-titles original) :every (lambda (title)
+          (and (= (value-type title) "string") (> (js-length title) 0))))
         (Array/isArray (resource-field original "regions")) (> (js-length (get original :regions)) 0)
         (= (value-type filename) "string")
         (or (undefined? fixture) (= fixture filename))
         (or (js-call filename :startsWith "stdlib/")
           (js-call (js-array "tests/fixtures/core-set-usage.eli"
-                    "tests/fixtures/core-stdlib-usage.eli") :includes filename)))))
+                    "tests/fixtures/core-stdlib-usage.eli"
+                    "tests/fixtures/persistent-tree-walk.eli") :includes filename)))))
   (defun complete-library-functional-resource-coordinate-p (record)
     ;; Source authentication belongs to the enclosing matrix. Admit complete
     ;; positive source programs by their original source graph, never by the
@@ -425,10 +482,11 @@
         (or (js-call fixture :startsWith "stdlib/")
           (js-call (js-array "tests/fixtures/map-patterns.eli"
                     "tests/fixtures/core-stdlib-usage.eli" "tests/fixtures/core-language-api-usage.eli"
-                    "tests/fixtures/core-set-usage.eli" "tests/fixtures/persistent-zipper.eli") :includes fixture))
+                    "tests/fixtures/core-set-usage.eli" "tests/fixtures/persistent-zipper.eli"
+                    "tests/fixtures/persistent-tree-walk.eli") :includes fixture))
         (= (get record :id) (str "stable-compatibility:program:" fixture))))))
   (defun complete-library-input-identity (record)
-    (js-object :entry (get record :entry)
+    (js-object :id (get record :id) :entry (get record :entry)
       :fixture (get (get record :original) :fixture) :host (get (get record :original) :host)
       :provenanceSha256 (corpus-hash (JSON/stringify (js-object
         :manifest (get (get record :original) :manifest)
@@ -443,11 +501,7 @@
     (let* ((original (resource-field record "original"))
            (retained (resource-field original "functionalResourceInputs"))
            (coordinate (complete-library-functional-resource-coordinate-p record))
-           (bound-coordinate (and retained
-             (= (resource-field retained "fixture") (resource-field original "fixture"))
-             (or (= (resource-field record "id") (str "stable-compatibility:program:" (resource-field original "fixture")))
-               (and (= (value-type (resource-field record "id")) "string")
-                 (js-call (get record :id) :startsWith "original-program:"))))))
+           (bound-coordinate (not (undefined? retained))))
       ;; Deleting or renaming an authenticated entry is input corruption, even
       ;; though the now-incomplete graph no longer satisfies admission. It must
       ;; not silently fall through to a different functional heap profile.
@@ -505,10 +559,8 @@
             (put original :functionalResourceInputs (complete-library-input-identity record))))))
       document))
   (defun compilerCorpusFunctionalResources (record options)
-    (let ((profile (resource-field options "functionalRuntimeProfile")) (result undefined))
+    (let ((profile (compilerFunctionalRuntimeProfile options)) (result undefined))
       (unless (undefined? profile)
-        (unless (= profile "small")
-          (throw (new globalThis.TypeError "functionalRuntimeProfile must be small when explicitly supplied")))
         (let* ((id (resource-field record "id")) (execution (resource-field record "execution"))
                (original (resource-field record "original")) (expected (resource-field record "expected"))
                (provided (resource-field options "runtimeOptions"))
@@ -562,6 +614,15 @@
                      (and (= (value-type id) "string") (js-call id :startsWith "original-program:")))))
                  (not (resource-budget-specified-p provided)) (not (resource-budget-specified-p declared))
                  (not (= (resource-field execution "runtimeProfile") "compiler")))))
+          ;; A bound positive input cannot escape authentication by corrupting
+          ;; the coordinate that originally admitted it. Explicit low-capacity
+          ;; or negative programs still stay outside functional admission.
+          (when (and (not (undefined? (resource-field original "functionalResourceInputs")))
+                     (not (resource-budget-specified-p provided)) (not (resource-budget-specified-p declared))
+                     (= (resource-field expected "oracleRequired") t)
+                     (= (value-type id) "string")
+                     (not (js-call (new globalThis.RegExp "(?:^|[-:])(?:negative|oom|capacity|recovery|recover|refusal|exhaustion)(?:[-:]|$)") :test id)))
+            (complete-library-functional-resource-recipe-p record))
           ;; No admission by failure text. Raw low-slot, OOM, refusal and
           ;; recovery contracts stay strict even during functional acceptance.
           (when (and (= (value-type id) "string") (or sequence sorted wire core-modules ordinary)
@@ -575,8 +636,7 @@
                                     (originalInteropFullRuntimeRecipe record)))
                    (selected-profile (cond (full-interop "full-runtime")
                      ((or (complete-library-functional-resource-recipe-p record)
-                          (million-core-exit-resource-recipe-p record) (retained-deep-walk-resource-recipe-p record)
-                          (retained-original-graph-resource-recipe-p record)) "full-compiler")
+                          (million-core-exit-resource-recipe-p record) (retained-deep-walk-resource-recipe-p record)) "full-compiler")
                      (t "small")))
                    (resources (independentCompilerResources (js-object :profile selected-profile)))
                    (before (Object/assign (js-object)
@@ -713,19 +773,16 @@
                "tests/portable-value-semantics.test.mjs" "stdlib/value.eli" "value.mjs" t)
              (js-array "original-program:portable-persistent-list-complete-hosts" "list"
                "Eliscript-authored persistent list compiles and agrees across hosts"
-               nil nil nil t "tests/fixtures/portable-list-host.mjs")
+               nil nil nil t)
              (js-array "original-program:persistent-core-exit-complete-hosts-vector" "vector"
                "persistent collection core closes its all-host million-value exit gate"
-               "tests/persistent-core-exit.test.mjs" "stdlib/value.eli" "value.mjs" t
-               "tests/fixtures/persistent-core-exit-host.mjs")
+               "tests/persistent-core-exit.test.mjs" "stdlib/value.eli" "value.mjs" t)
              (js-array "original-program:persistent-core-exit-complete-hosts-map" "map"
                "persistent collection core closes its all-host million-value exit gate"
-               "tests/persistent-core-exit.test.mjs" "stdlib/value.eli" "value.mjs" t
-               "tests/fixtures/persistent-core-exit-host.mjs")
+               "tests/persistent-core-exit.test.mjs" "stdlib/value.eli" "value.mjs" t)
              (js-array "original-program:persistent-core-exit-complete-hosts-set" "set"
                "persistent collection core closes its all-host million-value exit gate"
-               "tests/persistent-core-exit.test.mjs" "stdlib/value.eli" "value.mjs" t
-               "tests/fixtures/persistent-core-exit-host.mjs")))
+               "tests/persistent-core-exit.test.mjs" "stdlib/value.eli" "value.mjs" t)))
            (row (js-call rows :find (lambda (entry) (= (aref entry 0) id)))) (result undefined))
       (when (and row (= (resource-field options "functionalRuntimeProfile") "small")
                  (js-call (js-array "javascript" "wasm" "native") :includes target)
@@ -754,18 +811,17 @@
             (let* ((suite (or (aref row 3) (+ "tests/portable-persistent-" name ".test.mjs")))
                    (fixture (or (aref row 4) (+ "stdlib/persistent-" name ".eli")))
                    (entry-id (or (aref row 5) (+ "persistent-" name ".mjs")))
-                   (host (or (aref row 7) suite))
-                   (regions (resource-field original "regions")) (million-region false))
-              (unless (and (= (get original :suite) suite) (= (get original :host) host)
-                           (= (get original :fixture) fixture) (= (get original :originalAssertion) assertion)
+                   (regions (resource-field original "regions")) (million-region false)
+                   (entry (js-call (get record :modules) :find (lambda (module) (= (get module :id) entry-id)))))
+              (unless (and (= (get original :suite) suite) (= (get original :host) suite)
+                           (not (nullish? entry)) (= (get entry :filename) fixture)
+                           (or (undefined? (get original :fixture)) (= (get original :fixture) fixture))
+                           (resource-single-assertion-p original assertion)
                            (= (get record :entry) entry-id)
                            (Array/isArray regions) (> (js-length regions) 0)) (funcall refuse))
               (setq suite-source (request-source assets suite))
               (unless (= (corpus-hash suite-source) (get original :sourceSha256)) (funcall refuse))
               (js-call proofs :push (js-object :file suite :sha256 (corpus-hash suite-source)))
-              (unless (= host suite)
-                (js-call proofs :push (js-object :file host
-                  :sha256 (corpus-hash (request-source assets host)))))
               (let ((bytes (js-call Buffer :from suite-source)))
                 (js-call regions :forEach (lambda (region)
                   (let ((start (get region :start)) (end (get region :end))
@@ -777,12 +833,11 @@
                                  (= (corpus-hash (js-call bytes :subarray byte-start byte-end)) (get region :sha256))
                                  (= (js-call (js-call bytes :subarray byte-start byte-end) :toString "utf8")
                                     (js-call suite-source :slice start end))) (funcall refuse))
-                    (when (js-call (js-call suite-source :slice start end) :includes "1_000_000") (setq million-region t)))))
+                    (when (million-value-source-p (js-call suite-source :slice start end)) (setq million-region t)))))
               (unless million-region (funcall refuse)))))
           ;; The complete source and original assertion remain in the corpus.
           ;; This private admission grants only a deferred resource receipt.
-          (unless (and (= (value-type (get execution :hostSource)) "string")
-                       (js-call (get execution :hostSource) :includes "1_000_000")) (funcall refuse))
+          (unless (million-value-source-p (get execution :hostSource)) (funcall refuse))
           (let* ((entry (js-call (get record :modules) :find (lambda (module) (= (get module :id) (get record :entry)))))
                  (filename (and entry (get entry :filename))))
             (unless (and entry (= (get entry :source) (request-source assets filename))) (funcall refuse))
@@ -1019,9 +1074,9 @@
           ;; the locator moved to the maintained generated suite; it has its
           ;; own authenticated identity, never the old file's invented spans.
           (js-call (js-array
-              (js-array "async function run(" "\ntest(")
-              (js-array "    const module = (name) => import(" "\n  } finally {")
-              (js-array "const compilerSources = [" "\n];")) :forEach (lambda (pair)
+              (js-array "const reportPath = " "\ntest(")
+              (js-array "        return (await (async (modules) => {" "\n      } finally {")
+              (js-array "const compilerSources = [" "];")) :forEach (lambda (pair)
             (let* ((start (js-call source :indexOf (aref pair 0)))
                    (end (js-call source :indexOf (aref pair 1) start)))
               (unless (and (>= start 0) (> end start)
@@ -1136,14 +1191,18 @@
               (js-call (new globalThis.RegExp "^[0-9a-f]{64}$") :test digest))
               (throw (new globalThis.TypeError "original matcher transport source identity is invalid")))
             (js-call seen :add name))))
-        (let* ((line-end (js-call source :indexOf "\n"))
-               (line (js-call source :slice 0 line-end)) (start (js-call line :indexOf before)))
-          (unless (and (> line-end 0) (js-call line :startsWith "import ")
-            (>= start 0) (= (js-call line :indexOf before (1+ start)) -1)
-            (= (js-call line :slice (+ start (js-length before))) ";"))
+        (let* ((maintained (and (= (get (get original :setupReplacement (js-object)) :kind) "actual-selected-library-artifacts")
+                                (Array/isArray (get original :helperPrograms)) (> (js-length (get original :helperPrograms)) 0)))
+               (lines (js-call (Array/from (js-call source :matchAll
+                 (new globalThis.RegExp "^import [^\\n]* from \"bun:test\";" "gm"))) :filter (lambda (item) t)))
+               (selected (aref lines 0))
+               (start (if selected (+ (get selected :index) (js-call (aref selected 0) :indexOf before)) -1)))
+          (unless (if maintained
+              (js-call source :includes (get (pathToFileURL (resolve source-root "tools/backends/compiler-corpus-matchers.mjs")) :href))
+              (and (= (js-length lines) 1) (>= start 0)))
             (throw (new globalThis.TypeError "original matcher import boundary changed")))
-          (let* ((output (str (js-call source :slice 0 start) after
-                           (js-call source :slice (+ start (js-length before)))))
+          (let* ((output (if maintained source (str (js-call source :slice 0 start) after
+                           (js-call source :slice (+ start (js-length before))))))
                  (proofs (js-call (get original :sourceAssets (js-array)) :slice)))
             (js-call assets :forEach (lambda (asset)
               (let ((existing (js-call proofs :find (lambda (item) (= (get item :file) (get asset :file))))))
@@ -1180,38 +1239,28 @@
   (defun transportOriginalCoreInstrumentationRecord (record)
     (if (not (js-call matcher-records :includes (get record :id))) record
       (let* ((execution (get record :execution)) (source (get execution :hostSource))
-             (start-text "    expect(transientMapMetrics()).toMatchObject({")
-             (start (js-call source :indexOf start-text))
-             (end (js-call source :indexOf "\n    });" start))
-             (marker "__eliscript_retained_core_metrics__"))
-        (unless (and (>= start 0) (> end start)
-                     (= (js-call source :indexOf start-text (1+ start)) -1))
-          (throw (new globalThis.TypeError "original core host metrics assertion boundary changed")))
-        (setq end (+ end (js-length "\n    });")))
-        (let* ((assertion (js-call source :slice start end))
-               ;; Only the scheduling predicate is new code, written in Eli.
-               ;; The placeholder carries the exact retained original assertion.
-               (compiled (compile-string (str
-                 "(defun original_core_native_metrics () "
-                 "(when (= (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_TARGET) \"javascript\") "
-                 "(js* " (JSON/stringify marker) ")))" ) "original-core-metrics-scope.eli"))
-               (call (get (emit-top-level (aref (get (compile-ir-string
-                 "(funcall (js* \"original_core_native_metrics\"))" "original-core-metrics-call.eli") :body) 0)) :text))
-               (at (js-call compiled :indexOf marker)))
-          (unless (and (>= at 0)
-                       (= (js-call compiled :indexOf marker (1+ at)) -1))
-            (throw (new globalThis.TypeError "compiler core metrics statement boundary changed")))
-          (let* ((guard (js-call compiled :replace marker assertion))
-                 (output (str guard (js-call source :slice 0 start) call (js-call source :slice end)))
-                 (original (get record :original)))
-            (Object/assign (js-object) record (js-object
-              :execution (Object/assign (js-object) execution (js-object :hostSource output))
-              :original (Object/assign (js-object) original (js-object :nativeInstrumentationScope
-                (js-object :kind "javascript-host-implementation-counters" :version 1
-                  :beforeSha256 (corpus-hash source) :afterSha256 (corpus-hash output)
-                  :assertionSha256 (corpus-hash assertion) :executedTargets (js-array "javascript")
-                  :notEvaluatedTargets (js-array "wasm" "native")
-                  :functionalInputCount 50000 :functionalResultsUnchanged t))))))))))
+             (original (get record :original)) (scope (get original :nativeInstrumentationScope)))
+        (if (and scope (= (get scope :kind) "javascript-host-implementation-counters")
+                 (= (get (get original :setupReplacement (js-object)) :kind) "actual-selected-library-artifacts")) record
+          (let* ((assertion "(expect(transientMapMetrics()))[\"toMatchObject\"](({\"persistentCalls\": 1, \"invalidCalls\": 0}))")
+                 (start (js-call source :indexOf assertion))
+                 (marker "__eliscript_retained_core_metrics__"))
+            (unless (and (>= start 0) (= (js-call source :indexOf assertion (1+ start)) -1))
+              (throw (new globalThis.TypeError "original core host metrics assertion boundary changed")))
+            (let* ((program (compile-ir-string (str
+                      "(if (= (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_TARGET) \"javascript\") (js* "
+                      (JSON/stringify marker) ") nil)") "original-core-metrics-scope.eli"))
+                   (expression (aref (get (aref (get program :body) 0) :children) 0))
+                   (guard (js-call (get (emit-expression expression) :text) :replace marker assertion))
+                   (output (str (js-call source :slice 0 start) guard (js-call source :slice (+ start (js-length assertion))))))
+              (Object/assign (js-object) record (js-object
+                :execution (Object/assign (js-object) execution (js-object :hostSource output))
+                :original (Object/assign (js-object) original (js-object :nativeInstrumentationScope
+                  (js-object :kind "javascript-host-implementation-counters" :version 1
+                    :beforeSha256 (corpus-hash source) :afterSha256 (corpus-hash output)
+                    :assertionSha256 (corpus-hash assertion) :executedTargets (js-array "javascript")
+                    :notEvaluatedTargets (js-array "wasm" "native")
+                    :functionalInputCount 50000 :functionalResultsUnchanged t)))))))))))
 
   (defasync tools-cli-assets (document options)
     (let* ((ids (js-array "original-tools-artifact:compiler-session-tools:node"
@@ -1273,7 +1322,12 @@
            (reader (createOriginalCorpusSourceReader options)) (proofs (js-array))
            (files (js-array "tools/backends/eliscript/compiler-corpus-tools-reference.eli"
                     "tools/backends/compiler-corpus-tools-reference.mjs"
+                    "runtime/array-text.eli" "runtime/array-text.mjs"
+                    "runtime/errors.eli" "runtime/errors.mjs"
+                    "runtime/math.eli" "runtime/math.mjs"
+                    "runtime/number-radix.eli" "runtime/number-radix.mjs"
                     "runtime/prelude.eli" "runtime/prelude.mjs"
+                    "runtime/primitives.eli" "runtime/primitives.mjs"
                     "runtime/unicode-case.eli" "runtime/unicode-case.mjs"
                     "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs")) (index 0))
       (when (> (js-length records) 0)
@@ -1306,7 +1360,7 @@
              "bootstrap/host/project-cli.mjs" "bootstrap/host/project-cli.mjs.map"
              "bootstrap/host/project-cli-ground.mjs" "tools/project/project-cli.eli")))
       (when (> (js-length records) 0)
-        (js-call (js-array "math" "prelude" "unicode-case" "unicode-case-data") :forEach (lambda (name)
+        (js-call (js-array "array-text" "binding" "errors" "math" "number-radix" "prelude" "primitives" "unicode-case" "unicode-case-data") :forEach (lambda (name)
           (js-call files :push (str "runtime/" name ".eli")
             (str "runtime/" name ".mjs") (str "runtime/" name ".mjs.map"))))
         (let* ((reader (createOriginalCorpusSourceReader (js-object :sourceRoot
@@ -1317,7 +1371,7 @@
                    (existing (js-call (get document :evidence) :find
                      (lambda (entry) (= (get entry :file) filename)))))
               (when (and (= filename "bootstrap/host/project-cli-ground.mjs")
-                         (/= (get asset :sha256) "79980b2a6e38e4ab9daca31b04cb366bd749b66e3b384fbd04e696ddc465cd82"))
+                         (/= (get asset :sha256) "cbaaf12e9aa56c696e555d2cd101c17ac8c3177046c513d0fbe8655a10f916d2"))
                 (throw (new globalThis.TypeError "original project CLI archive bytes changed")))
               (if existing
                 (unless (and (= (get existing :bytes) (get asset :bytes))
@@ -1436,15 +1490,222 @@
               (put gate :coverageIds (js-call required :filter (lambda (id) (js-call ids :has id))))))))
       document))
 
+  ;; These are the finite source assets introduced by the capsule migration.
+  ;; Program assets remain attached to their actual selected-program record;
+  ;; harness fixtures belong to the unchanged required make test-core gate.
+  ;; Source authentication here never counts a program or host test as passed.
+  (defconst maintained-fixture-plans (js-array
+    (js-array "tests/fixtures/archive-resource-driver.eli" "host-fixture" (js-array "tests/helpers/archive-resource-contract.eli" "archive-resource-driver"))
+    (js-array "tests/fixtures/archive-session-host.eli" "host-fixture" (js-array "tests/compiler-source-archive-streaming.test.eli" "archive-session-host"))
+    (js-array "tests/fixtures/archive-source-assets-host.eli" "host-fixture" (js-array "tests/compiler-artifact-archive-test-ground.eli" "archive-source-assets-host"))
+    (js-array "tests/fixtures/archive-transport-driver.eli" "host-fixture" (js-array "tests/compiler-artifact-archive-test-ground.eli" "archive-transport-driver"))
+    (js-array "tests/fixtures/array-text-call-host.eli" "host-fixture" (js-array "tests/compiler-js-array-text-call.test.eli" "array-text-call-host"))
+    (js-array "tests/fixtures/array-text-host.eli" "host-fixture" (js-array "tests/js-array-text-fast-path.test.eli" "array-text-host"))
+    (js-array "tests/fixtures/array-text-maintenance-runtime.eli" "host-fixture" (js-array "tests/compiler-js-array-text-call.test.eli" "array-text-maintenance-runtime"))
+    (js-array "tests/fixtures/bootstrap-emitter-host.eli" "host-fixture" (js-array "tests/bootstrap-emitter.test.eli" "bootstrap-emitter-host"))
+    (js-array "tests/fixtures/bootstrap-formatter-host.eli" "host-fixture" (js-array "tests/bootstrap-formatter.test.eli" "bootstrap-formatter-host"))
+    (js-array "tests/fixtures/bootstrap-ir-host.eli" "host-fixture" (js-array "tests/bootstrap-ir-serialization.test.eli" "bootstrap-ir-host"))
+    (js-array "tests/fixtures/bootstrap-project-node-host.eli" "host-fixture" (js-array "tests/bootstrap-project.test.eli" "bootstrap-project-node-host"))
+    (js-array "tests/fixtures/boundary-project-host.eli" "host-fixture" (js-array "tests/boundary-security.test.eli" "boundary-project-host"))
+    (js-array "tests/fixtures/browser-project-reference-host.eli" "host-fixture" (js-array "tests/compiler-browser-session-test-ground.eli" "browser-project-reference-host"))
+    (js-array "tests/fixtures/browser-session-page.eli" "host-fixture" (js-array "tests/compiler-browser-session-test-ground.eli" "browser-session-page"))
+    (js-array "tests/fixtures/ci-worker-test-host.eli" "host-fixture" (js-array "tests/ci-contract-test-ground.eli" "ci-worker-test-host"))
+    (js-array "tests/fixtures/compiler-blocked-worker-host.eli" "host-fixture" (js-array "tests/compiler-error-transport.test.eli" "compiler-blocked-worker-host"))
+    (js-array "tests/fixtures/compiler-fragment-host.eli" "host-fixture" (js-array "tests/compiler-fragment-combine.test.eli" "compiler-fragment-host"))
+    (js-array "tests/fixtures/compiler-function-source-host.eli" "host-fixture" (js-array "tests/compiler-fragment-combine.test.eli" "compiler-function-source-host"))
+    (js-array "tests/fixtures/compiler-indent-wasm-host.eli" "host-fixture" (js-array "tests/compiler-portable-emitter.test.eli" "compiler-indent-wasm-host"))
+    (js-array "tests/fixtures/compiler-js-codegen-host.eli" "host-fixture" (js-array "tests/compiler-js-codegen.test.eli" "compiler-js-codegen-host"))
+    (js-array "tests/fixtures/compiler-order-host.eli" "host-fixture" (js-array "tests/compiler-internal-string-order.test.eli" "compiler-order-host"))
+    (js-array "tests/fixtures/compiler-portable-errors-host.eli" "host-fixture" (js-array "tests/compiler-portable-errors.test.eli" "compiler-portable-errors-host"))
+    (js-array "tests/fixtures/compiler-producer-numeric-host.eli" "host-fixture" (js-array "tests/compiler-producer-rig.eli" "compiler-producer-numeric-host"))
+    (js-array "tests/fixtures/compiler-run-host.eli" "host-fixture" (js-array "tests/compiler-binary-comparison.test.eli" "compiler-run-host"))
+    (js-array "tests/fixtures/compiler-sha256-host.eli" "host-fixture" (js-array "tests/compiler-sha256.test.eli" "compiler-sha256-host"))
+    (js-array "tests/fixtures/compiler-stage-products-host.eli" "host-fixture" (js-array "tests/compiler-producer-stages.test.eli" "compiler-stage-products-host"))
+    (js-array "tests/fixtures/compiler-vlq-host.eli" "host-fixture" (js-array "tests/compiler-source-map-vlq.test.eli" "compiler-vlq-host"))
+    (js-array "tests/fixtures/control-context-host.eli" "host-fixture" (js-array "tests/compiler-js-control-context.test.eli" "control-context-host"))
+    (js-array "tests/fixtures/core-set-usage-host.eli" "program-asset" (js-array "original-program:core-set-source-map"))
+    (js-array "tests/fixtures/core-stdlib-api-host.eli" "program-asset" (js-array "original-program:core-stdlib-complete-protocols"))
+    (js-array "tests/fixtures/core-stdlib-project-host.eli" "program-asset" (js-array "original-program:core-project-core" "original-program:core-project-utility" "original-program:core-project-persistent-values" "original-program:core-project-value-text" "original-program:core-project-public"))
+    (js-array "tests/fixtures/corpus-arguments-asset-driver.eli" "host-fixture" (js-array "tests/compiler-corpus-arguments.test.eli" "corpus-arguments-"))
+    (js-array "tests/fixtures/corpus-arguments-entry.eli" "host-fixture" (js-array "tests/compiler-corpus-arguments.test.eli" "corpus-arguments-"))
+    (js-array "tests/fixtures/corpus-arguments-falsy-host.eli" "host-fixture" (js-array "tests/compiler-corpus-arguments.test.eli" "corpus-arguments-"))
+    (js-array "tests/fixtures/corpus-arguments-ieee-host.eli" "host-fixture" (js-array "tests/compiler-corpus-arguments.test.eli" "corpus-arguments-"))
+    (js-array "tests/fixtures/corpus-arguments-program-host.eli" "host-fixture" (js-array "tests/compiler-corpus-arguments.test.eli" "corpus-arguments-"))
+    (js-array "tests/fixtures/corpus-clone-host.eli" "host-fixture" (js-array "tests/compiler-corpus-source-sharing.test.eli" "corpus-clone-host"))
+    (js-array "tests/fixtures/direct-backend-browser-cases.eli" "host-fixture" (js-array "tests/direct-wasm-backend-test-ground.eli" "direct-backend-browser-cases"))
+    (js-array "tests/fixtures/direct-backend-node-host.eli" "host-fixture" (js-array "tests/direct-wasm-backend-test-ground.eli" "direct-backend-node-host"))
+    (js-array "tests/fixtures/loop-recur-host.eli" "host-fixture" (js-array "tests/loop-recur.test.eli" "loop-recur-host"))
+    (js-array "tests/fixtures/macro-generated-names-host.eli" "host-fixture" (js-array "tests/macro-generated-names.test.eli" "macro-generated-names-host"))
+    (js-array "tests/fixtures/macro-module-value-host.eli" "host-fixture" (js-array "tests/macro-file-dependencies.test.eli" "macro-module-value-host"))
+    (js-array "tests/fixtures/managed-stdlib-json-host.eli" "host-fixture" (js-array "tests/managed-stdlib-value-json.test.eli" "managed-stdlib-json-host"))
+    (js-array "tests/fixtures/managed-vector-host.eli" "host-fixture" (js-array "tests/managed-persistent-vector.test.eli" "managed-vector-host"))
+    (js-array "tests/fixtures/metadata-stress-host.eli" "host-fixture" (js-array "tests/compiler-metadata-codec-test-ground.eli" "metadata-stress-host"))
+    (js-array "tests/fixtures/native-debug-options-host.eli" "host-fixture" (js-array "tests/native-memory-debug-options.test.eli" "native-debug-options-host"))
+    (js-array "tests/fixtures/native-node-memory-host.eli" "host-fixture" (js-array "tests/native-node-memory.test.eli" "native-node-memory-host"))
+    (js-array "tests/fixtures/native-node-owner-host.eli" "host-fixture" (js-array "tests/native-node-memory.test.eli" "native-node-owner-host"))
+    (js-array "tests/fixtures/native-word-oracle-host.eli" "host-fixture" (js-array "tests/native-memory-backend.test.eli" "native-word-oracle-host"))
+    (js-array "tests/fixtures/numeric-c-oracle-host.eli" "host-fixture" (js-array "tests/native-wasm-backend.test.eli" "numeric-c-oracle-host"))
+    (js-array "tests/fixtures/owned-declared-driver.eli" "host-fixture" (js-array "tests/compiler-owned-build-consumption.test.eli" "owned-declared-driver"))
+    (js-array "tests/fixtures/owned-seed-empty.eli" "host-fixture" (js-array "tests/compiler-owned-build-consumption.test.eli" "owned-seed-empty"))
+    (js-array "tests/fixtures/owned-seed-managed.eli" "host-fixture" (js-array "tests/compiler-owned-build-consumption.test.eli" "owned-seed-managed"))
+    (js-array "tests/fixtures/owned-seed-native.eli" "host-fixture" (js-array "tests/compiler-owned-build-consumption.test.eli" "owned-seed-native"))
+    (js-array "tests/fixtures/package-cli-execution-host.eli" "host-fixture" (js-array "tests/compiler-package-session.test.eli" "package-cli-execution-host"))
+    (js-array "tests/fixtures/package-cli-request-product-host.eli" "host-fixture" (js-array "tests/compiler-package-session.test.eli" "package-cli-request-product-host"))
+    (js-array "tests/fixtures/package-close-failure.eli" "host-fixture" (js-array "tests/helpers/package-close-contract.eli" "package-close-failure"))
+    (js-array "tests/fixtures/package-encoded-session-host.eli" "host-fixture" (js-array "tests/compiler-package-session.test.eli" "package-encoded-session-host"))
+    (js-array "tests/fixtures/package-fixture-host.eli" "host-fixture" (js-array "tests/helpers/package-fixtures.eli" "package-fixture-host"))
+    (js-array "tests/fixtures/package-run-host.eli" "host-fixture" (js-array "tests/compiler-package-session.test.eli" "package-run-host"))
+    (js-array "tests/fixtures/package-source-lifetime-host.eli" "host-fixture" (js-array "tests/compiler-package-session.test.eli" "package-source-lifetime-host"))
+    (js-array "tests/fixtures/package-source-observer.eli" "host-fixture" (js-array "tests/helpers/package-fixtures.eli" "package-source-observer"))
+    (js-array "tests/fixtures/packages/interop-consumer/index.eli" "program-asset" (js-array "original-program:compiler-interop-package-complete"))
+    (js-array "tests/fixtures/packages/native-container-consumer/index.eli" "program-asset" (js-array "original-program:compiler-interop-package-complete"))
+    (js-array "tests/fixtures/persistent-zipper-indexed-host.eli" "program-asset" (js-array "original-program:persistent-zipper-indexed-ascent"))
+    (js-array "tests/fixtures/reader-fuzz-proof-host.eli" "host-fixture" (js-array "tests/reader-program-fuzz.test.eli" "reader-fuzz-proof-host"))
+    (js-array "tests/fixtures/reader-portable-host.eli" "host-fixture" (js-array "tests/compiler-portable-reader.test.eli" "reader-portable-host"))
+    (js-array "tests/fixtures/regexp-property-wasm-host.eli" "host-fixture" (js-array "tests/regexp-property-outlining.test.eli" "regexp-property-wasm-host"))
+    (js-array "tests/fixtures/resource-guard-blocked.eli" "host-fixture" (js-array "tests/test-resource-supervisor.test.eli" "resource-guard-blocked"))
+    (js-array "tests/fixtures/resource-guard-runner-host.eli" "host-fixture" (js-array "tests/test-resource-supervisor.test.eli" "resource-guard-runner-host"))
+    (js-array "tests/fixtures/response-events-setup-host.eli" "host-fixture" (js-array "tests/compiler-response-events-test-ground.eli" "response-events-setup-host"))
+    (js-array "tests/fixtures/response-negotiation-host.eli" "host-fixture" (js-array "tests/compiler-response-events-test-ground.eli" "response-negotiation-host"))
+    (js-array "tests/fixtures/response-owned-native-host.eli" "host-fixture" (js-array "tests/compiler-response-events-test-ground.eli" "response-owned-native-host"))
+    (js-array "tests/fixtures/response-owned-wasm-host.eli" "host-fixture" (js-array "tests/compiler-response-events-test-ground.eli" "response-owned-wasm-host"))
+    (js-array "tests/fixtures/session-tools-build-host.eli" "host-fixture" (js-array "tests/compiler-session-tools.test.eli" "session-tools-build-host"))
+    (js-array "tests/fixtures/session-tools-cli-stream-host.eli" "host-fixture" (js-array "tests/compiler-session-tools.test.eli" "session-tools-cli-stream-host"))
+    (js-array "tests/fixtures/source-debugging-host.eli" "program-asset" (js-array "original-program:compiler-source-debugging"))))
+
+  (defun fixture-consumer-region (source filename token)
+    (let ((pending (read-string source filename)) (found undefined))
+      (while (> (js-length pending) 0)
+        (let ((node (js-call pending :pop)))
+          (when (and (undefined? found) (= (get node :kind) "literal")
+                     (= (value-type (get node :value)) "string")
+                     (js-call (get node :value) :includes token)) (setq found node))
+          (when (Array/isArray (get node :items))
+            (Reflect/apply (get pending :push) pending (get node :items)))))
+      (unless found (throw (new globalThis.TypeError (str "maintained fixture consumer lost its actual source literal: " filename))))
+      (let* ((span (get found :span))
+             (start (audit-unit-offset source (get span :start)))
+             (end (audit-unit-offset source (get span :end))))
+        (js-object :start start :end end :byteStart (Buffer/byteLength (js-call source :slice 0 start))
+          :byteEnd (Buffer/byteLength (js-call source :slice 0 end))
+          :sha256 (corpus-hash (js-call source :slice start end))))))
+
+  (defasync bindOriginalMaintainedFixtureEvidence (document options)
+    (let* ((reader (createOriginalCorpusSourceReader (js-object :sourceRoot (get options :sourceRoot root))))
+           (gate (get document :originalGateEvidence))
+           (missing (new globalThis.Map (js-call (get document :missingCaseAdapters) :map
+             (lambda (item) (js-array (get item :file) item)))))
+           (pending (js-array)) (errors (js-array)) (assets (new globalThis.Map)) (index 0))
+      (unless (and (= (get gate :required) t) (= (get (get gate :execution) :provider) "local")
+                   (= (get (get gate :execution) :command) "make test-core"))
+        (throw (new globalThis.TypeError "maintained fixture coverage requires the real original host gate")))
+      ;; Validate the entire batch before assigning any coverage. Independent
+      ;; source/consumer failures are retained together, without partial claims.
+      (while (< index (js-length maintained-fixture-plans))
+        (let* ((plan (aref maintained-fixture-plans index)) (filename (aref plan 0))
+               (unmapped (js-call missing :get filename)))
+          (when unmapped
+            (try
+              (let* ((source (await (js-call reader :text filename)))
+                     (source-proof (await (js-call reader :file filename)))
+                     (artifact (str (js-call filename :slice 0 -4) ".mjs"))
+                     (artifact-proof (await (js-call reader :file artifact)))
+                     (actual (js-call (await (js-call reader :text artifact)) :replace
+                       (new globalThis.RegExp "\\n?//# sourceMappingURL=[^\\r\\n]*\\r?\\n?$") "\n"))
+                     (expected (compile-string source filename))
+                     (bindings (js-array)) (detail undefined))
+                (unless (= (js-call actual :trimEnd) (js-call expected :trimEnd))
+                  (throw (new globalThis.TypeError "fixture source differs from its complete generated artifact")))
+                (js-call assets :set filename source-proof) (js-call assets :set artifact artifact-proof)
+                (if (= (aref plan 1) "program-asset")
+                  (js-call (aref plan 2) :forEach (lambda (id)
+                    (let* ((record (js-call (get document :records) :find (lambda (record) (= (get record :id) id))))
+                           (original (and record (get record :original)))
+                           (proof (and original (js-call (get original :sourceAssets (js-array)) :find
+                             (lambda (asset)
+                               (or (and (= (get asset :file) filename)
+                                     (= (get asset :sourceSha256) (get source-proof :sha256)))
+                                   (and (= (get asset :file) artifact)
+                                     (= (get asset :sourceSha256) (get artifact-proof :sha256))))))))
+                           (module (and record (js-call (get record :modules (js-array)) :find
+                             (lambda (module) (and (= (get module :filename) filename) (= (get module :source) source)))))))
+                      (unless (and record (or proof module))
+                        (throw (new globalThis.TypeError (str "selected program lost its exact maintained fixture asset: " id))))
+                      (js-call bindings :push record))))
+                  (let* ((consumer (aref (aref plan 2) 0)) (token (aref (aref plan 2) 1))
+                         (text (await (js-call reader :text consumer)))
+                         (proof (await (js-call reader :file consumer)))
+                         (region (fixture-consumer-region text consumer token)))
+                    (js-call assets :set consumer proof)
+                    (setq detail (js-object :consumer consumer :consumerSha256 (get proof :sha256) :region region
+                      :hostGate "make test-core" :executionStatus "not-executed-by-this-binding"))))
+                (js-call pending :push (js-object :coverageId (get unmapped :coverageId) :file filename
+                  :sourceSha256 (get source-proof :sha256) :artifact artifact :artifactSha256 (get artifact-proof :sha256)
+                  :kind (aref plan 1) :records bindings :consumer detail)))
+              (catch error (js-call errors :push (str filename ": " (get error :message)))))))
+        (setq index (1+ index)))
+      (when (> (js-length errors) 0)
+        (throw (new globalThis.TypeError (str "maintained fixture bindings failed:\n" (js-call errors :join "\n")))))
+      (let ((claimed (new globalThis.Set)) (gate-ids (new globalThis.Set (get gate :coverageIds))))
+        (js-call pending :forEach (lambda (binding)
+          (let ((id (get binding :coverageId)))
+            (js-call claimed :add id)
+            (if (= (get binding :kind) "program-asset")
+              (js-call (get binding :records) :forEach (lambda (record)
+                (unless (js-call (get record :coverage) :includes id) (js-call (get record :coverage) :push id))
+                (let* ((original (get record :original))
+                       (proofs (get original :maintainedFixtureAssets (js-array))))
+                  (js-call proofs :push (js-object :file (get binding :file) :sourceSha256 (get binding :sourceSha256)
+                    :artifact (get binding :artifact) :artifactSha256 (get binding :artifactSha256)))
+                  (put original :maintainedFixtureAssets proofs))))
+              (progn
+                (js-call gate-ids :add id)
+                (js-call (get gate :hostOnlyDependencies) :push
+                  (js-object :coverageId id :file (get binding :file) :sourceSha256 (get binding :sourceSha256)
+                    :artifact (get binding :artifact) :artifactSha256 (get binding :artifactSha256)
+                    :kind "maintained-test-harness-fixture" :consumer (get binding :consumer)
+                    :reason "exact migrated harness source and emitted module; only its original required host gate may assert execution")))))))
+        (put gate :coverageIds (js-call (get document :coverageIds) :filter (lambda (id) (js-call gate-ids :has id))))
+        (put document :missingCaseAdapters (js-call (get document :missingCaseAdapters) :filter
+          (lambda (item) (not (js-call claimed :has (get item :coverageId))))))
+        (js-call (Array/from (js-call assets :values)) :forEach (lambda (asset)
+          (let ((prior (js-call (get document :evidence) :find (lambda (entry) (= (get entry :file) (get asset :file))))))
+            (if prior
+              (unless (and (= (get prior :sha256) (get asset :sha256)) (= (get prior :content) (get asset :content)))
+                (throw (new globalThis.TypeError "maintained fixture archive source identity changed")))
+              (js-call (get document :evidence) :push asset)))))) document))
+
   (defasync load-original-corpus (options)
-    (let ((document (await (js-call ground :loadOriginalCompilerCorpus (prepareOriginalBootstrapEmitterOptions options)))))
+    (let* ((document (await (js-call ground :loadOriginalCompilerCorpus (prepareOriginalBootstrapEmitterOptions options))))
+           (reader (createOriginalCorpusSourceReader
+                     (js-object :sourceRoot (if (nullish? options) root (get options :sourceRoot root)))))
+           (bit-source (await (js-call reader :file "stdlib/bit.eli")))
+           (bit-provider (await (js-call reader :file "stdlib/bit.mjs")))
+           (bit-text (await (js-call reader :text "stdlib/bit.mjs"))))
+      (js-call (js-array bit-source bit-provider) :forEach (lambda (asset)
+        (let ((existing (js-call (get document :evidence) :find
+                          (lambda (entry) (= (get entry :file) (get asset :file))))))
+          (if existing
+            (unless (and (= (get existing :sha256) (get asset :sha256))
+                         (= (get existing :content) (get asset :content)))
+              (throw (new globalThis.TypeError (+ "original runtime stdlib/bit source identity differs: " (get asset :file)))))
+            (js-call (get document :evidence) :push asset)))))
+      (js-call (get document :records) :forEach (lambda (record)
+        (let ((hosts (and (get record :request) (get (get record :request) :hostSources)))
+              (modules (get record :modules)))
+          (when (and (Array/isArray hosts)
+                     (js-call hosts :some (lambda (item) (= (get item :id) "runtime/literals.mjs")))
+                     (or (js-call hosts :some (lambda (item) (= (get item :id) "runtime/core/value-internals.mjs")))
+                         (js-call hosts :some (lambda (item) (= (get item :id) "runtime/core/map-internals.mjs"))))
+                     (not (js-call hosts :some (lambda (item) (= (get item :id) "stdlib/bit.mjs"))))
+                     (not (and (Array/isArray modules)
+                               (js-call modules :some (lambda (item) (= (get item :id) "stdlib/bit.mjs"))))))
+            (js-call hosts :push (js-object :id "stdlib/bit.mjs" :filename "stdlib/bit.mjs" :source bit-text))))))
       ;; The canonical HTTP literal imports the actual host provider. It is
       ;; source evidence and a hostSource, never a fabricated .eli module.
       (when (js-call (get document :records) :some
               (lambda (record) (js-call request-layouts :has (get record :id))))
-        (let* ((reader (createOriginalCorpusSourceReader
-                         (js-object :sourceRoot (if (nullish? options) root (get options :sourceRoot root)))))
-               (provider (await (js-call reader :file "platform/http.mjs")))
+        (let* ((provider (await (js-call reader :file "platform/http.mjs")))
                (existing (js-call (get document :evidence) :find
                            (lambda (asset) (= (get asset :file) "platform/http.mjs")))))
           (if existing
@@ -1465,6 +1726,14 @@
       (await (transportOriginalBootstrapEmitterCorpus document options))
       (bindOriginalMaintainedSuiteEvidence document)
       (await (bindOriginalRuntimeScanReportEvidence document options))
+      (await (bindOriginalMaintainedFixtureEvidence document options))
+      ;; Added maintained assets keep their authenticated source proofs. The
+      ;; caller's frozen gate inventory still selects which host IDs it owns.
+      (let* ((required (resource-field (get options :originals) "requiredCoverage"))
+             (gate (get document :originalGateEvidence))
+             (ids (new globalThis.Set (get gate :coverageIds))))
+        (when (Array/isArray required)
+          (put gate :coverageIds (js-call required :filter (lambda (id) (js-call ids :has id))))))
       (bind-complete-library-resource-inputs document)))
 
   (defasync loadOriginalCompilerCorpus (options)
@@ -1536,7 +1805,7 @@
   (export createOriginalCorpusSourceReader cloneCompilerCorpusData cloneCompilerCorpusModules
     compilerCorpusRequest prepareOriginalSeedSources loadOriginalCompilerCorpus readOriginalLiteralRuntimeAudit transportOriginalMatcherRecord transportOriginalCoreInstrumentationRecord
     bindOriginalMaintainedSuiteEvidence
-    bindOriginalRuntimeScanReportEvidence
+    bindOriginalRuntimeScanReportEvidence bindOriginalMaintainedFixtureEvidence
     transportOriginalProjectRuntimeAssets transportOriginalToolsCLIAssets
     transportOriginalExecutionAssets transportOriginalToolsDataReferenceAssets bindOriginalFunctionalResourceInputs
     originalSequenceNativeInteropP transportOriginalSequenceRuntime compilerCorpusFunctionalResources compilerCorpusResourceDeferred))

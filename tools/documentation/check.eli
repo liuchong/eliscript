@@ -1,2 +1,437 @@
-(module capsules.tools.documentation.check
-  (js* "#!/usr/bin/env bun\n\nimport { mkdtemp, readFile, rm, stat, writeFile } from \"node:fs/promises\";\nimport path from \"node:path\";\nimport process from \"node:process\";\nimport { fileURLToPath } from \"node:url\";\n\nconst moduleDirectory = path.dirname(fileURLToPath(import.meta.url));\nexport const DEFAULT_ROOT = path.resolve(moduleDirectory, \"../..\");\nconst CONTRACT_FILE = \"contracts/documentation.json\";\nconst EXPECTED_DOCUMENTS = [\n  [\"getting-started\", \"docs/getting-started.md\"],\n  [\"language-reference\", \"docs/language-reference.md\"],\n  [\"macros\", \"docs/macros.md\"],\n  [\"javascript-interop\", \"docs/javascript-interop.md\"],\n  [\"project-configuration\", \"docs/project-configuration.md\"],\n  [\"compiler-architecture\", \"compiler/README.md\"],\n  [\"emacs-mode\", \"editor/README.md\"],\n  [\"terminal-repl\", \"docs/repl.md\"],\n  [\"worker\", \"tools/worker/README.md\"],\n  [\"troubleshooting\", \"docs/troubleshooting.md\"],\n  [\"contributing\", \"CONTRIBUTING.md\"],\n];\nconst EXPECTED_SNIPPETS = [\n  [\"language-values\", \"language-reference\", \"elisp\", \"module\"],\n  [\"macro-expansion\", \"macros\", \"elisp\", \"module\"],\n  [\"host-containers\", \"javascript-interop\", \"elisp\", \"module\"],\n  [\"project-config\", \"project-configuration\", \"json\", \"project-config\"],\n  [\"persistent-repl\", \"terminal-repl\", \"text\", \"repl\"],\n];\n\nexport class DocumentationValidationError extends Error {\n  constructor(errors) {\n    super(`documentation validation failed:\\n- ${errors.join(\"\\n- \")}`);\n    this.name = \"DocumentationValidationError\";\n    this.errors = errors;\n  }\n}\n\nfunction isPlainObject(value) {\n  return value !== null && typeof value === \"object\" && !Array.isArray(value);\n}\n\nfunction safeRelativePath(value) {\n  return typeof value === \"string\" && value.length > 0 &&\n    !path.isAbsolute(value) && !value.split(\"/\").includes(\"..\") &&\n    path.posix.normalize(value) === value;\n}\n\nfunction uniqueStrings(values) {\n  return Array.isArray(values) && values.length > 0 &&\n    values.every((value) => typeof value === \"string\" && value.length > 0) &&\n    new Set(values).size === values.length;\n}\n\nfunction equal(left, right) {\n  return JSON.stringify(left) === JSON.stringify(right);\n}\n\nexport function validateDocumentationContract(contract) {\n  const errors = [];\n  if (!isPlainObject(contract) || contract.schemaVersion !== 1 ||\n      contract.format !== \"eliscript-documentation-contract\" ||\n      contract.version !== 2) {\n    throw new DocumentationValidationError([\n      \"contract must use eliscript-documentation-contract version 2\",\n    ]);\n  }\n\n  if (!Array.isArray(contract.documents) ||\n      !equal(contract.documents.map((document) => [document?.id, document?.file]),\n        EXPECTED_DOCUMENTS)) {\n    errors.push(\"documents must contain the exact ordered AC-23 core inventory\");\n  } else {\n    for (const [index, document] of contract.documents.entries()) {\n      if (!isPlainObject(document) || !safeRelativePath(document.file) ||\n          !uniqueStrings(document.requiredSections) ||\n          !uniqueStrings(document.requiredLiterals)) {\n        errors.push(`document ${index} must declare a valid file sections and literals`);\n      }\n    }\n  }\n\n  if (!Array.isArray(contract.snippets) ||\n      !equal(contract.snippets.map((snippet) => [\n        snippet?.id,\n        snippet?.document,\n        snippet?.language,\n        snippet?.kind,\n      ]), EXPECTED_SNIPPETS)) {\n    errors.push(\"snippets must contain the exact ordered executable inventory\");\n  } else {\n    for (const [index, snippet] of contract.snippets.entries()) {\n      if (!isPlainObject(snippet)) {\n        errors.push(`snippet ${index} must be an object`);\n        continue;\n      }\n      if (snippet.kind === \"module\" &&\n          (!equal(snippet.runtimes, [\"bun\", \"node\"]) ||\n            typeof snippet.expectedStdout !== \"string\")) {\n        errors.push(`snippet ${snippet.id} must execute under Bun and Node with expected stdout`);\n      }\n      if (snippet.kind === \"repl\" &&\n          typeof snippet.expectedStdout !== \"string\") {\n        errors.push(`snippet ${snippet.id} must declare expected stdout`);\n      }\n      if (snippet.kind === \"project-config\" &&\n          (snippet.expectedStdout !== undefined || snippet.runtimes !== undefined)) {\n        errors.push(`snippet ${snippet.id} is validation-only`);\n      }\n    }\n  }\n\n  if (!Array.isArray(contract.entryPoints) || contract.entryPoints.length !== 12) {\n    errors.push(\"entryPoints must contain README plus every documentation-hub link\");\n  } else {\n    for (const [index, entry] of contract.entryPoints.entries()) {\n      if (!isPlainObject(entry) || !safeRelativePath(entry.file) ||\n          typeof entry.literal !== \"string\" || entry.literal.length === 0) {\n        errors.push(`entry point ${index} must declare a valid file and literal`);\n      }\n    }\n  }\n\n  if (errors.length > 0) throw new DocumentationValidationError(errors);\n  return contract;\n}\n\nfunction secondLevelHeadings(source) {\n  return [...source.matchAll(/^## ([^\\n]+)$/gmu)].map((match) => match[1]);\n}\n\nfunction localLinkTargets(source) {\n  const targets = [];\n  for (const match of source.matchAll(/\\[[^\\]]*\\]\\(([^)]+)\\)/gmu)) {\n    const raw = match[1].trim().replace(/^<|>$/g, \"\");\n    if (raw.startsWith(\"#\") || /^[a-z][a-z0-9+.-]*:/iu.test(raw)) continue;\n    const target = raw.split(\"#\", 1)[0].split(\"?\", 1)[0];\n    if (target.length > 0) targets.push(decodeURIComponent(target));\n  }\n  return targets;\n}\n\nfunction escapeRegExp(value) {\n  return value.replace(/[.*+?^${}()|[\\]\\\\]/g, \"\\\\$&\");\n}\n\nfunction extractSnippet(source, id, language, errors) {\n  const marker = `<!-- eliscript-snippet:${id} -->`;\n  const occurrences = source.split(marker).length - 1;\n  if (occurrences !== 1) {\n    errors.push(`snippet ${id} marker must occur exactly once`);\n    return null;\n  }\n  const expression = new RegExp(\n    `${escapeRegExp(marker)}\\\\s*\\\\n\\`\\`\\`${escapeRegExp(language)}\\\\n([\\\\s\\\\S]*?)\\\\n\\`\\`\\``,\n    \"u\",\n  );\n  const match = expression.exec(source);\n  if (!match) {\n    errors.push(`snippet ${id} must be followed by a ${language} fence`);\n    return null;\n  }\n  return `${match[1]}\\n`;\n}\n\nasync function runCommand(root, argv, options = {}) {\n  const child = Bun.spawn(argv, {\n    cwd: options.cwd ?? root,\n    env: { ...process.env, ...(options.env ?? {}) },\n    stdin: options.stdin === undefined ? \"ignore\" : \"pipe\",\n    stdout: \"pipe\",\n    stderr: \"pipe\",\n  });\n  let timedOut = false;\n  let forceKillTimer;\n  const timer = setTimeout(() => {\n    timedOut = true;\n    child.kill(\"SIGTERM\");\n    forceKillTimer = setTimeout(() => child.kill(\"SIGKILL\"), 2_000);\n  }, options.timeoutMs ?? 30_000);\n  if (options.stdin !== undefined) {\n    child.stdin.write(options.stdin);\n    child.stdin.end();\n  }\n  const [exitCode, stdout, stderr] = await Promise.all([\n    child.exited,\n    new Response(child.stdout).text(),\n    new Response(child.stderr).text(),\n  ]);\n  clearTimeout(timer);\n  clearTimeout(forceKillTimer);\n  return { argv, exitCode, timedOut, stdout, stderr };\n}\n\nfunction requireCommand(result, expectedStdout, label) {\n  if (result.exitCode !== 0 || result.timedOut || result.stderr !== \"\" ||\n      result.stdout !== expectedStdout) {\n    throw new Error(`${label} failed: ${result.stderr.trim() ||\n      `expected ${JSON.stringify(expectedStdout)}, received ${JSON.stringify(result.stdout)}`}`);\n  }\n}\n\nfunction validateProjectConfiguration(source) {\n  const value = JSON.parse(source);\n  const expected = {\n    schemaVersion: 1,\n    sourceRoot: \"src\",\n    entry: \"main.eli\",\n    outDir: \"dist\",\n  };\n  if (!equal(value, expected)) {\n    throw new Error(\"project-config must match the documented version 1 request\");\n  }\n  return 1;\n}\n\nasync function executeSnippets(root, contract, sources) {\n  const directory = await mkdtemp(path.join(root, \".eliscript-docs-\"));\n  let executions = 0;\n  try {\n    for (const snippet of contract.snippets) {\n      const document = contract.documents.find((candidate) =>\n        candidate.id === snippet.document);\n      const source = extractSnippet(\n        sources.get(document.file),\n        snippet.id,\n        snippet.language,\n        [],\n      );\n      if (snippet.kind === \"project-config\") {\n        executions += validateProjectConfiguration(source);\n        continue;\n      }\n      if (snippet.kind === \"repl\") {\n        const result = await runCommand(root, [\n          \"./bin/eliscript-eval\", \"--repl\", \"--root\", directory, \"--no-prompt\",\n        ], { stdin: source, timeoutMs: 60_000 });\n        requireCommand(result, snippet.expectedStdout, snippet.id);\n        executions += 1;\n        continue;\n      }\n\n      const input = path.join(directory, `${snippet.id}.eli`);\n      const output = path.join(directory, `${snippet.id}.mjs`);\n      await writeFile(input, source);\n      const compiled = await runCommand(root, [\n        \"./bin/eliscript\", \"--output\", output, input,\n      ], { timeoutMs: 120_000 });\n      if (compiled.exitCode !== 0 || compiled.timedOut) {\n        throw new Error(`${snippet.id} compilation failed: ${compiled.stderr.trim()}`);\n      }\n      for (const runtime of snippet.runtimes) {\n        const result = await runCommand(root, [runtime, output]);\n        requireCommand(result, snippet.expectedStdout, `${snippet.id}/${runtime}`);\n        executions += 1;\n      }\n    }\n  } finally {\n    await rm(directory, { recursive: true, force: true });\n  }\n  return executions;\n}\n\nexport async function checkDocumentation(options = {}) {\n  const root = path.resolve(options.root ?? DEFAULT_ROOT);\n  const sourceOverrides = options.sourceOverrides ?? {};\n  const contract = validateDocumentationContract(options.contract ?? JSON.parse(\n    await readFile(path.join(root, CONTRACT_FILE), \"utf8\"),\n  ));\n  const errors = [];\n  const sources = new Map();\n  let sectionCount = 0;\n  let literalCount = 0;\n  let linkCount = 0;\n\n  for (const document of contract.documents) {\n    let source;\n    try {\n      source = sourceOverrides[document.file] ??\n        await readFile(path.join(root, document.file), \"utf8\");\n      sources.set(document.file, source);\n    } catch (error) {\n      errors.push(`${document.file} cannot be read: ${error.code ?? error.message}`);\n      continue;\n    }\n    const headings = secondLevelHeadings(source);\n    let previousIndex = -1;\n    for (const section of document.requiredSections) {\n      const index = headings.indexOf(section);\n      if (index < 0) {\n        errors.push(`${document.file} is missing section: ${section}`);\n      } else if (index <= previousIndex) {\n        errors.push(`${document.file} section is out of contract order: ${section}`);\n      } else {\n        previousIndex = index;\n        sectionCount += 1;\n      }\n    }\n    for (const literal of document.requiredLiterals) {\n      if (!source.includes(literal)) {\n        errors.push(`${document.file} is missing required text: ${literal}`);\n      } else {\n        literalCount += 1;\n      }\n    }\n    for (const target of localLinkTargets(source)) {\n      const resolved = path.resolve(path.dirname(path.join(root, document.file)), target);\n      if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {\n        errors.push(`${document.file} link escapes the repository: ${target}`);\n        continue;\n      }\n      try {\n        if (!(await stat(resolved)).isFile()) {\n          errors.push(`${document.file} link is not a regular file: ${target}`);\n        } else {\n          linkCount += 1;\n        }\n      } catch (error) {\n        errors.push(`${document.file} has broken local link: ${target}`);\n      }\n    }\n  }\n\n  for (const entry of contract.entryPoints) {\n    let source;\n    try {\n      source = sourceOverrides[entry.file] ?? sources.get(entry.file) ??\n        await readFile(path.join(root, entry.file), \"utf8\");\n    } catch (error) {\n      errors.push(`${entry.file} cannot be read: ${error.code ?? error.message}`);\n      continue;\n    }\n    if (!source.includes(entry.literal)) {\n      errors.push(`${entry.file} is missing documentation entry point: ${entry.literal}`);\n    }\n  }\n\n  for (const snippet of contract.snippets) {\n    const document = contract.documents.find((candidate) =>\n      candidate.id === snippet.document);\n    const source = document ? sources.get(document.file) : undefined;\n    if (source) extractSnippet(source, snippet.id, snippet.language, errors);\n  }\n\n  if (errors.length > 0) throw new DocumentationValidationError(errors);\n  let executionCount;\n  try {\n    executionCount = await executeSnippets(root, contract, sources);\n  } catch (error) {\n    throw new DocumentationValidationError([error.message]);\n  }\n  return {\n    schemaVersion: 1,\n    format: \"eliscript-documentation-report\",\n    version: 2,\n    documents: contract.documents.length,\n    sections: sectionCount,\n    requiredLiterals: literalCount,\n    localLinks: linkCount,\n    snippets: contract.snippets.length,\n    executions: executionCount,\n    entryPoints: contract.entryPoints.length,\n    applicationsContribute: false,\n  };\n}\n\nexport function humanDocumentationReport(report) {\n  return [\n    \"Core documentation contract:\",\n    `  Documents     ${report.documents}`,\n    `  Sections      ${report.sections}`,\n    `  Required text ${report.requiredLiterals}`,\n    `  Local links   ${report.localLinks}`,\n    `  Snippets      ${report.snippets} / ${report.executions} executions`,\n    `  Entry points  ${report.entryPoints}`,\n    `  Applications  ${report.applicationsContribute ? \"included\" : \"excluded\"}`,\n  ].join(\"\\n\");\n}\n\nconst invokedFilename = process.argv[1] ? path.resolve(process.argv[1]) : undefined;\nif (invokedFilename === fileURLToPath(import.meta.url)) {\n  try {\n    const report = await checkDocumentation();\n    console.log(humanDocumentationReport(report));\n  } catch (error) {\n    console.error(error.message);\n    process.exitCode = 1;\n  }\n}\n"))
+(module tools.documentation.check
+  (import "node:fs/promises" mkdtemp readFile rm stat writeFile)
+  (import "node:path" :as path)
+  (import "node:url" fileURLToPath)
+
+  (defconst module-file (fileURLToPath (js* "import.meta.url")))
+  (defconst DEFAULT_ROOT (js-call path :resolve (js-call path :dirname module-file) "../.."))
+  (defconst contract-file "contracts/documentation.json")
+  (defconst expected-documents
+    (js-array
+      (js-array "getting-started" "docs/getting-started.md")
+      (js-array "language-reference" "docs/language-reference.md")
+      (js-array "macros" "docs/macros.md")
+      (js-array "javascript-interop" "docs/javascript-interop.md")
+      (js-array "project-configuration" "docs/project-configuration.md")
+      (js-array "compiler-architecture" "compiler/README.md")
+      (js-array "emacs-mode" "editor/README.md")
+      (js-array "terminal-repl" "docs/repl.md")
+      (js-array "worker" "tools/worker/README.md")
+      (js-array "troubleshooting" "docs/troubleshooting.md")
+      (js-array "contributing" "CONTRIBUTING.md")))
+  (defconst expected-snippets
+    (js-array
+      (js-array "language-values" "language-reference" "elisp" "module")
+      (js-array "macro-expansion" "macros" "elisp" "module")
+      (js-array "host-containers" "javascript-interop" "elisp" "module")
+      (js-array "project-config" "project-configuration" "json" "project-config")
+      (js-array "persistent-repl" "terminal-repl" "text" "repl")))
+  (defconst expected-project-config
+    (js-object :schemaVersion 1 :sourceRoot "src" :entry "main.eli" :outDir "dist"))
+
+  (defun documentation-error-message (errors)
+    (str "documentation validation failed:\n- " (js-call errors :join "\n- ")))
+
+  (defun documentation-error-fields (self errors)
+    (put self :name "DocumentationValidationError")
+    (put self :errors errors)
+    self)
+
+  (defconst DocumentationValidationError
+    (funcall
+      (js* "(message, fields) => class DocumentationValidationError extends Error { constructor(errors) { const self = super(message(errors)); return fields(self, errors); } }")
+      documentation-error-message
+      documentation-error-fields))
+
+  (defun host-type (value)
+    (funcall (js* "(value) => typeof value") value))
+
+  (defun host-truthy (value)
+    (funcall (js* "(value) => !!value") value))
+
+  (defun plain-object? (value)
+    (and (not (nil? value))
+         (= (host-type value) "object")
+         (not (Array/isArray value))))
+
+  (defun host-get (value key)
+    (if (nullish? value) undefined (get value key)))
+
+  (defun call-options (supplied)
+    (if (or (= (js-length supplied) 0) (undefined? (aref supplied 0)))
+      (js-object)
+      (aref supplied 0)))
+
+  (defun json-equal (left right)
+    (= (JSON/stringify left) (JSON/stringify right)))
+
+  (defun nonempty-text? (value)
+    (and (= (host-type value) "string") (> (js-length value) 0)))
+
+  (defun safe-relative-path (value)
+    (and (nonempty-text? value)
+         (not (js-call path :isAbsolute value))
+         (not (js-call (js-call value :split "/") :includes ".."))
+         (= (js-call (get path :posix) :normalize value) value)))
+
+  (defun every-nonempty-text (values)
+    (let ((index 0) (valid t))
+      (while (and valid (< index (js-length values)))
+        (unless (nonempty-text? (aref values index))
+          (setq valid nil))
+        (setq index (1+ index)))
+      valid))
+
+  (defun unique-strings (values)
+    (and (Array/isArray values)
+         (> (js-length values) 0)
+         (every-nonempty-text values)
+         (= (get (new globalThis.Set values) :size) (js-length values))))
+
+  (defun mapped (values mapper)
+    (let ((result (js-array)) (index 0))
+      (while (< index (js-length values))
+        (js-call result :push (funcall mapper (aref values index)))
+        (setq index (1+ index)))
+      result))
+
+  (defun document-pair (document)
+    (js-array (host-get document "id") (host-get document "file")))
+
+  (defun snippet-identity (snippet)
+    (js-array (host-get snippet "id") (host-get snippet "document")
+      (host-get snippet "language") (host-get snippet "kind")))
+
+  (defun validateDocumentationContract (contract)
+    (let ((errors (js-array)))
+      (unless (and (plain-object? contract)
+                   (= (get contract :schemaVersion) 1)
+                   (= (get contract :format) "eliscript-documentation-contract")
+                   (= (get contract :version) 2))
+        (throw (new DocumentationValidationError
+                 (js-array "contract must use eliscript-documentation-contract version 2"))))
+      (if (or (not (Array/isArray (get contract :documents)))
+              (not (json-equal (mapped (get contract :documents) document-pair) expected-documents)))
+        (js-call errors :push "documents must contain the exact ordered AC-23 core inventory")
+        (let ((index 0) (documents (get contract :documents)))
+          (while (< index (js-length documents))
+            (let ((document (aref documents index)))
+              (unless (and (plain-object? document)
+                           (safe-relative-path (get document :file))
+                           (unique-strings (get document :requiredSections))
+                           (unique-strings (get document :requiredLiterals)))
+                (js-call errors :push (str "document " index " must declare a valid file sections and literals"))))
+            (setq index (1+ index)))))
+      (if (or (not (Array/isArray (get contract :snippets)))
+              (not (json-equal (mapped (get contract :snippets) snippet-identity) expected-snippets)))
+        (js-call errors :push "snippets must contain the exact ordered executable inventory")
+        (let ((index 0) (snippets (get contract :snippets)))
+          (while (< index (js-length snippets))
+            (let ((snippet (aref snippets index)))
+              (if (not (plain-object? snippet))
+                (js-call errors :push (str "snippet " index " must be an object"))
+                (progn
+                  (when (and (= (get snippet :kind) "module")
+                             (or (not (json-equal (get snippet :runtimes) (js-array "bun" "node")))
+                                 (not (= (host-type (get snippet :expectedStdout)) "string"))))
+                    (js-call errors :push (str "snippet " (get snippet :id) " must execute under Bun and Node with expected stdout")))
+                  (when (and (= (get snippet :kind) "repl")
+                             (not (= (host-type (get snippet :expectedStdout)) "string")))
+                    (js-call errors :push (str "snippet " (get snippet :id) " must declare expected stdout")))
+                  (when (and (= (get snippet :kind) "project-config")
+                             (or (not (undefined? (get snippet :expectedStdout)))
+                                 (not (undefined? (get snippet :runtimes)))))
+                    (js-call errors :push (str "snippet " (get snippet :id) " is validation-only"))))))
+            (setq index (1+ index)))))
+      (if (or (not (Array/isArray (get contract :entryPoints)))
+              (not (= (js-length (get contract :entryPoints)) 12)))
+        (js-call errors :push "entryPoints must contain README plus every documentation-hub link")
+        (let ((index 0) (entries (get contract :entryPoints)))
+          (while (< index (js-length entries))
+            (let ((entry (aref entries index)))
+              (unless (and (plain-object? entry)
+                           (safe-relative-path (get entry :file))
+                           (nonempty-text? (get entry :literal)))
+                (js-call errors :push (str "entry point " index " must declare a valid file and literal"))))
+            (setq index (1+ index)))))
+      (when (> (js-length errors) 0)
+        (throw (new DocumentationValidationError errors)))
+      contract))
+
+  (defun regexp-test (source text flags)
+    (js-call (new globalThis.RegExp source flags) :test text))
+
+  (defun regexp-matches (text source flags)
+    (Array/from (js-call text :matchAll (new globalThis.RegExp source flags))))
+
+  (defun second-level-headings (source)
+    (mapped (regexp-matches source "^## ([^\\n]+)$" "gmu")
+      (lambda (match) (aref match 1))))
+
+  (defun local-link-targets (source)
+    (let ((targets (js-array)) (matches (regexp-matches source "\\[[^\\]]*\\]\\(([^)]+)\\)" "gmu")) (index 0))
+      (while (< index (js-length matches))
+        (let* ((raw (js-call (js-call (aref (aref matches index) 1) :trim)
+                      :replace (new globalThis.RegExp "^<|>$" "g") ""))
+               (scheme (regexp-test "^[a-z][a-z0-9+.-]*:" raw "iu")))
+          (unless (or (js-call raw :startsWith "#") scheme)
+            (let ((target (aref (js-call (aref (js-call raw :split "#" 1) 0) :split "?" 1) 0)))
+              (when (> (js-length target) 0)
+                (js-call targets :push (globalThis.decodeURIComponent target))))))
+        (setq index (1+ index)))
+      targets))
+
+  (defun escape-regexp (value)
+    (js-call value :replace (new globalThis.RegExp "[.*+?^${}()|[\\]\\\\]" "g") "\\$&"))
+
+  (defun extract-snippet (source id language errors)
+    (let* ((marker (str "<!-- eliscript-snippet:" id " -->"))
+           (occurrences (- (js-length (js-call source :split marker)) 1)))
+      (if (not (= occurrences 1))
+        (progn
+          (js-call errors :push (str "snippet " id " marker must occur exactly once"))
+          nil)
+        (let ((match (js-call (new globalThis.RegExp
+                             (str (escape-regexp marker) "\\s*\\n```" (escape-regexp language) "\\n([\\s\\S]*?)\\n```")
+                             "u")
+                       :exec source)))
+          (if (not match)
+            (progn
+              (js-call errors :push (str "snippet " id " must be followed by a " language " fence"))
+              nil)
+            (str (aref match 1) "\n"))))))
+
+  (defasync run-command (root argv &rest supplied)
+    (let* ((options (call-options supplied))
+           (state (js-object :timedOut false :forceKill undefined))
+           (child (js-call globalThis.Bun :spawn argv
+                    (js-object :cwd (get options :cwd root)
+                      :env (funcall (js* "(base, extra) => ({...base, ...(extra ?? {})})")
+                             (get globalThis.process :env)
+                             (if (nullish? (get options :env)) (js-object) (get options :env)))
+                      :stdin (if (undefined? (get options :stdin)) "ignore" "pipe")
+                      :stdout "pipe" :stderr "pipe")))
+           (timer (globalThis.setTimeout
+                    (lambda ()
+                      (put state :timedOut t)
+                      (js-call child :kill "SIGTERM")
+                      (put state :forceKill
+                        (globalThis.setTimeout (lambda () (js-call child :kill "SIGKILL")) 2000)))
+                    (get options :timeoutMs 30000))))
+      (unless (undefined? (get options :stdin))
+        (js-call (get child :stdin) :write (get options :stdin))
+        (js-call (get child :stdin) :end))
+      (let ((parts (await (js-call globalThis.Promise :all
+                            (js-array (get child :exited)
+                              (js-call (new globalThis.Response (get child :stdout)) :text)
+                              (js-call (new globalThis.Response (get child :stderr)) :text))))))
+        (globalThis.clearTimeout timer)
+        (globalThis.clearTimeout (get state :forceKill))
+        (js-object :argv argv :exitCode (aref parts 0) :timedOut (get state :timedOut)
+          :stdout (aref parts 1) :stderr (aref parts 2)))))
+
+  (defun require-command (result expected-stdout label)
+    (when (or (not (= (get result :exitCode) 0))
+              (get result :timedOut)
+              (not (= (get result :stderr) ""))
+              (not (= (get result :stdout) expected-stdout)))
+      (let ((err (js-call (get result :stderr) :trim)))
+        (throw (new globalThis.Error
+                 (str label " failed: "
+                      (if (host-truthy err)
+                        err
+                        (str "expected " (JSON/stringify expected-stdout) ", received "
+                             (JSON/stringify (get result :stdout))))))))))
+
+  (defun validate-project-configuration (source)
+    (unless (json-equal (JSON/parse source) expected-project-config)
+      (throw (new globalThis.Error "project-config must match the documented version 1 request")))
+    1)
+
+  (defasync execute-snippets (root contract sources)
+    (let ((directory (await (mkdtemp (js-call path :join root ".eliscript-docs-"))))
+          (executions 0))
+      (try
+        (let ((index 0) (snippets (get contract :snippets)))
+          (while (< index (js-length snippets))
+            (let* ((snippet (aref snippets index))
+                   (document (js-call (get contract :documents) :find
+                               (lambda (candidate) (= (get candidate :id) (get snippet :document)))))
+                   (source (extract-snippet (js-call sources :get (get document :file))
+                             (get snippet :id) (get snippet :language) (js-array))))
+              (cond
+                ((= (get snippet :kind) "project-config")
+                 (setq executions (+ executions (validate-project-configuration source))))
+                ((= (get snippet :kind) "repl")
+                 (let ((result (await (run-command root
+                                       (js-array "./bin/eliscript-eval" "--repl" "--root" directory "--no-prompt")
+                                       (js-object :stdin source :timeoutMs 60000)))))
+                   (require-command result (get snippet :expectedStdout) (get snippet :id))
+                   (setq executions (1+ executions))))
+                (t
+                 (let ((input (js-call path :join directory (str (get snippet :id) ".eli")))
+                       (output (js-call path :join directory (str (get snippet :id) ".mjs"))))
+                   (await (writeFile input source))
+                   (let ((compiled (await (run-command root
+                                            (js-array "./bin/eliscript" "--output" output input)
+                                            (js-object :timeoutMs 120000))))
+                         (runtime-index 0)
+                         (runtimes (get snippet :runtimes)))
+                     (when (or (not (= (get compiled :exitCode) 0)) (get compiled :timedOut))
+                       (throw (new globalThis.Error
+                                (str (get snippet :id) " compilation failed: "
+                                     (js-call (get compiled :stderr) :trim)))))
+                     (while (< runtime-index (js-length runtimes))
+                       (let* ((runtime (aref runtimes runtime-index))
+                              (result (await (run-command root (js-array runtime output)))))
+                         (require-command result (get snippet :expectedStdout)
+                           (str (get snippet :id) "/" runtime))
+                         (setq executions (1+ executions)))
+                       (setq runtime-index (1+ runtime-index))))))))
+            (setq index (1+ index))))
+        (finally
+          (await (rm directory (js-object :recursive t :force t)))))
+      executions))
+
+  (defun error-text (error)
+    (let ((code (get error :code)))
+      (if (nullish? code) (get error :message) code)))
+
+  (defasync read-override (overrides file root)
+    (let ((override (get overrides file)))
+      (if (nullish? override)
+        (await (readFile (js-call path :join root file) "utf8"))
+        override)))
+
+  (defasync checkDocumentation (&rest supplied)
+    (let* ((options (call-options supplied))
+           (root (js-call path :resolve (get options :root DEFAULT_ROOT)))
+           (overrides (if (nullish? (get options :sourceOverrides)) (js-object) (get options :sourceOverrides)))
+           (contract (validateDocumentationContract
+                       (if (nullish? (get options :contract))
+                         (JSON/parse (await (readFile (js-call path :join root contract-file) "utf8")))
+                         (get options :contract))))
+           (errors (js-array))
+           (sources (new globalThis.Map))
+           (section-count 0)
+           (literal-count 0)
+           (link-count 0)
+           (index 0)
+           (documents (get contract :documents)))
+      (while (< index (js-length documents))
+        (let* ((document (aref documents index))
+               (read-state (js-object :failed false))
+               (source (try
+                         (await (read-override overrides (get document :file) root))
+                         (catch error
+                           (put read-state :failed t)
+                           (js-call errors :push (str (get document :file) " cannot be read: " (error-text error)))
+                           ""))))
+          (unless (get read-state :failed)
+            (let ((previous -1)
+                  (section-index 0)
+                  (literals (get document :requiredSections)))
+              (js-call sources :set (get document :file) source)
+              (let ((headings (second-level-headings source)))
+                (while (< section-index (js-length literals))
+                  (let* ((section (aref literals section-index))
+                         (found (js-call headings :indexOf section)))
+                    (cond
+                      ((< found 0)
+                       (js-call errors :push (str (get document :file) " is missing section: " section)))
+                      ((<= found previous)
+                       (js-call errors :push (str (get document :file) " section is out of contract order: " section)))
+                      (t
+                       (setq previous found)
+                       (setq section-count (1+ section-count)))))
+                  (setq section-index (1+ section-index))))
+              (let ((literal-index 0) (required (get document :requiredLiterals)))
+                (while (< literal-index (js-length required))
+                  (let ((literal (aref required literal-index)))
+                    (if (js-call source :includes literal)
+                      (setq literal-count (1+ literal-count))
+                      (js-call errors :push (str (get document :file) " is missing required text: " literal))))
+                  (setq literal-index (1+ literal-index))))
+              (let ((targets (local-link-targets source)) (target-index 0))
+                (while (< target-index (js-length targets))
+                  (let* ((target (aref targets target-index))
+                         (resolved (js-call path :resolve
+                                     (js-call path :dirname (js-call path :join root (get document :file)))
+                                     target)))
+                    (if (and (not (= resolved root))
+                             (not (js-call resolved :startsWith (str root (get path :sep)))))
+                      (js-call errors :push (str (get document :file) " link escapes the repository: " target))
+                      (try
+                        (if (js-call (await (stat resolved)) :isFile)
+                          (setq link-count (1+ link-count))
+                          (js-call errors :push (str (get document :file) " link is not a regular file: " target)))
+                        (catch error
+                          (js-call errors :push (str (get document :file) " has broken local link: " target))))))
+                  (setq target-index (1+ target-index)))))))
+        (setq index (1+ index)))
+      (let ((entry-index 0) (entries (get contract :entryPoints)))
+        (while (< entry-index (js-length entries))
+          (let ((entry (aref entries entry-index)))
+            (try
+              (let ((source (let ((override (get overrides (get entry :file))))
+                              (if (not (nullish? override))
+                                override
+                                (let ((cached (js-call sources :get (get entry :file))))
+                                  (if (not (nullish? cached))
+                                    cached
+                                    (await (readFile (js-call path :join root (get entry :file)) "utf8"))))))))
+                (unless (js-call source :includes (get entry :literal))
+                  (js-call errors :push (str (get entry :file) " is missing documentation entry point: " (get entry :literal)))))
+              (catch error
+                (js-call errors :push (str (get entry :file) " cannot be read: " (error-text error))))))
+          (setq entry-index (1+ entry-index))))
+      (let ((snippet-index 0) (snippets (get contract :snippets)))
+        (while (< snippet-index (js-length snippets))
+          (let* ((snippet (aref snippets snippet-index))
+                 (document (js-call documents :find
+                             (lambda (candidate) (= (get candidate :id) (get snippet :document)))))
+                 (source (if document (js-call sources :get (get document :file)) undefined)))
+            (when (host-truthy source)
+              (extract-snippet source (get snippet :id) (get snippet :language) errors)))
+          (setq snippet-index (1+ snippet-index))))
+      (when (> (js-length errors) 0)
+        (throw (new DocumentationValidationError errors)))
+      (let ((execution-count (try
+                               (await (execute-snippets root contract sources))
+                               (catch error
+                                 (throw (new DocumentationValidationError (js-array (get error :message))))))))
+        (js-object :schemaVersion 1 :format "eliscript-documentation-report" :version 2
+          :documents (js-length documents)
+          :sections section-count
+          :requiredLiterals literal-count
+          :localLinks link-count
+          :snippets (js-length (get contract :snippets))
+          :executions execution-count
+          :entryPoints (js-length (get contract :entryPoints))
+          :applicationsContribute false))))
+
+  (defun humanDocumentationReport (report)
+    (js-call (js-array
+               "Core documentation contract:"
+               (str "  Documents     " (get report :documents))
+               (str "  Sections      " (get report :sections))
+               (str "  Required text " (get report :requiredLiterals))
+               (str "  Local links   " (get report :localLinks))
+               (str "  Snippets      " (get report :snippets) " / " (get report :executions) " executions")
+               (str "  Entry points  " (get report :entryPoints))
+               (str "  Applications  " (if (get report :applicationsContribute) "included" "excluded")))
+      :join "\n"))
+
+  (defasync main ()
+    (try
+      (console/log (humanDocumentationReport (await (checkDocumentation))))
+      (catch error
+        (console/error (get error :message))
+        (put globalThis.process :exitCode 1))))
+
+  (let ((entry (aref (get globalThis.process :argv) 1)))
+    (when (and (host-truthy entry) (= (js-call path :resolve entry) module-file))
+      (main)))
+
+  (export DEFAULT_ROOT DocumentationValidationError validateDocumentationContract
+    checkDocumentation humanDocumentationReport))

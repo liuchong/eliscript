@@ -1,2 +1,68 @@
-(module capsules.browser.worker
-  (js* "// Module worker for the browser compile host.\n//\n// Compilation runs here so an editor stays responsive, and the host is imported\n// by a relative path because a worker realm has no document and therefore no\n// import map. The worker returns plain data: the main thread creates the blob\n// URLs and executes the entry, so no blob URL crosses a realm boundary.\n\nimport { compileProject, compileSource, outputPathFor } from \"./host.mjs\";\n\n// A function cannot cross the worker boundary, so the caller passes the URL the\n// package is served from and the worker builds the resolver. Pointing the\n// runtime at a URL rather than an import map is what lets compiled output run\n// from blob modules, which have no directory of their own.\nfunction externalResolver(runtimeBase) {\n  if (typeof runtimeBase !== \"string\" || runtimeBase.length === 0) return undefined;\n  const base = new URL(runtimeBase);\n  return (specifier) => {\n    if (!specifier.startsWith(\"eliscript/\")) return undefined;\n    const subpath = specifier.slice(\"eliscript/\".length);\n    const normalized = /\\.[a-z0-9]+$/iu.test(subpath) ? subpath : `${subpath}.mjs`;\n    return new URL(normalized, base).href;\n  };\n}\n\nfunction compile(request) {\n  const resolveExternal = externalResolver(request.runtimeBase);\n  if (request.mode === \"project\") {\n    return compileProject({\n      files: request.files,\n      entry: request.entry,\n      resolveExternal,\n    });\n  }\n  const options = resolveExternal === undefined ? {} : { resolveExternal };\n  const output = outputPathFor(request.filename);\n  return {\n    plan: { entries: [request.filename], modules: [{ id: request.filename, dependencies: [] }] },\n    modules: {\n      [output]: {\n        id: request.filename,\n        source: request.source,\n        ...compileSource(request.source, request.filename, options),\n      },\n    },\n  };\n}\n\nself.addEventListener(\"message\", (event) => {\n  const { id, request } = event.data ?? {};\n  try {\n    const result = compile(request);\n    self.postMessage({ id, ok: true, plan: result.plan, modules: result.modules });\n  } catch (error) {\n    self.postMessage({\n      id,\n      ok: false,\n      message: error?.message ?? String(error),\n      diagnostics: error?.diagnostics ?? [],\n    });\n  }\n});\n\nself.postMessage({ ready: true });\n"))
+(module browser.worker
+  ;; Module worker for the browser compile host.
+  ;;
+  ;; Compilation runs here so an editor stays responsive, and the host is imported
+  ;; by a relative path because a worker realm has no document and therefore no
+  ;; import map. The worker returns plain data: the main thread creates the blob
+  ;; URLs and executes the entry, so no blob URL crosses a realm boundary.
+  (import "./host.mjs" compileProject compileSource outputPathFor)
+
+  (defun host-typeof (value) (js* "typeof value"))
+  (defconst extension-pattern (new globalThis.RegExp "\\.[a-z0-9]+$" "iu"))
+
+  (defun externalResolver (runtimeBase)
+    (if (or (not (= (host-typeof runtimeBase) "string")) (= (js-length runtimeBase) 0))
+      undefined
+      (let ((base (new globalThis.URL runtimeBase)))
+        (lambda (specifier)
+          (if (not (js-call specifier :startsWith "eliscript/"))
+            undefined
+            (let* ((subpath (js-call specifier :slice (js-length "eliscript/")))
+                   (normalized (if (js-call extension-pattern :test subpath)
+                                 subpath
+                                 (str subpath ".mjs"))))
+              (get (new globalThis.URL normalized base) :href)))))))
+
+  (defun compile (request)
+    (let ((resolveExternal (externalResolver (get request :runtimeBase))))
+      (if (= (get request :mode) "project")
+        (compileProject
+          (js-object :files (get request :files)
+            :entry (get request :entry)
+            :resolveExternal resolveExternal))
+        (let* ((options (if (undefined? resolveExternal)
+                          (js-object)
+                          (js-object :resolveExternal resolveExternal)))
+               (filename (get request :filename))
+               (source (get request :source))
+               (output (outputPathFor filename))
+               (compiled (compileSource source filename options))
+               (modules (js-object)))
+          (put modules output
+            (Object/assign (js-object :id filename :source source) compiled))
+          (js-object
+            :plan (js-object :entries (js-array filename)
+                    :modules (js-array (js-object :id filename :dependencies (js-array))))
+            :modules modules)))))
+
+  (js-call globalThis.self :addEventListener "message"
+    (lambda (event)
+      (let* ((data (if (nullish? (get event :data)) (js-object) (get event :data)))
+             (id (get data :id))
+             (request (get data :request)))
+        (try
+          (let ((result (compile request)))
+            (js-call globalThis.self :postMessage
+              (js-object :id id :ok t :plan (get result :plan) :modules (get result :modules))))
+          (catch error
+            (js-call globalThis.self :postMessage
+              (js-object :id id
+                :ok false
+                :message (if (or (nullish? error) (nullish? (get error :message)))
+                           (funcall globalThis.String error)
+                           (get error :message))
+                :diagnostics (if (or (nullish? error) (nullish? (get error :diagnostics)))
+                               (js-array)
+                               (get error :diagnostics)))))))))
+
+  (js-call globalThis.self :postMessage (js-object :ready t)))

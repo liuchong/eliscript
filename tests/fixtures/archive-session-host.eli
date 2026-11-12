@@ -1,0 +1,5 @@
+(module tests.fixtures.archive-session-host
+  (defun compiler_session_new () (js-object))
+  (defun compiler_session_close (state) (put state :closed t))
+  (defun compiler_session_request (state text) (JSON/stringify (JSON/parse text)))
+  (export compiler_session_new compiler_session_close compiler_session_request))

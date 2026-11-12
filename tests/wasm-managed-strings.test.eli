@@ -1,2 +1,1151 @@
-(module capsules.tests.wasm-managed-strings.test
-  (js* "import {beforeAll,afterAll,test} from 'bun:test';import assert from 'node:assert/strict';import {inspect} from 'node:util';\nimport {readFile,mkdtemp,rm,writeFile} from 'node:fs/promises';import {resolve} from 'node:path';import {tmpdir} from 'node:os';import {spawnSync} from 'node:child_process';\nimport {instantiateNativeManagedRuntime} from '../tools/backends/native-managed-runtime.mjs';\nimport {buildBackends} from '../tools/backends/build.mjs';import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nlet directory,backend,runtimeProgram,program,bytes,js;\nbeforeAll(async()=>{directory=await mkdtemp(resolve(tmpdir(),'eliscript-managed-strings-'));backend=await buildBackends({outputRoot:directory});\n const source=await readFile('bootstrap/runtime/memory.eli','utf8'),moduleEnd=source.lastIndexOf(')');assert(moduleEnd>=0);\n // Only this test's compiled copy exposes the two private borrow helpers. Keep\n // the production export surface unchanged and avoid unrelated realm bootstrap.\n const testSource=source.slice(0,moduleEnd)+'\\n  (export heap-borrow-root heap-return-root)\\n'+source.slice(moduleEnd);\n runtimeProgram=backend.compiler.compile_ir_string(testSource,'runtime.eli');program=backend.compiler.compile_ir_string(await readFile('tests/fixtures/wasm-managed-strings.eli','utf8'),'strings.eli');bytes=Uint8Array.from(backend.managed.emit_managed_wasm(program,runtimeProgram));assert(WebAssembly.validate(bytes));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);js=await import('data:text/javascript;base64,'+Buffer.from(backend.compiler.emit_ir_string(program)).toString('base64'));},120000);\nafterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});\nconst box=(a,x)=>typeof x==='number'?a.number(x):typeof x==='string'?a.string(x):x;\nconst read=(a,x)=>x&&typeof x==='object'?x.kind===4?a.readNumber(x):x.kind===5?a.readString(x):x:x;\nfunction invoke(a,name,args){const v=a.invoke(name,args);try{return read(a,v);}finally{a.release(v);}}\nfunction check(a,name,inputs){const args=inputs.map(x=>box(a,x));try{assert.deepEqual(invoke(a,name,args),js[name.replaceAll('-','_')](...inputs),name);}catch(error){error.message+='\\n'+name+' '+inspect(inputs);throw error;}finally{args.forEach(x=>a.release(x));}a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}\nconst positions=[null,false,true,undefined,NaN,Infinity,-Infinity,0,-0,.5,-.5,1,-1,3.5,-3.5,Number.MIN_VALUE,-Number.MIN_VALUE,Number.MAX_VALUE,-Number.MAX_VALUE,2**32-1,2**32];\nconst texts=['','x','a\\0b','中😀\\ud800x\\udfff','ababa','\\ud83d\\ude00','\\ud83dx\\ude00'];\ntest('ordinary UTF16 property and character access keeps code units, code points, signed positions and exact missing results under GC',()=>{\n const a=instantiateManagedRuntime(bytes);a.auto(1);for(const text of texts){check(a,'size',[text]);for(const key of[0,-0,1,2,99,-1,.5,NaN,Infinity,'0','1','01','','length'])for(const name of['read-value','default-value'])check(a,name,name==='default-value'?[text,key,'fallback']:[text,key]);\n  for(const position of positions)for(const name of['at','char-at','char-code','code-point'])check(a,name,[text,position]);for(const key of['0','1','length'])check(a,'nth-value',[key,text]);check(a,'scan',[text]);}\n});\ntest('source slice, substring and substr preserve each conversion rule and endpoints without code-point normalization',()=>{\n const a=instantiateManagedRuntime(bytes);a.auto(1);for(const text of texts)for(const lo of positions)for(const hi of positions)for(const name of['slice','substring','substr'])check(a,name,[text,lo,hi]);\n});\ntest('forward and reverse source searches preserve empty needles, overlapping matches, NaN defaults and primitive string conversions',()=>{\n const a=instantiateManagedRuntime(bytes);a.auto(1);for(const text of texts)for(const needle of['','x','a','aba','\\0','😀','\\ud800',null,false,true,undefined,0,-0,-1,NaN,Infinity,-Infinity])for(const p of positions)for(const name of['find','last','includes','starts','ends'])check(a,name,[text,needle,p]);\n});\ntest('String repeat, trim, well-formed repair, identities and variadic concat retain exact primitive text and lone surrogates',()=>{\n const a=instantiateManagedRuntime(bytes);a.auto(1);for(const text of texts){for(const name of['identity','value','well-formed','repair','trim','trim-start','trim-end'])check(a,name,[text]);for(const count of[null,false,true,undefined,NaN,-0,-.5,0,.5,1,3.5])check(a,'repeat',[text,count]);for(const value of[null,false,true,undefined,0,-0,2**32-1,-1,NaN,Infinity,-Infinity,'中😀'])check(a,'concat',[text,value,'!',value]);}\n const whitespace='\\u0009\\u000a\\u000b\\u000c\\u000d \\u00a0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff';for(const text of[whitespace,whitespace+'x'+whitespace,'\\u0085x\\u0085','\\u180ex\\u180e','😀'])for(const name of['trim','trim-start','trim-end'])check(a,name,[text]);for(const count of[-1,-1.5,-Infinity,Infinity]){const s=a.string('x'),n=a.number(count);assert.throws(()=>a.invoke('repeat',[s,n]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');a.release(s);a.release(n);}check(a,'repeat',['',Number.MAX_VALUE]);\n});\ntest('raw text queries reject unfinished string keys and protect borrowed receiver, positions and results across allocating GC',()=>{\n const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports,heap=e['heap-new'](64,4096,65536),call=(name,...args)=>{const out=e[name](heap,...args)>>>0;assert.equal(e['last-error'](),0,name);return out;};\n const string=(text,sealed=true)=>{const h=call('value-string',text.length),view=new DataView(e.memory.buffer),p=call('value-data',h,5);for(let i=0;i<text.length;i++)view.setUint16(p+i*2,text.charCodeAt(i),true);if(sealed)call('value-seal',h);return h;};\n const s=string('中😀'),key=string('0',false);e['value-text-get'](heap,s,key,0);assert.equal(e['last-error'](),6);call('value-seal',key);call('heap-auto',1);const first=call('value-text-get',s,key,0);call('heap-pin',s);call('heap-pin',key);call('heap-pin',first);assert.equal(new DataView(e.memory.buffer).getUint16(call('value-data',first,5),true),'中'.charCodeAt(0));\n const p=call('value-number',0,0x3ff00000),out=call('value-source-text-method',s,p,3,3);call('heap-pin',out);assert.equal(new DataView(e.memory.buffer).getFloat64(call('value-data',out,4),true),0x1f600);for(const h of[s,key,first,out])call('heap-release',h);call('heap-collect');assert.equal(call('heap-live'),0);assert.equal(call('frame-depth'),0);\n});\ntest('text calls capture receiver and earlier arguments, evaluate ignored extras and preserve lazy defaults before method conversions',()=>{\n const a=instantiateManagedRuntime(bytes);a.auto(1);check(a,'capture',['abcdef',1,'xy']);check(a,'concat-capture',['base','old','new']);\n const s=a.string('中😀'),trace=a.sourceObject({});assert.equal(invoke(a,'ignored',[s,trace]),'中');for(const [name,expected]of[['first',1],['second',2]]){const key=a.string(name),value=a.objectGet(trace,key);assert.equal(a.readNumber(value),expected);a.release(value);a.release(key);}a.release(trace);a.release(s);a.collect();assert.equal(a.live(),0);\n for(const text of texts)for(const key of[0,1,99,'0','length'])check(a,'default-order',[text,key]);\n});\ntest('source text boundaries are immutable, source-bound unsupported calls and malformed arity are refused, and invalid handles stay branded',async()=>{\n const before=JSON.stringify(program);backend.managed.emit_managed_wasm(program,runtimeProgram);assert.equal(JSON.stringify(program),before);\n for(const expression of['(js-call s :toLowerCase)','(js-call s :split \"x\")']){const ir=backend.compiler.compile_ir_string(`(defun f (s) ${expression}) (export f)`,'supported-text.eli'),saved=JSON.stringify(ir),bytes=Uint8Array.from(backend.managed.emit_managed_wasm(ir,runtimeProgram));assert(WebAssembly.validate(bytes));assert.equal(JSON.stringify(ir),saved);}\n // General member invocation now preserves dead branches instead of rejecting\n // a property spelling everywhere, including methods on user-defined objects.\n const formerlyRejected=['(js-call s method)','(js-call s :toLocaleLowerCase)','(js-call s :normalize)','(js-call s :matchAll \"x\")','(js-call s :match \"x\")'];\n const deadSource=formerlyRejected.map((expression,index)=>`(defun dead${index} (s method) (if false ${expression} s))`).join('\\n')+`\n (defun dynamic (s method argument) (js-call s method argument))\n (defun matched (s) (let ((found (js-call s :match \"x\"))) (if found (get found 0) nil)))\n (defun matched-all (s) (let* ((iterator (js-call s :matchAll \"x\")) (step (js-call iterator :next)))\n  (if (get step :done) nil (get (get step :value) 0))))\n (defun dynamic-matched (s) (let* ((method \"match\") (found (js-call s method \"x\"))) (if found (get found 0) nil)))\n (defun dynamic-matched-all (s) (let* ((method \"matchAll\") (iterator (js-call s method \"x\")) (step (js-call iterator :next)))\n  (if (get step :done) nil (get (get step :value) 0))))\n (defun custom-matched (s) (let ((pattern (js-object)))\n  (put pattern (js* \"Symbol.match\") (lambda (input) (js-array input)))\n  (get (js-call s :match pattern) 0)))\n (defun custom-matched-all (s) (let ((pattern (js-object)))\n  (put pattern (js* \"Symbol.matchAll\") (lambda (input)\n   (js-object :next (lambda () (js-object :done false :value (js-array input))))))\n  (get (get (js-call (js-call s :matchAll pattern) :next) :value) 0)))\n (defun protocol-fault () (let ((trace (js-array)) (marker (js-object)) (pattern (js-object)))\n  (put pattern (js* \"Symbol.match\") (lambda (input) (js-call trace :push \"method\") (throw marker)))\n  (try (js-call \"text\" :match (progn (js-call trace :push \"argument\") pattern))\n   (catch error (JSON/stringify (js-array (= error marker) trace))))))\n (defun invalid-all () (let ((pattern (new (js* \"RegExp\") \"x\")))\n  (try (js-call \"abxx\" :matchAll pattern) (catch error (get error :name)))))\n (defun normalized (s) (js-call s :normalize))\n (defun localized (s) (js-call s :toLocaleLowerCase))\n (defun custom () (let ((value (js-object :normalize (lambda () \"custom-normalize\") :toLocaleLowerCase (lambda () \"custom-locale\"))))\n  (js-call (js-call value :normalize) :concat \"/\" (js-call value :toLocaleLowerCase))))\n (defun dynamic-order ()\n  (let* ((trace (js-array)) (text \"abcd\")\n         (key (js-object :toString (lambda () (js-call trace :push \"key\") \"slice\")))\n         (result (js-call (progn (js-call trace :push \"receiver\") text)\n           (progn (js-call trace :push \"key-expression\") key)\n           (progn (js-call trace :push \"first\") (setq text \"changed\") 1)\n           (progn (js-call trace :push \"second\") 3)\n           (progn (js-call trace :push \"extra\") 99))))\n   (JSON/stringify (js-array result trace))))\n (defun null-order ()\n  (let* ((trace (js-array)) (key (js-object :toString (lambda () (js-call trace :push \"coercion\") \"slice\"))))\n   (try (js-call nil (progn (js-call trace :push \"key-expression\") key) (js-call trace :push \"argument\"))\n    (catch error (JSON/stringify (js-array (get error :name) trace))))))\n (defun prototype-order (throwing)\n  (let* ((trace (js-array)) (prototype (get (js* \"String\") :prototype))\n         (saved (Object/getOwnPropertyDescriptor prototype \"slice\")) (marker (js-object)) (method \"slice\"))\n   (try\n    (Object/defineProperty prototype \"slice\" (js-object :configurable t :get (lambda ()\n     (js-call trace :push \"get\")\n     (if throwing (throw marker) (lambda (argument) (js-call trace :push \"old-call\") (js-call \"old:\" :concat argument))))))\n    (let ((result (try\n      (js-call \"abcd\" method (progn (js-call trace :push \"argument\")\n       (Object/defineProperty prototype \"slice\" (js-object :configurable t :value (lambda (argument) \"new\"))) \"ARG\"))\n      (catch error (= error marker)))))\n     (JSON/stringify (js-array result trace)))\n    (finally (if saved (Object/defineProperty prototype \"slice\" saved) (Reflect/deleteProperty prototype \"slice\"))))))\n (defun native-capture-order ()\n  (let* ((trace (js-array)) (prototype (get (js* \"String\") :prototype))\n         (saved (Object/getOwnPropertyDescriptor prototype \"slice\")) (method \"slice\"))\n   (try\n    (let ((result (js-call \"abcd\" method (progn (js-call trace :push \"argument\")\n      (Object/defineProperty prototype \"slice\" (js-object :configurable t :value (lambda (argument) \"new\"))) 1))))\n     (JSON/stringify (js-array result trace)))\n    (finally (if saved (Object/defineProperty prototype \"slice\" saved) (Reflect/deleteProperty prototype \"slice\"))))))\n (export dead0 dead1 dead2 dead3 dead4 dynamic matched matched-all dynamic-matched dynamic-matched-all\n  custom-matched custom-matched-all normalized localized custom\n  dynamic-order null-order prototype-order native-capture-order protocol-fault invalid-all)`;\n const deadIR=backend.compiler.compile_ir_string(deadSource,'dead-text.eli'),deadJS=await import('data:text/javascript;base64,'+Buffer.from(backend.compiler.emit_ir_string(deadIR)).toString('base64'));\n const deadBytes=Uint8Array.from(backend.managed.emit_managed_wasm(deadIR,runtimeProgram));\n const dead=instantiateManagedRuntime(deadBytes);\n dead.auto(1);\n const held=dead.string('unchanged'),method=dead.string('missing');\n const withCleanup=(body,steps)=>{\n  let failed=false,failure,result;const cleanupErrors=[];\n  try{result=body();}catch(error){failed=true;failure=error;}\n  steps((label,operation)=>{\n   try{operation();}catch(error){\n    const cleanupError=new Error('string fixture cleanup: '+label,{cause:error});\n    if(!failed){failed=true;failure=cleanupError;}\n    else if(cleanupErrors.length<12)cleanupErrors.push(cleanupError);\n   }\n  });\n  if(failed){\n   if(cleanupErrors.length){\n    const error=new Error((failure instanceof Error?failure.message:'string fixture failed')+'; subsequent cleanup also failed',{cause:failure});\n    error.cleanupErrors=cleanupErrors;throw error;\n   }\n   throw failure;\n  }\n  return result;\n };\n const invokeWithCleanup=(runtime,name,args)=>{\n  let value,returned=false;\n  return withCleanup(()=>{value=runtime.invoke(name,args);returned=true;return read(runtime,value);},cleanup=>{\n   if(returned)cleanup('result '+name,()=>runtime.release(value));\n  });\n };\n withCleanup(()=>{\n  for(let index=0;index<formerlyRejected.length;index++)assert.equal(invoke(dead,'dead'+index,[held,method]),deadJS['dead'+index]('unchanged','missing'));\n  const activeCases=[['dynamic',['abcd','slice',1]],['dynamic',['中x','toUpperCase',0]],\n   ['matched',['abxx']],['matched',['none']],['matched-all',['abxx']],['matched-all',['none']],['custom',[]],\n   ['dynamic-order',[]],['null-order',[]],['prototype-order',[false]],['prototype-order',[true]],['native-capture-order',[]],\n   ['dynamic-matched',['abxx']],['dynamic-matched',['none']],['dynamic-matched-all',['abxx']],['dynamic-matched-all',['none']],\n   ['custom-matched',['中😀\\ud800']],['custom-matched-all',['中😀\\ud800']],['protocol-fault',[]],['invalid-all',[]]];\n  const oracle=spawnSync('node',['--input-type=module','-e',\n   \"let input='';for await(const chunk of process.stdin)input+=chunk;const {javascript,cases}=JSON.parse(input);const m=await import('data:text/javascript;base64,'+Buffer.from(javascript).toString('base64'));process.stdout.write(JSON.stringify(cases.map(([name,args])=>m[name.replaceAll('-','_')](...args))));\"],\n   {input:JSON.stringify({javascript:backend.compiler.emit_ir_string(deadIR),cases:activeCases}),encoding:'utf8',timeout:30000});\n  assert.equal(oracle.error,undefined);assert.equal(oracle.status,0,oracle.stderr);const expected=JSON.parse(oracle.stdout);\n  for(const [index,[name,inputs]]of activeCases.entries()){\n   const args=[];\n   withCleanup(()=>{\n    try{for(const input of inputs)args.push(box(dead,input));assert.deepEqual(invokeWithCleanup(dead,name,args),expected[index],name);}\n    catch(error){\n     let heapContext='stats unavailable';\n     try{heapContext=JSON.stringify({stats:dead.stats(),auto:1,\n      maxSlots:1024,initialBytes:65536,maxBytes:16777216});}catch{}\n     throw new Error('active string case '+name+' '+inspect(inputs)+'; heap='+heapContext,{cause:error});\n    }\n   },cleanup=>{for(const[index,arg]of args.entries())cleanup('active '+name+' argument '+index,()=>dead.release(arg));});\n  }\n  // Keep the previously observed capacity boundary on the mutated/restored\n  // realm. Refusing a request must not invalidate any independent caller root.\n  let dirtyZero,dirtyFrame,dirtyCapacity;\n  try{\n   withCleanup(()=>{\n    assert.equal(dead.readString(held),'unchanged','held string before dirty manual pressure');\n    assert.equal(dead.readString(method),'missing','method string before dirty manual pressure');\n    dirtyZero=dead.number(-0);dirtyFrame=dead.frame(1);dead.frameSet(dirtyFrame,0,dirtyZero);\n    dead.auto(0);dead.collect();\n    assert.equal(dead.readString(held),'unchanged','held string after first dirty manual collection');\n    assert.equal(dead.readString(method),'missing','method string after first dirty manual collection');\n    for(let round=0;round<16;round++)for(const[index,[name,inputs]]of activeCases.entries())if(/^(?:dynamic-|custom-)?matched(?:-all)?$/.test(name)){\n     const args=[];\n     withCleanup(()=>{\n      for(const input of inputs)args.push(box(dead,input));\n      try{assert.deepEqual(invokeWithCleanup(dead,name,args),expected[index],name+' dirty manual round='+round);}\n      catch(error){\n       if(error.eliscriptDiagnostic?.code!=='ELI-RT0002')throw error;\n       dirtyCapacity=error;\n      }\n     },cleanup=>{for(const[index,arg]of args.entries())cleanup('dirty '+name+' argument '+index,()=>dead.release(arg));});\n     if(dirtyCapacity)return;\n     dead.collect();\n     assert.equal(dead.stats().frameDepth,1);\n    }\n   },cleanup=>{\n    cleanup('dirty realm held string',()=>assert.equal(dead.readString(held),'unchanged'));\n    cleanup('dirty realm method string',()=>assert.equal(dead.readString(method),'missing'));\n    if(dirtyFrame!==undefined){\n     cleanup('dirty realm caller frame depth',()=>assert.equal(dead.stats().frameDepth,1));\n     cleanup('dirty realm caller negative zero',()=>{\n      const retained=dead.frameGet(dirtyFrame,0);\n      withCleanup(()=>assert(Object.is(dead.readNumber(retained),-0)),release=>release('dirty retained caller value',()=>dead.release(retained)));\n     });\n     cleanup('dirty caller frame',()=>dead.leaveFrame(dirtyFrame));\n    }\n    if(dirtyZero!==undefined)cleanup('dirty caller negative zero handle',()=>dead.release(dirtyZero));\n    cleanup('restore active automatic collection',()=>dead.auto(1));\n   });\n  }catch(error){\n   if(!dirtyCapacity)throw error;\n   const failure=new Error('dirty realm capacity refusal must preserve caller roots and cleanup',{cause:error});\n   failure.capacityFailure=dirtyCapacity;throw failure;\n  }\n  // Each collection policy gets an independent realm from the same compiled\n  // bytes, with the original default slot/byte budgets. Keep the full active\n  // sequence, including prototype mutations, together on the original realm.\n  for(const threshold of[0,1]){\n   const stress=instantiateManagedRuntime(deadBytes);let heldZero,heldText,outer;\n   let refusalCount=0,recoveryCount=0;const refusalEvidence=[];\n   const assertStressRoots=()=>{\n    assert.equal(stress.stats().frameDepth,1);assert.equal(stress.readString(heldText),'stress-held');\n    const retained=stress.frameGet(outer,0);\n    withCleanup(()=>assert(Object.is(stress.readNumber(retained),-0)),cleanup=>cleanup('retained caller value',()=>stress.release(retained)));\n   };\n   const request=(name,inputs,expectedValue,context,allowCapacity)=>{\n    const args=[];let refused;\n    withCleanup(()=>{\n     try{for(const input of inputs)args.push(box(stress,input));assert.deepEqual(invokeWithCleanup(stress,name,args),expectedValue,context);}\n     catch(error){\n      if(allowCapacity&&error.eliscriptDiagnostic?.code==='ELI-RT0002'){\n       refused=error;assertStressRoots();\n       for(const[index,arg]of args.entries())assert.deepEqual(read(stress,arg),inputs[index],'refused request retains argument '+index);\n      }else throw new Error(context+' '+inspect(inputs),{cause:error});\n     }\n    },cleanup=>{for(const[index,arg]of args.entries())cleanup('repeated '+name+' argument '+index,()=>stress.release(arg));});\n    return refused;\n   };\n   withCleanup(()=>{\n    stress.auto(threshold);heldZero=stress.number(-0);heldText=stress.string('stress-held');\n    outer=stress.frame(1);stress.frameSet(outer,0,heldZero);\n    if(threshold===0)stress.collect();\n    for(let round=0;round<16;round++)for(const [index,[name,inputs]]of activeCases.entries())if(/^(?:dynamic-|custom-)?matched(?:-all)?$/.test(name)){\n     const context='repeated string protocol '+name+' collection='+threshold+' round='+round;\n     const refused=request(name,inputs,expected[index],context,threshold===0);\n     if(refused){\n      refusalCount++;\n      if(refusalEvidence.length<8)refusalEvidence.push({name,round,code:refused.eliscriptDiagnostic.code,stats:stress.stats()});\n     }\n     if(threshold===0)stress.collect();\n     assertStressRoots();\n     if(refused){\n      // A manual heap may refuse the allocation demand of this exact request.\n      // After its complete cleanup/collection, prove recovery once with the\n      // same inputs and automatic collection; then restore the manual policy.\n      withCleanup(()=>{\n       stress.auto(1);request(name,inputs,expected[index],context+' automatic recovery',false);assertStressRoots();\n       recoveryCount++;\n      },cleanup=>cleanup('restore manual collection after refusal',()=>stress.auto(0)));\n      stress.collect();assertStressRoots();\n     }\n    }\n    assert.equal(recoveryCount,refusalCount);\n    if(refusalCount)console.info('manual string protocol capacity refusals '+JSON.stringify({refusalCount,recoveryCount,cases:refusalEvidence}));\n   },cleanup=>{\n    if(outer!==undefined)cleanup('caller frame',()=>stress.leaveFrame(outer));\n    if(heldZero!==undefined)cleanup('caller negative zero',()=>stress.release(heldZero));\n    if(heldText!==undefined)cleanup('independent caller string',()=>stress.release(heldText));\n    cleanup('stress module',()=>stress.closeModule());cleanup('stress heap collection',()=>stress.collect());\n    cleanup('stress empty heap assertion',()=>assert.equal(stress.live(),0));\n    cleanup('stress empty frame assertion',()=>assert.equal(stress.stats().frameDepth,0));\n   });\n  }\n  // Locale casing and Unicode normalization remain explicitly unsupported on\n  // strings. Successful generic member lookup does not advertise these APIs.\n  for(const name of['normalized','localized'])assert.throws(()=>dead.invoke(name,[held]),error=>error.eliscriptDiagnostic?.code==='ELI-RT0003');\n },cleanup=>{\n  cleanup('held string',()=>dead.release(held));cleanup('method string',()=>dead.release(method));\n  cleanup('module',()=>dead.closeModule());cleanup('heap collection',()=>dead.collect());\n  cleanup('empty heap assertion',()=>assert.equal(dead.live(),0));\n  cleanup('empty frame assertion',()=>assert.equal(dead.stats().frameDepth,0));\n });\n const a=instantiateManagedRuntime(bytes),b=instantiateManagedRuntime(bytes),s=a.string('abc'),foreign=b.string('x');assert.throws(()=>a.invoke('concat',[s,foreign,true,false]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');b.release(foreign);b.collect();\n const opaque=a.sourceObject({}),fraction=a.number(.5),position=a.string('1');for(const [name,args]of[['char-at',[s,opaque]],['char-at',[s,position]],['concat',[s,fraction,true,false]],['read-value',[s,opaque]],['read-value',[s,position]],['read-value',[s,a.string('constructor')]]]){if(name==='char-at'&&args[1]===opaque){assert.equal(invoke(a,name,args),js.char_at('abc',{}));assert.equal(js.char_at('abc',{}),'a');continue;}if((name==='read-value'||name==='char-at')&&args[1]===position){assert.equal(invoke(a,name,args),'b');continue;}if(name==='concat'&&args[1]===fraction){assert.equal(invoke(a,name,args),'abc0.5truefalse');continue;}assert.throws(()=>a.invoke(name,args));if(name==='read-value'&&args[1]!==opaque)a.release(args[1]);}\n for(const x of[s,opaque,fraction,position])a.release(x);a.collect();assert.equal(a.live(),0);assert.throws(()=>a.invoke('trim',[s]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');\n});\ntest('native initialization root-range release preserves returned values caller roots and exact refusal before any partial clearing',()=>{\n const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;\n const heap=e['heap-new'](64,4096,65536),outer=e['frame-new'](heap,1),inner=e['frame-new'](heap,4);\n assert(heap&&outer&&inner);\n const caller=e['value-number'](heap,0,0x80000000),values=[1,2,3,4].map(value=>e['value-number'](heap,value,0));\n assert.equal(e['frame-set'](heap,outer,0,caller),1);\n for(const[index,value]of values.entries())assert.equal(e['frame-set'](heap,inner,index,value),1);\n for(const[first,end,keep]of[[3,2,2],[0,5,2],[1,4,0],[1,4,4]]){\n  assert.equal(e['frame-clear-range'](heap,inner,first,end,keep),0);assert.equal(e['last-error'](),3);\n  for(const[index,value]of values.entries())assert.equal(e['frame-get'](heap,inner,index),value);\n }\n assert.equal(e['frame-clear-range'](heap,inner,1,4,2),1);assert.equal(e['last-error'](),0);\n assert.deepEqual(values.map((_,index)=>e['frame-get'](heap,inner,index)),[values[0],0,values[2],0]);\n e['heap-collect'](heap);assert.equal(e['last-error'](),0);assert.equal(e['frame-depth'](heap),2);\n for(const value of[caller,values[0],values[2]])assert.equal(e['value-kind'](heap,value),4);\n for(const value of[values[1],values[3]]){assert.equal(e['value-kind'](heap,value),0);assert.equal(e['last-error'](),1);}\n assert.equal(e['frame-get'](heap,outer,0),caller);\n assert(Object.is(new DataView(e.memory.buffer).getFloat64(e['value-data'](heap,caller,4),true),-0));\n assert.equal(e['frame-pop'](heap,inner),1);assert.equal(e['frame-pop'](heap,outer),1);\n e['heap-collect'](heap);assert.equal(e['last-error'](),0);assert.equal(e['heap-live'](heap),0);\n});\ntest('immediate temporary roots preserve manual collection metadata binding cells and caller roots across capacity refusal',()=>{\n const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;\n const heap=e['heap-new'](256,8192,65536),call=(name,...args)=>{\n  const value=e[name](heap,...args)>>>0;assert.equal(e['last-error'](),0,name);return value;\n };\n assert(heap);const held=call('value-number',0,0x80000000);call('heap-pin',held);\n const binding=call('value-binding-cell-new');call('heap-pin',binding);call('value-binding-init',binding,held);\n const outer=call('frame-new',1);call('frame-set',outer,0,held);\n const args=call('value-refs',7,4);call('heap-pin',args);\n for(let index=0;index<4;index++)call('value-set',args,index,index);\n const metadata=()=>{\n  const view=new DataView(e.memory.buffer),control=view.getUint32(heap+16,true),pool=view.getUint32(control+4,true),base=view.getUint32(pool+16,true);\n  return Array.from({length:6},(_,index)=>view.getUint32(base+index*4,true));\n };\n const immediateSlots=()=>{\n  const view=new DataView(e.memory.buffer),control=view.getUint32(heap+16,true),pool=view.getUint32(control+4,true),base=view.getUint32(pool+16,true);\n  return Array.from({length:24},(_,index)=>view.getUint32(base+index*4,true));\n };\n const before=metadata();assert.equal(before[1],0);assert.equal(before[3],0);\n // Immediate IDs must not touch metadata slot zero or existing entries 1..3,\n // even transiently before a matching return. No native realm setup is needed.\n const beforeSlots=immediateSlots();\n for(const value of[0,1,2,3]){\n  assert.equal(call('heap-borrow-root',value),0);assert.deepEqual(immediateSlots(),beforeSlots);\n  assert.equal(call('heap-return-root',value),0);assert.deepEqual(immediateSlots(),beforeSlots);\n }\n assert.deepEqual(metadata(),before);\n call('heap-collect');\n const assertRoots=()=>{\n  assert.equal(call('value-binding-get',binding),held);\n  assert.deepEqual([0,1,2,3].map(index=>call('value-get',args,index)),[0,1,2,3]);\n  assert.equal(call('frame-depth'),1);assert.equal(call('frame-get',outer,0),held);\n  assert(Object.is(new DataView(e.memory.buffer).getFloat64(call('value-data',held,4),true),-0));\n  assert.equal(metadata()[1],0);\n };\n assertRoots();\n let exhausted=false;\n for(let index=0;index<=256;index++){\n  const value=e['value-number'](heap,index,0)>>>0;\n  if(value===0){assert.equal(e['last-error'](),2);exhausted=true;break;}\n  assert.equal(e['last-error'](),0);\n }\n assert(exhausted,'manual allocation must refuse the fixed slot capacity');assertRoots();\n assert(call('heap-collect')>0);assertRoots();assert(call('value-number',7,0)>3);\n call('heap-release',args);call('frame-pop',outer);call('heap-release',held);\n call('heap-release',binding);call('heap-collect');assert.equal(call('heap-live'),0);assert.equal(call('frame-depth'),0);\n});\ntest('deterministic random UTF16 methods and full f64 position words agree with independent JS during automatic collection',()=>{\n const a=instantiateManagedRuntime(bytes);a.auto(1);let seed=0x84fbd9a;const next=()=>{seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return seed>>>0;};const bits=new DataView(new ArrayBuffer(8));\n for(let i=0;i<1024;i++){const units=Array.from({length:next()%64},()=>next()%65536),text=String.fromCharCode(...units),needle=i%3?text.slice(next()%(text.length+1),next()%(text.length+1)):String.fromCharCode(next()%65536);bits.setUint32(0,next(),true);bits.setUint32(4,next(),true);const position=bits.getFloat64(0,true);for(const name of['at','char-at','char-code','code-point'])check(a,name,[text,position]);for(const name of['find','last','includes','starts','ends'])check(a,name,[text,needle,position]);for(const name of['slice','substring','substr'])check(a,name,[text,position,(next()%65)-32]);for(const name of['well-formed','repair'])check(a,name,[text]);}\n});\ntest('source searches retain bounded Two-Way behavior on long periodic and overlapping text in both directions',()=>{\n const a=instantiateManagedRuntime(bytes,{maxSlots:256,initialBytes:65536,maxBytes:4194304});a.auto(1);\n for(const [text,needle]of[['a'.repeat(262144)+'b','a'.repeat(32768)+'c'],['ab'.repeat(65536)+'z','ab'.repeat(8192)+'z'],['a'.repeat(65536),'a'.repeat(8192)],['\\ud800'.repeat(65536)+'中','\\ud800'.repeat(8192)+'中']])for(const position of[undefined,NaN,0,99,Infinity,-Infinity])for(const name of['find','last','includes','starts','ends'])check(a,name,[text,needle,position]);\n});\ntest('text capacity failures preserve input bits and caller frames; real search traps unwind only private roots and retain earlier errors',async()=>{\n const source=await readFile('bootstrap/runtime/memory.eli','utf8'),start=source.indexOf('  (defun heap-text-search-unit '),end=source.indexOf('  (defun heap-text-find-direction ',start);assert(start>=0&&end>start);\n const injected=backend.compiler.compile_ir_string(source.slice(0,start)+'  (defun heap-text-search-unit (data length index reverse) (load-u16 4294967295))\\n'+source.slice(end),'trap-runtime.eli'),a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(program,injected)));a.auto(1);\n const s=a.string('xxx'),bad=a.sourceObject({valueOf:false,toString:false}),good=a.number(0),frame=a.frame(1);a.frameSet(frame,0,s);assert.throws(()=>js.fault('xxx',{valueOf:false,toString:false}),TypeError);assert.throws(()=>a.invoke('fault',[s,bad]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.equal(a.stats().frameDepth,1);assert.throws(()=>a.invoke('fault',[s,good]),e=>e instanceof WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);assert.equal(a.readString(s),'xxx');const retained=a.frameGet(frame,0);assert(a.keyEqual(retained,s));a.release(retained);a.leaveFrame(frame);for(const x of[s,bad,good])a.release(x);a.collect();assert.equal(a.live(),0);\n const bounded=instantiateManagedRuntime(bytes,{maxSlots:64,initialBytes:4096,maxBytes:4096});bounded.auto(1);const original=bounded.string('中😀\\ud800'),n=bounded.number(10000),outer=bounded.frame(1);bounded.frameSet(outer,0,original);assert.throws(()=>bounded.invoke('repeat',[original,n]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0002');assert.equal(bounded.readString(original),'中😀\\ud800');assert.equal(bounded.stats().frameDepth,1);bounded.leaveFrame(outer);bounded.release(n);bounded.release(original);bounded.collect();assert.equal(bounded.live(),0);\n});\ntest('text literal emission refuses malformed method IR before lowering absent children and preserves the original source schema',()=>{\n for(const malformed of ['missing','null-receiver','null-key']){\n  const copy=structuredClone(program);let method;const visit=v=>{if(!v||typeof v!=='object'||method)return;if(v.kind==='method-call')method=v;else for(const x of Object.values(v))visit(x);};visit(copy);assert(method);\n  if(malformed==='missing')method.children=method.children.slice(0,1);else method.children[malformed==='null-receiver'?0:1]=null;\n  const before=JSON.stringify(copy);assert.throws(()=>backend.managed.emit_managed_wasm(copy,runtimeProgram),e=>{\n   assert.equal(e.eliscriptDiagnostic?.code,'ELI-B0001');\n   assert.deepEqual(e.eliscriptDiagnostic.location,{file:'strings.eli',\n    start:{offset:method.span.start,line:method.span.line,column:method.span.column},\n    end:{offset:method.span.end,line:method.span.endLine,column:method.span.endColumn}});return true;\n  });assert.equal(JSON.stringify(copy),before);\n }\n});\ntest('Node executes identical zero-import source text bytes with code-point, reverse-search, trim and repair semantics and complete root cleanup',async()=>{\n const path=resolve(directory,'text.wasm');await writeFile(path,bytes);const result=spawnSync('node',['--input-type=module','-e',`\n import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {instantiateManagedRuntime} from ${JSON.stringify(resolve('tools/backends/managed-runtime.mjs'))};\n const a=instantiateManagedRuntime(readFileSync(${JSON.stringify(path)}));a.auto(1);const s=a.string('中😀\\\\ud800'),p=a.number(1),point=a.invoke('code-point',[s,p]);assert.equal(a.readNumber(point),0x1f600);a.release(point);const fixed=a.invoke('repair',[s]);assert.equal(a.readString(fixed),'中😀�');a.release(fixed);const needle=a.string('😀'),nan=a.number(NaN),last=a.invoke('last',[s,needle,nan]);assert.equal(a.readNumber(last),1);a.release(last);const spaced=a.string('\\\\ufeff x \\\\u2000'),trimmed=a.invoke('trim',[spaced]);assert.equal(a.readString(trimmed),'x');for(const v of[s,p,needle,nan,spaced,trimmed])a.release(v);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);\n `],{encoding:'utf8',timeout:30000});assert.equal(result.status,0,result.stderr);\n});\n\ntest('omitted method arguments, zero-argument concat and ignored identity arguments preserve source defaults and borrowed value lifetime',()=>{\n const a=instantiateManagedRuntime(bytes);a.auto(1);for(const text of texts)for(const name of['concat-empty','char-empty','at-empty','slice-empty','substring-empty','substr-empty','find-empty','repeat-empty'])check(a,name,[text]);\n for(const extra of[.5,Number.MIN_VALUE,NaN,undefined,true,'x'])check(a,'ignored-identity',['中😀',extra]);const s=a.string('held'),object=a.sourceObject({}),alias=a.invoke('ignored-identity',[s,object]);assert(a.keyEqual(alias,s));a.release(s);a.collect();assert.equal(a.readString(alias),'held');a.release(alias);a.release(object);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);\n});\n\nconst staticLiteralText=String.fromCharCode(...Array.from({length:8192},(_,index)=>\n index%7===0?0:index%7===1?0xd800:index%7===2?0xdfff:index%7===3?0xfeff:(index*4051)&0xffff));\nfunction staticLiteralSource(text){return'(defun literal () '+JSON.stringify(text)+') (defun source-text () (js-call literal :toString)) (export literal source-text)';}\nfunction staticLiteralShape(typed){\n const pending=typed.functions.map(fn=>fn.body),seen=new Set(),copies=[];let count=0;\n while(pending.length){const node=pending.pop();if(!node||typeof node!=='object'||seen.has(node))continue;seen.add(node);count++;\n  if(node.kind==='memory-data-copy')copies.push(node);if(Array.isArray(node.children))pending.push(...node.children);\n }\n return{count,copies};\n}\nfunction closeStaticLiteral(a,roots=[]){try{roots.forEach(root=>a.release(root));a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}finally{a.close?.();}}\nlet staticLiteralProduct;\nasync function staticLiteralArtifact(){\n if(staticLiteralProduct)return staticLiteralProduct;\n const text=staticLiteralText,source=staticLiteralSource(text),p=backend.compiler.compile_ir_string(source,'static-literal-中.eli');\n const saved=JSON.stringify(p),lowered=backend.managed.lower_managed_program(p,runtimeProgram);\n const bytes=Uint8Array.from(backend.managed.emit_managed_wasm(p,runtimeProgram));assert.equal(JSON.stringify(p),saved);\n assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);\n const reference=await import('data:text/javascript;base64,'+Buffer.from(backend.compiler.emit_ir_string(p)).toString('base64'));\n assert.equal(reference.literal(),text);\n // Bun rewrites Unicode and escape spellings in Function.toString. The source\n // contract uses the actual Node function created from these exact JS bytes.\n const oracle=spawnSync('node',['--input-type=module','-e',\n  \"let source='';for await(const chunk of process.stdin)source+=chunk;const m=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));process.stdout.write(JSON.stringify({text:m.literal(),sourceText:m.literal.toString()}));\"],\n  {input:backend.compiler.emit_ir_string(p),encoding:'utf8',timeout:30000});\n assert.equal(oracle.error,undefined);assert.equal(oracle.status,0,oracle.stderr);\n const nodeReference=JSON.parse(oracle.stdout);assert.equal(nodeReference.text,text);\n return staticLiteralProduct={text,source,p,lowered,bytes,sourceText:nodeReference.sourceText};\n}\nfunction assertStaticLiteral(a,product){\n a.auto(1);const held=a.number(-0),frame=a.frame(1);a.frameSet(frame,0,held);let literal,sourceText;\n try{\n  literal=a.invoke('literal');assert.equal(a.readString(literal),product.text);\n  assert.equal(a.length(literal),product.text.length);\n  try{sourceText=a.invoke('source-text');}\n  catch(error){throw new Error('static literal source-text invocation after literal length '+product.text.length+'; auto GC enabled',{cause:error});}\n  assert.equal(a.readString(sourceText),product.sourceText);\n  const filler=a.string('growth'.repeat(8192));a.release(filler);a.collect();\n  assert.equal(a.readString(literal),product.text);assert.equal(a.readString(sourceText),product.sourceText);\n  const again=a.invoke('source-text');try{assert.equal(a.readString(again),product.sourceText);}finally{a.release(again);}\n  const caller=a.frameGet(frame,0);try{assert(Object.is(a.readNumber(caller),-0));}finally{a.release(caller);}\n  assert.equal(a.stats().frameDepth,1);\n }finally{a.leaveFrame(frame);closeStaticLiteral(a,[held,...[literal,sourceText].filter(value=>value!==undefined)]);}\n}\ntest('Given exact UTF16 literal data when emitted and collected then owned copies preserve NUL BOM surrogate pairs lone surrogates and complete Function source text',async()=>{\n const product=await staticLiteralArtifact();assertStaticLiteral(instantiateManagedRuntime(product.bytes,{maxSlots:2048,initialBytes:65536,maxBytes:2097152}),product);\n for(const text of['','a','中😀\\ud800\\0\\udfff']){\n  const p=backend.compiler.compile_ir_string(staticLiteralSource(text),'static-small.eli'),artifact=Uint8Array.from(backend.managed.emit_managed_wasm(p,runtimeProgram));\n  const a=instantiateManagedRuntime(artifact,{maxSlots:2048,initialBytes:65536,maxBytes:2097152});let output;\n  try{output=a.invoke('literal');assert.equal(a.readString(output),text);}finally{closeStaticLiteral(a,output===undefined?[]:[output]);}\n }\n},120000);\ntest('Given larger source literals when managed IR is lowered then string bytes remain static data instead of a per-code-unit control tree',async()=>{\n const product=await staticLiteralArtifact(),large=staticLiteralShape(product.lowered.typed);\n const small=backend.managed.lower_managed_program(backend.compiler.compile_ir_string(staticLiteralSource('x'),'static-small.eli'),runtimeProgram),smallShape=staticLiteralShape(small.typed);\n assert(large.copies.some(copy=>copy.value===product.text),'the literal retains its exact UTF16 static payload');\n assert(large.copies.some(copy=>copy.value===product.sourceText),'Function.toString retains its complete original generated source');\n assert(large.count<=smallShape.count+128,'growing literal text must not grow the executable control tree per code unit');\n},120000);\ntest.skipIf(process.arch!=='arm64'||!['darwin','linux'].includes(process.platform))('Given native literal static blocks when their bytes are copied then the same UTF16 source and collecting-root contract executes without imports',async()=>{\n const product=await staticLiteralArtifact(),target=process.platform==='linux'?'arm64-linux':'arm64-macos';\n const path=resolve(directory,'static-literal'+(process.platform==='linux'?'.so':'.dylib'));\n await writeFile(path,Uint8Array.from(backend.native.emit_typed_native_memory_library(product.lowered.typed,target)));\n assertStaticLiteral(await instantiateNativeManagedRuntime(path,product.lowered,{maxSlots:2048,initialBytes:65536,maxBytes:2097152}),product);\n},120000);\n"))
+(module tests.wasm-managed-strings.test
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:util" inspect)
+  (import "node:fs/promises" readFile mkdtemp rm writeFile)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:child_process" spawnSync)
+  (import "node:buffer" Buffer)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../tools/testing/initializer-array-fixture.mjs" verifyTextPropertyReads)
+  (import "../tools/testing/managed-fixture-repairs.mjs" assertMalformedTextMethods)
+
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+  (defconst to-uint32 (js* "(x) => x >>> 0"))
+  (defconst xorshift32 (js* "(s) => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return s >>> 0; }"))
+  (defconst bit-and-u16 (js* "(x) => x & 65535"))
+  (defconst js-instanceof (js* "(a, b) => a instanceof b"))
+
+  (defvar directory undefined)
+  (defvar backend undefined)
+  (defvar runtime-program undefined)
+  (defvar program undefined)
+  (defvar bytes undefined)
+  (defvar js undefined)
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-managed-strings-"))))
+      (setq backend (await (buildBackends (js-object :outputRoot directory))))
+      (let* ((source (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
+             (module-end (js-call source :lastIndexOf ")")))
+        (funcall assert (>= module-end 0))
+        ;; Only this test's compiled copy exposes the two private borrow helpers. Keep
+        ;; the production export surface unchanged and avoid unrelated realm bootstrap.
+        (let ((test-source (str (js-call source :slice 0 module-end)
+                                "\n  (export heap-borrow-root heap-return-root)\n"
+                                (js-call source :slice module-end))))
+          (setq runtime-program (js-call (get backend :compiler) :compile_ir_string test-source "runtime.eli"))
+          (setq program (js-call (get backend :compiler) :compile_ir_string
+                          (await (readFile "tests/fixtures/wasm-managed-strings.eli" "utf8"))
+                          "strings.eli"))
+          (setq bytes (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm program runtime-program)))
+          (funcall assert (js-call globalThis.WebAssembly :validate bytes))
+          (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+          (setq js (await (funcall dynamic-import
+                            (str "data:text/javascript;base64,"
+                                 (js-call (Buffer/from (js-call (get backend :compiler) :emit_ir_string program)) :toString "base64"))))))))
+    120000)
+
+  (afterAll
+    (async ()
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun box (a x)
+    (cond
+      ((= (value-type x) "number") (js-call a :number x))
+      ((= (value-type x) "string") (js-call a :string x))
+      (t x)))
+
+  (defun read-val (a x)
+    (if (and (not (nullish? x)) (= (value-type x) "object"))
+      (cond
+        ((= (get x :kind) 4) (js-call a :readNumber x))
+        ((= (get x :kind) 5) (js-call a :readString x))
+        (t x))
+      x))
+
+  (defun invoke-val (a name args)
+    (let ((v (js-call a :invoke name args)))
+      (try
+        (read-val a v)
+        (finally (js-call a :release v)))))
+
+  (defun check (a name inputs)
+    (let ((args (js-call inputs :map (lambda (x) (box a x)))))
+      (try
+        (js-call assert :deepEqual
+          (invoke-val a name args)
+          (Reflect/apply (get js (js-call name :replaceAll "-" "_")) js inputs)
+          name)
+        (catch error
+          (put error :message (str (get error :message) "\n" name " " (inspect inputs)))
+          (throw error))
+        (finally
+          (js-call args :forEach (lambda (x) (js-call a :release x)))))
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))
+
+  (defconst positions
+    (js-array nil false t undefined
+              (get globalThis.Number :NaN)
+              (get globalThis.Number :POSITIVE_INFINITY)
+              (get globalThis.Number :NEGATIVE_INFINITY)
+              0 -0.0 0.5 -0.5 1 -1 3.5 -3.5
+              (get globalThis.Number :MIN_VALUE)
+              (- (get globalThis.Number :MIN_VALUE))
+              (get globalThis.Number :MAX_VALUE)
+              (- (get globalThis.Number :MAX_VALUE))
+              4294967295 4294967296))
+
+  (defconst texts
+    (js-array ""
+              "x"
+              (str "a" (String/fromCharCode 0) "b")
+              (str "中😀" (String/fromCharCode 55296) "x" (String/fromCharCode 57343))
+              "ababa"
+              (String/fromCharCode 55357 56832)
+              (str (String/fromCharCode 55357) "x" (String/fromCharCode 56832))))
+
+  (test "ordinary UTF16 property and character access keeps code units, code points, signed positions and exact missing results under GC"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (js-call texts :forEach
+          (lambda (text)
+            (check a "size" (js-array text))
+            (js-call (js-array 0 -0.0 1 2 99 -1 0.5
+                               (get globalThis.Number :NaN)
+                               (get globalThis.Number :POSITIVE_INFINITY)
+                               "0" "1" "01" "" "length")
+                     :forEach
+                     (lambda (key)
+                       (js-call (js-array "read-value" "default-value") :forEach
+                         (lambda (name)
+                           (check a name
+                             (if (= name "default-value")
+                               (js-array text key "fallback")
+                               (js-array text key)))))))
+            (js-call positions :forEach
+              (lambda (position)
+                (js-call (js-array "at" "char-at" "char-code" "code-point") :forEach
+                  (lambda (name) (check a name (js-array text position))))))
+            (js-call (js-array "0" "1" "length") :forEach
+              (lambda (key) (check a "nth-value" (js-array key text))))
+            (check a "scan" (js-array text))))
+        (js-call a :closeModule)
+        (js-call a :collect))))
+
+  (test "source slice, substring and substr preserve each conversion rule and endpoints without code-point normalization"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (js-call texts :forEach
+          (lambda (text)
+            (js-call positions :forEach
+              (lambda (lo)
+                (js-call positions :forEach
+                  (lambda (hi)
+                    (js-call (js-array "slice" "substring" "substr") :forEach
+                      (lambda (name) (check a name (js-array text lo hi))))))))))
+        (js-call a :closeModule)
+        (js-call a :collect))))
+
+  (test "forward and reverse source searches preserve empty needles, overlapping matches, NaN defaults and primitive string conversions"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes))
+            (needles (js-array "" "x" "a" "aba" (String/fromCharCode 0) "😀" (String/fromCharCode 55296)
+                               nil false t undefined 0 -0.0 -1
+                               (get globalThis.Number :NaN)
+                               (get globalThis.Number :POSITIVE_INFINITY)
+                               (get globalThis.Number :NEGATIVE_INFINITY))))
+        (js-call a :auto 1)
+        (js-call texts :forEach
+          (lambda (text)
+            (js-call needles :forEach
+              (lambda (needle)
+                (js-call positions :forEach
+                  (lambda (p)
+                    (js-call (js-array "find" "last" "includes" "starts" "ends") :forEach
+                      (lambda (name) (check a name (js-array text needle p))))))))))
+        (js-call a :closeModule)
+        (js-call a :collect))))
+
+  (test "String repeat, trim, well-formed repair, identities and variadic concat retain exact primitive text and lone surrogates"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (js-call texts :forEach
+          (lambda (text)
+            (js-call (js-array "identity" "value" "well-formed" "repair" "trim" "trim-start" "trim-end") :forEach
+              (lambda (name) (check a name (js-array text))))
+            (js-call (js-array nil false t undefined (get globalThis.Number :NaN) -0.0 -0.5 0 0.5 1 3.5) :forEach
+              (lambda (count) (check a "repeat" (js-array text count))))
+            (js-call (js-array nil false t undefined 0 -0.0 4294967295 -1
+                               (get globalThis.Number :NaN)
+                               (get globalThis.Number :POSITIVE_INFINITY)
+                               (get globalThis.Number :NEGATIVE_INFINITY)
+                               "中😀")
+                     :forEach
+                     (lambda (value) (check a "concat" (js-array text value "!" value))))))
+        (let ((whitespace (String/fromCharCode 9 10 11 12 13 32 160 5760 8192 8193 8194 8195 8196 8197 8198 8199 8200 8201 8202 8232 8233 8239 8287 12288 65279)))
+          (js-call (js-array whitespace
+                             (str whitespace "x" whitespace)
+                             (str (String/fromCharCode 133) "x" (String/fromCharCode 133))
+                             (str (String/fromCharCode 6158) "x" (String/fromCharCode 6158))
+                             "😀")
+                   :forEach
+                   (lambda (text)
+                     (js-call (js-array "trim" "trim-start" "trim-end") :forEach
+                       (lambda (name) (check a name (js-array text)))))))
+        (js-call (js-array -1 -1.5 (get globalThis.Number :NEGATIVE_INFINITY) (get globalThis.Number :POSITIVE_INFINITY)) :forEach
+          (lambda (count)
+            (let ((s (js-call a :string "x"))
+                  (n (js-call a :number count)))
+              (js-call assert :throws
+                (lambda () (js-call a :invoke "repeat" (js-array s n)))
+                (lambda (e) (= (and (get e :eliscriptDiagnostic) (get (get e :eliscriptDiagnostic) :code)) "ELI-RT0003")))
+              (js-call a :release s)
+              (js-call a :release n))))
+        (check a "repeat" (js-array "" (get globalThis.Number :MAX_VALUE)))
+        (js-call a :closeModule)
+        (js-call a :collect))))
+
+  (test "raw text queries reject unfinished string keys and protect borrowed receiver, positions and results across allocating GC"
+    (lambda ()
+      (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
+             (heap (funcall (get e "heap-new") 64 4096 65536))
+             (call-fn (lambda (name &rest args)
+                        (let ((out (funcall to-uint32 (Reflect/apply (get e name) e (js-call (js-array heap) :concat args)))))
+                          (js-call assert :equal (funcall (get e "last-error")) 0 name)
+                          out)))
+             (make-string (lambda (text &rest __host_default_arguments_1)
+    (let* ((sealed (aref __host_default_arguments_1 0)))
+                            (let* ((seal-flag (if (undefined? sealed) t sealed))
+                                   (h (funcall call-fn "value-string" (js-length text)))
+                                   (view (new globalThis.DataView (get (get e :memory) :buffer)))
+                                   (p (funcall call-fn "value-data" h 5))
+                                   (i 0))
+                              (while (< i (js-length text))
+                                (js-call view :setUint16 (+ p (* i 2)) (js-call text :charCodeAt i) t)
+                                (setq i (1+ i)))
+                              (when seal-flag (funcall call-fn "value-seal" h))
+                              h))))
+             (s (funcall make-string "中😀"))
+             (key (funcall make-string "0" false)))
+        (funcall (get e "value-text-get") heap s key 0)
+        (js-call assert :equal (funcall (get e "last-error")) 6)
+        (funcall call-fn "value-seal" key)
+        (funcall call-fn "heap-auto" 1)
+        (let ((first (funcall call-fn "value-text-get" s key 0)))
+          (funcall call-fn "heap-pin" s)
+          (funcall call-fn "heap-pin" key)
+          (funcall call-fn "heap-pin" first)
+          (js-call assert :equal
+            (js-call (new globalThis.DataView (get (get e :memory) :buffer)) :getUint16 (funcall call-fn "value-data" first 5) t)
+            (js-call "中" :charCodeAt 0))
+          (let* ((p (funcall call-fn "value-number" 0 1072693248))
+                 (out (funcall call-fn "value-source-text-method" s p 3 3)))
+            (funcall call-fn "heap-pin" out)
+            (js-call assert :equal
+              (js-call (new globalThis.DataView (get (get e :memory) :buffer)) :getFloat64 (funcall call-fn "value-data" out 4) t)
+              128512)
+            (js-call (js-array s key first out) :forEach (lambda (h) (funcall call-fn "heap-release" h)))
+            (funcall call-fn "heap-collect")
+            (js-call assert :equal (funcall call-fn "heap-live") 0)
+            (js-call assert :equal (funcall call-fn "frame-depth") 0))))))
+
+  (test "text calls capture receiver and earlier arguments, evaluate ignored extras and preserve lazy defaults before method conversions"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (check a "capture" (js-array "abcdef" 1 "xy"))
+        (check a "concat-capture" (js-array "base" "old" "new"))
+        (let ((s (js-call a :string "中😀"))
+              (trace (js-call a :sourceObject (js-object))))
+          (js-call assert :equal (invoke-val a "ignored" (js-array s trace)) "中")
+          (js-call (js-array (js-array "first" 1) (js-array "second" 2)) :forEach
+            (lambda (pair)
+              (let* ((key (js-call a :string (aref pair 0)))
+                     (value (js-call a :objectGet trace key)))
+                (js-call assert :equal (js-call a :readNumber value) (aref pair 1))
+                (js-call a :release value)
+                (js-call a :release key))))
+          (js-call a :release trace)
+          (js-call a :release s)
+          (js-call a :collect)
+          (js-call assert :equal (js-call a :live) 0))
+        (js-call texts :forEach
+          (lambda (text)
+            (js-call (js-array 0 1 99 "0" "length") :forEach
+              (lambda (key) (check a "default-order" (js-array text key))))))
+        (js-call a :closeModule)
+        (js-call a :collect))))
+
+  (test "source text boundaries are immutable, source-bound unsupported calls and malformed arity are refused, and invalid handles stay branded"
+    (async ()
+      (let ((before (JSON/stringify program)))
+        (js-call (get backend :managed) :emit_managed_wasm program runtime-program)
+        (js-call assert :equal (JSON/stringify program) before))
+      (js-call (js-array "(js-call s :toLowerCase)" "(js-call s :split \"x\")") :forEach
+        (lambda (expression)
+          (let* ((ir (js-call (get backend :compiler) :compile_ir_string (str "(defun f (s) " expression ") (export f)") "supported-text.eli"))
+                 (saved (JSON/stringify ir))
+                 (emitted (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm ir runtime-program))))
+            (funcall assert (js-call globalThis.WebAssembly :validate emitted))
+            (js-call assert :equal (JSON/stringify ir) saved))))
+      ;; General member invocation now preserves dead branches instead of rejecting
+      ;; a property spelling everywhere, including methods on user-defined objects.
+      (let* ((formerly-rejected (js-array "(js-call s method)"
+                                          "(js-call s :toLocaleLowerCase)"
+                                          "(js-call s :normalize)"
+                                          "(js-call s :matchAll \"x\")"
+                                          "(js-call s :match \"x\")"))
+             (dead-source
+               (str (js-call (js-call formerly-rejected :map
+                               (lambda (expression index)
+                                 (str "(defun dead" index " (s method) (if false " expression " s))")))
+                             :join "\n")
+                    "\n (defun dynamic (s method argument) (js-call s method argument))\n"
+                    " (defun matched (s) (let ((found (js-call s :match \"x\"))) (if found (get found 0) nil)))\n"
+                    " (defun matched-all (s) (let* ((iterator (js-call s :matchAll \"x\")) (step (js-call iterator :next)))\n"
+                    "  (if (get step :done) nil (get (get step :value) 0))))\n"
+                    " (defun dynamic-matched (s) (let* ((method \"match\") (found (js-call s method \"x\"))) (if found (get found 0) nil)))\n"
+                    " (defun dynamic-matched-all (s) (let* ((method \"matchAll\") (iterator (js-call s method \"x\")) (step (js-call iterator :next)))\n"
+                    "  (if (get step :done) nil (get (get step :value) 0))))\n"
+                    " (defun custom-matched (s) (let ((pattern (js-object)))\n"
+                    "  (put pattern (js* \"Symbol.match\") (lambda (input) (js-array input)))\n"
+                    "  (get (js-call s :match pattern) 0)))\n"
+                    " (defun custom-matched-all (s) (let ((pattern (js-object)))\n"
+                    "  (put pattern (js* \"Symbol.matchAll\") (lambda (input)\n"
+                    "   (js-object :next (lambda () (js-object :done false :value (js-array input))))))\n"
+                    "  (get (get (js-call (js-call s :matchAll pattern) :next) :value) 0)))\n"
+                    " (defun protocol-fault () (let ((trace (js-array)) (marker (js-object)) (pattern (js-object)))\n"
+                    "  (put pattern (js* \"Symbol.match\") (lambda (input) (js-call trace :push \"method\") (throw marker)))\n"
+                    "  (try (js-call \"text\" :match (progn (js-call trace :push \"argument\") pattern))\n"
+                    "   (catch error (JSON/stringify (js-array (= error marker) trace))))))\n"
+                    " (defun invalid-all () (let ((pattern (new (js* \"RegExp\") \"x\")))\n"
+                    "  (try (js-call \"abxx\" :matchAll pattern) (catch error (get error :name)))))\n"
+                    " (defun normalized (s) (js-call s :normalize))\n"
+                    " (defun localized (s) (js-call s :toLocaleLowerCase))\n"
+                    " (defun custom () (let ((value (js-object :normalize (lambda () \"custom-normalize\") :toLocaleLowerCase (lambda () \"custom-locale\"))))\n"
+                    "  (js-call (js-call value :normalize) :concat \"/\" (js-call value :toLocaleLowerCase))))\n"
+                    " (defun dynamic-order ()\n"
+                    "  (let* ((trace (js-array)) (text \"abcd\")\n"
+                    "         (key (js-object :toString (lambda () (js-call trace :push \"key\") \"slice\")))\n"
+                    "         (result (js-call (progn (js-call trace :push \"receiver\") text)\n"
+                    "           (progn (js-call trace :push \"key-expression\") key)\n"
+                    "           (progn (js-call trace :push \"first\") (setq text \"changed\") 1)\n"
+                    "           (progn (js-call trace :push \"second\") 3)\n"
+                    "           (progn (js-call trace :push \"extra\") 99))))\n"
+                    "   (JSON/stringify (js-array result trace))))\n"
+                    " (defun null-order ()\n"
+                    "  (let* ((trace (js-array)) (key (js-object :toString (lambda () (js-call trace :push \"coercion\") \"slice\"))))\n"
+                    "   (try (js-call nil (progn (js-call trace :push \"key-expression\") key) (js-call trace :push \"argument\"))\n"
+                    "    (catch error (JSON/stringify (js-array (get error :name) trace))))))\n"
+                    " (defun prototype-order (throwing)\n"
+                    "  (let* ((trace (js-array)) (prototype (get (js* \"String\") :prototype))\n"
+                    "         (saved (Object/getOwnPropertyDescriptor prototype \"slice\")) (marker (js-object)) (method \"slice\"))\n"
+                    "   (try\n"
+                    "    (Object/defineProperty prototype \"slice\" (js-object :configurable t :get (lambda ()\n"
+                    "     (js-call trace :push \"get\")\n"
+                    "     (if throwing (throw marker) (lambda (argument) (js-call trace :push \"old-call\") (js-call \"old:\" :concat argument))))))\n"
+                    "    (let ((result (try\n"
+                    "      (js-call \"abcd\" method (progn (js-call trace :push \"argument\")\n"
+                    "       (Object/defineProperty prototype \"slice\" (js-object :configurable t :value (lambda (argument) \"new\"))) \"ARG\"))\n"
+                    "      (catch error (= error marker)))))\n"
+                    "     (JSON/stringify (js-array result trace)))\n"
+                    "    (finally (if saved (Object/defineProperty prototype \"slice\" saved) (Reflect/deleteProperty prototype \"slice\"))))))\n"
+                    " (defun native-capture-order ()\n"
+                    "  (let* ((trace (js-array)) (prototype (get (js* \"String\") :prototype))\n"
+                    "         (saved (Object/getOwnPropertyDescriptor prototype \"slice\")) (method \"slice\"))\n"
+                    "   (try\n"
+                    "    (let ((result (js-call \"abcd\" method (progn (js-call trace :push \"argument\")\n"
+                    "      (Object/defineProperty prototype \"slice\" (js-object :configurable t :value (lambda (argument) \"new\"))) 1))))\n"
+                    "     (JSON/stringify (js-array result trace)))\n"
+                    "    (finally (if saved (Object/defineProperty prototype \"slice\" saved) (Reflect/deleteProperty prototype \"slice\"))))))\n"
+                    " (export dead0 dead1 dead2 dead3 dead4 dynamic matched matched-all dynamic-matched dynamic-matched-all\n"
+                    "  custom-matched custom-matched-all normalized localized custom\n"
+                    "  dynamic-order null-order prototype-order native-capture-order protocol-fault invalid-all)"))
+             (dead-ir (js-call (get backend :compiler) :compile_ir_string dead-source "dead-text.eli"))
+             (dead-js-code (js-call (get backend :compiler) :emit_ir_string dead-ir))
+             (dead-js (await (funcall dynamic-import
+                               (str "data:text/javascript;base64," (js-call (Buffer/from dead-js-code) :toString "base64")))))
+             (dead-bytes (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm dead-ir runtime-program)))
+             (dead (instantiateManagedRuntime dead-bytes))
+             (_ (js-call dead :auto 1))
+             (held (js-call dead :string "unchanged"))
+             (method (js-call dead :string "missing"))
+             (with-cleanup
+               (lambda (body steps)
+                 (let ((failed false)
+                       (failure undefined)
+                       (result undefined)
+                       (cleanup-errors (js-array)))
+                   (try (setq result (funcall body))
+                     (catch error (setq failed t failure error)))
+                   (funcall steps
+                     (lambda (label operation)
+                       (try (funcall operation)
+                         (catch error
+                           (let ((cleanup-error (new globalThis.Error (str "string fixture cleanup: " label) (js-object :cause error))))
+                             (cond
+                               ((not failed) (setq failed t failure cleanup-error))
+                               ((< (js-length cleanup-errors) 12) (js-call cleanup-errors :push cleanup-error))))))))
+                   (when failed
+                     (when (> (js-length cleanup-errors) 0)
+                       (let ((err (new globalThis.Error
+                                    (str (if (funcall js-instanceof failure globalThis.Error)
+                                           (get failure :message)
+                                           "string fixture failed")
+                                         "; subsequent cleanup also failed")
+                                    (js-object :cause failure))))
+                         (put err :cleanupErrors cleanup-errors)
+                         (throw err)))
+                     (throw failure))
+                   result)))
+             (invoke-with-cleanup
+               (lambda (rt name args)
+                 (let ((value undefined)
+                       (returned false))
+                   (funcall with-cleanup
+                     (lambda ()
+                       (setq value (js-call rt :invoke name args))
+                       (setq returned t)
+                       (read-val rt value))
+                     (lambda (cleanup)
+                       (when returned
+                         (funcall cleanup (str "result " name) (lambda () (js-call rt :release value))))))))))
+        (funcall with-cleanup
+          (lambda ()
+            (let ((index 0))
+              (while (< index (js-length formerly-rejected))
+                (js-call assert :equal
+                  (invoke-val dead (str "dead" index) (js-array held method))
+                  (funcall (get dead-js (str "dead" index)) "unchanged" "missing"))
+                (setq index (1+ index))))
+            (let* ((lone-surrogate-str (str "中😀" (String/fromCharCode 55296)))
+                   (active-cases
+                     (js-array
+                       (js-array "dynamic" (js-array "abcd" "slice" 1))
+                       (js-array "dynamic" (js-array "中x" "toUpperCase" 0))
+                       (js-array "matched" (js-array "abxx"))
+                       (js-array "matched" (js-array "none"))
+                       (js-array "matched-all" (js-array "abxx"))
+                       (js-array "matched-all" (js-array "none"))
+                       (js-array "custom" (js-array))
+                       (js-array "dynamic-order" (js-array))
+                       (js-array "null-order" (js-array))
+                       (js-array "prototype-order" (js-array false))
+                       (js-array "prototype-order" (js-array t))
+                       (js-array "native-capture-order" (js-array))
+                       (js-array "dynamic-matched" (js-array "abxx"))
+                       (js-array "dynamic-matched" (js-array "none"))
+                       (js-array "dynamic-matched-all" (js-array "abxx"))
+                       (js-array "dynamic-matched-all" (js-array "none"))
+                       (js-array "custom-matched" (js-array lone-surrogate-str))
+                       (js-array "custom-matched-all" (js-array lone-surrogate-str))
+                       (js-array "protocol-fault" (js-array))
+                       (js-array "invalid-all" (js-array))))
+                   (oracle (spawnSync "node"
+                             (js-array (resolve "tests/helpers/wasm-managed-strings-node.mjs") "--eval-cases")
+                             (js-object :input (JSON/stringify (js-object :javascript dead-js-code :cases active-cases))
+                                        :encoding "utf8" :timeout 30000)))
+                   (_2 (progn
+                         (js-call assert :equal (get oracle :error) undefined)
+                         (js-call assert :equal (get oracle :status) 0 (get oracle :stderr))))
+                   (expected (JSON/parse (get oracle :stdout)))
+                   (matched-re (new globalThis.RegExp "^(?:dynamic-|custom-)?matched(?:-all)?$")))
+              (js-call active-cases :forEach
+                (lambda (pair index)
+                  (let ((name (aref pair 0))
+                        (inputs (aref pair 1))
+                        (args (js-array)))
+                    (funcall with-cleanup
+                      (lambda ()
+                        (try
+                          (progn
+                            (js-call inputs :forEach (lambda (input) (js-call args :push (box dead input))))
+                            (js-call assert :deepEqual (funcall invoke-with-cleanup dead name args) (aref expected index) name))
+                          (catch error
+                            (let ((heap-context "stats unavailable"))
+                              (try
+                                (setq heap-context
+                                  (JSON/stringify (js-object :stats (js-call dead :stats) :auto 1
+                                                             :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)))
+                                (catch ignored nil))
+                              (throw (new globalThis.Error
+                                       (str "active string case " name " " (inspect inputs) "; heap=" heap-context)
+                                       (js-object :cause error)))))))
+                      (lambda (cleanup)
+                        (js-call args :forEach
+                          (lambda (arg arg-idx)
+                            (funcall cleanup (str "active " name " argument " arg-idx) (lambda () (js-call dead :release arg))))))))))
+              ;; Keep the previously observed capacity boundary on the mutated/restored
+              ;; realm. Refusing a request must not invalidate any independent caller root.
+              (let ((dirty-zero undefined)
+                    (dirty-frame undefined)
+                    (dirty-capacity undefined))
+                (try
+                  (funcall with-cleanup
+                    (lambda ()
+                      (js-call assert :equal (js-call dead :readString held) "unchanged" "held string before dirty manual pressure")
+                      (js-call assert :equal (js-call dead :readString method) "missing" "method string before dirty manual pressure")
+                      (setq dirty-zero (js-call dead :number -0.0))
+                      (setq dirty-frame (js-call dead :frame 1))
+                      (js-call dead :frameSet dirty-frame 0 dirty-zero)
+                      (js-call dead :auto 0)
+                      (js-call dead :collect)
+                      (js-call assert :equal (js-call dead :readString held) "unchanged" "held string after first dirty manual collection")
+                      (js-call assert :equal (js-call dead :readString method) "missing" "method string after first dirty manual collection")
+                      (let ((round 0))
+                        (while (and (< round 16) (undefined? dirty-capacity))
+                          (let ((c-idx 0))
+                            (while (and (< c-idx (js-length active-cases)) (undefined? dirty-capacity))
+                              (let* ((pair (aref active-cases c-idx))
+                                     (name (aref pair 0))
+                                     (inputs (aref pair 1)))
+                                (when (js-call matched-re :test name)
+                                  (let ((args (js-array)))
+                                    (funcall with-cleanup
+                                      (lambda ()
+                                        (js-call inputs :forEach (lambda (input) (js-call args :push (box dead input))))
+                                        (try
+                                          (js-call assert :deepEqual
+                                            (funcall invoke-with-cleanup dead name args)
+                                            (aref expected c-idx)
+                                            (str name " dirty manual round=" round))
+                                          (catch error
+                                            (if (/= (and (get error :eliscriptDiagnostic) (get (get error :eliscriptDiagnostic) :code)) "ELI-RT0002")
+                                              (throw error)
+                                              (setq dirty-capacity error)))))
+                                      (lambda (cleanup)
+                                        (js-call args :forEach
+                                          (lambda (arg arg-idx)
+                                            (funcall cleanup (str "dirty " name " argument " arg-idx)
+                                              (lambda () (js-call dead :release arg)))))))
+                                    (when (undefined? dirty-capacity)
+                                      (js-call dead :collect)
+                                      (js-call assert :equal (get (js-call dead :stats) :frameDepth) 1)))))
+                              (setq c-idx (1+ c-idx))))
+                          (setq round (1+ round)))))
+                    (lambda (cleanup)
+                      (funcall cleanup "dirty realm held string" (lambda () (js-call assert :equal (js-call dead :readString held) "unchanged")))
+                      (funcall cleanup "dirty realm method string" (lambda () (js-call assert :equal (js-call dead :readString method) "missing")))
+                      (unless (undefined? dirty-frame)
+                        (funcall cleanup "dirty realm caller frame depth"
+                          (lambda () (js-call assert :equal (get (js-call dead :stats) :frameDepth) 1)))
+                        (funcall cleanup "dirty realm caller negative zero"
+                          (lambda ()
+                            (let ((retained (js-call dead :frameGet dirty-frame 0)))
+                              (funcall with-cleanup
+                                (lambda () (funcall assert (Object/is (js-call dead :readNumber retained) -0.0)))
+                                (lambda (rel) (funcall rel "dirty retained caller value" (lambda () (js-call dead :release retained))))))))
+                        (funcall cleanup "dirty caller frame" (lambda () (js-call dead :leaveFrame dirty-frame))))
+                      (unless (undefined? dirty-zero)
+                        (funcall cleanup "dirty caller negative zero handle" (lambda () (js-call dead :release dirty-zero))))
+                      (funcall cleanup "restore active automatic collection" (lambda () (js-call dead :auto 1)))))
+                  (catch error
+                    (when (undefined? dirty-capacity) (throw error))
+                    (let ((failure (new globalThis.Error "dirty realm capacity refusal must preserve caller roots and cleanup"
+                                     (js-object :cause error))))
+                      (put failure :capacityFailure dirty-capacity)
+                      (throw failure)))))
+              ;; Each collection policy gets an independent realm from the same compiled
+              ;; bytes, with the original default slot/byte budgets.
+              (js-call (js-array 0 1) :forEach
+                (lambda (threshold)
+                  (let* ((stress (instantiateManagedRuntime dead-bytes))
+                         (held-zero undefined)
+                         (held-text undefined)
+                         (outer undefined)
+                         (refusal-count 0)
+                         (recovery-count 0)
+                         (refusal-evidence (js-array))
+                         (assert-stress-roots
+                           (lambda ()
+                             (js-call assert :equal (get (js-call stress :stats) :frameDepth) 1)
+                             (js-call assert :equal (js-call stress :readString held-text) "stress-held")
+                             (let ((retained (js-call stress :frameGet outer 0)))
+                               (funcall with-cleanup
+                                 (lambda () (funcall assert (Object/is (js-call stress :readNumber retained) -0.0)))
+                                 (lambda (cleanup)
+                                   (funcall cleanup "retained caller value" (lambda () (js-call stress :release retained))))))))
+                         (request-fn
+                           (lambda (name inputs expected-value context allow-capacity)
+                             (let ((args (js-array))
+                                   (refused undefined))
+                               (funcall with-cleanup
+                                 (lambda ()
+                                   (try
+                                     (progn
+                                       (js-call inputs :forEach (lambda (input) (js-call args :push (box stress input))))
+                                       (js-call assert :deepEqual (funcall invoke-with-cleanup stress name args) expected-value context))
+                                     (catch error
+                                       (if (and allow-capacity
+                                                (= (and (get error :eliscriptDiagnostic) (get (get error :eliscriptDiagnostic) :code)) "ELI-RT0002"))
+                                         (progn
+                                           (setq refused error)
+                                           (funcall assert-stress-roots)
+                                           (js-call args :forEach
+                                             (lambda (arg arg-idx)
+                                               (js-call assert :deepEqual (read-val stress arg) (aref inputs arg-idx)
+                                                 (str "refused request retains argument " arg-idx)))))
+                                         (throw (new globalThis.Error (str context " " (inspect inputs)) (js-object :cause error)))))))
+                                 (lambda (cleanup)
+                                   (js-call args :forEach
+                                     (lambda (arg arg-idx)
+                                       (funcall cleanup (str "repeated " name " argument " arg-idx)
+                                         (lambda () (js-call stress :release arg)))))))
+                               refused))))
+                    (funcall with-cleanup
+                      (lambda ()
+                        (js-call stress :auto threshold)
+                        (setq held-zero (js-call stress :number -0.0))
+                        (setq held-text (js-call stress :string "stress-held"))
+                        (setq outer (js-call stress :frame 1))
+                        (js-call stress :frameSet outer 0 held-zero)
+                        (when (= threshold 0) (js-call stress :collect))
+                        (let ((round 0))
+                          (while (< round 16)
+                            (js-call active-cases :forEach
+                              (lambda (pair c-idx)
+                                (let ((name (aref pair 0))
+                                      (inputs (aref pair 1)))
+                                  (when (js-call matched-re :test name)
+                                    (let* ((context (str "repeated string protocol " name " collection=" threshold " round=" round))
+                                           (refused (funcall request-fn name inputs (aref expected c-idx) context (= threshold 0))))
+                                      (when refused
+                                        (setq refusal-count (1+ refusal-count))
+                                        (when (< (js-length refusal-evidence) 8)
+                                          (js-call refusal-evidence :push
+                                            (js-object :name name :round round
+                                                       :code (get (get refused :eliscriptDiagnostic) :code)
+                                                       :stats (js-call stress :stats)))))
+                                      (when (= threshold 0) (js-call stress :collect))
+                                      (funcall assert-stress-roots)
+                                      (when refused
+                                        (funcall with-cleanup
+                                          (lambda ()
+                                            (js-call stress :auto 1)
+                                            (funcall request-fn name inputs (aref expected c-idx) (str context " automatic recovery") false)
+                                            (funcall assert-stress-roots)
+                                            (setq recovery-count (1+ recovery-count)))
+                                          (lambda (cleanup)
+                                            (funcall cleanup "restore manual collection after refusal"
+                                              (lambda () (js-call stress :auto 0)))))
+                                        (js-call stress :collect)
+                                        (funcall assert-stress-roots)))))))
+                            (setq round (1+ round))))
+                        (js-call assert :equal recovery-count refusal-count)
+                        (when (> refusal-count 0)
+                          (js-call globalThis.console :info
+                            (str "manual string protocol capacity refusals "
+                                 (JSON/stringify (js-object :refusalCount refusal-count :recoveryCount recovery-count :cases refusal-evidence))))))
+                      (lambda (cleanup)
+                        (unless (undefined? outer) (funcall cleanup "caller frame" (lambda () (js-call stress :leaveFrame outer))))
+                        (unless (undefined? held-zero) (funcall cleanup "caller negative zero" (lambda () (js-call stress :release held-zero))))
+                        (unless (undefined? held-text) (funcall cleanup "independent caller string" (lambda () (js-call stress :release held-text))))
+                        (funcall cleanup "stress module" (lambda () (js-call stress :closeModule)))
+                        (funcall cleanup "stress heap collection" (lambda () (js-call stress :collect)))
+                        (funcall cleanup "stress empty heap assertion" (lambda () (js-call assert :equal (js-call stress :live) 0)))
+                        (funcall cleanup "stress empty frame assertion" (lambda () (js-call assert :equal (get (js-call stress :stats) :frameDepth) 0))))))))
+              ;; Locale casing and Unicode normalization remain explicitly unsupported on strings.
+              (js-call (js-array "normalized" "localized") :forEach
+                (lambda (name)
+                  (js-call assert :throws
+                    (lambda () (js-call dead :invoke name (js-array held)))
+                    (lambda (error) (= (and (get error :eliscriptDiagnostic) (get (get error :eliscriptDiagnostic) :code)) "ELI-RT0003")))))))
+          (lambda (cleanup)
+            (funcall cleanup "held string" (lambda () (js-call dead :release held)))
+            (funcall cleanup "method string" (lambda () (js-call dead :release method)))
+            (funcall cleanup "module" (lambda () (js-call dead :closeModule)))
+            (funcall cleanup "heap collection" (lambda () (js-call dead :collect)))
+            (funcall cleanup "empty heap assertion" (lambda () (js-call assert :equal (js-call dead :live) 0)))
+            (funcall cleanup "empty frame assertion" (lambda () (js-call assert :equal (get (js-call dead :stats) :frameDepth) 0)))))
+        (let* ((a (instantiateManagedRuntime bytes))
+               (b (instantiateManagedRuntime bytes))
+               (s (js-call a :string "abc"))
+               (foreign (js-call b :string "x")))
+          (js-call assert :throws
+            (lambda () (js-call a :invoke "concat" (js-array s foreign t false)))
+            (lambda (e) (= (and (get e :eliscriptDiagnostic) (get (get e :eliscriptDiagnostic) :code)) "ELI-RT0001")))
+          (js-call b :release foreign)
+          (js-call b :closeModule)
+          (js-call b :collect)
+          (let ((opaque (js-call a :sourceObject (js-object)))
+                (fraction (js-call a :number 0.5))
+                (position (js-call a :string "1")))
+            (verifyTextPropertyReads a s opaque fraction position js invoke-val)
+            (js-call (js-array s opaque fraction position) :forEach (lambda (x) (js-call a :release x)))
+            (js-call a :closeModule)
+            (js-call a :collect)
+            (js-call assert :strictEqual (js-call a :live) 0)
+            (js-call assert :throws
+              (lambda () (js-call a :invoke "trim" (js-array s)))
+              (lambda (e) (= (and (get e :eliscriptDiagnostic) (get (get e :eliscriptDiagnostic) :code)) "ELI-RT0001"))))))))
+
+  (test "native initialization root-range release preserves returned values caller roots and exact refusal before any partial clearing"
+    (lambda ()
+      (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
+             (heap (funcall (get e "heap-new") 64 4096 65536))
+             (outer (funcall (get e "frame-new") heap 1))
+             (inner (funcall (get e "frame-new") heap 4)))
+        (funcall assert (and (/= heap 0) (/= outer 0) (/= inner 0)))
+        (let ((caller (funcall (get e "value-number") heap 0 2147483648))
+              (values (js-call (js-array 1 2 3 4) :map (lambda (v) (funcall (get e "value-number") heap v 0)))))
+          (js-call assert :equal (funcall (get e "frame-set") heap outer 0 caller) 1)
+          (js-call values :forEach
+            (lambda (value index) (js-call assert :equal (funcall (get e "frame-set") heap inner index value) 1)))
+          (js-call (js-array (js-array 3 2 2) (js-array 0 5 2) (js-array 1 4 0) (js-array 1 4 4)) :forEach
+            (lambda (triple)
+              (js-call assert :equal
+                (funcall (get e "frame-clear-range") heap inner (aref triple 0) (aref triple 1) (aref triple 2))
+                0)
+              (js-call assert :equal (funcall (get e "last-error")) 3)
+              (js-call values :forEach
+                (lambda (value index) (js-call assert :equal (funcall (get e "frame-get") heap inner index) value)))))
+          (js-call assert :equal (funcall (get e "frame-clear-range") heap inner 1 4 2) 1)
+          (js-call assert :equal (funcall (get e "last-error")) 0)
+          (js-call assert :deepEqual
+            (js-call values :map (lambda (unused index) (funcall (get e "frame-get") heap inner index)))
+            (js-array (aref values 0) 0 (aref values 2) 0))
+          (funcall (get e "heap-collect") heap)
+          (js-call assert :equal (funcall (get e "last-error")) 0)
+          (js-call assert :equal (funcall (get e "frame-depth") heap) 2)
+          (js-call (js-array caller (aref values 0) (aref values 2)) :forEach
+            (lambda (value) (js-call assert :equal (funcall (get e "value-kind") heap value) 4)))
+          (js-call (js-array (aref values 1) (aref values 3)) :forEach
+            (lambda (value)
+              (js-call assert :equal (funcall (get e "value-kind") heap value) 0)
+              (js-call assert :equal (funcall (get e "last-error")) 1)))
+          (js-call assert :equal (funcall (get e "frame-get") heap outer 0) caller)
+          (funcall assert
+            (Object/is
+              (js-call (new globalThis.DataView (get (get e :memory) :buffer)) :getFloat64
+                (funcall (get e "value-data") heap caller 4) t)
+              -0.0))
+          (js-call assert :equal (funcall (get e "frame-pop") heap inner) 1)
+          (js-call assert :equal (funcall (get e "frame-pop") heap outer) 1)
+          (funcall (get e "heap-collect") heap)
+          (js-call assert :equal (funcall (get e "last-error")) 0)
+          (js-call assert :equal (funcall (get e "heap-live") heap) 0)))))
+
+  (test "immediate temporary roots preserve manual collection metadata binding cells and caller roots across capacity refusal"
+    (lambda ()
+      (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
+             (heap (funcall (get e "heap-new") 256 8192 65536))
+             (call-fn (lambda (name &rest args)
+                        (let ((value (funcall to-uint32 (Reflect/apply (get e name) e (js-call (js-array heap) :concat args)))))
+                          (js-call assert :equal (funcall (get e "last-error")) 0 name)
+                          value))))
+        (funcall assert (/= heap 0))
+        (let* ((held (funcall call-fn "value-number" 0 2147483648))
+               (_ (funcall call-fn "heap-pin" held))
+               (binding (funcall call-fn "value-binding-cell-new"))
+               (_2 (progn (funcall call-fn "heap-pin" binding) (funcall call-fn "value-binding-init" binding held)))
+               (outer (funcall call-fn "frame-new" 1))
+               (_3 (funcall call-fn "frame-set" outer 0 held))
+               (args (funcall call-fn "value-refs" 7 4))
+               (_4 (funcall call-fn "heap-pin" args))
+               (idx 0))
+          (while (< idx 4)
+            (funcall call-fn "value-set" args idx idx)
+            (setq idx (1+ idx)))
+          (let* ((metadata
+                   (lambda ()
+                     (let* ((view (new globalThis.DataView (get (get e :memory) :buffer)))
+                            (control (js-call view :getUint32 (+ heap 16) t))
+                            (pool (js-call view :getUint32 (+ control 4) t))
+                            (base (js-call view :getUint32 (+ pool 16) t)))
+                       (Array/from (js-object :length 6)
+                         (lambda (unused i) (js-call view :getUint32 (+ base (* i 4)) t))))))
+                 (immediate-slots
+                   (lambda ()
+                     (let* ((view (new globalThis.DataView (get (get e :memory) :buffer)))
+                            (control (js-call view :getUint32 (+ heap 16) t))
+                            (pool (js-call view :getUint32 (+ control 4) t))
+                            (base (js-call view :getUint32 (+ pool 16) t)))
+                       (Array/from (js-object :length 24)
+                         (lambda (unused i) (js-call view :getUint32 (+ base (* i 4)) t))))))
+                 (before (funcall metadata))
+                 (before-slots (funcall immediate-slots))
+                 (assert-roots
+                   (lambda ()
+                     (js-call assert :equal (funcall call-fn "value-binding-get" binding) held)
+                     (js-call assert :deepEqual
+                       (js-call (js-array 0 1 2 3) :map (lambda (i) (funcall call-fn "value-get" args i)))
+                       (js-array 0 1 2 3))
+                     (js-call assert :equal (funcall call-fn "frame-depth") 1)
+                     (js-call assert :equal (funcall call-fn "frame-get" outer 0) held)
+                     (funcall assert
+                       (Object/is
+                         (js-call (new globalThis.DataView (get (get e :memory) :buffer)) :getFloat64
+                           (funcall call-fn "value-data" held 4) t)
+                         -0.0))
+                     (js-call assert :equal (aref (funcall metadata) 1) 0))))
+            (js-call assert :equal (aref before 1) 0)
+            (js-call assert :equal (aref before 3) 0)
+            (js-call (js-array 0 1 2 3) :forEach
+              (lambda (value)
+                (js-call assert :equal (funcall call-fn "heap-borrow-root" value) 0)
+                (js-call assert :deepEqual (funcall immediate-slots) before-slots)
+                (js-call assert :equal (funcall call-fn "heap-return-root" value) 0)
+                (js-call assert :deepEqual (funcall immediate-slots) before-slots)))
+            (js-call assert :deepEqual (funcall metadata) before)
+            (funcall call-fn "heap-collect")
+            (funcall assert-roots)
+            (let ((exhausted false)
+                  (alloc-idx 0))
+              (while (and (<= alloc-idx 256) (not exhausted))
+                (let ((value (funcall to-uint32 (funcall (get e "value-number") heap alloc-idx 0))))
+                  (if (= value 0)
+                    (progn
+                      (js-call assert :equal (funcall (get e "last-error")) 2)
+                      (setq exhausted t))
+                    (js-call assert :equal (funcall (get e "last-error")) 0)))
+                (setq alloc-idx (1+ alloc-idx)))
+              (funcall assert exhausted "manual allocation must refuse the fixed slot capacity"))
+            (funcall assert-roots)
+            (funcall assert (> (funcall call-fn "heap-collect") 0))
+            (funcall assert-roots)
+            (funcall assert (> (funcall call-fn "value-number" 7 0) 3))
+            (funcall call-fn "heap-release" args)
+            (funcall call-fn "frame-pop" outer)
+            (funcall call-fn "heap-release" held)
+            (funcall call-fn "heap-release" binding)
+            (funcall call-fn "heap-collect")
+            (js-call assert :equal (funcall call-fn "heap-live") 0)
+            (js-call assert :equal (funcall call-fn "frame-depth") 0))))))
+
+  (test "deterministic random UTF16 methods and full f64 position words agree with independent JS during automatic collection"
+    (lambda ()
+      (let* ((a (instantiateManagedRuntime bytes))
+             (_ (js-call a :auto 1))
+             (seed 139443610)
+             (next-u32 (lambda () (setq seed (funcall xorshift32 seed)) seed))
+             (bits (new globalThis.DataView (new globalThis.ArrayBuffer 8)))
+             (i 0))
+        (while (< i 1024)
+          (let* ((units (Array/from (js-object :length (% (funcall next-u32) 64))
+                          (lambda () (% (funcall next-u32) 65536))))
+                 (text (Reflect/apply String/fromCharCode globalThis.String units))
+                 (tlen (js-length text))
+                 (needle (if (/= (% i 3) 0)
+                           (js-call text :slice (% (funcall next-u32) (1+ tlen)) (% (funcall next-u32) (1+ tlen)))
+                           (String/fromCharCode (% (funcall next-u32) 65536)))))
+            (js-call bits :setUint32 0 (funcall next-u32) t)
+            (js-call bits :setUint32 4 (funcall next-u32) t)
+            (let ((position (js-call bits :getFloat64 0 t)))
+              (js-call (js-array "at" "char-at" "char-code" "code-point") :forEach
+                (lambda (name) (check a name (js-array text position))))
+              (js-call (js-array "find" "last" "includes" "starts" "ends") :forEach
+                (lambda (name) (check a name (js-array text needle position))))
+              (let ((second-arg (- (% (funcall next-u32) 65) 32)))
+                (js-call (js-array "slice" "substring" "substr") :forEach
+                  (lambda (name) (check a name (js-array text position second-arg)))))
+              (js-call (js-array "well-formed" "repair") :forEach
+                (lambda (name) (check a name (js-array text))))))
+          (setq i (1+ i)))
+        (js-call a :closeModule)
+        (js-call a :collect))))
+
+  (test "source searches retain bounded Two-Way behavior on long periodic and overlapping text in both directions"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 256 :initialBytes 65536 :maxBytes 4194304)))
+            (lone (String/fromCharCode 55296)))
+        (js-call a :auto 1)
+        (js-call (js-array
+                   (js-array (str (js-call "a" :repeat 262144) "b") (str (js-call "a" :repeat 32768) "c"))
+                   (js-array (str (js-call "ab" :repeat 65536) "z") (str (js-call "ab" :repeat 8192) "z"))
+                   (js-array (js-call "a" :repeat 65536) (js-call "a" :repeat 8192))
+                   (js-array (str (js-call lone :repeat 65536) "中") (str (js-call lone :repeat 8192) "中")))
+                 :forEach
+                 (lambda (pair)
+                   (let ((text (aref pair 0))
+                         (needle (aref pair 1)))
+                     (js-call (js-array undefined (get globalThis.Number :NaN) 0 99
+                                        (get globalThis.Number :POSITIVE_INFINITY)
+                                        (get globalThis.Number :NEGATIVE_INFINITY))
+                              :forEach
+                              (lambda (position)
+                                (js-call (js-array "find" "last" "includes" "starts" "ends") :forEach
+                                  (lambda (name) (check a name (js-array text needle position)))))))))
+        (js-call a :closeModule)
+        (js-call a :collect))))
+
+  (test "text capacity failures preserve input bits and caller frames; real search traps unwind only private roots and retain earlier errors"
+    (async ()
+      (let* ((source (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
+             (start (js-call source :indexOf "  (defun heap-text-search-unit "))
+             (end (js-call source :indexOf "  (defun heap-text-find-direction " start)))
+        (funcall assert (and (>= start 0) (> end start)))
+        (let* ((injected (js-call (get backend :compiler) :compile_ir_string
+                           (str (js-call source :slice 0 start)
+                                "  (defun heap-text-search-unit (data length index reverse) (load-u16 4294967295))\n"
+                                (js-call source :slice end))
+                           "trap-runtime.eli"))
+               (a (instantiateManagedRuntime
+                    (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm program injected))))
+               (_ (js-call a :auto 1))
+               (s (js-call a :string "xxx"))
+               (bad (js-call a :sourceObject (js-object :valueOf false :toString false)))
+               (good (js-call a :number 0))
+               (frame (js-call a :frame 1)))
+          (js-call a :frameSet frame 0 s)
+          (js-call assert :throws
+            (lambda () (js-call js :fault "xxx" (js-object :valueOf false :toString false)))
+            globalThis.TypeError)
+          (js-call assert :throws
+            (lambda () (js-call a :invoke "fault" (js-array s bad)))
+            (lambda (e) (= (and (get e :eliscriptDiagnostic) (get (get e :eliscriptDiagnostic) :code)) "ELI-RT0003")))
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+          (js-call assert :throws
+            (lambda () (js-call a :invoke "fault" (js-array s good)))
+            (lambda (e) (funcall js-instanceof e globalThis.WebAssembly.RuntimeError)))
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+          (js-call assert :equal (js-call a :readString s) "xxx")
+          (let ((retained (js-call a :frameGet frame 0)))
+            (funcall assert (js-call a :keyEqual retained s))
+            (js-call a :release retained))
+          (js-call a :leaveFrame frame)
+          (js-call (js-array s bad good) :forEach (lambda (x) (js-call a :release x)))
+          (js-call a :closeModule)
+          (js-call a :collect)
+          (js-call assert :equal (js-call a :live) 0)))
+      (let* ((bounded (instantiateManagedRuntime bytes (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 4096)))
+             (_ (js-call bounded :auto 1))
+             (lone-str (str "中😀" (String/fromCharCode 55296)))
+             (original (js-call bounded :string lone-str))
+             (n (js-call bounded :number 10000))
+             (outer (js-call bounded :frame 1)))
+        (js-call bounded :frameSet outer 0 original)
+        (js-call assert :throws
+          (lambda () (js-call bounded :invoke "repeat" (js-array original n)))
+          (lambda (e) (= (and (get e :eliscriptDiagnostic) (get (get e :eliscriptDiagnostic) :code)) "ELI-RT0002")))
+        (js-call assert :equal (js-call bounded :readString original) lone-str)
+        (js-call assert :equal (get (js-call bounded :stats) :frameDepth) 1)
+        (js-call bounded :leaveFrame outer)
+        (js-call bounded :release n)
+        (js-call bounded :release original)
+        (js-call bounded :closeModule)
+        (js-call bounded :collect)
+        (js-call assert :equal (js-call bounded :live) 0))))
+
+  (test "text literal emission refuses malformed method IR before lowering absent children and preserves the original source schema"
+    (async ()
+      (await (assertMalformedTextMethods backend runtime-program))))
+
+  (test "Node executes identical zero-import source text bytes with code-point, reverse-search, trim and repair semantics and complete root cleanup"
+    (async ()
+      (let ((path (resolve directory "text.wasm")))
+        (await (writeFile path bytes))
+        (let ((result (spawnSync "node"
+                        (js-array (resolve "tests/helpers/wasm-managed-strings-node.mjs") "--check-wasm" path)
+                        (js-object :encoding "utf8" :timeout 30000))))
+          (js-call assert :equal (get result :status) 0 (get result :stderr))))))
+
+  (test "omitted method arguments, zero-argument concat and ignored identity arguments preserve source defaults and borrowed value lifetime"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (js-call texts :forEach
+          (lambda (text)
+            (js-call (js-array "concat-empty" "char-empty" "at-empty" "slice-empty"
+                               "substring-empty" "substr-empty" "find-empty" "repeat-empty")
+                     :forEach
+                     (lambda (name) (check a name (js-array text))))))
+        (js-call (js-array 0.5 (get globalThis.Number :MIN_VALUE) (get globalThis.Number :NaN) undefined t "x") :forEach
+          (lambda (extra) (check a "ignored-identity" (js-array "中😀" extra))))
+        (let* ((s (js-call a :string "held"))
+               (object (js-call a :sourceObject (js-object)))
+               (alias (js-call a :invoke "ignored-identity" (js-array s object))))
+          (funcall assert (js-call a :keyEqual alias s))
+          (js-call a :release s)
+          (js-call a :collect)
+          (js-call assert :equal (js-call a :readString alias) "held")
+          (js-call a :release alias)
+          (js-call a :release object)
+          (js-call a :closeModule)
+          (js-call a :collect)
+          (js-call assert :equal (js-call a :live) 0)
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))
+
+  (defconst static-literal-text
+    (let ((codes (Array/from (js-object :length 8192)
+                   (lambda (unused index)
+                     (let ((rem (% index 7)))
+                       (cond
+                         ((= rem 0) 0)
+                         ((= rem 1) 55296)
+                         ((= rem 2) 57343)
+                         ((= rem 3) 65279)
+                         (t (funcall bit-and-u16 (* index 4051)))))))))
+      (Reflect/apply String/fromCharCode globalThis.String codes)))
+
+  (defun static-literal-source (text)
+    (str "(defun literal () " (JSON/stringify text) ") (defun source-text () (js-call literal :toString)) (export literal source-text)"))
+
+  (defun static-literal-shape (typed)
+    (let ((pending (js-call (get typed :functions) :map (lambda (fn) (get fn :body))))
+          (seen (new globalThis.Set))
+          (copies (js-array))
+          (count 0))
+      (while (> (js-length pending) 0)
+        (let ((node (js-call pending :pop)))
+          (when (and (not (nullish? node)) (= (value-type node) "object") (not (js-call seen :has node)))
+            (js-call seen :add node)
+            (setq count (1+ count))
+            (when (= (get node :kind) "memory-data-copy")
+              (js-call copies :push node))
+            (when (Array/isArray (get node :children))
+              (js-call (get node :children) :forEach (lambda (child) (js-call pending :push child)))))))
+      (js-object :count count :copies copies)))
+
+  (defun close-static-literal (a &rest __host_default_arguments_2)
+    (let* ((roots (aref __host_default_arguments_2 0)))
+    (let ((r (if (undefined? roots) (js-array) roots)))
+      (try
+        (progn
+          (js-call r :forEach (lambda (root) (js-call a :release root)))
+          (js-call a :closeModule)
+          (js-call a :collect)
+          (js-call assert :equal (js-call a :live) 0)
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))
+        (finally
+          (when (= (value-type (get a :close)) "function")
+            (js-call a :close)))))))
+
+  (defvar static-literal-product undefined)
+
+  (defasync static-literal-artifact ()
+    (if (not (undefined? static-literal-product))
+      static-literal-product
+      (let* ((text static-literal-text)
+             (source (static-literal-source text))
+             (p (js-call (get backend :compiler) :compile_ir_string source "static-literal-中.eli"))
+             (saved (JSON/stringify p))
+             (lowered (js-call (get backend :managed) :lower_managed_program p runtime-program))
+             (art-bytes (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm p runtime-program)))
+             (js-code (js-call (get backend :compiler) :emit_ir_string p)))
+        (js-call assert :equal (JSON/stringify p) saved)
+        (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module art-bytes)) (js-array))
+        (let ((reference (await (funcall dynamic-import
+                                  (str "data:text/javascript;base64," (js-call (Buffer/from js-code) :toString "base64"))))))
+          (js-call assert :equal (js-call reference :literal) text))
+        ;; Bun rewrites Unicode and escape spellings in Function.toString. The source
+        ;; contract uses the actual Node function created from these exact JS bytes.
+        (let ((oracle (spawnSync "node"
+                        (js-array (resolve "tests/helpers/wasm-managed-strings-node.mjs") "--literal-source")
+                        (js-object :input js-code :encoding "utf8" :timeout 30000))))
+          (js-call assert :equal (get oracle :error) undefined)
+          (js-call assert :equal (get oracle :status) 0 (get oracle :stderr))
+          (let ((node-reference (JSON/parse (get oracle :stdout))))
+            (js-call assert :equal (get node-reference :text) text)
+            (setq static-literal-product
+              (js-object :text text :source source :p p :lowered lowered :bytes art-bytes
+                         :sourceText (get node-reference :sourceText)))
+            static-literal-product)))))
+
+  (defun assert-static-literal (a product)
+    (js-call a :auto 1)
+    (let ((held (js-call a :number -0.0))
+          (frame (js-call a :frame 1))
+          (literal undefined)
+          (source-text undefined))
+      (js-call a :frameSet frame 0 held)
+      (try
+        (progn
+          (setq literal (js-call a :invoke "literal"))
+          (js-call assert :equal (js-call a :readString literal) (get product :text))
+          (js-call assert :equal (js-call a :length literal) (js-length (get product :text)))
+          (try (setq source-text (js-call a :invoke "source-text"))
+            (catch error
+              (throw (new globalThis.Error
+                       (str "static literal source-text invocation after literal length " (js-length (get product :text)) "; auto GC enabled")
+                       (js-object :cause error)))))
+          (js-call assert :equal (js-call a :readString source-text) (get product :sourceText))
+          (let ((filler (js-call a :string (js-call "growth" :repeat 8192))))
+            (js-call a :release filler)
+            (js-call a :collect))
+          (js-call assert :equal (js-call a :readString literal) (get product :text))
+          (js-call assert :equal (js-call a :readString source-text) (get product :sourceText))
+          (let ((again (js-call a :invoke "source-text")))
+            (try
+              (js-call assert :equal (js-call a :readString again) (get product :sourceText))
+              (finally (js-call a :release again))))
+          (let ((caller (js-call a :frameGet frame 0)))
+            (try
+              (funcall assert (Object/is (js-call a :readNumber caller) -0.0))
+              (finally (js-call a :release caller))))
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 1))
+        (finally
+          (js-call a :leaveFrame frame)
+          (let ((roots (js-array held)))
+            (unless (undefined? literal) (js-call roots :push literal))
+            (unless (undefined? source-text) (js-call roots :push source-text))
+            (close-static-literal a roots))))))
+
+  (test "Given exact UTF16 literal data when emitted and collected then owned copies preserve NUL BOM surrogate pairs lone surrogates and complete Function source text"
+    (async ()
+      (let ((product (await (static-literal-artifact))))
+        (assert-static-literal
+          (instantiateManagedRuntime (get product :bytes) (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 2097152))
+          product)
+        (let ((small-texts (js-array "" "a" (str "中😀" (String/fromCharCode 55296 0 57343))))
+              (idx 0))
+          (while (< idx (js-length small-texts))
+            (let* ((text (aref small-texts idx))
+                   (p (js-call (get backend :compiler) :compile_ir_string (static-literal-source text) "static-small.eli"))
+                   (artifact (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm p runtime-program)))
+                   (a (instantiateManagedRuntime artifact (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 2097152)))
+                   (output undefined))
+              (try
+                (progn
+                  (setq output (js-call a :invoke "literal"))
+                  (js-call assert :equal (js-call a :readString output) text))
+                (finally
+                  (close-static-literal a (if (undefined? output) (js-array) (js-array output))))))
+            (setq idx (1+ idx))))))
+    120000)
+
+  (test "Given larger source literals when managed IR is lowered then string bytes remain static data instead of a per-code-unit control tree"
+    (async ()
+      (let* ((product (await (static-literal-artifact)))
+             (large (static-literal-shape (get (get product :lowered) :typed)))
+             (small (js-call (get backend :managed) :lower_managed_program
+                      (js-call (get backend :compiler) :compile_ir_string (static-literal-source "x") "static-small.eli")
+                      runtime-program))
+             (small-shape (static-literal-shape (get small :typed))))
+        (funcall assert
+          (js-call (get large :copies) :some (lambda (copy) (= (get copy :value) (get product :text))))
+          "the literal retains its exact UTF16 static payload")
+        (funcall assert
+          (js-call (get large :copies) :some (lambda (copy) (= (get copy :value) (get product :sourceText))))
+          "Function.toString retains its complete original generated source")
+        (funcall assert
+          (<= (get large :count) (+ (get small-shape :count) 128))
+          "growing literal text must not grow the executable control tree per code unit")))
+    120000)
+
+  (funcall (js-call test :skipIf (or (/= (get globalThis.process :arch) "arm64")
+                                     (not (js-call (js-array "darwin" "linux") :includes (get globalThis.process :platform)))))
+    "Given native literal static blocks when their bytes are copied then the same UTF16 source and collecting-root contract executes without imports"
+    (async ()
+      (let* ((product (await (static-literal-artifact)))
+             (is-linux (= (get globalThis.process :platform) "linux"))
+             (target (if is-linux "arm64-linux" "arm64-macos"))
+             (path (resolve directory (str "static-literal" (if is-linux ".so" ".dylib")))))
+        (await (writeFile path (globalThis.Uint8Array.from
+                                 (js-call (get backend :native) :emit_typed_native_memory_library
+                                   (get (get product :lowered) :typed) target))))
+        (assert-static-literal
+          (await (instantiateNativeManagedRuntime path (get product :lowered)
+                   (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 2097152)))
+          product)))
+    120000))

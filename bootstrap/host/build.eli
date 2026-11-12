@@ -1,2 +1,31 @@
-(module capsules.bootstrap.host.build
-  (js* "import { compileFile, loadCompiler } from \"./bun.mjs\";\nimport { buildProject } from \"./project.mjs\";\n\nexport async function executeBuild(options) {\n  const compiler = options.compiler ?? await loadCompiler(options.moduleDirectory);\n  const request = compiler.build_operation_request(options);\n  if (request.mode === \"single\") {\n    return compileFile({ ...request, compiler });\n  }\n\n  const projectOptions = {\n    entry: request.entry,\n    entries: request.entries,\n    outDir: request.outDir,\n    root: request.root,\n    portableEntries: request.portableEntries,\n    macroCapabilities: request.macroCapabilities,\n    macroFileDependencies: request.macroFileDependencies,\n    useCache: request.useCache,\n    sourceOverrides: options.sourceOverrides,\n    moduleDirectory: options.moduleDirectory,\n  };\n  if (options.compiler !== undefined) {\n    projectOptions.compiler = compiler;\n    projectOptions.compilerDigest = options.compilerDigest;\n  }\n  return buildProject(projectOptions);\n}\n"))
+(module bootstrap.host.build
+  (import "./bun.mjs" compileFile loadCompiler)
+  (import "./project.mjs" buildProject)
+
+  (defasync executeBuild (options)
+    (let* ((opt-compiler (get options :compiler))
+           (compiler (if (and (not (nil? opt-compiler))
+                              (not (undefined? opt-compiler)))
+                       opt-compiler
+                       (await (loadCompiler (get options :moduleDirectory)))))
+           (request (js-call compiler :build_operation_request options)))
+      (if (= (get request :mode) "single")
+        (await (compileFile (Object/assign (js-object) request (js-object :compiler compiler))))
+        (let ((projectOptions
+                (js-object
+                  :entry (get request :entry)
+                  :entries (get request :entries)
+                  :outDir (get request :outDir)
+                  :root (get request :root)
+                  :portableEntries (get request :portableEntries)
+                  :macroCapabilities (get request :macroCapabilities)
+                  :macroFileDependencies (get request :macroFileDependencies)
+                  :useCache (get request :useCache)
+                  :sourceOverrides (get options :sourceOverrides)
+                  :moduleDirectory (get options :moduleDirectory))))
+          (unless (undefined? opt-compiler)
+            (put projectOptions :compiler compiler)
+            (put projectOptions :compilerDigest (get options :compilerDigest)))
+          (await (buildProject projectOptions))))))
+
+  (export executeBuild))

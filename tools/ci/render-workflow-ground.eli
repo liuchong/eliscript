@@ -1,2 +1,487 @@
-(module capsules.tools.ci.render-workflow
-  (js* "import { readFile, writeFile } from \"node:fs/promises\";\nimport path from \"node:path\";\nimport { fileURLToPath } from \"node:url\";\n\nconst moduleDirectory = path.dirname(fileURLToPath(import.meta.url));\nconst defaultRoot = path.resolve(moduleDirectory, \"../..\");\nconst matrixPath = \"contracts/compatibility-matrix.json\";\n\n// CI scheduling leaves the measured local compatibility contract unchanged.\nexport const COMPATIBILITY_FILE_SHARDS = 2;\n\nexport class CompatibilityMatrixError extends Error {\n  constructor(errors) {\n    super(`compatibility matrix validation failed:\\n- ${errors.join(\"\\n- \")}`);\n    this.name = \"CompatibilityMatrixError\";\n    this.errors = errors;\n  }\n}\n\nfunction isPlainObject(value) {\n  return value !== null && typeof value === \"object\" && !Array.isArray(value);\n}\n\nfunction sortedUnique(values, label, errors) {\n  const expected = [...new Set(values)].sort();\n  if (JSON.stringify(values) !== JSON.stringify(expected)) {\n    errors.push(`${label} must be unique and lexicographically sorted`);\n  }\n}\n\nfunction safeRelativePath(value) {\n  return typeof value === \"string\" && value.length > 0 &&\n    !path.isAbsolute(value) &&\n    !value.split(\"/\").includes(\"..\") &&\n    path.posix.normalize(value) === value;\n}\n\nfunction actionMap(matrix, errors) {\n  if (!Array.isArray(matrix.actions)) {\n    errors.push(\"actions must be an array\");\n    return new Map();\n  }\n\n  const ids = matrix.actions.map((action) => action?.id);\n  sortedUnique(ids, \"action ids\", errors);\n  const actions = new Map();\n  for (const [index, action] of matrix.actions.entries()) {\n    const label = `action ${index}`;\n    if (!isPlainObject(action)) {\n      errors.push(`${label} must be an object`);\n      continue;\n    }\n    if (!/^[a-z0-9-]+\\/[a-z0-9-]+$/i.test(action.repository ?? \"\")) {\n      errors.push(`${label} must declare a GitHub repository`);\n    }\n    if (!/^[0-9a-f]{40}$/.test(action.revision ?? \"\")) {\n      errors.push(`${label} revision must be a full lowercase commit SHA`);\n    }\n    if (typeof action.label !== \"string\" || action.label.length === 0) {\n      errors.push(`${label} must declare its inspected label`);\n    }\n    actions.set(action.id, action);\n  }\n\n  for (const id of [\"checkout\", \"setup-bun\", \"setup-emacs\"]) {\n    if (!actions.has(id)) errors.push(`missing required action ${id}`);\n  }\n  return actions;\n}\n\nexport function validateCompatibilityMatrix(matrix) {\n  const errors = [];\n  if (!isPlainObject(matrix)) {\n    throw new CompatibilityMatrixError([\"matrix must be an object\"]);\n  }\n  if (matrix.schemaVersion !== 1 ||\n      matrix.format !== \"eliscript-compatibility-matrix\" ||\n      matrix.version !== 1) {\n    errors.push(\"matrix must use eliscript-compatibility-matrix version 1\");\n  }\n  if (matrix.workflow !== \".github/workflows/compatibility.yml\") {\n    errors.push(\"workflow must be .github/workflows/compatibility.yml\");\n  }\n  if (matrix.performanceAcceptance !== undefined &&\n      ![\"strict\", \"deferred\"].includes(matrix.performanceAcceptance)) {\n    errors.push(\"performanceAcceptance must be strict or deferred\");\n  }\n\n  const systems = Array.isArray(matrix.operatingSystems)\n    ? matrix.operatingSystems\n    : [];\n  if (systems.length === 0) errors.push(\"operatingSystems must not be empty\");\n  const systemIds = [];\n  const machineSystems = new Set();\n  for (const [index, system] of systems.entries()) {\n    const label = `operating system ${index}`;\n    if (!isPlainObject(system)) {\n      errors.push(`${label} must be an object`);\n      continue;\n    }\n    systemIds.push(system.id);\n    if (!/^[a-z][a-z0-9-]*$/.test(system.id ?? \"\")) {\n      errors.push(`${label} id must be a lowercase identifier`);\n    }\n    if (typeof system.runner !== \"string\" || system.runner.length === 0) {\n      errors.push(`${label} must declare a runner`);\n    }\n    if (!new Set([\"x64\", \"arm64\"]).has(system.architecture)) {\n      errors.push(`${label} must declare x64 or arm64 architecture`);\n    }\n    const operatingSystem = system.operatingSystem ?? system.id;\n    if ((system.operatingSystem !== undefined &&\n        ![\"linux\", \"macos\"].includes(system.operatingSystem)) ||\n        ![\"linux\", \"macos\"].includes(operatingSystem)) {\n      errors.push(`${label} operatingSystem must identify linux or macos`);\n    }\n    if ([\"linux\", \"macos\"].includes(system.id) && operatingSystem !== system.id) {\n      errors.push(`${label} operatingSystem must match its canonical system id`);\n    }\n    const machine = `${operatingSystem}/${system.architecture}`;\n    if (machineSystems.has(machine)) {\n      errors.push(`${label} duplicates an actual operatingSystem and architecture`);\n    }\n    machineSystems.add(machine);\n  }\n  sortedUnique(systemIds, \"operating system ids\", errors);\n  if (!systemIds.includes(\"linux\") || !systemIds.includes(\"macos\")) {\n    errors.push(\"operatingSystems must include linux and macos\");\n  }\n\n  const acceptanceSystemIds = Array.isArray(matrix.acceptanceOperatingSystems)\n    ? matrix.acceptanceOperatingSystems\n    : [];\n  if (acceptanceSystemIds.length === 0 ||\n      acceptanceSystemIds.some((id) => typeof id !== \"string\")) {\n    errors.push(\"acceptanceOperatingSystems must be a non-empty string array\");\n  }\n  sortedUnique(acceptanceSystemIds, \"acceptance operating system ids\", errors);\n  for (const id of acceptanceSystemIds) {\n    if (!systemIds.includes(id)) {\n      errors.push(`acceptance operating system ${id} must exist in operatingSystems`);\n    }\n  }\n  const acceptanceSystems = systems.filter((system) =>\n    acceptanceSystemIds.includes(system.id));\n\n  const emacsVersions = Array.isArray(matrix.emacsVersions)\n    ? matrix.emacsVersions\n    : [];\n  if (emacsVersions.length === 0 ||\n      emacsVersions.some((version) => !/^\\d+\\.\\d+$/.test(version))) {\n    errors.push(\"emacsVersions must contain major.minor release strings\");\n  }\n  sortedUnique(emacsVersions, \"Emacs versions\", errors);\n  const emacsMajors = new Set(emacsVersions.map((version) => version.split(\".\")[0]));\n  if (!emacsMajors.has(\"29\") || !emacsMajors.has(\"30\")) {\n    errors.push(\"emacsVersions must cover Emacs 29 and Emacs 30\");\n  }\n\n  if (!isPlainObject(matrix.javascriptHost) ||\n      matrix.javascriptHost.name !== \"bun\" ||\n      !/^\\d+\\.\\d+\\.\\d+$/.test(matrix.javascriptHost.version ?? \"\")) {\n    errors.push(\"javascriptHost must declare an exact Bun version\");\n  }\n\n  const localEvidence = matrix.localEvidence;\n  if (!isPlainObject(localEvidence)) {\n    errors.push(\"localEvidence must declare direct local matrix evidence\");\n  } else {\n    if (!safeRelativePath(localEvidence.directory) ||\n        localEvidence.directory !== \"acceptance/matrix\") {\n      errors.push(\"localEvidence directory must be acceptance/matrix\");\n    }\n    if (!isPlainObject(localEvidence.nodeHost) ||\n        localEvidence.nodeHost.name !== \"node\" ||\n        !/^\\d+\\.\\d+\\.\\d+$/.test(localEvidence.nodeHost.version ?? \"\") ||\n        Number(localEvidence.nodeHost.version.split(\".\")[0]) < 24) {\n      errors.push(\"localEvidence nodeHost must declare an exact Node version >=24\");\n    }\n  }\n\n  const actions = actionMap(matrix, errors);\n  const commands = Array.isArray(matrix.commands) ? matrix.commands : [];\n  const requiredCommands = [\n    \"bun install --frozen-lockfile\",\n    \"bun run test\",\n    \"make byte-compile\",\n  ];\n  if (JSON.stringify(commands) !== JSON.stringify(requiredCommands)) {\n    errors.push(`commands must be ${requiredCommands.join(\", \")}`);\n  }\n  const timeouts = localEvidence?.timeoutsMs;\n  if (!isPlainObject(timeouts) ||\n      JSON.stringify(Object.keys(timeouts)) !== JSON.stringify(requiredCommands) ||\n      requiredCommands.some((command) =>\n        !Number.isInteger(timeouts[command]) || timeouts[command] < 60_000)) {\n    errors.push(\"localEvidence timeoutsMs must cover every command with bounded values\");\n  }\n\n  if (errors.length > 0) throw new CompatibilityMatrixError(errors);\n  return {\n    schemaVersion: 1,\n    systems,\n    acceptanceSystems,\n    emacsVersions,\n    javascriptHost: matrix.javascriptHost,\n    localEvidence,\n    actions,\n    commands,\n    testFileShards: COMPATIBILITY_FILE_SHARDS,\n    jobs: systems.length * emacsVersions.length * COMPATIBILITY_FILE_SHARDS,\n    acceptanceJobs: acceptanceSystems.length * emacsVersions.length * COMPATIBILITY_FILE_SHARDS,\n    workflow: matrix.workflow,\n  };\n}\n\nfunction workflowJobRows(validated) {\n  return validated.systems.flatMap((system) =>\n    validated.emacsVersions.flatMap((emacsVersion) => Array.from({length: validated.testFileShards}, (_, index) => [\n      \"          - name: \" + `${system.id}-emacs-${emacsVersion}-shard-${index + 1}-of-${validated.testFileShards}`,\n      \"            os: \" + system.runner,\n      \"            architecture: \" + system.architecture,\n      `            emacs: \\\"${emacsVersion}\\\"`,\n      `            shard: ${index + 1}`,\n    ].join(\"\\n\")))\n  ).join(\"\\n\");\n}\n\nexport function renderToolchainSteps(matrix) {\n  const validated = validateCompatibilityMatrix(matrix);\n  const checkout = validated.actions.get(\"checkout\");\n  const setupBun = validated.actions.get(\"setup-bun\");\n  const setupEmacs = validated.actions.get(\"setup-emacs\");\n  return `      - name: Check out repository\\n` +\n`        uses: ${checkout.repository}@${checkout.revision} # ${checkout.label}\\n` +\n`        with:\\n` +\n`          persist-credentials: false\\n` +\n// Retained platform reports name the commit each was produced from, and the\n// verification resolves those trees. A shallow clone cannot, so the job that\n// verifies evidence needs the history the evidence refers to.\n`          fetch-depth: 0\\n` +\n`      - name: Install Emacs\\n` +\n`        uses: ${setupEmacs.repository}@${setupEmacs.revision} # ${setupEmacs.label}\\n` +\n`        with:\\n` +\n`          version: \\${{ matrix.emacs }}\\n` +\n`      - name: Install Bun\\n` +\n`        uses: ${setupBun.repository}@${setupBun.revision} # ${setupBun.label}\\n` +\n`        with:\\n` +\n`          bun-version: ${validated.javascriptHost.version}\\n` +\n`      - name: Install Node\\n` +\n`        run: |\\n` +\n`          case \"$(uname -s)\" in\\n` +\n`            Linux) node_platform=linux ;;\\n` +\n`            Darwin) node_platform=darwin ;;\\n` +\n`            *) exit 1 ;;\\n` +\n`          esac\\n` +\n`          node_version=${validated.localEvidence.nodeHost.version}\\n` +\n`          node_archive=\"node-v$node_version-$node_platform-\\${{ matrix.architecture }}.tar.gz\"\\n` +\n`          node_directory=\"$RUNNER_TEMP/eliscript-node\"\\n` +\n`          mkdir -p \"$node_directory\"\\n` +\n`          cd \"$node_directory\"\\n` +\n`          curl --fail --silent --show-error --location --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 1 --retry-max-time 60 \"https://nodejs.org/dist/v$node_version/$node_archive\" --output \"$node_archive\"\\n` +\n`          curl --fail --silent --show-error --location --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 1 --retry-max-time 60 \"https://nodejs.org/dist/v$node_version/SHASUMS256.txt\" --output SHASUMS256.txt\\n` +\n`          awk -v file=\"$node_archive\" '$2 == file { print }' SHASUMS256.txt > node.sha256\\n` +\n`          test -s node.sha256\\n` +\n`          shasum -a 256 -c node.sha256\\n` +\n`          tar -xzf \"$node_archive\"\\n` +\n`          echo \"$node_directory/node-v$node_version-$node_platform-\\${{ matrix.architecture }}/bin\" >> \"$GITHUB_PATH\"\\n` +\n`      - name: Record toolchain\\n` +\n`        run: |\\n` +\n`          uname -a\\n` +\n`          emacs --version\\n` +\n`          bun --version\\n` +\n`          node --version\\n` +\n`          test \"$(bun -p 'process.arch')\" = \"\\${{ matrix.architecture }}\"\\n` +\n`          test \"$(node -p 'process.arch')\" = \"\\${{ matrix.architecture }}\"\\n` +\n`          test \"$(node --version)\" = \"v${validated.localEvidence.nodeHost.version}\"\\n`;\n}\n\nexport function renderWorkflow(matrix) {\n  const validated = validateCompatibilityMatrix(matrix);\n  const commandSteps = validated.commands.map((command) => {\n    const names = {\n      \"bun install --frozen-lockfile\": \"Install locked dependencies\",\n      \"bun run test\": \"Run test file shard ${{ matrix.shard }}/\" + validated.testFileShards,\n      \"make byte-compile\": \"Strict byte compilation\",\n    };\n    const label = command === \"bun run test\" && matrix.performanceAcceptance === \"deferred\"\n      ? `${names[command]} (performance reacceptance deferred)` : names[command];\n    const step = `      - name: ${label}\\n        run: ${command}`;\n    // Browser execution is mandatory in the core WASM differential tests.\n    // Use the locked CLI so its browser revision matches playwright-core.\n    return command === \"bun install --frozen-lockfile\"\n      ? `${step}\\n      - name: Install Chromium\\n        run: bun node_modules/playwright-core/cli.js install --with-deps chromium`\n      : step;\n  }).join(\"\\n\");\n\n  return `# Generated by tools/ci/render-workflow.mjs from contracts/compatibility-matrix.json.\\n` +\n`# Run \\`bun tools/ci/render-workflow.mjs --write\\` after changing the contract.\\n` +\n`name: Compatibility\\n\\n` +\n`on:\\n` +\n`  push:\\n` +\n`    branches: [master]\\n` +\n`  pull_request:\\n` +\n`  workflow_dispatch:\\n\\n` +\n`permissions:\\n` +\n`  contents: read\\n\\n` +\n`concurrency:\\n` +\n`  group: compatibility-\\${{ github.workflow }}-\\${{ github.ref }}\\n` +\n`  cancel-in-progress: true\\n\\n` +\n`jobs:\\n` +\n`  test:\\n` +\n`    name: \\${{ matrix.name }}\\n` +\n`    runs-on: \\${{ matrix.os }}\\n` +\n`    timeout-minutes: 30\\n` +\n`    env:\\n` +\n`      BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index \\${{ matrix.shard }} --shard-count ${validated.testFileShards}\\n` +\n(matrix.performanceAcceptance === \"deferred\"\n  ? `      ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: \"1\"\\n` : \"\") +\n`    strategy:\\n` +\n`      fail-fast: false\\n` +\n`      matrix:\\n` +\n`        include:\\n` +\n`${workflowJobRows(validated)}\\n` +\n`    steps:\\n` +\nrenderToolchainSteps(matrix) +\n`${commandSteps}\\n`;\n}\n\nexport async function checkCompatibilityWorkflow(options = {}) {\n  const root = options.root ?? defaultRoot;\n  const matrix = options.matrix ?? JSON.parse(\n    await readFile(path.join(root, matrixPath), \"utf8\"),\n  );\n  const validated = validateCompatibilityMatrix(matrix);\n  const expected = renderWorkflow(matrix);\n  const workflowText = options.workflowText ?? await readFile(\n    path.join(root, validated.workflow), \"utf8\",\n  );\n  if (workflowText !== expected) {\n    throw new CompatibilityMatrixError([\n      `${validated.workflow} differs from the compatibility matrix; run the renderer with --write`,\n    ]);\n  }\n  return {\n    schemaVersion: 1,\n    systems: validated.systems.map(({ id, architecture, runner, operatingSystem }) => ({\n      id, architecture, runner, operatingSystem: operatingSystem ?? id,\n    })),\n    acceptanceSystems: validated.acceptanceSystems.map(\n      ({ id, architecture, runner }) => ({ id, architecture, runner }),\n    ),\n    emacsVersions: validated.emacsVersions,\n    javascriptHost: validated.javascriptHost,\n    nodeHost: validated.localEvidence.nodeHost,\n    localEvidenceDirectory: validated.localEvidence.directory,\n    testFileShards: validated.testFileShards,\n    jobs: validated.jobs,\n    acceptanceJobs: validated.acceptanceJobs,\n    workflow: validated.workflow,\n  };\n}\n\nexport function humanCompatibilityReport(report) {\n  const systems = report.systems\n    .map((system) => `${system.id}/${system.architecture}`)\n    .join(\", \");\n  const acceptanceSystems = report.acceptanceSystems\n    .map((system) => `${system.id}/${system.architecture}`)\n    .join(\", \");\n  return [\n    \"Compatibility matrix:\",\n    `  Systems        ${systems}`,\n    `  Acceptance     ${acceptanceSystems}`,\n    `  Emacs          ${report.emacsVersions.join(\", \")}`,\n    `  JS host        ${report.javascriptHost.name} ${report.javascriptHost.version}`,\n    `  Node host      ${report.nodeHost.name} ${report.nodeHost.version}`,\n    `  File shards    ${report.testFileShards} per system/Emacs pair`,\n    `  Matrix jobs    ${report.jobs}`,\n    `  Required jobs  ${report.acceptanceJobs}`,\n    `  Local evidence ${report.localEvidenceDirectory}`,\n    `  Workflow       ${report.workflow}`,\n  ].join(\"\\n\");\n}\n\nconst invokedFilename = process.argv[1] ? path.resolve(process.argv[1]) : undefined;\nif (invokedFilename === fileURLToPath(import.meta.url)) {\n  const args = new Set(process.argv.slice(2));\n  try {\n    const matrix = JSON.parse(\n      await readFile(path.join(defaultRoot, matrixPath), \"utf8\"),\n    );\n    const validated = validateCompatibilityMatrix(matrix);\n    if (args.has(\"--write\")) {\n      await writeFile(\n        path.join(defaultRoot, validated.workflow),\n        renderWorkflow(matrix),\n        \"utf8\",\n      );\n    }\n    const report = await checkCompatibilityWorkflow({ root: defaultRoot, matrix });\n    console.log(args.has(\"--json\")\n      ? JSON.stringify(report, null, 2)\n      : humanCompatibilityReport(report));\n  } catch (error) {\n    console.error(error instanceof Error ? error.message : String(error));\n    process.exitCode = 1;\n  }\n}\n"))
+(module tools.ci.render-workflow-ground
+  (import "node:fs/promises" readFile writeFile)
+  (import "node:path" :as path)
+  (import "node:url" fileURLToPath)
+
+  ;; Module location is host glue. The validation and workflow text below are Eli.
+  (defconst module-file (fileURLToPath (js* "import.meta.url")))
+  (defconst default-root (js-call path :resolve (js-call path :dirname module-file) "../.."))
+  (defconst matrix-path "contracts/compatibility-matrix.json")
+  ;; CI scheduling leaves the measured local compatibility contract unchanged.
+  (defconst COMPATIBILITY_FILE_SHARDS 2)
+  (defconst host-system-ids (js-array "linux" "macos"))
+  (defconst cpu-architectures (new globalThis.Set (js-array "x64" "arm64")))
+  (defconst acceptance-modes (js-array "strict" "deferred"))
+  (defconst required-commands
+    (js-array "bun install --frozen-lockfile" "bun run test" "make byte-compile"))
+  (defconst required-action-ids (js-array "checkout" "setup-bun" "setup-emacs"))
+  (defconst repository-pattern "^[a-z0-9-]+/[a-z0-9-]+$")
+  (defconst revision-pattern "^[0-9a-f]{40}$")
+  (defconst identifier-pattern "^[a-z][a-z0-9-]*$")
+  (defconst release-pattern "^\\d+\\.\\d+$")
+  (defconst exact-version-pattern "^\\d+\\.\\d+\\.\\d+$")
+
+  (defun compatibility-matrix-error-message (errors)
+    (str "compatibility matrix validation failed:\n- " (js-call errors :join "\n- ")))
+
+  (defun compatibility-matrix-error-fields (self errors)
+    (put self :name "CompatibilityMatrixError")
+    (put self :errors errors)
+    self)
+
+  ;; Real subclass: new.target survives Reflect.construct, and a bare call throws.
+  (defconst CompatibilityMatrixError
+    (funcall
+      (js* "(message, fields) => class CompatibilityMatrixError extends Error { constructor(errors) { const self = super(message(errors)); return fields(self, errors); } }")
+      compatibility-matrix-error-message
+      compatibility-matrix-error-fields))
+
+  (defun host-type (value)
+    (funcall (js* "(value) => typeof value") value))
+
+  (defun host-truthy (value)
+    (funcall (js* "(value) => !!value") value))
+
+  (defun plain-object? (value)
+    (and (not (nil? value))
+         (= (host-type value) "object")
+         (not (Array/isArray value))))
+
+  (defun missing-text? (value)
+    (or (not (= (host-type value) "string")) (= (js-length value) 0)))
+
+  (defun regexp-test (pattern text flags)
+    (js-call (new globalThis.RegExp pattern flags) :test text))
+
+  (defun sorted-unique (values label errors)
+    (let ((expected (js-call (Array/from (new globalThis.Set values)) :sort)))
+      (unless (= (JSON/stringify values) (JSON/stringify expected))
+        (js-call errors :push (str label " must be unique and lexicographically sorted")))))
+
+  (defun safe-relative-path (value)
+    (and (= (host-type value) "string")
+         (> (js-length value) 0)
+         (not (js-call path :isAbsolute value))
+         (not (js-call (js-call value :split "/") :includes ".."))
+         (= (js-call (get path :posix) :normalize value) value)))
+
+  (defun some-not-string (values)
+    (let ((index 0) (found nil))
+      (while (and (not found) (< index (js-length values)))
+        (when (not (= (host-type (aref values index)) "string"))
+          (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  (defun some-invalid-release (values)
+    (let ((index 0) (found nil))
+      (while (and (not found) (< index (js-length values)))
+        (unless (regexp-test release-pattern (aref values index) "")
+          (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  (defun invalid-timeout? (timeouts commands)
+    (let ((index 0) (found nil))
+      (while (and (not found) (< index (js-length commands)))
+        (let ((value (get timeouts (aref commands index))))
+          (when (or (not (Number/isInteger value)) (< value 60000))
+            (setq found t)))
+        (setq index (1+ index)))
+      found))
+
+  (defun action-map (matrix errors)
+    (if (not (Array/isArray (get matrix :actions)))
+      (progn
+        (js-call errors :push "actions must be an array")
+        (new globalThis.Map))
+      (let ((input (get matrix :actions))
+            (ids (js-array))
+            (actions (new globalThis.Map))
+            (index 0))
+        (while (< index (js-length input))
+          (let ((action (aref input index)))
+            (js-call ids :push (if (nullish? action) undefined (get action :id))))
+          (setq index (1+ index)))
+        (sorted-unique ids "action ids" errors)
+        (setq index 0)
+        (while (< index (js-length input))
+          (let ((action (aref input index))
+                (label (str "action " index)))
+            (if (not (plain-object? action))
+              (js-call errors :push (str label " must be an object"))
+              (progn
+                (unless (regexp-test repository-pattern (get action :repository "") "i")
+                  (js-call errors :push (str label " must declare a GitHub repository")))
+                (unless (regexp-test revision-pattern (get action :revision "") "")
+                  (js-call errors :push (str label " revision must be a full lowercase commit SHA")))
+                (when (missing-text? (get action :label))
+                  (js-call errors :push (str label " must declare its inspected label")))
+                (js-call actions :set (get action :id) action))))
+          (setq index (1+ index)))
+        (setq index 0)
+        (while (< index (js-length required-action-ids))
+          (let ((id (aref required-action-ids index)))
+            (unless (js-call actions :has id)
+              (js-call errors :push (str "missing required action " id))))
+          (setq index (1+ index)))
+        actions)))
+
+  (defun systems-with-ids (systems ids)
+    (let ((selected (js-array)) (index 0))
+      (while (< index (js-length systems))
+        (let ((system (aref systems index)))
+          (when (js-call ids :includes (get system :id))
+            (js-call selected :push system)))
+        (setq index (1+ index)))
+      selected))
+
+  (defun validateCompatibilityMatrix (matrix)
+    (let ((errors (js-array)))
+      (unless (plain-object? matrix)
+        (throw (new CompatibilityMatrixError (js-array "matrix must be an object"))))
+      (when (or (not (= (get matrix :schemaVersion) 1))
+                (not (= (get matrix :format) "eliscript-compatibility-matrix"))
+                (not (= (get matrix :version) 1)))
+        (js-call errors :push "matrix must use eliscript-compatibility-matrix version 1"))
+      (unless (= (get matrix :workflow) ".github/workflows/compatibility.yml")
+        (js-call errors :push "workflow must be .github/workflows/compatibility.yml"))
+      (when (and (not (undefined? (get matrix :performanceAcceptance)))
+                 (not (js-call acceptance-modes :includes (get matrix :performanceAcceptance))))
+        (js-call errors :push "performanceAcceptance must be strict or deferred"))
+      (let* ((systems (if (Array/isArray (get matrix :operatingSystems))
+                        (get matrix :operatingSystems) (js-array)))
+             (system-ids (js-array))
+             (machine-systems (new globalThis.Set))
+             (index 0))
+        (when (= (js-length systems) 0)
+          (js-call errors :push "operatingSystems must not be empty"))
+        (while (< index (js-length systems))
+          (let ((system (aref systems index))
+                (label (str "operating system " index)))
+            (if (not (plain-object? system))
+              (js-call errors :push (str label " must be an object"))
+              (let* ((operating-system (get system :operatingSystem (get system :id)))
+                     (machine (str operating-system "/" (get system :architecture))))
+                (js-call system-ids :push (get system :id))
+                (unless (regexp-test identifier-pattern (get system :id "") "")
+                  (js-call errors :push (str label " id must be a lowercase identifier")))
+                (when (missing-text? (get system :runner))
+                  (js-call errors :push (str label " must declare a runner")))
+                (unless (js-call cpu-architectures :has (get system :architecture))
+                  (js-call errors :push (str label " must declare x64 or arm64 architecture")))
+                (when (or (and (not (undefined? (get system :operatingSystem)))
+                               (not (js-call host-system-ids :includes (get system :operatingSystem))))
+                          (not (js-call host-system-ids :includes operating-system)))
+                  (js-call errors :push (str label " operatingSystem must identify linux or macos")))
+                (when (and (js-call host-system-ids :includes (get system :id))
+                           (not (= operating-system (get system :id))))
+                  (js-call errors :push (str label " operatingSystem must match its canonical system id")))
+                (when (js-call machine-systems :has machine)
+                  (js-call errors :push (str label " duplicates an actual operatingSystem and architecture")))
+                (js-call machine-systems :add machine))))
+          (setq index (1+ index)))
+        (sorted-unique system-ids "operating system ids" errors)
+        (unless (and (js-call system-ids :includes "linux") (js-call system-ids :includes "macos"))
+          (js-call errors :push "operatingSystems must include linux and macos"))
+        (let ((acceptance-ids (if (Array/isArray (get matrix :acceptanceOperatingSystems))
+                                (get matrix :acceptanceOperatingSystems) (js-array))))
+          (when (or (= (js-length acceptance-ids) 0) (some-not-string acceptance-ids))
+            (js-call errors :push "acceptanceOperatingSystems must be a non-empty string array"))
+          (sorted-unique acceptance-ids "acceptance operating system ids" errors)
+          (setq index 0)
+          (while (< index (js-length acceptance-ids))
+            (let ((id (aref acceptance-ids index)))
+              (unless (js-call system-ids :includes id)
+                (js-call errors :push (str "acceptance operating system " id " must exist in operatingSystems"))))
+            (setq index (1+ index)))
+          (let ((acceptance-systems (systems-with-ids systems acceptance-ids))
+                (emacs-versions (if (Array/isArray (get matrix :emacsVersions))
+                                  (get matrix :emacsVersions) (js-array)))
+                (local-evidence (get matrix :localEvidence)))
+            (when (or (= (js-length emacs-versions) 0) (some-invalid-release emacs-versions))
+              (js-call errors :push "emacsVersions must contain major.minor release strings"))
+            (sorted-unique emacs-versions "Emacs versions" errors)
+            (let ((majors (new globalThis.Set)) (major-index 0))
+              (while (< major-index (js-length emacs-versions))
+                (js-call majors :add (aref (js-call (aref emacs-versions major-index) :split ".") 0))
+                (setq major-index (1+ major-index)))
+              (unless (and (js-call majors :has "29") (js-call majors :has "30"))
+                (js-call errors :push "emacsVersions must cover Emacs 29 and Emacs 30")))
+            (let ((javascript-host (get matrix :javascriptHost)))
+              (when (or (not (plain-object? javascript-host))
+                        (not (= (get javascript-host :name) "bun"))
+                        (not (regexp-test exact-version-pattern (get javascript-host :version "") "")))
+                (js-call errors :push "javascriptHost must declare an exact Bun version")))
+            (if (not (plain-object? local-evidence))
+              (js-call errors :push "localEvidence must declare direct local matrix evidence")
+              (progn
+                (when (or (not (safe-relative-path (get local-evidence :directory)))
+                          (not (= (get local-evidence :directory) "acceptance/matrix")))
+                  (js-call errors :push "localEvidence directory must be acceptance/matrix"))
+                (let ((node-host (get local-evidence :nodeHost)))
+                  (when (or (not (plain-object? node-host))
+                            (not (= (get node-host :name) "node"))
+                            (not (regexp-test exact-version-pattern (get node-host :version "") ""))
+                            (< (globalThis.Number (aref (js-call (get node-host :version) :split ".") 0)) 24))
+                    (js-call errors :push "localEvidence nodeHost must declare an exact Node version >=24")))))
+            (let ((actions (action-map matrix errors))
+                  (commands (if (Array/isArray (get matrix :commands))
+                              (get matrix :commands) (js-array)))
+                  (timeouts (if (nullish? local-evidence) undefined (get local-evidence :timeoutsMs))))
+              (unless (= (JSON/stringify commands) (JSON/stringify required-commands))
+                (js-call errors :push (str "commands must be " (js-call required-commands :join ", "))))
+              (when (or (not (plain-object? timeouts))
+                        (not (= (JSON/stringify (object-keys timeouts)) (JSON/stringify required-commands)))
+                        (invalid-timeout? timeouts required-commands))
+                (js-call errors :push "localEvidence timeoutsMs must cover every command with bounded values"))
+              (when (> (js-length errors) 0)
+                (throw (new CompatibilityMatrixError errors)))
+              (js-object :schemaVersion 1
+                :systems systems
+                :acceptanceSystems acceptance-systems
+                :emacsVersions emacs-versions
+                :javascriptHost (get matrix :javascriptHost)
+                :localEvidence local-evidence
+                :actions actions
+                :commands commands
+                :testFileShards COMPATIBILITY_FILE_SHARDS
+                :jobs (* (js-length systems) (js-length emacs-versions) COMPATIBILITY_FILE_SHARDS)
+                :acceptanceJobs (* (js-length acceptance-systems) (js-length emacs-versions) COMPATIBILITY_FILE_SHARDS)
+                :workflow (get matrix :workflow))))))))
+
+  (defun workflow-job-rows (validated)
+    (let ((rows (js-array))
+          (systems (get validated :systems))
+          (versions (get validated :emacsVersions))
+          (shards (get validated :testFileShards))
+          (system-index 0))
+      (while (< system-index (js-length systems))
+        (let ((system (aref systems system-index)) (version-index 0))
+          (while (< version-index (js-length versions))
+            (let ((emacs-version (aref versions version-index)) (shard-index 0))
+              (while (< shard-index shards)
+                (js-call rows :push
+                  (js-call (js-array
+                             (str "          - name: " (get system :id) "-emacs-" emacs-version
+                                  "-shard-" (1+ shard-index) "-of-" shards)
+                             (str "            os: " (get system :runner))
+                             (str "            architecture: " (get system :architecture))
+                             (str "            emacs: \"" emacs-version "\"")
+                             (str "            shard: " (1+ shard-index)))
+                    :join "\n"))
+                (setq shard-index (1+ shard-index))))
+            (setq version-index (1+ version-index))))
+        (setq system-index (1+ system-index)))
+      (js-call rows :join "\n")))
+
+  (defun renderToolchainSteps (matrix)
+    (let* ((validated (validateCompatibilityMatrix matrix))
+           (checkout (js-call (get validated :actions) :get "checkout"))
+           (setup-bun (js-call (get validated :actions) :get "setup-bun"))
+           (setup-emacs (js-call (get validated :actions) :get "setup-emacs"))
+           (node-version (get (get (get validated :localEvidence) :nodeHost) :version)))
+      (+ "      - name: Check out repository\n"
+         "        uses: " (get checkout :repository) "@" (get checkout :revision) " # " (get checkout :label) "\n"
+         "        with:\n"
+         "          persist-credentials: false\n"
+         ;; Retained platform reports name the commit each was produced from, and the
+         ;; verification resolves those trees. A shallow clone cannot, so the job that
+         ;; verifies evidence needs the history the evidence refers to.
+         "          fetch-depth: 0\n"
+         "      - name: Install Emacs\n"
+         "        uses: " (get setup-emacs :repository) "@" (get setup-emacs :revision) " # " (get setup-emacs :label) "\n"
+         "        with:\n"
+         "          version: ${{ matrix.emacs }}\n"
+         "      - name: Install Bun\n"
+         "        uses: " (get setup-bun :repository) "@" (get setup-bun :revision) " # " (get setup-bun :label) "\n"
+         "        with:\n"
+         "          bun-version: " (get (get validated :javascriptHost) :version) "\n"
+         "      - name: Install Node\n"
+         "        run: |\n"
+         "          case \"$(uname -s)\" in\n"
+         "            Linux) node_platform=linux ;;\n"
+         "            Darwin) node_platform=darwin ;;\n"
+         "            *) exit 1 ;;\n"
+         "          esac\n"
+         "          node_version=" node-version "\n"
+         "          node_archive=\"node-v$node_version-$node_platform-${{ matrix.architecture }}.tar.gz\"\n"
+         "          node_directory=\"$RUNNER_TEMP/eliscript-node\"\n"
+         "          mkdir -p \"$node_directory\"\n"
+         "          cd \"$node_directory\"\n"
+         "          curl --fail --silent --show-error --location --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 1 --retry-max-time 60 \"https://nodejs.org/dist/v$node_version/$node_archive\" --output \"$node_archive\"\n"
+         "          curl --fail --silent --show-error --location --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 1 --retry-max-time 60 \"https://nodejs.org/dist/v$node_version/SHASUMS256.txt\" --output SHASUMS256.txt\n"
+         "          awk -v file=\"$node_archive\" '$2 == file { print }' SHASUMS256.txt > node.sha256\n"
+         "          test -s node.sha256\n"
+         "          shasum -a 256 -c node.sha256\n"
+         "          tar -xzf \"$node_archive\"\n"
+         "          echo \"$node_directory/node-v$node_version-$node_platform-${{ matrix.architecture }}/bin\" >> \"$GITHUB_PATH\"\n"
+         "      - name: Record toolchain\n"
+         "        run: |\n"
+         "          uname -a\n"
+         "          emacs --version\n"
+         "          bun --version\n"
+         "          node --version\n"
+         "          test \"$(bun -p 'process.arch')\" = \"${{ matrix.architecture }}\"\n"
+         "          test \"$(node -p 'process.arch')\" = \"${{ matrix.architecture }}\"\n"
+         "          test \"$(node --version)\" = \"v" node-version "\"\n")))
+
+  (defun command-steps (matrix validated)
+    (let ((rows (js-array))
+          (commands (get validated :commands))
+          (labels (js-object
+                    "bun install --frozen-lockfile" "Install locked dependencies"
+                    "bun run test" (str "Run test file shard ${{ matrix.shard }}/" (get validated :testFileShards))
+                    "make byte-compile" "Strict byte compilation"))
+          (index 0))
+      (while (< index (js-length commands))
+        (let* ((command (aref commands index))
+               (base (get labels command))
+               (label (if (and (= command "bun run test")
+                               (= (get matrix :performanceAcceptance) "deferred"))
+                        (str base " (performance reacceptance deferred)")
+                        base))
+               (step (str "      - name: " label "\n        run: " command)))
+          ;; Browser execution is mandatory in the core WASM differential tests.
+          ;; Use the locked CLI so its browser revision matches playwright-core.
+          (js-call rows :push
+            (if (= command "bun install --frozen-lockfile")
+              (str step "\n      - name: Install Chromium\n        run: bun node_modules/playwright-core/cli.js install --with-deps chromium")
+              step)))
+        (setq index (1+ index)))
+      (js-call rows :join "\n")))
+
+  (defun renderWorkflow (matrix)
+    (let* ((validated (validateCompatibilityMatrix matrix))
+           (deferred (= (get matrix :performanceAcceptance) "deferred")))
+      (+ "# Generated by tools/ci/render-workflow.mjs from contracts/compatibility-matrix.json.\n"
+         "# Run `bun tools/ci/render-workflow.mjs --write` after changing the contract.\n"
+         "name: Compatibility\n\n"
+         "on:\n"
+         "  push:\n"
+         "    branches: [master]\n"
+         "  pull_request:\n"
+         "  workflow_dispatch:\n\n"
+         "permissions:\n"
+         "  contents: read\n\n"
+         "concurrency:\n"
+         "  group: compatibility-${{ github.workflow }}-${{ github.ref }}\n"
+         "  cancel-in-progress: true\n\n"
+         "jobs:\n"
+         "  test:\n"
+         "    name: ${{ matrix.name }}\n"
+         "    runs-on: ${{ matrix.os }}\n"
+         "    timeout-minutes: 30\n"
+         "    env:\n"
+         "      BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index ${{ matrix.shard }} --shard-count "
+         (get validated :testFileShards) "\n"
+         (if deferred "      ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: \"1\"\n" "")
+         "    strategy:\n"
+         "      fail-fast: false\n"
+         "      matrix:\n"
+         "        include:\n"
+         (workflow-job-rows validated) "\n"
+         "    steps:\n"
+         (renderToolchainSteps matrix)
+         (command-steps matrix validated) "\n")))
+
+  (defun report-systems (systems)
+    (let ((parts (js-array)) (index 0))
+      (while (< index (js-length systems))
+        (let ((system (aref systems index)))
+          (js-call parts :push (str (get system :id) "/" (get system :architecture))))
+        (setq index (1+ index)))
+      (js-call parts :join ", ")))
+
+  (defun humanCompatibilityReport (report)
+    (let ((javascript-host (get report :javascriptHost))
+          (node-host (get report :nodeHost)))
+      (js-call (js-array
+                 "Compatibility matrix:"
+                 (str "  Systems        " (report-systems (get report :systems)))
+                 (str "  Acceptance     " (report-systems (get report :acceptanceSystems)))
+                 (str "  Emacs          " (js-call (get report :emacsVersions) :join ", "))
+                 (str "  JS host        " (get javascript-host :name) " " (get javascript-host :version))
+                 (str "  Node host      " (get node-host :name) " " (get node-host :version))
+                 (str "  File shards    " (get report :testFileShards) " per system/Emacs pair")
+                 (str "  Matrix jobs    " (get report :jobs))
+                 (str "  Required jobs  " (get report :acceptanceJobs))
+                 (str "  Local evidence " (get report :localEvidenceDirectory))
+                 (str "  Workflow       " (get report :workflow)))
+        :join "\n")))
+
+  (defun thrown-text (error)
+    (if (js-call (get globalThis.Error :prototype) :isPrototypeOf error)
+      (get error :message)
+      (funcall globalThis.String error)))
+
+  (defun call-options (supplied)
+    (if (or (= (js-length supplied) 0) (undefined? (aref supplied 0)))
+      (js-object)
+      (aref supplied 0)))
+
+  (defasync checkCompatibilityWorkflow (&rest supplied)
+    (let* ((options (call-options supplied))
+           (root (get options :root default-root))
+           (matrix (if (nullish? (get options :matrix))
+                     (JSON/parse (await (readFile (js-call path :join root matrix-path) "utf8")))
+                     (get options :matrix)))
+           (validated (validateCompatibilityMatrix matrix))
+           (expected (renderWorkflow matrix))
+           (workflow-text (if (nullish? (get options :workflowText))
+                            (await (readFile (js-call path :join root (get validated :workflow)) "utf8"))
+                            (get options :workflowText))))
+      (unless (= workflow-text expected)
+        (throw (new CompatibilityMatrixError
+                 (js-array (str (get validated :workflow)
+                                " differs from the compatibility matrix; run the renderer with --write")))))
+      (js-object :schemaVersion 1
+        :systems (let ((parts (js-array)) (index 0) (systems (get validated :systems)))
+                   (while (< index (js-length systems))
+                     (let ((system (aref systems index)))
+                       (js-call parts :push (js-object :id (get system :id)
+                                               :architecture (get system :architecture)
+                                               :runner (get system :runner)
+                                               :operatingSystem (get system :operatingSystem (get system :id)))))
+                     (setq index (1+ index)))
+                   parts)
+        :acceptanceSystems (let ((parts (js-array)) (index 0) (systems (get validated :acceptanceSystems)))
+                             (while (< index (js-length systems))
+                               (let ((system (aref systems index)))
+                                 (js-call parts :push (js-object :id (get system :id)
+                                                         :architecture (get system :architecture)
+                                                         :runner (get system :runner))))
+                               (setq index (1+ index)))
+                             parts)
+        :emacsVersions (get validated :emacsVersions)
+        :javascriptHost (get validated :javascriptHost)
+        :nodeHost (get (get validated :localEvidence) :nodeHost)
+        :localEvidenceDirectory (get (get validated :localEvidence) :directory)
+        :testFileShards (get validated :testFileShards)
+        :jobs (get validated :jobs)
+        :acceptanceJobs (get validated :acceptanceJobs)
+        :workflow (get validated :workflow))))
+
+  (defasync main ()
+    (try
+      (let* ((args (new globalThis.Set (js-call (get globalThis.process :argv) :slice 2)))
+             (matrix (JSON/parse (await (readFile (js-call path :join default-root matrix-path) "utf8"))))
+             (validated (validateCompatibilityMatrix matrix)))
+        (when (js-call args :has "--write")
+          (await (writeFile (js-call path :join default-root (get validated :workflow))
+                   (renderWorkflow matrix) "utf8")))
+        (let ((report (await (checkCompatibilityWorkflow (js-object :root default-root :matrix matrix)))))
+          (console/log (if (js-call args :has "--json")
+                         (JSON/stringify report nil 2)
+                         (humanCompatibilityReport report)))))
+      (catch error
+        (console/error (thrown-text error))
+        (put globalThis.process :exitCode 1))))
+
+  (let ((entry (aref (get globalThis.process :argv) 1)))
+    (when (and (host-truthy entry)
+               (= (js-call path :resolve entry) module-file))
+      (main)))
+
+  (export COMPATIBILITY_FILE_SHARDS CompatibilityMatrixError validateCompatibilityMatrix
+    renderToolchainSteps renderWorkflow checkCompatibilityWorkflow humanCompatibilityReport))

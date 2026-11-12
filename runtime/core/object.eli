@@ -1,2 +1,31 @@
-(module capsules.runtime.core.object
-  (js* "export {\n  assoc,\n  dissoc,\n  filter_values as filterValues,\n  has_QMARK_ as has,\n  key_in_QMARK_ as keyIn,\n  keys,\n  map_values as mapValues,\n  merge,\n  omit,\n  pick,\n  update,\n} from \"./object-impl.mjs\";\n"))
+(module eliscript.runtime.core.object
+  (import "./object-impl.mjs"
+    assoc
+    dissoc
+    filter_values
+    has_QMARK_
+    key_in_QMARK_
+    keys
+    map_values
+    merge
+    omit
+    pick
+    update)
+
+  (defconst filterValues filter_values)
+  (defconst has has_QMARK_)
+  (defconst keyIn key_in_QMARK_)
+  (defconst mapValues map_values)
+
+  (export
+    assoc
+    dissoc
+    filterValues
+    has
+    keyIn
+    keys
+    mapValues
+    merge
+    omit
+    pick
+    update))

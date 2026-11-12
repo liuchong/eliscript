@@ -1,2 +1,338 @@
-(module capsules.tests.wasm-managed-text-constructors.test
-  (js* "import {beforeAll,afterAll,test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {readFile,mkdtemp,rm,writeFile} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {spawnSync} from 'node:child_process';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nlet directory,b,runtime,program,reference,bytes;\nbeforeAll(async()=>{\n directory=await mkdtemp(resolve(tmpdir(),'eliscript-text-constructors-'));b=await buildBackends({outputRoot:directory});runtime=b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli');\n program=b.compiler.compile_ir_string(await readFile('tests/fixtures/wasm-managed-strings.eli','utf8'),'text-constructors.eli');\n reference=await import('data:text/javascript;base64,'+Buffer.from(b.compiler.emit_ir_string(program)).toString('base64'));\n assert.equal(reference.from_points(65,0x1f600,0xd800),'A😀\\ud800');assert.throws(()=>reference.from_point(.5),RangeError);\n},120000);\nafterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true})});\nfunction artifact(){return bytes??=Uint8Array.from(b.managed.emit_managed_wasm(program,runtime))}\nconst box=(a,x)=>typeof x==='number'?a.number(x):typeof x==='string'?a.string(x):x;\nfunction verify(a,name,inputs,exportName=name){a.collect();const baseline=a.live(),argv=inputs.map(x=>box(a,x));let result;try{let expected,error;try{expected=reference[name.replaceAll('-','_')](...inputs)}catch(e){error=e}if(error){assert(error instanceof RangeError);assert.throws(()=>a.invoke(exportName,argv),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003')}else{result=a.invoke(exportName,argv);assert.equal(a.readString(result),expected,name)}}finally{if(result)a.release(result);for(const x of argv)a.release(x)}a.collect();assert.equal(a.live(),baseline);assert.equal(a.stats().frameDepth,0)}\ntest('static String constructors execute existing source semantics with zero imports and exact UTF16',()=>{\n const raw=artifact();assert(WebAssembly.validate(raw));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(raw)),[]);const a=instantiateManagedRuntime(raw);a.auto(1);\n for(const name of['empty-units','empty-points'])verify(a,name,[]);\n for(const x of[null,false,true,undefined,0,-0,65,65535,65536,0x1f600,0x10ffff,-1,.5,-.5,NaN,Infinity,-Infinity,Number.MIN_VALUE,Number.MAX_VALUE,2**32,2**32+65,'65','0x1f600','-0','1.5','x',''])for(const name of['from-unit','from-point','global-unit','global-point','constructor-capture'])verify(a,name,[x]);\n for(const x of[0,-0,0xd800,0xdfff,0x1f600,0x10ffff,NaN,Infinity,-1,.5,'65',undefined])for(const name of['from-units','from-points'])verify(a,name,[65,x,0xde00]);\n});\ntest('deterministic full f64 words and random Unicode points match independent JS during collection',()=>{\n const a=instantiateManagedRuntime(artifact());a.auto(1);let seed=0x73b12941;const next=()=>seed=(Math.imul(seed,1664525)+1013904223)>>>0,view=new DataView(new ArrayBuffer(8));\n for(let i=0;i<512;i++){view.setUint32(0,next(),true);view.setUint32(4,next(),true);verify(a,'from-unit',[view.getFloat64(0,true)]);verify(a,'from-points',[next()%0x110000,next()%0x110000,next()%0x110000]);}\n});\ntest('all arguments execute before range conversion failures and earlier values remain snapshotted',()=>{\n const a=instantiateManagedRuntime(artifact());a.auto(1);for(const value of[-1,.5,NaN]){const bad=a.number(value),trace=a.sourceObject({});const control={};assert.throws(()=>reference.constructor_effects(value,control),RangeError);assert.equal(control.visited,66);assert.throws(()=>a.invoke('constructor-effects',[bad,trace]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');const key=a.string('visited'),seen=a.objectGet(trace,key);assert.equal(a.readNumber(seen),66);for(const x of[bad,trace,key,seen])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0)}verify(a,'constructor-capture',[65]);\n});\ntest('shadowed constructors and malformed or dynamic static-method IR never silently invoke globals',()=>{\n for(const source of[\n  '(defun f (String) (js-call (js* \"String\") :fromCodePoint 65)) (export f)',\n  '(defun f (globalThis) (js-call globalThis/String :fromCodePoint 65)) (export f)',\n  '(defconst String (js-object)) (defun f () (js-call (js* \"String\") :fromCharCode 65)) (export f)',\n  '(defun f (method) (js-call (js* \"String\") method 65)) (export f)',\n  '(defun f () (js-call (js* \"String\") :raw 65)) (export f)',\n ]){const ir=b.compiler.compile_ir_string(source,'shadowed.eli');for(const build of[()=>b.managed.emit_managed_wasm(ir,runtime),()=>b.managed.emit_managed_project_wasm([{id:'main.mjs',program:ir}],'main.mjs',runtime)])assert.throws(build,e=>e.eliscriptDiagnostic?.code==='ELI-B0001');}\n const copy=structuredClone(program);let target;const visit=x=>{if(!x||typeof x!=='object'||target)return;if(x.kind==='method-call'&&x.children?.[1]?.value==='fromCodePoint')target=x;else for(const v of Object.values(x))visit(v)};visit(copy);assert(target);target.children[0].children.push({kind:'literal',value:'extra',children:[],properties:null});assert.throws(()=>b.managed.emit_managed_wasm(copy,runtime),e=>e.eliscriptDiagnostic?.code==='ELI-B0001');\n for(const literal of[null,false,0,{}, {kind:'literal',value:65,children:[],properties:null}]){const p=b.compiler.compile_ir_string('(defun f () (js-call (js* \"String\") :fromCharCode 65)) (export f)','malformed-constructor.eli');p.body[0].children[0].children[0].children=[literal];assert.throws(()=>b.managed.emit_managed_wasm(p,runtime),e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.location.file==='malformed-constructor.eli');}\n});\ntest('linked projects retain the same static constructors without source mutation',()=>{\n const saved=b.compiler.serialize_ir_program(program),raw=Uint8Array.from(b.managed.emit_managed_project_wasm([{id:'strings.mjs',program}],'strings.mjs',runtime));assert.equal(b.compiler.serialize_ir_program(program),saved);const a=instantiateManagedRuntime(raw);a.auto(1);verify(a,'from-points',[65,0x1f600,0xd800],'from_points');a.closeModule();a.collect();assert.equal(a.live(),0);\n});\ntest('capacity errors preserve caller roots and UTF16 inputs; retry after failure remains usable',()=>{\n const a=instantiateManagedRuntime(artifact(),{maxSlots:24,initialBytes:4096,maxBytes:4096});a.auto(1);const text=a.string('中😀'),outer=a.frame(1);a.frameSet(outer,0,text);const fillers=[];while(a.live()<22)fillers.push(a.number(65));assert.throws(()=>a.invoke('from-units',fillers.slice(0,3)),e=>e.eliscriptDiagnostic?.code==='ELI-RT0002');assert.equal(a.stats().frameDepth,1);assert.equal(a.readString(text),'中😀');a.leaveFrame(outer);for(const x of[text,...fillers])a.release(x);a.collect();assert.equal(a.live(),0);verify(a,'from-unit',[65]);\n});\ntest('independent Node executes the same code-point, modulo and range boundaries with no private roots',async()=>{\n const path=resolve(directory,'constructors.wasm');await writeFile(path,artifact());const child=spawnSync('node',['--input-type=module','-e',`\n import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {instantiateManagedRuntime} from ${JSON.stringify(resolve('tools/backends/managed-runtime.mjs'))};\n const a=instantiateManagedRuntime(readFileSync(${JSON.stringify(path)}));a.auto(1);for(const [name,value] of [['from-point',0x1f600],['from-unit',-65535.5],['global-point',0xd800]]){const x=a.number(value),out=a.invoke(name,[x]);assert.equal(a.readString(out),name==='from-unit'?String.fromCharCode(value):String.fromCodePoint(value));a.release(x);a.release(out)}const bad=a.number(NaN);assert.throws(()=>a.invoke('from-point',[bad]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');a.release(bad);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);\n `],{encoding:'utf8',timeout:30000});assert.equal(child.status,0,child.stderr);\n});\n\ntest('bulk raw construction grows memory, seals exact surrogate pairs and validates modes, kinds and lifetime',()=>{\n const e=new WebAssembly.Instance(new WebAssembly.Module(artifact())).exports,h=e['heap-new'](128,4096,1048576),call=(name,...args)=>{const value=e[name](h,...args)>>>0;assert.equal(e['last-error'](),0,name);return value;};\n const initial=e.memory.buffer.byteLength,list=call('value-refs',7,16384);call('heap-pin',list);call('heap-auto',1);const n=call('value-number',0,0x40ff6000);call('heap-pin',n);\n for(let i=0;i<16384;i++)call('value-set',list,i,n);const out=call('value-source-text-codes',list,1);call('heap-pin',out);assert.equal(call('value-length',out),32768);assert(e.memory.buffer.byteLength>initial);const p=call('value-data',out,5),view=new DataView(e.memory.buffer);for(let i=0;i<32768;i+=2){assert.equal(view.getUint16(p+i*2,true),0xd83d);assert.equal(view.getUint16(p+(i+1)*2,true),0xde00)}\n e['value-unit-set'](h,out,0,0);assert.equal(e['last-error'](),6);for(const [value,mode,code]of[[list,2,3],[out,0,1],[0,0,1]]){e['value-source-text-codes'](h,value,mode);assert.equal(e['last-error'](),code)}\n for(const value of[list,n,out])call('heap-release',value);call('heap-collect');assert.equal(call('heap-live'),0);e['value-source-text-codes'](h,list,0);assert.equal(e['last-error'](),1);assert.equal(call('frame-depth'),0);\n});\ntest('real conversion traps unwind private scratch roots and cannot replace an earlier range error',async()=>{\n const source=await readFile('bootstrap/runtime/memory.eli','utf8'),needle='  (defun heap-number-word (heap input)';assert.equal(source.split(needle).length,2);const faulty=source.replace(needle,needle+'\\n    (when (= (load-u32 (+ (heap-block heap input) 32)) 12345) (load-u32 4294967295))'),runtime=b.compiler.compile_ir_string(faulty,'constructor-trap.eli'),a=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(program,runtime)));a.auto(1);\n const bits=new DataView(new ArrayBuffer(8));bits.setUint32(0,12345,true);bits.setUint32(4,0x3ff00000,true);const held=a.string('held😀'),frame=a.frame(1);a.frameSet(frame,0,held);const bad=a.number(-1),marker=a.number(bits.getFloat64(0,true)),good=a.number(65);\n assert.throws(()=>a.invoke('from-points',[bad,marker,good]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.equal(a.stats().frameDepth,1);assert.throws(()=>a.invoke('from-points',[good,marker,good]),WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);assert.equal(a.readString(held),'held😀');a.leaveFrame(frame);for(const v of[held,bad,marker,good])a.release(v);a.collect();assert.equal(a.live(),0);\n});\n\ntest('unsealed conversion input is rejected without mutating the argument list or escaping private roots',()=>{\n const e=new WebAssembly.Instance(new WebAssembly.Module(artifact())).exports,h=e['heap-new'](64,4096,65536),call=(name,...args)=>{const v=e[name](h,...args)>>>0;assert.equal(e['last-error'](),0,name);return v;};\n const args=call('value-refs',7,1),s=call('value-string',2);call('heap-pin',args);call('heap-pin',s);call('value-unit-set',s,0,54);call('value-unit-set',s,1,53);call('value-set',args,0,s);call('heap-auto',1);\n e['value-source-text-codes'](h,args,0);assert.equal(e['last-error'](),6);assert.equal(call('value-get',args,0),s);assert.equal(call('frame-depth'),0);call('value-seal',s);const out=call('value-source-text-codes',args,0);call('heap-pin',out);assert.equal(call('value-unit-get',out,0),65);for(const x of[args,s,out])call('heap-release',x);call('heap-collect');assert.equal(call('heap-live'),0);\n});\n\ntest('intrinsic String lookup keeps module binding shadowing after hygienic project renaming',async()=>{\n const source='(defconst String (js-object :fromCharCode (lambda (x) \"custom\"))) (defun f (x) (string-from-code-unit x)) (export f)',p=b.compiler.compile_ir_string(source,'intrinsic-shadow.eli'),control=await import('data:text/javascript;base64,'+Buffer.from(b.compiler.emit_ir_string(p)).toString('base64'));assert.equal(control.f(65),'custom');\n for(const build of[()=>b.managed.emit_managed_wasm(p,runtime),()=>b.managed.emit_managed_project_wasm([{id:'main.mjs',program:p}],'main.mjs',runtime)])assert.throws(build,e=>e.eliscriptDiagnostic?.code==='ELI-B0001');\n});\n"))
+(module tests.wasm-managed-text-constructors.test
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile mkdtemp rm writeFile)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:url" pathToFileURL)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defun dynamic-import (specifier)
+    (funcall (js* "(specifier) => import(specifier)") specifier))
+
+  (defconst js-instanceof (js* "(value, ctor) => value instanceof ctor"))
+
+  (defvar directory undefined)
+  (defvar b undefined)
+  (defvar runtime undefined)
+  (defvar program undefined)
+  (defvar reference undefined)
+  (defvar bytes undefined)
+
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-text-constructors-"))))
+    (setq b (await (buildBackends (js-object :outputRoot directory))))
+    (setq runtime (js-call (get b :compiler) :compile_ir_string (await (readFile "bootstrap/runtime/memory.eli" "utf8")) "runtime.eli"))
+    (setq program (js-call (get b :compiler) :compile_ir_string (await (readFile "tests/fixtures/wasm-managed-strings.eli" "utf8")) "text-constructors.eli"))
+    (setq reference (await (dynamic-import (str "data:text/javascript;base64,"
+                                                (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string program)) :toString "base64")))))
+    (js-call assert :equal (js-call reference :from_points 65 128512 55296) "A😀\ud800")
+    (js-call assert :throws (lambda () (js-call reference :from_point 0.5)) globalThis.RangeError))
+    120000)
+
+  (afterAll (async ()
+    (when directory
+      (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun artifact ()
+    (when (not bytes)
+      (setq bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program runtime))))
+    bytes)
+
+  (defun box (a x)
+    (cond
+      ((= (value-type x) "number") (js-call a :number x))
+      ((= (value-type x) "string") (js-call a :string x))
+      (t x)))
+
+  (defun verify (a name inputs &rest __host_default_arguments_1)
+    (let* ((exportName-arg (aref __host_default_arguments_1 0)))
+    (let ((exportName (if (undefined? exportName-arg) name exportName-arg)))
+      (js-call a :collect)
+      (let ((baseline (js-call a :live))
+            (argv (js-call inputs :map (lambda (x) (box a x))))
+            (result undefined))
+        (try
+          (let ((expected undefined)
+                (error undefined))
+            (try
+              (setq expected (Reflect/apply (get reference (js-call name :replaceAll "-" "_")) reference inputs))
+              (catch e (setq error e)))
+            (if error
+              (progn
+                (funcall assert (funcall js-instanceof error globalThis.RangeError))
+                (js-call assert :throws
+                  (lambda () (js-call a :invoke exportName argv))
+                  (lambda (e) (let ((diag (get e :eliscriptDiagnostic))) (and diag (= (get diag :code) "ELI-RT0003"))))))
+              (progn
+                (setq result (js-call a :invoke exportName argv))
+                (js-call assert :equal (js-call a :readString result) expected name))))
+          (finally
+            (when result (js-call a :release result))
+            (js-call argv :forEach (lambda (x) (js-call a :release x)))))
+        (js-call a :collect)
+        (js-call assert :equal (js-call a :live) baseline)
+        (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))
+
+  (test "static String constructors execute existing source semantics with zero imports and exact UTF16" (lambda ()
+    (let ((raw (artifact)))
+      (funcall assert (js-call globalThis.WebAssembly :validate raw))
+      (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module raw)) (js-array))
+      (let ((a (instantiateManagedRuntime raw)))
+        (js-call a :auto 1)
+        (js-call (js-array "empty-units" "empty-points") :forEach
+          (lambda (name) (verify a name (js-array))))
+        (js-call
+          (js-array nil false t undefined 0 -0.0 65 65535 65536 128512 1114111 -1 0.5 -0.5
+                    globalThis.NaN globalThis.Infinity (- globalThis.Infinity)
+                    globalThis.Number.MIN_VALUE globalThis.Number.MAX_VALUE
+                    4294967296 4294967361 "65" "0x1f600" "-0" "1.5" "x" "")
+          :forEach
+          (lambda (x)
+            (js-call (js-array "from-unit" "from-point" "global-unit" "global-point" "constructor-capture") :forEach
+              (lambda (name) (verify a name (js-array x))))))
+        (js-call (js-array 0 -0.0 55296 57343 128512 1114111 globalThis.NaN globalThis.Infinity -1 0.5 "65" undefined) :forEach
+          (lambda (x)
+            (js-call (js-array "from-units" "from-points") :forEach
+              (lambda (name) (verify a name (js-array 65 x 56832))))))))))
+
+  (test "deterministic full f64 words and random Unicode points match independent JS during collection" (lambda ()
+    (let* ((a (instantiateManagedRuntime (artifact)))
+           (_ (js-call a :auto 1))
+           (seed 1941006657)
+           (next (lambda () (setq seed (uint32 (+ (Math/imul seed 1664525) 1013904223)))))
+           (view (new globalThis.DataView (new globalThis.ArrayBuffer 8)))
+           (i 0))
+      (while (< i 512)
+        (js-call view :setUint32 0 (funcall next) t)
+        (js-call view :setUint32 4 (funcall next) t)
+        (verify a "from-unit" (js-array (js-call view :getFloat64 0 t)))
+        (verify a "from-points" (js-array (% (funcall next) 1114112) (% (funcall next) 1114112) (% (funcall next) 1114112)))
+        (setq i (1+ i))))))
+
+  (test "all arguments execute before range conversion failures and earlier values remain snapshotted" (lambda ()
+    (let ((a (instantiateManagedRuntime (artifact))))
+      (js-call a :auto 1)
+      (js-call (js-array -1 0.5 globalThis.NaN) :forEach
+        (lambda (value)
+          (let ((bad (js-call a :number value))
+                (trace (js-call a :sourceObject (js-object)))
+                (control (js-object)))
+            (js-call assert :throws (lambda () (js-call reference :constructor_effects value control)) globalThis.RangeError)
+            (js-call assert :equal (get control :visited) 66)
+            (js-call assert :throws
+              (lambda () (js-call a :invoke "constructor-effects" (js-array bad trace)))
+              (lambda (e) (let ((diag (get e :eliscriptDiagnostic))) (and diag (= (get diag :code) "ELI-RT0003")))))
+            (let* ((key (js-call a :string "visited"))
+                   (seen (js-call a :objectGet trace key)))
+              (js-call assert :equal (js-call a :readNumber seen) 66)
+              (js-call (js-array bad trace key seen) :forEach (lambda (x) (js-call a :release x)))
+              (js-call a :collect)
+              (js-call assert :equal (js-call a :live) 0)
+              (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))
+      (verify a "constructor-capture" (js-array 65)))))
+
+  (test "shadowed constructors and malformed or dynamic static-method IR never silently invoke globals" (lambda ()
+    (js-call
+      (js-array
+        "(defun f (String) (js-call (js* \"String\") :fromCodePoint 65)) (export f)"
+        "(defun f (globalThis) (js-call globalThis/String :fromCodePoint 65)) (export f)"
+        "(defconst String (js-object)) (defun f () (js-call (js* \"String\") :fromCharCode 65)) (export f)"
+        "(defun f (method) (js-call (js* \"String\") method 65)) (export f)"
+        "(defun f () (js-call (js* \"String\") :raw 65)) (export f)")
+      :forEach
+      (lambda (source)
+        (let ((ir (js-call (get b :compiler) :compile_ir_string source "shadowed.eli")))
+          (js-call
+            (js-array
+              (lambda () (js-call (get b :managed) :emit_managed_wasm ir runtime))
+              (lambda () (js-call (get b :managed) :emit_managed_project_wasm (js-array (js-object :id "main.mjs" :program ir)) "main.mjs" runtime)))
+            :forEach
+            (lambda (build)
+              (js-call assert :throws build
+                (lambda (e) (let ((diag (get e :eliscriptDiagnostic))) (and diag (= (get diag :code) "ELI-B0001"))))))))))
+    (let ((copy (globalThis.structuredClone program))
+          (target undefined))
+      (letfn ((visit (x)
+                (when (and x (= (value-type x) "object") (not target))
+                  (if (and (= (get x :kind) "method-call")
+                           (get x :children)
+                           (aref (get x :children) 1)
+                           (= (get (aref (get x :children) 1) :value) "fromCodePoint"))
+                    (setq target x)
+                    (js-call (Object/values x) :forEach (lambda (v) (visit v)))))))
+        (visit copy)
+        (funcall assert target)
+        (js-call (get (aref (get target :children) 0) :children) :push
+          (js-object :kind "literal" :value "extra" :children (js-array) :properties nil))
+        (js-call assert :throws
+          (lambda () (js-call (get b :managed) :emit_managed_wasm copy runtime))
+          (lambda (e) (let ((diag (get e :eliscriptDiagnostic))) (and diag (= (get diag :code) "ELI-B0001")))))))
+    (js-call
+      (js-array nil false 0 (js-object) (js-object :kind "literal" :value 65 :children (js-array) :properties nil))
+      :forEach
+      (lambda (literal)
+        (let ((p (js-call (get b :compiler) :compile_ir_string "(defun f () (js-call (js* \"String\") :fromCharCode 65)) (export f)" "malformed-constructor.eli")))
+          (put (aref (get (aref (get (aref (get p :body) 0) :children) 0) :children) 0) :children (js-array literal))
+          (js-call assert :throws
+            (lambda () (js-call (get b :managed) :emit_managed_wasm p runtime))
+            (lambda (e)
+              (let ((diag (get e :eliscriptDiagnostic)))
+                (and diag (= (get diag :code) "ELI-B0001") (= (get (get diag :location) :file) "malformed-constructor.eli"))))))))))
+
+  (test "linked projects retain the same static constructors without source mutation" (lambda ()
+    (let* ((saved (js-call (get b :compiler) :serialize_ir_program program))
+           (raw (Uint8Array/from (js-call (get b :managed) :emit_managed_project_wasm (js-array (js-object :id "strings.mjs" :program program)) "strings.mjs" runtime))))
+      (js-call assert :equal (js-call (get b :compiler) :serialize_ir_program program) saved)
+      (let ((a (instantiateManagedRuntime raw)))
+        (js-call a :auto 1)
+        (verify a "from-points" (js-array 65 128512 55296) "from_points")
+        (js-call a :closeModule)
+        (js-call a :collect)
+        (js-call assert :equal (js-call a :live) 0)))))
+
+  (test "capacity errors preserve caller roots and UTF16 inputs; retry after failure remains usable" (lambda ()
+    (let* ((a (instantiateManagedRuntime (artifact) (js-object :maxSlots 24 :initialBytes 4096 :maxBytes 4096)))
+           (_ (js-call a :auto 1))
+           (text (js-call a :string "中😀"))
+           (outer (js-call a :frame 1))
+           (fillers (js-array)))
+      (js-call a :frameSet outer 0 text)
+      (while (< (js-call a :live) 22)
+        (js-call fillers :push (js-call a :number 65)))
+      (js-call assert :throws
+        (lambda () (js-call a :invoke "from-units" (js-call fillers :slice 0 3)))
+        (lambda (e) (let ((diag (get e :eliscriptDiagnostic))) (and diag (= (get diag :code) "ELI-RT0002")))))
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+      (js-call assert :equal (js-call a :readString text) "中😀")
+      (js-call a :leaveFrame outer)
+      (js-call (js-call (js-array text) :concat fillers) :forEach (lambda (x) (js-call a :release x)))
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (verify a "from-unit" (js-array 65)))))
+
+  (test "independent Node executes the same code-point, modulo and range boundaries with no private roots" (async ()
+    (let ((path (resolve directory "constructors.wasm")))
+      (await (writeFile path (artifact)))
+      (let ((child (spawnSync "node"
+                     (js-array (resolve "tests/helpers/wasm-managed-text-constructors-node.mjs")
+                               (get (pathToFileURL (resolve "tools/backends/managed-runtime.mjs")) :href)
+                               path)
+                     (js-object :encoding "utf8" :timeout 30000))))
+        (js-call assert :equal (get child :status) 0 (get child :stderr))))))
+
+  (test "bulk raw construction grows memory, seals exact surrogate pairs and validates modes, kinds and lifetime" (lambda ()
+    (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module (artifact))) :exports))
+           (h (js-call e "heap-new" 128 4096 1048576))
+           (call (lambda (name &rest args)
+                   (let ((value (uint32 (Reflect/apply (get e name) e (js-call (js-array h) :concat args)))))
+                     (js-call assert :equal (js-call e "last-error") 0 name)
+                     value)))
+           (initial (get (get (get e :memory) :buffer) :byteLength))
+           (list-val (funcall call "value-refs" 7 16384)))
+      (funcall call "heap-pin" list-val)
+      (funcall call "heap-auto" 1)
+      (let ((n (funcall call "value-number" 0 1090478080))
+            (i 0))
+        (funcall call "heap-pin" n)
+        (while (< i 16384)
+          (funcall call "value-set" list-val i n)
+          (setq i (1+ i)))
+        (let ((out (funcall call "value-source-text-codes" list-val 1)))
+          (funcall call "heap-pin" out)
+          (js-call assert :equal (funcall call "value-length" out) 32768)
+          (funcall assert (> (get (get (get e :memory) :buffer) :byteLength) initial))
+          (let ((p (funcall call "value-data" out 5))
+                (view (new globalThis.DataView (get (get e :memory) :buffer)))
+                (j 0))
+            (while (< j 32768)
+              (js-call assert :equal (js-call view :getUint16 (+ p (* j 2)) t) 55357)
+              (js-call assert :equal (js-call view :getUint16 (+ p (* (+ j 1) 2)) t) 56832)
+              (setq j (+ j 2))))
+          (js-call e "value-unit-set" h out 0 0)
+          (js-call assert :equal (js-call e "last-error") 6)
+          (js-call (js-array (js-array list-val 2 3) (js-array out 0 1) (js-array 0 0 1)) :forEach
+            (lambda (triple)
+              (js-call e "value-source-text-codes" h (aref triple 0) (aref triple 1))
+              (js-call assert :equal (js-call e "last-error") (aref triple 2))))
+          (js-call (js-array list-val n out) :forEach (lambda (v) (funcall call "heap-release" v)))
+          (funcall call "heap-collect")
+          (js-call assert :equal (funcall call "heap-live") 0)
+          (js-call e "value-source-text-codes" h list-val 0)
+          (js-call assert :equal (js-call e "last-error") 1)
+          (js-call assert :equal (funcall call "frame-depth") 0))))))
+
+  (test "real conversion traps unwind private scratch roots and cannot replace an earlier range error" (async ()
+    (let* ((source (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
+           (needle "  (defun heap-number-word (heap input)"))
+      (js-call assert :equal (js-length (js-call source :split needle)) 2)
+      (let* ((faulty (js-call source :replace needle (str needle "\n    (when (= (load-u32 (+ (heap-block heap input) 32)) 12345) (load-u32 4294967295))")))
+             (injected-rt (js-call (get b :compiler) :compile_ir_string faulty "constructor-trap.eli"))
+             (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program injected-rt))))
+             (_ (js-call a :auto 1))
+             (bits (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
+        (js-call bits :setUint32 0 12345 t)
+        (js-call bits :setUint32 4 1072693248 t)
+        (let* ((held (js-call a :string "held😀"))
+               (frame (js-call a :frame 1))
+               (bad (js-call a :number -1))
+               (marker (js-call a :number (js-call bits :getFloat64 0 t)))
+               (good (js-call a :number 65)))
+          (js-call a :frameSet frame 0 held)
+          (js-call assert :throws
+            (lambda () (js-call a :invoke "from-points" (js-array bad marker good)))
+            (lambda (e) (let ((diag (get e :eliscriptDiagnostic))) (and diag (= (get diag :code) "ELI-RT0003")))))
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+          (js-call assert :throws
+            (lambda () (js-call a :invoke "from-points" (js-array good marker good)))
+            globalThis.WebAssembly.RuntimeError)
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+          (js-call assert :equal (js-call a :readString held) "held😀")
+          (js-call a :leaveFrame frame)
+          (js-call (js-array held bad marker good) :forEach (lambda (v) (js-call a :release v)))
+          (js-call a :collect)
+          (js-call assert :equal (js-call a :live) 0))))))
+
+  (test "unsealed conversion input is rejected without mutating the argument list or escaping private roots" (lambda ()
+    (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module (artifact))) :exports))
+           (h (js-call e "heap-new" 64 4096 65536))
+           (call (lambda (name &rest args)
+                   (let ((v (uint32 (Reflect/apply (get e name) e (js-call (js-array h) :concat args)))))
+                     (js-call assert :equal (js-call e "last-error") 0 name)
+                     v)))
+           (args (funcall call "value-refs" 7 1))
+           (s (funcall call "value-string" 2)))
+      (funcall call "heap-pin" args)
+      (funcall call "heap-pin" s)
+      (funcall call "value-unit-set" s 0 54)
+      (funcall call "value-unit-set" s 1 53)
+      (funcall call "value-set" args 0 s)
+      (funcall call "heap-auto" 1)
+      (js-call e "value-source-text-codes" h args 0)
+      (js-call assert :equal (js-call e "last-error") 6)
+      (js-call assert :equal (funcall call "value-get" args 0) s)
+      (js-call assert :equal (funcall call "frame-depth") 0)
+      (funcall call "value-seal" s)
+      (let ((out (funcall call "value-source-text-codes" args 0)))
+        (funcall call "heap-pin" out)
+        (js-call assert :equal (funcall call "value-unit-get" out 0) 65)
+        (js-call (js-array args s out) :forEach (lambda (x) (funcall call "heap-release" x)))
+        (funcall call "heap-collect")
+        (js-call assert :equal (funcall call "heap-live") 0)))))
+
+  (test "intrinsic String lookup keeps module binding shadowing after hygienic project renaming" (async ()
+    (let* ((source "(defconst String (js-object :fromCharCode (lambda (x) \"custom\"))) (defun f (x) (string-from-code-unit x)) (export f)")
+           (p (js-call (get b :compiler) :compile_ir_string source "intrinsic-shadow.eli"))
+           (control (await (dynamic-import (str "data:text/javascript;base64,"
+                                                (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string p)) :toString "base64"))))))
+      (js-call assert :equal (js-call control :f 65) "custom")
+      (js-call
+        (js-array
+          (lambda () (js-call (get b :managed) :emit_managed_wasm p runtime))
+          (lambda () (js-call (get b :managed) :emit_managed_project_wasm (js-array (js-object :id "main.mjs" :program p)) "main.mjs" runtime)))
+        :forEach
+        (lambda (build)
+          (js-call assert :throws build
+            (lambda (e) (let ((diag (get e :eliscriptDiagnostic))) (and diag (= (get diag :code) "ELI-B0001")))))))))))

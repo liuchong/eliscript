@@ -1,0 +1,48 @@
+(module tests.helpers.wasm-managed-builtins-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:process" :default process)
+
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+
+  (defasync main ()
+    (let* ((argv (get process :argv))
+           (mode (aref argv 2)))
+      (cond
+        ((= mode "js")
+         (let ((m (await (funcall dyn-import (aref argv 3)))))
+           (funcall assert (Object/is (js-call m :number_call "-0") -0))
+           (js-call assert :equal (js-call m :number_empty) 0)
+           (js-call assert :equal (js-call m :string_empty) "")
+           (js-call assert :equal (js-call m :boolean_call 0) false)
+           (js-call assert :equal (js-call m :finite_call "1") false)
+           (js-call assert :equal (js-call m :integer_call -0) t)
+           (js-call assert :equal (js-call m :same_number) t)
+           (js-call assert :equal (js-call m :same_finite) t)))
+        ((= mode "wasm")
+         (let* ((mod (await (funcall dyn-import (aref argv 3))))
+                (instantiateManagedRuntime (get mod :instantiateManagedRuntime))
+                (a (funcall instantiateManagedRuntime (readFileSync (aref argv 4)))))
+           (js-call a :auto 1)
+           (let* ((text (js-call a :string "-0"))
+                  (out (js-call a :invoke "number-call" (js-array text)))
+                  (unsafe (js-call a :number (Math/pow 2 53)))
+                  (empty-arr (js-call a :sourceArray (js-array))))
+             (funcall assert (Object/is (js-call a :readNumber out) -0))
+             (js-call assert :equal (js-call a :invoke "integer-call" (js-array unsafe)) t)
+             (js-call assert :equal (js-call a :invoke "safe-call" (js-array unsafe)) false)
+             (js-call assert :equal (js-call a :invoke "array-call" (js-array empty-arr)) t)
+             (js-call assert :equal (js-call a :invoke "same-number") t)
+             (js-call (js-array text out unsafe empty-arr) :forEach
+               (lambda (x) (js-call a :release x)))
+             (js-call a :closeModule)
+             (js-call a :collect)
+             (js-call assert :equal (js-call a :live) 0)
+             (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
+        (t
+         (throw (new globalThis.Error (str "unknown mode: " mode)))))))
+
+  (js-call (main) :catch
+    (lambda (err)
+      (console/error err)
+      (js-call process :exit 1))))

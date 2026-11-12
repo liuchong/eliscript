@@ -17,7 +17,7 @@
   (defvar memo-registrations 0)
   (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update
     (readFileSync (resolve root "tests/wasm-memory-static-data-test-ground.mjs"))) :digest "hex")
-    "060bb7f392c7d1978815f66b34fe1de601fa5d64d4d410e1d363e3bc424e41bc")
+    "ad8c6c48bf1a732d3b2a86b0cc4e31d27900939486516b8e176a489597a81332")
   (defasync buildBackends (&rest arguments)
     (let ((actual (await (Reflect/apply (get original :buildBackends) original arguments))))
       (setq directory (get (aref arguments 0) :outputRoot))

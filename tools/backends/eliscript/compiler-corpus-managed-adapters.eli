@@ -9,7 +9,7 @@
   (import "./compiler-corpus-process.mjs" originalCorpusExecutionPolicy runOriginalCorpusProcess readOriginalCorpusExecutionContext readOriginalProcessHostDependency bindOriginalProcessHostDependency)
   (import "../../dist/bootstrap/reader.mjs" read-string)
   (import "../../dist/bootstrap/compiler.mjs" compile-string compile-ir-string)
-  (import "../../dist/bootstrap/emitter.mjs" emit-expression)
+  (import "../../dist/bootstrap/emitter.mjs" emit-top-level)
   (import "./build.mjs" root loadLiteralSources)
   (import "./compiler-corpus-managed-adapters-ground.mjs" :as ground)
   (import "./compiler-corpus-sorted.mjs" addOriginalSortedRecipes)
@@ -99,7 +99,7 @@
                      (js-array "--preload" (resolve source-root "tests/fixtures/compiled-eli-bun-preload.mjs"))
                      (js-array "--experimental-loader" (resolve source-root "tests/fixtures/compiled-eli-node-loader.mjs"))))
                  (unused nil))
-            (js-object :executable (get environment (if (= engine "bun") :BUN :NODE) engine)
+            (js-object :executable (get environment (if (= engine "bun") "BUN" "NODE") engine)
               :args (js-call preload :concat (js-array driver) (get input :args))
               :env environment :cleanup cleanup :directory directory))
           (catch error (try (await (funcall cleanup)) (catch ignored nil)) (throw error))))))
@@ -188,59 +188,44 @@
         (Object/assign (js-object) context
           (js-object :directory (resolve (get context :directory) (str "nested-" position))))))))
 
-  (defun original-observation-call-end (source start)
-    ;; The caller is one authenticated generated wrapper expression. Scan its
-    ;; balanced argument list; do not interpret or rewrite its original args.
-    (let ((index (+ start (js-length "originalObservation"))) (depth 0)
-          (quote nil) (escaped false) (done false))
-      (while (and (< index (js-length source)) (not done))
-        (let ((character (aref source index)))
-          (cond
-            (quote (cond (escaped (setq escaped false))
-                     ((= character "\\") (setq escaped t))
-                     ((= character quote) (setq quote nil))))
-            ((js-call (js-array "\"" "'" "`") :includes character) (setq quote character))
-            ((= character "(") (setq depth (1+ depth)))
-            ((= character ")") (setq depth (1- depth)) (when (= depth 0) (setq done t)))))
-        (setq index (1+ index)))
-      (unless done (fail "original observation invocation has no complete argument boundary"))
-      index))
+  (defun maintained-observation-host? (record)
+    (let* ((transport (get (get record :original) :observationTransport))
+           (kind (and transport (get transport :kind))) (id (get record :id))
+           (selected
+             (and (= (and transport (get transport :version)) 1)
+              (or (and (= kind "original-managed-standard-identities-host")
+                      (js-call id :startsWith "original-managed:sequence-data-standard-identities:"))
+                 (and (= kind "original-managed-sequence-host")
+                      (js-call (new globalThis.RegExp "^original-managed:sequence-data-host-(transducer|core-stdlib|data-text|value-hash|lazy-sequence|core-text-object):") :test id))))))
+      (when selected
+        (unless (and (= (value-type (get transport :originalHostSource)) "string")
+                     (= (hash (get transport :originalHostSource)) (get transport :originalHostSha256)))
+          (fail "maintained original observation host source identity conflicts")))
+      selected))
 
   (defun migrate-original-observation-record (record assets helper-url)
     (let* ((execution (get record :execution)) (host (and execution (get execution :hostSource))))
       (if (or (/= (value-type host) "string")
-              (not (js-call host :includes "function originalObservation("))) record
-        (let* ((begin (js-call host :indexOf "function originalObservation("))
-               (end (js-call host :indexOf "function plain(" begin))
-               (original (get record :original))
-               (configuration (js-object :recordId (get record :id) :sourceIdentity (hash host)))
-               (declaration (str "(import " (JSON/stringify helper-url) " runInheritedOriginalManagedObservation)\n"
-                 "(defasync originalObservation (source &rest supplied)"
-                 " (await (runInheritedOriginalManagedObservation source (aref supplied 0) (aref supplied 1) (aref supplied 2) (JSON/parse "
-                 (JSON/stringify (JSON/stringify configuration)) "))))"))
-               (tail (js-call host :slice end)) (parts (js-array)) (position 0) (calls 0))
-          (unless (and (>= end 0)
-                       (= (js-call host :indexOf "function originalObservation(" (1+ begin)) -1)
-                       (js-call (new globalThis.RegExp "^original-managed:") :test (get record :id)))
-            (fail "original observation helper no longer identifies one maintained wrapper"))
-          (let ((at (js-call tail :indexOf "originalObservation(" position)))
-            (while (>= at 0)
-              (let* ((prefix (js-call tail :slice 0 at))
-                     (finish (original-observation-call-end tail at))
-                     (call (js-call tail :slice at finish)))
-                (unless (or (js-call prefix :endsWith "const expected=")
-                            (js-call prefix :endsWith "const actual=")
-                            (js-call prefix :endsWith "assert.deepEqual("))
-                  (fail "original observation call is outside its authenticated wrapper grammar"))
-                (let* ((program (compile-ir-string (str "(async () (await (js* " (JSON/stringify call) ")))")
-                                  "original-observation-await.eli"))
-                       (function-node (aref (get (aref (get program :body) 0) :children) 0))
-                       (awaited (get (emit-expression (aref (get function-node :children) 0)) :text)))
-                  (js-call parts :push (js-call tail :slice position at) awaited))
-                (setq position finish calls (1+ calls)))
-              (setq at (js-call tail :indexOf "originalObservation(" position))))
-          (js-call parts :push (js-call tail :slice position))
-          (let ((combined (js-call (get original :sourceAssets (js-array)) :slice)))
+              (not (js-call (new globalThis.RegExp "^original-managed:") :test (get record :id)))
+              (maintained-observation-host? record)) record
+        (let* ((boundary "let {runtime,boundaryLowered,selectedInput} = __managed_context;\n")
+               (begin (js-call host :indexOf boundary)) (original (get record :original))
+               (configuration (js-object :recordId (get record :id) :sourceIdentity (hash host))))
+          (unless (and (>= begin 0) (= (js-call host :indexOf boundary (1+ begin)) -1))
+            (fail "original observation context no longer identifies one maintained wrapper"))
+          (let* ((declaration (str "(import " (JSON/stringify helper-url) " runInheritedOriginalManagedObservation)\n"
+                    "(put (js* \"__managed_context\") :originalObservation (async (source &rest supplied)"
+                    " (await (runInheritedOriginalManagedObservation source (get supplied 0) (get supplied 1) (get supplied 2) (JSON/parse "
+                    (JSON/stringify (JSON/stringify configuration)) ")))))"))
+                 (filename "original-observation-helper.eli")
+                 (program (compile-string declaration filename))
+                 (ir (compile-ir-string declaration filename))
+                 (statement (get (emit-top-level (aref (get ir :body) (1- (js-length (get ir :body))))) :text))
+                 (end (+ begin (js-length boundary)))
+                 (combined (js-call (get original :sourceAssets (js-array)) :slice)))
+            (unless (and (> (js-length statement) 0)
+                         (= (js-length (js-call program :split statement)) 2))
+              (fail "original observation installation left its maintained compiled program"))
             (js-call assets :forEach (lambda (asset)
               (let ((previous (js-call combined :find (lambda (item) (= (get item :file) (get asset :file))))))
                 (when (and previous (/= (get previous :sourceSha256) (get asset :sourceSha256)))
@@ -248,11 +233,13 @@
                 (unless previous (js-call combined :push asset)))))
             (Object/assign (js-object) record (js-object
               :execution (Object/assign (js-object) execution (js-object :hostSource
-                (str (js-call host :slice 0 begin) (if (> calls 0) (compile-string declaration "original-observation-helper.eli") "")
-                  (js-call parts :join ""))))
+                (str (js-call host :slice 0 end) program (js-call host :slice end))))
               :original (Object/assign (js-object) original (js-object :sourceAssets combined
                 :observationTransport (js-object :kind "original-managed-observation" :version 1
-                  :originalHostSource host :originalHostSha256 (hash host) :calls calls))))))))))
+                  :originalHostSource host :originalHostSha256 (hash host)
+                  :calls 2
+                  :installation (js-object :filename filename :source declaration :sourceSha256 (hash declaration)
+                    :statement statement :statementSha256 (hash statement) :emittedSha256 (hash program))))))))))))
 
   (defasync observation-transport-options (options)
     (if (or (nullish? options) (/= (value-type (get options :add)) "function")

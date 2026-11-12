@@ -1,0 +1,23 @@
+(module tests.number-spelling-oracle-driver
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+
+  (defconst evaluate-literal
+    (js* "(text) => globalThis.Function('return (' + text + ')')()"))
+
+  (let ((records (JSON/parse (readFileSync 0 "utf8")))
+        (index 0))
+    (while (< index (js-length records))
+      (let* ((record (aref records index))
+             (token (aref record 0))
+             (value (funcall globalThis.Number token)))
+        (funcall assert (Number/isFinite value))
+        (let ((expected (if (Object/is value -0.0) "-0.0" (funcall globalThis.String value)))
+              (output-index 1))
+          (while (< output-index (js-length record))
+            (let ((text (aref record output-index)))
+              (js-call assert :equal text expected token)
+              (funcall assert (Object/is (funcall evaluate-literal text) value) token))
+            (setq output-index (1+ output-index)))))
+      (setq index (1+ index)))
+    (js-call (get globalThis.process :stdout) :write "number-spelling-verified")))

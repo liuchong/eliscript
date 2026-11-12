@@ -214,20 +214,20 @@
       (let ((second (eliscript-project-build entry out-dir root)))
         (should (= (eliscript-project-build-result-compiled-count second) 0))
         (should (= (eliscript-project-build-result-reused-count second) 2))
-        (should (equal (file-attribute-modification-time
-                        (file-attributes entry-output))
-                       old-time)))
+        (should (time-equal-p (file-attribute-modification-time
+                               (file-attributes entry-output))
+                              old-time)))
       (eliscript-project-tests--write
        dependency "(defconst answer 2)\n(export answer)\n")
       (let ((third (eliscript-project-build entry out-dir root)))
         (should (= (eliscript-project-build-result-compiled-count third) 1))
         (should (= (eliscript-project-build-result-reused-count third) 1))
-        (should (equal (file-attribute-modification-time
-                        (file-attributes entry-output))
-                       old-time))
-        (should-not (equal (file-attribute-modification-time
-                            (file-attributes dependency-output))
-                           old-time)))
+        (should (time-equal-p (file-attribute-modification-time
+                               (file-attributes entry-output))
+                              old-time))
+        (should-not (time-equal-p (file-attribute-modification-time
+                                   (file-attributes dependency-output))
+                                  old-time)))
       (with-temp-file entry-output (insert "tampered\n"))
       (let ((repaired (eliscript-project-build entry out-dir root)))
         (should (= (eliscript-project-build-result-compiled-count repaired) 1))

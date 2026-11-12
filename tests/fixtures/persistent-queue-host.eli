@@ -1,2 +1,14 @@
-(module capsules.tests.fixtures.persistent-queue-host
-  (js* "import { keyword } from \"../../runtime/core/identifier.mjs\";\nimport { persistentHashMap } from \"../../runtime/core/map.mjs\";\nimport { meta, withMeta } from \"../../runtime/core/metadata.mjs\";\nimport { persistentQueue } from \"../../runtime/core/queue.mjs\";\nimport { equalValues, hashValue } from \"../../runtime/core/value.mjs\";\n\nlet values = persistentQueue(1, keyword(\"two\"), 3);\nvalues = values.conj(4).pop();\nconst annotated = withMeta(values, persistentHashMap([\"source\", \"host\"]));\n\nconsole.log(JSON.stringify({\n  values: values.toArray().map(String),\n  count: values.count,\n  front: String(values.peek()),\n  hash: hashValue(values),\n  equal: equalValues(values, persistentQueue(keyword(\"two\"), 3, 4)),\n  source: meta(annotated).get(\"source\"),\n}));\n"))
+(module tests.fixtures.persistent-queue-host
+  (import "../../runtime/core/identifier.mjs" keyword)
+  (import "../../runtime/core/map.mjs" persistentHashMap)
+  (import "../../runtime/core/metadata.mjs" meta withMeta)
+  (import "../../runtime/core/queue.mjs" persistentQueue)
+  (import "../../runtime/core/value.mjs" equalValues hashValue)
+  (defvar values (persistentQueue 1 (keyword "two") 3))
+  (setq values (js-call (js-call values :conj 4) :pop))
+  (defconst annotated (withMeta values (persistentHashMap (js-array "source" "host"))))
+  (js-call globalThis.console :log (JSON/stringify (js-object
+    :values (js-call (js-call values :toArray) :map globalThis.String)
+    :count (get values :count) :front (funcall globalThis.String (js-call values :peek))
+    :hash (hashValue values) :equal (equalValues values (persistentQueue (keyword "two") 3 4))
+    :source (js-call (meta annotated) :get "source")))))

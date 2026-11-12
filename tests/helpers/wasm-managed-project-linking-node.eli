@@ -1,0 +1,15 @@
+(module tests.helpers.wasm-managed-project-linking-node
+  (import "node:assert/strict" :default assert)
+  (import "node:process" :default process)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defasync run-main ()
+    (let* ((m (await (funcall dynamic-import (aref (get process :argv) 2))))
+           (expected (globalThis.Number (aref (get process :argv) 3))))
+      (funcall assert (Object/is (js-call m :f 5) expected))
+      (when (= (funcall js-typeof (get m :global)) "function")
+        (js-call assert :equal (js-call m :global) 3))))
+
+  (run-main))

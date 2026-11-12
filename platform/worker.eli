@@ -1,2 +1,140 @@
-(module capsules.platform.worker
-  (js* "export {\n  WorkerValueCodecError,\n  decodeWorkerValue,\n  decodeWorkerValues,\n  encodeWorkerValue,\n  encodeWorkerValues,\n  workerValueEncoding,\n  workerValueLimits,\n} from \"../runtime/worker-value-codec.mjs\";\nexport {\n  WorkerValueStreamDecoder,\n  WorkerValueStreamError,\n  decodeWorkerValueChunks,\n  encodeWorkerValueChunks,\n  encodeWorkerValueEvents,\n  workerValueFraming,\n  workerValueStreamLimits,\n} from \"../runtime/worker-value-stream.mjs\";\n\nexport const workerCapabilityKinds = Object.freeze([\n  \"cancellation\",\n  \"progress\",\n]);\n\nconst capabilityState = new WeakMap();\nconst knownCapabilities = new Set(workerCapabilityKinds);\n\nexport class WorkerCapabilityError extends Error {\n  constructor(code, message, capability) {\n    super(message);\n    this.name = \"WorkerCapabilityError\";\n    this.code = code;\n    this.capability = capability;\n  }\n}\n\nfunction fail(code, message, capability) {\n  throw new WorkerCapabilityError(code, message, capability);\n}\n\nfunction normalizeGrants(grants) {\n  if (!Array.isArray(grants) || grants.some(\n    (grant) => typeof grant !== \"string\" || grant.length === 0,\n  )) {\n    fail(\"invalid-grants\", \"worker grants must be an array of non-empty strings\");\n  }\n  const normalized = [...new Set(grants)].sort();\n  if (normalized.length !== grants.length) {\n    fail(\"duplicate-grant\", \"worker grants must not contain duplicates\");\n  }\n  for (const grant of normalized) {\n    if (!knownCapabilities.has(grant)) {\n      fail(\"unknown-grant\", `unknown worker capability ${grant}`, grant);\n    }\n  }\n  return normalized;\n}\n\nfunction operationTable(context, grants) {\n  const operations = Object.create(null);\n  for (const grant of grants) {\n    if (grant === \"progress\") {\n      if (typeof context.progress !== \"function\") {\n        fail(\n          \"unavailable-capability\",\n          \"worker context does not provide progress\",\n          grant,\n        );\n      }\n      operations.progress = (value) => Reflect.apply(\n        context.progress,\n        context,\n        [value],\n      );\n    } else if (grant === \"cancellation\") {\n      const signal = context.signal;\n      if (signal === null || typeof signal !== \"object\" ||\n          typeof signal.aborted !== \"boolean\" ||\n          typeof signal.addEventListener !== \"function\") {\n        fail(\n          \"unavailable-capability\",\n          \"worker context does not provide an AbortSignal\",\n          grant,\n        );\n      }\n      operations.signal = () => signal;\n    }\n  }\n  return Object.freeze(operations);\n}\n\nexport function workerCapabilities(context, grants = []) {\n  if (context === null || typeof context !== \"object\") {\n    fail(\"invalid-host\", \"worker context must be an object\");\n  }\n  const normalized = normalizeGrants(grants);\n  const capabilities = Object.freeze({\n    format: \"eliscript-worker-capabilities\",\n    version: 1,\n    grants: Object.freeze(normalized),\n  });\n  capabilityState.set(capabilities, operationTable(context, normalized));\n  return capabilities;\n}\n\nexport function isWorkerCapabilities(value) {\n  return value !== null && typeof value === \"object\" && capabilityState.has(value);\n}\n\nfunction stateFor(capabilities) {\n  const state = isWorkerCapabilities(capabilities)\n    ? capabilityState.get(capabilities)\n    : undefined;\n  if (state === undefined) {\n    fail(\"invalid-capabilities\", \"expected Eliscript worker capabilities\");\n  }\n  return state;\n}\n\nexport function workerCapabilityDescriptor(capabilities) {\n  stateFor(capabilities);\n  return Object.freeze({\n    format: capabilities.format,\n    version: capabilities.version,\n    grants: Object.freeze([...capabilities.grants]),\n  });\n}\n\nexport function hasWorkerCapability(capabilities, capability) {\n  stateFor(capabilities);\n  return typeof capability === \"string\" && capabilities.grants.includes(capability);\n}\n\nfunction operationFor(capabilities, operation, capability) {\n  const operation_ = stateFor(capabilities)[operation];\n  if (operation_ === undefined) {\n    fail(\n      \"missing-capability\",\n      `worker capability ${capability} was not granted`,\n      capability,\n    );\n  }\n  return operation_;\n}\n\nexport function workerProgress(capabilities, value) {\n  return operationFor(capabilities, \"progress\", \"progress\")(value);\n}\n\nexport function workerSignal(capabilities) {\n  return operationFor(capabilities, \"signal\", \"cancellation\")();\n}\n\nexport function workerCancelled(capabilities) {\n  return workerSignal(capabilities).aborted;\n}\n\nexport function throwIfWorkerCancelled(capabilities) {\n  if (workerCancelled(capabilities)) {\n    fail(\n      \"worker-cancelled\",\n      \"worker operation has been cancelled\",\n      \"cancellation\",\n    );\n  }\n}\n"))
+(module platform.worker
+  (import "../runtime/worker-value-codec.mjs"
+    WorkerValueCodecError decodeWorkerValue decodeWorkerValues
+    encodeWorkerValue encodeWorkerValues workerValueEncoding workerValueLimits)
+  (import "../runtime/worker-value-stream.mjs"
+    WorkerValueStreamDecoder WorkerValueStreamError decodeWorkerValueChunks
+    encodeWorkerValueChunks encodeWorkerValueEvents workerValueFraming
+    workerValueStreamLimits)
+
+  (defconst host-error-class
+    (js* "(init, name, arity, messageOf) => { const C = ({ [name]: class extends Error { constructor(...args) { super(messageOf(...args)); init(this, ...args); } } })[name]; Object.defineProperty(C, 'length', { value: arity, configurable: true }); return C; }"))
+  (defun host-typeof (value) (js* "typeof value"))
+
+  (defconst workerCapabilityKinds
+    (Object/freeze (js-array "cancellation" "progress")))
+
+  (defconst capabilityState (new globalThis.WeakMap))
+  (defconst knownCapabilities (new globalThis.Set workerCapabilityKinds))
+
+  (defconst WorkerCapabilityError
+    (funcall host-error-class
+      (lambda (receiver code message capability)
+        (put receiver :name "WorkerCapabilityError")
+        (put receiver :code code)
+        (put receiver :capability capability))
+      "WorkerCapabilityError"
+      3
+      (lambda (code message capability) message)))
+
+  (defun fail (code message &rest __opt)
+    (throw (new WorkerCapabilityError code message (aref __opt 0))))
+
+  (defun invalid-grant-item? (grant)
+    (or (not (= (host-typeof grant) "string")) (= (js-length grant) 0)))
+
+  (defun normalizeGrants (grants)
+    (when (or (not (Array/isArray grants))
+              (js-call grants :some invalid-grant-item?))
+      (fail "invalid-grants" "worker grants must be an array of non-empty strings"))
+    (let ((normalized (js-call (Array/from (new globalThis.Set grants)) :sort)))
+      (when (not (= (js-length normalized) (js-length grants)))
+        (fail "duplicate-grant" "worker grants must not contain duplicates"))
+      (let ((index 0))
+        (while (< index (js-length normalized))
+          (let ((grant (aref normalized index)))
+            (unless (js-call knownCapabilities :has grant)
+              (fail "unknown-grant" (str "unknown worker capability " grant) grant)))
+          (setq index (1+ index))))
+      normalized))
+
+  (defun operationTable (context grants)
+    (let ((operations (Object/create nil))
+          (index 0))
+      (while (< index (js-length grants))
+        (let ((grant (aref grants index)))
+          (cond
+            ((= grant "progress")
+              (unless (= (host-typeof (get context :progress)) "function")
+                (fail "unavailable-capability" "worker context does not provide progress" grant))
+              (put operations :progress
+                (lambda (value)
+                  (Reflect/apply (get context :progress) context (js-array value)))))
+            ((= grant "cancellation")
+              (let ((signal (get context :signal)))
+                (when (or (nil? signal)
+                          (not (= (host-typeof signal) "object"))
+                          (not (= (host-typeof (get signal :aborted)) "boolean"))
+                          (not (= (host-typeof (get signal :addEventListener)) "function")))
+                  (fail "unavailable-capability" "worker context does not provide an AbortSignal" grant))
+                (put operations :signal (lambda () signal))))))
+        (setq index (1+ index)))
+      (Object/freeze operations)))
+
+  (defun workerCapabilities (context &rest __opt)
+    (let* ((grants (aref __opt 0))
+           (actual-grants (if (undefined? grants) (js-array) grants)))
+      (when (or (nil? context) (not (= (host-typeof context) "object")))
+        (fail "invalid-host" "worker context must be an object"))
+      (let* ((normalized (normalizeGrants actual-grants))
+             (capabilities (Object/freeze
+                             (js-object :format "eliscript-worker-capabilities"
+                               :version 1
+                               :grants (Object/freeze normalized)))))
+        (js-call capabilityState :set capabilities (operationTable context normalized))
+        capabilities)))
+
+  (defun isWorkerCapabilities (value)
+    (and (not (nil? value))
+         (= (host-typeof value) "object")
+         (js-call capabilityState :has value)))
+
+  (defun stateFor (capabilities)
+    (let ((state (if (isWorkerCapabilities capabilities)
+                   (js-call capabilityState :get capabilities)
+                   undefined)))
+      (when (undefined? state)
+        (fail "invalid-capabilities" "expected Eliscript worker capabilities"))
+      state))
+
+  (defun workerCapabilityDescriptor (capabilities)
+    (stateFor capabilities)
+    (Object/freeze
+      (js-object :format (get capabilities :format)
+        :version (get capabilities :version)
+        :grants (Object/freeze (Array/from (get capabilities :grants))))))
+
+  (defun hasWorkerCapability (capabilities capability)
+    (stateFor capabilities)
+    (and (= (host-typeof capability) "string")
+         (js-call (get capabilities :grants) :includes capability)))
+
+  (defun operationFor (capabilities operation capability)
+    (let ((operation_ (aref (stateFor capabilities) operation)))
+      (when (undefined? operation_)
+        (fail "missing-capability"
+          (str "worker capability " capability " was not granted")
+          capability))
+      operation_))
+
+  (defun workerProgress (capabilities value)
+    (funcall (operationFor capabilities "progress" "progress") value))
+
+  (defun workerSignal (capabilities)
+    (funcall (operationFor capabilities "signal" "cancellation")))
+
+  (defun workerCancelled (capabilities)
+    (get (workerSignal capabilities) :aborted))
+
+  (defun throwIfWorkerCancelled (capabilities)
+    (when (workerCancelled capabilities)
+      (fail "worker-cancelled" "worker operation has been cancelled" "cancellation")))
+
+  (export WorkerCapabilityError WorkerValueCodecError WorkerValueStreamDecoder
+    WorkerValueStreamError decodeWorkerValue decodeWorkerValueChunks
+    decodeWorkerValues encodeWorkerValue encodeWorkerValueChunks
+    encodeWorkerValueEvents encodeWorkerValues hasWorkerCapability
+    isWorkerCapabilities throwIfWorkerCancelled workerCancelled
+    workerCapabilities workerCapabilityDescriptor workerCapabilityKinds
+    workerProgress workerSignal workerValueEncoding workerValueFraming
+    workerValueLimits workerValueStreamLimits))

@@ -1,0 +1,6 @@
+(module tests.fixtures.boundary-project-host
+  (import "node:process" :default process)
+  (defasync main ()
+    (let ((host (await (funcall (js* "(specifier) => import(specifier)") (get (get process :env) :ELISCRIPT_PROJECT_HOST)))))
+      (await (js-call host :buildProject (JSON/parse (get (get process :env) :ELISCRIPT_OPTIONS))))))
+  (main))

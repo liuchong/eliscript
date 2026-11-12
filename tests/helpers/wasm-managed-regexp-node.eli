@@ -1,0 +1,45 @@
+(module tests.helpers.wasm-managed-regexp-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:process" :default process)
+
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defasync run-main ()
+    (let ((mode (aref (get process :argv) 2)))
+      (cond
+        ((= mode "ref")
+         (let ((m (await (funcall dynamic-import (aref (get process :argv) 3)))))
+           (js-call assert :equal (js-call m :test_value "abca") t)
+           (js-call assert :equal (js-call m :test_value "abd") false)
+           (js-call assert :deepEqual (Array/from (js-call m :match_value "abca")) (js-array "abca"))))
+        ((= mode "wasm")
+         (let* ((rt-mod (await (funcall dynamic-import (aref (get process :argv) 3))))
+                (instantiate (get rt-mod :instantiateManagedRuntime))
+                (a (funcall instantiate (readFileSync (aref (get process :argv) 4)))))
+           (js-call a :auto 1)
+           (let ((x (js-call a :string "abca")))
+             (js-call assert :equal (js-call a :invoke "test-value" (js-array x)) t)
+             (let* ((out (js-call a :invoke "match-value" (js-array x)))
+                    (first (js-call a :get out 0)))
+               (js-call assert :equal (js-call a :readString first) "abca")
+               (js-call (js-array x out first) :forEach (lambda (v) (js-call a :release v)))
+               (js-call a :closeModule)
+               (js-call a :collect)
+               (js-call assert :equal (js-call a :live) 0)
+               (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))
+        ((= mode "models")
+         (let ((records (JSON/parse (readFileSync (aref (get process :argv) 3) "utf8"))))
+           (js-call records :forEach
+             (lambda (r)
+               (let* ((m (js-call (new globalThis.RegExp (get r :pattern) (get r :flags)) :exec (get r :text)))
+                      (actual (if (nil? m)
+                                nil
+                                (js-object
+                                  :values (js-call (Array/from m) :map (lambda (x) (if (undefined? x) (js-object :missing t) x)))
+                                  :index (get m :index)
+                                  :input (get m :input)))))
+                 (js-call assert :deepEqual actual (get r :expected) (str (get r :pattern) ": " (get r :text))))))))
+        (t (throw (new globalThis.Error (str "unknown mode: " mode)))))))
+
+  (run-main))

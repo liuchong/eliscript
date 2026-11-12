@@ -6,7 +6,7 @@
   (import "../backends/sha256.mjs" sha256-string-utf16le)
 
   (defun tools-fail (message filename &optional code)
-    (let ((error (new (js* "Error") message)))
+    (let ((error (new globalThis.Error message)))
       (put error :eliscriptDiagnostic
         (js-object :format "eliscript-diagnostic" :version 1 :code (or code "ELI-T0001")
           :severity "error" :phase "compiler-tools" :message message

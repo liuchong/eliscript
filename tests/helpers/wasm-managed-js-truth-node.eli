@@ -1,0 +1,37 @@
+(module tests.helpers.wasm-managed-js-truth-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+
+  (defun dynamic-import (specifier)
+    (funcall (js* "(specifier) => import(specifier)") specifier))
+
+  (defconst js-boolean (js* "(value) => !!value"))
+
+  (defasync main ()
+    (let* ((js (await (dynamic-import (aref (get globalThis.process :argv) 2))))
+           (rt-mod (await (dynamic-import (aref (get globalThis.process :argv) 3))))
+           (instantiateManagedRuntime (get rt-mod :instantiateManagedRuntime))
+           (a (funcall instantiateManagedRuntime (readFileSync (aref (get globalThis.process :argv) 4))))
+           (original globalThis.Boolean))
+      (js-call a :auto 1)
+      (try
+        (progn
+          (put (js* "globalThis") :Boolean (lambda () false))
+          (js-call (js-array undefined nil false t 0 -0.0 globalThis.NaN 1 "" "中😀") :forEach
+            (lambda (value)
+              (let ((v (cond
+                         ((= (value-type value) "number") (js-call a :number value))
+                         ((= (value-type value) "string") (js-call a :string value))
+                         (t value)))
+                    (expected (funcall js-boolean value)))
+                (js-call assert :equal (js-call a :invoke "truth" (js-array v)) expected)
+                (js-call assert :equal (js-call js :truth value) expected)
+                (js-call a :release v)))))
+        (finally
+          (put (js* "globalThis") :Boolean original)))
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))
+
+  (main))

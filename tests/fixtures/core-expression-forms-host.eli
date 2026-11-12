@@ -1,2 +1,16 @@
-(module capsules.tests.fixtures.core-expression-forms-host
-  (js* "const modulePath = process.argv[2];\nif (!modulePath) throw new TypeError(\"compiled module path is required\");\n\nconst module = await import(modulePath);\nprocess.stdout.write(`${JSON.stringify(module.expression_form_report())}\\n`);\n"))
+(module tests.fixtures.core-expression-forms-host
+  (import "node:url" pathToFileURL)
+  (defconst load-module (js* "(specifier) => import(specifier)"))
+  (defconst modulePath (aref (get globalThis.process :argv) 2))
+  (when (not (js* "!!modulePath")) (throw (new globalThis.TypeError "compiled module path is required")))
+  (defvar compiled undefined)
+  (defasync run-host-main ()
+    (setq compiled (await (funcall load-module modulePath)))
+    (js-call (get globalThis.process :stdout) :write (str (JSON/stringify (js-call compiled "expression_form_report")) "\n")))
+  (defconst completion (run-host-main))
+  (js-call completion :catch (lambda (error)
+    (console/error error)
+    (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

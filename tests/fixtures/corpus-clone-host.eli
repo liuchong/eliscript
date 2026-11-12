@@ -1,0 +1,5 @@
+(module tests.fixtures.corpus-clone-host
+  (import "node:process" :default process)
+  (import "../helpers/corpus-clone-contract.mjs" checkNodeFallback)
+  (checkNodeFallback)
+  (js-call (get process :stdout) :write "native Node clone oracle passed\n"))

@@ -3,13 +3,44 @@
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
   (defconst fail
     (lambda (message)
-      (throw (new (js* "Error") message))))
+      (throw (new globalThis.Error message))))
+  (defconst iterator-key globalThis.Symbol.iterator)
+  (defconst native-apply Reflect/apply)
+  (defconst native-boolean globalThis.Boolean)
+  (defconst native-object globalThis.Object)
+  (defun js-object-p (value)
+    (eq (funcall native-object value) value))
   (defconst visit-iterable
-    (js* "(iterable, visit) => { for (const item of iterable) visit(item); }"))
-  (defconst spread-iterable (js* "(iterable) => [...iterable]"))
+    (lambda (iterable visit)
+      (let ((iterator (native-apply (aref iterable iterator-key) iterable (js-array))))
+        (unless (js-object-p iterator)
+          (throw (new globalThis.TypeError "iterator is not an object")))
+        (let ((next (aref iterator "next"))
+              (done false))
+          (while (not done)
+            (let ((step (native-apply next iterator (js-array))))
+              (unless (js-object-p step)
+                (throw (new globalThis.TypeError "iterator result is not an object")))
+              (if (funcall native-boolean (aref step "done"))
+                  (setq done t)
+                (let ((value (aref step "value")))
+                  (try
+                    (funcall visit value)
+                    (catch error
+                      (try
+                        (let ((close (aref iterator "return")))
+                          (unless (nullish? close)
+                            (native-apply close iterator (js-array))))
+                        (catch ignored nil))
+                      (throw error)))))))))))
+  (defconst spread-iterable
+    (lambda (iterable)
+      (let ((items (js-array)))
+        (funcall visit-iterable iterable (lambda (item) (js-call items :push item)))
+        items)))
   (defconst native-source-locations
     (lambda (source marks)
-      (let ((wanted (new (js* "Set"))) (locations (new (js* "Map"))))
+      (let ((wanted (new globalThis.Set)) (locations (new globalThis.Map)))
         (funcall visit-iterable marks
           (lambda (mark)
             (let* ((entry (if (nullish? mark) (js-array) mark))
@@ -20,7 +51,7 @@
         (let* ((starts (js-call (funcall spread-iterable wanted) :filter
                         (lambda (start)
                           (let ((answer (Number/isSafeInteger start)))
-                            (and (js* "!!answer") (>= start 0))))))
+                            (and (funcall native-boolean answer) (>= start 0))))))
                (ordered (js-call starts :sort (lambda (left right) (- left right))))
                (index 0) (offset 0) (line 0) (column 0))
           (funcall visit-iterable ordered
@@ -89,8 +120,8 @@
     (funcall native-collect-generated-marks generated marks))
 
   (defun reference-source-locations (source marks)
-    (let ((wanted (new (js* "Map")))
-          (locations (new (js* "Map"))))
+    (let ((wanted (new globalThis.Map))
+          (locations (new globalThis.Map)))
       (js-call marks :forEach
         (lambda (mark)
           (let ((start (get (js-nth 2 mark) :start)))

@@ -43,6 +43,19 @@
     (fail "the original host or dependency differs from its authenticated source transport"))
   (defconst host-url (get (pathToFileURL host) :href))
   (defconst runtime-url (get (pathToFileURL runtime-path) :href))
+  (defconst runtime-routes (new globalThis.Map))
+  ;; Every compiler-emitted runtime import needs a real package coordinate in
+  ;; a data module. Resolve only complete, separately authenticated providers.
+  (js-call (js-array "array-text" "errors" "math" "number-radix" "prelude"
+                    "primitives" "unicode-case" "unicode-case-data") :forEach
+    (lambda (name)
+      (let* ((file (str "runtime/" name ".mjs")) (path (resolve root file))
+             (proofs (js-call assets :filter (lambda (entry) (= (get entry :file) file)))))
+        (unless (and (= (js-length proofs) 1) (= (realpathSync path) path)
+                     (= (get (aref proofs 0) :sourceSha256) (digest (readFileSync path))))
+          (fail (str "runtime provider differs from its authenticated source: " file)))
+        (js-call runtime-routes :set (str "eliscript/" file)
+          (js-object :path path :url (get (pathToFileURL path) :href))))))
   (defconst prefix "data:text/javascript;base64,")
   (defconst parents (new globalThis.Set))
   (defun data-bytes (specifier)
@@ -64,8 +77,9 @@
           (data-bytes specifier)
           (js-call parents :add specifier))
         (funcall nextResolve
-          (if (and (= specifier "eliscript/runtime/unicode-case.mjs")
-                   (js-call parents :has (get context :parentURL))) runtime-url specifier)
+          (if (and (js-call runtime-routes :has specifier)
+                   (js-call parents :has (get context :parentURL)))
+              (get (js-call runtime-routes :get specifier) :url) specifier)
           context)))))
     (js-call globalThis.Bun :plugin (js-object :name "authenticated-original-tools-data" :setup (lambda (builder)
       (js-call builder :onResolve (js-object :filter (new globalThis.RegExp "^data:text/javascript;base64,"))
@@ -86,10 +100,12 @@
           (unless (js-call parents :has (get request :path)) (fail "unrecognized original data module"))
           (js-object :contents (data-bytes (get request :path)) :loader "js")))
       (js-call builder :onResolve
-        (js-object :filter (new globalThis.RegExp "^eliscript/runtime/unicode-case[.]mjs$") :namespace "original-tools-data")
+        (js-object :filter (new globalThis.RegExp "^eliscript/runtime/[^/]+[.]mjs$") :namespace "original-tools-data")
         (lambda (request)
           (unless (js-call parents :has (get request :importer)) (fail "unrecognized original data importer"))
-          (js-object :path runtime-path :namespace "file")))
+          (let ((route (js-call runtime-routes :get (get request :path))))
+            (unless route (fail "undeclared runtime import in original data module"))
+            (js-object :path (get route :path) :namespace "file"))))
       ;; The AggregateError reference also imports its actual compiler driver
       ;; by file URL. Preserve that URL's canonical file identity.
       (js-call builder :onResolve

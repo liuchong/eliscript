@@ -1,2 +1,20 @@
-(module capsules.tests.fixtures.data-text-host
-  (js* "import { printValue, readValue } from \"../../runtime/core/data-text.mjs\";\nimport { eliscriptSymbol, keyword } from \"../../runtime/core/identifier.mjs\";\nimport { persistentList } from \"../../runtime/core/list.mjs\";\nimport { persistentHashMap } from \"../../runtime/core/map.mjs\";\nimport { meta, withMeta } from \"../../runtime/core/metadata.mjs\";\nimport { persistentQueue } from \"../../runtime/core/queue.mjs\";\nimport { persistentHashSet } from \"../../runtime/core/set.mjs\";\nimport { equalValues } from \"../../runtime/core/value.mjs\";\nimport { persistentVector } from \"../../runtime/core/vector.mjs\";\n\nconst metadata = persistentHashMap([keyword(\"source\"), \"host\"]);\nconst value = withMeta(persistentHashMap(\n  [keyword(\"vector\"), persistentVector(1, eliscriptSymbol(\"two\"))],\n  [keyword(\"list\"), persistentList(1, keyword(\"two\"))],\n  [keyword(\"set\"), persistentHashSet(3, 1, 2)],\n  [keyword(\"map\"), persistentHashMap([keyword(\"b\"), 2], [keyword(\"a\"), 1])],\n  [keyword(\"queue\"), persistentQueue(1, keyword(\"two\"), persistentVector(3))],\n), metadata);\nconst text = printValue(value);\nconst restored = readValue(text);\n\nconsole.log(JSON.stringify({\n  text,\n  stable: printValue(restored) === text,\n  equal: equalValues(restored, value),\n  source: meta(restored).get(keyword(\"source\")),\n}));\n"))
+(module tests.fixtures.data-text-host
+  (import "../../runtime/core/data-text.mjs" printValue readValue)
+  (import "../../runtime/core/identifier.mjs" eliscriptSymbol keyword)
+  (import "../../runtime/core/list.mjs" persistentList)
+  (import "../../runtime/core/map.mjs" persistentHashMap)
+  (import "../../runtime/core/metadata.mjs" meta withMeta)
+  (import "../../runtime/core/queue.mjs" persistentQueue)
+  (import "../../runtime/core/set.mjs" persistentHashSet)
+  (import "../../runtime/core/value.mjs" equalValues)
+  (import "../../runtime/core/vector.mjs" persistentVector)
+  (defconst metadata (persistentHashMap (js-array (keyword "source") "host")))
+  (defconst value (withMeta (persistentHashMap
+    (js-array (keyword "vector") (persistentVector 1 (eliscriptSymbol "two")))
+    (js-array (keyword "list") (persistentList 1 (keyword "two")))
+    (js-array (keyword "set") (persistentHashSet 3 1 2))
+    (js-array (keyword "map") (persistentHashMap (js-array (keyword "b") 2) (js-array (keyword "a") 1)))
+    (js-array (keyword "queue") (persistentQueue 1 (keyword "two") (persistentVector 3)))) metadata))
+  (defconst text (printValue value)) (defconst restored (readValue text))
+  (js-call globalThis.console :log (JSON/stringify (js-object :text text :stable (= (printValue restored) text)
+    :equal (equalValues restored value) :source (js-call (meta restored) :get (keyword "source"))))))

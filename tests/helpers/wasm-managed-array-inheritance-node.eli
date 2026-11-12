@@ -1,0 +1,69 @@
+(module tests.helpers.wasm-managed-array-inheritance-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+  (defconst methods
+    (js-array "map" "filter" "forEach" "every" "some" "reduce" "reduceRight"
+              "indexOf" "lastIndexOf" "sort" "slice" "concat"))
+
+  (defun withPrototype (fn)
+    (let ((saved (Object/getOwnPropertyDescriptors globalThis.Array.prototype)))
+      (try
+        (funcall fn)
+        (finally
+          (let ((keys (Reflect/ownKeys globalThis.Array.prototype)) (i 0))
+            (while (< i (js-length keys))
+              (let ((key (aref keys i)))
+                (when (not (Object/hasOwn saved key))
+                  (Reflect/deleteProperty globalThis.Array.prototype key)))
+              (setq i (1+ i))))
+          (let ((skeys (Reflect/ownKeys saved)) (si 0))
+            (while (< si (js-length skeys))
+              (let ((key (aref skeys si)))
+                (when (/= key "length")
+                  (Object/defineProperty globalThis.Array.prototype key (get saved key))))
+              (setq si (1+ si))))
+          (Object/defineProperty globalThis.Array.prototype "length" (get saved :length))))))
+
+  (defun finish (a &rest __host_default_arguments_1)
+    (let* ((values (aref __host_default_arguments_1 0)))
+    (let ((items (if (undefined? values) (js-array) values)))
+      (js-call items :forEach (lambda (value) (js-call a :release value))))
+    (js-call a :closeModule)
+    (js-call a :collect)
+    (js-call assert :equal (js-call a :live) 0)
+    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))
+
+  (defasync main ()
+    (let* ((argv (get globalThis.process :argv))
+           (rt-mod (await (funcall dynamic-import (aref argv 2))))
+           (instantiateManagedRuntime (get rt-mod :instantiateManagedRuntime))
+           (reference (await (funcall dynamic-import (aref argv 3))))
+           (bytes (readFileSync (aref argv 4))))
+      (js-call methods :forEach
+        (lambda (method)
+          (js-call (js-array 7 undefined) :forEach
+            (lambda (inherited)
+              (let* ((a (funcall instantiateManagedRuntime bytes))
+                     (_ (js-call a :auto 1))
+                     (input (if (undefined? inherited) undefined (js-call a :number inherited)))
+                     (expected (withPrototype (lambda () (js-call reference (str "test_" method) inherited))))
+                     (out (js-call a :invoke (str "test-" method) (js-array input))))
+                (js-call assert :equal (js-call a :readString out) expected method)
+                (finish a (js-array input out)))))))
+      (js-call (js-array 7 undefined) :forEach
+        (lambda (inherited)
+          (let ((mode 0))
+            (while (< mode 6)
+              (let* ((a (funcall instantiateManagedRuntime bytes))
+                     (_ (js-call a :auto 1))
+                     (input (if (undefined? inherited) undefined (js-call a :number inherited)))
+                     (m (js-call a :number mode))
+                     (expected (withPrototype (lambda () (js-call reference :iterator_inherited inherited mode))))
+                     (out (js-call a :invoke "iterator-inherited" (js-array input m))))
+                (js-call assert :equal (js-call a :readString out) expected (str "iterator mode " mode))
+                (finish a (js-array input m out)))
+              (setq mode (1+ mode))))))))
+
+  (main))

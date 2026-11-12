@@ -1,0 +1,117 @@
+(module tests.helpers.wasm-managed-array-splice-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defun box (a v)
+    (cond
+      ((= (value-type v) "number") (js-call a :number v))
+      ((= (value-type v) "string") (js-call a :string v))
+      ((Array/isArray v)
+       (let* ((values (Array/from v (lambda (x i) (if (Object/hasOwn v i) (box a x) undefined))))
+              (sparse (new globalThis.Array (js-length v)))
+              (i 0))
+         (while (< i (js-length v))
+           (when (Object/hasOwn v i)
+             (put sparse i (aref values i)))
+           (setq i (1+ i)))
+         (try (js-call a :sourceArray sparse)
+           (finally (js-call values :forEach (lambda (x) (js-call a :release x)))))))
+      (t v)))
+
+  (defun read (a v)
+    (if (or (not v) (/= (value-type v) "object"))
+      v
+      (cond
+        ((= (get v :kind) 4) (js-call a :readNumber v))
+        ((= (get v :kind) 5) (js-call a :readString v))
+        (t
+         (js-call assert :equal (get v :kind) 14)
+         (let ((out (new globalThis.Array (js-call a :length v)))
+               (i 0))
+           (while (< i (js-length out))
+             (let ((key (js-call a :number i))
+                   (present nil))
+               (try (setq present (js-call a :invoke "own" (js-array v key)))
+                 (finally (js-call a :release key)))
+               (when present
+                 (let ((value (js-call a :get v i)))
+                   (try (put out i (read a value))
+                     (finally (js-call a :release value))))))
+             (setq i (1+ i)))
+           (let ((keys (js-call a :invoke "properties" (js-array v))))
+             (try
+               (let ((k 0))
+                 (while (< k (js-call a :length keys))
+                   (let ((key (js-call a :get keys k)))
+                     (try
+                       (let* ((name (js-call a :readString key))
+                              (num (funcall globalThis.Number name)))
+                         (when (or (/= (funcall globalThis.String (uint32 num)) name)
+                                   (>= num 4294967295))
+                           (let ((child (js-call a :invoke "property" (js-array v key))))
+                             (try
+                               (Object/defineProperty out name
+                                 (js-object :value (read a child) :writable t :enumerable t :configurable t))
+                               (finally (js-call a :release child))))))
+                       (finally (js-call a :release key))))
+                   (setq k (1+ k))))
+               (finally (js-call a :release keys))))
+           out)))))
+
+  (defun finish (a roots)
+    (js-call roots :forEach (lambda (v) (js-call a :release v)))
+    (js-call a :closeModule)
+    (js-call a :collect)
+    (js-call assert :equal (js-call a :live) 0)
+    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))
+
+  (defun exercise (a js name values args)
+    (let ((input (box a values))
+          (boxed (js-call args :map (lambda (v) (box a v))))
+          (reference (js-call values :slice))
+          (result undefined))
+      (try
+        (progn
+          (setq result (js-call a :invoke name (js-call (js-array input) :concat boxed)))
+          (js-call assert :deepEqual (read a result) (Reflect/apply (get js name) js (js-call (js-array reference) :concat args)))
+          (js-call assert :deepEqual (read a input) reference)
+          (js-call assert :equal (js-call a :keyEqual result input) false))
+        (finally
+          (js-call a :release result)
+          (js-call a :release input)
+          (js-call boxed :forEach (lambda (v) (js-call a :release v)))))))
+
+  (defasync main ()
+    (let* ((argv (get globalThis.process :argv))
+           (rt-mod (await (funcall dynamic-import (aref argv 2))))
+           (instantiateManagedRuntime (get rt-mod :instantiateManagedRuntime))
+           (bytes (readFileSync (aref argv 3))))
+      (js-call assert :deepEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      (let* ((js (js-object
+                   :zero (lambda (items) (js-call items :splice))
+                   :one (lambda (items start) (js-call items :splice start))
+                   :two (lambda (items start count) (js-call items :splice start count))
+                   :many (lambda (items start count x y) (js-call items :splice start count x y))))
+             (a (funcall instantiateManagedRuntime bytes))
+             (_ (js-call a :auto 1))
+             (seed 1935284523)
+             (next (lambda () (setq seed (uint32 (+ (Math/imul seed 1664525) 1013904223))) seed))
+             (pool (js-array undefined nil false globalThis.NaN -0.0 "中😀"))
+             (i 0))
+        (while (< i 64)
+          (let ((values (new globalThis.Array (% (funcall next) 16)))
+                (j 0))
+            (while (< j (js-length values))
+              (when (/= (% (funcall next) 4) 0)
+                (put values j (aref pool (% (funcall next) 6))))
+              (setq j (1+ j)))
+            (exercise a js "zero" values (js-array))
+            (js-call (js-array undefined globalThis.NaN globalThis.Infinity (- globalThis.Infinity) -1.9 0 1.9) :forEach
+              (lambda (start)
+                (exercise a js "many" values (js-array start (- (% (funcall next) 24) 4) undefined "x")))))
+          (setq i (1+ i)))
+        (finish a (js-array)))))
+
+  (js-call (main) :catch (lambda (err) (console/error err) (js-call globalThis.process :exit 1))))

@@ -1,2 +1,413 @@
-(module capsules.bootstrap.host.bun
-  (js* "#!/usr/bin/env bun\n\nimport {\n  lstat,\n  mkdir,\n  readFile,\n  realpath,\n  stat,\n  writeFile,\n} from \"node:fs/promises\";\nimport { existsSync, readFileSync } from \"node:fs\";\nimport { basename, dirname, relative, resolve } from \"node:path\";\nimport { fileURLToPath, pathToFileURL } from \"node:url\";\n\nconst commandName = process.env.ELISCRIPT_COMMAND_NAME ?? \"eliscript-portable\";\nconst usage = `Usage: ${commandName} [OPTIONS] INPUT [ARGS...]\n\nOptions:\n  -o, --output FILE  Write the generated ECMAScript module to FILE\n  --source-map       Write FILE.map and add a sourceMappingURL comment\n  --portable NAME    Emit a worker entry and its transitive dependencies\n  --diagnostic-format human|json\n                     Select human-readable or JSON failures\n  -e, --eval EXPR    Evaluate EXPR in the Eliscript runtime\n  -l, --load FILE    Load FILE in the Eliscript runtime\n  -h, --help         Show this help\n`;\n\nconst diagnosticFormat = \"eliscript-diagnostic\";\nconst diagnosticVersion = 1;\n\nexport function requestedDiagnosticFormat(arguments_) {\n  for (let index = 0; index < arguments_.length - 1; index += 1) {\n    if (arguments_[index] === \"--diagnostic-format\" &&\n        arguments_[index + 1] === \"json\") {\n      return \"json\";\n    }\n  }\n  return \"human\";\n}\n\nexport function parseArguments(arguments_) {\n  const argumentsList = [...arguments_];\n  if (argumentsList[0] === \"--\") argumentsList.shift();\n  let input;\n  let output;\n  let sourceMap = false;\n  let diagnosticOutput = \"human\";\n  const portableEntries = [];\n\n  while (argumentsList.length > 0) {\n    const argument = argumentsList.shift();\n    if (argument === \"-h\" || argument === \"--help\") {\n      return { help: true };\n    }\n    if (argument === \"-o\" || argument === \"--output\") {\n      if (argumentsList.length === 0) {\n        throw new Error(`${argument} requires a file`);\n      }\n      output = argumentsList.shift();\n    } else if (argument === \"--source-map\") {\n      sourceMap = true;\n    } else if (argument === \"--portable\") {\n      if (argumentsList.length === 0) {\n        throw new Error(`${argument} requires a function name`);\n      }\n      portableEntries.push(argumentsList.shift());\n    } else if (argument === \"--diagnostic-format\") {\n      if (argumentsList.length === 0) {\n        throw new Error(`${argument} requires human or json`);\n      }\n      diagnosticOutput = argumentsList.shift();\n      if (diagnosticOutput !== \"human\" && diagnosticOutput !== \"json\") {\n        throw new Error(`unsupported diagnostic format: ${diagnosticOutput}`);\n      }\n    } else if (argument.startsWith(\"-\")) {\n      throw new Error(`unknown option: ${argument}`);\n    } else if (input) {\n      throw new Error(\"multiple input files are not supported yet\");\n    } else {\n      input = argument;\n    }\n  }\n\n  if (!input) throw new Error(\"missing input file\");\n  if (sourceMap && !output) {\n    throw new Error(\"--source-map requires --output\");\n  }\n  return {\n    input,\n    output,\n    sourceMap,\n    portableEntries,\n    diagnosticFormat: diagnosticOutput,\n  };\n}\n\nexport function diagnosticFromError(error) {\n  if (error?.eliscriptDiagnostic?.format === diagnosticFormat &&\n      error.eliscriptDiagnostic.version === diagnosticVersion) {\n    return error.eliscriptDiagnostic;\n  }\n  return {\n    format: diagnosticFormat,\n    version: diagnosticVersion,\n    code: \"ELI-C0001\",\n    severity: \"error\",\n    phase: \"cli\",\n    message: error instanceof Error ? error.message : String(error),\n  };\n}\n\nexport function renderDiagnostic(diagnostic) {\n  const location = diagnostic?.location;\n  const start = location?.start;\n  if (typeof location?.file === \"string\" &&\n      Number.isSafeInteger(start?.line) &&\n      Number.isSafeInteger(start?.column)) {\n    return `${location.file}:${start.line}:${start.column}: ${diagnostic.message}`;\n  }\n  return diagnostic.message;\n}\n\nexport async function loadCompiler(moduleDirectory) {\n  const hostDirectory = dirname(fileURLToPath(import.meta.url));\n  const directory = resolve(\n    moduleDirectory ??\n      process.env.ELISCRIPT_BOOTSTRAP_MODULE_DIR ??\n      resolve(hostDirectory, \"../../dist/bootstrap\"),\n  );\n  return import(pathToFileURL(resolve(directory, \"compiler.mjs\")).href);\n}\n\nasync function loadLispRuntime() {\n  const hostDirectory = dirname(fileURLToPath(import.meta.url));\n  const lispPath = resolve(hostDirectory, \"../../dist/runtime/lisp.mjs\");\n  return import(pathToFileURL(lispPath).href);\n}\n\nfunction isCoreIrModule(rawSource, inputPath, request = {}) {\n  if ((request.portableEntries?.length ?? 0) > 0) return true;\n  if (!request.output) return true;\n  const stripped = String(rawSource).replace(/^(?:\\s|;[^\\n]*\\n)+/, \"\");\n  if (/^\\(\\s*module\\b/.test(stripped)) return true;\n  if (String(rawSource).startsWith(\"#!\")) return false;\n  if (inputPath && !String(inputPath).endsWith(\".eli\")) return false;\n  if (!/\\(\\s*require\\s+'eliscript-/.test(stripped) &&\n      /^\\(\\s*(?:export|defportable)\\b/m.test(stripped)) {\n    return true;\n  }\n  return false;\n}\n\nfunction isCompileInvocation(arguments_) {\n  if (process.env.ELISCRIPT_COMMAND_NAME === \"eliscript-portable\") return true;\n  const list = [...arguments_];\n  if (list.length === 0) return true;\n  if (list.length === 1 && list[0] === \"--\") return true;\n  if (list.length === 1 && (list[0] === \"-h\" || list[0] === \"--help\")) return true;\n\n  const runtimeFlag = /^-(?:-(?:batch|quick|no-init-file|no-site-file|no-site-lisp|directory|load|script|funcall|eval|execute|version|che-session-worker)(?:=|$)|batch$|scriptload$|[QqlLfeV]$)/;\n  const compileFlagWithValue = /^(?:-o|--output|--portable|--diagnostic-format)$/;\n  const compileFlagBool = /^--source-map$/;\n\n  let index = 0;\n  if (list[0] === \"--\") {\n    if (list.length > 1 && (compileFlagWithValue.test(list[1]) || compileFlagBool.test(list[1]) || list[1] === \"-h\" || list[1] === \"--help\")) {\n      index = 1;\n    } else {\n      return false;\n    }\n  }\n\n  let sawCompileFlag = false;\n  let firstInput;\n  while (index < list.length) {\n    const arg = list[index];\n    if (arg === \"--\") {\n      break;\n    }\n    if (compileFlagWithValue.test(arg)) {\n      if (firstInput !== undefined && arg === \"-o\" && !String(firstInput).endsWith(\".eli\")) {\n        index += 1;\n        continue;\n      }\n      sawCompileFlag = true;\n      index += 2;\n      continue;\n    }\n    if (compileFlagBool.test(arg)) {\n      sawCompileFlag = true;\n      index += 1;\n      continue;\n    }\n    if (firstInput !== undefined) {\n      index += 1;\n      continue;\n    }\n    if (runtimeFlag.test(arg)) {\n      return false;\n    }\n    if (arg.startsWith(\"-\")) {\n      return true;\n    }\n    firstInput = arg;\n    index += 1;\n  }\n  if (sawCompileFlag) return true;\n  if (firstInput !== undefined) {\n    const candidate = resolve(firstInput);\n    if (existsSync(candidate)) {\n      try {\n        const raw = readFileSync(candidate, \"utf8\");\n        return isCoreIrModule(raw, candidate, { output: \"check\" });\n      } catch {\n        return true;\n      }\n    }\n    return false;\n  }\n  return true;\n}\n\nasync function physicalWritePath(path) {\n  let existing = resolve(path);\n  const missing = [];\n\n  while (true) {\n    try {\n      const metadata = await lstat(existing);\n      if (metadata.isSymbolicLink()) {\n        try {\n          const target = await realpath(existing);\n          return resolve(target, ...missing.reverse());\n        } catch (error) {\n          if (error?.code === \"ENOENT\" || error?.code === \"ENOTDIR\") {\n            throw new Error(\n              `generated artifact path contains an unresolved symbolic link: ${path}`,\n            );\n          }\n          throw error;\n        }\n      }\n      return resolve(await realpath(existing), ...missing.reverse());\n    } catch (error) {\n      if (error?.code !== \"ENOENT\" && error?.code !== \"ENOTDIR\") throw error;\n      const parent = dirname(existing);\n      if (parent === existing) throw error;\n      missing.push(basename(existing));\n      existing = parent;\n    }\n  }\n}\n\nasync function existingFileIdentity(path) {\n  try {\n    const metadata = await stat(path);\n    return `${metadata.dev}:${metadata.ino}`;\n  } catch (error) {\n    if (error?.code === \"ENOENT\" || error?.code === \"ENOTDIR\") return undefined;\n    throw error;\n  }\n}\n\nasync function validateFileOutputPaths(inputPath, outputPaths) {\n  const inputPhysical = await realpath(inputPath);\n  const inputIdentity = await existingFileIdentity(inputPath);\n  const artifacts = [];\n\n  for (const outputPath of outputPaths) {\n    const physical = await physicalWritePath(outputPath);\n    const identity = await existingFileIdentity(outputPath);\n    if (physical === inputPhysical ||\n        (identity !== undefined && identity === inputIdentity)) {\n      throw new Error(`generated artifact must not overwrite input file: ${outputPath}`);\n    }\n    for (const artifact of artifacts) {\n      if (physical === artifact.physical ||\n          (identity !== undefined && identity === artifact.identity)) {\n        throw new Error(\n          `generated artifacts must be physically distinct: ${artifact.path} and ${outputPath}`,\n        );\n      }\n    }\n    artifacts.push({ path: outputPath, physical, identity });\n  }\n}\n\nexport async function compileFile(options) {\n  const compiler = options.compiler ?? await loadCompiler(options.moduleDirectory);\n  const request = compiler.build_operation_request({\n    mode: \"single\",\n    input: options.input,\n    output: options.output ?? null,\n    sourceMap: options.sourceMap === undefined ? false : options.sourceMap,\n    portableEntries: options.portableEntries ?? [],\n  });\n  const inputPath = resolve(request.input);\n  const outputPath = request.output ? resolve(request.output) : undefined;\n  if (outputPath) {\n    await validateFileOutputPaths(\n      inputPath,\n      request.sourceMap ? [outputPath, `${outputPath}.map`] : [outputPath],\n    );\n  }\n  const rawSource = await readFile(inputPath, \"utf8\");\n  let source = rawSource;\n  let rewriteRuntimeSpec;\n  if (!isCoreIrModule(rawSource, inputPath, request)) {\n    const hostDirectory = dirname(fileURLToPath(import.meta.url));\n    const lispPath = resolve(hostDirectory, \"../../dist/runtime/lisp.mjs\");\n    const distRuntimeDir = resolve(hostDirectory, \"../../dist/runtime\");\n    const srcRuntimeDir = resolve(hostDirectory, \"../../runtime\");\n    const outputDirPhysical = outputPath\n      ? await physicalWritePath(dirname(outputPath))\n      : undefined;\n    const lispMod = await loadLispRuntime();\n    const baseName = basename(inputPath).replace(/\\.[^.]+$/, \"\").replace(/[^A-Za-z0-9-]/g, \"-\") || \"program\";\n    const modName = `eliscript.generated.${baseName}`;\n    const runtimeSpec = outputDirPhysical\n      ? (() => {\n          const rel = relative(outputDirPhysical, lispPath).replace(/\\\\/g, \"/\");\n          return rel.startsWith(\".\") ? rel : `./${rel}`;\n        })()\n      : \"eliscript/runtime/lisp\";\n    if (outputDirPhysical) {\n      rewriteRuntimeSpec = (subpath) => {\n        const distTarget = resolve(distRuntimeDir, subpath);\n        const target = existsSync(distTarget) ? distTarget : resolve(srcRuntimeDir, subpath);\n        const rel = relative(outputDirPhysical, target).replace(/\\\\/g, \"/\");\n        return rel.startsWith(\".\") ? rel : `./${rel}`;\n      };\n    }\n    source = lispMod.compileModule(rawSource, {\n      moduleName: modName,\n      runtime: runtimeSpec,\n      sourceFile: inputPath,\n      autorun: true,\n    });\n  }\n  const rewriteRuntimeImports = (js) =>\n    rewriteRuntimeSpec\n      ? js.replace(\n          /\"eliscript\\/runtime\\/([^\"\\n]+\\.mjs)\"/g,\n          (_match, subpath) => JSON.stringify(rewriteRuntimeSpec(subpath)),\n        )\n      : js;\n\n  if (!request.sourceMap) {\n    const rawJavascript = request.portableEntries.length > 0\n      ? compiler.compile_portable_string(\n        source,\n        request.portableEntries,\n        inputPath,\n      )\n      : compiler.compile_string(source, inputPath);\n    const javascript = rewriteRuntimeImports(rawJavascript);\n    if (outputPath) {\n      await mkdir(dirname(outputPath), { recursive: true });\n      await writeFile(outputPath, javascript);\n    }\n    return { javascript };\n  }\n\n  if (!outputPath) throw new Error(\"--source-map requires --output\");\n  const mapPath = `${outputPath}.map`;\n  const mapDirectory = dirname(mapPath);\n  const generatedName = relative(mapDirectory, outputPath);\n  const sourceName = relative(mapDirectory, inputPath);\n  const emission = request.portableEntries.length > 0\n    ? compiler.compile_portable_string_with_source_map(\n      source,\n      request.portableEntries,\n      inputPath,\n      generatedName,\n      sourceName,\n    )\n    : compiler.compile_string_with_source_map(\n      source,\n      inputPath,\n      generatedName,\n      sourceName,\n    );\n  const mapUrl = relative(dirname(outputPath), mapPath);\n  const javascript = rewriteRuntimeImports(`${emission.javascript}//# sourceMappingURL=${mapUrl}\\n`);\n\n  await mkdir(mapDirectory, { recursive: true });\n  await writeFile(mapPath, emission.sourceMap);\n  await mkdir(dirname(outputPath), { recursive: true });\n  await writeFile(outputPath, javascript);\n  return { javascript, sourceMap: emission.sourceMap };\n}\n\nexport async function main(arguments_ = process.argv.slice(2)) {\n  if (!isCompileInvocation(arguments_)) {\n    const lispMod = await loadLispRuntime();\n    lispMod.runBatchCli(arguments_);\n    return;\n  }\n  const options = parseArguments(arguments_);\n  if (options.help) {\n    process.stdout.write(usage);\n    return;\n  }\n  const { executeBuild } = await import(\"./build.mjs\");\n  const result = await executeBuild({ mode: \"single\", ...options });\n  if (!options.output) process.stdout.write(result.javascript);\n}\n\nconst isMain = process.argv[1] !== undefined &&\n  resolve(process.argv[1]) === fileURLToPath(import.meta.url);\nif (isMain) {\n  const outputFormat = requestedDiagnosticFormat(process.argv.slice(2));\n  main().catch((error) => {\n    if (outputFormat === \"json\") {\n      console.error(JSON.stringify(diagnosticFromError(error)));\n    } else {\n      console.error(`eliscript: ${error.message}`);\n    }\n    process.exitCode = 1;\n  });\n}\n"))
+(module bootstrap.host.bun
+  (import "node:fs/promises" lstat mkdir readFile realpath stat writeFile)
+  (import "node:fs" existsSync readFileSync)
+  (import "node:path" basename dirname relative resolve)
+  (import "node:url" fileURLToPath pathToFileURL)
+
+  (defconst host-import (js* "(url) => import(url)"))
+  (defun host-typeof (value) (js* "typeof value"))
+  (defun error-instance? (value) (js* "value instanceof Error"))
+
+  (defconst commandName
+    (let ((env-name (get (get globalThis.process :env) :ELISCRIPT_COMMAND_NAME)))
+      (if (nullish? env-name) "eliscript-portable" env-name)))
+
+  (defconst usage
+    (str "Usage: " commandName " [OPTIONS] INPUT [ARGS...]\n\n"
+         "Options:\n"
+         "  -o, --output FILE  Write the generated ECMAScript module to FILE\n"
+         "  --source-map       Write FILE.map and add a sourceMappingURL comment\n"
+         "  --portable NAME    Emit a worker entry and its transitive dependencies\n"
+         "  --diagnostic-format human|json\n"
+         "                     Select human-readable or JSON failures\n"
+         "  -e, --eval EXPR    Evaluate EXPR in the Eliscript runtime\n"
+         "  -l, --load FILE    Load FILE in the Eliscript runtime\n"
+         "  -h, --help         Show this help\n"))
+
+  (defconst diagnosticFormat "eliscript-diagnostic")
+  (defconst diagnosticVersion 1)
+
+  (defun requestedDiagnosticFormat (arguments_)
+    (let ((index 0)
+          (limit (1- (js-length arguments_)))
+          (result "human"))
+      (while (and (= result "human") (< index limit))
+        (when (and (= (aref arguments_ index) "--diagnostic-format")
+                   (= (aref arguments_ (1+ index)) "json"))
+          (setq result "json"))
+        (setq index (1+ index)))
+      result))
+
+  (defun parseArguments (arguments_)
+    (let ((argumentsList (Array/from arguments_))
+          (input undefined)
+          (output undefined)
+          (sourceMap false)
+          (diagnosticOutput "human")
+          (portableEntries (js-array))
+          (helpResult nil))
+      (when (= (aref argumentsList 0) "--")
+        (js-call argumentsList :shift))
+      (while (and (nil? helpResult) (> (js-length argumentsList) 0))
+        (let ((argument (js-call argumentsList :shift)))
+          (cond
+            ((or (= argument "-h") (= argument "--help"))
+              (setq helpResult (js-object :help t)))
+            ((or (= argument "-o") (= argument "--output"))
+              (when (= (js-length argumentsList) 0)
+                (throw (new globalThis.Error (str argument " requires a file"))))
+              (setq output (js-call argumentsList :shift)))
+            ((= argument "--source-map")
+              (setq sourceMap t))
+            ((= argument "--portable")
+              (when (= (js-length argumentsList) 0)
+                (throw (new globalThis.Error (str argument " requires a function name"))))
+              (js-call portableEntries :push (js-call argumentsList :shift)))
+            ((= argument "--diagnostic-format")
+              (when (= (js-length argumentsList) 0)
+                (throw (new globalThis.Error (str argument " requires human or json"))))
+              (setq diagnosticOutput (js-call argumentsList :shift))
+              (unless (or (= diagnosticOutput "human") (= diagnosticOutput "json"))
+                (throw (new globalThis.Error (str "unsupported diagnostic format: " diagnosticOutput)))))
+            ((js-call argument :startsWith "-")
+              (throw (new globalThis.Error (str "unknown option: " argument))))
+            (input
+              (throw (new globalThis.Error "multiple input files are not supported yet")))
+            (t
+              (setq input argument)))))
+      (if helpResult
+        helpResult
+        (progn
+          (unless input
+            (throw (new globalThis.Error "missing input file")))
+          (when (and sourceMap (not output))
+            (throw (new globalThis.Error "--source-map requires --output")))
+          (js-object :input input
+            :output output
+            :sourceMap sourceMap
+            :portableEntries portableEntries
+            :diagnosticFormat diagnosticOutput)))))
+
+  (defun diagnosticFromError (error)
+    (let ((diag (if (nullish? error) undefined (get error :eliscriptDiagnostic))))
+      (if (and (not (nullish? diag))
+               (= (get diag :format) diagnosticFormat)
+               (= (get diag :version) diagnosticVersion))
+        diag
+        (js-object :format diagnosticFormat
+          :version diagnosticVersion
+          :code "ELI-C0001"
+          :severity "error"
+          :phase "cli"
+          :message (if (error-instance? error)
+                     (get error :message)
+                     (funcall globalThis.String error))))))
+
+  (defun renderDiagnostic (diagnostic)
+    (let* ((location (if (nullish? diagnostic) undefined (get diagnostic :location)))
+           (start (if (nullish? location) undefined (get location :start))))
+      (if (and (not (nullish? location))
+               (= (host-typeof (get location :file)) "string")
+               (not (nullish? start))
+               (Number/isSafeInteger (get start :line))
+               (Number/isSafeInteger (get start :column)))
+        (str (get location :file) ":" (get start :line) ":" (get start :column) ": " (get diagnostic :message))
+        (get diagnostic :message))))
+
+  (defasync loadCompiler (&optional moduleDirectory)
+    (let* ((hostDirectory (dirname (fileURLToPath (js* "import.meta.url"))))
+           (envDir (get (get globalThis.process :env) :ELISCRIPT_BOOTSTRAP_MODULE_DIR))
+           (directory (resolve
+                        (cond
+                          ((not (nullish? moduleDirectory)) moduleDirectory)
+                          ((not (nullish? envDir)) envDir)
+                          (t (resolve hostDirectory "../../dist/bootstrap"))))))
+      (await (funcall host-import (get (pathToFileURL (resolve directory "compiler.mjs")) :href)))))
+
+  (defasync loadLispRuntime ()
+    (let* ((hostDirectory (dirname (fileURLToPath (js* "import.meta.url"))))
+           (lispPath (resolve hostDirectory "../../dist/runtime/lisp.mjs")))
+      (await (funcall host-import (get (pathToFileURL lispPath) :href)))))
+
+  (defconst leading-comments-pattern (new globalThis.RegExp "^(?:\\s|;[^\\n]*\\n)+"))
+  (defconst module-head-pattern (new globalThis.RegExp "^\\(\\s*module\\b"))
+  (defconst require-eliscript-pattern (new globalThis.RegExp "\\(\\s*require\\s+'eliscript-"))
+  (defconst export-or-portable-pattern (new globalThis.RegExp "^\\(\\s*(?:export|defportable)\\b" "m"))
+
+  (defun isCoreIrModule (rawSource inputPath &rest __opt)
+    (let* ((request (aref __opt 0))
+           (actual-request (if (undefined? request) (js-object) request))
+           (portable (get actual-request :portableEntries)))
+      (if (and (not (nullish? portable)) (> (js-length portable) 0))
+        t
+        (if (not (get actual-request :output))
+          t
+          (let* ((rawText (funcall globalThis.String rawSource))
+                 (stripped (js-call rawText :replace leading-comments-pattern "")))
+            (cond
+              ((js-call module-head-pattern :test stripped) t)
+              ((js-call rawText :startsWith "#!") false)
+              ((and inputPath (not (js-call (funcall globalThis.String inputPath) :endsWith ".eli"))) false)
+              ((and (not (js-call require-eliscript-pattern :test stripped))
+                    (js-call export-or-portable-pattern :test stripped))
+                t)
+              (t false)))))))
+
+  (defconst runtime-flag-pattern
+    (new globalThis.RegExp "^-(?:-(?:batch|quick|no-init-file|no-site-file|no-site-lisp|directory|load|script|funcall|eval|execute|version|che-session-worker)(?:=|$)|batch$|scriptload$|[QqlLfeV]$)"))
+  (defconst compile-flag-with-value-pattern
+    (new globalThis.RegExp "^(?:-o|--output|--portable|--diagnostic-format)$"))
+  (defconst compile-flag-bool-pattern
+    (new globalThis.RegExp "^--source-map$"))
+
+  (defun isCompileInvocation (arguments_)
+    (if (= (get (get globalThis.process :env) :ELISCRIPT_COMMAND_NAME) "eliscript-portable")
+      t
+      (let ((list (Array/from arguments_)))
+        (cond
+          ((= (js-length list) 0) t)
+          ((and (= (js-length list) 1) (= (aref list 0) "--")) t)
+          ((and (= (js-length list) 1) (or (= (aref list 0) "-h") (= (aref list 0) "--help"))) t)
+          (t
+            (let ((index 0)
+                  (earlyResult nil)
+                  (hasEarly false))
+              (when (= (aref list 0) "--")
+                (if (and (> (js-length list) 1)
+                         (or (js-call compile-flag-with-value-pattern :test (aref list 1))
+                             (js-call compile-flag-bool-pattern :test (aref list 1))
+                             (= (aref list 1) "-h")
+                             (= (aref list 1) "--help")))
+                  (setq index 1)
+                  (setq earlyResult false hasEarly t)))
+              (if hasEarly
+                earlyResult
+                (let ((sawCompileFlag false)
+                      (firstInput undefined)
+                      (stopped false))
+                  (while (and (not hasEarly) (not stopped) (< index (js-length list)))
+                    (let ((arg (aref list index)))
+                      (cond
+                        ((= arg "--")
+                          (setq stopped t))
+                        ((js-call compile-flag-with-value-pattern :test arg)
+                          (if (and (not (undefined? firstInput))
+                                   (= arg "-o")
+                                   (not (js-call (funcall globalThis.String firstInput) :endsWith ".eli")))
+                            (setq index (1+ index))
+                            (setq sawCompileFlag t index (+ index 2))))
+                        ((js-call compile-flag-bool-pattern :test arg)
+                          (setq sawCompileFlag t index (1+ index)))
+                        ((not (undefined? firstInput))
+                          (setq index (1+ index)))
+                        ((js-call runtime-flag-pattern :test arg)
+                          (setq earlyResult false hasEarly t))
+                        ((js-call arg :startsWith "-")
+                          (setq earlyResult t hasEarly t))
+                        (t
+                          (setq firstInput arg index (1+ index))))))
+                  (cond
+                    (hasEarly earlyResult)
+                    (sawCompileFlag t)
+                    ((not (undefined? firstInput))
+                      (let ((candidate (resolve firstInput)))
+                        (if (existsSync candidate)
+                          (try
+                            (let ((raw (readFileSync candidate "utf8")))
+                              (isCoreIrModule raw candidate (js-object :output "check")))
+                            (catch err t))
+                          false)))
+                    (t t))))))))))
+
+  (defasync physicalWritePath (path)
+    (let ((existing (resolve path))
+          (missing (js-array))
+          (resolved nil))
+      (while (nil? resolved)
+        (try
+          (let ((metadata (await (lstat existing))))
+            (if (js-call metadata :isSymbolicLink)
+              (try
+                (let ((target (await (realpath existing))))
+                  (setq resolved
+                    (Reflect/apply resolve undefined
+                      (js-call (js-array target) :concat (js-call (Array/from missing) :reverse)))))
+                (catch error
+                  (let ((code (if (nullish? error) undefined (get error :code))))
+                    (when (or (= code "ENOENT") (= code "ENOTDIR"))
+                      (throw (new globalThis.Error
+                               (str "generated artifact path contains an unresolved symbolic link: " path))))
+                    (throw error))))
+              (let ((target (await (realpath existing))))
+                (setq resolved
+                  (Reflect/apply resolve undefined
+                    (js-call (js-array target) :concat (js-call (Array/from missing) :reverse)))))))
+          (catch error
+            (let ((code (if (nullish? error) undefined (get error :code))))
+              (when (and (not (= code "ENOENT")) (not (= code "ENOTDIR")))
+                (throw error))
+              (let ((parent (dirname existing)))
+                (when (= parent existing) (throw error))
+                (js-call missing :push (basename existing))
+                (setq existing parent))))))
+      resolved))
+
+  (defasync existingFileIdentity (path)
+    (try
+      (let ((metadata (await (stat path))))
+        (str (get metadata :dev) ":" (get metadata :ino)))
+      (catch error
+        (let ((code (if (nullish? error) undefined (get error :code))))
+          (if (or (= code "ENOENT") (= code "ENOTDIR"))
+            undefined
+            (throw error))))))
+
+  (defasync validateFileOutputPaths (inputPath outputPaths)
+    (let ((inputPhysical (await (realpath inputPath)))
+          (inputIdentity (await (existingFileIdentity inputPath)))
+          (artifacts (js-array))
+          (index 0))
+      (while (< index (js-length outputPaths))
+        (let* ((outputPath (aref outputPaths index))
+               (physical (await (physicalWritePath outputPath)))
+               (identity (await (existingFileIdentity outputPath))))
+          (when (or (= physical inputPhysical)
+                    (and (not (undefined? identity)) (= identity inputIdentity)))
+            (throw (new globalThis.Error (str "generated artifact must not overwrite input file: " outputPath))))
+          (let ((artIndex 0))
+            (while (< artIndex (js-length artifacts))
+              (let ((artifact (aref artifacts artIndex)))
+                (when (or (= physical (get artifact :physical))
+                          (and (not (undefined? identity)) (= identity (get artifact :identity))))
+                  (throw (new globalThis.Error
+                           (str "generated artifacts must be physically distinct: "
+                                (get artifact :path) " and " outputPath)))))
+              (setq artIndex (1+ artIndex))))
+          (js-call artifacts :push
+            (js-object :path outputPath :physical physical :identity identity)))
+        (setq index (1+ index)))))
+
+  (defconst extension-strip-pattern (new globalThis.RegExp "\\.[^.]+$"))
+  (defconst sanitize-ident-pattern (new globalThis.RegExp "[^A-Za-z0-9-]" "g"))
+  (defconst backslash-pattern (new globalThis.RegExp "\\\\" "g"))
+  (defconst runtime-import-pattern (new globalThis.RegExp "\"eliscript\\/runtime\\/([^\"\\n]+\\.mjs)\"" "g"))
+
+  (defasync compileFile (options)
+    (let* ((compiler (if (nullish? (get options :compiler))
+                       (await (loadCompiler (get options :moduleDirectory)))
+                       (get options :compiler)))
+           (request (js-call compiler :build_operation_request
+                      (js-object :mode "single"
+                        :input (get options :input)
+                        :output (if (nullish? (get options :output)) nil (get options :output))
+                        :sourceMap (if (undefined? (get options :sourceMap)) false (get options :sourceMap))
+                        :portableEntries (if (nullish? (get options :portableEntries))
+                                           (js-array)
+                                           (get options :portableEntries)))))
+           (inputPath (resolve (get request :input)))
+           (outputPath (if (get request :output) (resolve (get request :output)) undefined)))
+      (when outputPath
+        (await (validateFileOutputPaths inputPath
+                 (if (get request :sourceMap)
+                   (js-array outputPath (str outputPath ".map"))
+                   (js-array outputPath)))))
+      (let ((rawSource (await (readFile inputPath "utf8")))
+            (source nil)
+            (rewriteRuntimeSpec undefined))
+        (setq source rawSource)
+        (unless (isCoreIrModule rawSource inputPath request)
+          (let* ((hostDirectory (dirname (fileURLToPath (js* "import.meta.url"))))
+                 (lispPath (resolve hostDirectory "../../dist/runtime/lisp.mjs"))
+                 (distRuntimeDir (resolve hostDirectory "../../dist/runtime"))
+                 (srcRuntimeDir (resolve hostDirectory "../../runtime"))
+                 (outputDirPhysical (if outputPath (await (physicalWritePath (dirname outputPath))) undefined))
+                 (lispMod (await (loadLispRuntime)))
+                 (strippedBase (js-call (js-call (basename inputPath) :replace extension-strip-pattern "")
+                                 :replace sanitize-ident-pattern "-"))
+                 (baseName (if (= strippedBase "") "program" strippedBase))
+                 (modName (str "eliscript.generated." baseName))
+                 (runtimeSpec (if outputDirPhysical
+                                (let ((rel (js-call (relative outputDirPhysical lispPath) :replace backslash-pattern "/")))
+                                  (if (js-call rel :startsWith ".") rel (str "./" rel)))
+                                "eliscript/runtime/lisp")))
+            (when outputDirPhysical
+              (setq rewriteRuntimeSpec
+                (lambda (subpath)
+                  (let* ((distTarget (resolve distRuntimeDir subpath))
+                         (target (if (existsSync distTarget) distTarget (resolve srcRuntimeDir subpath)))
+                         (rel (js-call (relative outputDirPhysical target) :replace backslash-pattern "/")))
+                    (if (js-call rel :startsWith ".") rel (str "./" rel))))))
+            (setq source
+              (js-call lispMod :compileModule rawSource
+                (js-object :moduleName modName
+                  :runtime runtimeSpec
+                  :sourceFile inputPath
+                  :autorun t)))))
+        (let ((rewriteRuntimeImports
+                (lambda (js)
+                  (if rewriteRuntimeSpec
+                    (js-call js :replace runtime-import-pattern
+                      (lambda (_match subpath)
+                        (JSON/stringify (funcall rewriteRuntimeSpec subpath))))
+                    js))))
+          (if (not (get request :sourceMap))
+            (let* ((rawJavascript (if (> (js-length (get request :portableEntries)) 0)
+                                    (js-call compiler :compile_portable_string
+                                      source (get request :portableEntries) inputPath)
+                                    (js-call compiler :compile_string source inputPath)))
+                   (javascript (funcall rewriteRuntimeImports rawJavascript)))
+              (when outputPath
+                (await (mkdir (dirname outputPath) (js-object :recursive t)))
+                (await (writeFile outputPath javascript)))
+              (js-object :javascript javascript))
+            (progn
+              (unless outputPath
+                (throw (new globalThis.Error "--source-map requires --output")))
+              (let* ((mapPath (str outputPath ".map"))
+                     (mapDirectory (dirname mapPath))
+                     (generatedName (relative mapDirectory outputPath))
+                     (sourceName (relative mapDirectory inputPath))
+                     (emission (if (> (js-length (get request :portableEntries)) 0)
+                                 (js-call compiler :compile_portable_string_with_source_map
+                                   source (get request :portableEntries) inputPath generatedName sourceName)
+                                 (js-call compiler :compile_string_with_source_map
+                                   source inputPath generatedName sourceName)))
+                     (mapUrl (relative (dirname outputPath) mapPath))
+                     (javascript (funcall rewriteRuntimeImports
+                                   (str (get emission :javascript) "//# sourceMappingURL=" mapUrl "\n"))))
+                (await (mkdir mapDirectory (js-object :recursive t)))
+                (await (writeFile mapPath (get emission :sourceMap)))
+                (await (mkdir (dirname outputPath) (js-object :recursive t)))
+                (await (writeFile outputPath javascript))
+                (js-object :javascript javascript :sourceMap (get emission :sourceMap)))))))))
+
+  (defasync main (&rest __opt)
+    (let* ((arguments_ (aref __opt 0))
+           (actual-args (if (undefined? arguments_)
+                          (js-call (get globalThis.process :argv) :slice 2)
+                          arguments_)))
+      (if (not (isCompileInvocation actual-args))
+        (let ((lispMod (await (loadLispRuntime))))
+          (js-call lispMod :runBatchCli actual-args))
+        (let ((options (parseArguments actual-args)))
+          (if (get options :help)
+            (js-call (get globalThis.process :stdout) :write usage)
+            (let* ((buildMod (await (funcall host-import "./build.mjs")))
+                   (result (await (js-call buildMod :executeBuild
+                                    (Object/assign (js-object :mode "single") options)))))
+              (unless (get options :output)
+                (js-call (get globalThis.process :stdout) :write (get result :javascript)))))))))
+
+  (let ((entry (aref (get globalThis.process :argv) 1)))
+    (when (and (not (undefined? entry))
+               (= (resolve entry) (fileURLToPath (js* "import.meta.url"))))
+      (let ((outputFormat (requestedDiagnosticFormat (js-call (get globalThis.process :argv) :slice 2))))
+        (js-call (main) :catch
+          (lambda (error)
+            (if (= outputFormat "json")
+              (console/error (JSON/stringify (diagnosticFromError error)))
+              (console/error (str "eliscript: " (get error :message))))
+            (put globalThis.process :exitCode 1))))))
+
+  (export compileFile diagnosticFromError loadCompiler main parseArguments
+    renderDiagnostic requestedDiagnosticFormat))

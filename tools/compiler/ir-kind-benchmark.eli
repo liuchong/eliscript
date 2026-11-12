@@ -1,2 +1,341 @@
-(module capsules.tools.compiler.ir-kind-benchmark
-  (js* "import { createHash } from \"node:crypto\";\nimport { readFile, writeFile } from \"node:fs/promises\";\nimport os from \"node:os\";\nimport path from \"node:path\";\nimport process from \"node:process\";\nimport { fileURLToPath, pathToFileURL } from \"node:url\";\n\nexport const COMPILER_IR_KIND_FORMAT = \"eliscript-compiler-ir-kind-benchmark\";\nexport const COMPILER_IR_KIND_VERSION = 1;\n\nconst directory = path.dirname(fileURLToPath(import.meta.url));\nconst projectDirectory = path.resolve(directory, \"../..\");\nconst compilerSources = Object.freeze([\n  \"bootstrap/compiler/symbol.eli\",\n  \"bootstrap/compiler/syntax.eli\",\n  \"bootstrap/compiler/reader.eli\",\n  \"bootstrap/compiler/formatter.eli\",\n  \"bootstrap/compiler/expander.eli\",\n  \"bootstrap/compiler/transient-analysis.eli\",\n  \"bootstrap/compiler/analyzer.eli\",\n  \"bootstrap/compiler/ir.eli\",\n  \"bootstrap/compiler/lower.eli\",\n  \"bootstrap/compiler/source-map.eli\",\n  \"bootstrap/compiler/emitter.eli\",\n  \"bootstrap/compiler/project.eli\",\n  \"bootstrap/compiler/compiler.eli\",\n]);\nconst digestFiles = Object.freeze([\n  ...compilerSources,\n  \"tools/compiler/ir-kind-benchmark.mjs\",\n]);\n\nfunction parsePositiveInteger(value, name) {\n  const parsed = Number(value);\n  if (!Number.isSafeInteger(parsed) || parsed <= 0) {\n    throw new TypeError(`${name} must be a positive safe integer`);\n  }\n  return parsed;\n}\n\nfunction parseArguments(arguments_) {\n  let output;\n  for (let index = 0; index < arguments_.length; index += 1) {\n    const argument = arguments_[index];\n    if (argument === \"--output\") {\n      output = arguments_[index + 1];\n      if (output === undefined) {\n        throw new TypeError(\"--output requires a path\");\n      }\n      index += 1;\n    } else if (argument === \"--help\") {\n      process.stdout.write(\n        \"Usage: bun tools/compiler/ir-kind-benchmark.mjs \" +\n          \"[--output REPORT.json]\\n\",\n      );\n      process.exit(0);\n    } else {\n      throw new TypeError(`unknown argument ${argument}`);\n    }\n  }\n  return { output };\n}\n\nexport async function compilerIrKindSourceDigest() {\n  const hash = createHash(\"sha256\");\n  for (const relative of digestFiles) {\n    hash.update(relative);\n    hash.update(\"\\0\");\n    hash.update(await readFile(path.join(projectDirectory, relative)));\n    hash.update(\"\\0\");\n  }\n  return {\n    algorithm: \"sha256\",\n    files: digestFiles,\n    value: hash.digest(\"hex\"),\n  };\n}\n\nfunction collectProgramNodes(program) {\n  const nodes = [];\n  const stack = [...program.body];\n  while (stack.length > 0) {\n    const node = stack.pop();\n    nodes.push(node);\n    for (const child of node.children ?? []) {\n      stack.push(child);\n    }\n  }\n  return nodes;\n}\n\nfunction boundaryValues() {\n  return [\n    null,\n    undefined,\n    false,\n    true,\n    0,\n    1,\n    \"\",\n    \"literal\",\n    Symbol(\"literal\"),\n    () => \"literal\",\n    [],\n    {},\n    { kind: \"unknown\" },\n    { kind: null },\n    { kind: Symbol(\"literal\") },\n    Object.create({ kind: \"literal\" }),\n    Object.freeze({ kind: \"literal\" }),\n  ];\n}\n\nfunction median(values) {\n  const sorted = [...values].sort((left, right) => left - right);\n  return sorted[Math.floor(sorted.length / 2)];\n}\n\nfunction measure(predicate, values, iterations) {\n  let checksum = 0;\n  const start = performance.now();\n  for (let iteration = 0; iteration < iterations; iteration += 1) {\n    for (const value of values) {\n      checksum += predicate(value) ? 1 : 0;\n    }\n  }\n  return { milliseconds: performance.now() - start, checksum };\n}\n\nasync function loadGeneratedCompiler() {\n  const moduleDirectory = path.join(projectDirectory, \"dist/bootstrap\");\n  try {\n    const [compiler, ir] = await Promise.all([\n      import(pathToFileURL(path.join(moduleDirectory, \"compiler.mjs\")).href),\n      import(pathToFileURL(path.join(moduleDirectory, \"ir.mjs\")).href),\n    ]);\n    return { compiler, ir };\n  } catch (error) {\n    throw new Error(\n      \"generated compiler is unavailable; run bun run build:bootstrap first\",\n      { cause: error },\n    );\n  }\n}\n\nexport function validateCompilerIrKindReport(report) {\n  if (report?.format !== COMPILER_IR_KIND_FORMAT ||\n      report?.version !== COMPILER_IR_KIND_VERSION) {\n    throw new TypeError(\"invalid compiler IR kind report identity\");\n  }\n  if (report.validation?.equivalent !== true ||\n      report.validation?.values !==\n        report.corpus?.irNodes + report.corpus?.boundaryValues ||\n      report.validation?.accepted < report.corpus?.irNodes ||\n      report.validation?.checksum <= 0) {\n    throw new TypeError(\"compiler IR kind equivalence was not proven\");\n  }\n  if (!Array.isArray(report.measurements?.optimized?.samplesMs) ||\n      !Array.isArray(report.measurements?.reference?.samplesMs) ||\n      report.measurements.optimized.samplesMs.length !==\n        report.parameters?.timingSamples ||\n      report.measurements.reference.samplesMs.length !==\n        report.parameters?.timingSamples) {\n    throw new TypeError(\"compiler IR kind timing samples are incomplete\");\n  }\n  if (report.decision?.passed !== true ||\n      report.measurements.speedup < report.decision.minimumSpeedup) {\n    const error = new TypeError(\"compiler IR kind speedup decision did not pass\");\n    error.report = report;\n    throw error;\n  }\n  return report;\n}\n\nexport async function runCompilerIrKindBenchmark(options = {}) {\n  const warmupIterations = parsePositiveInteger(\n    options.warmupIterations ??\n      process.env.ELISCRIPT_COMPILER_IR_KIND_WARMUP_ITERATIONS ?? 25,\n    \"warmup iterations\",\n  );\n  const timingIterations = parsePositiveInteger(\n    options.timingIterations ??\n      process.env.ELISCRIPT_COMPILER_IR_KIND_TIMING_ITERATIONS ?? 100,\n    \"timing iterations\",\n  );\n  const timingSamples = parsePositiveInteger(\n    options.timingSamples ??\n      process.env.ELISCRIPT_COMPILER_IR_KIND_TIMING_SAMPLES ?? 9,\n    \"timing samples\",\n  );\n  if (timingSamples % 2 === 0) {\n    throw new TypeError(\"timing samples must be odd\");\n  }\n  const minimumSpeedup = Number(\n    options.minimumSpeedup ??\n      process.env.ELISCRIPT_COMPILER_IR_KIND_MINIMUM_SPEEDUP ?? 1.5,\n  );\n  if (!Number.isFinite(minimumSpeedup) || minimumSpeedup <= 1) {\n    throw new TypeError(\"minimum speedup must be greater than 1\");\n  }\n\n  const { compiler, ir } = await loadGeneratedCompiler();\n  const programs = [];\n  const nodes = [];\n  let sourceBytes = 0;\n  for (const relative of compilerSources) {\n    const source = await readFile(path.join(projectDirectory, relative), \"utf8\");\n    sourceBytes += Buffer.byteLength(source);\n    const program = compiler.compile_ir_string(source, relative);\n    programs.push(program);\n    nodes.push(...collectProgramNodes(program));\n  }\n  const boundaries = boundaryValues();\n  const values = [...nodes, ...boundaries];\n\n  let accepted = 0;\n  for (const value of values) {\n    const optimized = ir.node_p(value);\n    const reference = ir.reference_node_p(value);\n    if (!Object.is(optimized, reference)) {\n      throw new Error(\"optimized and reference IR kind decisions differ\");\n    }\n    accepted += optimized ? 1 : 0;\n  }\n\n  measure(ir.node_p, values, warmupIterations);\n  measure(ir.reference_node_p, values, warmupIterations);\n  const optimizedSamples = [];\n  const referenceSamples = [];\n  for (let sample = 0; sample < timingSamples; sample += 1) {\n    const order = sample % 2 === 0\n      ? [\n        [ir.node_p, optimizedSamples],\n        [ir.reference_node_p, referenceSamples],\n      ]\n      : [\n        [ir.reference_node_p, referenceSamples],\n        [ir.node_p, optimizedSamples],\n      ];\n    let expectedChecksum;\n    for (const [predicate, samples] of order) {\n      const measured = measure(predicate, values, timingIterations);\n      samples.push(measured.milliseconds);\n      expectedChecksum ??= measured.checksum;\n      if (measured.checksum !== expectedChecksum) {\n        throw new Error(\"compiler IR kind benchmark checksum drifted\");\n      }\n    }\n  }\n\n  const optimizedMedian = median(optimizedSamples);\n  const referenceMedian = median(referenceSamples);\n  const speedup = referenceMedian / optimizedMedian;\n  const report = {\n    format: COMPILER_IR_KIND_FORMAT,\n    version: COMPILER_IR_KIND_VERSION,\n    generatedAt: new Date().toISOString(),\n    sourceDigest: await compilerIrKindSourceDigest(),\n    host: {\n      runtime: \"bun\",\n      runtimeVersion: Bun.version,\n      engine: \"JavaScriptCore\",\n      platform: process.platform,\n      architecture: process.arch,\n      operatingSystem: `${os.type()} ${os.release()}`,\n    },\n    corpus: {\n      files: compilerSources,\n      sourceBytes,\n      programs: programs.length,\n      irNodes: nodes.length,\n      boundaryValues: boundaries.length,\n    },\n    parameters: { warmupIterations, timingIterations, timingSamples },\n    validation: {\n      equivalent: true,\n      values: values.length,\n      accepted,\n      checksum: accepted * timingIterations,\n    },\n    measurements: {\n      optimized: {\n        samplesMs: optimizedSamples,\n        medianMs: optimizedMedian,\n      },\n      reference: {\n        samplesMs: referenceSamples,\n        medianMs: referenceMedian,\n      },\n      speedup,\n    },\n    decision: {\n      minimumSpeedup,\n      passed: speedup >= minimumSpeedup,\n    },\n  };\n  return validateCompilerIrKindReport(report);\n}\n\nif (import.meta.main) {\n  const { output } = parseArguments(process.argv.slice(2));\n  let report;\n  try { report = await runCompilerIrKindBenchmark(); }\n  catch (error) {\n    if (error.report) {\n      const failed = `${JSON.stringify(error.report, null, 2)}\\n`;\n      if (output === undefined) process.stdout.write(failed);\n      else await writeFile(path.resolve(output), failed);\n    }\n    throw error;\n  }\n  const serialized = `${JSON.stringify(report, null, 2)}\\n`;\n  if (output === undefined) {\n    process.stdout.write(serialized);\n  } else {\n    await writeFile(path.resolve(output), serialized);\n    process.stdout.write(`${path.resolve(output)}\\n`);\n  }\n}\n"))
+(module tools.compiler.ir-kind-benchmark
+  (import "node:crypto" createHash)
+  (import "node:fs/promises" readFile writeFile)
+  (import "node:os" :default os)
+  (import "node:path" :default path)
+  (import "node:process" :default process)
+  (import "node:url" fileURLToPath pathToFileURL)
+
+  (defconst COMPILER_IR_KIND_FORMAT "eliscript-compiler-ir-kind-benchmark")
+  (defconst COMPILER_IR_KIND_VERSION 1)
+
+  (defconst directory (js-call path :dirname (fileURLToPath (js* "import.meta.url"))))
+  (defconst project-directory (js-call path :resolve directory "../.."))
+  (defconst compiler-sources
+    (Object/freeze
+      (js-array
+        "bootstrap/compiler/symbol.eli"
+        "bootstrap/compiler/syntax.eli"
+        "bootstrap/compiler/reader.eli"
+        "bootstrap/compiler/formatter.eli"
+        "bootstrap/compiler/expander.eli"
+        "bootstrap/compiler/transient-analysis.eli"
+        "bootstrap/compiler/analyzer.eli"
+        "bootstrap/compiler/ir.eli"
+        "bootstrap/compiler/lower.eli"
+        "bootstrap/compiler/source-map.eli"
+        "bootstrap/compiler/emitter.eli"
+        "bootstrap/compiler/project.eli"
+        "bootstrap/compiler/compiler.eli")))
+  (defconst digest-files
+    (Object/freeze
+      (js-call compiler-sources :concat (js-array "tools/compiler/ir-kind-benchmark.mjs"))))
+
+  (defun parse-positive-integer (value name)
+    (let ((parsed (globalThis.Number value)))
+      (when (or (not (Number/isSafeInteger parsed)) (<= parsed 0))
+        (throw (new globalThis.TypeError (str name " must be a positive safe integer"))))
+      parsed))
+
+  (defun parse-arguments (arguments*)
+    (let ((output undefined)
+          (index 0))
+      (while (< index (js-length arguments*))
+        (let ((argument (aref arguments* index)))
+          (cond
+            ((= argument "--output")
+             (setq output (aref arguments* (+ index 1)))
+             (when (= output undefined)
+               (throw (new globalThis.TypeError "--output requires a path")))
+             (setq index (+ index 1)))
+            ((= argument "--help")
+             (js-call (get process :stdout) :write
+               (str "Usage: bun tools/compiler/ir-kind-benchmark.mjs "
+                    "[--output REPORT.json]\n"))
+             (js-call process :exit 0))
+            (t
+             (throw (new globalThis.TypeError (str "unknown argument " argument))))))
+        (setq index (+ index 1)))
+      (js-object :output output)))
+
+  (defasync compilerIrKindSourceDigest ()
+    (let ((hash (createHash "sha256"))
+          (index 0))
+      (while (< index (js-length digest-files))
+        (let ((relative (aref digest-files index)))
+          (js-call hash :update relative)
+          (js-call hash :update "\u0000")
+          (js-call hash :update (await (readFile (js-call path :join project-directory relative))))
+          (js-call hash :update "\u0000"))
+        (setq index (+ index 1)))
+      (js-object
+        :algorithm "sha256"
+        :files digest-files
+        :value (js-call hash :digest "hex"))))
+
+  (defun collect-program-nodes (program)
+    (let ((nodes (js-array))
+          (stack (js-call (get program :body) :slice)))
+      (while (> (js-length stack) 0)
+        (let* ((node (js-call stack :pop))
+               (children (or (get node :children) (js-array)))
+               (idx 0))
+          (js-call nodes :push node)
+          (while (< idx (js-length children))
+            (js-call stack :push (aref children idx))
+            (setq idx (+ idx 1)))))
+      nodes))
+
+  (defun boundary-values ()
+    (js-array
+      nil
+      undefined
+      false
+      t
+      0
+      1
+      ""
+      "literal"
+      (globalThis.Symbol "literal")
+      (lambda () "literal")
+      (js-array)
+      (js-object)
+      (js-object :kind "unknown")
+      (js-object :kind nil)
+      (js-object :kind (globalThis.Symbol "literal"))
+      (Object/create (js-object :kind "literal"))
+      (Object/freeze (js-object :kind "literal"))))
+
+  (defun median (values)
+    (let ((sorted (js-call (js-call values :slice) :sort (lambda (left right) (- left right)))))
+      (aref sorted (Math/floor (/ (js-length sorted) 2)))))
+
+  (defun measure (predicate values iterations)
+    (let ((checksum 0)
+          (start (js-call globalThis.performance :now))
+          (iteration 0))
+      (while (< iteration iterations)
+        (let ((index 0))
+          (while (< index (js-length values))
+            (setq checksum (+ checksum (if (funcall predicate (aref values index)) 1 0)))
+            (setq index (+ index 1))))
+        (setq iteration (+ iteration 1)))
+      (js-object
+        :milliseconds (- (js-call globalThis.performance :now) start)
+        :checksum checksum)))
+
+  (defasync load-generated-compiler ()
+    (let ((module-directory (js-call path :join project-directory "dist/bootstrap")))
+      (try
+        (let ((loaded
+                (await (Promise/all
+                         (js-array
+                           (funcall (js* "(u) => import(u)") (get (pathToFileURL (js-call path :join module-directory "compiler.mjs")) :href))
+                           (funcall (js* "(u) => import(u)") (get (pathToFileURL (js-call path :join module-directory "ir.mjs")) :href)))))))
+          (js-object
+            :compiler (aref loaded 0)
+            :ir (aref loaded 1)))
+        (catch error
+          (throw (new globalThis.Error
+                   "generated compiler is unavailable; run bun run build:bootstrap first"
+                   (js-object :cause error)))))))
+
+  (defun validateCompilerIrKindReport (report)
+    (when (or (not report)
+              (not (= (get report :format) COMPILER_IR_KIND_FORMAT))
+              (not (= (get report :version) COMPILER_IR_KIND_VERSION)))
+      (throw (new globalThis.TypeError "invalid compiler IR kind report identity")))
+    (let ((validation (get report :validation))
+          (corpus (get report :corpus)))
+      (when (or (not validation)
+                (not corpus)
+                (not (= (get validation :equivalent) t))
+                (not (= (get validation :values)
+                        (+ (get corpus :irNodes) (get corpus :boundaryValues))))
+                (< (get validation :accepted) (get corpus :irNodes))
+                (<= (get validation :checksum) 0))
+        (throw (new globalThis.TypeError "compiler IR kind equivalence was not proven"))))
+    (let* ((measurements (get report :measurements))
+           (parameters (get report :parameters))
+           (samples (if parameters (get parameters :timingSamples) undefined))
+           (opt-meas (if measurements (get measurements :optimized) undefined))
+           (ref-meas (if measurements (get measurements :reference) undefined))
+           (opt-samples (if opt-meas (get opt-meas :samplesMs) undefined))
+           (ref-samples (if ref-meas (get ref-meas :samplesMs) undefined)))
+      (when (or (not (Array/isArray opt-samples))
+                (not (Array/isArray ref-samples))
+                (not (= (js-length opt-samples) samples))
+                (not (= (js-length ref-samples) samples)))
+        (throw (new globalThis.TypeError "compiler IR kind timing samples are incomplete"))))
+    (let ((decision (get report :decision))
+          (measurements (get report :measurements)))
+      (when (or (not decision)
+                (not (= (get decision :passed) t))
+                (< (get measurements :speedup) (get decision :minimumSpeedup)))
+        (let ((err (new globalThis.TypeError "compiler IR kind speedup decision did not pass")))
+          (put err :report report)
+          (throw err))))
+    report)
+
+  (defun coalesce (a b c)
+    (if (not (= a undefined))
+        (if (not (= a nil)) a (if (not (= b undefined)) (if (not (= b nil)) b c) c))
+      (if (not (= b undefined)) (if (not (= b nil)) b c) c)))
+
+  (defasync runCompilerIrKindBenchmark (&optional options)
+    (let* ((opts (or options (js-object)))
+           (env (get process :env))
+           (warmup-iterations
+             (parse-positive-integer
+               (coalesce (get opts :warmupIterations)
+                         (get env :ELISCRIPT_COMPILER_IR_KIND_WARMUP_ITERATIONS)
+                         25)
+               "warmup iterations"))
+           (timing-iterations
+             (parse-positive-integer
+               (coalesce (get opts :timingIterations)
+                         (get env :ELISCRIPT_COMPILER_IR_KIND_TIMING_ITERATIONS)
+                         100)
+               "timing iterations"))
+           (timing-samples
+             (parse-positive-integer
+               (coalesce (get opts :timingSamples)
+                         (get env :ELISCRIPT_COMPILER_IR_KIND_TIMING_SAMPLES)
+                         9)
+               "timing samples")))
+      (when (= (% timing-samples 2) 0)
+        (throw (new globalThis.TypeError "timing samples must be odd")))
+      (let ((minimum-speedup
+              (globalThis.Number
+                (coalesce (get opts :minimumSpeedup)
+                          (get env :ELISCRIPT_COMPILER_IR_KIND_MINIMUM_SPEEDUP)
+                          1.5))))
+        (when (or (not (Number/isFinite minimum-speedup)) (<= minimum-speedup 1))
+          (throw (new globalThis.TypeError "minimum speedup must be greater than 1")))
+        (let* ((loaded (await (load-generated-compiler)))
+               (compiler (get loaded :compiler))
+               (ir (get loaded :ir))
+               (programs (js-array))
+               (nodes (js-array))
+               (source-bytes 0)
+               (index 0))
+          (while (< index (js-length compiler-sources))
+            (let* ((relative (aref compiler-sources index))
+                   (source (await (readFile (js-call path :join project-directory relative) "utf8")))
+                   (program (js-call compiler :compile_ir_string source relative))
+                   (collected (collect-program-nodes program))
+                   (node-idx 0))
+              (setq source-bytes (+ source-bytes (Buffer/byteLength source)))
+              (js-call programs :push program)
+              (while (< node-idx (js-length collected))
+                (js-call nodes :push (aref collected node-idx))
+                (setq node-idx (+ node-idx 1))))
+            (setq index (+ index 1)))
+          (let* ((boundaries (boundary-values))
+                 (values (js-call nodes :concat boundaries))
+                 (accepted 0)
+                 (val-idx 0))
+            (while (< val-idx (js-length values))
+              (let* ((value (aref values val-idx))
+                     (optimized (js-call ir :node_p value))
+                     (reference (js-call ir :reference_node_p value)))
+                (when (not (Object/is optimized reference))
+                  (throw (new globalThis.Error "optimized and reference IR kind decisions differ")))
+                (setq accepted (+ accepted (if optimized 1 0))))
+              (setq val-idx (+ val-idx 1)))
+            (measure (get ir :node_p) values warmup-iterations)
+            (measure (get ir :reference_node_p) values warmup-iterations)
+            (let ((optimized-samples (js-array))
+                  (reference-samples (js-array))
+                  (sample 0))
+              (while (< sample timing-samples)
+                (let ((order (if (= (% sample 2) 0)
+                                 (js-array
+                                   (js-array (get ir :node_p) optimized-samples)
+                                   (js-array (get ir :reference_node_p) reference-samples))
+                               (js-array
+                                 (js-array (get ir :reference_node_p) reference-samples)
+                                 (js-array (get ir :node_p) optimized-samples))))
+                      (expected-checksum undefined)
+                      (order-idx 0))
+                  (while (< order-idx (js-length order))
+                    (let* ((entry (aref order order-idx))
+                           (predicate (aref entry 0))
+                           (samples (aref entry 1))
+                           (measured (measure predicate values timing-iterations)))
+                      (js-call samples :push (get measured :milliseconds))
+                      (when (= expected-checksum undefined)
+                        (setq expected-checksum (get measured :checksum)))
+                      (when (not (= (get measured :checksum) expected-checksum))
+                        (throw (new globalThis.Error "compiler IR kind benchmark checksum drifted"))))
+                    (setq order-idx (+ order-idx 1))))
+                (setq sample (+ sample 1)))
+              (let* ((optimized-median (median optimized-samples))
+                     (reference-median (median reference-samples))
+                     (speedup (/ reference-median optimized-median))
+                     (report
+                       (js-object
+                         :format COMPILER_IR_KIND_FORMAT
+                         :version COMPILER_IR_KIND_VERSION
+                         :generatedAt (js-call (new globalThis.Date) :toISOString)
+                         :sourceDigest (await (compilerIrKindSourceDigest))
+                         :host (js-object
+                                 :runtime "bun"
+                                 :runtimeVersion (get globalThis.Bun :version)
+                                 :engine "JavaScriptCore"
+                                 :platform (get process :platform)
+                                 :architecture (get process :arch)
+                                 :operatingSystem (str (js-call os :type) " " (js-call os :release)))
+                         :corpus (js-object
+                                   :files compiler-sources
+                                   :sourceBytes source-bytes
+                                   :programs (js-length programs)
+                                   :irNodes (js-length nodes)
+                                   :boundaryValues (js-length boundaries))
+                         :parameters (js-object
+                                       :warmupIterations warmup-iterations
+                                       :timingIterations timing-iterations
+                                       :timingSamples timing-samples)
+                         :validation (js-object
+                                       :equivalent t
+                                       :values (js-length values)
+                                       :accepted accepted
+                                       :checksum (* accepted timing-iterations))
+                         :measurements (js-object
+                                         :optimized (js-object :samplesMs optimized-samples :medianMs optimized-median)
+                                         :reference (js-object :samplesMs reference-samples :medianMs reference-median)
+                                         :speedup speedup)
+                         :decision (js-object
+                                     :minimumSpeedup minimum-speedup
+                                     :passed (>= speedup minimum-speedup)))))
+                (validateCompilerIrKindReport report))))))))
+
+  (defasync run-main ()
+    (let* ((parsed (parse-arguments (js-call (get process :argv) :slice 2)))
+           (output (get parsed :output))
+           (report undefined))
+      (try
+        (setq report (await (runCompilerIrKindBenchmark)))
+        (catch error
+          (when (get error :report)
+            (let ((failed (str (JSON/stringify (get error :report) nil 2) "\n")))
+              (if (= output undefined)
+                  (js-call (get process :stdout) :write failed)
+                (await (writeFile (js-call path :resolve output) failed)))))
+          (throw error)))
+      (let ((serialized (str (JSON/stringify report nil 2) "\n")))
+        (if (= output undefined)
+            (js-call (get process :stdout) :write serialized)
+          (progn
+            (await (writeFile (js-call path :resolve output) serialized))
+            (js-call (get process :stdout) :write (str (js-call path :resolve output) "\n")))))))
+
+  (when (js* "import.meta.main")
+    (run-main))
+
+  (export
+    COMPILER_IR_KIND_FORMAT
+    COMPILER_IR_KIND_VERSION
+    compilerIrKindSourceDigest
+    validateCompilerIrKindReport
+    runCompilerIrKindBenchmark))

@@ -1,2 +1,171 @@
-(module capsules.tools.debugging.check
-  (js* "#!/usr/bin/env bun\n\nimport { readFile } from \"node:fs/promises\";\nimport path from \"node:path\";\nimport process from \"node:process\";\nimport { fileURLToPath } from \"node:url\";\n\nconst moduleDirectory = path.dirname(fileURLToPath(import.meta.url));\nexport const DEFAULT_ROOT = path.resolve(moduleDirectory, \"../..\");\nexport const CONTRACT_FILE = \"contracts/source-debugging-corpus.json\";\nconst EXPECTED_CASES = [\n  \"compiler\",\n  \"runtime\",\n  \"browser-event\",\n  \"async-rejection\",\n  \"worker\",\n];\n\nexport class SourceDebuggingCorpusError extends Error {\n  constructor(errors) {\n    super(`source debugging corpus validation failed:\\n- ${errors.join(\"\\n- \")}`);\n    this.name = \"SourceDebuggingCorpusError\";\n    this.errors = errors;\n  }\n}\n\nfunction isPlainObject(value) {\n  return value !== null && typeof value === \"object\" && !Array.isArray(value);\n}\n\nfunction equal(left, right) {\n  return JSON.stringify(left) === JSON.stringify(right);\n}\n\nfunction safePath(value) {\n  return typeof value === \"string\" && value.length > 0 &&\n    !path.isAbsolute(value) && !value.split(\"/\").includes(\"..\") &&\n    path.posix.normalize(value) === value;\n}\n\nfunction validPoint(value, offsetRequired = false) {\n  return isPlainObject(value) && Number.isInteger(value.line) && value.line > 0 &&\n    Number.isInteger(value.column) && value.column > 0 &&\n    (!offsetRequired || (Number.isInteger(value.offset) && value.offset >= 0));\n}\n\nasync function trackedFiles(root) {\n  const child = Bun.spawn([\"git\", \"ls-files\", \"-z\"], {\n    cwd: root,\n    stdout: \"pipe\",\n    stderr: \"pipe\",\n  });\n  const [exitCode, stdout, stderr] = await Promise.all([\n    child.exited,\n    new Response(child.stdout).text(),\n    new Response(child.stderr).text(),\n  ]);\n  if (exitCode !== 0) throw new Error(stderr.trim() || \"git ls-files failed\");\n  return new Set(stdout.split(\"\\0\").filter(Boolean));\n}\n\nexport async function validateSourceDebuggingCorpus(contract, options = {}) {\n  const root = path.resolve(options.root ?? DEFAULT_ROOT);\n  const errors = [];\n  if (!isPlainObject(contract) || contract.schemaVersion !== 1 ||\n      contract.format !== \"eliscript-source-debugging-corpus\" ||\n      contract.version !== 1) {\n    throw new SourceDebuggingCorpusError([\n      \"contract must use eliscript-source-debugging-corpus version 1\",\n    ]);\n  }\n  const cases = Array.isArray(contract.cases) ? contract.cases : [];\n  if (!equal(cases.map((entry) => entry?.id), EXPECTED_CASES)) {\n    errors.push(\"cases must be exactly compiler runtime browser-event async-rejection worker\");\n  }\n  let tracked = new Set();\n  try {\n    tracked = await trackedFiles(root);\n  } catch (error) {\n    errors.push(error.message);\n  }\n  for (const [index, entry] of cases.entries()) {\n    const label = entry?.id ?? `case ${index}`;\n    if (!isPlainObject(entry) || !safePath(entry.source) ||\n        !entry.source.endsWith(\".eli\") || !isPlainObject(entry.location) ||\n        !isPlainObject(entry.evidence) || !safePath(entry.evidence.file) ||\n        typeof entry.evidence.contains !== \"string\" ||\n        entry.evidence.contains.length === 0) {\n      errors.push(`${label} must declare source location and evidence`);\n      continue;\n    }\n    if (entry.id === \"compiler\") {\n      if (!validPoint(entry.location.start, true) ||\n          !validPoint(entry.location.end, true)) {\n        errors.push(\"compiler must declare a complete start and end source span\");\n      }\n    } else if (!validPoint(entry.location)) {\n      errors.push(`${label} must declare an exact source point`);\n    }\n    for (const file of [entry.source, entry.evidence.file]) {\n      const capsule = file.endsWith(\".mjs\")\n        ? `${file.slice(0, -4)}.eli`\n        : null;\n      if (!tracked.has(file) && (!capsule || !tracked.has(capsule))) {\n        errors.push(`${label} file is not tracked: ${file}`);\n      }\n    }\n    try {\n      const evidence = await readFile(path.join(root, entry.evidence.file), \"utf8\");\n      if (!evidence.includes(entry.evidence.contains)) {\n        errors.push(`${label} evidence locator is absent: ${entry.evidence.contains}`);\n      }\n    } catch (error) {\n      errors.push(`${label} evidence could not be read: ${error.message}`);\n    }\n  }\n  if (errors.length > 0) throw new SourceDebuggingCorpusError(errors);\n  return contract;\n}\n\nexport async function checkSourceDebuggingCorpus(options = {}) {\n  const root = path.resolve(options.root ?? DEFAULT_ROOT);\n  const contract = options.contract ?? JSON.parse(\n    await readFile(path.join(root, CONTRACT_FILE), \"utf8\"),\n  );\n  return validateSourceDebuggingCorpus(contract, { root });\n}\n\nif (import.meta.main) {\n  checkSourceDebuggingCorpus().then((contract) => {\n    process.stdout.write(\n      `Source debugging corpus verified (${contract.cases.length} workflows)\\n`,\n    );\n  }).catch((error) => {\n    process.stderr.write(`${error.message}\\n`);\n    process.exitCode = 1;\n  });\n}\n"))
+(module tools.debugging.check
+  (import "node:fs/promises" readFile)
+  (import "node:path" :as path)
+  (import "node:url" fileURLToPath)
+
+  (defconst module-file (fileURLToPath (js* "import.meta.url")))
+  (defconst DEFAULT_ROOT (js-call path :resolve (js-call path :dirname module-file) "../.."))
+  (defconst CONTRACT_FILE "contracts/source-debugging-corpus.json")
+  (defconst expected-cases
+    (js-array "compiler" "runtime" "browser-event" "async-rejection" "worker"))
+
+  (defun source-debugging-error-message (errors)
+    (str "source debugging corpus validation failed:\n- " (js-call errors :join "\n- ")))
+
+  (defun source-debugging-error-fields (self errors)
+    (put self :name "SourceDebuggingCorpusError")
+    (put self :errors errors)
+    self)
+
+  (defconst SourceDebuggingCorpusError
+    (funcall
+      (js* "(message, fields) => class SourceDebuggingCorpusError extends Error { constructor(errors) { const self = super(message(errors)); return fields(self, errors); } }")
+      source-debugging-error-message
+      source-debugging-error-fields))
+
+  (defun host-type (value)
+    (funcall (js* "(value) => typeof value") value))
+
+  (defun host-truthy (value)
+    (funcall (js* "(value) => !!value") value))
+
+  (defun plain-object? (value)
+    (and (not (nil? value))
+         (= (host-type value) "object")
+         (not (Array/isArray value))))
+
+  (defun host-get (value key)
+    (if (nullish? value) undefined (get value key)))
+
+  (defun call-options (supplied)
+    (if (or (= (js-length supplied) 0) (undefined? (aref supplied 0)))
+      (js-object)
+      (aref supplied 0)))
+
+  (defun json-equal (left right)
+    (= (JSON/stringify left) (JSON/stringify right)))
+
+  (defun safe-path (value)
+    (and (= (host-type value) "string")
+         (> (js-length value) 0)
+         (not (js-call path :isAbsolute value))
+         (not (js-call (js-call value :split "/") :includes ".."))
+         (= (js-call (get path :posix) :normalize value) value)))
+
+  (defun valid-point (value offset-required)
+    (and (plain-object? value)
+         (Number/isInteger (get value :line))
+         (> (get value :line) 0)
+         (Number/isInteger (get value :column))
+         (> (get value :column) 0)
+         (or (not offset-required)
+             (and (Number/isInteger (get value :offset))
+                  (>= (get value :offset) 0)))))
+
+  (defasync tracked-files (root)
+    (let* ((child (js-call globalThis.Bun :spawn (js-array "git" "ls-files" "-z")
+                    (js-object :cwd root :stdout "pipe" :stderr "pipe")))
+           (parts (await (js-call globalThis.Promise :all
+                           (js-array (get child :exited)
+                             (js-call (new globalThis.Response (get child :stdout)) :text)
+                             (js-call (new globalThis.Response (get child :stderr)) :text)))))
+           (exit-code (aref parts 0))
+           (stdout (aref parts 1))
+           (stderr (aref parts 2)))
+      (unless (= exit-code 0)
+        (let ((text (js-call stderr :trim)))
+          (throw (new globalThis.Error (if (> (js-length text) 0) text "git ls-files failed")))))
+      (new globalThis.Set (js-call (js-call stdout :split "\u0000") :filter host-truthy))))
+
+  (defun case-ids (cases)
+    (let ((ids (js-array)) (index 0))
+      (while (< index (js-length cases))
+        (js-call ids :push (host-get (aref cases index) "id"))
+        (setq index (1+ index)))
+      ids))
+
+  (defun tracked-file? (tracked file)
+    (let ((capsule (if (js-call file :endsWith ".mjs")
+                     (str (js-call file :slice 0 -4) ".eli")
+                     nil)))
+      (or (js-call tracked :has file)
+          (and capsule (js-call tracked :has capsule)))))
+
+  (defasync validateSourceDebuggingCorpus (contract &rest supplied)
+    (let* ((options (call-options supplied))
+           (root (js-call path :resolve (get options :root DEFAULT_ROOT)))
+           (errors (js-array)))
+      (unless (and (plain-object? contract)
+                   (= (get contract :schemaVersion) 1)
+                   (= (get contract :format) "eliscript-source-debugging-corpus")
+                   (= (get contract :version) 1))
+        (throw (new SourceDebuggingCorpusError
+                 (js-array "contract must use eliscript-source-debugging-corpus version 1"))))
+      (let ((cases (if (Array/isArray (get contract :cases)) (get contract :cases) (js-array)))
+            (tracked (new globalThis.Set)))
+        (unless (json-equal (case-ids cases) expected-cases)
+          (js-call errors :push "cases must be exactly compiler runtime browser-event async-rejection worker"))
+        (try
+          (setq tracked (await (tracked-files root)))
+          (catch error
+            (js-call errors :push (get error :message))))
+        (let ((index 0))
+          (while (< index (js-length cases))
+            (let* ((entry (aref cases index))
+                   (label (let ((id (host-get entry "id")))
+                            (if (nullish? id) (str "case " index) id))))
+              (if (or (not (plain-object? entry))
+                      (not (safe-path (get entry :source)))
+                      (not (js-call (get entry :source) :endsWith ".eli"))
+                      (not (plain-object? (get entry :location)))
+                      (not (plain-object? (get entry :evidence)))
+                      (not (safe-path (get (get entry :evidence) :file)))
+                      (not (= (host-type (get (get entry :evidence) :contains)) "string"))
+                      (= (js-length (get (get entry :evidence) :contains)) 0))
+                (js-call errors :push (str label " must declare source location and evidence"))
+                (progn
+                  (if (= (get entry :id) "compiler")
+                    (unless (and (valid-point (get (get entry :location) :start) t)
+                                 (valid-point (get (get entry :location) :end) t))
+                      (js-call errors :push "compiler must declare a complete start and end source span"))
+                    (unless (valid-point (get entry :location) nil)
+                      (js-call errors :push (str label " must declare an exact source point"))))
+                  (let ((files (js-array (get entry :source) (get (get entry :evidence) :file)))
+                        (file-index 0))
+                    (while (< file-index (js-length files))
+                      (let ((file (aref files file-index)))
+                        (unless (tracked-file? tracked file)
+                          (js-call errors :push (str label " file is not tracked: " file))))
+                      (setq file-index (1+ file-index))))
+                  (try
+                    (let ((evidence (await (readFile (js-call path :join root (get (get entry :evidence) :file)) "utf8"))))
+                      (unless (js-call evidence :includes (get (get entry :evidence) :contains))
+                        (js-call errors :push (str label " evidence locator is absent: " (get (get entry :evidence) :contains)))))
+                    (catch error
+                      (js-call errors :push (str label " evidence could not be read: " (get error :message))))))))
+            (setq index (1+ index))))
+        (when (> (js-length errors) 0)
+          (throw (new SourceDebuggingCorpusError errors)))
+        contract)))
+
+  (defasync checkSourceDebuggingCorpus (&rest supplied)
+    (let* ((options (call-options supplied))
+           (root (js-call path :resolve (get options :root DEFAULT_ROOT)))
+           (contract (if (nullish? (get options :contract))
+                       (JSON/parse (await (readFile (js-call path :join root CONTRACT_FILE) "utf8")))
+                       (get options :contract))))
+      (await (validateSourceDebuggingCorpus contract (js-object :root root)))))
+
+  (when (js* "import.meta.main")
+    (js-call
+      (js-call (checkSourceDebuggingCorpus) :then
+        (lambda (contract)
+          (js-call (get globalThis.process :stdout) :write
+            (str "Source debugging corpus verified (" (js-length (get contract :cases)) " workflows)\n"))))
+      :catch
+      (lambda (error)
+        (js-call (get globalThis.process :stderr) :write (str (get error :message) "\n"))
+        (put globalThis.process :exitCode 1))))
+
+  (export DEFAULT_ROOT CONTRACT_FILE SourceDebuggingCorpusError
+    validateSourceDebuggingCorpus checkSourceDebuggingCorpus))

@@ -2029,7 +2029,7 @@ already nested suffix, or use either production emitter to build the oracle."
           "multi-arity.eli")))
     (should (string-match-p "arity_arguments\$G[0-9]+" output))
     (should (string-match-p
-             (regexp-quote "received unsupported arity:") output))
+             (regexp-quote "__eliscript_arity_error(") output))
     (should-not
      (string-match-p "(lambda (()\|(fn (()\|(async (()" output))))
 
@@ -2325,6 +2325,8 @@ already nested suffix, or use either production emitter to build the oracle."
       (unless false (put record :done t))
       (while (> state 10) (set! state (1- state)))
       (or (null values)
+          (apply (lambda (first second &rest tail) first) value next values)
+          (apply (lambda (first) first) value nil)
           (apply (lambda (item) item) values)
           (js-call values :map (lambda (item) (* item 2))))
       (cond ((= state 0) '(zero)) (t (str state))))))
@@ -2434,34 +2436,22 @@ already nested suffix, or use either production emitter to build the oracle."
       (should
        (string-match-p
         (regexp-quote
-         "Symbol.for(\"eliscript.value.type\")")
+         "import { valueType as __eliscript_value_type } from \"eliscript/runtime/primitives.mjs\";")
         generated))
+      (should (string-match-p (regexp-quote "__eliscript_value_type(value)") generated))
       (should
        (string-match-p
         (regexp-quote
-         "__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\"")
+         "import { createHostIdentityToken as __eliscript_create_host_identity_token } from \"eliscript/runtime/primitives.mjs\";")
         generated))
+      ;; Each consumer instantiates a private allocator; source emission must
+      ;; not hide an independent JavaScript implementation in the output.
       (should
        (string-match-p
         (regexp-quote
-         "__eliscript_kind.value === \"eliscript/keyword\"")
+         "const __eliscript_host_identity_token = __eliscript_create_host_identity_token();")
         generated))
-      (should
-       (string-match-p
-        (regexp-quote
-         "__eliscript_kind.value === \"eliscript/symbol\"")
-        generated))
-      (should
-       (string-match-p
-        (regexp-quote
-         "const __eliscript_host_identity_token = (() =>")
-        generated))
-      (should
-       (string-match-p
-        (regexp-quote "const objects = new WeakMap()") generated))
-      (should
-       (string-match-p
-        (regexp-quote "const symbols = new Map()") generated))
+      (should-not (string-match-p (regexp-quote "const objects = new WeakMap()") generated))
       (should
        (string-match-p
         (regexp-quote "__eliscript_host_identity_token(value)") generated))
@@ -2474,11 +2464,11 @@ already nested suffix, or use either production emitter to build the oracle."
        (string-match-p (regexp-quote "Number(\"1.5\")") generated))
       (should
        (string-match-p
-        (regexp-quote "return BigInt(__eliscript_text)") generated))
+        (regexp-quote "__eliscript_string_to_bigint(\"42\")") generated))
       (should
        (string-match-p
         (regexp-quote
-         "__eliscript_bytes.setFloat64(0, __eliscript_number === 0 ? 0 : __eliscript_number, true)")
+         "__eliscript_number_float64_words(value)")
         generated)))))
 
 (ert-deftest eliscript-rejects-invalid-value-inspection-arities ()

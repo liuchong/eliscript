@@ -1,2 +1,706 @@
-(module capsules.tools.backends.compiler-corpus-cli-adapters-ground
-  (js* "import {createHash} from 'node:crypto';\nimport {resolve} from 'node:path';\nimport {pathToFileURL} from 'node:url';\nimport {loadCompilerSources} from './compiler-build.mjs';\nimport {compilerSourceIdentity} from './compiler-bootstrap.mjs';\nimport {originalSourceCaseLocators} from './compiler-corpus-managed-cases.mjs';\n\nconst sha256 = source => createHash('sha256').update(source).digest('hex');\n\nfunction replaceOriginal(source, before, after, changes) {\n  const start = source.indexOf(before);\n  if (start < 0 || source.indexOf(before, start + before.length) >= 0) {\n    throw new TypeError('original compiler CLI setup boundary changed');\n  }\n  changes.push({role: 'selected-compiler-transport', beforeSha256: sha256(before), afterSha256: sha256(after)});\n  return source.slice(0, start) + after + source.slice(start + before.length);\n}\n\nfunction region(source, before, after) {\n  const start = source.indexOf(before), end = start < 0 ? -1 : source.indexOf(after, start + before.length);\n  if (start < 0 || end < 0) throw new TypeError('original CLI helper boundary changed');\n  return source.slice(start, end);\n}\n\nconst forwardingTransport = `\nasync function __eliscript_install_compiler(source, destination) {\n  await __cli_fs.mkdir(destination, {recursive: true});\n  for (const name of moduleNames) {\n    const path = resolve(source, name + '.mjs');\n    await __cli_fs.readFile(path);\n    await __cli_fs.writeFile(resolve(destination, name + '.mjs'),\n      'export * from ' + JSON.stringify(__cli_url.pathToFileURL(path).href) + ';\\\\n');\n    await __cli_fs.writeFile(resolve(destination, name + '.mjs.map'),\n      await __cli_fs.readFile(path + '.map'));\n  }\n}\n`;\n\nfunction generationsTransport(sourceRoot) {\n  return `\nimport * as __cli_fs from 'node:fs/promises';\nimport * as __cli_url from 'node:url';\nconst __cli_manifest_path = process.env.ELISCRIPT_ORIGINAL_COMPILER_GENERATIONS;\nif (!__cli_manifest_path) throw new Error('original three-generation CLI requires selected compiler generation artifacts');\nconst __cli_manifest = JSON.parse(await __cli_fs.readFile(__cli_manifest_path, 'utf8'));\nif (__cli_manifest.format !== 'eliscript-original-compiler-generations' || __cli_manifest.version !== 1 ||\n    !['javascript', 'wasm', 'native'].includes(__cli_manifest.target) ||\n    __cli_manifest.target !== process.env.ELISCRIPT_ORIGINAL_TARGET ||\n    !Array.isArray(__cli_manifest.generations) || __cli_manifest.generations.length !== 3) {\n  throw new TypeError('original CLI requires three actual generations for the selected target');\n}\nconst __cli_directories = new Map();\nconst __cli_contexts = [];\ntry {for (let index = 0; index < 3; index++) {\n  const generation = __cli_manifest.generations[index];\n  if (generation.generation !== index + 1 || typeof generation.compilerDirectory !== 'string' ||\n      typeof generation.javascriptDirectory !== 'string' ||\n      !['javascript', 'wasm', 'native'].includes(generation.producerHost) ||\n      (index > 0 && generation.producerHost !== __cli_manifest.target)) {\n    throw new TypeError('original CLI generation provenance is incomplete');\n  }\n  if (__cli_manifest.target !== 'javascript') {\n    if (typeof generation.context !== 'string') throw new TypeError('binary compiler generation requires its actual runtime context');\n    const {openOriginalProgramContext} = await import(${JSON.stringify(pathToFileURL(resolve(sourceRoot, 'tools/backends/compiler-corpus-host-context.mjs')).href)});\n    const input = JSON.parse(await __cli_fs.readFile(generation.context, 'utf8'));\n    if (input.target !== __cli_manifest.target) throw new Error('compiler generation changed its execution target');\n    __cli_contexts.push(await openOriginalProgramContext(input, {identity: generation.context}));\n  }\n}} catch (error) {\n  for (const context of __cli_contexts.reverse()) {\n    try {await context.close();} catch { /* Preserve the construction error. */ }\n  }\n  throw error;\n}\n${forwardingTransport}\nasync function __cli_place_generation(index, destination) {\n  const generation = __cli_manifest.generations[index];\n  if (!generation) throw new Error('original CLI requested an unavailable compiler generation');\n  await __eliscript_install_compiler(generation.compilerDirectory, destination);\n  __cli_directories.set(resolve(destination), generation);\n}\nasync function __cli_prepare_command(command, options) {\n  if (command[0] === buildPath) {\n    if (command.length !== 1 || !options?.env?.ELISCRIPT_BOOTSTRAP_OUT_DIR) {\n      throw new TypeError('original bootstrap setup command changed');\n    }\n    await __cli_place_generation(0, options.env.ELISCRIPT_BOOTSTRAP_OUT_DIR);\n    return {exitCode: 0, stdout: '', stderr: ''};\n  }\n  if (command[0] === publicCliPath || command[0] === portableCliPath) {\n    const directory = options?.env?.ELISCRIPT_BOOTSTRAP_MODULE_DIR;\n    if (typeof directory !== 'string') throw new TypeError('original public compiler command lost its module directory');\n    if (!__cli_directories.has(resolve(directory))) {\n      // Automatic setup is supplied by the selected compiler construction,\n      // rather than invoking the shell script's independent Emacs bootstrap.\n      await __cli_place_generation(0, directory);\n    }\n    const generation = __cli_directories.get(resolve(directory));\n    if (generation.context) options.env.ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT = generation.context;\n  }\n  return null;\n}\n`;\n}\n\nconst runOriginalCases = `\nlet __cli_failure;\ntry {\n  for (const {name, body, timeout} of __cli_cases) {\n    let timer;\n    try {\n      await Promise.race([Promise.resolve().then(body), new Promise((_, reject) => {\n        timer = setTimeout(() => reject(new Error(name + ' exceeded its original ' + timeout + ' ms timeout')), timeout);\n      })]);\n    } finally {clearTimeout(timer);}\n  }\n} catch (error) {__cli_failure = error; throw error;}\nfinally {\n  let cleanup;\n  for (const context of __cli_contexts.reverse()) {\n    try {await context.close();} catch (error) {cleanup ??= error;}\n  }\n  if (!__cli_failure && cleanup) throw cleanup;\n}\n`;\n\n// Define executable recipes only. Loading this module neither constructs a\n// compiler generation nor invokes an original CLI or independent oracle.\nexport async function addOriginalCLIPrograms({add, locators, text, file, bootstrapSources, sourceRoot}) {\n  if (typeof add !== 'function' || !Array.isArray(locators) || typeof text !== 'function' ||\n      typeof file !== 'function' || !Array.isArray(bootstrapSources) || typeof sourceRoot !== 'string') {\n    throw new TypeError('original CLI adapter requires source services and its complete compiler manifest');\n  }\n  const modules = [], names = [], seen = new Set();\n  for (const filename of bootstrapSources) {\n    if (typeof filename !== 'string' || !/^bootstrap\\/compiler\\/[a-z][a-z0-9-]*\\.eli$/.test(filename) || seen.has(filename)) {\n      throw new TypeError('original CLI compiler manifest contains an invalid or duplicate source');\n    }\n    seen.add(filename); names.push(filename.slice('bootstrap/compiler/'.length, -4));\n    modules.push({id: filename.slice(0, -4) + '.mjs', filename, source: await text(filename)});\n  }\n  if (modules.length !== 13 || !seen.has('bootstrap/compiler/compiler.eli')) {\n    throw new TypeError('original CLI requires the complete thirteen-module compiler graph');\n  }\n  const mapped = [];\n  for (const suite of ['tests/bootstrap-compiler.test.mjs', 'tests/cli-test.sh']) {\n    const coverage = locators.filter(locator => locator.file === suite);\n    if (!coverage.length) continue;\n    const original = await text(suite), identity = await file(suite), changes = [];\n    for (const locator of coverage) {\n      if (typeof locator.contains !== 'string' || !original.includes(locator.contains)) {\n        throw new TypeError('original compiler CLI coverage locator is not present in its source');\n      }\n    }\n    let hostSource, generations;\n    if (suite.endsWith('.test.mjs')) {\n      let transported = replaceOriginal(original, 'import { expect, test } from \"bun:test\";',\n        'import { expect } from \"bun:test\";', changes);\n      transported = replaceOriginal(transported, 'const projectDirectory = resolve(import.meta.dir, \"..\");',\n        'const projectDirectory = process.env.ELISCRIPT_ORIGINAL_SOURCE_ROOT;\\n' +\n        'if (!projectDirectory) throw new Error(\"original compiler CLI requires its source root\");', changes);\n      transported = replaceOriginal(transported, '\"../bootstrap/host/bun.mjs\"',\n        JSON.stringify(pathToFileURL(resolve(sourceRoot, 'bootstrap/host/bun.mjs')).href), changes);\n      transported = replaceOriginal(transported, 'async function run(command, options = {}) {\\n',\n        'async function run(command, options = {}) {\\n' +\n        '  const replacement = await __cli_prepare_command(command, options);\\n' +\n        '  if (replacement) return replacement;\\n', changes);\n      const build = region(transported, 'async function buildWithPortableCompiler(', '\\nasync function expectArtifactDirectoriesEqual(');\n      transported = replaceOriginal(transported, build,\n        'async function buildWithPortableCompiler(compilerDirectory, outputDirectory) {\\n' +\n        '  const previous = __cli_directories.get(resolve(compilerDirectory));\\n' +\n        '  if (!previous) throw new Error(\"generation producer is not the selected compiler\");\\n' +\n        '  await __cli_place_generation(previous.generation, outputDirectory);\\n}\\n', changes);\n      transported = replaceOriginal(transported, 'async function expectArtifactDirectoriesEqual(left, right) {\\n',\n        'async function expectArtifactDirectoriesEqual(left, right) {\\n' +\n        '  const leftGeneration = __cli_directories.get(resolve(left));\\n' +\n        '  const rightGeneration = __cli_directories.get(resolve(right));\\n' +\n        '  if (!leftGeneration || !rightGeneration) throw new Error(\"original generation comparison lacks actual products\");\\n' +\n        '  left = leftGeneration.javascriptDirectory;\\n' +\n        '  right = rightGeneration.javascriptDirectory;\\n', changes);\n      hostSource = generationsTransport(sourceRoot) +\n        '\\nconst __cli_cases = [];\\nfunction test(name, body, timeout) {\\n' +\n        '  if (!Number.isSafeInteger(timeout) || timeout <= 0) throw new TypeError(\"original CLI case lost its timeout\");\\n' +\n        '  __cli_cases.push({name, body, timeout});\\n}\\n' + transported + runOriginalCases;\n      generations = {count: 3, producer: 'previous-generation', target: 'selected-target', completeCompiler: true,\n        sourceMaps: true, manifestEnvironment: 'ELISCRIPT_ORIGINAL_COMPILER_GENERATIONS',\n        manifestFormat: 'eliscript-original-compiler-generations', manifestVersion: 1,\n        javascriptCompanions: 'selected-generation-producer', fixedPoint: 'complete-target-artifacts-and-original-javascript-files'};\n    } else {\n      // The shell body is executed verbatim from the original source root.\n      // Its real public CLI loads the selected target via this prepared module\n      // directory. Generated user JavaScript is still executed by its original\n      // Bun commands, and every diagnostic/snapshot/map assertion remains.\n      hostSource = `import {mkdir,readFile,writeFile} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {pathToFileURL} from 'node:url';\nconst root = process.env.ELISCRIPT_ORIGINAL_SOURCE_ROOT;\nif (!root) throw new Error('original shell CLI requires its source root');\nconst directory = resolve(process.argv[2], '__eliscript_original_cli_compiler');\nawait mkdir(directory, {recursive: true});\nfor (const name of ${JSON.stringify(names)}) {\n  const source = resolve(process.argv[2], 'bootstrap/compiler', name + '.mjs');\n  await readFile(source);\n  await writeFile(resolve(directory, name + '.mjs'), 'export * from ' + JSON.stringify(pathToFileURL(source).href) + ';\\\\n');\n  await writeFile(resolve(directory, name + '.mjs.map'), await readFile(source + '.map'));\n}\nconst child = Bun.spawn(['sh', resolve(root, 'tests/cli-test.sh')], {\n  cwd: root, env: {...process.env, ELISCRIPT_BOOTSTRAP_MODULE_DIR: directory}, stdout: 'pipe', stderr: 'pipe',\n});\nconst [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);\nif (code !== 0) throw new Error(stderr.trim() || stdout.trim() || 'original shell CLI failed: ' + code);\nprocess.stdout.write(stdout);\n`;\n    }\n    const setupReplacement = {kind: generations ? 'selected-compiler-generations' : 'selected-compiler-module-directory',\n      sourceSha256: identity.sha256, modules: modules.map(module => module.id), changes,\n      independentOracle: 'original-emacs-seed', algorithms: 'selected-target-only'};\n    add({id: 'original-program:compiler-cli-' + (generations ? 'bootstrap-generations' : 'shell'),\n      kind: 'project', coverage: coverage.map(locator => locator.id), modules: structuredClone(modules),\n      entry: 'bootstrap/compiler/compiler.mjs',\n      request: {operation: 'project', resolveImports: true, phased: true, sourceMap: true, entries: modules.map(module => module.id)},\n      execution: {kind: 'original-program', host: 'tests/__eliscript_original_compiler_cli_' + (generations ? 'generations' : 'shell') + '.mjs',\n        hostSource, arguments: [{directory: true}], aliases: true, requiresBun: true, compilerSourceMaps: true,\n        runtimeLaunchers: true, childProcesses: 'inherit-selected-artifact', runtimeProfile:'compiler', setupReplacement,\n        ...(generations ? {compilerGenerations: generations} : {})},\n      expected: {kind: 'seed-program', oracleRequired: true,\n        stdout: generations ? '' : 'CLI and Bun execution test passed\\n'},\n      original: {manifest: 'stable-compatibility', suite, fixture: suite, host: suite, sourceSha256: identity.sha256,\n        regions: [{start: 0, end: original.length, byteStart: 0, byteEnd: Buffer.byteLength(original), sha256: sha256(original)}],\n        setupReplacement},\n    });\n    mapped.push(suite);\n  }\n  return mapped;\n}\n\n// The worker remains the original Bun process and protocol implementation.\n// Only its compiler setup consumes the selected complete compiler session.\nexport async function addOriginalWorkerProgram({add, locators, text, file, sourceRoot}) {\n  const suite = 'tests/worker-runtime.test.mjs';\n  const title = 'long-lived worker implements the versioned NDJSON protocol and maps failures through project source maps';\n  const candidates = locators.filter(locator => locator.file === suite);\n  if (!candidates.length) return [];\n  const source = await text(suite), identity = await file(suite);\n  const cases = originalSourceCaseLocators(suite, source);\n  const selected = cases.find(locator => locator.contains === title)?.originalCase;\n  if (!selected || selected.timeoutMs !== 20000 || selected.registration !== 'test') {\n    throw new TypeError('original worker source mapping registration changed');\n  }\n  const coverage = candidates.filter(locator => {\n    if (typeof locator.contains !== 'string' || !locator.contains.length) return false;\n    const matches = cases.filter(item => source.slice(item.originalCase.span.start, item.originalCase.span.end).includes(locator.contains));\n    return matches.length === 1 && matches[0].originalCase === selected;\n  });\n  if (!coverage.length) return [];\n  const setupStart = source.indexOf('const projectDirectory =');\n  if (setupStart < 0) throw new TypeError('original worker dependency boundary changed');\n  const header = source.slice(0, setupStart);\n  const expectedImports = ['bun:test', 'node:crypto', 'node:fs/promises', 'node:os', 'node:path',\n    '../runtime/core/identifier.mjs', '../runtime/core/list.mjs', '../runtime/core/map.mjs',\n    '../runtime/core/vector.mjs', '../runtime/core/value.mjs', '../runtime/worker-value-codec.mjs',\n    '../runtime/worker-value-stream.mjs'];\n  const importPattern = /^import\\s+[\\s\\S]*?\\sfrom\\s+([\"'])([^\"']+)\\1;/gm;\n  const imports = [...header.matchAll(importPattern)];\n  if (imports.length !== expectedImports.length || imports.some((match, index) => match[2] !== expectedImports[index]) ||\n      header.replace(importPattern, '').trim()) throw new TypeError('original worker dependencies changed');\n  let transportedHeader = header;\n  const changes = [];\n  transportedHeader = replaceOriginal(transportedHeader, 'import { expect, test } from \"bun:test\";',\n    'import { expect } from \"bun:test\";', changes);\n  for (const specifier of expectedImports.filter(name => name.startsWith('.'))) {\n    transportedHeader = replaceOriginal(transportedHeader, JSON.stringify(specifier),\n      JSON.stringify(pathToFileURL(resolve(sourceRoot, 'tests', specifier)).href), changes);\n    await file(resolve(sourceRoot, 'tests', specifier).slice(resolve(sourceRoot).length + 1));\n  }\n  const firstCase = Math.min(...cases.map(locator => locator.originalCase.span.start));\n  let helpers = source.slice(setupStart, firstCase);\n  helpers = replaceOriginal(helpers, 'const projectDirectory = resolve(import.meta.dir, \"..\");',\n    'const projectDirectory = configuration.sourceRoot;', changes);\n  let body = source.slice(selected.span.start, selected.span.end);\n  const originalCompile = '    await runSuccessful(\\n' +\n    '      [compilerPath, \"--source-map\", \"--output\", modulePath, fixturePath],\\n' +\n    '      { env: { ...process.env, EMACS: emacs } },\\n' +\n    '    );';\n  body = replaceOriginal(body, originalCompile,\n    '    const compiler = await openSelected();\\n' +\n    '    try {\\n' +\n    '      await compileSelectedWorker({input: fixturePath, output: modulePath, sourceMap: true, compiler: {\\n' +\n    '        build_operation_request(input) { return compiler.request({operation: \"protocol\", name: \"build-operation-request\", input}); },\\n' +\n    '        compile_string_with_source_map(source, filename, generatedFile, sourceName) {\\n' +\n    '          return compiler.request({operation: \"compile\", source, filename, sourceMap: {generatedFile, sourceName}});\\n' +\n    '        },\\n' +\n    '      }});\\n' +\n    '    } finally { compiler.close(); }', changes);\n  const sources = await loadCompilerSources({sourceRoot});\n  for (const record of [...sources.modules, sources.runtime, ...(sources.literalSources ?? [])]) await file(record.filename);\n  const completeSourceIdentity = compilerSourceIdentity(sources);\n  const fixture = 'tests/fixtures/worker.eli', fixtureIdentity = await file(fixture);\n  await file('bootstrap/host/bun.mjs');\n  await file('runtime/worker.mjs');\n  const moduleURL = name => JSON.stringify(pathToFileURL(resolve(sourceRoot, name)).href);\n  const hostSource = transportedHeader + `\nimport {readFile} from 'node:fs/promises';\nimport assert from 'node:assert/strict';\nimport {pathToFileURL} from 'node:url';\nimport {createCompilerSession} from ${moduleURL('tools/backends/compiler-session.mjs')};\nimport {readCompilerMetadata} from ${moduleURL('tools/backends/compiler-metadata.mjs')};\nimport {loadCompilerSources} from ${moduleURL('tools/backends/compiler-build.mjs')};\nimport {compilerSourceIdentity} from ${moduleURL('tools/backends/compiler-bootstrap.mjs')};\nimport {compileFile as compileSelectedWorker} from ${moduleURL('bootstrap/host/bun.mjs')};\nconst configuration=await readCompilerMetadata(process.env.ELISCRIPT_ORIGINAL_COMPILER_SESSION);\nprocess.chdir(configuration.sourceRoot);\nassert.deepEqual(compilerSourceIdentity(await loadCompilerSources({sourceRoot:configuration.sourceRoot})),${JSON.stringify(completeSourceIdentity)});\nassert.equal(createHash('sha256').update(await readFile(resolve(configuration.sourceRoot,${JSON.stringify(fixture)}))).digest('hex'),${JSON.stringify(fixtureIdentity.sha256)});\nconst selectedDriver=configuration.target==='javascript'?await import(pathToFileURL(configuration.path).href):undefined;\nconst selectedBytes=configuration.target==='wasm'?new Uint8Array(await readFile(configuration.path)):undefined;\nasync function openSelected(){\n const session=await createCompilerSession({host:configuration.target,compiler:selectedDriver,\n  ...(configuration.target==='wasm'?{bytes:selectedBytes}:{}),\n  ...(configuration.target==='native'?{path:configuration.path,descriptor:{typed:configuration.typed,descriptor:configuration.descriptor}}:{}),\n  memory:configuration.memory,options:configuration.runtimeOptions});\n assert.equal(session.host,configuration.target);return session;\n}\nconst cases=[];\nfunction test(name,run,timeout){\n if(name!==${JSON.stringify(title)}||timeout!==20000)throw new TypeError('original worker case changed its deadline');\n cases.push({name,run,timeout});\n}\n` + helpers + '\\n' + body + `\nassert.equal(cases.length,1);\nfor(const record of cases){\n let timer;const start=performance.now();\n try{await Promise.race([Promise.resolve().then(record.run),new Promise((_,reject)=>{\n  timer=setTimeout(()=>reject(new Error(record.name+' exceeded its original '+record.timeout+' ms timeout')),record.timeout);\n })]);assert(performance.now()-start<=record.timeout,'original worker case exceeded its deadline');}\n finally{clearTimeout(timer);}\n}\nconsole.log(JSON.stringify(cases.map(record=>record.name)));\n`;\n  const region = {start: selected.span.start, end: selected.span.end, byteStart: selected.byteStart,\n    byteEnd: selected.byteEnd, sha256: selected.sha256};\n  const id = 'original-tools-artifact:worker-source-mapping:bun';\n  add({id, kind: 'project', coverage: coverage.map(locator => locator.id), entry: sources.entry,\n    modules: structuredClone(sources.modules), memory: {initialPages: 128, maximumPages: 4096},\n    request: {operation: 'project', resolveImports: true, phased: false, sourceMap: true},\n    execution: {kind: 'compiler-session-program', host: 'tests/__eliscript_original_worker_source_mapping.mjs',\n      hostRuntime: 'bun', hostSource, runtimeProfile: 'compiler', compilerProfile: 'small',\n      runtimeOptions: {maxSlots: 131072, initialBytes: 8388608, maxBytes: 67108864, auto: 65536}, timeoutMs: 20000,\n      setupReplacement: {kind: 'selected-complete-compiler-worker', producer: 'selected-session', changes,\n        sourceIdentity: completeSourceIdentity, originalCaseTimeoutMs: selected.timeoutMs}},\n    expected: {kind: 'seed-program', oracleRequired: true},\n    original: {suite, host: suite, sourceSha256: identity.sha256, regions: [region],\n      completeLocatorCoverage: true,\n      cases: coverage.map(locator => ({id: locator.id, ...structuredClone(selected)})),\n      helperRegion: {start: setupStart, end: firstCase, sha256: sha256(source.slice(setupStart, firstCase))},\n      dependencies: {imports: expectedImports, headerSha256: sha256(header),\n        fixture: {file: fixture, sha256: fixtureIdentity.sha256}},\n      originalAssertions: [title], completeSourceIdentity,\n      setupReplacement: {kind: 'selected-complete-compiler-worker', changes}, coverageScope: 'complete-source-mapping-worker-case-only'},\n  });\n  return [{suite, coverage: coverage.map(locator => locator.id), regions: [region], recordIds: [id]}];\n}\n"))
+(module tools.backends.compiler-corpus-cli-adapters-ground
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "./compiler-build.mjs" loadCompilerSources)
+  (import "./compiler-bootstrap.mjs" compilerSourceIdentity)
+  (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
+  (import "../../dist/bootstrap/reader.mjs" read-string)
+  (import "../../dist/bootstrap/compiler.mjs" compile-ir-string emit-ir-string)
+
+  (defun eli-data (value)
+    (str "(JSON/parse " (JSON/stringify (JSON/stringify value)) ")"))
+
+  (defun sha256 (source)
+    (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
+
+  (defun replace-original (source before after changes)
+    (let ((start (js-call source :indexOf before)))
+      (when (or (< start 0) (>= (js-call source :indexOf before (+ start (js-length before))) 0))
+        (throw (new globalThis.TypeError "original compiler CLI setup boundary changed")))
+      (js-call changes :push
+        (js-object
+          :role "selected-compiler-transport"
+          :beforeSha256 (sha256 before)
+          :afterSha256 (sha256 after)))
+      (str (js-call source :slice 0 start)
+           after
+           (js-call source :slice (+ start (js-length before))))))
+
+  (defun region (source before after)
+    (let* ((start (js-call source :indexOf before))
+           (end (if (< start 0) -1 (js-call source :indexOf after (+ start (js-length before))))))
+      (when (or (< start 0) (< end 0))
+        (throw (new globalThis.TypeError "original CLI helper boundary changed")))
+      (js-call source :slice start end)))
+
+  (defasync cli-source-asset (options filename)
+    (let* ((source (await (js-call options :text filename)))
+           (identity (await (js-call options :file filename))))
+      (unless (and (= (value-type source) "string") (= (get identity :file) filename)
+                   (= (sha256 source) (get identity :sha256))
+                   (= (js-call Buffer :byteLength source) (get identity :bytes)))
+        (throw (new globalThis.TypeError "original CLI maintained source asset identity differs")))
+      (js-object :source source :identity identity
+        :proof (js-object :file filename :sourceSha256 (get identity :sha256)))))
+
+  (defasync compile-cli-replay (options names changes generations)
+    (let* ((source-root (get options :sourceRoot))
+           (source-file "tests/bootstrap-compiler-test-ground.eli")
+           (transport-source "tools/backends/eliscript/compiler-corpus-cli-transport.eli")
+           (transport-file "tools/backends/compiler-corpus-cli-transport.mjs")
+           (transport-eli (await (cli-source-asset options transport-source)))
+           (transport-js (await (cli-source-asset options transport-file)))
+           (assets (js-array (get transport-eli :proof) (get transport-js :proof)))
+           (transport-url (JSON/stringify (get (pathToFileURL (resolve source-root transport-file)) :href)))
+           (filename (if generations "original-compiler-cli-generations.eli" "original-compiler-cli-shell.eli"))
+           (maintained undefined)
+           (eli-source undefined))
+      (let ((paths (js-array "tools/backends/compiler-host-record.eli" "tools/backends/compiler-host-record.mjs"
+                     "tools/backends/compiler-host-iteration.eli" "tools/backends/compiler-host-iteration.mjs")) (index 0))
+        (while (< index (js-length paths))
+          (js-call assets :push (get (await (cli-source-asset options (aref paths index))) :proof))
+          (setq index (1+ index))))
+      (if generations
+        (let* ((asset (await (cli-source-asset options source-file)))
+               (source (get asset :source)) (forms (read-string source source-file))
+               (module (if (= (js-length forms) 1) (aref forms 0) nil))
+               (members (if (ast-head-p module "module") (js-call (get module :items) :slice 2) (js-array)))
+               (expected-imports (js-array
+                 "(import \"bun:test\" expect test)"
+                 "(import \"node:process\" :default process)"
+                 "(import \"node:fs/promises\" mkdtemp rm writeFile)"
+                 "(import \"node:os\" tmpdir)"
+                 "(import \"node:path\" resolve)"
+                 "(import \"../bootstrap/host/bun.mjs\" compileFile loadCompiler parseArguments)"))
+               (imports (js-call members :filter (lambda (node) (ast-head-p node "import"))))
+               (title "portable compiler driver reaches a reproducible fixed point")
+               (cases (js-call members :filter (lambda (node) (ast-head-p node "test"))))
+               (body (js-array)) (index 0))
+          (unless (and (= (js-length imports) (js-length expected-imports)) (= (js-length cases) 1))
+            (throw (new globalThis.TypeError "original compiler CLI maintained dependencies changed")))
+          (while (< index (js-length imports))
+            (unless (= (get (ast-source-region source (aref imports index)) :text) (aref expected-imports index))
+              (throw (new globalThis.TypeError "original compiler CLI maintained dependencies changed")))
+            (setq index (1+ index)))
+          (let ((items (get (aref cases 0) :items)))
+            (unless (and (= (js-length items) 4) (= (get (aref items 1) :value) title)
+                         (= (get (aref items 3) :value) 30000))
+              (throw (new globalThis.TypeError "original compiler CLI maintained case or deadline changed"))))
+          (setq index 0)
+          (while (< index (js-length members))
+            (let* ((node (aref members index)) (text (get (ast-source-region source node) :text)))
+              (js-call body :push
+                (cond
+                  ((= text (aref expected-imports 0)) "(import \"bun:test\" expect)")
+                  ((= text (aref expected-imports 5))
+                    (replace-original text "\"../bootstrap/host/bun.mjs\""
+                      (JSON/stringify (get (pathToFileURL (resolve source-root "bootstrap/host/bun.mjs")) :href)) changes))
+                  ((and (ast-head-p node "defconst") (ast-symbol-p (aref (get node :items) 1) "projectDirectory"))
+                    (replace-original text "(resolve (js* \"import.meta.dir\") \"..\")"
+                      "(get (get process :env) :ELISCRIPT_ORIGINAL_SOURCE_ROOT)" changes))
+                  ((and (ast-head-p node "defasync") (ast-symbol-p (aref (get node :items) 1) "run"))
+                    (replace-original text "(defasync run (command &rest __host_forwarded_arguments_4)"
+                      "(defasync runOriginalCLICommand (command &rest __host_forwarded_arguments_4)" changes))
+                  ((and (ast-head-p node "defasync") (ast-symbol-p (aref (get node :items) 1) "buildWithPortableCompiler"))
+                    (replace-original text text
+                      "(defasync buildWithPortableCompiler (compilerDirectory outputDirectory) (await (js-call __cli_transport :build compilerDirectory outputDirectory)))" changes))
+                  ((and (ast-head-p node "defasync") (ast-symbol-p (aref (get node :items) 1) "expectArtifactDirectoriesEqual"))
+                    (replace-original text "(defasync expectArtifactDirectoriesEqual (left right)"
+                      "(defasync compareOriginalCLIArtifacts (left right)" changes))
+                  (t text))))
+            (setq index (1+ index)))
+          (setq eli-source (str "(module original.compiler-cli-generations\n"
+            "(import " transport-url " openOriginalCLITransport runOriginalCLICases)\n"
+            "(defvar __cli_transport undefined)\n(defconst __cli_cases (js-array))\n"
+            "(defun test (name body timeout)\n"
+            "  (unless (and (Number/isSafeInteger timeout) (> timeout 0)) (throw (new globalThis.TypeError \"original CLI case lost its timeout\")))\n"
+            "  (js-call __cli_cases :push (js-object :name name :body body :timeout timeout)))\n"
+            (js-call body :join "\n") "\n"
+            "(defasync run (command &rest supplied)\n"
+            "  (let* ((options (aref supplied 0)) (replacement (await (js-call __cli_transport :prepare command options))))\n"
+            "    (if (nullish? replacement) (await (runOriginalCLICommand command options)) replacement)))\n"
+            "(defasync expectArtifactDirectoriesEqual (left right)\n"
+            "  (await (compareOriginalCLIArtifacts (js-call __cli_transport :comparisonDirectory left) (js-call __cli_transport :comparisonDirectory right))))\n"
+            "(defasync run-original-cli ()\n"
+            "  (unless (funcall (js* \"(value) => !!value\") projectDirectory) (throw (new globalThis.Error \"original compiler CLI requires its source root\")))\n"
+            "  (setq __cli_transport (await (openOriginalCLITransport moduleNames (js-object :build buildPath :public publicCliPath :portable portableCliPath))))\n"
+            "  (await (runOriginalCLICases __cli_transport __cli_cases)))\n"
+            "(js-call (run-original-cli) :catch (lambda (error) (js-call globalThis.console :error error) (js-call process :exit 1)))\n)\n"))
+          (js-call assets :push (get asset :proof))
+          (setq maintained (js-object :sourceFile source-file :sourceSha256 (get (get asset :identity) :sha256)
+            :regions (js-array (ast-region-meta (ast-source-region source (aref cases 0)))))))
+        (setq eli-source (str "(module original.compiler-cli-shell\n"
+          "(import \"node:process\" :default process)\n"
+          "(import " transport-url " runOriginalShellCLI)\n"
+          "(js-call (runOriginalShellCLI " (eli-data names) ") :catch\n"
+          "  (lambda (error) (js-call globalThis.console :error error) (js-call process :exit 1)))\n)\n")))
+      (let ((host (rewrite-runtime-imports (emit-ir-string (compile-ir-string eli-source filename)) source-root)))
+        (js-object :hostSource host :sourceAssets assets
+          :maintainedSource (Object/assign (js-object) maintained
+            (js-object :compilation (js-object :filename filename :source eli-source
+              :sourceSha256 (sha256 eli-source) :hostSha256 (sha256 host))))))))
+
+  ;; Define executable recipes only. Loading this module neither constructs a
+  ;; compiler generation nor invokes an original CLI or independent oracle.
+  (defasync addOriginalCLIPrograms (options)
+    (let ((add (get options :add))
+          (locators (get options :locators))
+          (text (get options :text))
+          (file (get options :file))
+          (bootstrap-sources (get options :bootstrapSources))
+          (source-root (get options :sourceRoot)))
+      (when (or (/= (value-type add) "function")
+                (not (Array/isArray locators))
+                (/= (value-type text) "function")
+                (/= (value-type file) "function")
+                (not (Array/isArray bootstrap-sources))
+                (/= (value-type source-root) "string"))
+        (throw (new globalThis.TypeError "original CLI adapter requires source services and its complete compiler manifest")))
+      (let ((modules (js-array))
+            (names (js-array))
+            (seen (new globalThis.Set))
+            (mod-re (new globalThis.RegExp "^bootstrap/compiler/[a-z][a-z0-9-]*\\.eli$"))
+            (i 0))
+        (while (< i (js-length bootstrap-sources))
+          (let ((filename (aref bootstrap-sources i)))
+            (when (or (/= (value-type filename) "string")
+                      (not (js-call mod-re :test filename))
+                      (js-call seen :has filename))
+              (throw (new globalThis.TypeError "original CLI compiler manifest contains an invalid or duplicate source")))
+            (js-call seen :add filename)
+            (js-call names :push (js-call filename :slice (js-length "bootstrap/compiler/") -4))
+            (js-call modules :push
+              (js-object
+                :id (str (js-call filename :slice 0 -4) ".mjs")
+                :filename filename
+                :source (await (funcall text filename)))))
+          (setq i (1+ i)))
+        (unless (and (= (js-length modules) 13)
+                     (js-call seen :has "bootstrap/compiler/compiler.eli"))
+          (throw (new globalThis.TypeError "original CLI requires the complete thirteen-module compiler graph")))
+        (let ((mapped (js-array))
+              (suites (js-array "tests/bootstrap-compiler.test.mjs" "tests/cli-test.sh"))
+              (s-idx 0))
+          (while (< s-idx (js-length suites))
+            (let* ((suite (aref suites s-idx))
+                   (coverage (js-call locators :filter (lambda (locator) (= (get locator :file) suite)))))
+              (when (> (js-length coverage) 0)
+                (let* ((original (await (funcall text suite)))
+                       (identity (await (funcall file suite)))
+                       (changes (js-array))
+                       (c-idx 0))
+                  (while (< c-idx (js-length coverage))
+                    (let ((locator (aref coverage c-idx)))
+                      (when (or (/= (value-type (get locator :contains)) "string")
+                                (not (js-call original :includes (get locator :contains))))
+                        (throw (new globalThis.TypeError "original compiler CLI coverage locator is not present in its source"))))
+                    (setq c-idx (1+ c-idx)))
+                  (let ((host-source undefined)
+                        (generations undefined))
+                    (let* ((is-generation (js-call suite :endsWith ".test.mjs"))
+                           (replay (await (compile-cli-replay options names changes is-generation))))
+                      (setq host-source (get replay :hostSource))
+                      (when is-generation
+                        (setq generations
+                          (js-object :count 3 :producer "previous-generation" :target "selected-target"
+                            :completeCompiler t :sourceMaps t
+                            :manifestEnvironment "ELISCRIPT_ORIGINAL_COMPILER_GENERATIONS"
+                            :manifestFormat "eliscript-original-compiler-generations" :manifestVersion 1
+                            :javascriptCompanions "selected-generation-producer"
+                            :fixedPoint "complete-target-artifacts-and-original-javascript-files")))
+                    (let* ((setup-replacement
+                             (js-object
+                               :kind (if generations "selected-compiler-generations" "selected-compiler-module-directory")
+                               :sourceSha256 (get identity :sha256)
+                               :modules (js-call modules :map (lambda (m) (get m :id)))
+                               :changes changes
+                               :independentOracle "original-emacs-seed"
+                               :algorithms "selected-target-only"))
+                           (exec-obj
+                             (js-object
+                               :kind "original-program"
+                               :host (str "tests/__eliscript_original_compiler_cli_" (if generations "generations" "shell") ".mjs")
+                               :hostSource host-source
+                               :arguments (js-array (js-object :directory t))
+                               :aliases t
+                               :requiresBun t
+                               :compilerSourceMaps t
+                               :runtimeLaunchers t
+                               :childProcesses "inherit-selected-artifact"
+                               :runtimeProfile "compiler"
+                               :setupReplacement setup-replacement)))
+                      (when generations
+                        (put exec-obj :compilerGenerations generations))
+                      (funcall add
+                        (js-object
+                          :id (str "original-program:compiler-cli-" (if generations "bootstrap-generations" "shell"))
+                          :kind "project"
+                          :coverage (js-call coverage :map (lambda (l) (get l :id)))
+                          :modules (globalThis.structuredClone modules)
+                          :entry "bootstrap/compiler/compiler.mjs"
+                          :request (js-object
+                                     :operation "project"
+                                     :resolveImports t
+                                     :phased t
+                                     :sourceMap t
+                                     :entries (js-call modules :map (lambda (m) (get m :id))))
+                          :execution exec-obj
+                          :expected (js-object
+                                      :kind "seed-program"
+                                      :oracleRequired t
+                                      :stdout (if generations "" "CLI and Bun execution test passed\n"))
+                          :original
+                            (js-object
+                              :maintainedSource (get replay :maintainedSource)
+                              :sourceAssets (get replay :sourceAssets)
+                              :manifest "stable-compatibility"
+                              :suite suite
+                              :fixture suite
+                              :host suite
+                              :sourceSha256 (get identity :sha256)
+                              :regions (js-array
+                                         (js-object
+                                           :start 0
+                                           :end (js-length original)
+                                           :byteStart 0
+                                           :byteEnd (js-call Buffer :byteLength original)
+                                           :sha256 (sha256 original)))
+                              :setupReplacement setup-replacement)))
+                      (js-call mapped :push suite)))))))
+            (setq s-idx (1+ s-idx)))
+          mapped))))
+
+  (defun ast-head-p (node name)
+    (and node (= (get node :kind) "list") (Array/isArray (get node :items))
+         (> (js-length (get node :items)) 0)
+         (= (get (aref (get node :items) 0) :kind) "symbol")
+         (= (get (aref (get node :items) 0) :name) name)))
+
+  (defun ast-symbol-p (node name)
+    (and node (= (get node :kind) "symbol") (= (get node :name) name)))
+
+  (defun ast-unit-offset (source point)
+    (let ((unit 0) (offset 0))
+      (while (< offset point)
+        (when (>= unit (js-length source))
+          (throw (new globalThis.TypeError "original worker AST span exceeds its actual source")))
+        (setq unit (+ unit (if (> (js-call source :codePointAt unit) 65535) 2 1)))
+        (setq offset (1+ offset)))
+      unit))
+
+  (defun ast-source-region (source node)
+    (let* ((span (get node :span))
+           (start (ast-unit-offset source (get span :start)))
+           (end (ast-unit-offset source (get span :end)))
+           (text (js-call source :slice start end)))
+      (js-object :text text :start start :end end
+        :byteStart (js-call Buffer :byteLength (js-call source :slice 0 start))
+        :byteEnd (js-call Buffer :byteLength (js-call source :slice 0 end))
+        :sha256 (sha256 text))))
+
+  (defun ast-span-region (source start end)
+    (let ((text (js-call source :slice start end)))
+      (js-object :text text :start start :end end
+        :byteStart (js-call Buffer :byteLength (js-call source :slice 0 start))
+        :byteEnd (js-call Buffer :byteLength (js-call source :slice 0 end))
+        :sha256 (sha256 text))))
+
+  (defun ast-region-meta (region-obj)
+    (js-object
+      :start (get region-obj :start)
+      :end (get region-obj :end)
+      :byteStart (get region-obj :byteStart)
+      :byteEnd (get region-obj :byteEnd)
+      :sha256 (get region-obj :sha256)))
+
+  (defun ast-walk (node predicate)
+    (let ((result (js-array)) (pending (js-array node)))
+      (while (> (js-length pending) 0)
+        (let ((current (js-call pending :pop)))
+          (when (funcall predicate current) (js-call result :push current))
+          (when (and current (Array/isArray (get current :items)))
+            (let* ((items (get current :items)) (index (1- (js-length items))))
+              (while (>= index 0)
+                (js-call pending :push (aref items index))
+                (setq index (1- index)))))))
+      result))
+
+  (defun rewrite-runtime-imports (javascript source-root)
+    (let ((names (js-array "array-text" "binding" "errors" "math" "number-radix" "prelude" "primitives" "unicode-case" "unicode-case-data"))
+          (result javascript)
+          (index 0))
+      (while (< index (js-length names))
+        (let* ((name (aref names index))
+               (specifier (JSON/stringify (str "eliscript/runtime/" name ".mjs")))
+               (url (JSON/stringify (get (pathToFileURL (resolve source-root (str "runtime/" name ".mjs"))) :href))))
+          (setq result (js-call result :replaceAll specifier url)))
+        (setq index (1+ index)))
+      result))
+
+  ;; The worker remains the original Bun process and protocol implementation.
+  ;; Only its compiler setup consumes the selected complete compiler session.
+  (defasync addOriginalWorkerProgram (options)
+    (let* ((add (get options :add))
+           (locators (get options :locators))
+           (text (get options :text))
+           (file (get options :file))
+           (source-root (get options :sourceRoot))
+           (suite "tests/worker-runtime.test.mjs")
+           (eli-file "tests/worker-runtime.test.eli")
+           (title "long-lived worker implements the versioned NDJSON protocol and maps failures through project source maps")
+           (candidates (js-call locators :filter (lambda (locator) (= (get locator :file) suite)))))
+      (if (= (js-length candidates) 0)
+        (js-array)
+        (let* ((source (await (funcall text suite)))
+               (identity (await (funcall file suite)))
+               (eli-source (await (funcall text eli-file)))
+               (eli-identity (await (funcall file eli-file)))
+               (cases (originalSourceCaseLocators suite source))
+               (found-case (js-call cases :find (lambda (locator) (= (get locator :contains) title))))
+               (selected (if (nullish? found-case) undefined (get found-case :originalCase))))
+          (when (or (not selected)
+                    (/= (get selected :timeoutMs) 20000)
+                    (/= (get selected :registration) "test"))
+            (throw (new globalThis.TypeError "original worker source mapping registration changed")))
+          (let ((coverage
+                  (js-call candidates :filter
+                    (lambda (locator)
+                      (if (or (/= (value-type (get locator :contains)) "string")
+                              (= (js-length (get locator :contains)) 0))
+                        false
+                        (let ((matches
+                                (js-call cases :filter
+                                  (lambda (item)
+                                    (js-call
+                                      (js-call source :slice
+                                        (get (get (get item :originalCase) :span) :start)
+                                        (get (get (get item :originalCase) :span) :end))
+                                      :includes (get locator :contains))))))
+                          (and (= (js-length matches) 1)
+                               (eq (get (aref matches 0) :originalCase) selected))))))))
+            (if (= (js-length coverage) 0)
+              (js-array)
+              (let* ((forms (read-string eli-source eli-file))
+                     (modules (js-call forms :filter (lambda (node) (ast-head-p node "module")))))
+                (unless (and (= (js-length forms) 1) (= (js-length modules) 1))
+                  (throw (new globalThis.TypeError "original worker dependency boundary changed")))
+                (let* ((members (get (aref modules 0) :items))
+                       (setup-idx
+                         (js-call members :findIndex
+                           (lambda (node idx)
+                             (and (> idx 0)
+                                  (ast-head-p node "defconst")
+                                  (>= (js-length (get node :items)) 3)
+                                  (ast-symbol-p (aref (get node :items) 1) "projectDirectory")))))
+                       (first-test-idx
+                         (js-call members :findIndex
+                           (lambda (node idx) (and (> idx 0) (ast-head-p node "test"))))))
+                  (when (or (< setup-idx 3) (< first-test-idx (1+ setup-idx)))
+                    (throw (new globalThis.TypeError "original worker dependency boundary changed")))
+                  (let* ((expected-imports
+                           (js-array
+                             "bun:test"
+                             "node:crypto"
+                             "node:fs/promises"
+                             "node:os"
+                             "node:path"
+                             "node:url"
+                             "../runtime/core/identifier.mjs"
+                             "../runtime/core/list.mjs"
+                             "../runtime/core/map.mjs"
+                             "../runtime/core/vector.mjs"
+                             "../runtime/core/value.mjs"
+                             "../runtime/worker-value-codec.mjs"
+                             "../runtime/worker-value-stream.mjs"))
+                         (import-nodes (js-call members :slice 2 setup-idx)))
+                    (when (or (/= (js-length import-nodes) (js-length expected-imports))
+                              (js-call import-nodes :some
+                                (lambda (node idx)
+                                  (or (not (ast-head-p node "import"))
+                                      (< (js-length (get node :items)) 2)
+                                      (/= (get (aref (get node :items) 1) :kind) "literal")
+                                      (/= (get (aref (get node :items) 1) :value) (aref expected-imports idx))))))
+                      (throw (new globalThis.TypeError "original worker dependencies changed")))
+                    (let ((bun-import-text (get (ast-source-region eli-source (aref import-nodes 0)) :text)))
+                      (unless (= bun-import-text "(import \"bun:test\" expect test)")
+                        (throw (new globalThis.TypeError "original worker dependencies changed"))))
+                    (let* ((matching-tests
+                             (js-call members :filter
+                               (lambda (node idx)
+                                 (and (>= idx first-test-idx)
+                                      (ast-head-p node "test")
+                                      (>= (js-length (get node :items)) 2)
+                                      (= (get (aref (get node :items) 1) :kind) "literal")
+                                      (= (get (aref (get node :items) 1) :value) title)))))
+                           (eli-case-node (if (= (js-length matching-tests) 1) (aref matching-tests 0) nil)))
+                      (unless (and eli-case-node
+                                   (= (js-length (get eli-case-node :items)) 4)
+                                   (= (get (aref (get eli-case-node :items) 3) :kind) "literal")
+                                   (= (get (aref (get eli-case-node :items) 3) :value) 20000))
+                        (throw (new globalThis.TypeError "original worker source mapping registration changed")))
+                      (let* ((cli-calls
+                               (ast-walk eli-case-node
+                                 (lambda (node)
+                                   (and (ast-head-p node "await")
+                                        (= (js-length (get node :items)) 2)
+                                        (ast-head-p (aref (get node :items) 1) "runSuccessful")))))
+                             (cli-node (if (= (js-length cli-calls) 1) (aref cli-calls 0) nil)))
+                        (unless cli-node
+                          (throw (new globalThis.TypeError "original compiler CLI setup boundary changed")))
+                        (let* ((call-items (get (aref (get cli-node :items) 1) :items))
+                               (cmd-node (if (= (js-length call-items) 3) (aref call-items 1) nil))
+                               (opts-node (if (= (js-length call-items) 3) (aref call-items 2) nil)))
+                          (unless (and cmd-node
+                                       (ast-head-p cmd-node "js-array")
+                                       (= (js-length (get cmd-node :items)) 6)
+                                       (ast-symbol-p (aref (get cmd-node :items) 1) "compilerPath")
+                                       (= (get (aref (get cmd-node :items) 2) :value) "--source-map")
+                                       (= (get (aref (get cmd-node :items) 3) :value) "--output")
+                                       (ast-symbol-p (aref (get cmd-node :items) 4) "modulePath")
+                                       (ast-symbol-p (aref (get cmd-node :items) 5) "fixturePath")
+                                       opts-node
+                                       (ast-head-p opts-node "js-object"))
+                            (throw (new globalThis.TypeError "original compiler CLI setup boundary changed"))))
+                        (let* ((header-region
+                                 (ast-span-region eli-source
+                                   (get (ast-source-region eli-source (aref import-nodes 0)) :start)
+                                   (get (ast-source-region eli-source (aref import-nodes (1- (js-length import-nodes)))) :end)))
+                               (helper-region
+                                 (ast-span-region eli-source
+                                   (get (ast-source-region eli-source (aref members setup-idx)) :start)
+                                   (get (ast-source-region eli-source (aref members (1- first-test-idx))) :end)))
+                               (eli-case-region (ast-source-region eli-source eli-case-node))
+                               (project-dir-region (ast-source-region eli-source (aref members setup-idx)))
+                               (cli-call-region (ast-source-region eli-source cli-node))
+                               (changes (js-array))
+                               (transported-header
+                                 (replace-original (get header-region :text)
+                                   "(import \"bun:test\" expect test)"
+                                   "(import \"bun:test\" expect)"
+                                   changes))
+                               (rel-imports (js-call expected-imports :filter (lambda (name) (js-call name :startsWith "."))))
+                               (r-idx 0))
+                          (while (< r-idx (js-length rel-imports))
+                            (let ((specifier (aref rel-imports r-idx)))
+                              (setq transported-header
+                                (replace-original transported-header
+                                  (JSON/stringify specifier)
+                                  (JSON/stringify (get (pathToFileURL (resolve source-root "tests" specifier)) :href))
+                                  changes))
+                              (await (funcall file
+                                       (js-call (resolve source-root "tests" specifier)
+                                         :slice (1+ (js-length (resolve source-root)))))))
+                            (setq r-idx (1+ r-idx)))
+                          (let* ((helpers
+                                   (replace-original (get helper-region :text)
+                                     (get project-dir-region :text)
+                                     "(defconst projectDirectory (get __worker_bootstrap_config :sourceRoot))"
+                                     changes))
+                                 (replacement-compile
+                                   (str "(let ((compiler (await (openSelected))))\n"
+                                        "            (try\n"
+                                        "              (await (compileSelectedWorker\n"
+                                        "                       (js-object :input fixturePath :output modulePath :sourceMap t\n"
+                                        "                         :compiler (js-object\n"
+                                        "                                     :build_operation_request\n"
+                                        "                                     (lambda (input)\n"
+                                        "                                       (js-call compiler :request\n"
+                                        "                                         (js-object :operation \"protocol\" :name \"build-operation-request\" :input input)))\n"
+                                        "                                     :compile_string_with_source_map\n"
+                                        "                                     (lambda (source filename generatedFile sourceName)\n"
+                                        "                                       (js-call compiler :request\n"
+                                        "                                         (js-object :operation \"compile\" :source source :filename filename\n"
+                                        "                                           :sourceMap (js-object :generatedFile generatedFile :sourceName sourceName))))))))\n"
+                                        "              (finally (js-call compiler :close))))"))
+                                 (body
+                                   (replace-original (get eli-case-region :text)
+                                     (get cli-call-region :text)
+                                     replacement-compile
+                                     changes))
+                                 (sources (await (loadCompilerSources (js-object :sourceRoot source-root))))
+                                 (all-records
+                                   (js-call (get sources :modules) :concat
+                                     (js-array (get sources :runtime))
+                                     (let ((lit (get sources :literalSources))) (if (nullish? lit) (js-array) lit))))
+                                 (rec-idx 0))
+                            (while (< rec-idx (js-length all-records))
+                              (await (funcall file (get (aref all-records rec-idx) :filename)))
+                              (setq rec-idx (1+ rec-idx)))
+                            (let* ((complete-source-identity (compilerSourceIdentity sources))
+                                   (fixture "tests/fixtures/worker.eli")
+                                   (fixture-identity (await (funcall file fixture)))
+                                   (_0 (await (funcall file "bootstrap/host/bun.mjs")))
+                                   (_1 (await (funcall file "runtime/worker.mjs")))
+                                   (_2 (await (funcall file "runtime/array-text.mjs")))
+                                   (_3 (await (funcall file "runtime/errors.mjs")))
+                                   (_4 (await (funcall file "runtime/math.mjs")))
+                                   (_5 (await (funcall file "runtime/number-radix.mjs")))
+                                   (_6 (await (funcall file "runtime/prelude.mjs")))
+                                   (_7 (await (funcall file "runtime/primitives.mjs")))
+                                   (_8 (await (funcall file "runtime/unicode-case.mjs")))
+                                   (_9 (await (funcall file "runtime/unicode-case-data.mjs")))
+                                   (module-url (lambda (name) (JSON/stringify (get (pathToFileURL (resolve source-root name)) :href))))
+                                   (eli-host-source
+                                     (str "(module original.worker-source-mapping-host\n"
+                                          transported-header "\n"
+                                          "(import \"node:fs\" :as __worker_fs)\n(defconst __worker_readFileSync (get __worker_fs :readFileSync))\n"
+                                          "(import \"node:fs/promises\" :as __worker_fs_promises)\n(defconst __worker_readFile (get __worker_fs_promises :readFile))\n"
+                                          "(import \"node:assert/strict\" :default __worker_assert)\n"
+                                          "(import \"node:url\" :as __worker_url)\n(defconst __worker_pathToFileURL (get __worker_url :pathToFileURL))\n"
+                                          "(import " (funcall module-url "tools/backends/compiler-session.mjs") " createCompilerSession)\n"
+                                          "(import " (funcall module-url "tools/backends/compiler-metadata.mjs") " readCompilerMetadata)\n"
+                                          "(import " (funcall module-url "tools/backends/compiler-build.mjs") " loadCompilerSources)\n"
+                                          "(import " (funcall module-url "tools/backends/compiler-bootstrap.mjs") " compilerSourceIdentity)\n"
+                                          "(import " (funcall module-url "bootstrap/host/bun.mjs") " :as __worker_seed)\n(defconst compileSelectedWorker (get __worker_seed :compileFile))\n"
+                                          "(defconst __worker_dynamic_import (js* \"(specifier) => import(specifier)\"))\n"
+                                          "(defconst __worker_bootstrap_config (JSON/parse (__worker_readFileSync (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_COMPILER_SESSION) \"utf8\")))\n"
+                                          "(defvar configuration undefined)\n"
+                                          "(defvar selectedDriver undefined)\n"
+                                          "(defvar selectedBytes undefined)\n"
+                                          "(defasync openSelected ()\n"
+                                          "  (let* ((base (js-object :host (get configuration :target) :compiler selectedDriver\n"
+                                          "                 :memory (get configuration :memory) :options (get configuration :runtimeOptions)))\n"
+                                          "         (opts (Object/assign base\n"
+                                          "                 (if (= (get configuration :target) \"wasm\") (js-object :bytes selectedBytes) (js-object))\n"
+                                          "                 (if (= (get configuration :target) \"native\")\n"
+                                          "                   (js-object :path (get configuration :path)\n"
+                                          "                     :descriptor (js-object :typed (get configuration :typed) :descriptor (get configuration :descriptor)))\n"
+                                          "                   (js-object))))\n"
+                                          "         (session (await (createCompilerSession opts))))\n"
+                                          "    (js-call __worker_assert :equal (get session :host) (get configuration :target))\n"
+                                          "    session))\n"
+                                          "(defconst cases (js-array))\n"
+                                          "(defun test (name run timeout)\n"
+                                          "  (when (or (/= name " (JSON/stringify title) ") (/= timeout 20000))\n"
+                                          "    (throw (new globalThis.TypeError \"original worker case changed its deadline\")))\n"
+                                          "  (js-call cases :push (js-object :name name :run run :timeout timeout)))\n"
+                                          helpers "\n"
+                                          body "\n"
+                                          "(defasync run-original-worker-host ()\n"
+                                          "  (setq configuration (await (readCompilerMetadata (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_COMPILER_SESSION))))\n"
+                                          "  (js-call __worker_assert :equal (get configuration :sourceRoot) projectDirectory)\n"
+                                          "  (js-call globalThis.process :chdir (get configuration :sourceRoot))\n"
+                                          "  (js-call __worker_assert :deepEqual\n"
+                                          "    (compilerSourceIdentity (await (loadCompilerSources (js-object :sourceRoot (get configuration :sourceRoot)))))\n"
+                                          "    " (eli-data complete-source-identity) ")\n"
+                                          "  (js-call __worker_assert :equal\n"
+                                          "    (js-call (js-call (createHash \"sha256\") :update (await (__worker_readFile (resolve (get configuration :sourceRoot) " (JSON/stringify fixture) ")))) :digest \"hex\")\n"
+                                          "    " (JSON/stringify (get fixture-identity :sha256)) ")\n"
+                                          "  (setq selectedDriver\n"
+                                          "    (if (= (get configuration :target) \"javascript\")\n"
+                                          "      (await (funcall __worker_dynamic_import (get (__worker_pathToFileURL (get configuration :path)) :href)))\n"
+                                          "      undefined))\n"
+                                          "  (setq selectedBytes\n"
+                                          "    (if (= (get configuration :target) \"wasm\")\n"
+                                          "      (new globalThis.Uint8Array (await (__worker_readFile (get configuration :path))))\n"
+                                          "      undefined))\n"
+                                          "  (js-call __worker_assert :equal (js-length cases) 1)\n"
+                                          "  (let ((idx 0))\n"
+                                          "    (while (< idx (js-length cases))\n"
+                                          "      (let* ((record (aref cases idx))\n"
+                                          "             (timer undefined)\n"
+                                          "             (start (js-call globalThis.performance :now)))\n"
+                                          "        (try\n"
+                                          "          (await (Promise/race\n"
+                                          "                   (js-array\n"
+                                          "                     (js-call (Promise/resolve) :then (get record :run))\n"
+                                          "                     (new globalThis.Promise\n"
+                                          "                       (lambda (_ reject)\n"
+                                          "                         (setq timer (globalThis.setTimeout\n"
+                                          "                                       (lambda ()\n"
+                                          "                                         (funcall reject (new globalThis.Error (str (get record :name) \" exceeded its original \" (get record :timeout) \" ms timeout\"))))\n"
+                                          "                                       (get record :timeout))))))))\n"
+                                          "          (funcall __worker_assert (<= (- (js-call globalThis.performance :now) start) (get record :timeout))\n"
+                                          "            \"original worker case exceeded its deadline\")\n"
+                                          "          (finally (globalThis.clearTimeout timer))))\n"
+                                          "      (setq idx (1+ idx))))\n"
+                                          "  (js-call globalThis.console :log (JSON/stringify (js-call cases :map (lambda (record) (get record :name))))))\n"
+                                          "(js-call (run-original-worker-host) :catch\n"
+                                          "  (lambda (error)\n"
+                                          "    (js-call globalThis.console :error error)\n"
+                                          "    (js-call globalThis.process :exit 1)))\n"
+                                          ")\n"))
+                                   (host-source
+                                     (rewrite-runtime-imports
+                                       (emit-ir-string (compile-ir-string eli-host-source "original-worker-source-mapping-host.eli"))
+                                       source-root))
+                                   (reg-obj
+                                     (js-object
+                                       :start (get (get selected :span) :start)
+                                       :end (get (get selected :span) :end)
+                                       :byteStart (get selected :byteStart)
+                                       :byteEnd (get selected :byteEnd)
+                                       :sha256 (get selected :sha256)))
+                                   (id "original-tools-artifact:worker-source-mapping:bun"))
+                              (funcall add
+                                (js-object
+                                  :id id
+                                  :kind "project"
+                                  :coverage (js-call coverage :map (lambda (l) (get l :id)))
+                                  :entry (get sources :entry)
+                                  :modules (globalThis.structuredClone (get sources :modules))
+                                  :memory (js-object :initialPages 128 :maximumPages 4096)
+                                  :request (js-object :operation "project" :resolveImports t :phased false :sourceMap t)
+                                  :execution
+                                    (js-object
+                                      :kind "compiler-session-program"
+                                      :host "tests/__eliscript_original_worker_source_mapping.mjs"
+                                      :hostRuntime "bun"
+                                      :hostSource host-source
+                                      :runtimeProfile "compiler"
+                                      :compilerProfile "small"
+                                      :runtimeOptions (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864 :auto 65536)
+                                      :timeoutMs 20000
+                                      :setupReplacement
+                                        (js-object
+                                          :kind "selected-complete-compiler-worker"
+                                          :producer "selected-session"
+                                          :changes changes
+                                          :sourceIdentity complete-source-identity
+                                          :originalCaseTimeoutMs (get selected :timeoutMs)))
+                                  :expected (js-object :kind "seed-program" :oracleRequired t)
+                                  :original
+                                    (js-object
+                                      :suite suite
+                                      :host suite
+                                      :sourceSha256 (get identity :sha256)
+                                      :regions (js-array reg-obj)
+                                      :completeLocatorCoverage t
+                                      :cases (js-call coverage :map
+                                               (lambda (locator)
+                                                 (Object/assign (js-object :id (get locator :id))
+                                                   (globalThis.structuredClone selected))))
+                                      :maintainedSource
+                                        (js-object
+                                          :file eli-file
+                                          :sourceSha256 (get eli-identity :sha256)
+                                          :compilation (js-object :filename "original-worker-source-mapping-host.eli"
+                                            :source eli-host-source :sourceSha256 (sha256 eli-host-source)
+                                            :hostSha256 (sha256 host-source))
+                                          :region (ast-region-meta eli-case-region)
+                                          :helperRegion (ast-region-meta helper-region)
+                                          :dependencies
+                                            (js-object
+                                              :imports expected-imports
+                                              :header (ast-region-meta header-region)
+                                              :headerSha256 (get header-region :sha256)))
+                                      :helperRegion (ast-region-meta helper-region)
+                                      :dependencies
+                                        (js-object
+                                          :imports expected-imports
+                                          :headerSha256 (get header-region :sha256)
+                                          :fixture (js-object :file fixture :sha256 (get fixture-identity :sha256)))
+                                      :originalAssertions (js-array title)
+                                      :completeSourceIdentity complete-source-identity
+                                      :setupReplacement (js-object :kind "selected-complete-compiler-worker" :changes changes)
+                                      :coverageScope "complete-source-mapping-worker-case-only")))
+                              (js-array
+                                (js-object
+                                  :suite suite
+                                  :coverage (js-call coverage :map (lambda (l) (get l :id)))
+                                  :regions (js-array reg-obj)
+                                  :recordIds (js-array id)))))))))))))))))
+
+  (export addOriginalCLIPrograms addOriginalWorkerProgram))

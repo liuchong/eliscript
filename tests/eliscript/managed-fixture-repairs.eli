@@ -5,11 +5,14 @@
   (import "node:fs/promises" writeFile)
   (import "node:path" resolve)
   (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "../dist/bootstrap/compiler.mjs" compile-string)
   (import "../tools/backends/build.mjs" root buildBackends)
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
   (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
   (import "../tools/testing/fixture-environment.mjs" prepareFixtureEnvironment)
   (import "../tools/testing/generated-fixture-module.mjs" loadGeneratedFixture)
+  (import "../tools/testing/maintained-suite-source.mjs" maintainedLiteralBinding)
   (import "../tools/testing/managed-fixture-repairs.mjs" managedFixtureRepairPlans nativePrototypeFixtureSource managedReferenceChildArguments
     managedFixtureTestMethod managedFixtureRealmPressureTitle persistentBoundaryFixtureSource managedFixtureFunctionalArguments)
   (test "source callback tail transfers finish before sort conversion and discarded Map Set results, including throws and recovery"
@@ -134,14 +137,10 @@
           (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root (get plan :suite)))) :digest "hex")
           (get plan :sha256))))))
   (test "only the authenticated persistent boundary normalizes its eight supplied module coordinates without granting host capabilities"
-    (lambda ()
+    (async ()
       (let* ((suite (readFileSync (resolve root "tests/wasm-managed-persistent-literals.test.mjs") "utf8"))
-             (start (+ (js-call suite :indexOf "const boundarySource = `") (js-length "const boundarySource = `")))
-             (end (js-call suite :indexOf "`;" start))
-             (source (js-call suite :slice start end))
+             (source (await (maintainedLiteralBinding root "tests/wasm-managed-persistent-literals.test.mjs" suite "boundary-source")))
              (actual (persistentBoundaryFixtureSource source "persistent-boundary.eli")))
-        (js-call assert :ok (> start (js-length "const boundarySource = `")))
-        (js-call assert :ok (> end start))
         (js-call (js-array "regex" "sorted" "metadata" "value" "value-internals" "protocol" "type" "record") :forEach
           (lambda (name)
             (js-call assert :strictEqual (js-length (js-call actual :split (str "(import \"eliscript/runtime/core/" name ".mjs\" "))) 2)))
@@ -161,7 +160,9 @@
           (js-call assert :throws (lambda () (nativePrototypeFixtureSource changed "native-prototype-callables.eli")) globalThis.TypeError))))))
   (test "file reference preload preserves every original child script byte option deadline and nonmatching argument identity"
     (lambda ()
-      (let* ((script (readFileSync (resolve root "tests/wasm-managed-realm-lifetime.test.mjs") "utf8"))
+      (let* ((module (compile-string "(defun value () 1) (export value)" "reference-module.eli"))
+             (url (str "data:text/javascript;base64," (js-call (Buffer/from module "utf8") :toString "base64")))
+             (script (compile-string (str "(import " (JSON/stringify url) " value) (console/log (value))") "reference-child.eli"))
              (preload (resolve root "tests/helpers/managed-reference-node.mjs"))
              (arguments (js-array "--input-type=module" "--eval" script))
              (before (js-call arguments :slice))

@@ -1,2 +1,9 @@
-(module capsules.runtime.core.list-internals
-  (js* "export const LIST_CONSTRUCTOR_TOKEN = Symbol(\"eliscript.list.constructor\");\nexport const LIST_STATE = Symbol(\"eliscript.list.state\");\n\nconst metrics = {\n  nodeAllocations: 0,\n};\n\nexport function recordListNodeAllocation() {\n  metrics.nodeAllocations += 1;\n}\n\nexport function resetListMetrics() {\n  metrics.nodeAllocations = 0;\n}\n\nexport function readListMetrics() {\n  return Object.freeze({ ...metrics });\n}\n"))
+(module eliscript.runtime.core.list-internals
+  (defconst LIST_CONSTRUCTOR_TOKEN (funcall globalThis.Symbol "eliscript.list.constructor"))
+  (defconst LIST_STATE (funcall globalThis.Symbol "eliscript.list.state"))
+  (defconst metrics (js-object :nodeAllocations 0))
+  (defun recordListNodeAllocation ()
+    (put metrics :nodeAllocations (1+ (get metrics :nodeAllocations))) undefined)
+  (defun resetListMetrics () (put metrics :nodeAllocations 0) undefined)
+  (defun readListMetrics () (Object/freeze (Object/assign (js-object) metrics)))
+  (export LIST_CONSTRUCTOR_TOKEN LIST_STATE recordListNodeAllocation resetListMetrics readListMetrics))

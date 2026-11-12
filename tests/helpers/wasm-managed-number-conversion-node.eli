@@ -1,0 +1,78 @@
+(module tests.helpers.wasm-managed-number-conversion-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:process" :default process)
+
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+
+  (defconst longHex
+    "0xbcf8f9bdba22840724d028768a8a77b3e6b0f283670085477910eccc4e9d6b278a11db79c280d4e9c237774812029ac7ce82daaafca38")
+
+  (defasync run-node-wasm (managed-url parse-path text-path)
+    (let* ((rt-mod (await (funcall dyn-import managed-url)))
+           (instantiateManagedRuntime (get rt-mod :instantiateManagedRuntime))
+           (p (funcall instantiateManagedRuntime (readFileSync parse-path)))
+           (txt (funcall instantiateManagedRuntime (readFileSync text-path))))
+      (js-call p :auto 1)
+      (js-call txt :auto 1)
+      (js-call (js-array longHex "-0" "5e-324" "2.2250738585072012e-308" "1.7976931348623157e308" "0b11" "invalid")
+        :forEach
+        (lambda (value)
+          (let* ((input (js-call p :string value))
+                 (out (js-call p :invoke "parse" (js-array input))))
+            (funcall assert (Object/is (js-call p :readNumber out) (globalThis.Number value)))
+            (js-call p :release input)
+            (js-call p :release out))))
+      (js-call (js-array
+                 Number.MIN_VALUE
+                 Number.MAX_VALUE
+                 globalThis.NaN
+                 globalThis.Infinity
+                 (- globalThis.Infinity)
+                 -0.0
+                 1e21
+                 1e-6
+                 1000000000000000100)
+        :forEach
+        (lambda (value)
+          (let* ((input (js-call txt :number value))
+                 (out (js-call txt :invoke "text" (js-array input))))
+            (js-call assert :equal (js-call txt :readString out) (globalThis.String value))
+            (js-call txt :release input)
+            (js-call txt :release out))))
+      (js-call (js-array p txt) :forEach
+        (lambda (a)
+          (js-call a :collect)
+          (js-call assert :equal (js-call a :live) 0)
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))
+
+  (defasync run-node-seed (seed-url)
+    (let* ((js (await (funcall dyn-import seed-url)))
+           (expected (globalThis.Number (globalThis.BigInt longHex)))
+           (counter (js-object :calls 0)))
+      (js-call assert :equal (js-call js :parse longHex) expected)
+      (js-call assert :equal
+        (js-call js :shadow
+          (lambda () (throw (new globalThis.Error "Number")))
+          (lambda () (throw (new globalThis.Error "BigInt")))
+          longHex)
+        expected)
+      (js-call assert :equal (js-call js :once counter longHex) expected)
+      (js-call assert :equal (get counter :calls) 1)))
+
+  (let ((mode (aref (get process :argv) 2))
+        (argv (get process :argv)))
+    (cond
+      ((= mode "--run-node-wasm")
+       (js-call (run-node-wasm (aref argv 3) (aref argv 4) (aref argv 5)) :catch
+         (lambda (err)
+           (console/error err)
+           (js-call process :exit 1))))
+      ((= mode "--run-node-seed")
+       (js-call (run-node-seed (aref argv 3)) :catch
+         (lambda (err)
+           (console/error err)
+           (js-call process :exit 1))))
+      (t nil)))
+
+  (export longHex run-node-wasm run-node-seed))

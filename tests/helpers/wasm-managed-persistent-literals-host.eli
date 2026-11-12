@@ -1,0 +1,99 @@
+(module tests.helpers.wasm-managed-persistent-literals-host
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "node:process" :default process)
+  (import "../../tools/backends/compiler-build.mjs" independentCompilerResources)
+
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+
+  (defun forbid-wasm ()
+    (throw (new globalThis.Error "native literals must not execute WASM")))
+
+  (defasync run-host ()
+    (let* ((argv (get process :argv))
+           (host (aref argv 3))
+           (root (aref argv 4))
+           (directory (aref argv 5))
+           (deployment (aref argv 6))
+           (native-target (aref argv 7))
+           (native-path (aref argv 8))
+           (managed-rt-mod
+             (await (funcall dyn-import
+                      (get (pathToFileURL (resolve root "tools/backends/managed-runtime.mjs")) :href))))
+           (native-rt-mod
+             (await (funcall dyn-import
+                      (get (pathToFileURL (resolve root "tools/backends/native-managed-runtime.mjs")) :href))))
+           (graph-mod
+             (await (funcall dyn-import
+                      (get (pathToFileURL (resolve root "tools/backends/managed-module-graph.mjs")) :href))))
+           (instantiateManagedRuntime (get managed-rt-mod :instantiateManagedRuntime))
+           (instantiateNativeManagedRuntime (get native-rt-mod :instantiateNativeManagedRuntime))
+           (createManagedModuleGraph (get graph-mod :createManagedModuleGraph))
+           (loadManagedProjectGraph (get graph-mod :loadManagedProjectGraph))
+           (lowered (JSON/parse (await (readFile (resolve directory "literal-runtime.lowered.json") "utf8"))))
+           (module-graph (funcall createManagedModuleGraph (get lowered :descriptor)))
+           (environment (get process :env))
+           (functional (and (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
+                            (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")))
+           (original-budget (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216))
+           (effective-budget (if functional (get (independentCompilerResources (js-object :profile "small")) :budget) original-budget))
+           (options
+             (Object/assign (js-object)
+              effective-budget (js-object
+               :initialPages 128
+               :maximumPages 4096
+               :initializeModule false
+               :nativeTarget native-target
+               :moduleGraph module-graph)))
+           (runtime undefined)
+           (load-failed false)
+           (old-module (get globalThis.WebAssembly :Module))
+           (old-instance (get globalThis.WebAssembly :Instance)))
+      (try
+        (when (= host "native")
+          (put globalThis.WebAssembly :Module forbid-wasm)
+          (put globalThis.WebAssembly :Instance forbid-wasm))
+        (setq runtime
+          (if (= host "wasm")
+              (funcall instantiateManagedRuntime
+                (new globalThis.Uint8Array (await (readFile (resolve directory "literal-runtime.wasm"))))
+                options)
+              (await (funcall instantiateNativeManagedRuntime native-path lowered options))))
+        (js-call runtime :auto 65536)
+        (try (await (funcall loadManagedProjectGraph
+                 runtime
+                 (get lowered :descriptor)
+                 (js-object
+                   :moduleGraph module-graph
+                   :projectEntry "boundary.mjs"
+                   :projectModuleBaseURL (get (pathToFileURL (str deployment "/")) :href))))
+          (catch error (setq load-failed t) (throw error)))
+        (put argv 2 (resolve deployment "boundary.mjs"))
+        (put argv :length 3)
+        (await (funcall dyn-import
+                 (get (pathToFileURL (resolve root "tests/fixtures/literal-runtime-host.mjs")) :href)))
+        (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0)
+        (finally
+          (put globalThis.WebAssembly :Module old-module)
+          (put globalThis.WebAssembly :Instance old-instance)
+          (if load-failed nil
+           (if (not (undefined? runtime))
+              (try
+                (js-call runtime :closeModule)
+                (js-call runtime :collect)
+                (js-call assert :equal (js-call runtime :live) 0)
+                (finally
+                  (let ((close-fn (get runtime :close)))
+                    (when close-fn
+                      (js-call runtime :close)))))
+              (js-call module-graph :close)))))))
+
+  (when (= (aref (get process :argv) 2) "--run-host")
+    (js-call (run-host) :catch
+      (lambda (err)
+        (console/error err)
+        (js-call process :exit 1))))
+
+  (export run-host))

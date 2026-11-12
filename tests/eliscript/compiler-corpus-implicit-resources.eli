@@ -532,7 +532,7 @@
                   (js-call assert :throws (lambda () (compilerCorpusFunctionalResources changed options)) globalThis.TypeError))))
             (let ((changed (globalThis.structuredClone record)))
               (put (get changed :original) :fixture "tests/fixtures/unrelated.eli")
-              (js-call assert :strictEqual (compilerCorpusFunctionalResources changed options) undefined))))))))
+              (js-call assert :throws (lambda () (compilerCorpusFunctionalResources changed options)) globalThis.TypeError))))))))
 
   (test "the independent core Seed oracle executes the retained input proof after compiling its private expanded graph"
     (async ()
@@ -700,7 +700,9 @@
             (js-call assert :throws (lambda () (compilerCorpusResourceDeferred record "wasm"
               (js-object :functionalRuntimeProfile "small" :sourceAssets (js-array)))) globalThis.TypeError)
             (let* ((proofs (globalThis.structuredClone (get options :sourceAssets)))
-                   (fixture (get (get record :original) :fixture))
+                   (entry (js-call (get record :modules) :find
+                     (lambda (module) (= (get module :id) (get record :entry)))))
+                   (fixture (get entry :filename))
                    (proof (js-call proofs :find (lambda (asset) (= (get asset :file) fixture)))))
               (js-call assert :ok proof)
               (put proof :sha256 (js-call "0" :repeat 64))
@@ -774,7 +776,8 @@
             (lambda (record) (put (get record :original) :sourceSha256 (js-call "0" :repeat 64)))
             (lambda (record) (put (aref (get (get record :original) :regions) 0) :sha256 (js-call "0" :repeat 64)))
             (lambda (record) (put (get record :execution) :hostSource
-              (js-call (get (get record :execution) :hostSource) :replaceAll "1_000_000" "999_999"))))
+              (js-call (js-call (get (get record :execution) :hostSource)
+                :replaceAll "1_000_000" "999999") :replaceAll "1000000" "999999"))))
             :forEach (lambda (mutate)
               (let ((record (globalThis.structuredClone reference)))
                 (funcall mutate record)
@@ -820,7 +823,7 @@
                      (lambda (item) (= (get item :filename) "tests/fixtures/persistent-tree-walk.eli")))))
               (js-call assert :ok module)
               (put module :source (js-call (get module :source) :replace "(depth 12000)" "(depth 12001)"))
-              (js-call assert :strictEqual (get (compilerCorpusFunctionalResources changed options) :effectiveRuntimeProfile) "small")))
+              (js-call assert :throws (lambda () (compilerCorpusFunctionalResources changed options)) globalThis.TypeError)))
           (setq index (1+ index))))))
   (test "authenticated complete and indexed original zipper programs bind every input before selecting a bounded functional heap"
     (async ()

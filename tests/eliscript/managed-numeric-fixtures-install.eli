@@ -15,8 +15,8 @@
   (defconst actual-processes (Object/assign (js-object) processNamespace))
   (defconst root (get build :root))
   (defconst plans (js-array
-    (js-object :suite "tests/wasm-managed-number-text.test.mjs" :kind "number-text" :sha256 "efb82a6a9f2457924f661ceaf8780412e4d2c80a983a535b7c066817a9f9e913")
-    (js-object :suite "tests/wasm-managed-primitive-operators.test.mjs" :kind "primitive" :sha256 "35a423057162377838fdcd3a8a5ceec4634293fa5fe33450b39d4fafcfc48f22")))
+    (js-object :suite "tests/wasm-managed-number-text.test.mjs" :kind "number-text" :sha256 "c8438c1e8018e36fdfca81a4800ac1332ddf11a0f094aa2788fe147e5740b5fc")
+    (js-object :suite "tests/wasm-managed-primitive-operators.test.mjs" :kind "primitive" :sha256 "e6ce0d9d0d3cd060ad6389dc1f7c3d362ca4ba63997ea0338cb790efbc8e492d")))
   (defconst selected (js-call plans :filter (lambda (plan)
     (js-call (get globalThis.process :argv) :some (lambda (argument) (= (resolve root argument) (resolve root (get plan :suite))))))))
   (js-call assert :strictEqual (js-length selected) 1)

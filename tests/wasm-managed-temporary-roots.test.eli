@@ -1,2 +1,53 @@
-(module capsules.tests.wasm-managed-temporary-roots.test
-  (js* "import {beforeAll, afterAll, test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {mkdtemp, readFile, rm} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nimport {temporaryRootSource, temporaryRootOptions, initializeTemporaryRootRuntime,\n  exerciseTemporaryRootPressure, exerciseTemporaryRootValues, closeTemporaryRootRuntime} from './helpers/managed-temporary-roots.mjs';\n\nlet directory, bytes, reference;\nbeforeAll(async () => {\n  directory = await mkdtemp(resolve(tmpdir(), 'eliscript-wasm-temporary-roots-'));\n  const backend = await buildBackends({outputRoot: directory});\n  const runtime = backend.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli', 'utf8'), 'runtime.eli');\n  const program = backend.compiler.compile_ir_string(temporaryRootSource, 'temporary-roots.eli');\n  const lowered = backend.managed.lower_managed_program(program, runtime);\n  const raw = backend.wasm.emit_typed_memory_wasm(lowered.typed, {initialPages: 1, maximumPages: 8});\n  bytes = Uint8Array.from(backend.wasm.append_metadata_section(raw, 'eliscript-managed-control', JSON.stringify(lowered.descriptor)));\n  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);\n  reference = await import('data:text/javascript;base64,' + Buffer.from(backend.compiler.emit_ir_string(program)).toString('base64'));\n}, 120000);\nafterAll(async () => {if (directory) await rm(directory, {recursive: true, force: true});});\n\ntest('WASM clears completed initializer and assignment temporaries under the original small capacity and recovers', () => {\n  const a = instantiateManagedRuntime(bytes, temporaryRootOptions);\n  try {initializeTemporaryRootRuntime(a);exerciseTemporaryRootPressure(a, reference);}\n  finally {closeTemporaryRootRuntime(a);}\n}, 30000);\ntest('WASM keeps returned assignment aliases captured cells user temporary bindings and first errors alive through GC', () => {\n  const a = instantiateManagedRuntime(bytes, temporaryRootOptions);\n  try {initializeTemporaryRootRuntime(a);exerciseTemporaryRootValues(a, reference);}\n  finally {closeTemporaryRootRuntime(a);}\n}, 30000);\n"))
+(module tests.wasm-managed-temporary-roots.test
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "./helpers/managed-temporary-roots.mjs"
+    temporaryRootSource temporaryRootOptions initializeTemporaryRootRuntime
+    exerciseTemporaryRootPressure exerciseTemporaryRootValues closeTemporaryRootRuntime)
+
+  (defun dynamic-import (specifier)
+    (funcall (js* "(specifier) => import(specifier)") specifier))
+
+  (defvar directory undefined)
+  (defvar bytes undefined)
+  (defvar reference undefined)
+
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-wasm-temporary-roots-"))))
+    (let* ((backend (await (buildBackends (js-object :outputRoot directory))))
+           (runtime (js-call (get backend :compiler) :compile_ir_string (await (readFile "bootstrap/runtime/memory.eli" "utf8")) "runtime.eli"))
+           (program (js-call (get backend :compiler) :compile_ir_string temporaryRootSource "temporary-roots.eli"))
+           (lowered (js-call (get backend :managed) :lower_managed_program program runtime))
+           (raw (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) (js-object :initialPages 1 :maximumPages 8))))
+      (setq bytes (Uint8Array/from (js-call (get backend :wasm) :append_metadata_section raw "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))))
+      (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      (setq reference (await (dynamic-import (str "data:text/javascript;base64,"
+                                                  (js-call (Buffer/from (js-call (get backend :compiler) :emit_ir_string program)) :toString "base64")))))))
+    120000)
+
+  (afterAll (async ()
+    (when directory
+      (await (rm directory (js-object :recursive t :force t))))))
+
+  (test "WASM clears completed initializer and assignment temporaries under the original small capacity and recovers" (lambda ()
+    (let ((a (instantiateManagedRuntime bytes temporaryRootOptions)))
+      (try
+        (progn
+          (initializeTemporaryRootRuntime a)
+          (exerciseTemporaryRootPressure a reference))
+        (finally (closeTemporaryRootRuntime a)))))
+    30000)
+
+  (test "WASM keeps returned assignment aliases captured cells user temporary bindings and first errors alive through GC" (lambda ()
+    (let ((a (instantiateManagedRuntime bytes temporaryRootOptions)))
+      (try
+        (progn
+          (initializeTemporaryRootRuntime a)
+          (exerciseTemporaryRootValues a reference))
+        (finally (closeTemporaryRootRuntime a)))))
+    30000))

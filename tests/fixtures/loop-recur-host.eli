@@ -1,0 +1,9 @@
+(module tests.fixtures.loop-recur-host
+  (import "node:process" :default process)
+  (defun check (actual expected) (when (not (= actual expected)) (js-call process :exit 1)))
+  (defasync main ()
+    (let ((module (await (funcall (js* "(url) => import(url)") (aref (get process :argv) 2)))))
+      (check (js-call module :function_countdown 1000000 0) 1000000)
+      (check (js-call module :loop_countdown 1000000) 1000000)
+      (check (await (js-call module :async_countdown 5000 0)) 5000)))
+  (main))

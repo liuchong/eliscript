@@ -525,8 +525,8 @@ values and native mutable JavaScript containers:
         from-js js-array js-object to-js to-js-object)
 
 (let* ((source (js-object "items" (js-array "left" "right")))
-       (state (from-js source (js* "({deep: true})")))
-       (props (to-js-object state (js* "({deep: true})"))))
+       (state (from-js source (js-object :deep t)))
+       (props (to-js-object state (js-object :deep t))))
   props)
 ```
 

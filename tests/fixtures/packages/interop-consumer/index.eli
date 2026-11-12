@@ -1,2 +1,10 @@
-(module capsules.tests.fixtures.packages.interop-consumer.index
-  (js* "import {\n  hashMap,\n  hashSet,\n  vector,\n} from \"eliscript/runtime/literals.mjs\";\nimport { to_js_object } from \"eliscript/stdlib/interop/js.mjs\";\nimport {\n  consumeNativeOptions,\n} from \"@eliscript-fixtures/native-container-consumer\";\n\nconst children = vector(\"left\", \"right\");\nconst settings = hashMap(\"ready\", true);\nconst tags = hashSet(\"host\", \"stable\");\nconst source = hashMap(\n  \"title\", \"Eliscript\",\n  \"children\", children,\n  \"settings\", settings,\n  \"tags\", tags,\n);\n\nconst nativeOptions = to_js_object(source, { deep: true });\nconst consumer = consumeNativeOptions(nativeOptions);\n\nconsole.log(JSON.stringify({\n  consumer,\n  sourceUnchanged: {\n    children: children.toArray(),\n    childCount: children.count,\n    settingAdded: settings.has(\"package-added\"),\n    tagAdded: tags.has(\"package-added\"),\n  },\n}));\n"))
+(module tests.fixtures.packages.interop-consumer
+  (import "eliscript/runtime/literals.mjs" hashMap hashSet vector)
+  (import "eliscript/stdlib/interop/js.mjs" to_js_object)
+  (import "@eliscript-fixtures/native-container-consumer" consumeNativeOptions)
+  (defconst children (vector "left" "right")) (defconst settings (hashMap "ready" t)) (defconst tags (hashSet "host" "stable"))
+  (defconst source (hashMap "title" "Eliscript" "children" children "settings" settings "tags" tags))
+  (defconst nativeOptions (to_js_object source (js-object :deep t))) (defconst consumer (consumeNativeOptions nativeOptions))
+  (js-call globalThis.console :log (JSON/stringify (js-object :consumer consumer
+    :sourceUnchanged (js-object :children (js-call children :toArray) :childCount (get children :count)
+      :settingAdded (js-call settings :has "package-added") :tagAdded (js-call tags :has "package-added"))))))

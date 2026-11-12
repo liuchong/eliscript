@@ -9,9 +9,9 @@
   (import "../compiler-bootstrap.mjs" compilerFailure saveCompilerMetadata)
   (import "../compiler-build.mjs" independentCompilerProductIdentity)
   (import "../compiler-metadata.mjs" readCompilerMetadata)
-  (import "../compiler-matrix.mjs" loadCompilerMatrixCorpus)
   (import "./bootstrap-js-stages.mjs" bootstrapJsStages)
   (import "../stage3-targets.mjs" runStage3Targets authenticateStage3Targets)
+  (defconst import-release-tool (js* "(specifier) => import(specifier)"))
 
   (defconst release-help
     "Eliscript JavaScript compiler bootstrap and final outputs\n\n  bootstrap --stage0-manifest FILE --output DIRECTORY\n  verify-bootstrap [--bootstrap-manifest FILE]\n  targets [--bootstrap-manifest FILE] [--corpus-records FILE] [--output DIRECTORY] [--functional-runtime-profile small] [--resume-from PREVIOUS_DIRECTORY]\n  compile [--bootstrap-manifest FILE] --input SOURCE --target javascript|wasm|native --output PATH\n  compile [--bootstrap-manifest FILE] --project ENTRY --root DIRECTORY --target TARGET --output PATH\n  request [--bootstrap-manifest FILE] --request FILE [--output PATH]\n  package [--bootstrap-manifest FILE] --output DIRECTORY\n  prepare-release-package [--bootstrap-manifest FILE]\n\nEmacs generates JavaScript stage0. stage0 -> stage1 -> stage2 -> stage3 all run as JavaScript.\nOnly stage3 supplies the final javascript, wasm and native program outputs.\nThe stage2/stage3 fixed point is verified before a final compiler is used.\nFunctional small resources explicitly defer the original sequence capacity acceptance.\n")
@@ -21,9 +21,10 @@
   (defun default-release-manifest ()
     (let ((bootstrap-path (resolve root "dist/bootstrap-release/bootstrap.json"))
           (release-path (resolve root "dist/stage3-release.json")))
-      (if (and (not (existsSync bootstrap-path)) (existsSync release-path))
-        release-path
-        bootstrap-path)))
+      ;; A completed package preparation designates the public compiler.
+      ;; An older build directory may coexist with that certified package;
+      ;; explicit --bootstrap-manifest still selects it without substitution.
+      (if (existsSync release-path) release-path bootstrap-path)))
   (defun release-manifest (values)
     (resolve (release-default (get values :bootstrap-manifest)
       (release-default (get (get globalThis.process :env) :ELISCRIPT_BOOTSTRAP_MANIFEST)
@@ -78,8 +79,9 @@
     (let* ((metadata-path (get certified :stage3MetadataPath))
            (metadata (await (readCompilerMetadata metadata-path)))
            (supports (js-call (get metadata :modules) :filter
-             (lambda (record) (js-call (js-array "runtime/math.mjs" "runtime/prelude.mjs" "runtime/unicode-case.mjs"
-               "runtime/unicode-case-data.mjs") :includes (get record :id))))) (index 0))
+             (lambda (record) (js-call (js-array "runtime/array-text.mjs" "runtime/errors.mjs" "runtime/math.mjs"
+               "runtime/number-radix.mjs" "runtime/prelude.mjs" "runtime/primitives.mjs"
+               "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs") :includes (get record :id))))) (index 0))
       (while (< index (js-length supports))
         (let* ((support (aref supports index))
                (actual (await (readFile (resolve (dirname metadata-path) (get support :path)))))
@@ -110,7 +112,7 @@
 
   (defasync release-corpus-path (values output)
     (if (not (undefined? (get values :corpus-records))) (resolve (get values :corpus-records))
-      (let* ((corpus (await (loadCompilerMatrixCorpus (js-object :sourceRoot root))))
+      (let* ((corpus (await (js-call (await (funcall import-release-tool "../compiler-matrix.mjs")) :loadCompilerMatrixCorpus (js-object :sourceRoot root))))
              (path (resolve output "original-corpus.json")))
         (await (mkdir output (js-object :recursive t)))
         (await (writeFile path (get corpus :recordsBytes))) path)))
@@ -142,11 +144,11 @@
             (when (or (isAbsolute part) (= part "..") (js-call part :startsWith (+ ".." sep)))
               (release-type-error "stage3 package source escapes its artifact"))
             (await (copy-if-different source destination))
-            (when (js-call (js-array "runtime/math.mjs" "runtime/prelude.mjs" "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs") :includes id)
+            (when (js-call (js-array "runtime/array-text.mjs" "runtime/errors.mjs" "runtime/math.mjs" "runtime/number-radix.mjs" "runtime/prelude.mjs" "runtime/primitives.mjs" "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs") :includes id)
               (await (copy-if-different source (resolve root id))))
             (when (= (value-type (get record :sourceMapPath)) "string")
               (await (copy-if-different (resolve directory (get record :sourceMapPath)) (+ destination ".map")))
-              (when (js-call (js-array "runtime/math.mjs" "runtime/prelude.mjs" "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs") :includes id)
+              (when (js-call (js-array "runtime/array-text.mjs" "runtime/errors.mjs" "runtime/math.mjs" "runtime/number-radix.mjs" "runtime/prelude.mjs" "runtime/primitives.mjs" "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs") :includes id)
                 (await (copy-if-different (resolve directory (get record :sourceMapPath))
                   (resolve root (+ id ".map"))))))))
         (setq index (1+ index)))
@@ -250,6 +252,8 @@
          (await (require-prepared-runtime (await (resolveReleaseCompiler
            (js-object :bootstrapManifestPath (release-manifest values)
              :stage3MetadataPath (get values :compiler-artifact))))))
+         (unless (existsSync (resolve root "tools/backends/compiler-matrix.mjs"))
+           (release-type-error "Full target acceptance requires an Eliscript source checkout"))
          (let* ((output (resolve (release-default (get values :output) (resolve root "dist/bootstrap-release/targets"))))
                 (corpus-path (await (release-corpus-path values output))))
            (release-progress (js-object :phase "targets-start"))

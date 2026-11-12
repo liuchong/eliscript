@@ -1,2 +1,26 @@
-(module capsules.tests.fixtures.persistent-queue-library-host
-  (js* "import { resolve } from \"node:path\";\nimport { pathToFileURL } from \"node:url\";\n\nconst queue = await import(pathToFileURL(resolve(process.argv[2])).href);\nlet values = queue.persistent_queue(1, 2, 3);\nvalues = queue.persistent_queue_conj(values, 4);\nvalues = queue.persistent_queue_pop(values);\n\nconsole.log(JSON.stringify({\n  persistent: queue.persistent_queue_QMARK_(values),\n  empty: queue.persistent_queue_empty_QMARK_(values),\n  count: queue.persistent_queue_count(values),\n  front: queue.persistent_queue_peek(values, \"empty\"),\n  values: queue.persistent_queue_to_array(values),\n  sum: queue.persistent_queue_reduce((sum, value) => sum + value, 0, values),\n}));\n"))
+(module tests.fixtures.persistent-queue-library-host
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (defconst host-import (js* "(specifier) => import(specifier)"))
+  (defvar queue undefined)
+  (defvar values undefined)
+  (defasync run-host-main ()
+    (setq queue (await (funcall host-import
+    (get (pathToFileURL (resolve (get (get globalThis.process :argv) 2))) :href))))
+    (setq values (js-call queue :persistent_queue 1 2 3))
+    (setq values (js-call queue :persistent_queue_conj values 4))
+    (setq values (js-call queue :persistent_queue_pop values))
+    (js-call globalThis.console :log (JSON/stringify (js-object
+    :persistent (js-call queue :persistent_queue_QMARK_ values)
+    :empty (js-call queue :persistent_queue_empty_QMARK_ values)
+    :count (js-call queue :persistent_queue_count values)
+    :front (js-call queue :persistent_queue_peek values "empty")
+    :values (js-call queue :persistent_queue_to_array values)
+    :sum (js-call queue :persistent_queue_reduce (lambda (sum value) (+ sum value)) 0 values)))))
+  (defconst completion (run-host-main))
+  (js-call completion :catch (lambda (error)
+    (console/error error)
+    (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

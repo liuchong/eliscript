@@ -1,2 +1,55 @@
-(module capsules.tools.collections.layout-host
-  (js* "import process from \"node:process\";\n\nimport {\n  DEFAULT_OCCUPANCIES,\n  runLayoutHostBenchmark,\n} from \"./layout-benchmark.mjs\";\n\nfunction positiveEnvironment(name, fallback) {\n  const text = process.env[name];\n  if (text === undefined) {\n    return fallback;\n  }\n  const value = Number(text);\n  if (!Number.isSafeInteger(value) || value <= 0) {\n    throw new TypeError(`${name} must be a positive safe integer`);\n  }\n  return value;\n}\n\nfunction occupanciesFromEnvironment() {\n  const text = process.env.ELISCRIPT_LAYOUT_OCCUPANCIES;\n  return text === undefined\n    ? DEFAULT_OCCUPANCIES\n    : text.split(\",\").map((value) => Number(value.trim()));\n}\n\nfunction garbageCollector() {\n  if (typeof globalThis.Bun?.gc === \"function\") {\n    return () => globalThis.Bun.gc(true);\n  }\n  if (typeof globalThis.gc === \"function\") {\n    return () => globalThis.gc();\n  }\n  return undefined;\n}\n\nconst runtime = typeof globalThis.Bun === \"object\" ? \"bun\" : \"node\";\nconst runtimeVersion = runtime === \"bun\" ? Bun.version : process.versions.node;\n\nconst report = await runLayoutHostBenchmark({\n  host: {\n    id: runtime,\n    runtime,\n    runtimeVersion,\n    engine: runtime === \"bun\" ? \"JavaScriptCore\" : \"V8\",\n    platform: process.platform,\n    architecture: process.arch,\n  },\n  occupancies: occupanciesFromEnvironment(),\n  lookupIterations: positiveEnvironment(\"ELISCRIPT_LAYOUT_ITERATIONS\", 250_000),\n  mutationIterations: positiveEnvironment(\n    \"ELISCRIPT_LAYOUT_MUTATION_ITERATIONS\",\n    50_000,\n  ),\n  timingSamples: positiveEnvironment(\"ELISCRIPT_LAYOUT_TIMING_SAMPLES\", 7),\n  memoryNodeCount: positiveEnvironment(\"ELISCRIPT_LAYOUT_MEMORY_NODES\", 20_000),\n  memorySamples: positiveEnvironment(\"ELISCRIPT_LAYOUT_MEMORY_SAMPLES\", 3),\n  collectGarbage: garbageCollector(),\n  heapUsed: runtime === \"bun\" ? undefined : () => process.memoryUsage().heapUsed,\n});\n\nprocess.stdout.write(`${JSON.stringify(report)}\\n`);\n"))
+(module tools.collections.layout-host
+  (import "node:process" :default process)
+  (import "./layout-benchmark.mjs" DEFAULT_OCCUPANCIES runLayoutHostBenchmark)
+
+  (defun positive-environment (name fallback)
+    (let ((text (get (get process :env) name)))
+      (if (undefined? text)
+        fallback
+        (let ((value (funcall globalThis.Number text)))
+          (when (or (not (Number/isSafeInteger value)) (<= value 0))
+            (throw (new globalThis.TypeError (str name " must be a positive safe integer"))))
+          value))))
+
+  (defun occupancies-from-environment ()
+    (let ((text (get (get process :env) :ELISCRIPT_LAYOUT_OCCUPANCIES)))
+      (if (undefined? text)
+        DEFAULT_OCCUPANCIES
+        (js-call (js-call text :split ",") :map (lambda (value) (funcall globalThis.Number (js-call value :trim)))))))
+
+  (defun garbage-collector ()
+    (cond
+      ((and (not (nullish? globalThis.Bun)) (= (value-type (get globalThis.Bun :gc)) "function"))
+       (lambda () (js-call globalThis.Bun :gc t)))
+      ((= (value-type globalThis.gc) "function")
+       (lambda () (funcall globalThis.gc)))
+      (t undefined)))
+
+  (defasync main ()
+    (let* ((runtime (if (= (value-type globalThis.Bun) "object") "bun" "node"))
+           (runtime-version (if (= runtime "bun")
+                              (get globalThis.Bun :version)
+                              (get (get process :versions) :node)))
+           (report (await (runLayoutHostBenchmark (js-object
+                     :host (js-object
+                             :id runtime
+                             :runtime runtime
+                             :runtimeVersion runtime-version
+                             :engine (if (= runtime "bun") "JavaScriptCore" "V8")
+                             :platform (get process :platform)
+                             :architecture (get process :arch))
+                     :occupancies (occupancies-from-environment)
+                     :lookupIterations (positive-environment "ELISCRIPT_LAYOUT_ITERATIONS" 250000)
+                     :mutationIterations (positive-environment "ELISCRIPT_LAYOUT_MUTATION_ITERATIONS" 50000)
+                     :timingSamples (positive-environment "ELISCRIPT_LAYOUT_TIMING_SAMPLES" 7)
+                     :memoryNodeCount (positive-environment "ELISCRIPT_LAYOUT_MEMORY_NODES" 20000)
+                     :memorySamples (positive-environment "ELISCRIPT_LAYOUT_MEMORY_SAMPLES" 3)
+                     :collectGarbage (garbage-collector)
+                     :heapUsed (if (= runtime "bun")
+                                 undefined
+                                 (lambda () (get (js-call process :memoryUsage) :heapUsed))))))))
+      (js-call (get process :stdout) :write (str (JSON/stringify report) "\n"))))
+
+  (js-call (main) :catch (lambda (error)
+    (js-call globalThis.console :error error)
+    (put process :exitCode 1))))

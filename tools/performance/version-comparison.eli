@@ -280,10 +280,15 @@
              (compiler (funcall (createRequire activeCompilerPath) activeCompilerPath))
              (generatedPairs
                (js-array
+                 (js-array "runtime/number-radix.eli" "runtime/number-radix.mjs")
+                 (js-array "runtime/array-text.eli" "runtime/array-text.mjs")
+                 (js-array "runtime/primitives.eli" "runtime/primitives.mjs")
+                 (js-array "runtime/errors.eli" "runtime/errors.mjs")
                  (js-array "runtime/prelude.eli" "runtime/prelude.mjs")
                  (js-array "stdlib/core/protocol.eli" "runtime/core/protocol-impl.mjs")
                  (js-array "stdlib/core/text.eli" "runtime/core/text-impl.mjs")
                  (js-array "stdlib/core/object.eli" "runtime/core/object-impl.mjs")
+                 (js-array "runtime/binding.eli" "runtime/binding.mjs")
                  (js-array "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs")
                  (js-array "runtime/unicode-case.eli" "runtime/unicode-case.mjs")
                  (js-array "runtime/math.eli" "runtime/math.mjs")))
@@ -298,22 +303,29 @@
                 (if (await (pathExists srcPath))
                   (let ((srcText (await (readFile srcPath "utf8"))))
                     (await (writeFile outPath (js-call compiler :compile_string srcText srcRel))))
-                  (let ((fallbackOutPath (js-call path :join compilerRoot outRel)))
-                    (when (await (pathExists fallbackOutPath))
-                      (await (writeFile outPath (await (readFile fallbackOutPath))))))))))
+                  (throw (new globalThis.Error
+                    (str "benchmark target runtime artifact is unavailable from its own source: " srcRel)))))))
           (setq pairIdx (1+ pairIdx)))
         (let* ((zipperSource (await (readFile (js-call path :join targetRoot "stdlib/core/zipper.eli") "utf8")))
                (compiledZipper
                  (js-call
-                   (js-call (js-call compiler :compile_string zipperSource "stdlib/core/zipper.eli")
-                     :split "\"eliscript/runtime/prelude.mjs\"")
-                   :join "\"../../runtime/prelude.mjs\""))
+                   (js-call
+                     (js-call
+                       (js-call (js-call compiler :compile_string zipperSource "stdlib/core/zipper.eli")
+                         :split "\"eliscript/runtime/prelude.mjs\"")
+                       :join "\"../../runtime/prelude.mjs\"")
+                     :split "\"eliscript/runtime/primitives.mjs\"")
+                   :join "\"../../runtime/primitives.mjs\""))
                (seqSource (await (readFile (js-call path :join targetRoot "stdlib/core/seq.eli") "utf8")))
                (compiledSeq
                  (js-call
-                   (js-call (js-call compiler :compile_string seqSource "stdlib/core/seq.eli")
-                     :split "\"eliscript/runtime/prelude.mjs\"")
-                   :join "\"../../runtime/prelude.mjs\""))
+                   (js-call
+                     (js-call
+                       (js-call (js-call compiler :compile_string seqSource "stdlib/core/seq.eli")
+                         :split "\"eliscript/runtime/prelude.mjs\"")
+                       :join "\"../../runtime/prelude.mjs\"")
+                     :split "\"eliscript/runtime/primitives.mjs\"")
+                   :join "\"../../runtime/primitives.mjs\""))
                (tempDir (await (mkdtemp (js-call path :join (js-call os :tmpdir) "eliscript-version-bench-")))))
           (try
             (let* ((stdlibCoreDir (js-call path :join tempDir "stdlib/core"))
@@ -321,60 +333,11 @@
                    (zipperMjsPath (js-call path :join stdlibCoreDir "zipper.mjs"))
                    (seqMjsPath (js-call path :join stdlibCoreDir "seq.mjs"))
                    (runnerPath (js-call path :join tempDir "run-bench.mjs"))
-                   (runnerScript
-                     (js-call
-                       (js-array
-                         "import { performance } from \"node:perf_hooks\";"
-                         "import { vector } from \"./runtime/literals.mjs\";"
-                         "import { first, last } from \"./runtime/core/sequence.mjs\";"
-                         "import { count } from \"./runtime/core/collection.mjs\";"
-                         "import { sort, compareValues } from \"./runtime/core/order.mjs\";"
-                         "import { groupBy, frequencies } from \"./runtime/core/data.mjs\";"
-                         "import { equalValues } from \"./runtime/core/value.mjs\";"
-                         "import { VALUE_EQUAL } from \"./runtime/core/value-internals.mjs\";"
-                         "import { take_last } from \"./stdlib/core/seq.mjs\";"
-                         "import { vector_zipper, down, path as zipPath, replace as zipReplace, root as zipRoot } from \"./stdlib/core/zipper.mjs\";"
-                         "function bench(iters, fn) {"
-                         "  for (let i = 0; i < Math.min(5, iters); i += 1) fn();"
-                         "  const t0 = performance.now();"
-                         "  for (let i = 0; i < iters; i += 1) fn();"
-                         "  return (performance.now() - t0) / iters;"
-                         "}"
-                         "const N = 10000;"
-                         "const arr = Array.from({ length: N }, (_, i) => i);"
-                         "const vec = vector(...arr);"
-                         "const shuffledVec = vector(...Array.from({ length: N }, (_, i) => (i * 7919) % N));"
-                         "const modVec100k = vector(...Array.from({ length: 100000 }, (_, i) => i % 1000));"
-                         "const scoreArr = Int32Array.from({ length: 10000 }, (_, i) => i % 997);"
-                         "const takeLastFn = (n, col) => count(take_last(n, col));"
-                         "let nested = vector(0);"
-                         "for (let i = 0; i < 12000; i += 1) nested = vector(nested);"
-                         "const metrics = {"
-                         "  \"sequence.first10k\": bench(20000, () => first(vec)),"
-                         "  \"sequence.last10k\": bench(200, () => last(vec)),"
-                         "  \"sequence.takeLast10k\": bench(200, () => takeLastFn(64, vec)),"
-                         "  \"value.equalSameRef10k\": bench(1000, () => vec[VALUE_EQUAL](vec, equalValues) && compareValues(vec, vec) === 0),"
-                         "  \"order.sort10k\": bench(30, () => sort(shuffledVec)),"
-                         "  \"data.groupBy10k\": bench(30, () => groupBy((x) => x % 100, vec)),"
-                         "  \"data.frequencies100k\": bench(7, () => frequencies(modVec100k)),"
-                         "  \"tree.zipper12k\": bench(3, () => {"
-                         "    let loc = vector_zipper(nested);"
-                         "    for (let i = 0; i < 12000; i += 1) loc = down(loc);"
-                         "    zipPath(loc);"
-                         "    return zipRoot(zipReplace(loc, 42));"
-                         "  }),"
-                         "  \"worker.scoreValues\": bench(7, () => {"
-                         "    let total = 0;"
-                         "    for (let round = 0; round < 10; round += 1) {"
-                         "      for (let idx = 0; idx < 10000; idx += 1) {"
-                         "        total = (total * 33 + scoreArr[idx] + round) % 1000000007;"
-                         "      }"
-                         "    }"
-                         "    return total;"
-                         "  }),"
-                         "};"
-                         "process.stdout.write(JSON.stringify(metrics) + \"\\n\");")
-                       :join "\n")))
+                   (runnerSource (await (readFile (js-call path :join compilerRoot "tools/performance/version-comparison-runner.eli") "utf8")))
+                   (relocatedRunner (js-call (js-call runnerSource :replaceAll
+                     "(import \"../../runtime/" "(import \"./runtime/") :replaceAll
+                     "(import \"../../stdlib/core/" "(import \"./stdlib/core/"))
+                   (runnerScript (js-call compiler :compile_string relocatedRunner "version-comparison-runner.eli")))
               (await (mkdir stdlibCoreDir (js-object :recursive t)))
               (await (symlink (js-call path :join targetRoot "runtime") (js-call path :join tempDir "runtime") "dir"))
               (await (mkdir (js-call path :dirname nodeModulesEliscript) (js-object :recursive t)))
@@ -391,7 +354,9 @@
     (let ((targetRoot (nullish rawRoot projectDirectory)))
       (if (or (= (get target :id) "latest") (not (get target :tag)))
         (await (measureEliscriptDirectory targetRoot targetRoot))
-        (let ((worktreeDir (await (mkdtemp (js-call path :join (js-call os :tmpdir) (str "eliscript-wt-" (get target :version) "-"))))))
+        (let* ((worktreeRoot (js-call path :join targetRoot "_worktree" "version-comparison"))
+               (_ (await (mkdir worktreeRoot (js-object :recursive t))))
+               (worktreeDir (await (mkdtemp (js-call path :join worktreeRoot (str "eliscript-wt-" (get target :version) "-"))))))
           (try
             (progn
               (await (rm worktreeDir (js-object :recursive t :force t)))

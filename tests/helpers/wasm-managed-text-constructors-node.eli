@@ -1,0 +1,40 @@
+(module tests.helpers.wasm-managed-text-constructors-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+
+  (defun dynamic-import (specifier)
+    (funcall (js* "(specifier) => import(specifier)") specifier))
+
+  (defasync main ()
+    (let* ((rt-mod (await (dynamic-import (aref (get globalThis.process :argv) 2))))
+           (instantiateManagedRuntime (get rt-mod :instantiateManagedRuntime))
+           (a (funcall instantiateManagedRuntime (readFileSync (aref (get globalThis.process :argv) 3)))))
+      (js-call a :auto 1)
+      (js-call
+        (js-array
+          (js-array "from-point" 128512)
+          (js-array "from-unit" -65535.5)
+          (js-array "global-point" 55296))
+        :forEach
+        (lambda (pair)
+          (let* ((name (aref pair 0))
+                 (value (aref pair 1))
+                 (x (js-call a :number value))
+                 (out (js-call a :invoke name (js-array x))))
+            (js-call assert :equal
+              (js-call a :readString out)
+              (if (= name "from-unit")
+                (String/fromCharCode value)
+                (String/fromCodePoint value)))
+            (js-call a :release x)
+            (js-call a :release out))))
+      (let ((bad (js-call a :number globalThis.NaN)))
+        (js-call assert :throws
+          (lambda () (js-call a :invoke "from-point" (js-array bad)))
+          (lambda (e) (let ((diag (get e :eliscriptDiagnostic))) (and diag (= (get diag :code) "ELI-RT0003")))))
+        (js-call a :release bad)
+        (js-call a :collect)
+        (js-call assert :equal (js-call a :live) 0)
+        (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
+
+  (main))

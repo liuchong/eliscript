@@ -1,2 +1,314 @@
-(module capsules.tests.wasm-managed-json-callbacks.test
-  (js* "import {beforeAll, afterAll, test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {readFile, writeFile, mkdtemp, rm, realpath} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {pathToFileURL} from 'node:url';\nimport {spawnSync} from 'node:child_process';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nimport {instantiateNativeManagedRuntime} from '../tools/backends/native-managed-runtime.mjs';\n\nconst fixture = 'tests/fixtures/wasm-managed-json-callbacks.eli';\nconst target = process.arch === 'arm64' ? process.platform === 'darwin' ? 'arm64-macos'\n  : process.platform === 'linux' ? 'arm64-linux' : undefined : undefined;\nconst options = {maxSlots: 4096, initialBytes: 131072, maxBytes: 4194304, maximumPages: 128};\nconst parseCases = [\n  ['null', 0], ['false', 0], ['-0', 0], ['9007199254740993', 0], ['1e9999', 0], ['-1e-9999', 0],\n  ['\"\\\\u0041\\\\ud800\\\\udc00\\\\ud800中😀\"', 0],\n  ['{\"b\":0,\"a\":9007199254740993,\"b\":-0,\"__proto__\":1,\"nested\":[true,null,\"\\\\u0041\"]}', 0],\n  ['{\"a\":1,\"nested\":{\"z\":2}}', 6], ['1', 3], ['{\"value\":1}', 7],\n];\nconst mutationCases = [['{\"a\":1,\"b\":2,\"gone\":3}', 1], ['[1,2,3]', 1], ['{\"a\":1,\"locked\":2}', 2]];\nconst rawTexts = ['null', 'false', 'true', '0', '-0', '1.2', '1e+2', '1e-2', '1e400',\n  '1.2300e+02', '90071992547409931234567890', '1e9999', '-1e-9999',\n  '\"\"', '\"\\\\u0000\"', '\"\\\\ud800\"', '\"\\\\udc00\"', '\"\\\\u0041\\\\ud800\\\\udc00\\\\ud800\"',\n  '\"中😀\"', '\"\\\\/\\\\\\\\\\\\\\\"\"', '\"\\\\b\\\\f\\\\n\\\\r\\\\t\"'];\nconst invalidRaw = ['', ' ', '\\t', ' null', 'null ', '\\tnull', 'null\\n', '\\ufeffnull', 'null\\ufeff',\n  '[]', '{}', '[1]', '{\"a\":1}', '01', '-01', '+1', '-', '.1', '1.', '1e', '1e+', '1e-',\n  'NaN', 'Infinity', '-Infinity', 'undefined', 'true false', 'null0', '1true', '1 2',\n  'tru', 'True', 'fals', 'nul', '\"unterminated', '\"\\\\x20\"', '\"\\\\u12\"', '\"\\\\u12X4\"',\n  '\"a\\nb\"', '\"a\\tb\"', '\"\\0\"'];\nlet directory, backend, lowered, bytes, wasmFile, nativeFile, referenceFile, reference;\nbeforeAll(async () => {\n  directory = await mkdtemp(resolve(tmpdir(), 'eliscript-json-callbacks-'));\n  backend = await buildBackends({outputRoot: directory});\n  const program = backend.compiler.compile_ir_string(await readFile(fixture, 'utf8'), fixture), saved = JSON.stringify(program);\n  const runtime = backend.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli', 'utf8'), 'runtime.eli');\n  lowered = backend.managed.lower_managed_program(program, runtime, true);\n  const raw = backend.wasm.emit_typed_memory_wasm(lowered.typed, {initialPages: 2, maximumPages: 128});\n  bytes = Uint8Array.from(backend.wasm.append_metadata_section(raw, 'eliscript-managed-control', JSON.stringify(lowered.descriptor)));\n  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);\n  wasmFile = resolve(directory, 'callbacks.wasm');await writeFile(wasmFile, bytes);\n  if (target) {\n    nativeFile = resolve(directory, target === 'arm64-linux' ? 'callbacks.so' : 'callbacks.dylib');\n    await writeFile(nativeFile, Uint8Array.from(backend.native.emit_typed_native_memory_library(lowered.typed, target)));\n  }\n  referenceFile = resolve(directory, 'callbacks.mjs');await writeFile(referenceFile, backend.compiler.emit_ir_string(program));\n  referenceFile = await realpath(referenceFile);\n  reference = await import(pathToFileURL(referenceFile).href);assert.equal(JSON.stringify(program), saved);\n}, 120000);\nafterAll(async () => {lowered = undefined;if (directory) await rm(directory, {recursive: true, force: true});});\n\nfunction invoke(a, name, values = []) {\n  const owned = [], args = values.map(value => {\n    if (typeof value !== 'number' && typeof value !== 'string') return value;\n    const handle = typeof value === 'number' ? a.number(value) : a.string(value);owned.push(handle);return handle;\n  });\n  try {return a.invoke(name, args);} catch (error) {\n    if (error instanceof Error && error.constructor === Error && name !== 'failure-phase') {\n      try {\n        const phase = a.invoke('failure-phase', []);\n        try {console.error('JSON callback failure', name, values.filter(value => typeof value === 'number'), a.readNumber(phase));}\n        finally {a.release(phase);}\n      } catch {}\n    }\n    throw error;\n  } finally {for (const value of owned) a.release(value);}\n}\nfunction report(a, name, values = []) {\n  const value = invoke(a, name, values);try {return a.readString(value);} finally {a.release(value);}\n}\nfunction finish(a) {\n  try {a.closeModule();a.collect();assert.equal(a.live(), 0);assert.equal(a.stats().frameDepth, 0);}\n  finally {a.close?.();}\n}\nasync function each(run) {\n  for (const kind of target ? ['wasm', 'native'] : ['wasm']) {\n    const a = kind === 'wasm' ? instantiateManagedRuntime(bytes, {...options, initialPages: 2})\n      : await instantiateNativeManagedRuntime(nativeFile, lowered, {...options, initialPages: 2, nativeTarget: target});\n    a.auto(1);try {await run(a, kind);} finally {finish(a);}\n  }\n}\nfunction parseContract(a, js, records) {\n  for (const args of records) {\n    const actual = report(a, 'parse-probe', args), expected = js.parse_probe(...args);\n    assert.equal(actual, expected, JSON.stringify(args));\n    const output = JSON.parse(actual);assert.equal(output[3], true, 'each represented primitive source context is fresh');\n    for (const event of output[2]) if (event[0] === 'reviver' && event[6])\n      assert.deepEqual(event[8], [true, true, true, true]);\n    a.collect();assert.equal(a.stats().frameDepth, 0);\n  }\n}\nfunction stringifyContract(a, js) {\n  for (const mode of [0, 1, 2, 3, 6]) {\n    const actual = report(a, 'stringify-probe', [mode]);assert.equal(actual, js.stringify_probe(mode));\n    const output = JSON.parse(actual);\n    if (mode === 2) assert.equal(output[0], true);\n    if (mode === 1) assert.equal(output[2][0], 'space valueOf', 'space conversion precedes the root replacer');\n    if (mode === 3) assert(output[1].includes('9007199254740993'), 'raw replacement retains the full original integer');\n    a.collect();assert.equal(a.stats().frameDepth, 0);\n  }\n  assert.equal(report(a, 'property-list-probe'), js.property_list_probe());\n}\nfunction rawContract(a, js, texts) {\n  for (const text of texts) for (const mode of [0, 1]) {\n    const actual = report(a, 'raw-probe', [text, mode]);assert.equal(actual, js.raw_probe(text, mode), text);\n    const value = JSON.parse(actual);\n    assert.equal(value[0], text);assert.equal(value[1], true);assert.equal(value[2], true);\n    assert.deepEqual(value[3], ['rawJSON']);assert.deepEqual(value[4], [true, false, true, false]);\n    assert.deepEqual(value.slice(5, 11), [true, false, false, false, false, false]);\n    assert(value[11].includes('\"raw\":' + text));assert(value[11].includes('\"also\":' + text));\n    assert(value[11].includes('\"hook\":1.2300e+02'));\n    assert.equal(value[12].filter(event => event === 'ToString').length, mode);\n    a.collect();assert.equal(a.stats().frameDepth, 0);\n  }\n}\nfunction errorsAndRecovery(a, js, rejected) {\n  const held = a.number(-0), frame = a.frame(1);a.frameSet(frame, 0, held);\n  try {\n    for (const [name, args, expected] of [\n      ['parse-probe', ['{\"a\":1}', 4], false], ['parse-probe', ['{\"a\":1}', 5], undefined],\n      ['stringify-probe', [8], false], ['stringify-probe', [9], undefined],\n      ['raw-throw', [false], false], ['raw-throw', [undefined], undefined],\n    ]) {\n      let sourceThrew = false, managedThrew = false;\n      try {js[name.replaceAll('-', '_')](...args);} catch (error) {sourceThrew = true;assert.strictEqual(error, expected);}\n      try {invoke(a, name, args);} catch (error) {managedThrew = true;assert.strictEqual(error, expected);}\n      assert.equal(sourceThrew, true);assert.equal(managedThrew, true);\n      assert(Object.is(a.readNumber(held), -0));assert.equal(a.stats().frameDepth, 1);\n      assert.equal(report(a, 'recover'), js.recover());\n    }\n    for (const text of rejected) {\n      assert.throws(() => js.raw_probe(text, 0), SyntaxError);\n      assert.throws(() => invoke(a, 'raw-probe', [text, 0]), SyntaxError);\n      assert.equal(a.stats().frameDepth, 1);\n    }\n    for (const mode of [4, 7]) {\n      assert.throws(() => js.stringify_probe(mode), TypeError);\n      assert.throws(() => invoke(a, 'stringify-probe', [mode]), TypeError);\n      assert.equal(a.stats().frameDepth, 1);\n    }\n    assert.equal(report(a, 'recover'), js.recover());assert(Object.is(a.readNumber(held), -0));\n  } finally {a.leaveFrame(frame);a.release(held);}\n}\n\ntest('Given JSON source tokens When a three-argument reviver traverses postorder Then holder keys exact primitive contexts and nested calls match JS', async () => {\n  await each(a => parseContract(a, reference, parseCases));\n}, 30000);\ntest('Given reviver mutations When pending properties change disappear or become nonconfigurable Then source contexts invalidate without adding visits or throwing', async () => {\n  await each(a => parseContract(a, reference, mutationCases));\n}, 30000);\ntest('Given toJSON replacer boxed values holes property lists and space When stringified Then exact callback order keys snapshots and raw BigInt replacement survive GC', async () => {\n  await each(a => stringifyContract(a, reference));\n}, 30000);\ntest('Given raw JSON primitives When wrapped cloned inherited frozen and stringified Then only the genuine brand injects its unchanged source text', async () => {\n  await each(a => rawContract(a, reference, rawTexts));\n}, 30000);\ntest('Given invalid raw text cycles BigInts and falsy callback throws When execution fails Then the first source value caller roots and later JSON operations survive', async () => {\n  await each(a => errorsAndRecovery(a, reference, invalidRaw));\n}, 30000);\ntest('Given the identical callback fixture When run by independent Node and real WASM Then complete parse stringify raw brands and cleanup match', () => {\n  const script = `import assert from 'node:assert/strict';import{readFileSync}from'node:fs';\nconst{options,parseCases,mutationCases,rawTexts,invalidRaw}=JSON.parse(readFileSync(0,'utf8'));\nconst js=await import(process.argv[1]);const{instantiateManagedRuntime}=await import(process.argv[2]);\nconst bytes=readFileSync(process.argv[3]);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);\n${invoke.toString()}\n${report.toString()}\n${finish.toString()}\n${parseContract.toString()}\n${stringifyContract.toString()}\n${rawContract.toString()}\n${errorsAndRecovery.toString()}\nconst a=instantiateManagedRuntime(bytes,{...options,initialPages:2});a.auto(1);\ntry{parseContract(a,js,parseCases);parseContract(a,js,mutationCases);stringifyContract(a,js);\nrawContract(a,js,rawTexts);errorsAndRecovery(a,js,invalidRaw);}finally{finish(a);}\nprocess.stdout.write('complete JSON callback source contracts preserved');`;\n  const child = spawnSync(process.env.NODE ?? 'node', ['--input-type=module', '--eval', script,\n    pathToFileURL(referenceFile).href, new URL('../tools/backends/managed-runtime.mjs', import.meta.url).href, wasmFile],\n  {encoding: 'utf8', input: JSON.stringify({options, parseCases, mutationCases, rawTexts, invalidRaw}), timeout: 30000, maxBuffer: 65536});\n  assert.equal(child.error, undefined);assert.equal(child.signal, null);assert.equal(child.status, 0, child.stderr);\n  assert.equal(child.stdout, 'complete JSON callback source contracts preserved');\n}, 30000);\n"))
+(module tests.wasm-managed-json-callbacks.test
+  (import "bun:test" afterAll beforeAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile realpath rm writeFile)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:process" :default process)
+  (import "node:url" pathToFileURL)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+  (defconst is-instance (js* "(a, b) => a instanceof b"))
+
+  (defconst fixture "tests/fixtures/wasm-managed-json-callbacks.eli")
+  (defconst target
+    (if (= (get process :arch) "arm64")
+      (cond
+        ((= (get process :platform) "darwin") "arm64-macos")
+        ((= (get process :platform) "linux") "arm64-linux")
+        (t undefined))
+      undefined))
+
+  (defconst options (js-object :maxSlots 4096 :initialBytes 131072 :maxBytes 4194304 :maximumPages 128))
+
+  (defconst parse-cases
+    (js-array
+      (js-array "null" 0)
+      (js-array "false" 0)
+      (js-array "-0" 0)
+      (js-array "9007199254740993" 0)
+      (js-array "1e9999" 0)
+      (js-array "-1e-9999" 0)
+      (js-array "\"\\u0041\\ud800\\udc00\\ud800中😀\"" 0)
+      (js-array "{\"b\":0,\"a\":9007199254740993,\"b\":-0,\"__proto__\":1,\"nested\":[true,null,\"\\u0041\"]}" 0)
+      (js-array "{\"a\":1,\"nested\":{\"z\":2}}" 6)
+      (js-array "1" 3)
+      (js-array "{\"value\":1}" 7)))
+
+  (defconst mutation-cases
+    (js-array
+      (js-array "{\"a\":1,\"b\":2,\"gone\":3}" 1)
+      (js-array "[1,2,3]" 1)
+      (js-array "{\"a\":1,\"locked\":2}" 2)))
+
+  (defconst raw-texts
+    (js-array
+      "null" "false" "true" "0" "-0" "1.2" "1e+2" "1e-2" "1e400"
+      "1.2300e+02" "90071992547409931234567890" "1e9999" "-1e-9999"
+      "\"\"" "\"\\u0000\"" "\"\\ud800\"" "\"\\udc00\"" "\"\\u0041\\ud800\\udc00\\ud800\""
+      "\"中😀\"" "\"\\/\\\\\\\"\"" "\"\\b\\f\\n\\r\\t\""))
+
+  (defconst invalid-raw
+    (js-array
+      "" " " "\t" " null" "null " "\tnull" "null\n" "\ufeffnull" "null\ufeff"
+      "[]" "{}" "[1]" "{\"a\":1}" "01" "-01" "+1" "-" ".1" "1." "1e" "1e+" "1e-"
+      "NaN" "Infinity" "-Infinity" "undefined" "true false" "null0" "1true" "1 2"
+      "tru" "True" "fals" "nul" "\"unterminated" "\"\\x20\"" "\"\\u12\"" "\"\\u12X4\""
+      "\"a\nb\"" "\"a\tb\"" "\"\u0000\""))
+
+  (defvar directory nil)
+  (defvar backend nil)
+  (defvar lowered nil)
+  (defvar bytes nil)
+  (defvar wasm-file nil)
+  (defvar native-file nil)
+  (defvar reference-file nil)
+  (defvar reference nil)
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-json-callbacks-"))))
+      (setq backend (await (buildBackends (js-object :outputRoot directory))))
+      (let* ((program (js-call (get backend :compiler) :compile_ir_string (await (readFile fixture "utf8")) fixture))
+             (saved (JSON/stringify program))
+             (runtime (js-call (get backend :compiler) :compile_ir_string (await (readFile "bootstrap/runtime/memory.eli" "utf8")) "runtime.eli")))
+        (setq lowered (js-call (get backend :managed) :lower_managed_program program runtime t))
+        (let ((raw (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) (js-object :initialPages 2 :maximumPages 128))))
+          (setq bytes (Uint8Array/from (js-call (get backend :wasm) :append_metadata_section raw "eliscript-managed-control" (JSON/stringify (get lowered :descriptor))))))
+        (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+        (setq wasm-file (resolve directory "callbacks.wasm"))
+        (await (writeFile wasm-file bytes))
+        (when (not (nullish? target))
+          (setq native-file (resolve directory (if (= target "arm64-linux") "callbacks.so" "callbacks.dylib")))
+          (await (writeFile native-file (Uint8Array/from (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) target)))))
+        (setq reference-file (resolve directory "callbacks.mjs"))
+        (await (writeFile reference-file (js-call (get backend :compiler) :emit_ir_string program)))
+        (setq reference-file (await (realpath reference-file)))
+        (setq reference (await (funcall dynamic-import (get (pathToFileURL reference-file) :href))))
+        (js-call assert :equal (JSON/stringify program) saved)))
+    120000)
+
+  (afterAll
+    (async ()
+      (setq lowered undefined)
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun invoke-val (a name &rest __host_default_arguments_1)
+    (let* ((values (aref __host_default_arguments_1 0)))
+    (let* ((vals (if (undefined? values) (js-array) values))
+           (owned (js-array))
+           (args (js-call vals :map
+                   (lambda (value)
+                     (let ((ty (funcall js-typeof value)))
+                       (if (and (/= ty "number") (/= ty "string"))
+                         value
+                         (let ((handle (if (= ty "number") (js-call a :number value) (js-call a :string value))))
+                           (js-call owned :push handle)
+                           handle)))))))
+      (try
+        (js-call a :invoke name args)
+        (catch err
+          (when (and (funcall is-instance err globalThis.Error)
+                     (eq (get err :constructor) globalThis.Error)
+                     (/= name "failure-phase"))
+            (try
+              (let ((phase (js-call a :invoke "failure-phase" (js-array))))
+                (try
+                  (js-call globalThis.console :error "JSON callback failure" name
+                    (js-call vals :filter (lambda (v) (= (funcall js-typeof v) "number")))
+                    (js-call a :readNumber phase))
+                  (finally (js-call a :release phase))))
+              (catch _ignored nil)))
+          (throw err))
+        (finally
+          (js-call owned :forEach (lambda (v) (js-call a :release v))))))))
+
+  (defun report-val (a name &rest __host_forwarded_arguments_1)
+    (let* ((values (aref __host_forwarded_arguments_1 0)))
+    (let ((value (invoke-val a name values)))
+      (try
+        (js-call a :readString value)
+        (finally (js-call a :release value))))))
+
+  (defun finish (a)
+    (try
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+      (finally
+        (when (= (funcall js-typeof (get a :close)) "function")
+          (js-call a :close)))))
+
+  (defasync for-each-target (run-fn)
+    (let ((kinds (if (not (nullish? target)) (js-array "wasm" "native") (js-array "wasm")))
+          (i 0))
+      (while (< i (length kinds))
+        (let* ((kind (aref kinds i))
+               (a (if (= kind "wasm")
+                    (instantiateManagedRuntime bytes (Object/assign (js-object) options (js-object :initialPages 2)))
+                    (await (instantiateNativeManagedRuntime native-file lowered
+                             (Object/assign (js-object) options (js-object :initialPages 2 :nativeTarget target)))))))
+          (js-call a :auto 1)
+          (try
+            (await (funcall run-fn a kind))
+            (finally (finish a))))
+        (setq i (+ i 1)))))
+
+  (defun parse-contract (a js records)
+    (js-call records :forEach
+      (lambda (args)
+        (let* ((actual (report-val a "parse-probe" args))
+               (expected (js-call (get js :parse_probe) :apply nil args)))
+          (js-call assert :equal actual expected (JSON/stringify args))
+          (let ((output (JSON/parse actual)))
+            (js-call assert :equal (aref output 3) t "each represented primitive source context is fresh")
+            (js-call (aref output 2) :forEach
+              (lambda (event)
+                (when (and (= (aref event 0) "reviver") (aref event 6))
+                  (js-call assert :deepEqual (aref event 8) (js-array t t t t)))))
+            (js-call a :collect)
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))))
+
+  (defun stringify-contract (a js)
+    (js-call (js-array 0 1 2 3 6) :forEach
+      (lambda (mode)
+        (let ((actual (report-val a "stringify-probe" (js-array mode))))
+          (js-call assert :equal actual (js-call js :stringify_probe mode))
+          (let ((output (JSON/parse actual)))
+            (when (= mode 2)
+              (js-call assert :equal (aref output 0) t))
+            (when (= mode 1)
+              (js-call assert :equal (aref (aref output 2) 0) "space valueOf" "space conversion precedes the root replacer"))
+            (when (= mode 3)
+              (funcall assert (js-call (aref output 1) :includes "9007199254740993") "raw replacement retains the full original integer"))
+            (js-call a :collect)
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))
+    (js-call assert :equal (report-val a "property-list-probe") (js-call js :property_list_probe)))
+
+  (defun raw-contract (a js texts)
+    (js-call texts :forEach
+      (lambda (text)
+        (js-call (js-array 0 1) :forEach
+          (lambda (mode)
+            (let ((actual (report-val a "raw-probe" (js-array text mode))))
+              (js-call assert :equal actual (js-call js :raw_probe text mode) text)
+              (let ((value (JSON/parse actual)))
+                (js-call assert :equal (aref value 0) text)
+                (js-call assert :equal (aref value 1) t)
+                (js-call assert :equal (aref value 2) t)
+                (js-call assert :deepEqual (aref value 3) (js-array "rawJSON"))
+                (js-call assert :deepEqual (aref value 4) (js-array t false t false))
+                (js-call assert :deepEqual (js-call value :slice 5 11) (js-array t false false false false false))
+                (funcall assert (js-call (aref value 11) :includes (str "\"raw\":" text)))
+                (funcall assert (js-call (aref value 11) :includes (str "\"also\":" text)))
+                (funcall assert (js-call (aref value 11) :includes "\"hook\":1.2300e+02"))
+                (js-call assert :equal (length (js-call (aref value 12) :filter (lambda (ev) (= ev "ToString")))) mode)
+                (js-call a :collect)
+                (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))))))
+
+  (defun errors-and-recovery (a js rejected)
+    (let* ((held (js-call a :number -0.0))
+           (frame (js-call a :frame 1)))
+      (js-call a :frameSet frame 0 held)
+      (try
+        (js-call
+          (js-array
+            (js-array "parse-probe" (js-array "{\"a\":1}" 4) false)
+            (js-array "parse-probe" (js-array "{\"a\":1}" 5) undefined)
+            (js-array "stringify-probe" (js-array 8) false)
+            (js-array "stringify-probe" (js-array 9) undefined)
+            (js-array "raw-throw" (js-array false) false)
+            (js-array "raw-throw" (js-array undefined) undefined))
+          :forEach
+          (lambda (item)
+            (let ((name (aref item 0))
+                  (args (aref item 1))
+                  (expected (aref item 2))
+                  (source-threw false)
+                  (managed-threw false))
+              (try
+                (js-call (aref js (js-call name :replaceAll "-" "_")) :apply nil args)
+                (catch err
+                  (setq source-threw t)
+                  (js-call assert :strictEqual err expected)))
+              (try
+                (invoke-val a name args)
+                (catch err
+                  (setq managed-threw t)
+                  (js-call assert :strictEqual err expected)))
+              (js-call assert :equal source-threw t)
+              (js-call assert :equal managed-threw t)
+              (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+              (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+              (js-call assert :equal (report-val a "recover") (js-call js :recover)))))
+        (js-call rejected :forEach
+          (lambda (text)
+            (js-call assert :throws (lambda () (js-call js :raw_probe text 0)) globalThis.SyntaxError)
+            (js-call assert :throws (lambda () (invoke-val a "raw-probe" (js-array text 0))) globalThis.SyntaxError)
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)))
+        (js-call (js-array 4 7) :forEach
+          (lambda (mode)
+            (js-call assert :throws (lambda () (js-call js :stringify_probe mode)) globalThis.TypeError)
+            (js-call assert :throws (lambda () (invoke-val a "stringify-probe" (js-array mode))) globalThis.TypeError)
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)))
+        (js-call assert :equal (report-val a "recover") (js-call js :recover))
+        (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+        (finally
+          (js-call a :leaveFrame frame)
+          (js-call a :release held)))))
+
+  (test "Given JSON source tokens When a three-argument reviver traverses postorder Then holder keys exact primitive contexts and nested calls match JS"
+    (async ()
+      (await (for-each-target (lambda (a _kind) (parse-contract a reference parse-cases)))))
+    30000)
+
+  (test "Given reviver mutations When pending properties change disappear or become nonconfigurable Then source contexts invalidate without adding visits or throwing"
+    (async ()
+      (await (for-each-target (lambda (a _kind) (parse-contract a reference mutation-cases)))))
+    30000)
+
+  (test "Given toJSON replacer boxed values holes property lists and space When stringified Then exact callback order keys snapshots and raw BigInt replacement survive GC"
+    (async ()
+      (await (for-each-target (lambda (a _kind) (stringify-contract a reference)))))
+    30000)
+
+  (test "Given raw JSON primitives When wrapped cloned inherited frozen and stringified Then only the genuine brand injects its unchanged source text"
+    (async ()
+      (await (for-each-target (lambda (a _kind) (raw-contract a reference raw-texts)))))
+    30000)
+
+  (test "Given invalid raw text cycles BigInts and falsy callback throws When execution fails Then the first source value caller roots and later JSON operations survive"
+    (async ()
+      (await (for-each-target (lambda (a _kind) (errors-and-recovery a reference invalid-raw)))))
+    30000)
+
+  (test "Given the identical callback fixture When run by independent Node and real WASM Then complete parse stringify raw brands and cleanup match"
+    (lambda ()
+      (let* ((node-bin (let ((env-node (get (get process :env) :NODE))) (if (nullish? env-node) "node" env-node)))
+             (runner (resolve "tests/helpers/wasm-managed-json-callbacks-node.mjs"))
+             (rt-href (get (new globalThis.URL "../tools/backends/managed-runtime.mjs" (get (js* "import.meta") :url)) :href))
+             (child (spawnSync node-bin
+                      (js-array runner (get (pathToFileURL reference-file) :href) rt-href wasm-file)
+                      (js-object
+                        :encoding "utf8"
+                        :input (JSON/stringify
+                                 (js-object
+                                   :options options
+                                   :parseCases parse-cases
+                                   :mutationCases mutation-cases
+                                   :rawTexts raw-texts
+                                   :invalidRaw invalid-raw))
+                        :timeout 30000
+                        :maxBuffer 65536))))
+        (js-call assert :equal (get child :error) undefined)
+        (js-call assert :equal (get child :signal) nil)
+        (js-call assert :equal (get child :status) 0 (get child :stderr))
+        (js-call assert :equal (get child :stdout) "complete JSON callback source contracts preserved")))
+    30000))

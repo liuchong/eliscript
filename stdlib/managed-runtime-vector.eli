@@ -9,7 +9,8 @@
     (when (<= (js-length values) 32) (funcall freeze values))
     (js-call PersistentVector :from values))
   (defun isPersistentVector (value) (literal-instance? value PersistentVector))
-  (defun subvec (vector start &optional end) (literal-subvec vector start end))
+  (defun subvec (vector start &optional end)
+    (if (nullish? end) (literal-subvec vector start) (literal-subvec vector start end)))
   (defun readPersistentVectorView (value)
     (if (not (= (literal-type value) 8)) undefined
       (let ((state (js-call view-states :get value)))

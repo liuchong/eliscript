@@ -1,2 +1,107 @@
-(module capsules.tests.worker-value-codec.test
-  (js* "import { expect, test } from \"bun:test\";\nimport {\n  eliscriptSymbol,\n  keyword,\n} from \"../runtime/core/identifier.mjs\";\nimport { persistentList } from \"../runtime/core/list.mjs\";\nimport { persistentHashMap } from \"../runtime/core/map.mjs\";\nimport { meta, withMeta } from \"../runtime/core/metadata.mjs\";\nimport {\n  defineProtocol,\n  defineProtocolFromDefinition,\n  protocolDefinition,\n  protocolSlot,\n} from \"../runtime/core/protocol.mjs\";\nimport { persistentHashSet } from \"../runtime/core/set.mjs\";\nimport { transient } from \"../runtime/core/transient.mjs\";\nimport { equalValues } from \"../runtime/core/value.mjs\";\nimport { persistentVector } from \"../runtime/core/vector.mjs\";\nimport {\n  WorkerValueCodecError,\n  decodeWorkerValue,\n  decodeWorkerValues,\n  encodeWorkerValue,\n  encodeWorkerValues,\n  workerValueEncoding,\n} from \"../runtime/worker-value-codec.mjs\";\n\ntest(\"worker value codec preserves persistent categories and metadata\", () => {\n  const metadata = persistentHashMap([keyword(\"source\"), \"emacs\"]);\n  const value = withMeta(persistentList(\n    keyword(\"app\", \"ready\"),\n    withMeta(eliscriptSymbol(\"model\", \"item\"), metadata),\n    persistentVector(undefined, -0, Number.NaN, Number.POSITIVE_INFINITY),\n    persistentHashMap(\n      [keyword(\"enabled\"), true],\n      [eliscriptSymbol(\"count\"), 3],\n    ),\n    persistentHashSet(\"alpha\", keyword(\"beta\")),\n  ), metadata);\n\n  const encoded = encodeWorkerValue(value);\n  const decoded = decodeWorkerValue(encoded);\n\n  expect(workerValueEncoding).toBe(\"eliscript-value-v1\");\n  expect(equalValues(decoded, value)).toBe(true);\n  expect(equalValues(meta(decoded), metadata)).toBe(true);\n  expect(equalValues(meta(decoded.nth(1)), metadata)).toBe(true);\n  expect(decoded.nth(2).nth(0)).toBeUndefined();\n  expect(Object.is(decoded.nth(2).nth(1), -0)).toBe(true);\n  expect(Number.isNaN(decoded.nth(2).nth(2))).toBe(true);\n  expect(decoded.nth(2).nth(3)).toBe(Number.POSITIVE_INFINITY);\n  expect(encodeWorkerValue(decoded)).toEqual(encoded);\n\n  const hostValue = [1, { ready: false }];\n  expect(decodeWorkerValue(encodeWorkerValue(hostValue))).toEqual(hostValue);\n  const sparse = Array(1);\n  const sparseWire = encodeWorkerValue(sparse);\n  expect(sparseWire).toEqual([\"array\", [[\"undefined\"]]]);\n  expect(decodeWorkerValue(JSON.parse(JSON.stringify(sparseWire))))\n    .toEqual([undefined]);\n});\n\ntest(\"worker value codec emits deterministic Map, Set, and object order\", () => {\n  const left = persistentHashMap(\n    [keyword(\"z\"), 1],\n    [keyword(\"a\"), 2],\n  );\n  const right = persistentHashMap(\n    [keyword(\"a\"), 2],\n    [keyword(\"z\"), 1],\n  );\n  expect(encodeWorkerValue(left)).toEqual(encodeWorkerValue(right));\n  expect(encodeWorkerValue(persistentHashSet(\"z\", \"a\"))).toEqual(\n    encodeWorkerValue(persistentHashSet(\"a\", \"z\")),\n  );\n  expect(encodeWorkerValue({ z: 1, a: 2 })).toEqual(\n    encodeWorkerValue({ a: 2, z: 1 }),\n  );\n  expect(encodeWorkerValue(persistentHashSet(\"😀\", \"\\uE000\"))).toEqual(\n    [\"set\", [\"\\uE000\", \"😀\"], null],\n  );\n});\n\ntest(\"worker value codec transports protocol definitions without runtime identity\", () => {\n  const original = defineProtocol(\"WorkerReadable\", [\"read\", \"close\"]);\n  const originalDefinition = protocolDefinition(original);\n  const transported = decodeWorkerValue(encodeWorkerValue(originalDefinition));\n  const restored = defineProtocolFromDefinition(transported);\n\n  expect(transported).toEqual(originalDefinition);\n  expect(protocolDefinition(restored)).toEqual(originalDefinition);\n  expect(protocolSlot(restored, \"read\"))\n    .not.toBe(protocolSlot(original, \"read\"));\n  expect(() => encodeWorkerValue(original)).toThrow(\n    /unsupported function value/,\n  );\n});\n\ntest(\"worker value codec rejects unsupported, cyclic, duplicate, and oversized values\", () => {\n  const cycle = [];\n  cycle.push(cycle);\n  expect(() => encodeWorkerValue(cycle)).toThrow(WorkerValueCodecError);\n  expect(() => encodeWorkerValue(() => 1)).toThrow(\n    /unsupported function value at \\$/,\n  );\n  expect(() => encodeWorkerValue(transient(persistentVector(1)))).toThrow(\n    /unsupported object/,\n  );\n  expect(() => encodeWorkerValue([1, 2, 3], {\n    maxCollectionLength: 2,\n  })).toThrow(/collection exceeds 2 values/);\n  expect(() => decodeWorkerValue(\n    [\"map\", [[[\"keyword\", null, \"x\"], 1], [[\"keyword\", null, \"x\"], 2]], null],\n  )).toThrow(/equivalent duplicate key/);\n  expect(() => decodeWorkerValue([\"unknown\"])).toThrow(/unknown value tag/);\n  expect(() => decodeWorkerValue([\"array\", [[\"array\", [1]]]], {\n    maxDepth: 1,\n  })).toThrow(/value exceeds depth 1/);\n});\n\ntest(\"worker value codec shares one resource budget across argument vectors\", () => {\n  const encoded = encodeWorkerValues([\n    persistentVector(1, 2),\n    persistentList(3, 4),\n  ]);\n  const decoded = decodeWorkerValues(encoded);\n  expect(equalValues(decoded[0], persistentVector(1, 2))).toBe(true);\n  expect(equalValues(decoded[1], persistentList(3, 4))).toBe(true);\n  expect(() => decodeWorkerValues(encoded, { maxNodes: 3 })).toThrow(\n    /value exceeds 3 nodes/,\n  );\n});\n"))
+(module tests.worker-value-codec
+  (import "bun:test" expect test)
+  (import "../runtime/core/identifier.mjs" eliscriptSymbol keyword)
+  (import "../runtime/core/list.mjs" persistentList)
+  (import "../runtime/core/map.mjs" persistentHashMap)
+  (import "../runtime/core/metadata.mjs" meta withMeta)
+  (import "../runtime/core/protocol.mjs" defineProtocol defineProtocolFromDefinition protocolDefinition protocolSlot)
+  (import "../runtime/core/set.mjs" persistentHashSet)
+  (import "../runtime/core/transient.mjs" :as transient-mod)
+  (import "../runtime/core/value.mjs" equalValues)
+  (import "../runtime/core/vector.mjs" persistentVector)
+  (import "../runtime/worker-value-codec.mjs"
+    WorkerValueCodecError decodeWorkerValue decodeWorkerValues
+    encodeWorkerValue encodeWorkerValues workerValueEncoding)
+
+  (test "worker value codec preserves persistent categories and metadata"
+    (lambda ()
+      (let* ((metadata (persistentHashMap (js-array (keyword "source") "emacs")))
+             (value (withMeta
+                      (persistentList
+                        (keyword "app" "ready")
+                        (withMeta (eliscriptSymbol "model" "item") metadata)
+                        (persistentVector undefined -0 globalThis.Number.NaN globalThis.Number.POSITIVE_INFINITY)
+                        (persistentHashMap
+                          (js-array (keyword "enabled") t)
+                          (js-array (eliscriptSymbol "count") 3))
+                        (persistentHashSet "alpha" (keyword "beta")))
+                      metadata))
+             (encoded (encodeWorkerValue value))
+             (decoded (decodeWorkerValue encoded)))
+        (js-call (expect workerValueEncoding) :toBe "eliscript-value-v1")
+        (js-call (expect (equalValues decoded value)) :toBe t)
+        (js-call (expect (equalValues (meta decoded) metadata)) :toBe t)
+        (js-call (expect (equalValues (meta (js-call decoded :nth 1)) metadata)) :toBe t)
+        (js-call (expect (js-call (js-call decoded :nth 2) :nth 0)) :toBeUndefined)
+        (js-call (expect (Object/is (js-call (js-call decoded :nth 2) :nth 1) -0)) :toBe t)
+        (js-call (expect (Number/isNaN (js-call (js-call decoded :nth 2) :nth 2))) :toBe t)
+        (js-call (expect (js-call (js-call decoded :nth 2) :nth 3)) :toBe globalThis.Number.POSITIVE_INFINITY)
+        (js-call (expect (encodeWorkerValue decoded)) :toEqual encoded)
+        (let ((hostValue (js-array 1 (js-object :ready false))))
+          (js-call (expect (decodeWorkerValue (encodeWorkerValue hostValue))) :toEqual hostValue))
+        (let* ((sparse (globalThis.Array 1))
+               (sparseWire (encodeWorkerValue sparse)))
+          (js-call (expect sparseWire) :toEqual (js-array "array" (js-array (js-array "undefined"))))
+          (js-call (expect (decodeWorkerValue (JSON/parse (JSON/stringify sparseWire))))
+            :toEqual (js-array undefined))))))
+
+  (test "worker value codec emits deterministic Map, Set, and object order"
+    (lambda ()
+      (let ((left (persistentHashMap (js-array (keyword "z") 1) (js-array (keyword "a") 2)))
+            (right (persistentHashMap (js-array (keyword "a") 2) (js-array (keyword "z") 1))))
+        (js-call (expect (encodeWorkerValue left)) :toEqual (encodeWorkerValue right))
+        (js-call (expect (encodeWorkerValue (persistentHashSet "z" "a")))
+          :toEqual (encodeWorkerValue (persistentHashSet "a" "z")))
+        (js-call (expect (encodeWorkerValue (js-object :z 1 :a 2)))
+          :toEqual (encodeWorkerValue (js-object :a 2 :z 1)))
+        (js-call (expect (encodeWorkerValue (persistentHashSet "😀" "\uE000")))
+          :toEqual (js-array "set" (js-array "\uE000" "😀") nil)))))
+
+  (test "worker value codec transports protocol definitions without runtime identity"
+    (lambda ()
+      (let* ((original (defineProtocol "WorkerReadable" (js-array "read" "close")))
+             (originalDefinition (protocolDefinition original))
+             (transported (decodeWorkerValue (encodeWorkerValue originalDefinition)))
+             (restored (defineProtocolFromDefinition transported)))
+        (js-call (expect transported) :toEqual originalDefinition)
+        (js-call (expect (protocolDefinition restored)) :toEqual originalDefinition)
+        (js-call (get (expect (protocolSlot restored "read")) :not)
+          :toBe (protocolSlot original "read"))
+        (js-call (expect (lambda () (encodeWorkerValue original)))
+          :toThrow (new globalThis.RegExp "unsupported function value")))))
+
+  (test "worker value codec rejects unsupported, cyclic, duplicate, and oversized values"
+    (lambda ()
+      (let ((cycle (js-array)))
+        (js-call cycle :push cycle)
+        (js-call (expect (lambda () (encodeWorkerValue cycle))) :toThrow WorkerValueCodecError)
+        (js-call (expect (lambda () (encodeWorkerValue (lambda () 1))))
+          :toThrow (new globalThis.RegExp "unsupported function value at \\$"))
+        (js-call (expect (lambda () (encodeWorkerValue (js-call transient-mod :transient (persistentVector 1)))))
+          :toThrow (new globalThis.RegExp "unsupported object"))
+        (js-call (expect (lambda () (encodeWorkerValue (js-array 1 2 3) (js-object :maxCollectionLength 2))))
+          :toThrow (new globalThis.RegExp "collection exceeds 2 values"))
+        (js-call (expect (lambda ()
+                           (decodeWorkerValue
+                             (js-array "map"
+                               (js-array
+                                 (js-array (js-array "keyword" nil "x") 1)
+                                 (js-array (js-array "keyword" nil "x") 2))
+                               nil))))
+          :toThrow (new globalThis.RegExp "equivalent duplicate key"))
+        (js-call (expect (lambda () (decodeWorkerValue (js-array "unknown"))))
+          :toThrow (new globalThis.RegExp "unknown value tag"))
+        (js-call (expect (lambda ()
+                           (decodeWorkerValue
+                             (js-array "array" (js-array (js-array "array" (js-array 1))))
+                             (js-object :maxDepth 1))))
+          :toThrow (new globalThis.RegExp "value exceeds depth 1")))))
+
+  (test "worker value codec shares one resource budget across argument vectors"
+    (lambda ()
+      (let* ((encoded (encodeWorkerValues (js-array (persistentVector 1 2) (persistentList 3 4))))
+             (decoded (decodeWorkerValues encoded)))
+        (js-call (expect (equalValues (aref decoded 0) (persistentVector 1 2))) :toBe t)
+        (js-call (expect (equalValues (aref decoded 1) (persistentList 3 4))) :toBe t)
+        (js-call (expect (lambda () (decodeWorkerValues encoded (js-object :maxNodes 3))))
+          :toThrow (new globalThis.RegExp "value exceeds 3 nodes"))))))

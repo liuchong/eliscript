@@ -1,0 +1,12 @@
+(module tests.fixtures.compiler-fragment-host
+  (import "../helpers/fragment-combine-contract.mjs" check)
+  (defconst load-module (js* "(specifier) => import(specifier)"))
+  (defasync run-host-main ()
+    (check (await (funcall load-module (aref (get globalThis.process :argv) 2)))))
+  (defconst completion (run-host-main))
+  (js-call completion :catch (lambda (error)
+    (console/error error)
+    (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

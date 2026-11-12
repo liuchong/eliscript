@@ -1,2 +1,572 @@
-(module capsules.runtime.core.transducer
-  (js* "import {\n  conj,\n  contains,\n  empty,\n  isReduced,\n  memoizedSequenceView,\n  reduce,\n  reduced,\n  reductionView,\n  seq,\n  unreduced,\n} from \"./collection.mjs\";\nimport { implementsProtocolOperation } from \"./protocol.mjs\";\nimport { EMPTY_SET } from \"./set.mjs\";\nimport {\n  IEditable,\n  conjBang,\n  persistentBang,\n  transient,\n} from \"./transient.mjs\";\nimport { isTruthy } from \"./truth.mjs\";\nimport { equalValues } from \"./value.mjs\";\nimport { EMPTY_VECTOR } from \"./vector.mjs\";\n\nconst REDUCING_FUNCTION = Symbol(\"eliscript.transducer.reducing-function\");\nconst ZERO_INPUT = Symbol(\"eliscript.transducer.zero-input\");\nconst NO_PREVIOUS_VALUE = Symbol(\"eliscript.transducer.no-previous-value\");\nconst NO_PARTITION_KEY = Symbol(\"eliscript.transducer.no-partition-key\");\nconst NO_REDUCTION_INITIAL = Symbol(\"eliscript.transducer.no-reduction-initial\");\n\nfunction identity(value) {\n  return value;\n}\n\nfunction requireFunction(value, label) {\n  if (typeof value !== \"function\") {\n    throw new TypeError(`${label} must be a function`);\n  }\n  return value;\n}\n\nfunction requirePositiveSafeInteger(value, label) {\n  if (!Number.isSafeInteger(value) || value <= 0) {\n    throw new TypeError(`${label} must be a positive safe integer`);\n  }\n  return value;\n}\n\nfunction asReducingFunction(value, label) {\n  requireFunction(value, label);\n  return value[REDUCING_FUNCTION] === true ? value : completing(value);\n}\n\nfunction makeTransducer(transform, zeroInput = false) {\n  Object.defineProperty(transform, ZERO_INPUT, { value: zeroInput });\n  return Object.freeze(transform);\n}\n\nfunction applyTransducer(transducer, reducingFunction) {\n  requireFunction(transducer, \"transducer\");\n  return asReducingFunction(\n    transducer(reducingFunction),\n    \"transducer result\",\n  );\n}\n\nfunction createPartitionBuffer() {\n  let builder = transient(EMPTY_VECTOR);\n  let length = 0;\n  return Object.freeze({\n    append(value) {\n      builder = conjBang(builder, value);\n      length += 1;\n      return length;\n    },\n    flush(result, downstream) {\n      if (length === 0) return result;\n      const partition = persistentBang(builder);\n      builder = transient(EMPTY_VECTOR);\n      length = 0;\n      return downstream(result, partition);\n    },\n  });\n}\n\nconst IDENTITY_TRANSDUCER = makeTransducer((reducingFunction) =>\n  reducingFunction);\n\nexport function completing(step, complete = identity) {\n  requireFunction(step, \"reducing step\");\n  requireFunction(complete, \"reducing completion\");\n\n  const reducingFunction = (...arguments_) => {\n    if (arguments_.length === 1) {\n      return complete(arguments_[0]);\n    }\n    if (arguments_.length === 2) {\n      return step(arguments_[0], arguments_[1]);\n    }\n    throw new TypeError(\n      \"reducing functions accept one completion argument or two step arguments\",\n    );\n  };\n  Object.defineProperty(reducingFunction, REDUCING_FUNCTION, { value: true });\n  return Object.freeze(reducingFunction);\n}\n\nexport function mapping(transform) {\n  requireFunction(transform, \"mapping transform\");\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"mapping reducing function\",\n    );\n    return completing(\n      (result, input) => downstream(result, transform(input)),\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function mappingIndexed(transform) {\n  requireFunction(transform, \"mapping-indexed transform\");\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"mapping-indexed reducing function\",\n    );\n    let index = 0;\n    return completing(\n      (result, input) => {\n        const currentIndex = index;\n        index += 1;\n        return downstream(result, transform(currentIndex, input));\n      },\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function keeping(transform) {\n  requireFunction(transform, \"keeping transform\");\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"keeping reducing function\",\n    );\n    return completing(\n      (result, input) => {\n        const value = transform(input);\n        return value === null ? result : downstream(result, value);\n      },\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function keepingIndexed(transform) {\n  requireFunction(transform, \"keeping-indexed transform\");\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"keeping-indexed reducing function\",\n    );\n    let index = 0;\n    return completing(\n      (result, input) => {\n        const currentIndex = index;\n        index += 1;\n        const value = transform(currentIndex, input);\n        return value === null ? result : downstream(result, value);\n      },\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function catting() {\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"catting reducing function\",\n    );\n    return completing(\n      (result, input) => {\n        let stopped = false;\n        const flattened = reduce(\n          input,\n          (nestedResult, value) => {\n            const stepped = downstream(nestedResult, value);\n            if (isReduced(stepped)) stopped = true;\n            return stepped;\n          },\n          result,\n        );\n        return stopped ? reduced(flattened) : flattened;\n      },\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function mapcatting(transform) {\n  requireFunction(transform, \"mapcatting transform\");\n  return composeTransducers(mapping(transform), catting());\n}\n\nexport function filtering(predicate) {\n  requireFunction(predicate, \"filtering predicate\");\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"filtering reducing function\",\n    );\n    return completing(\n      (result, input) => isTruthy(predicate(input))\n        ? downstream(result, input)\n        : result,\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function removing(predicate) {\n  requireFunction(predicate, \"removing predicate\");\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"removing reducing function\",\n    );\n    return completing(\n      (result, input) => isTruthy(predicate(input))\n        ? result\n        : downstream(result, input),\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function taking(limit) {\n  if (!Number.isSafeInteger(limit) || limit < 0) {\n    throw new TypeError(\"taking limit must be a non-negative safe integer\");\n  }\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"taking reducing function\",\n    );\n    let remaining = limit;\n    return completing(\n      (result, input) => {\n        if (remaining === 0) {\n          return reduced(result);\n        }\n        remaining -= 1;\n        const stepped = downstream(result, input);\n        return remaining === 0 && !isReduced(stepped)\n          ? reduced(stepped)\n          : stepped;\n      },\n      (result) => downstream(result),\n    );\n  }, limit === 0);\n}\n\nexport function dropping(limit) {\n  if (!Number.isSafeInteger(limit) || limit < 0) {\n    throw new TypeError(\"dropping limit must be a non-negative safe integer\");\n  }\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"dropping reducing function\",\n    );\n    let remaining = limit;\n    return completing(\n      (result, input) => {\n        if (remaining > 0) {\n          remaining -= 1;\n          return result;\n        }\n        return downstream(result, input);\n      },\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function takingWhile(predicate) {\n  requireFunction(predicate, \"taking-while predicate\");\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"taking-while reducing function\",\n    );\n    return completing(\n      (result, input) => isTruthy(predicate(input))\n        ? downstream(result, input)\n        : reduced(result),\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function droppingWhile(predicate) {\n  requireFunction(predicate, \"dropping-while predicate\");\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"dropping-while reducing function\",\n    );\n    let dropping = true;\n    return completing(\n      (result, input) => {\n        if (dropping && isTruthy(predicate(input))) return result;\n        dropping = false;\n        return downstream(result, input);\n      },\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function takingNth(interval) {\n  requirePositiveSafeInteger(interval, \"taking-nth interval\");\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"taking-nth reducing function\",\n    );\n    let remaining = 0;\n    return completing(\n      (result, input) => {\n        if (remaining > 0) {\n          remaining -= 1;\n          return result;\n        }\n        remaining = interval - 1;\n        return downstream(result, input);\n      },\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function interposing(separator) {\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"interposing reducing function\",\n    );\n    let started = false;\n    return completing(\n      (result, input) => {\n        if (!started) {\n          started = true;\n          return downstream(result, input);\n        }\n        const separated = downstream(result, separator);\n        return isReduced(separated)\n          ? separated\n          : downstream(separated, input);\n      },\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function partitioningAll(size) {\n  requirePositiveSafeInteger(size, \"partitioning-all size\");\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"partitioning-all reducing function\",\n    );\n    const buffer = createPartitionBuffer();\n    return completing(\n      (result, input) => buffer.append(input) === size\n        ? buffer.flush(result, downstream)\n        : result,\n      (result) => downstream(unreduced(buffer.flush(result, downstream))),\n    );\n  });\n}\n\nexport function partitioningBy(classifier) {\n  requireFunction(classifier, \"partitioning-by classifier\");\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"partitioning-by reducing function\",\n    );\n    const buffer = createPartitionBuffer();\n    let previousKey = NO_PARTITION_KEY;\n    return completing(\n      (result, input) => {\n        const key = classifier(input);\n        if (previousKey === NO_PARTITION_KEY || equalValues(previousKey, key)) {\n          previousKey = key;\n          buffer.append(input);\n          return result;\n        }\n        const stepped = buffer.flush(result, downstream);\n        if (isReduced(stepped)) return stepped;\n        previousKey = key;\n        buffer.append(input);\n        return stepped;\n      },\n      (result) => downstream(unreduced(buffer.flush(result, downstream))),\n    );\n  });\n}\n\nexport function deduping() {\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"deduping reducing function\",\n    );\n    let previous = NO_PREVIOUS_VALUE;\n    return completing(\n      (result, input) => {\n        if (previous !== NO_PREVIOUS_VALUE && equalValues(previous, input)) {\n          return result;\n        }\n        previous = input;\n        return downstream(result, input);\n      },\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function distincting() {\n  return makeTransducer((reducingFunction) => {\n    const downstream = asReducingFunction(\n      reducingFunction,\n      \"distincting reducing function\",\n    );\n    let seen = EMPTY_SET;\n    return completing(\n      (result, input) => {\n        if (contains(seen, input)) return result;\n        seen = conj(seen, input);\n        return downstream(result, input);\n      },\n      (result) => downstream(result),\n    );\n  });\n}\n\nexport function composeTransducers(...transducers) {\n  for (const transducer of transducers) {\n    requireFunction(transducer, \"composed transducer\");\n  }\n  return makeTransducer(\n    (reducingFunction) => transducers.reduceRight(\n      (downstream, transducer) => applyTransducer(transducer, downstream),\n      asReducingFunction(reducingFunction, \"composed reducing function\"),\n    ),\n    transducers.some((transducer) => transducer[ZERO_INPUT] === true),\n  );\n}\n\nexport function transduce(transducer, reducer, initial, collection) {\n  if (arguments.length !== 4) {\n    throw new TypeError(\n      \"transduce requires a transducer, reducer, initial value, and collection\",\n    );\n  }\n  const transformed = applyTransducer(\n    transducer,\n    asReducingFunction(reducer, \"transduce reducer\"),\n  );\n  const seed = unreduced(initial);\n  const result = transducer[ZERO_INPUT] === true\n    ? seed\n    : reduce(collection, transformed, seed);\n  return unreduced(transformed(unreduced(result)));\n}\n\nexport function eduction(...arguments_) {\n  if (arguments_.length < 2) {\n    throw new TypeError(\"eduction requires one or more transducers and a collection\");\n  }\n  const collection = arguments_[arguments_.length - 1];\n  const transducer = composeTransducers(...arguments_.slice(0, -1));\n  return reductionView((reducer, ...initial) => {\n    requireFunction(reducer, \"eduction reducer\");\n    if (initial.length > 0) {\n      return transduce(\n        transducer,\n        completing(reducer),\n        initial[0],\n        collection,\n      );\n    }\n    return transduce(\n      transducer,\n      completing(\n        (result, value) => result === NO_REDUCTION_INITIAL\n          ? value\n          : reducer(result, value),\n        (result) => {\n          if (result === NO_REDUCTION_INITIAL) {\n            throw new TypeError(\n              \"cannot reduce an empty eduction without an initial value\",\n            );\n          }\n          return result;\n        },\n      ),\n      NO_REDUCTION_INITIAL,\n      collection,\n    );\n  });\n}\n\nfunction transformedSequenceIterator(transducer, collection) {\n  const output = [];\n  let outputIndex = 0;\n  let input = null;\n  let transformed = null;\n  let accumulator = null;\n  let initialized = false;\n  let complete = false;\n\n  function closeInput() {\n    if (input !== null && typeof input.return === \"function\") input.return();\n    input = null;\n  }\n\n  function finish() {\n    if (complete) return;\n    complete = true;\n    closeInput();\n    accumulator = unreduced(transformed(unreduced(accumulator)));\n  }\n\n  function initialize() {\n    if (initialized) return;\n    initialized = true;\n    transformed = applyTransducer(\n      transducer,\n      completing((result, value) => {\n        output.push(value);\n        return result;\n      }),\n    );\n    if (transducer[ZERO_INPUT] === true) {\n      finish();\n      return;\n    }\n    const source = seq(collection);\n    if (source === null) {\n      finish();\n      return;\n    }\n    input = source[Symbol.iterator]();\n  }\n\n  function pump() {\n    initialize();\n    while (outputIndex === output.length && !complete) {\n      output.length = 0;\n      outputIndex = 0;\n      let next;\n      try {\n        next = input.next();\n      } catch (error) {\n        closeInput();\n        complete = true;\n        throw error;\n      }\n      if (next.done) {\n        finish();\n        continue;\n      }\n      let stepped;\n      try {\n        stepped = transformed(accumulator, next.value);\n      } catch (error) {\n        closeInput();\n        complete = true;\n        throw error;\n      }\n      if (isReduced(stepped)) {\n        accumulator = unreduced(stepped);\n        finish();\n      } else {\n        accumulator = stepped;\n      }\n    }\n  }\n\n  return {\n    next() {\n      pump();\n      if (outputIndex === output.length) {\n        return { value: undefined, done: true };\n      }\n      const value = output[outputIndex];\n      outputIndex += 1;\n      return { value, done: false };\n    },\n    return(value) {\n      output.length = 0;\n      outputIndex = 0;\n      complete = true;\n      closeInput();\n      return { value, done: true };\n    },\n    [Symbol.iterator]() {\n      return this;\n    },\n  };\n}\n\nexport function sequence(transducer, collection) {\n  if (arguments.length !== 2) {\n    throw new TypeError(\"sequence requires a transducer and collection\");\n  }\n  requireFunction(transducer, \"sequence transducer\");\n  return memoizedSequenceView(() =>\n    transformedSequenceIterator(transducer, collection));\n}\n\nexport function runBang(procedure, collection) {\n  if (arguments.length !== 2) {\n    throw new TypeError(\"run! requires a procedure and collection\");\n  }\n  requireFunction(procedure, \"run! procedure\");\n  reduce(collection, (_result, value) => {\n    procedure(value);\n    return null;\n  }, null);\n  return null;\n}\n\nexport function into(target, ...arguments_) {\n  if (arguments_.length !== 1 && arguments_.length !== 2) {\n    throw new TypeError(\n      \"into requires a target and source, or a target, transducer, and source\",\n    );\n  }\n  const transducer = arguments_.length === 1\n    ? IDENTITY_TRANSDUCER\n    : arguments_[0];\n  const source = arguments_.length === 1 ? arguments_[0] : arguments_[1];\n  const seed = empty(target);\n  if (implementsProtocolOperation(IEditable, \"transient\", seed)) {\n    return transduce(\n      transducer,\n      completing(\n        (result, value) => conjBang(result, value),\n        (result) => persistentBang(result),\n      ),\n      transient(seed),\n      source,\n    );\n  }\n  return transduce(\n    transducer,\n    (result, value) => conj(result, value),\n    seed,\n    source,\n  );\n}\n"))
+(module eliscript.runtime.core.transducer
+  (import "./collection.mjs"
+    conj
+    contains
+    empty
+    isReduced
+    memoizedSequenceView
+    reduce
+    reduced
+    reductionView
+    seq
+    unreduced)
+  (import "./protocol.mjs" implementsProtocolOperation)
+  (import "./set.mjs" EMPTY_SET)
+  (import "./transient.mjs" IEditable conjBang persistentBang transient)
+  (import "./truth.mjs" isTruthy)
+  (import "./value.mjs" equalValues)
+  (import "./vector.mjs" EMPTY_VECTOR)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst reducing-function-key (funcall globalThis/Symbol "eliscript.transducer.reducing-function"))
+  (defconst zero-input-key (funcall globalThis/Symbol "eliscript.transducer.zero-input"))
+  (defconst no-previous (funcall globalThis/Symbol "eliscript.transducer.no-previous-value"))
+  (defconst no-partition (funcall globalThis/Symbol "eliscript.transducer.no-partition-key"))
+  (defconst no-initial (funcall globalThis/Symbol "eliscript.transducer.no-reduction-initial"))
+
+  (defun fail (message)
+    (throw (new globalThis/TypeError message)))
+
+  (defun identity (value)
+    value)
+
+  (defun callable? (value)
+    (= (funcall typeof-value value) "function"))
+
+  (defun truth (value)
+    (funcall globalThis/Boolean value))
+
+  (defun require-function (value label)
+    (unless (callable? value)
+      (fail (str label " must be a function")))
+    value)
+
+  (defun require-positive (value label)
+    (unless (and (Number/isSafeInteger value) (> value 0))
+      (fail (str label " must be a positive safe integer")))
+    value)
+
+  (defun as-reducer (value label)
+    (require-function value label)
+    (if (eq (aref value reducing-function-key) t) value (completing value)))
+
+  (defun make-transducer (transform &rest optional)
+    (let ((zero-input (if (or (= (js-length optional) 0) (undefined? (get optional 0)))
+                          false
+                          (get optional 0))))
+      (Object/defineProperty transform zero-input-key (js-object :value zero-input))
+      (Object/freeze transform)))
+
+  (defun apply-transducer (transducer reducer)
+    (require-function transducer "transducer")
+    (as-reducer (funcall transducer reducer) "transducer result"))
+
+  (defun method (implementation name arity)
+    (let ((function (funcall
+                      (js* "(fn, name) => ({ [name](...args) { return fn(this, ...args); } })[name]")
+                      implementation
+                      name)))
+      (Object/defineProperty function "length" (js-object :value arity :configurable t))
+      function))
+
+  (defun partition-buffer ()
+    (let ((builder (transient EMPTY_VECTOR))
+          (length 0))
+      (Object/freeze
+        (js-object
+          :append (method
+                    (lambda (_self value)
+                      (setq builder (conjBang builder value)
+                            length (1+ length))
+                      length)
+                    "append"
+                    1)
+          :flush (method
+                   (lambda (_self result downstream)
+                     (if (= length 0)
+                         result
+                         (let ((partition (persistentBang builder)))
+                           (setq builder (transient EMPTY_VECTOR)
+                                 length 0)
+                           (funcall downstream result partition))))
+                   "flush"
+                   2)))))
+
+  (defconst identity-transducer (make-transducer (lambda (reducer) reducer) false))
+
+  (defun completing (step &rest optional-complete)
+    (let ((complete (if (or (= (js-length optional-complete) 0) (undefined? (get optional-complete 0)))
+                        identity
+                        (get optional-complete 0))))
+      (require-function step "reducing step")
+      (require-function complete "reducing completion")
+      (let ((function (lambda (&rest arguments)
+                        (cond
+                          ((= (js-length arguments) 1) (funcall complete (get arguments 0)))
+                          ((= (js-length arguments) 2) (funcall step (get arguments 0) (get arguments 1)))
+                          (t (fail "reducing functions accept one completion argument or two step arguments"))))))
+        (Object/defineProperty function "name" (js-object :value "reducingFunction" :configurable t))
+        (Object/defineProperty function reducing-function-key (js-object :value t))
+        (Object/freeze function))))
+
+  (defun mapping (transform)
+    (require-function transform "mapping transform")
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "mapping reducing function")))
+          (completing
+            (lambda (result input) (funcall downstream result (funcall transform input)))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun mappingIndexed (transform)
+    (require-function transform "mapping-indexed transform")
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "mapping-indexed reducing function"))
+              (index 0))
+          (completing
+            (lambda (result input)
+              (let ((current index))
+                (setq index (1+ index))
+                (funcall downstream result (funcall transform current input))))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun keeping (transform)
+    (require-function transform "keeping transform")
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "keeping reducing function")))
+          (completing
+            (lambda (result input)
+              (let ((value (funcall transform input)))
+                (if (nil? value) result (funcall downstream result value))))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun keepingIndexed (transform)
+    (require-function transform "keeping-indexed transform")
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "keeping-indexed reducing function"))
+              (index 0))
+          (completing
+            (lambda (result input)
+              (let ((current index))
+                (setq index (1+ index))
+                (let ((value (funcall transform current input)))
+                  (if (nil? value) result (funcall downstream result value)))))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun catting ()
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "catting reducing function")))
+          (completing
+            (lambda (result input)
+              (let* ((stopped false)
+                     (flattened (reduce input
+                                  (lambda (nested value)
+                                    (let ((stepped (funcall downstream nested value)))
+                                      (when (isReduced stepped) (setq stopped t))
+                                      stepped))
+                                  result)))
+                (if stopped (reduced flattened) flattened)))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun mapcatting (transform)
+    (require-function transform "mapcatting transform")
+    (composeTransducers (mapping transform) (catting)))
+
+  (defun filtering (predicate)
+    (require-function predicate "filtering predicate")
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "filtering reducing function")))
+          (completing
+            (lambda (result input)
+              (if (isTruthy (funcall predicate input))
+                  (funcall downstream result input)
+                  result))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun removing (predicate)
+    (require-function predicate "removing predicate")
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "removing reducing function")))
+          (completing
+            (lambda (result input)
+              (if (isTruthy (funcall predicate input))
+                  result
+                  (funcall downstream result input)))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun taking (limit)
+    (unless (and (Number/isSafeInteger limit) (>= limit 0))
+      (fail "taking limit must be a non-negative safe integer"))
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "taking reducing function"))
+              (remaining limit))
+          (completing
+            (lambda (result input)
+              (if (= remaining 0)
+                  (reduced result)
+                  (progn
+                    (setq remaining (1- remaining))
+                    (let ((stepped (funcall downstream result input)))
+                      (if (and (= remaining 0) (not (isReduced stepped)))
+                          (reduced stepped)
+                          stepped)))))
+            (lambda (result) (funcall downstream result)))))
+      (= limit 0)))
+
+  (defun dropping (limit)
+    (unless (and (Number/isSafeInteger limit) (>= limit 0))
+      (fail "dropping limit must be a non-negative safe integer"))
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "dropping reducing function"))
+              (remaining limit))
+          (completing
+            (lambda (result input)
+              (if (> remaining 0)
+                  (progn
+                    (setq remaining (1- remaining))
+                    result)
+                  (funcall downstream result input)))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun takingWhile (predicate)
+    (require-function predicate "taking-while predicate")
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "taking-while reducing function")))
+          (completing
+            (lambda (result input)
+              (if (isTruthy (funcall predicate input))
+                  (funcall downstream result input)
+                  (reduced result)))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun droppingWhile (predicate)
+    (require-function predicate "dropping-while predicate")
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "dropping-while reducing function"))
+              (dropping t))
+          (completing
+            (lambda (result input)
+              (if (and dropping (isTruthy (funcall predicate input)))
+                  result
+                  (progn
+                    (setq dropping false)
+                    (funcall downstream result input))))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun takingNth (interval)
+    (require-positive interval "taking-nth interval")
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "taking-nth reducing function"))
+              (remaining 0))
+          (completing
+            (lambda (result input)
+              (if (> remaining 0)
+                  (progn
+                    (setq remaining (1- remaining))
+                    result)
+                  (progn
+                    (setq remaining (1- interval))
+                    (funcall downstream result input))))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun interposing (separator)
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "interposing reducing function"))
+              (started false))
+          (completing
+            (lambda (result input)
+              (if (not started)
+                  (progn
+                    (setq started t)
+                    (funcall downstream result input))
+                  (let ((separated (funcall downstream result separator)))
+                    (if (isReduced separated)
+                        separated
+                        (funcall downstream separated input)))))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun partitioningAll (size)
+    (require-positive size "partitioning-all size")
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "partitioning-all reducing function"))
+              (buffer (partition-buffer)))
+          (completing
+            (lambda (result input)
+              (if (= (js-call buffer :append input) size)
+                  (js-call buffer :flush result downstream)
+                  result))
+            (lambda (result)
+              (funcall downstream (unreduced (js-call buffer :flush result downstream)))))))
+      false))
+
+  (defun partitioningBy (classifier)
+    (require-function classifier "partitioning-by classifier")
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "partitioning-by reducing function"))
+              (buffer (partition-buffer))
+              (previous no-partition))
+          (completing
+            (lambda (result input)
+              (let ((key (funcall classifier input)))
+                (if (or (eq previous no-partition) (equalValues previous key))
+                    (progn
+                      (setq previous key)
+                      (js-call buffer :append input)
+                      result)
+                    (let ((stepped (js-call buffer :flush result downstream)))
+                      (if (isReduced stepped)
+                          stepped
+                          (progn
+                            (setq previous key)
+                            (js-call buffer :append input)
+                            stepped))))))
+            (lambda (result)
+              (funcall downstream (unreduced (js-call buffer :flush result downstream)))))))
+      false))
+
+  (defun deduping ()
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "deduping reducing function"))
+              (previous no-previous))
+          (completing
+            (lambda (result input)
+              (if (and (not (eq previous no-previous)) (equalValues previous input))
+                  result
+                  (progn
+                    (setq previous input)
+                    (funcall downstream result input))))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun distincting ()
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "distincting reducing function"))
+              (seen EMPTY_SET))
+          (completing
+            (lambda (result input)
+              (if (contains seen input)
+                  result
+                  (progn
+                    (setq seen (conj seen input))
+                    (funcall downstream result input))))
+            (lambda (result) (funcall downstream result)))))
+      false))
+
+  (defun composeTransducers (&rest transducers)
+    (let ((index 0))
+      (while (< index (js-length transducers))
+        (require-function (get transducers index) "composed transducer")
+        (setq index (1+ index))))
+    (make-transducer
+      (lambda (reducer)
+        (js-call transducers :reduceRight
+          (lambda (downstream transducer) (apply-transducer transducer downstream))
+          (as-reducer reducer "composed reducing function")))
+      (js-call transducers :some (lambda (transducer) (eq (aref transducer zero-input-key) t)))))
+
+  (defun transduce (&rest arguments)
+    (unless (= (js-length arguments) 4)
+      (fail "transduce requires a transducer, reducer, initial value, and collection"))
+    (let* ((transducer (get arguments 0))
+           (transformed (apply-transducer transducer (as-reducer (get arguments 1) "transduce reducer")))
+           (seed (unreduced (get arguments 2)))
+           (result (if (eq (aref transducer zero-input-key) t)
+                       seed
+                       (reduce (get arguments 3) transformed seed))))
+      (unreduced (funcall transformed (unreduced result)))))
+
+  (defun eduction (&rest arguments)
+    (when (< (js-length arguments) 2)
+      (fail "eduction requires one or more transducers and a collection"))
+    (let* ((collection (get arguments (1- (js-length arguments))))
+           (transducer (apply composeTransducers (js-call arguments :slice 0 -1))))
+      (reductionView
+        (lambda (reducer &rest initial)
+          (require-function reducer "eduction reducer")
+          (if (> (js-length initial) 0)
+              (transduce transducer (completing reducer) (get initial 0) collection)
+              (transduce
+                transducer
+                (completing
+                  (lambda (result value)
+                    (if (eq result no-initial) value (funcall reducer result value)))
+                  (lambda (result)
+                    (when (eq result no-initial)
+                      (fail "cannot reduce an empty eduction without an initial value"))
+                    result))
+                no-initial
+                collection))))))
+
+  (defun transformed-iterator (transducer collection)
+    (let ((output (js-array))
+          (output-index 0)
+          (input nil)
+          (transformed nil)
+          (accumulator nil)
+          (initialized false)
+          (complete false))
+      (let* ((close-input (lambda ()
+                            (when (and (not (nil? input)) (callable? (get input :return)))
+                              (js-call input :return))
+                            (setq input nil)))
+             (finish (lambda ()
+                       (unless complete
+                         (setq complete t)
+                         (funcall close-input)
+                         (setq accumulator (unreduced (funcall transformed (unreduced accumulator)))))))
+             (initialize (lambda ()
+                           (unless initialized
+                             (setq initialized t
+                                   transformed (apply-transducer
+                                                 transducer
+                                                 (completing
+                                                   (lambda (result value)
+                                                     (js-call output :push value)
+                                                     result))))
+                             (if (eq (aref transducer zero-input-key) t)
+                                 (funcall finish)
+                                 (let ((source (seq collection)))
+                                   (if (nil? source)
+                                       (funcall finish)
+                                       (setq input (js-call (aref source (get globalThis/Symbol :iterator)) :call source))))))))
+             (pump (lambda ()
+                     (funcall initialize)
+                     (while (and (= output-index (js-length output)) (not complete))
+                       (put output "length" 0)
+                       (setq output-index 0)
+                       (let ((next-item (try
+                                          (js-call input :next)
+                                          (catch error
+                                            (funcall close-input)
+                                            (setq complete t)
+                                            (throw error)))))
+                         (if (truth (get next-item :done))
+                             (funcall finish)
+                             (let ((stepped (try
+                                              (funcall transformed accumulator (get next-item :value))
+                                              (catch error
+                                                (funcall close-input)
+                                                (setq complete t)
+                                                (throw error)))))
+                               (if (isReduced stepped)
+                                   (progn
+                                     (setq accumulator (unreduced stepped))
+                                     (funcall finish))
+                                   (setq accumulator stepped)))))))))
+        (let ((iterator (js-object
+                          :next (method
+                                  (lambda (_self)
+                                    (funcall pump)
+                                    (if (= output-index (js-length output))
+                                        (js-object :value undefined :done t)
+                                        (let ((value (get output output-index)))
+                                          (setq output-index (1+ output-index))
+                                          (js-object :value value :done false))))
+                                  "next"
+                                  0)
+                          :return (method
+                                    (lambda (_self value)
+                                      (put output "length" 0)
+                                      (setq output-index 0 complete t)
+                                      (funcall close-input)
+                                      (js-object :value value :done t))
+                                    "return"
+                                    1))))
+          (put iterator (get globalThis/Symbol :iterator)
+                (method (lambda (self) self) "[Symbol.iterator]" 0))
+          iterator))))
+
+  (defun sequence (&rest arguments)
+    (unless (= (js-length arguments) 2)
+      (fail "sequence requires a transducer and collection"))
+    (let ((transducer (get arguments 0))
+          (collection (get arguments 1)))
+      (require-function transducer "sequence transducer")
+      (memoizedSequenceView (lambda () (transformed-iterator transducer collection)))))
+
+  (defun runBang (&rest arguments)
+    (unless (= (js-length arguments) 2)
+      (fail "run! requires a procedure and collection"))
+    (let ((procedure (get arguments 0)))
+      (require-function procedure "run! procedure")
+      (reduce (get arguments 1)
+        (lambda (_result value)
+          (funcall procedure value)
+          nil)
+        nil))
+    nil)
+
+  (defun into (target &rest arguments)
+    (unless (or (= (js-length arguments) 1) (= (js-length arguments) 2))
+      (fail "into requires a target and source, or a target, transducer, and source"))
+    (let* ((transducer (if (= (js-length arguments) 1) identity-transducer (get arguments 0)))
+           (source (get arguments (1- (js-length arguments))))
+           (seed (empty target)))
+      (if (implementsProtocolOperation IEditable "transient" seed)
+          (transduce
+            transducer
+            (completing
+              (lambda (result value) (conjBang result value))
+              (lambda (result) (persistentBang result)))
+            (transient seed)
+            source)
+          (transduce transducer (lambda (result value) (conj result value)) seed source))))
+
+  (Object/defineProperty transduce "length" (js-object :value 4 :configurable t))
+  (Object/defineProperty sequence "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty runBang "length" (js-object :value 2 :configurable t))
+
+  (export
+    completing
+    mapping
+    mappingIndexed
+    keeping
+    keepingIndexed
+    catting
+    mapcatting
+    filtering
+    removing
+    taking
+    dropping
+    takingWhile
+    droppingWhile
+    takingNth
+    interposing
+    partitioningAll
+    partitioningBy
+    deduping
+    distincting
+    composeTransducers
+    transduce
+    eduction
+    sequence
+    runBang
+    into))

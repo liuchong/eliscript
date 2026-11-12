@@ -1,0 +1,69 @@
+(module tests.helpers.wasm-managed-function-properties-runtime-node
+  (import "node:assert/strict" :default assert)
+
+  (defun dynamic-import (specifier)
+    (funcall (js* "(specifier) => import(specifier)") specifier))
+
+  (defconst reflectedKeys
+    (js-array "name" "length" "prototype" "caller" "arguments" "call" "apply" "bind" "constructor" "toString" "__proto__" "kind" "missing"))
+
+  (defun norm (value owner)
+    (cond
+      ((undefined? value) (js-array "undefined"))
+      ((= value nil) (js-array "null"))
+      ((= (value-type value) "function")
+       (js-array "function" (get value :name) (get value :length)
+                 (Object/hasOwn value "prototype") (= value globalThis.Function.prototype)))
+      ((= (value-type value) "object")
+       (js-array "object" (= value (get owner :prototype))))
+      ((= (value-type value) "symbol")
+       (js-array "symbol" (funcall globalThis.String value)))
+      (t (js-array "value" value))))
+
+  (defasync main ()
+    (let* ((m (await (dynamic-import (aref (get globalThis.process :argv) 2))))
+           (output (js-array)))
+      (js-call assert :equal (js-call m :function_constructor) globalThis.Function)
+      (let ((constructorPrototype (Object/getOwnPropertyDescriptor globalThis.Function "prototype")))
+        (js-call assert :equal (get constructorPrototype :value) globalThis.Function.prototype)
+        (js-call assert :equal (get constructorPrototype :writable) false)
+        (js-call assert :equal (get constructorPrototype :enumerable) false)
+        (js-call assert :equal (get constructorPrototype :configurable) false))
+      (js-call (js-array (js-call m :function_value) (js-call m :closure) globalThis.Function) :forEach
+        (lambda (f)
+          (let ((fields (Object/create nil)))
+            (js-call reflectedKeys :forEach
+              (lambda (key)
+                (let ((reading undefined))
+                  (try
+                    (setq reading (js-array "value" (norm (get f key) f)))
+                    (catch error (setq reading (js-array "throw" (get error :name)))))
+                  (let* ((d (Object/getOwnPropertyDescriptor f key))
+                         (descriptor (if (undefined? d)
+                                       (js-array "undefined")
+                                       (js-array "descriptor"
+                                                 (Object/hasOwn d "value")
+                                                 (norm (get d :value) f)
+                                                 (get d :writable)
+                                                 (get d :enumerable)
+                                                 (get d :configurable)
+                                                 (norm (get d :get) f)
+                                                 (norm (get d :set) f)))))
+                    (put fields key (JSON/stringify (js-array reading (Object/hasOwn f key) (Object/hasOwn f key) descriptor)))
+                    (js-call assert :equal (js-call m :reflection f key) (get fields key) key)))))
+            (let ((shape (JSON/stringify
+                           (js-array (Object/keys f)
+                                     (Object/getOwnPropertyNames f)
+                                     (js-call (Object/getOwnPropertySymbols f) :map globalThis.String)
+                                     (= (Object/getPrototypeOf f) globalThis.Function.prototype)
+                                     (norm (Object/getPrototypeOf f) f)))))
+              (js-call assert :equal (js-call m :reflection_shape f) shape)
+              (js-call assert :deepEqual (js-call m :native_shadow f) (js-array "function" t))
+              (js-call output :push (js-object :fields fields :shape shape))))))
+      (js-call assert :throws (lambda () (get (js-call m :function_value) :caller)) globalThis.TypeError)
+      (js-call assert :throws (lambda () (get (js-call m :function_value) :arguments)) globalThis.TypeError)
+      (js-call assert :equal (Object/hasOwn (js-call m :function_value) "prototype") t)
+      (js-call assert :equal (Object/hasOwn (js-call m :closure) "prototype") false)
+      (js-call globalThis.console :log (JSON/stringify output))))
+
+  (main))

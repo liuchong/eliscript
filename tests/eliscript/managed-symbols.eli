@@ -7,6 +7,7 @@
   (import "node:url" pathToFileURL)
   (import "node:module" createRequire)
   (import "node:crypto" createHash)
+  (import "../dist/bootstrap/reader.mjs" read-string)
   (import "node:child_process" spawnSync)
   (import "../tools/backends/build.mjs" buildBackends root)
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
@@ -17,8 +18,8 @@
   (defvar directory undefined) (defvar b undefined) (defvar runtime undefined) (defvar family undefined)
   (defvar generationEvidence undefined)
   (defconst archive (readFileSync (resolve root "tests/wasm-managed-symbols-test-ground.mjs") "utf8"))
-  (defconst archive-sha "fe0fd09cd43e80b01617570dc7913d3a0bd006f8c0a7f0a945de3072a3efdbc6")
-  (defconst cases (Array/from (js-call archive :matchAll (new globalThis.RegExp "^test\\('([^']+)'" "gm"))))
+  (defconst archive-sha "d2f4d987d964925456f7c3fe91ec2ed36fbc007b8cae8b064f993bb0bdbea8fd")
+  (defconst cases (Array/from (js-call archive :matchAll (new globalThis.RegExp "^test\\(\"((?:\\\\.|[^\"\\\\])*)\"" "gm"))))
   (defconst wellKnownSymbolNames (js-array "iterator" "toPrimitive" "match" "replace" "search" "split" "species" "isConcatSpreadable" "toStringTag" "hasInstance" "asyncIterator" "unscopables" "matchAll" "dispose" "asyncDispose"))
   (defun same (&rest arguments) (Reflect/apply (get assert :strictEqual) assert arguments))
   (defun deep (&rest arguments) (Reflect/apply (get assert :deepStrictEqual) assert arguments))
@@ -32,17 +33,18 @@
     ;; archived test, helper JavaScript or a generated JavaScript template.
     (let* ((start (get (aref cases index) :index))
            (end (if (< (1+ index) (js-length cases)) (get (aref cases (1+ index)) :index) (js-length archive)))
-           (region (js-call archive :slice start end)) (open (js-call region :indexOf "`"))
-           (close (js-call region :indexOf "`" (1+ open))))
-      (assert (and (>= open 0) (> close open)))
-      (js-call (js-call region :slice (1+ open) close) :replace
-        (new globalThis.RegExp "\\\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[nrtbfv0'\"`\\\\])" "g")
-        (lambda (match escape)
-          (cond ((js-call escape :startsWith "u") (globalThis.String.fromCharCode (globalThis.parseInt (js-call escape :slice 1) 16)))
-            ((js-call escape :startsWith "x") (globalThis.String.fromCharCode (globalThis.parseInt (js-call escape :slice 1) 16)))
-            ((= escape "n") "\n") ((= escape "r") "\r") ((= escape "t") "\t")
-            ((= escape "b") (globalThis.String.fromCharCode 8)) ((= escape "f") (globalThis.String.fromCharCode 12))
-            ((= escape "v") (globalThis.String.fromCharCode 11)) ((= escape "0") (globalThis.String.fromCharCode 0)) (t escape))))))
+           (region (js-call archive :slice start end))
+           (literals (Array/from (js-call region :matchAll
+             (new globalThis.RegExp "\"(?:\\\\.|[^\"\\\\])*\"" "g"))))
+           (sources (js-call (js-call literals :map (lambda (match) (JSON/parse (aref match 0)))) :filter
+             (lambda (value)
+               (and (js-call (js-call value :trimStart) :startsWith "(defun")
+                    (try (progn (read-string value "original-symbol-fixture.eli") t)
+                      (catch _invalid nil)))))))
+      ;; Compiler-emitted JSON strings preserve escapes and isolated UTF-16
+      ;; units. Only fixture data is decoded; no JavaScript is evaluated.
+      (same (js-length sources) 1)
+      (aref sources 0)))
   (defasync compiled (&rest arguments)
     (let* ((source (if (or (= (js-length arguments) 0) (undefined? (aref arguments 0))) family (aref arguments 0)))
            (options (if (> (js-length arguments) 1) (aref arguments 1) undefined))

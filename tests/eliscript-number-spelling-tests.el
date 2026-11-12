@@ -9,18 +9,27 @@
   (expand-file-name ".." (file-name-directory (or load-file-name buffer-file-name)))
   "Repository containing the original public bootstrap executable.")
 
-(defun eliscript-number-spelling-tests--node (script input &rest arguments)
-  "Run Node SCRIPT on JSON INPUT and ARGUMENTS within the enclosing test tree."
-  (let ((output (generate-new-buffer " *eliscript-number-spelling*")))
+(load (expand-file-name "tools/bootstrap-runtime.el" eliscript-number-spelling-tests--root) nil t)
+(declare-function eliscript-bootstrap-prepare-runtime "../tools/bootstrap-runtime" (root directory))
+
+(defun eliscript-number-spelling-tests--run-eli-driver (source-file input &rest arguments)
+  "Compile SOURCE-FILE into a clean runtime scope and run it on JSON INPUT."
+  (let ((directory (make-temp-file "eliscript-number-oracle-" t))
+        (output (generate-new-buffer " *eliscript-number-spelling*")))
     (unwind-protect
-        (progn
+        (let ((driver (expand-file-name "number-spelling-oracle-driver.mjs" directory)))
+          (eliscript-bootstrap-prepare-runtime eliscript-number-spelling-tests--root directory)
+          (eliscript-compile-file-with-source-map
+           (expand-file-name source-file eliscript-number-spelling-tests--root)
+           driver)
           (with-temp-buffer
             (insert (json-encode input))
             (should (= 0 (apply #'call-process-region (point-min) (point-max)
                                 (or (getenv "NODE") "node") nil output nil
-                                "--input-type=module" "--eval" script arguments))))
+                                driver arguments))))
           (with-current-buffer output (buffer-string)))
-      (kill-buffer output))))
+      (kill-buffer output)
+      (delete-directory directory t))))
 
 (defun eliscript-number-spelling-tests--token (value)
   "Return the original round-tripping Emacs decimal token for VALUE."
@@ -80,14 +89,8 @@
           (eliscript-number-spelling-tests--values))))
     (should
      (equal
-      (eliscript-number-spelling-tests--node
-       (concat "import assert from 'node:assert/strict';import{readFileSync}from'node:fs';"
-               "const records=JSON.parse(readFileSync(0,'utf8'));"
-               "for(const[token,...outputs]of records){const value=Number(token);assert(Number.isFinite(value));"
-               "const expected=Object.is(value,-0)?'-0.0':String(value);"
-               "for(const text of outputs){assert.equal(text,expected,token);"
-               "assert(Object.is(Function('return ('+text+')')(),value),token);}}"
-               "process.stdout.write('number-spelling-verified');")
+      (eliscript-number-spelling-tests--run-eli-driver
+       "tools/testing/number-spelling-oracle-driver.eli"
        (vconcat records))
       "number-spelling-verified"))))
 

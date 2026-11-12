@@ -1,2 +1,783 @@
-(module capsules.tests.wasm-managed-persistent-literals.test
-  (js* "import {afterAll, beforeAll, expect, test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {mkdir, mkdtemp, readFile, rm, symlink, writeFile} from 'node:fs/promises';\nimport {tmpdir} from 'node:os';\nimport {dirname, resolve} from 'node:path';\nimport {pathToFileURL} from 'node:url';\nimport {spawnSync} from 'node:child_process';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nimport {instantiateNativeManagedRuntime} from '../tools/backends/native-managed-runtime.mjs';\nimport {createManagedModuleGraph, createManagedProjectFacades, loadManagedProjectGraph} from '../tools/backends/managed-module-graph.mjs';\nimport {PersistentList, persistentList} from '../runtime/core/list.mjs';\nimport {PersistentVector, persistentVector} from '../runtime/core/vector.mjs';\nimport {PersistentHashMap, persistentHashMap} from '../runtime/core/map.mjs';\nimport {PersistentHashSet, persistentHashSet} from '../runtime/core/set.mjs';\nimport {PersistentQueue, persistentQueue} from '../runtime/core/queue.mjs';\nimport {EliscriptSymbol, eliscriptSymbol, keyword} from '../runtime/core/identifier.mjs';\nimport {meta, withMeta} from '../runtime/core/metadata.mjs';\nimport {compileRegex, isRegexPattern, regexSource, regexFlags} from '../runtime/core/regex.mjs';\nimport {PersistentSortedMap, PersistentSortedSet, persistentSortedMap, defaultSortedComparator} from '../runtime/core/sorted.mjs';\nimport {hashValue} from '../runtime/core/value.mjs';\nimport {isProtocol, protocolMethod, protocolSlot} from '../runtime/core/protocol.mjs';\nimport {isType, isTypeValue, typeFieldNames} from '../runtime/core/type.mjs';\nimport {isRecord, isRecordType, recordFieldNames} from '../runtime/core/record.mjs';\n\nconst root = resolve(import.meta.dir, '..');\nconst nativeSupported = process.arch === 'arm64' && ['darwin', 'linux'].includes(process.platform);\nconst nativeTarget = process.platform === 'linux' ? 'arm64-linux' : 'arm64-macos';\nconst memory = Object.freeze({initialPages: 128, maximumPages: 4096});\n// Keep the existing managed host defaults, rather than masking allocation bugs\n// by enlarging the literal fixture's heap.\nconst budget = Object.freeze({maxSlots: 1024, initialBytes: 65536, maxBytes: 16777216});\nconst exported = `vector-value map-value map-literal set-value set-literal macro-set\nset-evaluation-order queue-value queue-literal queue-evaluation-order keyword-value keyword-map\nmacro-keyword quoted-keyword quoted-data quoted-map quoted-set quoted-queue\nlist-value list-first list-rest list-cons empty-list-rest array-value prepended-array object-value\nvector-first vector-count array-second array-count`.trim().split(/\\s+/);\nconst boundarySource = `(import \"./literal-runtime.mjs\" ${exported.join(' ')})\n(import \"eliscript/runtime/core/regex\" compileRegex regexFind regexSource regexFlags isRegexPattern)\n(import \"eliscript/runtime/core/sorted\" persistentSortedMapBy persistentSortedSetBy isPersistentSortedCollection)\n(import \"eliscript/runtime/core/metadata\" withMeta)\n(import \"eliscript/runtime/core/value\" hashValue)\n(import \"eliscript/runtime/core/value-internals\" cachedProtocolHash resetValueMetrics clearValueCaches readValueMetrics)\n(import \"eliscript/runtime/core/protocol\" defineProtocol protocolMethod protocolSlot)\n(import \"eliscript/runtime/core/type\" defineType reifyProtocols)\n(import \"eliscript/runtime/core/record\" defineRecordType)\n(defun boundary-echo (value) value)\n(defun boundary-same (left right) (eq left right))\n(defun boundary-vector-update (value) (js-call value :assoc 0 -0.0))\n(defun boundary-map-update (value) (js-call value :assoc :updated 42))\n(defun boundary-set-update (value) (js-call value :conj 42))\n(defun boundary-queue-update (value) (js-call value :conj 42))\n(defun boundary-list-update (value) (cons 42 value))\n(defun boundary-aliases ()\n  (let ((shared [1 undefined -0.0]))\n    (js-array shared shared (hash-map :child shared) (list shared shared))))\n(defun boundary-identifiers ()\n  (let ((name 'same)) (js-array :same :same name name 'same)))\n(defun boundary-fake () (Object/freeze (js-object :kind \"vector\" :count 2 :values (js-array 1 2))))\n(defun boundary-regex-value ()\n  (let ((pattern (compileRegex \"a+\" \"ui\")))\n    (js-array pattern pattern (regexFind pattern \"BAAA\"))))\n(defun boundary-regex-observe (pattern)\n  (js-array (regexSource pattern) (regexFlags pattern) (regexFind pattern \"BAAA\")))\n(defun boundary-regex-pattern? (pattern) (isRegexPattern pattern))\n(defun boundary-sorted-values ()\n  (let* ((calls 0)\n         (comparison (lambda (left right) (setq calls (1+ calls)) (- left right)))\n         (values (persistentSortedMapBy comparison 2 \"b\" 1 \"a\"))\n         (map (withMeta values (hash-map :origin \"target\")))\n         (set (persistentSortedSetBy comparison 3 1)))\n    (js-array map (get map :comparator) map set (get set :comparator) (lambda () calls) calls)))\n(defun boundary-sorted-default-update (value) (js-call value :assoc 3 \"c\"))\n(defun boundary-sorted? (value) (isPersistentSortedCollection value))\n(defun boundary-hash-cache ()\n  (clearValueCaches)\n  (let* ((value [1 2]) (computations 0)\n         (direct (cachedProtocolHash value (lambda () (setq computations (1+ computations)) -1)))\n         (public (hashValue value)) (first (readValueMetrics)))\n    (resetValueMetrics)\n    (let* ((retained (hashValue value)) (after-reset (readValueMetrics)))\n      (clearValueCaches)\n      (let* ((empty (readValueMetrics)) (recomputed (hashValue value)) (after-clear (readValueMetrics)))\n        (js-array direct public retained computations first after-reset empty recomputed after-clear)))))\n(defun boundary-type-identities ()\n  (let* ((protocol (defineProtocol \"Boundary\" (js-array \"read\")))\n         (shared (js-object :zero -0.0))\n         (type (defineType \"Same\" (js-array \"value\")\n           (js-array (js-array protocol (js-object :read (lambda (self) (get self :value)))))))\n         (value (js-call type :create shared))\n         (record-type (defineRecordType \"Same\" (js-array \"value\")))\n         (other-record-type (defineRecordType \"Same\" (js-array \"value\")))\n         (record (js-call record-type :create shared))\n         (reified (reifyProtocols (js-array (js-array protocol (js-object :read (lambda (self) 7)))))))\n    (js-array (protocolSlot protocol \"read\") (protocolMethod protocol \"read\") (get protocol :operations) protocol\n      (get type :typeFields) type value shared (get record-type :recordFields) record-type other-record-type record reified)))\n(export ${exported.join(' ')} boundary-echo boundary-same boundary-vector-update boundary-map-update\n boundary-set-update boundary-queue-update boundary-list-update boundary-aliases boundary-identifiers boundary-fake\n boundary-regex-value boundary-regex-observe boundary-regex-pattern?\n boundary-sorted-values boundary-sorted-default-update boundary-sorted? boundary-hash-cache boundary-type-identities)`;\nlet directory, backend, lowered, wasmBytes, nativePath, oraclePath, assertOriginalReport, serial = 0;\nbeforeAll(async () => {\n  directory = await mkdtemp(resolve(tmpdir(), 'eliscript-managed-persistent-literals-'));\n  backend = await buildBackends({outputRoot: resolve(directory, 'backend')});\n  const fixtureSource = await readFile(resolve(root, 'tests/fixtures/literal-runtime.eli'), 'utf8');\n  const {literalSources, literalModules} = await backend.loadLiteralModules();\n  assert.deepEqual(literalSources.map(item => item.id).sort(), [\n    'bit', 'persistent-list', 'persistent-vector', 'persistent-map', 'persistent-set', 'value', 'managed-queue-state', 'managed-literals',\n    'managed-transient-state', 'managed-vector-view-state', 'managed-literal-protocols', 'managed-sorted-state',\n    'managed-value-state', 'core/protocol', 'core/text', 'core/object', 'core/set', 'core/data',\n  ].map(name => 'stdlib/' + name + '.mjs').concat(\n    ['protocol-error', 'list', 'vector', 'map', 'set', 'queue', 'identifier', 'record', 'value',\n      'metadata', 'collection', 'transient', 'protocol', 'type', 'order', 'sorted', 'regex',\n      'transducer', 'lazy-sequence', 'text', 'object', 'truth', 'sequence', 'set-algebra',\n      'collection-internals', 'metadata-internals', 'persistent-kind', 'data', 'data-text', 'value-internals'].map(name => 'runtime/core/' + name + '.mjs'),\n    'runtime/literals.mjs',\n    'runtime/wire/markdown.mjs', 'runtime/wire/schema.mjs', 'runtime/wire/http-rpc.mjs',\n    'runtime/testing/value.mjs',\n  ).sort());\n  assert.equal(literalModules.length, literalSources.length);\n  for (let index = 0; index < literalModules.length; index++) {\n    assert.equal(literalModules[index].id, literalSources[index].id);\n    assert.equal(literalSources[index].source, await readFile(resolve(root, literalSources[index].filename), 'utf8'));\n  }\n  const modules = [\n    {id: 'literal-runtime.mjs', program: backend.compiler.compile_ir_string(fixtureSource, 'tests/fixtures/literal-runtime.eli')},\n    {id: 'boundary.mjs', program: backend.compiler.compile_ir_string(boundarySource, 'persistent-boundary.eli')},\n  ];\n  const runtime = backend.compiler.compile_ir_string(await readFile(resolve(root, 'bootstrap/runtime/memory.eli'), 'utf8'), 'runtime.eli');\n  const originalModules = structuredClone(modules), originalLibrary = structuredClone(literalModules);\n  lowered = backend.managed.lower_managed_project(modules, 'boundary.mjs', runtime, {literalModules, phased: true});\n  assert.deepEqual(modules, originalModules);assert.deepEqual(literalModules, originalLibrary);\n  assert.deepEqual(lowered.descriptor.hostCapabilities ?? [], []);\n  assert.equal(lowered.descriptor.literalRuntime.version, 1);\n  wasmBytes = Uint8Array.from(backend.wasm.append_metadata_section(\n    backend.wasm.emit_typed_memory_wasm(lowered.typed, memory), 'eliscript-managed-control', JSON.stringify(lowered.descriptor)));\n  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(wasmBytes)), []);\n  await writeFile(resolve(directory, 'literal-runtime.wasm'), wasmBytes);\n  await writeFile(resolve(directory, 'literal-runtime.lowered.json'), JSON.stringify(lowered));\n  if (nativeSupported) {\n    nativePath = resolve(directory, process.platform === 'linux' ? 'literal-runtime.so' : 'literal-runtime.dylib');\n    await writeFile(nativePath, Uint8Array.from(backend.native.emit_typed_native_memory_library(lowered.typed, nativeTarget)));\n  }\n  // Reuse the complete original assertion body. This is the original literal\n  // host's data oracle, not a reduced fixture or a replacement compiler.\n  const originalTest = await readFile(resolve(root, 'tests/literal-runtime.test.mjs'), 'utf8');\n  const start = originalTest.indexOf('expect(bunReport).toEqual({');\n  assert(start >= 0);const end = originalTest.indexOf('\\n    });', start);assert(end > start);\n  assert.equal(originalTest.indexOf('expect(bunReport).toEqual({', start + 1), -1);\n  assertOriginalReport = new Function('expect', 'bunReport', originalTest.slice(start, end + '\\n    });'.length));\n  const oracleDirectory = resolve(directory, 'oracle');await mkdir(oracleDirectory);\n  await mkdir(resolve(directory, 'node_modules'));await symlink(root, resolve(directory, 'node_modules/eliscript'), 'dir');\n  oraclePath = resolve(oracleDirectory, 'literal-runtime.mjs');\n  await writeFile(oraclePath, backend.compiler.compile_string(fixtureSource, 'tests/fixtures/literal-runtime.eli'));\n}, 120000);\nafterAll(async () => {if (directory) await rm(directory, {recursive: true, force: true});});\n\nasync function facadesAt(path) {\n  const facades = createManagedProjectFacades(lowered.descriptor, {entry: 'boundary.mjs'});\n  for (const file of facades.files) {const output = resolve(path, file.id);await mkdir(dirname(output), {recursive: true});await writeFile(output, file.source);}\n  return facades;\n}\nasync function openRuntime(host, {hostModules} = {}) {\n  const deployment = resolve(directory, 'live-' + host + '-' + (++serial));await mkdir(deployment);\n  await facadesAt(deployment);\n  const moduleGraph = createManagedModuleGraph(lowered.descriptor);\n  let runtime;\n  try {\n    if (host === 'wasm') runtime = instantiateManagedRuntime(wasmBytes, {...budget, initializeModule: false, moduleGraph, hostModules});\n    else runtime = await instantiateNativeManagedRuntime(nativePath, lowered, {...memory, ...budget, initializeModule: false, moduleGraph, nativeTarget, hostModules});\n    runtime.auto(65536);\n    const project = await loadManagedProjectGraph(runtime, lowered.descriptor, {moduleGraph,\n      projectEntry: 'boundary.mjs', projectModuleBaseURL: pathToFileURL(deployment + '/').href});\n    return {runtime, namespace: project.namespace};\n  } catch (error) {try {runtime?.closeModule();} catch {}try {runtime?.close?.();} catch {}moduleGraph.close();throw error;}\n}\nfunction finish(runtime) {\n  try {\n    runtime.closeModule();runtime.collect();assert.equal(runtime.stats().frameDepth, 0);assert.equal(runtime.live(), 0);\n    runtime.closeModule();runtime.collect();assert.equal(runtime.live(), 0);\n  } finally {runtime.close?.();}\n}\nfunction invokeHost(runtime, name, value) {\n  const input = runtime.fromHostValue(value);\n  try {const output = runtime.invoke(name, [input]);try {return runtime.toHostValue(output);} finally {runtime.release(output);}}\n  finally {runtime.release(input);}\n}\nfunction hostScript(engine, script, args, timeout = 60000) {\n  const result = spawnSync(engine === 'bun' ? process.execPath : process.env.NODE_BINARY ?? 'node', [script, ...args], {\n    cwd: root, encoding: 'utf8', timeout, env: {...process.env, BUN: process.execPath},\n  });\n  assert.equal(result.error, undefined);assert.equal(result.status, 0, result.stderr + result.stdout);\n  return JSON.parse(result.stdout.trim());\n}\n\nfor (const host of ['wasm', 'native']) {\n  const hostTest = test.skipIf(host === 'native' && !nativeSupported);\n  for (const engine of ['bun', 'node']) {\n    hostTest('the complete original persistent literal host executes real ' + host + ' with ' + engine, async () => {\n      const deployment = resolve(directory, 'original-' + host + '-' + engine);await mkdir(deployment);\n      await facadesAt(deployment);\n      const script = resolve(deployment, 'host.mjs');\n      const source = `import assert from 'node:assert/strict';\nimport {readFile} from 'node:fs/promises';import {resolve} from 'node:path';import {pathToFileURL} from 'node:url';\nimport {instantiateManagedRuntime} from ${JSON.stringify(pathToFileURL(resolve(root, 'tools/backends/managed-runtime.mjs')).href)};\nimport {instantiateNativeManagedRuntime} from ${JSON.stringify(pathToFileURL(resolve(root, 'tools/backends/native-managed-runtime.mjs')).href)};\nimport {createManagedModuleGraph,loadManagedProjectGraph} from ${JSON.stringify(pathToFileURL(resolve(root, 'tools/backends/managed-module-graph.mjs')).href)};\nconst lowered=JSON.parse(await readFile(${JSON.stringify(resolve(directory, 'literal-runtime.lowered.json'))},'utf8'));\nconst moduleGraph=createManagedModuleGraph(lowered.descriptor);\nconst options={...${JSON.stringify({...memory, ...budget, initializeModule: false, nativeTarget})},moduleGraph};\nlet runtime;const oldModule=WebAssembly.Module,oldInstance=WebAssembly.Instance;\ntry{\n ${host === 'native' ? `WebAssembly.Module=function(){throw new Error('native literals must not execute WASM');};WebAssembly.Instance=function(){throw new Error('native literals must not execute WASM');};` : ''}\n runtime=${host === 'wasm' ? `instantiateManagedRuntime(new Uint8Array(await readFile(${JSON.stringify(resolve(directory, 'literal-runtime.wasm'))})),options)` : `await instantiateNativeManagedRuntime(${JSON.stringify(nativePath)},lowered,options)`};\n runtime.auto(65536);\n await loadManagedProjectGraph(runtime,lowered.descriptor,{moduleGraph,projectEntry:'boundary.mjs',projectModuleBaseURL:${JSON.stringify(pathToFileURL(deployment + '/').href)}});\n process.argv[2]=${JSON.stringify(resolve(deployment, 'boundary.mjs'))};\n await import(${JSON.stringify(pathToFileURL(resolve(root, 'tests/fixtures/literal-runtime-host.mjs')).href)});\n assert.equal(runtime.stats().frameDepth,0);\n}finally{WebAssembly.Module=oldModule;WebAssembly.Instance=oldInstance;if(runtime){try{runtime.closeModule();runtime.collect();assert.equal(runtime.live(),0);}finally{runtime.close?.();}}else moduleGraph.close();}\n`;\n      await writeFile(script, source);\n      const report = hostScript(engine, script, []);\n      assertOriginalReport(expect, report);\n      const oracle = hostScript(engine, resolve(root, 'tests/fixtures/literal-runtime-host.mjs'), [oraclePath]);\n      assertOriginalReport(expect, oracle);assert.deepEqual(report, oracle);\n    }, 60000);\n  }\n\n  hostTest(host + ' persistent boundaries preserve actual classes, immutable structure and nested aliases', async () => {\n    const {runtime: a, namespace: m} = await openRuntime(host);\n    try {\n      for (const [value, Class] of [[m.vector_value, PersistentVector], [m.map_value, PersistentHashMap],\n        [m.set_value, PersistentHashSet], [m.queue_value, PersistentQueue], [m.list_value, PersistentList]]) {\n        assert(value instanceof Class);assert.equal(Object.isFrozen(value), true);assert.equal(Object.isExtensible(value), false);\n        assert.equal(Reflect.set(value, 'added', 1), false);\n        assert.throws(() => Object.defineProperty(value, 'added', {value: 1}), TypeError);\n      }\n      const aliases = m.boundary_aliases(), shared = aliases[0];\n      assert(shared instanceof PersistentVector);assert.equal(aliases[1], shared);\n      assert.equal(aliases[2].get(keyword('child')), shared);\n      assert.equal(aliases[3].first(), shared);assert.equal(aliases[3].rest().first(), shared);\n      assert.equal(shared.nth(1), undefined);assert(Object.is(shared.nth(2), -0));\n      const raw = a.fromHostValue(shared);\n      try {\n        const same = a.invoke('boundary_same', [raw, raw]);assert.equal(same, true);\n        const echoed = a.invoke('boundary_echo', [raw]);\n        try {assert.equal(a.toHostValue(echoed), shared);} finally {a.release(echoed);}\n      } finally {a.release(raw);}\n      const ids = m.boundary_identifiers();\n      assert.equal(ids[0], keyword('same'));assert.equal(ids[0], ids[1]);\n      assert(ids[2] instanceof EliscriptSymbol);assert.equal(ids[2], ids[3]);assert.notEqual(ids[2], ids[4]);\n      assert.equal(ids[2].qualifiedName, ids[4].qualifiedName);\n    } finally {finish(a);}\n  }, 60000);\n\n  hostTest(host + ' imported persistent metadata and updates use target algorithms and preserve the original input', async () => {\n    const {runtime: a} = await openRuntime(host);\n    try {\n      const metadata = persistentHashMap([keyword('source'), 'host']);\n      const shared = persistentVector(7, 8);\n      const cases = [\n        ['boundary_vector_update', withMeta(persistentVector(shared, shared), metadata), PersistentVector],\n        ['boundary_map_update', withMeta(persistentHashMap([keyword('child'), shared]), metadata), PersistentHashMap],\n        ['boundary_set_update', withMeta(persistentHashSet(shared), metadata), PersistentHashSet],\n        ['boundary_queue_update', withMeta(persistentQueue(shared), metadata), PersistentQueue],\n        ['boundary_list_update', withMeta(persistentList(shared), metadata), PersistentList],\n      ];\n      for (const [name, input, Class] of cases) {\n        const original = [...input], raw = a.fromHostValue(input);\n        const blocked = [PersistentVector, PersistentHashMap, PersistentHashSet, PersistentQueue, PersistentList]\n          .flatMap(Constructor => ['assoc', 'conj', 'cons'].filter(method => typeof Constructor.prototype[method] === 'function')\n            .map(method => [Constructor.prototype, method, Object.getOwnPropertyDescriptor(Constructor.prototype, method)]));\n        let output;\n        try {\n          for (const [prototype, method, descriptor] of blocked) Object.defineProperty(prototype, method, {...descriptor,\n            value() {throw new Error('target persistent algorithms cannot execute a host collection method');}});\n          output = a.invoke(name, [raw]);\n        } finally {for (const [prototype, method, descriptor] of blocked) Object.defineProperty(prototype, method, descriptor);a.release(raw);}\n        try {\n          const result = a.toHostValue(output);assert(result instanceof Class);assert.equal(Object.isFrozen(result), true);\n          assert.notEqual(result, input);assert.equal(meta(result), metadata);assert.deepEqual([...input], original);\n          assert.equal(invokeHost(a, 'boundary_echo', input), input);\n          if(name==='boundary_vector_update'){assert(Object.is(result.nth(0), -0));assert.equal(result.nth(1), shared);}\n          else if(name==='boundary_map_update'){assert.equal(result.get(keyword('updated')), 42);assert.equal(result.get(keyword('child')), shared);}\n          else if(name==='boundary_set_update')assert.equal(result.has(42), true);\n          else if(name==='boundary_queue_update')assert.deepEqual([...result], [shared, 42]);\n          else assert.deepEqual([...result], [42, shared]);\n        } finally {a.release(output);}\n      }\n      const symbol = eliscriptSymbol('same');assert.equal(invokeHost(a, 'boundary_echo', symbol), symbol);\n    } finally {finish(a);}\n  }, 60000);\n\n  hostTest(host + ' persistent branding rejects ordinary lookalikes and close releases boundary roots', async () => {\n    const {runtime: a, namespace: m} = await openRuntime(host);\n    let closed = false;\n    try {\n      const fake = m.boundary_fake();\n      assert.equal(fake instanceof PersistentVector, false);assert.equal(fake.kind, 'vector');\n      for (const Class of [PersistentList, PersistentVector, PersistentHashMap, PersistentHashSet, PersistentQueue]) assert.equal(fake instanceof Class, false);\n      const hostFake = Object.freeze({kind: 'vector', count: 2, values: [1, 2]});\n      assert.equal(invokeHost(a, 'boundary_echo', hostFake), hostFake);\n      const retained = m.vector_value, imported = persistentList(m.map_value, retained);\n      assert.equal(invokeHost(a, 'boundary_echo', imported), imported);\n      assert(a.live() > 0);a.closeModule();a.collect();\n      assert.equal(a.live(), 0);assert.equal(a.stats().frameDepth, 0);\n      // A materialized immutable host value remains a normal value after the\n      // VM releases its roots; its implementation is the original host class.\n      assert.deepEqual([...retained].slice(0, 2), [1, 2]);\n      a.close?.();a.close?.();closed = true;assert.throws(() => a.fromHostValue(imported), /closed/);\n    } finally {if (!closed) finish(a);}\n  }, 60000);\n\n  hostTest(host + ' regex patterns keep the actual private brand and identity while matching in the target', async () => {\n    const {runtime: a, namespace: m} = await openRuntime(host);\n    try {\n      const [pattern, alias, match] = m.boundary_regex_value();\n      assert.equal(pattern, alias);assert.equal(isRegexPattern(pattern), true);\n      assert.equal(Object.isFrozen(pattern), true);assert.equal(regexSource(pattern), 'a+');assert.equal(regexFlags(pattern), 'iu');\n      assert.equal(match, 'AAA');assert.equal(invokeHost(a, 'boundary_echo', pattern), pattern);\n      const original = compileRegex('a+', 'iu'), raw = a.fromHostValue(original);\n      const HostRegExp = globalThis.RegExp;let result;\n      try {\n        globalThis.RegExp = function () {throw new Error('target regex matching must not call the host RegExp constructor');};\n        result = a.invoke('boundary_regex_observe', [raw]);\n      } finally {globalThis.RegExp = HostRegExp;a.release(raw);}\n      try {assert.deepEqual(Array.from(a.toHostValue(result)), ['a+', 'iu', 'AAA']);} finally {a.release(result);}\n      assert.equal(invokeHost(a, 'boundary_echo', original), original);\n      for (const fake of [Object.freeze({}), Object.freeze({source: 'a+', flags: 'iu'})]) {\n        assert.equal(invokeHost(a, 'boundary_regex_pattern_QMARK_', fake), false);\n        assert.equal(invokeHost(a, 'boundary_echo', fake), fake);\n      }\n    } finally {finish(a);}\n  }, 60000);\n\n  hostTest(host + ' regex boundaries use the declared host provider private registry', async () => {\n    const alternative = await import(pathToFileURL(resolve(root, 'runtime/core/regex.mjs')).href + '?persistent-boundary=' + (++serial));\n    const original = alternative.compileRegex('a+', 'iu');\n    assert.equal(alternative.isRegexPattern(original), true);assert.equal(isRegexPattern(original), false);\n    const {runtime: a} = await openRuntime(host, {hostModules: new Map([['eliscript/runtime/core/regex', alternative]])});\n    try {\n      assert.equal(invokeHost(a, 'boundary_echo', original), original);\n      const raw = a.fromHostValue(original);let output;\n      try {output = a.invoke('boundary_regex_value', []);} finally {a.release(raw);}\n      try {\n        const result = a.toHostValue(output);\n        assert.equal(result[0], result[1]);assert.equal(alternative.isRegexPattern(result[0]), true);\n        assert.equal(isRegexPattern(result[0]), false);assert.equal(result[2], 'AAA');\n      } finally {a.release(output);}\n    } finally {finish(a);}\n  }, 60000);\n\n  hostTest(host + ' sorted boundaries keep normalized comparator identity without calling it again', async () => {\n    const {runtime: a, namespace: m} = await openRuntime(host);\n    try {\n      const [map, comparison, alias, set, setComparison, calls, before] = m.boundary_sorted_values();\n      assert(map instanceof PersistentSortedMap);assert(set instanceof PersistentSortedSet);\n      assert.equal(alias, map);assert.equal(map.comparator, comparison);assert.equal(set.comparator, setComparison);\n      assert.equal(calls(), before);assert.deepEqual(Array.from(map), [[1, 'a'], [2, 'b']]);assert.deepEqual(Array.from(set), [1, 3]);\n      assert.equal(calls(), before);assert.equal(meta(map).get(keyword('origin')), 'target');\n      assert.equal(Object.isFrozen(map), true);assert.equal(Object.isFrozen(set), true);\n      assert.equal(comparison(2, 1), 1);assert.equal(calls(), before + 1);\n      assert.equal(invokeHost(a, 'boundary_echo', map), map);assert.equal(invokeHost(a, 'boundary_echo', set), set);\n      const original = persistentSortedMap(1, 'a', 2, 'b'), raw = a.fromHostValue(original);\n      const descriptor = Object.getOwnPropertyDescriptor(PersistentSortedMap.prototype, 'assoc');let result;\n      try {\n        Object.defineProperty(PersistentSortedMap.prototype, 'assoc', {...descriptor, value() {\n          throw new Error('target sorted updates must not execute a host collection algorithm');\n        }});\n        result = a.invoke('boundary_sorted_default_update', [raw]);\n      } finally {Object.defineProperty(PersistentSortedMap.prototype, 'assoc', descriptor);a.release(raw);}\n      try {\n        const updated = a.toHostValue(result);\n        assert(updated instanceof PersistentSortedMap);assert.equal(updated.comparator, defaultSortedComparator());\n        assert.deepEqual(Array.from(updated), [[1, 'a'], [2, 'b'], [3, 'c']]);\n        assert.deepEqual(Array.from(original), [[1, 'a'], [2, 'b']]);\n      } finally {a.release(result);}\n      const fake = Object.freeze({kind: 'sorted-map', entries: [[1, 'a']], comparison: (left, right) => left - right});\n      assert.equal(invokeHost(a, 'boundary_sorted_QMARK_', fake), false);\n    } finally {finish(a);}\n  }, 60000);\n\n  hostTest(host + ' public and internal value hashing share actual caches and resettable metrics', async () => {\n    const {runtime: a, namespace: m} = await openRuntime(host);\n    try {\n      const [direct, publicHash, retained, computations, first, reset, empty, recomputed, cleared] = m.boundary_hash_cache();\n      assert.equal(direct, 0xffffffff);assert.equal(publicHash, direct);assert.equal(retained, direct);assert.equal(computations, 1);\n      assert.deepEqual({...first}, {hashValueCalls: 1, protocolHashComputations: 1, protocolHashCacheHits: 1, hostIdentityAssignments: 0});\n      assert.deepEqual({...reset}, {hashValueCalls: 1, protocolHashComputations: 0, protocolHashCacheHits: 1, hostIdentityAssignments: 0});\n      assert.deepEqual({...empty}, {hashValueCalls: 0, protocolHashComputations: 0, protocolHashCacheHits: 0, hostIdentityAssignments: 0});\n      assert.equal(recomputed, hashValue(persistentVector(1, 2)));\n      assert.deepEqual({...cleared}, {hashValueCalls: 3, protocolHashComputations: 1, protocolHashCacheHits: 0, hostIdentityAssignments: 0});\n      for (const snapshot of [first, reset, empty, cleared]) assert.equal(Object.isFrozen(snapshot), true);\n    } finally {finish(a);}\n  }, 60000);\n\n  hostTest(host + ' protocol members and declarations preserve aliases regardless of graph order', async () => {\n    const {runtime: a, namespace: m} = await openRuntime(host);\n    try {\n      const [slot, method, operations, protocol, fields, Type, value, shared,\n        recordFields, Record, OtherRecord, record, reified] = m.boundary_type_identities();\n      assert.equal(isProtocol(protocol), true);assert.equal(operations, protocol.operations);\n      assert.equal(method, protocolMethod(protocol, 'read'));assert.equal(method.slot, slot);\n      assert.equal(protocolSlot(protocol, 'read'), slot);assert.equal(method.protocol, protocol);\n      assert.equal(isType(Type), true);assert.equal(isTypeValue(value), true);assert.equal(value.constructor, Type);\n      assert.equal(Type.typeFields, fields);assert.equal(typeFieldNames(Type), fields);\n      assert.equal(value.value, shared);assert(Object.is(shared.zero, -0));assert.equal(method(value), shared);\n      assert.equal(isRecordType(Record), true);assert.equal(isRecordType(OtherRecord), true);assert.notEqual(Record, OtherRecord);\n      assert.equal(Record.recordName, OtherRecord.recordName);assert.deepEqual(Array.from(Record.recordFields), Array.from(OtherRecord.recordFields));\n      assert.equal(Record.recordFields, recordFields);assert.equal(recordFieldNames(Record), recordFields);\n      assert.equal(isRecord(record), true);assert.equal(record.constructor, Record);assert.equal(record.value, shared);\n      assert.equal(method(reified), 7);assert.equal(Object.getPrototypeOf(reified), null);\n      for (const item of [Type, value, Record, OtherRecord, record, reified, fields, recordFields]) assert.equal(Object.isFrozen(item), true);\n      for (const item of [Type, value, Record, record, protocol, method, operations, fields, recordFields, reified]) {\n        assert.equal(invokeHost(a, 'boundary_echo', item), item);\n      }\n    } finally {finish(a);}\n  }, 60000);\n}\n"))
+(module tests.wasm-managed-persistent-literals.test
+  (import "bun:test" afterAll beforeAll expect test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdir mkdtemp readFile rm symlink writeFile)
+  (import "node:os" tmpdir)
+  (import "node:path" dirname resolve)
+  (import "node:url" fileURLToPath pathToFileURL)
+  (import "node:child_process" spawnSync)
+  (import "node:process" :default process)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "../tools/backends/managed-module-graph.mjs"
+    createManagedModuleGraph createManagedProjectFacades loadManagedProjectGraph)
+  (import "../runtime/core/list.mjs" PersistentList persistentList)
+  (import "../runtime/core/vector.mjs" PersistentVector persistentVector)
+  (import "../runtime/core/map.mjs" PersistentHashMap persistentHashMap)
+  (import "../runtime/core/set.mjs" PersistentHashSet persistentHashSet)
+  (import "../runtime/core/queue.mjs" PersistentQueue persistentQueue)
+  (import "../runtime/core/identifier.mjs" EliscriptSymbol eliscriptSymbol keyword)
+  (import "../runtime/core/metadata.mjs" meta withMeta)
+  (import "../runtime/core/regex.mjs" compileRegex isRegexPattern regexSource regexFlags)
+  (import "../runtime/core/sorted.mjs"
+    PersistentSortedMap PersistentSortedSet persistentSortedMap defaultSortedComparator)
+  (import "../runtime/core/value.mjs" hashValue)
+  (import "../runtime/core/protocol.mjs" isProtocol protocolMethod protocolSlot)
+  (import "../runtime/core/type.mjs" isType isTypeValue typeFieldNames)
+  (import "../runtime/core/record.mjs" isRecord isRecordType recordFieldNames)
+
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst js-instanceof (js* "(a, b) => a instanceof b"))
+
+  (defconst root
+    (resolve (dirname (fileURLToPath (get (js* "import.meta") :url))) ".."))
+  (defconst host-helper
+    (resolve root "tests/helpers/wasm-managed-persistent-literals-host.mjs"))
+
+  (defconst native-supported
+    (and (= (get process :arch) "arm64")
+         (or (= (get process :platform) "darwin")
+             (= (get process :platform) "linux"))))
+  (defconst native-target
+    (if (= (get process :platform) "linux") "arm64-linux" "arm64-macos"))
+
+  (defconst memory (Object/freeze (js-object :initialPages 128 :maximumPages 4096)))
+  (defconst budget (Object/freeze (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)))
+
+  (defconst exported
+    (js-array
+      "vector-value" "map-value" "map-literal" "set-value" "set-literal" "macro-set"
+      "set-evaluation-order" "queue-value" "queue-literal" "queue-evaluation-order" "keyword-value" "keyword-map"
+      "macro-keyword" "quoted-keyword" "quoted-data" "quoted-map" "quoted-set" "quoted-queue"
+      "list-value" "list-first" "list-rest" "list-cons" "empty-list-rest" "array-value" "prepended-array" "object-value"
+      "vector-first" "vector-count" "array-second" "array-count"))
+
+  (defconst boundary-source
+    (str "(import \"./literal-runtime.mjs\" " (js-call exported :join " ") ")\n"
+      "(import \"eliscript/runtime/core/regex\" compileRegex regexFind regexSource regexFlags isRegexPattern)\n"
+      "(import \"eliscript/runtime/core/sorted\" persistentSortedMapBy persistentSortedSetBy isPersistentSortedCollection)\n"
+      "(import \"eliscript/runtime/core/metadata\" withMeta)\n"
+      "(import \"eliscript/runtime/core/value\" hashValue)\n"
+      "(import \"eliscript/runtime/core/value-internals\" cachedProtocolHash resetValueMetrics clearValueCaches readValueMetrics)\n"
+      "(import \"eliscript/runtime/core/protocol\" defineProtocol protocolMethod protocolSlot)\n"
+      "(import \"eliscript/runtime/core/type\" defineType reifyProtocols)\n"
+      "(import \"eliscript/runtime/core/record\" defineRecordType)\n"
+      "(defun boundary-echo (value) value)\n"
+      "(defun boundary-same (left right) (eq left right))\n"
+      "(defun boundary-vector-update (value) (js-call value :assoc 0 -0.0))\n"
+      "(defun boundary-map-update (value) (js-call value :assoc :updated 42))\n"
+      "(defun boundary-set-update (value) (js-call value :conj 42))\n"
+      "(defun boundary-queue-update (value) (js-call value :conj 42))\n"
+      "(defun boundary-list-update (value) (cons 42 value))\n"
+      "(defun boundary-aliases ()\n"
+      "  (let ((shared [1 undefined -0.0]))\n"
+      "    (js-array shared shared (hash-map :child shared) (list shared shared))))\n"
+      "(defun boundary-identifiers ()\n"
+      "  (let ((name 'same)) (js-array :same :same name name 'same)))\n"
+      "(defun boundary-fake () (Object/freeze (js-object :kind \"vector\" :count 2 :values (js-array 1 2))))\n"
+      "(defun boundary-regex-value ()\n"
+      "  (let ((pattern (compileRegex \"a+\" \"ui\")))\n"
+      "    (js-array pattern pattern (regexFind pattern \"BAAA\"))))\n"
+      "(defun boundary-regex-observe (pattern)\n"
+      "  (js-array (regexSource pattern) (regexFlags pattern) (regexFind pattern \"BAAA\")))\n"
+      "(defun boundary-regex-pattern? (pattern) (isRegexPattern pattern))\n"
+      "(defun boundary-sorted-values ()\n"
+      "  (let* ((calls 0)\n"
+      "         (comparison (lambda (left right) (setq calls (1+ calls)) (- left right)))\n"
+      "         (values (persistentSortedMapBy comparison 2 \"b\" 1 \"a\"))\n"
+      "         (map (withMeta values (hash-map :origin \"target\")))\n"
+      "         (set (persistentSortedSetBy comparison 3 1)))\n"
+      "    (js-array map (get map :comparator) map set (get set :comparator) (lambda () calls) calls)))\n"
+      "(defun boundary-sorted-default-update (value) (js-call value :assoc 3 \"c\"))\n"
+      "(defun boundary-sorted? (value) (isPersistentSortedCollection value))\n"
+      "(defun boundary-hash-cache ()\n"
+      "  (clearValueCaches)\n"
+      "  (let* ((value [1 2]) (computations 0)\n"
+      "         (direct (cachedProtocolHash value (lambda () (setq computations (1+ computations)) -1)))\n"
+      "         (public (hashValue value)) (first (readValueMetrics)))\n"
+      "    (resetValueMetrics)\n"
+      "    (let* ((retained (hashValue value)) (after-reset (readValueMetrics)))\n"
+      "      (clearValueCaches)\n"
+      "      (let* ((empty (readValueMetrics)) (recomputed (hashValue value)) (after-clear (readValueMetrics)))\n"
+      "        (js-array direct public retained computations first after-reset empty recomputed after-clear)))))\n"
+      "(defun boundary-type-identities ()\n"
+      "  (let* ((protocol (defineProtocol \"Boundary\" (js-array \"read\")))\n"
+      "         (shared (js-object :zero -0.0))\n"
+      "         (type (defineType \"Same\" (js-array \"value\")\n"
+      "           (js-array (js-array protocol (js-object :read (lambda (self) (get self :value)))))))\n"
+      "         (value (js-call type :create shared))\n"
+      "         (record-type (defineRecordType \"Same\" (js-array \"value\")))\n"
+      "         (other-record-type (defineRecordType \"Same\" (js-array \"value\")))\n"
+      "         (record (js-call record-type :create shared))\n"
+      "         (reified (reifyProtocols (js-array (js-array protocol (js-object :read (lambda (self) 7)))))))\n"
+      "    (js-array (protocolSlot protocol \"read\") (protocolMethod protocol \"read\") (get protocol :operations) protocol\n"
+      "      (get type :typeFields) type value shared (get record-type :recordFields) record-type other-record-type record reified)))\n"
+      "(export " (js-call exported :join " ") " boundary-echo boundary-same boundary-vector-update boundary-map-update\n"
+      " boundary-set-update boundary-queue-update boundary-list-update boundary-aliases boundary-identifiers boundary-fake\n"
+      " boundary-regex-value boundary-regex-observe boundary-regex-pattern?\n"
+      " boundary-sorted-values boundary-sorted-default-update boundary-sorted? boundary-hash-cache boundary-type-identities)"))
+
+  (defun assert-original-report (bun-report)
+    (js-call (expect bun-report) :toEqual
+      (js-object
+        :vector (js-object :persistent t :count 3 :languageCount 3 :first 1
+          :values (js-array 1 2 (js-object)) :nestedPersistent t)
+        :map (js-object :persistent t :count 2 :name "Eliscript" :valueKey (js-array 5 6))
+        :mapLiteral (js-object :persistent t :count 4 :name "source" :valueKey (js-array 7 8)
+          :nestedPersistent t :nestedReady t :duplicate 2)
+        :set (js-object :explicitPersistent t :explicitCount 2 :explicitValueKey t
+          :literalPersistent t :literalCount 3 :duplicate t :valueKey t :nestedMap t :nestedReady t
+          :evaluationOrder "12" :macroPersistent t :macroKeyword t :macroValue t)
+        :queue (js-object :explicitPersistent t :explicitValues (js-array "explicit" (js-array 5 6))
+          :literalPersistent t :literalValues (js-array "source" (js-array 7 8) (js-object :ready t))
+          :evaluationOrder "12" :text "#queue [\"source\" [7 8] {:ready true}]")
+        :keyword (js-object :value t :interned t :qualifiedName "article/title" :printed ":article/title"
+          :mapPersistent t :mapCount 2 :mapQualified "qualified" :mapReady t :stringKeyMiss nil
+          :macroValue t :macroQualifiedName "macro/value"
+          :quotedSyntax (js-object :value t :qualifiedName "quoted/value"))
+        :quoted (js-object :persistentList t :count 5 :symbol t :symbolName "alpha" :keyword t
+          :vector t :vectorValues (js-array 1 nil) :emptyList t :falseSymbol t
+          :text "(alpha :beta [1 undefined] () #eliscript/symbol [nil \"false\"])"
+          :mapSyntax "(hash-map :ready true)" :setSyntax "(hash-set :ready [1 undefined])"
+          :queueSyntax "(queue 1 :ready)")
+        :list (js-object :persistent t :values (js-array 1 2 3) :first 1 :restPersistent t
+          :restValues (js-array 2 3) :consPersistent t :consValues (js-array 0 1 2 3) :emptyRest t)
+        :host (js-object :array t :prependedArray (js-array 0 1 2 3) :languageCount 3 :second 2
+          :object t :objectValue (js-object :name "host" :count 2)))))
+
+  (defvar directory nil)
+  (defvar backend nil)
+  (defvar lowered nil)
+  (defvar wasm-bytes nil)
+  (defvar native-path nil)
+  (defvar oracle-path nil)
+  (defvar serial 0)
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-managed-persistent-literals-"))))
+      (setq backend (await (buildBackends (js-object :outputRoot (resolve directory "backend")))))
+      (let* ((fixture-source (await (readFile (resolve root "tests/fixtures/literal-runtime.eli") "utf8")))
+             (loaded (await (js-call backend :loadLiteralModules)))
+             (literal-sources (get loaded :literalSources))
+             (literal-modules (get loaded :literalModules))
+             (expected-ids
+               (js-call
+                 (js-call
+                   (js-call
+                     (js-array
+                       "bit" "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value" "managed-queue-state" "managed-literals"
+                       "managed-transient-state" "managed-vector-view-state" "managed-literal-protocols" "managed-sorted-state"
+                       "managed-value-state" "core/protocol" "core/text" "core/object" "core/set" "core/data")
+                     :map (lambda (name) (str "stdlib/" name ".mjs")))
+                   :concat
+                   (js-call
+                     (js-array
+                       "protocol-error" "list" "vector" "map" "set" "queue" "identifier" "record" "value"
+                       "metadata" "collection" "transient" "protocol" "type" "order" "sorted" "regex"
+                       "transducer" "lazy-sequence" "text" "object" "truth" "sequence" "set-algebra"
+                       "collection-internals" "metadata-internals" "persistent-kind" "data" "data-text" "value-internals")
+                     :map (lambda (name) (str "runtime/core/" name ".mjs")))
+                   "runtime/literals.mjs"
+                   "runtime/wire/markdown.mjs" "runtime/wire/schema.mjs" "runtime/wire/http-rpc.mjs"
+                   "runtime/testing/value.mjs")
+                 :sort)))
+        (js-call assert :deepEqual
+          (js-call (js-call literal-sources :map (lambda (item) (get item :id))) :sort)
+          expected-ids)
+        (js-call assert :equal (get literal-modules :length) (get literal-sources :length))
+        (let ((index 0))
+          (while (< index (get literal-modules :length))
+            (let ((mod-item (aref literal-modules index))
+                  (src-item (aref literal-sources index)))
+              (js-call assert :equal (get mod-item :id) (get src-item :id))
+              (js-call assert :equal
+                (get src-item :source)
+                (await (readFile (resolve root (get src-item :filename)) "utf8"))))
+            (setq index (+ index 1))))
+        (let* ((modules
+                 (js-array
+                   (js-object
+                     :id "literal-runtime.mjs"
+                     :program (js-call (get backend :compiler) :compile_ir_string fixture-source "tests/fixtures/literal-runtime.eli"))
+                   (js-object
+                     :id "boundary.mjs"
+                     :program (js-call (get backend :compiler) :compile_ir_string boundary-source "persistent-boundary.eli"))))
+               (runtime
+                 (js-call (get backend :compiler) :compile_ir_string
+                   (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8"))
+                   "runtime.eli"))
+               (original-modules (globalThis.structuredClone modules))
+               (original-library (globalThis.structuredClone literal-modules)))
+          (setq lowered
+            (js-call (get backend :managed) :lower_managed_project
+              modules "boundary.mjs" runtime
+              (js-object :literalModules literal-modules :phased t)))
+          (js-call assert :deepEqual modules original-modules)
+          (js-call assert :deepEqual literal-modules original-library)
+          (let ((caps (get (get lowered :descriptor) :hostCapabilities)))
+            (js-call assert :deepEqual (if (nullish? caps) (js-array) caps) (js-array)))
+          (js-call assert :equal (get (get (get lowered :descriptor) :literalRuntime) :version) 1)
+          (setq wasm-bytes
+            (Uint8Array/from
+              (js-call (get backend :wasm) :append_metadata_section
+                (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) memory)
+                "eliscript-managed-control"
+                (JSON/stringify (get lowered :descriptor)))))
+          (js-call assert :deepEqual
+            (WebAssembly.Module/imports (new WebAssembly.Module wasm-bytes))
+            (js-array))
+          (await (writeFile (resolve directory "literal-runtime.wasm") wasm-bytes))
+          (await (writeFile (resolve directory "literal-runtime.lowered.json") (JSON/stringify lowered)))
+          (when native-supported
+            (setq native-path
+              (resolve directory
+                (if (= (get process :platform) "linux")
+                    "literal-runtime.so"
+                    "literal-runtime.dylib")))
+            (await (writeFile native-path
+                     (Uint8Array/from
+                       (js-call (get backend :native) :emit_typed_native_memory_library
+                         (get lowered :typed)
+                         native-target)))))
+          (let ((oracle-directory (resolve directory "oracle")))
+            (await (mkdir oracle-directory))
+            (await (mkdir (resolve directory "node_modules")))
+            (await (symlink root (resolve directory "node_modules/eliscript") "dir"))
+            (setq oracle-path (resolve oracle-directory "literal-runtime.mjs"))
+            (await (writeFile oracle-path
+                     (js-call (get backend :compiler) :compile_string
+                       fixture-source "tests/fixtures/literal-runtime.eli")))))))
+    120000)
+
+  (afterAll
+    (async ()
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defasync facades-at (path)
+    (let* ((facades (createManagedProjectFacades (get lowered :descriptor) (js-object :entry "boundary.mjs")))
+           (files (get facades :files))
+           (idx 0))
+      (while (< idx (get files :length))
+        (let* ((file (aref files idx))
+               (output (resolve path (get file :id))))
+          (await (mkdir (dirname output) (js-object :recursive t)))
+          (await (writeFile output (get file :source))))
+        (setq idx (+ idx 1)))
+      facades))
+
+  (defasync open-runtime (host &rest __host_forwarded_arguments_1)
+    (let* ((opts (aref __host_forwarded_arguments_1 0)))
+    (setq serial (+ serial 1))
+    (let ((deployment (resolve directory (str "live-" host "-" serial))))
+      (await (mkdir deployment))
+      (await (facades-at deployment))
+      (let ((host-modules (if (nullish? opts) undefined (get opts :hostModules)))
+            (module-graph (createManagedModuleGraph (get lowered :descriptor)))
+            (runtime undefined))
+      (try
+        (if (= host "wasm")
+            (setq runtime
+              (instantiateManagedRuntime wasm-bytes
+                (Object/assign (js-object) budget
+                  (js-object :initializeModule false :moduleGraph module-graph :hostModules host-modules))))
+            (setq runtime
+              (await (instantiateNativeManagedRuntime native-path lowered
+                       (Object/assign (js-object) memory budget
+                         (js-object :initializeModule false :moduleGraph module-graph :nativeTarget native-target :hostModules host-modules))))))
+        (js-call runtime :auto 65536)
+        (let ((project
+                (await (loadManagedProjectGraph runtime (get lowered :descriptor)
+                         (js-object
+                           :moduleGraph module-graph
+                           :projectEntry "boundary.mjs"
+                           :projectModuleBaseURL (get (pathToFileURL (str deployment "/")) :href))))))
+          (js-object :runtime runtime :namespace (get project :namespace)))
+        (catch error
+          (try (when runtime (js-call runtime :closeModule)) (catch _e nil))
+          (try (when (and runtime (get runtime :close)) (js-call runtime :close)) (catch _e nil))
+          (js-call module-graph :close)
+          (throw error)))))))
+
+  (defun finish (runtime)
+    (try
+      (js-call runtime :closeModule)
+      (js-call runtime :collect)
+      (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0)
+      (js-call assert :equal (js-call runtime :live) 0)
+      (js-call runtime :closeModule)
+      (js-call runtime :collect)
+      (js-call assert :equal (js-call runtime :live) 0)
+      (finally
+        (let ((close-fn (get runtime :close)))
+          (when close-fn
+            (js-call runtime :close))))))
+
+  (defun invoke-host (runtime name value)
+    (let ((input (js-call runtime :fromHostValue value)))
+      (try
+        (let ((output (js-call runtime :invoke name (js-array input))))
+          (try
+            (js-call runtime :toHostValue output)
+            (finally
+              (js-call runtime :release output))))
+        (finally
+          (js-call runtime :release input)))))
+
+  (defun host-script (engine script args &rest __host_default_arguments_1)
+    (let* ((timeout (aref __host_default_arguments_1 0)))
+    (let* ((limit (if (undefined? timeout) 60000 timeout))
+           (env-node (get (get process :env) :NODE_BINARY))
+           (bin (if (= engine "bun")
+                    (get process :execPath)
+                    (if (nullish? env-node) "node" env-node)))
+           (child (spawnSync bin
+                    (js-call (js-array script) :concat args)
+                    (js-object
+                      :cwd root
+                      :encoding "utf8"
+                      :timeout limit
+                      :env (Object/assign (js-object) (get process :env) (js-object :BUN (get process :execPath)))))))
+      (js-call assert :equal (get child :error) undefined)
+      (js-call assert :equal (get child :status) 0 (str (get child :stderr) (get child :stdout)))
+      (JSON/parse (js-call (get child :stdout) :trim)))))
+
+  (js-call (js-array "wasm" "native") :forEach
+    (lambda (host)
+      (let ((host-test (js-call test :skipIf (and (= host "native") (not native-supported)))))
+        (js-call (js-array "bun" "node") :forEach
+          (lambda (engine)
+            (funcall host-test
+              (str "the complete original persistent literal host executes real " host " with " engine)
+              (async ()
+                (let ((deployment (resolve directory (str "original-" host "-" engine))))
+                  (await (mkdir deployment))
+                  (await (facades-at deployment))
+                  (let* ((report
+                           (host-script engine host-helper
+                             (js-array "--run-host" host root directory deployment native-target (if native-path native-path ""))))
+                         (oracle
+                           (host-script engine (resolve root "tests/fixtures/literal-runtime-host.mjs")
+                             (js-array oracle-path))))
+                    (assert-original-report report)
+                    (assert-original-report oracle)
+                    (js-call assert :deepEqual report oracle))))
+              60000)))
+
+        (funcall host-test
+          (str host " persistent boundaries preserve actual classes, immutable structure and nested aliases")
+          (async ()
+            (let* ((opened (await (open-runtime host)))
+                   (a (get opened :runtime))
+                   (m (get opened :namespace)))
+              (try
+                (js-call
+                  (js-array
+                    (js-array (get m :vector_value) PersistentVector)
+                    (js-array (get m :map_value) PersistentHashMap)
+                    (js-array (get m :set_value) PersistentHashSet)
+                    (js-array (get m :queue_value) PersistentQueue)
+                    (js-array (get m :list_value) PersistentList))
+                  :forEach
+                  (lambda (pair)
+                    (let ((value (aref pair 0))
+                          (cls (aref pair 1)))
+                      (funcall assert (funcall js-instanceof value cls))
+                      (js-call assert :equal (Object/isFrozen value) t)
+                      (js-call assert :equal (Object/isExtensible value) false)
+                      (js-call assert :equal (Reflect/set value "added" 1) false)
+                      (js-call assert :throws
+                        (lambda () (Object/defineProperty value "added" (js-object :value 1)))
+                        globalThis.TypeError))))
+                (let* ((aliases (js-call m :boundary_aliases))
+                       (shared (aref aliases 0)))
+                  (funcall assert (funcall js-instanceof shared PersistentVector))
+                  (js-call assert :equal (aref aliases 1) shared)
+                  (js-call assert :equal (js-call (aref aliases 2) :get (keyword "child")) shared)
+                  (js-call assert :equal (js-call (aref aliases 3) :first) shared)
+                  (js-call assert :equal (js-call (js-call (aref aliases 3) :rest) :first) shared)
+                  (js-call assert :equal (js-call shared :nth 1) undefined)
+                  (funcall assert (Object/is (js-call shared :nth 2) -0.0))
+                  (let ((raw (js-call a :fromHostValue shared)))
+                    (try
+                      (js-call assert :equal (js-call a :invoke "boundary_same" (js-array raw raw)) t)
+                      (let ((echoed (js-call a :invoke "boundary_echo" (js-array raw))))
+                        (try
+                          (js-call assert :equal (js-call a :toHostValue echoed) shared)
+                          (finally
+                            (js-call a :release echoed))))
+                      (finally
+                        (js-call a :release raw))))
+                  (let ((ids (js-call m :boundary_identifiers)))
+                    (js-call assert :equal (aref ids 0) (keyword "same"))
+                    (js-call assert :equal (aref ids 0) (aref ids 1))
+                    (funcall assert (funcall js-instanceof (aref ids 2) EliscriptSymbol))
+                    (js-call assert :equal (aref ids 2) (aref ids 3))
+                    (js-call assert :notEqual (aref ids 2) (aref ids 4))
+                    (js-call assert :equal (get (aref ids 2) :qualifiedName) (get (aref ids 4) :qualifiedName))))
+                (finally
+                  (finish a)))))
+          60000)
+
+        (funcall host-test
+          (str host " imported persistent metadata and updates use target algorithms and preserve the original input")
+          (async ()
+            (let* ((opened (await (open-runtime host)))
+                   (a (get opened :runtime)))
+              (try
+                (let* ((metadata (persistentHashMap (js-array (keyword "source") "host")))
+                       (shared (persistentVector 7 8))
+                       (cases
+                         (js-array
+                           (js-array "boundary_vector_update" (withMeta (persistentVector shared shared) metadata) PersistentVector)
+                           (js-array "boundary_map_update" (withMeta (persistentHashMap (js-array (keyword "child") shared)) metadata) PersistentHashMap)
+                           (js-array "boundary_set_update" (withMeta (persistentHashSet shared) metadata) PersistentHashSet)
+                           (js-array "boundary_queue_update" (withMeta (persistentQueue shared) metadata) PersistentQueue)
+                           (js-array "boundary_list_update" (withMeta (persistentList shared) metadata) PersistentList)))
+                       (ctors (js-array PersistentVector PersistentHashMap PersistentHashSet PersistentQueue PersistentList)))
+                  (js-call cases :forEach
+                    (lambda (spec)
+                      (let* ((name (aref spec 0))
+                             (input (aref spec 1))
+                             (cls (aref spec 2))
+                             (original (Array/from input))
+                             (raw (js-call a :fromHostValue input))
+                             (blocked
+                               (js-call ctors :flatMap
+                                 (lambda (ctor)
+                                   (let ((proto (get ctor :prototype)))
+                                     (js-call
+                                       (js-call (js-array "assoc" "conj" "cons") :filter
+                                         (lambda (method) (= (funcall js-typeof (get proto method)) "function")))
+                                       :map
+                                       (lambda (method)
+                                         (js-array proto method (Object/getOwnPropertyDescriptor proto method))))))))
+                             (output undefined))
+                        (try
+                          (js-call blocked :forEach
+                            (lambda (entry)
+                              (Object/defineProperty (aref entry 0) (aref entry 1)
+                                (Object/assign (js-object) (aref entry 2)
+                                  (js-object :value
+                                    (lambda ()
+                                      (throw (new globalThis.Error "target persistent algorithms cannot execute a host collection method"))))))))
+                          (setq output (js-call a :invoke name (js-array raw)))
+                          (finally
+                            (js-call blocked :forEach
+                              (lambda (entry)
+                                (Object/defineProperty (aref entry 0) (aref entry 1) (aref entry 2))))
+                            (js-call a :release raw)))
+                        (try
+                          (let ((result (js-call a :toHostValue output)))
+                            (funcall assert (funcall js-instanceof result cls))
+                            (js-call assert :equal (Object/isFrozen result) t)
+                            (js-call assert :notEqual result input)
+                            (js-call assert :equal (meta result) metadata)
+                            (js-call assert :deepEqual (Array/from input) original)
+                            (js-call assert :equal (invoke-host a "boundary_echo" input) input)
+                            (cond
+                              ((= name "boundary_vector_update")
+                               (funcall assert (Object/is (js-call result :nth 0) -0.0))
+                               (js-call assert :equal (js-call result :nth 1) shared))
+                              ((= name "boundary_map_update")
+                               (js-call assert :equal (js-call result :get (keyword "updated")) 42)
+                               (js-call assert :equal (js-call result :get (keyword "child")) shared))
+                              ((= name "boundary_set_update")
+                               (js-call assert :equal (js-call result :has 42) t))
+                              ((= name "boundary_queue_update")
+                               (js-call assert :deepEqual (Array/from result) (js-array shared 42)))
+                              (t
+                               (js-call assert :deepEqual (Array/from result) (js-array 42 shared)))))
+                          (finally
+                            (js-call a :release output))))))
+                  (let ((symbol (eliscriptSymbol "same")))
+                    (js-call assert :equal (invoke-host a "boundary_echo" symbol) symbol)))
+                (finally
+                  (finish a)))))
+          60000)
+
+        (funcall host-test
+          (str host " persistent branding rejects ordinary lookalikes and close releases boundary roots")
+          (async ()
+            (let* ((opened (await (open-runtime host)))
+                   (a (get opened :runtime))
+                   (m (get opened :namespace))
+                   (closed false))
+              (try
+                (let ((fake (js-call m :boundary_fake)))
+                  (js-call assert :equal (funcall js-instanceof fake PersistentVector) false)
+                  (js-call assert :equal (get fake :kind) "vector")
+                  (js-call (js-array PersistentList PersistentVector PersistentHashMap PersistentHashSet PersistentQueue) :forEach
+                    (lambda (cls)
+                      (js-call assert :equal (funcall js-instanceof fake cls) false)))
+                  (let ((host-fake (Object/freeze (js-object :kind "vector" :count 2 :values (js-array 1 2)))))
+                    (js-call assert :equal (invoke-host a "boundary_echo" host-fake) host-fake))
+                  (let* ((retained (get m :vector_value))
+                         (imported (persistentList (get m :map_value) retained)))
+                    (js-call assert :equal (invoke-host a "boundary_echo" imported) imported)
+                    (funcall assert (> (js-call a :live) 0))
+                    (js-call a :closeModule)
+                    (js-call a :collect)
+                    (js-call assert :equal (js-call a :live) 0)
+                    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+                    (js-call assert :deepEqual (js-call (Array/from retained) :slice 0 2) (js-array 1 2))
+                    (when (get a :close) (js-call a :close))
+                    (when (get a :close) (js-call a :close))
+                    (setq closed t)
+                    (js-call assert :throws
+                      (lambda () (js-call a :fromHostValue imported))
+                      (new globalThis.RegExp "closed"))))
+                (finally
+                  (unless closed
+                    (finish a))))))
+          60000)
+
+        (funcall host-test
+          (str host " regex patterns keep the actual private brand and identity while matching in the target")
+          (async ()
+            (let* ((opened (await (open-runtime host)))
+                   (a (get opened :runtime))
+                   (m (get opened :namespace)))
+              (try
+                (let* ((triple (js-call m :boundary_regex_value))
+                       (pattern (aref triple 0))
+                       (alias (aref triple 1))
+                       (match (aref triple 2)))
+                  (js-call assert :equal pattern alias)
+                  (js-call assert :equal (isRegexPattern pattern) t)
+                  (js-call assert :equal (Object/isFrozen pattern) t)
+                  (js-call assert :equal (regexSource pattern) "a+")
+                  (js-call assert :equal (regexFlags pattern) "iu")
+                  (js-call assert :equal match "AAA")
+                  (js-call assert :equal (invoke-host a "boundary_echo" pattern) pattern)
+                  (let* ((original (compileRegex "a+" "iu"))
+                         (raw (js-call a :fromHostValue original))
+                         (host-regexp globalThis.RegExp)
+                         (result undefined))
+                    (try
+                      (put (js* "globalThis") :RegExp
+                        (lambda ()
+                          (throw (new globalThis.Error "target regex matching must not call the host RegExp constructor"))))
+                      (setq result (js-call a :invoke "boundary_regex_observe" (js-array raw)))
+                      (finally
+                        (put (js* "globalThis") :RegExp host-regexp)
+                        (js-call a :release raw)))
+                    (try
+                      (js-call assert :deepEqual
+                        (Array/from (js-call a :toHostValue result))
+                        (js-array "a+" "iu" "AAA"))
+                      (finally
+                        (js-call a :release result)))
+                    (js-call assert :equal (invoke-host a "boundary_echo" original) original)
+                    (js-call
+                      (js-array
+                        (Object/freeze (js-object))
+                        (Object/freeze (js-object :source "a+" :flags "iu")))
+                      :forEach
+                      (lambda (fake)
+                        (js-call assert :equal (invoke-host a "boundary_regex_pattern_QMARK_" fake) false)
+                        (js-call assert :equal (invoke-host a "boundary_echo" fake) fake)))))
+                (finally
+                  (finish a)))))
+          60000)
+
+        (funcall host-test
+          (str host " regex boundaries use the declared host provider private registry")
+          (async ()
+            (setq serial (+ serial 1))
+            (let* ((alternative
+                     (await (funcall dyn-import
+                              (str (get (pathToFileURL (resolve root "runtime/core/regex.mjs")) :href)
+                                   "?persistent-boundary=" serial))))
+                   (original (js-call alternative :compileRegex "a+" "iu")))
+              (js-call assert :equal (js-call alternative :isRegexPattern original) t)
+              (js-call assert :equal (isRegexPattern original) false)
+              (let* ((opened
+                       (await (open-runtime host
+                                (js-object :hostModules
+                                  (new globalThis.Map (js-array (js-array "eliscript/runtime/core/regex" alternative)))))))
+                     (a (get opened :runtime)))
+                (try
+                  (js-call assert :equal (invoke-host a "boundary_echo" original) original)
+                  (let ((raw (js-call a :fromHostValue original))
+                        (output undefined))
+                    (try
+                      (setq output (js-call a :invoke "boundary_regex_value" (js-array)))
+                      (finally
+                        (js-call a :release raw)))
+                    (try
+                      (let ((result (js-call a :toHostValue output)))
+                        (js-call assert :equal (aref result 0) (aref result 1))
+                        (js-call assert :equal (js-call alternative :isRegexPattern (aref result 0)) t)
+                        (js-call assert :equal (isRegexPattern (aref result 0)) false)
+                        (js-call assert :equal (aref result 2) "AAA"))
+                      (finally
+                        (js-call a :release output))))
+                  (finally
+                    (finish a))))))
+          60000)
+
+        (funcall host-test
+          (str host " sorted boundaries keep normalized comparator identity without calling it again")
+          (async ()
+            (let* ((opened (await (open-runtime host)))
+                   (a (get opened :runtime))
+                   (m (get opened :namespace)))
+              (try
+                (let* ((vals (js-call m :boundary_sorted_values))
+                       (map (aref vals 0))
+                       (comparison (aref vals 1))
+                       (alias (aref vals 2))
+                       (set (aref vals 3))
+                       (set-comparison (aref vals 4))
+                       (calls (aref vals 5))
+                       (before (aref vals 6)))
+                  (funcall assert (funcall js-instanceof map PersistentSortedMap))
+                  (funcall assert (funcall js-instanceof set PersistentSortedSet))
+                  (js-call assert :equal alias map)
+                  (js-call assert :equal (get map :comparator) comparison)
+                  (js-call assert :equal (get set :comparator) set-comparison)
+                  (js-call assert :equal (funcall calls) before)
+                  (js-call assert :deepEqual (Array/from map) (js-array (js-array 1 "a") (js-array 2 "b")))
+                  (js-call assert :deepEqual (Array/from set) (js-array 1 3))
+                  (js-call assert :equal (funcall calls) before)
+                  (js-call assert :equal (js-call (meta map) :get (keyword "origin")) "target")
+                  (js-call assert :equal (Object/isFrozen map) t)
+                  (js-call assert :equal (Object/isFrozen set) t)
+                  (js-call assert :equal (funcall comparison 2 1) 1)
+                  (js-call assert :equal (funcall calls) (+ before 1))
+                  (js-call assert :equal (invoke-host a "boundary_echo" map) map)
+                  (js-call assert :equal (invoke-host a "boundary_echo" set) set)
+                  (let* ((original (persistentSortedMap 1 "a" 2 "b"))
+                         (raw (js-call a :fromHostValue original))
+                         (proto (get PersistentSortedMap :prototype))
+                         (descriptor (Object/getOwnPropertyDescriptor proto "assoc"))
+                         (result undefined))
+                    (try
+                      (Object/defineProperty proto "assoc"
+                        (Object/assign (js-object) descriptor
+                          (js-object :value
+                            (lambda ()
+                              (throw (new globalThis.Error "target sorted updates must not execute a host collection algorithm"))))))
+                      (setq result (js-call a :invoke "boundary_sorted_default_update" (js-array raw)))
+                      (finally
+                        (Object/defineProperty proto "assoc" descriptor)
+                        (js-call a :release raw)))
+                    (try
+                      (let ((updated (js-call a :toHostValue result)))
+                        (funcall assert (funcall js-instanceof updated PersistentSortedMap))
+                        (js-call assert :equal (get updated :comparator) (defaultSortedComparator))
+                        (js-call assert :deepEqual (Array/from updated) (js-array (js-array 1 "a") (js-array 2 "b") (js-array 3 "c")))
+                        (js-call assert :deepEqual (Array/from original) (js-array (js-array 1 "a") (js-array 2 "b"))))
+                      (finally
+                        (js-call a :release result))))
+                  (let ((fake (Object/freeze
+                                (js-object
+                                  :kind "sorted-map"
+                                  :entries (js-array (js-array 1 "a"))
+                                  :comparison (lambda (left right) (- left right))))))
+                    (js-call assert :equal (invoke-host a "boundary_sorted_QMARK_" fake) false)))
+                (finally
+                  (finish a)))))
+          60000)
+
+        (funcall host-test
+          (str host " public and internal value hashing share actual caches and resettable metrics")
+          (async ()
+            (let* ((opened (await (open-runtime host)))
+                   (a (get opened :runtime))
+                   (m (get opened :namespace)))
+              (try
+                (let* ((vals (js-call m :boundary_hash_cache))
+                       (direct (aref vals 0))
+                       (public-hash (aref vals 1))
+                       (retained (aref vals 2))
+                       (computations (aref vals 3))
+                       (first (aref vals 4))
+                       (reset (aref vals 5))
+                       (empty (aref vals 6))
+                       (recomputed (aref vals 7))
+                       (cleared (aref vals 8)))
+                  (js-call assert :equal direct 4294967295)
+                  (js-call assert :equal public-hash direct)
+                  (js-call assert :equal retained direct)
+                  (js-call assert :equal computations 1)
+                  (js-call assert :deepEqual
+                    (Object/assign (js-object) first)
+                    (js-object :hashValueCalls 1 :protocolHashComputations 1 :protocolHashCacheHits 1 :hostIdentityAssignments 0))
+                  (js-call assert :deepEqual
+                    (Object/assign (js-object) reset)
+                    (js-object :hashValueCalls 1 :protocolHashComputations 0 :protocolHashCacheHits 1 :hostIdentityAssignments 0))
+                  (js-call assert :deepEqual
+                    (Object/assign (js-object) empty)
+                    (js-object :hashValueCalls 0 :protocolHashComputations 0 :protocolHashCacheHits 0 :hostIdentityAssignments 0))
+                  (js-call assert :equal recomputed (hashValue (persistentVector 1 2)))
+                  (js-call assert :deepEqual
+                    (Object/assign (js-object) cleared)
+                    (js-object :hashValueCalls 3 :protocolHashComputations 1 :protocolHashCacheHits 0 :hostIdentityAssignments 0))
+                  (js-call (js-array first reset empty cleared) :forEach
+                    (lambda (snapshot)
+                      (js-call assert :equal (Object/isFrozen snapshot) t))))
+                (finally
+                  (finish a)))))
+          60000)
+
+        (funcall host-test
+          (str host " protocol members and declarations preserve aliases regardless of graph order")
+          (async ()
+            (let* ((opened (await (open-runtime host)))
+                   (a (get opened :runtime))
+                   (m (get opened :namespace)))
+              (try
+                (let* ((vals (js-call m :boundary_type_identities))
+                       (slot (aref vals 0))
+                       (method (aref vals 1))
+                       (operations (aref vals 2))
+                       (protocol (aref vals 3))
+                       (fields (aref vals 4))
+                       (type-ctor (aref vals 5))
+                       (value (aref vals 6))
+                       (shared (aref vals 7))
+                       (record-fields (aref vals 8))
+                       (record-ctor (aref vals 9))
+                       (other-record-ctor (aref vals 10))
+                       (record (aref vals 11))
+                       (reified (aref vals 12)))
+                  (js-call assert :equal (isProtocol protocol) t)
+                  (js-call assert :equal operations (get protocol :operations))
+                  (js-call assert :equal method (protocolMethod protocol "read"))
+                  (js-call assert :equal (get method :slot) slot)
+                  (js-call assert :equal (protocolSlot protocol "read") slot)
+                  (js-call assert :equal (get method :protocol) protocol)
+                  (js-call assert :equal (isType type-ctor) t)
+                  (js-call assert :equal (isTypeValue value) t)
+                  (js-call assert :equal (get value :constructor) type-ctor)
+                  (js-call assert :equal (get type-ctor :typeFields) fields)
+                  (js-call assert :equal (typeFieldNames type-ctor) fields)
+                  (js-call assert :equal (get value :value) shared)
+                  (funcall assert (Object/is (get shared :zero) -0.0))
+                  (js-call assert :equal (funcall method value) shared)
+                  (js-call assert :equal (isRecordType record-ctor) t)
+                  (js-call assert :equal (isRecordType other-record-ctor) t)
+                  (js-call assert :notEqual record-ctor other-record-ctor)
+                  (js-call assert :equal (get record-ctor :recordName) (get other-record-ctor :recordName))
+                  (js-call assert :deepEqual (Array/from (get record-ctor :recordFields)) (Array/from (get other-record-ctor :recordFields)))
+                  (js-call assert :equal (get record-ctor :recordFields) record-fields)
+                  (js-call assert :equal (recordFieldNames record-ctor) record-fields)
+                  (js-call assert :equal (isRecord record) t)
+                  (js-call assert :equal (get record :constructor) record-ctor)
+                  (js-call assert :equal (get record :value) shared)
+                  (js-call assert :equal (funcall method reified) 7)
+                  (js-call assert :equal (Object/getPrototypeOf reified) nil)
+                  (js-call (js-array type-ctor value record-ctor other-record-ctor record reified fields record-fields) :forEach
+                    (lambda (item)
+                      (js-call assert :equal (Object/isFrozen item) t)))
+                  (js-call (js-array type-ctor value record-ctor record protocol method operations fields record-fields reified) :forEach
+                    (lambda (item)
+                      (js-call assert :equal (invoke-host a "boundary_echo" item) item))))
+                (finally
+                  (finish a)))))
+          60000)))))

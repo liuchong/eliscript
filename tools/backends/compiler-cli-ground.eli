@@ -12,12 +12,12 @@
     bootstrapCompilerChain bootstrapIndependentCompilers bootstrapCompilerGrid
     compilerFailure openCompilerArtifact)
   (import "./compiler-package.mjs" packageIndependentCompiler)
-  (import "./compiler-matrix.mjs" buildCompilerMatrix)
   (import "./managed-module-graph.mjs" createManagedProjectFacades)
   (import "./compiler-session.mjs"
     encodeCompilerMetadata forEachCompilerMetadataChunk
     isOwnedCompilerBuildProduct requestCompilerBuildProduct)
   (import "./compiler-metadata.mjs" readCompilerMetadata)
+  (defconst import-compiler-tool (js* "(specifier) => import(specifier)"))
 
   (defun cli-default (value fallback)
     (if (undefined? value) fallback value))
@@ -377,7 +377,7 @@
                      (unless (= (get (get grid :metadata) :identityVerification) "identical")
                        (throw (new globalThis.Error "complete compiler grid has not established all same-target identities")))
                      (when (= cmd "matrix")
-                       (let ((matrix (await (buildCompilerMatrix
+                       (let ((matrix (await (js-call (await (funcall import-compiler-tool "./compiler-matrix.mjs")) :buildCompilerMatrix
                                        (Object/assign (js-object) options
                                          (js-object :compilerArtifacts (get grid :canonicalArtifacts)
                                            :compilerGrid (js-object :directory (get grid :directory)

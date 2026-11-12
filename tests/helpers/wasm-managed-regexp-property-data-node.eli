@@ -1,0 +1,34 @@
+(module tests.helpers.wasm-managed-regexp-property-data-node
+  (import "node:assert/strict" :default assert)
+  (import "node:process" :default process)
+
+  (defconst property-vectors
+    (js-array
+      (js-array "ASCII" "u" "A" t)
+      (js-array "ASCII" "u" "Ω" false)
+      (js-array "Script=Greek" "u" "α" t)
+      (js-array "Script=Greek" "u" "A" false)
+      (js-array "Lowercase_Letter" "iu" "a" t)
+      (js-array "Lowercase_Letter" "iv" "a" false)
+      (js-array "Letter" "u" "K" t)
+      (js-array "ASCII" "u" (String/fromCharCode 55296) false)))
+
+  (defun property-pattern (name flags)
+    (str "^\\"
+         (if (and (js-call flags :includes "i") (= name "Lowercase_Letter")) "P" "p")
+         "{" name "}$"))
+
+  (defun run-node-property-check (serialized-inputs)
+    (let ((entries (JSON/parse serialized-inputs)))
+      (js-call entries :forEach
+        (lambda (entry)
+          (let ((p (aref entry 0))
+                (f (aref entry 1))
+                (s (aref entry 2))
+                (w (aref entry 3)))
+            (js-call assert :equal (js-call (new globalThis.RegExp p f) :test s) w))))))
+
+  (when (= (aref (get process :argv) 2) "--run-node-check")
+    (run-node-property-check (aref (get process :argv) 3)))
+
+  (export property-vectors property-pattern run-node-property-check))

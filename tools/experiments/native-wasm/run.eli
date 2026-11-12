@@ -1,2 +1,328 @@
-(module capsules.tools.experiments.native-wasm.run
-  (js* "#!/usr/bin/env node\nimport assert from \"node:assert/strict\";\nimport { createHash } from \"node:crypto\";\nimport { spawnSync } from \"node:child_process\";\nimport { readFile, writeFile, mkdir, stat, readdir } from \"node:fs/promises\";\nimport { arch, cpus, platform, release } from \"node:os\";\nimport { dirname, resolve } from \"node:path\";\nimport { fileURLToPath, pathToFileURL } from \"node:url\";\nimport { emitNumericC } from \"./emit-c.mjs\";\nimport { cases, samples, summarize, warmups } from \"./cases.mjs\";\n\nconst here = dirname(fileURLToPath(import.meta.url));\nconst root = resolve(here, \"../../..\");\nconst options = new Map();\nfor (let index = 2; index < process.argv.length; index += 2) {\n  const key = process.argv[index];\n  if (![\"--out\", \"--compiler-dir\", \"--baseline-js\", \"--baseline-report\"].includes(key) || !process.argv[index + 1]) throw new Error(\"usage: node run.mjs [--out DIR] [--compiler-dir DIR] [--baseline-js FILE --baseline-report FILE]\");\n  options.set(key, process.argv[index + 1]);\n}\nconst out = resolve(options.get(\"--out\") ?? resolve(root, \"dist/native-wasm-probe\"));\nconst compilerDirectory = resolve(options.get(\"--compiler-dir\") ?? resolve(out, \"compiler\"));\nawait mkdir(out, { recursive: true });\nfunction run(command, args, extra = {}) {\n  const result = spawnSync(command, args, { cwd: root, encoding: \"utf8\", timeout: 120_000, maxBuffer: 4 * 1024 * 1024, ...extra });\n  if (result.status !== 0) throw new Error(`${command} failed: ${result.error ?? result.stderr ?? result.stdout}`);\n  return result.stdout.trim();\n}\nif (!options.has(\"--compiler-dir\")) {\n  run(resolve(root, \"bin/eliscript-bootstrap\"), [], { env: { ...process.env, ELISCRIPT_BOOTSTRAP_OUT_DIR: compilerDirectory } });\n}\nconst compiler = await import(pathToFileURL(resolve(compilerDirectory, \"compiler.mjs\")).href);\nconst sourcePath = resolve(here, \"kernels.eli\");\nconst filename = \"tools/experiments/native-wasm/kernels.eli\";\nconst source = await readFile(sourcePath, \"utf8\");\nconst start = performance.now();\nconst ir = compiler.compile_ir_string(source, filename);\nconst { code, functions } = emitNumericC(ir);\nconst frontendAndCEmissionMs = performance.now() - start;\nconst irPath = resolve(out, \"kernels.ir.json\");\nawait writeFile(irPath, compiler.serialize_ir_program(ir));\nawait writeFile(resolve(out, \"kernels.c\"), code);\nawait writeFile(resolve(out, \"functions.json\"), JSON.stringify(functions));\nawait writeFile(resolve(out, \"kernels.mjs\"), compiler.compile_string(source, filename));\n// An independent frontend path must produce the same JavaScript artifact.\nrun(resolve(root, \"bin/eliscript-seed\"), [\"--output\", resolve(out, \"seed.mjs\"), sourcePath]);\nassert.equal(await readFile(resolve(out, \"seed.mjs\"), \"utf8\"), await readFile(resolve(out, \"kernels.mjs\"), \"utf8\"));\n\nconst prototypes = functions.map((fn) => `extern double ${fn.symbol}(${Array(fn.arity).fill(\"double\").join(\", \")});`).join(\"\\n\");\nconst nativeCases = cases.map((testCase) => {\n  const fn = functions.find((entry) => entry.name === testCase.fn);\n  return `{\"${testCase.name}\", ${fn.symbol}, ${testCase.args[0]}, ${testCase.args[1]}, ${testCase.calls}}`;\n});\nconst evaluator = functions.map((fn) => `if (strcmp(argv[2], \"${fn.name}\") == 0) { printf(\"%.17g\\\\n\", ${fn.symbol}(strtod(argv[3], NULL), strtod(argv[4], NULL))); return 0; }`).join(\"\\n\");\nawait writeFile(resolve(out, \"main.c\"), `#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <time.h>\n${prototypes}\ntypedef double (*kernel)(double, double);\nstruct bench { const char *name; kernel fn; double a, b; int calls; };\nstatic double now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1000.0 + t.tv_nsec / 1e6; }\nstatic double execute(struct bench b) { double sum = 0; for (int i = 0; i < b.calls; i++) sum += b.fn(b.a, b.b + (i & 7) * 1e-9); return sum; }\nint main(int argc, char **argv) {\n  if (argc == 5 && strcmp(argv[1], \"--eval\") == 0) { ${evaluator} return 2; }\n  struct bench cases[] = {${nativeCases.join(\",\\n\")}};\n  volatile double warm_checksum = 0;\n  printf(\"{\\\\\"cases\\\\\":[\");\n  for (unsigned c = 0; c < sizeof(cases)/sizeof(cases[0]); c++) {\n    if (c) printf(\",\");\n    for (int w = 0; w < ${warmups}; w++) warm_checksum += execute(cases[c]);\n    double times[${samples}], sums[${samples}];\n    for (int s = 0; s < ${samples}; s++) { double t = now_ms(); sums[s] = execute(cases[c]); times[s] = now_ms() - t; }\n    printf(\"{\\\\\"name\\\\\":\\\\\"%s\\\\\",\\\\\"samplesMs\\\\\":[\", cases[c].name);\n    for (int s = 0; s < ${samples}; s++) printf(\"%s%.9g\", s ? \",\" : \"\", times[s]);\n    printf(\"],\\\\\"checksum\\\\\":[\");\n    for (int s = 0; s < ${samples}; s++) printf(\"%s%.17g\", s ? \",\" : \"\", sums[s]);\n    printf(\"]}\");\n  }\n  printf(\"]}\\\\n\"); return 0;\n}\n`);\nconst native = resolve(out, \"kernels-native\");\nconst wasm = resolve(out, \"kernels.wasm\");\nconst cc = process.env.CC ?? \"clang\";\nconst zig = process.env.ZIG ?? \"zig\";\nconst buildTimes = {};\nlet buildStart = performance.now();\nrun(cc, [\"-O3\", \"-ffp-contract=off\", \"-fno-fast-math\", resolve(out, \"kernels.c\"), resolve(out, \"main.c\"), \"-o\", native]);\nbuildTimes.nativeMs = performance.now() - buildStart;\nbuildStart = performance.now();\nrun(zig, [\"cc\", \"-target\", \"wasm32-freestanding\", \"-O3\", \"-ffp-contract=off\", \"-fno-fast-math\", \"-nostdlib\", \"-Wl,--no-entry\", ...functions.map((fn) => `-Wl,--export=${fn.symbol}`), resolve(out, \"kernels.c\"), \"-o\", wasm]);\nbuildTimes.wasmMs = performance.now() - buildStart;\n\nconst bytes = await readFile(wasm);\nconst wasmModule = new WebAssembly.Module(bytes);\nassert.deepEqual(WebAssembly.Module.imports(wasmModule), []);\nconst wasmInstance = new WebAssembly.Instance(wasmModule);\nconst js = await import(pathToFileURL(resolve(out, \"kernels.mjs\")).href);\nconst referenceJsPath = resolve(here, \"reference-js.mjs\");\nconst referenceJs = await import(pathToFileURL(referenceJsPath).href);\nconst inputCases = {};\nlet parityChecks = 0;\nfor (const fn of functions) {\n  const inputs = fn.name === \"recurrence\"\n    ? [[0, 0.123], [1, 0.123], [17, 0.71], [1000, 0.31], [1_000_000, 0.123], [0, -0], [1, NaN], [1, Infinity]]\n    : [[0, 64], [1, 1], [8, 10], [32, 64], [160, 64]];\n  inputCases[fn.name] = inputs;\n  for (const args of inputs) {\n    const expected = js[fn.name.replaceAll(\"-\", \"_\")](...args);\n    assert(Object.is(referenceJs[fn.name.replaceAll(\"-\", \"_\")](...args), expected), `reference JS parity: ${fn.name} ${args}`);\n    assert(Object.is(wasmInstance.exports[fn.symbol](...args), expected), `WASM parity: ${fn.name} ${args}`);\n    const text = run(native, [\"--eval\", fn.name, ...args.map(String)]);\n    const actual = /^-?inf$/i.test(text) ? (text[0] === \"-\" ? -Infinity : Infinity) : Number(text);\n    assert(Object.is(actual, expected), `native parity: ${fn.name} ${args}: ${text} vs ${expected}`);\n    parityChecks += 2;\n  }\n}\n\nlet baseline;\nconst baselineJs = options.has(\"--baseline-js\") ? resolve(options.get(\"--baseline-js\")) : undefined;\nif (options.has(\"--baseline-js\") !== options.has(\"--baseline-report\")) throw new Error(\"baseline JS and report must be supplied together\");\nif (baselineJs) {\n  const baselineReportPath = resolve(options.get(\"--baseline-report\"));\n  const bytes = await readFile(baselineJs);\n  const retained = JSON.parse(await readFile(baselineReportPath, \"utf8\"));\n  const hash = createHash(\"sha256\").update(bytes).digest(\"hex\");\n  assert.equal(hash, retained.artifactHashes[\"kernels.mjs\"], \"baseline artifact must match retained report\");\n  assert.equal(createHash(\"sha256\").update(source).digest(\"hex\"), retained.sourceHashes[filename], \"baseline uses the same kernel source\");\n  const old = await import(pathToFileURL(baselineJs).href);\n  let checks = 0;\n  for (const fn of functions) {\n    for (const args of inputCases[fn.name]) {\n      assert(Object.is(old[fn.name.replaceAll(\"-\", \"_\")](...args), js[fn.name.replaceAll(\"-\", \"_\")](...args)), \"baseline scalar parity\");\n      checks++;\n    }\n  }\n  baseline = { gitBase: retained.gitBase, artifactSha256: hash, reportSha256: createHash(\"sha256\").update(await readFile(baselineReportPath)).digest(\"hex\"), compilerSourceHashes: Object.fromEntries(Object.entries(retained.sourceHashes).filter(([key]) => key.startsWith(\"generated-compiler/\"))), scalarParityChecks: checks };\n}\nconst engines = [process.env.NODE ?? \"node\", process.env.BUN ?? \"bun\"];\nconst worker = resolve(here, \"measure-js.mjs\");\nconst measurements = [];\n// Rotate variants between fresh processes rather than measuring only one order.\nconst variants = engines.flatMap((engine) => [\"js\", ...(baselineJs ? [\"baseline-js\"] : []), \"reference-js\", \"wasm\"].map((mode) => ({ engine, mode })));\nvariants.push({ engine: native, mode: \"native\" });\nconst sessions = new Map(variants.map((variant) => [`${variant.engine}:${variant.mode}`, []]));\nfor (let round = 0; round < 3; round++) {\n  const order = [...variants.slice(round), ...variants.slice(0, round)];\n  for (const variant of order) {\n    const args = variant.mode === \"native\" ? [] : [worker, variant.mode, variant.mode === \"js\" ? resolve(out, \"kernels.mjs\") : variant.mode === \"baseline-js\" ? baselineJs : variant.mode === \"reference-js\" ? referenceJsPath : wasm, resolve(out, \"functions.json\")];\n    sessions.get(`${variant.engine}:${variant.mode}`).push(JSON.parse(run(variant.engine, args)));\n  }\n}\nconst reference = sessions.get(`${engines[0]}:js`)[0];\nfor (const variant of variants) {\n  const records = sessions.get(`${variant.engine}:${variant.mode}`);\n  const record = { engine: variant.mode === \"native\" ? \"native\" : records[0].engine, mode: variant.mode, cases: [] };\n  if (variant.mode !== \"native\") record.loadMs = records.map((entry) => entry.loadMs);\n  for (const testCase of cases) {\n    const rows = records.map((entry) => entry.cases.find((row) => row.name === testCase.name));\n    const expected = reference.cases.find((row) => row.name === testCase.name).checksum[0];\n    for (const row of rows) for (const sum of row.checksum) assert.equal(sum, expected, `${record.engine} ${record.mode}: checksum`);\n    record.cases.push({ ...testCase, ...summarize(rows.flatMap((row) => row.samplesMs)), checksum: expected, sessionMediansMs: rows.map((row) => summarize(row.samplesMs).medianMs) });\n  }\n  // Fresh process + one minimal result, OS caches warm; includes parent spawn overhead.\n  const firstResult = [];\n  for (let index = 0; index < samples; index++) {\n    const begin = performance.now();\n    if (variant.mode === \"native\") {\n      assert.equal(Number(run(native, [\"--eval\", \"recurrence\", \"1\", \"0.123\"])), js.recurrence(1, 0.123));\n    } else {\n      const evalCode = variant.mode !== \"wasm\"\n        ? \"const m=await import(process.argv[1]); console.log(m.recurrence(1,0.123));\"\n        : \"const fs=await import('node:fs'); const m=new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync(process.argv[1]))); console.log(m.exports.eli_0(1,0.123));\";\n      const input = variant.mode === \"js\" ? pathToFileURL(resolve(out, \"kernels.mjs\")).href : variant.mode === \"baseline-js\" ? pathToFileURL(baselineJs).href : variant.mode === \"reference-js\" ? pathToFileURL(referenceJsPath).href : wasm;\n      assert.equal(Number(run(variant.engine, [\"--input-type=module\", \"-e\", evalCode, input])), js.recurrence(1, 0.123));\n    }\n    firstResult.push(performance.now() - begin);\n  }\n  record.freshProcessFirstResult = summarize(firstResult);\n  measurements.push(record);\n}\nconst boundPaths = [\"kernels.eli\", \"emit-c.mjs\", \"cases.mjs\", \"measure-js.mjs\", \"reference-js.mjs\", \"run.mjs\"];\nconst hashes = {};\nfor (const file of boundPaths) hashes[`tools/experiments/native-wasm/${file}`] = createHash(\"sha256\").update(await readFile(resolve(here, file))).digest(\"hex\");\nfor (const file of (await readdir(compilerDirectory)).filter((file) => file.endsWith(\".mjs\")).sort()) hashes[`generated-compiler/${file}`] = createHash(\"sha256\").update(await readFile(resolve(compilerDirectory, file))).digest(\"hex\");\nconst artifactNames = [\"kernels.ir.json\", \"kernels.mjs\", \"kernels.c\", \"kernels.wasm\", \"kernels-native\"];\nconst artifactHashes = {};\nfor (const file of artifactNames) artifactHashes[file] = createHash(\"sha256\").update(await readFile(resolve(out, file))).digest(\"hex\");\nconst report = {\n  format: \"eliscript-native-wasm-probe\", version: 1, measuredAt: new Date().toISOString(),\n  gitBase: run(\"git\", [\"rev-parse\", \"HEAD\"]), sourceHashes: hashes, artifactHashes,\n  host: { platform: platform(), release: release(), arch: arch(), cpu: cpus()[0].model },\n  toolchain: { node: run(engines[0], [\"--version\"]), bun: run(engines[1], [\"--version\"]), cc: run(cc, [\"--version\"]).split(\"\\n\")[0], zig: run(zig, [\"version\"]) },\n  scope: \"Experimental f64-only IR backend; not full Eliscript native/WASM support or a browser benchmark\",\n  methodology: { warmups, samplesPerSession: samples, sessions: 3, noFastMath: true, fpContract: \"off\", freshProcess: \"OS caches warm, parent spawn + load + one result; not cold boot\", nativeBoundary: \"in-process C call, not JS FFI\", wasmBoundary: \"scalar JS/WASM calls; no array serialization\" },\n  validation: { seedSelfHostedJsEqual: true, scalarParityChecks: parityChecks, referenceJsChecks: parityChecks / 2, measuredChecksumsEqual: true, wasmImports: [] },\n  ...(baseline ? { baseline } : {}),\n  compilation: { frontendAndCEmissionMs, ...buildTimes },\n  artifactBytes: Object.fromEntries(await Promise.all(artifactNames.map(async (file) => [file, (await stat(resolve(out, file))).size]))),\n  measurements,\n};\nawait writeFile(resolve(out, \"report.json\"), JSON.stringify(report, null, 2) + \"\\n\");\nconsole.log(JSON.stringify({ report: resolve(out, \"report.json\"), validation: report.validation, results: measurements.map((entry) => ({ engine: entry.engine, mode: entry.mode, medianMs: entry.cases.map((row) => [row.name, row.medianMs]), firstResultMs: entry.freshProcessFirstResult.medianMs })) }, null, 2));\n"))
+(module tools.experiments.native-wasm.run
+  (import "node:assert/strict" :default assert)
+  (import "node:crypto" createHash)
+  (import "node:child_process" spawnSync)
+  (import "node:fs/promises" readFile writeFile mkdir stat readdir)
+  (import "node:os" arch cpus platform release)
+  (import "node:path" dirname resolve)
+  (import "node:url" fileURLToPath pathToFileURL)
+  (import "./emit-c.mjs" emitNumericC)
+  (import "./cases.mjs" cases samples summarize warmups)
+
+  (defconst here (dirname (fileURLToPath (get (js* "import.meta") :url))))
+  (defconst root (resolve here "../../.."))
+
+  (defun run-command (command args &optional extra)
+    (let ((result (spawnSync command args (Object/assign
+                    (js-object :cwd root :encoding "utf8" :timeout 120000 :maxBuffer 4194304)
+                    (or extra (js-object))))))
+      (unless (= (get result :status) 0)
+        (throw (new globalThis.Error (str command " failed: "
+                 (or (get result :error) (get result :stderr) (get result :stdout))))))
+      (js-call (get result :stdout) :trim)))
+
+  (defasync main ()
+    (let ((options (new globalThis.Map))
+          (argv (get globalThis.process :argv))
+          (index 2))
+      (while (< index (js-length argv))
+        (let ((key (aref argv index))
+              (val (aref argv (1+ index))))
+          (when (or (not (js-call (js-array "--out" "--compiler-dir" "--baseline-js" "--baseline-report") :includes key))
+                    (not val))
+            (throw (new globalThis.Error "usage: node run.mjs [--out DIR] [--compiler-dir DIR] [--baseline-js FILE --baseline-report FILE]")))
+          (js-call options :set key val))
+        (setq index (+ index 2)))
+      (let* ((out (resolve (or (js-call options :get "--out") (resolve root "dist/native-wasm-probe"))))
+             (compiler-directory (resolve (or (js-call options :get "--compiler-dir") (resolve out "compiler")))))
+        (await (mkdir out (js-object :recursive t)))
+        (unless (js-call options :has "--compiler-dir")
+          (run-command (resolve root "bin/eliscript-bootstrap") (js-array)
+            (js-object :env (Object/assign (js-object) (get globalThis.process :env)
+                              (js-object :ELISCRIPT_BOOTSTRAP_OUT_DIR compiler-directory)))))
+        (let* ((compiler-href (get (pathToFileURL (resolve compiler-directory "compiler.mjs")) :href))
+               (compiler (await (js* "import(compiler_href)")))
+               (source-path (resolve here "kernels.eli"))
+               (filename "tools/experiments/native-wasm/kernels.eli")
+               (source (await (readFile source-path "utf8")))
+               (start (js-call globalThis.performance :now))
+               (ir (js-call compiler :compile_ir_string source filename))
+               (emitted (emitNumericC ir))
+               (code (get emitted :code))
+               (functions (get emitted :functions))
+               (frontend-and-c-ms (- (js-call globalThis.performance :now) start))
+               (ir-path (resolve out "kernels.ir.json")))
+          (await (writeFile ir-path (js-call compiler :serialize_ir_program ir)))
+          (await (writeFile (resolve out "kernels.c") code))
+          (await (writeFile (resolve out "functions.json") (JSON/stringify functions)))
+          (await (writeFile (resolve out "kernels.mjs") (js-call compiler :compile_string source filename)))
+          (run-command (resolve root "bin/eliscript-seed") (js-array "--output" (resolve out "seed.mjs") source-path))
+          (js-call assert :equal (await (readFile (resolve out "seed.mjs") "utf8"))
+                                 (await (readFile (resolve out "kernels.mjs") "utf8")))
+          (let* ((prototypes (js-call (js-call functions :map (lambda (fn)
+                               (str "extern double " (get fn :symbol) "("
+                                    (js-call (js-call (new globalThis.Array (get fn :arity)) :fill "double") :join ", ") ");")))
+                               :join "\n"))
+                 (native-cases (js-call cases :map (lambda (test-case)
+                                 (let ((fn (js-call functions :find (lambda (entry) (= (get entry :name) (get test-case :fn))))))
+                                   (str "{\"" (get test-case :name) "\", " (get fn :symbol) ", "
+                                        (aref (get test-case :args) 0) ", " (aref (get test-case :args) 1) ", "
+                                        (get test-case :calls) "}")))))
+                 (evaluator (js-call (js-call functions :map (lambda (fn)
+                              (str "if (strcmp(argv[2], \"" (get fn :name) "\") == 0) { printf(\"%.17g\\n\", "
+                                   (get fn :symbol) "(strtod(argv[3], NULL), strtod(argv[4], NULL))); return 0; }")))
+                              :join "\n")))
+            (await (writeFile (resolve out "main.c")
+              (str "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <time.h>\n"
+                   prototypes "\ntypedef double (*kernel)(double, double);\n"
+                   "struct bench { const char *name; kernel fn; double a, b; int calls; };\n"
+                   "static double now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1000.0 + t.tv_nsec / 1e6; }\n"
+                   "static double execute(struct bench b) { double sum = 0; for (int i = 0; i < b.calls; i++) sum += b.fn(b.a, b.b + (i & 7) * 1e-9); return sum; }\n"
+                   "int main(int argc, char **argv) {\n"
+                   "  if (argc == 5 && strcmp(argv[1], \"--eval\") == 0) { " evaluator " return 2; }\n"
+                   "  struct bench cases[] = {" (js-call native-cases :join ",\n") "};\n"
+                   "  volatile double warm_checksum = 0;\n"
+                   "  printf(\"{\\\"cases\\\":[\");\n"
+                   "  for (unsigned c = 0; c < sizeof(cases)/sizeof(cases[0]); c++) {\n"
+                   "    if (c) printf(\",\");\n"
+                   "    for (int w = 0; w < " warmups "; w++) warm_checksum += execute(cases[c]);\n"
+                   "    double times[" samples "], sums[" samples "];\n"
+                   "    for (int s = 0; s < " samples "; s++) { double t = now_ms(); sums[s] = execute(cases[c]); times[s] = now_ms() - t; }\n"
+                   "    printf(\"{\\\"name\\\":\\\"%s\\\",\\\"samplesMs\\\":[\", cases[c].name);\n"
+                   "    for (int s = 0; s < " samples "; s++) printf(\"%s%.9g\", s ? \",\" : \"\", times[s]);\n"
+                   "    printf(\"],\\\"checksum\\\":[\");\n"
+                   "    for (int s = 0; s < " samples "; s++) printf(\"%s%.17g\", s ? \",\" : \"\", sums[s]);\n"
+                   "    printf(\"]}\");\n"
+                   "  }\n"
+                   "  printf(\"]}\\n\"); return 0;\n}\n")))
+            (let* ((native (resolve out "kernels-native"))
+                   (wasm (resolve out "kernels.wasm"))
+                   (cc (or (get (get globalThis.process :env) :CC) "clang"))
+                   (zig (or (get (get globalThis.process :env) :ZIG) "zig"))
+                   (build-times (js-object))
+                   (build-start (js-call globalThis.performance :now)))
+              (run-command cc (js-array "-O3" "-ffp-contract=off" "-fno-fast-math"
+                                        (resolve out "kernels.c") (resolve out "main.c") "-o" native))
+              (put build-times :nativeMs (- (js-call globalThis.performance :now) build-start))
+              (setq build-start (js-call globalThis.performance :now))
+              (run-command zig (js-call (js-array "cc" "-target" "wasm32-freestanding" "-O3" "-ffp-contract=off"
+                                          "-fno-fast-math" "-nostdlib" "-Wl,--no-entry")
+                                 :concat (js-call functions :map (lambda (fn) (str "-Wl,--export=" (get fn :symbol))))
+                                 (js-array (resolve out "kernels.c") "-o" wasm)))
+              (put build-times :wasmMs (- (js-call globalThis.performance :now) build-start))
+              (let* ((bytes (await (readFile wasm)))
+                     (wasm-module (new globalThis.WebAssembly.Module bytes))
+                     (_ (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports wasm-module) (js-array)))
+                     (wasm-instance (new globalThis.WebAssembly.Instance wasm-module))
+                     (js-href (get (pathToFileURL (resolve out "kernels.mjs")) :href))
+                     (js (await (js* "import(js_href)")))
+                     (reference-js-path (resolve here "reference-js.mjs"))
+                     (ref-href (get (pathToFileURL reference-js-path) :href))
+                     (reference-js (await (js* "import(ref_href)")))
+                     (input-cases (js-object))
+                     (parity-checks 0))
+                (js-call functions :forEach (lambda (fn)
+                  (let ((inputs (if (= (get fn :name) "recurrence")
+                                  (js-array (js-array 0 0.123) (js-array 1 0.123) (js-array 17 0.71)
+                                            (js-array 1000 0.31) (js-array 1000000 0.123) (js-array 0 -0.0)
+                                            (js-array 1 globalThis.NaN) (js-array 1 globalThis.Infinity))
+                                  (js-array (js-array 0 64) (js-array 1 1) (js-array 8 10)
+                                            (js-array 32 64) (js-array 160 64))))
+                        (munged (js-call (get fn :name) :replaceAll "-" "_")))
+                    (put input-cases (get fn :name) inputs)
+                    (js-call inputs :forEach (lambda (args)
+                      (let* ((expected (Reflect/apply (get js munged) undefined args))
+                             (ref-val (Reflect/apply (get reference-js munged) undefined args))
+                             (wasm-val (Reflect/apply (get (get wasm-instance :exports) (get fn :symbol)) undefined args))
+                             (text (run-command native (js-call (js-array "--eval" (get fn :name))
+                                                         :concat (js-call args :map (lambda (v) (funcall globalThis.String v))))))
+                             (actual (if (js-call (new globalThis.RegExp "^-?inf$" "i") :test text)
+                                       (if (= (aref text 0) "-") (- 0 globalThis.Infinity) globalThis.Infinity)
+                                       (funcall globalThis.Number text))))
+                        (js-call assert :ok (Object/is ref-val expected) (str "reference JS parity: " (get fn :name) " " args))
+                        (js-call assert :ok (Object/is wasm-val expected) (str "WASM parity: " (get fn :name) " " args))
+                        (js-call assert :ok (Object/is actual expected) (str "native parity: " (get fn :name) " " args ": " text " vs " expected))
+                        (setq parity-checks (+ parity-checks 2))))))))
+                (let ((baseline undefined)
+                      (baseline-js (if (js-call options :has "--baseline-js")
+                                     (resolve (js-call options :get "--baseline-js"))
+                                     undefined)))
+                  (when (/= (js-call options :has "--baseline-js") (js-call options :has "--baseline-report"))
+                    (throw (new globalThis.Error "baseline JS and report must be supplied together")))
+                  (when baseline-js
+                    (let* ((baseline-report-path (resolve (js-call options :get "--baseline-report")))
+                           (base-bytes (await (readFile baseline-js)))
+                           (retained (JSON/parse (await (readFile baseline-report-path "utf8"))))
+                           (hash (js-call (js-call (createHash "sha256") :update base-bytes) :digest "hex"))
+                           (old-href (get (pathToFileURL baseline-js) :href))
+                           (old (await (js* "import(old_href)")))
+                           (checks 0))
+                      (js-call assert :equal hash (get (get retained :artifactHashes) "kernels.mjs")
+                               "baseline artifact must match retained report")
+                      (js-call assert :equal (js-call (js-call (createHash "sha256") :update source) :digest "hex")
+                               (get (get retained :sourceHashes) filename)
+                               "baseline uses the same kernel source")
+                      (js-call functions :forEach (lambda (fn)
+                        (let ((munged (js-call (get fn :name) :replaceAll "-" "_")))
+                          (js-call (get input-cases (get fn :name)) :forEach (lambda (args)
+                            (js-call assert :ok (Object/is (Reflect/apply (get old munged) undefined args)
+                                                           (Reflect/apply (get js munged) undefined args))
+                                     "baseline scalar parity")
+                            (setq checks (1+ checks)))))))
+                      (setq baseline (js-object
+                        :gitBase (get retained :gitBase)
+                        :artifactSha256 hash
+                        :reportSha256 (js-call (js-call (createHash "sha256") :update (await (readFile baseline-report-path))) :digest "hex")
+                        :compilerSourceHashes (Object/fromEntries (js-call (Object/entries (get retained :sourceHashes))
+                                                :filter (lambda (pair) (js-call (aref pair 0) :startsWith "generated-compiler/"))))
+                        :scalarParityChecks checks))))
+                  (let* ((engines (js-array (or (get (get globalThis.process :env) :NODE) "node")
+                                            (or (get (get globalThis.process :env) :BUN) "bun")))
+                         (worker (resolve here "measure-js.mjs"))
+                         (measurements (js-array))
+                         (modes (js-call (js-array "js")
+                                  :concat (if baseline-js (js-array "baseline-js") (js-array))
+                                  (js-array "reference-js" "wasm")))
+                         (variants (js-call (js-call engines :flatMap (lambda (engine)
+                                      (js-call modes :map (lambda (mode) (js-object :engine engine :mode mode)))))
+                                     :concat (js-array (js-object :engine native :mode "native"))))
+                         (sessions (new globalThis.Map (js-call variants :map (lambda (variant)
+                                     (js-array (str (get variant :engine) ":" (get variant :mode)) (js-array))))))
+                         (round 0))
+                    (while (< round 3)
+                      (let ((order (js-call (js-call variants :slice round) :concat (js-call variants :slice 0 round))))
+                        (js-call order :forEach (lambda (variant)
+                          (let* ((mode (get variant :mode))
+                                 (args (if (= mode "native")
+                                         (js-array)
+                                         (js-array worker mode
+                                           (cond
+                                             ((= mode "js") (resolve out "kernels.mjs"))
+                                             ((= mode "baseline-js") baseline-js)
+                                             ((= mode "reference-js") reference-js-path)
+                                             (t wasm))
+                                           (resolve out "functions.json")))))
+                            (js-call (js-call sessions :get (str (get variant :engine) ":" mode))
+                              :push (JSON/parse (run-command (get variant :engine) args)))))))
+                      (setq round (1+ round)))
+                    (let ((reference (aref (js-call sessions :get (str (aref engines 0) ":js")) 0)))
+                      (js-call variants :forEach (lambda (variant)
+                        (let* ((mode (get variant :mode))
+                               (records (js-call sessions :get (str (get variant :engine) ":" mode)))
+                               (record (js-object
+                                         :engine (if (= mode "native") "native" (get (aref records 0) :engine))
+                                         :mode mode
+                                         :cases (js-array))))
+                          (unless (= mode "native")
+                            (put record :loadMs (js-call records :map (lambda (entry) (get entry :loadMs)))))
+                          (js-call cases :forEach (lambda (test-case)
+                            (let* ((rows (js-call records :map (lambda (entry)
+                                           (js-call (get entry :cases) :find (lambda (row) (= (get row :name) (get test-case :name)))))))
+                                   (expected (aref (get (js-call (get reference :cases) :find
+                                                          (lambda (row) (= (get row :name) (get test-case :name)))) :checksum) 0)))
+                              (js-call rows :forEach (lambda (row)
+                                (js-call (get row :checksum) :forEach (lambda (sum)
+                                  (js-call assert :equal sum expected (str (get record :engine) " " mode ": checksum"))))))
+                              (js-call (get record :cases) :push (Object/assign (js-object) test-case
+                                (summarize (js-call rows :flatMap (lambda (row) (get row :samplesMs))))
+                                (js-object
+                                  :checksum expected
+                                  :sessionMediansMs (js-call rows :map (lambda (row) (get (summarize (get row :samplesMs)) :medianMs)))))))))
+                          (let ((first-result (js-array)) (s-idx 0))
+                            (while (< s-idx samples)
+                              (let ((begin-time (js-call globalThis.performance :now)))
+                                (if (= mode "native")
+                                  (js-call assert :equal (funcall globalThis.Number (run-command native (js-array "--eval" "recurrence" "1" "0.123")))
+                                           (js-call js :recurrence 1 0.123))
+                                  (let ((eval-code (if (/= mode "wasm")
+                                                     "const m=await import(process.argv[1]); console.log(m.recurrence(1,0.123));"
+                                                     "const fs=await import('node:fs'); const m=new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync(process.argv[1]))); console.log(m.exports.eli_0(1,0.123));"))
+                                        (input (cond
+                                                 ((= mode "js") js-href)
+                                                 ((= mode "baseline-js") (get (pathToFileURL baseline-js) :href))
+                                                 ((= mode "reference-js") ref-href)
+                                                 (t wasm))))
+                                    (js-call assert :equal (funcall globalThis.Number (run-command (get variant :engine) (js-array "--input-type=module" "-e" eval-code input)))
+                                             (js-call js :recurrence 1 0.123))))
+                                (js-call first-result :push (- (js-call globalThis.performance :now) begin-time)))
+                              (setq s-idx (1+ s-idx)))
+                            (put record :freshProcessFirstResult (summarize first-result))
+                            (js-call measurements :push record))))))
+                    (let* ((bound-paths (js-array "kernels.eli" "emit-c.mjs" "cases.mjs" "measure-js.mjs" "reference-js.mjs" "run.mjs"))
+                           (hashes (js-object))
+                           (b-idx 0))
+                      (while (< b-idx (js-length bound-paths))
+                        (let ((file (aref bound-paths b-idx)))
+                          (put hashes (str "tools/experiments/native-wasm/" file)
+                            (js-call (js-call (createHash "sha256") :update (await (readFile (resolve here file)))) :digest "hex")))
+                        (setq b-idx (1+ b-idx)))
+                      (let ((comp-files (js-call (js-call (await (readdir compiler-directory))
+                                                   :filter (lambda (file) (js-call file :endsWith ".mjs")))
+                                          :sort))
+                            (c-idx 0))
+                        (while (< c-idx (js-length comp-files))
+                          (let ((file (aref comp-files c-idx)))
+                            (put hashes (str "generated-compiler/" file)
+                              (js-call (js-call (createHash "sha256") :update (await (readFile (resolve compiler-directory file)))) :digest "hex")))
+                          (setq c-idx (1+ c-idx))))
+                      (let ((artifact-names (js-array "kernels.ir.json" "kernels.mjs" "kernels.c" "kernels.wasm" "kernels-native"))
+                            (artifact-hashes (js-object))
+                            (artifact-bytes (js-object))
+                            (a-idx 0))
+                        (while (< a-idx (js-length artifact-names))
+                          (let ((file (aref artifact-names a-idx)))
+                            (put artifact-hashes file
+                              (js-call (js-call (createHash "sha256") :update (await (readFile (resolve out file)))) :digest "hex"))
+                            (put artifact-bytes file (get (await (stat (resolve out file))) :size)))
+                          (setq a-idx (1+ a-idx)))
+                        (let ((report (Object/assign
+                                        (js-object
+                                          :format "eliscript-native-wasm-probe"
+                                          :version 1
+                                          :measuredAt (js-call (new globalThis.Date) :toISOString)
+                                          :gitBase (run-command "git" (js-array "rev-parse" "HEAD"))
+                                          :sourceHashes hashes
+                                          :artifactHashes artifact-hashes
+                                          :host (js-object :platform (platform) :release (release) :arch (arch) :cpu (get (aref (cpus) 0) :model))
+                                          :toolchain (js-object
+                                                       :node (run-command (aref engines 0) (js-array "--version"))
+                                                       :bun (run-command (aref engines 1) (js-array "--version"))
+                                                       :cc (aref (js-call (run-command cc (js-array "--version")) :split "\n") 0)
+                                                       :zig (run-command zig (js-array "version")))
+                                          :scope "Experimental f64-only IR backend; not full Eliscript native/WASM support or a browser benchmark"
+                                          :methodology (js-object
+                                                         :warmups warmups
+                                                         :samplesPerSession samples
+                                                         :sessions 3
+                                                         :noFastMath t
+                                                         :fpContract "off"
+                                                         :freshProcess "OS caches warm, parent spawn + load + one result; not cold boot"
+                                                         :nativeBoundary "in-process C call, not JS FFI"
+                                                         :wasmBoundary "scalar JS/WASM calls; no array serialization")
+                                          :validation (js-object
+                                                        :seedSelfHostedJsEqual t
+                                                        :scalarParityChecks parity-checks
+                                                        :referenceJsChecks (/ parity-checks 2)
+                                                        :measuredChecksumsEqual t
+                                                        :wasmImports (js-array)))
+                                        (if baseline (js-object :baseline baseline) (js-object))
+                                        (js-object
+                                          :compilation (Object/assign (js-object :frontendAndCEmissionMs frontend-and-c-ms) build-times)
+                                          :artifactBytes artifact-bytes
+                                          :measurements measurements))))
+                          (await (writeFile (resolve out "report.json") (str (JSON/stringify report nil 2) "\n")))
+                          (js-call globalThis.console :log (JSON/stringify
+                            (js-object
+                              :report (resolve out "report.json")
+                              :validation (get report :validation)
+                              :results (js-call measurements :map (lambda (entry)
+                                         (js-object
+                                           :engine (get entry :engine)
+                                           :mode (get entry :mode)
+                                           :medianMs (js-call (get entry :cases) :map (lambda (row) (js-array (get row :name) (get row :medianMs))))
+                                           :firstResultMs (get (get entry :freshProcessFirstResult) :medianMs)))))
+                            nil 2))))))))))))))
+
+  (js-call (main) :catch (lambda (error)
+    (js-call globalThis.console :error error)
+    (put globalThis.process :exitCode 1))))

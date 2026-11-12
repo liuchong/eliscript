@@ -3,6 +3,7 @@
   (import "./syntax.mjs"
     node-kind node-span node-value node-name node-items)
   (import "./transient-analysis.mjs" analyze-transients)
+  (defconst typeof-value (lambda (value) (js* "typeof value")))
 
   (defconst builtin-operators
     (js-array "if" "when" "unless" "progn" "do" "while" "loop" "recur"
@@ -29,15 +30,16 @@
   (defconst fail
     (lambda (diagnostic)
       (let* ((p (aref (aref diagnostic "location") "start"))
-             (error (new (js* "Error")
+             (Constructor globalThis.Error)
+             (error (new Constructor
                (let* ((file-value (aref (aref diagnostic "location") "file"))
-                      (file (js* "`${file_value}`"))
+                      (file (js-call "" :concat file-value))
                       (line-value (aref p "line"))
-                      (line (js* "`${line_value}`"))
+                      (line (js-call "" :concat line-value))
                       (column-value (aref p "column"))
-                      (column (js* "`${column_value}`"))
+                      (column (js-call "" :concat column-value))
                       (message-value (aref diagnostic "message"))
-                      (message (js* "`${message_value}`")))
+                      (message (js-call "" :concat message-value)))
                  (+ file ":" line ":" column ": " message)))))
         (put error :eliscriptDiagnostic diagnostic)
         (throw error))))
@@ -93,7 +95,7 @@
   (defun string-node-p (node)
     (and node
          (= (node-kind node) "literal")
-         (= (js* "typeof node.value") "string")))
+         (= (funcall typeof-value (get node :value)) "string")))
 
   (defun null-node-p (node)
     (and node
@@ -142,8 +144,8 @@
     (or (keyword-node-p node)
         (and node
              (= (node-kind node) "literal")
-             (or (= (js* "typeof node.value") "string")
-                 (= (js* "typeof node.value") "number")))))
+             (or (= (funcall typeof-value (get node :value)) "string")
+                 (= (funcall typeof-value (get node :value)) "number")))))
 
   (defun map-binding-spec (pattern context)
     (let ((items (js-call (node-items pattern) :slice 1))
@@ -376,8 +378,8 @@
            ((null value) "nil")
            ((eq value t) "t")
            ((eq value false) "false")
-           ((= (js* "typeof value") "string")
-            (js-call (js* "JSON") :stringify value))
+           ((= (funcall typeof-value value) "string")
+            (JSON/stringify value))
            (t (str value)))))
       ((or (= (node-kind node) "list") (= (node-kind node) "vector"))
        (let* ((items (node-items node))
@@ -417,7 +419,7 @@
                           (analyzer-fail context span (get error :message))))))
           (when (= (js* "typeof name") "string")
             (unless cache
-              (setq cache (new (js* "Map")))
+              (setq cache (new globalThis.Map))
               (put context :bindingNames cache))
             (js-call cache :set name result))
           result))))
@@ -431,7 +433,7 @@
                           (analyzer-fail context span (get error :message))))))
           (when (= (js* "typeof name") "string")
             (unless cache
-              (setq cache (new (js* "Map")))
+              (setq cache (new globalThis.Map))
               (put context :referenceNames cache))
             (js-call cache :set name result))
           result))))
@@ -463,9 +465,9 @@
                :kind kind
                :mutable mutable)))
         (unless names
-          (setq names (new (js* "Map")))
+          (setq names (new globalThis.Map))
           (put scope :names names)
-          (setq outputs (new (js* "Map")))
+          (setq outputs (new globalThis.Map))
           (put scope :outputs outputs))
         (js-call names :set name binding)
         (js-call outputs :set output-name binding)
@@ -504,7 +506,7 @@
               (setq current (get current :parent)))
             (when binding
               (unless cache
-                (setq cache (new (js* "Map")))
+                (setq cache (new globalThis.Map))
                 (put scope :lookupCache cache)
                 (put scope :lookupEpoch epoch))
               (js-call cache :set name binding)))
@@ -1149,7 +1151,7 @@
           (t (analyze-expression form scope context))))))
 
   (defun portable-declarations (forms context)
-    (let ((declarations (new (js* "Map"))))
+    (let ((declarations (new globalThis.Map)))
       (js-call forms :forEach
         (lambda (form)
           (when (= (node-kind form) "list")
@@ -1190,7 +1192,7 @@
       declarations))
 
   (defun portable-scope (parameters context)
-    (let ((scope (new (js* "Set"))))
+    (let ((scope (new globalThis.Set)))
       (when parameters
         (js-call (function-parameters parameters context) :forEach
           (lambda (parameter)
@@ -1200,7 +1202,7 @@
       scope))
 
   (defun copy-portable-scope (scope)
-    (new (js* "Set") scope))
+    (new globalThis.Set scope))
 
   (defun add-portable-pattern (pattern scope context)
     (js-call (binding-nodes pattern context) :forEach
@@ -1406,7 +1408,7 @@
            form scope declarations dependencies entry context)))))
 
   (defun portable-dependencies (declaration declarations entry context)
-    (let ((dependencies (new (js* "Set")))
+    (let ((dependencies (new globalThis.Set))
           (scope (portable-scope (get declaration :parameters) context)))
       (if (= (get declaration :kind) "portable")
           (portable-sequence
@@ -1420,7 +1422,7 @@
   (defun validate-portable-module (forms context)
     (let ((declarations (portable-declarations forms context))
           (pending (js-array))
-          (visited (new (js* "Set"))))
+          (visited (new globalThis.Set)))
       (js-call declarations :forEach
         (lambda (declaration name)
           (when (= (get declaration :kind) "portable")
@@ -1444,7 +1446,7 @@
            (flattened (flatten-modules forms context))
            (declarations (portable-declarations flattened context))
            (pending (js-array))
-           (selected (new (js* "Set"))))
+           (selected (new globalThis.Set)))
       (js-call entries :forEach
         (lambda (entry)
           (let ((declaration (js-call declarations :get entry)))

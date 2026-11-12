@@ -1,0 +1,382 @@
+(module tests.helpers.wasm-managed-wire-oracle
+  (import "node:assert/strict" :default assert)
+
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  ;; These are the complete 128 original nested records, not a reduced smoke set.
+  (defconst roundtrips
+    (let ((items (js-array
+                   (js-object
+                     :version "001"
+                     :User (js-object
+                             :name "小明"
+                             :nested (js-object :ok t)
+                             :values (js-array 1 nil "a|b")
+                             :rows (js-array (js-object :a 1 :b "x") (js-object :b false))
+                             :mixed (js-array (js-object :one 1) (js-array 2) "x")))
+                   (js-object
+                     :x "1e999"
+                     :y (str (String/fromCharCode 0) "\n")
+                     :z "{}"
+                     :q "[]")))
+          (original-scalars (js-array nil t false 42 -1.25 "" "{}" "[]" "null" "😀" "a|b" "\"quotes\"" "a\\n" "\n\t" (js-object) (js-array)))
+          (index 0))
+      (while (< index 128)
+        (let ((value (aref original-scalars (% index (js-length original-scalars)))))
+          (js-call items :push
+            (js-object
+              :stamp index
+              :Data (js-object
+                      :scalar value
+                      :nested (js-object :value value)
+                      :records (js-array (js-object :key value :other index)
+                                         (js-object :other (1+ index)))
+                      :mixed (js-array value (js-object :key value) (js-array value) (js-object))))))
+        (setq index (1+ index)))
+      items))
+
+  (defconst parse-cases
+    (js-array
+      (js-array "<!--\n# hidden\n-->\n```md\n- hidden: 1\n```\n# A\n- key: \\x\n### note\n## B\n- x: \"\\q\"\n" (js-object))
+      (js-array "# A\n| a | b |\n| --- | --- |\n| | null |\n" (js-object))
+      (js-array "# A\n- a:\n  - :\n    - k: 2\n  - : false\n" (js-object))
+      (js-array "- __proto__:\n  - polluted: true\n" (js-object))
+      (js-array "<span>inline</span>\n# A\n- ok: true" (js-object))
+      (js-array (str (String/fromCharCode 65279) "# A\r\n- emoji: \"😀\"\r- value: 2\n") (js-object))
+      (js-array "~~~md\n# hidden\n- hidden: 1\n~~~\n# A\n- visible: true\n" (js-object))
+      (js-array "# A\n| a | b |\n| --- | --- |\n| \"a\\|b\" | \"中😀\" |\n" (js-object))
+      (js-array "## orphan" (js-object))
+      (js-array "# A\n- x: 1\n| a | b |\n| --- | --- |" (js-object))
+      (js-array "- x: 1\n- x: 2" (js-object))
+      (js-array "# A\n| a | b |\n| --- | --- |\n| 1 |" (js-object))
+      (js-array "# A\n| a | a |\n| --- | --- |" (js-object))
+      (js-array "| a |\n| --- |" (js-object))
+      (js-array "# " (js-object))
+      (js-array "- a:\n    - b: 1" (js-object))
+      (js-array "\t- a: 1" (js-object))
+      (js-array "# ###" (js-object))
+      (js-array "# A\n| value |\n| --- |\n\t| 1 |" (js-object))
+      (js-array "- a: 1" (js-object :maxLength 2))
+      (js-array "- a: 1" (js-object :maxLength 6))
+      (js-array "- a:\n  - b: 1" (js-object :maxDepth 0))
+      (js-array "- a: 1" (js-object :maxLength 0))
+      (js-array "- a: 1" (js-object :maxDepth -1))
+      (js-array "- a: 1" (js-object :maxDepth 513))
+      (js-array "- a: 1e999" (js-object))
+      (js-array "" (js-object))
+      (js-array (str (String/fromCharCode 65279) "\r\n") (js-object))))
+
+  (defconst original-error-codes
+    (js-array "MDP-E001" "MDP-E002" "MDP-E003" "MDP-E004" "MDP-E005" "MDP-E006" "MDP-E007" "MDP-E009" "MDP-E009"))
+
+  (defconst schema
+    (let ((s (js-object
+               :mds "0.1"
+               :Sections (js-array (js-object :name "User" :kind "object" :required t :additional false))
+               :User (js-array
+                       (js-object :name "name" :type "string" :required t :min_len 2)
+                       (js-object :name "age" :type "int" :min 0 :max 100)))))
+      (put s "User.Address" (js-array (js-object :name "zip" :type "string" :pattern "^\\d{5}$")))
+      s))
+
+  (defconst schema-cases
+    (let ((items (js-array
+                   (js-array (js-object :User (js-object :name "😀中" :age 42 :Address (js-object :zip "12345")) :Extra (js-object)) schema)
+                   (js-array (js-object :User (js-object :name "x" :age "42" :unknown t :Address (js-object :zip "bad"))) schema)
+                   (js-array (js-object) schema)
+                   (js-array (js-object) (js-object :mds "9"))
+                   (js-array (js-object) (js-object :mds "0.1" :A (js-object)))
+                   (js-array (js-object) (js-object :mds "0.1" :A (js-array (js-object :name "n" :type "int" :min 5 :max 2))))
+                   (js-array (js-object :A (js-object :d "2023-02-29")) (js-object :mds "0.1" :A (js-array (js-object :name "d" :type "date"))))
+                   (js-array "# User\n- name: \"😀中\"\n- age: 42\n" schema)
+                   (js-array (js-object :A (js-array (js-object :v 1) (js-object :v 2) (js-object :v 3)))
+                             (js-object :mds "0.1"
+                                        :Sections (js-array (js-object :name "A" :kind "list" :min_rows 1 :max_rows 2 :additional false))
+                                        :A (js-array (js-object :name "v" :type "int" :enum "1, 2"))))
+                   (js-array (js-object :title "😀" :A (js-object :v nil))
+                             (js-object :mds "0.1"
+                                        :Preamble (js-array (js-object :name "title" :type "string" :min_len 1 :max_len 1))
+                                        :A (js-array (js-object :name "v" :type "null" :required t))))
+                   (js-array (js-object) (js-object :mds "0.1" :A (js-array (js-object :name "same" :type "int") (js-object :name "same" :type "string"))))
+                   (js-array (js-object) (js-object :mds "0.1" :A (js-array (js-object :name "x" :type "unknown"))))
+                   (js-array (js-object) (js-object :mds "0.1" :A (js-array (js-object :name "x" :type "string" :required 1))))
+                   (js-array (js-object) (js-object :mds "0.1" :A (js-array (js-object :name "x" :type "string" :min_len 0.5))))
+                   (js-array (js-object) (js-object :mds "0.1" :A (js-array (js-object :name "x" :type "string" :enum (js-array)))))
+                   (js-array (js-object) (js-object :mds "0.1" :Sections (js-array (js-object :name "A..B"))))
+                   (js-array (js-object) (js-object :mds "0.1" :Sections (js-array (js-object :name "A" :min_rows 5 :max_rows 2)))))))
+      (js-call (js-array "0000-01-01" "0000-02-29" "0001-02-29" "1900-02-29" "2000-02-29" "2024-02-29" "2023-02-29"
+                         "2024-04-31" "9999-12-31" "2024-1-01" "2024-00-01" "2024-01-00" "2024-13-01")
+               :forEach
+               (lambda (value)
+                 (js-call items :push
+                   (js-array (js-object :A (js-object :d value))
+                             (js-object :mds "0.1" :A (js-array (js-object :name "d" :type "date")))))))
+      (js-call (js-array "0000-02-29T00:00:00Z" "1900-02-29T12:00:00Z" "2000-02-29T23:59:59Z"
+                         "2024-02-29T24:00:00Z" "2024-02-29T24:00:00.000Z" "2024-02-29T24:00:00.001Z"
+                         "2024-02-29T24:00:01Z" "2024-02-29T23:59:60Z" "2024-02-29t12:34:56z"
+                         "2024-02-29T12:34:56.1+05:30" "2024-02-29T12:34:56.123456789-23:59"
+                         "2024-02-29T12:34:56.000000001Z" "2024-02-29T12:34:56+24:00"
+                         "2024-02-29T12:34:56+00:60" "2024-02-29T12:34:56" "2024-02-29T12:34:56.Z")
+               :forEach
+               (lambda (value)
+                 (js-call items :push
+                   (js-array (js-object :A (js-object :d value))
+                             (js-object :mds "0.1" :A (js-array (js-object :name "d" :type "datetime")))))))
+      (js-call (js-array "😀" "😀中" (str "e" (String/fromCharCode 769)) (String/fromCharCode 55296) "")
+               :forEach
+               (lambda (value)
+                 (js-call items :push
+                   (js-array (js-object :A (js-object :text value))
+                             (js-object :mds "0.1" :A (js-array (js-object :name "text" :type "string" :min_len 1 :max_len 1)))))))
+      items))
+
+  (defconst gepo-cases
+    (let* ((operations (js-array
+                         (js-object :path "/math/add" :title "Add" :summary "a + b")
+                         (js-object :path "/math" :title "Math")
+                         (js-object :path "/中文/😀" :summary "Unicode")))
+           (items (js-array
+                    (js-array 0 (js-object :path "/math/add" :title "Add\r\nInjected" :failures (js-array "400" "500") :summary "sum")))))
+      (js-call (js-array "/" "/math" "/math/add" "/missing") :forEach
+        (lambda (location)
+          (js-call items :push (js-array 1 (js-object :title "Example" :operations operations :location location)))))
+      (js-call items :push
+        (js-array 1 (js-object :title "Empty" :operations (js-array) :location "/"))
+        (js-array 1 (js-object :title "Duplicate" :operations (js-array (js-object :path "/a") (js-object :path "/a")) :location "/"))
+        (js-array 2 "https://example.test/a?secret=x#fragment")
+        (js-array 2 "https://example.test/")
+        (js-array 2 "https://user:password@example.test")
+        (js-array 2 "file:///tmp/value")
+        (js-array 3 (js-object :status 200 :contentType "text/markdown" :body "# Example\n\nGEPO 0.2\n\n## Children\n\n- `/a`\n- `/a`\n- `/中文`\n"))
+        (js-array 3 (js-object :status 200 :contentType "text/plain; charset=utf-8" :body "GEPO 0.2\nPath: `/`\nKind: operation\n## Children\nNo immediate child paths.\n"))
+        (js-array 3 (js-object :status 200 :contentType "text/markdown" :body "GEPO 0.2\n## Children\nThe visible capability set is empty.\n"))
+        (js-array 3 (js-object :status 200 :contentType "text/html" :body "<html>GEPO</html>"))
+        (js-array 3 (js-object :status 404 :contentType "text/plain" :body "GEPO 0.2"))
+        (js-array 3 (js-object :status 200 :contentType nil :body "GEPO 0.2"))
+        (js-array 4 (js-object :path "/valid" :title "Valid"))
+        (js-array 5 (js-object :path "/valid")))
+      (js-call (js-array "relative" "/a/../b" "/a/./b" "/a//b" "/a/" "/a b" "/a?b" "/a#b" "/a`b" "/a\\b" "/.gepo" "/.gepo/a" "/.well-known/gepo" "/%2e%2e/a")
+               :forEach
+               (lambda (path) (js-call items :push (js-array 4 (js-object :path path)))))
+      items))
+
+  (defconst cases
+    (let ((items (js-array (js-object :name "original codec" :fn "original-codec-report" :args (js-array))))
+          (mode 0))
+      (js-call roundtrips :forEach
+        (lambda (value index)
+          (js-call items :push (js-object :name (str "MDP roundtrip " index) :fn "roundtrip-report" :args (js-array (JSON/stringify value))))))
+      (js-call parse-cases :forEach
+        (lambda (pair index)
+          (js-call items :push (js-object :name (str "MDP parse " index) :fn "parse-report"
+                                          :args (js-array (aref pair 0) (JSON/stringify (aref pair 1)))))))
+      (while (< mode 10)
+        (js-call items :push (js-object :name (str "MDP invalid encode " mode) :fn "invalid-encode" :args (js-array mode)))
+        (setq mode (1+ mode)))
+      (js-call schema-cases :forEach
+        (lambda (pair index)
+          (js-call items :push (js-object :name (str "MDS validate " index) :fn "validate-report"
+                                          :args (js-array (JSON/stringify (aref pair 0)) (JSON/stringify (aref pair 1)))))))
+      (js-call gepo-cases :forEach
+        (lambda (pair index)
+          (js-call items :push (js-object :name (str "GEPO pure " index) :fn "gepo-pure-report"
+                                          :args (js-array (aref pair 0) (JSON/stringify (aref pair 1)))))))
+      items))
+
+  ;; The four original HTTP suites retain their actual assertions and host
+  ;; callbacks. Only these four library entry points are supplied by the target.
+  (defasync httpContracts (api)
+    (let* ((create-service (get api :createService))
+           (create-client (get api :createClient))
+           (discovery-candidates (get api :discoveryCandidates))
+           (path-index-markdown (get api :pathIndexMarkdown))
+           (calls 0)
+           (service (funcall create-service
+                      (js-object
+                        :title "Example"
+                        :operations (js-array
+                                      (js-object
+                                        :path "/math/add" :title "Add" :request "JSON a,b"
+                                        :success "200 JSON sum" :effect "Read only"
+                                        :execute (async (request)
+                                                   (setq calls (1+ calls))
+                                                   (let ((body (await (js-call request :json))))
+                                                     (js-call globalThis.Response :json
+                                                       (js-object :sum (+ (get body :a) (get body :b)))))))
+                                      (js-object
+                                        :path "/math" :title "Math"
+                                        :execute (lambda () (new globalThis.Response "math")))))))
+           (transport (lambda (url settings) (funcall service (new globalThis.Request url settings))))
+           (client (funcall create-client (js-object :fetch transport)))
+           (discovery (await (js-call client :discover "https://example.test/"))))
+      (js-call assert :equal (get discovery :state) "found")
+      (js-call assert :deepEqual (Array/from (get discovery :paths)) (js-array "/math"))
+      (let ((index (await (js-call client :index "https://example.test/math?secret=removed"))))
+        (js-call assert :match (get index :body) (new globalThis.RegExp "operation and directory" "u"))
+        (js-call assert :match (get index :body) (new globalThis.RegExp "`/math/add`" "u")))
+      (js-call assert :match
+        (get (await (js-call client :usage "https://example.test/math/add?.gepo&x=1")) :body)
+        (new globalThis.RegExp "POST `/math/add`" "u"))
+      (js-call assert :equal calls 0)
+      (await (js-call assert :rejects (js-call client :invoke "https://example.test/math/add" "{}")))
+      (js-call assert :equal calls 0)
+      (let ((reply (await (js-call client :invoke "https://example.test/math/add" "{\"a\":2,\"b\":3}"
+                            (js-object :allowPost t :contentType "application/json")))))
+        (js-call assert :deepEqual (JSON/parse (get reply :body)) (js-object :sum 5))
+        (js-call assert :equal calls 1))
+      (js-call assert :equal (get (await (funcall service (new globalThis.Request "https://example.test/math/add?.gepo=false"))) :status) 200)
+      (js-call assert :equal (get (await (funcall service (new globalThis.Request "https://example.test/math/add" (js-object :method "HEAD")))) :body) nil)
+      (let ((head-index (await (funcall service (new globalThis.Request "https://example.test/.gepo" (js-object :method "HEAD"))))))
+        (js-call assert :equal (get head-index :status) 200)
+        (js-call assert :equal (get head-index :body) nil))
+      (js-call assert :equal
+        (js-call (get (await (funcall service (new globalThis.Request "https://example.test/.gepo" (js-object :method "OPTIONS")))) :headers) :get "Allow")
+        "GET, HEAD, OPTIONS")
+      (js-call assert :equal (get (await (funcall service (new globalThis.Request "https://example.test/.gepo" (js-object :method "POST")))) :status) 405)
+      (js-call assert :equal (get (await (funcall service (new globalThis.Request "https://example.test/math" (js-object :method "DELETE")))) :status) 405)
+
+      (let* ((urls (js-array))
+             (fallback (funcall create-client
+                         (js-object
+                           :fetch (async (url settings)
+                                    (js-call urls :push (globalThis.String url))
+                                    (js-call assert :equal (get settings :redirect) "manual")
+                                    (if (= (js-length urls) 1)
+                                      (new globalThis.Response "<html>GEPO</html>"
+                                           (js-object :headers (js-object "Content-Type" "text/html")))
+                                      (new globalThis.Response (funcall path-index-markdown "Empty" (js-array) "/")
+                                           (js-object :headers (js-object "Content-Type" "text/markdown")))))))))
+        (js-call assert :equal (get (await (js-call fallback :discover "https://example.test/?secret=x#fragment")) :state) "empty")
+        (js-call assert :deepEqual urls (js-array "https://example.test/?.gepo" "https://example.test/.gepo"))
+        (js-call assert :equal (aref (funcall discovery-candidates "https://example.test/a?secret=x") 0) "https://example.test/a?.gepo")
+        (let* ((root-service (funcall create-service
+                               (js-object :operations (js-array (js-object :path "/" :execute (lambda () (new globalThis.Response "root")))))))
+               (root-client (funcall create-client
+                              (js-object :fetch (lambda (url settings) (funcall root-service (new globalThis.Request url settings)))))))
+          (js-call assert :equal (get (await (js-call root-client :discover "https://example.test")) :state) "found"))
+        (js-call assert :throws
+          (lambda ()
+            (funcall create-service
+              (js-object :operations (js-array (js-object :path "/a/../b" :execute (lambda () nil)))))))
+        (await (js-call assert :rejects (js-call fallback :discover "https://user:password@example.test"))))
+
+      (let* ((forbidden-calls 0)
+             (forbidden (funcall create-service
+                          (js-object
+                            :operations (js-array (js-object :path "/private"
+                                                             :execute (lambda ()
+                                                                        (setq forbidden-calls (1+ forbidden-calls))
+                                                                        (new globalThis.Response "done"))))
+                            :authorize (lambda () false))))
+             (bounded (funcall create-client (js-object :fetch (async () (new globalThis.Response "12345")) :maxBytes 4)))
+             (redirect (funcall create-client
+                         (js-object :fetch (async () (new globalThis.Response nil
+                                                       (js-object :status 302 :headers (js-object :Location "https://elsewhere.test/")))))))
+             (posts 0)
+             (loss (funcall create-client
+                     (js-object :fetch (async (url settings)
+                                         (if (= (get settings :method) "POST")
+                                           (progn (setq posts (1+ posts)) (throw (new globalThis.Error "lost")))
+                                           (new globalThis.Response "usage"))))))
+             (timeout (funcall create-client
+                        (js-object :fetch (lambda () (new globalThis.Promise (lambda () nil))) :timeoutMs 10)))
+             (stalled-body (funcall create-client
+                             (js-object :fetch (async () (new globalThis.Response
+                                                           (new globalThis.ReadableStream (js-object :pull (lambda () nil)))))
+                                        :timeoutMs 10)))
+             (aborted (new globalThis.AbortController))
+             (requests 0)
+             (cancelled (funcall create-client
+                          (js-object :fetch (async () (setq requests (1+ requests)) (new globalThis.Response "bad"))))))
+        (js-call assert :equal (get (await (funcall forbidden (new globalThis.Request "https://example.test/private" (js-object :method "POST")))) :status) 403)
+        (js-call assert :equal forbidden-calls 0)
+        (await (js-call assert :rejects (js-call bounded :usage "https://example.test/a") (new globalThis.RegExp "limit" "u")))
+        (await (js-call assert :rejects (js-call redirect :usage "https://example.test/a") (new globalThis.RegExp "Redirect" "u")))
+        (await (js-call assert :rejects (js-call loss :invoke "https://example.test/a" "" (js-object :allowPost t)) (new globalThis.RegExp "lost" "u")))
+        (js-call assert :equal posts 1)
+        (await (js-call assert :rejects (js-call timeout :usage "https://example.test/a") (new globalThis.RegExp "timeout" "u")))
+        (await (js-call assert :rejects (js-call stalled-body :usage "https://example.test/a") (new globalThis.RegExp "timeout" "u")))
+        (js-call aborted :abort (new globalThis.Error "cancelled"))
+        (await (js-call assert :rejects
+                 (js-call cancelled :usage "https://example.test/a" (js-object :signal (get aborted :signal)))
+                 (new globalThis.RegExp "cancelled" "u")))
+        (js-call assert :equal requests 0)
+
+        (let* ((identity (funcall create-service
+                           (js-object
+                             :operations (js-array
+                                           (js-object :path "/public/read" :execute (lambda () (js-call globalThis.Response :json (js-object :ok t))))
+                                           (js-object :path "/private/read" :execute (lambda () (new globalThis.Response "secret"))))
+                             :visible (lambda (request operation)
+                                        (or (not (js-call (get operation :path) :startsWith "/private"))
+                                            (= (js-call (get request :headers) :get "Authorization") "example-user")))
+                             :authorize (lambda (request)
+                                          (if (/= (get request :method) "POST")
+                                            t
+                                            (new globalThis.Response "Sign in" (js-object :status 401)))))))
+               (public-index (await (js-call (await (funcall identity (new globalThis.Request "https://example.test/?.gepo"))) :text)))
+               (private-index (await (js-call (await (funcall identity (new globalThis.Request "https://example.test/?.gepo"
+                                                                         (js-object :headers (js-object :Authorization "example-user"))))) :text)))
+               (not-found (funcall create-client (js-object :fetch (async () (new globalThis.Response "ordinary site")))))
+               (failure (await (js-call not-found :discover "https://example.test")))
+               (json (funcall create-client
+                       (js-object
+                         :fetch (async () (js-call globalThis.Response :json (js-object :protocol "GEPO" :children (js-array "/api"))))
+                         :classify (lambda (response)
+                                     (let ((body (JSON/parse (get response :body))))
+                                       (js-object :accepted (= (get body :protocol) "GEPO")
+                                                  :paths (get body :children)
+                                                  :empty (= (js-length (get body :children)) 0))))))))
+          (js-call assert :match public-index (new globalThis.RegExp "`/public`" "u"))
+          (funcall assert (not (js-call public-index :includes "/private")))
+          (js-call assert :match private-index (new globalThis.RegExp "`/private`" "u"))
+          (js-call assert :equal (get (await (funcall identity (new globalThis.Request "https://example.test/public/read" (js-object :method "POST")))) :status) 401)
+          (js-call assert :equal (get failure :state) "not-found")
+          (js-call assert :equal (js-length (get failure :attempts)) 3)
+          (js-call assert :deepEqual (Array/from (get (await (js-call json :discover "https://example.test")) :paths)) (js-array "/api"))
+          (js-object
+            :hierarchical t
+            :fallback t
+            :authorization t
+            :bounds t
+            :redirects t
+            :lostPosts posts
+            :timeouts t
+            :cancelledRequests requests
+            :visibility t
+            :customClassifier t)))))
+
+  (defasync run-cli (mode arg1 arg2)
+    (cond
+      ((= mode "--run-oracle")
+       (let* ((fixture (await (funcall dynamic-import arg1)))
+              (http (await (funcall dynamic-import arg2)))
+              (results (js-array))
+              (index 0))
+         (while (< index (js-length cases))
+           (let* ((record (aref cases index))
+                  (method-name (js-call (get record :fn) :replaceAll "-" "_"))
+                  (raw (await (Reflect/apply (get fixture method-name) fixture (get record :args)))))
+             (js-call results :push (JSON/parse raw)))
+           (setq index (1+ index)))
+         (js-call globalThis.console :log
+           (JSON/stringify
+             (js-object
+               :results results
+               :negativeZero (js-call fixture :parse_negative_zero)
+               :http (await (httpContracts http)))))))
+      ((= mode "--run-roundtrip")
+       (let ((fixture (await (funcall dynamic-import arg1))))
+         (js-call globalThis.console :log (js-call fixture :original_roundtrip arg2))))))
+
+  (let* ((argv (get globalThis.process :argv))
+         (oracle-idx (js-call argv :indexOf "--run-oracle"))
+         (roundtrip-idx (js-call argv :indexOf "--run-roundtrip")))
+    (when (>= oracle-idx 0)
+      (js-call (run-cli "--run-oracle" (aref argv (+ oracle-idx 1)) (aref argv (+ oracle-idx 2)))
+               :catch (lambda (err) (js-call globalThis.console :error err) (js-call globalThis.process :exit 1))))
+    (when (>= roundtrip-idx 0)
+      (js-call (run-cli "--run-roundtrip" (aref argv (+ roundtrip-idx 1)) (aref argv (+ roundtrip-idx 2)))
+               :catch (lambda (err) (js-call globalThis.console :error err) (js-call globalThis.process :exit 1)))))
+
+  (export roundtrips parse-cases original-error-codes schema schema-cases gepo-cases cases httpContracts))

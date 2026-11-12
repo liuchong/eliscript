@@ -1,2 +1,5 @@
-(module capsules.runtime.core.truth
-  (js* "export function isTruthy(value) {\n  return value !== false && value != null;\n}\n"))
+(module eliscript.runtime.core.truth
+  (defun isTruthy (value)
+    (and (not (eq value false)) (not (nullish? value))))
+
+  (export isTruthy))

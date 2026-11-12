@@ -1,0 +1,53 @@
+(module tests.helpers.wasm-managed-collection-for-each-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+
+  (defun dynamic-import (specifier)
+    (funcall (js* "(specifier) => import(specifier)") specifier))
+
+  (defun read-val (a x)
+    (cond
+      ((or (nil? x) (not (= (value-type x) "object"))) x)
+      ((= (get x :kind) 4) (js-call a :readNumber x))
+      ((= (get x :kind) 5) (js-call a :readString x))
+      (t (Array/from (js-object :length (js-call a :length x))
+           (lambda (_ i)
+             (let ((child (js-call a :get x i)))
+               (try (read-val a child) (finally (js-call a :release child)))))))))
+
+  (defasync main ()
+    (let* ((rt-mod (await (dynamic-import (aref (get globalThis.process :argv) 2))))
+           (instantiateManagedRuntime (get rt-mod :instantiateManagedRuntime))
+           (a (funcall instantiateManagedRuntime (readFileSync 0))))
+      (js-call a :auto 1)
+      (js-call (js-array false t) :forEach
+        (lambda (set-mode)
+          (let* ((values (js-array -0.0 globalThis.NaN globalThis.Number.MIN_VALUE))
+                 (control (if set-mode
+                            (new globalThis.Set values)
+                            (new globalThis.Map (js-call values :map (lambda (v i) (js-array i v))))))
+                 (items (js-call a :invoke (if set-mode "empty-set" "empty-map")))
+                 (i 0))
+            (while (< i (js-length values))
+              (let* ((key (js-call a :number i))
+                     (value (js-call a :number (aref values i)))
+                     (out (js-call a :invoke
+                            (if set-mode "add-value" "set-value")
+                            (if set-mode (js-array items value) (js-array items key value)))))
+                (js-call (js-array key value out) :forEach (lambda (x) (js-call a :release x))))
+              (setq i (1+ i)))
+            (let ((log (js-call a :sourceArray (js-array)))
+                  (out undefined)
+                  (expected (js-array)))
+              (setq out (js-call a :invoke "visit" (js-array items log)))
+              (js-call control :forEach
+                (lambda (v k c) (js-call expected :push (js-array v k (= c control)))))
+              (js-call assert :equal out undefined)
+              (js-call assert :deepEqual (read-val a log) expected)
+              (js-call a :release log)
+              (js-call a :release items)
+              (js-call a :collect)
+              (js-call assert :equal (js-call a :live) 0)
+              (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))))
+
+  (main))

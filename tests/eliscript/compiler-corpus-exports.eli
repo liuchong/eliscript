@@ -325,7 +325,11 @@
              "  (js-call assert :strictEqual (Object/getPrototypeOf (get reference :value)) (get PersistentQueue :prototype))"
              "  (js-call assert :strictEqual (printValue (get reference :value)) \"#queue [1 2]\")))"
              " (js-call (get globalThis.process :stdout) :write (printValue (get selected :value))))") :join "\n"))
-           (sources (if declare-runtime (await (runtime-assets (resolve root "runtime") "runtime")) (js-array)))
+           (sources (if declare-runtime
+                      (js-call (await (runtime-assets (resolve root "runtime") "runtime")) :concat
+                        (js-array (js-object :id "stdlib/bit.mjs" :filename "stdlib/bit.mjs"
+                                    :source (await (readFile (resolve root "stdlib/bit.mjs") "utf8")))))
+                      (js-array)))
            (entry (resolve product "module.mjs")))
       (await (writeFile entry (js-call (get backend :compiler) :compile_string source "queue-fixture.eli")))
       (js-object :record (js-object :kind "project" :entry "module.mjs"
@@ -360,7 +364,17 @@
         (let ((before (await (readFile path "utf8"))))
           (await (js-call assert :rejects (executeCompilerCorpusRecord context)
             (lambda (error) (and (= (get error :name) "Error") (= (get error :message) "original local runtime package conflicts with emitted source")))))
-          (js-call assert :strictEqual (await (readFile path "utf8")) before)))))
+          (js-call assert :strictEqual (await (readFile path "utf8")) before)))
+      (let* ((context (await (queue-context t)))
+             (request (get (get context :record) :request)))
+        (put (get (get context :record) :execution) :aliases t)
+        (put request :hostSources (js-call (get request :hostSources) :filter
+          (lambda (item) (/= (get item :id) "stdlib/bit.mjs"))))
+        (let ((before (JSON/stringify (get context :record))))
+          (await (js-call assert :rejects (executeCompilerCorpusRecord context)
+            (lambda (error) (and (= (get error :name) "Error")
+                                 (= (get error :message) "original local runtime graph is incomplete")))))
+          (js-call assert :strictEqual (JSON/stringify (get context :record)) before)))))
   (test "independent Seed source and selected JS share only the declared runtime graph for exact protocol identity"
     (async ()
       (let ((context (await (queue-context t))))

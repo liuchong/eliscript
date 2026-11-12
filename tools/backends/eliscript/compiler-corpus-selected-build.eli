@@ -1,0 +1,65 @@
+(module tools.backends.compiler-corpus-selected-build
+  (import "node:fs/promises" mkdir writeFile realpath symlink)
+  (import "node:path" resolve dirname)
+  (import "node:url" pathToFileURL)
+  (import "./compiler-host-record.mjs" copyHostRecord)
+  (defconst import-module (js* "(specifier) => import(specifier)"))
+  (defun host-truth (value) (js* "!!value"))
+
+  (defasync canonical-output (path)
+    (try (await (realpath path))
+      (catch error (if (= (get error :code) "ENOENT") path (throw error)))))
+
+  (defasync buildSelectedBackends (original input load-literal-sources root)
+    (let* ((options (if (undefined? input) (js-object) input))
+           (transport (get (js* "globalThis") (Symbol/for "eliscript.original.selected-backends"))))
+      (unless (host-truth transport) (throw (new globalThis.Error "the selected backend product is not installed")))
+      (let ((actual (await (js-call transport :load))))
+        (if (or (not (undefined? (get options :frontend))) (eq (get options :seed) t))
+          (let* ((forwarded (copyHostRecord options)) (frontend (get options :frontend)))
+            (await (funcall original (copyHostRecord forwarded
+              (js-object :frontend (if (nullish? frontend) (get actual :compiler) frontend))))))
+          (let ((selected-directory (get actual :directory)))
+            (unless (undefined? (get options :outputRoot))
+              (let ((output-root (resolve (get options :outputRoot))) (index 0))
+                (setq selected-directory (resolve output-root "backends"))
+                (when (= (await (canonical-output output-root)) (await (realpath (get actual :product))))
+                  (throw (new globalThis.Error "original build output must not overwrite the selected compiler artifact")))
+                (while (< index (js-length (get actual :moduleIds)))
+                  (let* ((id (aref (get actual :moduleIds) index)) (target (resolve output-root id))
+                         (_mkdir (await (mkdir (dirname target) (js-object :recursive t))))
+                         (url (get (pathToFileURL (resolve (get actual :product) id)) :href))
+                         (namespace (await (funcall import-module url)))
+                         (lines (js-array
+                           (str "import * as actual from " (JSON/stringify url) ";")
+                           (str "import {transportCompilerExport} from " (JSON/stringify (get actual :transportModule)) ";")))
+                         (keys (Object/keys namespace)) (key-index 0))
+                    (while (< key-index (js-length keys))
+                      (let ((key (aref keys key-index)) (local (str "transported" key-index)))
+                        ;; ESM names and calls are thin host syntax. Graph
+                        ;; traversal and facade behavior live in Eli modules.
+                        (js-call lines :push
+                          (str "const " local " = transportCompilerExport(actual, " (JSON/stringify key) ");")
+                          (str "export {" local " as " (JSON/stringify key) "};")))
+                      (setq key-index (1+ key-index)))
+                    (await (writeFile target (str (js-call lines :join "\n") "\n")))
+                    (let ((record (js-call (get actual :moduleRecords) :find (lambda (record) (= (get record :id) id)))))
+                      (js-call (get actual :browserModules) :set (await (realpath target))
+                        (js-object :filename (resolve root (get record :filename)) :compiler (get actual :compiler)))))
+                  (setq index (1+ index)))
+                (let* ((dependencies (resolve output-root "node_modules")) (link (resolve dependencies "eliscript")))
+                  (await (mkdir dependencies (js-object :recursive t)))
+                  (try (await (symlink root link "dir"))
+                    (catch error
+                      (unless (= (get error :code) "EEXIST") (throw error))
+                      (unless (= (await (realpath link)) (await (realpath root)))
+                        (throw (new globalThis.Error "backend transport resolves a different runtime package"))))))))
+            (copyHostRecord actual (js-object :directory selected-directory
+              :loadLiteralModules (async ()
+                (let ((literal-sources (await (funcall load-literal-sources (js-object :sourceRoot root)))))
+                  (js-object :literalSources literal-sources :literalModules
+                    (js-call literal-sources :map (lambda (record)
+                      (js-object :id (get record :id) :program
+                        (js-call (get actual :compiler) :compile_ir_string (get record :source) (get record :filename))))))))))))))
+  )
+  (export buildSelectedBackends))

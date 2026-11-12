@@ -1,0 +1,72 @@
+(module tools.backends.compiler-corpus-fixture-runtime
+  (import "node:assert/strict" :default assert)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "node:process" :default process)
+  (defconst import-module (js* "(specifier) => import(specifier)"))
+  (defun host-truth (value) (js* "!!value"))
+
+  (defasync openOriginalFixtureRuntime (automatic)
+    (let* ((root (get (get process :env) :ELISCRIPT_ORIGINAL_SOURCE_ROOT))
+           (reference (get (get process :env) :ELISCRIPT_ORIGINAL_REFERENCE_PRODUCT_ROOT))
+           (product (aref (get process :argv) 2)) (entry (aref (get process :argv) 3)))
+      (unless (and (host-truth root) (host-truth reference))
+        (throw (new globalThis.Error "original fixture execution requires its independent Seed product")))
+      (let* ((module (await (funcall import-module (get (pathToFileURL (resolve product entry)) :href))))
+             (oracle (await (funcall import-module (get (pathToFileURL (resolve reference entry)) :href))))
+             (runtime undefined)
+             (fixture (js-object :observations 0 :groups (Object/create nil))))
+        (unless (= (get (get process :env) :ELISCRIPT_ORIGINAL_TARGET) "javascript")
+          (let ((configuration (get (get process :env) :ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT)))
+            (unless (host-truth configuration)
+              (throw (new globalThis.Error "selected binary fixture requires its real runtime context")))
+            (let* ((metadata (await (funcall import-module
+                               (get (pathToFileURL (resolve root "tools/backends/compiler-metadata.mjs")) :href))))
+                   (input (await (js-call metadata :readCompilerMetadata configuration)))
+                   (context (await (funcall import-module
+                              (get (pathToFileURL (resolve root "tools/backends/compiler-corpus-host-context.mjs")) :href)))))
+              (setq runtime (get (await (js-call context :openOriginalProgramContext input
+                                         (js-object :identity configuration))) :runtime))
+              (js-call runtime :auto automatic))))
+        (put fixture :root root)
+        (put fixture :product product)
+        (put fixture :entry entry)
+        (put fixture :reference reference)
+        (put fixture :m module)
+        (put fixture :oracle oracle)
+        (put fixture :runtime runtime)
+        (put fixture :compare
+          (lambda (label observe)
+            (let* ((expected (funcall observe oracle)) (actual (funcall observe module)))
+              (js-call assert :deepEqual actual expected label)
+              (put fixture :observations (1+ (get fixture :observations)))
+              (put (get fixture :groups) label (1+ (get (get fixture :groups) label 0)))
+              (when (host-truth runtime)
+                (js-call runtime :collect)
+                (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0
+                  (str label " restores private frames"))))))
+        (put fixture :outcome
+          (lambda (action)
+            (try (js-object :value (funcall action))
+              (catch error
+                (js-object :error (js-object :name
+                  (if (nullish? error) undefined (get error :name))))))))
+        (put fixture :named
+          (lambda (target name &rest arguments)
+            (Reflect/apply (get target (js-call name :replaceAll "-" "_")) target arguments)))
+        (put fixture :finish
+          (lambda ()
+            (funcall assert (> (get fixture :observations) 0)
+              "a fixture must execute assertions, not merely compile")
+            (when (host-truth runtime)
+              (js-call runtime :closeModule)
+              (js-call runtime :collect)
+              (js-call assert :equal (js-call runtime :live) 0)
+              (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0))
+            (let ((report (get fixture :report)))
+              (if (= (funcall (js* "(value) => typeof value") report) "function")
+                (Reflect/apply report undefined (js-array (get fixture :observations) (get fixture :groups)))
+                (js-call globalThis.console :log
+                  (JSON/stringify (js-object :observations (get fixture :observations))))))))
+        fixture)))
+  (export openOriginalFixtureRuntime))

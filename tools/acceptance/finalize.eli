@@ -18,6 +18,7 @@
   (defconst humanFinalAcceptanceSummary (get ground :humanFinalAcceptanceSummary))
   (defconst contract-file "contracts/final-acceptance.json")
   (defconst fuzz-file "tests/reader-program-fuzz.test.mjs")
+  (defconst scale-file "tests/project-scale.test.mjs")
   (defconst expected-source (js-object :run "acceptance/runs/m13-01.json" :report "acceptance/runs/m13-01.md"))
   (defconst expected-outputs (js-object :manifest "acceptance/manifest.json" :report "acceptance/report.md"))
   (defconst expected-groups (js-array "benchmark" "fuzz" "scale" "soak" "test"))
@@ -53,30 +54,39 @@
   (defun git-text (root arguments)
     (js-call (new globalThis.TextDecoder) :decode (retainedGitSnapshotBytes root arguments)))
 
-  ;; This authenticates the original source run only. It never certifies the
-  ;; current fuzz implementation, changes its digest, or executes its workload.
-  (defasync verifyHistoricalFuzzArtifact (root filename run)
-    (unless (= filename fuzz-file) (fail "only the retained reader/program fuzz artifact has historical source authentication"))
+  ;; Authenticate only the bytes and source identity of the accepted historical
+  ;; run. Neither this proof nor deferral establishes current-source acceptance.
+  (defasync verify-historical-artifact (root filename run kind)
     (let* ((source (field run "source")) (commit (field source "commit")) (tree (field source "tree"))
            (artifacts (field run "artifacts")))
       (unless (and (= (value-type commit) "string") (js-call revision-pattern :test commit)
                    (= (value-type tree) "string") (js-call revision-pattern :test tree))
-        (fail "historical fuzz source must identify a full Git commit and tree"))
-      (unless (Array/isArray artifacts) (fail "historical fuzz artifact inventory is missing"))
+        (fail (str "historical " kind " source must identify a full Git commit and tree")))
+      (unless (Array/isArray artifacts) (fail (str "historical " kind " artifact inventory is missing")))
       (let* ((bound (js-call artifacts :filter (lambda (entry) (= (field entry "file") filename))))
              (digest (field (aref bound 0) "sha256")))
         (unless (and (= (js-length bound) 1) (= (value-type digest) "string") (js-call digest-pattern :test digest))
-          (fail "historical fuzz artifact must be uniquely bound by the source run"))
+          (fail (str "historical " kind " artifact must be uniquely bound by the source run")))
         (try
           (unless (= (js-call (git-text root (js-array "rev-parse" (str commit "^{tree}"))) :trim) tree)
-            (fail "historical fuzz source tree does not belong to its source commit"))
+            (fail (str "historical " kind " source tree does not belong to its source commit")))
           (unless (= (sha256 (retainedGitSnapshotBytes root (js-array "show" (str commit ":" filename)))) digest)
-            (fail "historical fuzz artifact differs from its accepted Git snapshot"))
+            (fail (str "historical " kind " artifact differs from its accepted Git snapshot")))
           (catch error
             (if (js-call (get FinalAcceptanceError :prototype) :isPrototypeOf error) (throw error)
-              (fail (str "historical fuzz Git source authentication failed: " (get error :message))))))
+              (fail (str "historical " kind " Git source authentication failed: " (get error :message))))))
         (js-object :artifact filename :artifactSha256 digest :sourceCommit commit :sourceTree tree
           :historicalSourcesVerified t :currentSourceAcceptance "not-asserted" :currentSourceClaim false))))
+
+
+  (defasync verifyHistoricalFuzzArtifact (root filename run)
+    (unless (= filename fuzz-file)
+      (fail "only the retained reader/program fuzz artifact has historical source authentication"))
+    (await (verify-historical-artifact root filename run "fuzz")))
+  (defasync verifyHistoricalScaleArtifact (root filename run)
+    (unless (= filename scale-file)
+      (fail "only the retained project scale artifact has historical source authentication"))
+    (await (verify-historical-artifact root filename run "scale")))
 
   (defun record-refresh (options result)
     (let ((items (get options :deferredPerformanceAcceptance)))
@@ -143,6 +153,9 @@
                                       (catch error (js-call errors :push (str label " artifact changed after the source run: " file ": " (get error :message))))))
                                   ((and (= file fuzz-file) (eq (get options :deferPerformanceAcceptance) t))
                                     (try (record-history options (await (verifyHistoricalFuzzArtifact root file run)))
+                                      (catch error (js-call errors :push (str label " artifact changed after the source run: " file ": " (get error :message))))))
+                                  ((and (= file scale-file) (eq (get options :deferPerformanceAcceptance) t))
+                                    (try (record-history options (await (verifyHistoricalScaleArtifact root file run)))
                                       (catch error (js-call errors :push (str label " artifact changed after the source run: " file ": " (get error :message))))))
                                   (t (js-call errors :push (str label " artifact changed after the source run: " file))))))))))
                     (setq file-index (1+ file-index)))))))
@@ -261,8 +274,13 @@
             (js-call (get process :stdout) :write (str "  " (get item :report) ": measured Git snapshot "
               (get (get item :measuredSource) :commit) " verified; current source comparison not performed\n"))))
           (js-call (get options :historicalSourceEvidence) :forEach (lambda (item)
-            (js-call (get process :stdout) :write (str "Historical fuzz source: " (get item :artifact) " at "
-              (get item :sourceCommit) " verified; current fuzz acceptance is provided by the independent complete functional run\n")))))
+            (let ((scale (= (get item :artifact) scale-file)))
+              (js-call (get process :stdout) :write (str
+                (if scale "Historical scale source: " "Historical fuzz source: ")
+                (get item :artifact) " at " (get item :sourceCommit) " verified; "
+                (if scale
+                  "current scale acceptance: DEFERRED / NOT ACCEPTED; current-source acceptance not asserted\n"
+                  "current fuzz acceptance requires an independent complete functional run (not asserted here)\n")))))))
         (when (and (get options :requirePass) (not (get (get manifest :summary) :acceptancePass)))
           (fail "the canonical artifacts are valid, but final acceptance has not been reached")))))
   (let ((entry (aref (get process :argv) 1)))
@@ -275,6 +293,6 @@
                    (str message "\n" stack)
                    (nullish stack error)) "\n")))
         (put process :exitCode 1)))))
-  (export DEFAULT_ROOT FinalAcceptanceError validateFinalAcceptanceContract verifyHistoricalFuzzArtifact
+  (export DEFAULT_ROOT FinalAcceptanceError validateFinalAcceptanceContract verifyHistoricalFuzzArtifact verifyHistoricalScaleArtifact
     validateDefectRegister buildFinalAcceptance humanFinalAcceptanceReport validateFinalManifest
     generateFinalAcceptance verifyFinalAcceptance humanFinalAcceptanceSummary))

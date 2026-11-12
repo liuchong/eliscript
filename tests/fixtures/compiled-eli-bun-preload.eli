@@ -1,2 +1,9 @@
-(module capsules.tests.fixtures.compiled-eli-bun-preload
-  (js* "import { plugin } from \"bun\";\n\nplugin({\n  name: \"compiled-eliscript-module\",\n  setup(build) {\n    build.onLoad({ filter: /\\.eli$/ }, async ({ path }) => ({\n      contents: await Bun.file(path).text(),\n      loader: \"js\",\n    }));\n  },\n});\n"))
+(module tests.fixtures.compiled-eli-bun-preload
+  (import "bun" plugin)
+  ;; These .eli files contain generated JS compiler products under the fixture's
+  ;; original paths. Register their host loader without changing their bytes.
+  (plugin (js-object :name "compiled-eliscript-module"
+    :setup (lambda (build)
+      (js-call build :onLoad (js-object :filter (new globalThis.RegExp "\\.eli$"))
+        (async (arguments_)
+          (js-object :contents (await (js-call (Bun/file (get arguments_ :path)) :text)) :loader "js")))))))

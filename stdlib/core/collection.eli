@@ -33,7 +33,8 @@
   (defun sequence? (value) (Runtime/isSequence value))
   (defun bounded-count (limit collection) (Runtime/boundedCount limit collection))
   (defun distinct? (&rest values) (apply Runtime/areDistinct values))
-  (defun subvec (vector start &optional end) (Vector/subvec vector start end))
+  (defun subvec (vector start &optional end)
+    (if (nullish? end) (Vector/subvec vector start) (Vector/subvec vector start end)))
   (defun empty (collection) (Runtime/empty collection))
   (defun conj
     (collection &rest values)

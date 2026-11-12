@@ -1,2 +1,9 @@
-(module capsules.runtime.core.metadata-internals
-  (js* "import {\n  defineProtocol,\n  protocolMethod,\n  protocolSlot,\n} from \"./protocol.mjs\";\n\nexport const I_META = defineProtocol(\"IMeta\", [\"meta\"]);\nexport const I_WITH_META = defineProtocol(\"IWithMeta\", [\"withMeta\"]);\n\nexport const METADATA_READ = protocolSlot(I_META, \"meta\");\nexport const METADATA_WITH = protocolSlot(I_WITH_META, \"withMeta\");\n\nexport const dispatchMetadataRead = protocolMethod(I_META, \"meta\");\nexport const dispatchMetadataWith = protocolMethod(I_WITH_META, \"withMeta\");\n"))
+(module eliscript.runtime.core.metadata-internals
+  (import "./protocol.mjs" defineProtocol protocolMethod protocolSlot)
+  (defconst I_META (defineProtocol "IMeta" (js-array "meta")))
+  (defconst I_WITH_META (defineProtocol "IWithMeta" (js-array "withMeta")))
+  (defconst METADATA_READ (protocolSlot I_META "meta"))
+  (defconst METADATA_WITH (protocolSlot I_WITH_META "withMeta"))
+  (defconst dispatchMetadataRead (protocolMethod I_META "meta"))
+  (defconst dispatchMetadataWith (protocolMethod I_WITH_META "withMeta"))
+  (export I_META I_WITH_META METADATA_READ METADATA_WITH dispatchMetadataRead dispatchMetadataWith))

@@ -1,2 +1,371 @@
-(module capsules.tools.compiler.locate-benchmark
-  (js* "import { createHash } from \"node:crypto\";\nimport { readFile, writeFile } from \"node:fs/promises\";\nimport os from \"node:os\";\nimport path from \"node:path\";\nimport process from \"node:process\";\nimport { fileURLToPath, pathToFileURL } from \"node:url\";\n\nexport const COMPILER_LOCATE_FORMAT = \"eliscript-compiler-locate-benchmark\";\nexport const COMPILER_LOCATE_VERSION = 1;\n\nconst directory = path.dirname(fileURLToPath(import.meta.url));\nconst projectDirectory = path.resolve(directory, \"../..\");\nconst compilerSources = Object.freeze([\n  \"bootstrap/compiler/symbol.eli\",\n  \"bootstrap/compiler/syntax.eli\",\n  \"bootstrap/compiler/reader.eli\",\n  \"bootstrap/compiler/formatter.eli\",\n  \"bootstrap/compiler/expander.eli\",\n  \"bootstrap/compiler/transient-analysis.eli\",\n  \"bootstrap/compiler/analyzer.eli\",\n  \"bootstrap/compiler/ir.eli\",\n  \"bootstrap/compiler/lower.eli\",\n  \"bootstrap/compiler/source-map.eli\",\n  \"bootstrap/compiler/emitter.eli\",\n  \"bootstrap/compiler/project.eli\",\n  \"bootstrap/compiler/compiler.eli\",\n]);\nconst digestFiles = Object.freeze([\n  ...compilerSources,\n  \"tools/compiler/locate-benchmark.mjs\",\n]);\n\nfunction parsePositiveInteger(value, name) {\n  const parsed = Number(value);\n  if (!Number.isSafeInteger(parsed) || parsed <= 0) {\n    throw new TypeError(`${name} must be a positive safe integer`);\n  }\n  return parsed;\n}\n\nfunction parseArguments(arguments_) {\n  let output;\n  for (let index = 0; index < arguments_.length; index += 1) {\n    const argument = arguments_[index];\n    if (argument === \"--output\") {\n      output = arguments_[index + 1];\n      if (output === undefined) {\n        throw new TypeError(\"--output requires a path\");\n      }\n      index += 1;\n    } else if (argument === \"--help\") {\n      process.stdout.write(\n        \"Usage: bun tools/compiler/locate-benchmark.mjs \" +\n          \"[--output REPORT.json]\\n\",\n      );\n      process.exit(0);\n    } else {\n      throw new TypeError(`unknown argument ${argument}`);\n    }\n  }\n  return { output };\n}\n\nexport async function compilerLocateSourceDigest() {\n  const hash = createHash(\"sha256\");\n  for (const relative of digestFiles) {\n    hash.update(relative);\n    hash.update(\"\\0\");\n    hash.update(await readFile(path.join(projectDirectory, relative)));\n    hash.update(\"\\0\");\n  }\n  return {\n    algorithm: \"sha256\",\n    files: digestFiles,\n    value: hash.digest(\"hex\"),\n  };\n}\n\nfunction artifactFragments(artifact) {\n  const fragments = [];\n  let blockStart = 0;\n  while (blockStart < artifact.text.length) {\n    const separator = artifact.text.indexOf(\"\\n\\n\", blockStart);\n    const blockEnd = separator === -1 ? artifact.text.length : separator;\n    if (blockEnd > blockStart) {\n      fragments.push({\n        text: artifact.text.slice(blockStart, blockEnd),\n        marks: artifact.marks\n          .filter((mark) => mark.offset >= blockStart && mark.offset < blockEnd)\n          .map((mark) => ({\n            offset: mark.offset - blockStart,\n            span: mark.span,\n          })),\n      });\n    }\n    if (separator === -1) break;\n    blockStart = blockEnd + 2;\n  }\n  return fragments;\n}\n\nfunction shiftedFragment(fragment) {\n  if (fragment.text.length <= 1 || fragment.marks.length <= 1) return null;\n  return {\n    text: fragment.text.slice(1),\n    marks: fragment.marks\n      .filter((mark) => mark.offset >= 1)\n      .map((mark) => ({\n        offset: mark.offset - 1,\n        span: mark.span,\n      })),\n  };\n}\n\nfunction resultChecksum(fragment) {\n  let checksum = fragment.text.length * 31 + fragment.marks.length;\n  for (const mark of fragment.marks) checksum += mark.offset;\n  return checksum;\n}\n\nfunction median(values) {\n  const sorted = [...values].sort((left, right) => left - right);\n  return sorted[Math.floor(sorted.length / 2)];\n}\n\nfunction measure(locate, cases, iterations) {\n  let checksum = 0;\n  const start = performance.now();\n  for (let iteration = 0; iteration < iterations; iteration += 1) {\n    for (const item of cases) {\n      checksum += resultChecksum(locate(item.node, item.fragment));\n    }\n  }\n  return { milliseconds: performance.now() - start, checksum };\n}\n\nasync function loadGeneratedCompiler() {\n  const moduleDirectory = path.join(projectDirectory, \"dist/bootstrap\");\n  try {\n    const [compiler, emitter] = await Promise.all([\n      import(pathToFileURL(path.join(moduleDirectory, \"compiler.mjs\")).href),\n      import(pathToFileURL(path.join(moduleDirectory, \"emitter.mjs\")).href),\n    ]);\n    return { compiler, emitter };\n  } catch (error) {\n    throw new Error(\n      \"generated compiler is unavailable; run bun run build:bootstrap first\",\n      { cause: error },\n    );\n  }\n}\n\nexport function validateCompilerLocateReport(report) {\n  if (report?.format !== COMPILER_LOCATE_FORMAT ||\n      report?.version !== COMPILER_LOCATE_VERSION) {\n    throw new TypeError(\"invalid compiler locate report identity\");\n  }\n  if (report.validation?.equivalent !== true ||\n      report.validation?.cases !== report.corpus?.cases ||\n      report.validation?.checksum <= 0) {\n    throw new TypeError(\"compiler locate equivalence was not proven\");\n  }\n  if (!Array.isArray(report.measurements?.optimized?.samplesMs) ||\n      !Array.isArray(report.measurements?.reference?.samplesMs) ||\n      report.measurements.optimized.samplesMs.length !==\n        report.parameters?.timingSamples ||\n      report.measurements.reference.samplesMs.length !==\n        report.parameters?.timingSamples) {\n    throw new TypeError(\"compiler locate timing samples are incomplete\");\n  }\n  if (report.decision?.passed !== true ||\n      report.measurements.speedup < report.decision.minimumSpeedup) {\n    const error = new TypeError(\"compiler locate speedup decision did not pass\");\n    error.report = report;\n    throw error;\n  }\n  return report;\n}\n\nexport async function runCompilerLocateBenchmark(options = {}) {\n  const warmupIterations = parsePositiveInteger(\n    options.warmupIterations ??\n      process.env.ELISCRIPT_COMPILER_LOCATE_WARMUP_ITERATIONS ?? 50,\n    \"warmup iterations\",\n  );\n  const timingIterations = parsePositiveInteger(\n    options.timingIterations ??\n      process.env.ELISCRIPT_COMPILER_LOCATE_TIMING_ITERATIONS ?? 500,\n    \"timing iterations\",\n  );\n  const timingSamples = parsePositiveInteger(\n    options.timingSamples ??\n      process.env.ELISCRIPT_COMPILER_LOCATE_TIMING_SAMPLES ?? 9,\n    \"timing samples\",\n  );\n  if (timingSamples % 2 === 0) {\n    throw new TypeError(\"timing samples must be odd\");\n  }\n  const minimumSpeedup = Number(\n    options.minimumSpeedup ??\n      process.env.ELISCRIPT_COMPILER_LOCATE_MINIMUM_SPEEDUP ?? 1.75,\n  );\n  if (!Number.isFinite(minimumSpeedup) || minimumSpeedup <= 1) {\n    throw new TypeError(\"minimum speedup must be greater than 1\");\n  }\n\n  const { compiler, emitter } = await loadGeneratedCompiler();\n  const cases = [];\n  let sourceBytes = 0;\n  let artifactFragmentsCount = 0;\n  let shiftedCases = 0;\n  for (const relative of compilerSources) {\n    const source = await readFile(path.join(projectDirectory, relative), \"utf8\");\n    sourceBytes += Buffer.byteLength(source);\n    const program = compiler.compile_ir_string(source, relative);\n    const node = program.body[0];\n    const fragments = artifactFragments(emitter.emit_module_artifact(program));\n    artifactFragmentsCount += fragments.length;\n    for (const fragment of fragments) {\n      cases.push({ node, fragment });\n      const shifted = shiftedFragment(fragment);\n      if (shifted !== null) {\n        cases.push({ node, fragment: shifted });\n        shiftedCases += 1;\n      }\n    }\n  }\n\n  let validationChecksum = 0;\n  for (const item of cases) {\n    const optimized = emitter.locate(item.node, item.fragment);\n    const reference = emitter.reference_locate(item.node, item.fragment);\n    if (JSON.stringify(optimized) !== JSON.stringify(reference)) {\n      throw new Error(\"optimized and reference compiler location differ\");\n    }\n    validationChecksum += resultChecksum(optimized);\n  }\n\n  measure(emitter.locate, cases, warmupIterations);\n  measure(emitter.reference_locate, cases, warmupIterations);\n  const optimizedSamples = [];\n  const referenceSamples = [];\n  for (let sample = 0; sample < timingSamples; sample += 1) {\n    const order = sample % 2 === 0\n      ? [\n        [emitter.locate, optimizedSamples],\n        [emitter.reference_locate, referenceSamples],\n      ]\n      : [\n        [emitter.reference_locate, referenceSamples],\n        [emitter.locate, optimizedSamples],\n      ];\n    let expectedChecksum;\n    for (const [locate, samples] of order) {\n      const measured = measure(locate, cases, timingIterations);\n      samples.push(measured.milliseconds);\n      expectedChecksum ??= measured.checksum;\n      if (measured.checksum !== expectedChecksum) {\n        throw new Error(\"compiler locate benchmark checksum drifted\");\n      }\n    }\n  }\n\n  const optimizedMedian = median(optimizedSamples);\n  const referenceMedian = median(referenceSamples);\n  const speedup = referenceMedian / optimizedMedian;\n  const report = {\n    format: COMPILER_LOCATE_FORMAT,\n    version: COMPILER_LOCATE_VERSION,\n    generatedAt: new Date().toISOString(),\n    sourceDigest: await compilerLocateSourceDigest(),\n    host: {\n      runtime: \"bun\",\n      runtimeVersion: Bun.version,\n      engine: \"JavaScriptCore\",\n      platform: process.platform,\n      architecture: process.arch,\n      operatingSystem: `${os.type()} ${os.release()}`,\n    },\n    corpus: {\n      files: compilerSources,\n      sourceBytes,\n      programs: compilerSources.length,\n      artifactFragments: artifactFragmentsCount,\n      shiftedCases,\n      cases: cases.length,\n      textBytes: cases.reduce(\n        (total, item) => total + Buffer.byteLength(item.fragment.text),\n        0,\n      ),\n      marks: cases.reduce(\n        (total, item) => total + item.fragment.marks.length,\n        0,\n      ),\n    },\n    parameters: { warmupIterations, timingIterations, timingSamples },\n    validation: {\n      equivalent: true,\n      cases: cases.length,\n      checksum: validationChecksum,\n    },\n    measurements: {\n      optimized: {\n        samplesMs: optimizedSamples,\n        medianMs: optimizedMedian,\n      },\n      reference: {\n        samplesMs: referenceSamples,\n        medianMs: referenceMedian,\n      },\n      speedup,\n    },\n    decision: {\n      minimumSpeedup,\n      passed: speedup >= minimumSpeedup,\n    },\n  };\n  return validateCompilerLocateReport(report);\n}\n\nif (import.meta.main) {\n  const { output } = parseArguments(process.argv.slice(2));\n  let report;\n  try { report = await runCompilerLocateBenchmark(); }\n  catch (error) {\n    if (error.report) {\n      const failed = `${JSON.stringify(error.report, null, 2)}\\n`;\n      if (output === undefined) process.stdout.write(failed);\n      else await writeFile(path.resolve(output), failed);\n    }\n    throw error;\n  }\n  const serialized = `${JSON.stringify(report, null, 2)}\\n`;\n  if (output === undefined) {\n    process.stdout.write(serialized);\n  } else {\n    await writeFile(path.resolve(output), serialized);\n    process.stdout.write(`${path.resolve(output)}\\n`);\n  }\n}\n"))
+(module tools.compiler.locate-benchmark
+  (import "node:crypto" createHash)
+  (import "node:fs/promises" readFile writeFile)
+  (import "node:os" :default os)
+  (import "node:path" :default path)
+  (import "node:process" :default process)
+  (import "node:url" fileURLToPath pathToFileURL)
+
+  (defconst COMPILER_LOCATE_FORMAT "eliscript-compiler-locate-benchmark")
+  (defconst COMPILER_LOCATE_VERSION 1)
+
+  (defconst directory (js-call path :dirname (fileURLToPath (js* "import.meta.url"))))
+  (defconst project-directory (js-call path :resolve directory "../.."))
+  (defconst compiler-sources
+    (Object/freeze
+      (js-array
+        "bootstrap/compiler/symbol.eli"
+        "bootstrap/compiler/syntax.eli"
+        "bootstrap/compiler/reader.eli"
+        "bootstrap/compiler/formatter.eli"
+        "bootstrap/compiler/expander.eli"
+        "bootstrap/compiler/transient-analysis.eli"
+        "bootstrap/compiler/analyzer.eli"
+        "bootstrap/compiler/ir.eli"
+        "bootstrap/compiler/lower.eli"
+        "bootstrap/compiler/source-map.eli"
+        "bootstrap/compiler/emitter.eli"
+        "bootstrap/compiler/project.eli"
+        "bootstrap/compiler/compiler.eli")))
+  (defconst digest-files
+    (Object/freeze
+      (js-call compiler-sources :concat (js-array "tools/compiler/locate-benchmark.mjs"))))
+
+  (defun parse-positive-integer (value name)
+    (let ((parsed (globalThis.Number value)))
+      (when (or (not (Number/isSafeInteger parsed)) (<= parsed 0))
+        (throw (new globalThis.TypeError (str name " must be a positive safe integer"))))
+      parsed))
+
+  (defun parse-arguments (arguments*)
+    (let ((output undefined)
+          (index 0))
+      (while (< index (js-length arguments*))
+        (let ((argument (aref arguments* index)))
+          (cond
+            ((= argument "--output")
+             (setq output (aref arguments* (+ index 1)))
+             (when (= output undefined)
+               (throw (new globalThis.TypeError "--output requires a path")))
+             (setq index (+ index 1)))
+            ((= argument "--help")
+             (js-call (get process :stdout) :write
+               (str "Usage: bun tools/compiler/locate-benchmark.mjs "
+                    "[--output REPORT.json]\n"))
+             (js-call process :exit 0))
+            (t
+             (throw (new globalThis.TypeError (str "unknown argument " argument))))))
+        (setq index (+ index 1)))
+      (js-object :output output)))
+
+  (defasync compilerLocateSourceDigest ()
+    (let ((hash (createHash "sha256"))
+          (index 0))
+      (while (< index (js-length digest-files))
+        (let ((relative (aref digest-files index)))
+          (js-call hash :update relative)
+          (js-call hash :update "\u0000")
+          (js-call hash :update (await (readFile (js-call path :join project-directory relative))))
+          (js-call hash :update "\u0000"))
+        (setq index (+ index 1)))
+      (js-object
+        :algorithm "sha256"
+        :files digest-files
+        :value (js-call hash :digest "hex"))))
+
+  (defun artifact-fragments (artifact)
+    (let ((fragments (js-array))
+          (text (get artifact :text))
+          (marks (get artifact :marks))
+          (block-start 0)
+          (done nil))
+      (while (and (< block-start (js-length text)) (not done))
+        (let* ((separator (js-call text :indexOf "\n\n" block-start))
+               (block-end (if (= separator -1) (js-length text) separator)))
+          (when (> block-end block-start)
+            (js-call fragments :push
+              (js-object
+                :text (js-call text :slice block-start block-end)
+                :marks (js-call (js-call marks :filter
+                            (lambda (mark)
+                              (and (>= (get mark :offset) block-start)
+                                   (< (get mark :offset) block-end))))
+                          :map
+                          (lambda (mark)
+                            (js-object
+                              :offset (- (get mark :offset) block-start)
+                              :span (get mark :span)))))))
+          (if (= separator -1)
+              (setq done t)
+            (setq block-start (+ block-end 2)))))
+      fragments))
+
+  (defun shifted-fragment (fragment)
+    (if (or (<= (js-length (get fragment :text)) 1)
+            (<= (js-length (get fragment :marks)) 1))
+        nil
+      (js-object
+        :text (js-call (get fragment :text) :slice 1)
+        :marks (js-call (js-call (get fragment :marks) :filter
+                    (lambda (mark) (>= (get mark :offset) 1)))
+                  :map
+                  (lambda (mark)
+                    (js-object
+                      :offset (- (get mark :offset) 1)
+                      :span (get mark :span)))))))
+
+  (defun result-checksum (fragment)
+    (let ((marks (get fragment :marks))
+          (checksum (+ (* (js-length (get fragment :text)) 31)
+                       (js-length (get fragment :marks))))
+          (index 0))
+      (while (< index (js-length marks))
+        (setq checksum (+ checksum (get (aref marks index) :offset)))
+        (setq index (+ index 1)))
+      checksum))
+
+  (defun median (values)
+    (let ((sorted (js-call (js-call values :slice) :sort (lambda (left right) (- left right)))))
+      (aref sorted (Math/floor (/ (js-length sorted) 2)))))
+
+  (defun measure (locate cases iterations)
+    (let ((checksum 0)
+          (start (js-call globalThis.performance :now))
+          (iteration 0))
+      (while (< iteration iterations)
+        (let ((index 0))
+          (while (< index (js-length cases))
+            (let ((item (aref cases index)))
+              (setq checksum (+ checksum (result-checksum (funcall locate (get item :node) (get item :fragment))))))
+            (setq index (+ index 1))))
+        (setq iteration (+ iteration 1)))
+      (js-object
+        :milliseconds (- (js-call globalThis.performance :now) start)
+        :checksum checksum)))
+
+  (defasync load-generated-compiler ()
+    (let ((module-directory (js-call path :join project-directory "dist/bootstrap")))
+      (try
+        (let ((loaded
+                (await (Promise/all
+                         (js-array
+                           (funcall (js* "(u) => import(u)") (get (pathToFileURL (js-call path :join module-directory "compiler.mjs")) :href))
+                           (funcall (js* "(u) => import(u)") (get (pathToFileURL (js-call path :join module-directory "emitter.mjs")) :href)))))))
+          (js-object
+            :compiler (aref loaded 0)
+            :emitter (aref loaded 1)))
+        (catch error
+          (throw (new globalThis.Error
+                   "generated compiler is unavailable; run bun run build:bootstrap first"
+                   (js-object :cause error)))))))
+
+  (defun validateCompilerLocateReport (report)
+    (when (or (not report)
+              (not (= (get report :format) COMPILER_LOCATE_FORMAT))
+              (not (= (get report :version) COMPILER_LOCATE_VERSION)))
+      (throw (new globalThis.TypeError "invalid compiler locate report identity")))
+    (let ((validation (get report :validation))
+          (corpus (get report :corpus)))
+      (when (or (not validation)
+                (not corpus)
+                (not (= (get validation :equivalent) t))
+                (not (= (get validation :cases) (get corpus :cases)))
+                (<= (get validation :checksum) 0))
+        (throw (new globalThis.TypeError "compiler locate equivalence was not proven"))))
+    (let* ((measurements (get report :measurements))
+           (parameters (get report :parameters))
+           (samples (if parameters (get parameters :timingSamples) undefined))
+           (opt-meas (if measurements (get measurements :optimized) undefined))
+           (ref-meas (if measurements (get measurements :reference) undefined))
+           (opt-samples (if opt-meas (get opt-meas :samplesMs) undefined))
+           (ref-samples (if ref-meas (get ref-meas :samplesMs) undefined)))
+      (when (or (not (Array/isArray opt-samples))
+                (not (Array/isArray ref-samples))
+                (not (= (js-length opt-samples) samples))
+                (not (= (js-length ref-samples) samples)))
+        (throw (new globalThis.TypeError "compiler locate timing samples are incomplete"))))
+    (let ((decision (get report :decision))
+          (measurements (get report :measurements)))
+      (when (or (not decision)
+                (not (= (get decision :passed) t))
+                (< (get measurements :speedup) (get decision :minimumSpeedup)))
+        (let ((err (new globalThis.TypeError "compiler locate speedup decision did not pass")))
+          (put err :report report)
+          (throw err))))
+    report)
+
+  (defun coalesce (a b c)
+    (if (not (= a undefined))
+        (if (not (= a nil)) a (if (not (= b undefined)) (if (not (= b nil)) b c) c))
+      (if (not (= b undefined)) (if (not (= b nil)) b c) c)))
+
+  (defasync runCompilerLocateBenchmark (&optional options)
+    (let* ((opts (or options (js-object)))
+           (env (get process :env))
+           (warmup-iterations
+             (parse-positive-integer
+               (coalesce (get opts :warmupIterations)
+                         (get env :ELISCRIPT_COMPILER_LOCATE_WARMUP_ITERATIONS)
+                         50)
+               "warmup iterations"))
+           (timing-iterations
+             (parse-positive-integer
+               (coalesce (get opts :timingIterations)
+                         (get env :ELISCRIPT_COMPILER_LOCATE_TIMING_ITERATIONS)
+                         500)
+               "timing iterations"))
+           (timing-samples
+             (parse-positive-integer
+               (coalesce (get opts :timingSamples)
+                         (get env :ELISCRIPT_COMPILER_LOCATE_TIMING_SAMPLES)
+                         9)
+               "timing samples")))
+      (when (= (% timing-samples 2) 0)
+        (throw (new globalThis.TypeError "timing samples must be odd")))
+      (let ((minimum-speedup
+              (globalThis.Number
+                (coalesce (get opts :minimumSpeedup)
+                          (get env :ELISCRIPT_COMPILER_LOCATE_MINIMUM_SPEEDUP)
+                          1.75))))
+        (when (or (not (Number/isFinite minimum-speedup)) (<= minimum-speedup 1))
+          (throw (new globalThis.TypeError "minimum speedup must be greater than 1")))
+        (let* ((loaded (await (load-generated-compiler)))
+               (compiler (get loaded :compiler))
+               (emitter (get loaded :emitter))
+               (cases (js-array))
+               (source-bytes 0)
+               (artifact-fragments-count 0)
+               (shifted-cases 0)
+               (index 0))
+          (while (< index (js-length compiler-sources))
+            (let* ((relative (aref compiler-sources index))
+                   (source (await (readFile (js-call path :join project-directory relative) "utf8")))
+                   (program (js-call compiler :compile_ir_string source relative))
+                   (node (aref (get program :body) 0))
+                   (fragments (artifact-fragments (js-call emitter :emit_module_artifact program)))
+                   (frag-idx 0))
+              (setq source-bytes (+ source-bytes (Buffer/byteLength source)))
+              (setq artifact-fragments-count (+ artifact-fragments-count (js-length fragments)))
+              (while (< frag-idx (js-length fragments))
+                (let* ((fragment (aref fragments frag-idx))
+                       (shifted (shifted-fragment fragment)))
+                  (js-call cases :push (js-object :node node :fragment fragment))
+                  (when (not (= shifted nil))
+                    (js-call cases :push (js-object :node node :fragment shifted))
+                    (setq shifted-cases (+ shifted-cases 1))))
+                (setq frag-idx (+ frag-idx 1))))
+            (setq index (+ index 1)))
+          (let ((validation-checksum 0)
+                (case-idx 0))
+            (while (< case-idx (js-length cases))
+              (let* ((item (aref cases case-idx))
+                     (optimized (js-call emitter :locate (get item :node) (get item :fragment)))
+                     (reference (js-call emitter :reference_locate (get item :node) (get item :fragment))))
+                (when (not (= (JSON/stringify optimized) (JSON/stringify reference)))
+                  (throw (new globalThis.Error "optimized and reference compiler location differ")))
+                (setq validation-checksum (+ validation-checksum (result-checksum optimized))))
+              (setq case-idx (+ case-idx 1)))
+            (measure (get emitter :locate) cases warmup-iterations)
+            (measure (get emitter :reference_locate) cases warmup-iterations)
+            (let ((optimized-samples (js-array))
+                  (reference-samples (js-array))
+                  (sample 0))
+              (while (< sample timing-samples)
+                (let ((order (if (= (% sample 2) 0)
+                                 (js-array
+                                   (js-array (get emitter :locate) optimized-samples)
+                                   (js-array (get emitter :reference_locate) reference-samples))
+                               (js-array
+                                 (js-array (get emitter :reference_locate) reference-samples)
+                                 (js-array (get emitter :locate) optimized-samples))))
+                      (expected-checksum undefined)
+                      (order-idx 0))
+                  (while (< order-idx (js-length order))
+                    (let* ((entry (aref order order-idx))
+                           (locate-fn (aref entry 0))
+                           (samples (aref entry 1))
+                           (measured (measure locate-fn cases timing-iterations)))
+                      (js-call samples :push (get measured :milliseconds))
+                      (when (= expected-checksum undefined)
+                        (setq expected-checksum (get measured :checksum)))
+                      (when (not (= (get measured :checksum) expected-checksum))
+                        (throw (new globalThis.Error "compiler locate benchmark checksum drifted"))))
+                    (setq order-idx (+ order-idx 1))))
+                (setq sample (+ sample 1)))
+              (let* ((optimized-median (median optimized-samples))
+                     (reference-median (median reference-samples))
+                     (speedup (/ reference-median optimized-median))
+                     (report
+                       (js-object
+                         :format COMPILER_LOCATE_FORMAT
+                         :version COMPILER_LOCATE_VERSION
+                         :generatedAt (js-call (new globalThis.Date) :toISOString)
+                         :sourceDigest (await (compilerLocateSourceDigest))
+                         :host (js-object
+                                 :runtime "bun"
+                                 :runtimeVersion (get globalThis.Bun :version)
+                                 :engine "JavaScriptCore"
+                                 :platform (get process :platform)
+                                 :architecture (get process :arch)
+                                 :operatingSystem (str (js-call os :type) " " (js-call os :release)))
+                         :corpus (js-object
+                                   :files compiler-sources
+                                   :sourceBytes source-bytes
+                                   :programs (js-length compiler-sources)
+                                   :artifactFragments artifact-fragments-count
+                                   :shiftedCases shifted-cases
+                                   :cases (js-length cases)
+                                   :textBytes (js-call cases :reduce
+                                                (lambda (total item)
+                                                  (+ total (Buffer/byteLength (get (get item :fragment) :text))))
+                                                0)
+                                   :marks (js-call cases :reduce
+                                            (lambda (total item)
+                                              (+ total (js-length (get (get item :fragment) :marks))))
+                                            0))
+                         :parameters (js-object
+                                       :warmupIterations warmup-iterations
+                                       :timingIterations timing-iterations
+                                       :timingSamples timing-samples)
+                         :validation (js-object
+                                       :equivalent t
+                                       :cases (js-length cases)
+                                       :checksum validation-checksum)
+                         :measurements (js-object
+                                         :optimized (js-object :samplesMs optimized-samples :medianMs optimized-median)
+                                         :reference (js-object :samplesMs reference-samples :medianMs reference-median)
+                                         :speedup speedup)
+                         :decision (js-object
+                                     :minimumSpeedup minimum-speedup
+                                     :passed (>= speedup minimum-speedup)))))
+                (validateCompilerLocateReport report))))))))
+
+  (defasync run-main ()
+    (let* ((parsed (parse-arguments (js-call (get process :argv) :slice 2)))
+           (output (get parsed :output))
+           (report undefined))
+      (try
+        (setq report (await (runCompilerLocateBenchmark)))
+        (catch error
+          (when (get error :report)
+            (let ((failed (str (JSON/stringify (get error :report) nil 2) "\n")))
+              (if (= output undefined)
+                  (js-call (get process :stdout) :write failed)
+                (await (writeFile (js-call path :resolve output) failed)))))
+          (throw error)))
+      (let ((serialized (str (JSON/stringify report nil 2) "\n")))
+        (if (= output undefined)
+            (js-call (get process :stdout) :write serialized)
+          (progn
+            (await (writeFile (js-call path :resolve output) serialized))
+            (js-call (get process :stdout) :write (str (js-call path :resolve output) "\n")))))))
+
+  (when (js* "import.meta.main")
+    (run-main))
+
+  (export
+    COMPILER_LOCATE_FORMAT
+    COMPILER_LOCATE_VERSION
+    compilerLocateSourceDigest
+    validateCompilerLocateReport
+    runCompilerLocateBenchmark))

@@ -1,0 +1,14 @@
+(module tools.project.scale-evaluator
+  ;; Maintained evaluator, built by the normal bootstrap inventory. ESM loading
+  ;; is a host operation; export validation and result aggregation are Eli.
+  (defconst load-module (js* "specifier => import(specifier)"))
+  (defasync run-module-entry ()
+(let ((modules (await (Promise/all (js-call (js-call (get globalThis.process :argv) :slice 2) :map (lambda (specifier) (funcall load-module specifier)))))))
+(let ((values (js-call modules :map (lambda (loaded) (Object/values loaded)))))
+(when (js-call values :some (lambda (items) (or (/= (js-length items) 1) (not (Number/isSafeInteger (aref items 0))))))
+    (throw (new globalThis.Error "expected one safe integer export per module")))
+(js-call (get globalThis.process :stdout) :write (JSON/stringify (js-call values :map (lambda (items) (aref items 0)))))
+)))
+  (js-call (run-module-entry) :catch (lambda (error)
+    (js-call (get (js* "globalThis") :console) :error error)
+    (put (get (js* "globalThis") :process) :exitCode 1))))

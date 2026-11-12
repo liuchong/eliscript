@@ -1,2 +1,15 @@
-(module capsules.tests.fixtures.declarative-type-host
-  (js* "import { pathToFileURL } from \"node:url\";\n\nconst [modulePath] = process.argv.slice(2);\nconst declarations = await import(pathToFileURL(modulePath).href);\n\nconsole.log(JSON.stringify(declarations.type_report()));\n"))
+(module tests.fixtures.declarative-type-host
+  (import "node:url" pathToFileURL)
+  (defconst load-module (js* "(specifier) => import(specifier)"))
+  (defconst modulePath (aref (get globalThis.process :argv) 2))
+  (defvar compiled undefined)
+  (defasync run-host-main ()
+    (setq compiled (await (funcall load-module (get (pathToFileURL modulePath) :href))))
+    (js-call globalThis.console :log (JSON/stringify (js-call compiled "type_report"))))
+  (defconst completion (run-host-main))
+  (js-call completion :catch (lambda (error)
+    (console/error error)
+    (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

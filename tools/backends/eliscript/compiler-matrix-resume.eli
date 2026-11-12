@@ -121,9 +121,17 @@
             (throw (new globalThis.Error "matrix continuation lost retained results")))
           (while (< index (js-length previous))
             (let* ((row (aref previous index)) (record (aref records index))
-                   (verification (get row :verification)) (id (get record :id)))
+                   (verification (get row :verification)) (id (get record :id))
+                   ;; A finished selected execution may lack an independent
+                   ;; Seed result. Retain that failure without retrying it;
+                   ;; compiling/produced rows are still an unfinished gap.
+                   (oracle-unverified (and (= verification "unverified")
+                     (= (get row :status) "executed")
+                     (= (get row :functionalVerification) "unverified")
+                     (= (get row :verificationReason) "original complete program Seed oracle did not finish"))))
               (require-same (get row :id) id "original record order")
-              (if (not (js-call (js-array "equivalent" "different" "cancelled" "deferred") :includes verification))
+              (if (not (or oracle-unverified
+                        (js-call (js-array "equivalent" "different" "cancelled" "deferred") :includes verification)))
                 (setq finished t)
                 (progn
                   (when finished (throw (new globalThis.Error "matrix continuation contains a completed record after a gap")))
@@ -150,6 +158,11 @@
                           (when (= verification "equivalent")
                             (require-same (get (await (readCompilerMetadata (join directory "comparison.json"))) :status)
                               "equivalent" "independent comparison"))
+                          (when oracle-unverified
+                            (let ((comparison (await (readCompilerMetadata (join directory "comparison.json")))))
+                              (require-same (get comparison :status) "unverified" "unfinished independent Seed comparison")
+                              (require-same (get comparison :reason) (get row :verificationReason) "unfinished independent Seed reason")
+                              (require-same (get (get comparison :failure) :kind) "diagnostic" "independent Seed failure evidence")))
                           (await (verify-product directory row (get expected :target)))
                           (when (get row :stageIdentitySha256)
                             (let ((response (await (readCompilerMetadata (join directory "stage-response.json")))))

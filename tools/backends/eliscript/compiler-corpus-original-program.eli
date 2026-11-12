@@ -31,7 +31,7 @@
       (await (mkdir modules (js-object :recursive t)))
       (try (await (symlink (resolve source-root) (join modules "eliscript") "dir"))
         (catch error (unless (= (get error :code) "EEXIST") (throw error))))))
-  (defasync originalProgramAliases (artifact source-root)
+  (defasync original-module-aliases (artifact)
     (let* ((directory (fallback (get artifact :directory) (resolve (get artifact :path) "..")))
            (modules (if (= (get artifact :target) "javascript") (get artifact :modules)
                       (get (get (get artifact :descriptor) :project) :modules))) (index 0))
@@ -50,6 +50,10 @@
                 (unless (and (= (get error :code) "EEXIST") (= (await (realpath file)) (await (realpath actual))))
                   (throw error))))))
         (setq index (1+ index)))
+      undefined))
+  (defasync originalProgramAliases (artifact source-root)
+    (let ((directory (fallback (get artifact :directory) (resolve (get artifact :path) ".."))))
+      (await (original-module-aliases artifact))
       (await (javascript-environment artifact source-root))
       (try (await (symlink (resolve source-root "runtime") (resolve directory "runtime") "dir"))
         (catch error (unless (= (get error :code) "EEXIST") (throw error))))))
@@ -83,12 +87,13 @@
            (execution (get record :execution))
            (runtime-options (when execution (get execution :runtimeOptions)))
            (provider (when runtime-options (get runtime-options :literalHostProvider)))
-           (shared-runtime (and (js-call (js-array "wasm" "native") :includes (get artifact :target))
+           (local-host-runtime (and provider (= (get provider :format) "eliscript-local-literal-provider") (= (get provider :base) "__eliscript_literal_host")))
+           (shared-runtime (or local-host-runtime (and (js-call (js-array "wasm" "native") :includes (get artifact :target))
              (js-call (js-array "original-program:literal-runtime-complete-hosts"
                "original-program:literal-runtime-portable-codec") :includes (get record :id))
              (= (get (get record :original) :suite) "tests/literal-runtime.test.mjs")
              provider (= (get provider :format) "eliscript-local-literal-provider")
-             (= (get provider :base) "source-root"))))
+             (= (get provider :base) "source-root")))))
       (when shared-runtime
         ;; Never replace a compiled program module with a host implementation.
         ;; These are authenticated foreign providers, not compiler outputs.
@@ -106,7 +111,8 @@
               (unless (and (safe-id id) proof
                 (= (get proof :bytes) (Buffer/byteLength (get source :source) "utf8"))
                 (= (get proof :sha256) (js-call (js-call (createHash "sha256") :update (get source :source)) :digest "hex"))
-                (js-call (await (readFile (resolve (get record :sourceRoot) id))) :equals (Buffer/from (get source :source))))
+                (js-call (await (readFile (resolve (if local-host-runtime (resolve directory "__eliscript_literal_host")
+                      (get record :sourceRoot)) id))) :equals (Buffer/from (get source :source))))
                 (invalid "canonical original runtime differs from its authenticated sidecar")))
             (await (put-sidecar directory (get source :id) (get source :source)))))
         (setq index (1+ index)))
@@ -146,6 +152,12 @@
                  (support (await (js-call context :archiveProduct response "original-compiler-javascript-maps" "javascript")))
                  (maps (js-array)) (index 0))
             (js-call assert :equal (get support :target) "javascript")
+            ;; Original CLI suites intentionally name compiled dependency files
+            ;; with .eli aliases. Expose those same emitted bytes in the binary
+            ;; target's separate JavaScript inspection view, without a new
+            ;; runtime provider or source-root fallback.
+            (when (get (get record :execution) :aliases)
+              (await (original-module-aliases support)))
             (js-call assert :deepEqual (js-call (js-call (get support :modules) :map (lambda (m) (get m :id))) :sort)
               (js-call (js-call modules :map (lambda (m) (get m :id))) :sort))
             (while (< index (js-length (get support :modules)))
@@ -179,7 +191,7 @@
     (let* ((artifact (get input-context :artifact)) (record (get input-context :record))
            (target (get input-context :target)) (source-root (get input-context :sourceRoot))
            (contract (get record :execution)) (supplied (or (get input-context :options) (js-object)))
-           (resources (when (= (get contract :runtimeProfile) "compiler") (independentCompilerResources supplied)))
+           (resources (independentCompilerResources supplied))
            (configured (if resources (Object/assign (js-object) supplied
              (js-object :profile (get resources :profile) :budget (get resources :budget) :memory (get resources :memory)
                :auto (get resources :auto) :runtimeOptions (Object/assign (js-object) (get resources :budget)

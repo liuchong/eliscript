@@ -1,0 +1,133 @@
+(module tests.helpers.wasm-managed-sequence-data-ground-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile)
+  (import "node:url" pathToFileURL)
+  (import "node:process" :default process)
+  (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "../../tools/backends/managed-module-graph.mjs" createManagedModuleGraph loadManagedProjectGraph)
+  (import "../../runtime/core/data-text.mjs" IPrint printValue)
+  (import "../../runtime/core/order.mjs" IComparable compareValues)
+  (import "../../runtime/core/protocol.mjs" protocolSlot protocolMethod isProtocol)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+
+  (defun observation-json (value)
+    (JSON/stringify value
+      (lambda (_key item)
+        (cond
+          ((undefined? item) (js-object :$number "undefined"))
+          ((= (funcall js-typeof item) "bigint") (js-object :$bigint (globalThis.String item)))
+          ((/= (funcall js-typeof item) "number") item)
+          ((Object/is item -0) (js-object :$number "-0"))
+          ((Number/isNaN item) (js-object :$number "NaN"))
+          ((= item globalThis.Infinity) (js-object :$number "+Infinity"))
+          ((= item (- globalThis.Infinity)) (js-object :$number "-Infinity"))
+          (t item)))))
+
+  (defasync run-boundaries (module-path observations)
+    (let ((m (await (funcall dyn-import (get (pathToFileURL module-path) :href))))
+          (out (js-object)))
+      (js-call observations :forEach
+        (lambda (name)
+          (let ((fn (get m name)))
+            (put out name (funcall fn)))))
+      (console/log (observation-json out))))
+
+  (defasync run-standard-protocols (module-path)
+    (let* ((m (await (funcall dyn-import (get (pathToFileURL module-path) :href))))
+           (input (js-object)))
+      (put input (protocolSlot IPrint "print") (lambda () "host-print"))
+      (put input (protocolSlot IComparable "compare") (lambda () 0))
+      (js-call assert :deepEqual
+        (Array/from (js-call m :read_standard_input input))
+        (js-array "host-print" 0))
+      (let ((values (js-call m :standard_protocol_identities)))
+        (js-call assert :equal (aref values 0) (protocolSlot IPrint "print"))
+        (js-call assert :equal (aref values 1) (protocolMethod IPrint "print"))
+        (js-call assert :equal (aref values 2) (get IPrint :operations))
+        (js-call assert :equal (aref values 3) IPrint)
+        (js-call assert :equal (aref values 4) (protocolSlot IComparable "compare"))
+        (js-call assert :equal (aref values 5) IComparable)
+        (js-call assert :equal (printValue (aref values 6)) "target-print")
+        (js-call assert :equal (compareValues (aref values 6) (aref values 6)) 0)
+        (js-call assert :equal (isProtocol (aref values 7)) t)
+        (js-call assert :notEqual (aref values 7) IPrint)
+        (js-call assert :notEqual (protocolSlot (aref values 7) "print") (protocolSlot IPrint "print"))
+        (console/log "standard identities preserved"))))
+
+  (defasync run-selected (config-path)
+    (let* ((config (JSON/parse (await (readFile config-path "utf8"))))
+           (lowered (JSON/parse (await (readFile (get config :loweredPath) "utf8"))))
+           (module-graph (createManagedModuleGraph (get lowered :descriptor)))
+           (old-module (get globalThis.WebAssembly :Module))
+           (old-instance (get globalThis.WebAssembly :Instance))
+           (runtime undefined))
+      (try
+        (when (= (get config :host) "native")
+          (put globalThis.WebAssembly :Module
+            (lambda () (throw (new globalThis.Error "native sequence/data must not execute WASM"))))
+          (put globalThis.WebAssembly :Instance
+            (lambda () (throw (new globalThis.Error "native sequence/data must not execute WASM")))))
+        (let ((options (Object/assign (js-object) (get config :runtimeOptions) (js-object :moduleGraph module-graph))))
+          (setq runtime
+            (if (= (get config :host) "wasm")
+                (instantiateManagedRuntime
+                  (new globalThis.Uint8Array (await (readFile (get config :wasmPath))))
+                  options)
+                (await (instantiateNativeManagedRuntime (get config :nativePath) lowered options))))
+          (js-call runtime :auto 65536)
+          (await (loadManagedProjectGraph runtime (get lowered :descriptor)
+                   (js-object
+                     :moduleGraph module-graph
+                     :projectEntry (get config :entry)
+                     :projectModuleBaseURL (get config :projectModuleBaseURL))))
+          (let ((argv (get process :argv))
+                (extra-args (get config :args)))
+            (Reflect/apply (get argv :splice) argv
+              (js-call (js-array 2 (- (get argv :length) 2)) :concat extra-args)))
+          (let ((submode (get config :submode)))
+            (cond
+              ((= submode "import")
+               (await (funcall dyn-import (get config :targetUrl))))
+              ((= submode "boundaries")
+               (await (run-boundaries (aref (get process :argv) 2) (get config :observations))))
+              ((= submode "standard-protocols")
+               (await (run-standard-protocols (aref (get process :argv) 2))))
+              (t
+               (throw (new globalThis.Error (str "unknown submode: " submode))))))
+          (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0))
+        (finally
+          (put globalThis.WebAssembly :Module old-module)
+          (put globalThis.WebAssembly :Instance old-instance)
+          (if runtime
+              (try
+                (js-call runtime :closeModule)
+                (js-call runtime :collect)
+                (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0)
+                (js-call assert :equal (js-call runtime :live) 0)
+                (js-call runtime :closeModule)
+                (js-call runtime :collect)
+                (js-call assert :equal (js-call runtime :live) 0)
+                (finally
+                  (let ((close-fn (get runtime :close)))
+                    (when close-fn
+                      (js-call runtime :close)))))
+              (js-call module-graph :close))))))
+
+  (defasync main ()
+    (let* ((argv (get process :argv))
+           (mode (aref argv 2)))
+      (cond
+        ((= mode "selected")
+         (await (run-selected (aref argv 3))))
+        ((= mode "reference-boundaries")
+         (await (run-boundaries (aref argv 3) (JSON/parse (aref argv 4)))))
+        (t
+         (throw (new globalThis.Error (str "unknown mode: " mode)))))))
+
+  (js-call (main) :catch
+    (lambda (err)
+      (console/error err)
+      (js-call process :exit 1))))

@@ -1,2 +1,288 @@
-(module capsules.runtime.core.set-algebra
-  (js* "import {\n  assoc,\n  conj,\n  contains,\n  count,\n  empty,\n  get,\n  reduce,\n  reduceKV,\n  reduced,\n} from \"./collection.mjs\";\nimport {\n  keys,\n  merge,\n  selectKeys,\n  vals,\n} from \"./data.mjs\";\nimport { EMPTY_MAP } from \"./map.mjs\";\nimport { meta, withMeta } from \"./metadata.mjs\";\nimport {\n  EMPTY_SET,\n  isPersistentHashSet,\n} from \"./set.mjs\";\nimport {\n  assocBang,\n  conjBang,\n  dissocBang,\n  persistentBang,\n  transient,\n} from \"./transient.mjs\";\nimport { isTruthy } from \"./truth.mjs\";\n\nconst NOT_FOUND = Object.freeze({});\n\nfunction requireArity(actual, expected, label) {\n  if (actual !== expected) {\n    throw new TypeError(`${label} expects ${expected} collection${expected === 1 ? \"\" : \"s\"}`);\n  }\n}\n\nfunction requireNonEmpty(actual, label) {\n  if (actual === 0) {\n    throw new TypeError(`${label} expects at least one collection`);\n  }\n}\n\nfunction requireFunction(value, label) {\n  if (typeof value !== \"function\") {\n    throw new TypeError(`${label} must be a function`);\n  }\n  return value;\n}\n\nfunction requireJoinArity(actual) {\n  if (actual !== 2 && actual !== 3) {\n    throw new TypeError(\"join expects 2 or 3 relations\");\n  }\n}\n\nfunction persistentMap(collection) {\n  return withMeta(merge(collection), meta(collection));\n}\n\nfunction firstValue(collection) {\n  return reduce(collection, (_missing, value) =>\n    reduced({ value }), NOT_FOUND);\n}\n\nexport function set(collection) {\n  requireArity(arguments.length, 1, \"set\");\n  if (isPersistentHashSet(collection)) return collection;\n\n  const result = transient(EMPTY_SET);\n  reduce(collection, (builder, value) => {\n    conjBang(builder, value);\n    return builder;\n  }, result);\n  return persistentBang(result);\n}\n\nexport function union(...collections) {\n  if (collections.length === 0) return EMPTY_SET;\n\n  const result = transient(set(collections[0]));\n  for (let index = 1; index < collections.length; index += 1) {\n    reduce(collections[index], (builder, value) => {\n      conjBang(builder, value);\n      return builder;\n    }, result);\n  }\n  return persistentBang(result);\n}\n\nfunction intersectPair(left, right) {\n  const leftSet = set(left);\n  const rightSet = set(right);\n  const candidates = count(leftSet) <= count(rightSet) ? leftSet : rightSet;\n  const membership = candidates === leftSet ? rightSet : leftSet;\n  const builder = transient(empty(leftSet));\n  reduce(candidates, (result, value) => {\n    if (contains(membership, value)) conjBang(result, value);\n    return result;\n  }, builder);\n  const retained = persistentBang(builder);\n  return count(retained) === count(leftSet) ? leftSet : retained;\n}\n\nexport function intersection(...collections) {\n  requireNonEmpty(collections.length, \"intersection\");\n  let result = set(collections[0]);\n  for (let index = 1;\n    index < collections.length && count(result) > 0;\n    index += 1) {\n    result = intersectPair(result, collections[index]);\n  }\n  return result;\n}\n\nexport function difference(...collections) {\n  requireNonEmpty(collections.length, \"difference\");\n  const result = transient(set(collections[0]));\n  for (let index = 1; index < collections.length; index += 1) {\n    reduce(collections[index], (builder, value) => {\n      dissocBang(builder, value);\n      return builder;\n    }, result);\n  }\n  return persistentBang(result);\n}\n\nexport function subset(left, right) {\n  requireArity(arguments.length, 2, \"subset\");\n  const candidates = set(left);\n  const membership = set(right);\n  if (count(candidates) > count(membership)) return false;\n  return reduce(candidates, (result, value) =>\n    contains(membership, value) ? result : reduced(false), true);\n}\n\nexport function superset(left, right) {\n  requireArity(arguments.length, 2, \"superset\");\n  return subset(right, left);\n}\n\nexport function disjoint(left, right) {\n  requireArity(arguments.length, 2, \"disjoint\");\n  const leftSet = set(left);\n  const rightSet = set(right);\n  const candidates = count(leftSet) <= count(rightSet) ? leftSet : rightSet;\n  const membership = candidates === leftSet ? rightSet : leftSet;\n  return reduce(candidates, (result, value) =>\n    contains(membership, value) ? reduced(false) : result, true);\n}\n\nexport function select(predicate, collection) {\n  requireArity(arguments.length, 2, \"select\");\n  requireFunction(predicate, \"select predicate\");\n  const source = set(collection);\n  const builder = transient(source);\n  reduce(source, (result, value) => {\n    if (!isTruthy(predicate(value))) dissocBang(result, value);\n    return result;\n  }, builder);\n  const selected = persistentBang(builder);\n  return count(selected) === count(source) ? source : selected;\n}\n\nexport function project(relation, selectedKeys) {\n  requireArity(arguments.length, 2, \"project\");\n  const source = set(relation);\n  const keySet = set(selectedKeys);\n  const builder = transient(empty(source));\n  reduce(source, (result, row) => {\n    conjBang(result, selectKeys(row, keySet));\n    return result;\n  }, builder);\n  return persistentBang(builder);\n}\n\nexport function renameKeys(collection, keyMap) {\n  requireArity(arguments.length, 2, \"renameKeys\");\n  const source = persistentMap(collection);\n  const mappings = persistentMap(keyMap);\n  const builder = transient(source);\n  reduceKV(mappings, (result, oldKey) => {\n    dissocBang(result, oldKey);\n    return result;\n  }, builder);\n  reduceKV(mappings, (result, oldKey, newKey) => {\n    if (contains(source, oldKey)) {\n      assocBang(result, newKey, get(source, oldKey));\n    }\n    return result;\n  }, builder);\n  return persistentBang(builder);\n}\n\nexport function rename(relation, keyMap) {\n  requireArity(arguments.length, 2, \"rename\");\n  const source = set(relation);\n  const mappings = persistentMap(keyMap);\n  const builder = transient(empty(source));\n  reduce(source, (result, row) => {\n    conjBang(result, renameKeys(row, mappings));\n    return result;\n  }, builder);\n  return persistentBang(builder);\n}\n\nexport function index(relation, selectedKeys) {\n  requireArity(arguments.length, 2, \"index\");\n  const source = set(relation);\n  const keySet = set(selectedKeys);\n  return reduce(source, (result, row) => {\n    const indexedKey = selectKeys(row, keySet);\n    const group = get(result, indexedKey, EMPTY_SET);\n    return assoc(result, indexedKey, conj(group, row));\n  }, EMPTY_MAP);\n}\n\nexport function mapInvert(collection) {\n  requireArity(arguments.length, 1, \"mapInvert\");\n  const builder = transient(EMPTY_MAP);\n  reduceKV(collection, (result, key, value) => {\n    assocBang(result, value, key);\n    return result;\n  }, builder);\n  return withMeta(persistentBang(builder), meta(collection));\n}\n\nfunction joinIndexed(probe, indexed, probeKeys, keyMap, builder) {\n  return reduce(probe, (result, row) => {\n    const selected = selectKeys(row, probeKeys);\n    const indexedKey = keyMap === null\n      ? selected\n      : renameKeys(selected, keyMap);\n    const matches = get(indexed, indexedKey, EMPTY_SET);\n    reduce(matches, (output, matched) => {\n      conjBang(output, merge(matched, row));\n      return output;\n    }, result);\n    return result;\n  }, builder);\n}\n\nexport function join(left, right, keyMap) {\n  requireJoinArity(arguments.length);\n  const leftSet = set(left);\n  const rightSet = set(right);\n  const builder = transient(empty(leftSet));\n  if (count(leftSet) === 0 || count(rightSet) === 0) {\n    return persistentBang(builder);\n  }\n\n  if (arguments.length === 2) {\n    const leftRow = firstValue(leftSet).value;\n    const rightRow = firstValue(rightSet).value;\n    const joinKeys = intersection(set(keys(leftRow)), set(keys(rightRow)));\n    const indexedRelation = count(leftSet) <= count(rightSet)\n      ? leftSet\n      : rightSet;\n    const probeRelation = indexedRelation === leftSet ? rightSet : leftSet;\n    return persistentBang(joinIndexed(\n      probeRelation,\n      index(indexedRelation, joinKeys),\n      joinKeys,\n      null,\n      builder,\n    ));\n  }\n\n  const mappings = persistentMap(keyMap);\n  const effectiveMap = count(leftSet) <= count(rightSet)\n    ? mapInvert(mappings)\n    : mappings;\n  const indexedRelation = count(leftSet) <= count(rightSet)\n    ? leftSet\n    : rightSet;\n  const probeRelation = indexedRelation === leftSet ? rightSet : leftSet;\n  return persistentBang(joinIndexed(\n    probeRelation,\n    index(indexedRelation, vals(effectiveMap)),\n    keys(effectiveMap),\n    effectiveMap,\n    builder,\n  ));\n}\n"))
+(module eliscript.runtime.core.set-algebra
+  (import "./collection.mjs"
+    assoc
+    conj
+    contains
+    count
+    empty
+    get
+    reduce
+    reduceKV
+    reduced)
+  (import "./data.mjs" keys merge selectKeys vals)
+  (import "./map.mjs" EMPTY_MAP)
+  (import "./metadata.mjs" meta withMeta)
+  (import "./set.mjs" EMPTY_SET isPersistentHashSet)
+  (import "./transient.mjs" assocBang conjBang dissocBang persistentBang transient)
+  (import "./truth.mjs" isTruthy)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst NOT_FOUND (Object/freeze (js-object)))
+
+  (defun require-arity (actual expected label)
+    (unless (= actual expected)
+      (throw (new globalThis/TypeError
+               (str label " expects " expected " collection" (if (= expected 1) "" "s"))))))
+
+  (defun require-non-empty (actual label)
+    (when (= actual 0)
+      (throw (new globalThis/TypeError (str label " expects at least one collection")))))
+
+  (defun require-function (value label)
+    (unless (= (funcall typeof-value value) "function")
+      (throw (new globalThis/TypeError (str label " must be a function"))))
+    value)
+
+  (defun require-join-arity (actual)
+    (unless (or (= actual 2) (= actual 3))
+      (throw (new globalThis/TypeError "join expects 2 or 3 relations"))))
+
+  (defun persistent-map (collection)
+    (withMeta (merge collection) (meta collection)))
+
+  (defun first-value (collection)
+    (reduce collection (lambda (_missing value) (reduced (js-object :value value))) NOT_FOUND))
+
+  (defun set (&rest arguments)
+    (require-arity (js-length arguments) 1 "set")
+    (let ((collection (funcall get arguments 0)))
+      (if (isPersistentHashSet collection)
+          collection
+          (let ((result (transient EMPTY_SET)))
+            (reduce collection
+              (lambda (builder value)
+                (conjBang builder value)
+                builder)
+              result)
+            (persistentBang result)))))
+
+  (defun union (&rest collections)
+    (if (= (js-length collections) 0)
+        EMPTY_SET
+        (let ((result (transient (set (funcall get collections 0))))
+              (index 1))
+          (while (< index (js-length collections))
+            (reduce (funcall get collections index)
+              (lambda (builder value)
+                (conjBang builder value)
+                builder)
+              result)
+            (setq index (1+ index)))
+          (persistentBang result))))
+
+  (defun intersect-pair (left right)
+    (let* ((left-set (set left))
+           (right-set (set right))
+           (candidates (if (<= (count left-set) (count right-set)) left-set right-set))
+           (membership (if (eq candidates left-set) right-set left-set))
+           (builder (transient (empty left-set))))
+      (reduce candidates
+        (lambda (result value)
+          (when (contains membership value)
+            (conjBang result value))
+          result)
+        builder)
+      (let ((retained (persistentBang builder)))
+        (if (= (count retained) (count left-set)) left-set retained))))
+
+  (defun intersection (&rest collections)
+    (require-non-empty (js-length collections) "intersection")
+    (let ((result (set (funcall get collections 0)))
+          (index 1))
+      (while (and (< index (js-length collections)) (> (count result) 0))
+        (setq result (intersect-pair result (funcall get collections index)))
+        (setq index (1+ index)))
+      result))
+
+  (defun difference (&rest collections)
+    (require-non-empty (js-length collections) "difference")
+    (let ((result (transient (set (funcall get collections 0))))
+          (index 1))
+      (while (< index (js-length collections))
+        (reduce (funcall get collections index)
+          (lambda (builder value)
+            (dissocBang builder value)
+            builder)
+          result)
+        (setq index (1+ index)))
+      (persistentBang result)))
+
+  (defun subset (&rest arguments)
+    (require-arity (js-length arguments) 2 "subset")
+    (let ((candidates (set (funcall get arguments 0)))
+          (membership (set (funcall get arguments 1))))
+      (if (> (count candidates) (count membership))
+          false
+          (reduce candidates
+            (lambda (result value)
+              (if (contains membership value) result (reduced false)))
+            t))))
+
+  (defun superset (&rest arguments)
+    (require-arity (js-length arguments) 2 "superset")
+    (subset (funcall get arguments 1) (funcall get arguments 0)))
+
+  (defun disjoint (&rest arguments)
+    (require-arity (js-length arguments) 2 "disjoint")
+    (let* ((left-set (set (funcall get arguments 0)))
+           (right-set (set (funcall get arguments 1)))
+           (candidates (if (<= (count left-set) (count right-set)) left-set right-set))
+           (membership (if (eq candidates left-set) right-set left-set)))
+      (reduce candidates
+        (lambda (result value)
+          (if (contains membership value) (reduced false) result))
+        t)))
+
+  (defun select (&rest arguments)
+    (require-arity (js-length arguments) 2 "select")
+    (let ((predicate (require-function (funcall get arguments 0) "select predicate"))
+          (source (set (funcall get arguments 1))))
+      (let ((builder (transient source)))
+        (reduce source
+          (lambda (result value)
+            (unless (isTruthy (funcall predicate value))
+              (dissocBang result value))
+            result)
+          builder)
+        (let ((selected (persistentBang builder)))
+          (if (= (count selected) (count source)) source selected)))))
+
+  (defun project (&rest arguments)
+    (require-arity (js-length arguments) 2 "project")
+    (let* ((source (set (funcall get arguments 0)))
+           (key-set (set (funcall get arguments 1)))
+           (builder (transient (empty source))))
+      (reduce source
+        (lambda (result row)
+          (conjBang result (selectKeys row key-set))
+          result)
+        builder)
+      (persistentBang builder)))
+
+  (defun renameKeys (&rest arguments)
+    (require-arity (js-length arguments) 2 "renameKeys")
+    (let* ((source (persistent-map (funcall get arguments 0)))
+           (mappings (persistent-map (funcall get arguments 1)))
+           (builder (transient source)))
+      (reduceKV mappings
+        (lambda (result old-key)
+          (dissocBang result old-key)
+          result)
+        builder)
+      (reduceKV mappings
+        (lambda (result old-key new-key)
+          (when (contains source old-key)
+            (assocBang result new-key (funcall get source old-key)))
+          result)
+        builder)
+      (persistentBang builder)))
+
+  (defun rename (&rest arguments)
+    (require-arity (js-length arguments) 2 "rename")
+    (let* ((source (set (funcall get arguments 0)))
+           (mappings (persistent-map (funcall get arguments 1)))
+           (builder (transient (empty source))))
+      (reduce source
+        (lambda (result row)
+          (conjBang result (renameKeys row mappings))
+          result)
+        builder)
+      (persistentBang builder)))
+
+  (defun index (&rest arguments)
+    (require-arity (js-length arguments) 2 "index")
+    (let ((source (set (funcall get arguments 0)))
+          (key-set (set (funcall get arguments 1))))
+      (reduce source
+        (lambda (result row)
+          (let* ((indexed-key (selectKeys row key-set))
+                 (group (funcall get result indexed-key EMPTY_SET)))
+            (assoc result indexed-key (conj group row))))
+        EMPTY_MAP)))
+
+  (defun mapInvert (&rest arguments)
+    (require-arity (js-length arguments) 1 "mapInvert")
+    (let ((collection (funcall get arguments 0))
+          (builder (transient EMPTY_MAP)))
+      (reduceKV collection
+        (lambda (result key value)
+          (assocBang result value key)
+          result)
+        builder)
+      (withMeta (persistentBang builder) (meta collection))))
+
+  (defun join-indexed (probe indexed probe-keys key-map builder)
+    (reduce probe
+      (lambda (result row)
+        (let* ((selected (selectKeys row probe-keys))
+               (indexed-key (if (nil? key-map) selected (renameKeys selected key-map)))
+               (matches (funcall get indexed indexed-key EMPTY_SET)))
+          (reduce matches
+            (lambda (output matched)
+              (conjBang output (merge matched row))
+              output)
+            result)
+          result))
+      builder))
+
+  (defun join (&rest arguments)
+    (require-join-arity (js-length arguments))
+    (let* ((left-set (set (funcall get arguments 0)))
+           (right-set (set (funcall get arguments 1)))
+           (builder (transient (empty left-set))))
+      (if (or (= (count left-set) 0) (= (count right-set) 0))
+          (persistentBang builder)
+          (if (= (js-length arguments) 2)
+              (let* ((left-row (get (first-value left-set) :value))
+                     (right-row (get (first-value right-set) :value))
+                     (join-keys (intersection (set (keys left-row)) (set (keys right-row))))
+                     (indexed-relation (if (<= (count left-set) (count right-set)) left-set right-set))
+                     (probe-relation (if (eq indexed-relation left-set) right-set left-set)))
+                (persistentBang
+                  (join-indexed
+                    probe-relation
+                    (index indexed-relation join-keys)
+                    join-keys
+                    nil
+                    builder)))
+              (let* ((mappings (persistent-map (funcall get arguments 2)))
+                     (effective-map (if (<= (count left-set) (count right-set))
+                                        (mapInvert mappings)
+                                        mappings))
+                     (indexed-relation (if (<= (count left-set) (count right-set)) left-set right-set))
+                     (probe-relation (if (eq indexed-relation left-set) right-set left-set)))
+                (persistentBang
+                  (join-indexed
+                    probe-relation
+                    (index indexed-relation (vals effective-map))
+                    (keys effective-map)
+                    effective-map
+                    builder)))))))
+
+  (Object/defineProperty set "length" (js-object :value 1 :configurable t))
+  (Object/defineProperty subset "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty superset "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty disjoint "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty select "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty project "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty renameKeys "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty rename "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty index "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty mapInvert "length" (js-object :value 1 :configurable t))
+  (Object/defineProperty join "length" (js-object :value 3 :configurable t))
+
+  (export
+    set
+    union
+    intersection
+    difference
+    subset
+    superset
+    disjoint
+    select
+    project
+    renameKeys
+    rename
+    index
+    mapInvert
+    join))

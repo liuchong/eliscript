@@ -1,2 +1,19 @@
-(module capsules.tests.fixtures.metadata-host
-  (js* "import { eliscriptSymbol } from \"../../runtime/core/identifier.mjs\";\nimport { meta, withMeta } from \"../../runtime/core/metadata.mjs\";\nimport { persistentHashMap } from \"../../runtime/core/map.mjs\";\nimport { persistentHashSet } from \"../../runtime/core/set.mjs\";\nimport { equalValues, hashValue } from \"../../runtime/core/value.mjs\";\nimport { persistentVector } from \"../../runtime/core/vector.mjs\";\n\nconst metadata = persistentHashMap([\"source\", \"host\"]);\nconst symbol = eliscriptSymbol(\"eliscript/metadata\");\nconst annotatedSymbol = withMeta(symbol, metadata);\nconst vector = withMeta(persistentVector(1, 2, 3), metadata).conj(4);\nconst map = withMeta(persistentHashMap([\"a\", 1]), metadata).assoc(\"b\", 2);\nconst set = withMeta(persistentHashSet(\"a\", \"b\"), metadata).conj(\"c\");\n\nconsole.log(JSON.stringify({\n  symbol: {\n    equal: equalValues(symbol, annotatedSymbol),\n    hashEqual: hashValue(symbol) === hashValue(annotatedSymbol),\n    source: meta(annotatedSymbol).get(\"source\"),\n  },\n  vector: { count: vector.count, source: meta(vector).get(\"source\") },\n  map: { count: map.count, source: meta(map).get(\"source\") },\n  set: { count: set.count, source: meta(set).get(\"source\") },\n}));\n"))
+(module tests.fixtures.metadata-host
+  (import "../../runtime/core/identifier.mjs" eliscriptSymbol)
+  (import "../../runtime/core/metadata.mjs" meta withMeta)
+  (import "../../runtime/core/map.mjs" persistentHashMap)
+  (import "../../runtime/core/set.mjs" persistentHashSet)
+  (import "../../runtime/core/value.mjs" equalValues hashValue)
+  (import "../../runtime/core/vector.mjs" persistentVector)
+  (defconst metadata (persistentHashMap (js-array "source" "host")))
+  (defconst symbol (eliscriptSymbol "eliscript/metadata"))
+  (defconst annotatedSymbol (withMeta symbol metadata))
+  (defconst vector (js-call (withMeta (persistentVector 1 2 3) metadata) :conj 4))
+  (defconst map (js-call (withMeta (persistentHashMap (js-array "a" 1)) metadata) :assoc "b" 2))
+  (defconst set (js-call (withMeta (persistentHashSet "a" "b") metadata) :conj "c"))
+  (js-call globalThis.console :log (JSON/stringify (js-object
+    :symbol (js-object :equal (equalValues symbol annotatedSymbol) :hashEqual (eq (hashValue symbol) (hashValue annotatedSymbol))
+      :source (js-call (meta annotatedSymbol) :get "source"))
+    :vector (js-object :count (get vector :count) :source (js-call (meta vector) :get "source"))
+    :map (js-object :count (get map :count) :source (js-call (meta map) :get "source"))
+    :set (js-object :count (get set :count) :source (js-call (meta set) :get "source"))))))

@@ -1,0 +1,17 @@
+(module tools.fuzz.reader-program-selected-host
+  (import "node:process" :default process)
+  (import "../backends/compiler-corpus-host-context.mjs")
+  (import "./reader-program-fuzz.mjs" runReaderProgramFuzz parseArguments stopReaderProgramFuzz)
+  (defasync main ()
+    (js-call process :once "SIGINT" (lambda () (stopReaderProgramFuzz "SIGINT")))
+    (js-call process :once "SIGTERM" (lambda () (stopReaderProgramFuzz "SIGTERM")))
+    (try
+      (let* ((options (parseArguments (js-call (get process :argv) :slice 2)))
+             (directory (get (get process :env) :ELISCRIPT_ORIGINAL_COMPILER_DIRECTORY)))
+        (put options :compilerDirectory directory)
+        (let ((report (await (runReaderProgramFuzz options))))
+          (js-call (get process :stdout) :write (str (JSON/stringify report) "\n"))))
+      (catch error
+        (js-call (get process :stderr) :write (str (if (nullish? (get error :stack)) error (get error :stack)) "\n"))
+        (put process :exitCode 1))))
+  (main))

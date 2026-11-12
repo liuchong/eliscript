@@ -1,0 +1,20 @@
+(module tests.fixtures.compiler-order-host
+  (import "../helpers/compiler-order-contract.mjs" names transientSource)
+  (defconst load-module (js* "(specifier) => import(specifier)"))
+  (defasync run-host-main ()
+    (let* ((c (await (funcall load-module (aref (get globalThis.process :argv) 2))))
+         (modules (js-call names :map (lambda (name) (js-object :source name :dependencies (js-array) :portableEntries (js-array)))))
+         (diagnostic undefined))
+    (try (js-call c :compile_ir_string (transientSource "ä" "z") "order.eli") (catch error (setq diagnostic (get error :eliscriptDiagnostic))))
+    (js-call globalThis.console :log (JSON/stringify (js-object
+      :modules (js-call (get (js-call c :project_check_report
+        (js-object :mode "standard" :root (aref (get globalThis.process :argv) 3) :entries (js-array "main.eli")
+          :portableEntries (js-array) :modules modules)) :modules) :map (lambda (module) (get module :source)))
+      :diagnostic diagnostic)))))
+  (defconst completion (run-host-main))
+  (js-call completion :catch (lambda (error)
+    (console/error error)
+    (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

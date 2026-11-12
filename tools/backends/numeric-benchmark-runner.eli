@@ -1,0 +1,31 @@
+(module tools.backends.numeric-benchmark-runner
+  (import "node:fs/promises" readFile)
+  (import "./numeric-benchmark-kernel.mjs" measureNumericBenchmark)
+  ;; ESM loading and Bun FFI are host capabilities, not benchmark algorithms.
+  (defconst load-module (js* "(specifier) => import(specifier)"))
+  (defasync run-module-entry ()
+(let ((runnerArgs (get globalThis.process :argv)))
+(let ((javascript (await (funcall load-module (aref runnerArgs 2)))))
+(let ((targetPath (aref runnerArgs 3)))
+(let ((session (funcall globalThis.Number (aref runnerArgs 4))))
+(let ((mode (aref runnerArgs 5)))
+(let ((inputs (JSON/parse (aref runnerArgs 6))))
+(let ((parameters (JSON/parse (aref runnerArgs 7))))
+(let ((library undefined))
+(try
+    (let* ((target (if (eq mode "native")
+             (let ((ffi (await (funcall load-module "bun:ffi"))))
+               (setq library (funcall (get ffi :dlopen) targetPath
+                 (js-object "recurrence-batch" (js-object :args (js-array "f64" "f64" "f64") :returns "f64")
+                   "escape-grid-batch" (js-object :args (js-array "f64" "f64" "f64") :returns "f64"))))
+               (get library :symbols))
+             (get (get (await (WebAssembly/instantiate (await (readFile targetPath)))) :instance) :exports)))
+           (results (measureNumericBenchmark javascript target session inputs parameters
+             (lambda () (performance/now)) mode (if (eq mode "native") "nativeFn" "wasmFn"))))
+      (console/log (JSON/stringify (js-object :version (if (eq mode "native") (get globalThis.Bun :version)
+        (get globalThis.process :version)) :results results))))
+    (finally (unless (undefined? library) (js-call library :close))))
+)))))))))
+  (js-call (run-module-entry) :catch (lambda (error)
+    (js-call (get (js* "globalThis") :console) :error error)
+    (put (get (js* "globalThis") :process) :exitCode 1))))

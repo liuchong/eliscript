@@ -1,15 +1,16 @@
 (module tests.final-acceptance-history
   (import "bun:test" :as framework)
   (import "node:assert/strict" :default assert)
-  (import "node:fs/promises" readFile)
+  (import "node:fs/promises" readFile mkdtemp rm)
   (import "node:path" resolve)
   (import "node:child_process" spawnSync)
   (import "../tools/backends/build.mjs" root)
   (import "../tools/acceptance/finalize.mjs" FinalAcceptanceError
-    verifyHistoricalFuzzArtifact validateFinalAcceptanceContract buildFinalAcceptance
+    verifyHistoricalFuzzArtifact verifyHistoricalScaleArtifact validateFinalAcceptanceContract buildFinalAcceptance
     verifyFinalAcceptance generateFinalAcceptance validateFinalManifest humanFinalAcceptanceReport)
 
   (defconst fuzz-file "tests/reader-program-fuzz.test.mjs")
+  (defconst scale-file "tests/project-scale.test.mjs")
   (defun test (title run) (js-call framework :test title run 300000))
   (defasync data (file) (JSON/parse (await (readFile (resolve root file) "utf8"))))
   (defasync retained-run () (await (data "acceptance/runs/m13-01.json")))
@@ -57,17 +58,70 @@
                 (await (js-call assert :rejects (verifyHistoricalFuzzArtifact root fuzz-file changed) typed-error)))
               (setq index (1+ index))))))))
 
-  (test "default and explicit false reject current fuzz drift even with an outer deferral environment"
+  (test "historical scale evidence authenticates accepted Git bytes without current scale acceptance"
+    (async ()
+      (let* ((run (await (retained-run))) (before (JSON/stringify run))
+             (proof (await (verifyHistoricalScaleArtifact root scale-file run))))
+        (js-call assert :strictEqual (get proof :artifact) scale-file)
+        (js-call assert :strictEqual (get proof :artifactSha256)
+          "99a42aedd7c492c2d4879be162b971975cb82a4c4fd98b5a7a7a6aae773101fb")
+        (js-call assert :strictEqual (get proof :sourceCommit) (get (get run :source) :commit))
+        (js-call assert :strictEqual (get proof :sourceTree) (get (get run :source) :tree))
+        (js-call assert :strictEqual (get proof :historicalSourcesVerified) t)
+        (js-call assert :strictEqual (get proof :currentSourceClaim) false)
+        (js-call assert :strictEqual (get proof :currentSourceAcceptance) "not-asserted")
+        (js-call assert :strictEqual (JSON/stringify run) before))))
+
+  (test "historical scale authentication rejects other paths, missing bindings, forged identities and unavailable Git bytes"
+    (async ()
+      (let ((run (await (retained-run))))
+        (await (js-call assert :rejects (verifyHistoricalScaleArtifact root fuzz-file run)
+          (rejection "only the retained project scale")))
+        (let ((mutations (js-array
+          (lambda (value) (put (get value :source) :commit (js-call "0" :repeat 40)))
+          (lambda (value) (put (get value :source) :tree (js-call "0" :repeat 40)))
+          (lambda (value) (put (get value :source) :commit "HEAD"))
+          (lambda (value) (put value :source nil))
+          (lambda (value) (put value :artifacts nil))
+          (lambda (value) (put (js-call (get value :artifacts) :find (lambda (item) (= (get item :file) scale-file)))
+            :sha256 (js-call "0" :repeat 64)))
+          (lambda (value) (put (js-call (get value :artifacts) :find (lambda (item) (= (get item :file) scale-file)))
+            :sha256 "invalid"))
+          (lambda (value) (js-call (get value :artifacts) :push
+            (globalThis.structuredClone (js-call (get value :artifacts) :find (lambda (item) (= (get item :file) scale-file))))))
+          (lambda (value) (put value :artifacts (js-call (get value :artifacts) :filter
+            (lambda (item) (/= (get item :file) scale-file))))))))
+          (let ((index 0))
+            (while (< index (js-length mutations))
+              (let ((changed (globalThis.structuredClone run)))
+                (funcall (aref mutations index) changed)
+                (await (js-call assert :rejects (verifyHistoricalScaleArtifact root scale-file changed) typed-error)))
+              (setq index (1+ index)))))
+        (let ((directory (await (mkdtemp (resolve root "_worktree/ci-closure/scale-history-")))))
+          (try
+            (let ((initialized (spawnSync "git" (js-array "init" "--bare" directory)
+                                 (js-object :encoding "utf8" :timeout 10000))))
+              (js-call assert :strictEqual (get initialized :status) 0 (get initialized :stderr))
+              (await (js-call assert :rejects (verifyHistoricalScaleArtifact directory scale-file run)
+                (rejection "historical scale Git source authentication failed"))))
+            (finally (await (rm directory (js-object :recursive t :force t)))))))))
+
+  (defun rejects-current-source-drift (error)
+    (and (typed-error error)
+      (js-call (get error :message) :includes (str "fuzz artifact changed after the source run: " fuzz-file))
+      (js-call (get error :message) :includes (str "scale artifact changed after the source run: " scale-file))))
+
+  (test "default and explicit false reject current fuzz and scale drift even with an outer deferral environment"
     (async ()
       (let* ((run (await (retained-run))) (value (await (contract)))
              (environment (get globalThis.process :env)) (before (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE)))
         (try
           (put environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1")
           (await (js-call assert :rejects (validateFinalAcceptanceContract value run (js-object :root root))
-            (rejection (+ "fuzz artifact changed after the source run: " fuzz-file))))
+            rejects-current-source-drift))
           (await (js-call assert :rejects (validateFinalAcceptanceContract value run
             (js-object :root root :deferPerformanceAcceptance false))
-            (rejection (+ "fuzz artifact changed after the source run: " fuzz-file))))
+            rejects-current-source-drift))
           (finally (if (undefined? before) (js-call globalThis.Reflect :deleteProperty environment "ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE")
             (put environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE before)))))))
 
@@ -79,8 +133,12 @@
              (before (await (Promise/all (js-call files :map (lambda (file) (readFile (resolve root file))))))))
         (js-call assert :strictEqual (await (validateFinalAcceptanceContract value run options)) value)
         (await (validateFinalAcceptanceContract value run options))
-        (js-call assert :strictEqual (js-length historical) 1)
-        (js-call assert :strictEqual (get (aref historical 0) :artifact) fuzz-file)
+        (js-call assert :deepStrictEqual (js-call historical :map (lambda (item) (get item :artifact)))
+          (js-array fuzz-file scale-file))
+        (js-call historical :forEach (lambda (item)
+          (js-call assert :strictEqual (get item :historicalSourcesVerified) t)
+          (js-call assert :strictEqual (get item :currentSourceClaim) false)
+          (js-call assert :strictEqual (get item :currentSourceAcceptance) "not-asserted")))
         (let* ((manifest (await (verifyFinalAcceptance options))) (expected (await (buildFinalAcceptance options))))
           (js-call assert :deepStrictEqual manifest expected)
           (js-call assert :deepStrictEqual manifest (await (data "acceptance/manifest.json")))
@@ -107,7 +165,7 @@
         (Object/assign (functional-options) (js-object :requirePass t)))
         (rejection "current performance acceptance is deferred and has not passed")))))
 
-  (test "functional CLI labels historical fuzz separately without running or promoting current acceptance"
+  (test "functional CLI labels historical fuzz and scale separately without running or promoting current acceptance"
     (async ()
       (let* ((files (js-array "acceptance/manifest.json" "acceptance/report.md"))
              (before (await (Promise/all (js-call files :map (lambda (file) (readFile (resolve root file)))))))
@@ -118,7 +176,10 @@
                    (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1"))))))
         (js-call assert :strictEqual (get child :status) 0 (get child :stderr))
         (js-call assert :ok (js-call (get child :stdout) :includes "Historical fuzz source:"))
-        (js-call assert :ok (js-call (get child :stdout) :includes "current fuzz acceptance is provided by the independent complete functional run"))
+        (js-call assert :ok (js-call (get child :stdout) :includes "current fuzz acceptance requires an independent complete functional run (not asserted here)"))
+        (js-call assert :ok (js-call (get child :stdout) :includes "Historical scale source:"))
+        (js-call assert :ok (js-call (get child :stdout) :includes
+          "current scale acceptance: DEFERRED / NOT ACCEPTED; current-source acceptance not asserted"))
         (js-call assert :ok (js-call (get child :stdout) :includes "DEFERRED / NOT ACCEPTED"))
         (let ((index 0))
           (while (< index (js-length files))

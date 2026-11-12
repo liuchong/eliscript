@@ -512,7 +512,12 @@
       (js-call assert :deepStrictEqual
         (js-call s :value "apply-values" (js-call s :call "pack-value") (js-call s :call "values-iterator" (js-call s :array (js-array 1 2))))
         (oracle-call oracle "apply-values" (oracle-call oracle "pack-value") (js-call (js-array 1 2) :values)))))
-    (js-call (js-array nil undefined false t 1 (js-object)) :forEach (lambda (input)
+    (js-call (js-array nil undefined) :forEach (lambda (input)
+      (funcall check "empty spread" (lambda (s)
+        (js-call assert :deepStrictEqual
+          (js-call s :value "apply-values" (js-call s :call "pack-value") (js-call s :box input))
+          (oracle-call oracle "apply-values" (oracle-call oracle "pack-value") input))))))
+    (js-call (js-array false t 1 (js-object)) :forEach (lambda (input)
       (funcall check "spread failure" (lambda (s)
         (let ((raw (if (and (not (eq input nil)) (= (value-type input) "object")) (js-call s :object input) (js-call s :box input))))
           (js-call assert :throws (lambda () (js-call s :call "apply-values" (js-call s :call "pack-value") raw)))

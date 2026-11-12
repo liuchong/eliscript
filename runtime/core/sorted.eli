@@ -1,2 +1,828 @@
-(module capsules.runtime.core.sorted
-  (js* "import {\n  COLLECTION_ASSOC,\n  COLLECTION_CONJ,\n  COLLECTION_CONTAINS,\n  COLLECTION_COUNT,\n  COLLECTION_DISSOC,\n  COLLECTION_DISJ,\n  COLLECTION_EMPTY,\n  COLLECTION_GET,\n  COLLECTION_REDUCE,\n  COLLECTION_REDUCE_KV,\n  COLLECTION_RSEQ,\n  COLLECTION_SEQ,\n  isReducedValue,\n  readCollectionEntry,\n  reduceIterable,\n  sequenceView,\n  unreducedValue,\n} from \"./collection-internals.mjs\";\nimport { identifierName, identifierNamespace, isKeyword } from \"./identifier.mjs\";\nimport { METADATA_READ, METADATA_WITH } from \"./metadata-internals.mjs\";\nimport { comparator, compareValues } from \"./order.mjs\";\nimport {\n  PERSISTENT_MAP_HAS_VALUE_KEY,\n  PERSISTENT_MAP_KIND,\n  PERSISTENT_SET_HAS_VALUE,\n  PERSISTENT_SET_KIND,\n  persistentMapValueEqual,\n  persistentSetValueEqual,\n} from \"./persistent-kind.mjs\";\nimport {\n  SORTED_MAP_STATE,\n  SORTED_SET_STATE,\n  SortedNode,\n  sortedAssoc,\n  sortedDissoc,\n  sortedEntries,\n  sortedFind,\n} from \"./sorted-internals.mjs\";\nimport {\n  VALUE_EQUAL,\n  VALUE_HASH,\n  finishHash,\n  mixHash,\n  unorderedCollectionHash,\n} from \"./value-internals.mjs\";\nimport { equalValues } from \"./value.mjs\";\n\nconst SORTED_MAP_TOKEN = Symbol(\"eliscript.sorted-map.constructor-token\");\nconst SORTED_SET_TOKEN = Symbol(\"eliscript.sorted-set.constructor-token\");\nconst NOT_FOUND = Symbol(\"eliscript.sorted.not-found\");\nconst PRESENT = Object.freeze({});\nconst MAP_HASH_TAG = 0x6c8e_9cf5;\nconst MAP_ENTRY_HASH_TAG = 0x3a91_72eb;\nconst SET_HASH_TAG = 0x51e7_b32d;\nconst BOUND_TESTS = new Set([\"<\", \"<=\", \">\", \">=\"]);\nconst DEFAULT_COMPARATOR = comparator(compareValues);\n\nexport function isDefaultSortedComparator(value) {\n  return value === DEFAULT_COMPARATOR;\n}\n\nexport function defaultSortedComparator() {\n  return DEFAULT_COMPARATOR;\n}\n\nfunction normalizeComparator(comparison) {\n  return comparison === compareValues || comparison === DEFAULT_COMPARATOR\n    ? DEFAULT_COMPARATOR\n    : comparator(comparison);\n}\n\nfunction makeMap(root, comparison, metadata = null) {\n  return new PersistentSortedMap(\n    SORTED_MAP_TOKEN,\n    root,\n    comparison,\n    metadata,\n  );\n}\n\nfunction makeSet(map, metadata = null) {\n  return new PersistentSortedSet(SORTED_SET_TOKEN, map, metadata);\n}\n\nexport function readSortedMapState(value) {\n  if (!(value instanceof PersistentSortedMap)) return undefined;\n  const descriptor = Object.getOwnPropertyDescriptor(value, SORTED_MAP_STATE);\n  return descriptor !== undefined && \"value\" in descriptor ? descriptor.value : undefined;\n}\n\nexport function readSortedSetState(value) {\n  if (!(value instanceof PersistentSortedSet)) return undefined;\n  const descriptor = Object.getOwnPropertyDescriptor(value, SORTED_SET_STATE);\n  return descriptor !== undefined && \"value\" in descriptor ? descriptor.value : undefined;\n}\n\n// Transport already supplies ordered, unique data. Rebuild only its physical\n// host representation; normalizing or comparing again would invoke user code\n// a second time and change the comparator's observable identity.\nfunction materializeSortedRoot(values, set, start, end) {\n  if (start === end) return null;\n  const middle = start + Math.floor((end - start) / 2);\n  const item = values[middle];\n  if (!set && (!Array.isArray(item) || item.length !== 2)) {\n    throw new TypeError(\"invalid sorted map transport entry\");\n  }\n  return new SortedNode(\n    set ? item : item[0],\n    set ? PRESENT : item[1],\n    materializeSortedRoot(values, set, start, middle),\n    materializeSortedRoot(values, set, middle + 1, end),\n  );\n}\n\nexport function materializeSortedMap(entries, comparison, metadata = null) {\n  if (!Array.isArray(entries) || typeof comparison !== \"function\") {\n    throw new TypeError(\"invalid sorted map transport record\");\n  }\n  return makeMap(materializeSortedRoot(entries, false, 0, entries.length), comparison, metadata);\n}\n\nexport function materializeSortedSet(values, comparison, metadata = null) {\n  if (!Array.isArray(values) || typeof comparison !== \"function\") {\n    throw new TypeError(\"invalid sorted set transport record\");\n  }\n  return makeSet(makeMap(materializeSortedRoot(values, true, 0, values.length), comparison), metadata);\n}\n\nfunction mapPairHash(entry, hash) {\n  return finishHash(\n    mixHash(mixHash(MAP_ENTRY_HASH_TAG, hash(entry[0])), hash(entry[1])),\n    2,\n  );\n}\n\nfunction mapIterator(root, comparison, ascending, start = null, end = null) {\n  const nodes = sortedEntries(root, comparison, ascending, start, end);\n  return (function* entries() {\n    for (const item of nodes) {\n      yield Object.freeze([item.key, item.value]);\n    }\n  })();\n}\n\nfunction setIterator(root, comparison, ascending, start = null, end = null) {\n  const nodes = sortedEntries(root, comparison, ascending, start, end);\n  return (function* values() {\n    for (const item of nodes) yield item.key;\n  })();\n}\n\nfunction sequenceOrNull(factory) {\n  const probe = factory();\n  try {\n    if (probe.next().done) return null;\n  } finally {\n    if (typeof probe.return === \"function\") probe.return();\n  }\n  return sequenceView(factory);\n}\n\nexport class PersistentSortedMap {\n  constructor(token, root, comparison, metadata = null) {\n    if (token !== SORTED_MAP_TOKEN || typeof comparison !== \"function\") {\n      throw new TypeError(\n        \"PersistentSortedMap values must be created with persistentSortedMap or persistentSortedMapBy\",\n      );\n    }\n    this[SORTED_MAP_STATE] = Object.freeze({ root, comparison, metadata });\n    Object.freeze(this);\n  }\n\n  static empty(comparison = compareValues) {\n    return emptySortedMapBy(comparison);\n  }\n\n  static from(entries, comparison = compareValues) {\n    if (entries instanceof PersistentSortedMap && arguments.length === 1) {\n      return entries;\n    }\n    let result = emptySortedMapBy(comparison);\n    for (const entry of entries) {\n      const [key, value] = readCollectionEntry(entry);\n      result = result.assoc(key, value);\n    }\n    return result;\n  }\n\n  get count() {\n    return this[SORTED_MAP_STATE].root?.size ?? 0;\n  }\n\n  get size() {\n    return this.count;\n  }\n\n  get comparator() {\n    return this[SORTED_MAP_STATE].comparison;\n  }\n\n  get(key, notFound = null) {\n    const state = this[SORTED_MAP_STATE];\n    const found = sortedFind(state.root, key, state.comparison);\n    return found === null ? notFound : found.value;\n  }\n\n  has(key) {\n    const state = this[SORTED_MAP_STATE];\n    return sortedFind(state.root, key, state.comparison) !== null;\n  }\n\n  assoc(key, value) {\n    const state = this[SORTED_MAP_STATE];\n    const result = sortedAssoc(state.root, key, value, state.comparison);\n    return result.changed\n      ? makeMap(result.root, state.comparison, state.metadata)\n      : this;\n  }\n\n  dissoc(key) {\n    const state = this[SORTED_MAP_STATE];\n    const result = sortedDissoc(state.root, key, state.comparison);\n    return result.removed\n      ? makeMap(result.root, state.comparison, state.metadata)\n      : this;\n  }\n\n  entries(ascending = true) {\n    const state = this[SORTED_MAP_STATE];\n    return mapIterator(state.root, state.comparison, ascending);\n  }\n\n  keys(ascending = true) {\n    const entries = this.entries(ascending);\n    return (function* keys() {\n      for (const entry of entries) yield entry[0];\n    })();\n  }\n\n  values(ascending = true) {\n    const entries = this.entries(ascending);\n    return (function* values() {\n      for (const entry of entries) yield entry[1];\n    })();\n  }\n\n  [COLLECTION_COUNT]() {\n    return this.count;\n  }\n\n  [COLLECTION_EMPTY]() {\n    const state = this[SORTED_MAP_STATE];\n    return makeMap(null, state.comparison, state.metadata);\n  }\n\n  [COLLECTION_CONJ](entry) {\n    const [key, value] = readCollectionEntry(entry);\n    return this.assoc(key, value);\n  }\n\n  [COLLECTION_GET](key, notFound = null) {\n    return this.get(key, notFound);\n  }\n\n  [COLLECTION_ASSOC](key, value) {\n    return this.assoc(key, value);\n  }\n\n  [COLLECTION_CONTAINS](key) {\n    return this.has(key);\n  }\n\n  [COLLECTION_DISSOC](key) {\n    return this.dissoc(key);\n  }\n\n  [COLLECTION_SEQ]() {\n    return this.count === 0\n      ? null\n      : sequenceView(() => this.entries(), this.count);\n  }\n\n  [COLLECTION_RSEQ]() {\n    return this.count === 0\n      ? null\n      : sequenceView(() => this.entries(false), this.count);\n  }\n\n  [COLLECTION_REDUCE](reducer, ...initial) {\n    return reduceIterable(this, reducer, ...initial);\n  }\n\n  [COLLECTION_REDUCE_KV](reducer, initial) {\n    let result = initial;\n    for (const [key, value] of this) {\n      result = reducer(result, key, value);\n      if (isReducedValue(result)) return unreducedValue(result);\n    }\n    return result;\n  }\n\n  [PERSISTENT_MAP_HAS_VALUE_KEY](key) {\n    const state = this[SORTED_MAP_STATE];\n    const found = sortedFind(state.root, key, state.comparison);\n    return found !== null && equalValues(found.key, key);\n  }\n\n  get [PERSISTENT_MAP_KIND]() {\n    return true;\n  }\n\n  [VALUE_EQUAL](other, equal) {\n    return persistentMapValueEqual(this, other, equal);\n  }\n\n  [VALUE_HASH](hash) {\n    return unorderedCollectionHash(this, (entry) => mapPairHash(entry, hash), MAP_HASH_TAG);\n  }\n\n  [METADATA_READ]() {\n    return this[SORTED_MAP_STATE].metadata;\n  }\n\n  [METADATA_WITH](metadata) {\n    const state = this[SORTED_MAP_STATE];\n    return metadata === state.metadata\n      ? this\n      : makeMap(state.root, state.comparison, metadata);\n  }\n\n  [Symbol.iterator]() {\n    return this.entries();\n  }\n\n  get [Symbol.toStringTag]() {\n    return \"EliscriptPersistentSortedMap\";\n  }\n}\n\nexport class PersistentSortedSet {\n  constructor(token, map, metadata = null) {\n    if (token !== SORTED_SET_TOKEN || !(map instanceof PersistentSortedMap)) {\n      throw new TypeError(\n        \"PersistentSortedSet values must be created with persistentSortedSet or persistentSortedSetBy\",\n      );\n    }\n    this[SORTED_SET_STATE] = Object.freeze({ map, metadata });\n    Object.freeze(this);\n  }\n\n  static empty(comparison = compareValues) {\n    return emptySortedSetBy(comparison);\n  }\n\n  static from(values, comparison = compareValues) {\n    if (values instanceof PersistentSortedSet && arguments.length === 1) {\n      return values;\n    }\n    let result = emptySortedSetBy(comparison);\n    for (const value of values) result = result.conj(value);\n    return result;\n  }\n\n  get count() {\n    return this[SORTED_SET_STATE].map.count;\n  }\n\n  get size() {\n    return this.count;\n  }\n\n  get comparator() {\n    return this[SORTED_SET_STATE].map.comparator;\n  }\n\n  has(value) {\n    return this[SORTED_SET_STATE].map.has(value);\n  }\n\n  conj(value) {\n    const state = this[SORTED_SET_STATE];\n    const map = state.map.assoc(value, PRESENT);\n    return map === state.map ? this : makeSet(map, state.metadata);\n  }\n\n  disj(value) {\n    const state = this[SORTED_SET_STATE];\n    const map = state.map.dissoc(value);\n    return map === state.map ? this : makeSet(map, state.metadata);\n  }\n\n  values(ascending = true) {\n    const state = this[SORTED_SET_STATE].map[SORTED_MAP_STATE];\n    return setIterator(state.root, state.comparison, ascending);\n  }\n\n  keys(ascending = true) {\n    return this.values(ascending);\n  }\n\n  *entries(ascending = true) {\n    for (const value of this.values(ascending)) {\n      yield Object.freeze([value, value]);\n    }\n  }\n\n  [COLLECTION_COUNT]() {\n    return this.count;\n  }\n\n  [COLLECTION_EMPTY]() {\n    const state = this[SORTED_SET_STATE];\n    return makeSet(state.map[COLLECTION_EMPTY](), state.metadata);\n  }\n\n  [COLLECTION_CONJ](value) {\n    return this.conj(value);\n  }\n\n  [COLLECTION_DISJ](value) {\n    return this.disj(value);\n  }\n\n  [COLLECTION_GET](value, notFound = null) {\n    const state = this[SORTED_SET_STATE].map[SORTED_MAP_STATE];\n    const found = sortedFind(state.root, value, state.comparison);\n    return found === null ? notFound : found.key;\n  }\n\n  [COLLECTION_CONTAINS](value) {\n    return this.has(value);\n  }\n\n  [COLLECTION_SEQ]() {\n    return this.count === 0\n      ? null\n      : sequenceView(() => this.values(), this.count);\n  }\n\n  [COLLECTION_RSEQ]() {\n    return this.count === 0\n      ? null\n      : sequenceView(() => this.values(false), this.count);\n  }\n\n  [COLLECTION_REDUCE](reducer, ...initial) {\n    return reduceIterable(this, reducer, ...initial);\n  }\n\n  [PERSISTENT_SET_HAS_VALUE](value, equal) {\n    const state = this[SORTED_SET_STATE].map[SORTED_MAP_STATE];\n    const found = sortedFind(state.root, value, state.comparison);\n    return found !== null && equal(found.key, value);\n  }\n\n  get [PERSISTENT_SET_KIND]() {\n    return true;\n  }\n\n  [VALUE_EQUAL](other, equal) {\n    return persistentSetValueEqual(this, other, equal);\n  }\n\n  [VALUE_HASH](hash) {\n    return unorderedCollectionHash(this, hash, SET_HASH_TAG);\n  }\n\n  [METADATA_READ]() {\n    return this[SORTED_SET_STATE].metadata;\n  }\n\n  [METADATA_WITH](metadata) {\n    const state = this[SORTED_SET_STATE];\n    return metadata === state.metadata\n      ? this\n      : makeSet(state.map, metadata);\n  }\n\n  [Symbol.iterator]() {\n    return this.values();\n  }\n\n  get [Symbol.toStringTag]() {\n    return \"EliscriptPersistentSortedSet\";\n  }\n}\n\nexport const EMPTY_SORTED_MAP = makeMap(null, DEFAULT_COMPARATOR);\nexport const EMPTY_SORTED_SET = makeSet(EMPTY_SORTED_MAP);\n\nexport function emptySortedMapBy(comparison) {\n  const normalized = normalizeComparator(comparison);\n  return normalized === DEFAULT_COMPARATOR\n    ? EMPTY_SORTED_MAP\n    : makeMap(null, normalized);\n}\n\nexport function emptySortedSetBy(comparison) {\n  const map = emptySortedMapBy(comparison);\n  return map === EMPTY_SORTED_MAP ? EMPTY_SORTED_SET : makeSet(map);\n}\n\nfunction requireEvenKeyValues(keyValues, label) {\n  if (keyValues.length % 2 !== 0) {\n    throw new TypeError(`${label} expects an even number of key/value forms`);\n  }\n}\n\nfunction populateMap(map, keyValues) {\n  let result = map;\n  for (let index = 0; index < keyValues.length; index += 2) {\n    result = result.assoc(keyValues[index], keyValues[index + 1]);\n  }\n  return result;\n}\n\nexport function persistentSortedMap(...keyValues) {\n  requireEvenKeyValues(keyValues, \"persistentSortedMap\");\n  return populateMap(EMPTY_SORTED_MAP, keyValues);\n}\n\nexport function persistentSortedMapBy(comparison, ...keyValues) {\n  requireEvenKeyValues(keyValues, \"persistentSortedMapBy\");\n  return populateMap(emptySortedMapBy(comparison), keyValues);\n}\n\nexport function persistentSortedSet(...values) {\n  let result = EMPTY_SORTED_SET;\n  for (const value of values) result = result.conj(value);\n  return result;\n}\n\nexport function persistentSortedSetBy(comparison, ...values) {\n  let result = emptySortedSetBy(comparison);\n  for (const value of values) result = result.conj(value);\n  return result;\n}\n\nexport function isPersistentSortedMap(value) {\n  return value instanceof PersistentSortedMap;\n}\n\nexport function isPersistentSortedSet(value) {\n  return value instanceof PersistentSortedSet;\n}\n\nexport function isPersistentSortedCollection(value) {\n  return isPersistentSortedMap(value) || isPersistentSortedSet(value);\n}\n\nfunction sortedState(collection) {\n  if (collection instanceof PersistentSortedMap) {\n    const state = collection[SORTED_MAP_STATE];\n    return {\n      root: state.root,\n      comparison: state.comparison,\n      factory: (ascending, start, end) =>\n        mapIterator(state.root, state.comparison, ascending, start, end),\n    };\n  }\n  if (collection instanceof PersistentSortedSet) {\n    const state = collection[SORTED_SET_STATE].map[SORTED_MAP_STATE];\n    return {\n      root: state.root,\n      comparison: state.comparison,\n      factory: (ascending, start, end) =>\n        setIterator(state.root, state.comparison, ascending, start, end),\n    };\n  }\n  throw new TypeError(\"operation requires a persistent sorted collection\");\n}\n\nfunction requireBoolean(value, label) {\n  if (typeof value !== \"boolean\") throw new TypeError(`${label} must be a boolean`);\n  return value;\n}\n\nexport function sortedComparator(collection) {\n  return sortedState(collection).comparison;\n}\n\nexport function sortedSequence(collection, ascending = true) {\n  requireBoolean(ascending, \"sortedSequence ascending\");\n  const state = sortedState(collection);\n  return state.root === null\n    ? null\n    : sequenceView(() => state.factory(ascending, null, null), state.root.size);\n}\n\nexport function sortedSequenceFrom(\n  collection,\n  key,\n  ascending = true,\n  inclusive = true,\n) {\n  requireBoolean(ascending, \"sortedSequenceFrom ascending\");\n  requireBoolean(inclusive, \"sortedSequenceFrom inclusive\");\n  const state = sortedState(collection);\n  const start = { key, inclusive };\n  return sequenceOrNull(() => state.factory(ascending, start, null));\n}\n\nfunction boundTestName(test) {\n  const name = isKeyword(test) && identifierNamespace(test) === null\n    ? identifierName(test)\n    : test;\n  if (typeof name !== \"string\" || !BOUND_TESTS.has(name)) {\n    throw new TypeError(\"sorted bound test must be one of :<, :<=, :>, or :>=\");\n  }\n  return name;\n}\n\nfunction rangeBounds(bounds) {\n  if (bounds.length !== 2 && bounds.length !== 4) {\n    throw new TypeError(\"subsequence expects one or two test/key bounds\");\n  }\n  const firstTest = boundTestName(bounds[0]);\n  const first = { key: bounds[1], inclusive: firstTest.includes(\"=\") };\n  if (bounds.length === 2) {\n    return firstTest.startsWith(\">\")\n      ? { lower: first, upper: null }\n      : { lower: null, upper: first };\n  }\n  const secondTest = boundTestName(bounds[2]);\n  if (!firstTest.startsWith(\">\") || !secondTest.startsWith(\"<\")) {\n    throw new TypeError(\n      \"two-bound subsequence requires a lower :>/:>= bound then an upper :</:<= bound\",\n    );\n  }\n  return {\n    lower: first,\n    upper: { key: bounds[3], inclusive: secondTest.includes(\"=\") },\n  };\n}\n\nfunction rangeSequence(collection, ascending, bounds) {\n  const state = sortedState(collection);\n  const normalized = rangeBounds(bounds);\n  const start = ascending ? normalized.lower : normalized.upper;\n  const end = ascending ? normalized.upper : normalized.lower;\n  return sequenceOrNull(() => state.factory(ascending, start, end));\n}\n\nexport function subsequence(collection, ...bounds) {\n  return rangeSequence(collection, true, bounds);\n}\n\nexport function reverseSubsequence(collection, ...bounds) {\n  return rangeSequence(collection, false, bounds);\n}\n"))
+(module eliscript.runtime.core.sorted
+  (import "./collection-internals.mjs"
+    COLLECTION_ASSOC
+    COLLECTION_CONJ
+    COLLECTION_CONTAINS
+    COLLECTION_COUNT
+    COLLECTION_DISSOC
+    COLLECTION_DISJ
+    COLLECTION_EMPTY
+    COLLECTION_GET
+    COLLECTION_REDUCE
+    COLLECTION_REDUCE_KV
+    COLLECTION_RSEQ
+    COLLECTION_SEQ
+    isReducedValue
+    readCollectionEntry
+    reduceIterable
+    sequenceView
+    unreducedValue)
+  (import "./identifier.mjs"
+    identifierName
+    identifierNamespace
+    isKeyword)
+  (import "./metadata-internals.mjs"
+    METADATA_READ
+    METADATA_WITH)
+  (import "./order.mjs"
+    comparator
+    compareValues)
+  (import "./persistent-kind.mjs"
+    PERSISTENT_MAP_HAS_VALUE_KEY
+    PERSISTENT_MAP_KIND
+    PERSISTENT_SET_HAS_VALUE
+    PERSISTENT_SET_KIND
+    persistentMapValueEqual
+    persistentSetValueEqual)
+  (import "./sorted-internals.mjs"
+    SORTED_MAP_STATE
+    SORTED_SET_STATE
+    SortedNode
+    sortedAssoc
+    sortedDissoc
+    sortedEntries
+    sortedFind)
+  (import "./value-internals.mjs"
+    VALUE_EQUAL
+    VALUE_HASH
+    finishHash
+    mixHash
+    unorderedCollectionHash)
+  (import "./value.mjs"
+    equalValues)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst host-truth (js* "(value) => !!value"))
+  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+  (defconst has-key? (js* "(key, object) => key in object"))
+  (defconst host-generator (js* "(create) => function* (...args) { yield* create(this, ...args); }"))
+  (defconst host-generator-instance (js* "(create) => (function* () { yield* create(); })()"))
+  (defconst SORTED_MAP_TOKEN (funcall globalThis/Symbol "eliscript.sorted-map.constructor-token"))
+  (defconst SORTED_SET_TOKEN (funcall globalThis/Symbol "eliscript.sorted-set.constructor-token"))
+  (defconst PRESENT (Object/freeze (js-object)))
+  (defconst MAP_HASH_TAG 1821285621)
+  (defconst MAP_ENTRY_HASH_TAG 982610667)
+  (defconst SET_HASH_TAG 1374139181)
+  (defconst BOUND_TESTS (new globalThis/Set (js-array "<" "<=" ">" ">=")))
+  (defconst DEFAULT_COMPARATOR (comparator compareValues))
+
+  (defun callable? (value)
+    (= (funcall typeof-value value) "function"))
+
+  (defun object? (value)
+    (or (and (not (nil? value)) (= (funcall typeof-value value) "object"))
+        (callable? value)))
+
+  (defun method (implementation name arity)
+    (let ((function (funcall
+                      (js* "(fn, name) => ({ [name](...args) { return fn(this, ...args); } })[name]")
+                      implementation
+                      name)))
+      (Object/defineProperty function "length" (js-object :value arity :configurable t))
+      function))
+
+  (defun define-method (target key name arity implementation)
+    (Object/defineProperty
+      target
+      key
+      (js-object
+        :value (method implementation name arity)
+        :writable t
+        :configurable t)))
+
+  (defun define-getter (target key name implementation)
+    (Object/defineProperty
+      target
+      key
+      (js-object
+        :get (method implementation (str "get " name) 0)
+        :configurable t)))
+
+  (defun define-generator-method (target key name arity implementation)
+    (let ((gen-fn (funcall host-generator implementation)))
+      (Object/defineProperty gen-fn "name" (js-object :value name :configurable t))
+      (Object/defineProperty gen-fn "length" (js-object :value arity :configurable t))
+      (Object/defineProperty target key
+        (js-object :value gen-fn :writable t :configurable t))))
+
+  (defun isDefaultSortedComparator (value)
+    (eq value DEFAULT_COMPARATOR))
+
+  (defun defaultSortedComparator ()
+    DEFAULT_COMPARATOR)
+
+  (defun normalize-comparator (comparison)
+    (if (or (eq comparison compareValues)
+            (eq comparison DEFAULT_COMPARATOR))
+        DEFAULT_COMPARATOR
+        (comparator comparison)))
+
+  (defun open-iterator (iterable)
+    (when (nullish? iterable)
+      (throw (new globalThis/TypeError "value is not iterable")))
+    (let ((iterator-method (aref iterable (get globalThis/Symbol :iterator))))
+      (unless (callable? iterator-method)
+        (throw (new globalThis/TypeError "value is not iterable")))
+      (let ((iter (js-call iterator-method :call iterable)))
+        (unless (object? iter)
+          (throw (new globalThis/TypeError "iterator must be an object")))
+        iter)))
+
+  (defun close-iterator (iter)
+    (let ((close (get iter :return)))
+      (unless (nullish? close)
+        (unless (callable? close)
+          (throw (new globalThis/TypeError "iterator return is not a function")))
+        (let ((result (js-call close :call iter)))
+          (unless (object? result)
+            (throw (new globalThis/TypeError "iterator return must return an object")))))))
+
+  (defun protocol-pair (entry)
+    (let* ((iterator (open-iterator entry))
+           (next-fn (get iterator :next))
+           (done false)
+           (key undefined)
+           (value undefined))
+      (let ((first (js-call next-fn :call iterator)))
+        (unless (object? first)
+          (throw (new globalThis/TypeError "iterator result must be an object")))
+        (setq done (funcall host-truth (get first :done)))
+        (unless done
+          (setq key (get first :value))
+          (let ((second (js-call next-fn :call iterator)))
+            (unless (object? second)
+              (throw (new globalThis/TypeError "iterator result must be an object")))
+            (setq done (funcall host-truth (get second :done)))
+            (unless done
+              (setq value (get second :value))))))
+      (unless done
+        (close-iterator iterator))
+      (js-array key value)))
+
+  (defun map-step-iterator (source transform)
+    (let* ((iter (open-iterator source))
+           (next-fn (get iter :next))
+           (done false)
+           (iterator
+             (js-object
+               :next (method
+                       (lambda (_self)
+                         (if done
+                             (js-object :value undefined :done t)
+                             (let ((body-active false))
+                               (try
+                                 (let ((step (js-call next-fn :call iter)))
+                                   (unless (object? step)
+                                     (throw (new globalThis/TypeError "iterator result must be an object")))
+                                   (if (funcall host-truth (get step :done))
+                                       (progn
+                                         (setq done t)
+                                         (js-object :value undefined :done t))
+                                       (let ((item (get step :value)))
+                                         (setq body-active t)
+                                         (js-object :value (funcall transform item) :done false))))
+                                 (catch error
+                                   (setq done t)
+                                   (when body-active
+                                     (try
+                                       (close-iterator iter)
+                                       (catch _ignored
+                                         nil)))
+                                   (throw error))))))
+                       "next"
+                       0)
+               :return (method
+                         (lambda (_self &rest supplied)
+                           (let ((value (aref supplied 0)))
+                             (if done
+                                 (js-object :value value :done t)
+                                 (progn
+                                   (setq done t)
+                                   (close-iterator iter)
+                                   (js-object :value value :done t)))))
+                         "return"
+                         1)
+               :throw (method
+                        (lambda (_self &rest supplied)
+                          (let ((error (aref supplied 0)))
+                            (unless done
+                              (setq done t)
+                              (try
+                                (close-iterator iter)
+                                (catch _ignored
+                                  nil)))
+                            (throw error)))
+                        "throw"
+                        1))))
+      (put iterator (get globalThis/Symbol :iterator)
+            (method (lambda (self) self) "[Symbol.iterator]" 0))
+      iterator))
+
+  (defun map-iterator (root comparison ascending &optional start end)
+    (let ((nodes (sortedEntries root comparison ascending
+                   (if (undefined? start) nil start)
+                   (if (undefined? end) nil end))))
+      (funcall host-generator-instance
+        (lambda ()
+          (map-step-iterator nodes
+            (lambda (item) (Object/freeze (js-array (get item :key) (get item :value)))))))))
+
+  (defun set-iterator (root comparison ascending &optional start end)
+    (let ((nodes (sortedEntries root comparison ascending
+                   (if (undefined? start) nil start)
+                   (if (undefined? end) nil end))))
+      (funcall host-generator-instance
+        (lambda ()
+          (map-step-iterator nodes
+            (lambda (item) (get item :key)))))))
+
+  (defun sequence-or-null (factory)
+    (let ((probe (funcall factory)))
+      (try
+        (if (funcall host-truth (get (js-call probe :next) :done))
+            nil
+            (sequenceView factory))
+        (finally
+          (when (callable? (get probe :return))
+            (js-call probe :return))))))
+
+  (defun map-pair-hash (entry hash)
+    (finishHash
+      (mixHash (mixHash MAP_ENTRY_HASH_TAG (funcall hash (get entry 0)))
+               (funcall hash (get entry 1)))
+      2))
+
+  (defun initialize-sorted-map (self token root comparison metadata)
+    (unless (and (eq token SORTED_MAP_TOKEN) (= (funcall typeof-value comparison) "function"))
+      (throw (new globalThis.TypeError "PersistentSortedMap values must be created with persistentSortedMap or persistentSortedMapBy")))
+    (put self SORTED_MAP_STATE (Object/freeze (js-object :root root :comparison comparison :metadata metadata)))
+    (Object/freeze self))
+
+  (defconst PersistentSortedMap
+    (funcall (js* "(initialize) => class PersistentSortedMap { constructor(token, root, comparison, metadata = null) { initialize(this, token, root, comparison, metadata); } }") initialize-sorted-map))
+
+  (defun initialize-sorted-set (self token map metadata)
+    (unless (and (eq token SORTED_SET_TOKEN) (funcall instance-of? map PersistentSortedMap))
+      (throw (new globalThis.TypeError "PersistentSortedSet values must be created with persistentSortedSet or persistentSortedSetBy")))
+    (put self SORTED_SET_STATE (Object/freeze (js-object :map map :metadata metadata)))
+    (Object/freeze self))
+
+  (defconst PersistentSortedSet
+    (funcall (js* "(initialize) => class PersistentSortedSet { constructor(token, map, metadata = null) { initialize(this, token, map, metadata); } }") initialize-sorted-set))
+
+  (defun make-map (root comparison &optional metadata)
+    (new PersistentSortedMap
+      SORTED_MAP_TOKEN
+      root
+      comparison
+      (if (undefined? metadata) nil metadata)))
+
+  (defun make-set (map &optional metadata)
+    (new PersistentSortedSet
+      SORTED_SET_TOKEN
+      map
+      (if (undefined? metadata) nil metadata)))
+
+  (defconst EMPTY_SORTED_MAP
+    (make-map nil DEFAULT_COMPARATOR))
+
+  (defconst EMPTY_SORTED_SET
+    (make-set EMPTY_SORTED_MAP))
+
+  (defun emptySortedMapBy (comparison)
+    (let ((normalized (normalize-comparator comparison)))
+      (if (eq normalized DEFAULT_COMPARATOR)
+          EMPTY_SORTED_MAP
+          (make-map nil normalized))))
+
+  (defun emptySortedSetBy (comparison)
+    (let ((map (emptySortedMapBy comparison)))
+      (if (eq map EMPTY_SORTED_MAP)
+          EMPTY_SORTED_SET
+          (make-set map))))
+
+  (defun readSortedMapState (value)
+    (if (not (funcall instance-of? value PersistentSortedMap))
+        undefined
+        (let ((descriptor (Object/getOwnPropertyDescriptor value SORTED_MAP_STATE)))
+          (if (and (not (undefined? descriptor))
+                   (funcall has-key? "value" descriptor))
+              (get descriptor :value)
+              undefined))))
+
+  (defun readSortedSetState (value)
+    (if (not (funcall instance-of? value PersistentSortedSet))
+        undefined
+        (let ((descriptor (Object/getOwnPropertyDescriptor value SORTED_SET_STATE)))
+          (if (and (not (undefined? descriptor))
+                   (funcall has-key? "value" descriptor))
+              (get descriptor :value)
+              undefined))))
+
+  (defun materialize-sorted-root (values set start end)
+    (if (= start end)
+        nil
+        (let* ((middle (+ start (Math/floor (/ (- end start) 2))))
+               (item (get values middle)))
+          (when (and (not set)
+                     (or (not (Array/isArray item))
+                         (not (= (js-length item) 2))))
+            (throw (new globalThis/TypeError "invalid sorted map transport entry")))
+          (new SortedNode
+            (if set item (get item 0))
+            (if set PRESENT (get item 1))
+            (materialize-sorted-root values set start middle)
+            (materialize-sorted-root values set (+ middle 1) end)))))
+
+  (defun materializeSortedMap (entries comparison &optional metadata)
+    (when (or (not (Array/isArray entries)) (not (callable? comparison)))
+      (throw (new globalThis/TypeError "invalid sorted map transport record")))
+    (make-map
+      (materialize-sorted-root entries false 0 (js-length entries))
+      comparison
+      (if (undefined? metadata) nil metadata)))
+
+  (defun materializeSortedSet (values comparison &optional metadata)
+    (when (or (not (Array/isArray values)) (not (callable? comparison)))
+      (throw (new globalThis/TypeError "invalid sorted set transport record")))
+    (make-set
+      (make-map (materialize-sorted-root values t 0 (js-length values)) comparison)
+      (if (undefined? metadata) nil metadata)))
+
+  (defun for-each-iterable (iterable callback)
+    (let* ((iterator (open-iterator iterable))
+           (next-fn (get iterator :next))
+           (done false)
+           (body-active false))
+      (try
+        (while (not done)
+          (setq body-active false)
+          (let ((step (js-call next-fn :call iterator)))
+            (unless (object? step)
+              (throw (new globalThis/TypeError "iterator result must be an object")))
+            (if (funcall host-truth (get step :done))
+                (setq done t)
+                (let ((item (get step :value)))
+                  (setq body-active t)
+                  (funcall callback item)))))
+        (catch error
+          (when (and body-active (not done))
+            (try
+              (close-iterator iterator)
+              (catch _ignored
+                nil)))
+          (throw error)))))
+
+  (let ((mproto (get PersistentSortedMap :prototype)))
+    (define-method PersistentSortedMap "empty" "empty" 0
+      (lambda (_self &rest args)
+        (let ((comparison (if (or (= (js-length args) 0) (undefined? (get args 0)))
+                              compareValues
+                              (get args 0))))
+          (emptySortedMapBy comparison))))
+    (define-method PersistentSortedMap "from" "from" 1
+      (lambda (_self &rest args)
+        (let ((entries (get args 0))
+              (comparison (if (or (< (js-length args) 2) (undefined? (get args 1)))
+                              compareValues
+                              (get args 1))))
+          (if (and (funcall instance-of? entries PersistentSortedMap)
+                   (= (js-length args) 1))
+              entries
+              (let ((result (emptySortedMapBy comparison)))
+                (for-each-iterable entries
+                  (lambda (entry)
+                    (let ((pair (readCollectionEntry entry)))
+                      (setq result (js-call result :assoc (get pair 0) (get pair 1))))))
+                result)))))
+    (define-getter mproto "count" "count"
+      (lambda (self)
+        (let ((root (get (aref self SORTED_MAP_STATE) :root)))
+          (if (nil? root) 0 (get root :size)))))
+    (define-getter mproto "size" "size"
+      (lambda (self) (get self :count)))
+    (define-getter mproto "comparator" "comparator"
+      (lambda (self) (get (aref self SORTED_MAP_STATE) :comparison)))
+    (define-method mproto "get" "get" 1
+      (lambda (self key &rest args)
+        (let* ((not-found (if (= (js-length args) 0) nil (get args 0)))
+               (state (aref self SORTED_MAP_STATE))
+               (found (sortedFind (get state :root) key (get state :comparison))))
+          (if (eq found nil) not-found (get found :value)))))
+    (define-method mproto "has" "has" 1
+      (lambda (self key)
+        (let ((state (aref self SORTED_MAP_STATE)))
+          (not (eq (sortedFind (get state :root) key (get state :comparison)) nil)))))
+    (define-method mproto "assoc" "assoc" 2
+      (lambda (self key value)
+        (let* ((state (aref self SORTED_MAP_STATE))
+               (result (sortedAssoc (get state :root) key value (get state :comparison))))
+          (if (get result :changed)
+              (make-map (get result :root) (get state :comparison) (get state :metadata))
+              self))))
+    (define-method mproto "dissoc" "dissoc" 1
+      (lambda (self key)
+        (let* ((state (aref self SORTED_MAP_STATE))
+               (result (sortedDissoc (get state :root) key (get state :comparison))))
+          (if (get result :removed)
+              (make-map (get result :root) (get state :comparison) (get state :metadata))
+              self))))
+    (define-method mproto "entries" "entries" 0
+      (lambda (self &rest args)
+        (let ((ascending (if (or (= (js-length args) 0) (undefined? (get args 0))) t (get args 0)))
+              (state (aref self SORTED_MAP_STATE)))
+          (map-iterator (get state :root) (get state :comparison) ascending))))
+    (define-method mproto "keys" "keys" 0
+      (lambda (self &rest args)
+        (let* ((ascending (if (or (= (js-length args) 0) (undefined? (get args 0))) t (get args 0)))
+               (entries (js-call self :entries ascending)))
+          (funcall host-generator-instance
+            (lambda ()
+              (map-step-iterator entries (lambda (entry) (get entry 0))))))))
+    (define-method mproto "values" "values" 0
+      (lambda (self &rest args)
+        (let* ((ascending (if (or (= (js-length args) 0) (undefined? (get args 0))) t (get args 0)))
+               (entries (js-call self :entries ascending)))
+          (funcall host-generator-instance
+            (lambda ()
+              (map-step-iterator entries (lambda (entry) (get entry 1))))))))
+    (define-method mproto COLLECTION_COUNT "[eliscript.collection.count]" 0
+      (lambda (self) (get self :count)))
+    (define-method mproto COLLECTION_EMPTY "[eliscript.collection.empty]" 0
+      (lambda (self)
+        (let ((state (aref self SORTED_MAP_STATE)))
+          (make-map nil (get state :comparison) (get state :metadata)))))
+    (define-method mproto COLLECTION_CONJ "[eliscript.collection.conj]" 1
+      (lambda (self entry)
+        (let ((pair (readCollectionEntry entry)))
+          (js-call self :assoc (get pair 0) (get pair 1)))))
+    (define-method mproto COLLECTION_GET "[eliscript.collection.get]" 1
+      (lambda (self key &rest args)
+        (let ((not-found (if (= (js-length args) 0) nil (get args 0))))
+          (js-call self :get key not-found))))
+    (define-method mproto COLLECTION_ASSOC "[eliscript.collection.assoc]" 2
+      (lambda (self key value) (js-call self :assoc key value)))
+    (define-method mproto COLLECTION_CONTAINS "[eliscript.collection.contains]" 1
+      (lambda (self key) (js-call self :has key)))
+    (define-method mproto COLLECTION_DISSOC "[eliscript.collection.dissoc]" 1
+      (lambda (self key) (js-call self :dissoc key)))
+    (define-method mproto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+      (lambda (self)
+        (if (= (get self :count) 0)
+            nil
+            (sequenceView (lambda () (js-call self :entries)) (get self :count)))))
+    (define-method mproto COLLECTION_RSEQ "[eliscript.collection.rseq]" 0
+      (lambda (self)
+        (if (= (get self :count) 0)
+            nil
+            (sequenceView (lambda () (js-call self :entries false)) (get self :count)))))
+    (define-method mproto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
+      (lambda (self reducer &rest initial)
+        (apply reduceIterable self reducer initial)))
+    (define-method mproto COLLECTION_REDUCE_KV "[eliscript.collection.reduceKv]" 2
+      (lambda (self reducer initial)
+        (let* ((iter (open-iterator self))
+               (next-fn (get iter :next))
+               (result initial)
+               (complete false)
+               (early false)
+               (body-active false))
+          (try
+            (while (and (not complete) (not early))
+              (setq body-active false)
+              (let ((step (js-call next-fn :call iter)))
+                (unless (object? step)
+                  (throw (new globalThis/TypeError "iterator result must be an object")))
+                (if (funcall host-truth (get step :done))
+                    (setq complete t)
+                    (let ((entry (get step :value)))
+                      (setq body-active t)
+                      (let ((pair (protocol-pair entry)))
+                        (setq result (funcall reducer result (get pair 0) (get pair 1)))
+                        (when (isReducedValue result)
+                          (setq result (unreducedValue result)
+                                early t)))))))
+            (catch error
+              (when (and body-active (not complete))
+                (try
+                  (close-iterator iter)
+                  (catch _ignored
+                    nil)))
+              (throw error)))
+          (when early
+            (close-iterator iter))
+          result)))
+    (define-method mproto PERSISTENT_MAP_HAS_VALUE_KEY "[eliscript.persistent-map.has-value-key]" 1
+      (lambda (self key)
+        (let* ((state (aref self SORTED_MAP_STATE))
+               (found (sortedFind (get state :root) key (get state :comparison))))
+          (and (not (eq found nil))
+               (equalValues (get found :key) key)))))
+    (define-getter mproto PERSISTENT_MAP_KIND "[eliscript.persistent-map.kind]"
+      (lambda (_self) t))
+    (define-method mproto VALUE_EQUAL "[eliscript.value.equal]" 2
+      (lambda (self other equal)
+        (persistentMapValueEqual self other equal)))
+    (define-method mproto VALUE_HASH "[eliscript.value.hash]" 1
+      (lambda (self hash)
+        (unorderedCollectionHash self (lambda (entry) (map-pair-hash entry hash)) MAP_HASH_TAG)))
+    (define-method mproto METADATA_READ "[eliscript.metadata.read]" 0
+      (lambda (self) (get (aref self SORTED_MAP_STATE) :metadata)))
+    (define-method mproto METADATA_WITH "[eliscript.metadata.with]" 1
+      (lambda (self metadata)
+        (let ((state (aref self SORTED_MAP_STATE)))
+          (if (eq metadata (get state :metadata))
+              self
+              (make-map (get state :root) (get state :comparison) metadata)))))
+    (define-method mproto (get globalThis/Symbol :iterator) "[Symbol.iterator]" 0
+      (lambda (self) (js-call self :entries)))
+    (define-getter mproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptPersistentSortedMap")))
+
+  (let ((sproto (get PersistentSortedSet :prototype)))
+    (define-method PersistentSortedSet "empty" "empty" 0
+      (lambda (_self &rest args)
+        (let ((comparison (if (or (= (js-length args) 0) (undefined? (get args 0)))
+                              compareValues
+                              (get args 0))))
+          (emptySortedSetBy comparison))))
+    (define-method PersistentSortedSet "from" "from" 1
+      (lambda (_self &rest args)
+        (let ((values (get args 0))
+              (comparison (if (or (< (js-length args) 2) (undefined? (get args 1)))
+                              compareValues
+                              (get args 1))))
+          (if (and (funcall instance-of? values PersistentSortedSet)
+                   (= (js-length args) 1))
+              values
+              (let ((result (emptySortedSetBy comparison)))
+                (for-each-iterable values
+                  (lambda (value) (setq result (js-call result :conj value))))
+                result)))))
+    (define-getter sproto "count" "count"
+      (lambda (self) (get (get (aref self SORTED_SET_STATE) :map) :count)))
+    (define-getter sproto "size" "size"
+      (lambda (self) (get self :count)))
+    (define-getter sproto "comparator" "comparator"
+      (lambda (self) (get (get (aref self SORTED_SET_STATE) :map) :comparator)))
+    (define-method sproto "has" "has" 1
+      (lambda (self value)
+        (js-call (get (aref self SORTED_SET_STATE) :map) :has value)))
+    (define-method sproto "conj" "conj" 1
+      (lambda (self value)
+        (let* ((state (aref self SORTED_SET_STATE))
+               (map (js-call (get state :map) :assoc value PRESENT)))
+          (if (eq map (get state :map))
+              self
+              (make-set map (get state :metadata))))))
+    (define-method sproto "disj" "disj" 1
+      (lambda (self value)
+        (let* ((state (aref self SORTED_SET_STATE))
+               (map (js-call (get state :map) :dissoc value)))
+          (if (eq map (get state :map))
+              self
+              (make-set map (get state :metadata))))))
+    (define-method sproto "values" "values" 0
+      (lambda (self &rest args)
+        (let* ((ascending (if (or (= (js-length args) 0) (undefined? (get args 0))) t (get args 0)))
+               (state (aref (get (aref self SORTED_SET_STATE) :map) SORTED_MAP_STATE)))
+          (set-iterator (get state :root) (get state :comparison) ascending))))
+    (define-method sproto "keys" "keys" 0
+      (lambda (self &rest args)
+        (let ((ascending (if (or (= (js-length args) 0) (undefined? (get args 0))) t (get args 0))))
+          (js-call self :values ascending))))
+    (define-generator-method sproto "entries" "entries" 0
+      (lambda (self &rest args)
+        (let ((ascending (if (or (= (js-length args) 0) (undefined? (get args 0))) t (get args 0))))
+          (map-step-iterator
+            (js-call self :values ascending)
+            (lambda (value) (Object/freeze (js-array value value)))))))
+    (define-method sproto COLLECTION_COUNT "[eliscript.collection.count]" 0
+      (lambda (self) (get self :count)))
+    (define-method sproto COLLECTION_EMPTY "[eliscript.collection.empty]" 0
+      (lambda (self)
+        (let* ((state (aref self SORTED_SET_STATE))
+               (map (get state :map)))
+          (make-set (js-call (aref map COLLECTION_EMPTY) :call map) (get state :metadata)))))
+    (define-method sproto COLLECTION_CONJ "[eliscript.collection.conj]" 1
+      (lambda (self value) (js-call self :conj value)))
+    (define-method sproto COLLECTION_DISJ "[eliscript.collection.disj]" 1
+      (lambda (self value) (js-call self :disj value)))
+    (define-method sproto COLLECTION_GET "[eliscript.collection.get]" 1
+      (lambda (self value &rest args)
+        (let* ((not-found (if (= (js-length args) 0) nil (get args 0)))
+               (state (aref (get (aref self SORTED_SET_STATE) :map) SORTED_MAP_STATE))
+               (found (sortedFind (get state :root) value (get state :comparison))))
+          (if (eq found nil) not-found (get found :key)))))
+    (define-method sproto COLLECTION_CONTAINS "[eliscript.collection.contains]" 1
+      (lambda (self value) (js-call self :has value)))
+    (define-method sproto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+      (lambda (self)
+        (if (= (get self :count) 0)
+            nil
+            (sequenceView (lambda () (js-call self :values)) (get self :count)))))
+    (define-method sproto COLLECTION_RSEQ "[eliscript.collection.rseq]" 0
+      (lambda (self)
+        (if (= (get self :count) 0)
+            nil
+            (sequenceView (lambda () (js-call self :values false)) (get self :count)))))
+    (define-method sproto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
+      (lambda (self reducer &rest initial)
+        (apply reduceIterable self reducer initial)))
+    (define-method sproto PERSISTENT_SET_HAS_VALUE "[eliscript.persistent-set.has-value]" 2
+      (lambda (self value equal)
+        (let* ((state (aref (get (aref self SORTED_SET_STATE) :map) SORTED_MAP_STATE))
+               (found (sortedFind (get state :root) value (get state :comparison))))
+          (and (not (eq found nil))
+               (funcall host-truth (funcall equal (get found :key) value))))))
+    (define-getter sproto PERSISTENT_SET_KIND "[eliscript.persistent-set.kind]"
+      (lambda (_self) t))
+    (define-method sproto VALUE_EQUAL "[eliscript.value.equal]" 2
+      (lambda (self other equal)
+        (persistentSetValueEqual self other equal)))
+    (define-method sproto VALUE_HASH "[eliscript.value.hash]" 1
+      (lambda (self hash)
+        (unorderedCollectionHash self hash SET_HASH_TAG)))
+    (define-method sproto METADATA_READ "[eliscript.metadata.read]" 0
+      (lambda (self) (get (aref self SORTED_SET_STATE) :metadata)))
+    (define-method sproto METADATA_WITH "[eliscript.metadata.with]" 1
+      (lambda (self metadata)
+        (let ((state (aref self SORTED_SET_STATE)))
+          (if (eq metadata (get state :metadata))
+              self
+              (make-set (get state :map) metadata)))))
+    (define-method sproto (get globalThis/Symbol :iterator) "[Symbol.iterator]" 0
+      (lambda (self) (js-call self :values)))
+    (define-getter sproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptPersistentSortedSet")))
+
+  (defun require-even-key-values (key-values label)
+    (unless (= (mod (js-length key-values) 2) 0)
+      (throw (new globalThis/TypeError (str label " expects an even number of key/value forms")))))
+
+  (defun populate-map (map key-values)
+    (let ((result map)
+          (index 0)
+          (limit (js-length key-values)))
+      (while (< index limit)
+        (setq result (js-call result :assoc (get key-values index) (get key-values (+ index 1)))
+              index (+ index 2)))
+      result))
+
+  (defun persistentSortedMap (&rest key-values)
+    (require-even-key-values key-values "persistentSortedMap")
+    (populate-map EMPTY_SORTED_MAP key-values))
+
+  (defun persistentSortedMapBy (comparison &rest key-values)
+    (require-even-key-values key-values "persistentSortedMapBy")
+    (populate-map (emptySortedMapBy comparison) key-values))
+
+  (defun persistentSortedSet (&rest values)
+    (let ((result EMPTY_SORTED_SET)
+          (index 0)
+          (limit (js-length values)))
+      (while (< index limit)
+        (setq result (js-call result :conj (get values index))
+              index (+ index 1)))
+      result))
+
+  (defun persistentSortedSetBy (comparison &rest values)
+    (let ((result (emptySortedSetBy comparison))
+          (index 0)
+          (limit (js-length values)))
+      (while (< index limit)
+        (setq result (js-call result :conj (get values index))
+              index (+ index 1)))
+      result))
+
+  (defun isPersistentSortedMap (value)
+    (funcall instance-of? value PersistentSortedMap))
+
+  (defun isPersistentSortedSet (value)
+    (funcall instance-of? value PersistentSortedSet))
+
+  (defun isPersistentSortedCollection (value)
+    (or (isPersistentSortedMap value) (isPersistentSortedSet value)))
+
+  (defun sorted-state (collection)
+    (cond
+      ((funcall instance-of? collection PersistentSortedMap)
+       (let ((state (aref collection SORTED_MAP_STATE)))
+         (js-object
+           :root (get state :root)
+           :comparison (get state :comparison)
+           :factory (lambda (ascending start end)
+                      (map-iterator (get state :root) (get state :comparison) ascending start end)))))
+      ((funcall instance-of? collection PersistentSortedSet)
+       (let ((state (aref (get (aref collection SORTED_SET_STATE) :map) SORTED_MAP_STATE)))
+         (js-object
+           :root (get state :root)
+           :comparison (get state :comparison)
+           :factory (lambda (ascending start end)
+                      (set-iterator (get state :root) (get state :comparison) ascending start end)))))
+      (t
+       (throw (new globalThis/TypeError "operation requires a persistent sorted collection")))))
+
+  (defun require-boolean (value label)
+    (unless (= (funcall typeof-value value) "boolean")
+      (throw (new globalThis/TypeError (str label " must be a boolean"))))
+    value)
+
+  (defun sortedComparator (collection)
+    (get (sorted-state collection) :comparison))
+
+  (defun sortedSequence (collection &rest args)
+    (let ((ascending (if (or (= (js-length args) 0) (undefined? (get args 0))) t (get args 0))))
+      (require-boolean ascending "sortedSequence ascending")
+      (let* ((state (sorted-state collection))
+             (root (get state :root)))
+        (if (eq root nil)
+            nil
+            (sequenceView
+              (lambda () (funcall (get state :factory) ascending nil nil))
+              (get root :size))))))
+
+  (defun sortedSequenceFrom (collection key &rest args)
+    (let ((ascending (if (or (= (js-length args) 0) (undefined? (get args 0))) t (get args 0)))
+          (inclusive (if (or (< (js-length args) 2) (undefined? (get args 1))) t (get args 1))))
+      (require-boolean ascending "sortedSequenceFrom ascending")
+      (require-boolean inclusive "sortedSequenceFrom inclusive")
+      (let ((state (sorted-state collection))
+            (start (js-object :key key :inclusive inclusive)))
+        (sequence-or-null (lambda () (funcall (get state :factory) ascending start nil))))))
+
+  (defun bound-test-name (test)
+    (let ((name (if (and (isKeyword test) (eq (identifierNamespace test) nil))
+                    (identifierName test)
+                    test)))
+      (when (or (not (= (funcall typeof-value name) "string"))
+                (not (js-call BOUND_TESTS :has name)))
+        (throw (new globalThis/TypeError "sorted bound test must be one of :<, :<=, :>, or :>=")))
+      name))
+
+  (defun range-bounds (bounds)
+    (let ((len (js-length bounds)))
+      (when (and (not (= len 2)) (not (= len 4)))
+        (throw (new globalThis/TypeError "subsequence expects one or two test/key bounds")))
+      (let* ((first-test (bound-test-name (get bounds 0)))
+             (first (js-object :key (get bounds 1) :inclusive (js-call first-test :includes "="))))
+        (if (= len 2)
+            (if (js-call first-test :startsWith ">")
+                (js-object :lower first :upper nil)
+                (js-object :lower nil :upper first))
+            (let ((second-test (bound-test-name (get bounds 2))))
+              (when (or (not (js-call first-test :startsWith ">"))
+                        (not (js-call second-test :startsWith "<")))
+                (throw (new globalThis/TypeError
+                         "two-bound subsequence requires a lower :>/:>= bound then an upper :</:<= bound")))
+              (js-object
+                :lower first
+                :upper (js-object :key (get bounds 3) :inclusive (js-call second-test :includes "="))))))))
+
+  (defun range-sequence (collection ascending bounds)
+    (let* ((state (sorted-state collection))
+           (normalized (range-bounds bounds))
+           (start (if ascending (get normalized :lower) (get normalized :upper)))
+           (end (if ascending (get normalized :upper) (get normalized :lower))))
+      (sequence-or-null (lambda () (funcall (get state :factory) ascending start end)))))
+
+  (defun subsequence (collection &rest bounds)
+    (range-sequence collection t bounds))
+
+  (defun reverseSubsequence (collection &rest bounds)
+    (range-sequence collection false bounds))
+
+  (Object/defineProperty materializeSortedMap "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty materializeSortedSet "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty persistentSortedMapBy "length" (js-object :value 1 :configurable t))
+  (Object/defineProperty persistentSortedSetBy "length" (js-object :value 1 :configurable t))
+  (Object/defineProperty sortedSequence "length" (js-object :value 1 :configurable t))
+  (Object/defineProperty sortedSequenceFrom "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty subsequence "length" (js-object :value 1 :configurable t))
+  (Object/defineProperty reverseSubsequence "length" (js-object :value 1 :configurable t))
+
+  (export
+    isDefaultSortedComparator
+    defaultSortedComparator
+    readSortedMapState
+    readSortedSetState
+    materializeSortedMap
+    materializeSortedSet
+    PersistentSortedMap
+    PersistentSortedSet
+    EMPTY_SORTED_MAP
+    EMPTY_SORTED_SET
+    emptySortedMapBy
+    emptySortedSetBy
+    persistentSortedMap
+    persistentSortedMapBy
+    persistentSortedSet
+    persistentSortedSetBy
+    isPersistentSortedMap
+    isPersistentSortedSet
+    isPersistentSortedCollection
+    sortedComparator
+    sortedSequence
+    sortedSequenceFrom
+    subsequence
+    reverseSubsequence))

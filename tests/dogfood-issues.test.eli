@@ -1,2 +1,176 @@
-(module capsules.tests.dogfood-issues.test
-  (js* "import { afterAll, beforeAll, expect, test } from \"bun:test\";\nimport { mkdtemp, readFile, rm } from \"node:fs/promises\";\nimport { resolve } from \"node:path\";\n\nimport { get as cget } from \"../runtime/core/collection.mjs\";\nimport { hashMap, keyword, vector } from \"../runtime/literals.mjs\";\n\nconst ROOT = resolve(import.meta.dir, \"..\");\nconst COMPILER = resolve(ROOT, \"bin/eliscript-build\");\n\nlet staging;\nlet issues;\n\n// Configuration values reach the provider as persistent maps with keyword\n// keys, so the tests build the same shape the configuration loader produces.\nconst k = (name) => keyword(name);\nconst mapOf = (entries) => hashMap(...entries.flatMap(([key, value]) => [k(key), value]));\nconst getOf = (value, name, fallback = null) => cget(value, k(name), fallback);\n\nasync function run(command) {\n  const child = Bun.spawn(command, { cwd: ROOT, stdout: \"pipe\", stderr: \"pipe\" });\n  const [exitCode, stdout, stderr] = await Promise.all([\n    child.exited,\n    new Response(child.stdout).text(),\n    new Response(child.stderr).text(),\n  ]);\n  return { exitCode, stdout, stderr };\n}\n\nfunction publisher(login, id) {\n  return id === undefined ? mapOf([[\"login\", login]]) : mapOf([[\"login\", login], [\"id\", id]]);\n}\n\nfunction issue(number, options = {}) {\n  return {\n    number,\n    html_url: `https://github.com/owner/repository/issues/${number}`,\n    created_at: \"2026-09-10T00:00:00Z\",\n    updated_at: \"2026-09-11T00:00:00Z\",\n    labels: [],\n    // The owner is pinned to an immutable provider id in the fixture\n    // configuration, so the fetched account must carry the same id.\n    user: { login: \"owner\", id: \"U_owner\", type: \"User\" },\n    ...options,\n  };\n}\n\nfunction body(fields, markdown = \"Body text.\") {\n  const lines = Object.entries(fields).map(([key, value]) => `${key}: ${value}`);\n  return [\"```dogfood\", ...lines, \"```\", \"\", markdown, \"\"].join(\"\\n\");\n}\n\nfunction transportOf(pages) {\n  const requested = [];\n  return {\n    requested,\n    transport: (url) => {\n      requested.push(url);\n      const index = Number(new URL(url).searchParams.get(\"page\") ?? \"1\");\n      const page = pages[index - 1];\n      if (page === undefined) return { status: 404, headers: {}, body: [] };\n      return {\n        status: 200,\n        headers: page.next ? { link: `<${page.next}>; rel=\"next\"` } : {},\n        body: page.records,\n      };\n    },\n  };\n}\n\nconst utterances = () => mapOf([\n  [\"id\", k(\"utterances\")],\n  [\"carrier-kind\", k(\"issue\")],\n  [\"principal\", \"utterances-bot\"],\n  [\"marker\", \"This issue was created from \"],\n]);\n\n// Provider failures carry a stable code beside the message, so assertions\n// check the code rather than matching prose.\nfunction thrownBy(operation) {\n  try {\n    operation();\n    return null;\n  } catch (error) {\n    return error;\n  }\n}\n\nasync function rejectedBy(promise) {\n  try {\n    await promise;\n    return null;\n  } catch (error) {\n    return error;\n  }\n}\n\nconst source = (label = \"blog\") => mapOf([\n  [\"repository\", \"owner/repository\"],\n  [\"label\", label],\n]);\nconst publishing = () => mapOf([\n  [\"owner\", publisher(\"owner\", \"U_owner\")],\n  [\"coauthors\", vector(publisher(\"writer-one\"))],\n]);\n\nbeforeAll(async () => {\n  staging = await mkdtemp(resolve(ROOT, \".eliscript-dogfood-issues-\"));\n  const built = await run([\n    COMPILER, \"--no-cache\",\n    \"--root\", \"examples/dogfood\",\n    \"--out-dir\", staging,\n    \"examples/dogfood/src/builder/issues.eli\",\n  ]);\n  if (built.exitCode !== 0) throw new Error(built.stderr.trim() || built.stdout.trim());\n  issues = await import(resolve(staging, \"src/builder/issues.mjs\"));\n});\n\nafterAll(async () => {\n  if (staging) await rm(staging, { recursive: true, force: true });\n});\n\ntest(\"the provider module compiles from the dogfood project\", async () => {\n  const module = await readFile(resolve(staging, \"src/builder/issues.mjs\"), \"utf8\");\n  expect(module).toContain(\"eliscript/runtime/core/collection.mjs\");\n});\n\ntest(\"only the configured publisher set may publish\", () => {\n  const publishers = issues.publisher_set(publishing());\n  expect([...publishers].length).toBe(2);\n  const allowed = (author) => issues.authorized_author_QMARK_(publishers, author);\n\n  expect(allowed({ login: \"owner\", id: \"U_owner\", type: \"User\" })).toBe(true);\n  // Logins compare case-insensitively.\n  expect(allowed({ login: \"OWNER\", id: \"U_owner\", type: \"User\" })).toBe(true);\n  // A coauthor publishes without a pinned id.\n  expect(allowed({ login: \"writer-one\", id: 7, type: \"User\" })).toBe(true);\n  // An unlisted collaborator never publishes.\n  expect(allowed({ login: \"collaborator\", id: 9, type: \"User\" })).toBe(false);\n  // A pinned immutable id must agree with the fetched account.\n  expect(allowed({ login: \"owner\", id: \"U_other\", type: \"User\" })).toBe(false);\n  // Bots, applications, and deleted identities are denied.\n  expect(allowed({ login: \"owner\", id: \"U_owner\", type: \"Bot\" })).toBe(false);\n  expect(allowed({ login: \"ghost\", id: 1, type: \"User\" })).toBe(false);\n});\n\ntest(\"a carrier needs principal, kind, and a known explicit identity\", () => {\n  const adapters = vector(utterances());\n  const identities = vector(\"https://example.github.io/dogfood/posts/hello-dogfood/\");\n  const marker = \"This issue was created from https://example.github.io/dogfood/posts/hello-dogfood/\";\n  const carrierBody = body({ id: \"notes/carrier\" }, marker);\n\n  expect(issues.carrier_adapter(adapters, { login: \"utterances-bot\" }, carrierBody, identities))\n    .toBe(k(\"utterances\"));\n  // The same marker from another author is not a binding.\n  expect(issues.carrier_adapter(adapters, { login: \"visitor\" }, carrierBody, identities)).toBeNull();\n  // The right principal with an unknown identity is not a binding.\n  expect(issues.carrier_adapter(adapters, { login: \"utterances-bot\" }, carrierBody, vector(\"https://elsewhere/\")))\n    .toBeNull();\n  // An article-shaped body alone never binds.\n  expect(issues.carrier_adapter(adapters, { login: \"utterances-bot\" }, body({ id: \"notes/x\" }), identities))\n    .toBeNull();\n});\n\ntest(\"pagination follows the next relation to exhaustion\", async () => {\n  const { transport, requested } = transportOf([\n    { records: [issue(1)], next: \"https://api.github.com/repos/owner/repository/issues?page=2\" },\n    { records: [issue(2)] },\n  ]);\n  const records = await issues.fetch_issues(transport, \"https://api.github.com/x?page=1\");\n  expect([...records].map((record) => record.number)).toEqual([1, 2]);\n  expect(requested.length).toBe(2);\n});\n\ntest(\"a failed page fails the provider\", async () => {\n  const { transport } = transportOf([{ records: [issue(1)], next: \"https://api.github.com/x?page=2\" }]);\n  const error = await rejectedBy(issues.fetch_issues(transport, \"https://api.github.com/x?page=1\"));\n  expect(error.code).toBe(\"DOGFOOD-GITHUB-001\");\n});\n\ntest(\"an article-shaped issue without metadata fails closed\", async () => {\n  const { transport } = transportOf([{ records: [issue(5, { body: \"No metadata here.\" })] }]);\n  const records = await issues.fetch_issues(transport, \"https://api.github.com/x?page=1\");\n  const error = thrownBy(() => issues.normalize_issue(source(), [...records][0], vector()));\n  expect(error.code).toBe(\"DOGFOOD-ISSUES-001\");\n  expect(error.message).toContain(\"owner/repository#5\");\n});\n\ntest(\"an authorized issue becomes a canonical post\", async () => {\n  const record = issue(12, {\n    body: body({\n      id: \"notes/issued-article\",\n      title: \"Issued article\",\n      date: \"2026-09-12\",\n      tags: \"[design, issues]\",\n      pinned: \"2\",\n    }, \"## Heading\\n\\nSome **bold** text.\"),\n  });\n  const post = issues.normalize_issue(source(), record, vector());\n  expect(getOf(post, \"id\")).toBe(\"notes/issued-article\");\n  expect(getOf(post, \"slug\")).toBe(\"issued-article\");\n  expect([...getOf(post, \"tags\")]).toEqual([\"design\", \"issues\"]);\n  expect(getOf(post, \"pinned-weight\")).toBe(2);\n  expect(getOf(post, \"published-at\")).toBe(\"2026-09-12\");\n  const bodyHtml = getOf(post, \"body\");\n  expect(bodyHtml).toContain(\"<h2>Heading</h2>\");\n  expect(bodyHtml).toContain(\"<strong>bold</strong>\");\n  expect(bodyHtml).not.toContain(\"```dogfood\");\n  const provenance = getOf(post, \"provenance\");\n  expect(getOf(provenance, \"provider\")).toBe(\"issues\");\n  expect(getOf(provenance, \"path\")).toBe(\"owner/repository#12\");\n  expect(getOf(provenance, \"url\")).toBe(\"https://github.com/owner/repository/issues/12\");\n});\n\ntest(\"the collection separates carriers, unauthorized records, and posts\", async () => {\n  const { transport } = transportOf([{\n    records: [\n      issue(1, { body: body({ id: \"notes/one\", title: \"One\" }) }),\n      issue(2, { user: { login: \"visitor\", id: 5, type: \"User\" }, body: body({ id: \"notes/two\", title: \"Two\" }) }),\n      issue(3, {\n        user: { login: \"utterances-bot\", id: 6, type: \"Bot\" },\n        body: body({ id: \"notes/carrier\" },\n          \"This issue was created from https://example.github.io/dogfood/posts/hello-dogfood/\"),\n      }),\n      issue(4, { pull_request: {}, body: body({ id: \"notes/pr\", title: \"PR\" }) }),\n    ],\n  }]);\n  const result = await issues.collect_issues(mapOf([\n    [\"source\", source()],\n    [\"publishing\", publishing()],\n    [\"adapters\", vector(utterances())],\n    [\"identities\", vector(\"https://example.github.io/dogfood/posts/hello-dogfood/\")],\n    [\"transport\", transport],\n  ]));\n  expect([...getOf(result, \"posts\")].map((post) => getOf(post, \"id\"))).toEqual([\"notes/one\"]);\n  expect(getOf(result, \"records\")).toBe(4);\n  expect(getOf(result, \"unauthorized\")).toBe(1);\n  expect(getOf(result, \"carriers\")).toBe(1);\n});\n\ntest(\"a carrier with an article label is still a carrier\", async () => {\n  const adapters = vector(mapOf([\n    [\"id\", k(\"giscus\")],\n    [\"carrier-kind\", k(\"issue\")],\n    [\"principal\", \"giscus\"],\n    [\"marker\", \"Canonical post: \"],\n  ]));\n  const { transport } = transportOf([{\n    records: [issue(9, {\n      labels: [{ name: \"blog\" }],\n      // The provisioned record belongs to the adapter principal, carries the\n      // publication label, and still must not become an article.\n      user: { login: \"giscus\", id: 7, type: \"Bot\" },\n      body: body({ id: \"notes/bound\", title: \"Looks like an article\" }, \"Canonical post: notes/bound\"),\n    })],\n  }]);\n  const result = await issues.collect_issues(mapOf([\n    [\"source\", source()],\n    [\"publishing\", publishing()],\n    [\"adapters\", adapters],\n    [\"identities\", vector(\"notes/bound\")],\n    [\"transport\", transport],\n  ]));\n  expect([...getOf(result, \"posts\")]).toEqual([]);\n  expect(getOf(result, \"carriers\")).toBe(1);\n});\n"))
+(module
+  tests.dogfood-issues.test
+  (import "bun:test" afterAll beforeAll expect test)
+  (import "node:fs/promises" mkdtemp readFile rm)
+  (import "node:path" resolve)
+  (import "../runtime/core/collection.mjs" :as collection-mod)
+  (import "../runtime/literals.mjs" hashMap keyword vector)
+  (defconst
+    ROOT
+    (resolve (get (js* "import.meta") :dir) ".."))
+  (defconst
+    COMPILER
+    (resolve ROOT "bin/eliscript-build"))
+  (defconst
+    state
+    (js-object :staging nil :issues nil))
+  (defun
+    k
+    (name)
+    (keyword name))
+  (defun
+    mapOf
+    (entries)
+    (let*
+      ((flat (js-array)) (idx (js-object :i 0)))
+      (while
+        (< (get idx :i) (get entries :length))
+        (let*
+          ((pair (aref entries (get idx :i))))
+          (js-call flat :push (k (aref pair 0)))
+          (js-call flat :push (aref pair 1)))
+        (put idx :i (+ (get idx :i) 1)))
+      (apply hashMap flat)))
+  (defun
+    getOf
+    (value name &rest __host_default_arguments_1)
+    (let* ((fallback (aref __host_default_arguments_1 0)))
+    (js-call collection-mod :get value (k name) (if
+        (= fallback undefined)
+        nil
+        fallback))))
+  (defasync
+    run
+    (command)
+    (let*
+      ((child (js-call globalThis.Bun :spawn command (js-object :cwd ROOT :stdout "pipe" :stderr "pipe"))) (results (await (js-call globalThis.Promise :all (js-array (get child :exited) (js-call (new globalThis.Response (get child :stdout)) :text) (js-call (new globalThis.Response (get child :stderr)) :text))))))
+      (js-object :exitCode (aref results 0) :stdout (aref results 1) :stderr (aref results 2))))
+  (defun
+    publisher
+    (login &rest __host_default_arguments_2)
+    (let* ((id (aref __host_default_arguments_2 0)))
+    (if
+      (= id undefined)
+      (mapOf (js-array (js-array "login" login)))
+      (mapOf (js-array (js-array "login" login) (js-array "id" id))))))
+  (defun
+    issue
+    (number &rest __host_forwarded_arguments_1)
+    (let* ((options (aref __host_forwarded_arguments_1 0)))
+    (js-call globalThis.Object :assign (js-object :number number :html_url (str "https://github.com/owner/repository/issues/" number) :created_at "2026-09-10T00:00:00Z" :updated_at "2026-09-11T00:00:00Z" :labels (js-array) :user (js-object :login "owner" :id "U_owner" :type "User")) (or options (js-object)))))
+  (defun
+    body
+    (fields &rest __host_forwarded_arguments_2)
+    (let* ((markdown (aref __host_forwarded_arguments_2 0)))
+    (let*
+      ((entries (js-call globalThis.Object :entries fields)) (lines (js-call entries :map (lambda (pair) (str (aref pair 0) ": " (aref pair 1))))) (all (js-call (js-array "```dogfood") :concat lines (js-array "```" "" (or markdown "Body text.") ""))))
+      (js-call all :join "\n"))))
+  (defun
+    transportOf
+    (pages)
+    (let*
+      ((requested (js-array)))
+      (js-object :requested requested :transport (lambda (url) (js-call requested :push url) (let*
+            ((page-param (or (js-call (get (new globalThis.URL url) :searchParams) :get "page") "1")) (index (globalThis.Number page-param)) (page (aref pages (- index 1))))
+            (if
+              (= page undefined)
+              (js-object :status 404 :headers (js-object) :body (js-array))
+              (js-object :status 200 :headers (if
+                  (get page :next)
+                  (js-object :link (str "<" (get page :next) ">; rel=\"next\""))
+                  (js-object)) :body (get page :records))))))))
+  (defun
+    utterances
+    ()
+    (mapOf (js-array (js-array "id" (k "utterances")) (js-array "carrier-kind" (k "issue")) (js-array "principal" "utterances-bot") (js-array "marker" "This issue was created from "))))
+  (defun
+    thrownBy
+    (operation)
+    (try
+      (progn
+        (operation)
+        nil)
+      (catch
+        error
+        error)))
+  (defasync
+    rejectedBy
+    (promise)
+    (try
+      (progn
+        (await promise)
+        nil)
+      (catch
+        error
+        error)))
+  (defun
+    source
+    (&rest __host_forwarded_arguments_3)
+    (let* ((label (aref __host_forwarded_arguments_3 0)))
+    (mapOf (js-array (js-array "repository" "owner/repository") (js-array "label" (or label "blog"))))))
+  (defun
+    publishing
+    ()
+    (mapOf (js-array (js-array "owner" (publisher "owner" "U_owner")) (js-array "coauthors" (vector (publisher "writer-one"))))))
+  (beforeAll (async () (let*
+        ((staging (await (mkdtemp (resolve ROOT ".eliscript-dogfood-issues-")))) (__ign_1 (put state :staging staging)) (built (await (run (js-array COMPILER "--no-cache" "--root" "examples/dogfood" "--out-dir" staging "examples/dogfood/src/builder/issues.eli")))))
+        (when
+          (not= (get built :exitCode) 0)
+          (throw (new globalThis.Error (or (js-call (get built :stderr) :trim) (js-call (get built :stdout) :trim)))))
+        (put state :issues (await (funcall (js* "(u) => import(u)") (resolve staging "src/builder/issues.mjs")))))))
+  (afterAll (async () (when
+        (get state :staging)
+        (await (rm (get state :staging) (js-object :recursive t :force t))))))
+  (test "the provider module compiles from the dogfood project" (async () (let*
+        ((module-text (await (readFile (resolve (get state :staging) "src/builder/issues.mjs") "utf8"))))
+        (js-call (expect module-text) :toContain "eliscript/runtime/core/collection.mjs"))))
+  (test "only the configured publisher set may publish" (lambda () (let*
+        ((issues (get state :issues)) (publishers (js-call issues :publisher_set (publishing))) (allowed (lambda (author) (js-call issues :authorized_author_QMARK_ publishers author))))
+        (js-call (expect (get (js-call globalThis.Array :from publishers) :length)) :toBe 2)
+        (js-call (expect (allowed (js-object :login "owner" :id "U_owner" :type "User"))) :toBe t)
+        (js-call (expect (allowed (js-object :login "OWNER" :id "U_owner" :type "User"))) :toBe t)
+        (js-call (expect (allowed (js-object :login "writer-one" :id 7 :type "User"))) :toBe t)
+        (js-call (expect (allowed (js-object :login "collaborator" :id 9 :type "User"))) :toBe false)
+        (js-call (expect (allowed (js-object :login "owner" :id "U_other" :type "User"))) :toBe false)
+        (js-call (expect (allowed (js-object :login "owner" :id "U_owner" :type "Bot"))) :toBe false)
+        (js-call (expect (allowed (js-object :login "ghost" :id 1 :type "User"))) :toBe false))))
+  (test "a carrier needs principal, kind, and a known explicit identity" (lambda () (let*
+        ((issues (get state :issues)) (adapters (vector (utterances))) (identities (vector "https://example.github.io/dogfood/posts/hello-dogfood/")) (marker "This issue was created from https://example.github.io/dogfood/posts/hello-dogfood/") (carrierBody (body (js-object :id "notes/carrier") marker)))
+        (js-call (expect (js-call issues :carrier_adapter adapters (js-object :login "utterances-bot") carrierBody identities)) :toBe (k "utterances"))
+        (js-call (expect (js-call issues :carrier_adapter adapters (js-object :login "visitor") carrierBody identities)) :toBeNull)
+        (js-call (expect (js-call issues :carrier_adapter adapters (js-object :login "utterances-bot") carrierBody (vector "https://elsewhere/"))) :toBeNull)
+        (js-call (expect (js-call issues :carrier_adapter adapters (js-object :login "utterances-bot") (body (js-object :id "notes/x")) identities)) :toBeNull))))
+  (test "pagination follows the next relation to exhaustion" (async () (let*
+        ((issues (get state :issues)) (tp (transportOf (js-array (js-object :records (js-array (issue 1)) :next "https://api.github.com/repos/owner/repository/issues?page=2") (js-object :records (js-array (issue 2)))))) (records (await (js-call issues :fetch_issues (get tp :transport) "https://api.github.com/x?page=1"))))
+        (js-call (expect (js-call (js-call globalThis.Array :from records) :map (lambda (record) (get record :number)))) :toEqual (js-array 1 2))
+        (js-call (expect (get (get tp :requested) :length)) :toBe 2))))
+  (test "a failed page fails the provider" (async () (let*
+        ((issues (get state :issues)) (tp (transportOf (js-array (js-object :records (js-array (issue 1)) :next "https://api.github.com/x?page=2")))) (error (await (rejectedBy (js-call issues :fetch_issues (get tp :transport) "https://api.github.com/x?page=1")))))
+        (js-call (expect (get error :code)) :toBe "DOGFOOD-GITHUB-001"))))
+  (test "an article-shaped issue without metadata fails closed" (async () (let*
+        ((issues (get state :issues)) (tp (transportOf (js-array (js-object :records (js-array (issue 5 (js-object :body "No metadata here."))))))) (records (await (js-call issues :fetch_issues (get tp :transport) "https://api.github.com/x?page=1"))) (error (thrownBy (lambda () (js-call issues :normalize_issue (source) (aref (js-call globalThis.Array :from records) 0) (vector))))))
+        (js-call (expect (get error :code)) :toBe "DOGFOOD-ISSUES-001")
+        (js-call (expect (get error :message)) :toContain "owner/repository#5"))))
+  (test "an authorized issue becomes a canonical post" (lambda () (let*
+        ((issues (get state :issues)) (record (issue 12 (js-object :body (body (js-object :id "notes/issued-article" :title "Issued article" :date "2026-09-12" :tags "[design, issues]" :pinned "2") "## Heading\n\nSome **bold** text.")))) (post (js-call issues :normalize_issue (source) record (vector))) (bodyHtml (getOf post "body")) (provenance (getOf post "provenance")))
+        (js-call (expect (getOf post "id")) :toBe "notes/issued-article")
+        (js-call (expect (getOf post "slug")) :toBe "issued-article")
+        (js-call (expect (js-call globalThis.Array :from (getOf post "tags"))) :toEqual (js-array "design" "issues"))
+        (js-call (expect (getOf post "pinned-weight")) :toBe 2)
+        (js-call (expect (getOf post "published-at")) :toBe "2026-09-12")
+        (js-call (expect bodyHtml) :toContain "<h2>Heading</h2>")
+        (js-call (expect bodyHtml) :toContain "<strong>bold</strong>")
+        (js-call (get (expect bodyHtml) :not) :toContain "```dogfood")
+        (js-call (expect (getOf provenance "provider")) :toBe "issues")
+        (js-call (expect (getOf provenance "path")) :toBe "owner/repository#12")
+        (js-call (expect (getOf provenance "url")) :toBe "https://github.com/owner/repository/issues/12"))))
+  (test "the collection separates carriers, unauthorized records, and posts" (async () (let*
+        ((issues (get state :issues)) (tp (transportOf (js-array (js-object :records (js-array (issue 1 (js-object :body (body (js-object :id "notes/one" :title "One")))) (issue 2 (js-object :user (js-object :login "visitor" :id 5 :type "User") :body (body (js-object :id "notes/two" :title "Two")))) (issue 3 (js-object :user (js-object :login "utterances-bot" :id 6 :type "Bot") :body (body (js-object :id "notes/carrier") "This issue was created from https://example.github.io/dogfood/posts/hello-dogfood/"))) (issue 4 (js-object :pull_request (js-object) :body (body (js-object :id "notes/pr" :title "PR"))))))))) (result (await (js-call issues :collect_issues (mapOf (js-array (js-array "source" (source)) (js-array "publishing" (publishing)) (js-array "adapters" (vector (utterances))) (js-array "identities" (vector "https://example.github.io/dogfood/posts/hello-dogfood/")) (js-array "transport" (get tp :transport))))))))
+        (js-call (expect (js-call (js-call globalThis.Array :from (getOf result "posts")) :map (lambda (post) (getOf post "id")))) :toEqual (js-array "notes/one"))
+        (js-call (expect (getOf result "records")) :toBe 4)
+        (js-call (expect (getOf result "unauthorized")) :toBe 1)
+        (js-call (expect (getOf result "carriers")) :toBe 1))))
+  (test "a carrier with an article label is still a carrier" (async () (let*
+        ((issues (get state :issues)) (adapters (vector (mapOf (js-array (js-array "id" (k "giscus")) (js-array "carrier-kind" (k "issue")) (js-array "principal" "giscus") (js-array "marker" "Canonical post: "))))) (tp (transportOf (js-array (js-object :records (js-array (issue 9 (js-object :labels (js-array (js-object :name "blog")) :user (js-object :login "giscus" :id 7 :type "Bot") :body (body (js-object :id "notes/bound" :title "Looks like an article") "Canonical post: notes/bound")))))))) (result (await (js-call issues :collect_issues (mapOf (js-array (js-array "source" (source)) (js-array "publishing" (publishing)) (js-array "adapters" adapters) (js-array "identities" (vector "notes/bound")) (js-array "transport" (get tp :transport))))))))
+        (js-call (expect (js-call globalThis.Array :from (getOf result "posts"))) :toEqual (js-array))
+        (js-call (expect (getOf result "carriers")) :toBe 1)))))

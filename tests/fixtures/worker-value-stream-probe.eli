@@ -1,2 +1,7 @@
-(module capsules.tests.fixtures.worker-value-stream-probe
-  (js* "export async function echo_text(value, context) {\n  if (typeof value !== \"string\") {\n    throw new TypeError(\"echo_text requires one string\");\n  }\n  await context.progress(value.length);\n  await new Promise((resolve) => setTimeout(resolve, 100));\n  return value;\n}\n"))
+(module tests.fixtures.worker-value-stream-probe
+  (defconst host-type (js* "(value) => typeof value"))
+  (defasync echo_text (value context)
+    (unless (= (funcall host-type value) "string") (throw (new globalThis.TypeError "echo_text requires one string")))
+    (await (js-call context :progress (get value :length)))
+    (await (new globalThis.Promise (lambda (resolve) (globalThis/setTimeout resolve 100)))) value)
+  (export echo_text))

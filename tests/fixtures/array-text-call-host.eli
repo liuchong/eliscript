@@ -1,0 +1,7 @@
+(module tests.fixtures.array-text-call-host
+  (import "node:process" :default process)
+  (import "../helpers/array-text-call-contract.mjs" check checkQualifiedApply)
+  (defasync main ()
+    (let* ((m (await (funcall (js* "(specifier) => import(specifier)") (aref (get process :argv) 2)))) (mode (aref (get process :argv) 3)))
+      (if (= mode "qualified") (await (checkQualifiedApply m)) (await (check m)))))
+  (main))

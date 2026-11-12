@@ -1,2 +1,22 @@
-(module capsules.tests.fixtures.persistent-map-host
-  (js* "import {\n  EMPTY_MAP,\n  persistentHashMap,\n} from \"../../runtime/core/map.mjs\";\nimport {\n  inspectPersistentMap,\n  persistentMapMetrics,\n  resetPersistentMapMetrics,\n  sharedPersistentMapNodes,\n} from \"../../runtime/testing/map.mjs\";\nimport { equalValues, hashValue } from \"../../runtime/core/value.mjs\";\nimport { persistentVector } from \"../../runtime/core/vector.mjs\";\n\nlet values = EMPTY_MAP;\nfor (let key = 0; key < 100_000; key += 1) {\n  values = values.assoc(key, key * 2);\n}\n\nconst shape = inspectPersistentMap(values);\nresetPersistentMapMetrics();\nconst updated = values.assoc(54_321, \"updated\");\nconst metrics = persistentMapMetrics();\n\nconst collision = persistentHashMap(\n  [\"key-50691\", \"left\"],\n  [\"key-194634\", \"right\"],\n);\nconst ordered = persistentHashMap(\n  [\"alpha\", 1],\n  [persistentVector(1, 2), persistentVector(\"value\")],\n  [\"omega\", 3],\n);\nconst reversed = persistentHashMap(\n  [\"omega\", 3],\n  [persistentVector(1, 2), persistentVector(\"value\")],\n  [\"alpha\", 1],\n);\n\nconsole.log(JSON.stringify({\n  shape,\n  probes: [0, 31, 32, 1024, 32768, 99999].map((key) => values.get(key)),\n  missing: values.get(\"missing\", \"not-found\"),\n  original: values.get(54_321),\n  updated: updated.get(54_321),\n  sharedNodes: sharedPersistentMapNodes(values, updated),\n  metrics,\n  sum: values.reduce((total, value) => total + value, 0),\n  collision: {\n    count: collision.count,\n    left: collision.get(\"key-50691\"),\n    right: collision.get(\"key-194634\"),\n    shape: inspectPersistentMap(collision),\n  },\n  unordered: {\n    equal: equalValues(ordered, reversed),\n    leftHash: hashValue(ordered),\n    rightHash: hashValue(reversed),\n  },\n}));\n"))
+(module tests.fixtures.persistent-map-host
+  (import "../../runtime/core/map.mjs" EMPTY_MAP persistentHashMap)
+  (import "../../runtime/testing/map.mjs" inspectPersistentMap persistentMapMetrics resetPersistentMapMetrics sharedPersistentMapNodes)
+  (import "../../runtime/core/value.mjs" equalValues hashValue)
+  (import "../../runtime/core/vector.mjs" persistentVector)
+  (defvar values EMPTY_MAP)
+  (let ((key 0)) (while (< key 100000) (setq values (js-call values :assoc key (* key 2)) key (1+ key))))
+  (defconst shape (inspectPersistentMap values))
+  (resetPersistentMapMetrics)
+  (defconst updated (js-call values :assoc 54321 "updated"))
+  (defconst metrics (persistentMapMetrics))
+  (defconst collision (persistentHashMap (js-array "key-50691" "left") (js-array "key-194634" "right")))
+  (defconst ordered (persistentHashMap (js-array "alpha" 1) (js-array (persistentVector 1 2) (persistentVector "value")) (js-array "omega" 3)))
+  (defconst reversed (persistentHashMap (js-array "omega" 3) (js-array (persistentVector 1 2) (persistentVector "value")) (js-array "alpha" 1)))
+  (js-call globalThis.console :log (JSON/stringify (js-object :shape shape
+    :probes (js-call (js-array 0 31 32 1024 32768 99999) :map (lambda (key) (js-call values :get key)))
+    :missing (js-call values :get "missing" "not-found") :original (js-call values :get 54321) :updated (js-call updated :get 54321)
+    :sharedNodes (sharedPersistentMapNodes values updated) :metrics metrics
+    :sum (js-call values :reduce (lambda (total value) (+ total value)) 0)
+    :collision (js-object :count (get collision :count) :left (js-call collision :get "key-50691") :right (js-call collision :get "key-194634")
+      :shape (inspectPersistentMap collision))
+    :unordered (js-object :equal (equalValues ordered reversed) :leftHash (hashValue ordered) :rightHash (hashValue reversed))))))

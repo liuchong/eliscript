@@ -1,2 +1,495 @@
-(module capsules.tools.collections.benchmark
-  (js* "import { spawn } from \"node:child_process\";\nimport { createHash } from \"node:crypto\";\nimport { createReadStream } from \"node:fs\";\nimport {\n  copyFile,\n  mkdir,\n  mkdtemp,\n  readFile,\n  rm,\n  stat,\n  writeFile,\n} from \"node:fs/promises\";\nimport { createServer } from \"node:http\";\nimport { tmpdir } from \"node:os\";\nimport path from \"node:path\";\nimport process from \"node:process\";\nimport { fileURLToPath, pathToFileURL } from \"node:url\";\n\nimport { validateLayoutHostReport } from \"./layout-benchmark.mjs\";\n\nexport const LAYOUT_SUITE_FORMAT = \"eliscript-hamt-layout-benchmark\";\nexport const LAYOUT_SUITE_VERSION = 1;\nexport const BROWSER_PORT = 8740;\nexport const BROWSER_DEBUG_PORT = 8741;\n\nconst directory = path.dirname(fileURLToPath(import.meta.url));\nconst projectDirectory = path.resolve(directory, \"../..\");\nconst hostRunner = path.join(directory, \"layout-host.mjs\");\nconst browserModuleFiles = Object.freeze([\n  \"runtime/core/map-internals.mjs\",\n  \"runtime/core/protocol-error.mjs\",\n  \"runtime/core/protocol-impl.mjs\",\n  \"runtime/core/protocol.mjs\",\n  \"runtime/core/value-internals.mjs\",\n  \"runtime/core/value.mjs\",\n  \"tools/collections/browser/index.html\",\n  \"tools/collections/browser/main.mjs\",\n  \"tools/collections/layout-benchmark.mjs\",\n]);\nconst digestFiles = Object.freeze([\n  \"runtime/core/map-internals.mjs\",\n  \"runtime/core/protocol-error.mjs\",\n  \"runtime/core/protocol-impl.mjs\",\n  \"runtime/core/protocol.mjs\",\n  \"runtime/core/value.mjs\",\n  \"runtime/core/value-internals.mjs\",\n  \"tools/collections/benchmark.mjs\",\n  \"tools/collections/browser/index.html\",\n  \"tools/collections/browser/main.mjs\",\n  \"tools/collections/layout-benchmark.mjs\",\n]);\n\nfunction parseArguments(arguments_) {\n  let output;\n  for (let index = 0; index < arguments_.length; index += 1) {\n    const argument = arguments_[index];\n    if (argument === \"--output\") {\n      output = arguments_[index + 1];\n      if (output === undefined) {\n        throw new TypeError(\"--output requires a path\");\n      }\n      index += 1;\n    } else if (argument === \"--help\") {\n      process.stdout.write(\n        \"Usage: bun tools/collections/benchmark.mjs [--output REPORT.json]\\n\",\n      );\n      process.exit(0);\n    } else {\n      throw new TypeError(`unknown argument ${argument}`);\n    }\n  }\n  return { output };\n}\n\nfunction benchmarkEnvironment() {\n  return {\n    ...process.env,\n    ELISCRIPT_LAYOUT_OCCUPANCIES:\n      process.env.ELISCRIPT_LAYOUT_OCCUPANCIES ?? \"4,8,12,15,16,20,24,28,32\",\n    ELISCRIPT_LAYOUT_ITERATIONS:\n      process.env.ELISCRIPT_LAYOUT_ITERATIONS ?? \"250000\",\n    ELISCRIPT_LAYOUT_MUTATION_ITERATIONS:\n      process.env.ELISCRIPT_LAYOUT_MUTATION_ITERATIONS ?? \"50000\",\n    ELISCRIPT_LAYOUT_TIMING_SAMPLES:\n      process.env.ELISCRIPT_LAYOUT_TIMING_SAMPLES ?? \"7\",\n    ELISCRIPT_LAYOUT_MEMORY_NODES:\n      process.env.ELISCRIPT_LAYOUT_MEMORY_NODES ?? \"20000\",\n    ELISCRIPT_LAYOUT_MEMORY_SAMPLES:\n      process.env.ELISCRIPT_LAYOUT_MEMORY_SAMPLES ?? \"3\",\n  };\n}\n\nexport async function benchmarkSourceDigest() {\n  const hash = createHash(\"sha256\");\n  for (const relative of digestFiles) {\n    hash.update(relative);\n    hash.update(\"\\0\");\n    hash.update(await readFile(path.join(projectDirectory, relative)));\n    hash.update(\"\\0\");\n  }\n  return {\n    algorithm: \"sha256\",\n    files: digestFiles,\n    value: hash.digest(\"hex\"),\n  };\n}\n\nfunction runCommand(command, arguments_, { env, timeoutMs = 120_000 } = {}) {\n  return new Promise((resolve, reject) => {\n    const child = spawn(command, arguments_, {\n      cwd: projectDirectory,\n      env,\n      stdio: [\"ignore\", \"pipe\", \"pipe\"],\n    });\n    const stdout = [];\n    const stderr = [];\n    child.stdout.on(\"data\", (chunk) => stdout.push(chunk));\n    child.stderr.on(\"data\", (chunk) => stderr.push(chunk));\n    let timedOut = false;\n    const timeout = setTimeout(() => {\n      timedOut = true;\n      child.kill(\"SIGTERM\");\n      setTimeout(() => {\n        if (child.exitCode === null) {\n          child.kill(\"SIGKILL\");\n        }\n      }, 2_000).unref();\n    }, timeoutMs);\n    child.once(\"error\", (error) => {\n      clearTimeout(timeout);\n      reject(error);\n    });\n    child.once(\"close\", (code, signal) => {\n      clearTimeout(timeout);\n      const output = Buffer.concat(stdout).toString(\"utf8\");\n      const errorOutput = Buffer.concat(stderr).toString(\"utf8\");\n      if (timedOut || code !== 0) {\n        reject(new Error(\n          timedOut\n            ? `${command} timed out after ${timeoutMs}ms`\n            : `${command} exited with ${code ?? signal}: ${errorOutput || output}`,\n        ));\n        return;\n      }\n      resolve({ stdout: output, stderr: errorOutput });\n    });\n  });\n}\n\nasync function findChromeExecutable() {\n  const candidates = [\n    process.env.CHROME,\n    \"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\",\n    \"/usr/bin/google-chrome\",\n    \"/usr/bin/google-chrome-stable\",\n    \"/usr/bin/chromium\",\n    \"/usr/bin/chromium-browser\",\n  ].filter(Boolean);\n  for (const candidate of candidates) {\n    try {\n      const metadata = await stat(candidate);\n      if (metadata.isFile()) {\n        return candidate;\n      }\n    } catch {\n      // Try the next known executable path.\n    }\n  }\n  throw new Error(\"Chrome or Chromium executable not found; set CHROME explicitly\");\n}\n\nfunction contentType(file) {\n  switch (path.extname(file)) {\n    case \".html\": return \"text/html; charset=utf-8\";\n    case \".js\": return \"text/javascript; charset=utf-8\";\n    case \".mjs\": return \"text/javascript; charset=utf-8\";\n    case \".css\": return \"text/css; charset=utf-8\";\n    case \".json\": return \"application/json; charset=utf-8\";\n    default: return \"application/octet-stream\";\n  }\n}\n\nasync function prepareBrowserRoot(temporaryDirectory) {\n  const root = path.join(temporaryDirectory, \"browser-root\");\n  for (const relative of browserModuleFiles) {\n    const destination = path.join(root, relative);\n    await mkdir(path.dirname(destination), { recursive: true });\n    await copyFile(path.join(projectDirectory, relative), destination);\n  }\n  return root;\n}\n\nfunction startStaticServer(root) {\n  const server = createServer(async (request, response) => {\n    try {\n      const url = new URL(request.url ?? \"/\", `http://127.0.0.1:${BROWSER_PORT}`);\n      const relative = decodeURIComponent(url.pathname === \"/\" ? \"/index.html\" : url.pathname);\n      const file = path.resolve(root, `.${relative}`);\n      if (!file.startsWith(`${path.resolve(root)}${path.sep}`)) {\n        response.writeHead(403).end(\"forbidden\");\n        return;\n      }\n      const metadata = await stat(file);\n      if (!metadata.isFile()) {\n        response.writeHead(404).end(\"not found\");\n        return;\n      }\n      response.writeHead(200, {\n        \"content-type\": contentType(file),\n        \"content-length\": metadata.size,\n        \"cache-control\": \"no-store\",\n      });\n      createReadStream(file).pipe(response);\n    } catch {\n      response.writeHead(404).end(\"not found\");\n    }\n  });\n  return new Promise((resolve, reject) => {\n    server.once(\"error\", reject);\n    server.listen(BROWSER_PORT, \"127.0.0.1\", () => resolve(server));\n  });\n}\n\nfunction closeServer(server) {\n  return new Promise((resolve, reject) => {\n    server.close((error) => error ? reject(error) : resolve());\n    server.closeAllConnections?.();\n  });\n}\n\nasync function assertPortAvailable(port) {\n  const server = createServer();\n  await new Promise((resolve, reject) => {\n    server.once(\"error\", reject);\n    server.listen(port, \"127.0.0.1\", resolve);\n  });\n  await closeServer(server);\n}\n\nfunction launchProcess(command, arguments_) {\n  const child = spawn(command, arguments_, {\n    cwd: projectDirectory,\n    env: process.env,\n    stdio: [\"ignore\", \"pipe\", \"pipe\"],\n  });\n  const stdout = [];\n  const stderr = [];\n  child.stdout.on(\"data\", (chunk) => stdout.push(chunk));\n  child.stderr.on(\"data\", (chunk) => stderr.push(chunk));\n  const closed = new Promise((resolve, reject) => {\n    child.once(\"error\", reject);\n    child.once(\"close\", (code, signal) => resolve({\n      code,\n      signal,\n      stdout: Buffer.concat(stdout).toString(\"utf8\"),\n      stderr: Buffer.concat(stderr).toString(\"utf8\"),\n    }));\n  });\n  return { child, closed };\n}\n\nfunction delay(milliseconds) {\n  return new Promise((resolve) => setTimeout(resolve, milliseconds));\n}\n\nasync function waitForDebuggerTarget(processHandle, pageUrl, timeoutMs) {\n  const deadline = Date.now() + timeoutMs;\n  while (Date.now() < deadline) {\n    if (processHandle.child.exitCode !== null ||\n        processHandle.child.signalCode !== null) {\n      const result = await processHandle.closed;\n      throw new Error(\n        `Chrome exited before exposing its benchmark page: ${result.stderr || result.stdout}`,\n      );\n    }\n    try {\n      const response = await fetch(\n        `http://127.0.0.1:${BROWSER_DEBUG_PORT}/json/list`,\n      );\n      if (response.ok) {\n        const targets = await response.json();\n        const target = targets.find((candidate) =>\n          candidate.type === \"page\" && candidate.url.startsWith(pageUrl));\n        if (target?.webSocketDebuggerUrl !== undefined) {\n          return target.webSocketDebuggerUrl;\n        }\n      }\n    } catch {\n      // Chrome has not opened the debugger socket yet.\n    }\n    await delay(100);\n  }\n  throw new Error(`Chrome debugger did not become ready within ${timeoutMs}ms`);\n}\n\nasync function connectDebugger(webSocketUrl) {\n  const socket = new WebSocket(webSocketUrl);\n  const pending = new Map();\n  let nextId = 1;\n  await new Promise((resolve, reject) => {\n    socket.addEventListener(\"open\", resolve, { once: true });\n    socket.addEventListener(\"error\", reject, { once: true });\n  });\n  socket.addEventListener(\"message\", (event) => {\n    const message = JSON.parse(String(event.data));\n    if (message.id === undefined) {\n      return;\n    }\n    const request = pending.get(message.id);\n    if (request === undefined) {\n      return;\n    }\n    pending.delete(message.id);\n    if (message.error !== undefined) {\n      request.reject(new Error(message.error.message));\n    } else {\n      request.resolve(message.result);\n    }\n  });\n  socket.addEventListener(\"close\", () => {\n    for (const request of pending.values()) {\n      request.reject(new Error(\"Chrome debugger connection closed\"));\n    }\n    pending.clear();\n  });\n  return {\n    call(method, params = {}) {\n      const id = nextId;\n      nextId += 1;\n      return new Promise((resolve, reject) => {\n        pending.set(id, { resolve, reject });\n        socket.send(JSON.stringify({ id, method, params }));\n      });\n    },\n    close() {\n      socket.close();\n    },\n  };\n}\n\nasync function waitForBrowserReport(debuggerClient, timeoutMs) {\n  const deadline = Date.now() + timeoutMs;\n  while (Date.now() < deadline) {\n    const evaluation = await debuggerClient.call(\"Runtime.evaluate\", {\n      expression: \"document.querySelector('#result')?.textContent ?? ''\",\n      returnByValue: true,\n    });\n    const text = evaluation.result?.value ?? \"\";\n    if (text.startsWith(\"ELISCRIPT_LAYOUT_RESULT:\")) {\n      return validateLayoutHostReport(JSON.parse(\n        text.slice(\"ELISCRIPT_LAYOUT_RESULT:\".length),\n      ));\n    }\n    if (text.startsWith(\"ELISCRIPT_LAYOUT_ERROR:\")) {\n      throw new Error(text.slice(\"ELISCRIPT_LAYOUT_ERROR:\".length));\n    }\n    await delay(100);\n  }\n  throw new Error(`Chrome benchmark did not finish within ${timeoutMs}ms`);\n}\n\nasync function stopChrome(processHandle, debuggerClient) {\n  try {\n    await debuggerClient?.call(\"Browser.close\");\n  } catch {\n    // The debugger socket can close before acknowledging Browser.close.\n  }\n  debuggerClient?.close();\n  const graceful = await Promise.race([\n    processHandle.closed.then(() => true),\n    delay(2_000).then(() => false),\n  ]);\n  if (!graceful && processHandle.child.exitCode === null) {\n    processHandle.child.kill(\"SIGTERM\");\n    const terminated = await Promise.race([\n      processHandle.closed.then(() => true),\n      delay(2_000).then(() => false),\n    ]);\n    if (!terminated && processHandle.child.exitCode === null) {\n      processHandle.child.kill(\"SIGKILL\");\n      await processHandle.closed;\n    }\n  }\n}\n\nfunction browserQuery(environment) {\n  const parameters = new URLSearchParams({\n    occupancies: environment.ELISCRIPT_LAYOUT_OCCUPANCIES,\n    iterations: environment.ELISCRIPT_LAYOUT_ITERATIONS,\n    mutationIterations: environment.ELISCRIPT_LAYOUT_MUTATION_ITERATIONS,\n    timingSamples: environment.ELISCRIPT_LAYOUT_TIMING_SAMPLES,\n    memoryNodes: environment.ELISCRIPT_LAYOUT_MEMORY_NODES,\n    memorySamples: environment.ELISCRIPT_LAYOUT_MEMORY_SAMPLES,\n  });\n  return parameters.toString();\n}\n\nfunction median(values) {\n  const sorted = [...values].sort((left, right) => left - right);\n  const middle = Math.floor(sorted.length / 2);\n  return sorted.length % 2 === 1\n    ? sorted[middle]\n    : (sorted[middle - 1] + sorted[middle]) / 2;\n}\n\nexport function analyzeLayoutSuite(hosts) {\n  const occupancies = hosts[0].parameters.occupancies;\n  const candidates = occupancies.map((occupancy) => {\n    const measurements = hosts.map((host) =>\n      host.measurements.find((entry) => entry.occupancy === occupancy));\n    const mixedRatios = measurements.map((entry) =>\n      entry.ratios.arrayToBitmapMixed);\n    const memoryRatios = measurements\n      .map((entry) => entry.ratios.arrayToBitmapBytes)\n      .filter((value) => value !== null);\n    return {\n      occupancy,\n      arrayMixedWins: mixedRatios.filter((value) => value <= 1).length,\n      medianArrayToBitmapMixed: median(mixedRatios),\n      measuredMemoryHosts: memoryRatios.length,\n      medianArrayToBitmapBytes: memoryRatios.length === 0\n        ? null\n        : median(memoryRatios),\n    };\n  });\n  const promotionCandidate = candidates.find((candidate) =>\n    candidate.arrayMixedWins >= 2 &&\n    candidate.measuredMemoryHosts >= 2 &&\n    candidate.medianArrayToBitmapBytes <= 1.5);\n  const demotionCandidates = candidates.filter((candidate) =>\n    promotionCandidate !== undefined &&\n    candidate.occupancy < promotionCandidate.occupancy &&\n    candidate.medianArrayToBitmapMixed >= 1.15 &&\n    candidate.measuredMemoryHosts >= 2 &&\n    candidate.medianArrayToBitmapBytes >= 1.15);\n  const demotionCandidate = demotionCandidates.at(-1);\n  return {\n    policy: {\n      workload: { lookup: 0.8, assoc: 0.1, dissoc: 0.1 },\n      minimumArrayWinningHosts: 2,\n      minimumPreciseMemoryHosts: 2,\n      maximumMedianArrayToBitmapBytes: 1.5,\n      minimumBitmapMixedAdvantageAtDemotion: 1.15,\n      minimumBitmapMemoryAdvantageAtDemotion: 1.15,\n    },\n    candidates,\n    promotionCandidate: promotionCandidate?.occupancy ?? null,\n    demotionCandidate: demotionCandidate?.occupancy ?? null,\n  };\n}\n\nasync function runBrowserBenchmark(environment, temporaryDirectory) {\n  const browserRoot = await prepareBrowserRoot(temporaryDirectory);\n  const chrome = await findChromeExecutable();\n  const userDataDirectory = path.join(temporaryDirectory, \"chrome-profile\");\n  let server;\n  let processHandle;\n  let debuggerClient;\n  try {\n    await assertPortAvailable(BROWSER_DEBUG_PORT);\n    server = await startStaticServer(browserRoot);\n    const url =\n      `http://127.0.0.1:${BROWSER_PORT}/tools/collections/browser/index.html?` +\n      browserQuery(environment);\n    processHandle = launchProcess(chrome, [\n      \"--headless=new\",\n      \"--disable-gpu\",\n      \"--disable-background-networking\",\n      \"--disable-component-update\",\n      \"--disable-sync\",\n      \"--no-first-run\",\n      \"--no-default-browser-check\",\n      \"--enable-precise-memory-info\",\n      \"--js-flags=--expose-gc\",\n      `--remote-debugging-port=${BROWSER_DEBUG_PORT}`,\n      \"--remote-allow-origins=*\",\n      `--user-data-dir=${userDataDirectory}`,\n      url,\n    ]);\n    const debuggerUrl = await waitForDebuggerTarget(processHandle, url, 15_000);\n    debuggerClient = await connectDebugger(debuggerUrl);\n    return await waitForBrowserReport(debuggerClient, 180_000);\n  } finally {\n    if (processHandle !== undefined) {\n      await stopChrome(processHandle, debuggerClient);\n    }\n    if (server !== undefined) {\n      await closeServer(server);\n    }\n  }\n}\n\nexport function validateLayoutSuiteReport(report) {\n  if (report?.format !== LAYOUT_SUITE_FORMAT ||\n      report?.version !== LAYOUT_SUITE_VERSION) {\n    throw new TypeError(\"invalid HAMT layout benchmark suite format or version\");\n  }\n  if (!Array.isArray(report.hosts) || report.hosts.length !== 3) {\n    throw new TypeError(\"HAMT layout benchmark requires exactly three host reports\");\n  }\n  const ids = new Set();\n  const parameters = JSON.stringify(report.hosts[0].parameters);\n  for (const host of report.hosts) {\n    validateLayoutHostReport(host);\n    if (JSON.stringify(host.parameters) !== parameters) {\n      throw new TypeError(\"HAMT layout benchmark host parameters differ\");\n    }\n    ids.add(host.host.id);\n  }\n  for (const required of [\"bun\", \"node\", \"chrome\"]) {\n    if (!ids.has(required)) {\n      throw new TypeError(`HAMT layout benchmark is missing ${required}`);\n    }\n  }\n  if (report.sourceDigest?.algorithm !== \"sha256\" ||\n      !/^[0-9a-f]{64}$/.test(report.sourceDigest?.value ?? \"\")) {\n    throw new TypeError(\"HAMT layout benchmark source digest is invalid\");\n  }\n  const analysis = analyzeLayoutSuite(report.hosts);\n  if (JSON.stringify(report.analysis) !== JSON.stringify(analysis)) {\n    throw new TypeError(\"HAMT layout benchmark analysis does not match raw samples\");\n  }\n  if (report.runtimeThresholds?.promotion !== analysis.promotionCandidate ||\n      report.runtimeThresholds?.demotion !== analysis.demotionCandidate) {\n    const declared =\n      `${report.runtimeThresholds?.promotion ?? \"none\"}/` +\n      `${report.runtimeThresholds?.demotion ?? \"none\"}`;\n    const measured =\n      `${analysis.promotionCandidate ?? \"none\"}/` +\n      `${analysis.demotionCandidate ?? \"none\"}`;\n    const error = new TypeError(\n      `HAMT runtime thresholds ${declared} do not match measured candidates ${measured}`,\n    );\n    error.report = report;\n    throw error;\n  }\n  return report;\n}\n\nexport async function runLayoutSuiteBenchmark() {\n  const environment = benchmarkEnvironment();\n  const temporaryDirectory = await mkdtemp(\n    path.join(tmpdir(), \"eliscript-layout-benchmark-\"),\n  );\n  try {\n    const bun = process.env.BUN ?? (typeof Bun === \"object\" ? process.execPath : \"bun\");\n    const node = process.env.NODE ?? \"node\";\n    const bunResult = await runCommand(bun, [hostRunner], { env: environment });\n    const nodeResult = await runCommand(node, [\"--expose-gc\", hostRunner], {\n      env: environment,\n    });\n    const hosts = [\n      validateLayoutHostReport(JSON.parse(bunResult.stdout)),\n      validateLayoutHostReport(JSON.parse(nodeResult.stdout)),\n      await runBrowserBenchmark(environment, temporaryDirectory),\n    ];\n    return validateLayoutSuiteReport({\n      format: LAYOUT_SUITE_FORMAT,\n      version: LAYOUT_SUITE_VERSION,\n      generatedAt: new Date().toISOString(),\n      sourceDigest: await benchmarkSourceDigest(),\n      runtimeThresholds: { promotion: 32, demotion: 24 },\n      hosts,\n      analysis: analyzeLayoutSuite(hosts),\n    });\n  } finally {\n    await rm(temporaryDirectory, { recursive: true, force: true });\n  }\n}\n\nasync function main() {\n  const { output } = parseArguments(process.argv.slice(2));\n  const report = await runLayoutSuiteBenchmark();\n  const json = `${JSON.stringify(report, null, 2)}\\n`;\n  if (output === undefined) {\n    process.stdout.write(json);\n  } else {\n    const resolved = path.resolve(projectDirectory, output);\n    await writeFile(resolved, json, \"utf8\");\n    process.stdout.write(`${pathToFileURL(resolved).href}\\n`);\n  }\n}\n\nif (path.resolve(process.argv[1] ?? \"\") === fileURLToPath(import.meta.url)) {\n  await main();\n}\n"))
+(module tools.collections.benchmark
+  (import "node:child_process" spawn)
+  (import "node:crypto" createHash)
+  (import "node:fs" createReadStream)
+  (import "node:fs/promises" copyFile mkdir mkdtemp readFile rm stat writeFile)
+  (import "node:http" createServer)
+  (import "node:os" tmpdir)
+  (import "node:path" :default path)
+  (import "node:process" :default process)
+  (import "node:url" fileURLToPath pathToFileURL)
+  (import "./layout-benchmark.mjs" validateLayoutHostReport)
+
+  (defconst LAYOUT_SUITE_FORMAT "eliscript-hamt-layout-benchmark")
+  (defconst LAYOUT_SUITE_VERSION 1)
+  (defconst BROWSER_PORT 8740)
+  (defconst BROWSER_DEBUG_PORT 8741)
+
+  (defconst directory (js-call path :dirname (fileURLToPath (get (js* "import.meta") :url))))
+  (defconst project-directory (js-call path :resolve directory "../.."))
+  (defconst host-runner (js-call path :join directory "layout-host.mjs"))
+
+  (defconst browser-module-files (Object/freeze (js-array
+    "runtime/core/map-internals.mjs"
+    "runtime/core/protocol-error.mjs"
+    "runtime/core/protocol-impl.mjs"
+    "runtime/core/protocol.mjs"
+    "runtime/core/value-internals.mjs"
+    "runtime/core/value.mjs"
+    "tools/collections/browser/index.html"
+    "tools/collections/browser/main.mjs"
+    "tools/collections/layout-benchmark.mjs")))
+
+  (defconst digest-files (Object/freeze (js-array
+    "runtime/core/map-internals.mjs"
+    "runtime/core/protocol-error.mjs"
+    "runtime/core/protocol-impl.mjs"
+    "runtime/core/protocol.mjs"
+    "runtime/core/value.mjs"
+    "runtime/core/value-internals.mjs"
+    "tools/collections/benchmark.mjs"
+    "tools/collections/browser/index.html"
+    "tools/collections/browser/main.mjs"
+    "tools/collections/layout-benchmark.mjs")))
+
+  (defun parse-arguments (args)
+    (let ((output undefined) (index 0))
+      (while (< index (js-length args))
+        (let ((argument (aref args index)))
+          (cond
+            ((= argument "--output")
+             (setq output (aref args (1+ index)))
+             (when (undefined? output)
+               (throw (new globalThis.TypeError "--output requires a path")))
+             (setq index (1+ index)))
+            ((= argument "--help")
+             (js-call (get process :stdout) :write
+               "Usage: bun tools/collections/benchmark.mjs [--output REPORT.json]\n")
+             (js-call process :exit 0))
+            (t (throw (new globalThis.TypeError (str "unknown argument " argument))))))
+        (setq index (1+ index)))
+      (js-object :output output)))
+
+  (defun benchmark-environment ()
+    (let ((env (get process :env)))
+      (Object/assign (js-object) env (js-object
+        :ELISCRIPT_LAYOUT_OCCUPANCIES (or (get env :ELISCRIPT_LAYOUT_OCCUPANCIES) "4,8,12,15,16,20,24,28,32")
+        :ELISCRIPT_LAYOUT_ITERATIONS (or (get env :ELISCRIPT_LAYOUT_ITERATIONS) "250000")
+        :ELISCRIPT_LAYOUT_MUTATION_ITERATIONS (or (get env :ELISCRIPT_LAYOUT_MUTATION_ITERATIONS) "50000")
+        :ELISCRIPT_LAYOUT_TIMING_SAMPLES (or (get env :ELISCRIPT_LAYOUT_TIMING_SAMPLES) "7")
+        :ELISCRIPT_LAYOUT_MEMORY_NODES (or (get env :ELISCRIPT_LAYOUT_MEMORY_NODES) "20000")
+        :ELISCRIPT_LAYOUT_MEMORY_SAMPLES (or (get env :ELISCRIPT_LAYOUT_MEMORY_SAMPLES) "3")))))
+
+  (defasync benchmarkSourceDigest ()
+    (let ((hash (createHash "sha256")) (index 0))
+      (while (< index (js-length digest-files))
+        (let ((relative (aref digest-files index)))
+          (js-call hash :update relative)
+          (js-call hash :update "\u0000")
+          (js-call hash :update (await (readFile (js-call path :join project-directory relative))))
+          (js-call hash :update "\u0000"))
+        (setq index (1+ index)))
+      (js-object :algorithm "sha256" :files digest-files :value (js-call hash :digest "hex"))))
+
+  (defun run-command (command args &optional options)
+    (let* ((opts (or options (js-object)))
+           (env (get opts :env))
+           (timeout-ms (if (undefined? (get opts :timeoutMs)) 120000 (get opts :timeoutMs))))
+      (new globalThis.Promise (lambda (resolve-fn reject-fn)
+        (let* ((child (spawn command args (js-object
+                        :cwd project-directory
+                        :env env
+                        :stdio (js-array "ignore" "pipe" "pipe"))))
+               (stdout (js-array))
+               (stderr (js-array))
+               (timed-out false)
+               (timeout (funcall globalThis.setTimeout (lambda ()
+                          (setq timed-out t)
+                          (js-call child :kill "SIGTERM")
+                          (js-call (funcall globalThis.setTimeout (lambda ()
+                            (when (eq (get child :exitCode) nil)
+                              (js-call child :kill "SIGKILL"))) 2000) :unref))
+                        timeout-ms)))
+          (js-call (get child :stdout) :on "data" (lambda (chunk) (js-call stdout :push chunk)))
+          (js-call (get child :stderr) :on "data" (lambda (chunk) (js-call stderr :push chunk)))
+          (js-call child :once "error" (lambda (error)
+            (funcall globalThis.clearTimeout timeout)
+            (funcall reject-fn error)))
+          (js-call child :once "close" (lambda (code signal)
+            (funcall globalThis.clearTimeout timeout)
+            (let ((output (js-call (js-call globalThis.Buffer :concat stdout) :toString "utf8"))
+                  (error-output (js-call (js-call globalThis.Buffer :concat stderr) :toString "utf8")))
+              (if (or timed-out (/= code 0))
+                (funcall reject-fn (new globalThis.Error
+                  (if timed-out
+                    (str command " timed out after " timeout-ms "ms")
+                    (str command " exited with " (if (nullish? code) signal code) ": "
+                         (if (> (js-length error-output) 0) error-output output)))))
+                (funcall resolve-fn (js-object :stdout output :stderr error-output)))))))))))
+
+  (defasync find-chrome-executable ()
+    (let ((candidates (js-call (js-array
+                        (get (get process :env) :CHROME)
+                        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+                        "/usr/bin/google-chrome"
+                        "/usr/bin/google-chrome-stable"
+                        "/usr/bin/chromium"
+                        "/usr/bin/chromium-browser") :filter (lambda (x) x)))
+          (found undefined)
+          (index 0))
+      (while (and (undefined? found) (< index (js-length candidates)))
+        (let ((candidate (aref candidates index)))
+          (try
+            (let ((metadata (await (stat candidate))))
+              (when (js-call metadata :isFile)
+                (setq found candidate)))
+            (catch ignored nil)))
+        (setq index (1+ index)))
+      (when (undefined? found)
+        (throw (new globalThis.Error "Chrome or Chromium executable not found; set CHROME explicitly")))
+      found))
+
+  (defun content-type (file)
+    (let ((ext (js-call path :extname file)))
+      (cond
+        ((= ext ".html") "text/html; charset=utf-8")
+        ((= ext ".js") "text/javascript; charset=utf-8")
+        ((= ext ".mjs") "text/javascript; charset=utf-8")
+        ((= ext ".css") "text/css; charset=utf-8")
+        ((= ext ".json") "application/json; charset=utf-8")
+        (t "application/octet-stream"))))
+
+  (defasync prepare-browser-root (temporary-directory)
+    (let ((root (js-call path :join temporary-directory "browser-root"))
+          (index 0))
+      (while (< index (js-length browser-module-files))
+        (let* ((relative (aref browser-module-files index))
+               (destination (js-call path :join root relative)))
+          (await (mkdir (js-call path :dirname destination) (js-object :recursive t)))
+          (await (copyFile (js-call path :join project-directory relative) destination)))
+        (setq index (1+ index)))
+      root))
+
+  (defun start-static-server (root)
+    (let ((server (createServer (async (request response)
+                    (try
+                      (let* ((url (new globalThis.URL (or (get request :url) "/") (str "http://127.0.0.1:" BROWSER_PORT)))
+                             (pathname (get url :pathname))
+                             (relative (funcall globalThis.decodeURIComponent (if (= pathname "/") "/index.html" pathname)))
+                             (file (js-call path :resolve root (str "." relative))))
+                        (if (not (js-call file :startsWith (str (js-call path :resolve root) (get path :sep))))
+                          (js-call (js-call response :writeHead 403) :end "forbidden")
+                          (let ((metadata (await (stat file))))
+                            (if (not (js-call metadata :isFile))
+                              (js-call (js-call response :writeHead 404) :end "not found")
+                              (progn
+                                (js-call response :writeHead 200 (js-object
+                                  "content-type" (content-type file)
+                                  "content-length" (get metadata :size)
+                                  "cache-control" "no-store"))
+                                (js-call (createReadStream file) :pipe response))))))
+                      (catch ignored
+                        (js-call (js-call response :writeHead 404) :end "not found")))))))
+      (new globalThis.Promise (lambda (resolve-fn reject-fn)
+        (js-call server :once "error" reject-fn)
+        (js-call server :listen BROWSER_PORT "127.0.0.1" (lambda () (funcall resolve-fn server)))))))
+
+  (defun close-server (server)
+    (new globalThis.Promise (lambda (resolve-fn reject-fn)
+      (js-call server :close (lambda (error) (if error (funcall reject-fn error) (funcall resolve-fn undefined))))
+      (when (get server :closeAllConnections)
+        (js-call server :closeAllConnections)))))
+
+  (defasync assert-port-available (port)
+    (let ((server (createServer)))
+      (await (new globalThis.Promise (lambda (resolve-fn reject-fn)
+        (js-call server :once "error" reject-fn)
+        (js-call server :listen port "127.0.0.1" resolve-fn))))
+      (await (close-server server))))
+
+  (defun launch-process (command args)
+    (let* ((child (spawn command args (js-object
+                    :cwd project-directory
+                    :env (get process :env)
+                    :stdio (js-array "ignore" "pipe" "pipe"))))
+           (stdout (js-array))
+           (stderr (js-array))
+           (closed (new globalThis.Promise (lambda (resolve-fn reject-fn)
+                     (js-call child :once "error" reject-fn)
+                     (js-call child :once "close" (lambda (code signal)
+                       (funcall resolve-fn (js-object
+                         :code code
+                         :signal signal
+                         :stdout (js-call (js-call globalThis.Buffer :concat stdout) :toString "utf8")
+                         :stderr (js-call (js-call globalThis.Buffer :concat stderr) :toString "utf8")))))))))
+      (js-call (get child :stdout) :on "data" (lambda (chunk) (js-call stdout :push chunk)))
+      (js-call (get child :stderr) :on "data" (lambda (chunk) (js-call stderr :push chunk)))
+      (js-object :child child :closed closed)))
+
+  (defun delay (ms)
+    (new globalThis.Promise (lambda (resolve-fn) (funcall globalThis.setTimeout resolve-fn ms))))
+
+  (defasync wait-for-debugger-target (process-handle page-url timeout-ms)
+    (let ((deadline (+ (Date/now) timeout-ms))
+          (found undefined))
+      (while (and (undefined? found) (< (Date/now) deadline))
+        (let ((child (get process-handle :child)))
+          (when (or (not (eq (get child :exitCode) nil))
+                    (not (eq (get child :signalCode) nil)))
+            (let ((result (await (get process-handle :closed))))
+              (throw (new globalThis.Error
+                (str "Chrome exited before exposing its benchmark page: "
+                     (or (get result :stderr) (get result :stdout))))))))
+        (try
+          (let ((response (await (funcall globalThis.fetch (str "http://127.0.0.1:" BROWSER_DEBUG_PORT "/json/list")))))
+            (when (get response :ok)
+              (let* ((targets (await (js-call response :json)))
+                     (target (js-call targets :find (lambda (candidate)
+                               (and (= (get candidate :type) "page")
+                                    (js-call (get candidate :url) :startsWith page-url))))))
+                (when (and target (not (undefined? (get target :webSocketDebuggerUrl))))
+                  (setq found (get target :webSocketDebuggerUrl))))))
+          (catch ignored nil))
+        (when (undefined? found)
+          (await (delay 100))))
+      (when (undefined? found)
+        (throw (new globalThis.Error (str "Chrome debugger did not become ready within " timeout-ms "ms"))))
+      found))
+
+  (defasync connect-debugger (web-socket-url)
+    (let ((socket (new globalThis.WebSocket web-socket-url))
+          (pending (new globalThis.Map))
+          (next-id 1))
+      (await (new globalThis.Promise (lambda (resolve-fn reject-fn)
+        (js-call socket :addEventListener "open" resolve-fn (js-object :once t))
+        (js-call socket :addEventListener "error" reject-fn (js-object :once t)))))
+      (js-call socket :addEventListener "message" (lambda (event)
+        (let ((message (JSON/parse (funcall globalThis.String (get event :data)))))
+          (unless (undefined? (get message :id))
+            (let ((request (js-call pending :get (get message :id))))
+              (unless (undefined? request)
+                (js-call pending :delete (get message :id))
+                (if (not (undefined? (get message :error)))
+                  (js-call request :reject (new globalThis.Error (get (get message :error) :message)))
+                  (js-call request :resolve (get message :result)))))))))
+      (js-call socket :addEventListener "close" (lambda ()
+        (js-call (Array/from (js-call pending :values)) :forEach (lambda (request)
+          (js-call request :reject (new globalThis.Error "Chrome debugger connection closed"))))
+        (js-call pending :clear)))
+      (js-object
+        :call (lambda (method &optional params)
+          (let ((id next-id) (actual-params (or params (js-object))))
+            (setq next-id (1+ next-id))
+            (new globalThis.Promise (lambda (resolve-fn reject-fn)
+              (js-call pending :set id (js-object :resolve resolve-fn :reject reject-fn))
+              (js-call socket :send (JSON/stringify (js-object :id id :method method :params actual-params)))))))
+        :close (lambda () (js-call socket :close)))))
+
+  (defasync wait-for-browser-report (debugger-client timeout-ms)
+    (let ((deadline (+ (Date/now) timeout-ms))
+          (report undefined))
+      (while (and (undefined? report) (< (Date/now) deadline))
+        (let* ((evaluation (await (js-call debugger-client :call "Runtime.evaluate" (js-object
+                             :expression "document.querySelector('#result')?.textContent ?? ''"
+                             :returnByValue t))))
+               (res (get evaluation :result))
+               (text (or (and res (get res :value)) "")))
+          (cond
+            ((js-call text :startsWith "ELISCRIPT_LAYOUT_RESULT:")
+             (setq report (validateLayoutHostReport (JSON/parse
+               (js-call text :slice (js-length "ELISCRIPT_LAYOUT_RESULT:"))))))
+            ((js-call text :startsWith "ELISCRIPT_LAYOUT_ERROR:")
+             (throw (new globalThis.Error (js-call text :slice (js-length "ELISCRIPT_LAYOUT_ERROR:")))))
+            (t (await (delay 100))))))
+      (when (undefined? report)
+        (throw (new globalThis.Error (str "Chrome benchmark did not finish within " timeout-ms "ms"))))
+      report))
+
+  (defasync stop-chrome (process-handle debugger-client)
+    (when debugger-client
+      (try (await (js-call debugger-client :call "Browser.close")) (catch ignored nil))
+      (js-call debugger-client :close))
+    (let ((graceful (await (Promise/race (js-array
+                      (js-call (get process-handle :closed) :then (lambda () t))
+                      (js-call (delay 2000) :then (lambda () false))))))
+          (child (get process-handle :child)))
+      (when (and (not graceful) (eq (get child :exitCode) nil))
+        (js-call child :kill "SIGTERM")
+        (let ((terminated (await (Promise/race (js-array
+                            (js-call (get process-handle :closed) :then (lambda () t))
+                            (js-call (delay 2000) :then (lambda () false)))))))
+          (when (and (not terminated) (eq (get child :exitCode) nil))
+            (js-call child :kill "SIGKILL")
+            (await (get process-handle :closed)))))))
+
+  (defun browser-query (environment)
+    (let ((parameters (new globalThis.URLSearchParams (js-object
+            :occupancies (get environment :ELISCRIPT_LAYOUT_OCCUPANCIES)
+            :iterations (get environment :ELISCRIPT_LAYOUT_ITERATIONS)
+            :mutationIterations (get environment :ELISCRIPT_LAYOUT_MUTATION_ITERATIONS)
+            :timingSamples (get environment :ELISCRIPT_LAYOUT_TIMING_SAMPLES)
+            :memoryNodes (get environment :ELISCRIPT_LAYOUT_MEMORY_NODES)
+            :memorySamples (get environment :ELISCRIPT_LAYOUT_MEMORY_SAMPLES)))))
+      (js-call parameters :toString)))
+
+  (defun median (values)
+    (let* ((sorted (js-call (Array/from values) :sort (lambda (left right) (- left right))))
+           (middle (Math/floor (/ (js-length sorted) 2))))
+      (if (= (% (js-length sorted) 2) 1)
+        (aref sorted middle)
+        (/ (+ (aref sorted (1- middle)) (aref sorted middle)) 2))))
+
+  (defun analyzeLayoutSuite (hosts)
+    (let* ((occupancies (get (get (aref hosts 0) :parameters) :occupancies))
+           (candidates (js-call occupancies :map (lambda (occupancy)
+             (let* ((measurements (js-call hosts :map (lambda (host)
+                                    (js-call (get host :measurements) :find
+                                      (lambda (entry) (= (get entry :occupancy) occupancy))))))
+                    (mixed-ratios (js-call measurements :map (lambda (entry)
+                                    (get (get entry :ratios) :arrayToBitmapMixed))))
+                    (memory-ratios (js-call (js-call measurements :map (lambda (entry)
+                                      (get (get entry :ratios) :arrayToBitmapBytes)))
+                                     :filter (lambda (value) (not (eq value nil))))))
+               (js-object
+                 :occupancy occupancy
+                 :arrayMixedWins (js-length (js-call mixed-ratios :filter (lambda (value) (<= value 1))))
+                 :medianArrayToBitmapMixed (median mixed-ratios)
+                 :measuredMemoryHosts (js-length memory-ratios)
+                 :medianArrayToBitmapBytes (if (= (js-length memory-ratios) 0) nil (median memory-ratios)))))))
+           (promotion-candidate (js-call candidates :find (lambda (candidate)
+                                  (and (>= (get candidate :arrayMixedWins) 2)
+                                       (>= (get candidate :measuredMemoryHosts) 2)
+                                       (<= (get candidate :medianArrayToBitmapBytes) 1.5)))))
+           (demotion-candidates (js-call candidates :filter (lambda (candidate)
+                                  (and (not (undefined? promotion-candidate))
+                                       (< (get candidate :occupancy) (get promotion-candidate :occupancy))
+                                       (>= (get candidate :medianArrayToBitmapMixed) 1.15)
+                                       (>= (get candidate :measuredMemoryHosts) 2)
+                                       (>= (get candidate :medianArrayToBitmapBytes) 1.15)))))
+           (demotion-candidate (js-call demotion-candidates :at -1)))
+      (js-object
+        :policy (js-object
+                  :workload (js-object :lookup 0.8 :assoc 0.1 :dissoc 0.1)
+                  :minimumArrayWinningHosts 2
+                  :minimumPreciseMemoryHosts 2
+                  :maximumMedianArrayToBitmapBytes 1.5
+                  :minimumBitmapMixedAdvantageAtDemotion 1.15
+                  :minimumBitmapMemoryAdvantageAtDemotion 1.15)
+        :candidates candidates
+        :promotionCandidate (if promotion-candidate (get promotion-candidate :occupancy) nil)
+        :demotionCandidate (if demotion-candidate (get demotion-candidate :occupancy) nil))))
+
+  (defasync run-browser-benchmark (environment temporary-directory)
+    (let ((browser-root (await (prepare-browser-root temporary-directory)))
+          (chrome (await (find-chrome-executable)))
+          (user-data-directory (js-call path :join temporary-directory "chrome-profile"))
+          (server undefined)
+          (process-handle undefined)
+          (debugger-client undefined))
+      (try
+        (progn
+          (await (assert-port-available BROWSER_DEBUG_PORT))
+          (setq server (await (start-static-server browser-root)))
+          (let ((url (str "http://127.0.0.1:" BROWSER_PORT "/tools/collections/browser/index.html?"
+                          (browser-query environment))))
+            (setq process-handle (launch-process chrome (js-array
+              "--headless=new"
+              "--disable-gpu"
+              "--disable-background-networking"
+              "--disable-component-update"
+              "--disable-sync"
+              "--no-first-run"
+              "--no-default-browser-check"
+              "--enable-precise-memory-info"
+              "--js-flags=--expose-gc"
+              (str "--remote-debugging-port=" BROWSER_DEBUG_PORT)
+              "--remote-allow-origins=*"
+              (str "--user-data-dir=" user-data-directory)
+              url)))
+            (let ((debugger-url (await (wait-for-debugger-target process-handle url 15000))))
+              (setq debugger-client (await (connect-debugger debugger-url)))
+              (await (wait-for-browser-report debugger-client 180000)))))
+        (finally
+          (unless (undefined? process-handle)
+            (await (stop-chrome process-handle debugger-client)))
+          (unless (undefined? server)
+            (await (close-server server)))))))
+
+  (defun validateLayoutSuiteReport (report)
+    (when (or (nullish? report)
+              (/= (get report :format) LAYOUT_SUITE_FORMAT)
+              (/= (get report :version) LAYOUT_SUITE_VERSION))
+      (throw (new globalThis.TypeError "invalid HAMT layout benchmark suite format or version")))
+    (let ((hosts (get report :hosts)))
+      (unless (and (Array/isArray hosts) (= (js-length hosts) 3))
+        (throw (new globalThis.TypeError "HAMT layout benchmark requires exactly three host reports")))
+      (let ((ids (new globalThis.Set))
+            (parameters (JSON/stringify (get (aref hosts 0) :parameters)))
+            (index 0))
+        (while (< index (js-length hosts))
+          (let ((host (aref hosts index)))
+            (validateLayoutHostReport host)
+            (unless (= (JSON/stringify (get host :parameters)) parameters)
+              (throw (new globalThis.TypeError "HAMT layout benchmark host parameters differ")))
+            (js-call ids :add (get (get host :host) :id)))
+          (setq index (1+ index)))
+        (js-call (js-array "bun" "node" "chrome") :forEach (lambda (required)
+          (unless (js-call ids :has required)
+            (throw (new globalThis.TypeError (str "HAMT layout benchmark is missing " required))))))
+        (let ((source-digest (get report :sourceDigest)))
+          (when (or (nullish? source-digest)
+                    (/= (get source-digest :algorithm) "sha256")
+                    (not (js-call (new globalThis.RegExp "^[0-9a-f]{64}$") :test (or (get source-digest :value) ""))))
+            (throw (new globalThis.TypeError "HAMT layout benchmark source digest is invalid"))))
+        (let ((analysis (analyzeLayoutSuite hosts))
+              (thresholds (get report :runtimeThresholds)))
+          (unless (= (JSON/stringify (get report :analysis)) (JSON/stringify analysis))
+            (throw (new globalThis.TypeError "HAMT layout benchmark analysis does not match raw samples")))
+          (when (or (nullish? thresholds)
+                    (/= (get thresholds :promotion) (get analysis :promotionCandidate))
+                    (/= (get thresholds :demotion) (get analysis :demotionCandidate)))
+            (let* ((declared (str (if (or (nullish? thresholds) (nullish? (get thresholds :promotion))) "none" (get thresholds :promotion))
+                                  "/"
+                                  (if (or (nullish? thresholds) (nullish? (get thresholds :demotion))) "none" (get thresholds :demotion))))
+                   (measured (str (if (nullish? (get analysis :promotionCandidate)) "none" (get analysis :promotionCandidate))
+                                  "/"
+                                  (if (nullish? (get analysis :demotionCandidate)) "none" (get analysis :demotionCandidate))))
+                   (error (new globalThis.TypeError
+                            (str "HAMT runtime thresholds " declared " do not match measured candidates " measured))))
+              (put error :report report)
+              (throw error))))
+        report)))
+
+  (defasync runLayoutSuiteBenchmark ()
+    (let ((environment (benchmark-environment))
+          (temporary-directory (await (mkdtemp (js-call path :join (tmpdir) "eliscript-layout-benchmark-")))))
+      (try
+        (let* ((env (get process :env))
+               (bun (or (get env :BUN) (if (= (value-type globalThis.Bun) "object") (get process :execPath) "bun")))
+               (node (or (get env :NODE) "node"))
+               (bun-result (await (run-command bun (js-array host-runner) (js-object :env environment))))
+               (node-result (await (run-command node (js-array "--expose-gc" host-runner) (js-object :env environment))))
+               (hosts (js-array
+                        (validateLayoutHostReport (JSON/parse (get bun-result :stdout)))
+                        (validateLayoutHostReport (JSON/parse (get node-result :stdout)))
+                        (await (run-browser-benchmark environment temporary-directory)))))
+          (validateLayoutSuiteReport (js-object
+            :format LAYOUT_SUITE_FORMAT
+            :version LAYOUT_SUITE_VERSION
+            :generatedAt (js-call (new globalThis.Date) :toISOString)
+            :sourceDigest (await (benchmarkSourceDigest))
+            :runtimeThresholds (js-object :promotion 32 :demotion 24)
+            :hosts hosts
+            :analysis (analyzeLayoutSuite hosts))))
+        (finally
+          (await (rm temporary-directory (js-object :recursive t :force t)))))))
+
+  (defasync main ()
+    (let* ((parsed (parse-arguments (js-call (get process :argv) :slice 2)))
+           (output (get parsed :output))
+           (report (await (runLayoutSuiteBenchmark)))
+           (json (str (JSON/stringify report nil 2) "\n")))
+      (if (undefined? output)
+        (js-call (get process :stdout) :write json)
+        (let ((resolved (js-call path :resolve project-directory output)))
+          (await (writeFile resolved json "utf8"))
+          (js-call (get process :stdout) :write (str (get (pathToFileURL resolved) :href) "\n"))))))
+
+  (when (= (js-call path :resolve (or (aref (get process :argv) 1) ""))
+           (fileURLToPath (get (js* "import.meta") :url)))
+    (js-call (main) :catch (lambda (error)
+      (js-call globalThis.console :error error)
+      (put process :exitCode 1))))
+
+  (export LAYOUT_SUITE_FORMAT LAYOUT_SUITE_VERSION BROWSER_PORT BROWSER_DEBUG_PORT
+          benchmarkSourceDigest analyzeLayoutSuite validateLayoutSuiteReport runLayoutSuiteBenchmark))

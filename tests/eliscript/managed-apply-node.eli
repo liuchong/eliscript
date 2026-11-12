@@ -15,6 +15,17 @@
     "(defun pack (&rest values) (JSON/stringify values))"
     "(defun apply-input (values) (apply pack values))"
     "(defun composed (collection values) (apply pack (js-call (js-array collection) :concat values)))"
+    "(defun fixed-forward (values) (apply pack \"prefix\" -0 values))"
+    "(defun fixed-nil () (apply pack 7 nil))"
+    "(defun apply-nil () (apply pack nil))"
+    "(defun lisp-prefix () (apply (lambda (a b c) (+ a b c)) 1 2 3 nil))"
+    "(defun lisp-empty () (apply (lambda (a) a) 7 nil))"
+    "(defun fixed-order () (let ((trace \"\") (f (lambda (&rest xs) (str \"old:\" (JSON/stringify xs)))))"
+    " (let ((out (apply (progn (setq trace (str trace \"c\")) f)"
+    "   (progn (setq trace (str trace \"p\")) (js-object :tag \"kept\"))"
+    "   (progn (setq trace (str trace \"q\")) (setq f (lambda (&rest xs) \"new\")) 2)"
+    "   (progn (setq trace (str trace \"t\")) (js-array 3 4))))) (JSON/stringify (js-array trace out)))))"
+    "(defun prefix-throw () (apply pack (throw false) (throw \"late\")))"
     "(defun rest-forward (collection &rest values) (apply pack (js-call (js-array collection) :concat values)))"
     "(defun closed (values) (let ((offset 10)) (apply (lambda (a b) (+ offset a b)) values)))"
     "(defun alias (value values) (apply (lambda (first &rest tail) first) (js-call (js-array value) :concat values)))"
@@ -39,7 +50,7 @@
     "   (let ((position index)) (setq index (1+ index)) (js-object :done (>= position 2) :value position))))))))"
     " (try (let ((out (apply (progn (setq trace (str trace \"c\")) pack) (progn (setq trace (str trace \"v\")) input))))"
     "        (JSON/stringify (js-array trace out))) (catch error (JSON/stringify (js-array trace error))))))"
-    "(export apply-input composed rest-forward closed alias member-receiver property-reference call-order bad-input operand-throw iterable-report)") :join "\n"))
+    "(export apply-input composed rest-forward closed alias member-receiver property-reference call-order bad-input operand-throw iterable-report fixed-forward fixed-nil apply-nil lisp-prefix lisp-empty fixed-order prefix-throw)") :join "\n"))
 
   (defun declarations (nodes output)
     (js-call nodes :forEach (lambda (node)
@@ -101,6 +112,7 @@
     (js-call runtime :auto 1)
     (js-call (js-array (js-array) (js-array 7) (js-array -0 nil false t undefined "中\ud800" "😀")) :forEach (lambda (values)
       (compare runtime reference "apply-input" (js-array values))
+      (compare runtime reference "fixed-forward" (js-array values))
       (compare runtime reference "composed" (js-array "collection" values))
       (compare runtime reference "conjBang" (js-call (js-array "collection") :concat values))
       (compare runtime reference "dissocBang" (js-call (js-array "collection") :concat values))
@@ -109,6 +121,12 @@
       (compare runtime reference "mergeWith" (js-call (js-array "combine") :concat values))
       (compare runtime reference "rest-forward" (js-call (js-array "collection") :concat values))))
     (compare runtime reference "closed" (js-array (js-array 1 2)))
+    (js-call assert :strictEqual (js-call reference :fixed_nil) "[7]")
+    (js-call assert :strictEqual (js-call reference :apply_nil) "[]")
+    (js-call assert :strictEqual (js-call reference :lisp_prefix) 6)
+    (js-call assert :strictEqual (js-call reference :lisp_empty) 7)
+    (js-call (js-array "fixed-nil" "apply-nil" "lisp-prefix" "lisp-empty") :forEach
+      (lambda (name) (compare runtime reference name (js-array))))
     (let* ((value (js-call runtime :number -0)) (tail (js-call runtime :sourceArray))
            (out (js-call runtime :invoke "alias" (js-array value tail))))
       (try (assert (js-call runtime :keyEqual value out)) (assert (Object/is (js-call runtime :readNumber out) -0))
@@ -132,6 +150,9 @@
     (js-call runtime :auto 1)
     (js-call assert :strictEqual (js-call reference :call_order) "[\"cv\",\"old:[7,8]\"]")
     (compare runtime reference "call-order" (js-array))
+    (js-call assert :deepStrictEqual (JSON/parse (js-call reference :fixed_order))
+      (js-array "cpqt" "old:[{\"tag\":\"kept\"},2,3,4]"))
+    (compare runtime reference "fixed-order" (js-array))
     (js-call runtime :collect)
     (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
   (defun exercise-iterators (runtime reference)
@@ -144,12 +165,14 @@
     (js-call runtime :auto 1)
     (js-call (js-array nil undefined 7 false) :forEach (lambda (value)
       (compare runtime reference "bad-input" (js-array value))))
-    (let ((thrown false) (failure undefined))
-      (try (js-call reference :operand_throw) (catch error (setq thrown t failure error)))
-      (js-call assert :strictEqual thrown t) (js-call assert :strictEqual failure false)
-      (setq thrown false failure undefined)
-      (try (js-call runtime :invoke "operand-throw") (catch error (setq thrown t failure error)))
-      (js-call assert :strictEqual thrown t) (js-call assert :strictEqual failure false))
+    (js-call (js-array (js-array "operand-throw" "operand_throw") (js-array "prefix-throw" "prefix_throw")) :forEach
+      (lambda (names)
+        (let ((thrown false) (failure undefined))
+          (try (funcall (get reference (aref names 1))) (catch error (setq thrown t failure error)))
+          (js-call assert :strictEqual thrown t) (js-call assert :strictEqual failure false)
+          (setq thrown false failure undefined)
+          (try (js-call runtime :invoke (aref names 0)) (catch error (setq thrown t failure error)))
+          (js-call assert :strictEqual thrown t) (js-call assert :strictEqual failure false))))
     (js-call runtime :collect)
     (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))
   (defun exercise (runtime reference)

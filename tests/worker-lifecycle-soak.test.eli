@@ -1,2 +1,227 @@
-(module capsules.tests.worker-lifecycle-soak.test
-  (js* "import { currentPerformanceTest } from \"./helpers/performance-acceptance.mjs\";\nimport { expect, test } from \"bun:test\";\nimport { createHash } from \"node:crypto\";\nimport { readFile } from \"node:fs/promises\";\nimport { resolve } from \"node:path\";\n\nconst root = resolve(import.meta.dir, \"..\");\nconst soakPath = resolve(root, \"tools/worker/lifecycle-soak.el\");\nconst emacs = process.env.EMACS ?? \"emacs\";\n\nasync function verifySourceContract(source) {\n  const aggregate = [];\n  for (const entry of source.files) {\n    const bytes = await readFile(resolve(root, entry.file));\n    const digest = createHash(\"sha256\").update(bytes).digest(\"hex\");\n    expect(entry.sha256).toBe(digest);\n    aggregate.push(`${entry.file}:${digest}\\n`);\n  }\n  expect(source.digest).toBe(\n    createHash(\"sha256\").update(aggregate.join(\"\")).digest(\"hex\"),\n  );\n}\n\nasync function runSoak(requests = 100_000, environment = {}) {\n  const child = Bun.spawn(\n    [emacs, \"--batch\", \"-Q\", \"--script\", soakPath],\n    {\n      cwd: root,\n      stdout: \"pipe\",\n      stderr: \"pipe\",\n      env: {\n        ...process.env,\n        BUN: process.execPath,\n        ELISCRIPT_WORKER_SOAK_REQUESTS: String(requests),\n        ELISCRIPT_WORKER_SOAK_BATCH_SIZE: \"64\",\n        ELISCRIPT_WORKER_SOAK_CHECKPOINT_EVERY: \"2500\",\n        ELISCRIPT_WORKER_SOAK_TIMEOUT_SECONDS: \"180\",\n        ...environment,\n      },\n    },\n  );\n  let timedOut = false;\n  const timer = setTimeout(() => {\n    timedOut = true;\n    child.kill(\"SIGTERM\");\n  }, 210_000);\n  const [exitCode, stdout, stderr] = await Promise.all([\n    child.exited,\n    new Response(child.stdout).text(),\n    new Response(child.stderr).text(),\n  ]).finally(() => clearTimeout(timer));\n  if (timedOut) throw new Error(\"worker lifecycle soak exceeded 210000 ms\");\n  if (exitCode !== 0) {\n    throw new Error(stderr.trim() || stdout.trim() || `soak exited with ${exitCode}`);\n  }\n  return JSON.parse(stdout);\n}\n\nasync function runRejectedSoak(environment) {\n  const child = Bun.spawn(\n    [emacs, \"--batch\", \"-Q\", \"--script\", soakPath],\n    {\n      cwd: root,\n      stdout: \"pipe\",\n      stderr: \"pipe\",\n      env: {\n        ...process.env,\n        BUN: process.execPath,\n        ELISCRIPT_WORKER_SOAK_REQUESTS: \"1000\",\n        ELISCRIPT_WORKER_SOAK_BATCH_SIZE: \"16\",\n        ELISCRIPT_WORKER_SOAK_CHECKPOINT_EVERY: \"25\",\n        ELISCRIPT_WORKER_SOAK_TIMEOUT_SECONDS: \"60\",\n        ...environment,\n      },\n    },\n  );\n  const [exitCode, stdout, stderr] = await Promise.all([\n    child.exited,\n    new Response(child.stdout).text(),\n    new Response(child.stderr).text(),\n  ]);\n  return { exitCode, stdout, stderr };\n}\n\nfunction verifyReport(report) {\n  expect(report).toMatchObject({\n    schemaVersion: 1,\n    format: \"eliscript-worker-lifecycle-soak\",\n    version: 1,\n    verified: true,\n    acceptanceQualified: true,\n    limits: {\n      runTimeoutSeconds: 180,\n      requestTimeoutMs: 5_000,\n      blockingTimeoutMs: 25,\n    },\n    workload: {\n      successfulRequests: 100_000,\n      responseCount: 100_000,\n      uniqueResponses: 100_000,\n      duplicateResponses: 0,\n      lostResponses: 0,\n      batchSize: 64,\n      peakInFlight: 64,\n      checkpointEvery: 2_500,\n    },\n    recovery: {\n      faultCallbacks: 3,\n      initialGeneration: 1,\n      finalGeneration: 5,\n      restartCount: 4,\n      events: [\n        {\n          name: \"cooperative-cancellation\",\n          errorCode: \"cancelled\",\n          callbackCount: 1,\n          pendingAfter: 0,\n        },\n        {\n          name: \"explicit-restart\",\n          fromGeneration: 1,\n          toGeneration: 2,\n          pendingAfter: 0,\n        },\n        {\n          name: \"module-replacement\",\n          fromGeneration: 2,\n          toGeneration: 3,\n          revision: 2,\n          pendingAfter: 0,\n        },\n        {\n          name: \"blocking-timeout\",\n          fromGeneration: 3,\n          errorCode: \"timeout\",\n          callbackCount: 1,\n          workerStopped: true,\n          pendingAfter: 0,\n        },\n        {\n          name: \"process-death\",\n          fromGeneration: 4,\n          errorCode: \"worker-exit\",\n          callbackCount: 1,\n          pendingAfter: 0,\n        },\n      ],\n    },\n    memory: {\n      unit: \"KiB\",\n      withinBudget: true,\n      boundedTrend: true,\n      budgetKiB: {\n        emacs: 512 * 1024,\n        worker: 512 * 1024,\n        combined: 768 * 1024,\n      },\n      steadyState: {\n        fromGeneration: 1,\n        toGeneration: 5,\n        allowanceKiB: 16 * 1024,\n        bounded: true,\n      },\n    },\n    lifecycle: {\n      cleanShutdown: true,\n      temporaryDirectoryRemoved: true,\n      reclaimedProcessCount: 5,\n      pendingAfterCorpus: 0,\n      ownedProcessCount: 5,\n    },\n  });\n\n  expect(report.workload.resultChecksum).toBe(report.workload.expectedChecksum);\n  expect(report.workload.resultChecksum).toBe(2_409_405);\n  expect(report.memory.checkpoints).toHaveLength(40);\n  expect(report.memory.generations.map(({ checkpointCount }) => checkpointCount))\n    .toEqual([8, 8, 8, 8, 8]);\n  expect(report.memory.generations.map(({ generation }) => generation))\n    .toEqual([1, 2, 3, 4, 5]);\n  expect(new Set(report.lifecycle.ownedPids).size).toBe(5);\n  expect(report.memory.peakKiB.emacs).toBeGreaterThan(0);\n  expect(report.memory.peakKiB.worker).toBeGreaterThan(0);\n  expect(report.memory.peakKiB.combined).toBeGreaterThan(0);\n  expect(report.memory.peakKiB.emacs).toBeLessThanOrEqual(\n    report.memory.budgetKiB.emacs,\n  );\n  expect(report.memory.peakKiB.worker).toBeLessThanOrEqual(\n    report.memory.budgetKiB.worker,\n  );\n  expect(report.memory.peakKiB.combined).toBeLessThanOrEqual(\n    report.memory.budgetKiB.combined,\n  );\n  for (const generation of report.memory.generations) {\n    expect(generation.steadyState.bounded).toBe(true);\n    expect(generation.steadyState.checkpoints).toBe(generation.checkpointCount);\n    expect(generation.steadyState.warmupCheckpoints).toBe(4);\n  }\n}\n\ntest(\"100000 real Emacs worker requests survive bounded lifecycle recovery\", async () => {\n  const report = await runSoak();\n  verifyReport(report);\n  await verifySourceContract(report.source);\n}, 220_000);\n\ntest(\"smaller diagnostic worker runs cannot claim acceptance\", async () => {\n  const report = await runSoak(1_000, {\n    ELISCRIPT_WORKER_SOAK_BATCH_SIZE: \"16\",\n    ELISCRIPT_WORKER_SOAK_CHECKPOINT_EVERY: \"25\",\n    ELISCRIPT_WORKER_SOAK_TIMEOUT_SECONDS: \"60\",\n  });\n  expect(report.verified).toBe(true);\n  expect(report.acceptanceQualified).toBe(false);\n  expect(report.workload.successfulRequests).toBe(1_000);\n  expect(report.lifecycle.cleanShutdown).toBe(true);\n});\n\ntest(\"rejected worker runs verify failure-path cleanup\", async () => {\n  const result = await runRejectedSoak({\n    ELISCRIPT_WORKER_SOAK_EMACS_BUDGET_MIB: \"1\",\n  });\n  expect(result.exitCode).not.toBe(0);\n  expect(result.stdout).toBe(\"\");\n  expect(result.stderr).toContain(\"memory exceeded an absolute budget\");\n  expect(result.stderr).not.toContain(\"remained after cleanup\");\n});\n\ntest(\"retained worker lifecycle soak report preserves measured workload, recovery and budgets\", async () => {\n  const report = JSON.parse(\n    await readFile(resolve(root, \"benchmarks/worker-lifecycle-soak-macos-arm64.json\")),\n  );\n  verifyReport(report);\n});\n\ncurrentPerformanceTest(test)(\"committed worker lifecycle soak report matches its measured sources\", async () => {\n  const report = JSON.parse(await readFile(resolve(root, \"benchmarks/worker-lifecycle-soak-macos-arm64.json\")));\n  verifyReport(report);\n  await verifySourceContract(report.source);\n});\n"))
+(module tests.worker-lifecycle-soak
+  (import "./helpers/performance-acceptance.mjs" currentPerformanceTest)
+  (import "bun:test" expect test)
+  (import "node:crypto" createHash)
+  (import "node:fs/promises" readFile)
+  (import "node:path" resolve dirname)
+  (import "node:url" fileURLToPath)
+
+  (defconst root (resolve (dirname (fileURLToPath (js* "import.meta.url"))) ".."))
+  (defconst soakPath (resolve root "tools/worker/lifecycle-soak.el"))
+  (defconst emacs (or (get (get globalThis.process :env) :EMACS) "emacs"))
+
+  (defasync verifySourceContract (source)
+    (let ((aggregate (js-array))
+          (files (get source :files))
+          (i 0))
+      (while (< i (js-length files))
+        (let* ((entry (aref files i))
+               (bytes (await (readFile (resolve root (get entry :file)))))
+               (digest (js-call (js-call (createHash "sha256") :update bytes) :digest "hex")))
+          (js-call (expect (get entry :sha256)) :toBe digest)
+          (js-call aggregate :push (str (get entry :file) ":" digest "\n")))
+        (setq i (1+ i)))
+      (js-call (expect (get source :digest))
+        :toBe (js-call (js-call (createHash "sha256") :update (js-call aggregate :join "")) :digest "hex"))))
+
+  (defasync runSoak (&rest __host_default_arguments_1)
+    (let* ((requests (aref __host_default_arguments_1 0)) (environment (aref __host_default_arguments_1 1)))
+    (let* ((req-count (if (undefined? requests) 100000 requests))
+           (env (Object/assign (js-object) (get globalThis.process :env)
+                  (js-object
+                    :BUN (get globalThis.process :execPath)
+                    :ELISCRIPT_WORKER_SOAK_REQUESTS (globalThis.String req-count)
+                    :ELISCRIPT_WORKER_SOAK_BATCH_SIZE "64"
+                    :ELISCRIPT_WORKER_SOAK_CHECKPOINT_EVERY "2500"
+                    :ELISCRIPT_WORKER_SOAK_TIMEOUT_SECONDS "180")
+                  (or environment (js-object))))
+           (child (js-call globalThis.Bun :spawn
+                    (js-array emacs "--batch" "-Q" "--script" soakPath)
+                    (js-object :cwd root :stdout "pipe" :stderr "pipe" :env env)))
+           (timedOut false)
+           (timer (globalThis.setTimeout
+                    (lambda ()
+                      (setq timedOut t)
+                      (js-call child :kill "SIGTERM"))
+                    210000))
+           (parts (try
+                    (await (Promise/all
+                             (js-array (get child :exited)
+                               (js-call (new globalThis.Response (get child :stdout)) :text)
+                               (js-call (new globalThis.Response (get child :stderr)) :text))))
+                    (finally (globalThis.clearTimeout timer))))
+           (exitCode (aref parts 0))
+           (stdout (aref parts 1))
+           (stderr (aref parts 2)))
+      (when timedOut
+        (throw (new globalThis.Error "worker lifecycle soak exceeded 210000 ms")))
+      (unless (= exitCode 0)
+        (let ((err-trim (js-call stderr :trim))
+              (out-trim (js-call stdout :trim)))
+          (throw (new globalThis.Error
+                   (cond
+                     ((> (js-length err-trim) 0) err-trim)
+                     ((> (js-length out-trim) 0) out-trim)
+                     (t (str "soak exited with " exitCode)))))))
+      (JSON/parse stdout))))
+
+  (defasync runRejectedSoak (environment)
+    (let* ((env (Object/assign (js-object) (get globalThis.process :env)
+                  (js-object
+                    :BUN (get globalThis.process :execPath)
+                    :ELISCRIPT_WORKER_SOAK_REQUESTS "1000"
+                    :ELISCRIPT_WORKER_SOAK_BATCH_SIZE "16"
+                    :ELISCRIPT_WORKER_SOAK_CHECKPOINT_EVERY "25"
+                    :ELISCRIPT_WORKER_SOAK_TIMEOUT_SECONDS "60")
+                  environment))
+           (child (js-call globalThis.Bun :spawn
+                    (js-array emacs "--batch" "-Q" "--script" soakPath)
+                    (js-object :cwd root :stdout "pipe" :stderr "pipe" :env env)))
+           (parts (await (Promise/all
+                           (js-array (get child :exited)
+                             (js-call (new globalThis.Response (get child :stdout)) :text)
+                             (js-call (new globalThis.Response (get child :stderr)) :text))))))
+      (js-object :exitCode (aref parts 0) :stdout (aref parts 1) :stderr (aref parts 2))))
+
+  (defun verifyReport (report)
+    (js-call (expect report) :toMatchObject
+      (js-object
+        :schemaVersion 1
+        :format "eliscript-worker-lifecycle-soak"
+        :version 1
+        :verified t
+        :acceptanceQualified t
+        :limits (js-object
+                  :runTimeoutSeconds 180
+                  :requestTimeoutMs 5000
+                  :blockingTimeoutMs 25)
+        :workload (js-object
+                    :successfulRequests 100000
+                    :responseCount 100000
+                    :uniqueResponses 100000
+                    :duplicateResponses 0
+                    :lostResponses 0
+                    :batchSize 64
+                    :peakInFlight 64
+                    :checkpointEvery 2500)
+        :recovery (js-object
+                    :faultCallbacks 3
+                    :initialGeneration 1
+                    :finalGeneration 5
+                    :restartCount 4
+                    :events (js-array
+                              (js-object
+                                :name "cooperative-cancellation"
+                                :errorCode "cancelled"
+                                :callbackCount 1
+                                :pendingAfter 0)
+                              (js-object
+                                :name "explicit-restart"
+                                :fromGeneration 1
+                                :toGeneration 2
+                                :pendingAfter 0)
+                              (js-object
+                                :name "module-replacement"
+                                :fromGeneration 2
+                                :toGeneration 3
+                                :revision 2
+                                :pendingAfter 0)
+                              (js-object
+                                :name "blocking-timeout"
+                                :fromGeneration 3
+                                :errorCode "timeout"
+                                :callbackCount 1
+                                :workerStopped t
+                                :pendingAfter 0)
+                              (js-object
+                                :name "process-death"
+                                :fromGeneration 4
+                                :errorCode "worker-exit"
+                                :callbackCount 1
+                                :pendingAfter 0)))
+        :memory (js-object
+                  :unit "KiB"
+                  :withinBudget t
+                  :boundedTrend t
+                  :budgetKiB (js-object
+                               :emacs (* 512 1024)
+                               :worker (* 512 1024)
+                               :combined (* 768 1024))
+                  :steadyState (js-object
+                                 :fromGeneration 1
+                                 :toGeneration 5
+                                 :allowanceKiB (* 16 1024)
+                                 :bounded t))
+        :lifecycle (js-object
+                     :cleanShutdown t
+                     :temporaryDirectoryRemoved t
+                     :reclaimedProcessCount 5
+                     :pendingAfterCorpus 0
+                     :ownedProcessCount 5)))
+    (js-call (expect (get (get report :workload) :resultChecksum))
+      :toBe (get (get report :workload) :expectedChecksum))
+    (js-call (expect (get (get report :workload) :resultChecksum)) :toBe 2409405)
+    (js-call (expect (get (get report :memory) :checkpoints)) :toHaveLength 40)
+    (js-call (expect (js-call (get (get report :memory) :generations)
+                       :map (lambda (g) (get g :checkpointCount))))
+      :toEqual (js-array 8 8 8 8 8))
+    (js-call (expect (js-call (get (get report :memory) :generations)
+                       :map (lambda (g) (get g :generation))))
+      :toEqual (js-array 1 2 3 4 5))
+    (js-call (expect (get (new globalThis.Set (get (get report :lifecycle) :ownedPids)) :size)) :toBe 5)
+    (js-call (expect (get (get (get report :memory) :peakKiB) :emacs)) :toBeGreaterThan 0)
+    (js-call (expect (get (get (get report :memory) :peakKiB) :worker)) :toBeGreaterThan 0)
+    (js-call (expect (get (get (get report :memory) :peakKiB) :combined)) :toBeGreaterThan 0)
+    (js-call (expect (get (get (get report :memory) :peakKiB) :emacs))
+      :toBeLessThanOrEqual (get (get (get report :memory) :budgetKiB) :emacs))
+    (js-call (expect (get (get (get report :memory) :peakKiB) :worker))
+      :toBeLessThanOrEqual (get (get (get report :memory) :budgetKiB) :worker))
+    (js-call (expect (get (get (get report :memory) :peakKiB) :combined))
+      :toBeLessThanOrEqual (get (get (get report :memory) :budgetKiB) :combined))
+    (let ((generations (get (get report :memory) :generations))
+          (i 0))
+      (while (< i (js-length generations))
+        (let ((generation (aref generations i)))
+          (js-call (expect (get (get generation :steadyState) :bounded)) :toBe t)
+          (js-call (expect (get (get generation :steadyState) :checkpoints))
+            :toBe (get generation :checkpointCount))
+          (js-call (expect (get (get generation :steadyState) :warmupCheckpoints)) :toBe 4))
+        (setq i (1+ i)))))
+
+  (test "100000 real Emacs worker requests survive bounded lifecycle recovery"
+    (async ()
+      (let ((report (await (runSoak))))
+        (verifyReport report)
+        (await (verifySourceContract (get report :source)))))
+    220000)
+
+  (test "smaller diagnostic worker runs cannot claim acceptance"
+    (async ()
+      (let ((report (await (runSoak 1000
+                             (js-object
+                               :ELISCRIPT_WORKER_SOAK_BATCH_SIZE "16"
+                               :ELISCRIPT_WORKER_SOAK_CHECKPOINT_EVERY "25"
+                               :ELISCRIPT_WORKER_SOAK_TIMEOUT_SECONDS "60")))))
+        (js-call (expect (get report :verified)) :toBe t)
+        (js-call (expect (get report :acceptanceQualified)) :toBe false)
+        (js-call (expect (get (get report :workload) :successfulRequests)) :toBe 1000)
+        (js-call (expect (get (get report :lifecycle) :cleanShutdown)) :toBe t))))
+
+  (test "rejected worker runs verify failure-path cleanup"
+    (async ()
+      (let ((result (await (runRejectedSoak (js-object :ELISCRIPT_WORKER_SOAK_EMACS_BUDGET_MIB "1")))))
+        (js-call (get (expect (get result :exitCode)) :not) :toBe 0)
+        (js-call (expect (get result :stdout)) :toBe "")
+        (js-call (expect (get result :stderr)) :toContain "memory exceeded an absolute budget")
+        (js-call (get (expect (get result :stderr)) :not) :toContain "remained after cleanup"))))
+
+  (test "retained worker lifecycle soak report preserves measured workload, recovery and budgets"
+    (async ()
+      (let ((report (JSON/parse (await (readFile (resolve root "benchmarks/worker-lifecycle-soak-macos-arm64.json") "utf8")))))
+        (verifyReport report))))
+
+  (funcall (currentPerformanceTest test) "committed worker lifecycle soak report matches its measured sources"
+    (async ()
+      (let ((report (JSON/parse (await (readFile (resolve root "benchmarks/worker-lifecycle-soak-macos-arm64.json") "utf8")))))
+        (verifyReport report)
+        (await (verifySourceContract (get report :source)))))))

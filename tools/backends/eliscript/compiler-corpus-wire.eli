@@ -1,17 +1,12 @@
 (module tools.backends.compiler-corpus-wire
   (import "../../dist/bootstrap/compiler.mjs" compile-string compile-ir-string)
-  (import "../../dist/bootstrap/emitter.mjs" emit-top-level emit-expression)
+  (import "../../dist/bootstrap/emitter.mjs" emit-top-level)
   (import "./compiler-corpus-wire-host.mjs" wireFunctionalParts wireWholePart wireSuiteSha)
   (import "node:path" resolve)
   (import "node:url" pathToFileURL)
   (import "node:crypto" createHash)
   (defun fail (message) (throw (new globalThis.TypeError message)))
   (defun digest (text) (js-call (js-call (createHash "sha256") :update text) :digest "hex"))
-  (defun replace-once (source before after)
-    (let ((at (js-call source :indexOf before)))
-      (unless (and (>= at 0) (= (js-call source :indexOf before (1+ at)) -1))
-        (fail "original wire host boundary changed"))
-      (str (js-call source :slice 0 at) after (js-call source :slice (+ at (js-length before))))))
   (defasync prepareOriginalWirePartitions (options)
     (let ((assets (js-array)) (files (js-array
       "tools/backends/eliscript/compiler-corpus-wire.eli" "tools/backends/compiler-corpus-wire.mjs"
@@ -22,63 +17,22 @@
           (js-call assets :push (js-object :file file :sourceSha256 (get identity :sha256))))
         (setq index (1+ index)))
       (js-object :assets assets :sourceRoot (get options :sourceRoot))))
-  (defun wire-bridge (root part)
-    (let* ((provided (js-array "cases" "expected" "runtime" "m" "call" "targetHTTP" "httpContracts"
-                      "checkNetwork" "checkJavaScriptNetwork" "javascriptHTTP"))
-           (code (str
-             "(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/backends/compiler-corpus-wire-host.mjs")) :href)) " runWirePartition)\n"
-             "(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/testing/wire-call-cases.mjs")) :href)) " wireNetworkOptions wireNetworkListen)\n"
-             (js-call (js-call provided :map (lambda (name) (str "(defvar " name " nil)"))) :join "\n")
-             "\n(defun wireNetworkOption () (wireNetworkOptions))\n"
-             "(defun wireNetworkServer (server) (wireNetworkListen server))\n"
-             "(defconst originalWireLibrary (js-object :cases cases :expected expected :runtime runtime :module m"
-             " :call call :targetHTTP targetHTTP :httpContracts httpContracts :checkNetwork checkNetwork"
-             " :checkJavaScriptNetwork checkJavaScriptNetwork :javascriptHTTP javascriptHTTP))\n"
-             "(defconst originalWireCompletion (js-call (runWirePartition originalWireLibrary (JSON/parse "
-             (JSON/stringify (JSON/stringify part)) ")) :then (lambda (observation) (console/log (JSON/stringify observation)))))\n"
-             "(js-call originalWireCompletion :catch (lambda (error) (console/error error) (put globalThis.process :exitCode 1)))\n"
-             "(defun then (fulfill reject) (js-call originalWireCompletion :then (lambda (ignored) (Reflect/apply fulfill undefined (js-array undefined))) reject)) (export then)"))
-           (program (compile-ir-string code "original-wire-controller.eli"))
-           (body (get program :body)) (compiled (compile-string code "original-wire-controller.eli")))
-      ;; The original host already declares these exact bindings. Remove only
-      ;; their compiler-produced placeholders; all new execution stays in Eli.
-      (js-call (js-call body :slice 2 (+ 2 (js-length provided))) :forEach (lambda (node)
-        (setq compiled (replace-once compiled (get (emit-top-level node) :text) ""))))
-      (js-object :source compiled :sharedPrelude (compile-string "" "original-wire-common.eli") :networkOptions
-        (get (emit-expression (js-call (get (aref body (+ 2 (js-length provided))) :children) :at -1)) :text)
-        :networkListen (get (emit-expression (js-call (get (aref body (+ 3 (js-length provided))) :children) :at -1)) :text))))
   (defun wire-host (original root part)
-    (let* ((tail "\nif(runtime){await checkCorpus(runtime);await checkNetwork(runtime);}else{")
-           (begin (js-call original :indexOf tail))
-           (network-start (js-call original :indexOf "async function checkJavaScriptNetwork(){" begin))
-           (network-end (js-call original :indexOf "await checkJavaScriptNetwork();" network-start))
-           (http-start (js-call original :indexOf "const javascriptHTTP=" begin))
-           (http-end (js-call original :indexOf "\n assert.deepEqual(await httpContracts(javascriptHTTP),expected.http);" http-start))
-           (bridge (wire-bridge root part)))
-      (unless (and (>= begin 0) (> network-start begin) (> network-end network-start)
-                   (> http-start begin) (> http-end http-start)
-                   (= (js-call original :indexOf tail (1+ begin)) -1))
-        (fail "complete original wire execution or JavaScript network assertions changed"))
-      ;; These are unchanged original data, independent-reference construction,
-      ;; fixed assertions and helper bodies. Positive network options and the
-      ;; fixture listen call come from the shared Eli functional-profile helpers.
-      (let ((prefix (replace-once (js-call original :slice 0 begin) "{timeoutMs:3000}" (get bridge :networkOptions)))
-            (network (replace-once (js-call original :slice network-start network-end)
-                       "{timeoutMs:3000}" (get bridge :networkOptions)))
-            (javascript-http (js-call original :slice http-start http-end))
-            (controller (get bridge :source)))
-        (setq prefix (replace-once prefix "new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))"
-          (get bridge :networkListen)))
-        (setq network (replace-once network "new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))"
-          (get bridge :networkListen)))
-        ;; The earlier observation wrapper already contains the compiler's
-        ;; common prelude. Reuse exact compiler-produced shared declarations;
-        ;; retain this controller's distinct TDZ guards and user bindings.
-        (js-call (js-call (get bridge :sharedPrelude) :split "\n") :forEach (lambda (line)
-          (when (and (or (js-call line :startsWith "import ") (js-call line :startsWith "const __eliscript_"))
-                     (js-call prefix :includes line) (js-call controller :includes line))
-            (setq controller (replace-once controller line "")))))
-        (str prefix "\n" javascript-http "\n" network "\n" controller))))
+    (let* ((boundary "let {runtime,boundaryLowered,selectedInput} = __managed_context;\n")
+           (begin (js-call original :indexOf boundary))
+           (source (str "(put (js* \"__managed_context\") :wirePartition (JSON/parse "
+                       (JSON/stringify (JSON/stringify part)) "))"))
+           (filename "original-wire-controller.eli")
+           (program (compile-ir-string source filename))
+           (statement (get (emit-top-level (aref (get program :body) 0)) :text))
+           (emitted (compile-string source filename)))
+      (unless (and (>= begin 0) (= (js-call original :indexOf boundary (1+ begin)) -1)
+                   (= (js-length (js-call emitted :split statement)) 2))
+        (fail "complete original wire maintained context or controller changed"))
+      (let ((end (+ begin (js-length boundary))))
+        (js-object :source (str (js-call original :slice 0 end) statement "\n" (js-call original :slice end))
+          :installation (js-object :filename filename :source source :sourceSha256 (digest source)
+            :statement statement :statementSha256 (digest statement) :emittedSha256 (digest emitted) :part part)))))
   (defun expandOriginalWireRecord (record prepared)
     (let* ((id (get record :id)) (original (get record :original))
            (execution (get record :execution))
@@ -101,7 +55,8 @@
           (js-call (if selected wireFunctionalParts (js-array wireWholePart)) :map (lambda (part index)
             (let* ((copy (globalThis.structuredClone record)) (provenance (get copy :original))
                    (assets (get provenance :sourceAssets))
-                   (name (if (= index 0) id (str id ":part-" (get part :name)))))
+                   (name (if (= index 0) id (str id ":part-" (get part :name))))
+                   (controller (wire-host (get execution :hostSource) (get prepared :sourceRoot) part)))
               (put copy :id name)
               (put (get copy :request) :foreignEntry t)
               (js-call (get prepared :assets) :forEach (lambda (asset)
@@ -113,8 +68,8 @@
                 :originalHostSha256 (digest (get execution :hostSource))
                 :originalAggregatePerformance "NOT ACCEPTED")))
               (put provenance :wireController (js-object :sourceSha256 wireSuiteSha
-                :originalHostSha256 (digest (get execution :hostSource)) :scope (get part :name)))
-              (put (get copy :execution) :hostSource (wire-host (get execution :hostSource) (get prepared :sourceRoot) part))
+                :originalHostSha256 (digest (get execution :hostSource)) :scope (get part :name) :installation (get controller :installation)))
+              (put (get copy :execution) :hostSource (get controller :source))
               (put (get copy :execution) :host (str "tests/__eliscript_wire_" (get execution :hostRuntime) "_" (get part :name) ".mjs"))
               copy))))))))
   (export prepareOriginalWirePartitions expandOriginalWireRecord))

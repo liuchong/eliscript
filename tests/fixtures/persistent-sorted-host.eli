@@ -1,2 +1,16 @@
-(module capsules.tests.fixtures.persistent-sorted-host
-  (js* "import { pathToFileURL } from \"node:url\";\n\nconst modulePath = process.argv[2];\nif (!modulePath) throw new TypeError(\"expected compiled module path\");\n\nconst compiled = await import(pathToFileURL(modulePath).href);\nprocess.stdout.write(JSON.stringify(compiled.report()));\n"))
+(module tests.fixtures.persistent-sorted-host
+  (import "node:url" pathToFileURL)
+  (defconst modulePath (aref (get globalThis.process :argv) 2))
+  (unless (funcall globalThis.Boolean modulePath) (throw (new globalThis.TypeError "expected compiled module path")))
+  (defconst host-import (js* "(specifier) => import(specifier)"))
+  (defvar compiled undefined)
+  (defasync run-host-main ()
+    (setq compiled (await (funcall host-import (get (pathToFileURL modulePath) :href))))
+    (js-call (get globalThis.process :stdout) :write (JSON/stringify (js-call compiled :report))))
+  (defconst completion (run-host-main))
+  (js-call completion :catch (lambda (error)
+    (console/error error)
+    (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

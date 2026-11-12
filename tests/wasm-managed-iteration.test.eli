@@ -1,2 +1,407 @@
-(module capsules.tests.wasm-managed-iteration.test
-  (js* "import {beforeAll,afterAll,test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {readFile,mkdtemp,rm} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nconst intrinsic='(iterable, visit) => { for (const item of iterable) visit(item); }';\nconst source='(defconst iterate (js* '+JSON.stringify(intrinsic)+')) (defun empty () (funcall iterate (js-array) false)) (defun run (values trace) (funcall iterate values (lambda (&rest args) (js-call trace :push (js-array (js-length args) (aref args 0)))))) (defun invalid () (funcall iterate (js-array 1) false)) (export iterate empty run invalid)';\nlet directory,b,runtime,program,js;\nbeforeAll(async()=>{directory=await mkdtemp(resolve(tmpdir(),'eliscript-iteration-'));b=await buildBackends({outputRoot:directory});runtime=b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli');program=b.compiler.compile_ir_string(source,'iteration.eli');js=await import('data:text/javascript;base64,'+Buffer.from(b.compiler.emit_ir_string(program)).toString('base64'));},120000);\nafterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});\nfunction artifact(){const saved=JSON.stringify(program),bytes=Uint8Array.from(b.managed.emit_managed_wasm(program,runtime));assert.equal(JSON.stringify(program),saved);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);return bytes;}\nfunction read(a,value){if(value?.kind===4)return a.readNumber(value);if(value?.kind===5)return a.readString(value);if(value?.kind===14)return Array.from({length:a.length(value)},(_,i)=>{const item=a.get(value,i);try{return read(a,item);}finally{a.release(item);}});return value;}\nfunction finish(a,roots=[]){roots.forEach(value=>a.release(value));a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}\ntest('a general existing raw for-of expression lowers to pure zero-import WASM with lazy callback validation and exactly one callback argument',()=>{\n const a=instantiateManagedRuntime(artifact());a.auto(1);assert.equal(a.invoke('empty'),undefined);const value=a.string('A😀\\ud800'),trace=a.sourceArray([]),expected=[];assert.equal(a.invoke('run',[value,trace]),undefined);js.run('A😀\\ud800',expected);assert.deepEqual(read(a,trace),expected);assert.throws(()=>a.invoke('invalid'),error=>error.eliscriptDiagnostic?.code==='ELI-RT0003');finish(a,[value,trace]);\n});\ntest('the intrinsic preserves original arrow shape native iterator next capture receiver and per-item getter ordering in JavaScript',()=>{\n assert.equal(js.iterate.length,2);assert.equal(Object.hasOwn(js.iterate,'prototype'),false);assert.throws(()=>Reflect.construct(String,[],js.iterate),TypeError);\n const events=[],iterator={i:0,get next(){events.push('get-next');return function(){assert.equal(this,iterator);events.push('next'+this.i);return this.i++<2?{value:{get tag(){events.push('value'+iterator.i);return iterator.i;}},done:0}:{done:'yes'};}},return(){events.push('close');return{};}},values={[Symbol.iterator](){events.push('iterator');assert.equal(this,values);return iterator;}};\n assert.equal(js.iterate(values,function(item){assert.equal(arguments.length,1);assert.equal(this,undefined);events.push('visit'+item.tag);}),undefined);\n assert.deepEqual(events,['iterator','get-next','next0','value1','visit1','next1','value2','visit2','next2']);\n assert.equal(js.iterate([],false),undefined);assert.throws(()=>js.iterate([1],false),TypeError);\n});\n\nconst protocolSource=`\n (defun protocol (trace mode flag)\n   (let* ((iterator (js-object)) (index 0) (iterable (js-object)))\n     (put iterator :next (lambda ()\n       (js-call trace :push (str \"next\" index))\n       (put iterator :next (lambda () (throw \"replacement-next\")))\n       (when (= mode 3) (throw trace))\n       (if (> index 0) (js-object :done t)\n         (progn (setq index (1+ index)) (js-object :done flag :value 7)))))\n     (put iterator :return (lambda () (js-call trace :push \"return\")\n       (if (= mode 1) (throw \"return-error\") (if (= mode 2) undefined (js-object)))))\n     (put iterable (js* \"Symbol.iterator\") (lambda () (js-call trace :push \"iterator\") iterator))\n     iterable))\n (defun exercise (trace mode flag)\n   (let ((input (protocol trace mode flag)))\n     (funcall iterate input (lambda (item) (js-call trace :push item)))))\n (defun abrupt (trace mode flag)\n   (let ((input (protocol trace mode flag)))\n     (try (funcall iterate input (lambda (item) (throw trace)))\n       (catch error (Object/is error trace)))))\n (defun callback-invalid (trace mode)\n   (let ((input (protocol trace mode false)))\n     (try (funcall iterate input false)\n       (catch error (get error :name)))))\n (defun extra (trace)\n   (funcall iterate (js-array) false (js-call trace :push \"extra\")))\n (defun nested (trace)\n   (funcall iterate (js-array 1 2) (lambda (item)\n     (funcall iterate (js-array 3 4) (lambda (inner) (js-call trace :push (+ item inner)))))))\n (export exercise abrupt callback-invalid extra nested)`;\nfunction family(){const program=b.compiler.compile_ir_string(source+protocolSource,'protocol-iteration.eli'),bytes=Uint8Array.from(b.managed.emit_managed_wasm(program,runtime));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);return instantiateManagedRuntime(bytes);}\ntest('WASM iteration captures next once and observes native done truth before callbacks while nested calls retain caller roots',()=>{\n const a=family();a.auto(1);\n for(const flag of[undefined,null,false,0,-0,NaN,'',true,1,'yes',[],{}]){const trace=a.sourceArray([]),mode=a.number(0),value=Array.isArray(flag)?a.sourceArray([]):flag&&typeof flag==='object'?a.sourceObject({}):typeof flag==='number'?a.number(flag):typeof flag==='string'?a.string(flag):flag;\n  assert.equal(a.invoke('exercise',[trace,mode,value]),undefined);assert.deepEqual(read(a,trace),flag?['iterator','next0']:['iterator','next0',7,'next1']);for(const root of[trace,mode,value])a.release(root);}\n const trace=a.sourceArray([]);assert.equal(a.invoke('extra',[trace]),undefined);assert.deepEqual(read(a,trace),['extra']);assert.equal(a.invoke('nested',[trace]),undefined);assert.deepEqual(read(a,trace),['extra',4,5,5,6]);finish(a,[trace]);\n});\ntest('callback exceptions close iterators once with original-error priority while exceptions from next never call return',()=>{\n const a=family();a.auto(1);\n for(const mode of[0,1,2,3]){const trace=a.sourceArray([]),input=a.number(mode);assert.equal(a.invoke('abrupt',[trace,input,false]),true);assert.deepEqual(read(a,trace),mode===3?['iterator','next0']:['iterator','next0','return']);a.release(trace);a.release(input);}\n for(const mode of[0,1,2]){const trace=a.sourceArray([]),input=a.number(mode),out=a.invoke('callback-invalid',[trace,input]);assert.equal(a.readString(out),'TypeError');assert.deepEqual(read(a,trace),['iterator','next0','return']);for(const root of[trace,input,out])a.release(root);}\n finish(a);\n});\ntest('native JS abrupt completion closes exactly once and preserves iterator protocol getter and original exception ordering',()=>{\n for(const failure of['visit','next','done','value','return']){const events=[],sentinel={},iterator={next(){events.push('next');if(failure==='next')throw sentinel;return{get done(){events.push('done');if(failure==='done')throw sentinel;return false;},get value(){events.push('value');if(failure==='value')throw sentinel;return 7;}};},get return(){events.push('get-return');if(failure==='return')throw 'return-error';return function(){assert.equal(this,iterator);events.push('return');throw 'return-error';};}},values={[Symbol.iterator](){return iterator;}};let error;try{js.iterate(values,()=>{events.push('visit');throw sentinel;});}catch(caught){error=caught;}assert.equal(error,sentinel);assert.deepEqual(events,failure==='next'?['next']:failure==='done'?['next','done']:failure==='value'?['next','done','value']:failure==='return'?['next','done','value','visit','get-return']:['next','done','value','visit','get-return','return']);}\n});\n\ntest('each intrinsic expression evaluation creates a fresh arrow identity and spread retains holes Unicode codepoints and Map entry pairs',()=>{\n const extra='(defun fresh () (js* '+JSON.stringify(intrinsic)+')) (defun spread (value) (funcall (js* \"(iterable) => [...iterable]\") value)) (defun map-input () (let ((value (new (js* \"Map\")))) (js-call value :set \"x\" 1) value)) (export fresh spread map-input)',p=b.compiler.compile_ir_string(source+extra,'iteration-identity.eli'),a=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(p,runtime)));a.auto(1);\n const left=a.invoke('fresh'),right=a.invoke('fresh');assert.equal(a.keyEqual(left,right),false);\n const sparse=a.sourceArray([true,,undefined]),text=a.string('A😀\\ud800'),map=a.invoke('map-input');\n for(const[input,expected]of[[sparse,[true,undefined,undefined]],[text,[...'A😀\\ud800']],[map,[['x',1]]]]){const out=a.invoke('spread',[input]);assert.deepEqual(read(a,out),expected);a.release(out);}\n finish(a,[left,right,sparse,text,map]);\n});\n\ntest('native iterable callbacks preserve ordinary property errors through abrupt close and collecting GC',()=>{\n const p=b.compiler.compile_ir_string(source+' (defun bad-prop () (funcall iterate (js-array nil) (lambda (value) (aref value \"start\")))) (defun caught-bad-prop () (try (bad-prop) (catch error (get error :name)))) (export bad-prop caught-bad-prop)','iteration-property-error.eli'),a=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(p,runtime)));a.auto(1);assert.throws(()=>a.invoke('bad-prop'),error=>{assert.equal(error.eliscriptDiagnostic?.code,'ELI-RT0001');return true;});const kind=a.invoke('caught-bad-prop');assert.equal(a.readString(kind),'TypeError');a.release(kind);assert.equal(a.stats().frameDepth,0);finish(a);\n});\n\ntest('iteration capacity failures retain completed callback effects and caller roots and recover after collection',()=>{\n const a=instantiateManagedRuntime(artifact(),{maxSlots:64,initialBytes:8192,maxBytes:65536});a.auto(1);const input=a.sourceArray(Array(64).fill(false)),trace=a.sourceArray([]),held=a.number(-0),frame=a.frame(1);a.frameSet(frame,0,held);\n assert.throws(()=>a.invoke('run',[input,trace]),error=>error.eliscriptDiagnostic?.code==='ELI-RT0002');assert.equal(a.stats().frameDepth,1);assert(Object.is(a.readNumber(held),-0));const completed=read(a,trace);assert(completed.length>0&&completed.length<64);for(const item of completed)assert.deepEqual(item,[1,false]);a.release(input);a.release(trace);a.collect();assert.equal(a.invoke('empty'),undefined);a.leaveFrame(frame);finish(a,[held]);\n});\n\ntest('a real WASM callback trap unwinds private iteration frames without swallowing the trap or invalidating caller roots',async()=>{\n const text=await readFile('bootstrap/runtime/memory.eli','utf8'),first=text.indexOf('  (defun value-source-invoke '),last=text.indexOf('  (defun value-function-capture-set ',first);assert(first>=0&&last>first);\n const injected=b.compiler.compile_ir_string(text.slice(0,first)+'  (defun value-source-invoke (heap function arguments count) (load-u32 4294967295))\\n'+text.slice(last),'iteration-trap.eli'),bytes=Uint8Array.from(b.managed.emit_managed_wasm(program,injected)),a=instantiateManagedRuntime(bytes);a.auto(1);const input=a.sourceArray([true]),trace=a.sourceArray([]),held=a.number(-0),frame=a.frame(1);a.frameSet(frame,0,held);\n assert.throws(()=>a.invoke('run',[input,trace]),WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);assert(Object.is(a.readNumber(held),-0));assert.deepEqual(read(a,trace),[]);assert.equal(a.invoke('empty'),undefined);a.leaveFrame(frame);finish(a,[input,trace,held]);\n});\n\ntest('the iteration ABI rejects illegal handles counts and modes and does not accept nearby arbitrary raw functions',()=>{\n const bytes=artifact(),e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports,heap=e['heap-new'](64,8192,65536),argv=e['value-refs'](heap,7,0);assert.equal(e['last-error'](),0);\n for(const[owner,args,count,mode,code]of[[0,argv,0,0,1],[heap,0xffffffff,0,0,1],[heap,argv,1,0,3],[heap,argv,0,99,3]]){e['value-iterate-intrinsic'](owner,args,count,mode);assert.equal(e['last-error'](),code);}\n for(const raw of['(iterable, visit) => { for (const item of iterable) visit(item, 1); }','(iterable) => Array.from(iterable)','(iterable, visit) => { visit(iterable); }']){const p=b.compiler.compile_ir_string('(defconst arbitrary (js* '+JSON.stringify(raw)+')) (export arbitrary)','iteration-rejection.eli');assert.throws(()=>b.managed.emit_managed_wasm(p,runtime),error=>error.eliscriptDiagnostic?.code==='ELI-B0001');}\n});\n"))
+(module tests.wasm-managed-iteration.test
+  (import "bun:test" afterAll beforeAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:buffer" Buffer)
+  (import "node:fs/promises" mkdtemp readFile rm)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst js-truthy (js* "(v) => !!v"))
+  (defconst uint32 (js* "(v) => v >>> 0"))
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+  (defconst make-this-fn (js* "(impl) => function (...args) { return impl(this, args.length, args); }"))
+
+  (defconst intrinsic "(iterable, visit) => { for (const item of iterable) visit(item); }")
+  (defconst source
+    (str "(defconst iterate (js* " (JSON/stringify intrinsic) ")) "
+         "(defun empty () (funcall iterate (js-array) false)) "
+         "(defun run (values trace) (funcall iterate values (lambda (&rest args) (js-call trace :push (js-array (js-length args) (aref args 0)))))) "
+         "(defun invalid () (funcall iterate (js-array 1) false)) "
+         "(export iterate empty run invalid)"))
+
+  (defvar directory nil)
+  (defvar b nil)
+  (defvar runtime nil)
+  (defvar program nil)
+  (defvar js nil)
+
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-iteration-"))))
+    (setq b (await (buildBackends (js-object :outputRoot directory))))
+    (setq runtime (js-call (get b :compiler) :compile_ir_string
+                    (await (readFile "bootstrap/runtime/memory.eli" "utf8"))
+                    "runtime.eli"))
+    (setq program (js-call (get b :compiler) :compile_ir_string source "iteration.eli"))
+    (setq js (await (funcall dynamic-import
+                      (str "data:text/javascript;base64,"
+                           (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string program)) :toString "base64"))))))
+    120000)
+
+  (afterAll (async ()
+    (when directory
+      (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun artifact ()
+    (let* ((saved (JSON/stringify program))
+           (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program runtime))))
+      (js-call assert :equal (JSON/stringify program) saved)
+      (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      bytes))
+
+  (defun read (a value)
+    (cond
+      ((nullish? value) value)
+      ((= (get value :kind) 4) (js-call a :readNumber value))
+      ((= (get value :kind) 5) (js-call a :readString value))
+      ((= (get value :kind) 14)
+       (Array/from (js-object :length (js-call a :length value))
+         (lambda (_ i)
+           (let ((item (js-call a :get value i)))
+             (try (read a item) (finally (js-call a :release item)))))))
+      (t value)))
+
+  (defun finish (a &rest __host_default_arguments_1)
+    (let* ((roots (aref __host_default_arguments_1 0)))
+    (let ((items (if (undefined? roots) (js-array) roots)))
+      (js-call items :forEach (lambda (value) (js-call a :release value))))
+    (js-call a :closeModule)
+    (js-call a :collect)
+    (js-call assert :equal (js-call a :live) 0)
+    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))
+
+  (test "a general existing raw for-of expression lowers to pure zero-import WASM with lazy callback validation and exactly one callback argument" (lambda ()
+    (let ((a (instantiateManagedRuntime (artifact))))
+      (js-call a :auto 1)
+      (js-call assert :equal (js-call a :invoke "empty") undefined)
+      (let ((value (js-call a :string "A😀\ud800"))
+            (trace (js-call a :sourceArray (js-array)))
+            (expected (js-array)))
+        (js-call assert :equal (js-call a :invoke "run" (js-array value trace)) undefined)
+        (js-call js :run "A😀\ud800" expected)
+        (js-call assert :deepEqual (read a trace) expected)
+        (js-call assert :throws
+          (lambda () (js-call a :invoke "invalid"))
+          (lambda (err) (let ((d (get err :eliscriptDiagnostic))) (and d (= (get d :code) "ELI-RT0003")))))
+        (finish a (js-array value trace))))))
+
+  (test "the intrinsic preserves original arrow shape native iterator next capture receiver and per-item getter ordering in JavaScript" (lambda ()
+    (let ((iter-fn (get js :iterate)))
+      (js-call assert :equal (get iter-fn :length) 2)
+      (js-call assert :equal (Object/hasOwn iter-fn "prototype") false)
+      (js-call assert :throws (lambda () (Reflect/construct globalThis.String (js-array) iter-fn)) globalThis.TypeError))
+    (let* ((events (js-array))
+           (iterator (js-object
+                       :i 0
+                       :return (lambda () (js-call events :push "close") (js-object))))
+           (_ (Object/defineProperty iterator "next"
+                (js-object
+                  :enumerable t
+                  :configurable t
+                  :get (lambda ()
+                         (js-call events :push "get-next")
+                         (funcall make-this-fn
+                           (lambda (self _argc _args)
+                             (js-call assert :equal self iterator)
+                             (let ((cur (get self :i)))
+                               (js-call events :push (str "next" cur))
+                               (put self :i (1+ cur))
+                               (if (< cur 2)
+                                 (let ((val (js-object)))
+                                   (Object/defineProperty val "tag"
+                                     (js-object
+                                       :enumerable t
+                                       :configurable t
+                                       :get (lambda ()
+                                              (js-call events :push (str "value" (get iterator :i)))
+                                              (get iterator :i))))
+                                   (js-object :value val :done 0))
+                                 (js-object :done "yes")))))))))
+           (values (js-object)))
+      (put values globalThis.Symbol.iterator
+        (funcall make-this-fn
+          (lambda (self _argc _args)
+            (js-call events :push "iterator")
+            (js-call assert :equal self values)
+            iterator)))
+      (js-call assert :equal
+        (js-call js :iterate values
+          (funcall make-this-fn
+            (lambda (self argc args)
+              (js-call assert :equal argc 1)
+              (js-call assert :equal self undefined)
+              (js-call events :push (str "visit" (get (aref args 0) :tag))))))
+        undefined)
+      (js-call assert :deepEqual events
+        (js-array "iterator" "get-next" "next0" "value1" "visit1" "next1" "value2" "visit2" "next2"))
+      (js-call assert :equal (js-call js :iterate (js-array) false) undefined)
+      (js-call assert :throws (lambda () (js-call js :iterate (js-array 1) false)) globalThis.TypeError))))
+
+  (defconst protocolSource "
+ (defun protocol (trace mode flag)
+   (let* ((iterator (js-object)) (index 0) (iterable (js-object)))
+     (put iterator :next (lambda ()
+       (js-call trace :push (str \"next\" index))
+       (put iterator :next (lambda () (throw \"replacement-next\")))
+       (when (= mode 3) (throw trace))
+       (if (> index 0) (js-object :done t)
+         (progn (setq index (1+ index)) (js-object :done flag :value 7)))))
+     (put iterator :return (lambda () (js-call trace :push \"return\")
+       (if (= mode 1) (throw \"return-error\") (if (= mode 2) undefined (js-object)))))
+     (put iterable (js* \"Symbol.iterator\") (lambda () (js-call trace :push \"iterator\") iterator))
+     iterable))
+ (defun exercise (trace mode flag)
+   (let ((input (protocol trace mode flag)))
+     (funcall iterate input (lambda (item) (js-call trace :push item)))))
+ (defun abrupt (trace mode flag)
+   (let ((input (protocol trace mode flag)))
+     (try (funcall iterate input (lambda (item) (throw trace)))
+       (catch error (Object/is error trace)))))
+ (defun callback-invalid (trace mode)
+   (let ((input (protocol trace mode false)))
+     (try (funcall iterate input false)
+       (catch error (get error :name)))))
+ (defun extra (trace)
+   (funcall iterate (js-array) false (js-call trace :push \"extra\")))
+ (defun nested (trace)
+   (funcall iterate (js-array 1 2) (lambda (item)
+     (funcall iterate (js-array 3 4) (lambda (inner) (js-call trace :push (+ item inner)))))))
+ (export exercise abrupt callback-invalid extra nested)")
+
+  (defun family ()
+    (let* ((p (js-call (get b :compiler) :compile_ir_string (str source protocolSource) "protocol-iteration.eli"))
+           (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime))))
+      (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      (instantiateManagedRuntime bytes)))
+
+  (test "WASM iteration captures next once and observes native done truth before callbacks while nested calls retain caller roots" (lambda ()
+    (let ((a (family)))
+      (js-call a :auto 1)
+      (js-call
+        (js-array undefined nil false 0 -0.0 globalThis.NaN "" t 1 "yes" (js-array) (js-object))
+        :forEach
+        (lambda (flag)
+          (let* ((trace (js-call a :sourceArray (js-array)))
+                 (mode (js-call a :number 0))
+                 (ty (funcall js-typeof flag))
+                 (value (cond
+                          ((Array/isArray flag) (js-call a :sourceArray (js-array)))
+                          ((and (not (nil? flag)) (= ty "object")) (js-call a :sourceObject (js-object)))
+                          ((= ty "number") (js-call a :number flag))
+                          ((= ty "string") (js-call a :string flag))
+                          (t flag))))
+            (js-call assert :equal (js-call a :invoke "exercise" (js-array trace mode value)) undefined)
+            (js-call assert :deepEqual (read a trace)
+              (if (funcall js-truthy flag)
+                (js-array "iterator" "next0")
+                (js-array "iterator" "next0" 7 "next1")))
+            (js-call (js-array trace mode value) :forEach (lambda (root) (js-call a :release root))))))
+      (let ((trace (js-call a :sourceArray (js-array))))
+        (js-call assert :equal (js-call a :invoke "extra" (js-array trace)) undefined)
+        (js-call assert :deepEqual (read a trace) (js-array "extra"))
+        (js-call assert :equal (js-call a :invoke "nested" (js-array trace)) undefined)
+        (js-call assert :deepEqual (read a trace) (js-array "extra" 4 5 5 6))
+        (finish a (js-array trace))))))
+
+  (test "callback exceptions close iterators once with original-error priority while exceptions from next never call return" (lambda ()
+    (let ((a (family)))
+      (js-call a :auto 1)
+      (js-call (js-array 0 1 2 3) :forEach
+        (lambda (mode)
+          (let ((trace (js-call a :sourceArray (js-array)))
+                (input (js-call a :number mode)))
+            (js-call assert :equal (js-call a :invoke "abrupt" (js-array trace input false)) t)
+            (js-call assert :deepEqual (read a trace)
+              (if (= mode 3) (js-array "iterator" "next0") (js-array "iterator" "next0" "return")))
+            (js-call a :release trace)
+            (js-call a :release input))))
+      (js-call (js-array 0 1 2) :forEach
+        (lambda (mode)
+          (let* ((trace (js-call a :sourceArray (js-array)))
+                 (input (js-call a :number mode))
+                 (out (js-call a :invoke "callback-invalid" (js-array trace input))))
+            (js-call assert :equal (js-call a :readString out) "TypeError")
+            (js-call assert :deepEqual (read a trace) (js-array "iterator" "next0" "return"))
+            (js-call (js-array trace input out) :forEach (lambda (root) (js-call a :release root))))))
+      (finish a))))
+
+  (test "native JS abrupt completion closes exactly once and preserves iterator protocol getter and original exception ordering" (lambda ()
+    (js-call (js-array "visit" "next" "done" "value" "return") :forEach
+      (lambda (failure)
+        (let* ((events (js-array))
+               (sentinel (js-object))
+               (iterator (js-object
+                           :next (lambda ()
+                                   (js-call events :push "next")
+                                   (when (= failure "next") (throw sentinel))
+                                   (let ((step (js-object)))
+                                     (Object/defineProperty step "done"
+                                       (js-object
+                                         :enumerable t
+                                         :configurable t
+                                         :get (lambda ()
+                                                (js-call events :push "done")
+                                                (when (= failure "done") (throw sentinel))
+                                                false)))
+                                     (Object/defineProperty step "value"
+                                       (js-object
+                                         :enumerable t
+                                         :configurable t
+                                         :get (lambda ()
+                                                (js-call events :push "value")
+                                                (when (= failure "value") (throw sentinel))
+                                                7)))
+                                     step))))
+               (_ (Object/defineProperty iterator "return"
+                    (js-object
+                      :enumerable t
+                      :configurable t
+                      :get (lambda ()
+                             (js-call events :push "get-return")
+                             (when (= failure "return") (throw "return-error"))
+                             (funcall make-this-fn
+                               (lambda (self _argc _args)
+                                 (js-call assert :equal self iterator)
+                                 (js-call events :push "return")
+                                 (throw "return-error")))))))
+               (values (js-object))
+               (caught-err undefined))
+          (put values globalThis.Symbol.iterator (lambda () iterator))
+          (try
+            (js-call js :iterate values (lambda (_item) (js-call events :push "visit") (throw sentinel)))
+            (catch caught (setq caught-err caught)))
+          (js-call assert :equal caught-err sentinel)
+          (js-call assert :deepEqual events
+            (cond
+              ((= failure "next") (js-array "next"))
+              ((= failure "done") (js-array "next" "done"))
+              ((= failure "value") (js-array "next" "done" "value"))
+              ((= failure "return") (js-array "next" "done" "value" "visit" "get-return"))
+              (t (js-array "next" "done" "value" "visit" "get-return" "return")))))))))
+
+  (test "each intrinsic expression evaluation creates a fresh arrow identity and spread retains holes Unicode codepoints and Map entry pairs" (lambda ()
+    (let* ((extra (str "(defun fresh () (js* " (JSON/stringify intrinsic) ")) "
+                       "(defun spread (value) (funcall (js* \"(iterable) => [...iterable]\") value)) "
+                       "(defun map-input () (let ((value (new (js* \"Map\")))) (js-call value :set \"x\" 1) value)) "
+                       "(export fresh spread map-input)"))
+           (p (js-call (get b :compiler) :compile_ir_string (str source extra) "iteration-identity.eli"))
+           (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime)))))
+      (js-call a :auto 1)
+      (let* ((left (js-call a :invoke "fresh"))
+             (right (js-call a :invoke "fresh"))
+             (_ (js-call assert :equal (js-call a :keyEqual left right) false))
+             (sp-src (let ((arr (globalThis.Array 3))) (put arr 0 t) (put arr 2 undefined) arr))
+             (sparse (js-call a :sourceArray sp-src))
+             (text (js-call a :string "A😀\ud800"))
+             (map (js-call a :invoke "map-input")))
+        (js-call
+          (js-array
+            (js-array sparse (js-array t undefined undefined))
+            (js-array text (Array/from "A😀\ud800"))
+            (js-array map (js-array (js-array "x" 1))))
+          :forEach
+          (lambda (pair)
+            (let ((out (js-call a :invoke "spread" (js-array (aref pair 0)))))
+              (js-call assert :deepEqual (read a out) (aref pair 1))
+              (js-call a :release out))))
+        (finish a (js-array left right sparse text map))))))
+
+  (test "native iterable callbacks preserve ordinary property errors through abrupt close and collecting GC" (lambda ()
+    (let* ((p (js-call (get b :compiler) :compile_ir_string
+                (str source " (defun bad-prop () (funcall iterate (js-array nil) (lambda (value) (aref value \"start\")))) (defun caught-bad-prop () (try (bad-prop) (catch error (get error :name)))) (export bad-prop caught-bad-prop)")
+                "iteration-property-error.eli"))
+           (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime)))))
+      (js-call a :auto 1)
+      (js-call assert :throws
+        (lambda () (js-call a :invoke "bad-prop"))
+        (lambda (err)
+          (js-call assert :equal (let ((d (get err :eliscriptDiagnostic))) (and d (get d :code))) "ELI-RT0001")
+          t))
+      (let ((kind (js-call a :invoke "caught-bad-prop")))
+        (js-call assert :equal (js-call a :readString kind) "TypeError")
+        (js-call a :release kind)
+        (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+        (finish a)))))
+
+  (test "iteration capacity failures retain completed callback effects and caller roots and recover after collection" (lambda ()
+    (let ((a (instantiateManagedRuntime (artifact) (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 65536))))
+      (js-call a :auto 1)
+      (let ((input (js-call a :sourceArray (js-call (globalThis.Array 64) :fill false)))
+            (trace (js-call a :sourceArray (js-array)))
+            (held (js-call a :number -0.0))
+            (frame (js-call a :frame 1)))
+        (js-call a :frameSet frame 0 held)
+        (js-call assert :throws
+          (lambda () (js-call a :invoke "run" (js-array input trace)))
+          (lambda (err) (let ((d (get err :eliscriptDiagnostic))) (and d (= (get d :code) "ELI-RT0002")))))
+        (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+        (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+        (let ((completed (read a trace)))
+          (funcall assert (and (> (js-length completed) 0) (< (js-length completed) 64)))
+          (js-call completed :forEach (lambda (item) (js-call assert :deepEqual item (js-array 1 false)))))
+        (js-call a :release input)
+        (js-call a :release trace)
+        (js-call a :collect)
+        (js-call assert :equal (js-call a :invoke "empty") undefined)
+        (js-call a :leaveFrame frame)
+        (finish a (js-array held))))))
+
+  (test "a real WASM callback trap unwinds private iteration frames without swallowing the trap or invalidating caller roots" (async ()
+    (let* ((text (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
+           (first (js-call text :indexOf "  (defun value-source-invoke "))
+           (last (js-call text :indexOf "  (defun value-function-capture-set " first)))
+      (funcall assert (and (>= first 0) (> last first)))
+      (let* ((injected (js-call (get b :compiler) :compile_ir_string
+                         (str (js-call text :slice 0 first)
+                              "  (defun value-source-invoke (heap function arguments count) (load-u32 4294967295))\n"
+                              (js-call text :slice last))
+                         "iteration-trap.eli"))
+             (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program injected)))
+             (a (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (let ((input (js-call a :sourceArray (js-array t)))
+              (trace (js-call a :sourceArray (js-array)))
+              (held (js-call a :number -0.0))
+              (frame (js-call a :frame 1)))
+          (js-call a :frameSet frame 0 held)
+          (js-call assert :throws
+            (lambda () (js-call a :invoke "run" (js-array input trace)))
+            globalThis.WebAssembly.RuntimeError)
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+          (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+          (js-call assert :deepEqual (read a trace) (js-array))
+          (js-call assert :equal (js-call a :invoke "empty") undefined)
+          (js-call a :leaveFrame frame)
+          (finish a (js-array input trace held)))))))
+
+  (test "the iteration ABI rejects illegal handles counts and modes and does not accept nearby arbitrary raw functions" (lambda ()
+    (let* ((bytes (artifact))
+           (e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
+           (heap (funcall uint32 (js-call e "heap-new" 64 8192 65536)))
+           (argv (funcall uint32 (js-call e "value-refs" heap 7 0))))
+      (js-call assert :equal (js-call e "last-error") 0)
+      (js-call
+        (js-array
+          (js-array 0 argv 0 0 1)
+          (js-array heap 4294967295 0 0 1)
+          (js-array heap argv 1 0 3)
+          (js-array heap argv 0 99 3))
+        :forEach
+        (lambda (row)
+          (js-call e "value-iterate-intrinsic" (aref row 0) (aref row 1) (aref row 2) (aref row 3))
+          (js-call assert :equal (js-call e "last-error") (aref row 4))))
+      (js-call
+        (js-array
+          "(iterable, visit) => { for (const item of iterable) visit(item, 1); }"
+          "(iterable) => Array.from(iterable)"
+          "(iterable, visit) => { visit(iterable); }")
+        :forEach
+        (lambda (raw)
+          (let ((p (js-call (get b :compiler) :compile_ir_string
+                     (str "(defconst arbitrary (js* " (JSON/stringify raw) ")) (export arbitrary)")
+                     "iteration-rejection.eli")))
+            (js-call assert :throws
+              (lambda () (js-call (get b :managed) :emit_managed_wasm p runtime))
+              (lambda (err) (let ((d (get err :eliscriptDiagnostic))) (and d (= (get d :code) "ELI-B0001"))))))))))))

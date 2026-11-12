@@ -1,0 +1,8 @@
+(module eliscript.runtime.errors
+  (defconst reference-error-type (js* "ReferenceError"))
+  (defconst immutable-error-type (js* "TypeError"))
+  (defun tdz (name)
+    (throw (new reference-error-type (str "Cannot access '" name "' before initialization"))))
+  (defun immutable ()
+    (throw (new immutable-error-type "Assignment to constant variable.")))
+  (export tdz immutable))

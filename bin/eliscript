@@ -26,8 +26,9 @@ if [ ! -f "$MODULE_DIR/compiler.mjs" ] || [ ! -f "$HOST_DIR/bun.mjs" ]; then
     "$PROJECT_DIR/bin/eliscript-bootstrap"
 fi
 
-if [ ! -f "$PROJECT_DIR/dist/runtime/lisp.mjs" ]; then
-  "$PROJECT_DIR/bin/eliscript-build" --root "$PROJECT_DIR/runtime" --out-dir "$PROJECT_DIR/dist/runtime" "$PROJECT_DIR/runtime/lisp.eli" >/dev/null
+if [ ! -f "$PROJECT_DIR/dist/runtime/lisp.mjs" ] || [ ! -f "$PROJECT_DIR/dist/runtime/lisp/io-worker.mjs" ]; then
+  "$PROJECT_DIR/bin/eliscript-build" --root "$PROJECT_DIR/runtime" --out-dir "$PROJECT_DIR/dist/runtime" \
+    "$PROJECT_DIR/runtime/lisp.eli" "$PROJECT_DIR/runtime/lisp/io-worker.eli" >/dev/null
 fi
 
 export ELISCRIPT_BOOTSTRAP_MODULE_DIR="$MODULE_DIR"

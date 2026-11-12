@@ -1,0 +1,62 @@
+(module tests.helpers.wasm-managed-array-index-storage-node
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defun isolated (body)
+    (let ((snapshots
+            (js-call (js-array globalThis.Array globalThis.Array.prototype) :map
+              (lambda (object)
+                (js-array object (Object/getOwnPropertyDescriptors object))))))
+      (try
+        (funcall body)
+        (finally
+          (let ((si 0))
+            (while (< si (js-length snapshots))
+              (let* ((pair (aref snapshots si))
+                     (object (aref pair 0))
+                     (saved (aref pair 1))
+                     (current-keys (Reflect/ownKeys object))
+                     (ki 0))
+                (while (< ki (js-length current-keys))
+                  (let ((key (aref current-keys ki)))
+                    (when (not (Object/hasOwn saved key))
+                      (Reflect/deleteProperty object key)))
+                  (setq ki (1+ ki)))
+                (let ((saved-keys (Reflect/ownKeys saved))
+                      (ski 0))
+                  (while (< ski (js-length saved-keys))
+                    (let ((key (aref saved-keys ski)))
+                      (Object/defineProperty object key (get saved key)))
+                    (setq ski (1+ ski)))))
+              (setq si (1+ si))))))))
+
+  (defasync main ()
+    (let* ((m (await (funcall dynamic-import (aref (get globalThis.process :argv) 2))))
+           (exercise (Array/from (js-object :length 11) (lambda (_ i) (js-call m :exercise i))))
+           (thisArgs (Array/from (js-object :length 7) (lambda (_ i) (js-call m :this_argument i))))
+           (capturedMaps (js-call (js-array false t) :map (lambda (value) (js-call m :captured_map value))))
+           (order (Array/from (js-object :length 4)
+                    (lambda (_ i) (JSON/parse (isolated (lambda () (js-call m :prototype_order i)))))))
+           (order0-keys (aref (aref order 0) 0))
+           (order3-keys (aref (aref order 3) 0)))
+      (when (or (/= (JSON/stringify (aref order 0)) (JSON/stringify (aref order 1)))
+                (/= (JSON/stringify (aref order 0)) (JSON/stringify (aref order 2)))
+                (/= (JSON/stringify (js-call order3-keys :slice 0 -1))
+                    (JSON/stringify (js-call order0-keys :filter (lambda (key) (/= key "push")))))
+                (/= (js-call order3-keys :at -1) "push")
+                (js-call order :some (lambda (record) (/= (aref record 1) 0))))
+        (throw (new globalThis.Error "independent prototype order contract failed")))
+      (let ((aliases (Array/from (js-object :length 5)
+                       (lambda (_ i) (isolated (lambda () (js-call m :prototype_alias i))))))
+            (growth (js-call m :flags_after_growth))
+            (species (Array/from (js-object :length 4)
+                       (lambda (_ i) (isolated (lambda () (js-call m :species_observation i)))))))
+        (js-call (get globalThis.process :stdout) :write
+          (JSON/stringify
+            (js-object :exercise exercise
+                       :aliases aliases
+                       :growth growth
+                       :thisArgs thisArgs
+                       :capturedMaps capturedMaps
+                       :species species))))))
+
+  (main))

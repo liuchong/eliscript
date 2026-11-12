@@ -1,0 +1,17 @@
+(module tests.fixtures.control-context-host
+  (import "node:process" :default process)
+  (import "node:assert/strict" :default assert)
+  (import "../helpers/control-context-contract.mjs" checkBoundary asyncOracle discardedOracle timeline checkSequential sequentialAsyncOracle)
+  (defasync main ()
+    (let* ((mode (aref (get process :argv) 2)) (m (await (funcall (js* "(url) => import(url)") (aref (get process :argv) 3)))))
+      (if (= mode "boundary")
+        (progn
+          (checkBoundary m)
+          (let ((flags (js-array t false 0 "" nil)) (index 0))
+            (while (< index (get flags :length))
+              (let ((flag (aref flags index)))
+                (js-call assert :deepEqual (await (timeline (get m :asynchronous) flag)) (await (timeline asyncOracle flag)))
+                (js-call assert :deepEqual (await (timeline (get m :discarded_async) flag)) (await (timeline discardedOracle flag))))
+              (setq index (1+ index)))))
+        (progn (checkSequential m) (js-call assert :deepEqual (await (timeline (lambda (_ log) (js-call m :ordered log)) t)) (await (timeline sequentialAsyncOracle t)))))))
+  (main))

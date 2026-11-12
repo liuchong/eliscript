@@ -1,2 +1,845 @@
-(module capsules.tests.wasm-managed-exceptions.test
-  (js* "import {beforeAll,afterAll,test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {readFile,writeFile,readdir,mkdir,mkdtemp,rm} from 'node:fs/promises';\nimport {resolve,relative} from 'node:path';\nimport {pathToFileURL} from 'node:url';\nimport {spawnSync} from 'node:child_process';\nimport {tmpdir} from 'node:os';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nlet directory,b,runtime,program,bytes,reference;\nbeforeAll(async()=>{directory=await mkdtemp(resolve(tmpdir(),'eliscript-exceptions-'));b=await buildBackends({outputRoot:directory});runtime=b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli');program=b.compiler.compile_ir_string(await readFile('tests/fixtures/wasm-managed-exceptions.eli','utf8'),'exceptions.eli');reference=await import('data:text/javascript;base64,'+Buffer.from(b.compiler.emit_ir_string(program)).toString('base64'));},120000);\nafterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});\nfunction instance(){bytes??=Uint8Array.from(b.managed.emit_managed_wasm(program,runtime));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);const a=instantiateManagedRuntime(bytes);a.auto(1);return a;}\nconst box=(a,v)=>typeof v==='number'?a.number(v):typeof v==='string'?a.string(v):v;\nconst read=(a,v)=>v?.kind===4?a.readNumber(v):v?.kind===5?a.readString(v):v;\nfunction finish(a,values=[]){for(const v of values)a.release(v);a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}\nfunction items(a,value){return Array.from({length:a.length(value)},(_,i)=>{const v=a.get(value,i);try{return read(a,v);}finally{a.release(v);}});}\ntest('throw catch and finally lower to zero-import WASM and distinguish every primitive including null false and undefined',()=>{\n const a=instance();for(const value of[null,false,true,undefined,0,-0,NaN,Infinity,-Infinity,Number.MIN_VALUE,'','😀\\ud800']){const input=box(a,value);for(const name of['caught','indirect','handler-throw']){const out=a.invoke(name,name==='handler-throw'?[null,input]:[input]);assert.deepEqual(read(a,out),reference[name.replaceAll('-','_')](...(name==='handler-throw'?[null,value]:[value])));a.release(out);}a.release(input);}finish(a);\n});\ntest('finally preserves successful values, runs once through nested propagation and replaces pending throws only when it throws',()=>{\n const a=instance(),first=a.string('first'),second=a.string('second');for(const name of['normal','nested']){const trace=a.sourceArray([]),expected=[];const out=a.invoke(name,[first,trace]);assert.equal(read(a,out),reference[name]('first',expected));assert.deepEqual(items(a,trace),expected);a.release(out);a.release(trace);}const trace=a.sourceArray([]);let caught;try{a.invoke('replaced',[first,second,trace]);}catch(error){caught=error;}assert(caught&&typeof caught==='object');assert(a.keyEqual(caught,second));assert.deepEqual(items(a,trace),['first','finally']);finish(a,[first,second,trace,caught]);\n});\ntest('cross-function recursion, shadowing and captured catch bindings retain exact source identity through collecting GC',()=>{\n const a=instance(),value=a.sourceObject({}),depth=a.number(12);for(const name of['caught','indirect','across']){const out=a.invoke(name,name==='across'?[depth,value]:[value]);assert(a.keyEqual(out,value));a.release(out);}const pair=a.invoke('shadow',[value]),caught=a.get(pair,0),outer=a.get(pair,1);assert(a.keyEqual(caught,value));assert.equal(a.readNumber(outer),7);const closure=a.invoke('handler-closure',[value]);a.collect();const retained=a.invoke('call-handler',[closure]);assert(a.keyEqual(retained,value));finish(a,[value,depth,pair,caught,outer,closure,retained]);\n});\n\ntest('source Error TypeError RangeError and SyntaxError retain real prototype names, nonenumerable messages and optional cause',async()=>{\n const source=`(defconst marker 1)\n (defun make (kind message options) (cond ((= kind 0) (new (js* \"Error\") message options)) ((= kind 1) (new (js* \"TypeError\") message options)) ((= kind 2) (new (js* \"RangeError\") message options)) (t (new (js* \"SyntaxError\") message options))))\n (defun describe (error) (js-array (aref error \"name\") (aref error \"message\") (Object/hasOwn error \"name\") (Object/hasOwn error \"message\") (Object/hasOwn error \"cause\") (Object/keys error)))\n (export make describe)`;\n const p=b.compiler.compile_ir_string(source,'source-errors.eli'),artifact=Uint8Array.from(b.managed.emit_managed_wasm(p,runtime));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(artifact)),[]);const a=instantiateManagedRuntime(artifact);a.auto(1);\n for(let kind=0;kind<4;kind++)for(const message of[undefined,null,false,0,-0,NaN,'','中😀\\ud800']){const k=a.number(kind),m=box(a,message),cause=a.sourceObject({}),options=a.sourceObject({cause}),out=a.invoke('make',[k,m,options]),description=a.invoke('describe',[out]);const expected=new[Error,TypeError,RangeError,SyntaxError][kind](message,{cause:{}});const fields=[];for(let i=0;i<5;i++){const value=a.get(description,i);fields.push(read(a,value));a.release(value);}const keys=a.get(description,5);assert.deepEqual(fields,[expected.name,expected.message,Object.hasOwn(expected,'name'),Object.hasOwn(expected,'message'),Object.hasOwn(expected,'cause')]);assert.deepEqual(items(a,keys),Object.keys(expected));for(const v of[k,m,cause,options,out,description,keys])a.release(v);a.collect();}finish(a);\n});\n\ntest('Error default string conversion uses inherited name then message and preserves user override order',()=>{\n const source=`(defconst marker 1)\n (defun run (name message) (let ((error (new (js* \"TypeError\") message))) (put error \"name\" name) (js-call (js-array error) :join \"\"))) (export run)`;\n const p=b.compiler.compile_ir_string(source,'error-string.eli'),a=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(p,runtime)));a.auto(1);\n for(const name of[undefined,null,false,0,'','Other'])for(const message of[undefined,null,false,0,'','中']){const n=box(a,name),m=box(a,message),out=a.invoke('run',[n,m]),expected=new TypeError(message);expected.name=name;assert.equal(read(a,out),String(expected));for(const v of[n,m,out])a.release(v);}finish(a);\n});\n\ntest('runtime TypeError and RangeError enter source catches with retained WASM diagnostics and permit recovery',()=>{\n const source=`(defconst marker 1)\n (defun run (mode) (try (if mode (Math/round (js-object :valueOf (lambda () (js-object)) :toString (lambda () (js-object)))) (js-call 1 :toString 1)) (catch error (js-array (aref error \"name\") (aref error \"message\") (aref (aref error \"eliscriptDiagnostic\") \"code\"))) (finally 7))) (export run)`;\n const p=b.compiler.compile_ir_string(source,'runtime-catch.eli'),a=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(p,runtime)));a.auto(1);\n for(const [mode,name,code]of[[true,'TypeError','ELI-RT0003'],[false,'RangeError','ELI-RT0010'],[true,'TypeError','ELI-RT0003']]){const out=a.invoke('run',[mode]);assert.deepEqual(items(a,out),[name,code==='ELI-RT0010'?'invalid Number.toString radix':'managed argument or bounds error',code]);a.release(out);}finish(a);\n});\n\ntest('catch lexical mutation, source validation and firstclass Error constructors match the existing JS emitter',async()=>{\n const source=`(defconst marker 1)\n (defun mutate (value) (try (throw value) (catch error (setq error 8) (lambda () error))))\n (defun call (fn) (funcall fn))\n (defun selected () (try (throw 3) (catch error error) (finally 1)))\n (defun error-alias (message) (let ((ctor (js* \"TypeError\"))) (let ((error (funcall ctor message))) (js-array (aref error \"name\") (aref error \"message\")))))\n (export mutate call selected error-alias)`;\n const p=b.compiler.compile_ir_string(source,'catch-bindings.eli'),js=await import('data:text/javascript;base64,'+Buffer.from(b.compiler.emit_ir_string(p)).toString('base64')),a=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(p,runtime)));a.auto(1);\n const value=a.number(1),fn=a.invoke('mutate',[value]);a.collect();const out=a.invoke('call',[fn]);assert.equal(a.readNumber(out),js.call(js.mutate(1)));const selected=a.invoke('selected');assert.equal(a.readNumber(selected),js.selected());const text=a.string('x'),error=a.invoke('error-alias',[text]);assert.deepEqual(items(a,error),js.error_alias('x'));finish(a,[value,fn,out,selected,text,error]);assert.throws(()=>b.compiler.compile_ir_string('(defun f () (try 1 (catch a a) (catch b b)))','duplicate-catch.eli'),/at most one catch/);\n});\n\ntest('pending source exceptions are heap roots and illegal raw handles remain numeric ABI failures',()=>{\n const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports,heap=e['heap-new'](64,4096,16384);assert(heap);e['heap-auto'](heap,1);\n const value=e['value-string'](heap,1);assert(value);e['value-unit-set'](heap,value,0,120);e['value-seal'](heap,value);e['value-throw'](heap,value);assert.equal(e['last-error'](),11);assert.equal(e['value-exception-pending'](heap),1);e['heap-collect'](heap);assert.equal(e['value-kind'](heap,value),5);assert.equal(e['value-throw'](heap,0xffffffff),0);assert.equal(e['last-error'](),1);assert.equal(e['value-exception-take'](heap),value);assert.equal(e['value-exception-pending'](heap),0);e['heap-collect'](heap);assert.equal(e['heap-live'](heap),0);assert.equal(e['value-exception-take'](heap),0);assert.equal(e['last-error'](),3);\n});\n\ntest('capacity failures during Error creation preserve caller frames and recover after released source objects are collected',()=>{\n const source='(defconst marker 1) (defun make (message) (new (js* \"Error\") message)) (export make)',p=b.compiler.compile_ir_string(source,'error-capacity.eli'),a=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(p,runtime)),{maxSlots:64,initialBytes:4096,maxBytes:16384});a.auto(1);\n const message=a.string('x'),frame=a.frame(1);a.frameSet(frame,0,message);const retained=[];let failure;for(let i=0;i<100;i++){try{retained.push(a.invoke('make',[message]));}catch(error){failure=error;break;}}assert.equal(failure?.eliscriptDiagnostic?.code,'ELI-RT0002');assert.equal(a.stats().frameDepth,1);for(const error of retained)a.release(error);a.collect();const recovered=a.invoke('make',[message]),key=a.string('message'),text=a.objectGet(recovered,key);assert.equal(a.readString(text),'x');a.leaveFrame(frame);finish(a,[message,recovered,key,text]);\n});\n\ntest('real WASM traps bypass catch and finally without being disguised as a source Error and unwind only dynamic frames',async()=>{\n const source=await readFile('bootstrap/runtime/memory.eli','utf8'),start=source.indexOf('  (defun value-cell-get (heap cell)'),end=source.indexOf('  (defun value-cell-set',start);assert(start>=0&&end>start);\n const faulty=source.slice(0,start)+'  (defun value-cell-get (heap cell) (load-u32 4294967295))\\n'+source.slice(end),r=b.compiler.compile_ir_string(faulty,'trap-exception-runtime.eli'),a=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(program,r)));a.auto(1);const value=a.number(4),callback=a.invoke('handler-closure',[value]),frame=a.frame(1);a.frameSet(frame,0,value);assert.throws(()=>a.invoke('call-handler',[callback]),WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);const recovered=a.invoke('caught',[value]);assert(a.keyEqual(recovered,value));a.leaveFrame(frame);finish(a,[value,callback,recovered]);\n});\n\ntest('runtime origin classification separates null reads, repeat ranges and JSON syntax while finally restores the original exception class',()=>{\n const source=`(defconst marker 1)\n (defun fail-one (mode) (cond ((= mode 0) (aref nil \"x\")) ((= mode 1) (js-call \"x\" :repeat -1)) (t (JSON/parse \"{\"))))\n (defun run (mode) (try (try (fail-one mode) (finally (try (Math/round (js-object :valueOf (lambda () (js-object)) :toString (lambda () (js-object)))) (catch ignored 0)))) (catch error (js-array (aref error \"name\") (aref (aref error \"eliscriptDiagnostic\") \"code\"))))) (export run)`;\n const p=b.compiler.compile_ir_string(source,'runtime-origin.eli'),a=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(p,runtime)));a.auto(1);\n for(const [mode,name,code]of[[0,'TypeError','ELI-RT0001'],[1,'RangeError','ELI-RT0003'],[2,'SyntaxError','ELI-RT0003'],[1,'RangeError','ELI-RT0003']]){const m=a.number(mode),out=a.invoke('run',[m]);assert.deepEqual(items(a,out),[name,code]);a.release(m);a.release(out);}finish(a);\n});\n\ntest('uncaught primitives cross the adapter exactly and failed module evaluation rethrows its original source value per instance until close',()=>{\n const a=instance();for(const value of[null,undefined,false,true,0,-0,NaN,'x']){const input=box(a,value);let seen=false,actual;try{a.invoke('uncaught',[input]);}catch(error){seen=true;actual=error;}assert(seen);assert.deepEqual(read(a,actual),value);a.release(actual);a.release(input);}finish(a);\n for(const value of['nil','undefined','false','(new (js* \"TypeError\") \"init\")']){const p=b.compiler.compile_ir_string('(defconst fail (throw '+value+')) (export fail)','module-throw.eli'),artifact=Uint8Array.from(b.managed.emit_managed_wasm(p,runtime)),a=instantiateManagedRuntime(artifact,{initializeModule:false});a.auto(1);const seen=[];for(let i=0;i<2;i++){try{a.initializeModule();assert.fail('initializer must throw');}catch(error){seen.push(error);}a.collect();assert.equal(a.stats().frameDepth,0);}if(value.startsWith('(new')){assert(a.keyEqual(seen[0],seen[1]));const key=a.string('message'),text=a.objectGet(seen[0],key);assert.equal(a.readString(text),'init');a.release(key);a.release(text);}else assert.deepEqual(seen,[value==='nil'?null:value==='undefined'?undefined:false,value==='nil'?null:value==='undefined'?undefined:false]);finish(a,seen);}\n});\n\ntest('unrepresented generated Error stacks remain unsupported while explicit stack data preserves JavaScript descriptors and write restrictions',async()=>{\n const source=`(defconst marker 1)\n  (defun read-stack (error) (aref error \"stack\"))\n  (defun has-stack (error) (Object/hasOwn error \"stack\"))\n  (defun describe-stack (error) (Object/getOwnPropertyDescriptor error \"stack\"))\n  (defun define-default-stack (error) (Object/defineProperty error \"stack\" (js-object :value 9)))\n  (defun set-stack (error) (put error \"stack\" 9))\n  (defun make () (new (js* \"Error\") \"x\"))\n  (defun custom-stack (value mode)\n   (let ((error (new globalThis/TypeError \"explicit stack\")) (outcome \"unchanged\"))\n    (put error :stack value)\n    (cond ((= mode 1) (Object/defineProperty error \"stack\" (js-object :writable false)))\n          ((= mode 2) (Object/freeze error)))\n    (unless (= mode 0)\n     (setq outcome (try (put error :stack \"replacement\") \"written\" (catch failure (get failure :name)))))\n    (let ((descriptor (Object/getOwnPropertyDescriptor error \"stack\")))\n     (JSON/stringify (js-array (Object/is (aref error \"stack\") value) (Object/hasOwn error \"stack\")\n      (Object/is (get descriptor :value) value) (get descriptor :writable)\n      (get descriptor :enumerable) (get descriptor :configurable) outcome)))))\n  (defun receiver-stack-setter (written)\n   (let ((receiver (js* \"this\")))\n    (put receiver :calls (1+ (get receiver :calls))) (put receiver :seen written)))\n  (defun receiver-stack (mode value)\n   (let* ((error (new globalThis/TypeError \"receiver stack\"))\n          (receiver (js-object :seen \"before\" :calls 0)) (prototype (js-object)))\n    (put error :stack \"target\")\n    (cond\n     ((= mode 1)\n      (Reflect/deleteProperty error \"stack\")\n      (Object/defineProperty prototype \"stack\" (js-object\n       :set receiver-stack-setter :configurable t))\n      (Object/setPrototypeOf error prototype))\n     ((= mode 2)\n      (Reflect/deleteProperty error \"stack\")\n      (Object/defineProperty prototype \"stack\" (js-object :value \"locked\" :writable false :configurable t))\n      (Object/setPrototypeOf error prototype))\n     ((= mode 3) (Object/freeze receiver)))\n    (let* ((outcome (Reflect/set error \"stack\" value receiver))\n           (descriptor (Object/getOwnPropertyDescriptor receiver \"stack\")))\n     (JSON/stringify (js-array outcome (get receiver :calls)\n      (Object/hasOwn error \"stack\") (Object/hasOwn receiver \"stack\")\n      (Object/is (get error :stack) \"target\") (Object/is (get error :stack) \"locked\")\n      (Object/is (get receiver :seen) value) (Object/is (get receiver :stack) value)\n      (if descriptor (js-array (get descriptor :writable) (get descriptor :enumerable) (get descriptor :configurable)) nil))))))\n  (export read-stack has-stack describe-stack define-default-stack set-stack make custom-stack receiver-stack)`;\n const p=b.compiler.compile_ir_string(source,'error-stack-boundary.eli');\n const js=await import('data:text/javascript;base64,'+Buffer.from(b.compiler.emit_ir_string(p)).toString('base64'));\n const artifact=Uint8Array.from(b.managed.emit_managed_wasm(p,runtime));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(artifact)),[]);\n const a=instantiateManagedRuntime(artifact);a.auto(1);const error=a.invoke('make'),object=a.sourceObject({stack:true});\n try{\n  // A fresh managed Error has no represented engine-generated stack. These\n  // negative profile checks do not claim equivalence with the host's stack.\n  for(const name of['read-stack','has-stack','describe-stack','define-default-stack'])assert.throws(()=>a.invoke(name,[error]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');\n  for(const target of[error,object]){\n   if(target===object){assert.equal(a.invoke('read-stack',[target]),true);assert.equal(a.invoke('has-stack',[target]),true);}\n   const written=a.invoke('set-stack',[target]);try{assert.equal(a.readNumber(written),9);}finally{a.release(written);}\n   const actual=a.invoke('read-stack',[target]);try{assert.equal(a.readNumber(actual),9);}finally{a.release(actual);}\n   assert.equal(a.invoke('has-stack',[target]),true);\n  }\n  for(const value of['TypeError: supplied\\n    at original.eli:3:7',-0,undefined,false])for(const mode of[0,1,2]){\n   const input=box(a,value),option=a.number(mode);let out;\n   try{\n    const expected=JSON.parse(js.custom_stack(value,mode));\n    assert.deepEqual(expected,[true,true,true,mode===0,false,mode!==2,mode===0?'unchanged':'TypeError']);\n    out=a.invoke('custom-stack',[input,option]);assert.deepEqual(JSON.parse(a.readString(out)),expected);\n   }finally{a.release(out);a.release(option);a.release(input);}\n   a.collect();assert.equal(a.stats().frameDepth,0);\n  }\n  const receiverExpected=[\n   [true,0,true,true,true,false,false,true,[true,true,true]],\n   [true,1,false,false,false,false,true,false,null],\n   [false,0,false,false,false,true,false,false,null],\n   [false,0,true,false,true,false,false,false,null],\n  ];\n  for(const value of['explicit receiver stack',-0])for(let mode=0;mode<receiverExpected.length;mode++){\n   const input=box(a,value),option=a.number(mode);let out;\n   try{\n    const expected=JSON.parse(js.receiver_stack(mode,value));assert.deepEqual(expected,receiverExpected[mode]);\n    out=a.invoke('receiver-stack',[option,input]);assert.deepEqual(JSON.parse(a.readString(out)),expected);\n   }finally{a.release(out);a.release(option);a.release(input);}\n   a.collect();assert.equal(a.stats().frameDepth,0);\n  }\n }finally{finish(a,[error,object]);}\n});\n\ntest('cold Error realm dynamic lookups calls overrides and explicit prototypes match JavaScript reflection and recover after GC',async()=>{\n const source=`(defconst marker 1)\n  (defun property (object key) (get object key))\n  (defun invoke-method (object key arguments)\n   (let ((method (property object key))) (js-call method :apply object arguments)))\n  (defun own-render (&rest ignored) \"own\")\n  (defun prototype-render (&rest ignored) \"prototype\")\n  (defun cold-lookup ()\n   (let* ((error (new (js* \"Error\") \"message\"))\n          (constructor (property error \"constructor\"))\n          (to-string (property error \"toString\"))\n          (own (property error \"hasOwnProperty\"))\n          (enumerable (property error \"propertyIsEnumerable\"))\n          (prototype (Object/getPrototypeOf error))\n          (called (js-call constructor :call nil \"called\"))\n          (applied (js-call constructor :apply nil (js-array \"applied\")))\n          (bound (js-call constructor :bind nil \"bound\")) (bound-error (funcall bound)))\n    (JSON/stringify (js-array\n     (Object/is constructor (js* \"Error\")) (Object/is prototype (get constructor :prototype))\n     (Object/is (property prototype \"constructor\") constructor)\n     (Object/is to-string (property prototype \"toString\"))\n     (Object/is own (get globalThis.Object.prototype :hasOwnProperty))\n     (Object/is enumerable (get globalThis.Object.prototype :propertyIsEnumerable))\n     (invoke-method error \"toString\" (js-array))\n     (js-call own :call error \"message\") (js-call enumerable :call error \"message\")\n     (get called :message) (get applied :message) (get bound-error :message)\n     (Object/is constructor (property error \"constructor\"))))))\n  (defun overwrite ()\n   (let* ((error (new (js* \"Error\") \"message\")) (prototype (Object/getPrototypeOf error))\n          (original-method (property prototype \"toString\"))\n          (original-constructor (property prototype \"constructor\")))\n    (try\n     (put prototype :toString prototype-render)\n     (let ((inherited (invoke-method error \"toString\" (js-array))))\n      (put error :toString own-render)\n      (let ((own (invoke-method error \"toString\" (js-array))))\n       (Reflect/deleteProperty error \"toString\") (put prototype :constructor false)\n       (JSON/stringify (js-array inherited own\n        (invoke-method error \"toString\" (js-array)) (property error \"constructor\")\n        (Object/hasOwn error \"toString\")))))\n     (finally (put prototype :toString original-method) (put prototype :constructor original-constructor)))))\n  (defun getter-order ()\n   (let ((error (new (js* \"Error\") \"message\")) (trace (js-array)))\n    (Object/defineProperty error \"toString\" (js-object :configurable t\n     :get (lambda () (js-call trace :push \"getter\") own-render)))\n    (let* ((method (property error \"toString\"))\n           (result (js-call method :call error (progn (js-call trace :push \"argument\") 7))))\n     (JSON/stringify (js-array result trace)))))\n  (defun explicit-prototypes ()\n   (let ((error (new (js* \"Error\") \"message\")) (custom (js-object :constructor false :toString own-render)))\n    (Object/setPrototypeOf error nil)\n    (let ((empty (js-array (Object/is (Object/getPrototypeOf error) nil)\n                  (Object/is (property error \"constructor\") undefined)\n                  (Object/is (property error \"toString\") undefined))))\n     (Object/setPrototypeOf error custom)\n     (JSON/stringify (js-array empty (Object/is (Object/getPrototypeOf error) custom)\n      (property error \"constructor\") (invoke-method error \"toString\" (js-array))\n      (Object/is (Object/getPrototypeOf error) custom))))))\n  (defun reflection ()\n   (let* ((error (new (js* \"Error\") \"message\"))\n          (constructor (property error \"constructor\")) (prototype (Object/getPrototypeOf error))\n          (descriptor (Object/getOwnPropertyDescriptor prototype \"toString\"))\n          (reflected (Reflect/getOwnPropertyDescriptor prototype \"toString\")))\n    (JSON/stringify (js-array\n     (Object/is (Reflect/getPrototypeOf error) prototype)\n     (Object/is (Reflect/get error \"constructor\") constructor)\n     (Reflect/has error \"toString\") (Object/hasOwn error \"constructor\")\n     (invoke-method error \"hasOwnProperty\" (js-array \"message\"))\n     (invoke-method error \"propertyIsEnumerable\" (js-array \"message\"))\n     (Object/is (get descriptor :value) (property error \"toString\"))\n     (Object/is (get reflected :value) (get descriptor :value))\n     (get descriptor :writable) (get descriptor :enumerable) (get descriptor :configurable)\n     (get reflected :writable) (get reflected :enumerable) (get reflected :configurable)))))\n  (defun recover (value) (+ value marker))\n  (export cold-lookup overwrite getter-order explicit-prototypes reflection recover)`;\n const p=b.compiler.compile_ir_string(source,'cold-error-realm.eli');\n const js=await import('data:text/javascript;base64,'+Buffer.from(b.compiler.emit_ir_string(p)).toString('base64'));\n const artifact=Uint8Array.from(b.managed.emit_managed_wasm(p,runtime));\n assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(artifact)),[]);\n const observations=[\n  ['cold-lookup',[true,true,true,true,true,true,'Error: message',true,false,'called','applied','bound',true]],\n  ['overwrite',['prototype','own','prototype',false,false]],\n  ['getter-order',['own',['getter','argument']]],\n  ['explicit-prototypes',[[true,true,true],true,false,'own',true]],\n  ['reflection',[true,true,true,false,true,false,true,true,true,false,true,true,false,true]],\n ];\n for(const [name,expected]of observations){\n  const a=instantiateManagedRuntime(artifact);a.auto(1);const keep=a.number(-0),caller=a.frame(1);a.frameSet(caller,0,keep);\n  try{\n   for(let index=0;index<2;index++){\n    const oracle=JSON.parse(js[name.replaceAll('-','_')]());assert.deepEqual(oracle,expected);\n    const out=a.invoke(name);try{assert.deepEqual(JSON.parse(a.readString(out)),oracle);}finally{a.release(out);}\n    a.collect();assert.equal(a.stats().frameDepth,1);\n    const held=a.frameGet(caller,0);try{assert(Object.is(a.readNumber(held),-0));}finally{a.release(held);}\n    const input=a.number(7),recovered=a.invoke('recover',[input]);\n    try{assert.equal(a.readNumber(recovered),js.recover(7));}finally{a.release(recovered);a.release(input);}\n   }\n  }finally{a.leaveFrame(caller);finish(a,[keep]);}\n }\n},30000);\n\nlet generationEvidence;\nfunction generations(){return generationEvidence??=buildGenerations();}\nasync function buildGenerations(){\n const files=(await readdir('bootstrap/compiler')).filter(file=>file.endsWith('.eli')).sort(),all=[b];let previous=b;\n for(const generation of[2,3]){\n  const output=resolve(directory,'g'+generation),bootstrap=resolve(output,'bootstrap');await mkdir(bootstrap,{recursive:true});\n  for(const file of files){const path=resolve('bootstrap/compiler',file),name=file.replace(/\\.eli$/,'.mjs'),source=await readFile(path,'utf8'),emission=previous.compiler.compile_string_with_source_map(source,path,name,relative(bootstrap,path));await writeFile(resolve(bootstrap,name),emission.javascript+'//# sourceMappingURL='+name+'.map\\n');await writeFile(resolve(bootstrap,name+'.map'),emission.sourceMap);}\n  const current=await buildBackends({outputRoot:output,frontend:previous.compiler});current.compiler=await import(pathToFileURL(resolve(bootstrap,'compiler.mjs')).href);all.push(current);previous=current;\n }\n const filename=resolve('tests/fixtures/wasm-managed-exceptions.eli'),source=await readFile(filename,'utf8'),seedFile=resolve(directory,'exceptions-seed.mjs'),seed=spawnSync(resolve('bin/eliscript-seed'),['--output',seedFile,filename],{encoding:'utf8',timeout:30000});assert.equal(seed.status,0,seed.stderr);const javascript=await readFile(seedFile,'utf8'),outputs=[];\n for(const current of all){const p=current.compiler.compile_ir_string(source,filename),r=current.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli');assert.equal(current.compiler.emit_ir_string(p),javascript);outputs.push(Uint8Array.from(current.managed.emit_managed_wasm(p,r)));}\n for(const file of files){const path=resolve('bootstrap/compiler',file),source=await readFile(path,'utf8'),expected=all[0].compiler.compile_string(source,path);for(const current of all.slice(1))assert.equal(current.compiler.compile_string(source,path),expected);}\n assert.deepEqual(outputs[0],outputs[1]);assert.deepEqual(outputs[1],outputs[2]);\n const seeded=await buildBackends({outputRoot:resolve(directory,'seed-backends'),seed:true}),seedRuntime=seeded.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli'),seedProgram=seeded.compiler.compile_ir_string(source,filename);assert.deepEqual(Uint8Array.from(seeded.managed.emit_managed_wasm(seedProgram,seedRuntime)),outputs[0]);\n return {bytes:outputs[2],javascript};\n}\ntest('Seed and complete three-generation frontend and backend artifacts preserve exception IR and zero-import WASM bytes',async()=>{\n const evidence=await generations(),a=instantiateManagedRuntime(evidence.bytes);a.auto(1);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(evidence.bytes)),[]);const text=a.string('seed'),trace=a.sourceArray([]),out=a.invoke('nested',[text,trace]);assert(a.keyEqual(out,text));assert.deepEqual(items(a,trace),['inner','catch','outer']);for(let i=0;i<4;i++){const kind=a.number(i),error=a.invoke('make-error',[kind,text,undefined]),description=a.invoke('error-summary',[error]);assert.deepEqual(items(a,description),[['Error','TypeError','RangeError','SyntaxError'][i],'seed',false,true,false]);for(const value of[kind,error,description])a.release(value);}finish(a,[text,trace,out]);\n},120000);\ntest('Node executes the exact Seed and three-generation zero-import artifact with source exceptions and Error identity',async()=>{\n const evidence=await generations(),path=resolve(directory,'exceptions.wasm');await writeFile(path,evidence.bytes);\n const script=`import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {instantiateManagedRuntime} from ${JSON.stringify(pathToFileURL(resolve('tools/backends/managed-runtime.mjs')).href)};const bytes=await readFile(process.argv[1]);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);const a=instantiateManagedRuntime(bytes);a.auto(1);for(const value of[null,undefined,false,true]){assert.equal(a.invoke('caught',[value]),value);let entered=false;try{a.invoke('uncaught',[value]);}catch(error){entered=true;assert.equal(error,value);}assert(entered);}const message=a.string('node'),kind=a.number(1),error=a.invoke('make-error',[kind,message,undefined]),out=a.invoke('caught',[error]);assert(a.keyEqual(error,out));const summary=a.invoke('error-summary',[out]),name=a.get(summary,0),text=a.get(summary,1);assert.equal(a.readString(name),'TypeError');assert.equal(a.readString(text),'node');for(const value of[message,kind,error,out,summary,name,text])a.release(value);a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);`;\n const result=spawnSync('node',['--input-type=module','-e',script,path],{encoding:'utf8',timeout:30000});assert.equal(result.status,0,result.stderr);\n},120000);\n"))
+(module tests.wasm-managed-exceptions.test
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile writeFile readdir mkdir mkdtemp rm)
+  (import "node:path" resolve relative)
+  (import "node:url" pathToFileURL)
+  (import "node:child_process" spawnSync)
+  (import "node:os" tmpdir)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst node-helper (resolve "tests/helpers/wasm-managed-exceptions-node.mjs"))
+
+  (defvar directory nil)
+  (defvar b nil)
+  (defvar runtime nil)
+  (defvar program nil)
+  (defvar bytes nil)
+  (defvar reference nil)
+  (defvar generation-evidence nil)
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-exceptions-"))))
+      (setq b (await (buildBackends (js-object :outputRoot directory))))
+      (setq runtime
+        (js-call (get b :compiler) :compile_ir_string
+          (await (readFile "bootstrap/runtime/memory.eli" "utf8"))
+          "runtime.eli"))
+      (setq program
+        (js-call (get b :compiler) :compile_ir_string
+          (await (readFile "tests/fixtures/wasm-managed-exceptions.eli" "utf8"))
+          "exceptions.eli"))
+      (setq reference
+        (await (funcall dyn-import
+                 (str "data:text/javascript;base64,"
+                      (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string program)) :toString "base64"))))))
+    120000)
+
+  (afterAll
+    (async ()
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun instance ()
+    (when (nullish? bytes)
+      (setq bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program runtime))))
+    (js-call assert :deepEqual
+      (WebAssembly.Module/imports (new WebAssembly.Module bytes))
+      (js-array))
+    (let ((a (instantiateManagedRuntime bytes)))
+      (js-call a :auto 1)
+      a))
+
+  (defun box (a v)
+    (let ((ty (funcall js-typeof v)))
+      (cond
+        ((= ty "number") (js-call a :number v))
+        ((= ty "string") (js-call a :string v))
+        (t v))))
+
+  (defun read-val (a v)
+    (if (nullish? v)
+        v
+        (let ((kind (get v :kind)))
+          (cond
+            ((= kind 4) (js-call a :readNumber v))
+            ((= kind 5) (js-call a :readString v))
+            (t v)))))
+
+  (defun finish (a &rest __host_default_arguments_1)
+    (let* ((values (aref __host_default_arguments_1 0)))
+    (let ((vals (if (undefined? values) (js-array) values)))
+      (js-call vals :forEach (lambda (v) (js-call a :release v)))
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
+
+  (defun items (a value)
+    (Array/from (js-object :length (js-call a :length value))
+      (lambda (_unused i)
+        (let ((v (js-call a :get value i)))
+          (try
+            (read-val a v)
+            (finally
+              (js-call a :release v)))))))
+
+  (test "throw catch and finally lower to zero-import WASM and distinguish every primitive including null false and undefined"
+    (lambda ()
+      (let ((a (instance))
+            (primitives
+              (js-array
+                nil false t undefined 0 -0.0 globalThis.NaN globalThis.Infinity (- globalThis.Infinity)
+                (get globalThis.Number :MIN_VALUE) "" (str "😀" (String/fromCharCode 55296)))))
+        (js-call primitives :forEach
+          (lambda (value)
+            (let ((input (box a value)))
+              (js-call (js-array "caught" "indirect" "handler-throw") :forEach
+                (lambda (name)
+                  (let* ((args (if (= name "handler-throw") (js-array nil input) (js-array input)))
+                         (ref-args (if (= name "handler-throw") (js-array nil value) (js-array value)))
+                         (out (js-call a :invoke name args))
+                         (fn-name (js-call name :replaceAll "-" "_")))
+                    (js-call assert :deepEqual
+                      (read-val a out)
+                      (apply (get reference fn-name) ref-args))
+                    (js-call a :release out))))
+              (js-call a :release input))))
+        (finish a))))
+
+  (test "finally preserves successful values, runs once through nested propagation and replaces pending throws only when it throws"
+    (lambda ()
+      (let* ((a (instance))
+             (first (js-call a :string "first"))
+             (second (js-call a :string "second")))
+        (js-call (js-array "normal" "nested") :forEach
+          (lambda (name)
+            (let* ((trace (js-call a :sourceArray (js-array)))
+                   (expected (js-array))
+                   (out (js-call a :invoke name (js-array first trace))))
+              (js-call assert :equal
+                (read-val a out)
+                (funcall (get reference name) "first" expected))
+              (js-call assert :deepEqual (items a trace) expected)
+              (js-call a :release out)
+              (js-call a :release trace))))
+        (let ((trace (js-call a :sourceArray (js-array)))
+              (caught undefined))
+          (try
+            (js-call a :invoke "replaced" (js-array first second trace))
+            (catch error
+              (setq caught error)))
+          (funcall assert (and (not (nullish? caught)) (= (funcall js-typeof caught) "object")))
+          (funcall assert (js-call a :keyEqual caught second))
+          (js-call assert :deepEqual (items a trace) (js-array "first" "finally"))
+          (finish a (js-array first second trace caught))))))
+
+  (test "cross-function recursion, shadowing and captured catch bindings retain exact source identity through collecting GC"
+    (lambda ()
+      (let* ((a (instance))
+             (value (js-call a :sourceObject (js-object)))
+             (depth (js-call a :number 12)))
+        (js-call (js-array "caught" "indirect" "across") :forEach
+          (lambda (name)
+            (let ((out (js-call a :invoke name
+                         (if (= name "across") (js-array depth value) (js-array value)))))
+              (funcall assert (js-call a :keyEqual out value))
+              (js-call a :release out))))
+        (let* ((pair (js-call a :invoke "shadow" (js-array value)))
+               (caught (js-call a :get pair 0))
+               (outer (js-call a :get pair 1)))
+          (funcall assert (js-call a :keyEqual caught value))
+          (js-call assert :equal (js-call a :readNumber outer) 7)
+          (let ((closure (js-call a :invoke "handler-closure" (js-array value))))
+            (js-call a :collect)
+            (let ((retained (js-call a :invoke "call-handler" (js-array closure))))
+              (funcall assert (js-call a :keyEqual retained value))
+              (finish a (js-array value depth pair caught outer closure retained))))))))
+
+  (test "source Error TypeError RangeError and SyntaxError retain real prototype names, nonenumerable messages and optional cause"
+    (async ()
+      (let* ((source
+               (str "(defconst marker 1)\n"
+                    " (defun make (kind message options) (cond ((= kind 0) (new (js* \"Error\") message options)) ((= kind 1) (new (js* \"TypeError\") message options)) ((= kind 2) (new (js* \"RangeError\") message options)) (t (new (js* \"SyntaxError\") message options))))\n"
+                    " (defun describe (error) (js-array (aref error \"name\") (aref error \"message\") (Object/hasOwn error \"name\") (Object/hasOwn error \"message\") (Object/hasOwn error \"cause\") (Object/keys error)))\n"
+                    " (export make describe)"))
+             (p (js-call (get b :compiler) :compile_ir_string source "source-errors.eli"))
+             (artifact (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime)))
+             (ctors (js-array globalThis.Error globalThis.TypeError globalThis.RangeError globalThis.SyntaxError))
+             (messages (js-array undefined nil false 0 -0.0 globalThis.NaN "" (str "中😀" (String/fromCharCode 55296)))))
+        (js-call assert :deepEqual
+          (WebAssembly.Module/imports (new WebAssembly.Module artifact))
+          (js-array))
+        (let ((a (instantiateManagedRuntime artifact))
+              (kind 0))
+          (js-call a :auto 1)
+          (while (< kind 4)
+            (let ((ctor (aref ctors kind)))
+              (js-call messages :forEach
+                (lambda (message)
+                  (let* ((k (js-call a :number kind))
+                         (m (box a message))
+                         (cause (js-call a :sourceObject (js-object)))
+                         (options (js-call a :sourceObject (js-object :cause cause)))
+                         (out (js-call a :invoke "make" (js-array k m options)))
+                         (description (js-call a :invoke "describe" (js-array out)))
+                         (expected (Reflect/construct ctor (js-array message (js-object :cause (js-object)))))
+                         (fields (js-array))
+                         (i 0))
+                    (while (< i 5)
+                      (let ((val (js-call a :get description i)))
+                        (js-call fields :push (read-val a val))
+                        (js-call a :release val))
+                      (setq i (+ i 1)))
+                    (let ((keys (js-call a :get description 5)))
+                      (js-call assert :deepEqual
+                        fields
+                        (js-array
+                          (get expected :name)
+                          (get expected :message)
+                          (Object/hasOwn expected "name")
+                          (Object/hasOwn expected "message")
+                          (Object/hasOwn expected "cause")))
+                      (js-call assert :deepEqual (items a keys) (Object/keys expected))
+                      (js-call (js-array k m cause options out description keys) :forEach
+                        (lambda (v) (js-call a :release v)))
+                      (js-call a :collect))))))
+            (setq kind (+ kind 1)))
+          (finish a)))))
+
+  (test "Error default string conversion uses inherited name then message and preserves user override order"
+    (lambda ()
+      (let* ((source
+               (str "(defconst marker 1)\n"
+                    " (defun run (name message) (let ((error (new (js* \"TypeError\") message))) (put error \"name\" name) (js-call (js-array error) :join \"\"))) (export run)"))
+             (p (js-call (get b :compiler) :compile_ir_string source "error-string.eli"))
+             (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime))))
+             (vals (js-array undefined nil false 0 "" "Other"))
+             (msgs (js-array undefined nil false 0 "" "中")))
+        (js-call a :auto 1)
+        (js-call vals :forEach
+          (lambda (name)
+            (js-call msgs :forEach
+              (lambda (message)
+                (let* ((n (box a name))
+                       (m (box a message))
+                       (out (js-call a :invoke "run" (js-array n m)))
+                       (expected (new globalThis.TypeError message)))
+                  (put expected :name name)
+                  (js-call assert :equal (read-val a out) (globalThis.String expected))
+                  (js-call (js-array n m out) :forEach (lambda (v) (js-call a :release v))))))))
+        (finish a))))
+
+  (test "runtime TypeError and RangeError enter source catches with retained WASM diagnostics and permit recovery"
+    (lambda ()
+      (let* ((source
+               (str "(defconst marker 1)\n"
+                    " (defun run (mode) (try (if mode (Math/round (js-object :valueOf (lambda () (js-object)) :toString (lambda () (js-object)))) (js-call 1 :toString 1)) (catch error (js-array (aref error \"name\") (aref error \"message\") (aref (aref error \"eliscriptDiagnostic\") \"code\"))) (finally 7))) (export run)"))
+             (p (js-call (get b :compiler) :compile_ir_string source "runtime-catch.eli"))
+             (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime)))))
+        (js-call a :auto 1)
+        (js-call
+          (js-array
+            (js-array t "TypeError" "ELI-RT0003")
+            (js-array false "RangeError" "ELI-RT0010")
+            (js-array t "TypeError" "ELI-RT0003"))
+          :forEach
+          (lambda (spec)
+            (let* ((mode (aref spec 0))
+                   (name (aref spec 1))
+                   (code (aref spec 2))
+                   (out (js-call a :invoke "run" (js-array mode)))
+                   (msg (if (= code "ELI-RT0010")
+                            "invalid Number.toString radix"
+                            "managed argument or bounds error")))
+              (js-call assert :deepEqual (items a out) (js-array name msg code))
+              (js-call a :release out))))
+        (finish a))))
+
+  (test "catch lexical mutation, source validation and firstclass Error constructors match the existing JS emitter"
+    (async ()
+      (let* ((source
+               (str "(defconst marker 1)\n"
+                    " (defun mutate (value) (try (throw value) (catch error (setq error 8) (lambda () error))))\n"
+                    " (defun call (fn) (funcall fn))\n"
+                    " (defun selected () (try (throw 3) (catch error error) (finally 1)))\n"
+                    " (defun error-alias (message) (let ((ctor (js* \"TypeError\"))) (let ((error (funcall ctor message))) (js-array (aref error \"name\") (aref error \"message\")))))\n"
+                    " (export mutate call selected error-alias)"))
+             (p (js-call (get b :compiler) :compile_ir_string source "catch-bindings.eli"))
+             (js (await (funcall dyn-import
+                          (str "data:text/javascript;base64,"
+                               (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string p)) :toString "base64")))))
+             (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime)))))
+        (js-call a :auto 1)
+        (let* ((value (js-call a :number 1))
+               (fn (js-call a :invoke "mutate" (js-array value))))
+          (js-call a :collect)
+          (let* ((out (js-call a :invoke "call" (js-array fn)))
+                 (selected (js-call a :invoke "selected"))
+                 (text (js-call a :string "x"))
+                 (error (js-call a :invoke "error-alias" (js-array text))))
+            (js-call assert :equal (js-call a :readNumber out) (js-call js :call (js-call js :mutate 1)))
+            (js-call assert :equal (js-call a :readNumber selected) (js-call js :selected))
+            (js-call assert :deepEqual (items a error) (js-call js :error_alias "x"))
+            (finish a (js-array value fn out selected text error)))))
+      (js-call assert :throws
+        (lambda ()
+          (js-call (get b :compiler) :compile_ir_string
+            "(defun f () (try 1 (catch a a) (catch b b)))"
+            "duplicate-catch.eli"))
+        (new globalThis.RegExp "at most one catch"))))
+
+  (test "pending source exceptions are heap roots and illegal raw handles remain numeric ABI failures"
+    (lambda ()
+      (let* ((e (get (new WebAssembly.Instance (new WebAssembly.Module bytes)) :exports))
+             (heap (funcall (get e "heap-new") 64 4096 16384)))
+        (funcall assert (globalThis.Boolean heap))
+        (funcall (get e "heap-auto") heap 1)
+        (let ((value (funcall (get e "value-string") heap 1)))
+          (funcall assert (globalThis.Boolean value))
+          (funcall (get e "value-unit-set") heap value 0 120)
+          (funcall (get e "value-seal") heap value)
+          (funcall (get e "value-throw") heap value)
+          (js-call assert :equal (funcall (get e "last-error")) 11)
+          (js-call assert :equal (funcall (get e "value-exception-pending") heap) 1)
+          (funcall (get e "heap-collect") heap)
+          (js-call assert :equal (funcall (get e "value-kind") heap value) 5)
+          (js-call assert :equal (funcall (get e "value-throw") heap 4294967295) 0)
+          (js-call assert :equal (funcall (get e "last-error")) 1)
+          (js-call assert :equal (funcall (get e "value-exception-take") heap) value)
+          (js-call assert :equal (funcall (get e "value-exception-pending") heap) 0)
+          (funcall (get e "heap-collect") heap)
+          (js-call assert :equal (funcall (get e "heap-live") heap) 0)
+          (js-call assert :equal (funcall (get e "value-exception-take") heap) 0)
+          (js-call assert :equal (funcall (get e "last-error")) 3)))))
+
+  (test "capacity failures during Error creation preserve caller frames and recover after released source objects are collected"
+    (lambda ()
+      (let* ((source "(defconst marker 1) (defun make (message) (new (js* \"Error\") message)) (export make)")
+             (p (js-call (get b :compiler) :compile_ir_string source "error-capacity.eli"))
+             (a (instantiateManagedRuntime
+                  (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime))
+                  (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 16384)))
+             (_ (js-call a :auto 1))
+             (message (js-call a :string "x"))
+             (frame (js-call a :frame 1))
+             (retained (js-array))
+             (failure undefined)
+             (i 0)
+             (done false))
+        (js-call a :frameSet frame 0 message)
+        (while (and (< i 100) (not done))
+          (try
+            (js-call retained :push (js-call a :invoke "make" (js-array message)))
+            (catch error
+              (setq failure error)
+              (setq done t)))
+          (setq i (+ i 1)))
+        (let ((diag (if (nullish? failure) undefined (get failure :eliscriptDiagnostic))))
+          (js-call assert :equal (if diag (get diag :code) undefined) "ELI-RT0002"))
+        (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+        (js-call retained :forEach (lambda (err) (js-call a :release err)))
+        (js-call a :collect)
+        (let* ((recovered (js-call a :invoke "make" (js-array message)))
+               (key (js-call a :string "message"))
+               (text (js-call a :objectGet recovered key)))
+          (js-call assert :equal (js-call a :readString text) "x")
+          (js-call a :leaveFrame frame)
+          (finish a (js-array message recovered key text))))))
+
+  (test "real WASM traps bypass catch and finally without being disguised as a source Error and unwind only dynamic frames"
+    (async ()
+      (let* ((source (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
+             (start (js-call source :indexOf "  (defun value-cell-get (heap cell)"))
+             (end (js-call source :indexOf "  (defun value-cell-set" start)))
+        (funcall assert (and (>= start 0) (> end start)))
+        (let* ((faulty
+                 (str (js-call source :slice 0 start)
+                      "  (defun value-cell-get (heap cell) (load-u32 4294967295))\n"
+                      (js-call source :slice end)))
+               (r (js-call (get b :compiler) :compile_ir_string faulty "trap-exception-runtime.eli"))
+               (a (instantiateManagedRuntime
+                    (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program r))))
+               (_ (js-call a :auto 1))
+               (value (js-call a :number 4))
+               (callback (js-call a :invoke "handler-closure" (js-array value)))
+               (frame (js-call a :frame 1)))
+          (js-call a :frameSet frame 0 value)
+          (js-call assert :throws
+            (lambda () (js-call a :invoke "call-handler" (js-array callback)))
+            globalThis.WebAssembly.RuntimeError)
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+          (let ((recovered (js-call a :invoke "caught" (js-array value))))
+            (funcall assert (js-call a :keyEqual recovered value))
+            (js-call a :leaveFrame frame)
+            (finish a (js-array value callback recovered)))))))
+
+  (test "runtime origin classification separates null reads, repeat ranges and JSON syntax while finally restores the original exception class"
+    (lambda ()
+      (let* ((source
+               (str "(defconst marker 1)\n"
+                    " (defun fail-one (mode) (cond ((= mode 0) (aref nil \"x\")) ((= mode 1) (js-call \"x\" :repeat -1)) (t (JSON/parse \"{\"))))\n"
+                    " (defun run (mode) (try (try (fail-one mode) (finally (try (Math/round (js-object :valueOf (lambda () (js-object)) :toString (lambda () (js-object)))) (catch ignored 0)))) (catch error (js-array (aref error \"name\") (aref (aref error \"eliscriptDiagnostic\") \"code\"))))) (export run)"))
+             (p (js-call (get b :compiler) :compile_ir_string source "runtime-origin.eli"))
+             (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime)))))
+        (js-call a :auto 1)
+        (js-call
+          (js-array
+            (js-array 0 "TypeError" "ELI-RT0001")
+            (js-array 1 "RangeError" "ELI-RT0003")
+            (js-array 2 "SyntaxError" "ELI-RT0003")
+            (js-array 1 "RangeError" "ELI-RT0003"))
+          :forEach
+          (lambda (spec)
+            (let* ((m (js-call a :number (aref spec 0)))
+                   (out (js-call a :invoke "run" (js-array m))))
+              (js-call assert :deepEqual (items a out) (js-array (aref spec 1) (aref spec 2)))
+              (js-call a :release m)
+              (js-call a :release out))))
+        (finish a))))
+
+  (test "uncaught primitives cross the adapter exactly and failed module evaluation rethrows its original source value per instance until close"
+    (lambda ()
+      (let ((a (instance)))
+        (js-call (js-array nil undefined false t 0 -0.0 globalThis.NaN "x") :forEach
+          (lambda (value)
+            (let ((input (box a value))
+                  (seen false)
+                  (actual undefined))
+              (try
+                (js-call a :invoke "uncaught" (js-array input))
+                (catch error
+                  (setq seen t)
+                  (setq actual error)))
+              (funcall assert seen)
+              (js-call assert :deepEqual (read-val a actual) value)
+              (js-call a :release actual)
+              (js-call a :release input))))
+        (finish a))
+      (js-call (js-array "nil" "undefined" "false" "(new (js* \"TypeError\") \"init\")") :forEach
+        (lambda (value)
+          (let* ((p (js-call (get b :compiler) :compile_ir_string
+                      (str "(defconst fail (throw " value ")) (export fail)")
+                      "module-throw.eli"))
+                 (artifact (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime)))
+                 (a (instantiateManagedRuntime artifact (js-object :initializeModule false)))
+                 (seen (js-array))
+                 (i 0))
+            (js-call a :auto 1)
+            (while (< i 2)
+              (try
+                (js-call a :initializeModule)
+                (js-call assert :fail "initializer must throw")
+                (catch error
+                  (js-call seen :push error)))
+              (js-call a :collect)
+              (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+              (setq i (+ i 1)))
+            (if (js-call value :startsWith "(new")
+                (progn
+                  (funcall assert (js-call a :keyEqual (aref seen 0) (aref seen 1)))
+                  (let* ((key (js-call a :string "message"))
+                         (text (js-call a :objectGet (aref seen 0) key)))
+                    (js-call assert :equal (js-call a :readString text) "init")
+                    (js-call a :release key)
+                    (js-call a :release text)))
+                (let ((expected-prim
+                        (cond
+                          ((= value "nil") nil)
+                          ((= value "undefined") undefined)
+                          (t false))))
+                  (js-call assert :deepEqual seen (js-array expected-prim expected-prim))))
+            (finish a seen))))))
+
+  (test "unrepresented generated Error stacks remain unsupported while explicit stack data preserves JavaScript descriptors and write restrictions"
+    (async ()
+      (let* ((source
+               (str "(defconst marker 1)\n"
+                    "  (defun read-stack (error) (aref error \"stack\"))\n"
+                    "  (defun has-stack (error) (Object/hasOwn error \"stack\"))\n"
+                    "  (defun describe-stack (error) (Object/getOwnPropertyDescriptor error \"stack\"))\n"
+                    "  (defun define-default-stack (error) (Object/defineProperty error \"stack\" (js-object :value 9)))\n"
+                    "  (defun set-stack (error) (put error \"stack\" 9))\n"
+                    "  (defun make () (new (js* \"Error\") \"x\"))\n"
+                    "  (defun custom-stack (value mode)\n"
+                    "   (let ((error (new globalThis/TypeError \"explicit stack\")) (outcome \"unchanged\"))\n"
+                    "    (put error :stack value)\n"
+                    "    (cond ((= mode 1) (Object/defineProperty error \"stack\" (js-object :writable false)))\n"
+                    "          ((= mode 2) (Object/freeze error)))\n"
+                    "    (unless (= mode 0)\n"
+                    "     (setq outcome (try (put error :stack \"replacement\") \"written\" (catch failure (get failure :name)))))\n"
+                    "    (let ((descriptor (Object/getOwnPropertyDescriptor error \"stack\")))\n"
+                    "     (JSON/stringify (js-array (Object/is (aref error \"stack\") value) (Object/hasOwn error \"stack\")\n"
+                    "      (Object/is (get descriptor :value) value) (get descriptor :writable)\n"
+                    "      (get descriptor :enumerable) (get descriptor :configurable) outcome)))))\n"
+                    "  (defun receiver-stack-setter (written)\n"
+                    "   (let ((receiver (js* \"this\")))\n"
+                    "    (put receiver :calls (1+ (get receiver :calls))) (put receiver :seen written)))\n"
+                    "  (defun receiver-stack (mode value)\n"
+                    "   (let* ((error (new globalThis/TypeError \"receiver stack\"))\n"
+                    "          (receiver (js-object :seen \"before\" :calls 0)) (prototype (js-object)))\n"
+                    "    (put error :stack \"target\")\n"
+                    "    (cond\n"
+                    "     ((= mode 1)\n"
+                    "      (Reflect/deleteProperty error \"stack\")\n"
+                    "      (Object/defineProperty prototype \"stack\" (js-object\n"
+                    "       :set receiver-stack-setter :configurable t))\n"
+                    "      (Object/setPrototypeOf error prototype))\n"
+                    "     ((= mode 2)\n"
+                    "      (Reflect/deleteProperty error \"stack\")\n"
+                    "      (Object/defineProperty prototype \"stack\" (js-object :value \"locked\" :writable false :configurable t))\n"
+                    "      (Object/setPrototypeOf error prototype))\n"
+                    "     ((= mode 3) (Object/freeze receiver)))\n"
+                    "    (let* ((outcome (Reflect/set error \"stack\" value receiver))\n"
+                    "           (descriptor (Object/getOwnPropertyDescriptor receiver \"stack\")))\n"
+                    "     (JSON/stringify (js-array outcome (get receiver :calls)\n"
+                    "      (Object/hasOwn error \"stack\") (Object/hasOwn receiver \"stack\")\n"
+                    "      (Object/is (get error :stack) \"target\") (Object/is (get error :stack) \"locked\")\n"
+                    "      (Object/is (get receiver :seen) value) (Object/is (get receiver :stack) value)\n"
+                    "      (if descriptor (js-array (get descriptor :writable) (get descriptor :enumerable) (get descriptor :configurable)) nil))))))\n"
+                    "  (export read-stack has-stack describe-stack define-default-stack set-stack make custom-stack receiver-stack)"))
+             (p (js-call (get b :compiler) :compile_ir_string source "error-stack-boundary.eli"))
+             (js (await (funcall dyn-import
+                          (str "data:text/javascript;base64,"
+                               (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string p)) :toString "base64")))))
+             (artifact (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime))))
+        (js-call assert :deepEqual
+          (WebAssembly.Module/imports (new WebAssembly.Module artifact))
+          (js-array))
+        (let* ((a (instantiateManagedRuntime artifact))
+               (_ (js-call a :auto 1))
+               (error (js-call a :invoke "make"))
+               (object (js-call a :sourceObject (js-object :stack t))))
+          (try
+            (js-call (js-array "read-stack" "has-stack" "describe-stack" "define-default-stack") :forEach
+              (lambda (name)
+                (js-call assert :throws
+                  (lambda () (js-call a :invoke name (js-array error)))
+                  (lambda (e)
+                    (let ((diag (if (nullish? e) undefined (get e :eliscriptDiagnostic))))
+                      (= (if diag (get diag :code) undefined) "ELI-RT0003"))))))
+            (js-call (js-array error object) :forEach
+              (lambda (target)
+                (when (= target object)
+                  (js-call assert :equal (js-call a :invoke "read-stack" (js-array target)) t)
+                  (js-call assert :equal (js-call a :invoke "has-stack" (js-array target)) t))
+                (let ((written (js-call a :invoke "set-stack" (js-array target))))
+                  (try
+                    (js-call assert :equal (js-call a :readNumber written) 9)
+                    (finally
+                      (js-call a :release written))))
+                (let ((actual (js-call a :invoke "read-stack" (js-array target))))
+                  (try
+                    (js-call assert :equal (js-call a :readNumber actual) 9)
+                    (finally
+                      (js-call a :release actual))))
+                (js-call assert :equal (js-call a :invoke "has-stack" (js-array target)) t)))
+            (js-call (js-array "TypeError: supplied\n    at original.eli:3:7" -0.0 undefined false) :forEach
+              (lambda (value)
+                (js-call (js-array 0 1 2) :forEach
+                  (lambda (mode)
+                    (let ((input (box a value))
+                          (option (js-call a :number mode))
+                          (out undefined))
+                      (try
+                        (let ((expected (JSON/parse (js-call js :custom_stack value mode))))
+                          (js-call assert :deepEqual
+                            expected
+                            (js-array t t t (= mode 0) false (/= mode 2) (if (= mode 0) "unchanged" "TypeError")))
+                          (setq out (js-call a :invoke "custom-stack" (js-array input option)))
+                          (js-call assert :deepEqual (JSON/parse (js-call a :readString out)) expected))
+                        (finally
+                          (js-call a :release out)
+                          (js-call a :release option)
+                          (js-call a :release input)))
+                      (js-call a :collect)
+                      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))))
+            (let ((receiver-expected
+                    (js-array
+                      (js-array t 0 t t t false false t (js-array t t t))
+                      (js-array t 1 false false false false t false nil)
+                      (js-array false 0 false false false t false false nil)
+                      (js-array false 0 t false t false false false nil))))
+              (js-call (js-array "explicit receiver stack" -0.0) :forEach
+                (lambda (value)
+                  (let ((mode 0))
+                    (while (< mode (get receiver-expected :length))
+                      (let ((input (box a value))
+                            (option (js-call a :number mode))
+                            (out undefined))
+                        (try
+                          (let ((expected (JSON/parse (js-call js :receiver_stack mode value))))
+                            (js-call assert :deepEqual expected (aref receiver-expected mode))
+                            (setq out (js-call a :invoke "receiver-stack" (js-array option input)))
+                            (js-call assert :deepEqual (JSON/parse (js-call a :readString out)) expected))
+                          (finally
+                            (js-call a :release out)
+                            (js-call a :release option)
+                            (js-call a :release input)))
+                        (js-call a :collect)
+                        (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))
+                      (setq mode (+ mode 1)))))))
+            (finally
+              (finish a (js-array error object))))))))
+
+  (test "cold Error realm dynamic lookups calls overrides and explicit prototypes match JavaScript reflection and recover after GC"
+    (async ()
+      (let* ((source
+               (str "(defconst marker 1)\n"
+                    "  (defun property (object key) (get object key))\n"
+                    "  (defun invoke-method (object key arguments)\n"
+                    "   (let ((method (property object key))) (js-call method :apply object arguments)))\n"
+                    "  (defun own-render (&rest ignored) \"own\")\n"
+                    "  (defun prototype-render (&rest ignored) \"prototype\")\n"
+                    "  (defun cold-lookup ()\n"
+                    "   (let* ((error (new (js* \"Error\") \"message\"))\n"
+                    "          (constructor (property error \"constructor\"))\n"
+                    "          (to-string (property error \"toString\"))\n"
+                    "          (own (property error \"hasOwnProperty\"))\n"
+                    "          (enumerable (property error \"propertyIsEnumerable\"))\n"
+                    "          (prototype (Object/getPrototypeOf error))\n"
+                    "          (called (js-call constructor :call nil \"called\"))\n"
+                    "          (applied (js-call constructor :apply nil (js-array \"applied\")))\n"
+                    "          (bound (js-call constructor :bind nil \"bound\")) (bound-error (funcall bound)))\n"
+                    "    (JSON/stringify (js-array\n"
+                    "     (Object/is constructor (js* \"Error\")) (Object/is prototype (get constructor :prototype))\n"
+                    "     (Object/is (property prototype \"constructor\") constructor)\n"
+                    "     (Object/is to-string (property prototype \"toString\"))\n"
+                    "     (Object/is own (get globalThis.Object.prototype :hasOwnProperty))\n"
+                    "     (Object/is enumerable (get globalThis.Object.prototype :propertyIsEnumerable))\n"
+                    "     (invoke-method error \"toString\" (js-array))\n"
+                    "     (js-call own :call error \"message\") (js-call enumerable :call error \"message\")\n"
+                    "     (get called :message) (get applied :message) (get bound-error :message)\n"
+                    "     (Object/is constructor (property error \"constructor\"))))))\n"
+                    "  (defun overwrite ()\n"
+                    "   (let* ((error (new (js* \"Error\") \"message\")) (prototype (Object/getPrototypeOf error))\n"
+                    "          (original-method (property prototype \"toString\"))\n"
+                    "          (original-constructor (property prototype \"constructor\")))\n"
+                    "    (try\n"
+                    "     (put prototype :toString prototype-render)\n"
+                    "     (let ((inherited (invoke-method error \"toString\" (js-array))))\n"
+                    "      (put error :toString own-render)\n"
+                    "      (let ((own (invoke-method error \"toString\" (js-array))))\n"
+                    "       (Reflect/deleteProperty error \"toString\") (put prototype :constructor false)\n"
+                    "       (JSON/stringify (js-array inherited own\n"
+                    "        (invoke-method error \"toString\" (js-array)) (property error \"constructor\")\n"
+                    "        (Object/hasOwn error \"toString\")))))\n"
+                    "     (finally (put prototype :toString original-method) (put prototype :constructor original-constructor)))))\n"
+                    "  (defun getter-order ()\n"
+                    "   (let ((error (new (js* \"Error\") \"message\")) (trace (js-array)))\n"
+                    "    (Object/defineProperty error \"toString\" (js-object :configurable t\n"
+                    "     :get (lambda () (js-call trace :push \"getter\") own-render)))\n"
+                    "    (let* ((method (property error \"toString\"))\n"
+                    "           (result (js-call method :call error (progn (js-call trace :push \"argument\") 7))))\n"
+                    "     (JSON/stringify (js-array result trace)))))\n"
+                    "  (defun explicit-prototypes ()\n"
+                    "   (let ((error (new (js* \"Error\") \"message\")) (custom (js-object :constructor false :toString own-render)))\n"
+                    "    (Object/setPrototypeOf error nil)\n"
+                    "    (let ((empty (js-array (Object/is (Object/getPrototypeOf error) nil)\n"
+                    "                  (Object/is (property error \"constructor\") undefined)\n"
+                    "                  (Object/is (property error \"toString\") undefined))))\n"
+                    "     (Object/setPrototypeOf error custom)\n"
+                    "     (JSON/stringify (js-array empty (Object/is (Object/getPrototypeOf error) custom)\n"
+                    "      (property error \"constructor\") (invoke-method error \"toString\" (js-array))\n"
+                    "      (Object/is (Object/getPrototypeOf error) custom))))))\n"
+                    "  (defun reflection ()\n"
+                    "   (let* ((error (new (js* \"Error\") \"message\"))\n"
+                    "          (constructor (property error \"constructor\")) (prototype (Object/getPrototypeOf error))\n"
+                    "          (descriptor (Object/getOwnPropertyDescriptor prototype \"toString\"))\n"
+                    "          (reflected (Reflect/getOwnPropertyDescriptor prototype \"toString\")))\n"
+                    "    (JSON/stringify (js-array\n"
+                    "     (Object/is (Reflect/getPrototypeOf error) prototype)\n"
+                    "     (Object/is (Reflect/get error \"constructor\") constructor)\n"
+                    "     (Reflect/has error \"toString\") (Object/hasOwn error \"constructor\")\n"
+                    "     (invoke-method error \"hasOwnProperty\" (js-array \"message\"))\n"
+                    "     (invoke-method error \"propertyIsEnumerable\" (js-array \"message\"))\n"
+                    "     (Object/is (get descriptor :value) (property error \"toString\"))\n"
+                    "     (Object/is (get reflected :value) (get descriptor :value))\n"
+                    "     (get descriptor :writable) (get descriptor :enumerable) (get descriptor :configurable)\n"
+                    "     (get reflected :writable) (get reflected :enumerable) (get reflected :configurable)))))\n"
+                    "  (defun recover (value) (+ value marker))\n"
+                    "  (export cold-lookup overwrite getter-order explicit-prototypes reflection recover)"))
+             (p (js-call (get b :compiler) :compile_ir_string source "cold-error-realm.eli"))
+             (js (await (funcall dyn-import
+                          (str "data:text/javascript;base64,"
+                               (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string p)) :toString "base64")))))
+             (artifact (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime)))
+             (observations
+               (js-array
+                 (js-array "cold-lookup" (js-array t t t t t t "Error: message" t false "called" "applied" "bound" t))
+                 (js-array "overwrite" (js-array "prototype" "own" "prototype" false false))
+                 (js-array "getter-order" (js-array "own" (js-array "getter" "argument")))
+                 (js-array "explicit-prototypes" (js-array (js-array t t t) t false "own" t))
+                 (js-array "reflection" (js-array t t t false t false t t t false t t false t)))))
+        (js-call assert :deepEqual
+          (WebAssembly.Module/imports (new WebAssembly.Module artifact))
+          (js-array))
+        (js-call observations :forEach
+          (lambda (pair)
+            (let* ((name (aref pair 0))
+                   (expected (aref pair 1))
+                   (a (instantiateManagedRuntime artifact))
+                   (_ (js-call a :auto 1))
+                   (keep (js-call a :number -0.0))
+                   (caller (js-call a :frame 1)))
+              (js-call a :frameSet caller 0 keep)
+              (try
+                (let ((index 0))
+                  (while (< index 2)
+                    (let* ((fn-name (js-call name :replaceAll "-" "_"))
+                           (oracle (JSON/parse (funcall (get js fn-name)))))
+                      (js-call assert :deepEqual oracle expected)
+                      (let ((out (js-call a :invoke name)))
+                        (try
+                          (js-call assert :deepEqual (JSON/parse (js-call a :readString out)) oracle)
+                          (finally
+                            (js-call a :release out))))
+                      (js-call a :collect)
+                      (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+                      (let ((held (js-call a :frameGet caller 0)))
+                        (try
+                          (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+                          (finally
+                            (js-call a :release held))))
+                      (let ((input (js-call a :number 7))
+                            (recovered undefined))
+                        (try
+                          (setq recovered (js-call a :invoke "recover" (js-array input)))
+                          (js-call assert :equal (js-call a :readNumber recovered) (js-call js :recover 7))
+                          (finally
+                            (js-call a :release recovered)
+                            (js-call a :release input)))))
+                    (setq index (+ index 1))))
+                (finally
+                  (js-call a :leaveFrame caller)
+                  (finish a (js-array keep)))))))))
+    30000)
+
+  (defasync build-generations ()
+    (let* ((entries (await (readdir "bootstrap/compiler")))
+           (files (js-call (js-call entries :filter (lambda (file) (js-call file :endsWith ".eli"))) :sort))
+           (all (js-array b))
+           (previous b)
+           (gens (js-array 2 3))
+           (gidx 0))
+      (while (< gidx (get gens :length))
+        (let* ((generation (aref gens gidx))
+               (output (resolve directory (str "g" generation)))
+               (bootstrap (resolve output "bootstrap")))
+          (await (mkdir bootstrap (js-object :recursive t)))
+          (let ((fidx 0))
+            (while (< fidx (get files :length))
+              (let* ((file (aref files fidx))
+                     (path (resolve "bootstrap/compiler" file))
+                     (name (str (js-call file :slice 0 (- (get file :length) 4)) ".mjs"))
+                     (source (await (readFile path "utf8")))
+                     (emission
+                       (js-call (get previous :compiler) :compile_string_with_source_map
+                         source path name (relative bootstrap path))))
+                (await (writeFile (resolve bootstrap name)
+                         (str (get emission :javascript) "//# sourceMappingURL=" name ".map\n")))
+                (await (writeFile (resolve bootstrap (str name ".map"))
+                         (get emission :sourceMap))))
+              (setq fidx (+ fidx 1))))
+          (let ((current (await (buildBackends (js-object :outputRoot output :frontend (get previous :compiler))))))
+            (put current :compiler
+              (await (funcall dyn-import (get (pathToFileURL (resolve bootstrap "compiler.mjs")) :href))))
+            (js-call all :push current)
+            (setq previous current)))
+        (setq gidx (+ gidx 1)))
+      (let* ((filename (resolve "tests/fixtures/wasm-managed-exceptions.eli"))
+             (source (await (readFile filename "utf8")))
+             (seed-file (resolve directory "exceptions-seed.mjs"))
+             (seed (spawnSync (resolve "bin/eliscript-seed")
+                     (js-array "--output" seed-file filename)
+                     (js-object :encoding "utf8" :timeout 30000))))
+        (js-call assert :equal (get seed :status) 0 (get seed :stderr))
+        (let ((javascript (await (readFile seed-file "utf8")))
+              (outputs (js-array))
+              (aidx 0))
+          (while (< aidx (get all :length))
+            (let* ((current (aref all aidx))
+                   (p (js-call (get current :compiler) :compile_ir_string source filename))
+                   (r (js-call (get current :compiler) :compile_ir_string
+                        (await (readFile "bootstrap/runtime/memory.eli" "utf8"))
+                        "runtime.eli")))
+              (js-call assert :equal (js-call (get current :compiler) :emit_ir_string p) javascript)
+              (js-call outputs :push
+                (Uint8Array/from (js-call (get current :managed) :emit_managed_wasm p r))))
+            (setq aidx (+ aidx 1)))
+          (let ((fidx 0))
+            (while (< fidx (get files :length))
+              (let* ((file (aref files fidx))
+                     (path (resolve "bootstrap/compiler" file))
+                     (fsource (await (readFile path "utf8")))
+                     (expected (js-call (get (aref all 0) :compiler) :compile_string fsource path)))
+                (js-call (js-call all :slice 1) :forEach
+                  (lambda (current)
+                    (js-call assert :equal
+                      (js-call (get current :compiler) :compile_string fsource path)
+                      expected))))
+              (setq fidx (+ fidx 1))))
+          (js-call assert :deepEqual (aref outputs 0) (aref outputs 1))
+          (js-call assert :deepEqual (aref outputs 1) (aref outputs 2))
+          (let* ((seeded (await (buildBackends (js-object :outputRoot (resolve directory "seed-backends") :seed t))))
+                 (seed-runtime
+                   (js-call (get seeded :compiler) :compile_ir_string
+                     (await (readFile "bootstrap/runtime/memory.eli" "utf8"))
+                     "runtime.eli"))
+                 (seed-program
+                   (js-call (get seeded :compiler) :compile_ir_string source filename)))
+            (js-call assert :deepEqual
+              (Uint8Array/from (js-call (get seeded :managed) :emit_managed_wasm seed-program seed-runtime))
+              (aref outputs 0))
+            (js-object :bytes (aref outputs 2) :javascript javascript))))))
+
+  (defun generations ()
+    (when (nullish? generation-evidence)
+      (setq generation-evidence (build-generations)))
+    generation-evidence)
+
+  (test "Seed and complete three-generation frontend and backend artifacts preserve exception IR and zero-import WASM bytes"
+    (async ()
+      (let* ((evidence (await (generations)))
+             (ebytes (get evidence :bytes))
+             (a (instantiateManagedRuntime ebytes)))
+        (js-call a :auto 1)
+        (js-call assert :deepEqual
+          (WebAssembly.Module/imports (new WebAssembly.Module ebytes))
+          (js-array))
+        (let* ((text (js-call a :string "seed"))
+               (trace (js-call a :sourceArray (js-array)))
+               (out (js-call a :invoke "nested" (js-array text trace)))
+               (names (js-array "Error" "TypeError" "RangeError" "SyntaxError"))
+               (i 0))
+          (funcall assert (js-call a :keyEqual out text))
+          (js-call assert :deepEqual (items a trace) (js-array "inner" "catch" "outer"))
+          (while (< i 4)
+            (let* ((kind (js-call a :number i))
+                   (error (js-call a :invoke "make-error" (js-array kind text undefined)))
+                   (description (js-call a :invoke "error-summary" (js-array error))))
+              (js-call assert :deepEqual
+                (items a description)
+                (js-array (aref names i) "seed" false t false))
+              (js-call (js-array kind error description) :forEach
+                (lambda (v) (js-call a :release v))))
+            (setq i (+ i 1)))
+          (finish a (js-array text trace out)))))
+    120000)
+
+  (test "Node executes the exact Seed and three-generation zero-import artifact with source exceptions and Error identity"
+    (async ()
+      (let* ((evidence (await (generations)))
+             (path (resolve directory "exceptions.wasm")))
+        (await (writeFile path (get evidence :bytes)))
+        (let ((result (spawnSync "node"
+                        (js-array node-helper "--run-node-check"
+                          (get (pathToFileURL (resolve "tools/backends/managed-runtime.mjs")) :href)
+                          path)
+                        (js-object :encoding "utf8" :timeout 30000))))
+          (js-call assert :equal (get result :status) 0 (get result :stderr)))))
+    120000))

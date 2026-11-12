@@ -2,6 +2,7 @@
   (import "./syntax.mjs"
     node-kind node-span node-value node-name node-items)
   (import "./ir.mjs" make-program make-node)
+  (defconst typeof-value (lambda (value) (js* "typeof value")))
 
   (defconst intrinsics
     (js-array "not" "+" "*" "-" "/" "%" "mod" "=" "/=" "not=" "<" "<="
@@ -16,7 +17,7 @@
 
   (defconst fail
     (lambda (message)
-      (throw (new (js* "Error") message))))
+      (throw (new globalThis.Error message))))
   (defvar recur-targets (js-array))
 
   (defun symbol-node-p (node)
@@ -38,7 +39,7 @@
   (defun string-node-p (node)
     (and node
          (= (node-kind node) "literal")
-         (= (js* "typeof node.value") "string")))
+         (= (funcall typeof-value (get node :value)) "string")))
 
   (defun split-binding-name (name)
     (let ((slash (js-call name :lastIndexOf "/")))

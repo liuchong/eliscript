@@ -1,2 +1,327 @@
-(module capsules.tools.backends.compiler-corpus-generations
-  (js* "import {mkdir, readFile, writeFile} from 'node:fs/promises';\nimport {resolve, relative, sep} from 'node:path';\nimport {pathToFileURL} from 'node:url';\nimport {loadCompilerSources, buildIndependentCompiler, independentCompilerProfiles} from './compiler-build.mjs';\nimport {\n  archiveCompilerArtifact, archiveCompilerSources, compilerSourceIdentity,\n  compilerDigest, compilerFailure, normalizeCompilerHost, openCompilerArtifact, saveCompilerMetadata,\n} from './compiler-bootstrap.mjs';\n\nfunction aborted(signal) {\n  if (signal?.aborted) throw signal.reason ?? new Error('original compiler generations aborted');\n}\n\nfunction localPath(base, path) {\n  const result = relative(base, path).split(sep).join('/');\n  if (!result || result === '..' || result.startsWith('../')) {\n    throw new TypeError('original generation product must remain inside its case archive');\n  }\n  return result;\n}\n\nfunction frontendModules(context, sources) {\n  const actual = sources.modules.filter(module => module.filename.startsWith('bootstrap/compiler/'));\n  const declared = context.record.modules ?? context.record.request?.modules;\n  if (actual.length !== 13 || !Array.isArray(declared) || declared.length !== actual.length) {\n    throw new TypeError('original CLI generations require all thirteen original frontend sources');\n  }\n  const byFilename = new Map(actual.map(module => [module.filename, module])), seen = new Set();\n  for (const module of declared) {\n    const original = byFilename.get(module.filename);\n    if (!original || seen.has(module.filename) || module.source !== original.source ||\n        module.id !== module.filename.slice(0, -4) + '.mjs') {\n      throw new TypeError('original CLI frontend source differs from the complete compiler graph');\n    }\n    seen.add(module.filename);\n  }\n  return structuredClone(declared);\n}\n\nfunction requireProducer(artifact, producer, sources, target) {\n  const provenance = artifact.provenance;\n  if (normalizeCompilerHost(artifact.host) !== target || provenance?.mode !== 'session' ||\n      normalizeCompilerHost(provenance.producerHost) !== normalizeCompilerHost(producer.host) ||\n      provenance.runtimeCompiled !== true || !Array.isArray(provenance.compiledModuleIds) ||\n      JSON.stringify([...provenance.compiledModuleIds].sort()) !== JSON.stringify(sources.modules.map(module => module.id).sort())) {\n    throw new Error('original generation was not built entirely by its preceding compiler session');\n  }\n}\n\nfunction requireFrontendProduct(product, modules, target) {\n  if (product.target !== target || product.entry !== 'bootstrap/compiler/compiler.mjs') {\n    throw new Error('original compiler frontend view changed its entry or target');\n  }\n  const records = target === 'javascript' ? product.modules : product.descriptor?.project?.modules;\n  if (!Array.isArray(records) ||\n      JSON.stringify(records.map(module => module.id).sort()) !== JSON.stringify(modules.map(module => module.id).sort())) {\n    throw new Error('original compiler frontend view omitted an original module');\n  }\n}\n\n// Construct three actual successor compilers. No seed/bootstrap fallback is\n// available here: even the first generation must use the selected cell's\n// caller-owned compiler session. The frontend facades and JavaScript/map\n// companions are separate, independently identified products of each successor.\nexport async function prepareOriginalCompilerGenerations(context) {\n  const contract = context.record?.execution?.compilerGenerations;\n  if (contract === undefined) return undefined;\n  if (contract.count !== 3 || contract.producer !== 'previous-generation' ||\n      contract.target !== 'selected-target' || contract.completeCompiler !== true || contract.sourceMaps !== true ||\n      contract.manifestEnvironment !== 'ELISCRIPT_ORIGINAL_COMPILER_GENERATIONS' ||\n      contract.manifestFormat !== 'eliscript-original-compiler-generations' || contract.manifestVersion !== 1) {\n    throw new TypeError('unsupported original compiler generation contract');\n  }\n  const options = context.options ?? {}, profile = options.profile;\n  if (typeof profile !== 'string' || !Object.hasOwn(independentCompilerProfiles, profile)) {\n    throw new TypeError('original compiler generations require an explicit existing compiler profile');\n  }\n  if (typeof context.session?.request !== 'function' || typeof context.archiveProduct !== 'function') {\n    throw new TypeError('original compiler generations require the actual selected session and product archiver');\n  }\n  const target = normalizeCompilerHost(context.target), directory = resolve(context.directory, 'original-compiler-generations');\n  await mkdir(directory, {recursive: true});\n  const manifestPath = resolve(directory, 'generations.json');\n  const sources = await loadCompilerSources({sourceRoot: context.sourceRoot});\n  // The full producer is an ordinary compiler entry, never a phased ESM view.\n  // The latter is built separately only for the unchanged public host bodies.\n  sources.phased = false;\n  const modules = frontendModules(context, sources), identity = compilerSourceIdentity(sources);\n  await archiveCompilerSources(sources, resolve(directory, 'sources'));\n  const metadata = {\n    format: 'eliscript-original-compiler-generations', version: 1, target, profile,\n    status: 'constructing', verification: 'unverified', sourceIdentity: identity,\n    generations: [], fixedPoint: {verification: 'unverified', comparisons: []},\n  };\n  await saveCompilerMetadata(manifestPath, metadata);\n  const supportingProducts = [];\n  let producer = context.session, ownedSession = null, failure, phase = 'build';\n  try {\n    for (let number = 1; number <= 3; number++) {\n      aborted(context.signal);\n      const generationDirectory = resolve(directory, 'generation-' + number);\n      await mkdir(generationDirectory, {recursive: true});\n      const record = {generation: number, producerHost: normalizeCompilerHost(producer.host),\n        target, sourceSha256: identity.sha256, status: 'building', verification: 'unverified'};\n      metadata.generations.push(record);\n      phase = 'generation-' + number + '-build';\n      await saveCompilerMetadata(manifestPath, metadata);\n      const artifact = await buildIndependentCompiler({\n        host: target, outputRoot: resolve(generationDirectory, 'compiler'), sourceRoot: context.sourceRoot,\n        sources: structuredClone(sources), session: producer, profile,\n        budget: options.budget, memory: options.memory, auto: options.auto,\n        nativeTarget: options.nativeTarget, signal: context.signal,\n        retainIR: options.retainIR ?? true, debug: options.debug ?? true,\n      });\n      requireProducer(artifact, producer, sources, target);\n      record.fullCompiler = await archiveCompilerArtifact(artifact, resolve(generationDirectory, 'compiler-metadata'));\n      record.status = 'built';\n      supportingProducts.push({role: 'original-compiler-generation-full', generation: number, target,\n        producerHost: record.producerHost, directory: localPath(context.directory, artifact.directory),\n        identitySha256: record.fullCompiler.productIdentity.sha256});\n      phase = 'generation-' + number + '-initialize';\n      await saveCompilerMetadata(manifestPath, metadata);\n      const next = await openCompilerArtifact(artifact, options.sessionOptions);\n      const previousOwned = ownedSession;\n      ownedSession = next; producer = next;\n      if (previousOwned) await previousOwned.close();\n      aborted(context.signal);\n      phase = 'generation-' + number + '-frontend-runtime';\n      await producer.request({operation: 'runtime', source: sources.runtime.source, filename: sources.runtime.filename,\n        ...(Object.hasOwn(sources, 'literalSources') ? {literalSources: sources.literalSources} : {})}, {signal: context.signal});\n      const request = {operation: 'project', modules: structuredClone(modules),\n        entry: 'bootstrap/compiler/compiler.mjs', entries: modules.map(module => module.id),\n        resolveImports: true, phased: true, sourceMap: true, target,\n        memory: options.memory ?? artifact.memory, nativeTarget: options.nativeTarget ?? artifact.nativeTarget,\n        nativeFormat: 'library', debug: options.debug ?? true};\n      phase = 'generation-' + number + '-frontend-view';\n      const response = await producer.request(request, {signal: context.signal});\n      const view = await context.archiveProduct(response, 'original-generation-' + number + '-frontend-view', target);\n      requireFrontendProduct(view, modules, target);\n      record.frontendView = {producerHost: normalizeCompilerHost(producer.host), target,\n        identitySha256: view.identitySha256, directory: localPath(context.directory, view.directory)};\n      supportingProducts.push({role: 'original-compiler-generation-frontend-view', generation: number, ...record.frontendView});\n      phase = 'generation-' + number + '-javascript-companion';\n      const javascript = await producer.request({...request, target: 'javascript', phased: false}, {signal: context.signal});\n      const companion = await context.archiveProduct(javascript, 'original-generation-' + number + '-javascript-companion', 'javascript');\n      requireFrontendProduct(companion, modules, 'javascript');\n      record.javascriptCompanion = {producerHost: normalizeCompilerHost(producer.host), target: 'javascript',\n        identitySha256: companion.identitySha256, directory: localPath(context.directory, companion.directory)};\n      supportingProducts.push({role: 'original-compiler-generation-javascript-companion', generation: number, ...record.javascriptCompanion});\n      for (const module of companion.modules) {\n        if (typeof module.sourceMapPath !== 'string' || typeof module.sourceMapSha256 !== 'string') {\n          throw new Error('original compiler generation omitted an actual JavaScript source map');\n        }\n        const bytes = await readFile(module.sourceMapPath);\n        if (compilerDigest(bytes) !== module.sourceMapSha256) throw new Error('original compiler source map changed after emission');\n        if (target !== 'javascript') {\n          const path = resolve(view.directory, module.id + '.map');\n          await mkdir(resolve(path, '..'), {recursive: true});\n          await writeFile(path, bytes, {flag: 'wx'});\n        }\n      }\n      record.compilerDirectory = resolve(view.directory, 'bootstrap/compiler');\n      record.javascriptDirectory = resolve(companion.directory, 'bootstrap/compiler');\n      if (target !== 'javascript') {\n        const configuration = resolve(generationDirectory, 'frontend-context.json');\n        await saveCompilerMetadata(configuration, {\n          target, path: view.path, descriptor: view.descriptor, typed: view.typed,\n          nativeTarget: view.nativeTarget ?? options.nativeTarget ?? artifact.nativeTarget,\n          entry: view.entry, base: pathToFileURL(view.directory + sep).href,\n          sourceRoot: context.sourceRoot, memory: options.memory ?? artifact.memory,\n          runtimeOptions: {...options.runtimeOptions,\n            ...(options.auto === undefined ? {} : {auto: options.auto}),\n            ...(view.debug ? {debug: view.debug} : {})},\n        });\n        record.context = configuration;\n      }\n      record.status = 'constructed';\n      const previous = metadata.generations.at(-2);\n      if (previous) {\n        const left = previous.fullCompiler.productIdentity.sha256, right = record.fullCompiler.productIdentity.sha256;\n        metadata.fixedPoint.comparisons.push({from: previous.generation, to: number,\n          identities: [left, right], status: left === right ? 'identical' : 'different'});\n      }\n      await saveCompilerMetadata(manifestPath, metadata);\n    }\n    phase = 'complete-target-artifact-fixed-point';\n    metadata.fixedPoint.status = metadata.fixedPoint.comparisons.every(item => item.status === 'identical')\n      ? 'identical' : 'different';\n    if (metadata.fixedPoint.status !== 'identical') {\n      throw new Error('original compiler generations produced different complete target artifacts');\n    }\n    metadata.status = 'constructed';\n    await saveCompilerMetadata(manifestPath, metadata);\n    return {manifestPath, supportingProducts};\n  } catch (error) {\n    failure = error; metadata.status = 'failed'; metadata.failure = {phase, ...compilerFailure(error)};\n    await saveCompilerMetadata(manifestPath, metadata); throw error;\n  } finally {\n    if (ownedSession) {\n      try {await ownedSession.close();}\n      catch (error) {\n        metadata.cleanupFailure = compilerFailure(error); metadata.status = 'failed';\n        await saveCompilerMetadata(manifestPath, metadata);\n        if (!failure) throw error;\n      }\n    }\n  }\n}\n"))
+(module tools.backends.compiler-corpus-generations
+  (import "node:fs/promises" mkdir readFile writeFile)
+  (import "node:path" resolve relative sep)
+  (import "node:url" pathToFileURL)
+  (import "./compiler-build.mjs" loadCompilerSources buildIndependentCompiler independentCompilerProfiles)
+  (import "./compiler-bootstrap.mjs"
+    archiveCompilerArtifact
+    archiveCompilerSources
+    compilerSourceIdentity
+    compilerDigest
+    compilerFailure
+    normalizeCompilerHost
+    openCompilerArtifact
+    saveCompilerMetadata)
+
+  (defun aborted (signal)
+    (when (and (not (nullish? signal)) (get signal :aborted))
+      (let ((reason (get signal :reason)))
+        (throw (if (nullish? reason)
+                 (new globalThis.Error "original compiler generations aborted")
+                 reason)))))
+
+  (defun local-path (base path)
+    (let ((result (js-call (js-call (relative base path) :split sep) :join "/")))
+      (when (or (= result "") (= result "..") (js-call result :startsWith "../"))
+        (throw (new globalThis.TypeError "original generation product must remain inside its case archive")))
+      result))
+
+  (defun frontend-modules (context sources)
+    (let* ((actual (js-call (get sources :modules) :filter
+                     (lambda (module) (js-call (get module :filename) :startsWith "bootstrap/compiler/"))))
+           (record (get context :record))
+           (declared (let ((mods (get record :modules)))
+                       (if (nullish? mods)
+                         (let ((req (get record :request)))
+                           (if (nullish? req) undefined (get req :modules)))
+                         mods))))
+      (unless (and (= (js-length actual) 13)
+                   (Array/isArray declared)
+                   (= (js-length declared) (js-length actual)))
+        (throw (new globalThis.TypeError "original CLI generations require all thirteen original frontend sources")))
+      (let ((by-filename (new globalThis.Map
+                           (js-call actual :map (lambda (module) (js-array (get module :filename) module)))))
+            (seen (new globalThis.Set))
+            (i 0))
+        (while (< i (js-length declared))
+          (let* ((module (aref declared i))
+                 (filename (get module :filename))
+                 (original (js-call by-filename :get filename)))
+            (when (or (not original)
+                      (js-call seen :has filename)
+                      (/= (get module :source) (get original :source))
+                      (/= (get module :id) (str (js-call filename :slice 0 -4) ".mjs")))
+              (throw (new globalThis.TypeError "original CLI frontend source differs from the complete compiler graph")))
+            (js-call seen :add filename))
+          (setq i (1+ i)))
+        (globalThis.structuredClone declared))))
+
+  (defun require-producer (artifact producer sources target)
+    (let ((provenance (get artifact :provenance)))
+      (when (or (/= (normalizeCompilerHost (get artifact :host)) target)
+                (nullish? provenance)
+                (/= (get provenance :mode) "session")
+                (/= (normalizeCompilerHost (get provenance :producerHost))
+                    (normalizeCompilerHost (get producer :host)))
+                (/= (get provenance :runtimeCompiled) t)
+                (not (Array/isArray (get provenance :compiledModuleIds)))
+                (/= (JSON/stringify (js-call (js-call (get provenance :compiledModuleIds) :slice) :sort))
+                    (JSON/stringify (js-call (js-call (get sources :modules) :map (lambda (m) (get m :id))) :sort))))
+        (throw (new globalThis.Error "original generation was not built entirely by its preceding compiler session")))))
+
+  (defun require-frontend-product (product modules target)
+    (when (or (/= (get product :target) target)
+              (/= (get product :entry) "bootstrap/compiler/compiler.mjs"))
+      (throw (new globalThis.Error "original compiler frontend view changed its entry or target")))
+    (let ((records (if (= target "javascript")
+                     (get product :modules)
+                     (let ((desc (get product :descriptor)))
+                       (if (or (nullish? desc) (nullish? (get desc :project)))
+                         undefined
+                         (get (get desc :project) :modules))))))
+      (when (or (not (Array/isArray records))
+                (/= (JSON/stringify (js-call (js-call records :map (lambda (m) (get m :id))) :sort))
+                    (JSON/stringify (js-call (js-call modules :map (lambda (m) (get m :id))) :sort))))
+        (throw (new globalThis.Error "original compiler frontend view omitted an original module")))))
+
+  ;; Construct three actual successor compilers. No seed/bootstrap fallback is
+  ;; available here: even the first generation must use the selected cell's
+  ;; caller-owned compiler session. The frontend facades and JavaScript/map
+  ;; companions are separate, independently identified products of each successor.
+  (defasync prepareOriginalCompilerGenerations (context)
+    (let* ((record-obj (get context :record))
+           (execution (if (nullish? record-obj) undefined (get record-obj :execution)))
+           (contract (if (nullish? execution) undefined (get execution :compilerGenerations))))
+      (if (undefined? contract)
+        undefined
+        (progn
+          (when (or (/= (get contract :count) 3)
+                    (/= (get contract :producer) "previous-generation")
+                    (/= (get contract :target) "selected-target")
+                    (/= (get contract :completeCompiler) t)
+                    (/= (get contract :sourceMaps) t)
+                    (/= (get contract :manifestEnvironment) "ELISCRIPT_ORIGINAL_COMPILER_GENERATIONS")
+                    (/= (get contract :manifestFormat) "eliscript-original-compiler-generations")
+                    (/= (get contract :manifestVersion) 1))
+            (throw (new globalThis.TypeError "unsupported original compiler generation contract")))
+          (let* ((options (let ((opt (get context :options))) (if (nullish? opt) (js-object) opt)))
+                 (profile (get options :profile)))
+            (unless (and (= (value-type profile) "string")
+                         (Object/hasOwn independentCompilerProfiles profile))
+              (throw (new globalThis.TypeError "original compiler generations require an explicit existing compiler profile")))
+            (when (or (nullish? (get context :session))
+                      (/= (value-type (get (get context :session) :request)) "function")
+                      (/= (value-type (get context :archiveProduct)) "function"))
+              (throw (new globalThis.TypeError "original compiler generations require the actual selected session and product archiver")))
+            (let* ((target (normalizeCompilerHost (get context :target)))
+                   (directory (resolve (get context :directory) "original-compiler-generations"))
+                   (_ (await (mkdir directory (js-object :recursive t))))
+                   (manifest-path (resolve directory "generations.json"))
+                   (sources (await (loadCompilerSources (js-object :sourceRoot (get context :sourceRoot))))))
+              ;; The full producer is an ordinary compiler entry, never a phased ESM view.
+              ;; The latter is built separately only for the unchanged public host bodies.
+              (put sources :phased false)
+              (let* ((modules (frontend-modules context sources))
+                     (identity (compilerSourceIdentity sources))
+                     (_0 (await (archiveCompilerSources sources (resolve directory "sources"))))
+                     (metadata (js-object
+                                 :format "eliscript-original-compiler-generations"
+                                 :version 1
+                                 :target target
+                                 :profile profile
+                                 :status "constructing"
+                                 :verification "unverified"
+                                 :sourceIdentity identity
+                                 :generations (js-array)
+                                 :fixedPoint (js-object :verification "unverified" :comparisons (js-array))))
+                     (_1 (await (saveCompilerMetadata manifest-path metadata)))
+                     (supporting-products (js-array))
+                     (producer (get context :session))
+                     (owned-session nil)
+                     (failure undefined)
+                     (phase "build"))
+                (try
+                  (let ((number 1))
+                    (while (<= number 3)
+                      (aborted (get context :signal))
+                      (let* ((generation-directory (resolve directory (str "generation-" number)))
+                             (_ (await (mkdir generation-directory (js-object :recursive t))))
+                             (record (js-object
+                                       :generation number
+                                       :producerHost (normalizeCompilerHost (get producer :host))
+                                       :target target
+                                       :sourceSha256 (get identity :sha256)
+                                       :status "building"
+                                       :verification "unverified")))
+                        (js-call (get metadata :generations) :push record)
+                        (setq phase (str "generation-" number "-build"))
+                        (await (saveCompilerMetadata manifest-path metadata))
+                        (let ((artifact (await (buildIndependentCompiler
+                                                 (js-object
+                                                   :host target
+                                                   :outputRoot (resolve generation-directory "compiler")
+                                                   :sourceRoot (get context :sourceRoot)
+                                                   :sources (globalThis.structuredClone sources)
+                                                   :session producer
+                                                   :profile profile
+                                                   :budget (get options :budget)
+                                                   :memory (get options :memory)
+                                                   :auto (get options :auto)
+                                                   :nativeTarget (get options :nativeTarget)
+                                                   :signal (get context :signal)
+                                                   :retainIR (let ((v (get options :retainIR))) (if (nullish? v) t v))
+                                                   :debug (let ((v (get options :debug))) (if (nullish? v) t v)))))))
+                          (require-producer artifact producer sources target)
+                          (put record :fullCompiler
+                            (await (archiveCompilerArtifact artifact (resolve generation-directory "compiler-metadata"))))
+                          (put record :status "built")
+                          (js-call supporting-products :push
+                            (js-object
+                              :role "original-compiler-generation-full"
+                              :generation number
+                              :target target
+                              :producerHost (get record :producerHost)
+                              :directory (local-path (get context :directory) (get artifact :directory))
+                              :identitySha256 (get (get (get record :fullCompiler) :productIdentity) :sha256)))
+                          (setq phase (str "generation-" number "-initialize"))
+                          (await (saveCompilerMetadata manifest-path metadata))
+                          (let ((next (await (openCompilerArtifact artifact (get options :sessionOptions))))
+                                (previous-owned owned-session))
+                            (setq owned-session next)
+                            (setq producer next)
+                            (when previous-owned
+                              (await (js-call previous-owned :close))))
+                          (aborted (get context :signal))
+                          (setq phase (str "generation-" number "-frontend-runtime"))
+                          (let ((rt-req (js-object
+                                          :operation "runtime"
+                                          :source (get (get sources :runtime) :source)
+                                          :filename (get (get sources :runtime) :filename))))
+                            (when (Object/hasOwn sources "literalSources")
+                              (put rt-req :literalSources (get sources :literalSources)))
+                            (await (js-call producer :request rt-req (js-object :signal (get context :signal)))))
+                          (let* ((request (js-object
+                                            :operation "project"
+                                            :modules (globalThis.structuredClone modules)
+                                            :entry "bootstrap/compiler/compiler.mjs"
+                                            :entries (js-call modules :map (lambda (m) (get m :id)))
+                                            :resolveImports t
+                                            :phased t
+                                            :sourceMap t
+                                            :target target
+                                            :memory (let ((v (get options :memory))) (if (nullish? v) (get artifact :memory) v))
+                                            :nativeTarget (let ((v (get options :nativeTarget))) (if (nullish? v) (get artifact :nativeTarget) v))
+                                            :nativeFormat "library"
+                                            :debug (let ((v (get options :debug))) (if (nullish? v) t v)))))
+                            (setq phase (str "generation-" number "-frontend-view"))
+                            (let* ((response (await (js-call producer :request request (js-object :signal (get context :signal)))))
+                                   (view (await (js-call context :archiveProduct response (str "original-generation-" number "-frontend-view") target))))
+                              (require-frontend-product view modules target)
+                              (put record :frontendView
+                                (js-object
+                                  :producerHost (normalizeCompilerHost (get producer :host))
+                                  :target target
+                                  :identitySha256 (get view :identitySha256)
+                                  :directory (local-path (get context :directory) (get view :directory))))
+                              (js-call supporting-products :push
+                                (Object/assign
+                                  (js-object :role "original-compiler-generation-frontend-view" :generation number)
+                                  (get record :frontendView)))
+                              (setq phase (str "generation-" number "-javascript-companion"))
+                              (let* ((js-req (Object/assign (js-object) request (js-object :target "javascript" :phased false)))
+                                     (javascript (await (js-call producer :request js-req (js-object :signal (get context :signal)))))
+                                     (companion (await (js-call context :archiveProduct javascript (str "original-generation-" number "-javascript-companion") "javascript"))))
+                                (require-frontend-product companion modules "javascript")
+                                (put record :javascriptCompanion
+                                  (js-object
+                                    :producerHost (normalizeCompilerHost (get producer :host))
+                                    :target "javascript"
+                                    :identitySha256 (get companion :identitySha256)
+                                    :directory (local-path (get context :directory) (get companion :directory))))
+                                (js-call supporting-products :push
+                                  (Object/assign
+                                    (js-object :role "original-compiler-generation-javascript-companion" :generation number)
+                                    (get record :javascriptCompanion)))
+                                (let ((comp-mods (get companion :modules))
+                                      (m-idx 0))
+                                  (while (< m-idx (js-length comp-mods))
+                                    (let ((module (aref comp-mods m-idx)))
+                                      (when (or (/= (value-type (get module :sourceMapPath)) "string")
+                                                (/= (value-type (get module :sourceMapSha256)) "string"))
+                                        (throw (new globalThis.Error "original compiler generation omitted an actual JavaScript source map")))
+                                      (let ((bytes (await (readFile (get module :sourceMapPath)))))
+                                        (when (/= (compilerDigest bytes) (get module :sourceMapSha256))
+                                          (throw (new globalThis.Error "original compiler source map changed after emission")))
+                                        (when (/= target "javascript")
+                                          (let ((path (resolve (get view :directory) (str (get module :id) ".map"))))
+                                            (await (mkdir (resolve path "..") (js-object :recursive t)))
+                                            (await (writeFile path bytes (js-object :flag "wx")))))))
+                                    (setq m-idx (1+ m-idx))))
+                                (put record :compilerDirectory (resolve (get view :directory) "bootstrap/compiler"))
+                                (put record :javascriptDirectory (resolve (get companion :directory) "bootstrap/compiler"))
+                                (when (/= target "javascript")
+                                  (let ((configuration (resolve generation-directory "frontend-context.json"))
+                                        (rt-opts (Object/assign (js-object) (get options :runtimeOptions))))
+                                    (unless (undefined? (get options :auto))
+                                      (put rt-opts :auto (get options :auto)))
+                                    (when (get view :debug)
+                                      (put rt-opts :debug (get view :debug)))
+                                    (await (saveCompilerMetadata configuration
+                                             (js-object
+                                               :target target
+                                               :path (get view :path)
+                                               :descriptor (get view :descriptor)
+                                               :typed (get view :typed)
+                                               :nativeTarget (let ((v (get view :nativeTarget)))
+                                                               (if (nullish? v)
+                                                                 (let ((v2 (get options :nativeTarget)))
+                                                                   (if (nullish? v2) (get artifact :nativeTarget) v2))
+                                                                 v))
+                                               :entry (get view :entry)
+                                               :base (get (pathToFileURL (str (get view :directory) sep)) :href)
+                                               :sourceRoot (get context :sourceRoot)
+                                               :memory (let ((v (get options :memory))) (if (nullish? v) (get artifact :memory) v))
+                                               :runtimeOptions rt-opts)))
+                                    (put record :context configuration)))
+                                (put record :status "constructed")
+                                (let ((previous (js-call (get metadata :generations) :at -2)))
+                                  (when previous
+                                    (let ((left (get (get (get previous :fullCompiler) :productIdentity) :sha256))
+                                          (right (get (get (get record :fullCompiler) :productIdentity) :sha256)))
+                                      (js-call (get (get metadata :fixedPoint) :comparisons) :push
+                                        (js-object
+                                          :from (get previous :generation)
+                                          :to number
+                                          :identities (js-array left right)
+                                          :status (if (= left right) "identical" "different"))))))
+                                (await (saveCompilerMetadata manifest-path metadata)))))))
+                      (setq number (1+ number))))
+                  (setq phase "complete-target-artifact-fixed-point")
+                  (put (get metadata :fixedPoint) :status
+                    (if (js-call (get (get metadata :fixedPoint) :comparisons) :every
+                          (lambda (item) (= (get item :status) "identical")))
+                      "identical"
+                      "different"))
+                  (when (/= (get (get metadata :fixedPoint) :status) "identical")
+                    (throw (new globalThis.Error "original compiler generations produced different complete target artifacts")))
+                  (put metadata :status "constructed")
+                  (await (saveCompilerMetadata manifest-path metadata))
+                  (js-object :manifestPath manifest-path :supportingProducts supporting-products)
+                  (catch error
+                    (setq failure error)
+                    (put metadata :status "failed")
+                    (put metadata :failure (Object/assign (js-object :phase phase) (compilerFailure error)))
+                    (await (saveCompilerMetadata manifest-path metadata))
+                    (throw error))
+                  (finally
+                    (when owned-session
+                      (try
+                        (await (js-call owned-session :close))
+                        (catch error
+                          (put metadata :cleanupFailure (compilerFailure error))
+                          (put metadata :status "failed")
+                          (await (saveCompilerMetadata manifest-path metadata))
+                          (when (undefined? failure)
+                            (throw error))))))))))))))
+
+  (export prepareOriginalCompilerGenerations))

@@ -1,2 +1,16 @@
-(module capsules.examples.react-counter.render
-  (js* "import React from \"react\";\nimport { renderToStaticMarkup } from \"react-dom/server\";\nimport Counter from \"../../dist/react-counter.mjs\";\n\nconst markup = renderToStaticMarkup(\n  React.createElement(\n    Counter,\n    { title: \"Eliscript counter\" },\n    React.createElement(\"span\", { className: \"status\" }, \"Ready\"),\n  ),\n);\n\nconsole.log(markup);\n"))
+(module examples.react-counter.render
+  (import "react" :default React)
+  (import "react-dom/server" renderToStaticMarkup)
+  (import "../../dist/react-counter.mjs" :default Counter)
+
+  (defconst markup
+    (renderToStaticMarkup
+      (js-call React :createElement
+               Counter
+               (js-object :title "Eliscript counter")
+               (js-call React :createElement
+                        "span"
+                        (js-object :className "status")
+                        "Ready"))))
+
+  (js-call globalThis.console :log markup))

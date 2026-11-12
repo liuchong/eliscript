@@ -1,4 +1,5 @@
-;; Shared helpers for every generated module. The compiler recognizes this
-;; exact empty module and emits the complete helper set with named exports;
-;; ordinary modules import only the helpers their operations require.
-(module eliscript.runtime.prelude)
+;; This module is an ESM linkage boundary. Implementations live in maintained
+;; Eli modules; the compiler must never substitute handwritten helper bodies.
+(module eliscript.runtime.prelude
+  (js* "export { c as __eliscript_at, d as __eliscript_at_direct } from './array-text.mjs'")
+  (js* "export { toNumber as __eliscript_to_number, numericDecrement as __eliscript_numeric_decrement, numericRelation as __eliscript_numeric_relation, numericSub as __eliscript_numeric_sub, numericMul as __eliscript_numeric_mul, numericDiv as __eliscript_numeric_div, numericRem as __eliscript_numeric_rem, numericAnd as __eliscript_numeric_and, numericOr as __eliscript_numeric_or, numericXor as __eliscript_numeric_xor, numericShl as __eliscript_numeric_shl, numericShr as __eliscript_numeric_shr, numericUshr as __eliscript_numeric_ushr, numericNeg as __eliscript_numeric_neg, numericInt32 as __eliscript_numeric_int32, numericUint32 as __eliscript_numeric_uint32, numericNot as __eliscript_numeric_not, numericImul as __eliscript_numeric_imul } from './primitives.mjs'"))

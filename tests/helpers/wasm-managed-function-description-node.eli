@@ -1,0 +1,64 @@
+(module tests.helpers.wasm-managed-function-description-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile)
+
+  (defun dynamic-import (specifier)
+    (funcall (js* "(specifier) => import(specifier)") specifier))
+
+  (defasync main ()
+    (let* ((url (aref (get globalThis.process :argv) 2))
+           (m (await (dynamic-import url)))
+           (emitted (await (readFile (new globalThis.URL url) "utf8")))
+           (f (js-call m :reference))
+           (text (js-call m :text f))
+           (mutations (js-array)))
+      (assert (js-call emitted :includes text) "Node must preserve the original function source bytes")
+      (js-call (js-array false t) :forEach
+        (lambda (mode)
+          (js-call assert :equal (js-call m :mutate f mode) f)
+          (let ((repetitions (js-array))
+                (repeat 0))
+            (while (< repeat 4)
+              (let ((again (js-call m :reference)))
+                (js-call assert :equal again f)
+                (let ((src (js-call m :text again)))
+                  (js-call assert :equal src text)
+                  (js-call repetitions :push (js-object :snapshot (js-call m :snapshot again) :text src))))
+              (setq repeat (1+ repeat)))
+            (js-call mutations :push repetitions))))
+      (let ((prototype (js-object)))
+        (js-call assert :equal (js-call m :change_prototype f prototype) f)
+        (let ((prototypeIdentity (= (js-call m :prototype_value (js-call m :reference)) prototype)))
+          (js-call assert :equal prototypeIdentity t)
+          (let* ((first (js-call m :closure 1))
+                 (second (js-call m :closure 2))
+                 (_ (js-call assert :notEqual first second))
+                 (closures (js-call (js-array first second) :map
+                             (lambda (closure index)
+                               (let ((value (js-call m :call closure 4)))
+                                 (js-call assert :equal value (+ index 5))
+                                 (js-object :value value :text (js-call m :text closure))))))
+                 (builtin (js-call m :native_reference))
+                 (nativeText (js-call m :text builtin))
+                 (name-desc (Object/getOwnPropertyDescriptor builtin "name"))
+                 (length-desc (Object/getOwnPropertyDescriptor builtin "length"))
+                 (nativeSnapshot undefined)
+                 (nativeAfter undefined))
+            (try
+              (js-call assert :equal (js-call m :mutate builtin t) builtin)
+              (js-call assert :equal (js-call m :native_reference) builtin)
+              (setq nativeSnapshot (js-call m :snapshot builtin))
+              (setq nativeAfter (js-call m :text (js-call m :native_reference)))
+              (js-call assert :equal nativeAfter nativeText)
+              (finally
+                (Object/defineProperty builtin "name" name-desc)
+                (Object/defineProperty builtin "length" length-desc)))
+            (js-call (get globalThis.process :stdout) :write
+              (JSON/stringify
+                (js-object :text text
+                           :mutations mutations
+                           :prototypeIdentity prototypeIdentity
+                           :closures closures
+                           :native (js-object :text nativeText :snapshot nativeSnapshot :after nativeAfter)))))))))
+
+  (main))

@@ -9,12 +9,14 @@
   (import "node:crypto" createHash)
   (import "node:module" createRequire)
   (import "../dist/bootstrap/ir.mjs" deserialize-program)
+  (import "../dist/bootstrap/compiler.mjs" compile-string)
   (import "../tools/backends/build.mjs" buildBackends root)
   (import "../tools/backends/compiler-build.mjs" independentCompilerResources)
   (import "../tools/backends/compiler-corpus-process.mjs" originalCorpusExecutionPolicy runOriginalCorpusProcess)
   (import "../tools/backends/managed-module-graph.mjs" createManagedProjectFacades createManagedModuleGraph)
   (import "../tools/backends/managed-runtime.mjs" loadManagedHostModules)
   (import "../tools/backends/managed-source-view.mjs" createManagedSourceView isManagedSourceView)
+  (import "../tools/testing/maintained-suite-source.mjs" sourceRuntimeFileImports)
   (import "../tools/backends/native-managed-runtime.mjs" snapshotNativeManagedRuntimeABI instantiateNativeManagedRuntime)
   (import "./helpers/managed-sequence-data-host-selfhosted.mjs"
     withSequenceSourceFailure readSequenceSourceFailureReport createSequenceDiagnosticGraph assertSequenceProtocolRejection)
@@ -500,7 +502,7 @@
     (let ((configuration (resolve directory (+ "reference-" label "-" engine ".json")))
           (body (resolve directory (+ "reference-" label "-" engine ".mjs"))))
       (when source
-        (await (writeFile body (js-call source :replace
+        (await (writeFile body (js-call (sourceRuntimeFileImports root source) :replace
           (new globalThis.RegExp "from ([\"'])(\\.\\.\\/\\.\\.\\/runtime\\/[^\"']+)\\1" "g")
           (lambda (all quote path) (+ "from " (JSON/stringify (get (pathToFileURL (resolve root "tests/fixtures" path)) :href))))))))
       (await (writeFile configuration (JSON/stringify (js-object :host "reference" :mode mode :body body
@@ -508,6 +510,12 @@
         :observations observations :arguments (js-call ids :map (lambda (id) (resolve oracle-directory id)))))))
       (successful engine configuration)))
 
+  (defasync assert-maintained-host (source name)
+    (let* ((file (str "tests/fixtures/" name "-host.eli"))
+           (maintained (await (readFile (resolve root file) "utf8")))
+           (expected (compile-string maintained file))
+           (actual (js-call source :replace (new globalThis.RegExp "\\n?//# sourceMappingURL=[^\\r\\n]*\\r?\\n?$") "\n")))
+      (js-call assert :strictEqual actual expected)))
   (defun register-cases (host engine)
     (let ((actual-test (sequence-test-registrar
             (js-call test :skipIf (and (= host "native") (not native-supported))) functional-resources))
@@ -527,18 +535,14 @@
       (funcall actual-test (+ host "/" engine ": complete original compiled lazy-sequence fixture")
         (async ()
           (let ((source (js-call original-sources :get "lazy-sequence")) (ids (js-array "tests/fixtures/lazy-sequence.mjs")))
-            (js-call assert :ok (js-call source :includes
-              "const fixture = await import(pathToFileURL(modulePath).href);"))
+            (await (assert-maintained-host source "lazy-sequence"))
             (js-call assert :deepStrictEqual (JSON/parse (await (selected host engine "lazy" "body" source ids)))
               (JSON/parse (await (reference engine "lazy" "body" source ids)))))) 60000)
       (funcall actual-test (+ host "/" engine ": complete original core text/object host corpus")
         (async ()
           (let ((source (js-call original-sources :get "core-text-object"))
                 (ids (js-array "public/runtime/core/text.mjs" "public/runtime/core/object.mjs")))
-            (js-call assert :ok (js-call source :includes
-              "const Text = await import(pathToFileURL(textModule).href);"))
-            (js-call assert :ok (js-call source :includes
-              "const ObjectCore = await import(pathToFileURL(objectModule).href);"))
+            (await (assert-maintained-host source "core-text-object"))
             (js-call assert :deepStrictEqual (JSON/parse (await (selected host engine "text-object" "body" source ids)))
               (JSON/parse (await (reference engine "text-object" "body" source ids)))))) 60000)
       (let ((families (js-array "sequence" "text" "object")) (position 0))

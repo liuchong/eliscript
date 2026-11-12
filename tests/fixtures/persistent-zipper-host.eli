@@ -1,2 +1,16 @@
-(module capsules.tests.fixtures.persistent-zipper-host
-  (js* "import { pathToFileURL } from \"node:url\";\n\nconst modulePath = process.argv[2];\nif (!modulePath) throw new TypeError(\"expected compiled module path\");\n\nconst compiled = await import(pathToFileURL(modulePath).href);\nconst report = compiled.zipper_report();\nprocess.stdout.write(JSON.stringify(report));\n"))
+(module tests.fixtures.persistent-zipper-host
+  (import "node:url" pathToFileURL)
+  (defconst load-module (js* "(specifier) => import(specifier)"))
+  (defconst modulePath (aref (get globalThis.process :argv) 2))
+  (when (not (js* "!!modulePath")) (throw (new globalThis.TypeError "expected compiled module path")))
+  (defvar compiled undefined)
+  (defasync run-host-main ()
+    (setq compiled (await (funcall load-module (get (pathToFileURL modulePath) :href))))
+    (js-call (get globalThis.process :stdout) :write (JSON/stringify (js-call compiled "zipper_report"))))
+  (defconst completion (run-host-main))
+  (js-call completion :catch (lambda (error)
+    (console/error error)
+    (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

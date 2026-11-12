@@ -1,2 +1,279 @@
-(module capsules.runtime.core.queue
-  (js* "import {\n  COLLECTION_CONJ,\n  COLLECTION_COUNT,\n  COLLECTION_EMPTY,\n  COLLECTION_PEEK,\n  COLLECTION_POP,\n  COLLECTION_REDUCE,\n  COLLECTION_SEQ,\n  reduceIterable,\n  sequenceView,\n} from \"./collection-internals.mjs\";\nimport {\n  METADATA_READ,\n  METADATA_WITH,\n} from \"./metadata-internals.mjs\";\nimport {\n  QUEUE_CONSTRUCTOR_TOKEN,\n  QUEUE_STATE,\n  recordQueueAllocation,\n  recordQueueFrontPromotion,\n} from \"./queue-internals.mjs\";\nimport {\n  VALUE_EQUAL,\n  VALUE_HASH,\n  orderedCollectionHash,\n} from \"./value-internals.mjs\";\nimport {\n  EMPTY_VECTOR,\n  PersistentVector,\n  persistentVector,\n  subvec,\n} from \"./vector.mjs\";\n\nconst MAX_COUNT = 0x7fff_ffff;\nconst QUEUE_HASH_TAG = 0x6b3d_1f27;\n\nfunction makeQueue(count, front, rear, metadata = null) {\n  recordQueueAllocation();\n  return new PersistentQueue(\n    QUEUE_CONSTRUCTOR_TOKEN,\n    count,\n    front,\n    rear,\n    metadata,\n  );\n}\n\nfunction emptyQueueWithMetadata(metadata) {\n  return metadata === null\n    ? EMPTY_QUEUE\n    : makeQueue(0, EMPTY_VECTOR, EMPTY_VECTOR, metadata);\n}\n\nexport class PersistentQueue {\n  constructor(token, count, front, rear, metadata = null) {\n    if (token !== QUEUE_CONSTRUCTOR_TOKEN) {\n      throw new TypeError(\n        \"PersistentQueue values must be created with persistentQueue or PersistentQueue.from\",\n      );\n    }\n    if (!Number.isSafeInteger(count) || count < 0 || count > MAX_COUNT ||\n        !(front instanceof PersistentVector) ||\n        !(rear instanceof PersistentVector) ||\n        front.count + rear.count !== count ||\n        (count === 0 ? front.count !== 0 || rear.count !== 0 : front.count === 0)) {\n      throw new TypeError(\"invalid persistent queue state\");\n    }\n    this[QUEUE_STATE] = Object.freeze({\n      count,\n      front,\n      rear,\n      metadata,\n    });\n    Object.freeze(this);\n  }\n\n  static empty() {\n    return EMPTY_QUEUE;\n  }\n\n  static from(iterable) {\n    if (iterable instanceof PersistentQueue) return iterable;\n    let result = EMPTY_QUEUE;\n    for (const value of iterable) result = result.conj(value);\n    return result;\n  }\n\n  get count() {\n    return this[QUEUE_STATE].count;\n  }\n\n  get size() {\n    return this[QUEUE_STATE].count;\n  }\n\n  get isEmpty() {\n    return this[QUEUE_STATE].count === 0;\n  }\n\n  conj(value) {\n    const state = this[QUEUE_STATE];\n    if (state.count === MAX_COUNT) {\n      throw new RangeError(`persistent queue cannot exceed ${MAX_COUNT} values`);\n    }\n    return state.count === 0\n      ? makeQueue(1, persistentVector(value), EMPTY_VECTOR, state.metadata)\n      : makeQueue(\n        state.count + 1,\n        state.front,\n        state.rear.conj(value),\n        state.metadata,\n      );\n  }\n\n  peek(notFound = null) {\n    const state = this[QUEUE_STATE];\n    return state.count === 0 ? notFound : state.front.nth(0);\n  }\n\n  pop() {\n    const state = this[QUEUE_STATE];\n    if (state.count === 0) {\n      throw new RangeError(\"cannot pop an empty persistent queue\");\n    }\n    if (state.front.count > 1) {\n      return makeQueue(\n        state.count - 1,\n        subvec(state.front, 1),\n        state.rear,\n        state.metadata,\n      );\n    }\n    if (state.rear.count === 0) {\n      return emptyQueueWithMetadata(state.metadata);\n    }\n    recordQueueFrontPromotion(state.rear.count);\n    return makeQueue(\n      state.count - 1,\n      state.rear,\n      EMPTY_VECTOR,\n      state.metadata,\n    );\n  }\n\n  reduce(reducer, ...initial) {\n    return reduceIterable(this, reducer, ...initial);\n  }\n\n  toArray() {\n    return [...this];\n  }\n\n  [COLLECTION_COUNT]() {\n    return this.count;\n  }\n\n  [COLLECTION_EMPTY]() {\n    return emptyQueueWithMetadata(this[QUEUE_STATE].metadata);\n  }\n\n  [COLLECTION_CONJ](value) {\n    return this.conj(value);\n  }\n\n  [COLLECTION_PEEK]() {\n    return this.peek();\n  }\n\n  [COLLECTION_POP]() {\n    return this.pop();\n  }\n\n  [COLLECTION_SEQ]() {\n    return this.isEmpty\n      ? null\n      : sequenceView(() => this[Symbol.iterator](), this.count);\n  }\n\n  [COLLECTION_REDUCE](reducer, ...initial) {\n    return reduceIterable(this, reducer, ...initial);\n  }\n\n  [VALUE_EQUAL](other, equal) {\n    if (this === other) {\n      return true;\n    }\n    if (!(other instanceof PersistentQueue) || other.count !== this.count) {\n      return false;\n    }\n    const right = other[Symbol.iterator]();\n    for (const value of this) {\n      if (!equal(value, right.next().value)) return false;\n    }\n    return true;\n  }\n\n  [VALUE_HASH](hash) {\n    return orderedCollectionHash(this, hash, QUEUE_HASH_TAG);\n  }\n\n  [METADATA_READ]() {\n    return this[QUEUE_STATE].metadata;\n  }\n\n  [METADATA_WITH](metadata) {\n    const state = this[QUEUE_STATE];\n    return metadata === state.metadata\n      ? this\n      : makeQueue(\n        state.count,\n        state.front,\n        state.rear,\n        metadata,\n      );\n  }\n\n  *[Symbol.iterator]() {\n    const state = this[QUEUE_STATE];\n    yield* state.front;\n    yield* state.rear;\n  }\n\n  get [Symbol.toStringTag]() {\n    return \"EliscriptPersistentQueue\";\n  }\n}\n\nexport const EMPTY_QUEUE = new PersistentQueue(\n  QUEUE_CONSTRUCTOR_TOKEN,\n  0,\n  EMPTY_VECTOR,\n  EMPTY_VECTOR,\n);\n\nexport function persistentQueue(...values) {\n  return PersistentQueue.from(values);\n}\n\nexport function isPersistentQueue(value) {\n  return value instanceof PersistentQueue;\n}\n"))
+(module eliscript.runtime.core.queue
+  (import "./collection-internals.mjs"
+    COLLECTION_CONJ
+    COLLECTION_COUNT
+    COLLECTION_EMPTY
+    COLLECTION_PEEK
+    COLLECTION_POP
+    COLLECTION_REDUCE
+    COLLECTION_SEQ
+    reduceIterable
+    sequenceView)
+  (import "./metadata-internals.mjs"
+    METADATA_READ
+    METADATA_WITH)
+  (import "./queue-internals.mjs"
+    QUEUE_CONSTRUCTOR_TOKEN
+    QUEUE_STATE
+    recordQueueAllocation
+    recordQueueFrontPromotion)
+  (import "./value-internals.mjs"
+    VALUE_EQUAL
+    VALUE_HASH
+    orderedCollectionHash)
+  (import "./vector.mjs"
+    EMPTY_VECTOR
+    PersistentVector
+    persistentVector
+    subvec)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+  (defconst host-generator (js* "(create) => function* (...args) { yield* create(this, ...args); }"))
+  (defconst MAX_COUNT 2147483647)
+  (defconst QUEUE_HASH_TAG 1799167783)
+
+  (defun callable? (value)
+    (= (funcall typeof-value value) "function"))
+
+  (defun method (implementation name arity)
+    (let ((function (funcall
+                      (js* "(fn, name) => ({ [name](...args) { return fn(this, ...args); } })[name]")
+                      implementation
+                      name)))
+      (Object/defineProperty function "length" (js-object :value arity :configurable t))
+      function))
+
+  (defun define-method (target key name arity implementation)
+    (Object/defineProperty
+      target
+      key
+      (js-object
+        :value (method implementation name arity)
+        :writable t
+        :configurable t)))
+
+  (defun define-getter (target key name implementation)
+    (Object/defineProperty
+      target
+      key
+      (js-object
+        :get (method implementation (str "get " name) 0)
+        :configurable t)))
+
+  (defun validate-queue-state (token count front rear)
+    (when (not (eq token QUEUE_CONSTRUCTOR_TOKEN))
+      (throw (new globalThis/TypeError
+               "PersistentQueue values must be created with persistentQueue or PersistentQueue.from")))
+    (when (or (not (Number/isSafeInteger count))
+              (< count 0)
+              (> count MAX_COUNT)
+              (not (funcall instance-of? front PersistentVector))
+              (not (funcall instance-of? rear PersistentVector))
+              (not (= (+ (get front :count) (get rear :count)) count))
+              (if (= count 0)
+                  (or (not (= (get front :count) 0))
+                      (not (= (get rear :count) 0)))
+                  (= (get front :count) 0)))
+      (throw (new globalThis/TypeError "invalid persistent queue state"))))
+
+  (defun initialize-persistent-queue (self token count front rear metadata)
+    (validate-queue-state token count front rear)
+    (put self QUEUE_STATE (Object/freeze (js-object :count count :front front :rear rear :metadata metadata)))
+    (Object/freeze self))
+
+  (defconst PersistentQueue
+    (funcall (js* "(initialize) => class PersistentQueue { constructor(token, count, front, rear, metadata = null) { initialize(this, token, count, front, rear, metadata); } }") initialize-persistent-queue))
+
+  (defconst EMPTY_QUEUE
+    (new PersistentQueue QUEUE_CONSTRUCTOR_TOKEN 0 EMPTY_VECTOR EMPTY_VECTOR))
+
+  (defun make-queue (count front rear &optional metadata)
+    (recordQueueAllocation)
+    (new PersistentQueue
+      QUEUE_CONSTRUCTOR_TOKEN
+      count
+      front
+      rear
+      (if (undefined? metadata) nil metadata)))
+
+  (defun empty-queue-with-metadata (metadata)
+    (if (eq metadata nil)
+        EMPTY_QUEUE
+        (make-queue 0 EMPTY_VECTOR EMPTY_VECTOR metadata)))
+
+  (defun for-each-iterable (iterable callback)
+    (let ((iterator-method (if (nil? iterable)
+                               undefined
+                               (aref iterable (get globalThis/Symbol :iterator)))))
+      (unless (callable? iterator-method)
+        (throw (new globalThis/TypeError "value is not iterable")))
+      (let ((iterator (js-call iterator-method :call iterable))
+            (done false))
+        (try
+          (while (not done)
+            (let ((step (js-call iterator :next)))
+              (if (funcall globalThis/Boolean (get step :done))
+                  (setq done t)
+                  (funcall callback (get step :value)))))
+          (finally
+            (when (and (not done) (callable? (get iterator :return)))
+              (js-call iterator :return)))))))
+
+  (defun queue-step-iterator (queue)
+    (let* ((state (aref queue QUEUE_STATE))
+           (front-iter (js-call (aref (get state :front) (get globalThis/Symbol :iterator)) :call (get state :front)))
+           (rear-iter nil)
+           (in-front t))
+      (let ((iterator
+              (js-object
+                :next (method
+                        (lambda (_self)
+                          (if in-front
+                              (let ((step (js-call front-iter :next)))
+                                (if (not (funcall globalThis/Boolean (get step :done)))
+                                    step
+                                    (progn
+                                      (setq in-front false
+                                            rear-iter (js-call (aref (get state :rear) (get globalThis/Symbol :iterator)) :call (get state :rear)))
+                                      (js-call rear-iter :next))))
+                              (js-call rear-iter :next)))
+                        "next"
+                        0))))
+        (put iterator (get globalThis/Symbol :iterator)
+              (method (lambda (self) self) "[Symbol.iterator]" 0))
+        iterator)))
+
+  (let ((proto (get PersistentQueue :prototype)))
+    (define-method PersistentQueue "empty" "empty" 0
+      (lambda (_self) EMPTY_QUEUE))
+    (define-method PersistentQueue "from" "from" 1
+      (lambda (_self iterable)
+        (if (funcall instance-of? iterable PersistentQueue)
+            iterable
+            (let ((result EMPTY_QUEUE))
+              (for-each-iterable iterable (lambda (value) (setq result (js-call result :conj value))))
+              result))))
+    (define-getter proto "count" "count"
+      (lambda (self) (get (aref self QUEUE_STATE) :count)))
+    (define-getter proto "size" "size"
+      (lambda (self) (get (aref self QUEUE_STATE) :count)))
+    (define-getter proto "isEmpty" "isEmpty"
+      (lambda (self) (= (get (aref self QUEUE_STATE) :count) 0)))
+    (define-method proto "conj" "conj" 1
+      (lambda (self value)
+        (let ((state (aref self QUEUE_STATE)))
+          (when (= (get state :count) MAX_COUNT)
+            (throw (new globalThis/RangeError
+                     (str "persistent queue cannot exceed " MAX_COUNT " values"))))
+          (if (= (get state :count) 0)
+              (make-queue 1 (persistentVector value) EMPTY_VECTOR (get state :metadata))
+              (make-queue
+                (+ (get state :count) 1)
+                (get state :front)
+                (js-call (get state :rear) :conj value)
+                (get state :metadata))))))
+    (define-method proto "peek" "peek" 0
+      (lambda (self &rest args)
+        (let ((not-found (if (= (js-length args) 0) nil (get args 0)))
+              (state (aref self QUEUE_STATE)))
+          (if (= (get state :count) 0)
+              not-found
+              (js-call (get state :front) :nth 0)))))
+    (define-method proto "pop" "pop" 0
+      (lambda (self)
+        (let ((state (aref self QUEUE_STATE)))
+          (when (= (get state :count) 0)
+            (throw (new globalThis/RangeError "cannot pop an empty persistent queue")))
+          (cond
+            ((> (get (get state :front) :count) 1)
+             (make-queue
+               (- (get state :count) 1)
+               (subvec (get state :front) 1)
+               (get state :rear)
+               (get state :metadata)))
+            ((= (get (get state :rear) :count) 0)
+             (empty-queue-with-metadata (get state :metadata)))
+            (t
+             (recordQueueFrontPromotion (get (get state :rear) :count))
+             (make-queue
+               (- (get state :count) 1)
+               (get state :rear)
+               EMPTY_VECTOR
+               (get state :metadata)))))))
+    (define-method proto "reduce" "reduce" 1
+      (lambda (self reducer &rest initial)
+        (apply reduceIterable self reducer initial)))
+    (define-method proto "toArray" "toArray" 0
+      (lambda (self)
+        (Array/from self)))
+    (define-method proto COLLECTION_COUNT "[eliscript.collection.count]" 0
+      (lambda (self) (get self :count)))
+    (define-method proto COLLECTION_EMPTY "[eliscript.collection.empty]" 0
+      (lambda (self) (empty-queue-with-metadata (get (aref self QUEUE_STATE) :metadata))))
+    (define-method proto COLLECTION_CONJ "[eliscript.collection.conj]" 1
+      (lambda (self value) (js-call self :conj value)))
+    (define-method proto COLLECTION_PEEK "[eliscript.collection.peek]" 0
+      (lambda (self) (js-call self :peek)))
+    (define-method proto COLLECTION_POP "[eliscript.collection.pop]" 0
+      (lambda (self) (js-call self :pop)))
+    (define-method proto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+      (lambda (self)
+        (if (get self :isEmpty)
+            nil
+            (sequenceView
+              (lambda () (js-call (aref self (get globalThis/Symbol :iterator)) :call self))
+              (get self :count)))))
+    (define-method proto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
+      (lambda (self reducer &rest initial)
+        (apply reduceIterable self reducer initial)))
+    (define-method proto VALUE_EQUAL "[eliscript.value.equal]" 2
+      (lambda (self other equal)
+        (cond
+          ((eq self other) t)
+          ((or (not (funcall instance-of? other PersistentQueue))
+               (not (= (get other :count) (get self :count))))
+           false)
+          (t
+           (let ((left (js-call (aref self (get globalThis/Symbol :iterator)) :call self))
+                 (right (js-call (aref other (get globalThis/Symbol :iterator)) :call other))
+                 (matched t)
+                 (done false))
+             (while (and matched (not done))
+               (let ((left-step (js-call left :next)))
+                 (if (funcall globalThis/Boolean (get left-step :done))
+                     (setq done t)
+                     (let ((right-step (js-call right :next)))
+                       (unless (funcall globalThis/Boolean (funcall equal (get left-step :value) (get right-step :value)))
+                         (setq matched false))))))
+             matched)))))
+    (define-method proto VALUE_HASH "[eliscript.value.hash]" 1
+      (lambda (self hash)
+        (orderedCollectionHash self hash QUEUE_HASH_TAG)))
+    (define-method proto METADATA_READ "[eliscript.metadata.read]" 0
+      (lambda (self) (get (aref self QUEUE_STATE) :metadata)))
+    (define-method proto METADATA_WITH "[eliscript.metadata.with]" 1
+      (lambda (self metadata)
+        (let ((state (aref self QUEUE_STATE)))
+          (if (eq metadata (get state :metadata))
+              self
+              (make-queue (get state :count) (get state :front) (get state :rear) metadata)))))
+    (let ((gen-fn (funcall host-generator (lambda (self) (queue-step-iterator self)))))
+      (Object/defineProperty gen-fn "name" (js-object :value "[Symbol.iterator]" :configurable t))
+      (Object/defineProperty gen-fn "length" (js-object :value 0 :configurable t))
+      (Object/defineProperty proto (get globalThis/Symbol :iterator)
+        (js-object :value gen-fn :writable t :configurable t)))
+    (define-getter proto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptPersistentQueue")))
+
+  (defun persistentQueue (&rest values)
+    (js-call PersistentQueue :from values))
+
+  (defun isPersistentQueue (value)
+    (funcall instance-of? value PersistentQueue))
+
+  (export
+    PersistentQueue
+    EMPTY_QUEUE
+    persistentQueue
+    isPersistentQueue))

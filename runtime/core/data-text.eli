@@ -1,2 +1,535 @@
-(module capsules.runtime.core.data-text
-  (js* "import {\n  EliscriptSymbol,\n  Keyword,\n  eliscriptSymbol,\n  identifierName,\n  identifierNamespace,\n  keyword,\n  qualifiedIdentifierName,\n} from \"./identifier.mjs\";\nimport {\n  EMPTY_MAP,\n  PersistentHashMap,\n  isPersistentHashMap,\n} from \"./map.mjs\";\nimport { PersistentList } from \"./list.mjs\";\nimport { meta, withMeta } from \"./metadata.mjs\";\nimport { PersistentQueue, persistentQueue } from \"./queue.mjs\";\nimport {\n  defineProtocol,\n  extendProtocolCategory,\n  extendProtocolType,\n  protocolMethod,\n} from \"./protocol.mjs\";\nimport {\n  EMPTY_SET,\n  PersistentHashSet,\n} from \"./set.mjs\";\nimport { PersistentSortedMap, PersistentSortedSet } from \"./sorted.mjs\";\nimport {\n  assocBang,\n  conjBang,\n  persistentBang,\n  transient,\n} from \"./transient.mjs\";\nimport {\n  EMPTY_VECTOR,\n  PersistentVector,\n  isPersistentVector,\n} from \"./vector.mjs\";\n\nconst DEFAULT_MAX_DEPTH = 256;\nconst DEFAULT_MAX_LENGTH = 16 * 1024 * 1024;\nconst DEFAULT_MAX_VALUES = 1_000_000;\nconst NUMBER_PATTERN = /^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/;\nconst BIGINT_PATTERN = /^-?(?:0|[1-9]\\d*)N$/;\nconst UNSAFE_IDENTIFIER = /[\\s()[\\]{}\"';,@^`~\\\\]/u;\nconst RESERVED_SYMBOLS = new Set([\n  \"nil\",\n  \"true\",\n  \"false\",\n  \"undefined\",\n  \"##NaN\",\n  \"##Inf\",\n  \"##-Inf\",\n]);\n\nexport const IPrint = defineProtocol(\"IPrint\", [\"print\"]);\nconst dispatchPrint = protocolMethod(IPrint, \"print\");\n\nfunction positiveIntegerOption(options, name, fallback) {\n  const value = options?.[name] ?? fallback;\n  if (!Number.isSafeInteger(value) || value <= 0) {\n    throw new TypeError(`${name} must be a positive safe integer`);\n  }\n  return value;\n}\n\nfunction normalizeOptions(options) {\n  if (options === undefined || options === null) {\n    return Object.freeze({\n      maxDepth: DEFAULT_MAX_DEPTH,\n      maxLength: DEFAULT_MAX_LENGTH,\n      maxValues: DEFAULT_MAX_VALUES,\n    });\n  }\n  if (typeof options !== \"object\" || Array.isArray(options)) {\n    throw new TypeError(\"data text options must be an object\");\n  }\n  return Object.freeze({\n    maxDepth: positiveIntegerOption(options, \"maxDepth\", DEFAULT_MAX_DEPTH),\n    maxLength: positiveIntegerOption(options, \"maxLength\", DEFAULT_MAX_LENGTH),\n    maxValues: positiveIntegerOption(options, \"maxValues\", DEFAULT_MAX_VALUES),\n  });\n}\n\nfunction compareText(left, right) {\n  return left < right ? -1 : left > right ? 1 : 0;\n}\n\nfunction safeIdentifierPart(value) {\n  return value.length > 0 && !value.includes(\"/\") &&\n    !UNSAFE_IDENTIFIER.test(value);\n}\n\nfunction safeBareIdentifier(value, symbol) {\n  const namespace = identifierNamespace(value);\n  const name = identifierName(value);\n  if (!safeIdentifierPart(name) ||\n      (namespace !== null && !safeIdentifierPart(namespace))) {\n    return false;\n  }\n  const qualified = qualifiedIdentifierName(value);\n  return !symbol ||\n    (!RESERVED_SYMBOLS.has(qualified) &&\n     !NUMBER_PATTERN.test(qualified) &&\n     !BIGINT_PATTERN.test(qualified) &&\n     !qualified.startsWith(\":\") &&\n     !qualified.startsWith(\"#\"));\n}\n\nfunction taggedIdentifier(tag, value) {\n  const namespace = identifierNamespace(value);\n  return `#eliscript/${tag} [${namespace === null\n    ? \"nil\"\n    : JSON.stringify(namespace)} ${JSON.stringify(identifierName(value))}]`;\n}\n\nfunction printNumber(value) {\n  if (Number.isNaN(value)) return \"##NaN\";\n  if (value === Number.POSITIVE_INFINITY) return \"##Inf\";\n  if (value === Number.NEGATIVE_INFINITY) return \"##-Inf\";\n  return Object.is(value, -0) ? \"0\" : String(value);\n}\n\nfunction printKeyword(value) {\n  return safeBareIdentifier(value, false)\n    ? `:${qualifiedIdentifierName(value)}`\n    : taggedIdentifier(\"keyword\", value);\n}\n\nfunction printSymbol(value) {\n  return safeBareIdentifier(value, true)\n    ? qualifiedIdentifierName(value)\n    : taggedIdentifier(\"symbol\", value);\n}\n\nfunction printVector(value, context) {\n  return `[${[...value].map((item) => context.print(item)).join(\" \")}]`;\n}\n\nfunction printList(value, context) {\n  return `(${[...value].map((item) => context.print(item)).join(\" \")})`;\n}\n\nfunction printMap(value, context) {\n  const entries = [...value].map(([key, item]) => ({\n    key: context.print(key),\n    value: context.print(item),\n  }));\n  entries.sort((left, right) =>\n    compareText(left.key, right.key) || compareText(left.value, right.value));\n  return `{${entries.map(({ key, value: item }) => `${key} ${item}`).join(\" \")}}`;\n}\n\nfunction printSet(value, context) {\n  const items = [...value].map((item) => context.print(item));\n  items.sort(compareText);\n  return `#{${items.join(\" \")}}`;\n}\n\nfunction printQueue(value, context) {\n  return `#queue [${[...value].map((item) => context.print(item)).join(\" \")}]`;\n}\n\nextendProtocolCategory(IPrint, \"null\", { print: () => \"nil\" });\nextendProtocolCategory(IPrint, \"undefined\", { print: () => \"undefined\" });\nextendProtocolCategory(IPrint, \"boolean\", {\n  print: (value) => value ? \"true\" : \"false\",\n});\nextendProtocolCategory(IPrint, \"number\", { print: printNumber });\nextendProtocolCategory(IPrint, \"bigint\", {\n  print: (value) => `${value}N`,\n});\nextendProtocolCategory(IPrint, \"string\", {\n  print: (value) => JSON.stringify(value),\n});\nextendProtocolType(IPrint, Keyword, { print: printKeyword });\nextendProtocolType(IPrint, EliscriptSymbol, { print: printSymbol });\nextendProtocolType(IPrint, PersistentList, { print: printList });\nextendProtocolType(IPrint, PersistentVector, { print: printVector });\nextendProtocolType(IPrint, PersistentHashMap, { print: printMap });\nextendProtocolType(IPrint, PersistentHashSet, { print: printSet });\nextendProtocolType(IPrint, PersistentSortedMap, { print: printMap });\nextendProtocolType(IPrint, PersistentSortedSet, { print: printSet });\nextendProtocolType(IPrint, PersistentQueue, { print: printQueue });\n\nfunction makePrintContext(options) {\n  const state = { values: 0 };\n\n  function render(value, depth) {\n    if (depth > options.maxDepth) {\n      throw new RangeError(`data text exceeds maxDepth ${options.maxDepth}`);\n    }\n    state.values += 1;\n    if (state.values > options.maxValues) {\n      throw new RangeError(`data text exceeds maxValues ${options.maxValues}`);\n    }\n    const context = Object.freeze({\n      print: (item) => render(item, depth + 1),\n    });\n    const body = dispatchPrint(value, context);\n    if (typeof body !== \"string\") {\n      throw new TypeError(\"IPrint/print must return a string\");\n    }\n    const metadata = meta(value);\n    const result = metadata === null\n      ? body\n      : `^${render(metadata, depth + 1)} ${body}`;\n    if (result.length > options.maxLength) {\n      throw new RangeError(`data text exceeds maxLength ${options.maxLength}`);\n    }\n    return result;\n  }\n\n  return (value) => render(value, 0);\n}\n\nexport function printValue(value, options = undefined) {\n  return makePrintContext(normalizeOptions(options))(value);\n}\n\nexport class DataTextError extends SyntaxError {\n  constructor(message, source, position) {\n    super(`${message} at ${position.line}:${position.column}`);\n    this.name = \"DataTextError\";\n    this.code = \"ELI-DATA-TEXT\";\n    this.offset = position.index;\n    this.line = position.line;\n    this.column = position.column;\n    this.sourceLength = source.length;\n  }\n}\n\nclass Reader {\n  constructor(source, options) {\n    this.source = source;\n    this.options = options;\n    this.index = 0;\n    this.line = 1;\n    this.column = 1;\n    this.values = 0;\n  }\n\n  position() {\n    return { index: this.index, line: this.line, column: this.column };\n  }\n\n  fail(message, position = this.position()) {\n    throw new DataTextError(message, this.source, position);\n  }\n\n  peek(ahead = 0) {\n    return this.source[this.index + ahead];\n  }\n\n  advance() {\n    const code = this.source.codePointAt(this.index);\n    if (code === undefined) return undefined;\n    this.index += code > 0xffff ? 2 : 1;\n    if (code === 10) {\n      this.line += 1;\n      this.column = 1;\n    } else {\n      this.column += 1;\n    }\n    return code;\n  }\n\n  skipIgnored() {\n    while (this.index < this.source.length) {\n      const character = this.peek();\n      if (/\\s/u.test(character) || character === \",\") {\n        this.advance();\n      } else if (character === \";\") {\n        while (this.index < this.source.length && this.peek() !== \"\\n\") {\n          this.advance();\n        }\n      } else {\n        return;\n      }\n    }\n  }\n\n  delimiter(character) {\n    return character === undefined || /[\\s,()[\\]{}\";^]/u.test(character);\n  }\n\n  token(start) {\n    while (!this.delimiter(this.peek())) this.advance();\n    const token = this.source.slice(start.index, this.index);\n    if (token.length === 0) this.fail(\"expected token\", start);\n    return token;\n  }\n\n  string(start) {\n    this.advance();\n    let escaped = false;\n    while (this.index < this.source.length) {\n      const character = this.peek();\n      if (!escaped && character === \"\\n\") {\n        this.fail(\"newline in string literal\", start);\n      }\n      this.advance();\n      if (!escaped && character === \"\\\"\") {\n        const raw = this.source.slice(start.index, this.index);\n        try {\n          return JSON.parse(raw);\n        } catch {\n          this.fail(\"invalid string escape\", start);\n        }\n      }\n      escaped = !escaped && character === \"\\\\\";\n      if (character !== \"\\\\\") escaped = false;\n    }\n    this.fail(\"unexpected end of string\", start);\n  }\n\n  vector(depth, start) {\n    this.advance();\n    const editable = transient(EMPTY_VECTOR);\n    while (true) {\n      this.skipIgnored();\n      if (this.peek() === \"]\") {\n        this.advance();\n        return persistentBang(editable);\n      }\n      if (this.peek() === undefined) {\n        this.fail(\"unexpected end of vector\", start);\n      }\n      conjBang(editable, this.value(depth + 1));\n    }\n  }\n\n  list(depth, start) {\n    this.advance();\n    const values = [];\n    while (true) {\n      this.skipIgnored();\n      if (this.peek() === \")\") {\n        this.advance();\n        return PersistentList.from(values);\n      }\n      if (this.peek() === undefined) {\n        this.fail(\"unexpected end of list\", start);\n      }\n      values.push(this.value(depth + 1));\n    }\n  }\n\n  map(depth, start) {\n    this.advance();\n    const editable = transient(EMPTY_MAP);\n    let seen = EMPTY_MAP;\n    while (true) {\n      this.skipIgnored();\n      if (this.peek() === \"}\") {\n        this.advance();\n        return persistentBang(editable);\n      }\n      if (this.peek() === undefined) {\n        this.fail(\"unexpected end of map\", start);\n      }\n      const keyPosition = this.position();\n      const key = this.value(depth + 1);\n      this.skipIgnored();\n      if (this.peek() === \"}\" || this.peek() === undefined) {\n        this.fail(\"map requires a value for every key\", keyPosition);\n      }\n      const item = this.value(depth + 1);\n      if (seen.has(key)) this.fail(\"duplicate map key\", keyPosition);\n      seen = seen.assoc(key, true);\n      assocBang(editable, key, item);\n    }\n  }\n\n  set(depth, start) {\n    this.advance();\n    const editable = transient(EMPTY_SET);\n    let seen = EMPTY_SET;\n    while (true) {\n      this.skipIgnored();\n      if (this.peek() === \"}\") {\n        this.advance();\n        return persistentBang(editable);\n      }\n      if (this.peek() === undefined) {\n        this.fail(\"unexpected end of set\", start);\n      }\n      const position = this.position();\n      const item = this.value(depth + 1);\n      if (seen.has(item)) this.fail(\"duplicate set value\", position);\n      seen = seen.conj(item);\n      conjBang(editable, item);\n    }\n  }\n\n  taggedIdentifier(tag, depth, start) {\n    this.skipIgnored();\n    const payload = this.value(depth + 1);\n    if (!isPersistentVector(payload) || payload.count !== 2) {\n      this.fail(`${tag} tag requires [namespace name]`, start);\n    }\n    const namespace = payload.nth(0);\n    const name = payload.nth(1);\n    if ((namespace !== null && typeof namespace !== \"string\") ||\n        typeof name !== \"string\") {\n      this.fail(`${tag} tag requires a nil/string namespace and string name`, start);\n    }\n    try {\n      return tag === \"keyword\"\n        ? keyword(namespace, name)\n        : eliscriptSymbol(namespace, name);\n    } catch (error) {\n      this.fail(error.message, start);\n    }\n  }\n\n  taggedQueue(depth, start) {\n    this.skipIgnored();\n    const payload = this.value(depth + 1);\n    if (!isPersistentVector(payload)) {\n      this.fail(\"queue tag requires a vector\", start);\n    }\n    return persistentQueue(...payload);\n  }\n\n  dispatch(depth, start) {\n    if (this.peek(1) === \"{\") {\n      this.advance();\n      return this.set(depth, start);\n    }\n    const token = this.token(start);\n    if (token === \"##NaN\") return Number.NaN;\n    if (token === \"##Inf\") return Number.POSITIVE_INFINITY;\n    if (token === \"##-Inf\") return Number.NEGATIVE_INFINITY;\n    if (token === \"#eliscript/keyword\") {\n      return this.taggedIdentifier(\"keyword\", depth, start);\n    }\n    if (token === \"#eliscript/symbol\") {\n      return this.taggedIdentifier(\"symbol\", depth, start);\n    }\n    if (token === \"#queue\") return this.taggedQueue(depth, start);\n    this.fail(`unknown dispatch ${token}`, start);\n  }\n\n  atom(start) {\n    const token = this.token(start);\n    if (token === \"nil\") return null;\n    if (token === \"true\") return true;\n    if (token === \"false\") return false;\n    if (token === \"undefined\") return undefined;\n    if (BIGINT_PATTERN.test(token)) return BigInt(token.slice(0, -1));\n    if (NUMBER_PATTERN.test(token)) return Number(token);\n    try {\n      return token.startsWith(\":\")\n        ? keyword(token.slice(1))\n        : eliscriptSymbol(token);\n    } catch (error) {\n      this.fail(error.message, start);\n    }\n  }\n\n  metadata(depth, start) {\n    this.advance();\n    const metadata = this.value(depth + 1);\n    if (!isPersistentHashMap(metadata)) {\n      this.fail(\"metadata prefix requires a persistent map\", start);\n    }\n    const value = this.value(depth + 1);\n    try {\n      return withMeta(value, metadata);\n    } catch (error) {\n      this.fail(error.message, start);\n    }\n  }\n\n  value(depth) {\n    this.skipIgnored();\n    const start = this.position();\n    if (depth > this.options.maxDepth) {\n      this.fail(`data text exceeds maxDepth ${this.options.maxDepth}`, start);\n    }\n    this.values += 1;\n    if (this.values > this.options.maxValues) {\n      this.fail(`data text exceeds maxValues ${this.options.maxValues}`, start);\n    }\n    const character = this.peek();\n    if (character === undefined) this.fail(\"unexpected end of input\", start);\n    if (character === \"\\\"\") return this.string(start);\n    if (character === \"(\") return this.list(depth, start);\n    if (character === \"[\") return this.vector(depth, start);\n    if (character === \"{\") return this.map(depth, start);\n    if (character === \"#\") return this.dispatch(depth, start);\n    if (character === \"^\") return this.metadata(depth, start);\n    if (\"]})\".includes(character)) {\n      this.fail(`unexpected closing delimiter ${character}`, start);\n    }\n    return this.atom(start);\n  }\n}\n\nfunction makeReader(source, options) {\n  if (typeof source !== \"string\") {\n    throw new TypeError(\"data text source must be a string\");\n  }\n  const normalized = normalizeOptions(options);\n  if (source.length > normalized.maxLength) {\n    throw new RangeError(`data text exceeds maxLength ${normalized.maxLength}`);\n  }\n  return new Reader(source, normalized);\n}\n\nexport function readValue(source, options = undefined) {\n  const reader = makeReader(source, options);\n  const value = reader.value(0);\n  reader.skipIgnored();\n  if (reader.index !== source.length) {\n    reader.fail(\"trailing data after value\");\n  }\n  return value;\n}\n\nexport function readValues(source, options = undefined) {\n  const reader = makeReader(source, options);\n  const values = [];\n  reader.skipIgnored();\n  while (reader.index < source.length) {\n    values.push(reader.value(0));\n    reader.skipIgnored();\n  }\n  return Object.freeze(values);\n}\n"))
+(module eliscript.runtime.core.data-text
+  (import "./identifier.mjs"
+    EliscriptSymbol
+    Keyword
+    eliscriptSymbol
+    identifierName
+    identifierNamespace
+    keyword
+    qualifiedIdentifierName)
+  (import "./map.mjs" EMPTY_MAP PersistentHashMap isPersistentHashMap)
+  (import "./list.mjs" PersistentList)
+  (import "./metadata.mjs" meta withMeta)
+  (import "./queue.mjs" PersistentQueue persistentQueue)
+  (import "./protocol.mjs" defineProtocol extendProtocolCategory extendProtocolType protocolMethod)
+  (import "./set.mjs" EMPTY_SET PersistentHashSet)
+  (import "./sorted.mjs" PersistentSortedMap PersistentSortedSet)
+  (import "./transient.mjs" assocBang conjBang persistentBang transient)
+  (import "./vector.mjs" EMPTY_VECTOR PersistentVector isPersistentVector)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst number-pattern (js* "/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/"))
+  (defconst bigint-pattern (js* "/^-?(?:0|[1-9]\\d*)N$/"))
+  (defconst unsafe-identifier (js* "/[\\s()[\\]{}\"';,@^`~\\\\]/u"))
+  (defconst whitespace-pattern (js* "/\\s/u"))
+  (defconst delimiter-pattern (js* "/[\\s,()[\\]{}\";^]/u"))
+  (defconst reserved-symbols
+    (new globalThis/Set (js-array "nil" "true" "false" "undefined" "##NaN" "##Inf" "##-Inf")))
+  (defconst IPrint (defineProtocol "IPrint" (js-array "print")))
+  (defconst dispatch-print (protocolMethod IPrint "print"))
+
+  (defun fail (message)
+    (throw (new globalThis/TypeError message)))
+
+  (defun range-fail (message)
+    (throw (new globalThis/RangeError message)))
+
+  (defun truth (value)
+    (funcall globalThis/Boolean value))
+
+  (defun positive-option (options name fallback)
+    (let* ((input (if (nullish? options) undefined (aref options name)))
+           (value (if (nullish? input) fallback input)))
+      (unless (and (Number/isSafeInteger value) (> value 0))
+        (fail (str name " must be a positive safe integer")))
+      value))
+
+  (defun normalize-options (options)
+    (if (nullish? options)
+        (Object/freeze (js-object :maxDepth 256 :maxLength 16777216 :maxValues 1000000))
+        (progn
+          (when (or (not (= (funcall typeof-value options) "object")) (Array/isArray options))
+            (fail "data text options must be an object"))
+          (Object/freeze
+            (js-object
+              :maxDepth (positive-option options "maxDepth" 256)
+              :maxLength (positive-option options "maxLength" 16777216)
+              :maxValues (positive-option options "maxValues" 1000000))))))
+
+  (defun compare-text (left right)
+    (if (< left right) -1 (if (> left right) 1 0)))
+
+  (defun safe-part (value)
+    (and (> (js-length value) 0)
+         (not (js-call value :includes "/"))
+         (not (js-call unsafe-identifier :test value))))
+
+  (defun safe-bare (value symbol)
+    (let ((namespace (identifierNamespace value))
+          (name (identifierName value)))
+      (if (or (not (safe-part name))
+              (and (not (nil? namespace)) (not (safe-part namespace))))
+          false
+          (let ((qualified (qualifiedIdentifierName value)))
+            (or (not symbol)
+                (and (not (js-call reserved-symbols :has qualified))
+                     (not (js-call number-pattern :test qualified))
+                     (not (js-call bigint-pattern :test qualified))
+                     (not (js-call qualified :startsWith ":"))
+                     (not (js-call qualified :startsWith "#"))))))))
+
+  (defun tagged-identifier (tag value)
+    (let ((namespace (identifierNamespace value)))
+      (str "#eliscript/" tag " ["
+           (if (nil? namespace) "nil" (JSON/stringify namespace))
+           " "
+           (JSON/stringify (identifierName value))
+           "]")))
+
+  (defun print-number (value)
+    (cond
+      ((Number/isNaN value) "##NaN")
+      ((= value (get globalThis/Number :POSITIVE_INFINITY)) "##Inf")
+      ((= value (get globalThis/Number :NEGATIVE_INFINITY)) "##-Inf")
+      ((Object/is value -0.0) "0")
+      (t (funcall globalThis/String value))))
+
+  (defun print-keyword (value)
+    (if (safe-bare value false)
+        (str ":" (qualifiedIdentifierName value))
+        (tagged-identifier "keyword" value)))
+
+  (defun print-symbol (value)
+    (if (safe-bare value t)
+        (qualifiedIdentifierName value)
+        (tagged-identifier "symbol" value)))
+
+  (defun iterable-array (value)
+    (let ((iterator (js-call (aref value (get globalThis/Symbol :iterator)) :call value))
+          (out (js-array))
+          (done false))
+      (while (not done)
+        (let ((step (js-call iterator :next)))
+          (if (truth (get step :done))
+              (setq done t)
+              (js-call out :push (get step :value)))))
+      out))
+
+  (defun print-vector (value context)
+    (str "["
+         (js-call (js-call (iterable-array value) :map (lambda (item) (js-call context :print item))) :join " ")
+         "]"))
+
+  (defun print-list (value context)
+    (str "("
+         (js-call (js-call (iterable-array value) :map (lambda (item) (js-call context :print item))) :join " ")
+         ")"))
+
+  (defun object? (value)
+    (let ((type (funcall typeof-value value)))
+      (or (and (not (nil? value)) (= type "object"))
+          (= type "function"))))
+
+  (defun close-entry (iterator abrupt)
+    (try
+      (let ((close (get iterator :return)))
+        (unless (nullish? close)
+          (unless (= (funcall typeof-value close) "function")
+            (fail "iterator return must be callable"))
+          (unless (object? (js-call close :call iterator))
+            (fail "iterator return must be an object"))))
+      (catch error
+        (unless abrupt
+          (throw error)))))
+
+  (defun entry-two (entry)
+    (let* ((iterator (js-call (aref entry (get globalThis/Symbol :iterator)) :call entry))
+           (next-method undefined)
+           (done false)
+           (first-item undefined)
+           (second-item undefined))
+      (unless (object? iterator)
+        (fail "iterator must be an object"))
+      (setq next-method (get iterator :next))
+      (try
+        (let ((step (js-call next-method :call iterator)))
+          (unless (object? step)
+            (fail "iterator result must be an object"))
+          (setq done (truth (get step :done)))
+          (unless done
+            (setq first-item (get step :value))
+            (setq step (js-call next-method :call iterator))
+            (unless (object? step)
+              (fail "iterator result must be an object"))
+            (setq done (truth (get step :done)))
+            (unless done
+              (setq second-item (get step :value)))))
+        (catch error
+          (unless done
+            (close-entry iterator t))
+          (throw error)))
+      (unless done
+        (close-entry iterator false))
+      (js-array first-item second-item)))
+
+  (defun print-map (value context)
+    (let ((entries (js-call (iterable-array value) :map
+                     (lambda (entry)
+                       (let ((pair (entry-two entry)))
+                         (js-object
+                           :key (js-call context :print (get pair 0))
+                           :value (js-call context :print (get pair 1))))))))
+      (js-call entries :sort
+        (lambda (left right)
+          (let ((order (compare-text (get left :key) (get right :key))))
+            (if (= order 0) (compare-text (get left :value) (get right :value)) order))))
+      (str "{"
+           (js-call (js-call entries :map (lambda (entry) (str (get entry :key) " " (get entry :value)))) :join " ")
+           "}")))
+
+  (defun print-set (value context)
+    (let ((items (js-call (iterable-array value) :map (lambda (item) (js-call context :print item)))))
+      (js-call items :sort compare-text)
+      (str "#{" (js-call items :join " ") "}")))
+
+  (defun print-queue (value context)
+    (str "#queue ["
+         (js-call (js-call (iterable-array value) :map (lambda (item) (js-call context :print item))) :join " ")
+         "]"))
+
+  (extendProtocolCategory IPrint "null" (js-object :print (lambda () "nil")))
+  (extendProtocolCategory IPrint "undefined" (js-object :print (lambda () "undefined")))
+  (extendProtocolCategory IPrint "boolean" (js-object :print (lambda (value) (if (truth value) "true" "false"))))
+  (extendProtocolCategory IPrint "number" (js-object :print print-number))
+  (extendProtocolCategory IPrint "bigint" (js-object :print (lambda (value) (str value "N"))))
+  (extendProtocolCategory IPrint "string" (js-object :print (lambda (value) (JSON/stringify value))))
+  (extendProtocolType IPrint Keyword (js-object :print print-keyword))
+  (extendProtocolType IPrint EliscriptSymbol (js-object :print print-symbol))
+  (extendProtocolType IPrint PersistentList (js-object :print print-list))
+  (extendProtocolType IPrint PersistentVector (js-object :print print-vector))
+  (extendProtocolType IPrint PersistentHashMap (js-object :print print-map))
+  (extendProtocolType IPrint PersistentHashSet (js-object :print print-set))
+  (extendProtocolType IPrint PersistentSortedMap (js-object :print print-map))
+  (extendProtocolType IPrint PersistentSortedSet (js-object :print print-set))
+  (extendProtocolType IPrint PersistentQueue (js-object :print print-queue))
+
+  (defun make-print-context (options)
+    (let ((values 0)
+          (render nil))
+      (setq render
+        (lambda (value depth)
+          (when (> depth (get options :maxDepth))
+            (range-fail (str "data text exceeds maxDepth " (get options :maxDepth))))
+          (setq values (1+ values))
+          (when (> values (get options :maxValues))
+            (range-fail (str "data text exceeds maxValues " (get options :maxValues))))
+          (let* ((context (Object/freeze (js-object :print (lambda (item) (funcall render item (1+ depth))))))
+                 (body (funcall dispatch-print value context)))
+            (unless (= (funcall typeof-value body) "string")
+              (fail "IPrint/print must return a string"))
+            (let* ((metadata (meta value))
+                   (result (if (nil? metadata)
+                               body
+                               (str "^" (funcall render metadata (1+ depth)) " " body))))
+              (when (> (js-length result) (get options :maxLength))
+                (range-fail (str "data text exceeds maxLength " (get options :maxLength))))
+              result))))
+      (lambda (value) (funcall render value 0))))
+
+  (defun printValue (value &rest optional)
+    (let ((options (if (= (js-length optional) 0) undefined (get optional 0))))
+      (funcall (make-print-context (normalize-options options)) value)))
+
+  (defconst DataTextError
+    (funcall
+      (js* "(formatMessage, finishInstance) => class DataTextError extends SyntaxError { constructor(message, source, position) { super(formatMessage(message, position)); finishInstance(this, source, position); } }")
+      (lambda (message position)
+        (str message " at " (get position :line) ":" (get position :column)))
+      (lambda (instance source position)
+        (put instance "name" "DataTextError")
+        (put instance "code" "ELI-DATA-TEXT")
+        (put instance "offset" (get position :index))
+        (put instance "line" (get position :line))
+        (put instance "column" (get position :column))
+        (put instance "sourceLength" (js-length source))
+        instance)))
+
+  (defun reader-position (reader)
+    (js-object :index (get reader :index) :line (get reader :line) :column (get reader :column)))
+
+  (defun reader-fail (reader message &rest optional-position)
+    (let ((position (if (= (js-length optional-position) 0) undefined (get optional-position 0))))
+      (throw (new DataTextError
+               message
+               (get reader :source)
+               (if (undefined? position) (reader-position reader) position)))))
+
+  (defun reader-peek (reader &rest optional-ahead)
+    (let ((ahead (if (or (= (js-length optional-ahead) 0) (nil? (get optional-ahead 0)))
+                     0
+                     (get optional-ahead 0))))
+      (aref (get reader :source) (+ (get reader :index) ahead))))
+
+  (defun reader-advance (reader)
+    (let ((code (js-call (get reader :source) :codePointAt (get reader :index))))
+      (unless (undefined? code)
+        (put reader "index" (+ (get reader :index) (if (> code 65535) 2 1)))
+        (if (= code 10)
+            (progn
+              (put reader "line" (1+ (get reader :line)))
+              (put reader "column" 1))
+            (put reader "column" (1+ (get reader :column)))))
+      code))
+
+  (defun reader-skip (reader)
+    (let ((done false))
+      (while (and (not done) (< (get reader :index) (js-length (get reader :source))))
+        (let ((character (reader-peek reader)))
+          (cond
+            ((or (js-call whitespace-pattern :test character) (= character ","))
+             (reader-advance reader))
+            ((= character ";")
+             (while (and (< (get reader :index) (js-length (get reader :source)))
+                         (not (= (reader-peek reader) "\n")))
+               (reader-advance reader)))
+            (t (setq done t)))))))
+
+  (defun delimiter? (character)
+    (or (undefined? character) (js-call delimiter-pattern :test character)))
+
+  (defun reader-token (reader start)
+    (while (not (delimiter? (reader-peek reader)))
+      (reader-advance reader))
+    (let ((token (js-call (get reader :source) :slice (get start :index) (get reader :index))))
+      (when (= (js-length token) 0)
+        (reader-fail reader "expected token" start))
+      token))
+
+  (defun reader-string (reader start)
+    (reader-advance reader)
+    (let ((escaped false)
+          (done false)
+          (result undefined))
+      (while (and (not done) (< (get reader :index) (js-length (get reader :source))))
+        (let ((character (reader-peek reader)))
+          (when (and (not escaped) (= character "\n"))
+            (reader-fail reader "newline in string literal" start))
+          (reader-advance reader)
+          (when (and (not escaped) (= character "\""))
+            (let ((raw (js-call (get reader :source) :slice (get start :index) (get reader :index))))
+              (setq result (try
+                             (JSON/parse raw)
+                             (catch _error
+                               (reader-fail reader "invalid string escape" start)))
+                    done t)))
+          (setq escaped (and (not escaped) (= character "\\")))
+          (unless (= character "\\")
+            (setq escaped false))))
+      (unless done
+        (reader-fail reader "unexpected end of string" start))
+      result))
+
+  (defun reader-vector (reader depth start)
+    (reader-advance reader)
+    (let ((editable (transient EMPTY_VECTOR))
+          (done false))
+      (while (not done)
+        (reader-skip reader)
+        (cond
+          ((= (reader-peek reader) "]")
+           (reader-advance reader)
+           (setq done t))
+          ((undefined? (reader-peek reader))
+           (reader-fail reader "unexpected end of vector" start))
+          (t
+           (conjBang editable (reader-value reader (1+ depth))))))
+      (persistentBang editable)))
+
+  (defun reader-list (reader depth start)
+    (reader-advance reader)
+    (let ((values (js-array))
+          (done false))
+      (while (not done)
+        (reader-skip reader)
+        (cond
+          ((= (reader-peek reader) ")")
+           (reader-advance reader)
+           (setq done t))
+          ((undefined? (reader-peek reader))
+           (reader-fail reader "unexpected end of list" start))
+          (t
+           (js-call values :push (reader-value reader (1+ depth))))))
+      (js-call PersistentList :from values)))
+
+  (defun reader-map (reader depth start)
+    (reader-advance reader)
+    (let ((editable (transient EMPTY_MAP))
+          (seen EMPTY_MAP)
+          (done false))
+      (while (not done)
+        (reader-skip reader)
+        (cond
+          ((= (reader-peek reader) "}")
+           (reader-advance reader)
+           (setq done t))
+          ((undefined? (reader-peek reader))
+           (reader-fail reader "unexpected end of map" start))
+          (t
+           (let* ((position (reader-position reader))
+                  (key (reader-value reader (1+ depth))))
+             (reader-skip reader)
+             (when (or (= (reader-peek reader) "}") (undefined? (reader-peek reader)))
+               (reader-fail reader "map requires a value for every key" position))
+             (let ((item (reader-value reader (1+ depth))))
+               (when (js-call seen :has key)
+                 (reader-fail reader "duplicate map key" position))
+               (setq seen (js-call seen :assoc key t))
+               (assocBang editable key item))))))
+      (persistentBang editable)))
+
+  (defun reader-set (reader depth start)
+    (reader-advance reader)
+    (let ((editable (transient EMPTY_SET))
+          (seen EMPTY_SET)
+          (done false))
+      (while (not done)
+        (reader-skip reader)
+        (cond
+          ((= (reader-peek reader) "}")
+           (reader-advance reader)
+           (setq done t))
+          ((undefined? (reader-peek reader))
+           (reader-fail reader "unexpected end of set" start))
+          (t
+           (let* ((position (reader-position reader))
+                  (item (reader-value reader (1+ depth))))
+             (when (js-call seen :has item)
+               (reader-fail reader "duplicate set value" position))
+             (setq seen (js-call seen :conj item))
+             (conjBang editable item)))))
+      (persistentBang editable)))
+
+  (defun reader-tagged-identifier (reader tag depth start)
+    (reader-skip reader)
+    (let ((payload (reader-value reader (1+ depth))))
+      (unless (and (isPersistentVector payload) (= (get payload :count) 2))
+        (reader-fail reader (str tag " tag requires [namespace name]") start))
+      (let ((namespace (js-call payload :nth 0))
+            (name (js-call payload :nth 1)))
+        (unless (and (or (nil? namespace) (= (funcall typeof-value namespace) "string"))
+                     (= (funcall typeof-value name) "string"))
+          (reader-fail reader (str tag " tag requires a nil/string namespace and string name") start))
+        (try
+          (if (= tag "keyword")
+              (keyword namespace name)
+              (eliscriptSymbol namespace name))
+          (catch error
+            (reader-fail reader (get error :message) start))))))
+
+  (defun reader-tagged-queue (reader depth start)
+    (reader-skip reader)
+    (let ((payload (reader-value reader (1+ depth))))
+      (unless (isPersistentVector payload)
+        (reader-fail reader "queue tag requires a vector" start))
+      (apply persistentQueue (iterable-array payload))))
+
+  (defun reader-dispatch (reader depth start)
+    (if (= (reader-peek reader 1) "{")
+        (progn
+          (reader-advance reader)
+          (reader-set reader depth start))
+        (let ((token (reader-token reader start)))
+          (cond
+            ((= token "##NaN") (get globalThis/Number :NaN))
+            ((= token "##Inf") (get globalThis/Number :POSITIVE_INFINITY))
+            ((= token "##-Inf") (get globalThis/Number :NEGATIVE_INFINITY))
+            ((= token "#eliscript/keyword") (reader-tagged-identifier reader "keyword" depth start))
+            ((= token "#eliscript/symbol") (reader-tagged-identifier reader "symbol" depth start))
+            ((= token "#queue") (reader-tagged-queue reader depth start))
+            (t (reader-fail reader (str "unknown dispatch " token) start))))))
+
+  (defun reader-atom (reader start)
+    (let ((token (reader-token reader start)))
+      (cond
+        ((= token "nil") nil)
+        ((= token "true") t)
+        ((= token "false") false)
+        ((= token "undefined") undefined)
+        ((js-call bigint-pattern :test token)
+         (funcall globalThis/BigInt (js-call token :slice 0 -1)))
+        ((js-call number-pattern :test token)
+         (funcall globalThis/Number token))
+        (t
+         (try
+           (if (js-call token :startsWith ":")
+               (keyword (js-call token :slice 1))
+               (eliscriptSymbol token))
+           (catch error
+             (reader-fail reader (get error :message) start)))))))
+
+  (defun reader-metadata (reader depth start)
+    (reader-advance reader)
+    (let ((metadata (reader-value reader (1+ depth))))
+      (unless (isPersistentHashMap metadata)
+        (reader-fail reader "metadata prefix requires a persistent map" start))
+      (let ((value (reader-value reader (1+ depth))))
+        (try
+          (withMeta value metadata)
+          (catch error
+            (reader-fail reader (get error :message) start))))))
+
+  (defun reader-value (reader depth)
+    (reader-skip reader)
+    (let* ((start (reader-position reader))
+           (options (get reader :options)))
+      (when (> depth (get options :maxDepth))
+        (reader-fail reader (str "data text exceeds maxDepth " (get options :maxDepth)) start))
+      (put reader "values" (1+ (get reader :values)))
+      (when (> (get reader :values) (get options :maxValues))
+        (reader-fail reader (str "data text exceeds maxValues " (get options :maxValues)) start))
+      (let ((character (reader-peek reader)))
+        (cond
+          ((undefined? character) (reader-fail reader "unexpected end of input" start))
+          ((= character "\"") (reader-string reader start))
+          ((= character "(") (reader-list reader depth start))
+          ((= character "[") (reader-vector reader depth start))
+          ((= character "{") (reader-map reader depth start))
+          ((= character "#") (reader-dispatch reader depth start))
+          ((= character "^") (reader-metadata reader depth start))
+          ((js-call "]})" :includes character)
+           (reader-fail reader (str "unexpected closing delimiter " character) start))
+          (t (reader-atom reader start))))))
+
+  (defun make-reader (source options)
+    (unless (= (funcall typeof-value source) "string")
+      (fail "data text source must be a string"))
+    (let ((normalized (normalize-options options)))
+      (when (> (js-length source) (get normalized :maxLength))
+        (range-fail (str "data text exceeds maxLength " (get normalized :maxLength))))
+      (js-object :source source :options normalized :index 0 :line 1 :column 1 :values 0)))
+
+  (defun readValue (source &rest optional)
+    (let* ((options (if (= (js-length optional) 0) undefined (get optional 0)))
+           (reader (make-reader source options))
+           (value (reader-value reader 0)))
+      (reader-skip reader)
+      (unless (= (get reader :index) (js-length source))
+        (reader-fail reader "trailing data after value" (reader-position reader)))
+      value))
+
+  (defun readValues (source &rest optional)
+    (let* ((options (if (= (js-length optional) 0) undefined (get optional 0)))
+           (reader (make-reader source options))
+           (values (js-array)))
+      (reader-skip reader)
+      (while (< (get reader :index) (js-length source))
+        (js-call values :push (reader-value reader 0))
+        (reader-skip reader))
+      (Object/freeze values)))
+
+  (export
+    IPrint
+    printValue
+    DataTextError
+    readValue
+    readValues))

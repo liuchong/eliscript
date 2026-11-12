@@ -1,2 +1,669 @@
-(module capsules.runtime.core.sequence
-  (js* "import {\n  count as collectionCount,\n  IReversible,\n  isReduced,\n  nth as collectionNth,\n  reduce,\n  reduced,\n  rseq,\n  seq,\n  sequenceView,\n  unboundedSequenceView,\n  unreduced,\n} from \"./collection.mjs\";\nimport {\n  prependSequenceView,\n  sliceSequenceView,\n} from \"./collection-internals.mjs\";\nimport { EMPTY_LIST, isPersistentList } from \"./list.mjs\";\nimport { implementsProtocolOperation } from \"./protocol.mjs\";\nimport {\n  deduping,\n  distincting,\n  dropping,\n  droppingWhile,\n  filtering,\n  into,\n  interposing,\n  keeping,\n  keepingIndexed,\n  mapcatting,\n  mapping,\n  mappingIndexed,\n  partitioningAll,\n  partitioningBy,\n  removing,\n  taking,\n  takingNth,\n  takingWhile,\n} from \"./transducer.mjs\";\nimport {\n  conjBang,\n  persistentBang,\n  transient,\n} from \"./transient.mjs\";\nimport { isTruthy } from \"./truth.mjs\";\nimport {\n  EMPTY_VECTOR,\n  isPersistentVector,\n  persistentVector,\n} from \"./vector.mjs\";\n\nconst NOT_FOUND = Symbol(\"eliscript.sequence.not-found\");\nconst NO_PARTITION_PAD = Symbol(\"eliscript.sequence.no-partition-pad\");\n\nfunction requireFunction(value, label) {\n  if (typeof value !== \"function\") {\n    throw new TypeError(`${label} must be a function`);\n  }\n  return value;\n}\n\nfunction requireNonNegativeSafeInteger(value, label) {\n  if (!Number.isSafeInteger(value) || value < 0) {\n    throw new TypeError(`${label} must be a non-negative safe integer`);\n  }\n  return value;\n}\n\nfunction requirePositiveSafeInteger(value, label) {\n  if (!Number.isSafeInteger(value) || value <= 0) {\n    throw new TypeError(`${label} must be a positive safe integer`);\n  }\n  return value;\n}\n\nfunction materializeSources(collections) {\n  const sources = [];\n  for (const collection of collections) {\n    sources.push(into(EMPTY_VECTOR, collection));\n  }\n  return sources;\n}\n\nfunction partitionWindows(\n  size,\n  step,\n  collection,\n  { includePartial = false, pad = NO_PARTITION_PAD } = {},\n) {\n  requirePositiveSafeInteger(size, \"partition size\");\n  requirePositiveSafeInteger(step, \"partition step\");\n  const values = into(EMPTY_VECTOR, collection);\n  const valueCount = collectionCount(values);\n  const result = transient(EMPTY_VECTOR);\n\n  for (let start = 0; start < valueCount; start += step) {\n    const group = transient(EMPTY_VECTOR);\n    let groupCount = Math.min(size, valueCount - start);\n    for (let offset = 0; offset < groupCount; offset += 1) {\n      conjBang(group, collectionNth(values, start + offset));\n    }\n\n    const partial = groupCount < size;\n    if (partial && pad !== NO_PARTITION_PAD) {\n      reduce(pad, (builder, value) => {\n        conjBang(builder, value);\n        groupCount += 1;\n        return groupCount >= size ? reduced(builder) : builder;\n      }, group);\n    }\n    const completed = persistentBang(group);\n    if (!partial || includePartial || pad !== NO_PARTITION_PAD) {\n      conjBang(result, completed);\n    }\n    if (partial && !includePartial) break;\n  }\n  return persistentBang(result);\n}\n\nfunction isSequentialBranch(value) {\n  return Array.isArray(value) ||\n    isPersistentList(value) ||\n    isPersistentVector(value);\n}\n\nfunction requireFiniteNumber(value, label) {\n  if (!Number.isFinite(value)) {\n    throw new TypeError(`${label} must be a finite number`);\n  }\n  return value;\n}\n\nfunction rangeCount(start, end, step) {\n  const distance = (end - start) / step;\n  if (!(distance > 0)) return 0;\n  return requireNonNegativeSafeInteger(Math.ceil(distance), \"range count\");\n}\n\nfunction rangeFactory(start, step, count = null) {\n  return () => (function* rangeValues() {\n    let index = 0;\n    while (count === null || index < count) {\n      yield start + index * step;\n      index += 1;\n    }\n  })();\n}\n\nexport function range(...bounds) {\n  if (bounds.length === 0) {\n    return unboundedSequenceView(rangeFactory(0, 1));\n  }\n  if (bounds.length > 3) {\n    throw new TypeError(\"range expects zero to three arguments\");\n  }\n\n  const start = requireFiniteNumber(\n    bounds.length === 1 ? 0 : bounds[0],\n    \"range start\",\n  );\n  const end = requireFiniteNumber(\n    bounds.length === 1 ? bounds[0] : bounds[1],\n    \"range end\",\n  );\n  const step = requireFiniteNumber(bounds.length === 3 ? bounds[2] : 1, \"range step\");\n  if (step === 0) {\n    throw new TypeError(\"range step must be non-zero\");\n  }\n  const count = rangeCount(start, end, step);\n  return sequenceView(rangeFactory(start, step, count), count);\n}\n\nfunction repeatFactory(value, count = null) {\n  return () => (function* repeatedValues() {\n    let index = 0;\n    while (count === null || index < count) {\n      yield value;\n      index += 1;\n    }\n  })();\n}\n\nexport function repeat(...arguments_) {\n  if (arguments_.length === 1) {\n    return unboundedSequenceView(repeatFactory(arguments_[0]));\n  }\n  if (arguments_.length === 2) {\n    const count = requireNonNegativeSafeInteger(arguments_[0], \"repeat count\");\n    return sequenceView(repeatFactory(arguments_[1], count), count);\n  }\n  throw new TypeError(\"repeat expects a value or a count and value\");\n}\n\nfunction repeatedlyFactory(producer, count = null) {\n  return () => (function* producedValues() {\n    let index = 0;\n    while (count === null || index < count) {\n      yield producer();\n      index += 1;\n    }\n  })();\n}\n\nexport function repeatedly(...arguments_) {\n  if (arguments_.length === 1) {\n    const producer = requireFunction(arguments_[0], \"repeatedly producer\");\n    return unboundedSequenceView(repeatedlyFactory(producer));\n  }\n  if (arguments_.length === 2) {\n    const count = requireNonNegativeSafeInteger(arguments_[0], \"repeatedly count\");\n    const producer = requireFunction(arguments_[1], \"repeatedly producer\");\n    return sequenceView(repeatedlyFactory(producer, count), count);\n  }\n  throw new TypeError(\"repeatedly expects a producer or a count and producer\");\n}\n\nexport function iterate(transform, seed) {\n  requireFunction(transform, \"iterate transform\");\n  return unboundedSequenceView(() => (function* iterationValues() {\n    let value = seed;\n    while (true) {\n      yield value;\n      value = transform(value);\n    }\n  })());\n}\n\nexport function cycle(collection) {\n  const values = into(EMPTY_VECTOR, collection);\n  const count = collectionCount(values);\n  if (count === 0) return null;\n  return unboundedSequenceView(() => (function* cycledValues() {\n    let index = 0;\n    while (true) {\n      yield collectionNth(values, index);\n      index = (index + 1) % count;\n    }\n  })());\n}\n\nexport function generate(count, producer) {\n  requireNonNegativeSafeInteger(count, \"generate count\");\n  requireFunction(producer, \"generate producer\");\n  return sequenceView(() => (function* generatedValues() {\n    for (let index = 0; index < count; index += 1) {\n      yield producer(index);\n    }\n  })(), count);\n}\n\nexport function first(collection, notFound = null) {\n  if (isPersistentList(collection)) {\n    return collection.isEmpty ? notFound : collection.first(notFound);\n  }\n  if (isPersistentVector(collection)) {\n    return collection.count === 0 ? notFound : collection.nth(0);\n  }\n  let found = false;\n  let foundValue = null;\n  reduce(collection, (missing, value) => {\n    found = true;\n    foundValue = value;\n    return reduced(missing);\n  }, null);\n  return found ? foundValue : notFound;\n}\n\nexport function nthRest(limit, collection) {\n  requireNonNegativeSafeInteger(limit, \"nthRest limit\");\n  if (limit === 0) return collection;\n  return sliceSequenceView(seq(collection), limit) ?? EMPTY_LIST;\n}\n\nexport function nthNext(limit, collection) {\n  requireNonNegativeSafeInteger(limit, \"nthNext limit\");\n  const result = limit === 0\n    ? seq(collection)\n    : sliceSequenceView(seq(collection), limit);\n  return result === null ? null : seq(result);\n}\n\nexport function rest(collection) {\n  return nthRest(1, collection);\n}\n\nexport function next(collection) {\n  return nthNext(1, collection);\n}\n\nexport function prepend(value, collection) {\n  return prependSequenceView(value, seq(collection));\n}\n\nexport function second(collection, notFound = null) {\n  return first(next(collection), notFound);\n}\n\nexport function ffirst(collection) {\n  return first(first(collection));\n}\n\nexport function nfirst(collection) {\n  return next(first(collection));\n}\n\nexport function fnext(collection) {\n  return first(next(collection));\n}\n\nexport function nnext(collection) {\n  return next(next(collection));\n}\n\nexport function sequenceNth(index, collection, notFound = null) {\n  requireNonNegativeSafeInteger(index, \"sequenceNth index\");\n  let position = 0;\n  let found = false;\n  let foundValue = null;\n  reduce(collection, (missing, value) => {\n    if (position === index) {\n      found = true;\n      foundValue = value;\n      return reduced(missing);\n    }\n    position += 1;\n    return missing;\n  }, null);\n  return found ? foundValue : notFound;\n}\n\nexport function last(collection, notFound = null) {\n  if (isPersistentVector(collection)) {\n    return collection.peek(notFound);\n  }\n  if (implementsProtocolOperation(IReversible, \"rseq\", collection)) {\n    return first(rseq(collection), notFound);\n  }\n  let found = false;\n  let lastValue = null;\n  reduce(collection, (missing, value) => {\n    found = true;\n    lastValue = value;\n    return missing;\n  }, null);\n  return found ? lastValue : notFound;\n}\n\nexport function takeLast(limit, collection) {\n  requireNonNegativeSafeInteger(limit, \"takeLast limit\");\n  if (limit === 0) return EMPTY_VECTOR;\n  if (isPersistentVector(collection)) {\n    const total = collection.count;\n    if (total === 0) return EMPTY_VECTOR;\n    if (limit >= total) return collection;\n    if (typeof collection.sliceVector === \"function\") {\n      return collection.sliceVector(total - limit, total);\n    }\n    const builder = transient(EMPTY_VECTOR);\n    for (let index = total - limit; index < total; index += 1) {\n      conjBang(builder, collection.nth(index));\n    }\n    return persistentBang(builder);\n  }\n\n  const ring = new Array(limit);\n  let count = 0;\n  let start = 0;\n  reduce(collection, (state, value) => {\n    if (count < limit) {\n      ring[count] = value;\n      count += 1;\n    } else {\n      ring[start] = value;\n      start = (start + 1) % limit;\n    }\n    return state;\n  }, null);\n\n  const builder = transient(EMPTY_VECTOR);\n  for (let index = 0; index < count; index += 1) {\n    conjBang(builder, ring[(start + index) % limit]);\n  }\n  return persistentBang(builder);\n}\n\nexport function dropLast(limit, collection) {\n  requireNonNegativeSafeInteger(limit, \"dropLast limit\");\n  if (limit === 0) {\n    return isPersistentVector(collection) ? collection : into(EMPTY_VECTOR, collection);\n  }\n  if (isPersistentVector(collection)) {\n    const total = collection.count;\n    if (limit >= total) return EMPTY_VECTOR;\n    const keep = total - limit;\n    if (typeof collection.sliceVector === \"function\") {\n      return collection.sliceVector(0, keep);\n    }\n    const builder = transient(EMPTY_VECTOR);\n    for (let index = 0; index < keep; index += 1) {\n      conjBang(builder, collection.nth(index));\n    }\n    return persistentBang(builder);\n  }\n\n  const ring = new Array(limit);\n  const builder = transient(EMPTY_VECTOR);\n  let count = 0;\n  let start = 0;\n  reduce(collection, (state, value) => {\n    if (count < limit) {\n      ring[count] = value;\n      count += 1;\n    } else {\n      conjBang(builder, ring[start]);\n      ring[start] = value;\n      start = (start + 1) % limit;\n    }\n    return state;\n  }, null);\n  return persistentBang(builder);\n}\n\nexport function butlast(collection) {\n  return dropLast(1, collection);\n}\n\nexport function splitAt(limit, collection) {\n  requireNonNegativeSafeInteger(limit, \"splitAt limit\");\n  const left = transient(EMPTY_VECTOR);\n  const right = transient(EMPTY_VECTOR);\n  let index = 0;\n  reduce(collection, (state, value) => {\n    conjBang(index < limit ? left : right, value);\n    index += 1;\n    return state;\n  }, null);\n  return persistentVector(persistentBang(left), persistentBang(right));\n}\n\nexport function splitWith(predicate, collection) {\n  requireFunction(predicate, \"splitWith predicate\");\n  const left = transient(EMPTY_VECTOR);\n  const right = transient(EMPTY_VECTOR);\n  let prefix = true;\n  reduce(collection, (state, value) => {\n    if (prefix && isTruthy(predicate(value))) {\n      conjBang(left, value);\n    } else {\n      prefix = false;\n      conjBang(right, value);\n    }\n    return state;\n  }, null);\n  return persistentVector(persistentBang(left), persistentBang(right));\n}\n\nexport function reverse(collection) {\n  if (implementsProtocolOperation(IReversible, \"rseq\", collection)) {\n    return into(EMPTY_VECTOR, rseq(collection));\n  }\n  const values = reduce(collection, (result, value) => {\n    result.push(value);\n    return result;\n  }, []);\n  values.reverse();\n  return into(EMPTY_VECTOR, values);\n}\n\nexport function map(transform, collection) {\n  return into(EMPTY_VECTOR, mapping(transform), collection);\n}\n\nexport function mapIndexed(transform, collection) {\n  return into(EMPTY_VECTOR, mappingIndexed(transform), collection);\n}\n\nexport function keep(transform, collection) {\n  return into(EMPTY_VECTOR, keeping(transform), collection);\n}\n\nexport function keepIndexed(transform, collection) {\n  return into(EMPTY_VECTOR, keepingIndexed(transform), collection);\n}\n\nexport function filter(predicate, collection) {\n  return into(EMPTY_VECTOR, filtering(predicate), collection);\n}\n\nexport function remove(predicate, collection) {\n  return into(EMPTY_VECTOR, removing(predicate), collection);\n}\n\nexport function take(limit, collection) {\n  return into(EMPTY_VECTOR, taking(limit), collection);\n}\n\nexport function drop(limit, collection) {\n  return into(EMPTY_VECTOR, dropping(limit), collection);\n}\n\nexport function takeWhile(predicate, collection) {\n  return into(EMPTY_VECTOR, takingWhile(predicate), collection);\n}\n\nexport function dropWhile(predicate, collection) {\n  return into(EMPTY_VECTOR, droppingWhile(predicate), collection);\n}\n\nexport function takeNth(interval, collection) {\n  return into(EMPTY_VECTOR, takingNth(interval), collection);\n}\n\nexport function interpose(separator, collection) {\n  return into(EMPTY_VECTOR, interposing(separator), collection);\n}\n\nexport function dedupe(collection) {\n  return into(EMPTY_VECTOR, deduping(), collection);\n}\n\nexport function distinct(collection) {\n  return into(EMPTY_VECTOR, distincting(), collection);\n}\n\nexport function mapcat(transform, collection) {\n  return into(EMPTY_VECTOR, mapcatting(transform), collection);\n}\n\nexport function partition(size, ...arguments_) {\n  if (arguments_.length === 1) {\n    return partitionWindows(size, size, arguments_[0]);\n  }\n  if (arguments_.length === 2) {\n    return partitionWindows(size, arguments_[0], arguments_[1]);\n  }\n  if (arguments_.length === 3) {\n    return partitionWindows(size, arguments_[0], arguments_[2], {\n      pad: arguments_[1],\n    });\n  }\n  throw new TypeError(\n    \"partition expects size and collection, optional step, or step and pad\",\n  );\n}\n\nexport function partitionAll(size, ...arguments_) {\n  if (arguments_.length === 1) {\n    requirePositiveSafeInteger(size, \"partition size\");\n    return into(EMPTY_VECTOR, partitioningAll(size), arguments_[0]);\n  }\n  if (arguments_.length === 2) {\n    return partitionWindows(size, arguments_[0], arguments_[1], {\n      includePartial: true,\n    });\n  }\n  throw new TypeError(\n    \"partitionAll expects size and collection or size, step, and collection\",\n  );\n}\n\nexport function partitionBy(classifier, collection) {\n  return into(EMPTY_VECTOR, partitioningBy(classifier), collection);\n}\n\nexport function concat(...collections) {\n  const result = transient(EMPTY_VECTOR);\n  for (const collection of collections) {\n    reduce(collection, (builder, value) => conjBang(builder, value), result);\n  }\n  return persistentBang(result);\n}\n\nexport function interleave(...collections) {\n  if (collections.length === 0) return EMPTY_VECTOR;\n  const sources = materializeSources(collections);\n  let limit = collectionCount(sources[0]);\n  for (let index = 1; index < sources.length; index += 1) {\n    limit = Math.min(limit, collectionCount(sources[index]));\n  }\n  const result = transient(EMPTY_VECTOR);\n  for (let valueIndex = 0; valueIndex < limit; valueIndex += 1) {\n    for (const source of sources) {\n      conjBang(result, collectionNth(source, valueIndex));\n    }\n  }\n  return persistentBang(result);\n}\n\nexport function interleaveAll(...collections) {\n  if (collections.length === 0) return EMPTY_VECTOR;\n  const sources = materializeSources(collections);\n  let limit = 0;\n  for (const source of sources) {\n    limit = Math.max(limit, collectionCount(source));\n  }\n  const result = transient(EMPTY_VECTOR);\n  for (let valueIndex = 0; valueIndex < limit; valueIndex += 1) {\n    for (const source of sources) {\n      if (valueIndex < collectionCount(source)) {\n        conjBang(result, collectionNth(source, valueIndex));\n      }\n    }\n  }\n  return persistentBang(result);\n}\n\nexport function some(predicate, collection, notFound = null) {\n  requireFunction(predicate, \"some predicate\");\n  const result = reduce(collection, (missing, value) => {\n    const matched = predicate(value);\n    return isTruthy(matched) ? reduced(matched) : missing;\n  }, NOT_FOUND);\n  return result === NOT_FOUND ? notFound : result;\n}\n\nexport function every(predicate, collection) {\n  requireFunction(predicate, \"every predicate\");\n  return reduce(collection, (result, value) =>\n    isTruthy(predicate(value)) ? result : reduced(false), true);\n}\n\nexport function notAny(predicate, collection) {\n  return !isTruthy(some(predicate, collection));\n}\n\nexport function notEvery(predicate, collection) {\n  return !every(predicate, collection);\n}\n\nexport function find(predicate, collection, notFound = null) {\n  requireFunction(predicate, \"find predicate\");\n  let found = false;\n  let foundValue = null;\n  reduce(collection, (missing, value) => {\n    if (isTruthy(predicate(value))) {\n      found = true;\n      foundValue = value;\n      return reduced(missing);\n    }\n    return missing;\n  }, null);\n  return found ? foundValue : notFound;\n}\n\nexport function reductions(step, initial, collection) {\n  requireFunction(step, \"reductions step\");\n  const builder = transient(EMPTY_VECTOR);\n  const seed = unreduced(initial);\n  conjBang(builder, seed);\n  if (!isReduced(initial)) {\n    reduce(collection, (current, input) => {\n      const next = step(current, input);\n      const value = unreduced(next);\n      conjBang(builder, value);\n      return isReduced(next) ? reduced(value) : value;\n    }, seed);\n  }\n  return persistentBang(builder);\n}\n\nexport function treeSeq(branchPredicate, childrenFunction, root) {\n  requireFunction(branchPredicate, \"treeSeq branch predicate\");\n  requireFunction(childrenFunction, \"treeSeq children function\");\n  const result = transient(EMPTY_VECTOR);\n  const stack = [root];\n  while (stack.length > 0) {\n    const value = stack.pop();\n    conjBang(result, value);\n    if (isTruthy(branchPredicate(value))) {\n      const children = into(EMPTY_VECTOR, childrenFunction(value));\n      for (let index = collectionCount(children) - 1; index >= 0; index -= 1) {\n        stack.push(collectionNth(children, index));\n      }\n    }\n  }\n  return persistentBang(result);\n}\n\nexport function flatten(root) {\n  const result = transient(EMPTY_VECTOR);\n  const stack = [root];\n  while (stack.length > 0) {\n    const value = stack.pop();\n    if (isSequentialBranch(value)) {\n      const children = into(EMPTY_VECTOR, value);\n      for (let index = collectionCount(children) - 1; index >= 0; index -= 1) {\n        stack.push(collectionNth(children, index));\n      }\n    } else {\n      conjBang(result, value);\n    }\n  }\n  return persistentBang(result);\n}\n"))
+(module eliscript.runtime.core.sequence
+  (import "./collection.mjs"
+    count
+    IReversible
+    isReduced
+    nth
+    reduce
+    reduced
+    rseq
+    seq
+    sequenceView
+    unboundedSequenceView
+    unreduced)
+  (import "./collection-internals.mjs"
+    prependSequenceView
+    sliceSequenceView)
+  (import "./list.mjs" EMPTY_LIST isPersistentList)
+  (import "./protocol.mjs" implementsProtocolOperation)
+  (import "./transducer.mjs"
+    deduping
+    distincting
+    dropping
+    droppingWhile
+    filtering
+    into
+    interposing
+    keeping
+    keepingIndexed
+    mapcatting
+    mapping
+    mappingIndexed
+    partitioningAll
+    partitioningBy
+    removing
+    taking
+    takingNth
+    takingWhile)
+  (import "./transient.mjs" conjBang persistentBang transient)
+  (import "./truth.mjs" isTruthy)
+  (import "./vector.mjs" EMPTY_VECTOR isPersistentVector persistentVector)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst NOT_FOUND (funcall globalThis/Symbol "eliscript.sequence.not-found"))
+  (defconst NO_PARTITION_PAD (funcall globalThis/Symbol "eliscript.sequence.no-partition-pad"))
+
+  (defun fail (message)
+    (throw (new globalThis/TypeError message)))
+
+  (defun require-function (value label)
+    (unless (= (funcall typeof-value value) "function")
+      (fail (str label " must be a function")))
+    value)
+
+  (defun require-nonnegative (value label)
+    (unless (and (Number/isSafeInteger value) (>= value 0))
+      (fail (str label " must be a non-negative safe integer")))
+    value)
+
+  (defun require-positive (value label)
+    (unless (and (Number/isSafeInteger value) (> value 0))
+      (fail (str label " must be a positive safe integer")))
+    value)
+
+  (defun require-finite (value label)
+    (unless (Number/isFinite value)
+      (fail (str label " must be a finite number")))
+    value)
+
+  (defun iterator-object (next-function close-function)
+    (let ((iterator (js-object
+                      :next next-function
+                      :return (lambda (&rest optional)
+                                (let ((value (if (= (js-length optional) 0) undefined (get optional 0))))
+                                  (funcall close-function)
+                                  (js-object :value value :done t)))
+                      :throw (lambda (&rest optional)
+                               (let ((error (if (= (js-length optional) 0) undefined (get optional 0))))
+                                 (funcall close-function)
+                                 (throw error))))))
+      (Object/defineProperty iterator (get globalThis/Symbol :iterator)
+        (js-object :value (lambda () iterator) :writable t :configurable t))
+      iterator))
+
+  (defun indexed-factory (producer total-count)
+    (lambda ()
+      (let ((index 0)
+            (closed false))
+        (iterator-object
+          (lambda ()
+            (if (or closed (and (not (nil? total-count)) (>= index total-count)))
+                (progn
+                  (setq closed t)
+                  (js-object :value undefined :done t))
+                (try
+                  (let ((value (funcall producer index)))
+                    (setq index (1+ index))
+                    (js-object :value value :done false))
+                  (catch error
+                    (setq closed t)
+                    (throw error)))))
+          (lambda () (setq closed t))))))
+
+  (defun range (&rest bounds)
+    (when (> (js-length bounds) 3)
+      (fail "range expects zero to three arguments"))
+    (if (= (js-length bounds) 0)
+        (unboundedSequenceView (indexed-factory (lambda (index) (+ 0 (* index 1))) nil))
+        (let* ((start (require-finite (if (= (js-length bounds) 1) 0 (get bounds 0)) "range start"))
+               (end (require-finite (if (= (js-length bounds) 1) (get bounds 0) (get bounds 1)) "range end"))
+               (step (require-finite (if (= (js-length bounds) 3) (get bounds 2) 1) "range step")))
+          (when (= step 0)
+            (fail "range step must be non-zero"))
+          (let* ((distance (/ (- end start) step))
+                 (length (if (> distance 0)
+                             (require-nonnegative (Math/ceil distance) "range count")
+                             0)))
+            (sequenceView (indexed-factory (lambda (index) (+ start (* index step))) length) length)))))
+
+  (defun repeat (&rest arguments)
+    (cond
+      ((= (js-length arguments) 1)
+       (let ((value (get arguments 0)))
+         (unboundedSequenceView (indexed-factory (lambda (_index) value) nil))))
+      ((= (js-length arguments) 2)
+       (let ((length (require-nonnegative (get arguments 0) "repeat count"))
+             (value (get arguments 1)))
+         (sequenceView (indexed-factory (lambda (_index) value) length) length)))
+      (t (fail "repeat expects a value or a count and value"))))
+
+  (defun repeatedly (&rest arguments)
+    (cond
+      ((= (js-length arguments) 1)
+       (let ((producer (require-function (get arguments 0) "repeatedly producer")))
+         (unboundedSequenceView (indexed-factory (lambda (_index) (funcall producer)) nil))))
+      ((= (js-length arguments) 2)
+       (let ((length (require-nonnegative (get arguments 0) "repeatedly count"))
+             (producer (require-function (get arguments 1) "repeatedly producer")))
+         (sequenceView (indexed-factory (lambda (_index) (funcall producer)) length) length)))
+      (t (fail "repeatedly expects a producer or a count and producer"))))
+
+  (defun iterate (transform seed)
+    (require-function transform "iterate transform")
+    (unboundedSequenceView
+      (lambda ()
+        (let ((value seed)
+              (pending t)
+              (closed false))
+          (iterator-object
+            (lambda ()
+              (if closed
+                  (js-object :value undefined :done t)
+                  (try
+                    (unless pending
+                      (setq value (funcall transform value)))
+                    (setq pending false)
+                    (js-object :value value :done false)
+                    (catch error
+                      (setq closed t)
+                      (throw error)))))
+            (lambda () (setq closed t)))))))
+
+  (defun cycle (collection)
+    (let* ((values (into EMPTY_VECTOR collection))
+           (length (count values)))
+      (if (= length 0)
+          nil
+          (unboundedSequenceView
+            (lambda ()
+              (let ((index 0)
+                    (closed false))
+                (iterator-object
+                  (lambda ()
+                    (if closed
+                        (js-object :value undefined :done t)
+                        (try
+                          (let ((value (funcall nth values index)))
+                            (setq index (% (1+ index) length))
+                            (js-object :value value :done false))
+                          (catch error
+                            (setq closed t)
+                            (throw error)))))
+                  (lambda () (setq closed t)))))))))
+
+  (defun generate (length producer)
+    (require-nonnegative length "generate count")
+    (require-function producer "generate producer")
+    (sequenceView (indexed-factory producer length) length))
+
+  (defun first (collection &rest optional)
+    (let ((not-found (if (or (= (js-length optional) 0) (undefined? (get optional 0)))
+                         nil
+                         (get optional 0))))
+      (cond
+        ((isPersistentList collection)
+         (if (get collection :isEmpty) not-found (js-call collection :first not-found)))
+        ((isPersistentVector collection)
+         (if (= (get collection :count) 0) not-found (js-call collection :nth 0)))
+        (t
+         (let ((found false)
+               (found-value nil))
+           (reduce collection
+             (lambda (missing value)
+               (setq found t found-value value)
+               (reduced missing))
+             nil)
+           (if found found-value not-found))))))
+
+  (defun nthRest (limit collection)
+    (require-nonnegative limit "nthRest limit")
+    (if (= limit 0)
+        collection
+        (let ((result (sliceSequenceView (seq collection) limit)))
+          (if (nullish? result) EMPTY_LIST result))))
+
+  (defun nthNext (limit collection)
+    (require-nonnegative limit "nthNext limit")
+    (let ((result (if (= limit 0) (seq collection) (sliceSequenceView (seq collection) limit))))
+      (if (nil? result) nil (seq result))))
+
+  (defun rest (collection)
+    (nthRest 1 collection))
+
+  (defun next (collection)
+    (nthNext 1 collection))
+
+  (defun prepend (value collection)
+    (prependSequenceView value (seq collection)))
+
+  (defun second (collection &rest optional)
+    (let ((not-found (if (or (= (js-length optional) 0) (undefined? (get optional 0)))
+                         nil
+                         (get optional 0))))
+      (first (next collection) not-found)))
+
+  (defun ffirst (collection)
+    (first (first collection)))
+
+  (defun nfirst (collection)
+    (next (first collection)))
+
+  (defun fnext (collection)
+    (first (next collection)))
+
+  (defun nnext (collection)
+    (next (next collection)))
+
+  (defun sequenceNth (index collection &rest optional)
+    (require-nonnegative index "sequenceNth index")
+    (let ((not-found (if (or (= (js-length optional) 0) (undefined? (get optional 0)))
+                         nil
+                         (get optional 0)))
+          (position 0)
+          (found false)
+          (found-value nil))
+      (reduce collection
+        (lambda (missing value)
+          (if (= position index)
+              (progn
+                (setq found t found-value value)
+                (reduced missing))
+              (progn
+                (setq position (1+ position))
+                missing)))
+        nil)
+      (if found found-value not-found)))
+
+  (defun last (collection &rest optional)
+    (let ((not-found (if (or (= (js-length optional) 0) (undefined? (get optional 0)))
+                         nil
+                         (get optional 0))))
+      (cond
+        ((isPersistentVector collection)
+         (js-call collection :peek not-found))
+        ((implementsProtocolOperation IReversible "rseq" collection)
+         (first (rseq collection) not-found))
+        (t
+         (let ((found false)
+               (last-value nil))
+           (reduce collection
+             (lambda (missing value)
+               (setq found t last-value value)
+               missing)
+             nil)
+           (if found last-value not-found))))))
+
+  (defun takeLast (limit collection)
+    (require-nonnegative limit "takeLast limit")
+    (cond
+      ((= limit 0) EMPTY_VECTOR)
+      ((isPersistentVector collection)
+       (let ((total (get collection :count)))
+         (cond
+           ((= total 0) EMPTY_VECTOR)
+           ((>= limit total) collection)
+           ((= (funcall typeof-value (get collection :sliceVector)) "function")
+            (js-call collection :sliceVector (- total limit) total))
+           (t
+            (let ((builder (transient EMPTY_VECTOR))
+                  (index (- total limit)))
+              (while (< index total)
+                (conjBang builder (js-call collection :nth index))
+                (setq index (1+ index)))
+              (persistentBang builder))))))
+      (t
+       (let ((ring (new globalThis/Array limit))
+             (length 0)
+             (start 0))
+         (reduce collection
+           (lambda (state value)
+             (if (< length limit)
+                 (progn
+                   (put ring length value)
+                   (setq length (1+ length)))
+                 (progn
+                   (put ring start value)
+                   (setq start (% (1+ start) limit))))
+             state)
+           nil)
+         (let ((builder (transient EMPTY_VECTOR))
+               (index 0))
+           (while (< index length)
+             (conjBang builder (get ring (% (+ start index) limit)))
+             (setq index (1+ index)))
+           (persistentBang builder))))))
+
+  (defun dropLast (limit collection)
+    (require-nonnegative limit "dropLast limit")
+    (cond
+      ((= limit 0)
+       (if (isPersistentVector collection) collection (into EMPTY_VECTOR collection)))
+      ((isPersistentVector collection)
+       (let ((total (get collection :count)))
+         (if (>= limit total)
+             EMPTY_VECTOR
+             (let ((keep (- total limit)))
+               (if (= (funcall typeof-value (get collection :sliceVector)) "function")
+                   (js-call collection :sliceVector 0 keep)
+                   (let ((builder (transient EMPTY_VECTOR))
+                         (index 0))
+                     (while (< index keep)
+                       (conjBang builder (js-call collection :nth index))
+                       (setq index (1+ index)))
+                     (persistentBang builder)))))))
+      (t
+       (let ((ring (new globalThis/Array limit))
+             (builder (transient EMPTY_VECTOR))
+             (length 0)
+             (start 0))
+         (reduce collection
+           (lambda (state value)
+             (if (< length limit)
+                 (progn
+                   (put ring length value)
+                   (setq length (1+ length)))
+                 (progn
+                   (conjBang builder (get ring start))
+                   (put ring start value)
+                   (setq start (% (1+ start) limit))))
+             state)
+           nil)
+         (persistentBang builder)))))
+
+  (defun butlast (collection)
+    (dropLast 1 collection))
+
+  (defun splitAt (limit collection)
+    (require-nonnegative limit "splitAt limit")
+    (let ((left (transient EMPTY_VECTOR))
+          (right (transient EMPTY_VECTOR))
+          (index 0))
+      (reduce collection
+        (lambda (state value)
+          (conjBang (if (< index limit) left right) value)
+          (setq index (1+ index))
+          state)
+        nil)
+      (persistentVector (persistentBang left) (persistentBang right))))
+
+  (defun splitWith (predicate collection)
+    (require-function predicate "splitWith predicate")
+    (let ((left (transient EMPTY_VECTOR))
+          (right (transient EMPTY_VECTOR))
+          (prefix t))
+      (reduce collection
+        (lambda (state value)
+          (if (and prefix (isTruthy (funcall predicate value)))
+              (conjBang left value)
+              (progn
+                (setq prefix false)
+                (conjBang right value)))
+          state)
+        nil)
+      (persistentVector (persistentBang left) (persistentBang right))))
+
+  (defun reverse (collection)
+    (if (implementsProtocolOperation IReversible "rseq" collection)
+        (into EMPTY_VECTOR (rseq collection))
+        (let ((values (reduce collection
+                        (lambda (result value)
+                          (js-call result :push value)
+                          result)
+                        (js-array))))
+          (js-call values :reverse)
+          (into EMPTY_VECTOR values))))
+
+  (defun map (transform collection) (into EMPTY_VECTOR (mapping transform) collection))
+  (defun mapIndexed (transform collection) (into EMPTY_VECTOR (mappingIndexed transform) collection))
+  (defun keep (transform collection) (into EMPTY_VECTOR (keeping transform) collection))
+  (defun keepIndexed (transform collection) (into EMPTY_VECTOR (keepingIndexed transform) collection))
+  (defun filter (predicate collection) (into EMPTY_VECTOR (filtering predicate) collection))
+  (defun remove (predicate collection) (into EMPTY_VECTOR (removing predicate) collection))
+  (defun take (limit collection) (into EMPTY_VECTOR (taking limit) collection))
+  (defun drop (limit collection) (into EMPTY_VECTOR (dropping limit) collection))
+  (defun takeWhile (predicate collection) (into EMPTY_VECTOR (takingWhile predicate) collection))
+  (defun dropWhile (predicate collection) (into EMPTY_VECTOR (droppingWhile predicate) collection))
+  (defun takeNth (interval collection) (into EMPTY_VECTOR (takingNth interval) collection))
+  (defun interpose (separator collection) (into EMPTY_VECTOR (interposing separator) collection))
+  (defun dedupe (collection) (into EMPTY_VECTOR (deduping) collection))
+  (defun distinct (collection) (into EMPTY_VECTOR (distincting) collection))
+  (defun mapcat (transform collection) (into EMPTY_VECTOR (mapcatting transform) collection))
+
+  (defun partition-windows (size step collection include-partial pad)
+    (require-positive size "partition size")
+    (require-positive step "partition step")
+    (let* ((values (into EMPTY_VECTOR collection))
+           (length (count values))
+           (result (transient EMPTY_VECTOR))
+           (start 0)
+           (done false))
+      (while (and (< start length) (not done))
+        (let* ((group (transient EMPTY_VECTOR))
+               (group-count (Math/min size (- length start)))
+               (offset 0))
+          (while (< offset group-count)
+            (conjBang group (funcall nth values (+ start offset)))
+            (setq offset (1+ offset)))
+          (let ((partial (< group-count size)))
+            (when (and partial (not (eq pad NO_PARTITION_PAD)))
+              (reduce pad
+                (lambda (builder value)
+                  (conjBang builder value)
+                  (setq group-count (1+ group-count))
+                  (if (>= group-count size) (reduced builder) builder))
+                group))
+            (let ((completed (persistentBang group)))
+              (when (or (not partial) include-partial (not (eq pad NO_PARTITION_PAD)))
+                (conjBang result completed)))
+            (when (and partial (not include-partial))
+              (setq done t))))
+        (setq start (+ start step)))
+      (persistentBang result)))
+
+  (defun partition (size &rest arguments)
+    (cond
+      ((= (js-length arguments) 1) (partition-windows size size (get arguments 0) false NO_PARTITION_PAD))
+      ((= (js-length arguments) 2) (partition-windows size (get arguments 0) (get arguments 1) false NO_PARTITION_PAD))
+      ((= (js-length arguments) 3) (partition-windows size (get arguments 0) (get arguments 2) false (get arguments 1)))
+      (t (fail "partition expects size and collection, optional step, or step and pad"))))
+
+  (defun partitionAll (size &rest arguments)
+    (cond
+      ((= (js-length arguments) 1)
+       (require-positive size "partition size")
+       (into EMPTY_VECTOR (partitioningAll size) (get arguments 0)))
+      ((= (js-length arguments) 2)
+       (partition-windows size (get arguments 0) (get arguments 1) t NO_PARTITION_PAD))
+      (t (fail "partitionAll expects size and collection or size, step, and collection"))))
+
+  (defun partitionBy (classifier collection)
+    (into EMPTY_VECTOR (partitioningBy classifier) collection))
+
+  (defun concat (&rest collections)
+    (let ((result (transient EMPTY_VECTOR))
+          (index 0))
+      (while (< index (js-length collections))
+        (reduce (get collections index) (lambda (builder value) (conjBang builder value)) result)
+        (setq index (1+ index)))
+      (persistentBang result)))
+
+  (defun materialize-sources (collections)
+    (let ((sources (js-array))
+          (index 0))
+      (while (< index (js-length collections))
+        (js-call sources :push (into EMPTY_VECTOR (get collections index)))
+        (setq index (1+ index)))
+      sources))
+
+  (defun interleave (&rest collections)
+    (if (= (js-length collections) 0)
+        EMPTY_VECTOR
+        (let* ((sources (materialize-sources collections))
+               (limit (count (get sources 0)))
+               (index 1))
+          (while (< index (js-length sources))
+            (setq limit (Math/min limit (count (get sources index)))
+                  index (1+ index)))
+          (let ((result (transient EMPTY_VECTOR))
+                (value-index 0))
+            (while (< value-index limit)
+              (setq index 0)
+              (while (< index (js-length sources))
+                (conjBang result (funcall nth (get sources index) value-index))
+                (setq index (1+ index)))
+              (setq value-index (1+ value-index)))
+            (persistentBang result)))))
+
+  (defun interleaveAll (&rest collections)
+    (if (= (js-length collections) 0)
+        EMPTY_VECTOR
+        (let ((sources (materialize-sources collections))
+              (limit 0)
+              (index 0))
+          (while (< index (js-length sources))
+            (setq limit (Math/max limit (count (get sources index)))
+                  index (1+ index)))
+          (let ((result (transient EMPTY_VECTOR))
+                (value-index 0))
+            (while (< value-index limit)
+              (setq index 0)
+              (while (< index (js-length sources))
+                (let ((source (get sources index)))
+                  (when (< value-index (count source))
+                    (conjBang result (funcall nth source value-index))))
+                (setq index (1+ index)))
+              (setq value-index (1+ value-index)))
+            (persistentBang result)))))
+
+  (defun some (predicate collection &rest optional)
+    (require-function predicate "some predicate")
+    (let ((not-found (if (or (= (js-length optional) 0) (undefined? (get optional 0)))
+                         nil
+                         (get optional 0)))
+          (result (reduce collection
+                    (lambda (missing value)
+                      (let ((matched (funcall predicate value)))
+                        (if (isTruthy matched) (reduced matched) missing)))
+                    NOT_FOUND)))
+      (if (eq result NOT_FOUND) not-found result)))
+
+  (defun every (predicate collection)
+    (require-function predicate "every predicate")
+    (reduce collection
+      (lambda (result value)
+        (if (isTruthy (funcall predicate value)) result (reduced false)))
+      t))
+
+  (defun notAny (predicate collection)
+    (not (isTruthy (some predicate collection))))
+
+  (defun notEvery (predicate collection)
+    (not (every predicate collection)))
+
+  (defun find (predicate collection &rest optional)
+    (require-function predicate "find predicate")
+    (let ((not-found (if (or (= (js-length optional) 0) (undefined? (get optional 0)))
+                         nil
+                         (get optional 0)))
+          (found false)
+          (found-value nil))
+      (reduce collection
+        (lambda (missing value)
+          (if (isTruthy (funcall predicate value))
+              (progn
+                (setq found t found-value value)
+                (reduced missing))
+              missing))
+        nil)
+      (if found found-value not-found)))
+
+  (defun reductions (step initial collection)
+    (require-function step "reductions step")
+    (let ((builder (transient EMPTY_VECTOR))
+          (seed (unreduced initial)))
+      (conjBang builder seed)
+      (unless (isReduced initial)
+        (reduce collection
+          (lambda (current input)
+            (let* ((next-value (funcall step current input))
+                   (value (unreduced next-value)))
+              (conjBang builder value)
+              (if (isReduced next-value) (reduced value) value)))
+          seed))
+      (persistentBang builder)))
+
+  (defun treeSeq (branchPredicate childrenFunction root)
+    (require-function branchPredicate "treeSeq branch predicate")
+    (require-function childrenFunction "treeSeq children function")
+    (let ((result (transient EMPTY_VECTOR))
+          (stack (js-array root)))
+      (while (> (js-length stack) 0)
+        (let ((value (js-call stack :pop)))
+          (conjBang result value)
+          (when (isTruthy (funcall branchPredicate value))
+            (let* ((children (into EMPTY_VECTOR (funcall childrenFunction value)))
+                   (index (1- (count children))))
+              (while (>= index 0)
+                (js-call stack :push (funcall nth children index))
+                (setq index (1- index)))))))
+      (persistentBang result)))
+
+  (defun flatten (root)
+    (let ((result (transient EMPTY_VECTOR))
+          (stack (js-array root)))
+      (while (> (js-length stack) 0)
+        (let ((value (js-call stack :pop)))
+          (if (or (Array/isArray value) (isPersistentList value) (isPersistentVector value))
+              (let* ((children (into EMPTY_VECTOR value))
+                     (index (1- (count children))))
+                (while (>= index 0)
+                  (js-call stack :push (funcall nth children index))
+                  (setq index (1- index))))
+              (conjBang result value))))
+      (persistentBang result)))
+
+  (export
+    range
+    repeat
+    repeatedly
+    iterate
+    cycle
+    generate
+    first
+    nthRest
+    nthNext
+    rest
+    next
+    prepend
+    second
+    ffirst
+    nfirst
+    fnext
+    nnext
+    sequenceNth
+    last
+    takeLast
+    dropLast
+    butlast
+    splitAt
+    splitWith
+    reverse
+    map
+    mapIndexed
+    keep
+    keepIndexed
+    filter
+    remove
+    take
+    drop
+    takeWhile
+    dropWhile
+    takeNth
+    interpose
+    dedupe
+    distinct
+    mapcat
+    partition
+    partitionAll
+    partitionBy
+    concat
+    interleave
+    interleaveAll
+    some
+    every
+    notAny
+    notEvery
+    find
+    reductions
+    treeSeq
+    flatten))

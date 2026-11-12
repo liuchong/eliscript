@@ -7,30 +7,37 @@
   (defun utf16-string-order (left right)
     (cond ((< left right) -1) ((> left right) 1) (t 0)))
 
+  (defconst transient-module-pattern
+    (new globalThis.RegExp "(^|/)(stdlib|runtime)/core/transient\\.(mjs|eli)$"))
+  (defconst typeof-value (lambda (value) (js* "typeof value")))
+  (defconst runtime-core-pattern
+    (new globalThis.RegExp "(^|/)runtime/core/"))
+
   (defconst transient-fail
     (lambda (filename span message)
       (let* ((file
-              (if (js* "!!filename") filename
+              (if (funcall globalThis.Boolean filename) filename
                 (let ((fallback (if (nullish? span) undefined (aref span "filename"))))
-                  (if (js* "!!fallback") fallback "<input>"))))
-             (start (if (js* "!!span")
+                  (if (funcall globalThis.Boolean fallback) fallback "<input>"))))
+             (start (if (funcall globalThis.Boolean span)
                       (js-object :offset (aref span "start") :line (aref span "line")
                                  :column (aref span "column"))
                       (js-object :offset 0 :line 1 :column 1)))
-             (end (if (js* "!!span")
+             (end (if (funcall globalThis.Boolean span)
                     (js-object :offset (aref span "end") :line (aref span "endLine")
                                :column (aref span "endColumn"))
                     (js-object :offset 0 :line 1 :column 1)))
              (diagnostic (js-object :format "eliscript-diagnostic" :version 1
                            :code "ELI-A0001" :severity "error" :phase "analysis"
                            :message message :location (js-object :file file :start start :end end)))
-             (error (new (js* "Error")
-                      (let* ((file-text (js* "`${file}`"))
+             (Constructor globalThis.Error)
+             (error (new Constructor
+                      (let* ((file-text (js-call "" :concat file))
                              (line-value (aref start "line"))
-                             (line-text (js* "`${line_value}`"))
+                             (line-text (js-call "" :concat line-value))
                              (column-value (aref start "column"))
-                             (column-text (js* "`${column_value}`"))
-                             (message-text (js* "`${message}`")))
+                             (column-text (js-call "" :concat column-value))
+                             (message-text (js-call "" :concat message)))
                         (+ file-text ":" line-text ":" column-text ": " message-text)))))
         (put error :eliscriptDiagnostic diagnostic)
         (throw error))))
@@ -38,8 +45,8 @@
   (defconst canonical-transient-family
     (lambda (value)
       (if (and (= (js* "typeof value") "string")
-               (js-call (js* "/(^|\\/)(stdlib|runtime)\\/core\\/transient\\.(mjs|eli)$/") :test value))
-        (if (js-call (js* "/(^|\\/)runtime\\/core\\//") :test value) "runtime" "stdlib") nil)))
+               (js-call transient-module-pattern :test value))
+        (if (js-call runtime-core-pattern :test value) "runtime" "stdlib") nil)))
 
   (defconst trusted-core-source-p
     (lambda (value)
@@ -137,7 +144,7 @@
       (t (js-array))))
 
   (defun make-scope (parent)
-    (js-object :parent parent :names (new (js* "Map"))))
+    (js-object :parent parent :names (new globalThis.Map)))
 
   (defun make-binding (node &optional operation namespace)
     (js-object
@@ -210,13 +217,13 @@
                      (js-object :name name :operation operation)))))))))
 
   (defun copy-state (context)
-    (let ((result (new (js* "Map"))))
+    (let ((result (new globalThis.Map)))
       (js-call (get context :state) :forEach
         (lambda (state resource) (js-call result :set resource state)))
       result))
 
   (defun merge-state (baseline branches)
-    (let ((result (new (js* "Map"))))
+    (let ((result (new globalThis.Map)))
       (js-call baseline :forEach
         (lambda (original resource)
           (let ((first undefined)
@@ -236,7 +243,7 @@
   (defun run-with-state (context state operation)
     (let ((saved (get context :state)))
       (put context :state
-        (let ((result (new (js* "Map"))))
+        (let ((result (new globalThis.Map)))
           (js-call state :forEach
             (lambda (value resource) (js-call result :set resource value)))
           result))
@@ -247,7 +254,7 @@
 
   (defun retain-state-keys (context baseline)
     (let ((current (get context :state))
-          (result (new (js* "Map"))))
+          (result (new globalThis.Map)))
       (js-call baseline :forEach
         (lambda (original resource)
           (js-call result :set resource
@@ -846,7 +853,7 @@
       (let* ((context
               (js-object
                 :filename filename
-                :state (new (js* "Map"))
+                :state (new globalThis.Map)
                 :functionId 0
                 :nextFunctionId 0
                 :loopProtected (js-array)

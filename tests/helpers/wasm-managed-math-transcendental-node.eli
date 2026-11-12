@@ -1,0 +1,460 @@
+(module tests.helpers.wasm-managed-math-transcendental-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:process" :default process)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+  (defconst js-pow (js* "(a, b) => a ** b"))
+
+  (defconst names
+    (js-array
+      "acos" "acosh" "asin" "asinh" "atan" "atanh" "atan2" "cbrt" "expm1"
+      "cos" "cosh" "exp" "hypot" "log" "log1p" "log2" "log10" "pow"
+      "random" "sin" "sinh" "tan" "tanh"))
+
+  (defconst options
+    (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216))
+
+  ;; FDLIBM golden binary64 pairs, independently published by OpenJDK StrictMath
+  ;; TrigTests, Expm1Tests, ExpTests, Log1pTests, Log10Tests and HyperbolicTests.
+  ;; https://github.com/openjdk/jdk/tree/master/test/jdk/java/lang/StrictMath
+  (defconst golden
+    (js-array
+      (js-array "sin" "0x1.00000006eeeefp-12" "0x1.ffffffb888889p-13")
+      (js-array "sin" "0x1.0000000000174p50" "-0x1.54cd5e7e9e3d2p-1")
+      (js-array "sin" "0x1.00000000001afp1023" "0x1.d1c804ef2eeccp-1")
+      (js-array "cos" "0x1.0000000000174p0" "0x1.14a280fb50419p-1")
+      (js-array "cos" "0x1.00000000000b8p95" "0x1.8315138968a66p-1")
+      (js-array "cos" "0x1.000000000015fp1023" "-0x1.2f2596c42735cp-1")
+      (js-array "tan" "0x1.00000002221fep-13" "0x1.0000001777753p-13")
+      (js-array "tan" "0x1.0000000000013p500" "-0x1.c4e46751be12cp-1")
+      (js-array "tan" "0x1.00000000000ep1023" "-0x1.d52c4ec04f108p-2")
+      (js-array "expm1" "-0x1.580000008c619p3" "-0x1.fffd3069586f6p-1")
+      (js-array "expm1" "0x1.ffffffdccfeb7p-3" "0x1.22d78ef909144p-2")
+      (js-array "exp" "0x1.2e8f20cf3cbe7p8" "0x1.6a2a59cc78bf8p436")
+      (js-array "exp" "-0x1.49f33ad2c1c58p9" "0x1.f3ccc815431b6p-953")
+      (js-array "log1p" "0x1.fffffffffffffp-2" "0x1.9f323ecbf984bp-2")
+      (js-array "log1p" "0x1.ffffffffffffdp-1" "0x1.62e42fefa39eep-1")
+      (js-array "log10" "0x1.3fffffffffec1p-297" "-0x1.653c6a27ae2f8p6")
+      (js-array "log10" "0x1.4p-297" "-0x1.653c6a27ae2f7p6")
+      (js-array "sinh" "0x1.9fcba01feb507p-2" "0x1.ab50d8e4d8c56p-2")
+      (js-array "sinh" "-0x1.633c654fee2bap9" "-0x1.fdf25fc26e7cp1023")
+      (js-array "cosh" "0x1.0p0" "0x1.8b07551d9f551p0")
+      (js-array "cosh" "-0x1.633c654fee2bap9" "0x1.fdf25fc26e7cp1023")
+      (js-array "tanh" "0x1.0108b83c4bbc8p-1" "0x1.dad53a45da5b0p-2")
+      (js-array "tanh" "-0x1.c41e527b70f43p-3" "-0x1.bcea047cc736cp-3")
+      (js-array "asinh" "0x1.ffffffffffffep-26" "0x1.ffffffffffffdp-26")
+      (js-array "acosh" "0x1.0001ff6afc4bap0" "0x1.ffb5238940116p-8")
+      (js-array "atanh" "0x1.ffffffffffffep-26" "0x1p-25")))
+
+  (defun bits (value)
+    (if (Number/isNaN value)
+        "NaN"
+        (let ((view (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
+          (js-call view :setFloat64 0 value false)
+          (js-call (js-call (js-call view :getBigUint64 0 false) :toString 16) :padStart 16 "0"))))
+
+  (defun exact (actual expected label)
+    (js-call assert :equal (bits actual) (bits expected) label))
+
+  (defconst hex-float-re
+    (new globalThis.RegExp "^(-?)0x([0-9a-f]+)(?:[.]([0-9a-f]+))?p([+-]?[0-9]+)$"))
+
+  (defun hex (value)
+    (let ((m (js-call hex-float-re :exec value)))
+      (funcall assert m)
+      (let* ((frac-part (aref m 3))
+             (fraction (if (nullish? frac-part) "" frac-part))
+             (significand (globalThis.BigInt (str "0x" (aref m 2) fraction)))
+             (sign (if (> (get (aref m 1) :length) 0) -1 1)))
+        (* (* sign (globalThis.Number significand))
+           (funcall js-pow 2 (- (globalThis.Number (aref m 4)) (* 4 (get fraction :length))))))))
+
+  (defun fixed-cases ()
+    (let* ((cases (js-array))
+           (add (lambda (name args expected)
+                  (js-call cases :push (js-array name args expected))))
+           (pi Math.PI)
+           (half-pi (/ Math.PI 2))
+           (min-val Number.MIN_VALUE)
+           (neg-min (- Number.MIN_VALUE))
+           (max-val Number.MAX_VALUE)
+           (inf globalThis.Infinity)
+           (neg-inf (- globalThis.Infinity))
+           (nan globalThis.NaN))
+      (js-call (js-array "asin" "asinh" "atan" "atanh" "cbrt" "expm1" "log1p" "sin" "sinh" "tan" "tanh") :forEach
+        (lambda (name)
+          (js-call (js-array 0 -0.0) :forEach
+            (lambda (value) (funcall add name (js-array value) value)))))
+      (js-call (js-call names :filter
+                 (lambda (name) (not (js-call (js-array "random" "hypot" "atan2" "pow") :includes name))))
+        :forEach
+        (lambda (name) (funcall add name (js-array nan) nan)))
+      (js-call (js-array "cos" "sin" "tan" "acos" "asin" "atanh") :forEach
+        (lambda (name)
+          (js-call (js-array inf neg-inf) :forEach
+            (lambda (value) (funcall add name (js-array value) nan)))))
+      (js-call (js-array
+                 (js-array "acos" (js-array 1) 0)
+                 (js-array "acos" (js-array -1) pi)
+                 (js-array "acos" (js-array 0) half-pi)
+                 (js-array "acosh" (js-array 1) 0)
+                 (js-array "acosh" (js-array 0) nan)
+                 (js-array "acosh" (js-array inf) inf)
+                 (js-array "asin" (js-array 1) half-pi)
+                 (js-array "asin" (js-array -1) (- half-pi))
+                 (js-array "atan" (js-array inf) half-pi)
+                 (js-array "atan" (js-array neg-inf) (- half-pi))
+                 (js-array "asinh" (js-array inf) inf)
+                 (js-array "asinh" (js-array neg-inf) neg-inf)
+                 (js-array "atanh" (js-array 1) inf)
+                 (js-array "atanh" (js-array -1) neg-inf)
+                 (js-array "atanh" (js-array 2) nan)
+                 (js-array "cbrt" (js-array 8) 2)
+                 (js-array "cbrt" (js-array -8) -2)
+                 (js-array "cbrt" (js-array inf) inf)
+                 (js-array "cbrt" (js-array neg-inf) neg-inf)
+                 (js-array "cbrt" (js-array min-val) (funcall js-pow 2 -358))
+                 (js-array "expm1" (js-array inf) inf)
+                 (js-array "expm1" (js-array neg-inf) -1)
+                 (js-array "cos" (js-array 0) 1)
+                 (js-array "cos" (js-array -0.0) 1)
+                 (js-array "cosh" (js-array 0) 1)
+                 (js-array "cosh" (js-array -0.0) 1)
+                 (js-array "cosh" (js-array inf) inf)
+                 (js-array "cosh" (js-array neg-inf) inf)
+                 (js-array "exp" (js-array 0) 1)
+                 (js-array "exp" (js-array -0.0) 1)
+                 (js-array "exp" (js-array inf) inf)
+                 (js-array "exp" (js-array neg-inf) 0)
+                 (js-array "sinh" (js-array inf) inf)
+                 (js-array "sinh" (js-array neg-inf) neg-inf)
+                 (js-array "tanh" (js-array inf) 1)
+                 (js-array "tanh" (js-array neg-inf) -1))
+        :forEach
+        (lambda (triple) (funcall add (aref triple 0) (aref triple 1) (aref triple 2))))
+      (js-call (js-array "asinh" "atan" "atanh" "expm1" "log1p" "sin" "sinh" "tan" "tanh") :forEach
+        (lambda (name)
+          (js-call (js-array min-val neg-min) :forEach
+            (lambda (value) (funcall add name (js-array value) value)))))
+      (js-call (js-array "log" "log2" "log10") :forEach
+        (lambda (name)
+          (js-call (js-array
+                     (js-array 1 0)
+                     (js-array 0 neg-inf)
+                     (js-array -0.0 neg-inf)
+                     (js-array -1 nan)
+                     (js-array inf inf))
+            :forEach
+            (lambda (pair) (funcall add name (js-array (aref pair 0)) (aref pair 1))))))
+      (funcall add "log1p" (js-array -1) neg-inf)
+      (funcall add "log1p" (js-array -2) nan)
+      (funcall add "log1p" (js-array inf) inf)
+      (js-call (js-array -1074 -1022 -500 -1 0 1 53 500 1023) :forEach
+        (lambda (power) (funcall add "log2" (js-array (funcall js-pow 2 power)) power)))
+      (js-call (js-array 0 -0.0 1 -1 2 3 0.5 -0.5 9007199254740991 9007199254740992 inf neg-inf nan) :forEach
+        (lambda (exponent)
+          (js-call (js-array neg-inf -2 -1 -0.0 0 0.5 1 2 inf nan) :forEach
+            (lambda (base)
+              (funcall add "pow" (js-array base exponent) (Math/pow base exponent))))))
+      (js-call (js-array neg-inf -1 -0.0 0 1 inf nan) :forEach
+        (lambda (y)
+          (js-call (js-array neg-inf -1 -0.0 0 1 inf nan) :forEach
+            (lambda (x)
+              (funcall add "atan2" (js-array y x) (Math/atan2 y x))))))
+      (js-call (js-array
+                 (js-array)
+                 (js-array -0.0)
+                 (js-array 0 -0.0)
+                 (js-array 3 4)
+                 (js-array 3 4 12)
+                 (js-array nan inf)
+                 (js-array inf nan)
+                 (js-array min-val 0)
+                 (js-array (* 3 (funcall js-pow 2 500)) (* 4 (funcall js-pow 2 500)))
+                 (js-array (* 3 (funcall js-pow 2 -500)) (* 4 (funcall js-pow 2 -500)))
+                 (js-array (funcall js-pow 2 26) 1 1 1 1)
+                 (js-array 1 1 1 1 (funcall js-pow 2 26))
+                 (js-array max-val 0)
+                 (js-array min-val min-val min-val))
+        :forEach
+        (lambda (args)
+          (funcall add "hypot" args (apply Math/hypot args))))
+      cases))
+
+  (defun box (a values)
+    (let ((handles (js-call values :map
+                     (lambda (value) (if (undefined? value) undefined (js-call a :number value))))))
+      (try
+        (js-call a :sourceArray handles)
+        (finally
+          (js-call handles :forEach (lambda (handle) (js-call a :release handle)))))))
+
+  (defun invoke-rt (a name &rest __host_default_arguments_1)
+    (let* ((values (aref __host_default_arguments_1 0)))
+    (let* ((vals (if (undefined? values) (js-array) values))
+           (owned (js-array))
+           (args (js-call vals :map
+                   (lambda (value)
+                     (let ((ty (funcall js-typeof value)))
+                       (if (and (/= ty "string") (/= ty "number"))
+                           value
+                           (let ((handle (if (= ty "string")
+                                             (js-call a :string value)
+                                             (js-call a :number value))))
+                             (js-call owned :push handle)
+                             handle)))))))
+      (try
+        (js-call a :invoke name args)
+        (finally
+          (js-call owned :forEach (lambda (v) (js-call a :release v))))))))
+
+  (defun number-rt (a name &rest __host_forwarded_arguments_1)
+    (let* ((values (aref __host_forwarded_arguments_1 0)))
+    (let ((value (invoke-rt a name values)))
+      (try
+        (js-call a :readNumber value)
+        (finally
+          (js-call a :release value))))))
+
+  (defun text-rt (a name &rest __host_forwarded_arguments_2)
+    (let* ((values (aref __host_forwarded_arguments_2 0)))
+    (let ((value (invoke-rt a name values)))
+      (try
+        (js-call a :readString value)
+        (finally
+          (js-call a :release value))))))
+
+  (defun finish-rt (a)
+    (try
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+      (finally
+        (let ((close-fn (get a :close)))
+          (when close-fn
+            (js-call a :close))))))
+
+  (defun check-numbers (a records goldens)
+    (js-call records :forEach
+      (lambda (rec)
+        (let* ((name (aref rec 0))
+               (inputs (aref rec 1))
+               (expected (aref rec 2))
+               (values (box a inputs)))
+          (try
+            (exact
+              (number-rt a "route" (js-array name 2 values))
+              expected
+              (str name "/" (js-call (js-call inputs :map bits) :join ",")))
+            (catch err
+              (when (and (not (nullish? err)) (= (funcall js-typeof err) "object"))
+                (put err :mathCase (js-object :name name :inputs (js-call inputs :map bits) :stage "fixed")))
+              (throw err))
+            (finally
+              (js-call a :release values))))))
+    (js-call goldens :forEach
+      (lambda (rec)
+        (let* ((name (aref rec 0))
+               (input (aref rec 1))
+               (output (aref rec 2))
+               (values (box a (js-array (hex input)))))
+          (try
+            (exact
+              (number-rt a "route" (js-array name 2 values))
+              (hex output)
+              (str name "/fixed " input))
+            (catch err
+              (when (and (not (nullish? err)) (= (funcall js-typeof err) "object"))
+                (put err :mathCase (js-object :name name :input input :stage "golden")))
+              (throw err))
+            (finally
+              (js-call a :release values))))))
+    (js-call a :collect)
+    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))
+
+  (defun check-routes (a js)
+    ;; Qualified direct entry executes before any ordinary namespace lookup in
+    ;; this fresh instance; all family members retain that cold call route.
+    (js-call names :forEach
+      (lambda (name)
+        (let ((actual undefined))
+          (try
+            (setq actual (number-rt a "direct" (js-array name 0 1 0)))
+            (catch err
+              (when (and (not (nullish? err)) (= (funcall js-typeof err) "object"))
+                (put err :mathCase (js-object :name name :stage "cold-direct")))
+              (throw err)))
+          (if (= name "random")
+              (funcall assert (and (>= actual 0) (< actual 1)))
+              (exact actual (js-call js :direct name 0 1 0) (str name "/cold direct"))))))
+    (js-call names :forEach
+      (lambda (name)
+        (let* ((args (if (= name "hypot")
+                         (js-array 3 4 12)
+                         (if (js-call (js-array "pow" "atan2") :includes name)
+                             (js-array 0 1)
+                             (js-array 0))))
+               (values (box a args))
+               (method (invoke-rt a "method" (js-array name))))
+          (try
+            (js-call assert :equal (text-rt a "describe" (js-array name)) (js-call js :describe name))
+            (let ((description (JSON/parse (js-call js :describe name))))
+              (js-call assert :deepEqual (js-call description :slice 2 5) (js-array t false t))
+              (js-call assert :equal (aref description 5) name)
+              (js-call assert :equal (aref description 6)
+                (if (= name "random")
+                    0
+                    (if (js-call (js-array "hypot" "pow" "atan2") :includes name) 2 1)))
+              (js-call assert :equal (aref description 7) false)
+              (js-call assert :equal (aref description 14) "TypeError"))
+            (let ((mode 0))
+              (while (< mode 10)
+                (let ((actual (number-rt a "route" (js-array name mode values))))
+                  (if (= name "random")
+                      (funcall assert (and (>= actual 0) (< actual 1)))
+                      (exact actual (js-call js :route name mode args) (str name "/route " mode))))
+                (setq mode (+ mode 1))))
+            (let ((held (number-rt a "held" (js-array method values)))
+                  (math-fn (get globalThis.Math name)))
+              (if (= name "random")
+                  (funcall assert (and (>= held 0) (< held 1)))
+                  (exact held (apply math-fn args) (str name "/held"))))
+            (js-call assert :equal (text-rt a "mutation-report" (js-array name)) (js-call js :mutation_report name))
+            (js-call assert :equal (text-rt a "method-mutation" (js-array name)) (js-call js :method_mutation name))
+            (let ((mode 0))
+              (while (< mode 11)
+                (js-call assert :equal
+                  (text-rt a "conversion-report" (js-array name mode))
+                  (js-call js :conversion_report name mode))
+                (setq mode (+ mode 1))))
+            (js-call (js-array (js-array) (js-array undefined) (js-array undefined undefined)) :forEach
+              (lambda (omitted)
+                (let ((missing (box a omitted))
+                      (math-fn (get globalThis.Math name)))
+                  (try
+                    (let ((actual (number-rt a "held" (js-array method missing))))
+                      (if (= name "random")
+                          (funcall assert (and (>= actual 0) (< actual 1)))
+                          (exact actual (apply math-fn omitted) (str name "/missing"))))
+                    (finally
+                      (js-call a :release missing))))))
+            (finally
+              (js-call a :release values)
+              (js-call a :release method)))
+          (js-call a :collect)
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))
+
+  (defun sequence (a &rest __host_default_arguments_2)
+    (let* ((count-arg (aref __host_default_arguments_2 0)))
+    (let* ((cnt (if (undefined? count-arg) 48 count-arg))
+           (result (invoke-rt a "random-values" (js-array cnt))))
+      (try
+        (let ((values (js-array))
+              (index 0)
+              (len (js-call a :length result)))
+          (while (< index len)
+            (let ((value (js-call a :get result index)))
+              (try
+                (let ((num (js-call a :readNumber value)))
+                  (funcall assert (and (>= num 0) (< num 1)))
+                  (js-call values :push num))
+                (finally
+                  (js-call a :release value))))
+            (setq index (+ index 1)))
+          (js-call assert :equal (get values :length) cnt)
+          (js-call assert :equal (get (new globalThis.Set (js-call values :map bits)) :size) cnt)
+          values)
+        (finally
+          (js-call a :release result))))))
+
+  (defun check-scratch-lifetime (a js)
+    (js-call assert :equal (text-rt a "reentrant-power") (js-call js :reentrant_power))
+    (js-call assert :deepEqual
+      (JSON/parse (text-rt a "reentrant-power"))
+      (js-array 8 (js-array "base" 0 "exponent" 1 t)))
+    (exact (number-rt a "scalar-call") 8 "warm scalar kernel")
+    (js-call a :collect)
+    (let ((before (js-call a :stats))
+          (cnt 64))
+      (js-call a :auto 1)
+      (try
+        (let ((index 0))
+          (while (< index cnt)
+            (exact (number-rt a "scalar-call") 8 "scalar kernel without automatic collection")
+            (setq index (+ index 1))))
+        (let ((after (js-call a :stats)))
+          (js-call assert :equal (get after :frameDepth) (get before :frameDepth))
+          (funcall assert (<= (- (get after :usedBytes) (get before :usedBytes)) (* cnt 1024))
+            "64 released scalar results must not retain a workspace per call")
+          (js-call a :collect)
+          (js-call assert :equal (get (js-call a :stats) :usedBytes) (get before :usedBytes)
+            "collection after 64 calls retains exactly the original warm state"))
+        (finally
+          (js-call a :auto 1)
+          (js-call a :collect))))
+    (exact (number-rt a "scalar-call") 8 "after explicit collection"))
+
+  (defasync run-validate-emitted (url)
+    (let ((m (await (funcall dyn-import url))))
+      (js-call assert :equal (js-call m :direct "sin" 0 1 0) 0)
+      (js-call assert :equal (js-call m :direct "exp" 0 1 0) 1)
+      (js-call assert :equal (js-call m :scalar_call) 8)
+      (js-call (get process :stdout) :write "emitted Math module parsed and executed")))
+
+  (defasync run-node-cli ()
+    (let* ((argv (get process :argv))
+           (payload (JSON/parse (readFileSync 0 "utf8")))
+           (opts (get payload :options))
+           (golds (get payload :golden))
+           (js (await (funcall dyn-import (aref argv 3))))
+           (rt-mod (await (funcall dyn-import (aref argv 4))))
+           (instantiateManagedRuntime (get rt-mod :instantiateManagedRuntime))
+           (bytes (readFileSync (aref argv 5))))
+      (js-call assert :deepEqual
+        (WebAssembly.Module/imports (new WebAssembly.Module bytes))
+        (js-array))
+      (let ((a (funcall instantiateManagedRuntime bytes opts)))
+        (js-call a :auto 1)
+        (try
+          (check-numbers a (fixed-cases) golds)
+          (check-routes a js)
+          (sequence a)
+          (check-scratch-lifetime a js)
+          (finally
+            (finish-rt a))))
+      (js-call (get process :stdout) :write "complete Math source and fixed binary64 vectors preserved")))
+
+  (let ((mode (aref (get process :argv) 2)))
+    (cond
+      ((= mode "--validate-emitted")
+       (js-call (run-validate-emitted (aref (get process :argv) 3)) :catch
+         (lambda (err)
+           (console/error err)
+           (js-call process :exit 1))))
+      ((= mode "--run-node-check")
+       (js-call (run-node-cli) :catch
+         (lambda (err)
+           (console/error err)
+           (js-call process :exit 1))))
+      (t nil)))
+
+  (export
+    names
+    options
+    golden
+    bits
+    exact
+    hex
+    fixed-cases
+    box
+    invoke-rt
+    number-rt
+    text-rt
+    finish-rt
+    check-numbers
+    check-routes
+    sequence
+    check-scratch-lifetime))

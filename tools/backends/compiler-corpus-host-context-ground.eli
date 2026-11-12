@@ -1,2 +1,192 @@
-(module capsules.tools.backends.compiler-corpus-host-context-ground
-  (js* "import {readFile,writeFile} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {pathToFileURL,fileURLToPath} from 'node:url';\nimport {readCompilerMetadata} from './compiler-metadata.mjs';\nimport {\n  createManagedModuleGraph,\n  createManagedProjectFacades,\n  instantiateManagedRuntimeWithHostModules,\n} from './managed-runtime.mjs';\n\nconst contexts = new Map();\nconst environmentKey = 'ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT';\n\n// This installs an already emitted program. No source is compiled here, and a\n// native context continues through the native loader in every host process.\nexport async function openOriginalProgramContext(input, {identity} = {}) {\n  const key = identity === undefined ? undefined : resolve(identity);\n  if (key !== undefined && contexts.has(key)) return contexts.get(key);\n  const pending = (async () => {\n    if (!input || !['wasm', 'native'].includes(input.target) || typeof input.path !== 'string' ||\n        typeof input.base !== 'string' || typeof input.entry !== 'string' || !input.descriptor?.project) {\n      throw new TypeError('original program context requires the selected phased binary artifact');\n    }\n    const graph = createManagedModuleGraph(input.descriptor);\n    const facades = createManagedProjectFacades(input.descriptor, {entry: input.entry});\n    let runtime, closed = false;\n    async function close() {\n      if (closed) return;\n      closed = true;\n      let failure;\n      for (const action of [() => runtime?.closeModule(), () => runtime?.collect(),\n        () => {if(runtime&&runtime.live()!==0)throw new Error('original program retained managed values after module close');},\n        () => {if(runtime&&runtime.stats().frameDepth!==0)throw new Error('original program retained managed frames after module close');},\n        () => runtime?.close?.(), () => graph.close()]) {\n        try {await action();} catch (error) {failure ??= error;}\n      }\n      if (key !== undefined) contexts.delete(key);\n      if (failure) throw failure;\n    }\n    try {\n      const options = {...input.memory, ...input.runtimeOptions, moduleGraph: graph,\n        initializeModule: false, projectEntry: input.entry, projectModuleBaseURL: input.base,\n        moduleBaseURL: pathToFileURL(input.path).href, nativeTarget: input.nativeTarget};\n      if (input.target === 'wasm') {\n        runtime = await instantiateManagedRuntimeWithHostModules(new Uint8Array(await readFile(input.path)), options);\n      } else {\n        const {instantiateNativeManagedRuntime} = await import('./native-managed-runtime.mjs');\n        runtime = await instantiateNativeManagedRuntime(input.path, {typed: input.typed, descriptor: input.descriptor}, options);\n      }\n      if(input.runtimeOptions?.auto!==undefined)runtime.auto(input.runtimeOptions.auto);\n      graph.attachRuntime(runtime).prepare();\n      const registry = await import(new URL(facades.registry, input.base));\n      registry.install(graph);\n      return Object.freeze({graph, runtime, facades, close});\n    } catch (error) {\n      try {await close();} catch { /* Preserve the original loader/prepare error. */ }\n      throw error;\n    }\n  })();\n  if (key !== undefined) contexts.set(key, pending);\n  try {return await pending;}\n  catch (error) {if (key !== undefined && contexts.get(key) === pending) contexts.delete(key);throw error;}\n}\n\n// NODE_OPTIONS is inherited by the original suite's real Node subprocesses.\n// The parent host keeps its original executable and command arguments. Each\n// child installs fresh VM cells for the same product before its original code.\nexport function inheritOriginalProgramContext({configuration, sourceRoot}) {\n  if (typeof configuration !== 'string' || typeof sourceRoot !== 'string') {\n    throw new TypeError('original child context requires its actual configuration and source root');\n  }\n  const option = '--import=' + import.meta.url;\n  const previous = process.env.NODE_OPTIONS ?? '';\n  process.env.NODE_OPTIONS = previous.split(/\\s+/).includes(option) ? previous : (previous ? previous + ' ' : '') + option;\n  process.env[environmentKey] = resolve(configuration);\n  process.env.ELISCRIPT_ORIGINAL_SOURCE_ROOT = resolve(sourceRoot);\n}\n\n// Shell entry points accept one runtime executable, rather than an executable\n// plus preload arguments. Keep the actual Bun host and add only the selected\n// artifact's initialization before its unchanged CLI program starts.\nexport async function originalProgramBunLauncher({directory,bun,configuration,sourceRoot}) {\n  if([directory,bun,configuration,sourceRoot].some(value=>typeof value!=='string'||!value))\n    throw new TypeError('original Bun launcher requires its selected artifact and executable');\n  const quote=value=>\"'\"+value.replaceAll(\"'\",\"'\\\\''\")+\"'\";\n  const option='--import='+import.meta.url;\n  const nodeOptions=(process.env.NODE_OPTIONS??'').split(/\\s+/).filter(value=>value&&value!==option).join(' ');\n  const path=resolve(directory,'__eliscript_original_bun');\n  const source='#!/bin/sh\\n'+\n    'export NODE_OPTIONS='+quote(nodeOptions)+'\\n'+\n    'if [ -z \"${'+environmentKey+':-}\" ]; then\\n'+\n    '  export '+environmentKey+'='+quote(resolve(configuration))+'\\n'+\n    'fi\\n'+\n    'export ELISCRIPT_ORIGINAL_SOURCE_ROOT='+quote(resolve(sourceRoot))+'\\n'+\n    'exec '+quote(bun)+' --preload '+quote(fileURLToPath(import.meta.url))+' \"$@\"\\n';\n  await writeFile(path,source,{flag:'wx',mode:0o700});\n  return path;\n}\n\n// This branch is reached only through the explicit original-program preload.\n// Importing the scheduler or defining an adapter never executes an artifact.\nconst inherited = process.env[environmentKey];\nif (inherited) {\n  const input = await readCompilerMetadata(resolve(inherited));\n  const context = await openOriginalProgramContext(input, {identity: inherited});\n  process.env.ELISCRIPT_ORIGINAL_TARGET = input.target;\n  if (input.sourceRoot) process.env.ELISCRIPT_ORIGINAL_SOURCE_ROOT = input.sourceRoot;\n  process.once('beforeExit', () => {\n    context.close().catch(error => {\n      process.stderr.write((error?.stack ?? String(error)) + '\\n');\n      if (!process.exitCode) process.exitCode = 1;\n    });\n  });\n}\n"))
+(module tools.backends.compiler-corpus-host-context-ground
+  (import "node:fs/promises" readFile writeFile copyFile chmod)
+  (import "node:fs" constants)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL fileURLToPath)
+  (import "./compiler-metadata.mjs" readCompilerMetadata)
+  (import "./managed-runtime.mjs"
+    createManagedModuleGraph
+    createManagedProjectFacades
+    instantiateManagedRuntimeWithHostModules)
+  (import "./native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+
+  (defconst own-url (js* "import.meta.url"))
+  (defconst contexts (new globalThis.Map))
+  (defconst environmentKey "ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT")
+
+  ;; This installs an already emitted program. No source is compiled here, and a
+  ;; native context continues through the native loader in every host process.
+  (defasync openOriginalProgramContext (input &optional options)
+    (let* ((identity (if (nullish? options) undefined (get options :identity)))
+           (key (if (undefined? identity) undefined (resolve identity))))
+      (if (and (not (undefined? key)) (js-call contexts :has key))
+        (await (js-call contexts :get key))
+        (let ((pending
+                (funcall
+                  (async ()
+                    (when (or (not input)
+                              (not (js-call (js-array "wasm" "native") :includes (get input :target)))
+                              (/= (value-type (get input :path)) "string")
+                              (/= (value-type (get input :base)) "string")
+                              (/= (value-type (get input :entry)) "string")
+                              (nullish? (get input :descriptor))
+                              (nullish? (get (get input :descriptor) :project)))
+                      (throw (new globalThis.TypeError "original program context requires the selected phased binary artifact")))
+                    (let* ((graph (createManagedModuleGraph (get input :descriptor)))
+                           (facades (createManagedProjectFacades (get input :descriptor)
+                                      (js-object :entry (get input :entry))))
+                           (runtime undefined)
+                           (closed false)
+                           (close
+                             (async ()
+                               (unless closed
+                                 (setq closed t)
+                                 (let ((failure undefined)
+                                       (actions (js-array
+                                                  (lambda () (when runtime (js-call runtime :closeModule)))
+                                                  (lambda () (when runtime (js-call runtime :collect)))
+                                                  (lambda ()
+                                                    (when (and runtime (/= (js-call runtime :live) 0))
+                                                      (throw (new globalThis.Error "original program retained managed values after module close"))))
+                                                  (lambda ()
+                                                    (when (and runtime (/= (get (js-call runtime :stats) :frameDepth) 0))
+                                                      (throw (new globalThis.Error "original program retained managed frames after module close"))))
+                                                  (lambda ()
+                                                    (when (and runtime (= (value-type (get runtime :close)) "function"))
+                                                      (js-call runtime :close)))
+                                                  (lambda () (js-call graph :close))))
+                                       (i 0))
+                                   (while (< i (js-length actions))
+                                     (try
+                                       (await (funcall (aref actions i)))
+                                       (catch error
+                                         (when (undefined? failure)
+                                           (setq failure error))))
+                                     (setq i (1+ i)))
+                                   (unless (undefined? key)
+                                     (js-call contexts :delete key))
+                                   (unless (undefined? failure)
+                                     (throw failure)))))))
+                      (try
+                        (let ((rt-options
+                                (Object/assign (js-object)
+                                  (get input :memory)
+                                  (get input :runtimeOptions)
+                                  (js-object
+                                    :moduleGraph graph
+                                    :initializeModule false
+                                    :projectEntry (get input :entry)
+                                    :projectModuleBaseURL (get input :base)
+                                    :moduleBaseURL (get (pathToFileURL (get input :path)) :href)
+                                    :nativeTarget (get input :nativeTarget)))))
+                          (if (= (get input :target) "wasm")
+                            (setq runtime
+                              (await (instantiateManagedRuntimeWithHostModules
+                                       (new globalThis.Uint8Array (await (readFile (get input :path))))
+                                       rt-options)))
+                            (setq runtime
+                              (await (instantiateNativeManagedRuntime
+                                       (get input :path)
+                                       (js-object :typed (get input :typed) :descriptor (get input :descriptor))
+                                       rt-options))))
+                          (when (and (not (nullish? (get input :runtimeOptions)))
+                                     (not (undefined? (get (get input :runtimeOptions) :auto))))
+                            (js-call runtime :auto (get (get input :runtimeOptions) :auto)))
+                          (js-call (js-call graph :attachRuntime runtime) :prepare)
+                          (let ((registry (await (js-call (js* "(u => import(u))") :call nil
+                                                   (new globalThis.URL (get facades :registry) (get input :base))))))
+                            (js-call registry :install graph))
+                          (Object/freeze (js-object :graph graph :runtime runtime :facades facades :close close)))
+                        (catch error
+                          (try (await (funcall close)) (catch _ nil))
+                          (throw error))))))))
+          (unless (undefined? key)
+            (js-call contexts :set key pending))
+          (try
+            (await pending)
+            (catch error
+              (when (and (not (undefined? key)) (eq (js-call contexts :get key) pending))
+                (js-call contexts :delete key))
+              (throw error)))))))
+
+  ;; NODE_OPTIONS is inherited by the original suite's real Node subprocesses.
+  ;; The parent host keeps its original executable and command arguments. Each
+  ;; child installs fresh VM cells for the same product before its original code.
+  (defun inheritOriginalProgramContext (options)
+    (let ((configuration (get options :configuration))
+          (source-root (get options :sourceRoot)))
+      (when (or (/= (value-type configuration) "string")
+                (/= (value-type source-root) "string"))
+        (throw (new globalThis.TypeError "original child context requires its actual configuration and source root")))
+      (let* ((env (get globalThis.process :env))
+             (option (str "--import=" own-url))
+             (previous (let ((v (get env :NODE_OPTIONS))) (if (nullish? v) "" v))))
+        (put env :NODE_OPTIONS
+          (if (js-call (js-call previous :split (new globalThis.RegExp "\\s+")) :includes option)
+            previous
+            (str (if (= previous "") "" (str previous " ")) option)))
+        (put env environmentKey (resolve configuration))
+        (put env :ELISCRIPT_ORIGINAL_SOURCE_ROOT (resolve source-root)))))
+
+  ;; Shell entry points accept one runtime executable, rather than an executable
+  ;; plus preload arguments. Keep the actual Bun host and add only the selected
+  ;; artifact's initialization before its unchanged CLI program starts.
+  (defasync originalProgramBunLauncher (options)
+    (let ((directory (get options :directory))
+          (bun (get options :bun))
+          (configuration (get options :configuration))
+          (source-root (get options :sourceRoot)))
+      (when (js-call (js-array directory bun configuration source-root) :some
+              (lambda (value) (or (/= (value-type value) "string") (= (js-length value) 0))))
+        (throw (new globalThis.TypeError "original Bun launcher requires its selected artifact and executable")))
+      (let* ((env (get globalThis.process :env))
+             (option (str "--import=" own-url))
+             (node-options
+               (js-call
+                 (js-call
+                   (js-call (let ((v (get env :NODE_OPTIONS))) (if (nullish? v) "" v))
+                     :split (new globalThis.RegExp "\\s+"))
+                   :filter (lambda (value) (and (/= value "") (/= value option))))
+                 :join " "))
+             (path (resolve directory "__eliscript_original_bun"))
+             (source (fileURLToPath (new globalThis.URL "./original-program-bun-launcher.el" own-url))))
+        (await (writeFile (str path ".json")
+                 (JSON/stringify
+                   (js-object
+                     :bun bun
+                     :preload (fileURLToPath own-url)
+                     :configuration (resolve configuration)
+                     :sourceRoot (resolve source-root)
+                     :nodeOptions node-options))
+                 (js-object :flag "wx" :mode 384)))
+        (await (copyFile source path (get constants :COPYFILE_EXCL)))
+        (await (chmod path 448))
+        path)))
+
+  ;; This branch is reached only through the explicit original-program preload.
+  ;; Importing the scheduler or defining an adapter never executes an artifact.
+  (defasync initialize-inherited-context ()
+    (let* ((env (get globalThis.process :env))
+           (inherited (get env environmentKey)))
+      (when inherited
+        (let* ((input (await (readCompilerMetadata (resolve inherited))))
+               (context (await (openOriginalProgramContext input (js-object :identity inherited)))))
+          (put env :ELISCRIPT_ORIGINAL_TARGET (get input :target))
+          (when (get input :sourceRoot)
+            (put env :ELISCRIPT_ORIGINAL_SOURCE_ROOT (get input :sourceRoot)))
+          (js-call globalThis.process :once "beforeExit"
+            (lambda ()
+              (js-call (js-call context :close) :catch
+                (lambda (error)
+                  (js-call (get globalThis.process :stderr) :write
+                    (str (if (and (not (nullish? error)) (get error :stack))
+                           (get error :stack)
+                           (globalThis.String error))
+                         "\n"))
+                  (unless (get globalThis.process :exitCode)
+                    (put globalThis.process :exitCode 1))))))))))
+
+  (defconst inherited-completion (initialize-inherited-context))
+  (js-call inherited-completion :catch (lambda (_) undefined))
+
+  (export openOriginalProgramContext inheritOriginalProgramContext originalProgramBunLauncher))

@@ -1,2 +1,901 @@
-(module capsules.runtime.worker
-  (js* "#!/usr/bin/env bun\n\nimport { createHash } from \"node:crypto\";\nimport { once } from \"node:events\";\nimport { readFile, realpath, stat } from \"node:fs/promises\";\nimport { dirname, isAbsolute, relative, resolve, sep } from \"node:path\";\nimport { createInterface } from \"node:readline\";\nimport { fileURLToPath, pathToFileURL } from \"node:url\";\nimport { workerCapabilities } from \"../platform/worker.mjs\";\nimport {\n  decodeWorkerValues,\n  encodeWorkerValue,\n  workerValueEncoding,\n} from \"./worker-value-codec.mjs\";\nimport {\n  WorkerValueStreamDecoder,\n  encodeWorkerValueChunks,\n  workerValueFraming,\n  workerValueStreamLimits,\n} from \"./worker-value-stream.mjs\";\nimport {\n  decodeSourceMappings,\n  mapSourceFrames,\n  parseJavaScriptStack,\n} from \"./source-mapping.mjs\";\n\nexport const protocolVersion = 1;\nconst runtimeDirectory = dirname(fileURLToPath(import.meta.url));\nconst packageDirectories = new Map([\n  [\"eliscript/platform/\", resolve(runtimeDirectory, \"../platform\")],\n  [\"eliscript/runtime/\", runtimeDirectory],\n]);\n\nfunction installPackageResolver() {\n  Bun.plugin({\n    name: \"eliscript-worker-package\",\n    setup(build) {\n      build.onResolve(\n        { filter: /^eliscript\\/(?:platform|runtime)\\// },\n        ({ path: specifier }) => {\n          const [prefix, directory] = [...packageDirectories].find(\n            ([candidate]) => specifier.startsWith(candidate),\n          );\n          const suffix = specifier.slice(prefix.length);\n          const target = resolve(directory, suffix);\n          const local = relative(directory, target);\n          if (suffix.length === 0 || isAbsolute(local) ||\n              local === \"..\" || local.startsWith(`..${sep}`)) {\n            const area = prefix.split(\"/\")[1];\n            throw new Error(\n              `worker ${area} import escapes package ${area}: ${specifier}`,\n            );\n          }\n          return { namespace: \"file\", path: target };\n        },\n      );\n    },\n  });\n}\n\ninstallPackageResolver();\n\nexport const capabilities = Object.freeze([\n  \"request\",\n  \"progress\",\n  \"cancel\",\n  \"timeout\",\n  \"shutdown\",\n  \"module-cache\",\n  \"module-version\",\n  \"operation-capabilities-v1\",\n  \"project-manifest\",\n  \"portable-manifest\",\n  \"runtime-resolution\",\n  \"value-codec-v1\",\n  \"value-chunks-v1\",\n]);\n\nconst maximumLineBytes = 16 * 1024 * 1024;\nconst maximumValueChunkLineBytes = workerValueStreamLimits.maxChunkBytes + 4096;\nconst maximumValueStreamBytes = 768 * 1024 * 1024;\nconst moduleCache = new Map();\nconst pending = new Map();\nconst protocolOutput = process.stdout;\nlet shuttingDown = false;\n\nfor (const method of [\"log\", \"info\", \"debug\"]) {\n  console[method] = (...values) => console.error(...values);\n}\n\nfunction normalizeWorkerStackFile(file) {\n  if (!file.startsWith(\"file:\")) return file;\n  try {\n    return fileURLToPath(file);\n  } catch {\n    return file;\n  }\n}\n\nfunction errorPayload(code, message, error, sourceMaps) {\n  const payload = { code, message };\n  if (error?.name) payload.name = error.name;\n  if (error?.path) payload.path = error.path;\n  if (error?.stack) {\n    payload.stack = error.stack;\n    const frames = mapSourceFrames(\n      parseJavaScriptStack(error.stack, { normalizeFile: normalizeWorkerStackFile }),\n      sourceMaps ?? [],\n    );\n    if (frames.length > 0) {\n      payload.frames = frames;\n      payload.location = frames.find((frame) => frame.file.endsWith(\".eli\")) ??\n        frames[0];\n    }\n  }\n  return payload;\n}\n\nfunction encodeMessage(message) {\n  let encoded;\n  try {\n    encoded = JSON.stringify(message);\n  } catch (error) {\n    encoded = JSON.stringify({\n      version: protocolVersion,\n      type: \"protocol-error\",\n      error: errorPayload(\n        \"serialization\",\n        `worker could not serialize a protocol message: ${error.message}`,\n        error,\n      ),\n    });\n  }\n  return `${encoded}\\n`;\n}\n\nfunction writeMessage(message) {\n  protocolOutput.write(encodeMessage(message));\n}\n\nasync function writeMessageAsync(message) {\n  if (!protocolOutput.write(encodeMessage(message))) {\n    await once(protocolOutput, \"drain\");\n  }\n}\n\nfunction jsonValue(value, label) {\n  let encoded;\n  try {\n    encoded = JSON.stringify(value);\n  } catch (error) {\n    const wrapped = new Error(`${label} is not JSON-serializable: ${error.message}`);\n    wrapped.code = \"serialization\";\n    throw wrapped;\n  }\n  if (encoded === undefined) {\n    const error = new Error(`${label} is not JSON-serializable`);\n    error.code = \"serialization\";\n    throw error;\n  }\n  return JSON.parse(encoded);\n}\n\nfunction requestError(id, code, message, error, timing, sourceMaps) {\n  const response = {\n    version: protocolVersion,\n    type: \"response\",\n    id,\n    ok: false,\n    error: errorPayload(code, message, error, sourceMaps),\n  };\n  if (timing) response.timing = timing;\n  writeMessage(response);\n}\n\nfunction protocolError(code, message, id) {\n  const response = {\n    version: protocolVersion,\n    type: \"protocol-error\",\n    error: errorPayload(code, message),\n  };\n  if (id !== undefined) response.id = id;\n  writeMessage(response);\n}\n\nfunction moduleUrl(identity) {\n  let url;\n  try {\n    url = new URL(identity);\n  } catch {\n    url = pathToFileURL(resolve(identity));\n  }\n  if (url.protocol !== \"file:\") {\n    throw new Error(`worker modules must use local file URLs: ${identity}`);\n  }\n  return url.href;\n}\n\nexport async function loadSourceMap(moduleUrl_) {\n  try {\n    const cleanUrl = new URL(moduleUrl_);\n    cleanUrl.search = \"\";\n    cleanUrl.hash = \"\";\n    const javascript = await readFile(fileURLToPath(cleanUrl), \"utf8\");\n    const match = javascript.match(/\\/\\/# sourceMappingURL=([^\\s]+)\\s*$/);\n    if (!match || match[1].startsWith(\"data:\")) return undefined;\n    const mapUrl = new URL(match[1], cleanUrl);\n    const map = JSON.parse(await readFile(fileURLToPath(mapUrl), \"utf8\"));\n    if (map.version !== 3 || typeof map.mappings !== \"string\" ||\n        !Array.isArray(map.sources)) return undefined;\n    return {\n      generatedFile: resolve(await realpath(fileURLToPath(cleanUrl))),\n      sources: map.sources.map((source) => {\n        const sourceUrl = new URL(source, mapUrl);\n        return sourceUrl.protocol === \"file:\"\n          ? resolve(fileURLToPath(sourceUrl))\n          : sourceUrl.href;\n      }),\n      lines: decodeSourceMappings(map.mappings),\n    };\n  } catch (error) {\n    console.error(`could not load source map for ${moduleUrl_}: ${error.message}`);\n    return undefined;\n  }\n}\n\nasync function moduleFingerprint(url) {\n  const fileUrl = new URL(url);\n  fileUrl.search = \"\";\n  fileUrl.hash = \"\";\n  const metadata = await stat(fileURLToPath(fileUrl), { bigint: true });\n  return `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeNs}`;\n}\n\nfunction projectManifestError(message) {\n  const error = new Error(message);\n  error.code = \"invalid-project-manifest\";\n  return error;\n}\n\nfunction projectFile(root, value, label) {\n  if (typeof value !== \"string\" || value.length === 0 || isAbsolute(value)) {\n    throw projectManifestError(`${label} must be a non-empty relative path`);\n  }\n  const path = resolve(root, value);\n  const fromRoot = relative(root, path);\n  if (fromRoot === \"..\" || fromRoot.startsWith(`..${process.platform === \"win32\" ? \"\\\\\" : \"/\"}`) ||\n      isAbsolute(fromRoot)) {\n    throw projectManifestError(`${label} escapes the project output directory`);\n  }\n  return path;\n}\n\nasync function fileDigest(path) {\n  return createHash(\"sha256\").update(await readFile(path)).digest(\"hex\");\n}\n\nfunction textDigest(value) {\n  return createHash(\"sha256\").update(value, \"utf8\").digest(\"hex\");\n}\n\nasync function readProjectManifest(identity, entryUrl) {\n  const url = moduleUrl(identity);\n  let path;\n  try {\n    path = await realpath(fileURLToPath(url));\n  } catch (error) {\n    throw projectManifestError(`could not resolve project manifest: ${error.message}`);\n  }\n  const root = dirname(path);\n  let manifest;\n  try {\n    manifest = JSON.parse(await readFile(path, \"utf8\"));\n  } catch (error) {\n    throw projectManifestError(`could not read project manifest: ${error.message}`);\n  }\n  if (manifest.format !== \"eliscript-project\" ||\n      (manifest.version !== 1 && manifest.version !== 2) ||\n      typeof manifest.digest !== \"string\" ||\n      !/^[0-9a-f]{64}$/.test(manifest.digest) ||\n      !Array.isArray(manifest.modules)) {\n    throw projectManifestError(\"project manifest has an unsupported shape\");\n  }\n  const manifestEntries = manifest.version === 1\n    ? [manifest.entry]\n    : manifest.entries;\n  if (!Array.isArray(manifestEntries) || manifestEntries.length === 0 ||\n      new Set(manifestEntries).size !== manifestEntries.length ||\n      [...manifestEntries].sort().some((entry, index) =>\n        entry !== manifestEntries[index])) {\n    throw projectManifestError(\"project manifest entries have an unsupported shape\");\n  }\n  const entries = manifestEntries.map((entry, index) =>\n    projectFile(root, entry, `manifest entry ${index}`));\n  let canonicalEntries;\n  let canonicalModule;\n  try {\n    [canonicalEntries, canonicalModule] = await Promise.all([\n      Promise.all(entries.map((entry) => realpath(entry))),\n      realpath(fileURLToPath(entryUrl)),\n    ]);\n  } catch (error) {\n    throw projectManifestError(`could not resolve project entry: ${error.message}`);\n  }\n  if (!canonicalEntries.includes(canonicalModule)) {\n    throw projectManifestError(\"project manifest entry does not match request module\");\n  }\n  const identityModules = [];\n  const modules = manifest.modules.map((module, index) => {\n    if (!module || typeof module !== \"object\" ||\n        typeof module.source !== \"string\" || module.source.length === 0 ||\n        isAbsolute(module.source) ||\n        module.source.split(/[\\\\/]/).includes(\"..\") ||\n        !/^[0-9a-f]{64}$/.test(module.sourceDigest ?? \"\") ||\n        !/^[0-9a-f]{64}$/.test(module.outputDigest ?? \"\") ||\n        !/^[0-9a-f]{64}$/.test(module.sourceMapDigest ?? \"\")) {\n      throw projectManifestError(`manifest module ${index} has an unsupported shape`);\n    }\n    identityModules.push({\n      source: module.source,\n      output: module.output,\n      sourceMap: module.sourceMap,\n      sourceDigest: module.sourceDigest,\n      outputDigest: module.outputDigest,\n      sourceMapDigest: module.sourceMapDigest,\n    });\n    return {\n      output: projectFile(root, module.output, `manifest module ${index} output`),\n      sourceMap: projectFile(\n        root,\n        module.sourceMap,\n        `manifest module ${index} source map`,\n      ),\n      outputDigest: module.outputDigest,\n      sourceMapDigest: module.sourceMapDigest,\n    };\n  });\n  const declaredOutputs = new Set(identityModules.map((module) => module.output));\n  if (manifestEntries.some((entry) => !declaredOutputs.has(entry))) {\n    throw projectManifestError(\"project manifest does not describe every entry artifact\");\n  }\n  const graphIdentity = manifest.version === 1\n    ? {\n      format: manifest.format,\n      version: manifest.version,\n      entry: manifest.entry,\n      modules: identityModules,\n    }\n    : {\n      format: manifest.format,\n      version: manifest.version,\n      entries: manifest.entries,\n      modules: identityModules,\n    };\n  if (textDigest(JSON.stringify(graphIdentity)) !== manifest.digest) {\n    throw projectManifestError(\"project manifest graph digest does not match its records\");\n  }\n  return { digest: manifest.digest, modules };\n}\n\nasync function loadProjectArtifacts(project) {\n  const sourceMaps = await Promise.all(project.modules.map(async (module) => {\n    let outputDigest;\n    let sourceMapDigest;\n    try {\n      [outputDigest, sourceMapDigest] = await Promise.all([\n        fileDigest(module.output),\n        fileDigest(module.sourceMap),\n      ]);\n    } catch (error) {\n      throw projectManifestError(\n        `could not verify generated module ${module.output}: ${error.message}`,\n      );\n    }\n    if (outputDigest !== module.outputDigest ||\n        sourceMapDigest !== module.sourceMapDigest) {\n      throw projectManifestError(\n        `generated module does not match project manifest: ${module.output}`,\n      );\n    }\n    return loadSourceMap(pathToFileURL(module.output).href);\n  }));\n  return sourceMaps.filter(Boolean);\n}\n\nasync function loadModule(identity, requestedVersion, projectManifest) {\n  const url = moduleUrl(identity);\n  const projectPromise = projectManifest === undefined\n    ? Promise.resolve(undefined)\n    : readProjectManifest(projectManifest, url);\n  const discoveredProject = projectManifest !== undefined &&\n      requestedVersion === undefined\n    ? await projectPromise\n    : undefined;\n  const version = discoveredProject?.digest ?? requestedVersion ??\n    await moduleFingerprint(url);\n  const cacheKey = `${url}\\n${projectManifest === undefined ? \"\" : moduleUrl(projectManifest)}`;\n  const cached = moduleCache.get(cacheKey);\n  if (cached?.version === version) {\n    const loaded = await cached.promise;\n    return { ...loaded, cacheHit: true, version };\n  }\n  if (cached) {\n    const error = new Error(\n      `module version changed from ${cached.version} to ${version}; restart the worker before loading it`,\n    );\n    error.code = \"module-version-changed\";\n    throw error;\n  }\n  const importUrl = new URL(url);\n  importUrl.searchParams.set(\"__eliscript_worker_version\", version);\n  const entry = {\n    version,\n    promise: (async () => {\n      const project = discoveredProject ?? await projectPromise;\n      if (project && version !== project.digest) {\n        const error = new Error(\n          `requested module version ${version} does not match project manifest ${project.digest}`,\n        );\n        error.code = \"module-version-mismatch\";\n        throw error;\n      }\n      const [module, sourceMaps] = await Promise.all([\n        import(importUrl.href),\n        project\n          ? loadProjectArtifacts(project)\n          : loadSourceMap(url).then((sourceMap) => sourceMap ? [sourceMap] : []),\n      ]);\n      return { module, sourceMaps };\n    })(),\n  };\n  moduleCache.set(cacheKey, entry);\n  try {\n    const loaded = await entry.promise;\n    return { ...loaded, cacheHit: false, version };\n  } catch (error) {\n    if (moduleCache.get(cacheKey) === entry) moduleCache.delete(cacheKey);\n    throw error;\n  }\n}\n\nfunction validateRequest(message) {\n  if (typeof message.id !== \"string\" || message.id.length === 0) {\n    throw new Error(\"request id must be a non-empty string\");\n  }\n  if (typeof message.module !== \"string\" || message.module.length === 0) {\n    throw new Error(\"request module must be a non-empty string\");\n  }\n  const hasExport = typeof message.export === \"string\" && message.export.length > 0;\n  const hasOperation = typeof message.operation === \"string\" &&\n    message.operation.length > 0;\n  if (hasExport === hasOperation) {\n    throw new Error(\n      \"request must contain exactly one non-empty export or operation\",\n    );\n  }\n  const usesValueChunks = message.valueFraming === workerValueFraming;\n  if (message.valueFraming !== undefined && !usesValueChunks) {\n    throw new Error(`request valueFraming must be ${workerValueFraming}`);\n  }\n  if (usesValueChunks) {\n    if (message.valueEncoding !== workerValueEncoding) {\n      throw new Error(\n        `chunked requests require valueEncoding ${workerValueEncoding}`,\n      );\n    }\n    if (message.arguments !== undefined) {\n      throw new Error(\"chunked requests must stream arguments after the request header\");\n    }\n  } else if (!Array.isArray(message.arguments)) {\n    throw new Error(\"request arguments must be an array\");\n  }\n  if (message.valueEncoding !== undefined &&\n      message.valueEncoding !== workerValueEncoding) {\n    throw new Error(\n      `request valueEncoding must be ${workerValueEncoding}`,\n    );\n  }\n  if (message.moduleVersion !== undefined &&\n      (typeof message.moduleVersion !== \"string\" ||\n       message.moduleVersion.length === 0 || message.moduleVersion.length > 512)) {\n    throw new Error(\"request moduleVersion must be a non-empty string up to 512 characters\");\n  }\n  if (message.projectManifest !== undefined &&\n      (typeof message.projectManifest !== \"string\" ||\n       message.projectManifest.length === 0)) {\n    throw new Error(\"request projectManifest must be a non-empty string\");\n  }\n  if (message.timeoutMs !== undefined &&\n      (!Number.isInteger(message.timeoutMs) || message.timeoutMs <= 0 ||\n       message.timeoutMs > 2_147_483_647)) {\n    throw new Error(\"request timeoutMs must be a positive 32-bit integer\");\n  }\n}\n\nfunction closeEntry(id, entry) {\n  if (entry.timer !== undefined) clearTimeout(entry.timer);\n  if (pending.get(id) === entry) pending.delete(id);\n}\n\nfunction receivingError(entry, code, message, error = undefined) {\n  requestError(entry.message.id, code, message, error);\n  closeEntry(entry.message.id, entry);\n}\n\nfunction createEntry(message, phase) {\n  const entry = {\n    controller: new AbortController(),\n    abortCode: \"cancelled\",\n    timer: undefined,\n    phase,\n    message,\n    startedAt: performance.now(),\n    progressIndex: 0,\n    progressQueue: Promise.resolve(),\n    progressError: undefined,\n  };\n  pending.set(message.id, entry);\n  if (message.timeoutMs !== undefined) {\n    entry.timer = setTimeout(() => {\n      entry.abortCode = \"timeout\";\n      entry.controller.abort();\n      if (entry.phase === \"receiving\") {\n        const error = new Error(\"request timed out while receiving value chunks\");\n        error.code = \"timeout\";\n        receivingError(entry, \"timeout\", error.message, error);\n      }\n    }, message.timeoutMs);\n  }\n  return entry;\n}\n\nfunction abortPromise(entry) {\n  return new Promise((_, reject) => {\n    entry.controller.signal.addEventListener(\"abort\", () => {\n      const error = new Error(\n        entry.abortCode === \"timeout\" ? \"request timed out\" : \"request cancelled\",\n      );\n      error.code = entry.abortCode;\n      reject(error);\n    }, { once: true });\n  });\n}\n\nasync function writeValueStream({\n  id,\n  channel,\n  stream,\n  value,\n  signal,\n  finalFields,\n}) {\n  const iterator = encodeWorkerValueChunks(value, { signal })[Symbol.asyncIterator]();\n  let sequence = 0;\n  let current = await iterator.next();\n  if (current.done) {\n    throw new Error(\"value stream encoder produced no events\");\n  }\n  while (!current.done) {\n    const next = await iterator.next();\n    const final = next.done;\n    const message = {\n      version: protocolVersion,\n      type: \"value-chunk\",\n      id,\n      channel,\n      sequence,\n      final,\n      valueEncoding: workerValueEncoding,\n      valueFraming: workerValueFraming,\n      events: current.value,\n    };\n    if (stream !== undefined) message.stream = stream;\n    if (final && finalFields) {\n      Object.assign(message, finalFields({\n        sequence,\n        chunkCount: sequence + 1,\n      }));\n    }\n    await writeMessageAsync(message);\n    current = next;\n    sequence += 1;\n  }\n}\n\nfunction queueProgress(entry, value) {\n  const stream = String(++entry.progressIndex);\n  const task = entry.progressQueue.then(() => writeValueStream({\n    id: entry.message.id,\n    channel: \"progress\",\n    stream,\n    value,\n    signal: entry.controller.signal,\n  }));\n  entry.progressQueue = task.catch((error) => {\n    if (entry.progressError === undefined) entry.progressError = error;\n  });\n  return task;\n}\n\nasync function executeRequest(message, entry, streamedArguments = undefined) {\n  const startedAt = entry.startedAt;\n  let moduleLoadMs = 0;\n  let executionMs = 0;\n  let serializationMs = 0;\n  let moduleCacheHit = false;\n  let moduleVersion;\n  let sourceMaps = [];\n  let executionStartedAt;\n  entry.phase = \"executing\";\n\n  try {\n    const moduleLoadStartedAt = performance.now();\n    const loaded = await loadModule(\n      message.module,\n      message.moduleVersion,\n      message.projectManifest,\n    );\n    const module = loaded.module;\n    sourceMaps = loaded.sourceMaps;\n    moduleCacheHit = loaded.cacheHit;\n    moduleVersion = loaded.version;\n    moduleLoadMs = performance.now() - moduleLoadStartedAt;\n    const manifest = module.__eliscript_portable__;\n    const operation = message.operation === undefined\n      ? module[message.export]\n      : manifest && Object.hasOwn(manifest, message.operation)\n        ? manifest[message.operation]\n        : undefined;\n    if (typeof operation !== \"function\") {\n      const operationName = message.operation ?? message.export;\n      const error = new Error(\n        message.operation === undefined\n          ? `module does not export a function named ${operationName}`\n          : `module does not declare a portable function named ${operationName}`,\n      );\n      error.code = message.operation === undefined\n        ? \"missing-export\"\n        : \"missing-portable\";\n      throw error;\n    }\n    const usesValueCodec = message.valueEncoding === workerValueEncoding;\n    const usesValueChunks = message.valueFraming === workerValueFraming;\n    const arguments_ = streamedArguments !== undefined\n      ? streamedArguments\n      : usesValueCodec\n        ? decodeWorkerValues(message.arguments)\n        : message.arguments;\n    const progress = (value) => {\n      if (entry.controller.signal.aborted) return;\n      if (usesValueChunks) return queueProgress(entry, value);\n      const response = {\n        version: protocolVersion,\n        type: \"progress\",\n        id: message.id,\n        value: usesValueCodec\n          ? encodeWorkerValue(value)\n          : jsonValue(value, \"progress value\"),\n      };\n      if (usesValueCodec) response.valueEncoding = workerValueEncoding;\n      writeMessage(response);\n    };\n    const context = Object.freeze({\n      signal: entry.controller.signal,\n      progress,\n      capabilities: workerCapabilities(\n        { signal: entry.controller.signal, progress },\n        [\"cancellation\", \"progress\"],\n      ),\n    });\n    executionStartedAt = performance.now();\n    const operationPromise = Promise.resolve(\n      operation(...arguments_, context),\n    );\n    const value = await Promise.race([operationPromise, abortPromise(entry)]);\n    executionMs = performance.now() - executionStartedAt;\n    await entry.progressQueue;\n    if (entry.progressError !== undefined) throw entry.progressError;\n    const serializationStartedAt = performance.now();\n    if (usesValueChunks) {\n      await writeValueStream({\n        id: message.id,\n        channel: \"response\",\n        value,\n        signal: entry.controller.signal,\n        finalFields({ chunkCount }) {\n          serializationMs = performance.now() - serializationStartedAt;\n          return {\n            timing: {\n              moduleLoadMs,\n              moduleCacheHit,\n              moduleVersion,\n              sourceMapLoaded: sourceMaps.length > 0,\n              sourceMapCount: sourceMaps.length,\n              executionMs,\n              serializationMs,\n              workerMs: performance.now() - startedAt,\n              valueStream: {\n                framing: workerValueFraming,\n                argumentChunks: entry.sequence,\n                responseChunks: chunkCount,\n                maxChunkBytes: workerValueStreamLimits.maxChunkBytes,\n                maxEventsPerChunk: workerValueStreamLimits.maxEventsPerChunk,\n                maxTextPartUnits: workerValueStreamLimits.maxTextPartUnits,\n              },\n            },\n          };\n        },\n      });\n      return;\n    }\n    const serializedValue = usesValueCodec\n      ? encodeWorkerValue(value)\n      : jsonValue(value, \"response value\");\n    serializationMs = performance.now() - serializationStartedAt;\n    const response = {\n      version: protocolVersion,\n      type: \"response\",\n      id: message.id,\n      ok: true,\n      value: serializedValue,\n      timing: {\n        moduleLoadMs,\n        moduleCacheHit,\n        moduleVersion,\n        sourceMapLoaded: sourceMaps.length > 0,\n        sourceMapCount: sourceMaps.length,\n        executionMs,\n        serializationMs,\n        workerMs: performance.now() - startedAt,\n      },\n    };\n    if (usesValueCodec) response.valueEncoding = workerValueEncoding;\n    writeMessage(response);\n  } catch (error) {\n    if (executionStartedAt !== undefined && executionMs === 0) {\n      executionMs = performance.now() - executionStartedAt;\n    }\n    const code = entry.controller.signal.aborted\n      ? entry.abortCode\n      : error.code ?? \"runtime\";\n    requestError(\n      message.id,\n      code,\n      error.message,\n      error,\n      {\n        moduleLoadMs,\n        moduleCacheHit,\n        moduleVersion,\n        sourceMapLoaded: sourceMaps.length > 0,\n        sourceMapCount: sourceMaps.length,\n        executionMs,\n        serializationMs,\n        workerMs: performance.now() - startedAt,\n      },\n      sourceMaps,\n    );\n  } finally {\n    closeEntry(message.id, entry);\n  }\n}\n\nfunction valueAck(id, sequence, final = false) {\n  writeMessage({\n    version: protocolVersion,\n    type: \"value-ack\",\n    id,\n    channel: \"arguments\",\n    sequence,\n    final,\n    valueEncoding: workerValueEncoding,\n    valueFraming: workerValueFraming,\n  });\n}\n\nfunction startRequest(message) {\n  validateRequest(message);\n  if (pending.has(message.id)) {\n    throw new Error(`request id is already pending: ${message.id}`);\n  }\n  if (message.valueFraming === workerValueFraming) {\n    const entry = createEntry(message, \"receiving\");\n    entry.decoder = new WorkerValueStreamDecoder({\n      signal: entry.controller.signal,\n    });\n    entry.sequence = 0;\n    entry.framedBytes = 0;\n    valueAck(message.id, -1);\n    return;\n  }\n  const entry = createEntry(message, \"executing\");\n  void executeRequest(message, entry);\n}\n\nfunction receiveValueChunk(message, lineBytes) {\n  if (typeof message.id !== \"string\" || message.id.length === 0) {\n    protocolError(\"invalid-message\", \"value chunk id must be a non-empty string\");\n    return;\n  }\n  const entry = pending.get(message.id);\n  if (!entry || entry.phase !== \"receiving\") {\n    protocolError(\n      \"invalid-message\",\n      `no request is receiving value chunks for id ${message.id}`,\n      message.id,\n    );\n    return;\n  }\n  try {\n    if (lineBytes > maximumValueChunkLineBytes) {\n      throw new Error(\n        `value chunk exceeds ${maximumValueChunkLineBytes} framed bytes`,\n      );\n    }\n    if (message.channel !== \"arguments\") {\n      throw new Error(\"incoming value chunk channel must be arguments\");\n    }\n    if (message.valueEncoding !== workerValueEncoding ||\n        message.valueFraming !== workerValueFraming) {\n      throw new Error(\"incoming value chunk encoding or framing mismatch\");\n    }\n    if (!Number.isSafeInteger(message.sequence) || message.sequence < 0 ||\n        message.sequence !== entry.sequence) {\n      throw new Error(\n        `value chunk sequence ${String(message.sequence)} does not match ${entry.sequence}`,\n      );\n    }\n    if (typeof message.final !== \"boolean\") {\n      throw new Error(\"value chunk final must be a boolean\");\n    }\n    if (!Array.isArray(message.events)) {\n      throw new Error(\"value chunk events must be an array\");\n    }\n    entry.framedBytes += lineBytes;\n    if (entry.framedBytes > maximumValueStreamBytes) {\n      throw new Error(\n        `value stream exceeds ${maximumValueStreamBytes} framed bytes`,\n      );\n    }\n    entry.decoder.write(message.events);\n    const sequence = entry.sequence;\n    entry.sequence += 1;\n    if (!message.final) {\n      valueAck(message.id, sequence);\n      return;\n    }\n    const arguments_ = entry.decoder.finish();\n    if (!Array.isArray(arguments_)) {\n      throw new Error(\"chunked request root must decode to an argument array\");\n    }\n    entry.decoder = undefined;\n    entry.phase = \"executing\";\n    valueAck(message.id, sequence, true);\n    void executeRequest(entry.message, entry, arguments_);\n  } catch (error) {\n    entry.controller.abort();\n    receivingError(\n      entry,\n      error.code ?? \"invalid-value-chunk\",\n      error.message,\n      error,\n    );\n  }\n}\n\nfunction cancelRequest(message) {\n  if (typeof message.id !== \"string\" || message.id.length === 0) {\n    protocolError(\"invalid-message\", \"cancel id must be a non-empty string\");\n    return;\n  }\n  const entry = pending.get(message.id);\n  const accepted = Boolean(entry);\n  if (entry) {\n    entry.abortCode = \"cancelled\";\n    entry.controller.abort();\n  }\n  writeMessage({\n    version: protocolVersion,\n    type: \"cancel\",\n    id: message.id,\n    accepted,\n  });\n  if (entry?.phase === \"receiving\") {\n    const error = new Error(\"request cancelled while receiving value chunks\");\n    error.code = \"cancelled\";\n    receivingError(entry, \"cancelled\", error.message, error);\n  }\n}\n\nfunction shutdown(lines) {\n  shuttingDown = true;\n  for (const entry of pending.values()) {\n    entry.abortCode = \"shutdown\";\n    entry.controller.abort();\n  }\n  writeMessage({\n    version: protocolVersion,\n    type: \"shutdown\",\n    ok: true,\n  });\n  lines.close();\n  setTimeout(() => process.exit(0), 0);\n}\n\nfunction handleMessage(message, lines, lineBytes) {\n  if (!message || typeof message !== \"object\" || Array.isArray(message)) {\n    protocolError(\"invalid-message\", \"protocol message must be an object\");\n    return;\n  }\n  if (message.version !== protocolVersion) {\n    protocolError(\n      \"version-mismatch\",\n      `worker protocol version ${protocolVersion} required`,\n      message.id,\n    );\n    return;\n  }\n  if (message.type === \"request\") {\n    try {\n      startRequest(message);\n    } catch (error) {\n      requestError(message.id, \"invalid-request\", error.message, error);\n    }\n  } else if (message.type === \"value-chunk\") {\n    receiveValueChunk(message, lineBytes);\n  } else if (message.type === \"cancel\") {\n    cancelRequest(message);\n  } else if (message.type === \"shutdown\") {\n    shutdown(lines);\n  } else {\n    protocolError(\n      \"invalid-message\",\n      `unknown protocol message type: ${message.type}`,\n      message.id,\n    );\n  }\n}\n\nexport async function runWorker() {\n  const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });\n  writeMessage({\n    version: protocolVersion,\n    type: \"ready\",\n    capabilities,\n    pid: process.pid,\n  });\n  lines.on(\"close\", () => {\n    if (shuttingDown) return;\n    for (const entry of pending.values()) {\n      entry.abortCode = \"shutdown\";\n      entry.controller.abort();\n    }\n  });\n  for await (const line of lines) {\n    const lineBytes = Buffer.byteLength(line, \"utf8\");\n    if (lineBytes > maximumLineBytes) {\n      protocolError(\"line-too-large\", \"protocol line exceeds 16 MiB\");\n      continue;\n    }\n    if (line.trim().length === 0) continue;\n    try {\n      handleMessage(JSON.parse(line), lines, lineBytes);\n    } catch (error) {\n      protocolError(\"invalid-json\", `invalid JSON: ${error.message}`);\n    }\n  }\n}\n\nif (import.meta.main) {\n  runWorker().catch((error) => {\n    console.error(error.stack ?? error.message);\n    process.exitCode = 1;\n  });\n}\n"))
+(module eliscript.runtime.worker
+  (import "node:crypto" createHash)
+  (import "node:events" once)
+  (import "node:fs/promises" readFile realpath stat)
+  (import "node:path" dirname isAbsolute relative resolve sep)
+  (import "node:readline" createInterface)
+  (import "node:url" fileURLToPath pathToFileURL)
+  (import "../platform/worker.mjs" workerCapabilities)
+  (import "./worker-value-codec.mjs"
+    decodeWorkerValues encodeWorkerValue workerValueEncoding)
+  (import "./worker-value-stream.mjs"
+    WorkerValueStreamDecoder encodeWorkerValueChunks
+    workerValueFraming workerValueStreamLimits)
+  (import "./source-mapping.mjs"
+    decodeSourceMappings mapSourceFrames parseJavaScriptStack)
+
+  (defconst protocolVersion 1)
+  (defconst runtimeDirectory (dirname (fileURLToPath (js* "import.meta.url"))))
+  (defconst packageDirectories
+    (new globalThis.Map
+      (js-array
+        (js-array "eliscript/platform/" (resolve runtimeDirectory "../platform"))
+        (js-array "eliscript/runtime/" runtimeDirectory))))
+  (defconst package-filter (new globalThis.RegExp "^eliscript\\/(?:platform|runtime)\\/"))
+  (defconst hex-digest-pattern (new globalThis.RegExp "^[0-9a-f]{64}$"))
+  (defconst path-split-pattern (new globalThis.RegExp "[\\\\/]"))
+  (defconst source-map-url-pattern (new globalThis.RegExp "\\/\\/# sourceMappingURL=([^\\s]+)\\s*$"))
+  (defconst async-iterator-symbol globalThis.Symbol.asyncIterator)
+
+  (defun dynamic-import (specifier)
+    (js* "import(specifier)"))
+
+  (defun installPackageResolver ()
+    (when (and (not (undefined? globalThis.Bun))
+               (eq (value-type (get globalThis.Bun :plugin)) "function"))
+      (js-call globalThis.Bun :plugin
+        (js-object
+          :name "eliscript-worker-package"
+          :setup (lambda (build)
+                   (js-call build :onResolve
+                     (js-object :filter package-filter)
+                     (lambda (arg)
+                       (let* ((specifier (get arg :path))
+                              (entries (Array/from packageDirectories))
+                              (matched (js-call entries :find
+                                         (lambda (entry)
+                                           (js-call specifier :startsWith (aref entry 0)))))
+                              (prefix (aref matched 0))
+                              (directory (aref matched 1))
+                              (suffix (js-call specifier :slice (js-length prefix)))
+                              (target (resolve directory suffix))
+                              (local (relative directory target)))
+                         (when (or (eq (js-length suffix) 0)
+                                   (isAbsolute local)
+                                   (eq local "..")
+                                   (js-call local :startsWith (str ".." sep)))
+                           (let ((area (aref (js-call prefix :split "/") 1)))
+                             (throw (new globalThis.Error
+                                      (str "worker " area " import escapes package " area ": " specifier)))))
+                         (js-object :namespace "file" :path target)))))))))
+
+  (installPackageResolver)
+
+  (defconst capabilities
+    (Object/freeze
+      (js-array
+        "request"
+        "progress"
+        "cancel"
+        "timeout"
+        "shutdown"
+        "module-cache"
+        "module-version"
+        "operation-capabilities-v1"
+        "project-manifest"
+        "portable-manifest"
+        "runtime-resolution"
+        "value-codec-v1"
+        "value-chunks-v1")))
+
+  (defconst maximumLineBytes (* 16 1024 1024))
+  (defconst maximumValueChunkLineBytes (+ (get workerValueStreamLimits :maxChunkBytes) 4096))
+  (defconst maximumValueStreamBytes (* 768 1024 1024))
+  (defconst moduleCache (new globalThis.Map))
+  (defconst pending (new globalThis.Map))
+  (defconst protocolOutput (get globalThis.process :stdout))
+  (defconst worker-state (js-object :shuttingDown false))
+
+  (js-call (js-array "log" "info" "debug") :forEach
+    (lambda (method)
+      (put globalThis.console method
+           (lambda (&rest values)
+             (apply (get globalThis.console :error) values)))))
+
+  (defun normalizeWorkerStackFile (file)
+    (if (not (js-call file :startsWith "file:"))
+        file
+      (try
+        (fileURLToPath file)
+        (catch _error
+          file))))
+
+  (defun errorPayload (code message &optional error sourceMaps)
+    (let ((payload (js-object :code code :message message)))
+      (when (and (not (nullish? error)) (get error :name))
+        (put payload :name (get error :name)))
+      (when (and (not (nullish? error)) (get error :path))
+        (put payload :path (get error :path)))
+      (when (and (not (nullish? error)) (get error :stack))
+        (put payload :stack (get error :stack))
+        (let ((frames (mapSourceFrames
+                        (parseJavaScriptStack (get error :stack)
+                                              (js-object :normalizeFile normalizeWorkerStackFile))
+                        (or sourceMaps (js-array)))))
+          (when (> (js-length frames) 0)
+            (put payload :frames frames)
+            (put payload :location
+                 (or (js-call frames :find (lambda (frame) (js-call (get frame :file) :endsWith ".eli")))
+                     (aref frames 0))))))
+      payload))
+
+  (defun encodeMessage (message)
+    (let ((encoded undefined))
+      (try
+        (setq encoded (JSON/stringify message))
+        (catch error
+          (setq encoded
+                (JSON/stringify
+                  (js-object
+                    :version protocolVersion
+                    :type "protocol-error"
+                    :error (errorPayload
+                             "serialization"
+                             (str "worker could not serialize a protocol message: " (get error :message))
+                             error))))))
+      (str encoded "\n")))
+
+  (defun writeMessage (message)
+    (js-call protocolOutput :write (encodeMessage message)))
+
+  (defasync writeMessageAsync (message)
+    (unless (js-call protocolOutput :write (encodeMessage message))
+      (await (once protocolOutput "drain"))))
+
+  (defun jsonValue (value label)
+    (let ((encoded undefined))
+      (try
+        (setq encoded (JSON/stringify value))
+        (catch error
+          (let ((wrapped (new globalThis.Error (str label " is not JSON-serializable: " (get error :message)))))
+            (put wrapped :code "serialization")
+            (throw wrapped))))
+      (when (undefined? encoded)
+        (let ((error (new globalThis.Error (str label " is not JSON-serializable"))))
+          (put error :code "serialization")
+          (throw error)))
+      (JSON/parse encoded)))
+
+  (defun requestError (id code message &optional error timing sourceMaps)
+    (let ((response (js-object
+                      :version protocolVersion
+                      :type "response"
+                      :id id
+                      :ok false
+                      :error (errorPayload code message error sourceMaps))))
+      (when timing
+        (put response :timing timing))
+      (writeMessage response)))
+
+  (defun protocolError (code message &rest __opt)
+    (let* ((id (aref __opt 0))
+           (response (js-object
+                       :version protocolVersion
+                       :type "protocol-error"
+                       :error (errorPayload code message))))
+      (when (not (undefined? id))
+        (put response :id id))
+      (writeMessage response)))
+
+  (defun moduleUrl (identity)
+    (let ((url undefined))
+      (try
+        (setq url (new globalThis.URL identity))
+        (catch _error
+          (setq url (pathToFileURL (resolve identity)))))
+      (unless (eq (get url :protocol) "file:")
+        (throw (new globalThis.Error (str "worker modules must use local file URLs: " identity))))
+      (get url :href)))
+
+  (defasync loadSourceMap (moduleUrl_)
+    (try
+      (let ((cleanUrl (new globalThis.URL moduleUrl_)))
+        (put cleanUrl :search "")
+        (put cleanUrl :hash "")
+        (let* ((javascript (await (readFile (fileURLToPath cleanUrl) "utf8")))
+               (match (js-call javascript :match source-map-url-pattern)))
+          (if (or (not match) (js-call (aref match 1) :startsWith "data:"))
+              undefined
+            (let* ((mapUrl (new globalThis.URL (aref match 1) cleanUrl))
+                   (map (JSON/parse (await (readFile (fileURLToPath mapUrl) "utf8")))))
+              (if (or (not (eq (get map :version) 3))
+                      (not (eq (value-type (get map :mappings)) "string"))
+                      (not (Array/isArray (get map :sources))))
+                  undefined
+                (js-object
+                  :generatedFile (resolve (await (realpath (fileURLToPath cleanUrl))))
+                  :sources (js-call (get map :sources) :map
+                             (lambda (source)
+                               (let ((sourceUrl (new globalThis.URL source mapUrl)))
+                                 (if (eq (get sourceUrl :protocol) "file:")
+                                     (resolve (fileURLToPath sourceUrl))
+                                   (get sourceUrl :href)))))
+                  :lines (decodeSourceMappings (get map :mappings))))))))
+      (catch error
+        (js-call globalThis.console :error
+          (str "could not load source map for " moduleUrl_ ": " (get error :message)))
+        undefined)))
+
+  (defasync moduleFingerprint (url)
+    (let ((fileUrl (new globalThis.URL url)))
+      (put fileUrl :search "")
+      (put fileUrl :hash "")
+      (let ((metadata (await (stat (fileURLToPath fileUrl) (js-object :bigint t)))))
+        (str (get metadata :dev) ":" (get metadata :ino) ":"
+             (get metadata :size) ":" (get metadata :mtimeNs)))))
+
+  (defun projectManifestError (message)
+    (let ((error (new globalThis.Error message)))
+      (put error :code "invalid-project-manifest")
+      error))
+
+  (defun projectFile (root value label)
+    (when (or (not (eq (value-type value) "string"))
+              (eq (js-length value) 0)
+              (isAbsolute value))
+      (throw (projectManifestError (str label " must be a non-empty relative path"))))
+    (let* ((path (resolve root value))
+           (fromRoot (relative root path))
+           (sep-str (if (eq (get globalThis.process :platform) "win32") "\\" "/")))
+      (when (or (eq fromRoot "..")
+                (js-call fromRoot :startsWith (str ".." sep-str))
+                (isAbsolute fromRoot))
+        (throw (projectManifestError (str label " escapes the project output directory"))))
+      path))
+
+  (defasync fileDigest (path)
+    (js-call (js-call (createHash "sha256") :update (await (readFile path))) :digest "hex"))
+
+  (defun textDigest (value)
+    (js-call (js-call (createHash "sha256") :update value "utf8") :digest "hex"))
+
+  (defasync readProjectManifest (identity entryUrl)
+    (let ((url (moduleUrl identity))
+          (path undefined))
+      (try
+        (setq path (await (realpath (fileURLToPath url))))
+        (catch error
+          (throw (projectManifestError (str "could not resolve project manifest: " (get error :message))))))
+      (let ((root (dirname path))
+            (manifest undefined))
+        (try
+          (setq manifest (JSON/parse (await (readFile path "utf8"))))
+          (catch error
+            (throw (projectManifestError (str "could not read project manifest: " (get error :message))))))
+        (when (or (not (eq (get manifest :format) "eliscript-project"))
+                  (and (not (eq (get manifest :version) 1))
+                       (not (eq (get manifest :version) 2)))
+                  (not (eq (value-type (get manifest :digest)) "string"))
+                  (not (js-call hex-digest-pattern :test (get manifest :digest)))
+                  (not (Array/isArray (get manifest :modules))))
+          (throw (projectManifestError "project manifest has an unsupported shape")))
+        (let ((manifestEntries (if (eq (get manifest :version) 1)
+                                   (js-array (get manifest :entry))
+                                 (get manifest :entries))))
+          (when (or (not (Array/isArray manifestEntries))
+                    (eq (js-length manifestEntries) 0)
+                    (not (eq (get (new globalThis.Set manifestEntries) :size)
+                             (js-length manifestEntries)))
+                    (js-call (js-call (Array/from manifestEntries) :sort) :some
+                      (lambda (entry index)
+                        (not (eq entry (aref manifestEntries index))))))
+            (throw (projectManifestError "project manifest entries have an unsupported shape")))
+          (let ((entries (js-call manifestEntries :map
+                           (lambda (entry index)
+                             (projectFile root entry (str "manifest entry " index)))))
+                (canonicalEntries undefined)
+                (canonicalModule undefined))
+            (try
+              (let ((pair (await (Promise/all
+                                   (js-array
+                                     (Promise/all (js-call entries :map (lambda (entry) (realpath entry))))
+                                     (realpath (fileURLToPath entryUrl)))))))
+                (setq canonicalEntries (aref pair 0)
+                      canonicalModule (aref pair 1)))
+              (catch error
+                (throw (projectManifestError (str "could not resolve project entry: " (get error :message))))))
+            (unless (js-call canonicalEntries :includes canonicalModule)
+              (throw (projectManifestError "project manifest entry does not match request module")))
+            (let* ((identityModules (js-array))
+                   (modules (js-call (get manifest :modules) :map
+                              (lambda (mod index)
+                                (when (or (nullish? mod)
+                                          (not (eq (value-type mod) "object"))
+                                          (not (eq (value-type (get mod :source)) "string"))
+                                          (eq (js-length (get mod :source)) 0)
+                                          (isAbsolute (get mod :source))
+                                          (js-call (js-call (get mod :source) :split path-split-pattern) :includes "..")
+                                          (not (js-call hex-digest-pattern :test (or (get mod :sourceDigest) "")))
+                                          (not (js-call hex-digest-pattern :test (or (get mod :outputDigest) "")))
+                                          (not (js-call hex-digest-pattern :test (or (get mod :sourceMapDigest) ""))))
+                                  (throw (projectManifestError (str "manifest module " index " has an unsupported shape"))))
+                                (js-call identityModules :push
+                                  (js-object
+                                    :source (get mod :source)
+                                    :output (get mod :output)
+                                    :sourceMap (get mod :sourceMap)
+                                    :sourceDigest (get mod :sourceDigest)
+                                    :outputDigest (get mod :outputDigest)
+                                    :sourceMapDigest (get mod :sourceMapDigest)))
+                                (js-object
+                                  :output (projectFile root (get mod :output) (str "manifest module " index " output"))
+                                  :sourceMap (projectFile root (get mod :sourceMap) (str "manifest module " index " source map"))
+                                  :outputDigest (get mod :outputDigest)
+                                  :sourceMapDigest (get mod :sourceMapDigest)))))
+                   (declaredOutputs (new globalThis.Set
+                                      (js-call identityModules :map (lambda (mod) (get mod :output))))))
+              (when (js-call manifestEntries :some (lambda (entry) (not (js-call declaredOutputs :has entry))))
+                (throw (projectManifestError "project manifest does not describe every entry artifact")))
+              (let ((graphIdentity (if (eq (get manifest :version) 1)
+                                       (js-object
+                                         :format (get manifest :format)
+                                         :version (get manifest :version)
+                                         :entry (get manifest :entry)
+                                         :modules identityModules)
+                                     (js-object
+                                       :format (get manifest :format)
+                                       :version (get manifest :version)
+                                       :entries (get manifest :entries)
+                                       :modules identityModules))))
+                (unless (eq (textDigest (JSON/stringify graphIdentity)) (get manifest :digest))
+                  (throw (projectManifestError "project manifest graph digest does not match its records")))
+                (js-object :digest (get manifest :digest) :modules modules))))))))
+
+  (defasync loadProjectArtifacts (project)
+    (let ((sourceMaps
+            (await (Promise/all
+                     (js-call (get project :modules) :map
+                       (async (mod)
+                         (let ((outputDigest undefined)
+                               (sourceMapDigest undefined))
+                           (try
+                             (let ((pair (await (Promise/all
+                                                  (js-array (fileDigest (get mod :output))
+                                                            (fileDigest (get mod :sourceMap)))))))
+                               (setq outputDigest (aref pair 0)
+                                     sourceMapDigest (aref pair 1)))
+                             (catch error
+                               (throw (projectManifestError
+                                        (str "could not verify generated module " (get mod :output) ": " (get error :message))))))
+                           (when (or (not (eq outputDigest (get mod :outputDigest)))
+                                     (not (eq sourceMapDigest (get mod :sourceMapDigest))))
+                             (throw (projectManifestError
+                                      (str "generated module does not match project manifest: " (get mod :output)))))
+                           (await (loadSourceMap (get (pathToFileURL (get mod :output)) :href))))))))))
+      (js-call sourceMaps :filter (lambda (item) (funcall globalThis.Boolean item)))))
+
+  (defasync loadModule (identity requestedVersion projectManifest)
+    (let* ((url (moduleUrl identity))
+           (projectPromise (if (undefined? projectManifest)
+                               (Promise/resolve undefined)
+                             (readProjectManifest projectManifest url)))
+           (discoveredProject (if (and (not (undefined? projectManifest))
+                                       (undefined? requestedVersion))
+                                  (await projectPromise)
+                                undefined))
+           (version (or (if discoveredProject (get discoveredProject :digest) undefined)
+                        requestedVersion
+                        (await (moduleFingerprint url))))
+           (cacheKey (str url "\n" (if (undefined? projectManifest) "" (moduleUrl projectManifest))))
+           (cached (js-call moduleCache :get cacheKey)))
+      (if (and cached (eq (get cached :version) version))
+          (let ((loaded (await (get cached :promise))))
+            (Object/assign (js-object) loaded (js-object :cacheHit t :version version)))
+        (progn
+          (when cached
+            (let ((error (new globalThis.Error
+                           (str "module version changed from " (get cached :version)
+                                " to " version "; restart the worker before loading it"))))
+              (put error :code "module-version-changed")
+              (throw error)))
+          (let ((importUrl (new globalThis.URL url)))
+            (js-call (get importUrl :searchParams) :set "__eliscript_worker_version" version)
+            (let ((entry (js-object
+                           :version version
+                           :promise (funcall
+                                      (async ()
+                                        (let ((project (or discoveredProject (await projectPromise))))
+                                          (when (and project (not (eq version (get project :digest))))
+                                            (let ((error (new globalThis.Error
+                                                           (str "requested module version " version
+                                                                " does not match project manifest " (get project :digest)))))
+                                              (put error :code "module-version-mismatch")
+                                              (throw error)))
+                                          (let ((pair (await (Promise/all
+                                                               (js-array
+                                                                 (dynamic-import (get importUrl :href))
+                                                                 (if project
+                                                                     (loadProjectArtifacts project)
+                                                                   (js-call (loadSourceMap url) :then
+                                                                     (lambda (sm) (if sm (js-array sm) (js-array))))))))))
+                                            (js-object :module (aref pair 0) :sourceMaps (aref pair 1)))))))))
+              (js-call moduleCache :set cacheKey entry)
+              (try
+                (let ((loaded (await (get entry :promise))))
+                  (Object/assign (js-object) loaded (js-object :cacheHit false :version version)))
+                (catch error
+                  (when (eq (js-call moduleCache :get cacheKey) entry)
+                    (js-call moduleCache :delete cacheKey))
+                  (throw error)))))))))
+
+  (defun validateRequest (message)
+    (when (or (not (eq (value-type (get message :id)) "string"))
+              (eq (js-length (get message :id)) 0))
+      (throw (new globalThis.Error "request id must be a non-empty string")))
+    (when (or (not (eq (value-type (get message :module)) "string"))
+              (eq (js-length (get message :module)) 0))
+      (throw (new globalThis.Error "request module must be a non-empty string")))
+    (let ((hasExport (and (eq (value-type (get message :export)) "string")
+                          (> (js-length (get message :export)) 0)))
+          (hasOperation (and (eq (value-type (get message :operation)) "string")
+                             (> (js-length (get message :operation)) 0))))
+      (when (eq hasExport hasOperation)
+        (throw (new globalThis.Error
+                 "request must contain exactly one non-empty export or operation"))))
+    (let ((usesValueChunks (eq (get message :valueFraming) workerValueFraming)))
+      (when (and (not (undefined? (get message :valueFraming))) (not usesValueChunks))
+        (throw (new globalThis.Error (str "request valueFraming must be " workerValueFraming))))
+      (if usesValueChunks
+          (progn
+            (unless (eq (get message :valueEncoding) workerValueEncoding)
+              (throw (new globalThis.Error
+                       (str "chunked requests require valueEncoding " workerValueEncoding))))
+            (unless (undefined? (get message :arguments))
+              (throw (new globalThis.Error
+                       "chunked requests must stream arguments after the request header"))))
+        (unless (Array/isArray (get message :arguments))
+          (throw (new globalThis.Error "request arguments must be an array")))))
+    (when (and (not (undefined? (get message :valueEncoding)))
+               (not (eq (get message :valueEncoding) workerValueEncoding)))
+      (throw (new globalThis.Error (str "request valueEncoding must be " workerValueEncoding))))
+    (when (and (not (undefined? (get message :moduleVersion)))
+               (or (not (eq (value-type (get message :moduleVersion)) "string"))
+                   (eq (js-length (get message :moduleVersion)) 0)
+                   (> (js-length (get message :moduleVersion)) 512)))
+      (throw (new globalThis.Error
+               "request moduleVersion must be a non-empty string up to 512 characters")))
+    (when (and (not (undefined? (get message :projectManifest)))
+               (or (not (eq (value-type (get message :projectManifest)) "string"))
+                   (eq (js-length (get message :projectManifest)) 0)))
+      (throw (new globalThis.Error "request projectManifest must be a non-empty string")))
+    (when (and (not (undefined? (get message :timeoutMs)))
+               (or (not (Number/isInteger (get message :timeoutMs)))
+                   (<= (get message :timeoutMs) 0)
+                   (> (get message :timeoutMs) 2147483647)))
+      (throw (new globalThis.Error "request timeoutMs must be a positive 32-bit integer"))))
+
+  (defun closeEntry (id entry)
+    (when (not (undefined? (get entry :timer)))
+      (globalThis.clearTimeout (get entry :timer)))
+    (when (eq (js-call pending :get id) entry)
+      (js-call pending :delete id)))
+
+  (defun receivingError (entry code message &optional error)
+    (requestError (get (get entry :message) :id) code message error)
+    (closeEntry (get (get entry :message) :id) entry))
+
+  (defun createEntry (message phase)
+    (let ((entry (js-object
+                   :controller (new globalThis.AbortController)
+                   :abortCode "cancelled"
+                   :timer undefined
+                   :phase phase
+                   :message message
+                   :startedAt (js-call globalThis.performance :now)
+                   :progressIndex 0
+                   :progressQueue (Promise/resolve)
+                   :progressError undefined)))
+      (js-call pending :set (get message :id) entry)
+      (when (not (undefined? (get message :timeoutMs)))
+        (put entry :timer
+             (globalThis.setTimeout
+               (lambda ()
+                 (put entry :abortCode "timeout")
+                 (js-call (get entry :controller) :abort)
+                 (when (eq (get entry :phase) "receiving")
+                   (let ((error (new globalThis.Error "request timed out while receiving value chunks")))
+                     (put error :code "timeout")
+                     (receivingError entry "timeout" (get error :message) error))))
+               (get message :timeoutMs))))
+      entry))
+
+  (defun abortPromise (entry)
+    (new globalThis.Promise
+      (lambda (_resolve reject)
+        (js-call (get (get entry :controller) :signal) :addEventListener "abort"
+          (lambda ()
+            (let ((error (new globalThis.Error
+                           (if (eq (get entry :abortCode) "timeout")
+                               "request timed out"
+                             "request cancelled"))))
+              (put error :code (get entry :abortCode))
+              (funcall reject error)))
+          (js-object :once t)))))
+
+  (defasync writeValueStream (options)
+    (let* ((id (get options :id))
+           (channel (get options :channel))
+           (stream (get options :stream))
+           (value (get options :value))
+           (signal (get options :signal))
+           (finalFields (get options :finalFields))
+           (chunks (encodeWorkerValueChunks value (js-object :signal signal)))
+           (iterator (js-call (aref chunks async-iterator-symbol) :call chunks))
+           (sequence 0)
+           (current (await (js-call iterator :next))))
+      (when (funcall globalThis.Boolean (get current :done))
+        (throw (new globalThis.Error "value stream encoder produced no events")))
+      (while (not (funcall globalThis.Boolean (get current :done)))
+        (let* ((next (await (js-call iterator :next)))
+               (final (funcall globalThis.Boolean (get next :done)))
+               (message (js-object
+                          :version protocolVersion
+                          :type "value-chunk"
+                          :id id
+                          :channel channel
+                          :sequence sequence
+                          :final final
+                          :valueEncoding workerValueEncoding
+                          :valueFraming workerValueFraming
+                          :events (get current :value))))
+          (when (not (undefined? stream))
+            (put message :stream stream))
+          (when (and final finalFields)
+            (Object/assign message
+              (funcall finalFields (js-object :sequence sequence :chunkCount (1+ sequence)))))
+          (await (writeMessageAsync message))
+          (setq current next
+                sequence (1+ sequence))))))
+
+  (defun queueProgress (entry value)
+    (let* ((next-index (1+ (get entry :progressIndex)))
+           (stream (funcall globalThis.String next-index)))
+      (put entry :progressIndex next-index)
+      (let ((task (js-call (get entry :progressQueue) :then
+                    (lambda ()
+                      (writeValueStream
+                        (js-object
+                          :id (get (get entry :message) :id)
+                          :channel "progress"
+                          :stream stream
+                          :value value
+                          :signal (get (get entry :controller) :signal)))))))
+        (put entry :progressQueue
+             (js-call task :catch
+               (lambda (error)
+                 (when (undefined? (get entry :progressError))
+                   (put entry :progressError error)))))
+        task)))
+
+  (defasync executeRequest (message entry &rest __opt)
+    (let ((streamedArguments (aref __opt 0))
+          (startedAt (get entry :startedAt))
+          (moduleLoadMs 0)
+          (executionMs 0)
+          (serializationMs 0)
+          (moduleCacheHit false)
+          (moduleVersion undefined)
+          (sourceMaps (js-array))
+          (executionStartedAt undefined))
+      (put entry :phase "executing")
+      (try
+        (let* ((moduleLoadStartedAt (js-call globalThis.performance :now))
+               (loaded (await (loadModule (get message :module)
+                                          (get message :moduleVersion)
+                                          (get message :projectManifest))))
+               (mod (get loaded :module)))
+          (setq sourceMaps (get loaded :sourceMaps)
+                moduleCacheHit (get loaded :cacheHit)
+                moduleVersion (get loaded :version)
+                moduleLoadMs (- (js-call globalThis.performance :now) moduleLoadStartedAt))
+          (let* ((manifest (get mod :__eliscript_portable__))
+                 (operation (if (undefined? (get message :operation))
+                                (aref mod (get message :export))
+                              (if (and manifest (Object/hasOwn manifest (get message :operation)))
+                                  (aref manifest (get message :operation))
+                                undefined))))
+            (unless (eq (value-type operation) "function")
+              (let* ((operationName (or (get message :operation) (get message :export)))
+                     (error (new globalThis.Error
+                              (if (undefined? (get message :operation))
+                                  (str "module does not export a function named " operationName)
+                                (str "module does not declare a portable function named " operationName)))))
+                (put error :code (if (undefined? (get message :operation)) "missing-export" "missing-portable"))
+                (throw error)))
+            (let* ((usesValueCodec (eq (get message :valueEncoding) workerValueEncoding))
+                   (usesValueChunks (eq (get message :valueFraming) workerValueFraming))
+                   (arguments_ (if (not (undefined? streamedArguments))
+                                   streamedArguments
+                                 (if usesValueCodec
+                                     (decodeWorkerValues (get message :arguments))
+                                   (get message :arguments))))
+                   (progress (lambda (value)
+                               (if (get (get (get entry :controller) :signal) :aborted)
+                                   undefined
+                                 (if usesValueChunks
+                                     (queueProgress entry value)
+                                   (let ((response (js-object
+                                                     :version protocolVersion
+                                                     :type "progress"
+                                                     :id (get message :id)
+                                                     :value (if usesValueCodec
+                                                                (encodeWorkerValue value)
+                                                              (jsonValue value "progress value")))))
+                                     (when usesValueCodec
+                                       (put response :valueEncoding workerValueEncoding))
+                                     (writeMessage response))))))
+                   (context (Object/freeze
+                              (js-object
+                                :signal (get (get entry :controller) :signal)
+                                :progress progress
+                                :capabilities (workerCapabilities
+                                                (js-object :signal (get (get entry :controller) :signal)
+                                                           :progress progress)
+                                                (js-array "cancellation" "progress"))))))
+              (setq executionStartedAt (js-call globalThis.performance :now))
+              (let* ((call-args (js-call (Array/from arguments_) :concat (js-array context)))
+                     (operationPromise (Promise/resolve (apply operation call-args)))
+                     (value (await (Promise/race (js-array operationPromise (abortPromise entry))))))
+                (setq executionMs (- (js-call globalThis.performance :now) executionStartedAt))
+                (await (get entry :progressQueue))
+                (when (not (undefined? (get entry :progressError)))
+                  (throw (get entry :progressError)))
+                (let ((serializationStartedAt (js-call globalThis.performance :now)))
+                  (if usesValueChunks
+                      (await (writeValueStream
+                               (js-object
+                                 :id (get message :id)
+                                 :channel "response"
+                                 :value value
+                                 :signal (get (get entry :controller) :signal)
+                                 :finalFields
+                                 (lambda (info)
+                                   (setq serializationMs (- (js-call globalThis.performance :now) serializationStartedAt))
+                                   (js-object
+                                     :timing
+                                     (js-object
+                                       :moduleLoadMs moduleLoadMs
+                                       :moduleCacheHit moduleCacheHit
+                                       :moduleVersion moduleVersion
+                                       :sourceMapLoaded (> (js-length sourceMaps) 0)
+                                       :sourceMapCount (js-length sourceMaps)
+                                       :executionMs executionMs
+                                       :serializationMs serializationMs
+                                       :workerMs (- (js-call globalThis.performance :now) startedAt)
+                                       :valueStream
+                                       (js-object
+                                         :framing workerValueFraming
+                                         :argumentChunks (get entry :sequence)
+                                         :responseChunks (get info :chunkCount)
+                                         :maxChunkBytes (get workerValueStreamLimits :maxChunkBytes)
+                                         :maxEventsPerChunk (get workerValueStreamLimits :maxEventsPerChunk)
+                                         :maxTextPartUnits (get workerValueStreamLimits :maxTextPartUnits))))))))
+                    (let ((serializedValue (if usesValueCodec
+                                               (encodeWorkerValue value)
+                                             (jsonValue value "response value"))))
+                      (setq serializationMs (- (js-call globalThis.performance :now) serializationStartedAt))
+                      (let ((response (js-object
+                                        :version protocolVersion
+                                        :type "response"
+                                        :id (get message :id)
+                                        :ok t
+                                        :value serializedValue
+                                        :timing (js-object
+                                                  :moduleLoadMs moduleLoadMs
+                                                  :moduleCacheHit moduleCacheHit
+                                                  :moduleVersion moduleVersion
+                                                  :sourceMapLoaded (> (js-length sourceMaps) 0)
+                                                  :sourceMapCount (js-length sourceMaps)
+                                                  :executionMs executionMs
+                                                  :serializationMs serializationMs
+                                                  :workerMs (- (js-call globalThis.performance :now) startedAt)))))
+                        (when usesValueCodec
+                          (put response :valueEncoding workerValueEncoding))
+                        (writeMessage response)))))))))
+        (catch error
+          (when (and (not (undefined? executionStartedAt)) (eq executionMs 0))
+            (setq executionMs (- (js-call globalThis.performance :now) executionStartedAt)))
+          (let ((code (if (get (get (get entry :controller) :signal) :aborted)
+                          (get entry :abortCode)
+                        (or (get error :code) "runtime"))))
+            (requestError
+              (get message :id)
+              code
+              (get error :message)
+              error
+              (js-object
+                :moduleLoadMs moduleLoadMs
+                :moduleCacheHit moduleCacheHit
+                :moduleVersion moduleVersion
+                :sourceMapLoaded (> (js-length sourceMaps) 0)
+                :sourceMapCount (js-length sourceMaps)
+                :executionMs executionMs
+                :serializationMs serializationMs
+                :workerMs (- (js-call globalThis.performance :now) startedAt))
+              sourceMaps)))
+        (finally
+          (closeEntry (get message :id) entry)))))
+
+  (defun valueAck (id sequence &rest __opt)
+    (let ((final (aref __opt 0)))
+      (writeMessage
+        (js-object
+          :version protocolVersion
+          :type "value-ack"
+          :id id
+          :channel "arguments"
+          :sequence sequence
+          :final (if (undefined? final) false final)
+          :valueEncoding workerValueEncoding
+          :valueFraming workerValueFraming))))
+
+  (defun startRequest (message)
+    (validateRequest message)
+    (when (js-call pending :has (get message :id))
+      (throw (new globalThis.Error (str "request id is already pending: " (get message :id)))))
+    (if (eq (get message :valueFraming) workerValueFraming)
+        (let ((entry (createEntry message "receiving")))
+          (put entry :decoder
+               (new WorkerValueStreamDecoder
+                 (js-object :signal (get (get entry :controller) :signal))))
+          (put entry :sequence 0)
+          (put entry :framedBytes 0)
+          (valueAck (get message :id) -1))
+      (let ((entry (createEntry message "executing")))
+        (executeRequest message entry))))
+
+  (defun receiveValueChunk (message lineBytes)
+    (if (or (not (eq (value-type (get message :id)) "string"))
+            (eq (js-length (get message :id)) 0))
+        (protocolError "invalid-message" "value chunk id must be a non-empty string")
+      (let ((entry (js-call pending :get (get message :id))))
+        (if (or (not entry) (not (eq (get entry :phase) "receiving")))
+            (protocolError
+              "invalid-message"
+              (str "no request is receiving value chunks for id " (get message :id))
+              (get message :id))
+          (try
+            (when (> lineBytes maximumValueChunkLineBytes)
+              (throw (new globalThis.Error
+                       (str "value chunk exceeds " maximumValueChunkLineBytes " framed bytes"))))
+            (unless (eq (get message :channel) "arguments")
+              (throw (new globalThis.Error "incoming value chunk channel must be arguments")))
+            (unless (and (eq (get message :valueEncoding) workerValueEncoding)
+                         (eq (get message :valueFraming) workerValueFraming))
+              (throw (new globalThis.Error "incoming value chunk encoding or framing mismatch")))
+            (unless (and (Number/isSafeInteger (get message :sequence))
+                         (>= (get message :sequence) 0)
+                         (eq (get message :sequence) (get entry :sequence)))
+              (throw (new globalThis.Error
+                       (str "value chunk sequence " (funcall globalThis.String (get message :sequence))
+                            " does not match " (get entry :sequence)))))
+            (unless (eq (value-type (get message :final)) "boolean")
+              (throw (new globalThis.Error "value chunk final must be a boolean")))
+            (unless (Array/isArray (get message :events))
+              (throw (new globalThis.Error "value chunk events must be an array")))
+            (put entry :framedBytes (+ (get entry :framedBytes) lineBytes))
+            (when (> (get entry :framedBytes) maximumValueStreamBytes)
+              (throw (new globalThis.Error
+                       (str "value stream exceeds " maximumValueStreamBytes " framed bytes"))))
+            (js-call (get entry :decoder) :write (get message :events))
+            (let ((sequence (get entry :sequence)))
+              (put entry :sequence (1+ sequence))
+              (if (not (get message :final))
+                  (valueAck (get message :id) sequence)
+                (let ((arguments_ (js-call (get entry :decoder) :finish)))
+                  (unless (Array/isArray arguments_)
+                    (throw (new globalThis.Error "chunked request root must decode to an argument array")))
+                  (put entry :decoder undefined)
+                  (put entry :phase "executing")
+                  (valueAck (get message :id) sequence t)
+                  (executeRequest (get entry :message) entry arguments_))))
+            (catch error
+              (js-call (get entry :controller) :abort)
+              (receivingError entry
+                (or (get error :code) "invalid-value-chunk")
+                (get error :message)
+                error)))))))
+
+  (defun cancelRequest (message)
+    (if (or (not (eq (value-type (get message :id)) "string"))
+            (eq (js-length (get message :id)) 0))
+        (protocolError "invalid-message" "cancel id must be a non-empty string")
+      (let* ((entry (js-call pending :get (get message :id)))
+             (accepted (funcall globalThis.Boolean entry)))
+        (when entry
+          (put entry :abortCode "cancelled")
+          (js-call (get entry :controller) :abort))
+        (writeMessage
+          (js-object
+            :version protocolVersion
+            :type "cancel"
+            :id (get message :id)
+            :accepted accepted))
+        (when (and entry (eq (get entry :phase) "receiving"))
+          (let ((error (new globalThis.Error "request cancelled while receiving value chunks")))
+            (put error :code "cancelled")
+            (receivingError entry "cancelled" (get error :message) error))))))
+
+  (defun shutdown (lines)
+    (put worker-state :shuttingDown t)
+    (js-call (Array/from (js-call pending :values)) :forEach
+      (lambda (entry)
+        (put entry :abortCode "shutdown")
+        (js-call (get entry :controller) :abort)))
+    (writeMessage
+      (js-object
+        :version protocolVersion
+        :type "shutdown"
+        :ok t))
+    (js-call lines :close)
+    (globalThis.setTimeout (lambda () (js-call globalThis.process :exit 0)) 0))
+
+  (defun handleMessage (message lines lineBytes)
+    (if (or (nullish? message)
+            (not (eq (value-type message) "object"))
+            (Array/isArray message))
+        (protocolError "invalid-message" "protocol message must be an object")
+      (if (not (eq (get message :version) protocolVersion))
+          (protocolError
+            "version-mismatch"
+            (str "worker protocol version " protocolVersion " required")
+            (get message :id))
+        (let ((type (get message :type)))
+          (cond
+            ((eq type "request")
+             (try
+               (startRequest message)
+               (catch error
+                 (requestError (get message :id) "invalid-request" (get error :message) error))))
+            ((eq type "value-chunk")
+             (receiveValueChunk message lineBytes))
+            ((eq type "cancel")
+             (cancelRequest message))
+            ((eq type "shutdown")
+             (shutdown lines))
+            (t
+             (protocolError
+               "invalid-message"
+               (str "unknown protocol message type: " type)
+               (get message :id))))))))
+
+  (defasync runWorker ()
+    (let ((lines (createInterface
+                   (js-object :input (get globalThis.process :stdin)
+                              :crlfDelay globalThis.Infinity))))
+      (writeMessage
+        (js-object
+          :version protocolVersion
+          :type "ready"
+          :capabilities capabilities
+          :pid (get globalThis.process :pid)))
+      (js-call lines :on "close"
+        (lambda ()
+          (unless (get worker-state :shuttingDown)
+            (js-call (Array/from (js-call pending :values)) :forEach
+              (lambda (entry)
+                (put entry :abortCode "shutdown")
+                (js-call (get entry :controller) :abort))))))
+      (let ((iterator (js-call (aref lines async-iterator-symbol) :call lines))
+            (done false))
+        (while (not done)
+          (let ((step (await (js-call iterator :next))))
+            (if (funcall globalThis.Boolean (get step :done))
+                (setq done t)
+              (let* ((line (get step :value))
+                     (lineBytes (js-call globalThis.Buffer :byteLength line "utf8")))
+                (if (> lineBytes maximumLineBytes)
+                    (protocolError "line-too-large" "protocol line exceeds 16 MiB")
+                  (when (> (js-length (js-call line :trim)) 0)
+                    (try
+                      (handleMessage (JSON/parse line) lines lineBytes)
+                      (catch error
+                        (protocolError "invalid-json" (str "invalid JSON: " (get error :message))))))))))))))
+
+  (when (js* "import.meta.main")
+    (js-call (runWorker) :catch
+      (lambda (error)
+        (js-call globalThis.console :error (or (get error :stack) (get error :message)))
+        (put globalThis.process :exitCode 1))))
+
+  (export protocolVersion capabilities loadSourceMap runWorker))

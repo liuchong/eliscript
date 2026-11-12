@@ -8,11 +8,11 @@
   (import "./wasm-static-snapshot.mjs" adaptStaticSnapshotCompiler)
   (defconst plans (js-array
     (js-object :suite "tests/wasm-memory-static-data.test.mjs" :entry "tests/wasm-memory-static-data-test-ground.mjs" :cases 19
-      :archive "tests/wasm-memory-static-data-test-ground.mjs" :sha256 "060bb7f392c7d1978815f66b34fe1de601fa5d64d4d410e1d363e3bc424e41bc")
+      :archive "tests/wasm-memory-static-data-test-ground.mjs" :sha256 "ad8c6c48bf1a732d3b2a86b0cc4e31d27900939486516b8e176a489597a81332")
     (js-object :suite "tests/compiler-portable-guards.test.mjs" :entry "tests/compiler-portable-guards.test.mjs" :cases 5
-      :archive "tests/compiler-portable-guards-test-ground.mjs" :sha256 "b0b9cd417a7427edd5be0aa5cbc190a19ed617d09a751f944a06a775e2438915")
+      :archive "tests/compiler-portable-guards-test-ground.mjs" :sha256 "11588f03a29593318908caa21953bc56178774c3b5c052a8079308d8a0e3d7a6")
     (js-object :suite "tests/wasm-managed-number-text.test.mjs" :entry "tests/wasm-managed-number-text.test.mjs" :cases 9
-      :archive "tests/wasm-managed-number-text-test-ground.mjs" :sha256 "efb82a6a9f2457924f661ceaf8780412e4d2c80a983a535b7c066817a9f9e913")))
+      :archive "tests/wasm-managed-number-text-test-ground.mjs" :sha256 "f3788d1cda58227d8e28a968ad3678de884ca546883afa7c97439044ecd9cf9d")))
   (defconst selected (js-call plans :filter (lambda (plan)
     (js-call (get globalThis.process :argv) :some (lambda (argument) (= (resolve (get build :root) argument) (resolve (get build :root) (get plan :entry))))))))
   (js-call assert :strictEqual (js-length selected) 1)

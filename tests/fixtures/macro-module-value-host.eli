@@ -1,0 +1,6 @@
+(module tests.fixtures.macro-module-value-host
+  (import "node:process" :default process)
+  (defasync main ()
+    (let ((module (await (funcall (js* "(url) => import(url)") (aref (get process :argv) 2)))))
+      (console/log (get module :value))))
+  (main))

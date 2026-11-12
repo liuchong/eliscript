@@ -3,12 +3,23 @@
   (import "node:path" resolve)
   (import "node:url" pathToFileURL)
   (defun arrayTextMeasuredSource (root source)
-    (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex")
-               "06bf5e24ab43d0d9b65f242dd0ba47524d30f39b327a95ac9a0ced3d73675a4c")
-      (throw (new globalThis.TypeError "original measured array text source identity changed")))
-    ;; The original suite makes a data URL from this source. Preserve its
-    ;; complete algorithm and measurement edits, supplying only the real
-    ;; dependency coordinate that a data URL cannot resolve relatively.
-    (js-call source :replace "'./number-radix.mjs'"
-      (JSON/stringify (get (pathToFileURL (resolve root "runtime/number-radix.mjs")) :href))))
+    (let ((identity (js-call (js-call (createHash "sha256") :update source) :digest "hex")))
+      ;; Both official current producers emit the same body: the Seed writer
+      ;; appends its exact source-map coordinate; certified stage3 retains the
+      ;; body without that trailer. Neither arbitrary edits nor added LF pass.
+      (unless (or (= identity "a58208b41a90f560b331b4145601598f2c1dfe2dfd543969defa115eb4e94032")
+                  (= identity "404df45f44b0f1956fb5de140c86d335a606cbdca555b2877f553ff87fcdaa5a"))
+        (throw (new globalThis.TypeError "original measured array text source identity changed"))))
+    ;; A data URL has no package/relative base. Preserve every algorithm byte;
+    ;; rewrite only the two authenticated imports to actual runtime file URLs.
+    (let ((output source))
+      (js-call (js-array (js-array "./number-radix.mjs" "runtime/number-radix.mjs")
+                        (js-array "eliscript/runtime/errors.mjs" "runtime/errors.mjs"))
+        :forEach (lambda (entry)
+          (let ((literal (JSON/stringify (aref entry 0))))
+            (unless (= (js-length (js-call output :split literal)) 2)
+              (throw (new globalThis.TypeError "original measured array text dependency is absent or ambiguous")))
+            (setq output (js-call output :replace literal
+              (JSON/stringify (get (pathToFileURL (resolve root (aref entry 1))) :href)))))))
+      output))
   (export arrayTextMeasuredSource))

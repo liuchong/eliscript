@@ -1,0 +1,71 @@
+(module tests.helpers.wasm-managed-js-cons-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:vm" :default vm)
+
+  (defun dynamic-import (specifier)
+    (funcall (js* "(specifier) => import(specifier)") specifier))
+
+  (defun read (a value)
+    (cond
+      ((and value (= (get value :kind) 4)) (js-call a :readNumber value))
+      ((and value (= (get value :kind) 5)) (js-call a :readString value))
+      ((and value (= (get value :kind) 14))
+       (let ((out (js-array))
+             (i 0))
+         (while (< i (js-call a :length value))
+           (let ((child (js-call a :get value i)))
+             (try (js-call out :push (read a child)) (finally (js-call a :release child))))
+           (setq i (1+ i)))
+         out))
+      (t value)))
+
+  (defun finish (a &rest __host_default_arguments_1)
+    (let* ((values-arg (aref __host_default_arguments_1 0)))
+    (let ((values (if (undefined? values-arg) (js-array) values-arg)))
+      (js-call values :forEach (lambda (v) (js-call a :release v)))
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
+
+  (defun box (a value)
+    (cond
+      ((= (value-type value) "number") (js-call a :number value))
+      ((= (value-type value) "string") (js-call a :string value))
+      ((Array/isArray value)
+       (let ((children (js-call value :map (lambda (v) (box a v)))))
+         (try
+           (js-call a :sourceArray children)
+           (finally (js-call children :forEach (lambda (v) (js-call a :release v)))))))
+      (t value)))
+
+  (defasync main ()
+    (let ((mode (aref (get globalThis.process :argv) 2)))
+      (if (= mode "vm")
+        (let ((ctx (js-call vm :createContext)))
+          (js-call vm :runInContext
+            "(function(){const cons=(head,tail)=>[head,...(tail??[])],tail=[false];tail.length=2;Array.prototype[1]=9;Object.freeze(Array.prototype);const result=cons(true,tail);globalThis.out=JSON.stringify([result,Object.keys(result),Object.hasOwn(result,\"1\")]);})()"
+            ctx)
+          (js-call globalThis.console :log (get ctx :out)))
+        (let* ((rt-mod (await (dynamic-import (aref (get globalThis.process :argv) 3))))
+               (instantiateManagedRuntime (get rt-mod :instantiateManagedRuntime))
+               (a (funcall instantiateManagedRuntime (readFileSync (aref (get globalThis.process :argv) 4)))))
+          (js-call a :auto 1)
+          (js-call
+            (js-array nil undefined "中😀\ud800" (js-array) (js-array 0 -0.0 globalThis.NaN undefined) false 1)
+            :forEach
+            (lambda (tail)
+              (let ((input (box a tail)))
+                (if (or (= tail false) (= tail 1))
+                  (let ((out (js-call a :invoke "safe" (js-array t input))))
+                    (js-call assert :equal (js-call a :readString out) "TypeError")
+                    (js-call a :release out))
+                  (let ((out (js-call a :invoke "prepend" (js-array t input)))
+                        (expected (js-call (js-array t) :concat (Array/from (if (nullish? tail) (js-array) tail)))))
+                    (js-call assert :deepEqual (read a out) expected)
+                    (js-call a :release out)))
+                (js-call a :release input))))
+          (finish a)))))
+
+  (main))

@@ -1,2 +1,595 @@
-(module capsules.tests.wasm-memory-runtime.test
-  (js* "import {beforeAll,afterAll,test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';\nimport {tmpdir} from 'node:os';\nimport {resolve} from 'node:path';\nimport {buildBackends} from '../tools/backends/build.mjs';\nlet directory,backend;\nconst runtimeModules=new Map();let runtimeSource;\nbeforeAll(async()=>{ directory=await mkdtemp(resolve(tmpdir(),'eliscript-memory-')); backend=await buildBackends({outputRoot:directory}); },120000);\nafterAll(async()=>{runtimeModules.clear();runtimeSource=undefined;if(directory) await rm(directory,{recursive:true,force:true}); });\nfunction compile(source,options={}) {\n const ir=backend.compiler.compile_ir_string(source,'memory-test.eli');\n const bytes=Uint8Array.from(backend.wasm.emit_memory_wasm(ir,options));\n assert(WebAssembly.validate(bytes));\n const module=new WebAssembly.Module(bytes);\n assert.deepEqual(WebAssembly.Module.imports(module),[]);\n return {bytes,module,exports:new WebAssembly.Instance(module).exports};\n}\ntest('memory32 emits owned memory, full u32 literals and unsigned comparisons',()=>{\n const {exports:e}=compile('(defun high () 4294967295) (defun less (a b) (if (< a b) 1 0)) (defun truth (x) (if x 7 8)) (export high less truth)');\n assert(e.memory instanceof WebAssembly.Memory);\n assert.equal(e.high()>>>0,0xffffffff); assert.equal(e.less(0xffffffff,1),0);\n assert.equal(e.less(1,0xffffffff),1); assert.equal(e.truth(0),7);\n});\ntest('memory32 preserves stores, traps, growth and operand order without host imports',()=>{\n const {exports:e}=compile(`(import \"eliscript:memory32\" load-u8 store-u8 memory-size memory-grow word-div)\n (defun set (p x) (store-u8 p x) (load-u8 p))\n (defun effects (p) (store-u8 (progn (store-u8 p 9) p) (load-u8 p)) (load-u8 p))\n (defun trap (p) (load-u8 p) 1)\n (defun divide (x) (word-div 1 x) 1)\n (defun grow (n) (memory-grow n)) (defun size () (memory-size))\n (export set effects trap divide grow size)`,{initialPages:1,maximumPages:2});\n assert.equal(e.set(8,255),255); assert.equal(e.effects(8),9);\n assert.throws(()=>e.trap(65536),WebAssembly.RuntimeError);\n assert.throws(()=>e.divide(0),WebAssembly.RuntimeError);\n const old=e.memory.buffer; assert.equal(e.grow(1),1); assert.equal(old.byteLength,0);\n assert.equal(e.size(),2); assert.equal(e.grow(1)>>>0,0xffffffff); assert.equal(e.set(65536,42),42);\n});\ntest('memory32 checks every access width before host faults and preserves nested store and growth effects',()=>{\n const {exports:e}=compile(`(import \"eliscript:memory32\" load-u8 load-u16 load-u32 load-f64 store-u8 store-u16 store-u32 store-f64 memory-grow)\n (defun read8 (p) (load-u8 p)) (defun read16 (p) (load-u16 p)) (defun read32 (p) (load-u32 p))\n (defun read64 (p) (load-f64 p) 1)\n (defun write8 (p) (store-u8 p (progn (store-u8 16 7) 42)))\n (defun write16 (p) (store-u16 p (progn (store-u8 16 7) 42)))\n (defun write32 (p) (store-u32 p (progn (store-u8 16 7) 42)))\n (defun write64 (p) (store-f64 p (progn (store-u8 16 7) (load-f64 24))))\n (defun after-growth (p) (store-u32 p (progn (memory-grow 1) 123)))\n (export read8 read16 read32 read64 write8 write16 write32 write64 after-growth)`,{initialPages:1,maximumPages:2});\n for(const [width,read,write] of [[1,e.read8,e.write8],[2,e.read16,e.write16],[4,e.read32,e.write32],[8,e.read64,e.write64]]) {\n  const last=65536-width;assert.equal(write(last),0);assert.equal(read(last),width===8?1:42);\n  for(const address of [last+1,65536,0xfffffff8,0xfffffffc,0xffffffff]) {\n   assert.throws(()=>read(address),WebAssembly.RuntimeError);assert.throws(()=>write(address),WebAssembly.RuntimeError);\n   assert.equal(e.read8(16),7); // RHS effects survive the subsequent bounds trap.\n  }\n }\n assert.equal(e['after-growth'](65536),0);assert.equal(e.read32(65536),123);\n});\ntest('memory32 word xor preserves every bit and left-to-right operand effects',()=>{\n const {exports:e}=compile(`(import \"eliscript:memory32\" word-xor)\n (defun bits (a b) (word-xor a b))\n (defun effects (x) (let ((out (word-xor (setq x (1+ x)) (setq x (* x 2))))) (+ (* x 100) out)))\n (export bits effects)`);\n for(const a of [0,1,0x7fffffff,0x80000000,0xffffffff,0x55555555,0xaaaaaaaa])\n  for(const b of [0,1,0x7fffffff,0x80000000,0xffffffff,0x55555555,0xaaaaaaaa])assert.equal(e.bits(a,b)>>>0,(a^b)>>>0);\n let state=0x815daf1;const next=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return state>>>0;};\n for(let i=0;i<4096;i++){const a=next(),b=next();assert.equal(e.bits(a,b)>>>0,(a^b)>>>0);}\n for(const x of [0,1,15,65535,0x7fffffff,0xffffffff]) {\n  const first=(x+1)>>>0,second=(first*2)>>>0;assert.equal(e.effects(x)>>>0,(second*100+(first^second))>>>0);\n }\n assert.throws(()=>compile(`(import \"eliscript:memory32\" word-xor load-f64) (defun bad (p) (word-xor (load-f64 p) 1))`),\n  error=>error.eliscriptDiagnostic?.code==='ELI-B0001'&&error.eliscriptDiagnostic.phase==='memory-backend');\n});\n\nasync function runtime(options={}) {\n runtimeSource??=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8');\n const key=JSON.stringify(Object.fromEntries(Object.entries(options).sort(([a],[b])=>a<b?-1:a>b?1:0)));\n let artifact=runtimeModules.get(key);\n if(!artifact){\n  const {bytes,module}=compile(runtimeSource,options);artifact={bytes,module};runtimeModules.set(key,artifact);\n }\n // Only immutable code is shared. Every call receives its original fresh\n // memory, runtime allocator, handles and error state through a new instance.\n const {bytes,module}=artifact,e=new WebAssembly.Instance(module).exports;\n const r=Object.fromEntries(Object.entries(e).map(([key,value])=>[key.replaceAll('-','_'),typeof value==='function' ? (...args)=>value(...args)>>>0 : value]));\n return {r,bytes};\n}\ntest('runtime buffers grow in WASM, keep handles stable and reject stale lifetime',async()=>{\n const {r}=await runtime({maximumPages:8});\n const p=r.buffer_new(0); assert(p>0);\n for(let i=0;i<70000;i++) assert.equal(r.buffer_push(p,i&255),1);\n assert.equal(r.buffer_length(p),70000);\n for(let i=0;i<70000;i++) assert.equal(r.buffer_get(p,i),i&255);\n assert.equal(r.buffer_get(p,70000),0); assert.equal(r.last_error(),3);\n const oldLength=r.buffer_length(p); assert.equal(r.buffer_reserve(p,0xffffffff),0);\n assert.equal(r.last_error(),2); assert.equal(r.buffer_length(p),oldLength);\n assert.equal(r.retire(),1); assert.equal(r.buffer_length(p),0); assert.equal(r.last_error(),1);\n const next=r.buffer_new(0); assert(next>p); assert.equal(r.buffer_length(p),0); assert.equal(r.last_error(),1);\n});\ntest('runtime records preserve word slots, isolation and checked boundaries',async()=>{\n const {r}=await runtime(); const q=r.record_new(3); assert(q>0);\n assert.equal(r.record_get(q,0),0); assert.equal(r.record_set(q,2,0xffffffff),1);\n assert.equal(r.record_get(q,2),0xffffffff); assert.equal(r.record_set(q,3,1),0); assert.equal(r.last_error(),3);\n assert.equal(r.record_get(q,2),0xffffffff);\n assert.equal(r.buffer_get(q,0),0); assert.equal(r.last_error(),1);\n const other=(await runtime()).r; assert.equal(other.record_get(q,2),0); assert.equal(other.last_error(),1);\n});\nfunction putString(r,text) {\n const p=r.string_new(text.length); assert(p>0);\n for(let i=0;i<text.length;i++) assert.equal(r.string_set(p,i,text.charCodeAt(i)),1);\n assert.equal(r.string_seal(p),p); return p;\n}\nfunction getString(r,p) {\n assert(p>0); let result=''; const n=r.string_length(p);\n for(let i=0;i<n;i++) result+=String.fromCharCode(r.string_get(p,i));\n return result;\n}\nfunction putBytes(r,bytes) {const p=r.buffer_new(bytes.length); assert(p>0); for(const b of bytes) assert.equal(r.buffer_push(p,b),1); return p;}\nfunction getBytes(r,p) {assert(p>0); return Uint8Array.from({length:r.buffer_length(p)},(_,i)=>r.buffer_get(p,i));}\ntest('runtime UTF16 builders seal, encode surrogates, reject invalid strict input',async()=>{\n const {r}=await runtime();\n for(const text of ['', 'ASCII\\0', '中文😀', '\\ud800x\\udc00','\\ufeffhi','\\udbff\\udfff','\\ud800\\ud800\\udc00']) {\n  const p=putString(r,text); assert.equal(getString(r,p),text);\n  assert.deepEqual(getBytes(r,r.utf8_encode(p,0)),new TextEncoder().encode(text));\n  const valid=!/\\p{Surrogate}/u.test(text);\n  const strict=r.utf8_encode(p,1); if(valid) assert.deepEqual(getBytes(r,strict),new TextEncoder().encode(text));\n  else {assert.equal(strict,0); assert.equal(r.last_error(),5);}\n  assert.equal(r.string_set(p,0,1),0); assert.equal(r.last_error(),6);\n }\n const p=r.string_new(1); assert.equal(r.utf8_encode(p,0),0); assert.equal(r.last_error(),6);\n assert.equal(r.string_set(p,1,32),0); assert.equal(r.last_error(),3);\n assert.equal(r.string_set(p,0,65536),0); assert.equal(r.last_error(),3);\n});\ntest('runtime UTF8 decoding matches maximal-subpart replacement, strict errors and BOM',async()=>{\n const {r}=await runtime();\n const vectors=[[],[0],[0xff],[0x80],[0xc0,0xaf],[0xe0,0x80,0x80],[0xed,0xa0,0x80],\n [0xf4,0x90,0x80,0x80],[0xf0,0x9f],[0xe2,0x82,0x22],[0xe2,0x28,0xa1],\n [0xef,0xbb,0xbf,65],[0xef,0xbb,0xbf,0xef,0xbb,0xbf],[0xf4,0x8f,0xbf,0xbf]];\n for(const bytes of vectors) for(const bom of [0,1]) {\n  const p=putBytes(r,bytes); const input=Uint8Array.from(bytes);\n  assert.equal(getString(r,r.utf8_decode(p,0,bom)),new TextDecoder('utf-8',{ignoreBOM:!!bom}).decode(input));\n  let expected; try {expected=new TextDecoder('utf-8',{fatal:true,ignoreBOM:!!bom}).decode(input);} catch {}\n  const strict=r.utf8_decode(p,1,bom);\n  if(expected===undefined) {assert.equal(strict,0); assert.equal(r.last_error(),4);} else assert.equal(getString(r,strict),expected);\n }\n});\ntest('runtime rejects aligned byte data masquerading as an object header',async()=>{\n const {r}=await runtime(); const p=r.buffer_new(32);\n const data=new DataView(r.memory.buffer).getUint32(p+16,true);\n const forged=new Uint8Array(32); const v=new DataView(forged.buffer);\n v.setUint32(0,3,true); v.setUint32(4,1,true); v.setUint32(8,1,true); v.setUint32(12,1,true); v.setUint32(16,data,true);\n for(const b of forged) r.buffer_push(p,b);\n assert.equal(r.record_get(data,0),0); assert.equal(r.last_error(),1);\n});\ntest('memory32 refuses unsupported literals, imports, shadowing and dead branches before emission',()=>{\n const cases=[\n  '(defun f () -0.0) (export f)', '(defun f () 1.5) (export f)', '(defun f () -1) (export f)',\n  '(defun f () 4294967296) (export f)', '(defun f (x) (if false \"dead\" x)) (export f)',\n  '(defun f (x) (/ x 2)) (export f)', '(defun f (x) (if x t 1)) (export f)',\n  '(import \"host\" load-u8) (defun f (x) (load-u8 x)) (export f)',\n  '(import \"eliscript:memory32\" unknown) (defun f (x) x) (export f)',\n  '(import \"eliscript:memory32\" :as host) (defun f (x) x) (export f)',\n  '(import \"eliscript:memory32\" load-u8 load-u8) (defun f (x) x) (export f)',\n  '(import \"eliscript:memory32\" load-u8) (defun load-u8 (x) x) (export load-u8)',\n  '(import \"eliscript:memory32\" load-u8) (defun f (load-u8) (load-u8 0)) (export f)',\n  '(import \"eliscript:memory32\" store-u8) (defun f (x) (store-u8 x)) (export f)',\n  '(defun memory () 0) (export memory)'\n ];\n for(const source of cases) assert.throws(()=>compile(source),e=>{\n  assert(e.eliscriptDiagnostic); assert.equal(e.eliscriptDiagnostic.code,source.includes('load-u8 load-u8') || source.includes('(defun load-u8 ') ? 'ELI-A0001' : 'ELI-B0001',source);\n  assert.equal(e.eliscriptDiagnostic.location.file,'memory-test.eli'); return true;\n });\n for(const options of [{initialPages:0},{maximumPages:0},{initialPages:3,maximumPages:2},{maximumPages:65536},{initialPages:1.5}])\n  assert.throws(()=>compile('(defun f () 0) (export f)',options),e=>!!e.eliscriptDiagnostic);\n});\ntest('memory32 word arithmetic wraps exactly and preserves Lisp short-circuit effects',()=>{\n const {exports:e}=compile(`(import \"eliscript:memory32\" load-u32 store-u32 word-div word-shr word-shl word-and word-or)\n (defun add (x y) (+ x y)) (defun mul (x y) (* x y))\n (defun sub (x y) (- x y)) (defun neg (x) (- x))\n (defun inc (x) (1+ x)) (defun dec (x) (1- x))\n (defun bits (x n) (word-or (word-shr x n) (word-shl x n)))\n (defun div (x y) (word-div x y))\n (defun effects () (store-u32 0 0) (or (store-u32 0 1) (store-u32 0 2)) (load-u32 0))\n (defun and-effects () (and (store-u32 0 1) (store-u32 0 2)) (load-u32 0))\n (export add mul sub neg inc dec bits div effects and-effects)`);\n for(const x of [0,1,0x7fffffff,0x80000000,0xffffffff]) for(const y of [0,1,0x7fffffff,0xffffffff]) {\n  assert.equal(e.add(x,y)>>>0,(x+y)>>>0); assert.equal(e.mul(x,y)>>>0,Math.imul(x,y)>>>0);\n  assert.equal(e.sub(x,y)>>>0,(x-y)>>>0); if(y) assert.equal(e.div(x,y)>>>0,Math.floor(x/y));\n }\n for(const x of [0,1,0x80000000,0xffffffff]) for(const n of [0,1,31,32,33,0xffffffff])\n  assert.equal(e.bits(x,n)>>>0,((x>>>n)|(x<<n))>>>0);\n for(const x of [0,1,0x80000000,0xffffffff]) {\n  assert.equal(e.neg(x)>>>0,(-x)>>>0); assert.equal(e.inc(x)>>>0,(x+1)>>>0); assert.equal(e.dec(x)>>>0,(x-1)>>>0);\n }\n assert.equal(e.effects(),1); assert.equal(e['and-effects'](),2);\n});\ntest('runtime codec deterministic random differential covers arbitrary bytes and UTF16 units',async()=>{\n const {r}=await runtime(); let state=0x73219cab;\n const next=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return state>>>0;};\n for(let round=0;round<512;round++) {\n  const bytes=Uint8Array.from({length:next()%96},()=>next()&255); const p=putBytes(r,bytes);\n  for(const bom of [0,1]) assert.equal(getString(r,r.utf8_decode(p,0,bom)),new TextDecoder('utf-8',{ignoreBOM:!!bom}).decode(bytes));\n  const text=String.fromCharCode(...Array.from({length:next()%64},()=>next()&65535));\n  assert.deepEqual(getBytes(r,r.utf8_encode(putString(r,text),0)),new TextEncoder().encode(text));\n  assert.equal(r.retire(),1);\n }\n});\ntest('bulk memory bridge brands handles, rejects coercions and reports checked runtime errors',async()=>{\n const {instantiateMemoryRuntime}=await import('../tools/backends/memory-runtime.mjs');\n const {bytes}=await runtime(); const a=instantiateMemoryRuntime(bytes),b=instantiateMemoryRuntime(bytes);\n const text=a.string('😀\\ud800'),encoded=a.encode(text);\n assert.deepEqual(a.bytes(encoded),new TextEncoder().encode('😀\\ud800'));\n assert.equal(a.text(a.decode(encoded)),'😀�');\n const record=a.record([0,0xffffffff,42]); assert.deepEqual(a.words(record),Uint32Array.of(0,0xffffffff,42));\n assert.throws(()=>b.bytes(encoded),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');\n assert.throws(()=>a.encode(a.buffer([1])),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');\n for(const value of [-1,1.5,NaN,Infinity,0x100000000]) assert.throws(()=>a.reserve(encoded,value),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');\n assert.throws(()=>a.encode(text,{strict:true}),e=>e.eliscriptDiagnostic?.code==='ELI-RT0005');\n a.retire(); assert.throws(()=>a.bytes(encoded),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');\n const fresh=a.buffer([1,2]); a.push(fresh,3); assert.deepEqual(a.bytes(fresh),Uint8Array.of(1,2,3));\n});\ntest('runtime allocation failure rolls back unpublished storage and preserves existing buffers',async()=>{\n const {r}=await runtime({maximumPages:1});\n assert.equal(r.buffer_new(65256),0); assert.equal(r.last_error(),2);\n const p=r.buffer_new(8); assert(p>0);\n for(let i=0;i<8;i++) assert.equal(r.buffer_push(p,i),1);\n assert.equal(r.buffer_reserve(p,65536),0); assert.equal(r.last_error(),2);\n assert.deepEqual(getBytes(r,p),Uint8Array.of(0,1,2,3,4,5,6,7));\n for(const call of [()=>r.record_new(0xffffffff),()=>r.string_new(0xffffffff)]) {\n  assert.equal(call(),0); assert.equal(r.last_error(),2);\n }\n const v=new DataView(r.memory.buffer); v.setUint32(4,0xffffffff,true);\n assert.equal(r.retire(),0); assert.equal(r.last_error(),7); assert.equal(v.getUint32(4,true),0xffffffff);\n});\ntest('memory32 refuses value-position when and unless rather than changing their truth',()=>{\n for(const source of ['(defun f () (if (when t 0) 1 2)) (export f)',\n '(defun f () (if (unless false 0) 1 2)) (export f)',\n '(defun f () (let ((x (when t 0))) 1)) (export f)'])\n  assert.throws(()=>compile(source),e=>e.eliscriptDiagnostic?.code==='ELI-B0001');\n});\ntest('Node executes the same standalone memory bytes and bulk bridge against independent codecs',async()=>{\n const {spawnSync}=await import('node:child_process');\n const {pathToFileURL}=await import('node:url');\n const {createHash}=await import('node:crypto');\n const {bytes}=await runtime();\n const artifact=resolve(directory,'node-memory-runtime.wasm');await writeFile(artifact,bytes);\n const script=`import assert from 'node:assert/strict';\n import {readFileSync} from 'node:fs';\n import {createHash} from 'node:crypto';\n const {instantiateMemoryRuntime}=await import(process.argv[1]);\n const bytes=readFileSync(process.argv[2]);\n assert.equal(createHash('sha256').update(bytes).digest('hex'),process.argv[3]);\n const a=instantiateMemoryRuntime(bytes);\n let state=0x1765abcd; const next=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return state>>>0;};\n for(let round=0;round<512;round++) {\n  const text=String.fromCharCode(...Array.from({length:next()%64},()=>next()&65535));\n  assert.deepEqual(a.bytes(a.encode(a.string(text))),new TextEncoder().encode(text));\n  const input=Uint8Array.from({length:next()%96},()=>next()&255),p=a.buffer(input);\n  for(const preserveBOM of [false,true]) {\n   assert.equal(a.text(a.decode(p,{preserveBOM})),new TextDecoder('utf-8',{ignoreBOM:preserveBOM}).decode(input));\n   let expected; try {expected=new TextDecoder('utf-8',{fatal:true,ignoreBOM:preserveBOM}).decode(input);} catch {}\n   if(expected===undefined) assert.throws(()=>a.decode(p,{strict:true,preserveBOM}),e=>e.eliscriptDiagnostic?.code==='ELI-RT0004');\n   else assert.equal(a.text(a.decode(p,{strict:true,preserveBOM})),expected);\n  }\n  a.retire();\n }`;\n const arguments_=['--input-type=module','-e',script,\n pathToFileURL(resolve('tools/backends/memory-runtime.mjs')).href,artifact,createHash('sha256').update(bytes).digest('hex')];\n assert(arguments_.every(value=>Buffer.byteLength(value)<128*1024),'runtime artifact must not exceed a portable subprocess argument boundary');\n const child=spawnSync(process.env.NODE??'node',arguments_,{encoding:'utf8',timeout:30000});\n assert.equal(child.status,0,child.error?.message??child.stderr);\n});\n\ntest('memory32 handles recursion and multi-byte function and local indices',()=>{\n const definitions=Array.from({length:140},(_,i)=>`(defun f${i} (x) (+ x ${i}))`).join('\\n');\n const bindings=Array.from({length:140},(_,i)=>`(v${i} ${i})`).join(' ');\n const {exports:e}=compile(`${definitions}\n (defun locals (x) (let (${bindings}) (+ x v139)))\n (defun rec (n) (if (= n 0) 1 (* n (rec (1- n))))) (export f139 locals rec)`);\n assert.equal(e.f139(0xffffffff)>>>0,138); assert.equal(e.locals(0xffffffff)>>>0,138);\n let expected=1; for(let n=0;n<20;n++){if(n) expected=Math.imul(expected,n)>>>0; assert.equal(e.rec(n)>>>0,expected);}\n});\n"))
+(module tests.wasm-memory-runtime.test
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp rm readFile writeFile)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "node:child_process" spawnSync)
+  (import "node:url" pathToFileURL)
+  (import "node:crypto" createHash)
+  (import "node:process" :default process)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/memory-runtime.mjs" instantiateMemoryRuntime)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst instance-of? (js* "(a, b) => a instanceof b"))
+
+  (defvar directory nil)
+  (defvar backend nil)
+  (defconst runtime-modules (new globalThis.Map))
+  (defvar runtime-source undefined)
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-memory-"))))
+      (setq backend (await (buildBackends (js-object :outputRoot directory)))))
+    120000)
+
+  (afterAll
+    (async ()
+      (js-call runtime-modules :clear)
+      (setq runtime-source undefined)
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun compile-memory (source &rest __host_default_arguments_1)
+    (let* ((options (aref __host_default_arguments_1 0)))
+    (let* ((opts (if (undefined? options) (js-object) options))
+           (compiler (get backend :compiler))
+           (wasm (get backend :wasm))
+           (ir (js-call compiler :compile_ir_string source "memory-test.eli"))
+           (bytes (Uint8Array/from (js-call wasm :emit_memory_wasm ir opts))))
+      (funcall assert (WebAssembly/validate bytes))
+      (let ((mod (new WebAssembly.Module bytes)))
+        (js-call assert :deepEqual (WebAssembly.Module/imports mod) (js-array))
+        (let ((inst (new WebAssembly.Instance mod)))
+          (js-object :bytes bytes :module mod :exports (get inst :exports)))))))
+
+  (test "memory32 emits owned memory, full u32 literals and unsigned comparisons"
+    (lambda ()
+      (let* ((compiled (compile-memory "(defun high () 4294967295) (defun less (a b) (if (< a b) 1 0)) (defun truth (x) (if x 7 8)) (export high less truth)"))
+             (e (get compiled :exports)))
+        (funcall assert (funcall instance-of? (get e :memory) WebAssembly.Memory))
+        (js-call assert :equal (unsigned-bit-shift-right (js-call e :high) 0) 4294967295)
+        (js-call assert :equal (js-call e :less 4294967295 1) 0)
+        (js-call assert :equal (js-call e :less 1 4294967295) 1)
+        (js-call assert :equal (js-call e :truth 0) 7))))
+
+  (test "memory32 preserves stores, traps, growth and operand order without host imports"
+    (lambda ()
+      (let* ((compiled (compile-memory
+                         (str "(import \"eliscript:memory32\" load-u8 store-u8 memory-size memory-grow word-div)\n"
+                              " (defun set (p x) (store-u8 p x) (load-u8 p))\n"
+                              " (defun effects (p) (store-u8 (progn (store-u8 p 9) p) (load-u8 p)) (load-u8 p))\n"
+                              " (defun trap (p) (load-u8 p) 1)\n"
+                              " (defun divide (x) (word-div 1 x) 1)\n"
+                              " (defun grow (n) (memory-grow n)) (defun size () (memory-size))\n"
+                              " (export set effects trap divide grow size)")
+                         (js-object :initialPages 1 :maximumPages 2)))
+             (e (get compiled :exports)))
+        (js-call assert :equal (js-call e :set 8 255) 255)
+        (js-call assert :equal (js-call e :effects 8) 9)
+        (js-call assert :throws (lambda () (js-call e :trap 65536)) WebAssembly.RuntimeError)
+        (js-call assert :throws (lambda () (js-call e :divide 0)) WebAssembly.RuntimeError)
+        (let ((old (get (get e :memory) :buffer)))
+          (js-call assert :equal (js-call e :grow 1) 1)
+          (js-call assert :equal (get old :byteLength) 0)
+          (js-call assert :equal (js-call e :size) 2)
+          (js-call assert :equal (unsigned-bit-shift-right (js-call e :grow 1) 0) 4294967295)
+          (js-call assert :equal (js-call e :set 65536 42) 42)))))
+
+  (test "memory32 checks every access width before host faults and preserves nested store and growth effects"
+    (lambda ()
+      (let* ((compiled (compile-memory
+                         (str "(import \"eliscript:memory32\" load-u8 load-u16 load-u32 load-f64 store-u8 store-u16 store-u32 store-f64 memory-grow)\n"
+                              " (defun read8 (p) (load-u8 p)) (defun read16 (p) (load-u16 p)) (defun read32 (p) (load-u32 p))\n"
+                              " (defun read64 (p) (load-f64 p) 1)\n"
+                              " (defun write8 (p) (store-u8 p (progn (store-u8 16 7) 42)))\n"
+                              " (defun write16 (p) (store-u16 p (progn (store-u8 16 7) 42)))\n"
+                              " (defun write32 (p) (store-u32 p (progn (store-u8 16 7) 42)))\n"
+                              " (defun write64 (p) (store-f64 p (progn (store-u8 16 7) (load-f64 24))))\n"
+                              " (defun after-growth (p) (store-u32 p (progn (memory-grow 1) 123)))\n"
+                              " (export read8 read16 read32 read64 write8 write16 write32 write64 after-growth)")
+                         (js-object :initialPages 1 :maximumPages 2)))
+             (e (get compiled :exports))
+             (widths (js-array
+                       (js-array 1 (get e :read8) (get e :write8))
+                       (js-array 2 (get e :read16) (get e :write16))
+                       (js-array 4 (get e :read32) (get e :write32))
+                       (js-array 8 (get e :read64) (get e :write64)))))
+        (js-call widths :forEach
+          (lambda (entry)
+            (let* ((width (aref entry 0))
+                   (read-fn (aref entry 1))
+                   (write-fn (aref entry 2))
+                   (last (- 65536 width)))
+              (js-call assert :equal (funcall write-fn last) 0)
+              (js-call assert :equal (funcall read-fn last) (if (= width 8) 1 42))
+              (js-call (js-array (+ last 1) 65536 4294967288 4294967292 4294967295) :forEach
+                (lambda (address)
+                  (js-call assert :throws (lambda () (funcall read-fn address)) WebAssembly.RuntimeError)
+                  (js-call assert :throws (lambda () (funcall write-fn address)) WebAssembly.RuntimeError)
+                  ;; RHS effects survive the subsequent bounds trap.
+                  (js-call assert :equal (js-call e :read8 16) 7))))))
+        (js-call assert :equal (funcall (get e "after-growth") 65536) 0)
+        (js-call assert :equal (js-call e :read32 65536) 123))))
+
+  (test "memory32 word xor preserves every bit and left-to-right operand effects"
+    (lambda ()
+      (let* ((compiled (compile-memory
+                         (str "(import \"eliscript:memory32\" word-xor)\n"
+                              " (defun bits (a b) (word-xor a b))\n"
+                              " (defun effects (x) (let ((out (word-xor (setq x (1+ x)) (setq x (* x 2))))) (+ (* x 100) out)))\n"
+                              " (export bits effects)")))
+             (e (get compiled :exports))
+             (samples (js-array 0 1 2147483647 2147483648 4294967295 1431655765 2863311530)))
+        (js-call samples :forEach
+          (lambda (a)
+            (js-call samples :forEach
+              (lambda (b)
+                (js-call assert :equal
+                  (unsigned-bit-shift-right (js-call e :bits a b) 0)
+                  (unsigned-bit-shift-right (bit-xor a b) 0))))))
+        (let* ((state 135650033)
+               (next (lambda ()
+                       (setq state (bit-xor state (bit-shift-left state 13)))
+                       (setq state (bit-xor state (unsigned-bit-shift-right state 17)))
+                       (setq state (bit-xor state (bit-shift-left state 5)))
+                       (unsigned-bit-shift-right state 0)))
+               (i 0))
+          (while (< i 4096)
+            (let ((a (funcall next))
+                  (b (funcall next)))
+              (js-call assert :equal
+                (unsigned-bit-shift-right (js-call e :bits a b) 0)
+                (unsigned-bit-shift-right (bit-xor a b) 0)))
+            (setq i (+ i 1))))
+        (js-call (js-array 0 1 15 65535 2147483647 4294967295) :forEach
+          (lambda (x)
+            (let* ((first (unsigned-bit-shift-right (+ x 1) 0))
+                   (second (unsigned-bit-shift-right (* first 2) 0)))
+              (js-call assert :equal
+                (unsigned-bit-shift-right (js-call e :effects x) 0)
+                (unsigned-bit-shift-right (+ (* second 100) (bit-xor first second)) 0)))))
+        (js-call assert :throws
+          (lambda ()
+            (compile-memory "(import \"eliscript:memory32\" word-xor load-f64) (defun bad (p) (word-xor (load-f64 p) 1))"))
+          (lambda (err)
+            (let ((diag (get err :eliscriptDiagnostic)))
+              (and (not (nullish? diag))
+                   (= (get diag :code) "ELI-B0001")
+                   (= (get diag :phase) "memory-backend"))))))))
+
+  (defasync open-runtime (&rest __host_default_arguments_2)
+    (let* ((options (aref __host_default_arguments_2 0)))
+    (let ((opts (if (undefined? options) (js-object) options)))
+      (when (undefined? runtime-source)
+        (setq runtime-source (await (readFile (resolve "bootstrap/runtime/memory.eli") "utf8"))))
+      (let* ((sorted-entries (js-call (Object/entries opts) :sort
+                               (lambda (left right)
+                                 (let ((a (aref left 0))
+                                       (b (aref right 0)))
+                                   (if (< a b) -1 (if (> a b) 1 0))))))
+             (key (JSON/stringify (Object/fromEntries sorted-entries)))
+             (artifact (js-call runtime-modules :get key)))
+        (when (undefined? artifact)
+          (let ((compiled (compile-memory runtime-source opts)))
+            (setq artifact (js-object :bytes (get compiled :bytes) :module (get compiled :module)))
+            (js-call runtime-modules :set key artifact)))
+        ;; Only immutable code is shared. Every call receives its original fresh
+        ;; memory, runtime allocator, handles and error state through a new instance.
+        (let* ((bytes (get artifact :bytes))
+               (mod (get artifact :module))
+               (inst (new WebAssembly.Instance mod))
+               (e (get inst :exports))
+               (r (Object/fromEntries
+                    (js-call (Object/entries e) :map
+                      (lambda (entry)
+                        (let ((k (aref entry 0))
+                              (v (aref entry 1)))
+                          (js-array (js-call k :replaceAll "-" "_")
+                            (if (= (funcall js-typeof v) "function")
+                                (lambda (&rest args) (unsigned-bit-shift-right (apply v args) 0))
+                                v))))))))
+          (js-object :r r :bytes bytes))))))
+
+  (test "runtime buffers grow in WASM, keep handles stable and reject stale lifetime"
+    (async ()
+      (let* ((opened (await (open-runtime (js-object :maximumPages 8))))
+             (r (get opened :r))
+             (p (js-call r :buffer_new 0)))
+        (funcall assert (> p 0))
+        (let ((i 0))
+          (while (< i 70000)
+            (js-call assert :equal (js-call r :buffer_push p (bit-and i 255)) 1)
+            (setq i (+ i 1))))
+        (js-call assert :equal (js-call r :buffer_length p) 70000)
+        (let ((i 0))
+          (while (< i 70000)
+            (js-call assert :equal (js-call r :buffer_get p i) (bit-and i 255))
+            (setq i (+ i 1))))
+        (js-call assert :equal (js-call r :buffer_get p 70000) 0)
+        (js-call assert :equal (js-call r :last_error) 3)
+        (let ((old-length (js-call r :buffer_length p)))
+          (js-call assert :equal (js-call r :buffer_reserve p 4294967295) 0)
+          (js-call assert :equal (js-call r :last_error) 2)
+          (js-call assert :equal (js-call r :buffer_length p) old-length))
+        (js-call assert :equal (js-call r :retire) 1)
+        (js-call assert :equal (js-call r :buffer_length p) 0)
+        (js-call assert :equal (js-call r :last_error) 1)
+        (let ((next-handle (js-call r :buffer_new 0)))
+          (funcall assert (> next-handle p))
+          (js-call assert :equal (js-call r :buffer_length p) 0)
+          (js-call assert :equal (js-call r :last_error) 1)))))
+
+  (test "runtime records preserve word slots, isolation and checked boundaries"
+    (async ()
+      (let* ((opened (await (open-runtime)))
+             (r (get opened :r))
+             (q (js-call r :record_new 3)))
+        (funcall assert (> q 0))
+        (js-call assert :equal (js-call r :record_get q 0) 0)
+        (js-call assert :equal (js-call r :record_set q 2 4294967295) 1)
+        (js-call assert :equal (js-call r :record_get q 2) 4294967295)
+        (js-call assert :equal (js-call r :record_set q 3 1) 0)
+        (js-call assert :equal (js-call r :last_error) 3)
+        (js-call assert :equal (js-call r :record_get q 2) 4294967295)
+        (js-call assert :equal (js-call r :buffer_get q 0) 0)
+        (js-call assert :equal (js-call r :last_error) 1)
+        (let ((other (get (await (open-runtime)) :r)))
+          (js-call assert :equal (js-call other :record_get q 2) 0)
+          (js-call assert :equal (js-call other :last_error) 1)))))
+
+  (defun put-string (r text)
+    (let ((p (js-call r :string_new (get text :length)))
+          (i 0))
+      (funcall assert (> p 0))
+      (while (< i (get text :length))
+        (js-call assert :equal (js-call r :string_set p i (js-call text :charCodeAt i)) 1)
+        (setq i (+ i 1)))
+      (js-call assert :equal (js-call r :string_seal p) p)
+      p))
+
+  (defun get-string (r p)
+    (funcall assert (> p 0))
+    (let ((result "")
+          (n (js-call r :string_length p))
+          (i 0))
+      (while (< i n)
+        (setq result (str result (String/fromCharCode (js-call r :string_get p i))))
+        (setq i (+ i 1)))
+      result))
+
+  (defun put-bytes (r bytes)
+    (let ((p (js-call r :buffer_new (get bytes :length)))
+          (i 0))
+      (funcall assert (> p 0))
+      (while (< i (get bytes :length))
+        (js-call assert :equal (js-call r :buffer_push p (aref bytes i)) 1)
+        (setq i (+ i 1)))
+      p))
+
+  (defun get-bytes (r p)
+    (funcall assert (> p 0))
+    (Uint8Array/from (js-object :length (js-call r :buffer_length p))
+      (lambda (_unused i) (js-call r :buffer_get p i))))
+
+  (test "runtime UTF16 builders seal, encode surrogates, reject invalid strict input"
+    (async ()
+      (let* ((opened (await (open-runtime)))
+             (r (get opened :r))
+             (surrogate-re (new globalThis.RegExp "\\p{Surrogate}" "u"))
+             (encoder (new globalThis.TextEncoder))
+             (texts (js-array
+                      ""
+                      (str "ASCII" (String/fromCharCode 0))
+                      "中文😀"
+                      (str (String/fromCharCode 55296) "x" (String/fromCharCode 56320))
+                      (str (String/fromCharCode 65279) "hi")
+                      (str (String/fromCharCode 56319) (String/fromCharCode 57343))
+                      (str (String/fromCharCode 55296) (String/fromCharCode 55296) (String/fromCharCode 56320)))))
+        (js-call texts :forEach
+          (lambda (text)
+            (let ((p (put-string r text)))
+              (js-call assert :equal (get-string r p) text)
+              (js-call assert :deepEqual (get-bytes r (js-call r :utf8_encode p 0)) (js-call encoder :encode text))
+              (let ((valid (not (js-call surrogate-re :test text)))
+                    (strict (js-call r :utf8_encode p 1)))
+                (if valid
+                    (js-call assert :deepEqual (get-bytes r strict) (js-call encoder :encode text))
+                    (progn
+                      (js-call assert :equal strict 0)
+                      (js-call assert :equal (js-call r :last_error) 5))))
+              (js-call assert :equal (js-call r :string_set p 0 1) 0)
+              (js-call assert :equal (js-call r :last_error) 6))))
+        (let ((p (js-call r :string_new 1)))
+          (js-call assert :equal (js-call r :utf8_encode p 0) 0)
+          (js-call assert :equal (js-call r :last_error) 6)
+          (js-call assert :equal (js-call r :string_set p 1 32) 0)
+          (js-call assert :equal (js-call r :last_error) 3)
+          (js-call assert :equal (js-call r :string_set p 0 65536) 0)
+          (js-call assert :equal (js-call r :last_error) 3)))))
+
+  (test "runtime UTF8 decoding matches maximal-subpart replacement, strict errors and BOM"
+    (async ()
+      (let* ((opened (await (open-runtime)))
+             (r (get opened :r))
+             (vectors (js-array
+                        (js-array)
+                        (js-array 0)
+                        (js-array 255)
+                        (js-array 128)
+                        (js-array 192 175)
+                        (js-array 224 128 128)
+                        (js-array 237 160 128)
+                        (js-array 244 144 128 128)
+                        (js-array 240 159)
+                        (js-array 226 130 34)
+                        (js-array 226 40 161)
+                        (js-array 239 187 191 65)
+                        (js-array 239 187 191 239 187 191)
+                        (js-array 244 143 191 191))))
+        (js-call vectors :forEach
+          (lambda (bytes)
+            (js-call (js-array 0 1) :forEach
+              (lambda (bom)
+                (let* ((p (put-bytes r bytes))
+                       (input (Uint8Array/from bytes))
+                       (ignore-bom (/= bom 0))
+                       (decoder (new globalThis.TextDecoder "utf-8" (js-object :ignoreBOM ignore-bom))))
+                  (js-call assert :equal
+                    (get-string r (js-call r :utf8_decode p 0 bom))
+                    (js-call decoder :decode input))
+                  (let ((expected undefined))
+                    (try
+                      (let ((fatal-decoder (new globalThis.TextDecoder "utf-8" (js-object :fatal t :ignoreBOM ignore-bom))))
+                        (setq expected (js-call fatal-decoder :decode input)))
+                      (catch _err nil))
+                    (let ((strict (js-call r :utf8_decode p 1 bom)))
+                      (if (undefined? expected)
+                          (progn
+                            (js-call assert :equal strict 0)
+                            (js-call assert :equal (js-call r :last_error) 4))
+                          (js-call assert :equal (get-string r strict) expected))))))))))))
+
+  (test "runtime rejects aligned byte data masquerading as an object header"
+    (async ()
+      (let* ((opened (await (open-runtime)))
+             (r (get opened :r))
+             (p (js-call r :buffer_new 32))
+             (mem-view (new globalThis.DataView (get (get r :memory) :buffer)))
+             (data (js-call mem-view :getUint32 (+ p 16) t))
+             (forged (new globalThis.Uint8Array 32))
+             (v (new globalThis.DataView (get forged :buffer))))
+        (js-call v :setUint32 0 3 t)
+        (js-call v :setUint32 4 1 t)
+        (js-call v :setUint32 8 1 t)
+        (js-call v :setUint32 12 1 t)
+        (js-call v :setUint32 16 data t)
+        (let ((i 0))
+          (while (< i (get forged :length))
+            (js-call r :buffer_push p (aref forged i))
+            (setq i (+ i 1))))
+        (js-call assert :equal (js-call r :record_get data 0) 0)
+        (js-call assert :equal (js-call r :last_error) 1))))
+
+  (test "memory32 refuses unsupported literals, imports, shadowing and dead branches before emission"
+    (lambda ()
+      (let ((cases (js-array
+                     "(defun f () -0.0) (export f)"
+                     "(defun f () 1.5) (export f)"
+                     "(defun f () -1) (export f)"
+                     "(defun f () 4294967296) (export f)"
+                     "(defun f (x) (if false \"dead\" x)) (export f)"
+                     "(defun f (x) (/ x 2)) (export f)"
+                     "(defun f (x) (if x t 1)) (export f)"
+                     "(import \"host\" load-u8) (defun f (x) (load-u8 x)) (export f)"
+                     "(import \"eliscript:memory32\" unknown) (defun f (x) x) (export f)"
+                     "(import \"eliscript:memory32\" :as host) (defun f (x) x) (export f)"
+                     "(import \"eliscript:memory32\" load-u8 load-u8) (defun f (x) x) (export f)"
+                     "(import \"eliscript:memory32\" load-u8) (defun load-u8 (x) x) (export load-u8)"
+                     "(import \"eliscript:memory32\" load-u8) (defun f (load-u8) (load-u8 0)) (export f)"
+                     "(import \"eliscript:memory32\" store-u8) (defun f (x) (store-u8 x)) (export f)"
+                     "(defun memory () 0) (export memory)"))
+            (bad-options (js-array
+                           (js-object :initialPages 0)
+                           (js-object :maximumPages 0)
+                           (js-object :initialPages 3 :maximumPages 2)
+                           (js-object :maximumPages 65536)
+                           (js-object :initialPages 1.5))))
+        (js-call cases :forEach
+          (lambda (source)
+            (js-call assert :throws
+              (lambda () (compile-memory source))
+              (lambda (e)
+                (let ((diag (get e :eliscriptDiagnostic)))
+                  (funcall assert diag)
+                  (js-call assert :equal
+                    (get diag :code)
+                    (if (or (js-call source :includes "load-u8 load-u8")
+                            (js-call source :includes "(defun load-u8 "))
+                        "ELI-A0001"
+                        "ELI-B0001")
+                    source)
+                  (js-call assert :equal (get (get diag :location) :file) "memory-test.eli")
+                  t)))))
+        (js-call bad-options :forEach
+          (lambda (opts)
+            (js-call assert :throws
+              (lambda () (compile-memory "(defun f () 0) (export f)" opts))
+              (lambda (e) (not (nullish? (get e :eliscriptDiagnostic))))))))))
+
+  (test "memory32 word arithmetic wraps exactly and preserves Lisp short-circuit effects"
+    (lambda ()
+      (let* ((compiled (compile-memory
+                         (str "(import \"eliscript:memory32\" load-u32 store-u32 word-div word-shr word-shl word-and word-or)\n"
+                              " (defun add (x y) (+ x y)) (defun mul (x y) (* x y))\n"
+                              " (defun sub (x y) (- x y)) (defun neg (x) (- x))\n"
+                              " (defun inc (x) (1+ x)) (defun dec (x) (1- x))\n"
+                              " (defun bits (x n) (word-or (word-shr x n) (word-shl x n)))\n"
+                              " (defun div (x y) (word-div x y))\n"
+                              " (defun effects () (store-u32 0 0) (or (store-u32 0 1) (store-u32 0 2)) (load-u32 0))\n"
+                              " (defun and-effects () (and (store-u32 0 1) (store-u32 0 2)) (load-u32 0))\n"
+                              " (export add mul sub neg inc dec bits div effects and-effects)")))
+             (e (get compiled :exports)))
+        (js-call (js-array 0 1 2147483647 2147483648 4294967295) :forEach
+          (lambda (x)
+            (js-call (js-array 0 1 2147483647 4294967295) :forEach
+              (lambda (y)
+                (js-call assert :equal (unsigned-bit-shift-right (js-call e :add x y) 0) (unsigned-bit-shift-right (+ x y) 0))
+                (js-call assert :equal (unsigned-bit-shift-right (js-call e :mul x y) 0) (unsigned-bit-shift-right (Math/imul x y) 0))
+                (js-call assert :equal (unsigned-bit-shift-right (js-call e :sub x y) 0) (unsigned-bit-shift-right (- x y) 0))
+                (when (/= y 0)
+                  (js-call assert :equal (unsigned-bit-shift-right (js-call e :div x y) 0) (Math/floor (/ x y))))))))
+        (js-call (js-array 0 1 2147483648 4294967295) :forEach
+          (lambda (x)
+            (js-call (js-array 0 1 31 32 33 4294967295) :forEach
+              (lambda (n)
+                (js-call assert :equal
+                  (unsigned-bit-shift-right (js-call e :bits x n) 0)
+                  (unsigned-bit-shift-right (bit-or (unsigned-bit-shift-right x n) (bit-shift-left x n)) 0))))))
+        (js-call (js-array 0 1 2147483648 4294967295) :forEach
+          (lambda (x)
+            (js-call assert :equal (unsigned-bit-shift-right (js-call e :neg x) 0) (unsigned-bit-shift-right (- x) 0))
+            (js-call assert :equal (unsigned-bit-shift-right (js-call e :inc x) 0) (unsigned-bit-shift-right (+ x 1) 0))
+            (js-call assert :equal (unsigned-bit-shift-right (js-call e :dec x) 0) (unsigned-bit-shift-right (- x 1) 0))))
+        (js-call assert :equal (js-call e :effects) 1)
+        (js-call assert :equal (funcall (get e "and-effects")) 2))))
+
+  (test "runtime codec deterministic random differential covers arbitrary bytes and UTF16 units"
+    (async ()
+      (let* ((opened (await (open-runtime)))
+             (r (get opened :r))
+             (state 1931582635)
+             (next (lambda ()
+                     (setq state (bit-xor state (bit-shift-left state 13)))
+                     (setq state (bit-xor state (unsigned-bit-shift-right state 17)))
+                     (setq state (bit-xor state (bit-shift-left state 5)))
+                     (unsigned-bit-shift-right state 0)))
+             (encoder (new globalThis.TextEncoder))
+             (round 0))
+        (while (< round 512)
+          (let* ((bytes (Uint8Array/from (js-object :length (% (funcall next) 96)) (lambda () (bit-and (funcall next) 255))))
+                 (p (put-bytes r bytes)))
+            (js-call (js-array 0 1) :forEach
+              (lambda (bom)
+                (let ((decoder (new globalThis.TextDecoder "utf-8" (js-object :ignoreBOM (/= bom 0)))))
+                  (js-call assert :equal (get-string r (js-call r :utf8_decode p 0 bom)) (js-call decoder :decode bytes)))))
+            (let* ((codes (Array/from (js-object :length (% (funcall next) 64)) (lambda () (bit-and (funcall next) 65535))))
+                   (text (apply String/fromCharCode codes)))
+              (js-call assert :deepEqual (get-bytes r (js-call r :utf8_encode (put-string r text) 0)) (js-call encoder :encode text)))
+            (js-call assert :equal (js-call r :retire) 1))
+          (setq round (+ round 1))))))
+
+  (test "bulk memory bridge brands handles, rejects coercions and reports checked runtime errors"
+    (async ()
+      (let* ((opened (await (open-runtime)))
+             (bytes (get opened :bytes))
+             (a (instantiateMemoryRuntime bytes))
+             (b (instantiateMemoryRuntime bytes))
+             (surrogate-text (str "😀" (String/fromCharCode 55296)))
+             (text (js-call a :string surrogate-text))
+             (encoded (js-call a :encode text))
+             (encoder (new globalThis.TextEncoder)))
+        (js-call assert :deepEqual (js-call a :bytes encoded) (js-call encoder :encode surrogate-text))
+        (js-call assert :equal (js-call a :text (js-call a :decode encoded)) (str "😀" (String/fromCharCode 65533)))
+        (let ((record (js-call a :record (js-array 0 4294967295 42))))
+          (js-call assert :deepEqual (js-call a :words record) (Uint32Array/of 0 4294967295 42)))
+        (js-call assert :throws
+          (lambda () (js-call b :bytes encoded))
+          (lambda (e) (= (get (get e :eliscriptDiagnostic) :code) "ELI-RT0001")))
+        (js-call assert :throws
+          (lambda () (js-call a :encode (js-call a :buffer (js-array 1))))
+          (lambda (e) (= (get (get e :eliscriptDiagnostic) :code) "ELI-RT0001")))
+        (js-call (js-array -1 1.5 globalThis.NaN globalThis.Infinity 4294967296) :forEach
+          (lambda (value)
+            (js-call assert :throws
+              (lambda () (js-call a :reserve encoded value))
+              (lambda (e) (= (get (get e :eliscriptDiagnostic) :code) "ELI-RT0003")))))
+        (js-call assert :throws
+          (lambda () (js-call a :encode text (js-object :strict t)))
+          (lambda (e) (= (get (get e :eliscriptDiagnostic) :code) "ELI-RT0005")))
+        (js-call a :retire)
+        (js-call assert :throws
+          (lambda () (js-call a :bytes encoded))
+          (lambda (e) (= (get (get e :eliscriptDiagnostic) :code) "ELI-RT0001")))
+        (let ((fresh (js-call a :buffer (js-array 1 2))))
+          (js-call a :push fresh 3)
+          (js-call assert :deepEqual (js-call a :bytes fresh) (Uint8Array/of 1 2 3))))))
+
+  (test "runtime allocation failure rolls back unpublished storage and preserves existing buffers"
+    (async ()
+      (let* ((opened (await (open-runtime (js-object :maximumPages 1))))
+             (r (get opened :r)))
+        (js-call assert :equal (js-call r :buffer_new 65256) 0)
+        (js-call assert :equal (js-call r :last_error) 2)
+        (let ((p (js-call r :buffer_new 8))
+              (i 0))
+          (funcall assert (> p 0))
+          (while (< i 8)
+            (js-call assert :equal (js-call r :buffer_push p i) 1)
+            (setq i (+ i 1)))
+          (js-call assert :equal (js-call r :buffer_reserve p 65536) 0)
+          (js-call assert :equal (js-call r :last_error) 2)
+          (js-call assert :deepEqual (get-bytes r p) (Uint8Array/of 0 1 2 3 4 5 6 7)))
+        (js-call (js-array
+                   (lambda () (js-call r :record_new 4294967295))
+                   (lambda () (js-call r :string_new 4294967295))) :forEach
+          (lambda (call-fn)
+            (js-call assert :equal (funcall call-fn) 0)
+            (js-call assert :equal (js-call r :last_error) 2)))
+        (let ((v (new globalThis.DataView (get (get r :memory) :buffer))))
+          (js-call v :setUint32 4 4294967295 t)
+          (js-call assert :equal (js-call r :retire) 0)
+          (js-call assert :equal (js-call r :last_error) 7)
+          (js-call assert :equal (js-call v :getUint32 4 t) 4294967295)))))
+
+  (test "memory32 refuses value-position when and unless rather than changing their truth"
+    (lambda ()
+      (js-call (js-array
+                 "(defun f () (if (when t 0) 1 2)) (export f)"
+                 "(defun f () (if (unless false 0) 1 2)) (export f)"
+                 "(defun f () (let ((x (when t 0))) 1)) (export f)") :forEach
+        (lambda (source)
+          (js-call assert :throws
+            (lambda () (compile-memory source))
+            (lambda (e) (= (get (get e :eliscriptDiagnostic) :code) "ELI-B0001")))))))
+
+  (test "Node executes the same standalone memory bytes and bulk bridge against independent codecs"
+    (async ()
+      (let* ((opened (await (open-runtime)))
+             (bytes (get opened :bytes))
+             (artifact (resolve directory "node-memory-runtime.wasm"))
+             (helper-script (resolve "tests/helpers/wasm-memory-runtime-node.mjs"))
+             (runtime-href (get (pathToFileURL (resolve "tools/backends/memory-runtime.mjs")) :href))
+             (sha (js-call (js-call (createHash "sha256") :update bytes) :digest "hex")))
+        (await (writeFile artifact bytes))
+        (let ((arguments-list (js-array helper-script "--run-node-check" runtime-href artifact sha)))
+          (funcall assert
+            (js-call arguments-list :every (lambda (value) (< (Buffer/byteLength value) (* 128 1024))))
+            "runtime artifact must not exceed a portable subprocess argument boundary")
+          (let* ((env-node (get (get process :env) :NODE))
+                 (node-bin (if (nullish? env-node) "node" env-node))
+                 (child (spawnSync node-bin arguments-list (js-object :encoding "utf8" :timeout 30000)))
+                 (err (get child :error))
+                 (err-msg (if (nullish? err) (get child :stderr) (get err :message))))
+            (js-call assert :equal (get child :status) 0 err-msg))))))
+
+  (test "memory32 handles recursion and multi-byte function and local indices"
+    (lambda ()
+      (let* ((definitions (js-call (Array/from (js-object :length 140) (lambda (_u i) (str "(defun f" i " (x) (+ x " i "))"))) :join "\n"))
+             (bindings (js-call (Array/from (js-object :length 140) (lambda (_u i) (str "(v" i " " i ")"))) :join " "))
+             (compiled (compile-memory
+                         (str definitions "\n"
+                              " (defun locals (x) (let (" bindings ") (+ x v139)))\n"
+                              " (defun rec (n) (if (= n 0) 1 (* n (rec (1- n))))) (export f139 locals rec)")))
+             (e (get compiled :exports)))
+        (js-call assert :equal (unsigned-bit-shift-right (js-call e :f139 4294967295) 0) 138)
+        (js-call assert :equal (unsigned-bit-shift-right (js-call e :locals 4294967295) 0) 138)
+        (let ((expected 1)
+              (n 0))
+          (while (< n 20)
+            (when (> n 0)
+              (setq expected (unsigned-bit-shift-right (Math/imul expected n) 0)))
+            (js-call assert :equal (unsigned-bit-shift-right (js-call e :rec n) 0) expected)
+            (setq n (+ n 1))))))))

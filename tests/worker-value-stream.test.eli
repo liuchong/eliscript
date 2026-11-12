@@ -1,2 +1,121 @@
-(module capsules.tests.worker-value-stream.test
-  (js* "import { expect, test } from \"bun:test\";\n\nimport { eliscriptSymbol, keyword } from \"../runtime/core/identifier.mjs\";\nimport { persistentList } from \"../runtime/core/list.mjs\";\nimport { persistentHashMap } from \"../runtime/core/map.mjs\";\nimport { meta, withMeta } from \"../runtime/core/metadata.mjs\";\nimport { persistentHashSet } from \"../runtime/core/set.mjs\";\nimport { equalValues } from \"../runtime/core/value.mjs\";\nimport { persistentVector } from \"../runtime/core/vector.mjs\";\nimport {\n  WorkerValueStreamDecoder,\n  WorkerValueStreamError,\n  decodeWorkerValueChunks,\n  encodeWorkerValueChunks,\n  workerValueFraming,\n} from \"../runtime/worker-value-stream.mjs\";\n\nasync function chunksFor(value, options) {\n  const chunks = [];\n  for await (const chunk of encodeWorkerValueChunks(value, options)) {\n    chunks.push(chunk);\n  }\n  return chunks;\n}\n\nasync function roundTrip(value, options) {\n  return decodeWorkerValueChunks(await chunksFor(value, options), options);\n}\n\ntest(\"chunked value stream preserves every persistent and host category\", async () => {\n  const metadata = persistentHashMap([keyword(\"source\"), \"emacs\"]);\n  const value = withMeta(persistentList(\n    keyword(\"app\", \"ready\"),\n    withMeta(eliscriptSymbol(\"model\", \"item\"), metadata),\n    persistentVector(undefined, -0, Number.NaN, Number.POSITIVE_INFINITY),\n    persistentHashMap(\n      [keyword(\"enabled\"), true],\n      [eliscriptSymbol(\"count\"), 3],\n    ),\n    persistentHashSet(\"alpha\", keyword(\"beta\")),\n    [1, { ready: false }],\n  ), metadata);\n\n  const decoded = await roundTrip(value, {\n    maxChunkBytes: 256,\n    maxEventsPerChunk: 5,\n    maxTextPartUnits: 3,\n  });\n\n  expect(workerValueFraming).toBe(\"eliscript-value-chunks-v1\");\n  expect(equalValues(\n    persistentList(...Array.from(decoded).slice(0, 5)),\n    persistentList(...Array.from(value).slice(0, 5)),\n  )).toBe(true);\n  expect(equalValues(meta(decoded), metadata)).toBe(true);\n  expect(equalValues(meta(decoded.nth(1)), metadata)).toBe(true);\n  expect(decoded.nth(2).nth(0)).toBeUndefined();\n  expect(Object.is(decoded.nth(2).nth(1), -0)).toBe(true);\n  expect(Number.isNaN(decoded.nth(2).nth(2))).toBe(true);\n  expect(decoded.nth(2).nth(3)).toBe(Number.POSITIVE_INFINITY);\n  expect(decoded.nth(5)).toEqual([1, { ready: false }]);\n});\n\ntest(\"chunked value stream bounds frames and splits long Unicode text\", async () => {\n  const value = `${\"ab😀\\n\".repeat(20_000)}done`;\n  const options = {\n    maxChunkBytes: 512,\n    maxEventsPerChunk: 4,\n    maxTextPartUnits: 17,\n  };\n  const chunks = await chunksFor(value, options);\n  expect(chunks.length).toBeGreaterThan(1);\n  for (const chunk of chunks) {\n    expect(Buffer.byteLength(JSON.stringify(chunk), \"utf8\")).toBeLessThanOrEqual(512);\n    expect(chunk.length).toBeLessThanOrEqual(4);\n  }\n  expect(await decodeWorkerValueChunks(chunks, options)).toBe(value);\n});\n\ntest(\"stream decoder rejects malformed, duplicate, truncated, and oversized input\", () => {\n  const duplicateMap = new WorkerValueStreamDecoder();\n  expect(() => duplicateMap.write([\n    [\"open\", \"map\", 2],\n    [\"open\", \"keyword\", 2], [\"value\", null], [\"text\", 1], [\"text-part\", \"x\"],\n    [\"value\", 1],\n    [\"open\", \"keyword\", 2], [\"value\", null], [\"text\", 1], [\"text-part\", \"x\"],\n    [\"value\", 2],\n    [\"value\", null],\n  ])).toThrow(/equivalent duplicate key/);\n\n  const truncated = new WorkerValueStreamDecoder();\n  truncated.write([[\"text\", 4], [\"text-part\", \"ab\"]]);\n  expect(() => truncated.finish()).toThrow(/ended inside a string/);\n\n  const extraRoot = new WorkerValueStreamDecoder();\n  expect(() => extraRoot.write([[\"value\", 1], [\"value\", 2]]))\n    .toThrow(/multiple roots/);\n\n  const deep = new WorkerValueStreamDecoder({ maxDepth: 1 });\n  expect(() => deep.write([\n    [\"open\", \"array\", 1],\n    [\"open\", \"array\", 1],\n    [\"open\", \"array\", 0],\n  ])).toThrow(/exceeds depth 1/);\n\n  const longText = new WorkerValueStreamDecoder({\n    maxStringUnits: 2,\n    maxTextPartUnits: 2,\n  });\n  expect(() => longText.write([[\"text\", 3]])).toThrow(/string exceeds 2/);\n\n  const wideChunk = new WorkerValueStreamDecoder({ maxChunkBytes: 32 });\n  expect(() => wideChunk.write([[\"text\", 20], [\"text-part\", \"x\".repeat(20)]]))\n    .toThrow(/chunk exceeds 32 bytes/);\n});\n\ntest(\"stream encoder rejects cycles, unsupported values, limits, and cancellation\", async () => {\n  const cycle = [];\n  cycle.push(cycle);\n  await expect(chunksFor(cycle)).rejects.toBeInstanceOf(WorkerValueStreamError);\n  await expect(chunksFor(() => 1)).rejects.toThrow(/unsupported function value/);\n  await expect(chunksFor([1, 2, 3], { maxCollectionLength: 2 }))\n    .rejects.toThrow(/collection exceeds 2 values/);\n\n  const controller = new AbortController();\n  controller.abort();\n  await expect(chunksFor([1], { signal: controller.signal }))\n    .rejects.toThrow(/traversal was cancelled/);\n});\n"))
+(module tests.worker-value-stream
+  (import "bun:test" expect test)
+  (import "../runtime/core/identifier.mjs" eliscriptSymbol keyword)
+  (import "../runtime/core/list.mjs" persistentList)
+  (import "../runtime/core/map.mjs" persistentHashMap)
+  (import "../runtime/core/metadata.mjs" meta withMeta)
+  (import "../runtime/core/set.mjs" persistentHashSet)
+  (import "../runtime/core/value.mjs" equalValues)
+  (import "../runtime/core/vector.mjs" persistentVector)
+  (import "../runtime/worker-value-stream.mjs"
+    WorkerValueStreamDecoder WorkerValueStreamError
+    decodeWorkerValueChunks encodeWorkerValueChunks workerValueFraming)
+
+  (defasync chunksFor (value &rest __host_forwarded_arguments_1)
+    (let* ((options (aref __host_forwarded_arguments_1 0)))
+    (let ((chunks (js-array))
+          (iterator (js-call (encodeWorkerValueChunks value options) globalThis.Symbol.asyncIterator)))
+      (let ((done false))
+        (while (not done)
+          (let ((step (await (js-call iterator :next))))
+            (if (get step :done)
+              (setq done t)
+              (js-call chunks :push (get step :value))))))
+      chunks)))
+
+  (defasync roundTrip (value &rest __host_forwarded_arguments_2)
+    (let* ((options (aref __host_forwarded_arguments_2 0)))
+    (decodeWorkerValueChunks (await (chunksFor value options)) options)))
+
+  (test "chunked value stream preserves every persistent and host category"
+    (async ()
+      (let* ((metadata (persistentHashMap (js-array (keyword "source") "emacs")))
+             (value (withMeta
+                      (persistentList
+                        (keyword "app" "ready")
+                        (withMeta (eliscriptSymbol "model" "item") metadata)
+                        (persistentVector undefined -0 globalThis.Number.NaN globalThis.Number.POSITIVE_INFINITY)
+                        (persistentHashMap
+                          (js-array (keyword "enabled") t)
+                          (js-array (eliscriptSymbol "count") 3))
+                        (persistentHashSet "alpha" (keyword "beta"))
+                        (js-array 1 (js-object :ready false)))
+                      metadata))
+             (decoded (await (roundTrip value
+                               (js-object :maxChunkBytes 256 :maxEventsPerChunk 5 :maxTextPartUnits 3)))))
+        (js-call (expect workerValueFraming) :toBe "eliscript-value-chunks-v1")
+        (js-call (expect (equalValues
+                           (apply persistentList (js-call (Array/from decoded) :slice 0 5))
+                           (apply persistentList (js-call (Array/from value) :slice 0 5))))
+          :toBe t)
+        (js-call (expect (equalValues (meta decoded) metadata)) :toBe t)
+        (js-call (expect (equalValues (meta (js-call decoded :nth 1)) metadata)) :toBe t)
+        (js-call (expect (js-call (js-call decoded :nth 2) :nth 0)) :toBeUndefined)
+        (js-call (expect (Object/is (js-call (js-call decoded :nth 2) :nth 1) -0)) :toBe t)
+        (js-call (expect (Number/isNaN (js-call (js-call decoded :nth 2) :nth 2))) :toBe t)
+        (js-call (expect (js-call (js-call decoded :nth 2) :nth 3)) :toBe globalThis.Number.POSITIVE_INFINITY)
+        (js-call (expect (js-call decoded :nth 5)) :toEqual (js-array 1 (js-object :ready false))))))
+
+  (test "chunked value stream bounds frames and splits long Unicode text"
+    (async ()
+      (let* ((value (str (js-call "ab😀\n" :repeat 20000) "done"))
+             (options (js-object :maxChunkBytes 512 :maxEventsPerChunk 4 :maxTextPartUnits 17))
+             (chunks (await (chunksFor value options)))
+             (i 0))
+        (js-call (expect (js-length chunks)) :toBeGreaterThan 1)
+        (while (< i (js-length chunks))
+          (let ((chunk (aref chunks i)))
+            (js-call (expect (globalThis.Buffer.byteLength (JSON/stringify chunk) "utf8")) :toBeLessThanOrEqual 512)
+            (js-call (expect (js-length chunk)) :toBeLessThanOrEqual 4))
+          (setq i (1+ i)))
+        (js-call (expect (await (decodeWorkerValueChunks chunks options))) :toBe value))))
+
+  (test "stream decoder rejects malformed, duplicate, truncated, and oversized input"
+    (lambda ()
+      (let ((duplicateMap (new WorkerValueStreamDecoder)))
+        (js-call (expect (lambda ()
+                           (js-call duplicateMap :write
+                             (js-array
+                               (js-array "open" "map" 2)
+                               (js-array "open" "keyword" 2) (js-array "value" nil) (js-array "text" 1) (js-array "text-part" "x")
+                               (js-array "value" 1)
+                               (js-array "open" "keyword" 2) (js-array "value" nil) (js-array "text" 1) (js-array "text-part" "x")
+                               (js-array "value" 2)
+                               (js-array "value" nil)))))
+          :toThrow (new globalThis.RegExp "equivalent duplicate key")))
+      (let ((truncated (new WorkerValueStreamDecoder)))
+        (js-call truncated :write (js-array (js-array "text" 4) (js-array "text-part" "ab")))
+        (js-call (expect (lambda () (js-call truncated :finish)))
+          :toThrow (new globalThis.RegExp "ended inside a string")))
+      (let ((extraRoot (new WorkerValueStreamDecoder)))
+        (js-call (expect (lambda () (js-call extraRoot :write (js-array (js-array "value" 1) (js-array "value" 2)))))
+          :toThrow (new globalThis.RegExp "multiple roots")))
+      (let ((deep (new WorkerValueStreamDecoder (js-object :maxDepth 1))))
+        (js-call (expect (lambda ()
+                           (js-call deep :write
+                             (js-array (js-array "open" "array" 1)
+                                       (js-array "open" "array" 1)
+                                       (js-array "open" "array" 0)))))
+          :toThrow (new globalThis.RegExp "exceeds depth 1")))
+      (let ((longText (new WorkerValueStreamDecoder (js-object :maxStringUnits 2 :maxTextPartUnits 2))))
+        (js-call (expect (lambda () (js-call longText :write (js-array (js-array "text" 3)))))
+          :toThrow (new globalThis.RegExp "string exceeds 2")))
+      (let ((wideChunk (new WorkerValueStreamDecoder (js-object :maxChunkBytes 32))))
+        (js-call (expect (lambda ()
+                           (js-call wideChunk :write
+                             (js-array (js-array "text" 20) (js-array "text-part" (js-call "x" :repeat 20))))))
+          :toThrow (new globalThis.RegExp "chunk exceeds 32 bytes")))))
+
+  (test "stream encoder rejects cycles, unsupported values, limits, and cancellation"
+    (async ()
+      (let ((cycle (js-array)))
+        (js-call cycle :push cycle)
+        (await (js-call (get (expect (chunksFor cycle)) :rejects) :toBeInstanceOf WorkerValueStreamError))
+        (await (js-call (get (expect (chunksFor (lambda () 1))) :rejects)
+                 :toThrow (new globalThis.RegExp "unsupported function value")))
+        (await (js-call (get (expect (chunksFor (js-array 1 2 3) (js-object :maxCollectionLength 2))) :rejects)
+                 :toThrow (new globalThis.RegExp "collection exceeds 2 values")))
+        (let ((controller (new globalThis.AbortController)))
+          (js-call controller :abort)
+          (await (js-call (get (expect (chunksFor (js-array 1) (js-object :signal (get controller :signal)))) :rejects)
+                   :toThrow (new globalThis.RegExp "traversal was cancelled"))))))))

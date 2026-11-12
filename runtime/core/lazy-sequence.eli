@@ -1,2 +1,276 @@
-(module capsules.runtime.core.lazy-sequence
-  (js* "import {\n  MemoizedSequenceView,\n  memoizedSequenceView,\n  seq,\n} from \"./collection.mjs\";\nimport { memoizedSequenceStatus } from \"./collection-internals.mjs\";\nimport {\n  deduping,\n  distincting,\n  dropping,\n  droppingWhile,\n  filtering,\n  interposing,\n  keeping,\n  keepingIndexed,\n  mapcatting,\n  mapping,\n  mappingIndexed,\n  partitioningAll,\n  partitioningBy,\n  removing,\n  sequence as transducerSequence,\n  taking,\n  takingNth,\n  takingWhile,\n} from \"./transducer.mjs\";\n\nconst lazyConsStates = new WeakMap();\nconst NO_LAZY_CONS_FAILURE = Symbol(\"eliscript.lazy-cons.no-failure\");\n\nfunction requireThunk(value, label) {\n  if (typeof value !== \"function\") {\n    throw new TypeError(`${label} must be a function`);\n  }\n  return value;\n}\n\nfunction requireArity(actual, expected, name) {\n  if (actual !== expected) {\n    const unit = expected === 1 ? \"argument\" : \"arguments\";\n    throw new TypeError(`${name} requires exactly ${expected} ${unit}`);\n  }\n}\n\nfunction sequenceIterator(value) {\n  const sequence = seq(value);\n  return sequence === null\n    ? [][Symbol.iterator]()\n    : sequence[Symbol.iterator]();\n}\n\nfunction realizeConsTail(state) {\n  if (state.failure !== NO_LAZY_CONS_FAILURE) throw state.failure;\n  if (!state.tailStarted) {\n    state.tailStarted = true;\n    try {\n      state.tail = state.tailThunk();\n      state.tailThunk = null;\n    } catch (error) {\n      state.failure = error;\n      throw error;\n    }\n  }\n  return state.tail;\n}\n\nfunction lazyConsIterator(initialState) {\n  let state = initialState;\n  let headPending = true;\n  let tailIterator = null;\n  let complete = false;\n  return {\n    next() {\n      while (!complete) {\n        if (state !== null && headPending) {\n          headPending = false;\n          return { value: state.value, done: false };\n        }\n        if (state !== null) {\n          const tail = realizeConsTail(state);\n          const tailState = lazyConsStates.get(tail);\n          if (tailState !== undefined) {\n            state = tailState;\n            headPending = true;\n            continue;\n          }\n          state = null;\n          tailIterator = sequenceIterator(tail);\n        }\n        const result = tailIterator.next();\n        if (!result.done) return result;\n        complete = true;\n      }\n      return { value: undefined, done: true };\n    },\n    return(value) {\n      complete = true;\n      if (tailIterator !== null && typeof tailIterator.return === \"function\") {\n        tailIterator.return();\n      }\n      return { value, done: true };\n    },\n    [Symbol.iterator]() {\n      return this;\n    },\n  };\n}\n\nexport function lazySequence(thunk) {\n  if (arguments.length !== 1) {\n    throw new TypeError(\"lazySequence requires exactly one thunk\");\n  }\n  requireThunk(thunk, \"lazySequence thunk\");\n  return memoizedSequenceView(() => sequenceIterator(thunk()));\n}\n\nexport function lazyCons(value, tailThunk) {\n  if (arguments.length !== 2) {\n    throw new TypeError(\"lazyCons requires a value and tail thunk\");\n  }\n  requireThunk(tailThunk, \"lazyCons tail thunk\");\n  const state = {\n    value,\n    tailThunk,\n    tailStarted: false,\n    tail: null,\n    failure: NO_LAZY_CONS_FAILURE,\n  };\n  const result = memoizedSequenceView(() => lazyConsIterator(state));\n  lazyConsStates.set(result, state);\n  return result;\n}\n\nexport function lazyMap(transform, collection) {\n  requireArity(arguments.length, 2, \"lazyMap\");\n  return transducerSequence(mapping(transform), collection);\n}\n\nexport function lazyMapIndexed(transform, collection) {\n  requireArity(arguments.length, 2, \"lazyMapIndexed\");\n  return transducerSequence(mappingIndexed(transform), collection);\n}\n\nexport function lazyKeep(transform, collection) {\n  requireArity(arguments.length, 2, \"lazyKeep\");\n  return transducerSequence(keeping(transform), collection);\n}\n\nexport function lazyKeepIndexed(transform, collection) {\n  requireArity(arguments.length, 2, \"lazyKeepIndexed\");\n  return transducerSequence(keepingIndexed(transform), collection);\n}\n\nexport function lazyFilter(predicate, collection) {\n  requireArity(arguments.length, 2, \"lazyFilter\");\n  return transducerSequence(filtering(predicate), collection);\n}\n\nexport function lazyRemove(predicate, collection) {\n  requireArity(arguments.length, 2, \"lazyRemove\");\n  return transducerSequence(removing(predicate), collection);\n}\n\nexport function lazyTake(limit, collection) {\n  requireArity(arguments.length, 2, \"lazyTake\");\n  return transducerSequence(taking(limit), collection);\n}\n\nexport function lazyDrop(limit, collection) {\n  requireArity(arguments.length, 2, \"lazyDrop\");\n  return transducerSequence(dropping(limit), collection);\n}\n\nexport function lazyTakeWhile(predicate, collection) {\n  requireArity(arguments.length, 2, \"lazyTakeWhile\");\n  return transducerSequence(takingWhile(predicate), collection);\n}\n\nexport function lazyDropWhile(predicate, collection) {\n  requireArity(arguments.length, 2, \"lazyDropWhile\");\n  return transducerSequence(droppingWhile(predicate), collection);\n}\n\nexport function lazyTakeNth(interval, collection) {\n  requireArity(arguments.length, 2, \"lazyTakeNth\");\n  return transducerSequence(takingNth(interval), collection);\n}\n\nexport function lazyInterpose(separator, collection) {\n  requireArity(arguments.length, 2, \"lazyInterpose\");\n  return transducerSequence(interposing(separator), collection);\n}\n\nexport function lazyDedupe(collection) {\n  requireArity(arguments.length, 1, \"lazyDedupe\");\n  return transducerSequence(deduping(), collection);\n}\n\nexport function lazyDistinct(collection) {\n  requireArity(arguments.length, 1, \"lazyDistinct\");\n  return transducerSequence(distincting(), collection);\n}\n\nexport function lazyMapcat(transform, collection) {\n  requireArity(arguments.length, 2, \"lazyMapcat\");\n  return transducerSequence(mapcatting(transform), collection);\n}\n\nexport function lazyPartitionAll(size, collection) {\n  requireArity(arguments.length, 2, \"lazyPartitionAll\");\n  return transducerSequence(partitioningAll(size), collection);\n}\n\nexport function lazyPartitionBy(classifier, collection) {\n  requireArity(arguments.length, 2, \"lazyPartitionBy\");\n  return transducerSequence(partitioningBy(classifier), collection);\n}\n\nexport function isLazySequence(value) {\n  return value instanceof MemoizedSequenceView;\n}\n\nfunction status(value) {\n  if (!isLazySequence(value)) {\n    throw new TypeError(\"operation requires a lazy sequence\");\n  }\n  return memoizedSequenceStatus(value);\n}\n\nexport function isLazySequenceRealized(value) {\n  return status(value).started;\n}\n\nexport function realizedLazySequenceCount(value) {\n  return status(value).realizedCount;\n}\n\nexport function realizeLazySequence(value) {\n  status(value);\n  for (const _element of value) {\n    // Traversal commits each produced value to the shared realization cache.\n  }\n  return value;\n}\n"))
+(module eliscript.runtime.core.lazy-sequence
+  (import "./collection.mjs" MemoizedSequenceView memoizedSequenceView seq)
+  (import "./collection-internals.mjs" memoizedSequenceStatus)
+  (import "./transducer.mjs"
+    deduping
+    distincting
+    dropping
+    droppingWhile
+    filtering
+    interposing
+    keeping
+    keepingIndexed
+    mapcatting
+    mapping
+    mappingIndexed
+    partitioningAll
+    partitioningBy
+    removing
+    sequence
+    taking
+    takingNth
+    takingWhile)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+  (defconst lazy-cons-states (new globalThis/WeakMap))
+  (defconst no-failure (funcall globalThis/Symbol "eliscript.lazy-cons.no-failure"))
+
+  (defun fail (message)
+    (throw (new globalThis/TypeError message)))
+
+  (defun callable? (value)
+    (= (funcall typeof-value value) "function"))
+
+  (defun truth (value)
+    (funcall globalThis/Boolean value))
+
+  (defun require-thunk (value label)
+    (unless (callable? value)
+      (fail (str label " must be a function")))
+    value)
+
+  (defun require-arity (actual expected name)
+    (unless (= actual expected)
+      (fail (str name " requires exactly " expected (if (= expected 1) " argument" " arguments")))))
+
+  (defun method (implementation name arity)
+    (let ((function (funcall
+                      (js* "(fn, name) => ({ [name](...args) { return fn(this, ...args); } })[name]")
+                      implementation
+                      name)))
+      (Object/defineProperty function "length" (js-object :value arity :configurable t))
+      function))
+
+  (defun sequence-iterator (value)
+    (let ((source (seq value)))
+      (if (nil? source)
+          (js-call (aref (js-array) (get globalThis/Symbol :iterator)) :call (js-array))
+          (js-call (aref source (get globalThis/Symbol :iterator)) :call source))))
+
+  (defun realize-tail (state)
+    (unless (eq (get state :failure) no-failure)
+      (throw (get state :failure)))
+    (unless (get state :tailStarted)
+      (put state "tailStarted" t)
+      (try
+        (put state "tail" (funcall (get state :tailThunk)))
+        (put state "tailThunk" nil)
+        (catch error
+          (put state "failure" error)
+          (throw error))))
+    (get state :tail))
+
+  (defun cons-iterator (initial)
+    (let ((state initial)
+          (head-pending t)
+          (tail-iterator nil)
+          (complete false))
+      (let ((iterator
+              (js-object
+                :next (method
+                        (lambda (_self)
+                          (let ((result undefined)
+                                (returned false))
+                            (while (and (not complete) (not returned))
+                              (if (and (not (nil? state)) head-pending)
+                                  (setq head-pending false
+                                        result (js-object :value (get state :value) :done false)
+                                        returned t)
+                                  (progn
+                                    (when (not (nil? state))
+                                      (let* ((tail (realize-tail state))
+                                             (tail-state (js-call lazy-cons-states :get tail)))
+                                        (if (not (undefined? tail-state))
+                                            (setq state tail-state head-pending t)
+                                            (setq state nil tail-iterator (sequence-iterator tail)))))
+                                    (when (nil? state)
+                                      (let ((next-item (js-call tail-iterator :next)))
+                                        (if (not (truth (get next-item :done)))
+                                            (setq result next-item returned t)
+                                            (setq complete t)))))))
+                            (if returned result (js-object :value undefined :done t))))
+                        "next"
+                        0)
+                :return (method
+                          (lambda (_self value)
+                            (setq complete t)
+                            (when (and (not (nil? tail-iterator))
+                                       (callable? (get tail-iterator :return)))
+                              (js-call tail-iterator :return))
+                            (js-object :value value :done t))
+                          "return"
+                          1))))
+        (put iterator (get globalThis/Symbol :iterator)
+              (method (lambda (self) self) "[Symbol.iterator]" 0))
+        iterator)))
+
+  (defun lazySequence (&rest arguments)
+    (unless (= (js-length arguments) 1)
+      (fail "lazySequence requires exactly one thunk"))
+    (let ((thunk (get arguments 0)))
+      (require-thunk thunk "lazySequence thunk")
+      (memoizedSequenceView (lambda () (sequence-iterator (funcall thunk))))))
+
+  (defun lazyCons (&rest arguments)
+    (unless (= (js-length arguments) 2)
+      (fail "lazyCons requires a value and tail thunk"))
+    (let ((value (get arguments 0))
+          (tail-thunk (get arguments 1)))
+      (require-thunk tail-thunk "lazyCons tail thunk")
+      (let* ((state (js-object
+                      :value value
+                      :tailThunk tail-thunk
+                      :tailStarted false
+                      :tail nil
+                      :failure no-failure))
+             (result (memoizedSequenceView (lambda () (cons-iterator state)))))
+        (js-call lazy-cons-states :set result state)
+        result)))
+
+  (defun lazyMap (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyMap")
+    (sequence (mapping (get arguments 0)) (get arguments 1)))
+
+  (defun lazyMapIndexed (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyMapIndexed")
+    (sequence (mappingIndexed (get arguments 0)) (get arguments 1)))
+
+  (defun lazyKeep (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyKeep")
+    (sequence (keeping (get arguments 0)) (get arguments 1)))
+
+  (defun lazyKeepIndexed (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyKeepIndexed")
+    (sequence (keepingIndexed (get arguments 0)) (get arguments 1)))
+
+  (defun lazyFilter (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyFilter")
+    (sequence (filtering (get arguments 0)) (get arguments 1)))
+
+  (defun lazyRemove (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyRemove")
+    (sequence (removing (get arguments 0)) (get arguments 1)))
+
+  (defun lazyTake (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyTake")
+    (sequence (taking (get arguments 0)) (get arguments 1)))
+
+  (defun lazyDrop (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyDrop")
+    (sequence (dropping (get arguments 0)) (get arguments 1)))
+
+  (defun lazyTakeWhile (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyTakeWhile")
+    (sequence (takingWhile (get arguments 0)) (get arguments 1)))
+
+  (defun lazyDropWhile (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyDropWhile")
+    (sequence (droppingWhile (get arguments 0)) (get arguments 1)))
+
+  (defun lazyTakeNth (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyTakeNth")
+    (sequence (takingNth (get arguments 0)) (get arguments 1)))
+
+  (defun lazyInterpose (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyInterpose")
+    (sequence (interposing (get arguments 0)) (get arguments 1)))
+
+  (defun lazyDedupe (&rest arguments)
+    (require-arity (js-length arguments) 1 "lazyDedupe")
+    (sequence (deduping) (get arguments 0)))
+
+  (defun lazyDistinct (&rest arguments)
+    (require-arity (js-length arguments) 1 "lazyDistinct")
+    (sequence (distincting) (get arguments 0)))
+
+  (defun lazyMapcat (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyMapcat")
+    (sequence (mapcatting (get arguments 0)) (get arguments 1)))
+
+  (defun lazyPartitionAll (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyPartitionAll")
+    (sequence (partitioningAll (get arguments 0)) (get arguments 1)))
+
+  (defun lazyPartitionBy (&rest arguments)
+    (require-arity (js-length arguments) 2 "lazyPartitionBy")
+    (sequence (partitioningBy (get arguments 0)) (get arguments 1)))
+
+  (defun isLazySequence (value)
+    (funcall instance-of? value MemoizedSequenceView))
+
+  (defun status (value)
+    (unless (isLazySequence value)
+      (fail "operation requires a lazy sequence"))
+    (memoizedSequenceStatus value))
+
+  (defun isLazySequenceRealized (value)
+    (get (status value) :started))
+
+  (defun realizedLazySequenceCount (value)
+    (get (status value) :realizedCount))
+
+  (defun realizeLazySequence (value)
+    (status value)
+    (let ((iterator (js-call (aref value (get globalThis/Symbol :iterator)) :call value))
+          (done false))
+      (while (not done)
+        (let ((step (js-call iterator :next)))
+          (when (truth (get step :done))
+            (setq done t)))))
+    value)
+
+  (Object/defineProperty lazySequence "length" (js-object :value 1 :configurable t))
+  (Object/defineProperty lazyCons "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyMap "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyMapIndexed "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyKeep "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyKeepIndexed "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyFilter "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyRemove "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyTake "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyDrop "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyTakeWhile "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyDropWhile "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyTakeNth "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyInterpose "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyDedupe "length" (js-object :value 1 :configurable t))
+  (Object/defineProperty lazyDistinct "length" (js-object :value 1 :configurable t))
+  (Object/defineProperty lazyMapcat "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyPartitionAll "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty lazyPartitionBy "length" (js-object :value 2 :configurable t))
+
+  (export
+    lazySequence
+    lazyCons
+    lazyMap
+    lazyMapIndexed
+    lazyKeep
+    lazyKeepIndexed
+    lazyFilter
+    lazyRemove
+    lazyTake
+    lazyDrop
+    lazyTakeWhile
+    lazyDropWhile
+    lazyTakeNth
+    lazyInterpose
+    lazyDedupe
+    lazyDistinct
+    lazyMapcat
+    lazyPartitionAll
+    lazyPartitionBy
+    isLazySequence
+    isLazySequenceRealized
+    realizedLazySequenceCount
+    realizeLazySequence))

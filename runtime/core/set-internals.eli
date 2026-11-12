@@ -1,2 +1,19 @@
-(module capsules.runtime.core.set-internals
-  (js* "export const SET_CONSTRUCTOR_TOKEN = Symbol(\"eliscript.set.constructor\");\nexport const SET_STATE = Symbol(\"eliscript.set.state\");\nexport const TRANSIENT_SET_CONSTRUCTOR_TOKEN = Symbol(\n  \"eliscript.set.transient-constructor\",\n);\nexport const TRANSIENT_SET_STATE = Symbol(\"eliscript.set.transient-state\");\n\nconst transientMetrics = {\n  persistentCalls: 0,\n  invalidCalls: 0,\n};\n\nexport const SET_PRESENT = Object.freeze({\n  [Symbol.toStringTag]: \"EliscriptPersistentHashSetEntry\",\n});\n\nexport function resetTransientSetMetrics() {\n  for (const key of Object.keys(transientMetrics)) {\n    transientMetrics[key] = 0;\n  }\n}\n\nexport function readTransientSetMetrics() {\n  return Object.freeze({ ...transientMetrics });\n}\n\nexport function recordTransientSetPersistent() {\n  transientMetrics.persistentCalls += 1;\n}\n\nexport function recordInvalidTransientSetCall() {\n  transientMetrics.invalidCalls += 1;\n}\n"))
+(module eliscript.runtime.core.set-internals
+  (defconst SET_CONSTRUCTOR_TOKEN (funcall globalThis.Symbol "eliscript.set.constructor"))
+  (defconst SET_STATE (funcall globalThis.Symbol "eliscript.set.state"))
+  (defconst TRANSIENT_SET_CONSTRUCTOR_TOKEN (funcall globalThis.Symbol "eliscript.set.transient-constructor"))
+  (defconst TRANSIENT_SET_STATE (funcall globalThis.Symbol "eliscript.set.transient-state"))
+  (defconst transientMetrics (js-object :persistentCalls 0 :invalidCalls 0))
+  (defconst SET_PRESENT (let ((entry (js-object)))
+    (put entry (get globalThis.Symbol :toStringTag) "EliscriptPersistentHashSetEntry") (Object/freeze entry)))
+  (defun resetTransientSetMetrics ()
+    (let ((keys (Object/keys transientMetrics)) (index 0))
+      (while (< index (js-length keys))
+        (put transientMetrics (aref keys index) 0) (setq index (1+ index)))) undefined)
+  (defun readTransientSetMetrics () (Object/freeze (Object/assign (js-object) transientMetrics)))
+  (defun recordTransientSetPersistent ()
+    (put transientMetrics :persistentCalls (1+ (get transientMetrics :persistentCalls))) undefined)
+  (defun recordInvalidTransientSetCall ()
+    (put transientMetrics :invalidCalls (1+ (get transientMetrics :invalidCalls))) undefined)
+  (export SET_CONSTRUCTOR_TOKEN SET_STATE TRANSIENT_SET_CONSTRUCTOR_TOKEN TRANSIENT_SET_STATE SET_PRESENT
+    resetTransientSetMetrics readTransientSetMetrics recordTransientSetPersistent recordInvalidTransientSetCall))

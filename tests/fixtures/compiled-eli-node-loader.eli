@@ -1,2 +1,7 @@
-(module capsules.tests.fixtures.compiled-eli-node-loader
-  (js* "import { readFile } from \"node:fs/promises\";\n\nexport async function load(url, context, nextLoad) {\n  if (url.endsWith(\".eli\")) {\n    return {\n      format: \"module\",\n      shortCircuit: true,\n      source: await readFile(new URL(url), \"utf8\"),\n    };\n  }\n  return nextLoad(url, context);\n}\n"))
+(module tests.fixtures.compiled-eli-node-loader
+  (import "node:fs/promises" readFile)
+  (defasync load (url context nextLoad)
+    (if (js-call url :endsWith ".eli")
+      (js-object :format "module" :shortCircuit t :source (await (readFile (new globalThis.URL url) "utf8")))
+      (funcall nextLoad url context)))
+  (export load))

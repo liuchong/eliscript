@@ -1,2 +1,14 @@
-(module capsules.tests.fixtures.platform-capabilities
-  (js* "import {\n  browserCapabilities,\n  browserCapabilityDescriptor,\n  browserFetch,\n  browserNow,\n} from \"../../platform/browser.mjs\";\nimport {\n  workerCapabilities,\n  workerCapabilityDescriptor,\n  workerProgress,\n} from \"../../platform/worker.mjs\";\n\nconst browser = browserCapabilities({\n  fetch(input) {\n    return { ok: true, input };\n  },\n  performance: {\n    now() {\n      return 42.5;\n    },\n  },\n}, [\"network\", \"clock\"]);\nconst progress = [];\nconst worker = workerCapabilities({\n  signal: new AbortController().signal,\n  progress(value) {\n    progress.push(value);\n    return progress.length;\n  },\n}, [\"progress\", \"cancellation\"]);\n\nworkerProgress(worker, \"indexed\");\nconsole.log(JSON.stringify({\n  browser: browserCapabilityDescriptor(browser),\n  fetch: await browserFetch(browser, \"/articles\"),\n  now: browserNow(browser),\n  worker: workerCapabilityDescriptor(worker),\n  progress,\n}));\n"))
+(module tests.fixtures.platform-capabilities
+  (import "../../platform/browser.mjs" browserCapabilities browserCapabilityDescriptor browserFetch browserNow)
+  (import "../../platform/worker.mjs" workerCapabilities workerCapabilityDescriptor workerProgress)
+  (defconst browser (browserCapabilities (js-object :fetch (lambda (input) (js-object :ok t :input input))
+    :performance (js-object :now (lambda () 42.5))) (js-array "network" "clock")))
+  (defconst progress (js-array))
+  (defconst worker (workerCapabilities (js-object :signal (get (new globalThis.AbortController) :signal)
+    :progress (lambda (value) (js-call progress :push value) (js-length progress))) (js-array "progress" "cancellation")))
+  (workerProgress worker "indexed")
+  (defasync run-host-main ()
+    (js-call globalThis.console :log (JSON/stringify (js-object :browser (browserCapabilityDescriptor browser)
+    :fetch (await (browserFetch browser "/articles")) :now (browserNow browser) :worker (workerCapabilityDescriptor worker) :progress progress))))
+  (run-host-main)
+)

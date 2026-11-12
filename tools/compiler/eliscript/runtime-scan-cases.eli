@@ -48,9 +48,9 @@
             (js-call emitter :reference_runtime_requirements program))))
         (js-call assert :deepStrictEqual (js-call emitter :runtime_requirements all)
           (js-object :numericCoercion t :imul t :arrayText t :numberConversion t :hostIdentityToken t
-            :literal t :collection t :list t :value t :binding false :math false))
+            :literal t :collection t :list t :value t :binding false :math false :valueType false :primitiveRuntime false))
         (js-call assert :deepStrictEqual (js-call emitter :runtime_requirements static)
           (js-object :numericCoercion false :imul false :arrayText false :numberConversion false :hostIdentityToken false
-            :literal false :collection false :list false :value false :binding false :math false))
+            :literal false :collection false :list false :value false :binding false :math false :valueType false :primitiveRuntime false))
         (js-call assert :strictEqual (get (js-call emitter :runtime_requirements math) :math) t))))
   (export verifyRuntimeScan compilerSources))

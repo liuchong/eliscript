@@ -1,2 +1,158 @@
-(module capsules.bootstrap.host.check-cli-ground
-  (js* "#!/usr/bin/env node\n\nimport { readFile } from \"node:fs/promises\";\nimport { resolve } from \"node:path\";\nimport { fileURLToPath } from \"node:url\";\n\nimport {\n  diagnosticFromError,\n  loadCompiler,\n  renderDiagnostic,\n  requestedDiagnosticFormat,\n} from \"./bun.mjs\";\nimport { checkProject } from \"./project.mjs\";\nimport { readProjectConfiguration } from \"./project-cli.mjs\";\n\nconst usage = `Usage: eliscript-check [OPTIONS] [ENTRY ...]\n\nOptions:\n  --config FILE     Read entries and root from a versioned project request\n  --root DIR        Contain local source imports below DIR\n  --portable NAME   Check NAME and its transitive portable closure\n  --stdin-file FILE Use standard input as the current contents of FILE\n  --json            Print the versioned project check report\n  --diagnostic-format human|json\n                     Select human-readable or JSON failures\n  -h, --help         Show this help\n`;\n\nexport function parseArguments(arguments_) {\n  const argumentsList = [...arguments_];\n  if (argumentsList[0] === \"--\") argumentsList.shift();\n  const entries = [];\n  const portableEntries = [];\n  let configuration;\n  let root;\n  let stdinFile;\n  let jsonReport = false;\n  let diagnosticFormat = \"human\";\n\n  while (argumentsList.length > 0) {\n    const argument = argumentsList.shift();\n    if (argument === \"-h\" || argument === \"--help\") return { help: true };\n    if (argument === \"--config\") {\n      if (argumentsList.length === 0) throw new Error(`${argument} requires a file`);\n      if (configuration !== undefined) {\n        throw new Error(\"multiple --config files are not supported\");\n      }\n      configuration = argumentsList.shift();\n    } else if (argument === \"--root\") {\n      if (argumentsList.length === 0) throw new Error(`${argument} requires a directory`);\n      root = argumentsList.shift();\n    } else if (argument === \"--portable\") {\n      if (argumentsList.length === 0) throw new Error(`${argument} requires an entry name`);\n      portableEntries.push(argumentsList.shift());\n    } else if (argument === \"--stdin-file\") {\n      if (argumentsList.length === 0) throw new Error(`${argument} requires a file`);\n      if (stdinFile !== undefined) {\n        throw new Error(\"multiple --stdin-file values are not supported\");\n      }\n      stdinFile = argumentsList.shift();\n    } else if (argument === \"--json\") {\n      jsonReport = true;\n    } else if (argument === \"--diagnostic-format\") {\n      if (argumentsList.length === 0) {\n        throw new Error(`${argument} requires human or json`);\n      }\n      diagnosticFormat = argumentsList.shift();\n      if (diagnosticFormat !== \"human\" && diagnosticFormat !== \"json\") {\n        throw new Error(`unsupported diagnostic format: ${diagnosticFormat}`);\n      }\n    } else if (argument.startsWith(\"-\")) {\n      throw new Error(`unknown option: ${argument}`);\n    } else {\n      entries.push(argument);\n    }\n  }\n\n  if (configuration === undefined && entries.length === 0) {\n    throw new Error(\"missing entry file\");\n  }\n  return {\n    entry: entries.length === 1 ? entries[0] : undefined,\n    entries: entries.length > 1 ? entries : undefined,\n    root,\n    portableEntries,\n    configuration,\n    stdinFile,\n    jsonReport,\n    diagnosticFormat,\n  };\n}\n\nexport async function execute(arguments_, options = {}) {\n  const parsed = parseArguments(arguments_);\n  if (parsed.help) return { help: true };\n  const compiler = options.compiler ?? await loadCompiler(options.moduleDirectory);\n  let request;\n  if (parsed.configuration !== undefined) {\n    const configured = await readProjectConfiguration(parsed.configuration, compiler);\n    request = {\n      entry: configured.entry,\n      entries: configured.entries,\n      root: configured.root,\n      portableEntries: configured.portableEntries,\n    };\n    if (parsed.entries !== undefined) {\n      request.entries = parsed.entries;\n      delete request.entry;\n    } else if (parsed.entry !== undefined) {\n      request.entry = parsed.entry;\n      delete request.entries;\n    }\n    if (parsed.root !== undefined) request.root = parsed.root;\n    if (parsed.portableEntries.length > 0) {\n      request.portableEntries = parsed.portableEntries;\n    }\n  } else {\n    request = {\n      entry: parsed.entry,\n      entries: parsed.entries,\n      root: parsed.root,\n      portableEntries: parsed.portableEntries,\n    };\n  }\n  let sourceOverrides;\n  if (parsed.stdinFile !== undefined) {\n    const sourceText = options.stdinSource ?? await readFile(0, \"utf8\");\n    sourceOverrides = { [resolve(parsed.stdinFile)]: sourceText };\n  }\n  const result = await checkProject({\n    ...request,\n    sourceOverrides,\n    compiler,\n    moduleDirectory: options.moduleDirectory,\n  });\n  return { result, jsonReport: parsed.jsonReport };\n}\n\nexport async function main(arguments_ = process.argv.slice(2)) {\n  const execution = await execute(arguments_);\n  if (execution.help) {\n    process.stdout.write(usage);\n    return;\n  }\n  process.stdout.write(execution.jsonReport\n    ? `${JSON.stringify(execution.result.report)}\\n`\n    : `Checked ${execution.result.report.counts.modules} modules.\\n`);\n}\n\nconst isMain = process.argv[1] !== undefined &&\n  resolve(process.argv[1]) === fileURLToPath(import.meta.url);\nif (isMain) {\n  const outputFormat = requestedDiagnosticFormat(process.argv.slice(2));\n  main().catch((error) => {\n    const diagnostic = diagnosticFromError(error);\n    if (outputFormat === \"json\") {\n      console.error(JSON.stringify(diagnostic));\n    } else {\n      console.error(`eliscript-check: ${renderDiagnostic(diagnostic)}`);\n    }\n    process.exitCode = 1;\n  });\n}\n"))
+(module bootstrap.host.check-cli-ground
+  (import "node:fs/promises" readFile)
+  (import "node:path" resolve)
+  (import "node:url" fileURLToPath)
+  (import "./bun.mjs"
+    diagnosticFromError loadCompiler renderDiagnostic requestedDiagnosticFormat)
+  (import "./project.mjs" checkProject)
+  (import "./project-cli.mjs" readProjectConfiguration)
+
+  (defconst usage
+    (str "Usage: eliscript-check [OPTIONS] [ENTRY ...]\n\n"
+         "Options:\n"
+         "  --config FILE     Read entries and root from a versioned project request\n"
+         "  --root DIR        Contain local source imports below DIR\n"
+         "  --portable NAME   Check NAME and its transitive portable closure\n"
+         "  --stdin-file FILE Use standard input as the current contents of FILE\n"
+         "  --json            Print the versioned project check report\n"
+         "  --diagnostic-format human|json\n"
+         "                     Select human-readable or JSON failures\n"
+         "  -h, --help         Show this help\n"))
+
+  (defun parseArguments (arguments_)
+    (let ((argumentsList (Array/from arguments_))
+          (entries (js-array))
+          (portableEntries (js-array))
+          (configuration undefined)
+          (root undefined)
+          (stdinFile undefined)
+          (jsonReport false)
+          (diagnosticFormat "human")
+          (helpResult nil))
+      (when (= (aref argumentsList 0) "--")
+        (js-call argumentsList :shift))
+      (while (and (nil? helpResult) (> (js-length argumentsList) 0))
+        (let ((argument (js-call argumentsList :shift)))
+          (cond
+            ((or (= argument "-h") (= argument "--help"))
+              (setq helpResult (js-object :help t)))
+            ((= argument "--config")
+              (when (= (js-length argumentsList) 0)
+                (throw (new globalThis.Error (str argument " requires a file"))))
+              (unless (undefined? configuration)
+                (throw (new globalThis.Error "multiple --config files are not supported")))
+              (setq configuration (js-call argumentsList :shift)))
+            ((= argument "--root")
+              (when (= (js-length argumentsList) 0)
+                (throw (new globalThis.Error (str argument " requires a directory"))))
+              (setq root (js-call argumentsList :shift)))
+            ((= argument "--portable")
+              (when (= (js-length argumentsList) 0)
+                (throw (new globalThis.Error (str argument " requires an entry name"))))
+              (js-call portableEntries :push (js-call argumentsList :shift)))
+            ((= argument "--stdin-file")
+              (when (= (js-length argumentsList) 0)
+                (throw (new globalThis.Error (str argument " requires a file"))))
+              (unless (undefined? stdinFile)
+                (throw (new globalThis.Error "multiple --stdin-file values are not supported")))
+              (setq stdinFile (js-call argumentsList :shift)))
+            ((= argument "--json")
+              (setq jsonReport t))
+            ((= argument "--diagnostic-format")
+              (when (= (js-length argumentsList) 0)
+                (throw (new globalThis.Error (str argument " requires human or json"))))
+              (setq diagnosticFormat (js-call argumentsList :shift))
+              (unless (or (= diagnosticFormat "human") (= diagnosticFormat "json"))
+                (throw (new globalThis.Error (str "unsupported diagnostic format: " diagnosticFormat)))))
+            ((js-call argument :startsWith "-")
+              (throw (new globalThis.Error (str "unknown option: " argument))))
+            (t
+              (js-call entries :push argument)))))
+      (if helpResult
+        helpResult
+        (progn
+          (when (and (undefined? configuration) (= (js-length entries) 0))
+            (throw (new globalThis.Error "missing entry file")))
+          (js-object
+            :entry (if (= (js-length entries) 1) (aref entries 0) undefined)
+            :entries (if (> (js-length entries) 1) entries undefined)
+            :root root
+            :portableEntries portableEntries
+            :configuration configuration
+            :stdinFile stdinFile
+            :jsonReport jsonReport
+            :diagnosticFormat diagnosticFormat)))))
+
+  (defasync execute (arguments_ &rest __opt)
+    (let* ((options (aref __opt 0))
+           (actual-options (if (undefined? options) (js-object) options))
+           (parsed (parseArguments arguments_)))
+      (if (get parsed :help)
+        (js-object :help t)
+        (let* ((compiler (if (nullish? (get actual-options :compiler))
+                           (await (loadCompiler (get actual-options :moduleDirectory)))
+                           (get actual-options :compiler)))
+               (request nil))
+          (if (not (undefined? (get parsed :configuration)))
+            (let ((configured (await (readProjectConfiguration (get parsed :configuration) compiler))))
+              (setq request
+                (js-object :entry (get configured :entry)
+                  :entries (get configured :entries)
+                  :root (get configured :root)
+                  :portableEntries (get configured :portableEntries)))
+              (cond
+                ((not (undefined? (get parsed :entries)))
+                  (put request :entries (get parsed :entries))
+                  (Reflect/deleteProperty request "entry"))
+                ((not (undefined? (get parsed :entry)))
+                  (put request :entry (get parsed :entry))
+                  (Reflect/deleteProperty request "entries")))
+              (unless (undefined? (get parsed :root))
+                (put request :root (get parsed :root)))
+              (when (> (js-length (get parsed :portableEntries)) 0)
+                (put request :portableEntries (get parsed :portableEntries))))
+            (setq request
+              (js-object :entry (get parsed :entry)
+                :entries (get parsed :entries)
+                :root (get parsed :root)
+                :portableEntries (get parsed :portableEntries))))
+          (let ((sourceOverrides undefined))
+            (unless (undefined? (get parsed :stdinFile))
+              (let ((sourceText (if (nullish? (get actual-options :stdinSource))
+                                  (await (readFile 0 "utf8"))
+                                  (get actual-options :stdinSource))))
+                (setq sourceOverrides (js-object))
+                (put sourceOverrides (resolve (get parsed :stdinFile)) sourceText)))
+            (let ((result (await (checkProject
+                                   (Object/assign (js-object) request
+                                     (js-object :sourceOverrides sourceOverrides
+                                       :compiler compiler
+                                       :moduleDirectory (get actual-options :moduleDirectory)))))))
+              (js-object :result result :jsonReport (get parsed :jsonReport))))))))
+
+  (defasync main (&rest __opt)
+    (let* ((arguments_ (aref __opt 0))
+           (actual-args (if (undefined? arguments_)
+                          (js-call (get globalThis.process :argv) :slice 2)
+                          arguments_))
+           (execution (await (execute actual-args))))
+      (if (get execution :help)
+        (js-call (get globalThis.process :stdout) :write usage)
+        (js-call (get globalThis.process :stdout) :write
+          (if (get execution :jsonReport)
+            (str (JSON/stringify (get (get execution :result) :report)) "\n")
+            (str "Checked " (get (get (get (get execution :result) :report) :counts) :modules) " modules.\n"))))))
+
+  (let ((entry (aref (get globalThis.process :argv) 1)))
+    (when (and (not (undefined? entry))
+               (= (resolve entry) (fileURLToPath (js* "import.meta.url"))))
+      (let ((outputFormat (requestedDiagnosticFormat (js-call (get globalThis.process :argv) :slice 2))))
+        (js-call (main) :catch
+          (lambda (error)
+            (let ((diagnostic (diagnosticFromError error)))
+              (if (= outputFormat "json")
+                (console/error (JSON/stringify diagnostic))
+                (console/error (str "eliscript-check: " (renderDiagnostic diagnostic))))
+              (put globalThis.process :exitCode 1)))))))
+
+  (export execute main parseArguments))

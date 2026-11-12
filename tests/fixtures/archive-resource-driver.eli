@@ -1,0 +1,9 @@
+(module tests.fixtures.archive-resource-driver
+  ; These counters observe authenticated loader dispatch only.
+  (defun compiler_session_new () (js-object :calls 0))
+  (defun compiler_session_close (state) (put state :closed t))
+  (defun compiler_session_request (state text)
+    (put state :calls (+ (get state :calls) 1))
+    (let* ((input (JSON/parse text)) (literal (get input :literalSources)))
+      (JSON/stringify (js-object :operation (get input :operation) :calls (get state :calls) :literalSources (if (nullish? literal) nil literal)))))
+  (export compiler_session_new compiler_session_close compiler_session_request))

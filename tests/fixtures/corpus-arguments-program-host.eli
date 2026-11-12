@@ -1,0 +1,9 @@
+(module tests.fixtures.corpus-arguments-program-host
+  (import "node:process" :default process)
+  (import "node:url" pathToFileURL)
+  (import "node:path" resolve)
+  (defasync main ()
+    (let* ((args (js-call (get process :argv) :slice 2)) (directory (aref args 0)) (collection (aref args 1)) (count (aref args 2))
+           (module (await (funcall (js* "(specifier) => import(specifier)") (get (pathToFileURL (resolve directory "entry.mjs")) :href)))))
+      (js-call (get process :stdout) :write (str (JSON/stringify (js-array collection count (get module :value))) "\n"))))
+  (main))

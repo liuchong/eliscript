@@ -1,2 +1,204 @@
-(module capsules.tests.wasm-compiler-analyzer-rig
-  (js* "// Complete linked Analyzer test harness; no test registration or host callbacks.\nimport assert from 'node:assert/strict';\nimport {readFile,mkdtemp,rm} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {pathToFileURL} from 'node:url';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nexport let directory,backend,runtime,modules,reader,reference,bytes,analyzerFailure,transientFailure,transientReference;\nconst flatten=values=>values.flatMap(node=>node.kind==='module-declaration'?flatten(node.children):[node]);\nexport async function setup(){\n directory=await mkdtemp(resolve(tmpdir(),'eliscript-whole-analyzer-'));backend=await buildBackends({outputRoot:directory});\n modules=await Promise.all(['syntax','symbol','reader','transient-analysis','analyzer'].map(async name=>({id:name+'.mjs',program:backend.compiler.compile_ir_string(await readFile('bootstrap/compiler/'+name+'.eli','utf8'),name+'.eli')})));\n modules.push({id:'entry.mjs',program:backend.compiler.compile_ir_string('(import \"./reader.mjs\" read-string) (import \"./analyzer.mjs\" analyze-module select-portable-module) (import \"./transient-analysis.mjs\" analyze-transients) (export read-string analyze-module select-portable-module analyze-transients)','analyzer-entry.eli')});\n for(const[id,name]of[['analyzer.mjs','fail'],['transient-analysis.mjs','transient-fail']]){const p=modules.find(module=>module.id===id).program,node=flatten(p.body).find(node=>node.kind==='variable-declaration'&&node.value===name);assert(node);const exported=backend.compiler.compile_ir_string('(defconst '+name+' nil) (export '+name+')','diagnostic-export.eli').body.filter(node=>node.kind==='export-declaration');const helper=await import('data:text/javascript;base64,'+Buffer.from(backend.compiler.emit_ir_string({...p,body:[node,...exported]})).toString('base64'));if(id==='analyzer.mjs')analyzerFailure=helper.fail;else transientFailure=helper.transient_fail;}\n runtime=backend.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli');reference=await import(pathToFileURL(resolve(directory,'bootstrap/analyzer.mjs')).href);reader=await import(pathToFileURL(resolve(directory,'bootstrap/reader.mjs')).href);transientReference=await import(pathToFileURL(resolve(directory,'bootstrap/transient-analysis.mjs')).href);\n}\nexport async function teardown(){if(directory)await rm(directory,{recursive:true,force:true});}\nexport function artifact(options){if(bytes&&!options)return bytes;const saved=JSON.stringify(modules);let result;try{result=Uint8Array.from(backend.managed.emit_managed_project_wasm(modules,'entry.mjs',runtime,options));}catch(error){error.message+=' '+JSON.stringify(error.eliscriptDiagnostic);throw error;}assert.equal(JSON.stringify(modules),saved);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(result)),[]);if(!options)bytes=result;return result;}\nexport function decode(a,value){if(value?.kind===4)return a.readNumber(value);if(value?.kind===5)return a.readString(value);if(value?.kind===14){const out=[];for(let i=0;i<a.length(value);i++){const child=a.get(value,i);try{out.push(decode(a,child));}finally{a.release(child);}}return out;}if(value?.kind===13){const out={},keys=a.objectKeys(value);try{for(let i=0;i<a.length(keys);i++){const key=a.get(keys,i),child=a.objectGet(value,key);try{out[a.readString(key)]=decode(a,child);}finally{a.release(key);a.release(child);}}}finally{a.release(keys);}return out;}return value;}\nexport function property(a,value,name){const key=a.string(name);try{return a.objectGet(value,key);}finally{a.release(key);}}\nexport function finish(a){a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}\nexport function analyzeObserved(a,source,filename,operation='analyze_module'){\n const text=a.string(source),file=a.string(filename);let forms,out;\n try{forms=a.invoke('read_string',[text,file]);out=a.invoke(operation,[forms,file]);assert(a.keyEqual(forms,out));return{status:'ok'};}\n catch(error){if(!error?.kind){error.testManagedState={stage:forms===undefined?'read_string':operation,...a.stats()};throw error;}const message=property(a,error,'message'),diagnostic=property(a,error,'eliscriptDiagnostic');try{return{status:'error',message:a.readString(message),diagnostic:decode(a,diagnostic)};}finally{a.release(message);a.release(diagnostic);a.release(error);}}\n finally{for(const root of[text,file,forms,out])if(root!==undefined)a.release(root);}\n}\nexport function expectedAnalysis(source,filename){try{const forms=reader.read_string(source,filename);assert.equal(reference.analyze_module(forms,filename),forms);return{status:'ok'};}catch(error){return{status:'error',message:error.message,diagnostic:error.eliscriptDiagnostic};}}\n"))
+;; Complete linked Analyzer test harness; no test registration or host callbacks.
+(module tests.wasm-compiler-analyzer-rig
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile mkdtemp rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:url" pathToFileURL)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defvar directory undefined)
+  (defvar backend undefined)
+  (defvar runtime undefined)
+  (defvar modules undefined)
+  (defvar reader undefined)
+  (defvar reference undefined)
+  (defvar bytes undefined)
+  (defvar analyzerFailure undefined)
+  (defvar transientFailure undefined)
+  (defvar transientReference undefined)
+
+  (defun dynamic-import (specifier)
+    (funcall (js* "(specifier) => import(specifier)") specifier))
+
+  (defun flatten (values)
+    (js-call values :flatMap
+      (lambda (node)
+        (if (= (get node :kind) "module-declaration")
+          (flatten (get node :children))
+          (js-array node)))))
+
+  (defasync setup ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-whole-analyzer-"))))
+    (setq backend (await (buildBackends (js-object :outputRoot directory))))
+    (setq modules
+      (await
+        (Promise/all
+          (js-call (js-array "syntax" "symbol" "reader" "transient-analysis" "analyzer") :map
+            (async (name)
+              (js-object
+                :id (str name ".mjs")
+                :program (js-call (get backend :compiler) :compile_ir_string
+                           (await (readFile (str "bootstrap/compiler/" name ".eli") "utf8"))
+                           (str name ".eli"))))))))
+    (js-call modules :push
+      (js-object
+        :id "entry.mjs"
+        :program (js-call (get backend :compiler) :compile_ir_string
+                   "(import \"./reader.mjs\" read-string) (import \"./analyzer.mjs\" analyze-module select-portable-module) (import \"./transient-analysis.mjs\" analyze-transients) (export read-string analyze-module select-portable-module analyze-transients)"
+                   "analyzer-entry.eli")))
+    (let ((pairs (js-array (js-array "analyzer.mjs" "fail")
+                           (js-array "transient-analysis.mjs" "transient-fail")))
+          (idx 0))
+      (while (< idx (js-length pairs))
+        (let* ((pair (aref pairs idx))
+               (id (aref pair 0))
+               (name (aref pair 1))
+               (p (get (js-call modules :find (lambda (m) (= (get m :id) id))) :program))
+               (node (js-call (flatten (get p :body)) :find
+                       (lambda (n) (and (= (get n :kind) "variable-declaration")
+                                        (= (get n :value) name))))))
+          (assert node)
+          (let* ((exported (js-call
+                             (get (js-call (get backend :compiler) :compile_ir_string
+                                    (str "(defconst " name " nil) (export " name ")")
+                                    "diagnostic-export.eli")
+                                  :body)
+                             :filter (lambda (n) (= (get n :kind) "export-declaration"))))
+                 (unit (Object/assign (js-object) p
+                         (js-object :body (js-call (js-array node) :concat exported))))
+                 (helper-url (str "data:text/javascript;base64,"
+                                  (js-call (Buffer/from (js-call (get backend :compiler) :emit_ir_string unit))
+                                           :toString "base64")))
+                 (helper (await (dynamic-import helper-url))))
+            (if (= id "analyzer.mjs")
+              (setq analyzerFailure (get helper :fail))
+              (setq transientFailure (get helper :transient_fail)))))
+        (setq idx (1+ idx))))
+    (setq runtime
+      (js-call (get backend :compiler) :compile_ir_string
+        (await (readFile "bootstrap/runtime/memory.eli" "utf8"))
+        "runtime.eli"))
+    (setq reference (await (dynamic-import (get (pathToFileURL (resolve directory "bootstrap/analyzer.mjs")) :href))))
+    (setq reader (await (dynamic-import (get (pathToFileURL (resolve directory "bootstrap/reader.mjs")) :href))))
+    (setq transientReference (await (dynamic-import (get (pathToFileURL (resolve directory "bootstrap/transient-analysis.mjs")) :href)))))
+
+  (defasync teardown ()
+    (when directory
+      (await (rm directory (js-object :recursive t :force t)))))
+
+  (defun artifact (&rest __host_forwarded_arguments_1)
+    (let* ((options (aref __host_forwarded_arguments_1 0)))
+    (if (and bytes (not options))
+      bytes
+      (let ((saved (JSON/stringify modules))
+            (result undefined))
+        (try
+          (setq result
+            (Uint8Array/from
+              (js-call (get backend :managed) :emit_managed_project_wasm modules "entry.mjs" runtime options)))
+          (catch error
+            (put error :message (str (get error :message) " " (JSON/stringify (get error :eliscriptDiagnostic))))
+            (throw error)))
+        (js-call assert :equal (JSON/stringify modules) saved)
+        (js-call assert :deepEqual
+          (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module result))
+          (js-array))
+        (when (not options)
+          (setq bytes result))
+        result))))
+
+  (defun decode (a value)
+    (cond
+      ((and value (= (get value :kind) 4)) (js-call a :readNumber value))
+      ((and value (= (get value :kind) 5)) (js-call a :readString value))
+      ((and value (= (get value :kind) 14))
+        (let ((out (js-array)) (i 0))
+          (while (< i (js-call a :length value))
+            (let ((child (js-call a :get value i)))
+              (try
+                (js-call out :push (decode a child))
+                (finally (js-call a :release child))))
+            (setq i (1+ i)))
+          out))
+      ((and value (= (get value :kind) 13))
+        (let ((out (js-object))
+              (keys (js-call a :objectKeys value)))
+          (try
+            (let ((i 0))
+              (while (< i (js-call a :length keys))
+                (let* ((key (js-call a :get keys i))
+                       (child (js-call a :objectGet value key)))
+                  (try
+                    (put out (js-call a :readString key) (decode a child))
+                    (finally
+                      (js-call a :release key)
+                      (js-call a :release child))))
+                (setq i (1+ i))))
+            (finally (js-call a :release keys)))
+          out))
+      (t value)))
+
+  (defun property (a value name)
+    (let ((key (js-call a :string name)))
+      (try
+        (js-call a :objectGet value key)
+        (finally (js-call a :release key)))))
+
+  (defun finish (a)
+    (js-call a :closeModule)
+    (js-call a :collect)
+    (js-call assert :equal (js-call a :live) 0)
+    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))
+
+  (defun analyzeObserved (a source filename &rest __host_default_arguments_1)
+    (let* ((operation (aref __host_default_arguments_1 0)))
+    (let* ((op (if (undefined? operation) "analyze_module" operation))
+           (text (js-call a :string source))
+           (file (js-call a :string filename))
+           (forms undefined)
+           (out undefined))
+      (try
+        (setq forms (js-call a :invoke "read_string" (js-array text file)))
+        (setq out (js-call a :invoke op (js-array forms file)))
+        (assert (js-call a :keyEqual forms out))
+        (js-object :status "ok")
+        (catch error
+          (when (not (and error (get error :kind)))
+            (put error :testManagedState
+              (Object/assign (js-object :stage (if (undefined? forms) "read_string" op))
+                             (js-call a :stats)))
+            (throw error))
+          (let ((message (property a error "message"))
+                (diagnostic (property a error "eliscriptDiagnostic")))
+            (try
+              (js-object
+                :status "error"
+                :message (js-call a :readString message)
+                :diagnostic (decode a diagnostic))
+              (finally
+                (js-call a :release message)
+                (js-call a :release diagnostic)
+                (js-call a :release error)))))
+        (finally
+          (js-call (js-array text file forms out) :forEach
+            (lambda (root)
+              (when (not (undefined? root))
+                (js-call a :release root)))))))))
+
+  (defun expectedAnalysis (source filename)
+    (try
+      (let ((forms (js-call reader :read_string source filename)))
+        (js-call assert :equal (js-call reference :analyze_module forms filename) forms)
+        (js-object :status "ok"))
+      (catch error
+        (js-object
+          :status "error"
+          :message (get error :message)
+          :diagnostic (get error :eliscriptDiagnostic)))))
+
+  (export directory backend runtime modules reader reference bytes
+          analyzerFailure transientFailure transientReference
+          setup teardown artifact decode property finish
+          analyzeObserved expectedAnalysis))

@@ -1,2 +1,23 @@
-(module capsules.tests.fixtures.persistent-list-host
-  (js* "import { printValue, readValue } from \"../../runtime/core/data-text.mjs\";\nimport { keyword } from \"../../runtime/core/identifier.mjs\";\nimport {\n  EMPTY_LIST,\n  persistentList,\n} from \"../../runtime/core/list.mjs\";\nimport { persistentHashMap } from \"../../runtime/core/map.mjs\";\nimport { meta, withMeta } from \"../../runtime/core/metadata.mjs\";\nimport { equalValues, hashValue } from \"../../runtime/core/value.mjs\";\n\nconst metadata = persistentHashMap([keyword(\"source\"), \"host\"]);\nconst values = persistentList(1, keyword(\"two\"), persistentList(3, 4));\nconst annotated = withMeta(values, metadata);\nconst text = printValue(annotated);\nconst restored = readValue(text);\nconst keyed = persistentHashMap([values, \"found\"]);\n\nconsole.log(JSON.stringify({\n  empty: EMPTY_LIST.count,\n  values: values.toArray().map((value) =>\n    typeof value === \"object\" && value?.toArray ? value.toArray() : String(value)),\n  hash: hashValue(values),\n  equal: equalValues(restored, annotated),\n  text,\n  source: meta(restored).get(keyword(\"source\")),\n  keyed: keyed.get(persistentList(1, keyword(\"two\"), persistentList(3, 4))),\n}));\n"))
+(module tests.fixtures.persistent-list-host
+  (import "../../runtime/core/data-text.mjs" printValue readValue)
+  (import "../../runtime/core/identifier.mjs" keyword)
+  (import "../../runtime/core/list.mjs" EMPTY_LIST persistentList)
+  (import "../../runtime/core/map.mjs" persistentHashMap)
+  (import "../../runtime/core/metadata.mjs" meta withMeta)
+  (import "../../runtime/core/value.mjs" equalValues hashValue)
+  (defun host-type (value) (js* "typeof value"))
+  (defconst metadata (persistentHashMap (js-array (keyword "source") "host")))
+  (defconst values (persistentList 1 (keyword "two") (persistentList 3 4)))
+  (defconst annotated (withMeta values metadata))
+  (defconst text (printValue annotated))
+  (defconst restored (readValue text))
+  (defconst keyed (persistentHashMap (js-array values "found")))
+  (js-call globalThis.console :log (JSON/stringify (js-object
+    :empty (get EMPTY_LIST :count)
+    :values (js-call (js-call values :toArray) :map (lambda (value)
+      (if (and (= (host-type value) "object") (not (nullish? value))
+               (funcall globalThis.Boolean (get value :toArray)))
+        (js-call value :toArray) (funcall globalThis.String value))))
+    :hash (hashValue values) :equal (equalValues restored annotated) :text text
+    :source (js-call (meta restored) :get (keyword "source"))
+    :keyed (js-call keyed :get (persistentList 1 (keyword "two") (persistentList 3 4)))))))

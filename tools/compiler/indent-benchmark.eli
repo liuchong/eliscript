@@ -1,2 +1,397 @@
-(module capsules.tools.compiler.indent-benchmark
-  (js* "import { createHash } from \"node:crypto\";\nimport { readFile, writeFile } from \"node:fs/promises\";\nimport os from \"node:os\";\nimport path from \"node:path\";\nimport process from \"node:process\";\nimport { fileURLToPath, pathToFileURL } from \"node:url\";\n\nexport const COMPILER_INDENT_FORMAT = \"eliscript-compiler-indent-benchmark\";\nexport const COMPILER_INDENT_VERSION = 1;\n\nconst directory = path.dirname(fileURLToPath(import.meta.url));\nconst projectDirectory = path.resolve(directory, \"../..\");\nconst compilerSources = Object.freeze([\n  \"bootstrap/compiler/symbol.eli\",\n  \"bootstrap/compiler/syntax.eli\",\n  \"bootstrap/compiler/reader.eli\",\n  \"bootstrap/compiler/formatter.eli\",\n  \"bootstrap/compiler/expander.eli\",\n  \"bootstrap/compiler/transient-analysis.eli\",\n  \"bootstrap/compiler/analyzer.eli\",\n  \"bootstrap/compiler/ir.eli\",\n  \"bootstrap/compiler/lower.eli\",\n  \"bootstrap/compiler/source-map.eli\",\n  \"bootstrap/compiler/emitter.eli\",\n  \"bootstrap/compiler/project.eli\",\n  \"bootstrap/compiler/compiler.eli\",\n]);\nconst digestFiles = Object.freeze([\n  ...compilerSources,\n  \"tools/compiler/indent-benchmark.mjs\",\n]);\n\nfunction parsePositiveInteger(value, name) {\n  const parsed = Number(value);\n  if (!Number.isSafeInteger(parsed) || parsed <= 0) {\n    throw new TypeError(`${name} must be a positive safe integer`);\n  }\n  return parsed;\n}\n\nfunction parseArguments(arguments_) {\n  let output;\n  for (let index = 0; index < arguments_.length; index += 1) {\n    const argument = arguments_[index];\n    if (argument === \"--output\") {\n      output = arguments_[index + 1];\n      if (output === undefined) {\n        throw new TypeError(\"--output requires a path\");\n      }\n      index += 1;\n    } else if (argument === \"--help\") {\n      process.stdout.write(\n        \"Usage: bun tools/compiler/indent-benchmark.mjs \" +\n          \"[--output REPORT.json]\\n\",\n      );\n      process.exit(0);\n    } else {\n      throw new TypeError(`unknown argument ${argument}`);\n    }\n  }\n  return { output };\n}\n\nexport async function compilerIndentSourceDigest() {\n  const hash = createHash(\"sha256\");\n  for (const relative of digestFiles) {\n    hash.update(relative);\n    hash.update(\"\\0\");\n    hash.update(await readFile(path.join(projectDirectory, relative)));\n    hash.update(\"\\0\");\n  }\n  return {\n    algorithm: \"sha256\",\n    files: digestFiles,\n    value: hash.digest(\"hex\"),\n  };\n}\n\nfunction span(filename, offset, line = 1) {\n  return { filename, start: offset, end: offset + 1, line, column: offset };\n}\n\nfunction sourceBoundFragments(artifact) {\n  const fragments = [];\n  let blockStart = 0;\n  while (blockStart < artifact.text.length) {\n    const separator = artifact.text.indexOf(\"\\n\\n\", blockStart);\n    const blockEnd = separator === -1 ? artifact.text.length : separator;\n    if (blockEnd > blockStart) {\n      fragments.push({\n        text: artifact.text.slice(blockStart, blockEnd),\n        marks: artifact.marks\n          .filter((mark) => mark.offset >= blockStart && mark.offset < blockEnd)\n          .map((mark) => ({\n            offset: mark.offset - blockStart,\n            span: mark.span,\n          })),\n      });\n    }\n    if (separator === -1) break;\n    blockStart = blockEnd + 2;\n  }\n  return fragments;\n}\n\nfunction boundaryFragments() {\n  return [\n    { text: \"\", marks: [] },\n    { text: \"\", marks: [{ offset: 0, span: span(\"empty\", 0) }] },\n    { text: \"\\n\", marks: [{ offset: 0, span: span(\"blank\", 0) }] },\n    { text: \"\\n\\n\", marks: [\n      { offset: 0, span: span(\"blank-lines\", 0) },\n      { offset: 1, span: span(\"blank-lines\", 1, 2) },\n    ] },\n    { text: \"a\", marks: [\n      { offset: 0, span: span(\"single\", 0) },\n      { offset: 0, span: span(\"single-duplicate\", 0) },\n      { offset: 1, span: span(\"single-tail\", 1) },\n    ] },\n    { text: \"a\\n\", marks: [\n      { offset: 0, span: span(\"trailing-newline\", 0) },\n      { offset: 1, span: span(\"trailing-newline\", 1) },\n      { offset: 2, span: span(\"trailing-newline-tail\", 2) },\n    ] },\n    { text: \"\\na\", marks: [\n      { offset: 0, span: span(\"leading-newline\", 0) },\n      { offset: 1, span: span(\"leading-newline\", 1, 2) },\n    ] },\n    { text: \"a\\n\\nb\", marks: [\n      { offset: 0, span: span(\"mixed-lines\", 0) },\n      { offset: 1, span: span(\"mixed-lines\", 1) },\n      { offset: 2, span: span(\"mixed-lines\", 2, 2) },\n      { offset: 3, span: span(\"mixed-lines\", 3, 3) },\n      { offset: 4, span: span(\"mixed-lines-tail\", 4, 3) },\n    ] },\n    { text: \"\\r\\nx\", marks: [\n      { offset: 0, span: span(\"crlf\", 0) },\n      { offset: 2, span: span(\"crlf\", 2, 2) },\n    ] },\n    { text: \"\\u{1F642}\\n\\u03BB\", marks: [\n      { offset: 0, span: span(\"unicode\", 0) },\n      { offset: 2, span: span(\"unicode\", 2) },\n      { offset: 3, span: span(\"unicode\", 3, 2) },\n    ] },\n  ];\n}\n\nfunction median(values) {\n  const sorted = [...values].sort((left, right) => left - right);\n  return sorted[Math.floor(sorted.length / 2)];\n}\n\nfunction fragmentChecksum(fragment) {\n  let checksum = fragment.text.length * 31 + fragment.marks.length;\n  for (const mark of fragment.marks) checksum += mark.offset;\n  return checksum;\n}\n\nfunction measure(indent, fragments, iterations) {\n  let checksum = 0;\n  const start = performance.now();\n  for (let iteration = 0; iteration < iterations; iteration += 1) {\n    for (const fragment of fragments) {\n      checksum += fragmentChecksum(indent(fragment));\n    }\n  }\n  return { milliseconds: performance.now() - start, checksum };\n}\n\nasync function loadGeneratedCompiler() {\n  const moduleDirectory = path.join(projectDirectory, \"dist/bootstrap\");\n  try {\n    const [compiler, emitter] = await Promise.all([\n      import(pathToFileURL(path.join(moduleDirectory, \"compiler.mjs\")).href),\n      import(pathToFileURL(path.join(moduleDirectory, \"emitter.mjs\")).href),\n    ]);\n    return { compiler, emitter };\n  } catch (error) {\n    throw new Error(\n      \"generated compiler is unavailable; run bun run build:bootstrap first\",\n      { cause: error },\n    );\n  }\n}\n\nexport function validateCompilerIndentReport(report) {\n  if (report?.format !== COMPILER_INDENT_FORMAT ||\n      report?.version !== COMPILER_INDENT_VERSION) {\n    throw new TypeError(\"invalid compiler indent report identity\");\n  }\n  if (report.validation?.equivalent !== true ||\n      report.validation?.fragments !==\n        report.corpus?.fragments + report.corpus?.boundaryFragments ||\n      report.validation?.checksum <= 0) {\n    throw new TypeError(\"compiler indent equivalence was not proven\");\n  }\n  if (!Array.isArray(report.measurements?.optimized?.samplesMs) ||\n      !Array.isArray(report.measurements?.reference?.samplesMs) ||\n      report.measurements.optimized.samplesMs.length !==\n        report.parameters?.timingSamples ||\n      report.measurements.reference.samplesMs.length !==\n        report.parameters?.timingSamples) {\n    throw new TypeError(\"compiler indent timing samples are incomplete\");\n  }\n  if (!Number.isFinite(report.decision?.minimumSpeedup) ||\n      report.decision?.minimumSpeedup < 10 ||\n      report.decision?.passed !== true ||\n      report.measurements.speedup < report.decision.minimumSpeedup) {\n    throw new TypeError(\"compiler indent speedup decision did not pass\");\n  }\n  return report;\n}\n\nexport async function runCompilerIndentBenchmark(options = {}) {\n  const warmupIterations = parsePositiveInteger(\n    options.warmupIterations ??\n      process.env.ELISCRIPT_COMPILER_INDENT_WARMUP_ITERATIONS ?? 5,\n    \"warmup iterations\",\n  );\n  const timingIterations = parsePositiveInteger(\n    options.timingIterations ??\n      process.env.ELISCRIPT_COMPILER_INDENT_TIMING_ITERATIONS ?? 20,\n    \"timing iterations\",\n  );\n  const timingSamples = parsePositiveInteger(\n    options.timingSamples ??\n      process.env.ELISCRIPT_COMPILER_INDENT_TIMING_SAMPLES ?? 9,\n    \"timing samples\",\n  );\n  if (timingSamples % 2 === 0) {\n    throw new TypeError(\"timing samples must be odd\");\n  }\n  const minimumSpeedup = Number(\n    options.minimumSpeedup ??\n      process.env.ELISCRIPT_COMPILER_INDENT_MINIMUM_SPEEDUP ?? 10,\n  );\n  if (!Number.isFinite(minimumSpeedup) || minimumSpeedup <= 1) {\n    throw new TypeError(\"minimum speedup must be greater than 1\");\n  }\n\n  const { compiler, emitter } = await loadGeneratedCompiler();\n  const fragments = [];\n  let sourceBytes = 0;\n  for (const relative of compilerSources) {\n    const source = await readFile(path.join(projectDirectory, relative), \"utf8\");\n    sourceBytes += Buffer.byteLength(source);\n    const program = compiler.compile_ir_string(source, relative);\n    fragments.push(...sourceBoundFragments(emitter.emit_module_artifact(program)));\n  }\n  const boundaries = boundaryFragments();\n  const allFragments = [...fragments, ...boundaries];\n\n  let validationChecksum = 0;\n  for (const fragment of allFragments) {\n    const optimized = emitter.indent(fragment);\n    const reference = emitter.reference_indent(fragment);\n    if (JSON.stringify(optimized) !== JSON.stringify(reference)) {\n      throw new Error(\"optimized and reference compiler indentation differ\");\n    }\n    validationChecksum += fragmentChecksum(optimized);\n  }\n\n  measure(emitter.indent, allFragments, warmupIterations);\n  measure(emitter.reference_indent, allFragments, warmupIterations);\n  const optimizedSamples = [];\n  const referenceSamples = [];\n  for (let sample = 0; sample < timingSamples; sample += 1) {\n    const order = sample % 2 === 0\n      ? [\n        [emitter.indent, optimizedSamples],\n        [emitter.reference_indent, referenceSamples],\n      ]\n      : [\n        [emitter.reference_indent, referenceSamples],\n        [emitter.indent, optimizedSamples],\n      ];\n    let expectedChecksum;\n    for (const [indent, samples] of order) {\n      const measured = measure(indent, allFragments, timingIterations);\n      samples.push(measured.milliseconds);\n      expectedChecksum ??= measured.checksum;\n      if (measured.checksum !== expectedChecksum) {\n        throw new Error(\"compiler indent benchmark checksum drifted\");\n      }\n    }\n  }\n\n  const optimizedMedian = median(optimizedSamples);\n  const referenceMedian = median(referenceSamples);\n  const speedup = referenceMedian / optimizedMedian;\n  const report = {\n    format: COMPILER_INDENT_FORMAT,\n    version: COMPILER_INDENT_VERSION,\n    generatedAt: new Date().toISOString(),\n    sourceDigest: await compilerIndentSourceDigest(),\n    host: {\n      runtime: \"bun\",\n      runtimeVersion: Bun.version,\n      engine: \"JavaScriptCore\",\n      platform: process.platform,\n      architecture: process.arch,\n      operatingSystem: `${os.type()} ${os.release()}`,\n    },\n    corpus: {\n      files: compilerSources,\n      sourceBytes,\n      programs: compilerSources.length,\n      fragments: fragments.length,\n      boundaryFragments: boundaries.length,\n      generatedBytes: fragments.reduce(\n        (total, fragment) => total + Buffer.byteLength(fragment.text),\n        0,\n      ),\n      marks: fragments.reduce(\n        (total, fragment) => total + fragment.marks.length,\n        0,\n      ),\n    },\n    parameters: { warmupIterations, timingIterations, timingSamples },\n    validation: {\n      equivalent: true,\n      fragments: allFragments.length,\n      checksum: validationChecksum,\n    },\n    measurements: {\n      optimized: {\n        samplesMs: optimizedSamples,\n        medianMs: optimizedMedian,\n      },\n      reference: {\n        samplesMs: referenceSamples,\n        medianMs: referenceMedian,\n      },\n      speedup,\n    },\n    decision: {\n      minimumSpeedup,\n      passed: speedup >= minimumSpeedup,\n    },\n  };\n  return validateCompilerIndentReport(report);\n}\n\nif (import.meta.main) {\n  const { output } = parseArguments(process.argv.slice(2));\n  const report = await runCompilerIndentBenchmark();\n  const serialized = `${JSON.stringify(report, null, 2)}\\n`;\n  if (output === undefined) {\n    process.stdout.write(serialized);\n  } else {\n    await writeFile(path.resolve(output), serialized);\n    process.stdout.write(`${path.resolve(output)}\\n`);\n  }\n}\n"))
+(module tools.compiler.indent-benchmark
+  (import "node:crypto" createHash)
+  (import "node:fs/promises" readFile writeFile)
+  (import "node:os" :default os)
+  (import "node:path" :default path)
+  (import "node:process" :default process)
+  (import "node:url" fileURLToPath pathToFileURL)
+
+  (defconst COMPILER_INDENT_FORMAT "eliscript-compiler-indent-benchmark")
+  (defconst COMPILER_INDENT_VERSION 1)
+
+  (defconst directory (js-call path :dirname (fileURLToPath (js* "import.meta.url"))))
+  (defconst project-directory (js-call path :resolve directory "../.."))
+  (defconst compiler-sources
+    (Object/freeze
+      (js-array
+        "bootstrap/compiler/symbol.eli"
+        "bootstrap/compiler/syntax.eli"
+        "bootstrap/compiler/reader.eli"
+        "bootstrap/compiler/formatter.eli"
+        "bootstrap/compiler/expander.eli"
+        "bootstrap/compiler/transient-analysis.eli"
+        "bootstrap/compiler/analyzer.eli"
+        "bootstrap/compiler/ir.eli"
+        "bootstrap/compiler/lower.eli"
+        "bootstrap/compiler/source-map.eli"
+        "bootstrap/compiler/emitter.eli"
+        "bootstrap/compiler/project.eli"
+        "bootstrap/compiler/compiler.eli")))
+  (defconst digest-files
+    (Object/freeze
+      (js-call compiler-sources :concat (js-array "tools/compiler/indent-benchmark.mjs"))))
+
+  (defun parse-positive-integer (value name)
+    (let ((parsed (globalThis.Number value)))
+      (when (or (not (Number/isSafeInteger parsed)) (<= parsed 0))
+        (throw (new globalThis.TypeError (str name " must be a positive safe integer"))))
+      parsed))
+
+  (defun parse-arguments (arguments*)
+    (let ((output undefined)
+          (index 0))
+      (while (< index (js-length arguments*))
+        (let ((argument (aref arguments* index)))
+          (cond
+            ((= argument "--output")
+             (setq output (aref arguments* (+ index 1)))
+             (when (= output undefined)
+               (throw (new globalThis.TypeError "--output requires a path")))
+             (setq index (+ index 1)))
+            ((= argument "--help")
+             (js-call (get process :stdout) :write
+               (str "Usage: bun tools/compiler/indent-benchmark.mjs "
+                    "[--output REPORT.json]\n"))
+             (js-call process :exit 0))
+            (t
+             (throw (new globalThis.TypeError (str "unknown argument " argument))))))
+        (setq index (+ index 1)))
+      (js-object :output output)))
+
+  (defasync compilerIndentSourceDigest ()
+    (let ((hash (createHash "sha256"))
+          (index 0))
+      (while (< index (js-length digest-files))
+        (let ((relative (aref digest-files index)))
+          (js-call hash :update relative)
+          (js-call hash :update "\u0000")
+          (js-call hash :update (await (readFile (js-call path :join project-directory relative))))
+          (js-call hash :update "\u0000"))
+        (setq index (+ index 1)))
+      (js-object
+        :algorithm "sha256"
+        :files digest-files
+        :value (js-call hash :digest "hex"))))
+
+  (defun span (filename offset &rest __opt)
+    (let* ((line (aref __opt 0))
+           (resolved-line (if (= line undefined) 1 line)))
+      (js-object
+        :filename filename
+        :start offset
+        :end (+ offset 1)
+        :line resolved-line
+        :column offset)))
+
+  (defun source-bound-fragments (artifact)
+    (let ((fragments (js-array))
+          (text (get artifact :text))
+          (marks (get artifact :marks))
+          (block-start 0)
+          (done nil))
+      (while (and (< block-start (js-length text)) (not done))
+        (let* ((separator (js-call text :indexOf "\n\n" block-start))
+               (block-end (if (= separator -1) (js-length text) separator)))
+          (when (> block-end block-start)
+            (js-call fragments :push
+              (js-object
+                :text (js-call text :slice block-start block-end)
+                :marks (js-call (js-call marks :filter
+                            (lambda (mark)
+                              (and (>= (get mark :offset) block-start)
+                                   (< (get mark :offset) block-end))))
+                          :map
+                          (lambda (mark)
+                            (js-object
+                              :offset (- (get mark :offset) block-start)
+                              :span (get mark :span)))))))
+          (if (= separator -1)
+              (setq done t)
+            (setq block-start (+ block-end 2)))))
+      fragments))
+
+  (defun boundary-fragments ()
+    (js-array
+      (js-object :text "" :marks (js-array))
+      (js-object :text "" :marks (js-array (js-object :offset 0 :span (span "empty" 0))))
+      (js-object :text "\n" :marks (js-array (js-object :offset 0 :span (span "blank" 0))))
+      (js-object
+        :text "\n\n"
+        :marks (js-array
+                 (js-object :offset 0 :span (span "blank-lines" 0))
+                 (js-object :offset 1 :span (span "blank-lines" 1 2))))
+      (js-object
+        :text "a"
+        :marks (js-array
+                 (js-object :offset 0 :span (span "single" 0))
+                 (js-object :offset 0 :span (span "single-duplicate" 0))
+                 (js-object :offset 1 :span (span "single-tail" 1))))
+      (js-object
+        :text "a\n"
+        :marks (js-array
+                 (js-object :offset 0 :span (span "trailing-newline" 0))
+                 (js-object :offset 1 :span (span "trailing-newline" 1))
+                 (js-object :offset 2 :span (span "trailing-newline-tail" 2))))
+      (js-object
+        :text "\na"
+        :marks (js-array
+                 (js-object :offset 0 :span (span "leading-newline" 0))
+                 (js-object :offset 1 :span (span "leading-newline" 1 2))))
+      (js-object
+        :text "a\n\nb"
+        :marks (js-array
+                 (js-object :offset 0 :span (span "mixed-lines" 0))
+                 (js-object :offset 1 :span (span "mixed-lines" 1))
+                 (js-object :offset 2 :span (span "mixed-lines" 2 2))
+                 (js-object :offset 3 :span (span "mixed-lines" 3 3))
+                 (js-object :offset 4 :span (span "mixed-lines-tail" 4 3))))
+      (js-object
+        :text "\r\nx"
+        :marks (js-array
+                 (js-object :offset 0 :span (span "crlf" 0))
+                 (js-object :offset 2 :span (span "crlf" 2 2))))
+      (js-object
+        :text "🙂\nλ"
+        :marks (js-array
+                 (js-object :offset 0 :span (span "unicode" 0))
+                 (js-object :offset 2 :span (span "unicode" 2))
+                 (js-object :offset 3 :span (span "unicode" 3 2))))))
+
+  (defun median (values)
+    (let ((sorted (js-call (js-call values :slice) :sort (lambda (left right) (- left right)))))
+      (aref sorted (Math/floor (/ (js-length sorted) 2)))))
+
+  (defun fragment-checksum (fragment)
+    (let ((marks (get fragment :marks))
+          (checksum (+ (* (js-length (get fragment :text)) 31)
+                       (js-length (get fragment :marks))))
+          (index 0))
+      (while (< index (js-length marks))
+        (setq checksum (+ checksum (get (aref marks index) :offset)))
+        (setq index (+ index 1)))
+      checksum))
+
+  (defun measure (indent fragments iterations)
+    (let ((checksum 0)
+          (start (js-call globalThis.performance :now))
+          (iteration 0))
+      (while (< iteration iterations)
+        (let ((index 0))
+          (while (< index (js-length fragments))
+            (setq checksum (+ checksum (fragment-checksum (funcall indent (aref fragments index)))))
+            (setq index (+ index 1))))
+        (setq iteration (+ iteration 1)))
+      (js-object
+        :milliseconds (- (js-call globalThis.performance :now) start)
+        :checksum checksum)))
+
+  (defasync load-generated-compiler ()
+    (let ((module-directory (js-call path :join project-directory "dist/bootstrap")))
+      (try
+        (let ((loaded
+                (await (Promise/all
+                         (js-array
+                           (funcall (js* "(u) => import(u)") (get (pathToFileURL (js-call path :join module-directory "compiler.mjs")) :href))
+                           (funcall (js* "(u) => import(u)") (get (pathToFileURL (js-call path :join module-directory "emitter.mjs")) :href)))))))
+          (js-object
+            :compiler (aref loaded 0)
+            :emitter (aref loaded 1)))
+        (catch error
+          (throw (new globalThis.Error
+                   "generated compiler is unavailable; run bun run build:bootstrap first"
+                   (js-object :cause error)))))))
+
+  (defun validateCompilerIndentReport (report)
+    (when (or (not report)
+              (not (= (get report :format) COMPILER_INDENT_FORMAT))
+              (not (= (get report :version) COMPILER_INDENT_VERSION)))
+      (throw (new globalThis.TypeError "invalid compiler indent report identity")))
+    (let ((validation (get report :validation))
+          (corpus (get report :corpus)))
+      (when (or (not validation)
+                (not corpus)
+                (not (= (get validation :equivalent) t))
+                (not (= (get validation :fragments)
+                        (+ (get corpus :fragments) (get corpus :boundaryFragments))))
+                (<= (get validation :checksum) 0))
+        (throw (new globalThis.TypeError "compiler indent equivalence was not proven"))))
+    (let* ((measurements (get report :measurements))
+           (parameters (get report :parameters))
+           (samples (if parameters (get parameters :timingSamples) undefined))
+           (opt-meas (if measurements (get measurements :optimized) undefined))
+           (ref-meas (if measurements (get measurements :reference) undefined))
+           (opt-samples (if opt-meas (get opt-meas :samplesMs) undefined))
+           (ref-samples (if ref-meas (get ref-meas :samplesMs) undefined)))
+      (when (or (not (Array/isArray opt-samples))
+                (not (Array/isArray ref-samples))
+                (not (= (js-length opt-samples) samples))
+                (not (= (js-length ref-samples) samples)))
+        (throw (new globalThis.TypeError "compiler indent timing samples are incomplete"))))
+    (let ((decision (get report :decision))
+          (measurements (get report :measurements)))
+      (when (or (not decision)
+                (not (Number/isFinite (get decision :minimumSpeedup)))
+                (< (get decision :minimumSpeedup) 10)
+                (not (= (get decision :passed) t))
+                (< (get measurements :speedup) (get decision :minimumSpeedup)))
+        (throw (new globalThis.TypeError "compiler indent speedup decision did not pass"))))
+    report)
+
+  (defun coalesce (a b c)
+    (if (not (= a undefined))
+        (if (not (= a nil)) a (if (not (= b undefined)) (if (not (= b nil)) b c) c))
+      (if (not (= b undefined)) (if (not (= b nil)) b c) c)))
+
+  (defasync runCompilerIndentBenchmark (&optional options)
+    (let* ((opts (or options (js-object)))
+           (env (get process :env))
+           (warmup-iterations
+             (parse-positive-integer
+               (coalesce (get opts :warmupIterations)
+                         (get env :ELISCRIPT_COMPILER_INDENT_WARMUP_ITERATIONS)
+                         5)
+               "warmup iterations"))
+           (timing-iterations
+             (parse-positive-integer
+               (coalesce (get opts :timingIterations)
+                         (get env :ELISCRIPT_COMPILER_INDENT_TIMING_ITERATIONS)
+                         20)
+               "timing iterations"))
+           (timing-samples
+             (parse-positive-integer
+               (coalesce (get opts :timingSamples)
+                         (get env :ELISCRIPT_COMPILER_INDENT_TIMING_SAMPLES)
+                         9)
+               "timing samples")))
+      (when (= (% timing-samples 2) 0)
+        (throw (new globalThis.TypeError "timing samples must be odd")))
+      (let ((minimum-speedup
+              (globalThis.Number
+                (coalesce (get opts :minimumSpeedup)
+                          (get env :ELISCRIPT_COMPILER_INDENT_MINIMUM_SPEEDUP)
+                          10))))
+        (when (or (not (Number/isFinite minimum-speedup)) (<= minimum-speedup 1))
+          (throw (new globalThis.TypeError "minimum speedup must be greater than 1")))
+        (let* ((loaded (await (load-generated-compiler)))
+               (compiler (get loaded :compiler))
+               (emitter (get loaded :emitter))
+               (fragments (js-array))
+               (source-bytes 0)
+               (index 0))
+          (while (< index (js-length compiler-sources))
+            (let* ((relative (aref compiler-sources index))
+                   (source (await (readFile (js-call path :join project-directory relative) "utf8")))
+                   (program (js-call compiler :compile_ir_string source relative))
+                   (bound (source-bound-fragments (js-call emitter :emit_module_artifact program)))
+                   (bound-idx 0))
+              (setq source-bytes (+ source-bytes (Buffer/byteLength source)))
+              (while (< bound-idx (js-length bound))
+                (js-call fragments :push (aref bound bound-idx))
+                (setq bound-idx (+ bound-idx 1))))
+            (setq index (+ index 1)))
+          (let* ((boundaries (boundary-fragments))
+                 (all-fragments (js-call fragments :concat boundaries))
+                 (validation-checksum 0)
+                 (frag-index 0))
+            (while (< frag-index (js-length all-fragments))
+              (let* ((fragment (aref all-fragments frag-index))
+                     (optimized (js-call emitter :indent fragment))
+                     (reference (js-call emitter :reference_indent fragment)))
+                (when (not (= (JSON/stringify optimized) (JSON/stringify reference)))
+                  (throw (new globalThis.Error "optimized and reference compiler indentation differ")))
+                (setq validation-checksum (+ validation-checksum (fragment-checksum optimized))))
+              (setq frag-index (+ frag-index 1)))
+            (measure (get emitter :indent) all-fragments warmup-iterations)
+            (measure (get emitter :reference_indent) all-fragments warmup-iterations)
+            (let ((optimized-samples (js-array))
+                  (reference-samples (js-array))
+                  (sample 0))
+              (while (< sample timing-samples)
+                (let ((order (if (= (% sample 2) 0)
+                                 (js-array
+                                   (js-array (get emitter :indent) optimized-samples)
+                                   (js-array (get emitter :reference_indent) reference-samples))
+                               (js-array
+                                 (js-array (get emitter :reference_indent) reference-samples)
+                                 (js-array (get emitter :indent) optimized-samples))))
+                      (expected-checksum undefined)
+                      (order-idx 0))
+                  (while (< order-idx (js-length order))
+                    (let* ((entry (aref order order-idx))
+                           (indent-fn (aref entry 0))
+                           (samples (aref entry 1))
+                           (measured (measure indent-fn all-fragments timing-iterations)))
+                      (js-call samples :push (get measured :milliseconds))
+                      (when (= expected-checksum undefined)
+                        (setq expected-checksum (get measured :checksum)))
+                      (when (not (= (get measured :checksum) expected-checksum))
+                        (throw (new globalThis.Error "compiler indent benchmark checksum drifted"))))
+                    (setq order-idx (+ order-idx 1))))
+                (setq sample (+ sample 1)))
+              (let* ((optimized-median (median optimized-samples))
+                     (reference-median (median reference-samples))
+                     (speedup (/ reference-median optimized-median))
+                     (report
+                       (js-object
+                         :format COMPILER_INDENT_FORMAT
+                         :version COMPILER_INDENT_VERSION
+                         :generatedAt (js-call (new globalThis.Date) :toISOString)
+                         :sourceDigest (await (compilerIndentSourceDigest))
+                         :host (js-object
+                                 :runtime "bun"
+                                 :runtimeVersion (get globalThis.Bun :version)
+                                 :engine "JavaScriptCore"
+                                 :platform (get process :platform)
+                                 :architecture (get process :arch)
+                                 :operatingSystem (str (js-call os :type) " " (js-call os :release)))
+                         :corpus (js-object
+                                   :files compiler-sources
+                                   :sourceBytes source-bytes
+                                   :programs (js-length compiler-sources)
+                                   :fragments (js-length fragments)
+                                   :boundaryFragments (js-length boundaries)
+                                   :generatedBytes (js-call fragments :reduce
+                                                     (lambda (total fragment)
+                                                       (+ total (Buffer/byteLength (get fragment :text))))
+                                                     0)
+                                   :marks (js-call fragments :reduce
+                                            (lambda (total fragment)
+                                              (+ total (js-length (get fragment :marks))))
+                                            0))
+                         :parameters (js-object
+                                       :warmupIterations warmup-iterations
+                                       :timingIterations timing-iterations
+                                       :timingSamples timing-samples)
+                         :validation (js-object
+                                       :equivalent t
+                                       :fragments (js-length all-fragments)
+                                       :checksum validation-checksum)
+                         :measurements (js-object
+                                         :optimized (js-object :samplesMs optimized-samples :medianMs optimized-median)
+                                         :reference (js-object :samplesMs reference-samples :medianMs reference-median)
+                                         :speedup speedup)
+                         :decision (js-object
+                                     :minimumSpeedup minimum-speedup
+                                     :passed (>= speedup minimum-speedup)))))
+                (validateCompilerIndentReport report))))))))
+
+  (defasync run-main ()
+    (let* ((parsed (parse-arguments (js-call (get process :argv) :slice 2)))
+           (output (get parsed :output))
+           (report (await (runCompilerIndentBenchmark)))
+           (serialized (str (JSON/stringify report nil 2) "\n")))
+      (if (= output undefined)
+          (js-call (get process :stdout) :write serialized)
+        (progn
+          (await (writeFile (js-call path :resolve output) serialized))
+          (js-call (get process :stdout) :write (str (js-call path :resolve output) "\n"))))))
+
+  (when (js* "import.meta.main")
+    (run-main))
+
+  (export
+    COMPILER_INDENT_FORMAT
+    COMPILER_INDENT_VERSION
+    compilerIndentSourceDigest
+    validateCompilerIndentReport
+    runCompilerIndentBenchmark))

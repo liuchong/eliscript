@@ -1,2 +1,142 @@
-(module capsules.runtime.testing.map
-  (js* "import {\n  MAP_STATE,\n  TRANSIENT_MAP_STATE,\n  ArrayNode,\n  BitmapIndexedNode,\n  HashCollisionNode,\n  MapEntry,\n  readMapMetrics,\n  readTransientMapMetrics,\n  resetMapMetrics,\n  resetTransientMapMetrics as resetTransientMapMetricsInternal,\n} from \"../core/map-internals.mjs\";\n\nfunction stateOf(map) {\n  const state = map?.[MAP_STATE];\n  if (state === undefined) {\n    throw new TypeError(\"expected an Eliscript persistent hash map\");\n  }\n  return state;\n}\n\nfunction transientStateOf(map) {\n  const state = map?.[TRANSIENT_MAP_STATE];\n  if (state === undefined) {\n    throw new TypeError(\"expected an Eliscript transient hash map\");\n  }\n  return state;\n}\n\nfunction inspectItem(item, depth, result, nodes) {\n  if (item instanceof MapEntry) {\n    result.entries += 1;\n    result.maxDepth = Math.max(result.maxDepth, depth);\n    return;\n  }\n  if (nodes.has(item)) {\n    return;\n  }\n  nodes.add(item);\n  result.maxDepth = Math.max(result.maxDepth, depth);\n  if (item instanceof BitmapIndexedNode) {\n    result.bitmapNodes += 1;\n    for (const child of item.items) {\n      inspectItem(child, depth + 1, result, nodes);\n    }\n    return;\n  }\n  if (item instanceof ArrayNode) {\n    result.arrayNodes += 1;\n    for (const child of item.children) {\n      if (child !== undefined) {\n        inspectItem(child, depth + 1, result, nodes);\n      }\n    }\n    return;\n  }\n  if (item instanceof HashCollisionNode) {\n    result.collisionNodes += 1;\n    for (const entry of item.entries) {\n      inspectItem(entry, depth + 1, result, nodes);\n    }\n  }\n}\n\nfunction collectNodes(item, nodes) {\n  if (item instanceof MapEntry || nodes.has(item)) {\n    return;\n  }\n  nodes.add(item);\n  const children = item instanceof BitmapIndexedNode\n    ? item.items\n    : item instanceof ArrayNode\n      ? item.children\n      : item.entries;\n  for (const child of children) {\n    if (child !== undefined) {\n      collectNodes(child, nodes);\n    }\n  }\n}\n\nexport function resetPersistentMapMetrics() {\n  resetMapMetrics();\n}\n\nexport function persistentMapMetrics() {\n  return readMapMetrics();\n}\n\nexport function resetTransientMapMetrics() {\n  resetTransientMapMetricsInternal();\n}\n\nexport function transientMapMetrics() {\n  return readTransientMapMetrics();\n}\n\nexport function inspectTransientMap(map) {\n  const state = transientStateOf(map);\n  const nodes = new Set();\n  collectNodes(state.root, nodes);\n  let ownedNodeCount = 0;\n  for (const node of nodes) {\n    if (node.owner === state.owner) {\n      ownedNodeCount += 1;\n    }\n  }\n  return Object.freeze({\n    active: state.active,\n    count: state.count,\n    nodeCount: nodes.size,\n    ownedNodeCount,\n    sharesSourceRoot: state.root === state.source?.[MAP_STATE].root,\n  });\n}\n\nexport function inspectPersistentMap(map) {\n  const result = {\n    count: stateOf(map).count,\n    bitmapNodes: 0,\n    arrayNodes: 0,\n    collisionNodes: 0,\n    entries: 0,\n    nodeCount: 0,\n    maxDepth: 0,\n  };\n  const nodes = new Set();\n  inspectItem(stateOf(map).root, 1, result, nodes);\n  result.nodeCount = nodes.size;\n  return Object.freeze(result);\n}\n\nexport function sharedPersistentMapNodes(left, right) {\n  const leftNodes = new Set();\n  const rightNodes = new Set();\n  collectNodes(stateOf(left).root, leftNodes);\n  collectNodes(stateOf(right).root, rightNodes);\n  let shared = 0;\n  for (const node of leftNodes) {\n    if (rightNodes.has(node)) {\n      shared += 1;\n    }\n  }\n  return shared;\n}\n"))
+(module eliscript.runtime.testing.map
+  (import "../core/map-internals.mjs" :as map-internals)
+  (import "../core/map-internals.mjs"
+    MAP_STATE
+    TRANSIENT_MAP_STATE
+    ArrayNode
+    BitmapIndexedNode
+    HashCollisionNode
+    MapEntry
+    readMapMetrics
+    readTransientMapMetrics
+    resetMapMetrics)
+
+  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+
+  (defun state-of (map)
+    (let ((state (if (nil? map) undefined (aref map MAP_STATE))))
+      (when (undefined? state)
+        (throw (new globalThis/TypeError "expected an Eliscript persistent hash map")))
+      state))
+
+  (defun transient-state-of (map)
+    (let ((state (if (nil? map) undefined (aref map TRANSIENT_MAP_STATE))))
+      (when (undefined? state)
+        (throw (new globalThis/TypeError "expected an Eliscript transient hash map")))
+      state))
+
+  (defun inspect-item (item depth result nodes)
+    (cond
+      ((funcall instance-of? item MapEntry)
+       (put result "entries" (+ (get result :entries) 1))
+       (put result "maxDepth" (Math/max (get result :maxDepth) depth)))
+      ((not (js-call nodes :has item))
+       (js-call nodes :add item)
+       (put result "maxDepth" (Math/max (get result :maxDepth) depth))
+       (cond
+         ((funcall instance-of? item BitmapIndexedNode)
+          (put result "bitmapNodes" (+ (get result :bitmapNodes) 1))
+          (let ((items (get item :items))
+                (index 0))
+            (while (< index (js-length items))
+              (inspect-item (get items index) (+ depth 1) result nodes)
+              (setq index (+ index 1)))))
+         ((funcall instance-of? item ArrayNode)
+          (put result "arrayNodes" (+ (get result :arrayNodes) 1))
+          (let ((children (get item :children))
+                (index 0))
+            (while (< index (js-length children))
+              (let ((child (get children index)))
+                (unless (undefined? child)
+                  (inspect-item child (+ depth 1) result nodes)))
+              (setq index (+ index 1)))))
+         ((funcall instance-of? item HashCollisionNode)
+          (put result "collisionNodes" (+ (get result :collisionNodes) 1))
+          (let ((entries (get item :entries))
+                (index 0))
+            (while (< index (js-length entries))
+              (inspect-item (get entries index) (+ depth 1) result nodes)
+              (setq index (+ index 1)))))))))
+
+  (defun collect-nodes (item nodes)
+    (unless (or (funcall instance-of? item MapEntry)
+                (js-call nodes :has item))
+      (js-call nodes :add item)
+      (let ((children (cond
+                        ((funcall instance-of? item BitmapIndexedNode) (get item :items))
+                        ((funcall instance-of? item ArrayNode) (get item :children))
+                        (t (get item :entries))))
+            (index 0))
+        (while (< index (js-length children))
+          (let ((child (get children index)))
+            (unless (undefined? child)
+              (collect-nodes child nodes)))
+          (setq index (+ index 1))))))
+
+  (defun resetPersistentMapMetrics ()
+    (resetMapMetrics))
+
+  (defun persistentMapMetrics ()
+    (readMapMetrics))
+
+  (defun resetTransientMapMetrics ()
+    (map-internals/resetTransientMapMetrics))
+
+  (defun transientMapMetrics ()
+    (readTransientMapMetrics))
+
+  (defun inspectTransientMap (map)
+    (let ((state (transient-state-of map))
+          (nodes (new globalThis/Set))
+          (owned-node-count 0))
+      (collect-nodes (get state :root) nodes)
+      (js-call nodes :forEach
+        (lambda (node)
+          (when (eq (get node :owner) (get state :owner))
+            (setq owned-node-count (+ owned-node-count 1)))))
+      (let* ((source (get state :source))
+             (source-state (if (nil? source) undefined (aref source MAP_STATE))))
+        (Object/freeze
+          (js-object
+            :active (get state :active)
+            :count (get state :count)
+            :nodeCount (get nodes :size)
+            :ownedNodeCount owned-node-count
+            :sharesSourceRoot (and (not (undefined? source-state))
+                                   (eq (get state :root) (get source-state :root))))))))
+
+  (defun inspectPersistentMap (map)
+    (let* ((state (state-of map))
+           (result (js-object
+                     :count (get state :count)
+                     :bitmapNodes 0
+                     :arrayNodes 0
+                     :collisionNodes 0
+                     :entries 0
+                     :nodeCount 0
+                     :maxDepth 0))
+           (nodes (new globalThis/Set)))
+      (inspect-item (get state :root) 1 result nodes)
+      (put result "nodeCount" (get nodes :size))
+      (Object/freeze result)))
+
+  (defun sharedPersistentMapNodes (left right)
+    (let ((left-nodes (new globalThis/Set))
+          (right-nodes (new globalThis/Set))
+          (shared 0))
+      (collect-nodes (get (state-of left) :root) left-nodes)
+      (collect-nodes (get (state-of right) :root) right-nodes)
+      (js-call left-nodes :forEach
+        (lambda (node)
+          (when (js-call right-nodes :has node)
+            (setq shared (+ shared 1)))))
+      shared))
+
+  (export
+    resetPersistentMapMetrics
+    persistentMapMetrics
+    resetTransientMapMetrics
+    transientMapMetrics
+    inspectTransientMap
+    inspectPersistentMap
+    sharedPersistentMapNodes))

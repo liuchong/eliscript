@@ -1,2 +1,177 @@
-(module capsules.tests.wasm-managed-regexp-exact.test
-  (js* "import {beforeAll,afterAll,test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {readFile,writeFile,mkdtemp,rm,realpath} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {pathToFileURL} from 'node:url';\nimport {spawnSync} from 'node:child_process';\nimport {buildCompilerCandidate} from './compiler-module-candidate-rig.mjs';\nconst root=resolve(import.meta.dir,'..'),sourceRoot=await realpath(resolve(process.env.ELISCRIPT_COMPILER_SOURCE_ROOT??root));\nlet directory,b,runtime,instantiate;\nbeforeAll(async()=>{directory=await mkdtemp(resolve(tmpdir(),'eliscript-regexp-exact-'));b=await buildCompilerCandidate(directory,sourceRoot,{'bootstrap/backends/regexp.eli':resolve(root,'bootstrap/backends/regexp.eli')});runtime=b.compiler.compile_ir_string(await readFile(resolve(sourceRoot,'bootstrap/runtime/memory.eli'),'utf8'),'runtime.eli');({instantiateManagedRuntime:instantiate}=await import(pathToFileURL(resolve(sourceRoot,'tools/backends/managed-runtime.mjs')).href));},120000);\nafterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});\nfunction compile(pattern,flags=''){const source=`(defconst pattern (js* ${JSON.stringify('/'+pattern+'/'+flags)})) (defun run (text) (js-call pattern :exec text)) (defun field (x key) (get x key)) (export run field)`,program=b.compiler.compile_ir_string(source,'exact.eli'),saved=JSON.stringify(program),bytes=Uint8Array.from(b.managed.emit_managed_wasm(program,runtime));assert.equal(JSON.stringify(program),saved);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);return{bytes,source};}\nfunction finish(a,owned=[]){owned.forEach(v=>a.release(v));a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}\nfunction exec(a,text){const input=a.string(text),out=a.invoke('run',[input]);try{if(out===null)return null;const values=Array.from({length:a.length(out)},(_,i)=>{const v=a.get(out,i);try{return v===undefined?{missing:true}:a.readString(v);}finally{a.release(v);}}),key=a.string('index'),index=a.invoke('field',[out,key]);try{return{values,index:a.readNumber(index),input:text};}finally{a.release(key);a.release(index);}}finally{a.release(input);a.release(out);}}\nfunction model(pattern,flags,text){const out=new RegExp(pattern,flags).exec(text);return out&&{values:[...out].map(v=>v===undefined?{missing:true}:v),index:out.index,input:out.input};}\ntest('generic exact repetition preserves zero one multidigit leading-zero groups captures classes Unicode and escaped braces',()=>{\n const patterns=[['a{0}',''],['^a{1}$',''],['a{12}',''],['a{0002}',''],['[0-9a-f]{64}$',''],['(a|bc){2}',''],['(a|(b)){2}',''],['((a)?b){2}',''],['(a?){3}',''],['(?:){3}',''],['(?:a|){2}?',''],['(?:a{2}){2}',''],['^[😀a]{2}$','u'],['^😀{2}$','u'],['^\\\\uD83D\\\\uDE00{2}$','u'],['^\\\\u{1F600}{2}$','u'],['^\\\\uD800{2}$','u'],['^\\\\{{2}\\\\}{1}$','u'],['^[{}]{2}$','u']];\n const texts=['','a','aa','aaa','aaaa','a'.repeat(12),'a'.repeat(64),'f'.repeat(63),'g'.repeat(64),'ab','abab','abb','bb','bca','bcbc','😀','😀😀','a😀','\\ud800\\ud800','{{}','{}','\\n😀😀'];\n for(const[pattern,flags]of patterns){const a=instantiate(compile(pattern,flags).bytes);a.auto(1);try{for(const text of texts){assert.deepEqual(exec(a,text),model(pattern,flags,text),pattern+'/'+flags+':'+JSON.stringify(text));a.collect();assert.equal(a.stats().frameDepth,0);}}finally{finish(a);}}\n},120000);\n\ntest('exact repetition rejects malformed unsupported and over-capacity syntax with stable source diagnostics',()=>{\n for(const[pattern,flags]of [['a{2,3}',''],['a{2,}',''],['a{','u'],['a{}','u'],['a{-1}','u'],['a{1.5}','u'],['a{2a}','u'],['a{2}*',''],['a{2}{3}','u'],['^{0}',''],['\\\\b{2}','u'],['a{1048577}',''],['a{99999999999999999999999999999999}','']]){\n  const p=b.compiler.compile_ir_string(`(defun run () (js* ${JSON.stringify('/'+pattern+'/'+flags)})) (export run)`,'exact-invalid.eli'),saved=JSON.stringify(p);assert.throws(()=>b.managed.emit_managed_wasm(p,runtime),error=>error.eliscriptDiagnostic?.code==='ELI-B0001'&&error.eliscriptDiagnostic.phase==='regexp-backend'&&error.eliscriptDiagnostic.location.file==='exact-invalid.eli');assert.equal(JSON.stringify(p),saved);\n }\n});\ntest('exact repetition deterministic captures agree with independent Node and the same zero-import WASM bytes',async()=>{\n let seed=0x415f8d21;const next=()=>seed=(Math.imul(seed,1664525)+1013904223)>>>0,atoms=['a','b','[ab]','(a|(b))','(a?)','(?:a|)','😀','\\\\d'],records=[];\n for(let group=0;group<24;group++){const pattern=atoms[next()%atoms.length]+'{'+(next()%5)+'}'+(next()%2?'?':''),flags=next()%2?'u':'',a=instantiate(compile(pattern,flags).bytes);a.auto(1);try{for(let i=0;i<12;i++){const chars=['a','b','2','😀','\\ud800'],text=Array.from({length:next()%7},()=>chars[next()%chars.length]).join(''),expected=model(pattern,flags,text);assert.deepEqual(exec(a,text),expected);records.push({pattern,flags,text,expected});a.collect();assert.equal(a.stats().frameDepth,0);}}finally{finish(a);}}\n const cases=resolve(directory,'exact-models.json'),wasm=resolve(directory,'exact.wasm');await writeFile(cases,JSON.stringify(records));await writeFile(wasm,compile('^(a|(b)){2}$').bytes);\n const child=spawnSync('node',['--input-type=module','-e',`import assert from 'node:assert/strict';import{readFileSync}from'node:fs';for(const r of JSON.parse(readFileSync(process.argv[1],'utf8'))){const out=new RegExp(r.pattern,r.flags).exec(r.text),actual=out&&{values:[...out].map(v=>v===undefined?{missing:true}:v),index:out.index,input:out.input};assert.deepEqual(actual,r.expected);}const{instantiateManagedRuntime}=await import(process.argv[2]),a=instantiateManagedRuntime(readFileSync(process.argv[3]));a.auto(1);const input=a.string('ab'),out=a.invoke('run',[input]);assert.equal(a.length(out),3);for(const[i,expected]of['ab','b','b'].entries()){const value=a.get(out,i);assert.equal(a.readString(value),expected);a.release(value);}a.release(out);a.release(input);a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);`,cases,pathToFileURL(resolve(sourceRoot,'tools/backends/managed-runtime.mjs')).href,wasm],{encoding:'utf8',timeout:30000});assert.equal(child.status,0,child.stderr);\n},120000);\n"))
+(module tests.wasm-managed-regexp-exact.test
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" realpathSync)
+  (import "node:fs/promises" readFile writeFile mkdtemp rm)
+  (import "node:path" dirname resolve)
+  (import "node:os" tmpdir)
+  (import "node:url" fileURLToPath pathToFileURL)
+  (import "node:child_process" spawnSync)
+  (import "./compiler-module-candidate-rig.mjs" buildCompilerCandidate)
+
+  (defun dynamic-import (specifier)
+    (funcall (js* "(specifier) => import(specifier)") specifier))
+
+  (defconst root (resolve (dirname (fileURLToPath (js* "import.meta.url"))) ".."))
+  (defconst sourceRoot (realpathSync (resolve (or (get (get globalThis.process :env) :ELISCRIPT_COMPILER_SOURCE_ROOT) root))))
+
+  (defvar directory undefined)
+  (defvar b undefined)
+  (defvar runtime undefined)
+  (defvar instantiate undefined)
+
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-regexp-exact-"))))
+    (setq b (await (buildCompilerCandidate directory sourceRoot (js-object "bootstrap/backends/regexp.eli" (resolve root "bootstrap/backends/regexp.eli")))))
+    (setq runtime (js-call (get b :compiler) :compile_ir_string (await (readFile (resolve sourceRoot "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
+    (let ((mod (await (dynamic-import (get (pathToFileURL (resolve sourceRoot "tools/backends/managed-runtime.mjs")) :href)))))
+      (setq instantiate (get mod :instantiateManagedRuntime))))
+    120000)
+
+  (afterAll (async ()
+    (when directory
+      (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun compile (pattern &rest __host_default_arguments_1)
+    (let* ((flags-arg (aref __host_default_arguments_1 0)))
+    (let* ((flags (if (undefined? flags-arg) "" flags-arg))
+           (source (str "(defconst pattern (js* " (JSON/stringify (str "/" pattern "/" flags)) ")) (defun run (text) (js-call pattern :exec text)) (defun field (x key) (get x key)) (export run field)"))
+           (program (js-call (get b :compiler) :compile_ir_string source "exact.eli"))
+           (saved (JSON/stringify program))
+           (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program runtime))))
+      (js-call assert :equal (JSON/stringify program) saved)
+      (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      (js-object :bytes bytes :source source))))
+
+  (defun finish (a &rest __host_default_arguments_2)
+    (let* ((owned-arg (aref __host_default_arguments_2 0)))
+    (let ((owned (if (undefined? owned-arg) (js-array) owned-arg)))
+      (js-call owned :forEach (lambda (v) (js-call a :release v)))
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
+
+  (defun exec (a text)
+    (let* ((input (js-call a :string text))
+           (out (js-call a :invoke "run" (js-array input))))
+      (try
+        (if (nil? out)
+          nil
+          (let* ((values (Array/from (js-object :length (js-call a :length out))
+                           (lambda (_ i)
+                             (let ((v (js-call a :get out i)))
+                               (try
+                                 (if (undefined? v) (js-object :missing t) (js-call a :readString v))
+                                 (finally (js-call a :release v)))))))
+                 (key (js-call a :string "index"))
+                 (index (js-call a :invoke "field" (js-array out key))))
+            (try
+              (js-object :values values :index (js-call a :readNumber index) :input text)
+              (finally
+                (js-call a :release key)
+                (js-call a :release index)))))
+        (finally
+          (js-call a :release input)
+          (js-call a :release out)))))
+
+  (defun model (pattern flags text)
+    (let ((out (js-call (new globalThis.RegExp pattern flags) :exec text)))
+      (if (nil? out)
+        nil
+        (js-object
+          :values (js-call (Array/from out) :map (lambda (v) (if (undefined? v) (js-object :missing t) v)))
+          :index (get out :index)
+          :input (get out :input)))))
+
+  (test "generic exact repetition preserves zero one multidigit leading-zero groups captures classes Unicode and escaped braces" (lambda ()
+    (let ((patterns (js-array
+                      (js-array "a{0}" "") (js-array "^a{1}$" "") (js-array "a{12}" "") (js-array "a{0002}" "")
+                      (js-array "[0-9a-f]{64}$" "") (js-array "(a|bc){2}" "") (js-array "(a|(b)){2}" "")
+                      (js-array "((a)?b){2}" "") (js-array "(a?){3}" "") (js-array "(?:){3}" "")
+                      (js-array "(?:a|){2}?" "") (js-array "(?:a{2}){2}" "") (js-array "^[😀a]{2}$" "u")
+                      (js-array "^😀{2}$" "u") (js-array "^\\uD83D\\uDE00{2}$" "u") (js-array "^\\u{1F600}{2}$" "u")
+                      (js-array "^\\uD800{2}$" "u") (js-array "^\\{{2}\\}{1}$" "u") (js-array "^[{}]{2}$" "u")))
+          (texts (js-array "" "a" "aa" "aaa" "aaaa" (js-call "a" :repeat 12) (js-call "a" :repeat 64)
+                           (js-call "f" :repeat 63) (js-call "g" :repeat 64) "ab" "abab" "abb" "bb" "bca"
+                           "bcbc" "😀" "😀😀" "a😀" "\ud800\ud800" "{{}" "{}" "\n😀😀")))
+      (js-call patterns :forEach
+        (lambda (pair)
+          (let* ((pattern (aref pair 0))
+                 (flags (aref pair 1))
+                 (a (funcall instantiate (get (compile pattern flags) :bytes))))
+            (js-call a :auto 1)
+            (try
+              (js-call texts :forEach
+                (lambda (text)
+                  (js-call assert :deepEqual (exec a text) (model pattern flags text) (str pattern "/" flags ":" (JSON/stringify text)))
+                  (js-call a :collect)
+                  (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))
+              (finally (finish a))))))))
+    120000)
+
+  (test "exact repetition rejects malformed unsupported and over-capacity syntax with stable source diagnostics" (lambda ()
+    (js-call
+      (js-array
+        (js-array "a{2,3}" "") (js-array "a{2,}" "") (js-array "a{" "u") (js-array "a{}" "u")
+        (js-array "a{-1}" "u") (js-array "a{1.5}" "u") (js-array "a{2a}" "u") (js-array "a{2}*" "")
+        (js-array "a{2}{3}" "u") (js-array "^{0}" "") (js-array "\\b{2}" "u") (js-array "a{1048577}" "")
+        (js-array "a{99999999999999999999999999999999}" ""))
+      :forEach
+      (lambda (pair)
+        (let* ((pattern (aref pair 0))
+               (flags (aref pair 1))
+               (p (js-call (get b :compiler) :compile_ir_string
+                    (str "(defun run () (js* " (JSON/stringify (str "/" pattern "/" flags)) ")) (export run)")
+                    "exact-invalid.eli"))
+               (saved (JSON/stringify p)))
+          (js-call assert :throws
+            (lambda () (js-call (get b :managed) :emit_managed_wasm p runtime))
+            (lambda (error)
+              (let ((diag (get error :eliscriptDiagnostic)))
+                (and diag
+                     (= (get diag :code) "ELI-B0001")
+                     (= (get diag :phase) "regexp-backend")
+                     (= (get (get diag :location) :file) "exact-invalid.eli")))))
+          (js-call assert :equal (JSON/stringify p) saved))))))
+
+  (test "exact repetition deterministic captures agree with independent Node and the same zero-import WASM bytes" (async ()
+    (let* ((seed 1096781089)
+           (next (lambda () (setq seed (uint32 (+ (Math/imul seed 1664525) 1013904223)))))
+           (atoms (js-array "a" "b" "[ab]" "(a|(b))" "(a?)" "(?:a|)" "😀" "\\d"))
+           (records (js-array)))
+      (let ((group 0))
+        (while (< group 24)
+          (let* ((pattern (str (aref atoms (% (funcall next) (js-length atoms)))
+                               "{" (% (funcall next) 5) "}"
+                               (if (not (= (% (funcall next) 2) 0)) "?" "")))
+                 (flags (if (not (= (% (funcall next) 2) 0)) "u" ""))
+                 (a (funcall instantiate (get (compile pattern flags) :bytes))))
+            (js-call a :auto 1)
+            (try
+              (let ((i 0))
+                (while (< i 12)
+                  (let* ((chars (js-array "a" "b" "2" "😀" "\ud800"))
+                         (text (js-call (Array/from (js-object :length (% (funcall next) 7))
+                                          (lambda () (aref chars (% (funcall next) (js-length chars)))))
+                                        :join ""))
+                         (expected (model pattern flags text)))
+                    (js-call assert :deepEqual (exec a text) expected)
+                    (js-call records :push (js-object :pattern pattern :flags flags :text text :expected expected))
+                    (js-call a :collect)
+                    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))
+                  (setq i (1+ i))))
+              (finally (finish a))))
+          (setq group (1+ group))))
+      (let ((cases (resolve directory "exact-models.json"))
+            (wasm (resolve directory "exact.wasm")))
+        (await (writeFile cases (JSON/stringify records)))
+        (await (writeFile wasm (get (compile "^(a|(b)){2}$") :bytes)))
+        (let ((child (spawnSync "node"
+                       (js-array (resolve root "tests/helpers/wasm-managed-regexp-exact-node.mjs")
+                                 cases
+                                 (get (pathToFileURL (resolve sourceRoot "tools/backends/managed-runtime.mjs")) :href)
+                                 wasm)
+                       (js-object :encoding "utf8" :timeout 30000))))
+          (js-call assert :equal (get child :status) 0 (get child :stderr))))))
+    120000))

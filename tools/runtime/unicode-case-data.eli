@@ -1,2 +1,285 @@
-(module capsules.tools.runtime.unicode-case-data
-  (js* "// Maintenance only: normal compilation consumes the checked-in .eli functions.\n// Unicode data is licensed under Unicode-3.0; see the generated region notice.\nimport {createHash} from 'node:crypto';\nimport {readFile, writeFile} from 'node:fs/promises';\nimport {fileURLToPath} from 'node:url';\nconst names = ['UnicodeData.txt', 'SpecialCasing.txt', 'DerivedCoreProperties.txt'];\nconst inputs = {\n  '15.1.0': ['2fc713e6a31a87c4850a37fe2caffa4218180fadb5de86b43a143ddb4581fb86', '55a477efd933a52cd27e6a9bf70265bb2d8814af31aab07767abc8eb421f27ef', 'f55d0db69123431a7317868725b1fcbf1eab6b265d756d1bd7f0f6d9f9ee108b'],\n  '16.0.0': ['ff58e5823bd095166564a006e47d111130813dcf8bf234ef79fa51a870edb48f', '8d5de354eef79f2395a54c9c7dcebbaf3d30fc962d0f85611ea97aa973a0c451', '39d35161f2954497f69e08bdb9e701493f476a3d30222de20028feda36c1dabd'],\n  '17.0.0': ['2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c', 'efc25faf19de21b92c1194c111c932e03d2a5eaf18194e33f1156e96de4c9588', '24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08'],\n};\nconst versions = await Promise.all(Object.entries(inputs).map(async ([version, digests]) => {\n  const texts = await Promise.all(names.map(async (name, i) => {\n    const response = await fetch('https://www.unicode.org/Public/' + version + '/ucd/' + name);\n    if (!response.ok) throw Error(name + ': ' + response.status);\n    const bytes = new Uint8Array(await response.arrayBuffer());\n    if (createHash('sha256').update(bytes).digest('hex') !== digests[i]) throw Error(version + '/' + name + ': unexpected Unicode data identity');\n    return new TextDecoder().decode(bytes);\n  }));\n  const mappings = {upper: new Map(), lower: new Map()}, properties = {Cased: new Uint8Array(0x110000), Case_Ignorable: new Uint8Array(0x110000)};\n  for (const line of texts[0].split('\\n')) {\n    if (!line) continue;const fields = line.split(';'), point = parseInt(fields[0], 16);\n    for (const [name, index] of [['upper', 12], ['lower', 13]]) if (fields[index]) mappings[name].set(point, [parseInt(fields[index], 16)]);\n  }\n  for (const line of texts[1].split('\\n')) {\n    const fields = line.split('#')[0].split(';').map(s => s.trim());\n    if (!fields[0] || fields[4]) continue;\n    for (const [name, index] of [['upper', 3], ['lower', 1]]) mappings[name].set(parseInt(fields[0], 16), fields[index].split(/\\s+/).filter(Boolean).map(s => parseInt(s, 16)));\n  }\n  for (const line of texts[2].split('\\n')) {\n    const [range, property] = line.split('#')[0].split(';').map(s => s.trim());\n    if (!Object.hasOwn(properties, property)) continue;\n    const [a, b = a] = range.split('..').map(s => parseInt(s, 16));properties[property].fill(1, a, b + 1);\n  }\n  return {version, id: version === '15.1.0' ? 151 : parseInt(version) * 10, mappings, properties};\n}));\nconst base = versions.at(-1);\nfunction compress(entries, linear) {\n  const rows = entries.map(([point, value]) => ({point, value: linear ? value - point : value}));\n  const rules = [];\n  for (let i = 0; i < rows.length;) {\n    const first = rows[i], step = rows[i + 1]?.point - first.point;let j = i + 1;\n    if (step === 1 || step === 2) while (j < rows.length && rows[j].point - rows[j - 1].point === step && rows[j].value === first.value) j++;\n    rules.push({a: first.point, b: rows[j - 1].point, step: j > i + 1 ? step : 1, value: first.value});i = j;\n  }\n  return rules;\n}\nfunction tree(rules, fallback, linear) {\n  if (!rules.length) return fallback;\n  const middle = rules.length >>> 1, rule = rules[middle];\n  const value = linear ? rule.value < 0 ? `(- code ${-rule.value})` : `(+ code ${rule.value})` : String(rule.value);\n  const hit = rule.step === 2 ? `(if (= (word-and (- code ${rule.a}) 1) 0) ${value} ${fallback})` : value;\n  return `(if (< code ${rule.a}) ${tree(rules.slice(0, middle), fallback, linear)}\\n    (if (<= code ${rule.b}) ${hit} ${tree(rules.slice(middle + 1), fallback, linear)}))`;\n}\nconst begin = '  ;; BEGIN GENERATED UNICODE CASE DATA', end = '  ;; END GENERATED UNICODE CASE DATA';\nlet generated = begin + '\\n  ;; Unicode 15.1.0 / 16.0.0 / 17.0.0, Unicode-3.0: https://www.unicode.org/license.txt\\n  ;; Reproduce with tools/runtime/unicode-case-data.mjs; normal builds never fetch data.\\n';\nfor (const [version, digests] of Object.entries(inputs)) for (let i = 0; i < names.length; i++) generated += `  ;; ${version}/${names[i]} SHA-256 ${digests[i]}\\n`;\nconst differences = new Set();\nfunction versionedFunction(name, baseEntries, perVersion, fallback, linear) {\n  generated += `  (defun ${name}-17 (code)\\n    ${tree(compress(baseEntries, linear), fallback, linear)})\\n`;\n  const defaultCall = `(${name}-17 code)`;let body = defaultCall;\n  for (const version of versions.slice(0, -1).reverse()) {\n    const delta = perVersion(version);for (const [point] of delta) differences.add(point);\n    generated += `  (defun ${name}-${version.id} (code)\\n    ${tree(compress(delta, linear), defaultCall, linear)})\\n`;\n    body = `(if (= (load-u32 16) ${version.id}) (${name}-${version.id} code) ${body})`;\n  }\n  generated += `  (defun ${name} (code)\\n    ${body})\\n`;\n}\nfor (const [name, mapping] of Object.entries(base.mappings)) for (let part = 0; part < 3; part++) {\n  const at = (m, p) => m.get(p)?.[part] ?? (part === 0 ? p : 0);\n  const entries = [...mapping.keys()].sort((a, b) => a - b).filter(p => at(mapping, p) !== (part === 0 ? p : 0)).map(p => [p, at(mapping, p)]);\n  versionedFunction('heap-unicode-' + name + '-' + part, entries, version => [...new Set([...mapping.keys(), ...version.mappings[name].keys()])].sort((a, b) => a - b).filter(p => at(mapping, p) !== at(version.mappings[name], p)).map(p => [p, at(version.mappings[name], p)]), part === 0 ? 'code' : '0', part === 0);\n}\nfor (const [name, property] of Object.entries(base.properties)) {\n  const entries = [];for (let p = 0; p < property.length; p++) if (property[p]) entries.push([p, 1]);\n  versionedFunction('heap-unicode-' + (name === 'Cased' ? 'cased' : 'case-ignorable'), entries, version => {const delta = [];for (let p = 0; p < property.length; p++) if (property[p] !== version.properties[name][p]) delta.push([p, version.properties[name][p]]);return delta;}, '0', false);\n}\ngenerated += end;\nconst points = [...differences].sort((a, b) => a - b);\nconst signature = version => [points.map(p => String.fromCodePoint(...(version.mappings.upper.get(p) ?? [p]))).join('\\0'), points.map(p => String.fromCodePoint(...(version.mappings.lower.get(p) ?? [p]))).join('\\0'), points.map(p => Number(version.properties.Cased[p] && !version.properties.Case_Ignorable[p])).join(''), points.map(p => Number(!version.properties.Cased[p] && !version.properties.Case_Ignorable[p])).join('')];\nlet profiles = '// Generated by unicode-case-data.mjs from pinned Unicode data; Unicode-3.0.\\n// Compare only version-dependent behavior once per JS realm, never per WASM call.\\n';\nprofiles += 'const points = ' + JSON.stringify(points) + ';\\nconst profiles = ' + JSON.stringify(versions.map(v => [v.id, signature(v)])) + ';\\nlet cached;\\n';\nprofiles += `export function hostUnicodeCaseVersion() {\n  if (cached !== undefined) return cached;\n  const chars = points.map(p => String.fromCodePoint(p));\n  const actual = [chars.map(s => s.toUpperCase()).join('\\\\0'), chars.map(s => s.toLowerCase()).join('\\\\0'), chars.map(s => Number((s + 'Σ').toLowerCase().endsWith('ς'))).join(''), chars.map(s => Number(('AΣ' + s + 'A').toLowerCase().startsWith('aς'))).join('')];\n  const profile = profiles.find(([, expected]) => expected.every((s, i) => s === actual[i]));\n  if (!profile) throw new Error('unsupported host Unicode case data; select an explicit supported unicodeVersion');\n  return cached = profile[0];\n}\n`;\n// Independent fixture: scalar outputs are computed from the source mappings,\n// not by interpreting emitted decision trees or executing the WASM runtime.\nconst reference = {format: 'eliscript-unicode-case-reference', versions: versions.map(v => {\n  const hashes = {upper: createHash('sha256'), lower: createHash('sha256')};\n  for (let start = 0; start < 0x110000; start += 512) for (const name of ['upper', 'lower']) {\n    const text = [];for (let p = start; p < Math.min(start + 512, 0x110000); p++) if (p < 0xd800 || p > 0xdfff) text.push(String.fromCodePoint(...(v.mappings[name].get(p) ?? [p])));\n    hashes[name].update(text.join(''), 'utf16le');\n  }\n  return {version: v.id === 151 ? 15.1 : v.id / 10, upper: hashes.upper.digest('hex'), lower: hashes.lower.digest('hex'), sigma: points.flatMap(p => {\n    const letter = String.fromCodePoint(p), mapped = String.fromCodePoint(...(v.mappings.lower.get(p) ?? [p]));\n    return [['AΣ' + letter + 'A', 'a' + (v.properties.Cased[p] || v.properties.Case_Ignorable[p] ? 'σ' : 'ς') + mapped + 'a'], [letter + 'Σ', mapped + (v.properties.Cased[p] && !v.properties.Case_Ignorable[p] ? 'ς' : 'σ')]];\n  })};\n})};\nconst referencePath = fileURLToPath(new URL('../../tests/fixtures/unicode-case-profiles.json', import.meta.url)), referenceText = JSON.stringify(reference, null, 2) + '\\n';\nconst filename = fileURLToPath(new URL('../../bootstrap/runtime/memory.eli', import.meta.url)), source = await readFile(filename, 'utf8');\nconst first = source.indexOf(begin), last = source.indexOf(end);\nif (first < 0 || last < first) throw Error('invalid Unicode region');\nconst next = source.slice(0, first) + generated + source.slice(last + end.length), profilePath = fileURLToPath(new URL('./unicode-case-profiles.mjs', import.meta.url));\nif (process.argv.includes('--check')) {if (next !== source || profiles !== await readFile(profilePath, 'utf8') || referenceText !== await readFile(referencePath, 'utf8')) throw Error('Unicode case data differs');}\nelse if (process.argv.includes('--write')) {await writeFile(filename, next);await writeFile(profilePath, profiles);await writeFile(referencePath, referenceText);}\nelse throw Error('require --write or --check');\nconsole.log(JSON.stringify({versions: versions.map(v => v.version), generatedBytes: Buffer.byteLength(generated), profilePoints: points.length}));\n"))
+(module tools.runtime.unicode-case-data
+  ;; Maintenance only: normal compilation consumes the checked-in .eli functions.
+  ;; Unicode data is licensed under Unicode-3.0; see the generated region notice.
+  (import "node:crypto" createHash)
+  (import "node:fs/promises" readFile writeFile)
+  (import "node:url" fileURLToPath)
+
+  (defconst names (js-array "UnicodeData.txt" "SpecialCasing.txt" "DerivedCoreProperties.txt"))
+  (defconst inputs (js-object
+    "15.1.0" (js-array
+      "2fc713e6a31a87c4850a37fe2caffa4218180fadb5de86b43a143ddb4581fb86"
+      "55a477efd933a52cd27e6a9bf70265bb2d8814af31aab07767abc8eb421f27ef"
+      "f55d0db69123431a7317868725b1fcbf1eab6b265d756d1bd7f0f6d9f9ee108b")
+    "16.0.0" (js-array
+      "ff58e5823bd095166564a006e47d111130813dcf8bf234ef79fa51a870edb48f"
+      "8d5de354eef79f2395a54c9c7dcebbaf3d30fc962d0f85611ea97aa973a0c451"
+      "39d35161f2954497f69e08bdb9e701493f476a3d30222de20028feda36c1dabd")
+    "17.0.0" (js-array
+      "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c"
+      "efc25faf19de21b92c1194c111c932e03d2a5eaf18194e33f1156e96de4c9588"
+      "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08")))
+
+  (defun compress (entries linear)
+    (let ((rows (js-call entries :map (lambda (pair)
+                  (let ((point (aref pair 0)) (value (aref pair 1)))
+                    (js-object :point point :value (if linear (- value point) value))))))
+          (rules (js-array))
+          (i 0))
+      (while (< i (js-length rows))
+        (let* ((first (aref rows i))
+               (next (aref rows (1+ i)))
+               (step (if next (- (get next :point) (get first :point)) 0))
+               (j (1+ i)))
+          (when (or (= step 1) (= step 2))
+            (while (and (< j (js-length rows))
+                        (= (- (get (aref rows j) :point) (get (aref rows (1- j)) :point)) step)
+                        (= (get (aref rows j) :value) (get first :value)))
+              (setq j (1+ j))))
+          (js-call rules :push (js-object
+            :a (get first :point)
+            :b (get (aref rows (1- j)) :point)
+            :step (if (> j (1+ i)) step 1)
+            :value (get first :value)))
+          (setq i j)))
+      rules))
+
+  (defun tree (rules fallback linear)
+    (if (= (js-length rules) 0)
+      fallback
+      (let* ((middle (unsigned-bit-shift-right (js-length rules) 1))
+             (rule (aref rules middle))
+             (value (if linear
+                      (if (< (get rule :value) 0)
+                        (str "(- code " (- 0 (get rule :value)) ")")
+                        (str "(+ code " (get rule :value) ")"))
+                      (funcall globalThis.String (get rule :value))))
+             (hit (if (= (get rule :step) 2)
+                    (str "(if (= (word-and (- code " (get rule :a) ") 1) 0) " value " " fallback ")")
+                    value)))
+        (str "(if (< code " (get rule :a) ") " (tree (js-call rules :slice 0 middle) fallback linear)
+             "\n    (if (<= code " (get rule :b) ") " hit " "
+             (tree (js-call rules :slice (1+ middle)) fallback linear) "))"))))
+
+  (defconst begin "  ;; BEGIN GENERATED UNICODE CASE DATA")
+  (defconst end "  ;; END GENERATED UNICODE CASE DATA")
+
+  (defasync load-versions ()
+    (await (Promise/all (js-call (Object/entries inputs) :map
+      (async (entry)
+        (let* ((version (aref entry 0))
+               (digests (aref entry 1))
+               (texts (await (Promise/all (js-call names :map
+                 (async (name i)
+                   (let ((response (await (funcall globalThis.fetch
+                           (str "https://www.unicode.org/Public/" version "/ucd/" name)))))
+                     (unless (get response :ok)
+                       (throw (new globalThis.Error (str name ": " (get response :status)))))
+                     (let ((bytes (new globalThis.Uint8Array (await (js-call response :arrayBuffer)))))
+                       (unless (= (js-call (js-call (createHash "sha256") :update bytes) :digest "hex")
+                                  (aref digests i))
+                         (throw (new globalThis.Error (str version "/" name ": unexpected Unicode data identity"))))
+                       (js-call (new globalThis.TextDecoder) :decode bytes))))))))
+               (mappings (js-object :upper (new globalThis.Map) :lower (new globalThis.Map)))
+               (properties (js-object :Cased (new globalThis.Uint8Array 1114112)
+                             :Case_Ignorable (new globalThis.Uint8Array 1114112))))
+          (js-call (js-call (aref texts 0) :split "\n") :forEach (lambda (line)
+            (when (> (js-length line) 0)
+              (let* ((fields (js-call line :split ";"))
+                     (point (Number/parseInt (aref fields 0) 16)))
+                (js-call (js-array (js-array "upper" 12) (js-array "lower" 13)) :forEach (lambda (pair)
+                  (let ((name (aref pair 0)) (index (aref pair 1)))
+                    (when (> (js-length (or (aref fields index) "")) 0)
+                      (js-call (get mappings name) :set point
+                        (js-array (Number/parseInt (aref fields index) 16)))))))))))
+          (js-call (js-call (aref texts 1) :split "\n") :forEach (lambda (line)
+            (let ((fields (js-call (js-call (aref (js-call line :split "#") 0) :split ";")
+                            :map (lambda (s) (js-call s :trim)))))
+              (when (and (> (js-length (or (aref fields 0) "")) 0)
+                         (= (js-length (or (aref fields 4) "")) 0))
+                (let ((point (Number/parseInt (aref fields 0) 16)))
+                  (js-call (js-array (js-array "upper" 3) (js-array "lower" 1)) :forEach (lambda (pair)
+                    (let ((name (aref pair 0)) (index (aref pair 1)))
+                      (js-call (get mappings name) :set point
+                        (js-call (js-call (js-call (aref fields index) :split (new globalThis.RegExp "\\s+"))
+                                   :filter (lambda (s) (> (js-length s) 0)))
+                          :map (lambda (s) (Number/parseInt s 16))))))))))))
+          (js-call (js-call (aref texts 2) :split "\n") :forEach (lambda (line)
+            (let* ((parts (js-call (js-call (aref (js-call line :split "#") 0) :split ";")
+                            :map (lambda (s) (js-call s :trim))))
+                   (range (aref parts 0))
+                   (property (aref parts 1)))
+              (when (and property (Object/hasOwn properties property))
+                (let* ((bounds (js-call (js-call range :split "..") :map (lambda (s) (Number/parseInt s 16))))
+                       (a (aref bounds 0))
+                       (b (if (> (js-length bounds) 1) (aref bounds 1) a)))
+                  (js-call (get properties property) :fill 1 a (1+ b)))))))
+          (js-object :version version :id (if (= version "15.1.0") 151 (* (Number/parseInt version 10) 10))
+            :mappings mappings :properties properties)))))))
+
+  (defun render-profiles-source (points versions signature)
+    (let ((point-text (js-call (js-call points :map (lambda (p) (funcall globalThis.String p))) :join " "))
+          (profile-entries (js-call versions :map (lambda (v)
+            (let ((sig (funcall signature v)))
+              (str "      (js-array " (get v :id) " (js-array\n"
+                   (js-call (js-call sig :map (lambda (s) (str "        " (JSON/stringify s)))) :join "\n") "))"))))))
+      (str "(module tools.runtime.unicode-case-profiles\n"
+           "  ;; Generated by unicode-case-data.mjs from pinned Unicode data; Unicode-3.0.\n"
+           "  ;; Compare only version-dependent behavior once per JS realm, never per WASM call.\n"
+           "  (defconst points (js-array " point-text "))\n"
+           "  (defconst profiles\n    (js-array\n"
+           (js-call profile-entries :join "\n") "))\n"
+           "  (defvar cached undefined)\n"
+           "  (defun hostUnicodeCaseVersion ()\n"
+           "    (if (not (undefined? cached))\n"
+           "      cached\n"
+           "      (let* ((chars (js-call points :map (lambda (p) (String/fromCodePoint p))))\n"
+           "             (actual (js-array\n"
+           "                       (js-call (js-call chars :map (lambda (s) (js-call s :toUpperCase))) :join \"\\u0000\")\n"
+           "                       (js-call (js-call chars :map (lambda (s) (js-call s :toLowerCase))) :join \"\\u0000\")\n"
+           "                       (js-call (js-call chars :map (lambda (s) (funcall globalThis.Number (js-call (js-call (str s \"Σ\") :toLowerCase) :endsWith \"ς\")))) :join \"\")\n"
+           "                       (js-call (js-call chars :map (lambda (s) (funcall globalThis.Number (js-call (js-call (str \"AΣ\" s \"A\") :toLowerCase) :startsWith \"aς\")))) :join \"\")))\n"
+           "             (profile (js-call profiles :find (lambda (entry)\n"
+           "                        (js-call (aref entry 1) :every (lambda (s i) (= s (aref actual i))))))))\n"
+           "        (unless profile\n"
+           "          (throw (new globalThis.Error \"unsupported host Unicode case data; select an explicit supported unicodeVersion\")))\n"
+           "        (setq cached (aref profile 0))\n"
+           "        cached)))\n"
+           "  (export hostUnicodeCaseVersion))\n")))
+
+  (defasync main ()
+    (let* ((versions (await (load-versions)))
+           (base (js-call versions :at -1))
+           (generated (str begin "\n  ;; Unicode 15.1.0 / 16.0.0 / 17.0.0, Unicode-3.0: https://www.unicode.org/license.txt\n  ;; Reproduce with tools/runtime/unicode-case-data.mjs; normal builds never fetch data.\n"))
+           (differences (new globalThis.Set)))
+      (js-call (Object/entries inputs) :forEach (lambda (entry)
+        (let ((version (aref entry 0)) (digests (aref entry 1)) (i 0))
+          (while (< i (js-length names))
+            (setq generated (str generated "  ;; " version "/" (aref names i) " SHA-256 " (aref digests i) "\n"))
+            (setq i (1+ i))))))
+      (letfn ((versioned-function (name base-entries per-version fallback linear)
+                (setq generated (str generated "  (defun " name "-17 (code)\n    "
+                  (tree (compress base-entries linear) fallback linear) ")\n"))
+                (let ((default-call (str "(" name "-17 code)"))
+                      (body (str "(" name "-17 code)")))
+                  (js-call (js-call (js-call versions :slice 0 -1) :reverse) :forEach (lambda (version)
+                    (let ((delta (funcall per-version version)))
+                      (js-call delta :forEach (lambda (pair) (js-call differences :add (aref pair 0))))
+                      (setq generated (str generated "  (defun " name "-" (get version :id) " (code)\n    "
+                        (tree (compress delta linear) default-call linear) ")\n"))
+                      (setq body (str "(if (= (load-u32 16) " (get version :id) ") (" name "-" (get version :id) " code) " body ")")))))
+                  (setq generated (str generated "  (defun " name " (code)\n    " body ")\n"))))
+              (mapping-at (m p part)
+                (let ((row (js-call m :get p)))
+                  (if (and row (not (undefined? (aref row part))))
+                    (aref row part)
+                    (if (= part 0) p 0)))))
+        (js-call (Object/entries (get base :mappings)) :forEach (lambda (entry)
+          (let ((name (aref entry 0)) (mapping (aref entry 1)) (part 0))
+            (while (< part 3)
+              (let* ((current-part part)
+                     (keys (js-call (Array/from (js-call mapping :keys)) :sort (lambda (a b) (- a b))))
+                     (entries (js-call (js-call keys :filter (lambda (p)
+                                (/= (mapping-at mapping p current-part) (if (= current-part 0) p 0))))
+                                :map (lambda (p) (js-array p (mapping-at mapping p current-part))))))
+                (versioned-function (str "heap-unicode-" name "-" current-part) entries
+                  (lambda (version)
+                    (let* ((version-map (get (get version :mappings) name))
+                           (merged (new globalThis.Set (js-call (Array/from (js-call mapping :keys))
+                                     :concat (Array/from (js-call version-map :keys)))))
+                           (sorted (js-call (Array/from merged) :sort (lambda (a b) (- a b)))))
+                      (js-call (js-call sorted :filter (lambda (p)
+                                 (/= (mapping-at mapping p current-part) (mapping-at version-map p current-part))))
+                        :map (lambda (p) (js-array p (mapping-at version-map p current-part))))))
+                  (if (= current-part 0) "code" "0")
+                  (= current-part 0)))
+              (setq part (1+ part))))))
+        (js-call (Object/entries (get base :properties)) :forEach (lambda (entry)
+          (let ((name (aref entry 0)) (property (aref entry 1)) (entries (js-array)) (p 0))
+            (while (< p (js-length property))
+              (when (/= (aref property p) 0)
+                (js-call entries :push (js-array p 1)))
+              (setq p (1+ p)))
+            (versioned-function (str "heap-unicode-" (if (= name "Cased") "cased" "case-ignorable")) entries
+              (lambda (version)
+                (let ((delta (js-array)) (version-prop (get (get version :properties) name)) (idx 0))
+                  (while (< idx (js-length property))
+                    (when (/= (aref property idx) (aref version-prop idx))
+                      (js-call delta :push (js-array idx (aref version-prop idx))))
+                    (setq idx (1+ idx)))
+                  delta))
+              "0" false)))))
+      (setq generated (str generated end))
+      (let* ((points (js-call (Array/from differences) :sort (lambda (a b) (- a b))))
+             (from-points (lambda (pts) (Reflect/apply (get globalThis.String :fromCodePoint) globalThis.String pts)))
+             (signature (lambda (version)
+               (let ((upper (get (get version :mappings) :upper))
+                     (lower (get (get version :mappings) :lower))
+                     (cased (get (get version :properties) :Cased))
+                     (ignorable (get (get version :properties) :Case_Ignorable)))
+                 (js-array
+                   (js-call (js-call points :map (lambda (p) (funcall from-points (or (js-call upper :get p) (js-array p))))) :join "\u0000")
+                   (js-call (js-call points :map (lambda (p) (funcall from-points (or (js-call lower :get p) (js-array p))))) :join "\u0000")
+                   (js-call (js-call points :map (lambda (p) (if (and (/= (aref cased p) 0) (= (aref ignorable p) 0)) "1" "0"))) :join "")
+                   (js-call (js-call points :map (lambda (p) (if (and (= (aref cased p) 0) (= (aref ignorable p) 0)) "1" "0"))) :join "")))))
+             (profiles (render-profiles-source points versions signature))
+             (reference (js-object :format "eliscript-unicode-case-reference"
+               :versions (js-call versions :map (lambda (v)
+                 (let ((hashes (js-object :upper (createHash "sha256") :lower (createHash "sha256")))
+                       (start 0))
+                   (while (< start 1114112)
+                     (js-call (js-array "upper" "lower") :forEach (lambda (name)
+                       (let ((text (js-array)) (p start) (limit (Math/min (+ start 512) 1114112))
+                             (mapping (get (get v :mappings) name)))
+                         (while (< p limit)
+                           (when (or (< p 55296) (> p 57343))
+                             (js-call text :push (funcall from-points (or (js-call mapping :get p) (js-array p)))))
+                           (setq p (1+ p)))
+                         (js-call (get hashes name) :update (js-call text :join "") "utf16le"))))
+                     (setq start (+ start 512)))
+                   (let ((lower (get (get v :mappings) :lower))
+                         (cased (get (get v :properties) :Cased))
+                         (ignorable (get (get v :properties) :Case_Ignorable)))
+                     (js-object
+                       :version (if (= (get v :id) 151) 15.1 (/ (get v :id) 10))
+                       :upper (js-call (get hashes :upper) :digest "hex")
+                       :lower (js-call (get hashes :lower) :digest "hex")
+                       :sigma (js-call points :flatMap (lambda (p)
+                         (let ((letter (String/fromCodePoint p))
+                               (mapped (funcall from-points (or (js-call lower :get p) (js-array p)))))
+                           (js-array
+                             (js-array (str "AΣ" letter "A")
+                               (str "a" (if (or (/= (aref cased p) 0) (/= (aref ignorable p) 0)) "σ" "ς") mapped "a"))
+                             (js-array (str letter "Σ")
+                               (str mapped (if (and (/= (aref cased p) 0) (= (aref ignorable p) 0)) "ς" "σ"))))))))))))))
+             (base-url (get (js* "import.meta") :url))
+             (reference-path (fileURLToPath (new globalThis.URL "../../tests/fixtures/unicode-case-profiles.json" base-url)))
+             (reference-text (str (JSON/stringify reference nil 2) "\n"))
+             (filename (fileURLToPath (new globalThis.URL "../../bootstrap/runtime/memory.eli" base-url)))
+             (source (await (readFile filename "utf8")))
+             (first (js-call source :indexOf begin))
+             (last (js-call source :indexOf end)))
+        (when (or (< first 0) (< last first))
+          (throw (new globalThis.Error "invalid Unicode region")))
+        (let ((next (str (js-call source :slice 0 first) generated (js-call source :slice (+ last (js-length end)))))
+              (profile-path (fileURLToPath (new globalThis.URL "./unicode-case-profiles.eli" base-url)))
+              (argv (get globalThis.process :argv)))
+          (cond
+            ((js-call argv :includes "--check")
+             (when (or (/= next source)
+                       (/= profiles (await (readFile profile-path "utf8")))
+                       (/= reference-text (await (readFile reference-path "utf8"))))
+               (throw (new globalThis.Error "Unicode case data differs"))))
+            ((js-call argv :includes "--write")
+             (await (writeFile filename next))
+             (await (writeFile profile-path profiles))
+             (await (writeFile reference-path reference-text)))
+            (t (throw (new globalThis.Error "require --write or --check"))))
+          (js-call globalThis.console :log (JSON/stringify (js-object
+            :versions (js-call versions :map (lambda (v) (get v :version)))
+            :generatedBytes (js-call globalThis.Buffer :byteLength generated)
+            :profilePoints (js-length points))))))))
+
+  (js-call (main) :catch (lambda (error)
+    (js-call globalThis.console :error error)
+    (put globalThis.process :exitCode 1))))

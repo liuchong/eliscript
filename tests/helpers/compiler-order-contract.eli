@@ -1,0 +1,30 @@
+(module tests.helpers.compiler-order-contract
+  (defconst names (js-array "a" "A" "z" "Z" "ä" "å" "é" "e\u0301" "阿" "中" "重" "𐀀" "\uE000" "\uD800" "\uDC00" "prefix" "prefix-long"))
+  ;; Compare UTF16 code units, deliberately independent of Lisp/locale ordering.
+  (defconst native-order (js* "(left, right) => left < right ? -1 : left > right ? 1 : 0"))
+  (defun transientSource (left right)
+    (str "(import \"./stdlib/core/transient.mjs\" transient) (defasync build (source promise) (let (("
+      left " (transient source)) (" right " (transient source))) (await promise) nil))"))
+  (defun nodes (node)
+    (js-call (js-array node) :concat
+      (js-call (let ((value (get node :children))) (if (nullish? value) (js-array) value)) :flatMap nodes)))
+  (defun declarations (program) (js-call (get program :body) :flatMap nodes))
+  (defun units (text) (Array/from (js-object :length (get text :length)) (lambda (unused index) (js-call text :charCodeAt index))))
+  (defun decode (a value)
+    (let ((kind (if (nullish? value) undefined (get value :kind))))
+      (cond ((= kind 4) (js-call a :readNumber value)) ((= kind 5) (js-call a :readString value))
+        ((= kind 14) (Array/from (js-object :length (js-call a :length value)) (lambda (unused index)
+          (let ((item (js-call a :get value index))) (try (decode a item) (finally (js-call a :release item)))))))
+        ((= kind 13)
+          (let ((result (js-object)) (keys (js-call a :objectKeys value)) (index 0))
+            (try
+              (while (< index (js-call a :length keys))
+                (let* ((key (js-call a :get keys index)) (child (js-call a :objectGet value key)))
+                  (try (put result (js-call a :readString key) (decode a child))
+                    (finally (js-call a :release key) (js-call a :release child))))
+                (setq index (1+ index)))
+              (finally (js-call a :release keys)))
+            result))
+        (t value))))
+  (export names native-order transientSource nodes declarations units decode)
+)

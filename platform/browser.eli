@@ -1,2 +1,179 @@
-(module capsules.platform.browser
-  (js* "import { sourceMappedFailure } from \"../runtime/source-mapping.mjs\";\n\nexport const browserCapabilityKinds = Object.freeze([\n  \"clock\",\n  \"document\",\n  \"network\",\n  \"randomness\",\n  \"timers\",\n]);\n\nconst capabilityState = new WeakMap();\nconst knownCapabilities = new Set(browserCapabilityKinds);\n\nexport class BrowserCapabilityError extends Error {\n  constructor(code, message, capability) {\n    super(message);\n    this.name = \"BrowserCapabilityError\";\n    this.code = code;\n    this.capability = capability;\n  }\n}\n\nfunction fail(code, message, capability) {\n  throw new BrowserCapabilityError(code, message, capability);\n}\n\nfunction normalizeGrants(grants) {\n  if (!Array.isArray(grants) || grants.some(\n    (grant) => typeof grant !== \"string\" || grant.length === 0,\n  )) {\n    fail(\"invalid-grants\", \"browser grants must be an array of non-empty strings\");\n  }\n  const normalized = [...new Set(grants)].sort();\n  if (normalized.length !== grants.length) {\n    fail(\"duplicate-grant\", \"browser grants must not contain duplicates\");\n  }\n  for (const grant of normalized) {\n    if (!knownCapabilities.has(grant)) {\n      fail(\"unknown-grant\", `unknown browser capability ${grant}`, grant);\n    }\n  }\n  return normalized;\n}\n\nfunction requireFunction(receiver, name, capability) {\n  const operation = receiver?.[name];\n  if (typeof operation !== \"function\") {\n    fail(\n      \"unavailable-capability\",\n      `browser host does not provide ${capability}`,\n      capability,\n    );\n  }\n  return (...arguments_) => Reflect.apply(operation, receiver, arguments_);\n}\n\nfunction operationTable(scope, grants) {\n  const operations = Object.create(null);\n  for (const grant of grants) {\n    switch (grant) {\n      case \"clock\":\n        operations.clock = requireFunction(scope.performance, \"now\", grant);\n        break;\n      case \"document\":\n        {\n          const document = scope.document;\n          if (document === null || typeof document !== \"object\") {\n            fail(\n              \"unavailable-capability\",\n              \"browser host does not provide document\",\n              grant,\n            );\n          }\n          operations.document = () => document;\n        }\n        break;\n      case \"network\":\n        operations.network = requireFunction(scope, \"fetch\", grant);\n        break;\n      case \"randomness\":\n        operations.randomness = requireFunction(\n          scope.crypto,\n          \"getRandomValues\",\n          grant,\n        );\n        break;\n      case \"timers\":\n        operations.setTimeout = requireFunction(scope, \"setTimeout\", grant);\n        operations.clearTimeout = requireFunction(scope, \"clearTimeout\", grant);\n        break;\n    }\n  }\n  return Object.freeze(operations);\n}\n\nexport function browserCapabilities(scope, grants = []) {\n  if (scope === null || (typeof scope !== \"object\" && typeof scope !== \"function\")) {\n    fail(\"invalid-host\", \"browser host must be an object or function\");\n  }\n  const normalized = normalizeGrants(grants);\n  const capabilities = Object.freeze({\n    format: \"eliscript-browser-capabilities\",\n    version: 1,\n    grants: Object.freeze(normalized),\n  });\n  capabilityState.set(capabilities, operationTable(scope, normalized));\n  return capabilities;\n}\n\nexport function isBrowserCapabilities(value) {\n  return value !== null && typeof value === \"object\" && capabilityState.has(value);\n}\n\nfunction stateFor(capabilities) {\n  const state = isBrowserCapabilities(capabilities)\n    ? capabilityState.get(capabilities)\n    : undefined;\n  if (state === undefined) {\n    fail(\"invalid-capabilities\", \"expected Eliscript browser capabilities\");\n  }\n  return state;\n}\n\nexport function browserCapabilityDescriptor(capabilities) {\n  stateFor(capabilities);\n  return Object.freeze({\n    format: capabilities.format,\n    version: capabilities.version,\n    grants: Object.freeze([...capabilities.grants]),\n  });\n}\n\nexport function hasBrowserCapability(capabilities, capability) {\n  stateFor(capabilities);\n  return typeof capability === \"string\" && capabilities.grants.includes(capability);\n}\n\nfunction operationFor(capabilities, operation, capability = operation) {\n  const operation_ = stateFor(capabilities)[operation];\n  if (operation_ === undefined) {\n    fail(\n      \"missing-capability\",\n      `browser capability ${capability} was not granted`,\n      capability,\n    );\n  }\n  return operation_;\n}\n\nexport function browserDocument(capabilities) {\n  return operationFor(capabilities, \"document\")();\n}\n\nexport function browserFetch(capabilities, input, init) {\n  return operationFor(capabilities, \"network\")(input, init);\n}\n\nexport function browserNow(capabilities) {\n  return operationFor(capabilities, \"clock\")();\n}\n\nexport function browserRandomValues(capabilities, values) {\n  return operationFor(capabilities, \"randomness\")(values);\n}\n\nexport function browserSetTimeout(capabilities, callback, delay, ...arguments_) {\n  return operationFor(capabilities, \"setTimeout\", \"timers\")(\n    callback,\n    delay,\n    ...arguments_,\n  );\n}\n\nexport function browserClearTimeout(capabilities, handle) {\n  return operationFor(capabilities, \"clearTimeout\", \"timers\")(handle);\n}\n\nexport function browserEventBoundary(handler, report, sourceMaps = []) {\n  if (typeof handler !== \"function\") {\n    fail(\"invalid-event-handler\", \"browser event handler must be a function\");\n  }\n  if (typeof report !== \"function\") {\n    fail(\"invalid-event-reporter\", \"browser event reporter must be a function\");\n  }\n  if (!Array.isArray(sourceMaps)) {\n    fail(\"invalid-source-maps\", \"browser event source maps must be an array\");\n  }\n  return function boundedBrowserEvent(...arguments_) {\n    const reportFailure = (error) => {\n      report(sourceMappedFailure(error, sourceMaps), arguments_[0]);\n      return undefined;\n    };\n    try {\n      const result = Reflect.apply(handler, this, arguments_);\n      return result !== null &&\n          (typeof result === \"object\" || typeof result === \"function\") &&\n          typeof result.then === \"function\"\n        ? Promise.resolve(result).catch(reportFailure)\n        : result;\n    } catch (error) {\n      return reportFailure(error);\n    }\n  };\n}\n"))
+(module platform.browser
+  (import "../runtime/source-mapping.mjs" sourceMappedFailure)
+
+  (defconst host-error-class
+    (js* "(init, name, arity, messageOf) => { const C = ({ [name]: class extends Error { constructor(...args) { super(messageOf(...args)); init(this, ...args); } } })[name]; Object.defineProperty(C, 'length', { value: arity, configurable: true }); return C; }"))
+  (defconst host-function
+    (js* "(implementation, name) => ({ [name]: function(...args) { return implementation(this, args); } })[name]"))
+  (defun host-typeof (value) (js* "typeof value"))
+
+  (defconst browserCapabilityKinds
+    (Object/freeze (js-array "clock" "document" "network" "randomness" "timers")))
+
+  (defconst capabilityState (new globalThis.WeakMap))
+  (defconst knownCapabilities (new globalThis.Set browserCapabilityKinds))
+
+  (defconst BrowserCapabilityError
+    (funcall host-error-class
+      (lambda (receiver code message capability)
+        (put receiver :name "BrowserCapabilityError")
+        (put receiver :code code)
+        (put receiver :capability capability))
+      "BrowserCapabilityError"
+      3
+      (lambda (code message capability) message)))
+
+  (defun fail (code message &rest __opt)
+    (throw (new BrowserCapabilityError code message (aref __opt 0))))
+
+  (defun invalid-grant-item? (grant)
+    (or (not (= (host-typeof grant) "string")) (= (js-length grant) 0)))
+
+  (defun normalizeGrants (grants)
+    (when (or (not (Array/isArray grants))
+              (js-call grants :some invalid-grant-item?))
+      (fail "invalid-grants" "browser grants must be an array of non-empty strings"))
+    (let ((normalized (js-call (Array/from (new globalThis.Set grants)) :sort)))
+      (when (not (= (js-length normalized) (js-length grants)))
+        (fail "duplicate-grant" "browser grants must not contain duplicates"))
+      (let ((index 0))
+        (while (< index (js-length normalized))
+          (let ((grant (aref normalized index)))
+            (unless (js-call knownCapabilities :has grant)
+              (fail "unknown-grant" (str "unknown browser capability " grant) grant)))
+          (setq index (1+ index))))
+      normalized))
+
+  (defun requireFunction (receiver name capability)
+    (let ((operation (if (nullish? receiver) undefined (aref receiver name))))
+      (unless (= (host-typeof operation) "function")
+        (fail "unavailable-capability"
+          (str "browser host does not provide " capability)
+          capability))
+      (lambda (&rest arguments_)
+        (Reflect/apply operation receiver arguments_))))
+
+  (defun operationTable (scope grants)
+    (let ((operations (Object/create nil))
+          (index 0))
+      (while (< index (js-length grants))
+        (let ((grant (aref grants index)))
+          (cond
+            ((= grant "clock")
+              (put operations :clock (requireFunction (get scope :performance) "now" grant)))
+            ((= grant "document")
+              (let ((document (get scope :document)))
+                (when (or (nil? document) (not (= (host-typeof document) "object")))
+                  (fail "unavailable-capability" "browser host does not provide document" grant))
+                (put operations :document (lambda () document))))
+            ((= grant "network")
+              (put operations :network (requireFunction scope "fetch" grant)))
+            ((= grant "randomness")
+              (put operations :randomness (requireFunction (get scope :crypto) "getRandomValues" grant)))
+            ((= grant "timers")
+              (put operations :setTimeout (requireFunction scope "setTimeout" grant))
+              (put operations :clearTimeout (requireFunction scope "clearTimeout" grant)))))
+        (setq index (1+ index)))
+      (Object/freeze operations)))
+
+  (defun browserCapabilities (scope &rest __opt)
+    (let* ((grants (aref __opt 0))
+           (actual-grants (if (undefined? grants) (js-array) grants)))
+      (when (or (nil? scope)
+                (and (not (= (host-typeof scope) "object"))
+                     (not (= (host-typeof scope) "function"))))
+        (fail "invalid-host" "browser host must be an object or function"))
+      (let* ((normalized (normalizeGrants actual-grants))
+             (capabilities (Object/freeze
+                             (js-object :format "eliscript-browser-capabilities"
+                               :version 1
+                               :grants (Object/freeze normalized)))))
+        (js-call capabilityState :set capabilities (operationTable scope normalized))
+        capabilities)))
+
+  (defun isBrowserCapabilities (value)
+    (and (not (nil? value))
+         (= (host-typeof value) "object")
+         (js-call capabilityState :has value)))
+
+  (defun stateFor (capabilities)
+    (let ((state (if (isBrowserCapabilities capabilities)
+                   (js-call capabilityState :get capabilities)
+                   undefined)))
+      (when (undefined? state)
+        (fail "invalid-capabilities" "expected Eliscript browser capabilities"))
+      state))
+
+  (defun browserCapabilityDescriptor (capabilities)
+    (stateFor capabilities)
+    (Object/freeze
+      (js-object :format (get capabilities :format)
+        :version (get capabilities :version)
+        :grants (Object/freeze (Array/from (get capabilities :grants))))))
+
+  (defun hasBrowserCapability (capabilities capability)
+    (stateFor capabilities)
+    (and (= (host-typeof capability) "string")
+         (js-call (get capabilities :grants) :includes capability)))
+
+  (defun operationFor (capabilities operation &rest __opt)
+    (let* ((capability (aref __opt 0))
+           (actual-capability (if (undefined? capability) operation capability))
+           (operation_ (aref (stateFor capabilities) operation)))
+      (when (undefined? operation_)
+        (fail "missing-capability"
+          (str "browser capability " actual-capability " was not granted")
+          actual-capability))
+      operation_))
+
+  (defun browserDocument (capabilities)
+    (funcall (operationFor capabilities "document")))
+
+  (defun browserFetch (capabilities input init)
+    (funcall (operationFor capabilities "network") input init))
+
+  (defun browserNow (capabilities)
+    (funcall (operationFor capabilities "clock")))
+
+  (defun browserRandomValues (capabilities values)
+    (funcall (operationFor capabilities "randomness") values))
+
+  (defun browserSetTimeout (capabilities callback delay &rest arguments_)
+    (Reflect/apply
+      (operationFor capabilities "setTimeout" "timers")
+      undefined
+      (js-call (js-array callback delay) :concat arguments_)))
+
+  (defun browserClearTimeout (capabilities handle)
+    (funcall (operationFor capabilities "clearTimeout" "timers") handle))
+
+  (defun browserEventBoundary (handler report &rest __opt)
+    (let* ((sourceMaps (aref __opt 0))
+           (actual-maps (if (undefined? sourceMaps) (js-array) sourceMaps)))
+      (unless (= (host-typeof handler) "function")
+        (fail "invalid-event-handler" "browser event handler must be a function"))
+      (unless (= (host-typeof report) "function")
+        (fail "invalid-event-reporter" "browser event reporter must be a function"))
+      (unless (Array/isArray actual-maps)
+        (fail "invalid-source-maps" "browser event source maps must be an array"))
+      (funcall host-function
+        (lambda (receiver arguments_)
+          (let ((reportFailure (lambda (error)
+                                 (funcall report (sourceMappedFailure error actual-maps) (aref arguments_ 0))
+                                 undefined)))
+            (try
+              (let ((result (Reflect/apply handler receiver arguments_)))
+                (if (and (not (nil? result))
+                         (or (= (host-typeof result) "object")
+                             (= (host-typeof result) "function"))
+                         (= (host-typeof (get result :then)) "function"))
+                  (js-call (Promise/resolve result) :catch reportFailure)
+                  result))
+              (catch error
+                (funcall reportFailure error)))))
+        "boundedBrowserEvent")))
+
+  (export BrowserCapabilityError browserCapabilities browserCapabilityDescriptor
+    browserCapabilityKinds browserClearTimeout browserDocument
+    browserEventBoundary browserFetch browserNow browserRandomValues
+    browserSetTimeout hasBrowserCapability isBrowserCapabilities))

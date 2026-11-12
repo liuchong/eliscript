@@ -1,5 +1,6 @@
 (module bootstrap.compiler.compiler
   (import "./reader.mjs" read-string)
+  (defconst typeof-value (lambda (value) (js* "typeof value")))
   (import "./formatter.mjs"
     formatter-format
     formatter-version
@@ -55,10 +56,10 @@
     (js-array "export" "export-default" "import" "import-portable" "module"))
   (defconst evaluation-fail
     (lambda (message filename)
-      (let* ((error (new (js* "Error") message))
+      (let* ((error (new globalThis.Error message))
              (diagnostic (js-object :format "eliscript-diagnostic" :version 1
                :code "ELI-E0001" :severity "error" :phase "evaluation-request" :message message)))
-        (when (js* "!!filename")
+        (when (funcall globalThis.Boolean filename)
           (put diagnostic :location (js-object :file filename)))
         (put error :eliscriptDiagnostic diagnostic)
         (throw error))))
@@ -92,12 +93,12 @@
     (if (js-call globalThis.Object :hasOwn value key) (get value key) fallback))
   (defun evaluation-require-source
     (source filename)
-    (unless (and (= (js* "typeof source") "string") (> (get source :length) 0))
+    (unless (and (= (funcall typeof-value source) "string") (> (get source :length) 0))
       (funcall evaluation-fail "evaluation source must be a non-empty string" filename))
     source)
   (defun evaluation-require-filename
     (filename)
-    (unless (and (= (js* "typeof filename") "string") (> (get filename :length) 0))
+    (unless (and (= (funcall typeof-value filename) "string") (> (get filename :length) 0))
       (funcall evaluation-fail "evaluation filename must be a non-empty string" false))
     filename)
   (defun evaluation-input-result
@@ -117,7 +118,7 @@
   (defun evaluation-input-description
     (source filename)
     (evaluation-require-filename filename)
-    (unless (= (js* "typeof source") "string")
+    (unless (= (funcall typeof-value source) "string")
       (funcall evaluation-fail "evaluation input source must be a string" filename))
     (try
       (let ((forms (read-string source filename)))
@@ -172,7 +173,7 @@
           (unless
             (or
               (nil? root)
-              (and (= (js* "typeof root") "string") (> (get root :length) 0)))
+              (and (= (funcall typeof-value root) "string") (> (get root :length) 0)))
             (funcall
               evaluation-fail
               "evaluation root must be null or a non-empty string"
@@ -292,7 +293,7 @@
     (names seen value)
     (when
       (and
-        (= (js* "typeof value") "string")
+        (= (funcall typeof-value value) "string")
         (> (get value :length) 0)
         (not (js-call seen :has value)))
       (js-call seen :add value)

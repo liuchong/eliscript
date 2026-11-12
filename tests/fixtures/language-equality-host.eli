@@ -1,2 +1,16 @@
-(module capsules.tests.fixtures.language-equality-host
-  (js* "import { pathToFileURL } from \"node:url\";\n\nconst modulePath = process.argv[2];\nif (modulePath === undefined) {\n  throw new TypeError(\"language equality host requires a generated module path\");\n}\n\nconst generated = await import(pathToFileURL(modulePath).href);\nconsole.log(JSON.stringify(generated.report()));\n"))
+(module tests.fixtures.language-equality-host
+  (import "node:url" pathToFileURL)
+  (defconst load-module (js* "(specifier) => import(specifier)"))
+  (defconst modulePath (aref (get globalThis.process :argv) 2))
+  (when (= modulePath undefined) (throw (new globalThis.TypeError "language equality host requires a generated module path")))
+  (defvar compiled undefined)
+  (defasync run-host-main ()
+    (setq compiled (await (funcall load-module (get (pathToFileURL modulePath) :href))))
+    (js-call globalThis.console :log (JSON/stringify (js-call compiled "report"))))
+  (defconst completion (run-host-main))
+  (js-call completion :catch (lambda (error)
+    (console/error error)
+    (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

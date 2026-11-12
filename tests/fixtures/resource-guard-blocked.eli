@@ -1,0 +1,12 @@
+(module tests.fixtures.resource-guard-blocked
+  (import "node:process" :default process)
+  (import "node:fs" writeFileSync)
+  (import "node:child_process" spawn)
+  (import "node:url" fileURLToPath)
+  (let ((mode (aref (get process :argv) 2)))
+    (when (= mode "parent")
+      (spawn "node" (js-array (fileURLToPath (js* "import.meta.url")) "child" (aref (get process :argv) 4)) (js-object :stdio "ignore")))
+    (unless (= mode "small") (writeFileSync (aref (get process :argv) 3) (funcall globalThis.String (get process :pid))))
+    (when (or (= mode "parent") (= mode "child")) (js-call process :on "SIGINT" (lambda () undefined)) (js-call process :on "SIGTERM" (lambda () undefined)))
+    (while t nil))
+)

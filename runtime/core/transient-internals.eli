@@ -1,2 +1,17 @@
-(module capsules.runtime.core.transient-internals
-  (js* "import {\n  defineProtocol,\n  protocolMethod,\n  protocolSlot,\n} from \"./protocol.mjs\";\n\nexport const I_EDITABLE = defineProtocol(\"IEditable\", [\"transient\"]);\nexport const I_TRANSIENT_COLLECTION = defineProtocol(\n  \"ITransientCollection\",\n  [\"conj!\", \"assoc!\", \"dissoc!\", \"persistent!\"],\n);\n\nexport const EDITABLE_TRANSIENT = protocolSlot(I_EDITABLE, \"transient\");\nexport const TRANSIENT_CONJ = protocolSlot(I_TRANSIENT_COLLECTION, \"conj!\");\nexport const TRANSIENT_ASSOC = protocolSlot(I_TRANSIENT_COLLECTION, \"assoc!\");\nexport const TRANSIENT_DISSOC = protocolSlot(I_TRANSIENT_COLLECTION, \"dissoc!\");\nexport const TRANSIENT_PERSISTENT = protocolSlot(\n  I_TRANSIENT_COLLECTION,\n  \"persistent!\",\n);\n\nexport const dispatchEditableTransient = protocolMethod(I_EDITABLE, \"transient\");\nexport const dispatchTransientConj = protocolMethod(\n  I_TRANSIENT_COLLECTION,\n  \"conj!\",\n);\nexport const dispatchTransientAssoc = protocolMethod(\n  I_TRANSIENT_COLLECTION,\n  \"assoc!\",\n);\nexport const dispatchTransientDissoc = protocolMethod(\n  I_TRANSIENT_COLLECTION,\n  \"dissoc!\",\n);\nexport const dispatchTransientPersistent = protocolMethod(\n  I_TRANSIENT_COLLECTION,\n  \"persistent!\",\n);\n"))
+(module eliscript.runtime.core.transient-internals
+  (import "./protocol.mjs" defineProtocol protocolMethod protocolSlot)
+  (defconst I_EDITABLE (defineProtocol "IEditable" (js-array "transient")))
+  (defconst I_TRANSIENT_COLLECTION (defineProtocol "ITransientCollection" (js-array "conj!" "assoc!" "dissoc!" "persistent!")))
+  (defconst EDITABLE_TRANSIENT (protocolSlot I_EDITABLE "transient"))
+  (defconst TRANSIENT_CONJ (protocolSlot I_TRANSIENT_COLLECTION "conj!"))
+  (defconst TRANSIENT_ASSOC (protocolSlot I_TRANSIENT_COLLECTION "assoc!"))
+  (defconst TRANSIENT_DISSOC (protocolSlot I_TRANSIENT_COLLECTION "dissoc!"))
+  (defconst TRANSIENT_PERSISTENT (protocolSlot I_TRANSIENT_COLLECTION "persistent!"))
+  (defconst dispatchEditableTransient (protocolMethod I_EDITABLE "transient"))
+  (defconst dispatchTransientConj (protocolMethod I_TRANSIENT_COLLECTION "conj!"))
+  (defconst dispatchTransientAssoc (protocolMethod I_TRANSIENT_COLLECTION "assoc!"))
+  (defconst dispatchTransientDissoc (protocolMethod I_TRANSIENT_COLLECTION "dissoc!"))
+  (defconst dispatchTransientPersistent (protocolMethod I_TRANSIENT_COLLECTION "persistent!"))
+  (export I_EDITABLE I_TRANSIENT_COLLECTION EDITABLE_TRANSIENT TRANSIENT_CONJ TRANSIENT_ASSOC
+    TRANSIENT_DISSOC TRANSIENT_PERSISTENT dispatchEditableTransient dispatchTransientConj
+    dispatchTransientAssoc dispatchTransientDissoc dispatchTransientPersistent))

@@ -1,2 +1,396 @@
-(module capsules.tests.wasm-managed-typeof.test
-  (js* "import {beforeAll, afterAll, test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {readFile, writeFile, mkdtemp, rm} from 'node:fs/promises';\nimport {tmpdir} from 'node:os';\nimport {resolve} from 'node:path';\nimport {pathToFileURL} from 'node:url';\nimport {spawnSync} from 'node:child_process';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nlet directory, b, runtime, program, javascript, js;\nbeforeAll(async () => {\n  directory = await mkdtemp(resolve(tmpdir(), 'eliscript-typeof-'));b = await buildBackends({outputRoot: directory});\n  runtime = b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli', 'utf8'), 'runtime.eli');\n  program = b.compiler.compile_ir_string(await readFile('tests/fixtures/wasm-managed-typeof.eli', 'utf8'), 'typeof.eli');\n  javascript = b.compiler.emit_ir_string(program);js = await import('data:text/javascript;base64,' + Buffer.from(javascript).toString('base64'));\n}, 120000);\nafterAll(async () => {if (directory) await rm(directory, {recursive: true, force: true});});\nfunction artifact(p = program, rt = runtime) {const before = JSON.stringify(p), out = Uint8Array.from(b.managed.emit_managed_wasm(p, rt));assert.equal(JSON.stringify(p), before);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(out)), []);return out;}\nconst box = (a, v) => typeof v === 'number' ? a.number(v) : typeof v === 'string' ? a.string(v) : v;\nfunction finish(a, values = []) {for (const v of values) a.release(v);a.closeModule();a.collect();assert.equal(a.live(), 0);assert.equal(a.stats().frameDepth, 0);}\ntest('independent Node confirms existing typeof primitive distinctions, captured lexical bindings and member failures', async () => {\n  const file = resolve(directory, 'source.mjs');await writeFile(file, javascript);\n  const child = spawnSync('node', ['--input-type=module', '-e', `import assert from 'node:assert/strict';const m=await import(process.argv[1]);for(const x of[undefined,null,false,true,-0,NaN,Infinity,Number.MIN_VALUE,'中😀\\\\ud800',{},[],()=>1]){assert.equal(m.type_value(x),typeof x);assert.equal(m.type_member({item:x}),typeof x);assert.equal(m.invoke(m.capture(x)),typeof x);assert.equal(m.type_underscore(x),typeof x);}assert.equal(m.type_member({}),'undefined');assert.throws(()=>m.type_member(null),TypeError);assert.throws(()=>m.type_deep({}),TypeError);`, pathToFileURL(file).href], {encoding: 'utf8', timeout: 30000});assert.equal(child.status, 0, child.stderr);\n});\ntest('typeof values and member paths execute in owned WASM without coercing objects or conflating null and undefined', () => {\n  const a = instantiateManagedRuntime(artifact());a.auto(1);const owned = [];\n  for (const x of [undefined, null, false, true, 0, -0, NaN, Infinity, -Infinity, Number.MIN_VALUE, Number.MAX_VALUE, '', '中😀\\ud800']) {\n    const v = box(a, x), object = a.invoke('make-box', [v]), child = a.invoke('make-child', [object]);owned.push(v, object, child);\n    for (const [name, input, expected] of [['type-value', v, typeof x], ['type-underscore', v, typeof x], ['type-member', object, typeof x], ['type-deep', child, typeof x], ['type-shadow', v, 'boolean']]) {const out = a.invoke(name, [input]);owned.push(out);assert.equal(a.readString(out), expected);}\n    const closure = a.invoke('capture', [v]);owned.push(closure);a.collect();const out = a.invoke('invoke', [closure]);owned.push(out);assert.equal(a.readString(out), typeof x);assert.equal(a.stats().frameDepth, 0);\n    if (x !== null && x !== undefined) {const member = a.invoke('type-member', [v]);owned.push(member);assert.equal(a.readString(member), typeof x.item);}\n  }\n  const object = a.sourceObject({}), array = a.sourceArray([]), fn = a.getExport('type-value');owned.push(object, array, fn);\n  for (const [v, expected] of [[object, 'object'], [array, 'object'], [fn, 'function']]) {const out = a.invoke('type-value', [v]);owned.push(out);assert.equal(a.readString(out), expected);}\n  const missing = a.invoke('type-member', [object]);owned.push(missing);assert.equal(a.readString(missing), 'undefined');\n  for (const [name, value] of [['type-member', null], ['type-member', undefined], ['type-deep', object]]) {assert.throws(() => a.invoke(name, [value]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');assert.equal(a.stats().frameDepth, 0);}\n  finish(a, owned);\n});\ntest('typeof lexical and imported module bindings survive project renaming and writes without changing canonical IR', () => {\n  const entry = b.compiler.compile_ir_string('(module entry (import \"./typeof.mjs\" type-value type-global write-global) (defun imported-type () (js* \"typeof type_value\")) (export type-value type-global write-global imported-type))', 'entry.eli'), modules = [{id: 'typeof.mjs', program}, {id: 'entry.mjs', program: entry}], before = JSON.stringify(modules);\n  const bytes = Uint8Array.from(b.managed.emit_managed_project_wasm(modules, 'entry.mjs', runtime));assert.equal(JSON.stringify(modules), before);const a = instantiateManagedRuntime(bytes);a.auto(1);\n  const first = a.invoke('type_global'), imported = a.invoke('imported_type');assert.equal(a.readString(first), 'object');assert.equal(a.readString(imported), 'function');const owned = [first, imported];\n  for (const x of [undefined, null, false, -0, NaN, '中😀\\ud800']) {const v = box(a, x), out = a.invoke('write_global', [v]), read = a.invoke('type_global');owned.push(v, out, read);assert.equal(a.readString(out), typeof x);assert.equal(a.readString(read), typeof x);}\n  finish(a, owned);\n});\n\ntest('type queries never stringify objects and random IEEE values retain their original bits through collecting GC', () => {\n  const p = b.compiler.compile_ir_string('(defconst marker 1) (defun f (value) (js* \"typeof value\")) (defun factory (trace) (js-object :toString (lambda () (put trace :called t) \"wrong\") :valueOf (lambda () (put trace :called t) 7))) (export f factory)', 'type-hooks.eli'), a = instantiateManagedRuntime(artifact(p));a.auto(1);\n  const trace = a.sourceObject({}), object = a.invoke('factory', [trace]), label = a.invoke('f', [object]), key = a.string('called');assert.equal(a.readString(label), 'object');assert.equal(a.objectGet(trace, key), undefined);\n  const data = new DataView(new ArrayBuffer(8));let state = 0x294f61d7;const next = () => state = (Math.imul(state, 1664525) + 1013904223) >>> 0;\n  for (let i = 0; i < 1024; i++) {data.setUint32(0, next());data.setUint32(4, next());const x = data.getFloat64(0), input = a.number(x), out = a.invoke('f', [input]);assert.equal(a.readString(out), 'number');assert(Object.is(a.readNumber(input), x));a.release(input);a.release(out);}\n  finish(a, [trace, object, label, key]);\n});\n\ntest('unrepresented globals unsupported expressions and malformed typeof IR remain exact source-bound refusals even in dead code', () => {\n  for (const expression of ['typeof unknown', 'typeof value()', 'typeof (value)', 'typeof value[key]']) {\n    const p = b.compiler.compile_ir_string(';中😀\\n(defun f (value) (if nil (js* ' + JSON.stringify(expression) + ') 1)) (export f)', 'type-refusal.eli'), before = JSON.stringify(p);\n    assert.throws(() => b.managed.emit_managed_wasm(p, runtime), e => e.eliscriptDiagnostic?.code === 'ELI-B0001' && e.eliscriptDiagnostic.location.file === 'type-refusal.eli' && e.eliscriptDiagnostic.location.start.line === 2);assert.equal(JSON.stringify(p), before);\n  }\n  for (const change of [n => n.children.push(n.children[0]), n => n.children[0].value = null, n => n.children[0].children.push({kind: 'literal', value: 7, children: []})]) {\n    const p = b.compiler.compile_ir_string('(defun f (value) (js* \"typeof value\")) (export f)', 'malformed-type.eli');let raw;\n    const walk = n => {if (n && typeof n === 'object') {if (n.kind === 'raw-javascript') raw = n;for (const value of Object.values(n)) walk(value);}};walk(p);assert(raw);change(raw);\n    const before = JSON.stringify(p);assert.throws(() => b.managed.emit_managed_wasm(p, runtime), e => e.eliscriptDiagnostic?.code === 'ELI-B0001');assert.equal(JSON.stringify(p), before);\n  }\n});\n\ntest('unimplemented primitive prototype values are refused rather than mislabeled as undefined', () => {\n  for (const [key, values] of [['toString', [true, 1, 'x']], ['toFixed', [1]], ['toExponential', [1]], ['toPrecision', [1]], ['split', ['x']], ['toUpperCase', ['x']]]) {\n    const p = b.compiler.compile_ir_string(`(defconst marker 1) (defun f (value) (js* \"typeof value.${key}\")) (export f)`, 'type-prototype.eli'), a = instantiateManagedRuntime(artifact(p));a.auto(1);\n    for (const x of values) {const v = box(a, x);assert.throws(() => a.invoke('f', [v]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');assert.equal(a.stats().frameDepth, 0);a.release(v);}finish(a);\n  }\n});\n\ntest('type allocation and real WASM traps preserve outer roots and earlier member lookup errors', async () => {\n  const source = await readFile('bootstrap/runtime/memory.eli', 'utf8'), start = source.indexOf('  (defun value-source-typeof '), end = source.indexOf('  (defun ', start + 3);assert(start >= 0 && end > start);\n  const rt = b.compiler.compile_ir_string(source.slice(0, start) + '  (defun value-source-typeof (heap value) (load-u32 4294967295))\\n' + source.slice(end), 'type-trap.eli');\n  const a = instantiateManagedRuntime(artifact(program, rt));a.auto(1);const held = a.number(-0), outer = a.frame(1);a.frameSet(outer, 0, held);\n  assert.throws(() => a.invoke('type-member', [null]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');assert.equal(a.stats().frameDepth, 1);\n  assert.throws(() => a.invoke('type-value', [held]), WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth, 1);assert(Object.is(a.readNumber(held), -0));a.leaveFrame(outer);finish(a, [held]);\n  const small = instantiateManagedRuntime(artifact(), {maxSlots: 64, initialBytes: 8192, maxBytes: 8192});small.auto(1);const retained = small.number(-0), frame = small.frame(1), keep = [];small.frameSet(frame, 0, retained);\n  for (let i = 0; i < 128; i++) {try {keep.push(small.number(i));} catch (error) {assert.equal(error.eliscriptDiagnostic?.code, 'ELI-RT0002');break;}}\n  assert.throws(() => small.invoke('type-value', [retained]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0002');assert.equal(small.stats().frameDepth, 1);assert(Object.is(small.readNumber(retained), -0));for (const v of keep) small.release(v);small.collect();const out = small.invoke('type-value', [retained]);assert.equal(small.readString(out), 'number');small.leaveFrame(frame);finish(small, [retained, out]);\n});\n\ntest('Node executes identical zero-import typeof bytes with captured functions members and module state', async () => {\n  const file = resolve(directory, 'typeof.wasm');await writeFile(file, artifact());\n  const child = spawnSync('node', ['--input-type=module', '-e', `import assert from'node:assert/strict';import{readFileSync}from'node:fs';const{instantiateManagedRuntime}=await import(process.argv[1]),a=instantiateManagedRuntime(readFileSync(process.argv[2]));a.auto(1);const n=a.number(-0),box=a.invoke('make-box',[n]),label=a.invoke('type-member',[box]),fn=a.getExport('type-value'),callable=a.invoke('type-value',[fn]),captured=a.invoke('capture',[n]),result=a.invoke('invoke',[captured]);assert.equal(a.readString(label),'number');assert.equal(a.readString(callable),'function');assert.equal(a.readString(result),'number');assert(Object.is(a.readNumber(n),-0));for(const x of[n,box,label,fn,callable,captured,result])a.release(x);a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);`, pathToFileURL(resolve('tools/backends/managed-runtime.mjs')).href, file], {encoding: 'utf8', timeout: 30000});assert.equal(child.status, 0, child.stderr);\n});\n\ntest('existing nil undefined and nullish predicates preserve distinct meanings and evaluate operands once', async () => {\n  const source = '(defconst marker 1) (defun is-nil (value) (nil? value)) (defun is-undefined (value) (undefined? value)) (defun is-null (value) (null value)) (defun is-nullish (value) (nullish? value)) (defun once (value trace) (null (progn (put trace :calls (1+ (get trace :calls 0))) value))) (export is-nil is-undefined is-null is-nullish once)', p = b.compiler.compile_ir_string(source, 'null-predicates.eli'), ref = await import('data:text/javascript;base64,' + Buffer.from(b.compiler.emit_ir_string(p)).toString('base64')), a = instantiateManagedRuntime(artifact(p));a.auto(1);\n  const values = [undefined, null, false, true, -0, NaN, Infinity, Number.MIN_VALUE, '', '中😀\\ud800'];\n  for (const x of values) {const v = box(a, x);for (const name of ['is-nil', 'is-undefined', 'is-null', 'is-nullish']) assert.equal(a.invoke(name, [v]), ref[name.replaceAll('-', '_')](x));const trace = a.sourceObject({});assert.equal(a.invoke('once', [v, trace]), ref.once(x, {}));const key = a.string('calls'), calls = a.objectGet(trace, key);assert.equal(a.readNumber(calls), 1);for (const item of [v, trace, key, calls]) a.release(item);a.collect();assert.equal(a.stats().frameDepth, 0);}\n  const object = a.sourceObject({}), array = a.sourceArray([]), fn = a.getExport('is-null');for (const v of [object, array, fn]) for (const name of ['is-nil', 'is-undefined', 'is-null', 'is-nullish']) assert.equal(a.invoke(name, [v]), false);finish(a, [object, array, fn]);\n});\n\ntest('null predicate arity and malformed operands are diagnosed before lowering children with immutable source locations', () => {\n  for (const name of ['nil?', 'undefined?', 'null', 'nullish?']) for (const change of [n => n.children = [], n => n.children.push(n.children[0]), n => n.children = [null]]) {\n    const p = b.compiler.compile_ir_string(';中😀\\n(defun f (value) (' + name + ' value)) (export f)', 'null-shape.eli');let predicate;\n    const walk = n => {if (n && typeof n === 'object') {if (n.kind === 'intrinsic' && n.value === name) predicate = n;for (const value of Object.values(n)) walk(value);}};walk(p);assert(predicate);const span = predicate.span;change(predicate);const before = JSON.stringify(p);\n    assert.throws(() => b.managed.emit_managed_wasm(p, runtime), e => e.eliscriptDiagnostic?.code === 'ELI-B0001' && e.eliscriptDiagnostic.location.file === 'null-shape.eli' && e.eliscriptDiagnostic.location.start.line === span.line && e.eliscriptDiagnostic.location.start.column === span.column);assert.equal(JSON.stringify(p), before);\n  }\n});\n"))
+(module tests.wasm-managed-typeof.test
+  (import "bun:test" afterAll beforeAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:buffer" Buffer)
+  (import "node:child_process" spawnSync)
+  (import "node:fs/promises" mkdtemp readFile rm writeFile)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst uint32 (js* "(v) => v >>> 0"))
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defvar directory nil)
+  (defvar b nil)
+  (defvar runtime nil)
+  (defvar program nil)
+  (defvar javascript nil)
+  (defvar js nil)
+
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-typeof-"))))
+    (setq b (await (buildBackends (js-object :outputRoot directory))))
+    (setq runtime (js-call (get b :compiler) :compile_ir_string
+                    (await (readFile "bootstrap/runtime/memory.eli" "utf8"))
+                    "runtime.eli"))
+    (setq program (js-call (get b :compiler) :compile_ir_string
+                    (await (readFile "tests/fixtures/wasm-managed-typeof.eli" "utf8"))
+                    "typeof.eli"))
+    (setq javascript (js-call (get b :compiler) :emit_ir_string program))
+    (setq js (await (funcall dynamic-import
+                      (str "data:text/javascript;base64,"
+                           (js-call (Buffer/from javascript) :toString "base64"))))))
+    120000)
+
+  (afterAll (async ()
+    (when directory
+      (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun artifact (&rest __host_default_arguments_1)
+    (let* ((p (aref __host_default_arguments_1 0)) (rt (aref __host_default_arguments_1 1)))
+    (let* ((prog (if (undefined? p) program p))
+           (rt-ir (if (undefined? rt) runtime rt))
+           (before (JSON/stringify prog))
+           (out (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm prog rt-ir))))
+      (js-call assert :equal (JSON/stringify prog) before)
+      (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module out)) (js-array))
+      out)))
+
+  (defun box (a v)
+    (let ((ty (funcall js-typeof v)))
+      (cond
+        ((= ty "number") (js-call a :number v))
+        ((= ty "string") (js-call a :string v))
+        (t v))))
+
+  (defun finish (a &rest __host_default_arguments_2)
+    (let* ((values (aref __host_default_arguments_2 0)))
+    (let ((items (if (undefined? values) (js-array) values)))
+      (js-call items :forEach (lambda (v) (js-call a :release v))))
+    (js-call a :closeModule)
+    (js-call a :collect)
+    (js-call assert :equal (js-call a :live) 0)
+    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))
+
+  (test "independent Node confirms existing typeof primitive distinctions, captured lexical bindings and member failures" (async ()
+    (let ((file (resolve directory "source.mjs")))
+      (await (writeFile file javascript))
+      (let ((child (spawnSync "node"
+                     (js-array (resolve "tests/helpers/wasm-managed-typeof-node.mjs")
+                               "js"
+                               (get (pathToFileURL file) :href))
+                     (js-object :encoding "utf8" :timeout 30000))))
+        (js-call assert :equal (get child :status) 0 (get child :stderr))))))
+
+  (test "typeof values and member paths execute in owned WASM without coercing objects or conflating null and undefined" (lambda ()
+    (let ((a (instantiateManagedRuntime (artifact)))
+          (owned (js-array)))
+      (js-call a :auto 1)
+      (js-call
+        (js-array undefined nil false t 0 -0.0 globalThis.NaN globalThis.Infinity (- globalThis.Infinity) globalThis.Number.MIN_VALUE globalThis.Number.MAX_VALUE "" "中😀\ud800")
+        :forEach
+        (lambda (x)
+          (let* ((v (box a x))
+                 (object (js-call a :invoke "make-box" (js-array v)))
+                 (child (js-call a :invoke "make-child" (js-array object)))
+                 (expected (funcall js-typeof x)))
+            (js-call owned :push v object child)
+            (js-call
+              (js-array
+                (js-array "type-value" v expected)
+                (js-array "type-underscore" v expected)
+                (js-array "type-member" object expected)
+                (js-array "type-deep" child expected)
+                (js-array "type-shadow" v "boolean"))
+              :forEach
+              (lambda (triple)
+                (let ((out (js-call a :invoke (aref triple 0) (js-array (aref triple 1)))))
+                  (js-call owned :push out)
+                  (js-call assert :equal (js-call a :readString out) (aref triple 2)))))
+            (let ((closure (js-call a :invoke "capture" (js-array v))))
+              (js-call owned :push closure)
+              (js-call a :collect)
+              (let ((out (js-call a :invoke "invoke" (js-array closure))))
+                (js-call owned :push out)
+                (js-call assert :equal (js-call a :readString out) expected)
+                (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))
+            (when (not (nullish? x))
+              (let ((member (js-call a :invoke "type-member" (js-array v))))
+                (js-call owned :push member)
+                (js-call assert :equal (js-call a :readString member) (funcall js-typeof (get x :item))))))))
+      (let ((object (js-call a :sourceObject (js-object)))
+            (array (js-call a :sourceArray (js-array)))
+            (fn (js-call a :getExport "type-value")))
+        (js-call owned :push object array fn)
+        (js-call
+          (js-array (js-array object "object") (js-array array "object") (js-array fn "function"))
+          :forEach
+          (lambda (pair)
+            (let ((out (js-call a :invoke "type-value" (js-array (aref pair 0)))))
+              (js-call owned :push out)
+              (js-call assert :equal (js-call a :readString out) (aref pair 1)))))
+        (let ((missing (js-call a :invoke "type-member" (js-array object))))
+          (js-call owned :push missing)
+          (js-call assert :equal (js-call a :readString missing) "undefined"))
+        (js-call
+          (js-array (js-array "type-member" nil) (js-array "type-member" undefined) (js-array "type-deep" object))
+          :forEach
+          (lambda (pair)
+            (js-call assert :throws
+              (lambda () (js-call a :invoke (aref pair 0) (js-array (aref pair 1))))
+              (lambda (e) (let ((d (get e :eliscriptDiagnostic))) (and d (= (get d :code) "ELI-RT0003")))))
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))
+        (finish a owned)))))
+
+  (test "typeof lexical and imported module bindings survive project renaming and writes without changing canonical IR" (lambda ()
+    (let* ((entry (js-call (get b :compiler) :compile_ir_string
+                    "(module entry (import \"./typeof.mjs\" type-value type-global write-global) (defun imported-type () (js* \"typeof type_value\")) (export type-value type-global write-global imported-type))"
+                    "entry.eli"))
+           (modules (js-array (js-object :id "typeof.mjs" :program program) (js-object :id "entry.mjs" :program entry)))
+           (before (JSON/stringify modules))
+           (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_project_wasm modules "entry.mjs" runtime))))
+      (js-call assert :equal (JSON/stringify modules) before)
+      (let ((a (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (let* ((first (js-call a :invoke "type_global"))
+               (imported (js-call a :invoke "imported_type"))
+               (owned (js-array first imported)))
+          (js-call assert :equal (js-call a :readString first) "object")
+          (js-call assert :equal (js-call a :readString imported) "function")
+          (js-call (js-array undefined nil false -0.0 globalThis.NaN "中😀\ud800") :forEach
+            (lambda (x)
+              (let* ((v (box a x))
+                     (out (js-call a :invoke "write_global" (js-array v)))
+                     (rd (js-call a :invoke "type_global"))
+                     (expected (funcall js-typeof x)))
+                (js-call owned :push v out rd)
+                (js-call assert :equal (js-call a :readString out) expected)
+                (js-call assert :equal (js-call a :readString rd) expected))))
+          (finish a owned))))))
+
+  (test "type queries never stringify objects and random IEEE values retain their original bits through collecting GC" (lambda ()
+    (let* ((p (js-call (get b :compiler) :compile_ir_string
+                "(defconst marker 1) (defun f (value) (js* \"typeof value\")) (defun factory (trace) (js-object :toString (lambda () (put trace :called t) \"wrong\") :valueOf (lambda () (put trace :called t) 7))) (export f factory)"
+                "type-hooks.eli"))
+           (a (instantiateManagedRuntime (artifact p))))
+      (js-call a :auto 1)
+      (let* ((trace (js-call a :sourceObject (js-object)))
+             (object (js-call a :invoke "factory" (js-array trace)))
+             (label (js-call a :invoke "f" (js-array object)))
+             (key (js-call a :string "called")))
+        (js-call assert :equal (js-call a :readString label) "object")
+        (js-call assert :equal (js-call a :objectGet trace key) undefined)
+        (let* ((data (new globalThis.DataView (new globalThis.ArrayBuffer 8)))
+               (state 693068247)
+               (next (lambda ()
+                       (setq state (funcall uint32 (+ (Math/imul state 1664525) 1013904223)))
+                       state))
+               (i 0))
+          (while (< i 1024)
+            (js-call data :setUint32 0 (funcall next))
+            (js-call data :setUint32 4 (funcall next))
+            (let* ((x (js-call data :getFloat64 0))
+                   (input (js-call a :number x))
+                   (out (js-call a :invoke "f" (js-array input))))
+              (js-call assert :equal (js-call a :readString out) "number")
+              (funcall assert (Object/is (js-call a :readNumber input) x))
+              (js-call a :release input)
+              (js-call a :release out))
+            (setq i (1+ i))))
+        (finish a (js-array trace object label key))))))
+
+  (test "unrepresented globals unsupported expressions and malformed typeof IR remain exact source-bound refusals even in dead code" (lambda ()
+    (js-call (js-array "typeof unknown" "typeof value()" "typeof (value)" "typeof value[key]") :forEach
+      (lambda (expression)
+        (let* ((p (js-call (get b :compiler) :compile_ir_string
+                    (str ";中😀\n(defun f (value) (if nil (js* " (JSON/stringify expression) ") 1)) (export f)")
+                    "type-refusal.eli"))
+               (before (JSON/stringify p)))
+          (js-call assert :throws
+            (lambda () (js-call (get b :managed) :emit_managed_wasm p runtime))
+            (lambda (e)
+              (let ((d (get e :eliscriptDiagnostic)))
+                (and d
+                     (= (get d :code) "ELI-B0001")
+                     (= (get (get d :location) :file) "type-refusal.eli")
+                     (= (get (get (get d :location) :start) :line) 2)))))
+          (js-call assert :equal (JSON/stringify p) before))))
+    (js-call
+      (js-array
+        (lambda (n) (js-call (get n :children) :push (aref (get n :children) 0)))
+        (lambda (n) (put (aref (get n :children) 0) :value nil))
+        (lambda (n) (js-call (get (aref (get n :children) 0) :children) :push (js-object :kind "literal" :value 7 :children (js-array)))))
+      :forEach
+      (lambda (change)
+        (let ((p (js-call (get b :compiler) :compile_ir_string "(defun f (value) (js* \"typeof value\")) (export f)" "malformed-type.eli"))
+              (raw nil))
+          (let ((walk nil))
+            (setq walk (lambda (n)
+                         (when (and (not (nullish? n)) (= (funcall js-typeof n) "object"))
+                           (when (= (get n :kind) "raw-javascript")
+                             (setq raw n))
+                           (js-call (Object/values n) :forEach walk))))
+            (funcall walk p))
+          (funcall assert raw)
+          (funcall change raw)
+          (let ((before (JSON/stringify p)))
+            (js-call assert :throws
+              (lambda () (js-call (get b :managed) :emit_managed_wasm p runtime))
+              (lambda (e) (let ((d (get e :eliscriptDiagnostic))) (and d (= (get d :code) "ELI-B0001")))))
+            (js-call assert :equal (JSON/stringify p) before)))))))
+
+  (test "unimplemented primitive prototype values are refused rather than mislabeled as undefined" (lambda ()
+    (js-call
+      (js-array
+        (js-array "toString" (js-array t 1 "x"))
+        (js-array "toFixed" (js-array 1))
+        (js-array "toExponential" (js-array 1))
+        (js-array "toPrecision" (js-array 1))
+        (js-array "split" (js-array "x"))
+        (js-array "toUpperCase" (js-array "x")))
+      :forEach
+      (lambda (pair)
+        (let* ((key (aref pair 0))
+               (values (aref pair 1))
+               (p (js-call (get b :compiler) :compile_ir_string
+                    (str "(defconst marker 1) (defun f (value) (js* \"typeof value." key "\")) (export f)")
+                    "type-prototype.eli"))
+               (a (instantiateManagedRuntime (artifact p))))
+          (js-call a :auto 1)
+          (js-call values :forEach
+            (lambda (x)
+              (let ((v (box a x)))
+                (js-call assert :throws
+                  (lambda () (js-call a :invoke "f" (js-array v)))
+                  (lambda (e) (let ((d (get e :eliscriptDiagnostic))) (and d (= (get d :code) "ELI-RT0003")))))
+                (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+                (js-call a :release v))))
+          (finish a))))))
+
+  (test "type allocation and real WASM traps preserve outer roots and earlier member lookup errors" (async ()
+    (let* ((src (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
+           (start (js-call src :indexOf "  (defun value-source-typeof "))
+           (end (js-call src :indexOf "  (defun " (+ start 3))))
+      (funcall assert (and (>= start 0) (> end start)))
+      (let* ((rt (js-call (get b :compiler) :compile_ir_string
+                   (str (js-call src :slice 0 start)
+                        "  (defun value-source-typeof (heap value) (load-u32 4294967295))\n"
+                        (js-call src :slice end))
+                   "type-trap.eli"))
+             (a (instantiateManagedRuntime (artifact program rt))))
+        (js-call a :auto 1)
+        (let ((held (js-call a :number -0.0))
+              (outer (js-call a :frame 1)))
+          (js-call a :frameSet outer 0 held)
+          (js-call assert :throws
+            (lambda () (js-call a :invoke "type-member" (js-array nil)))
+            (lambda (e) (let ((d (get e :eliscriptDiagnostic))) (and d (= (get d :code) "ELI-RT0003")))))
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+          (js-call assert :throws
+            (lambda () (js-call a :invoke "type-value" (js-array held)))
+            globalThis.WebAssembly.RuntimeError)
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+          (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+          (js-call a :leaveFrame outer)
+          (finish a (js-array held))))
+      (let ((small (instantiateManagedRuntime (artifact) (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 8192))))
+        (js-call small :auto 1)
+        (let ((retained (js-call small :number -0.0))
+              (frame (js-call small :frame 1))
+              (keep (js-array))
+              (i 0)
+              (exhausted false))
+          (js-call small :frameSet frame 0 retained)
+          (while (and (< i 128) (not exhausted))
+            (try
+              (js-call keep :push (js-call small :number i))
+              (catch err
+                (js-call assert :equal (let ((d (get err :eliscriptDiagnostic))) (and d (get d :code))) "ELI-RT0002")
+                (setq exhausted t)))
+            (setq i (1+ i)))
+          (js-call assert :throws
+            (lambda () (js-call small :invoke "type-value" (js-array retained)))
+            (lambda (e) (let ((d (get e :eliscriptDiagnostic))) (and d (= (get d :code) "ELI-RT0002")))))
+          (js-call assert :equal (get (js-call small :stats) :frameDepth) 1)
+          (funcall assert (Object/is (js-call small :readNumber retained) -0.0))
+          (js-call keep :forEach (lambda (v) (js-call small :release v)))
+          (js-call small :collect)
+          (let ((out (js-call small :invoke "type-value" (js-array retained))))
+            (js-call assert :equal (js-call small :readString out) "number")
+            (js-call small :leaveFrame frame)
+            (finish small (js-array retained out))))))))
+
+  (test "Node executes identical zero-import typeof bytes with captured functions members and module state" (async ()
+    (let ((file (resolve directory "typeof.wasm")))
+      (await (writeFile file (artifact)))
+      (let ((child (spawnSync "node"
+                     (js-array (resolve "tests/helpers/wasm-managed-typeof-node.mjs")
+                               "wasm"
+                               (get (pathToFileURL (resolve "tools/backends/managed-runtime.mjs")) :href)
+                               file)
+                     (js-object :encoding "utf8" :timeout 30000))))
+        (js-call assert :equal (get child :status) 0 (get child :stderr))))))
+
+  (test "existing nil undefined and nullish predicates preserve distinct meanings and evaluate operands once" (async ()
+    (let* ((src "(defconst marker 1) (defun is-nil (value) (nil? value)) (defun is-undefined (value) (undefined? value)) (defun is-null (value) (null value)) (defun is-nullish (value) (nullish? value)) (defun once (value trace) (null (progn (put trace :calls (1+ (get trace :calls 0))) value))) (export is-nil is-undefined is-null is-nullish once)")
+           (p (js-call (get b :compiler) :compile_ir_string src "null-predicates.eli"))
+           (ref (await (funcall dynamic-import
+                         (str "data:text/javascript;base64,"
+                              (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string p)) :toString "base64")))))
+           (a (instantiateManagedRuntime (artifact p))))
+      (js-call a :auto 1)
+      (js-call
+        (js-array undefined nil false t -0.0 globalThis.NaN globalThis.Infinity globalThis.Number.MIN_VALUE "" "中😀\ud800")
+        :forEach
+        (lambda (x)
+          (let ((v (box a x)))
+            (js-call (js-array "is-nil" "is-undefined" "is-null" "is-nullish") :forEach
+              (lambda (name)
+                (js-call assert :equal (js-call a :invoke name (js-array v)) (js-call ref (js-call name :replaceAll "-" "_") x))))
+            (let ((trace (js-call a :sourceObject (js-object))))
+              (js-call assert :equal (js-call a :invoke "once" (js-array v trace)) (js-call ref :once x (js-object)))
+              (let* ((key (js-call a :string "calls"))
+                     (calls (js-call a :objectGet trace key)))
+                (js-call assert :equal (js-call a :readNumber calls) 1)
+                (js-call (js-array v trace key calls) :forEach (lambda (item) (js-call a :release item)))
+                (js-call a :collect)
+                (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))))
+      (let ((object (js-call a :sourceObject (js-object)))
+            (array (js-call a :sourceArray (js-array)))
+            (fn (js-call a :getExport "is-null")))
+        (js-call (js-array object array fn) :forEach
+          (lambda (v)
+            (js-call (js-array "is-nil" "is-undefined" "is-null" "is-nullish") :forEach
+              (lambda (name)
+                (js-call assert :equal (js-call a :invoke name (js-array v)) false)))))
+        (finish a (js-array object array fn)))))
+
+  (test "null predicate arity and malformed operands are diagnosed before lowering children with immutable source locations" (lambda ()
+    (js-call (js-array "nil?" "undefined?" "null" "nullish?") :forEach
+      (lambda (name)
+        (js-call
+          (js-array
+            (lambda (n) (put n :children (js-array)))
+            (lambda (n) (js-call (get n :children) :push (aref (get n :children) 0)))
+            (lambda (n) (put n :children (js-array nil))))
+          :forEach
+          (lambda (change)
+            (let ((p (js-call (get b :compiler) :compile_ir_string
+                       (str ";中😀\n(defun f (value) (" name " value)) (export f)")
+                       "null-shape.eli"))
+                  (predicate nil))
+              (let ((walk nil))
+                (setq walk (lambda (n)
+                             (when (and (not (nullish? n)) (= (funcall js-typeof n) "object"))
+                               (when (and (= (get n :kind) "intrinsic") (= (get n :value) name))
+                                 (setq predicate n))
+                               (js-call (Object/values n) :forEach walk))))
+                (funcall walk p))
+              (funcall assert predicate)
+              (let ((span (get predicate :span)))
+                (funcall change predicate)
+                (let ((before (JSON/stringify p)))
+                  (js-call assert :throws
+                    (lambda () (js-call (get b :managed) :emit_managed_wasm p runtime))
+                    (lambda (e)
+                      (let ((d (get e :eliscriptDiagnostic)))
+                        (and d
+                             (= (get d :code) "ELI-B0001")
+                             (= (get (get d :location) :file) "null-shape.eli")
+                             (= (get (get (get d :location) :start) :line) (get span :line))
+                             (= (get (get (get d :location) :start) :column) (get span :column))))))
+                  (js-call assert :equal (JSON/stringify p) before))))))))))))

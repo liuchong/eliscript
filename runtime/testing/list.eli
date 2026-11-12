@@ -1,2 +1,49 @@
-(module capsules.runtime.testing.list
-  (js* "import {\n  LIST_STATE,\n  readListMetrics,\n  resetListMetrics,\n} from \"../core/list-internals.mjs\";\n\nfunction stateOf(list) {\n  const state = list?.[LIST_STATE];\n  if (state === undefined) {\n    throw new TypeError(\"expected an Eliscript persistent list\");\n  }\n  return state;\n}\n\nfunction collectNodes(list) {\n  const nodes = new Set();\n  let node = list;\n  while (!stateOf(node).empty) {\n    nodes.add(node);\n    node = stateOf(node).rest;\n  }\n  return nodes;\n}\n\nexport function resetPersistentListMetrics() {\n  resetListMetrics();\n}\n\nexport function persistentListMetrics() {\n  return readListMetrics();\n}\n\nexport function inspectPersistentList(list) {\n  const state = stateOf(list);\n  return Object.freeze({\n    count: state.count,\n    empty: state.empty,\n    nodeCount: collectNodes(list).size,\n  });\n}\n\nexport function sharedPersistentListNodes(left, right) {\n  const leftNodes = collectNodes(left);\n  const rightNodes = collectNodes(right);\n  let shared = 0;\n  for (const node of leftNodes) {\n    if (rightNodes.has(node)) {\n      shared += 1;\n    }\n  }\n  return shared;\n}\n"))
+(module eliscript.runtime.testing.list
+  (import "../core/list-internals.mjs"
+    LIST_STATE
+    readListMetrics
+    resetListMetrics)
+
+  (defun state-of (list)
+    (let ((state (if (nil? list) undefined (aref list LIST_STATE))))
+      (when (undefined? state)
+        (throw (new globalThis/TypeError "expected an Eliscript persistent list")))
+      state))
+
+  (defun collect-nodes (list)
+    (let ((nodes (new globalThis/Set))
+          (node list))
+      (while (not (get (state-of node) :empty))
+        (js-call nodes :add node)
+        (setq node (get (state-of node) :rest)))
+      nodes))
+
+  (defun resetPersistentListMetrics ()
+    (resetListMetrics))
+
+  (defun persistentListMetrics ()
+    (readListMetrics))
+
+  (defun inspectPersistentList (list)
+    (let ((state (state-of list)))
+      (Object/freeze
+        (js-object
+          :count (get state :count)
+          :empty (get state :empty)
+          :nodeCount (get (collect-nodes list) :size)))))
+
+  (defun sharedPersistentListNodes (left right)
+    (let ((left-nodes (collect-nodes left))
+          (right-nodes (collect-nodes right))
+          (shared 0))
+      (js-call left-nodes :forEach
+        (lambda (node)
+          (when (js-call right-nodes :has node)
+            (setq shared (+ shared 1)))))
+      shared))
+
+  (export
+    resetPersistentListMetrics
+    persistentListMetrics
+    inspectPersistentList
+    sharedPersistentListNodes))

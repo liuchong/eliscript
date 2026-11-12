@@ -1,2 +1,51 @@
-(module capsules.runtime.core.protocol-error
-  (js* "function protocolHostCategory(value) {\n  return value === null ? \"null\" : typeof value;\n}\n\nfunction observedType(value) {\n  const category = protocolHostCategory(value);\n  if (category !== \"object\" && category !== \"function\") {\n    return category;\n  }\n  try {\n    const prototype = Object.getPrototypeOf(value);\n    const constructor = prototype?.constructor;\n    const name = typeof constructor === \"function\" && constructor.name.length > 0\n      ? constructor.name\n      : \"anonymous\";\n    return `${category}:${name}`;\n  } catch {\n    return category;\n  }\n}\n\nexport class ProtocolDispatchError extends TypeError {\n  constructor(protocol, operation, receiver, reason = \"missing\") {\n    const type = observedType(receiver);\n    const detail = reason === \"missing\"\n      ? \"has no implementation\"\n      : \"has a non-callable direct slot\";\n    super(`protocol ${protocol.name}/${operation} ${detail} for ${type}`);\n    this.name = \"ProtocolDispatchError\";\n    this.code = \"ELI-RUNTIME-PROTOCOL\";\n    this.protocol = protocol.name;\n    this.operation = operation;\n    this.observedType = type;\n    this.reason = reason;\n  }\n}\n"))
+(module eliscript.runtime.core.protocol-error
+  (defconst typeof-value (js* "(value) => typeof value"))
+
+  (defun protocol-host-category (value)
+    (if (nil? value) "null" (funcall typeof-value value)))
+
+  (defun observed-type (value)
+    (let ((category (protocol-host-category value)))
+      (if (and (not (= category "object")) (not (= category "function")))
+          category
+          (try
+            (let* ((prototype (Object/getPrototypeOf value))
+                   (ctor (if (nullish? prototype) undefined (get prototype :constructor)))
+                   (name (if (and (= (funcall typeof-value ctor) "function")
+                                  (> (js-length (get ctor :name)) 0))
+                             (get ctor :name)
+                             "anonymous")))
+              (str category ":" name))
+            (catch _error
+              category)))))
+
+  (defun prepare-protocol-dispatch-error (protocol operation receiver reason)
+    (let* ((type (observed-type receiver))
+           (detail (if (= reason "missing")
+                       "has no implementation"
+                       "has a non-callable direct slot"))
+           (protocol-name (get protocol :name))
+           (message (str "protocol " protocol-name "/" operation " " detail " for " type)))
+      (js-object
+        :message message
+        :protocol protocol-name
+        :operation operation
+        :observedType type
+        :reason reason)))
+
+  (defun finish-protocol-dispatch-error (instance state)
+    (put instance "name" "ProtocolDispatchError")
+    (put instance "code" "ELI-RUNTIME-PROTOCOL")
+    (put instance "protocol" (get state :protocol))
+    (put instance "operation" (get state :operation))
+    (put instance "observedType" (get state :observedType))
+    (put instance "reason" (get state :reason))
+    instance)
+
+  (defconst ProtocolDispatchError
+    (funcall
+      (js* "(prepare, finish) => class ProtocolDispatchError extends TypeError { constructor(protocol, operation, receiver, reason = \"missing\") { const state = prepare(protocol, operation, receiver, reason); super(state.message); finish(this, state); } }")
+      prepare-protocol-dispatch-error
+      finish-protocol-dispatch-error))
+
+  (export ProtocolDispatchError))

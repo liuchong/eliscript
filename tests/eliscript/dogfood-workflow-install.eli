@@ -10,7 +10,7 @@
   (defconst original (Object/assign (js-object) framework))
   (js-call assert :strictEqual
     (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root "tests/dogfood-workflow-test-ground.mjs"))) :digest "hex")
-    "4a80cf7a80a3faa921f2438ee87974a74c9fa6225acde2b936ba60776aa8d44e")
+    "2d120a43ab6ce10c594a2dc3cc5d4d7e0d7c83d68d13397b4a6cce82eef37a74")
   (defconst registration (createDirectWasmRegistration original (js-object
     "the template checks out the consumer repository and invokes the action" runSourceWorkflowCase)))
   (defvar restored false)

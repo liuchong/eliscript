@@ -1,0 +1,51 @@
+(module tests.helpers.wasm-managed-exceptions-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile)
+  (import "node:process" :default process)
+
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+
+  (defasync run-node-check (managed-runtime-url wasm-path)
+    (let* ((rt-mod (await (funcall dyn-import managed-runtime-url)))
+           (instantiateManagedRuntime (get rt-mod :instantiateManagedRuntime))
+           (bytes (await (readFile wasm-path))))
+      (js-call assert :deepEqual
+        (WebAssembly.Module/imports (new WebAssembly.Module bytes))
+        (js-array))
+      (let ((a (funcall instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (js-call (js-array nil undefined false t) :forEach
+          (lambda (value)
+            (js-call assert :equal (js-call a :invoke "caught" (js-array value)) value)
+            (let ((entered false))
+              (try
+                (js-call a :invoke "uncaught" (js-array value))
+                (catch error
+                  (setq entered t)
+                  (js-call assert :equal error value)))
+              (funcall assert entered))))
+        (let* ((message (js-call a :string "node"))
+               (kind (js-call a :number 1))
+               (error (js-call a :invoke "make-error" (js-array kind message undefined)))
+               (out (js-call a :invoke "caught" (js-array error))))
+          (funcall assert (js-call a :keyEqual error out))
+          (let* ((summary (js-call a :invoke "error-summary" (js-array out)))
+                 (name (js-call a :get summary 0))
+                 (text (js-call a :get summary 1)))
+            (js-call assert :equal (js-call a :readString name) "TypeError")
+            (js-call assert :equal (js-call a :readString text) "node")
+            (js-call (js-array message kind error out summary name text) :forEach
+              (lambda (v) (js-call a :release v)))
+            (js-call a :closeModule)
+            (js-call a :collect)
+            (js-call assert :equal (js-call a :live) 0)
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))))
+
+  (when (= (aref (get process :argv) 2) "--run-node-check")
+    (let ((argv (get process :argv)))
+      (js-call (run-node-check (aref argv 3) (aref argv 4)) :catch
+        (lambda (err)
+          (console/error err)
+          (js-call process :exit 1)))))
+
+  (export run-node-check))

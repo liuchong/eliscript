@@ -165,7 +165,7 @@
             ((= path "/page.mjs") (new globalThis.Response page-code (js-object :headers (js-object "content-type" "text/javascript"))))
             ((= path "/managed-project-runtime.mjs") (new globalThis.Response managed (js-object :headers (js-object "content-type" "text/javascript"))))
             ((= path "/debug-map.mjs") (new globalThis.Response debug (js-object :headers (js-object "content-type" "text/javascript"))))
-            ((js-call (js-array "/runtime/unicode-case.mjs" "/runtime/unicode-case-data.mjs") :includes path)
+            ((js-call (js-array "/runtime/array-text.mjs" "/runtime/binding.mjs" "/runtime/errors.mjs" "/runtime/math.mjs" "/runtime/number-radix.mjs" "/runtime/prelude.mjs" "/runtime/primitives.mjs" "/runtime/unicode-case.mjs" "/runtime/unicode-case-data.mjs") :includes path)
               (let* ((id (js-call path :slice 1))
                      (entry (js-call (get (get packaged :manifest) :files) :find
                        (lambda (record) (= (get record :path) id))))

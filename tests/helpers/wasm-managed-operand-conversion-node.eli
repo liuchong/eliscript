@@ -1,0 +1,121 @@
+(module tests.helpers.wasm-managed-operand-conversion-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:process" :default process)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defconst operations
+    (js-array
+      (js-array "add" (js* "(a, b) => a + b"))
+      (js-array "subtract" (js* "(a, b) => a - b"))
+      (js-array "multiply" (js* "(a, b) => a * b"))
+      (js-array "divide" (js* "(a, b) => a / b"))
+      (js-array "remainder" (js* "(a, b) => a % b"))
+      (js-array "less" (js* "(a, b) => a < b"))
+      (js-array "less-equal" (js* "(a, b) => a <= b"))
+      (js-array "greater" (js* "(a, b) => a > b"))
+      (js-array "greater-equal" (js* "(a, b) => a >= b"))
+      (js-array "bits-and" (js* "(a, b) => a & b"))
+      (js-array "bits-or" (js* "(a, b) => a | b"))
+      (js-array "bits-xor" (js* "(a, b) => a ^ b"))
+      (js-array "shift-left" (js* "(a, b) => a << b"))
+      (js-array "shift-right" (js* "(a, b) => a >> b"))
+      (js-array "shift-unsigned" (js* "(a, b) => a >>> b"))
+      (js-array "same" (js* "(a, b) => a === b"))
+      (js-array "different" (js* "(a, b) => a !== b"))))
+
+  (defun box-val (a x)
+    (let ((ty (funcall js-typeof x)))
+      (cond
+        ((= ty "number") (js-call a :number x))
+        ((= ty "string") (js-call a :string x))
+        (t x))))
+
+  (defun read-val (a x)
+    (if (and (not (nullish? x)) (= (funcall js-typeof x) "object"))
+      (let ((k (get x :kind)))
+        (cond
+          ((= k 4) (js-call a :readNumber x))
+          ((= k 5) (js-call a :readString x))
+          ((= k 14)
+           (let ((out (js-array))
+                 (len (js-call a :length x))
+                 (i 0))
+             (while (< i len)
+               (let ((v (js-call a :get x i)))
+                 (try
+                   (js-call out :push (read-val a v))
+                   (finally (js-call a :release v))))
+               (setq i (+ i 1)))
+             out))
+          (t x)))
+      x))
+
+  (defun finish (a values)
+    (js-call values :forEach (lambda (v) (js-call a :release v)))
+    (js-call a :closeModule)
+    (js-call a :collect)
+    (js-call assert :equal (js-call a :live) 0)
+    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))
+
+  (defun make-hook (a trace label first second mode)
+    (let ((values (js-call (js-array label first second mode) :map (lambda (v) (box-val a v)))))
+      (try
+        (js-call a :invoke "hook" (js-array trace (aref values 0) (aref values 1) (aref values 2) (aref values 3)))
+        (finally
+          (js-call values :forEach (lambda (v) (js-call a :release v)))))))
+
+  (defun reference-hook (trace label first second mode)
+    (js-object
+      :valueOf (if (= mode 3)
+                 7
+                 (lambda ()
+                   (js-call trace :push (str label "v"))
+                   (if (or (= mode 0) (= mode 5)) first (js-object))))
+      :toString (if (= mode 4)
+                  7
+                  (lambda ()
+                    (js-call trace :push (str label "s"))
+                    (if (or (= mode 2) (= mode 5)) (js-object) second)))))
+
+  (defasync run-main ()
+    (let* ((rt-mod (await (funcall dynamic-import (aref (get process :argv) 2))))
+           (instantiate (get rt-mod :instantiateManagedRuntime))
+           (a (funcall instantiate (readFileSync (aref (get process :argv) 3))))
+           (values (js-array undefined nil false t -0.0 globalThis.NaN globalThis.Infinity "2" "10" "x" "😀"))
+           (modes (js-array 0 1 3)))
+      (js-call a :auto 1)
+      (js-call values :forEach
+        (lambda (value)
+          (js-call modes :forEach
+            (lambda (mode)
+              (let* ((empty (js-call a :string ""))
+                     (trace (js-call a :sourceObject (js-object :events empty)))
+                     (left (make-hook a trace "l" value value mode))
+                     (right (make-hook a trace "r" 2 "3" mode)))
+                (js-call a :release empty)
+                (js-call operations :forEach
+                  (lambda (entry)
+                    (let* ((name (aref entry 0))
+                           (oracle (aref entry 1))
+                           (events (js-array))
+                           (out (js-call a :invoke name (js-array left right))))
+                      (js-call assert :deepEqual
+                        (read-val a out)
+                        (funcall oracle
+                          (reference-hook events "l" value value mode)
+                          (reference-hook events "r" 2 "3" mode))
+                        name)
+                      (js-call a :release out))))
+                (js-call (js-array trace left right) :forEach (lambda (v) (js-call a :release v)))
+                (js-call a :collect))))))
+      (let* ((text (js-call a :string "a/b/c"))
+             (separator (js-call a :string "/"))
+             (limit (js-call a :number 2))
+             (out (js-call a :invoke "split" (js-array text separator limit))))
+        (js-call assert :deepEqual (read-val a out) (js-call "a/b/c" :split "/" 2))
+        (finish a (js-array text separator limit out)))))
+
+  (run-main))

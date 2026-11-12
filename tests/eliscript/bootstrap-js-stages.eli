@@ -150,7 +150,9 @@
                        (js-object :cwd checkout :encoding "utf8"))))
             (js-call assert :strictEqual (get run :status) 0 (get run :stderr))
             (js-call assert :strictEqual (js-call (get run :stdout) :trim) "43")))
-        (let ((paths (js-array "runtime/math.mjs" "runtime/unicode-case.mjs"
+        (let ((paths (js-array "runtime/array-text.mjs" "runtime/errors.mjs"
+                       "runtime/number-radix.mjs" "runtime/prelude.mjs" "runtime/primitives.mjs"
+                       "runtime/math.mjs" "runtime/unicode-case.mjs"
                        "runtime/unicode-case-data.mjs" "bootstrap/host/project.mjs"
                        "dist/runtime/lisp.mjs" "dist/runtime/lisp/core.mjs"))
               (before (js-array)))

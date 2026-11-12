@@ -4,6 +4,7 @@
 
 (require 'ert)
 (require 'imenu)
+(require 'subr-x)
 (require 'eliscript-mode)
 
 (defconst eliscript-mode-tests--root
@@ -222,7 +223,7 @@
             (should (= (flymake-diagnostic-beg diagnostic) 8))
             (should (= (flymake-diagnostic-end diagnostic) 15))
             (should (eq (flymake-diagnostic-type diagnostic) :error))
-            (should (equal (flymake-diagnostic-text diagnostic)
+            (should (equal (string-trim-left (flymake-diagnostic-text diagnostic))
                            "ELI-A0001: unbound symbol: missing"))))
       (delete-file source))))
 
@@ -248,7 +249,7 @@
               (accept-process-output nil 0.05)))
           (should completed)
           (should (= (length diagnostics) 1))
-          (should (equal (flymake-diagnostic-text (car diagnostics))
+          (should (equal (string-trim-left (flymake-diagnostic-text (car diagnostics)))
                          "ELI-A0001: unbound symbol: missing")))
       (delete-file source))))
 

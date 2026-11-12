@@ -1,0 +1,183 @@
+(module tests.helpers.wasm-managed-json-callbacks-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:process" :default process)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+  (defconst is-instance (js* "(a, b) => a instanceof b"))
+
+  (defun invoke-val (a name &rest __host_default_arguments_1)
+    (let* ((values (aref __host_default_arguments_1 0)))
+    (let* ((vals (if (undefined? values) (js-array) values))
+           (owned (js-array))
+           (args (js-call vals :map
+                   (lambda (value)
+                     (let ((ty (funcall js-typeof value)))
+                       (if (and (/= ty "number") (/= ty "string"))
+                         value
+                         (let ((handle (if (= ty "number") (js-call a :number value) (js-call a :string value))))
+                           (js-call owned :push handle)
+                           handle)))))))
+      (try
+        (js-call a :invoke name args)
+        (catch err
+          (when (and (funcall is-instance err globalThis.Error)
+                     (eq (get err :constructor) globalThis.Error)
+                     (/= name "failure-phase"))
+            (try
+              (let ((phase (js-call a :invoke "failure-phase" (js-array))))
+                (try
+                  (js-call globalThis.console :error "JSON callback failure" name
+                    (js-call vals :filter (lambda (v) (= (funcall js-typeof v) "number")))
+                    (js-call a :readNumber phase))
+                  (finally (js-call a :release phase))))
+              (catch _ignored nil)))
+          (throw err))
+        (finally
+          (js-call owned :forEach (lambda (v) (js-call a :release v))))))))
+
+  (defun report-val (a name &rest __host_forwarded_arguments_1)
+    (let* ((values (aref __host_forwarded_arguments_1 0)))
+    (let ((value (invoke-val a name values)))
+      (try
+        (js-call a :readString value)
+        (finally (js-call a :release value))))))
+
+  (defun finish (a)
+    (try
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+      (finally
+        (when (= (funcall js-typeof (get a :close)) "function")
+          (js-call a :close)))))
+
+  (defun parse-contract (a js records)
+    (js-call records :forEach
+      (lambda (args)
+        (let* ((actual (report-val a "parse-probe" args))
+               (expected (js-call (get js :parse_probe) :apply nil args)))
+          (js-call assert :equal actual expected (JSON/stringify args))
+          (let ((output (JSON/parse actual)))
+            (js-call assert :equal (aref output 3) t "each represented primitive source context is fresh")
+            (js-call (aref output 2) :forEach
+              (lambda (event)
+                (when (and (= (aref event 0) "reviver") (aref event 6))
+                  (js-call assert :deepEqual (aref event 8) (js-array t t t t)))))
+            (js-call a :collect)
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))))
+
+  (defun stringify-contract (a js)
+    (js-call (js-array 0 1 2 3 6) :forEach
+      (lambda (mode)
+        (let ((actual (report-val a "stringify-probe" (js-array mode))))
+          (js-call assert :equal actual (js-call js :stringify_probe mode))
+          (let ((output (JSON/parse actual)))
+            (when (= mode 2)
+              (js-call assert :equal (aref output 0) t))
+            (when (= mode 1)
+              (js-call assert :equal (aref (aref output 2) 0) "space valueOf" "space conversion precedes the root replacer"))
+            (when (= mode 3)
+              (funcall assert (js-call (aref output 1) :includes "9007199254740993") "raw replacement retains the full original integer"))
+            (js-call a :collect)
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))
+    (js-call assert :equal (report-val a "property-list-probe") (js-call js :property_list_probe)))
+
+  (defun raw-contract (a js texts)
+    (js-call texts :forEach
+      (lambda (text)
+        (js-call (js-array 0 1) :forEach
+          (lambda (mode)
+            (let ((actual (report-val a "raw-probe" (js-array text mode))))
+              (js-call assert :equal actual (js-call js :raw_probe text mode) text)
+              (let ((value (JSON/parse actual)))
+                (js-call assert :equal (aref value 0) text)
+                (js-call assert :equal (aref value 1) t)
+                (js-call assert :equal (aref value 2) t)
+                (js-call assert :deepEqual (aref value 3) (js-array "rawJSON"))
+                (js-call assert :deepEqual (aref value 4) (js-array t false t false))
+                (js-call assert :deepEqual (js-call value :slice 5 11) (js-array t false false false false false))
+                (funcall assert (js-call (aref value 11) :includes (str "\"raw\":" text)))
+                (funcall assert (js-call (aref value 11) :includes (str "\"also\":" text)))
+                (funcall assert (js-call (aref value 11) :includes "\"hook\":1.2300e+02"))
+                (js-call assert :equal (length (js-call (aref value 12) :filter (lambda (ev) (= ev "ToString")))) mode)
+                (js-call a :collect)
+                (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))))))
+
+  (defun errors-and-recovery (a js rejected)
+    (let* ((held (js-call a :number -0.0))
+           (frame (js-call a :frame 1)))
+      (js-call a :frameSet frame 0 held)
+      (try
+        (js-call
+          (js-array
+            (js-array "parse-probe" (js-array "{\"a\":1}" 4) false)
+            (js-array "parse-probe" (js-array "{\"a\":1}" 5) undefined)
+            (js-array "stringify-probe" (js-array 8) false)
+            (js-array "stringify-probe" (js-array 9) undefined)
+            (js-array "raw-throw" (js-array false) false)
+            (js-array "raw-throw" (js-array undefined) undefined))
+          :forEach
+          (lambda (item)
+            (let ((name (aref item 0))
+                  (args (aref item 1))
+                  (expected (aref item 2))
+                  (source-threw false)
+                  (managed-threw false))
+              (try
+                (js-call (aref js (js-call name :replaceAll "-" "_")) :apply nil args)
+                (catch err
+                  (setq source-threw t)
+                  (js-call assert :strictEqual err expected)))
+              (try
+                (invoke-val a name args)
+                (catch err
+                  (setq managed-threw t)
+                  (js-call assert :strictEqual err expected)))
+              (js-call assert :equal source-threw t)
+              (js-call assert :equal managed-threw t)
+              (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+              (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+              (js-call assert :equal (report-val a "recover") (js-call js :recover)))))
+        (js-call rejected :forEach
+          (lambda (text)
+            (js-call assert :throws (lambda () (js-call js :raw_probe text 0)) globalThis.SyntaxError)
+            (js-call assert :throws (lambda () (invoke-val a "raw-probe" (js-array text 0))) globalThis.SyntaxError)
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)))
+        (js-call (js-array 4 7) :forEach
+          (lambda (mode)
+            (js-call assert :throws (lambda () (js-call js :stringify_probe mode)) globalThis.TypeError)
+            (js-call assert :throws (lambda () (invoke-val a "stringify-probe" (js-array mode))) globalThis.TypeError)
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)))
+        (js-call assert :equal (report-val a "recover") (js-call js :recover))
+        (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+        (finally
+          (js-call a :leaveFrame frame)
+          (js-call a :release held)))))
+
+  (defasync run-main ()
+    (let* ((payload (JSON/parse (readFileSync 0 "utf8")))
+           (options (get payload :options))
+           (parse-cases (get payload :parseCases))
+           (mutation-cases (get payload :mutationCases))
+           (raw-texts (get payload :rawTexts))
+           (invalid-raw (get payload :invalidRaw))
+           (js (await (funcall dynamic-import (aref (get process :argv) 2))))
+           (rt-mod (await (funcall dynamic-import (aref (get process :argv) 3))))
+           (instantiate (get rt-mod :instantiateManagedRuntime))
+           (bytes (readFileSync (aref (get process :argv) 4))))
+      (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      (let ((a (funcall instantiate bytes (Object/assign (js-object) options (js-object :initialPages 2)))))
+        (js-call a :auto 1)
+        (try
+          (parse-contract a js parse-cases)
+          (parse-contract a js mutation-cases)
+          (stringify-contract a js)
+          (raw-contract a js raw-texts)
+          (errors-and-recovery a js invalid-raw)
+          (finally (finish a))))
+      (js-call (get process :stdout) :write "complete JSON callback source contracts preserved")))
+
+  (run-main))

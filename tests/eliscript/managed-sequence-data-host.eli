@@ -13,6 +13,7 @@
   (import "../../runtime/core/data-text.mjs" IPrint printValue)
   (import "../../runtime/core/order.mjs" IComparable compareValues)
   (import "../../runtime/core/protocol.mjs" protocolSlot protocolMethod isProtocol)
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
   (defconst allocator-diagnostic (= (get (get globalThis.process :env) "ELISCRIPT_PROJECT_ALLOCATOR_DIAGNOSTIC") "1"))
   (defconst sequence-source-failures (new globalThis.WeakMap))
   (defvar sequence-phase-count 0)
@@ -157,19 +158,10 @@
       (js-call assert :strictEqual (js-call modules :get "body") namespace)
       namespace))
   (defasync load-body (path)
-    ;; The parent has already relocated the original static import specifiers.
-    ;; Transport its complete bytes without rewriting its code, including TLA.
-    (let* ((bytes (await (readFile path)))
-           (encoded (js-call bytes :toString "base64"))
-           (_bytes (js-call assert :ok (js-call (js-call Buffer :from encoded "base64") :equals bytes)))
-           (url (+ "data:text/javascript;base64," encoded))
-           (modules (await (loadManagedHostModules
-             (js-object :hostModules
-               (js-array (js-object :id "body" :specifier url :referrer "sequence-data-host.mjs"
-                 :allowedExports (js-array) :namespace t)))))))
-      (let ((namespace (js-call modules :get "body")))
-        (js-call assert :strictEqual (get namespace globalThis.Symbol.toStringTag) "Module")
-        namespace)))
+    ;; This is an authenticated side-effect runner, not a namespace provider.
+    ;; Its maintained `then` bridge awaits async main just as the old TLA did.
+    ;; A physical entry also resolves the compiler's ordinary ESM imports.
+    (await (funcall dynamic-import (get (pathToFileURL path) :href))))
   (defun observation-json (value)
     (JSON/stringify value (lambda (key item)
       (cond ((undefined? item) (js-object :$number "undefined"))

@@ -1,2 +1,232 @@
-(module capsules.runtime.core.regex
-  (js* "import { memoizedSequenceView } from \"./collection.mjs\";\nimport { persistentVector } from \"./vector.mjs\";\n\nconst patternStates = new WeakMap();\nconst ALLOWED_FLAGS = \"imsu\";\n\nfunction requireArity(actual, expected, name) {\n  if (actual !== expected) {\n    const unit = expected === 1 ? \"argument\" : \"arguments\";\n    throw new TypeError(`${name} requires exactly ${expected} ${unit}`);\n  }\n}\n\nfunction requireString(value, label) {\n  if (typeof value !== \"string\") {\n    throw new TypeError(`${label} must be a string`);\n  }\n  return value;\n}\n\nfunction normalizeFlags(value) {\n  const flags = requireString(value, \"regex flags\");\n  const seen = new Set();\n  for (const flag of flags) {\n    if (!ALLOWED_FLAGS.includes(flag)) {\n      throw new TypeError(`regex flags contain unsupported flag: ${flag}`);\n    }\n    if (seen.has(flag)) {\n      throw new TypeError(`regex flags contain duplicate flag: ${flag}`);\n    }\n    seen.add(flag);\n  }\n  return [...ALLOWED_FLAGS].filter((flag) => seen.has(flag)).join(\"\");\n}\n\nfunction stateOf(pattern) {\n  const state = patternStates.get(pattern);\n  if (state === undefined) {\n    throw new TypeError(\"operation requires an Eliscript regex pattern\");\n  }\n  return state;\n}\n\nexport function readRegexState(value) {\n  return patternStates.get(value);\n}\n\nfunction nativePattern(pattern, global = false) {\n  const state = stateOf(pattern);\n  return new RegExp(state.source, global ? `${state.flags}g` : state.flags);\n}\n\nfunction matchValue(match) {\n  if (match.length === 1) return match[0];\n  return persistentVector(...Array.from(\n    match,\n    (value) => value === undefined ? null : value,\n  ));\n}\n\nfunction requireStart(value) {\n  if (!Number.isSafeInteger(value) || value < 0) {\n    throw new TypeError(\"regex start must be a non-negative safe integer\");\n  }\n  return value;\n}\n\nfunction advanceStringIndex(text, index, unicode) {\n  if (!unicode || index + 1 >= text.length) return index + 1;\n  const first = text.charCodeAt(index);\n  if (first < 0xD800 || first > 0xDBFF) return index + 1;\n  const second = text.charCodeAt(index + 1);\n  return second >= 0xDC00 && second <= 0xDFFF ? index + 2 : index + 1;\n}\n\nfunction advanceEmptyMatch(matcher, text, match) {\n  if (match[0] === \"\") {\n    matcher.lastIndex = advanceStringIndex(\n      text,\n      matcher.lastIndex,\n      matcher.unicode,\n    );\n  }\n}\n\nfunction scanIterator(pattern, text, start) {\n  const matcher = nativePattern(pattern, true);\n  matcher.lastIndex = start;\n  return (function* matches() {\n    while (true) {\n      const match = matcher.exec(text);\n      if (match === null) return;\n      advanceEmptyMatch(matcher, text, match);\n      yield matchValue(match);\n    }\n  })();\n}\n\nexport function compileRegex(...arguments_) {\n  if (arguments_.length < 1 || arguments_.length > 2) {\n    throw new TypeError(\"compileRegex expects a source and optional flags\");\n  }\n  const source = requireString(arguments_[0], \"regex source\");\n  const flags = normalizeFlags(arguments_.length === 2 ? arguments_[1] : \"\");\n  try {\n    new RegExp(source, flags);\n  } catch {\n    throw new SyntaxError(\"regex source is invalid\");\n  }\n  const pattern = Object.freeze({});\n  patternStates.set(pattern, Object.freeze({ source, flags }));\n  return pattern;\n}\n\nexport function isRegexPattern(value) {\n  requireArity(arguments.length, 1, \"isRegexPattern\");\n  return patternStates.has(value);\n}\n\nexport function regexSource(pattern) {\n  requireArity(arguments.length, 1, \"regexSource\");\n  return stateOf(pattern).source;\n}\n\nexport function regexFlags(pattern) {\n  requireArity(arguments.length, 1, \"regexFlags\");\n  return stateOf(pattern).flags;\n}\n\nexport function regexMatches(pattern, text) {\n  requireArity(arguments.length, 2, \"regexMatches\");\n  const input = requireString(text, \"regex input\");\n  const match = nativePattern(pattern).exec(input);\n  return match !== null && match.index === 0 && match[0].length === input.length\n    ? matchValue(match)\n    : null;\n}\n\nexport function regexFind(...arguments_) {\n  if (arguments_.length < 2 || arguments_.length > 3) {\n    throw new TypeError(\"regexFind expects a pattern, input, and optional start\");\n  }\n  const input = requireString(arguments_[1], \"regex input\");\n  const start = requireStart(arguments_.length === 3 ? arguments_[2] : 0);\n  const matcher = nativePattern(arguments_[0], true);\n  matcher.lastIndex = start;\n  const match = matcher.exec(input);\n  return match === null ? null : matchValue(match);\n}\n\nexport function regexSequence(...arguments_) {\n  if (arguments_.length < 2 || arguments_.length > 3) {\n    throw new TypeError(\"regexSequence expects a pattern, input, and optional start\");\n  }\n  const pattern = arguments_[0];\n  stateOf(pattern);\n  const input = requireString(arguments_[1], \"regex input\");\n  const start = requireStart(arguments_.length === 3 ? arguments_[2] : 0);\n  return memoizedSequenceView(() => scanIterator(pattern, input, start));\n}\n\nexport function regexReplace(pattern, replacement, text) {\n  requireArity(arguments.length, 3, \"regexReplace\");\n  stateOf(pattern);\n  const input = requireString(text, \"regex input\");\n  if (typeof replacement !== \"string\" && typeof replacement !== \"function\") {\n    throw new TypeError(\"regex replacement must be a string or function\");\n  }\n\n  const matcher = nativePattern(pattern, true);\n  let cursor = 0;\n  let output = \"\";\n  while (true) {\n    const match = matcher.exec(input);\n    if (match === null) break;\n    output += input.slice(cursor, match.index);\n    const value = typeof replacement === \"function\"\n      ? replacement(matchValue(match), match.index, input)\n      : replacement;\n    if (typeof value !== \"string\") {\n      throw new TypeError(\"regex replacement function must return a string\");\n    }\n    output += value;\n    cursor = match.index + match[0].length;\n    advanceEmptyMatch(matcher, input, match);\n  }\n  return output + input.slice(cursor);\n}\n"))
+(module eliscript.runtime.core.regex
+  (import "./collection.mjs" memoizedSequenceView)
+  (import "./vector.mjs" persistentVector)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst pattern-states (new globalThis/WeakMap))
+  (defconst allowed-flags "imsu")
+
+  (defun fail (message)
+    (throw (new globalThis/TypeError message)))
+
+  (defun require-arity (actual expected name)
+    (unless (= actual expected)
+      (fail (str name " requires exactly " expected " "
+                 (if (= expected 1) "argument" "arguments")))))
+
+  (defun require-string (value label)
+    (unless (= (funcall typeof-value value) "string")
+      (fail (str label " must be a string")))
+    value)
+
+  (defun normalize-flags (value)
+    (let ((flags (require-string value "regex flags"))
+          (seen (new globalThis/Set))
+          (index 0)
+          (result ""))
+      (while (< index (js-length flags))
+        (let* ((code (js-call flags :charCodeAt index))
+               (width (if (and (>= code 55296)
+                               (<= code 56319)
+                               (< (1+ index) (js-length flags))
+                               (>= (js-call flags :charCodeAt (1+ index)) 56320)
+                               (<= (js-call flags :charCodeAt (1+ index)) 57343))
+                          2
+                          1))
+               (flag (js-call flags :slice index (+ index width))))
+          (unless (js-call allowed-flags :includes flag)
+            (fail (str "regex flags contain unsupported flag: " flag)))
+          (when (js-call seen :has flag)
+            (fail (str "regex flags contain duplicate flag: " flag)))
+          (js-call seen :add flag)
+          (setq index (+ index width))))
+      (setq index 0)
+      (while (< index (js-length allowed-flags))
+        (let ((flag (aref allowed-flags index)))
+          (when (js-call seen :has flag)
+            (setq result (str result flag))))
+        (setq index (1+ index)))
+      result))
+
+  (defun state-of (pattern)
+    (let ((state (js-call pattern-states :get pattern)))
+      (when (undefined? state)
+        (fail "operation requires an Eliscript regex pattern"))
+      state))
+
+  (defun readRegexState (value)
+    (js-call pattern-states :get value))
+
+  (defun native-pattern (pattern &rest optional)
+    (let ((global (if (or (= (js-length optional) 0) (undefined? (get optional 0)))
+                      false
+                      (get optional 0)))
+          (state (state-of pattern)))
+      (new globalThis/RegExp
+        (get state :source)
+        (if global (str (get state :flags) "g") (get state :flags)))))
+
+  (defun match-value (match)
+    (if (= (js-length match) 1)
+        (get match 0)
+        (let ((values (js-array))
+              (index 0))
+          (while (< index (js-length match))
+            (js-call values :push (if (undefined? (get match index)) nil (get match index)))
+            (setq index (1+ index)))
+          (apply persistentVector values))))
+
+  (defun require-start (value)
+    (unless (and (Number/isSafeInteger value) (>= value 0))
+      (fail "regex start must be a non-negative safe integer"))
+    value)
+
+  (defun advance-string-index (text index unicode)
+    (if (or (not unicode) (>= (1+ index) (js-length text)))
+        (1+ index)
+        (let ((first-code (js-call text :charCodeAt index)))
+          (if (or (< first-code 55296) (> first-code 56319))
+              (1+ index)
+              (let ((second-code (js-call text :charCodeAt (1+ index))))
+                (if (and (>= second-code 56320) (<= second-code 57343))
+                    (+ index 2)
+                    (1+ index)))))))
+
+  (defun advance-empty-match (matcher text match)
+    (when (= (get match 0) "")
+      (put matcher "lastIndex"
+        (advance-string-index text (get matcher :lastIndex) (get matcher :unicode)))))
+
+  (defun scan-iterator (pattern text start)
+    (let ((matcher (native-pattern pattern t))
+          (closed false)
+          (iterator nil))
+      (put matcher "lastIndex" start)
+      (setq iterator
+        (js-object
+          :next (lambda ()
+                  (if closed
+                      (js-object :value undefined :done t)
+                      (try
+                        (let ((match (js-call matcher :exec text)))
+                          (if (nil? match)
+                              (progn
+                                (setq closed t)
+                                (js-object :value undefined :done t))
+                              (progn
+                                (advance-empty-match matcher text match)
+                                (js-object :value (match-value match) :done false))))
+                        (catch error
+                          (setq closed t)
+                          (throw error)))))
+          :return (lambda (&rest optional)
+                    (let ((value (if (= (js-length optional) 0) undefined (get optional 0))))
+                      (setq closed t)
+                      (js-object :value value :done t)))
+          :throw (lambda (&rest optional)
+                   (let ((error (if (= (js-length optional) 0) undefined (get optional 0))))
+                     (setq closed t)
+                     (throw error)))))
+      (Object/defineProperty iterator (get globalThis/Symbol :iterator)
+        (js-object :value (lambda () iterator) :writable t :configurable t))
+      iterator))
+
+  (defun compileRegex (&rest arguments)
+    (unless (and (>= (js-length arguments) 1) (<= (js-length arguments) 2))
+      (fail "compileRegex expects a source and optional flags"))
+    (let* ((source (require-string (get arguments 0) "regex source"))
+           (flags (normalize-flags (if (= (js-length arguments) 2) (get arguments 1) ""))))
+      (try
+        (new globalThis/RegExp source flags)
+        (catch _error
+          (throw (new globalThis/SyntaxError "regex source is invalid"))))
+      (let ((pattern (Object/freeze (js-object))))
+        (js-call pattern-states :set pattern (Object/freeze (js-object :source source :flags flags)))
+        pattern)))
+
+  (defun isRegexPattern (&rest arguments)
+    (require-arity (js-length arguments) 1 "isRegexPattern")
+    (js-call pattern-states :has (get arguments 0)))
+
+  (defun regexSource (&rest arguments)
+    (require-arity (js-length arguments) 1 "regexSource")
+    (get (state-of (get arguments 0)) :source))
+
+  (defun regexFlags (&rest arguments)
+    (require-arity (js-length arguments) 1 "regexFlags")
+    (get (state-of (get arguments 0)) :flags))
+
+  (defun regexMatches (&rest arguments)
+    (require-arity (js-length arguments) 2 "regexMatches")
+    (let* ((input (require-string (get arguments 1) "regex input"))
+           (match (js-call (native-pattern (get arguments 0)) :exec input)))
+      (if (and (not (nil? match))
+               (= (get match :index) 0)
+               (= (js-length (get match 0)) (js-length input)))
+          (match-value match)
+          nil)))
+
+  (defun regexFind (&rest arguments)
+    (unless (and (>= (js-length arguments) 2) (<= (js-length arguments) 3))
+      (fail "regexFind expects a pattern, input, and optional start"))
+    (let* ((input (require-string (get arguments 1) "regex input"))
+           (start (require-start (if (= (js-length arguments) 3) (get arguments 2) 0)))
+           (matcher (native-pattern (get arguments 0) t)))
+      (put matcher "lastIndex" start)
+      (let ((match (js-call matcher :exec input)))
+        (if (nil? match) nil (match-value match)))))
+
+  (defun regexSequence (&rest arguments)
+    (unless (and (>= (js-length arguments) 2) (<= (js-length arguments) 3))
+      (fail "regexSequence expects a pattern, input, and optional start"))
+    (let ((pattern (get arguments 0)))
+      (state-of pattern)
+      (let ((input (require-string (get arguments 1) "regex input"))
+            (start (require-start (if (= (js-length arguments) 3) (get arguments 2) 0))))
+        (memoizedSequenceView (lambda () (scan-iterator pattern input start))))))
+
+  (defun regexReplace (&rest arguments)
+    (require-arity (js-length arguments) 3 "regexReplace")
+    (let ((pattern (get arguments 0))
+          (replacement (get arguments 1)))
+      (state-of pattern)
+      (let ((input (require-string (get arguments 2) "regex input")))
+        (unless (or (= (funcall typeof-value replacement) "string")
+                    (= (funcall typeof-value replacement) "function"))
+          (fail "regex replacement must be a string or function"))
+        (let ((matcher (native-pattern pattern t))
+              (cursor 0)
+              (output "")
+              (done false))
+          (while (not done)
+            (let ((match (js-call matcher :exec input)))
+              (if (nil? match)
+                  (setq done t)
+                  (progn
+                    (setq output (str output (js-call input :slice cursor (get match :index))))
+                    (let ((value (if (= (funcall typeof-value replacement) "function")
+                                     (funcall replacement (match-value match) (get match :index) input)
+                                     replacement)))
+                      (unless (= (funcall typeof-value value) "string")
+                        (fail "regex replacement function must return a string"))
+                      (setq output (str output value)))
+                    (setq cursor (+ (get match :index) (js-length (get match 0))))
+                    (advance-empty-match matcher input match)))))
+          (str output (js-call input :slice cursor))))))
+
+  (Object/defineProperty isRegexPattern "length" (js-object :value 1 :configurable t))
+  (Object/defineProperty regexSource "length" (js-object :value 1 :configurable t))
+  (Object/defineProperty regexFlags "length" (js-object :value 1 :configurable t))
+  (Object/defineProperty regexMatches "length" (js-object :value 2 :configurable t))
+  (Object/defineProperty regexReplace "length" (js-object :value 3 :configurable t))
+
+  (export
+    compileRegex
+    isRegexPattern
+    regexSource
+    regexFlags
+    regexMatches
+    regexFind
+    regexSequence
+    regexReplace
+    readRegexState))

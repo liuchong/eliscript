@@ -41,7 +41,12 @@
              (generated (await (readFile (resolve root generation-suite) "utf8")))
              (region (js-object :start 0 :end (js-length source) :byteStart 0
                :byteEnd (js-length (globalThis.Buffer.from source)) :sha256 (hash source)))
-             (asset-files (js-array generation-archive generation-eli generation-suite))
+             (asset-files (js-array generation-archive generation-eli generation-suite
+               "tools/backends/eliscript/compiler-corpus-cli-transport.eli"
+               "tools/backends/compiler-corpus-cli-transport.mjs"
+               "tools/backends/compiler-host-record.eli" "tools/backends/compiler-host-record.mjs"
+               "tools/backends/compiler-host-iteration.eli" "tools/backends/compiler-host-iteration.mjs"
+               "tests/bootstrap-compiler-test-ground.eli"))
              (assets (js-array)) (index 0))
         (while (< index (js-length asset-files))
           (let ((filename (aref asset-files index)))
@@ -75,11 +80,12 @@
           (js-call assert :strictEqual (get expected :timeoutMs) 30000)
           (js-call assert :strictEqual (get expected :title) "portable compiler driver reaches a reproducible fixed point")
           (js-call assert :deepStrictEqual (get original :cases) (js-array expected)))
-        ;; The entire historical transport/body/13 modules/oracle/IDs survive;
-        ;; only the separately explicit, authenticated provenance is new.
+        ;; The same maintained replay, 13 modules, oracle and IDs survive the
+        ;; wrapper. Its source assets include the real Eli transport separately.
         (let ((restored (globalThis.structuredClone record)))
-          (js-call (js-array "assertionSource" "sourceAssets" "maintainedGate" "cases") :forEach
+          (js-call (js-array "assertionSource" "maintainedGate" "cases") :forEach
             (lambda (key) (Reflect/deleteProperty (get restored :original) key)))
+          (put (get restored :original) :sourceAssets (get (get old-record :original) :sourceAssets))
           (put (get restored :original) :regions (get (get old-record :original) :regions))
           (js-call assert :deepStrictEqual restored old-record)))))
 

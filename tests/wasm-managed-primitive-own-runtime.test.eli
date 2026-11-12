@@ -1,2 +1,303 @@
-(module capsules.tests.wasm-managed-primitive-own-runtime.test
-  (js* "import {beforeAll, afterAll, test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {readFile, mkdtemp, rm} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {spawnSync} from 'node:child_process';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\n\nconst source = `\n (defun own (value key) (object-has? value key))\n (defun standard-own (value key) (Object/hasOwn value key))\n (defun descriptor (value key) (Object/getOwnPropertyDescriptor value key))\n (defun symbol-value () (funcall (js* \"Symbol\") \"opaque\"))\n (defun converted (value field trace standard)\n   (let ((key (js-object)))\n     (put key (js* \"Symbol.toPrimitive\")\n       (lambda (hint) (js-call trace :push hint) field))\n     (if standard (Object/hasOwn value key) (object-has? value key))))\n (defun abrupt (value trace)\n   (let ((key (js-object)))\n     (put key (js* \"Symbol.toPrimitive\") (lambda (hint) (throw trace)))\n     (try (object-has? value key) (catch error (Object/is error trace)))))\n (defun install (key) (put (js* \"Object.prototype\") key 41))\n (export own standard-own descriptor symbol-value converted abrupt install)`;\nlet directory, backends, runtime, program, bytes, reference;\nbeforeAll(async () => {\n  directory = await mkdtemp(resolve(tmpdir(), 'eliscript-primitive-own-'));\n  backends = await buildBackends({outputRoot: directory});\n  runtime = backends.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli', 'utf8'), 'runtime.eli');\n  program = backends.compiler.compile_ir_string(source, 'primitive-own.eli');\n  bytes = Uint8Array.from(backends.managed.emit_managed_wasm(program, runtime));\n  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);\n  reference = await import('data:text/javascript;base64,' + Buffer.from(backends.compiler.emit_ir_string(program)).toString('base64'));\n}, 120000);\nafterAll(async () => {if (directory) await rm(directory, {recursive: true, force: true});});\nfunction input(a, value) {\n  return typeof value === 'string' ? a.string(value) : typeof value === 'number' ? a.number(value) : value;\n}\nfunction finish(a, roots = []) {\n  for (const root of roots) a.release(root);\n  a.closeModule(); a.collect();\n  assert.equal(a.live(), 0); assert.equal(a.stats().frameDepth, 0);\n}\nfunction strings(a, array) {\n  return Array.from({length: a.length(array)}, (_, i) => {\n    const value = a.get(array, i);\n    try {return a.readString(value);} finally {a.release(value);}\n  });\n}\ntest('String Boolean Number and Symbol missing own fields agree with the independent JavaScript contract', () => {\n  const a = instantiateManagedRuntime(bytes); a.auto(1);\n  const symbol = a.invoke('symbol-value'), key = a.string('kind');\n  for (const value of ['', 'key-50691', 'key-194634', false, true, 0, -0, 1, NaN, Infinity]) {\n    const receiver = input(a, value);\n    assert.equal(a.invoke('own', [receiver, key]), reference.own(value, 'kind'));\n    assert.equal(a.invoke('standard-own', [receiver, key]), Object.hasOwn(value, 'kind'));\n    a.release(receiver);\n  }\n  assert.equal(a.invoke('own', [symbol, key]), reference.own(Symbol('opaque'), 'kind'));\n  finish(a, [symbol, key]);\n});\ntest('String own UTF16 indices length and canonical key spellings reuse the ordinary own predicate', () => {\n  const a = instantiateManagedRuntime(bytes); a.auto(1);\n  for (const value of ['', 'A😀\\ud800\\udfff']) {\n    const receiver = a.string(value);\n    for (const keyValue of ['length', '0', '1', '2', '3', '4', '5', '-0', '00', '01', '1.0', '-1', '4294967295', '', 0, -0, 1, 1.5, NaN, Infinity]) {\n      const key = input(a, keyValue), expected = Object.hasOwn(value, keyValue);\n      for (const method of ['own', 'standard-own']) assert.equal(a.invoke(method, [receiver, key]), expected, `${method}:${String(keyValue)}`);\n      a.release(key);\n    }\n    a.release(receiver);\n  }\n  finish(a);\n});\n\ntest('all primitive own queries convert keys once with a string hint and keep nullish source and Object API boundaries', () => {\n  const a = instantiateManagedRuntime(bytes); a.auto(1);\n  const symbol = a.invoke('symbol-value'), field = a.string('kind'), index = a.string('1'), trace = a.sourceArray([]);\n  for (const value of [false, true, null, undefined, 7, '😀']) {\n    const receiver = input(a, value);\n    for (const standard of [false, true]) {\n      const expected = [];\n      if (standard && value == null) {\n        assert.throws(() => reference.converted(value, 'kind', expected, true), TypeError);\n        assert.throws(() => a.invoke('converted', [receiver, field, trace, true]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');\n      } else {\n        assert.equal(a.invoke('converted', [receiver, field, trace, standard]), reference.converted(value, 'kind', expected, standard));\n      }\n      assert.deepEqual(strings(a, trace), expected);\n      a.resize(trace, 0);\n    }\n    assert.equal(a.invoke('abrupt', [receiver, trace]), true);\n    a.release(receiver);\n  }\n  assert.equal(a.invoke('converted', [symbol, field, trace, false]), false);\n  assert.deepEqual(strings(a, trace), ['string']); a.resize(trace, 0);\n  const string = a.string('😀');\n  assert.equal(a.invoke('converted', [string, index, trace, false]), true);\n  assert.deepEqual(strings(a, trace), ['string']);\n  assert.equal(a.invoke('own', [string, symbol]), Object.hasOwn('😀', Symbol('opaque')));\n  finish(a, [symbol, field, index, trace, string]);\n});\n\ntest('inherited fields and native prototype names stay non-own without widening any reflection admission', () => {\n  const a = instantiateManagedRuntime(bytes); a.auto(1);\n  const field = a.string('__primitive_own_inherited'), symbol = a.invoke('symbol-value');\n  a.release(a.invoke('install', [field]));\n  for (const value of [false, 1, 'abc']) {\n    const receiver = input(a, value);\n    for (const keyValue of ['__primitive_own_inherited', 'constructor', '__proto__', 'toString', 'valueOf', 'hasOwnProperty']) {\n      const key = a.string(keyValue);\n      assert.equal(a.invoke('own', [receiver, key]), Object.hasOwn(value, keyValue));\n      assert.equal(a.invoke('standard-own', [receiver, key]), Object.hasOwn(value, keyValue));\n      assert.equal(a.invoke('descriptor', [receiver, key]), undefined);\n      a.release(key);\n    }\n    a.release(receiver);\n  }\n  assert.equal(a.invoke('own', [symbol, field]), false);\n  finish(a, [field, symbol]);\n});\n\ntest('deterministic randomized string own checks match Node for canonical and noncanonical UTF16 keys', () => {\n  let state = 0x13917;\n  const next = () => state = (Math.imul(state, 1664525) + 1013904223) >>> 0;\n  const cases = [];\n  for (let i = 0; i < 160; i++) {\n    const text = Array.from({length: next() % 12}, () => String.fromCharCode(next() & 65535)).join('');\n    const index = (next() % 18) - 3;\n    const key = [String(index), '0' + index, index + '.0', 'length', String.fromCharCode(next() & 65535)][next() % 5];\n    cases.push([text, key]);\n  }\n  const node = spawnSync('node', ['--input-type=module', '-e', 'let s=\"\";for await(const c of process.stdin)s+=c;console.log(JSON.stringify(JSON.parse(s).map(([v,k])=>Object.hasOwn(v,k))));'], {input: JSON.stringify(cases), encoding: 'utf8'});\n  assert.equal(node.status, 0, node.stderr);\n  const expected = JSON.parse(node.stdout), a = instantiateManagedRuntime(bytes); a.auto(1);\n  for (let i = 0; i < cases.length; i++) {\n    const [text, key] = cases[i], receiver = a.string(text), name = a.string(key);\n    assert.equal(a.invoke('own', [receiver, name]), expected[i]);\n    a.release(receiver); a.release(name);\n  }\n  finish(a);\n});\n\ntest('slot exhaustion preserves caller roots and own checks recover without accepting stale foreign or private handles', () => {\n  const a = instantiateManagedRuntime(bytes, {maxSlots: 64, initialBytes: 8192, maxBytes: 65536}), other = instantiateManagedRuntime(bytes);\n  a.auto(1);\n  const receiver = a.string('abc'), key = a.string('1'), held = a.number(-0), frame = a.frame(1), fillers = [];\n  a.frameSet(frame, 0, held);\n  while (a.live() < 64) fillers.push(a.number(7));\n  assert.throws(() => a.invoke('own', [receiver, key]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0002');\n  assert.equal(a.stats().frameDepth, 1); assert(Object.is(a.readNumber(held), -0));\n  fillers.forEach(value => a.release(value)); a.collect();\n  assert.equal(a.invoke('own', [receiver, key]), true);\n  const stale = a.number(2), foreign = other.number(2);\n  a.release(stale); a.collect();\n  for (const value of [stale, foreign]) assert.throws(() => a.invoke('own', [value, key]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0001');\n  a.leaveFrame(frame); finish(a, [receiver, key, held]); finish(other, [foreign]);\n  const e = new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports, h = e['heap-new'](64, 8192, 65536);\n  const call = (name, ...args) => e[name](h, ...args) >>> 0;\n  const unfinished = call('value-string', 1); call('heap-pin', unfinished);\n  for (const [value, name, error] of [[unfinished, 3, 6], [1, unfinished, 6], [1, 0xffffffff, 1], [0xffffffff, 3, 1]]) {\n    assert.equal(call('value-object-has', value, name), 0); assert.equal(e['last-error'](), error); assert.equal(call('frame-depth'), 0);\n  }\n  const raw = call('value-refs', 7, 0); call('heap-pin', raw);\n  assert.equal(call('value-object-has', 1, raw), 0); assert.equal(e['last-error'](), 3);\n  call('heap-release', raw); call('heap-release', unfinished); call('heap-collect'); assert.equal(call('heap-live'), 0);\n});\n\ntest('real own-predicate traps occur after one conversion and unwind only callee roots', async () => {\n  const original = await readFile('bootstrap/runtime/memory.eli', 'utf8');\n  const signature = '(defun heap-object-properties-own (heap value key)';\n  const modified = original.replace(signature, signature + ' (when (and (= value 2) (= (load-u32 20) 0)) (store-u32 20 1) (load-u32 4294967295))');\n  assert.notEqual(modified, original);\n  const trapRuntime = backends.compiler.compile_ir_string(modified, 'primitive-own-trap.eli');\n  const a = instantiateManagedRuntime(Uint8Array.from(backends.managed.emit_managed_wasm(program, trapRuntime))); a.auto(1);\n  const field = a.string('kind'), trace = a.sourceArray([]), held = a.number(-0), frame = a.frame(1); a.frameSet(frame, 0, held);\n  assert.equal(a.invoke('abrupt', [true, trace]), true);\n  assert.throws(() => a.invoke('converted', [true, field, trace, false]), WebAssembly.RuntimeError);\n  assert.deepEqual(strings(a, trace), ['string']); assert.equal(a.stats().frameDepth, 1); assert(Object.is(a.readNumber(held), -0));\n  assert.equal(a.invoke('own', [true, field]), false);\n  a.leaveFrame(frame); finish(a, [field, trace, held]);\n});\n"))
+(module tests.wasm-managed-primitive-own-runtime.test
+  (import "bun:test" afterAll beforeAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:buffer" Buffer)
+  (import "node:fs/promises" mkdtemp readFile rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defconst source
+    (str "\n"
+         " (defun own (value key) (object-has? value key))\n"
+         " (defun standard-own (value key) (Object/hasOwn value key))\n"
+         " (defun descriptor (value key) (Object/getOwnPropertyDescriptor value key))\n"
+         " (defun symbol-value () (funcall (js* \"Symbol\") \"opaque\"))\n"
+         " (defun converted (value field trace standard)\n"
+         "   (let ((key (js-object)))\n"
+         "     (put key (js* \"Symbol.toPrimitive\")\n"
+         "       (lambda (hint) (js-call trace :push hint) field))\n"
+         "     (if standard (Object/hasOwn value key) (object-has? value key))))\n"
+         " (defun abrupt (value trace)\n"
+         "   (let ((key (js-object)))\n"
+         "     (put key (js* \"Symbol.toPrimitive\") (lambda (hint) (throw trace)))\n"
+         "     (try (object-has? value key) (catch error (Object/is error trace)))))\n"
+         " (defun install (key) (put (js* \"Object.prototype\") key 41))\n"
+         " (export own standard-own descriptor symbol-value converted abrupt install)"))
+
+  (defvar directory nil)
+  (defvar backends nil)
+  (defvar runtime nil)
+  (defvar program nil)
+  (defvar bytes nil)
+  (defvar reference nil)
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-primitive-own-"))))
+      (setq backends (await (buildBackends (js-object :outputRoot directory))))
+      (setq runtime (js-call (get backends :compiler) :compile_ir_string (await (readFile "bootstrap/runtime/memory.eli" "utf8")) "runtime.eli"))
+      (setq program (js-call (get backends :compiler) :compile_ir_string source "primitive-own.eli"))
+      (setq bytes (Uint8Array/from (js-call (get backends :managed) :emit_managed_wasm program runtime)))
+      (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      (setq reference (await (funcall dynamic-import
+                               (str "data:text/javascript;base64,"
+                                    (js-call (Buffer/from (js-call (get backends :compiler) :emit_ir_string program)) :toString "base64"))))))
+    120000)
+
+  (afterAll
+    (async ()
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun box-input (a value)
+    (let ((ty (funcall js-typeof value)))
+      (cond
+        ((= ty "string") (js-call a :string value))
+        ((= ty "number") (js-call a :number value))
+        (t value))))
+
+  (defun finish (a &rest __host_default_arguments_1)
+    (let* ((roots (aref __host_default_arguments_1 0)))
+    (let ((owned (if (undefined? roots) (js-array) roots)))
+      (js-call owned :forEach (lambda (root) (js-call a :release root)))
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
+
+  (defun read-strings (a arr)
+    (Array/from (js-object :length (js-call a :length arr))
+      (lambda (_ i)
+        (let ((value (js-call a :get arr i)))
+          (try
+            (js-call a :readString value)
+            (finally (js-call a :release value)))))))
+
+  (defun diag-code? (e code)
+    (let ((diag (if (and (not (nullish? e)) (= (funcall js-typeof e) "object"))
+                  (get e :eliscriptDiagnostic)
+                  nil)))
+      (and (not (nullish? diag)) (= (get diag :code) code))))
+
+  (test "String Boolean Number and Symbol missing own fields agree with the independent JavaScript contract"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (let ((sym (js-call a :invoke "symbol-value"))
+              (key (js-call a :string "kind")))
+          (js-call (js-array "" "key-50691" "key-194634" false t 0 -0.0 1 globalThis.NaN globalThis.Infinity) :forEach
+            (lambda (value)
+              (let ((receiver (box-input a value)))
+                (js-call assert :equal (js-call a :invoke "own" (js-array receiver key)) (js-call reference :own value "kind"))
+                (js-call assert :equal (js-call a :invoke "standard-own" (js-array receiver key)) (Object/hasOwn value "kind"))
+                (js-call a :release receiver))))
+          (js-call assert :equal (js-call a :invoke "own" (js-array sym key)) (js-call reference :own (globalThis.Symbol "opaque") "kind"))
+          (finish a (js-array sym key))))))
+
+  (test "String own UTF16 indices length and canonical key spellings reuse the ordinary own predicate"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (js-call (js-array "" "A😀\ud800\udfff") :forEach
+          (lambda (value)
+            (let ((receiver (js-call a :string value)))
+              (js-call
+                (js-array "length" "0" "1" "2" "3" "4" "5" "-0" "00" "01" "1.0" "-1" "4294967295" "" 0 -0.0 1 1.5 globalThis.NaN globalThis.Infinity)
+                :forEach
+                (lambda (key-value)
+                  (let ((key (box-input a key-value))
+                        (expected (Object/hasOwn value key-value)))
+                    (js-call (js-array "own" "standard-own") :forEach
+                      (lambda (method)
+                        (js-call assert :equal
+                          (js-call a :invoke method (js-array receiver key))
+                          expected
+                          (str method ":" (globalThis.String key-value)))))
+                    (js-call a :release key))))
+              (js-call a :release receiver))))
+        (finish a))))
+
+  (test "all primitive own queries convert keys once with a string hint and keep nullish source and Object API boundaries"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (let ((sym (js-call a :invoke "symbol-value"))
+              (field (js-call a :string "kind"))
+              (idx (js-call a :string "1"))
+              (trace (js-call a :sourceArray (js-array))))
+          (js-call (js-array false t nil undefined 7 "😀") :forEach
+            (lambda (value)
+              (let ((receiver (box-input a value)))
+                (js-call (js-array false t) :forEach
+                  (lambda (standard)
+                    (let ((expected (js-array)))
+                      (if (and standard (nullish? value))
+                        (progn
+                          (js-call assert :throws
+                            (lambda () (js-call reference :converted value "kind" expected t))
+                            globalThis.TypeError)
+                          (js-call assert :throws
+                            (lambda () (js-call a :invoke "converted" (js-array receiver field trace t)))
+                            (lambda (e) (diag-code? e "ELI-RT0003"))))
+                        (js-call assert :equal
+                          (js-call a :invoke "converted" (js-array receiver field trace standard))
+                          (js-call reference :converted value "kind" expected standard)))
+                      (js-call assert :deepEqual (read-strings a trace) expected)
+                      (js-call a :resize trace 0))))
+                (js-call assert :equal (js-call a :invoke "abrupt" (js-array receiver trace)) t)
+                (js-call a :release receiver))))
+          (js-call assert :equal (js-call a :invoke "converted" (js-array sym field trace false)) false)
+          (js-call assert :deepEqual (read-strings a trace) (js-array "string"))
+          (js-call a :resize trace 0)
+          (let ((str-h (js-call a :string "😀")))
+            (js-call assert :equal (js-call a :invoke "converted" (js-array str-h idx trace false)) t)
+            (js-call assert :deepEqual (read-strings a trace) (js-array "string"))
+            (js-call assert :equal (js-call a :invoke "own" (js-array str-h sym)) (Object/hasOwn "😀" (globalThis.Symbol "opaque")))
+            (finish a (js-array sym field idx trace str-h)))))))
+
+  (test "inherited fields and native prototype names stay non-own without widening any reflection admission"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (let ((field (js-call a :string "__primitive_own_inherited"))
+              (sym (js-call a :invoke "symbol-value")))
+          (js-call a :release (js-call a :invoke "install" (js-array field)))
+          (js-call (js-array false 1 "abc") :forEach
+            (lambda (value)
+              (let ((receiver (box-input a value)))
+                (js-call (js-array "__primitive_own_inherited" "constructor" "__proto__" "toString" "valueOf" "hasOwnProperty") :forEach
+                  (lambda (key-value)
+                    (let ((key (js-call a :string key-value)))
+                      (js-call assert :equal (js-call a :invoke "own" (js-array receiver key)) (Object/hasOwn value key-value))
+                      (js-call assert :equal (js-call a :invoke "standard-own" (js-array receiver key)) (Object/hasOwn value key-value))
+                      (js-call assert :equal (js-call a :invoke "descriptor" (js-array receiver key)) undefined)
+                      (js-call a :release key))))
+                (js-call a :release receiver))))
+          (js-call assert :equal (js-call a :invoke "own" (js-array sym field)) false)
+          (finish a (js-array field sym))))))
+
+  (test "deterministic randomized string own checks match Node for canonical and noncanonical UTF16 keys"
+    (lambda ()
+      (let* ((state 80151)
+             (next (lambda ()
+                     (setq state (unsigned-bit-shift-right (+ (Math/imul state 1664525) 1013904223) 0))
+                     state))
+             (cases (js-array))
+             (i 0))
+        (while (< i 160)
+          (let* ((text (js-call (Array/from (js-object :length (% (funcall next) 12))
+                                  (lambda () (String/fromCharCode (bit-and (funcall next) 65535))))
+                         :join ""))
+                 (idx (- (% (funcall next) 18) 3))
+                 (choices (js-array (globalThis.String idx) (str "0" idx) (str idx ".0") "length" (String/fromCharCode (bit-and (funcall next) 65535))))
+                 (key (aref choices (% (funcall next) 5))))
+            (js-call cases :push (js-array text key)))
+          (setq i (+ i 1)))
+        (let* ((runner (resolve "tests/helpers/wasm-managed-primitive-own-runtime-node.mjs"))
+               (node (spawnSync "node" (js-array runner) (js-object :input (JSON/stringify cases) :encoding "utf8"))))
+          (js-call assert :equal (get node :status) 0 (get node :stderr))
+          (let ((expected (JSON/parse (get node :stdout)))
+                (a (instantiateManagedRuntime bytes))
+                (j 0))
+            (js-call a :auto 1)
+            (while (< j (length cases))
+              (let* ((pair (aref cases j))
+                     (receiver (js-call a :string (aref pair 0)))
+                     (name (js-call a :string (aref pair 1))))
+                (js-call assert :equal (js-call a :invoke "own" (js-array receiver name)) (aref expected j))
+                (js-call a :release receiver)
+                (js-call a :release name))
+              (setq j (+ j 1)))
+            (finish a))))))
+
+  (test "slot exhaustion preserves caller roots and own checks recover without accepting stale foreign or private handles"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 65536)))
+            (other (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (let ((receiver (js-call a :string "abc"))
+              (key (js-call a :string "1"))
+              (held (js-call a :number -0.0))
+              (frame (js-call a :frame 1))
+              (fillers (js-array)))
+          (js-call a :frameSet frame 0 held)
+          (while (< (js-call a :live) 64)
+            (js-call fillers :push (js-call a :number 7)))
+          (js-call assert :throws
+            (lambda () (js-call a :invoke "own" (js-array receiver key)))
+            (lambda (e) (diag-code? e "ELI-RT0002")))
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+          (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+          (js-call fillers :forEach (lambda (value) (js-call a :release value)))
+          (js-call a :collect)
+          (js-call assert :equal (js-call a :invoke "own" (js-array receiver key)) t)
+          (let ((stale (js-call a :number 2))
+                (foreign (js-call other :number 2)))
+            (js-call a :release stale)
+            (js-call a :collect)
+            (js-call (js-array stale foreign) :forEach
+              (lambda (value)
+                (js-call assert :throws
+                  (lambda () (js-call a :invoke "own" (js-array value key)))
+                  (lambda (e) (diag-code? e "ELI-RT0001")))))
+            (js-call a :leaveFrame frame)
+            (finish a (js-array receiver key held))
+            (finish other (js-array foreign)))))
+      (let* ((inst (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)))
+             (e (get inst :exports))
+             (h (funcall (aref e "heap-new") 64 8192 65536))
+             (raw-call (lambda (name &rest args)
+                         (unsigned-bit-shift-right (js-call (aref e name) :apply nil (js-call (js-array h) :concat args)) 0)))
+             (unfinished (funcall raw-call "value-string" 1)))
+        (funcall raw-call "heap-pin" unfinished)
+        (js-call
+          (js-array
+            (js-array unfinished 3 6)
+            (js-array 1 unfinished 6)
+            (js-array 1 4294967295 1)
+            (js-array 4294967295 3 1))
+          :forEach
+          (lambda (item)
+            (js-call assert :equal (funcall raw-call "value-object-has" (aref item 0) (aref item 1)) 0)
+            (js-call assert :equal (funcall (aref e "last-error")) (aref item 2))
+            (js-call assert :equal (funcall raw-call "frame-depth") 0)))
+        (let ((raw (funcall raw-call "value-refs" 7 0)))
+          (funcall raw-call "heap-pin" raw)
+          (js-call assert :equal (funcall raw-call "value-object-has" 1 raw) 0)
+          (js-call assert :equal (funcall (aref e "last-error")) 3)
+          (funcall raw-call "heap-release" raw)
+          (funcall raw-call "heap-release" unfinished)
+          (funcall raw-call "heap-collect")
+          (js-call assert :equal (funcall raw-call "heap-live") 0)))))
+
+  (test "real own-predicate traps occur after one conversion and unwind only callee roots"
+    (async ()
+      (let* ((original (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
+             (signature "(defun heap-object-properties-own (heap value key)")
+             (modified (js-call original :replace signature
+                         (str signature " (when (and (= value 2) (= (load-u32 20) 0)) (store-u32 20 1) (load-u32 4294967295))"))))
+        (js-call assert :notEqual modified original)
+        (let* ((trap-runtime (js-call (get backends :compiler) :compile_ir_string modified "primitive-own-trap.eli"))
+               (a (instantiateManagedRuntime (Uint8Array/from (js-call (get backends :managed) :emit_managed_wasm program trap-runtime)))))
+          (js-call a :auto 1)
+          (let ((field (js-call a :string "kind"))
+                (trace (js-call a :sourceArray (js-array)))
+                (held (js-call a :number -0.0))
+                (frame (js-call a :frame 1)))
+            (js-call a :frameSet frame 0 held)
+            (js-call assert :equal (js-call a :invoke "abrupt" (js-array t trace)) t)
+            (js-call assert :throws
+              (lambda () (js-call a :invoke "converted" (js-array t field trace false)))
+              globalThis.WebAssembly.RuntimeError)
+            (js-call assert :deepEqual (read-strings a trace) (js-array "string"))
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+            (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+            (js-call assert :equal (js-call a :invoke "own" (js-array t field)) false)
+            (js-call a :leaveFrame frame)
+            (finish a (js-array field trace held))))))))

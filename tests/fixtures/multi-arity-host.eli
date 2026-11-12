@@ -1,2 +1,20 @@
-(module capsules.tests.fixtures.multi-arity-host
-  (js* "import { pathToFileURL } from \"node:url\";\n\nconst modulePath = process.argv[2];\nif (!modulePath) throw new TypeError(\"expected compiled module path\");\n\nconst compiled = await import(pathToFileURL(modulePath).href);\nlet failure;\ntry {\n  compiled.countdown();\n} catch (error) {\n  failure = { name: error.name, message: error.message };\n}\n\nprocess.stdout.write(JSON.stringify({\n  report: compiled.report(),\n  asyncReport: await compiled.async_report(),\n  failure,\n}));\n"))
+(module tests.fixtures.multi-arity-host
+  (import "node:url" pathToFileURL)
+  (defconst load-module (js* "(specifier) => import(specifier)"))
+  (defconst modulePath (aref (get globalThis.process :argv) 2))
+  (unless (js* "!!modulePath") (throw (new globalThis.TypeError "expected compiled module path")))
+  (defvar compiled undefined)
+  (defvar failure undefined)
+  (defasync run-host-main ()
+    (setq compiled (await (funcall load-module (get (pathToFileURL modulePath) :href))))
+    (setq failure undefined)
+    (try (js-call compiled :countdown) (catch error (setq failure (js-object :name (get error :name) :message (get error :message)))))
+    (js-call (get globalThis.process :stdout) :write (JSON/stringify
+    (js-object :report (js-call compiled :report) :asyncReport (await (js-call compiled :async_report)) :failure failure))))
+  (defconst completion (run-host-main))
+  (js-call completion :catch (lambda (error)
+    (console/error error)
+    (put globalThis.process :exitCode 1)))
+  (defun then (fulfill reject)
+    (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject))
+  (export then))

@@ -1,2 +1,18 @@
-(module capsules.tools.experiments.native-wasm.cases
-  (js* "export const warmups = 5;\nexport const samples = 9;\nexport const cases = [\n  { name: \"recurrence-batch\", fn: \"recurrence\", args: [1_000_000, 0.123], calls: 2 },\n  { name: \"escape-grid\", fn: \"escape-grid\", args: [160, 64], calls: 2 },\n  { name: \"recurrence-tiny-calls\", fn: \"recurrence\", args: [1, 0.123], calls: 2_000_000 },\n];\n\nexport function summarize(values) {\n  const sorted = [...values].sort((a, b) => a - b);\n  return { medianMs: sorted[Math.floor(sorted.length / 2)], minMs: sorted[0], maxMs: sorted.at(-1), samplesMs: values };\n}\n"))
+(module tools.experiments.native-wasm.cases
+  (defconst warmups 5)
+  (defconst samples 9)
+  (defconst cases
+    (js-array
+      (js-object :name "recurrence-batch" :fn "recurrence" :args (js-array 1000000 0.123) :calls 2)
+      (js-object :name "escape-grid" :fn "escape-grid" :args (js-array 160 64) :calls 2)
+      (js-object :name "recurrence-tiny-calls" :fn "recurrence" :args (js-array 1 0.123) :calls 2000000)))
+
+  (defun summarize (values)
+    (let ((sorted (js-call (Array/from values) :sort (lambda (a b) (- a b)))))
+      (js-object
+        :medianMs (aref sorted (Math/floor (/ (js-length sorted) 2)))
+        :minMs (aref sorted 0)
+        :maxMs (js-call sorted :at -1)
+        :samplesMs values)))
+
+  (export warmups samples cases summarize))

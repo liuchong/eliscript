@@ -1,2 +1,133 @@
-(module capsules.tests.whole-compiler-rig
-  (js* "import assert from 'node:assert/strict';\nimport {readFile,readdir,mkdtemp,writeFile,rm} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nimport {instantiateNativeManagedRuntime} from '../tools/backends/native-managed-runtime.mjs';\nexport const compilerBudget=Object.freeze({maxSlots:131072,initialBytes:8388608,maxBytes:67108864});\nexport const compilerMemory=Object.freeze({initialPages:128,maximumPages:4096});\nexport async function buildWholeCompiler({entrySource}={}){\n const directory=await mkdtemp(resolve(tmpdir(),'eliscript-whole-compiler-'));\n try{\n  const backend=await buildBackends({outputRoot:directory}),names=(await readdir('bootstrap/compiler')).filter(name=>name.endsWith('.eli')).sort();assert.equal(names.length,13);\n  const modules=await Promise.all(names.map(async name=>({id:name.replace(/[.]eli$/,'.mjs'),program:backend.compiler.compile_ir_string(await readFile(resolve('bootstrap/compiler',name),'utf8'),name)})));\n  const entry=entrySource===undefined?'compiler.mjs':'test-entry.mjs';\n  if(entrySource!==undefined)modules.push({id:entry,program:backend.compiler.compile_ir_string(entrySource,entry)});\n  const runtime=backend.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli'),saved=JSON.stringify(modules),runtimeSaved=JSON.stringify(runtime);\n  const lowered=backend.managed.lower_managed_project(modules,entry,runtime);assert.equal(JSON.stringify(modules),saved);assert.equal(JSON.stringify(runtime),runtimeSaved);\n  let bytes,nativePath;\n  const fixture={directory,backend,modules,runtime,lowered,\n   async wasm(){if(!bytes){bytes=Uint8Array.from(backend.managed.emit_managed_project_wasm(modules,entry,runtime,compilerMemory));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);}const a=instantiateManagedRuntime(bytes,{...compilerBudget,initializeModule:false});a.auto(65536);a.initializeModule();return a;},\n   async native(){if(!nativePath){nativePath=resolve(directory,'compiler.dylib');await writeFile(nativePath,Uint8Array.from(backend.native.emit_typed_native_memory_library(lowered.typed,'arm64-macos')));}const a=await instantiateNativeManagedRuntime(nativePath,lowered,{...compilerMemory,...compilerBudget,initializeModule:false});try{a.auto(65536);a.initializeModule();return a;}catch(error){try{a.close();}catch{}throw error;}},\n   async close(){await rm(directory,{recursive:true,force:true});}};\n  return fixture;\n }catch(error){await rm(directory,{recursive:true,force:true});throw error;}\n}\nexport function readCompilerValue(a,value){\n if(value===null||typeof value!=='object')return value;\n if(value.kind===4)return a.readNumber(value);if(value.kind===5)return a.readString(value);\n if(value.kind===14)return Array.from({length:a.length(value)},(_,i)=>{const child=a.get(value,i);try{return readCompilerValue(a,child);}finally{a.release(child);}});\n if(value.kind===13){const result={},keys=a.objectKeys(value);try{for(let i=0;i<a.length(keys);i++){const key=a.get(keys,i),child=a.objectGet(value,key);try{Object.defineProperty(result,a.readString(key),{value:readCompilerValue(a,child),enumerable:true,writable:true,configurable:true});}finally{a.release(child);a.release(key);}}}finally{a.release(keys);}return result;}\n throw new TypeError('unsupported compiler observation kind '+value.kind);\n}\nexport function finishCompiler(a){try{a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}finally{a.close?.();}}\n"))
+(module tests.whole-compiler-rig
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile readdir mkdtemp writeFile rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+
+  (defconst compilerBudget
+    (Object/freeze (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864)))
+  (defconst compilerMemory
+    (Object/freeze (js-object :initialPages 128 :maximumPages 4096)))
+
+  (defasync buildWholeCompiler (&rest __host_forwarded_arguments_1)
+    (let* ((options (aref __host_forwarded_arguments_1 0)))
+    (let* ((opts (or options (js-object)))
+           (entrySource (get opts :entrySource))
+           (directory (await (mkdtemp (resolve (tmpdir) "eliscript-whole-compiler-")))))
+      (try
+        (let* ((backend (await (buildBackends (js-object :outputRoot directory))))
+               (names (js-call (js-call (await (readdir "bootstrap/compiler"))
+                                 :filter (lambda (name) (js-call name :endsWith ".eli")))
+                        :sort)))
+          (js-call assert :equal (js-length names) 13)
+          (let* ((modules (await (Promise/all
+                                   (js-call names :map
+                                     (async (name)
+                                       (js-object
+                                         :id (js-call name :replace (new globalThis.RegExp "[.]eli$") ".mjs")
+                                         :program (js-call (get backend :compiler) :compile_ir_string
+                                                    (await (readFile (resolve "bootstrap/compiler" name) "utf8"))
+                                                    name)))))))
+                 (entry (if (undefined? entrySource) "compiler.mjs" "test-entry.mjs")))
+            (unless (undefined? entrySource)
+              (js-call modules :push
+                (js-object :id entry
+                  :program (js-call (get backend :compiler) :compile_ir_string entrySource entry))))
+            (let* ((runtime (js-call (get backend :compiler) :compile_ir_string
+                              (await (readFile "bootstrap/runtime/memory.eli" "utf8"))
+                              "runtime.eli"))
+                   (saved (JSON/stringify modules))
+                   (runtimeSaved (JSON/stringify runtime))
+                   (lowered (js-call (get backend :managed) :lower_managed_project modules entry runtime))
+                   (bytes undefined)
+                   (nativePath undefined))
+              (js-call assert :equal (JSON/stringify modules) saved)
+              (js-call assert :equal (JSON/stringify runtime) runtimeSaved)
+              (js-object
+                :directory directory
+                :backend backend
+                :modules modules
+                :runtime runtime
+                :lowered lowered
+                :wasm (async ()
+                        (unless bytes
+                          (setq bytes (globalThis.Uint8Array.from
+                                        (js-call (get backend :managed) :emit_managed_project_wasm
+                                          modules entry runtime compilerMemory)))
+                          (js-call assert :deepEqual
+                            (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes))
+                            (js-array)))
+                        (let ((a (instantiateManagedRuntime bytes
+                                   (Object/assign (js-object) compilerBudget (js-object :initializeModule false)))))
+                          (js-call a :auto 65536)
+                          (js-call a :initializeModule)
+                          a))
+                :native (async ()
+                          (unless nativePath
+                            (setq nativePath (resolve directory "compiler.dylib"))
+                            (await (writeFile nativePath
+                                     (globalThis.Uint8Array.from
+                                       (js-call (get backend :native) :emit_typed_native_memory_library
+                                         (get lowered :typed) "arm64-macos")))))
+                          (let ((a (await (instantiateNativeManagedRuntime nativePath lowered
+                                            (Object/assign (js-object) compilerMemory compilerBudget
+                                              (js-object :initializeModule false))))))
+                            (try
+                              (js-call a :auto 65536)
+                              (js-call a :initializeModule)
+                              a
+                              (catch error
+                                (try (js-call a :close) (catch _ nil))
+                                (throw error)))))
+                :close (async ()
+                         (await (rm directory (js-object :recursive t :force t))))))))
+        (catch error
+          (await (rm directory (js-object :recursive t :force t)))
+          (throw error))))))
+
+  (defun readCompilerValue (a value)
+    (cond
+      ((or (nil? value) (not (= (value-type value) "object"))) value)
+      ((= (get value :kind) 4) (js-call a :readNumber value))
+      ((= (get value :kind) 5) (js-call a :readString value))
+      ((= (get value :kind) 14)
+       (Array/from (js-object :length (js-call a :length value))
+         (lambda (_ign i)
+           (let ((child (js-call a :get value i)))
+             (try
+               (readCompilerValue a child)
+               (finally (js-call a :release child)))))))
+      ((= (get value :kind) 13)
+       (let ((result (js-object))
+             (keys (js-call a :objectKeys value)))
+         (try
+           (let ((i 0))
+             (while (< i (js-call a :length keys))
+               (let* ((key (js-call a :get keys i))
+                      (child (js-call a :objectGet value key)))
+                 (try
+                   (Object/defineProperty result (js-call a :readString key)
+                     (js-object :value (readCompilerValue a child)
+                       :enumerable t :writable t :configurable t))
+                   (finally
+                     (js-call a :release child)
+                     (js-call a :release key))))
+               (setq i (1+ i))))
+           (finally (js-call a :release keys)))
+         result))
+      (t (throw (new globalThis.TypeError (str "unsupported compiler observation kind " (get value :kind)))))))
+
+  (defun finishCompiler (a)
+    (try
+      (js-call a :closeModule)
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+      (finally
+        (when (= (value-type (get a :close)) "function")
+          (js-call a :close)))))
+
+  (export compilerBudget compilerMemory buildWholeCompiler readCompilerValue finishCompiler))

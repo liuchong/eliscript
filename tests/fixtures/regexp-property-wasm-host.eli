@@ -1,0 +1,6 @@
+(module tests.fixtures.regexp-property-wasm-host
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (let ((module (new globalThis.WebAssembly.Module (readFileSync (aref (get globalThis.process :argv) 2)))))
+    (js-call assert :deepEqual (js-call (get globalThis.WebAssembly :Module) :imports module) (js-array)))
+)

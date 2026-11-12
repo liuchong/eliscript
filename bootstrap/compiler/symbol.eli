@@ -13,7 +13,7 @@
   (defconst internal-prefix "__eliscript_")
   (defconst fail
     (lambda (message)
-      (throw (new (js* "Error") message))))
+      (throw (new globalThis.Error message))))
 
   (defun ascii-identifier-code-p (code)
     (or (and (>= code 65) (<= code 90))
@@ -31,7 +31,7 @@
   (defun munge-character (code)
     (cond
       ((ascii-identifier-code-p code)
-       (js-call (js* "String") :fromCodePoint code))
+       (js-call globalThis.String :fromCodePoint code))
       ((= code 45) "_")
       ((= code 63) "_QMARK_")
       ((= code 33) "_BANG_")

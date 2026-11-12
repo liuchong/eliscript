@@ -1,2 +1,485 @@
-(module capsules.tests.wasm-managed-array-splice-test-ground
-  (js* "import {beforeAll,afterAll,test} from 'bun:test';import assert from 'node:assert/strict';\nimport {readFile,mkdtemp,rm,writeFile} from 'node:fs/promises';import {resolve} from 'node:path';import {tmpdir} from 'node:os';import {pathToFileURL} from 'node:url';import {spawnSync} from 'node:child_process';\nimport {buildBackends} from '../tools/backends/build.mjs';import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nlet directory,b,runtime;\nbeforeAll(async()=>{directory=await mkdtemp(resolve(tmpdir(),'eliscript-splice-'));b=await buildBackends({outputRoot:directory});runtime=b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli');},120000);\nafterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});\nconst own=' (defun own (items key) (object-has? items key)) ';\nconst basic=`(defconst marker 1)\n (defun zero (items) (js-call items :splice))\n (defun one (items start) (js-call items :splice start))\n (defun two (items start count) (js-call items :splice start count))\n (defun many (items start count first second) (js-call items :splice start count first second))\n (defun observed (items start count) (js-array (js-call items :splice start count) items))\n ${own} (export zero one two many observed own)`;\nasync function compiled(source=basic,options,rt=runtime){const p=b.compiler.compile_ir_string(source+' (defun properties (items) (object-keys items)) (defun property (items key) (aref items key)) (export properties property)','array-splice.eli'),saved=JSON.stringify(p),bytes=Uint8Array.from(b.managed.emit_managed_wasm(p,rt));assert.equal(JSON.stringify(p),saved);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);const a=instantiateManagedRuntime(bytes,options);a.auto(1);return{a,bytes,p,js:await import('data:text/javascript;base64,'+Buffer.from(b.compiler.emit_ir_string(p)).toString('base64'))};}\nfunction box(a,v){if(typeof v==='number')return a.number(v);if(typeof v==='string')return a.string(v);if(Array.isArray(v)){const values=v.map(x=>box(a,x));try{return a.sourceArray(values);}finally{values.forEach(x=>a.release(x));}}return v;}\nfunction read(a,v){if(!v||typeof v!=='object')return v;if(v.kind===4)return a.readNumber(v);if(v.kind===5)return a.readString(v);assert.equal(v.kind,14);const out=Array(a.length(v));for(let i=0;i<out.length;i++){const key=a.number(i);let present;try{present=a.invoke('own',[v,key]);}finally{a.release(key);}if(present){const value=a.get(v,i);try{out[i]=read(a,value);}finally{a.release(value);}}}const keys=a.invoke('properties',[v]);try{for(let i=0;i<a.length(keys);i++){const key=a.get(keys,i);try{const name=a.readString(key);if(String(Number(name)>>>0)!==name||Number(name)>=4294967295){const child=a.invoke('property',[v,key]);try{Object.defineProperty(out,name,{value:read(a,child),writable:true,enumerable:true,configurable:true});}finally{a.release(child);}}}finally{a.release(key);}}}finally{a.release(keys);}return out;}\nfunction finish(a,roots=[]){roots.forEach(v=>a.release(v));a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}\nfunction exercise(a,js,name,values,args){const input=box(a,values),boxed=args.map(v=>box(a,v)),reference=values.slice();let result;try{result=a.invoke(name,[input,...boxed]);assert.deepEqual(read(a,result),js[name](reference,...args));assert.deepEqual(read(a,input),reference);assert.equal(a.keyEqual(result,input),false);}finally{a.release(result);a.release(input);boxed.forEach(v=>a.release(v));}}\ntest('ordinary Array splice preserves zero one two and inserted argument semantics sparse ownership and exact integer coercion',async()=>{\n const {a,js}=await compiled(),sparse=Array(5);sparse[1]=undefined;sparse[3]=-0;\n for(const values of[[],[0,-0,NaN,'中😀',false,null,undefined],sparse]){\n  exercise(a,js,'zero',values,[]);\n  for(const start of[undefined,null,false,true,NaN,-Infinity,Infinity,-0,.9,-.9,1.9,-1.9,99,-99,'2','-2','bad']){exercise(a,js,'one',values,[start]);for(const count of[undefined,null,false,NaN,-Infinity,Infinity,-1,0,1.9,99,'2']){exercise(a,js,'two',values,[start,count]);exercise(a,js,'many',values,[start,count,'insert',undefined]);}}\n }\n finish(a);\n},30000);\n\ntest('splice snapshots length before start then deleteCount conversions and observes their live mutations',async()=>{\n const text=`(defconst marker 1)\n (defun mutate (mode)\n   (let* ((items (js-array 1 2 3 4)) (trace (js-array))\n     (start (js-object :valueOf (lambda () (js-call trace :push \"start\")\n       (cond ((= mode 0) (put items :length 1)) ((= mode 1) (js-call items :push 9 10)) (t (put items 2 8))) -2.9)))\n     (count (js-object :valueOf (lambda () (js-call trace :push \"count\") 1.9))))\n     (js-array (js-call items :splice start count (progn (js-call trace :push \"arg0\") 7)\n       (progn (js-call trace :push \"arg1\") undefined)) items trace)))\n (defun thrown (trace)\n   (let ((items (js-array 1 2)) (start (js-object :valueOf (lambda () (js-call trace :push \"start\") (throw trace)))))\n     (try (js-call items :splice start (progn (js-call trace :push \"arg\") 1))\n       (catch error (Object/is error trace)))))\n ${own} (export mutate thrown own)`;\n const{a,js}=await compiled(text);for(const mode of[0,1,2]){const value=a.number(mode),out=a.invoke('mutate',[value]);assert.deepEqual(read(a,out),js.mutate(mode));a.release(out);a.release(value);}const trace=a.sourceArray([]),expected=[];assert.equal(a.invoke('thrown',[trace]),js.thrown(expected));assert.deepEqual(read(a,trace),expected);finish(a,[trace]);\n});\n\ntest('splice captures own and inherited methods before all arguments and ordinary objects keep their callable receivers',async()=>{\n const text=`(defconst marker 1)\n (defun captured () (let ((items (js-array 1)) (trace (js-array)))\n   (put items :splice (lambda (&rest args) (js-array \"captured\" (js-length args))))\n   (js-array (js-call items :splice (progn (put items :splice false) (js-call trace :push \"arg0\") 0)\n       (progn (js-call trace :push \"arg1\") 1) (progn (js-call trace :push \"arg2\") 7)) trace items)))\n (defun ordinary () (let ((item (js-object :splice (lambda (&rest args) (js-length args))))) (js-call item :splice 1 2 3)))\n (defun bad (items trace) (put items :splice false) (js-call items :splice (js-call trace :push \"argument\")))\n (defun nullish (items trace) (js-call items :splice (js-call trace :push \"argument\")))\n (defun inherited () (put (js* \"Array.prototype\") :splice (lambda (&rest args) (js-array \"inherited\" (js-length args)))) (js-call (js-array 1 2) :splice 0 1 7))\n ${own} (export captured ordinary bad nullish inherited own)`;\n const{a,js}=await compiled(text);for(const name of['captured','ordinary']){const out=a.invoke(name);assert.deepEqual(read(a,out),js[name]());a.release(out);}const input=box(a,[1]),trace=a.sourceArray([]),expected=[];assert.throws(()=>a.invoke('bad',[input,trace]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.throws(()=>js.bad([1],expected),TypeError);assert.deepEqual(read(a,trace),expected);a.release(input);a.release(trace);\n for(const value of[null,undefined,false,1]){const receiver=box(a,value),events=a.sourceArray([]),expected=[];assert.throws(()=>a.invoke('nullish',[receiver,events]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.throws(()=>js.nullish(value,expected),TypeError);assert.deepEqual(read(a,events),expected);a.release(receiver);a.release(events);}\n const saved=Object.getOwnPropertyDescriptor(Array.prototype,'splice');let wanted;try{wanted=js.inherited();}finally{Object.defineProperty(Array.prototype,'splice',saved);}const out=a.invoke('inherited');assert.deepEqual(read(a,out),wanted);a.release(out);finish(a);\n});\n\ntest('splice preserves inherited indexed Get and HasProperty when copying shifting and deleting sparse positions',async()=>{\n const text=`(defconst marker 1)\n (defun inherited (mode)\n   (put (js* \"Array.prototype\") 1 \"prototype\")\n   (let ((items (js-array))) (put items :length 5) (put items 3 \"own\")\n     (js-array (if (= mode 0) (js-call items :splice 0 2) (js-call items :splice 1 0 \"new\")) items)))\n ${own} (export inherited own)`;\n const{a,js}=await compiled(text),saved=Object.getOwnPropertyDescriptor(Array.prototype,'1');\n for(const mode of[0,1]){let wanted;try{wanted=js.inherited(mode);}finally{if(saved)Object.defineProperty(Array.prototype,'1',saved);else delete Array.prototype[1];}const input=a.number(mode),out=a.invoke('inherited',[input]);assert.deepEqual(read(a,out),wanted);a.release(input);a.release(out);}finish(a);\n});\n\ntest('splice checks frozen arrays and unsupported species only after numeric conversion and leaves ordinary inputs intact on rejection',async()=>{\n const text=`(defconst marker 1)\n (defun rejected (mode trace)\n   (let ((items (js-array 1 2 3)))\n     (if (= mode 0) (Object/freeze items) (put items :constructor 7))\n     (try (js-call items :splice\n       (js-object :valueOf (lambda () (js-call trace :push \"start\") 0))\n       (js-object :valueOf (lambda () (js-call trace :push \"count\") 1))\n       (progn (js-call trace :push \"arg\") 7))\n       (catch error (js-array (get error :name) items)))))\n ${own} (export rejected own)`;\n const{a,js}=await compiled(text);for(const mode of[0,1]){const value=a.number(mode),trace=a.sourceArray([]),expected=[],out=a.invoke('rejected',[value,trace]);assert.deepEqual(read(a,out),js.rejected(mode,expected));assert.deepEqual(read(a,trace),expected);for(const v of[value,trace,out])a.release(v);}finish(a);\n for(const source of['(defun f (items ctor) (put ctor (js* \"Symbol.species\") (lambda () (js-array))) (put items :constructor ctor) (js-call items :splice 0 1)) (export f)','(defun f (items) (Object/defineProperty items \"0\" (js-object :get (lambda () 7))) (js-call items :splice 0 1)) (export f)']){const p=b.compiler.compile_ir_string(source,'splice-unsupported.eli');assert.throws(()=>b.managed.emit_managed_wasm(p,runtime),e=>e.eliscriptDiagnostic?.code==='ELI-B0001');}\n});\n\ntest('deterministic random sparse splice inputs exactly match JS values holes result identity and surviving source elements',async()=>{\n const{a,js}=await compiled();let seed=0x416bc913;const next=()=>seed=(Math.imul(seed,1664525)+1013904223)>>>0,pool=[undefined,null,false,true,-0,NaN,1,2,'中😀','\\ud800'];\n for(let i=0;i<128;i++){const values=Array(next()%32);for(let j=0;j<values.length;j++)if(next()%4)values[j]=pool[next()%pool.length];const start=(next()%96-48)/3,count=(next()%96-16)/3;exercise(a,js,'many',values,[start,count,pool[next()%pool.length],pool[next()%pool.length]]);a.collect();assert.equal(a.stats().frameDepth,0);}finish(a);\n});\n\ntest('splice rejects inherited frozen numeric data at the original Set point after preserving earlier writes',async()=>{\n const text=`(defconst marker 1) (defun run ()\n   (put (js* \"Array.prototype\") 1 7) (Object/freeze (js* \"Array.prototype\"))\n   (let ((items (js-array))) (put items :length 3) (put items 2 2)\n     (try (js-call items :splice 0 1) (catch error (js-array (get error :name) items)))))\n ${own} (export run own)`;\n const{a}=await compiled(text),parent=Object.create(Array.prototype);Object.defineProperty(parent,'1',{value:7,writable:false,enumerable:true,configurable:false});const values=Array(3);values[2]=2;Object.setPrototypeOf(values,parent);let error;try{values.splice(0,1);}catch(e){error=e;}\n const expected=Array(values.length);for(let i=0;i<values.length;i++)if(Object.hasOwn(values,i))expected[i]=values[i];const out=a.invoke('run');assert.deepEqual(read(a,out),[error.name,expected]);finish(a,[out]);\n});\n\ntest('raw splice ABI rejects illegal private and malformed arguments while retaining caller roots and recovering from exhausted slots',async()=>{\n const{a,bytes}=await compiled();finish(a);const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports,h=e['heap-new'](64,16384,131072),call=(name,...args)=>{const out=e[name](h,...args)>>>0;assert.equal(e['last-error'](),0,name);return out;};\n const items=call('value-array-new',3),args=call('value-refs',7,2),zero=call('value-number',0,0),one=call('value-number',0,1072693248),frame=call('frame-new',4);call('frame-set',frame,0,items);call('frame-set',frame,1,args);call('frame-set',frame,2,zero);call('frame-set',frame,3,one);call('value-set',items,0,2);call('value-set',items,2,1);call('value-set',args,0,zero);call('value-set',args,1,one);call('heap-auto',1);\n for(const[receiver,argv,code]of[[0xffffffff,args,1],[frame,args,1],[items,0xffffffff,1],[items,items,1],[items,frame,1]]){assert.equal(e['value-array-splice'](h,receiver,argv),0);assert.equal(e['last-error'](),code);assert.equal(call('frame-depth'),1);assert.equal(call('frame-get',frame,0),items);}\n const data=call('value-data',args,7),view=new DataView(e.memory.buffer);view.setUint32(data,0xffffffff,true);assert.equal(e['value-array-splice'](h,items,args),0);assert.equal(e['last-error'](),1);view.setUint32(data,frame,true);assert.equal(e['value-array-splice'](h,items,args),0);assert.equal(e['last-error'](),3);view.setUint32(data,zero,true);\n const held=[];while(call('heap-live')<64){const value=call('value-number',0,0);call('heap-pin',value);held.push(value);}assert.equal(e['value-array-splice'](h,items,args),0);assert.equal(e['last-error'](),2);assert.equal(call('frame-depth'),1);assert.equal(call('value-length',items),3);held.forEach(value=>call('heap-release',value));call('heap-collect');const out=call('value-array-splice',items,args);assert.equal(call('value-length',out),1);assert.equal(call('value-get',out,0),2);assert.equal(call('value-length',items),2);call('frame-pop',frame);call('heap-collect');assert.equal(call('heap-live'),0);\n});\n\ntest('a real splice move trap escapes source catches and only unwinds private frames after already-evaluated argument effects',async()=>{\n const text=`(defconst marker 1) (defun run (items trace)\n   (try (js-call items :splice (progn (js-call trace :push \"argument\") 0) 1)\n     (catch error \"incorrectly-caught\"))) ${own} (export run own)`,raw=await readFile('bootstrap/runtime/memory.eli','utf8'),start=raw.indexOf('  (defun heap-array-splice-move '),end=raw.indexOf('  (defun ',start+10);assert(start>=0&&end>start);\n const rt=b.compiler.compile_ir_string(raw.slice(0,start)+'  (defun heap-array-splice-move (heap value from to frame) (load-u32 4294967295))\\n'+raw.slice(end),'splice-trap.eli'),{a}=await compiled(text,undefined,rt),items=box(a,[1,2,3]),trace=a.sourceArray([]),held=a.number(-0),caller=a.frame(1);a.frameSet(caller,0,held);\n assert.throws(()=>a.invoke('run',[items,trace]),WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);assert(Object.is(a.readNumber(held),-0));assert.deepEqual(read(a,trace),['argument']);assert.deepEqual(read(a,items),[1,2,3]);a.leaveFrame(caller);finish(a,[items,trace,held]);\n});\n\ntest('Node independently executes identical zero-import splice bytes and sparse native JavaScript mutation semantics',async()=>{\n const{a,bytes}=await compiled();finish(a);const file=resolve(directory,'splice.wasm');await writeFile(file,bytes);\n const script=[\"import assert from 'node:assert/strict';import{readFileSync}from'node:fs';\",'const{instantiateManagedRuntime}=await import(process.argv[1]);const bytes=readFileSync(process.argv[2]);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);',box.toString(),read.toString(),finish.toString(),exercise.toString(),\"const js={zero:items=>items.splice(),one:(items,start)=>items.splice(start),two:(items,start,count)=>items.splice(start,count),many:(items,start,count,a,b)=>items.splice(start,count,a,b)};const a=instantiateManagedRuntime(bytes);a.auto(1);let seed=0x735a192b;const next=()=>seed=(Math.imul(seed,1664525)+1013904223)>>>0;for(let i=0;i<64;i++){const values=Array(next()%16);for(let j=0;j<values.length;j++)if(next()%4)values[j]=[undefined,null,false,NaN,-0,'中😀'][next()%6];exercise(a,js,'zero',values,[]);for(const start of[undefined,NaN,Infinity,-Infinity,-1.9,0,1.9])exercise(a,js,'many',values,[start,next()%24-4,undefined,'x']);}finish(a);\"].join('\\n');\n const child=spawnSync('node',['--input-type=module','-e',script,pathToFileURL(resolve('tools/backends/managed-runtime.mjs')).href,file],{encoding:'utf8',timeout:30000});assert.equal(child.status,0,child.stderr);\n});\n\ntest('splice observes represented inherited constructor overrides after conversions and an own undefined constructor shadows them',async()=>{\n const text=`(defconst marker 1) (defun run (shadow trace)\n   (put (js* \"Array.prototype\") :constructor 7)\n   (let ((items (js-array 1 2)))\n     (when shadow (put items :constructor undefined))\n     (try (js-array \"ok\" (js-call items :splice\n       (js-object :valueOf (lambda () (js-call trace :push \"start\") 0))\n       (js-object :valueOf (lambda () (js-call trace :push \"count\") 1))))\n       (catch error (js-array (get error :name))))))\n ${own} (export run own)`;\n const{a,js}=await compiled(text),saved=Object.getOwnPropertyDescriptor(Array.prototype,'constructor');\n for(const shadow of[false,true]){const trace=a.sourceArray([]),expected=[];let wanted;try{wanted=js.run(shadow,expected);}finally{Object.defineProperty(Array.prototype,'constructor',saved);}const out=a.invoke('run',[shadow,trace]);assert.deepEqual(read(a,out),wanted);assert.deepEqual(read(a,trace),expected);a.release(trace);a.release(out);}finish(a);\n});\n"))
+(module tests.wasm-managed-array-splice-test-ground
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile mkdtemp rm writeFile)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:url" pathToFileURL)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+  (defvar directory undefined)
+  (defvar b undefined)
+  (defvar runtime undefined)
+
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-splice-"))))
+    (setq b (await (buildBackends (js-object :outputRoot directory))))
+    (setq runtime (js-call (get b :compiler) :compile_ir_string
+                    (await (readFile "bootstrap/runtime/memory.eli" "utf8")) "runtime.eli")))
+    120000)
+
+  (afterAll (async ()
+    (when directory
+      (await (rm directory (js-object :recursive t :force t))))))
+
+  (defconst own " (defun own (items key) (object-has? items key)) ")
+  (defconst basic
+    (str "(defconst marker 1)\n"
+         " (defun zero (items) (js-call items :splice))\n"
+         " (defun one (items start) (js-call items :splice start))\n"
+         " (defun two (items start count) (js-call items :splice start count))\n"
+         " (defun many (items start count first second) (js-call items :splice start count first second))\n"
+         " (defun observed (items start count) (js-array (js-call items :splice start count) items))\n"
+         " " own " (export zero one two many observed own)"))
+
+  (defasync compiled (&rest supplied)
+    (let* ((source (if (or (= (js-length supplied) 0) (undefined? (aref supplied 0))) basic (aref supplied 0)))
+           (options (aref supplied 1))
+           (rt (if (or (< (js-length supplied) 3) (undefined? (aref supplied 2))) runtime (aref supplied 2)))
+           (p (js-call (get b :compiler) :compile_ir_string
+                (str source " (defun properties (items) (object-keys items)) (defun property (items key) (aref items key)) (export properties property)")
+                "array-splice.eli"))
+           (saved (JSON/stringify p))
+           (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p rt))))
+      (js-call assert :equal (JSON/stringify p) saved)
+      (js-call assert :deepEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+      (let ((a (instantiateManagedRuntime bytes options)))
+        (js-call a :auto 1)
+        (js-object :a a :bytes bytes :p p
+          :js (await (funcall dynamic-import
+                       (str "data:text/javascript;base64,"
+                            (js-call (Buffer/from (js-call (get b :compiler) :emit_ir_string p)) :toString "base64"))))))))
+
+  (defun box (a v)
+    (cond
+      ((= (value-type v) "number") (js-call a :number v))
+      ((= (value-type v) "string") (js-call a :string v))
+      ((Array/isArray v)
+       (let* ((values (Array/from v (lambda (x i) (if (Object/hasOwn v i) (box a x) undefined))))
+              (sparse (new globalThis.Array (js-length v)))
+              (i 0))
+         (while (< i (js-length v))
+           (when (Object/hasOwn v i)
+             (put sparse i (aref values i)))
+           (setq i (1+ i)))
+         (try (js-call a :sourceArray sparse)
+           (finally (js-call values :forEach (lambda (x) (js-call a :release x)))))))
+      (t v)))
+
+  (defun read (a v)
+    (if (or (not v) (/= (value-type v) "object"))
+      v
+      (cond
+        ((= (get v :kind) 4) (js-call a :readNumber v))
+        ((= (get v :kind) 5) (js-call a :readString v))
+        (t
+         (js-call assert :equal (get v :kind) 14)
+         (let ((out (new globalThis.Array (js-call a :length v)))
+               (i 0))
+           (while (< i (js-length out))
+             (let ((key (js-call a :number i))
+                   (present nil))
+               (try (setq present (js-call a :invoke "own" (js-array v key)))
+                 (finally (js-call a :release key)))
+               (when present
+                 (let ((value (js-call a :get v i)))
+                   (try (put out i (read a value))
+                     (finally (js-call a :release value))))))
+             (setq i (1+ i)))
+           (let ((keys (js-call a :invoke "properties" (js-array v))))
+             (try
+               (let ((k 0))
+                 (while (< k (js-call a :length keys))
+                   (let ((key (js-call a :get keys k)))
+                     (try
+                       (let* ((name (js-call a :readString key))
+                              (num (funcall globalThis.Number name)))
+                         (when (or (/= (funcall globalThis.String (uint32 num)) name)
+                                   (>= num 4294967295))
+                           (let ((child (js-call a :invoke "property" (js-array v key))))
+                             (try
+                               (Object/defineProperty out name
+                                 (js-object :value (read a child) :writable t :enumerable t :configurable t))
+                               (finally (js-call a :release child))))))
+                       (finally (js-call a :release key))))
+                   (setq k (1+ k))))
+               (finally (js-call a :release keys))))
+           out)))))
+
+  (defun finish (a &rest supplied)
+    (let ((roots (if (or (= (js-length supplied) 0) (undefined? (aref supplied 0))) (js-array) (aref supplied 0))))
+      (js-call roots :forEach (lambda (v) (js-call a :release v))))
+    (js-call a :closeModule)
+    (js-call a :collect)
+    (js-call assert :equal (js-call a :live) 0)
+    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))
+
+  (defun exercise (a js name values args)
+    (let ((input (box a values))
+          (boxed (js-call args :map (lambda (v) (box a v))))
+          (reference (js-call values :slice))
+          (result undefined))
+      (try
+        (progn
+          (setq result (js-call a :invoke name (js-call (js-array input) :concat boxed)))
+          (js-call assert :deepEqual (read a result) (Reflect/apply (get js name) js (js-call (js-array reference) :concat args)))
+          (js-call assert :deepEqual (read a input) reference)
+          (js-call assert :equal (js-call a :keyEqual result input) false))
+        (finally
+          (js-call a :release result)
+          (js-call a :release input)
+          (js-call boxed :forEach (lambda (v) (js-call a :release v)))))))
+
+  (defun rt-diag-p (code)
+    (lambda (e) (and e (get e :eliscriptDiagnostic) (= (get (get e :eliscriptDiagnostic) :code) code))))
+
+  (test "ordinary Array splice preserves zero one two and inserted argument semantics sparse ownership and exact integer coercion" (async ()
+    (let* ((c (await (compiled)))
+           (a (get c :a))
+           (js (get c :js))
+           (sparse (new globalThis.Array 5)))
+      (put sparse 1 undefined)
+      (put sparse 3 -0.0)
+      (js-call (js-array (js-array) (js-array 0 -0.0 globalThis.NaN "中😀" false nil undefined) sparse) :forEach
+        (lambda (values)
+          (exercise a js "zero" values (js-array))
+          (js-call (js-array undefined nil false t globalThis.NaN (- globalThis.Infinity) globalThis.Infinity
+                             -0.0 0.9 -0.9 1.9 -1.9 99 -99 "2" "-2" "bad")
+            :forEach
+            (lambda (start)
+              (exercise a js "one" values (js-array start))
+              (js-call (js-array undefined nil false globalThis.NaN (- globalThis.Infinity) globalThis.Infinity -1 0 1.9 99 "2")
+                :forEach
+                (lambda (count)
+                  (exercise a js "two" values (js-array start count))
+                  (exercise a js "many" values (js-array start count "insert" undefined))))))))
+      (finish a)))
+    30000)
+
+  (test "splice snapshots length before start then deleteCount conversions and observes their live mutations" (async ()
+    (let* ((text (str "(defconst marker 1)\n"
+                      " (defun mutate (mode)\n"
+                      "   (let* ((items (js-array 1 2 3 4)) (trace (js-array))\n"
+                      "     (start (js-object :valueOf (lambda () (js-call trace :push \"start\")\n"
+                      "       (cond ((= mode 0) (put items :length 1)) ((= mode 1) (js-call items :push 9 10)) (t (put items 2 8))) -2.9)))\n"
+                      "     (count (js-object :valueOf (lambda () (js-call trace :push \"count\") 1.9))))\n"
+                      "     (js-array (js-call items :splice start count (progn (js-call trace :push \"arg0\") 7)\n"
+                      "       (progn (js-call trace :push \"arg1\") undefined)) items trace)))\n"
+                      " (defun thrown (trace)\n"
+                      "   (let ((items (js-array 1 2)) (start (js-object :valueOf (lambda () (js-call trace :push \"start\") (throw trace)))))\n"
+                      "     (try (js-call items :splice start (progn (js-call trace :push \"arg\") 1))\n"
+                      "       (catch error (Object/is error trace)))))\n"
+                      " " own " (export mutate thrown own)"))
+           (c (await (compiled text)))
+           (a (get c :a))
+           (js (get c :js)))
+      (js-call (js-array 0 1 2) :forEach
+        (lambda (mode)
+          (let* ((value (js-call a :number mode))
+                 (out (js-call a :invoke "mutate" (js-array value))))
+            (js-call assert :deepEqual (read a out) (js-call js :mutate mode))
+            (js-call a :release out)
+            (js-call a :release value))))
+      (let ((trace (js-call a :sourceArray (js-array)))
+            (expected (js-array)))
+        (js-call assert :equal (js-call a :invoke "thrown" (js-array trace)) (js-call js :thrown expected))
+        (js-call assert :deepEqual (read a trace) expected)
+        (finish a (js-array trace))))))
+
+  (test "splice captures own and inherited methods before all arguments and ordinary objects keep their callable receivers" (async ()
+    (let* ((text (str "(defconst marker 1)\n"
+                      " (defun captured () (let ((items (js-array 1)) (trace (js-array)))\n"
+                      "   (put items :splice (lambda (&rest args) (js-array \"captured\" (js-length args))))\n"
+                      "   (js-array (js-call items :splice (progn (put items :splice false) (js-call trace :push \"arg0\") 0)\n"
+                      "       (progn (js-call trace :push \"arg1\") 1) (progn (js-call trace :push \"arg2\") 7)) trace items)))\n"
+                      " (defun ordinary () (let ((item (js-object :splice (lambda (&rest args) (js-length args))))) (js-call item :splice 1 2 3)))\n"
+                      " (defun bad (items trace) (put items :splice false) (js-call items :splice (js-call trace :push \"argument\")))\n"
+                      " (defun nullish (items trace) (js-call items :splice (js-call trace :push \"argument\")))\n"
+                      " (defun inherited () (put (js* \"Array.prototype\") :splice (lambda (&rest args) (js-array \"inherited\" (js-length args)))) (js-call (js-array 1 2) :splice 0 1 7))\n"
+                      " " own " (export captured ordinary bad nullish inherited own)"))
+           (c (await (compiled text)))
+           (a (get c :a))
+           (js (get c :js)))
+      (js-call (js-array "captured" "ordinary") :forEach
+        (lambda (name)
+          (let ((out (js-call a :invoke name)))
+            (js-call assert :deepEqual (read a out) (js-call js name))
+            (js-call a :release out))))
+      (let ((input (box a (js-array 1)))
+            (trace (js-call a :sourceArray (js-array)))
+            (expected (js-array)))
+        (js-call assert :throws (lambda () (js-call a :invoke "bad" (js-array input trace))) (rt-diag-p "ELI-RT0003"))
+        (js-call assert :throws (lambda () (js-call js :bad (js-array 1) expected)) globalThis.TypeError)
+        (js-call assert :deepEqual (read a trace) expected)
+        (js-call a :release input)
+        (js-call a :release trace))
+      (js-call (js-array nil undefined false 1) :forEach
+        (lambda (value)
+          (let ((receiver (box a value))
+                (events (js-call a :sourceArray (js-array)))
+                (expected (js-array)))
+            (js-call assert :throws (lambda () (js-call a :invoke "nullish" (js-array receiver events))) (rt-diag-p "ELI-RT0003"))
+            (js-call assert :throws (lambda () (js-call js :nullish value expected)) globalThis.TypeError)
+            (js-call assert :deepEqual (read a events) expected)
+            (js-call a :release receiver)
+            (js-call a :release events))))
+      (let ((saved (Object/getOwnPropertyDescriptor globalThis.Array.prototype "splice"))
+            (wanted nil))
+        (try (setq wanted (js-call js :inherited))
+          (finally (Object/defineProperty globalThis.Array.prototype "splice" saved)))
+        (let ((out (js-call a :invoke "inherited")))
+          (js-call assert :deepEqual (read a out) wanted)
+          (js-call a :release out)
+          (finish a))))))
+
+  (test "splice preserves inherited indexed Get and HasProperty when copying shifting and deleting sparse positions" (async ()
+    (let* ((text (str "(defconst marker 1)\n"
+                      " (defun inherited (mode)\n"
+                      "   (put (js* \"Array.prototype\") 1 \"prototype\")\n"
+                      "   (let ((items (js-array))) (put items :length 5) (put items 3 \"own\")\n"
+                      "     (js-array (if (= mode 0) (js-call items :splice 0 2) (js-call items :splice 1 0 \"new\")) items)))\n"
+                      " " own " (export inherited own)"))
+           (c (await (compiled text)))
+           (a (get c :a))
+           (js (get c :js))
+           (saved (Object/getOwnPropertyDescriptor globalThis.Array.prototype "1")))
+      (js-call (js-array 0 1) :forEach
+        (lambda (mode)
+          (let ((wanted nil))
+            (try (setq wanted (js-call js :inherited mode))
+              (finally
+                (if saved
+                  (Object/defineProperty globalThis.Array.prototype "1" saved)
+                  (Reflect/deleteProperty globalThis.Array.prototype "1"))))
+            (let* ((input (js-call a :number mode))
+                   (out (js-call a :invoke "inherited" (js-array input))))
+              (js-call assert :deepEqual (read a out) wanted)
+              (js-call a :release input)
+              (js-call a :release out)))))
+      (finish a))))
+
+  (test "splice checks frozen arrays and unsupported species only after numeric conversion and leaves ordinary inputs intact on rejection" (async ()
+    (let* ((text (str "(defconst marker 1)\n"
+                      " (defun rejected (mode trace)\n"
+                      "   (let ((items (js-array 1 2 3)))\n"
+                      "     (if (= mode 0) (Object/freeze items) (put items :constructor 7))\n"
+                      "     (try (js-call items :splice\n"
+                      "       (js-object :valueOf (lambda () (js-call trace :push \"start\") 0))\n"
+                      "       (js-object :valueOf (lambda () (js-call trace :push \"count\") 1))\n"
+                      "       (progn (js-call trace :push \"arg\") 7))\n"
+                      "       (catch error (js-array (get error :name) items)))))\n"
+                      " " own " (export rejected own)"))
+           (c (await (compiled text)))
+           (a (get c :a))
+           (js (get c :js)))
+      (js-call (js-array 0 1) :forEach
+        (lambda (mode)
+          (let* ((value (js-call a :number mode))
+                 (trace (js-call a :sourceArray (js-array)))
+                 (expected (js-array))
+                 (out (js-call a :invoke "rejected" (js-array value trace))))
+            (js-call assert :deepEqual (read a out) (js-call js :rejected mode expected))
+            (js-call assert :deepEqual (read a trace) expected)
+            (js-call (js-array value trace out) :forEach (lambda (v) (js-call a :release v))))))
+      (finish a)
+      (js-call (js-array
+                 "(defun f (items ctor) (put ctor (js* \"Symbol.species\") (lambda () (js-array))) (put items :constructor ctor) (js-call items :splice 0 1)) (export f)"
+                 "(defun f (items) (Object/defineProperty items \"0\" (js-object :get (lambda () 7))) (js-call items :splice 0 1)) (export f)")
+        :forEach
+        (lambda (src)
+          (let ((p (js-call (get b :compiler) :compile_ir_string src "splice-unsupported.eli")))
+            (js-call assert :throws
+              (lambda () (js-call (get b :managed) :emit_managed_wasm p runtime))
+              (rt-diag-p "ELI-B0001"))))))))
+
+  (test "deterministic random sparse splice inputs exactly match JS values holes result identity and surviving source elements" (async ()
+    (let* ((c (await (compiled)))
+           (a (get c :a))
+           (js (get c :js))
+           (seed 1097582867)
+           (next (lambda () (setq seed (uint32 (+ (Math/imul seed 1664525) 1013904223))) seed))
+           (pool (js-array undefined nil false t -0.0 globalThis.NaN 1 2 "中😀" "\ud800"))
+           (i 0))
+      (while (< i 128)
+        (let ((values (new globalThis.Array (% (funcall next) 32)))
+              (j 0))
+          (while (< j (js-length values))
+            (when (/= (% (funcall next) 4) 0)
+              (put values j (aref pool (% (funcall next) (js-length pool)))))
+            (setq j (1+ j)))
+          (let ((start (/ (- (% (funcall next) 96) 48) 3))
+                (count (/ (- (% (funcall next) 96) 16) 3)))
+            (exercise a js "many" values
+              (js-array start count
+                (aref pool (% (funcall next) (js-length pool)))
+                (aref pool (% (funcall next) (js-length pool)))))
+            (js-call a :collect)
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))
+        (setq i (1+ i)))
+      (finish a))))
+
+  (test "splice rejects inherited frozen numeric data at the original Set point after preserving earlier writes" (async ()
+    (let* ((text (str "(defconst marker 1) (defun run ()\n"
+                      "   (put (js* \"Array.prototype\") 1 7) (Object/freeze (js* \"Array.prototype\"))\n"
+                      "   (let ((items (js-array))) (put items :length 3) (put items 2 2)\n"
+                      "     (try (js-call items :splice 0 1) (catch error (js-array (get error :name) items)))))\n"
+                      " " own " (export run own)"))
+           (c (await (compiled text)))
+           (a (get c :a))
+           (parent (Object/create globalThis.Array.prototype))
+           (values (new globalThis.Array 3))
+           (error nil))
+      (Object/defineProperty parent "1" (js-object :value 7 :writable false :enumerable t :configurable false))
+      (put values 2 2)
+      (Object/setPrototypeOf values parent)
+      (try (js-call values :splice 0 1)
+        (catch e (setq error e)))
+      (let ((expected (new globalThis.Array (js-length values)))
+            (i 0))
+        (while (< i (js-length values))
+          (when (Object/hasOwn values i)
+            (put expected i (aref values i)))
+          (setq i (1+ i)))
+        (let ((out (js-call a :invoke "run")))
+          (js-call assert :deepEqual (read a out) (js-array (get error :name) expected))
+          (finish a (js-array out)))))))
+
+  (test "raw splice ABI rejects illegal private and malformed arguments while retaining caller roots and recovering from exhausted slots" (async ()
+    (let* ((c (await (compiled)))
+           (a (get c :a))
+           (bytes (get c :bytes)))
+      (finish a)
+      (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
+             (h (js-call e "heap-new" 64 16384 131072))
+             (call (lambda (name &rest args)
+                     (let ((out (uint32 (Reflect/apply (get e name) e (js-call (js-array h) :concat args)))))
+                       (js-call assert :equal (js-call e "last-error") 0 name)
+                       out)))
+             (items (funcall call "value-array-new" 3))
+             (args (funcall call "value-refs" 7 2))
+             (zero (funcall call "value-number" 0 0))
+             (one (funcall call "value-number" 0 1072693248))
+             (frame (funcall call "frame-new" 4)))
+        (funcall call "frame-set" frame 0 items)
+        (funcall call "frame-set" frame 1 args)
+        (funcall call "frame-set" frame 2 zero)
+        (funcall call "frame-set" frame 3 one)
+        (funcall call "value-set" items 0 2)
+        (funcall call "value-set" items 2 1)
+        (funcall call "value-set" args 0 zero)
+        (funcall call "value-set" args 1 one)
+        (funcall call "heap-auto" 1)
+        (js-call (js-array
+                   (js-array 4294967295 args 1)
+                   (js-array frame args 1)
+                   (js-array items 4294967295 1)
+                   (js-array items items 1)
+                   (js-array items frame 1))
+          :forEach
+          (lambda (row)
+            (js-call assert :equal (js-call e "value-array-splice" h (aref row 0) (aref row 1)) 0)
+            (js-call assert :equal (js-call e "last-error") (aref row 2))
+            (js-call assert :equal (funcall call "frame-depth") 1)
+            (js-call assert :equal (funcall call "frame-get" frame 0) items)))
+        (let ((data (funcall call "value-data" args 7))
+              (view (new globalThis.DataView (get (get e :memory) :buffer))))
+          (js-call view :setUint32 data 4294967295 t)
+          (js-call assert :equal (js-call e "value-array-splice" h items args) 0)
+          (js-call assert :equal (js-call e "last-error") 1)
+          (js-call view :setUint32 data frame t)
+          (js-call assert :equal (js-call e "value-array-splice" h items args) 0)
+          (js-call assert :equal (js-call e "last-error") 3)
+          (js-call view :setUint32 data zero t))
+        (let ((held (js-array)))
+          (while (< (funcall call "heap-live") 64)
+            (let ((value (funcall call "value-number" 0 0)))
+              (funcall call "heap-pin" value)
+              (js-call held :push value)))
+          (js-call assert :equal (js-call e "value-array-splice" h items args) 0)
+          (js-call assert :equal (js-call e "last-error") 2)
+          (js-call assert :equal (funcall call "frame-depth") 1)
+          (js-call assert :equal (funcall call "value-length" items) 3)
+          (js-call held :forEach (lambda (value) (funcall call "heap-release" value)))
+          (funcall call "heap-collect")
+          (let ((out (funcall call "value-array-splice" items args)))
+            (js-call assert :equal (funcall call "value-length" out) 1)
+            (js-call assert :equal (funcall call "value-get" out 0) 2)
+            (js-call assert :equal (funcall call "value-length" items) 2)
+            (funcall call "frame-pop" frame)
+            (funcall call "heap-collect")
+            (js-call assert :equal (funcall call "heap-live") 0)))))))
+
+  (test "a real splice move trap escapes source catches and only unwinds private frames after already-evaluated argument effects" (async ()
+    (let* ((text (str "(defconst marker 1) (defun run (items trace)\n"
+                      "   (try (js-call items :splice (progn (js-call trace :push \"argument\") 0) 1)\n"
+                      "     (catch error \"incorrectly-caught\"))) " own " (export run own)"))
+           (raw (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
+           (start (js-call raw :indexOf "  (defun heap-array-splice-move "))
+           (end (js-call raw :indexOf "  (defun " (+ start 10))))
+      (funcall assert (and (>= start 0) (> end start)))
+      (let* ((rt (js-call (get b :compiler) :compile_ir_string
+                   (str (js-call raw :slice 0 start)
+                        "  (defun heap-array-splice-move (heap value from to frame) (load-u32 4294967295))\n"
+                        (js-call raw :slice end))
+                   "splice-trap.eli"))
+             (c (await (compiled text undefined rt)))
+             (a (get c :a))
+             (items (box a (js-array 1 2 3)))
+             (trace (js-call a :sourceArray (js-array)))
+             (held (js-call a :number -0.0))
+             (caller (js-call a :frame 1)))
+        (js-call a :frameSet caller 0 held)
+        (js-call assert :throws
+          (lambda () (js-call a :invoke "run" (js-array items trace)))
+          globalThis.WebAssembly.RuntimeError)
+        (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+        (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+        (js-call assert :deepEqual (read a trace) (js-array "argument"))
+        (js-call assert :deepEqual (read a items) (js-array 1 2 3))
+        (js-call a :leaveFrame caller)
+        (finish a (js-array items trace held))))))
+
+  (test "Node independently executes identical zero-import splice bytes and sparse native JavaScript mutation semantics" (async ()
+    (let* ((c (await (compiled)))
+           (a (get c :a))
+           (bytes (get c :bytes))
+           (file (resolve directory "splice.wasm")))
+      (finish a)
+      (await (writeFile file bytes))
+      (let ((child (spawnSync "node"
+                     (js-array (resolve "tests/helpers/wasm-managed-array-splice-node.mjs")
+                               (get (pathToFileURL (resolve "tools/backends/managed-runtime.mjs")) :href)
+                               file)
+                     (js-object :encoding "utf8" :timeout 30000))))
+        (js-call assert :equal (get child :status) 0 (get child :stderr))))))
+
+  (test "splice observes represented inherited constructor overrides after conversions and an own undefined constructor shadows them" (async ()
+    (let* ((text (str "(defconst marker 1) (defun run (shadow trace)\n"
+                      "   (put (js* \"Array.prototype\") :constructor 7)\n"
+                      "   (let ((items (js-array 1 2)))\n"
+                      "     (when shadow (put items :constructor undefined))\n"
+                      "     (try (js-array \"ok\" (js-call items :splice\n"
+                      "       (js-object :valueOf (lambda () (js-call trace :push \"start\") 0))\n"
+                      "       (js-object :valueOf (lambda () (js-call trace :push \"count\") 1))))\n"
+                      "       (catch error (js-array (get error :name))))))\n"
+                      " " own " (export run own)"))
+           (c (await (compiled text)))
+           (a (get c :a))
+           (js (get c :js))
+           (saved (Object/getOwnPropertyDescriptor globalThis.Array.prototype "constructor")))
+      (js-call (js-array false t) :forEach
+        (lambda (shadow)
+          (let ((trace (js-call a :sourceArray (js-array)))
+                (expected (js-array))
+                (wanted nil))
+            (try (setq wanted (js-call js :run shadow expected))
+              (finally (Object/defineProperty globalThis.Array.prototype "constructor" saved)))
+            (let ((out (js-call a :invoke "run" (js-array shadow trace))))
+              (js-call assert :deepEqual (read a out) wanted)
+              (js-call assert :deepEqual (read a trace) expected)
+              (js-call a :release trace)
+              (js-call a :release out)))))
+      (finish a)))))

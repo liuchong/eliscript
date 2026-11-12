@@ -1,5 +1,6 @@
 (module bootstrap.compiler.ir
   (defconst ir-format "eliscript-ir")
+  (defconst typeof-value (lambda (value) (js* "typeof value")))
   (defconst ir-version 1)
   (defconst ir-max-depth 512)
 
@@ -38,13 +39,13 @@
 
   (defconst fail
     (lambda (message)
-      (throw (new (js* "Error") message))))
+      (throw (new globalThis.Error message))))
 
   (defconst make-schema-error
     (lambda (message options)
       (let ((error (if (eq options undefined)
-                       (new (js* "Error") message)
-                     (new (js* "Error") message options))))
+                       (new globalThis.Error message)
+                     (new globalThis.Error message options))))
         (put error :eliscriptDiagnostic
           (js-object :format "eliscript-diagnostic" :version 1
             :code "ELI-I0001" :severity "error" :phase "ir-schema" :message message))
@@ -54,7 +55,7 @@
     (lambda (message)
       (throw (make-schema-error message undefined))))
 
-  (defconst array-p (js* "Array.isArray"))
+  (defconst array-p Array/isArray)
   (defconst dense-json-array-p
     (lambda (value)
       (if (or (not (Array/isArray value))
@@ -65,31 +66,37 @@
                   (/= (aref names (1- (js-length names))) "length")) false
             (let ((index 0) (valid t))
               (while (and valid (< index (aref value "length")))
-                (let ((name (funcall (js* "String") index)))
+                (let ((name (funcall globalThis.String index)))
                   (if (/= (aref names index) name) (setq valid false)
                     (let ((descriptor (Object/getOwnPropertyDescriptor value name)))
-                      (unless (and (funcall (js* "Boolean") descriptor)
-                                   (funcall (js* "Boolean") (aref descriptor "enumerable"))
+                      (unless (and (funcall globalThis.Boolean descriptor)
+                                   (funcall globalThis.Boolean (aref descriptor "enumerable"))
                                    (Object/hasOwn descriptor "value"))
                         (setq valid false)))))
                 (setq index (1+ index))) valid))))))
+  (defun raw-object-p (value)
+    (and (not (nullish? value)) (Object/is (funcall globalThis.Object value) value)
+      (try
+        (Object/defineProperty (js-object) "callable" (js-object :get value))
+        false
+        (catch error t))))
   (defconst plain-record-keys
     (lambda (value)
-      (if (or (nil? value) (/= (js* "typeof value") "object") (Array/isArray value)) nil
+      (if (or (not (raw-object-p value)) (Array/isArray value)) nil
         (let ((prototype (Object/getPrototypeOf value)))
           (if (and (not (Object/is prototype globalThis.Object.prototype)) (not (nil? prototype))) nil
             (if (/= (js-length (Object/getOwnPropertySymbols value)) 0) nil
               (let ((names (Object/getOwnPropertyNames value)) (index 0) (valid t))
                 (while (and valid (< index (js-length names)))
                   (let ((descriptor (Object/getOwnPropertyDescriptor value (aref names index))))
-                    (unless (and (funcall (js* "Boolean") descriptor)
-                                 (funcall (js* "Boolean") (aref descriptor "enumerable"))
+                    (unless (and (funcall globalThis.Boolean descriptor)
+                                 (funcall globalThis.Boolean (aref descriptor "enumerable"))
                                  (Object/hasOwn descriptor "value"))
                       (setq valid false)))
                   (setq index (1+ index)))
                 (if valid (js-call names :sort) nil))))))))
-  (defconst has-own (js* "Object.hasOwn"))
-  (defconst finite-number-p (js* "Number.isFinite"))
+  (defconst has-own Object/hasOwn)
+  (defconst finite-number-p Number/isFinite)
   (defconst non-negative-integer-p
     (lambda (value)
       (and (Number/isSafeInteger value) (>= value 0))))
@@ -123,7 +130,7 @@
   ;; These private arrays contain only complete string tokens. Invoke the
   ;; captured native join directly instead of the language's general array
   ;; text-conversion path, which also handles arbitrary and cyclic values.
-  (defconst canonical-json-array-join (get (js* "Array.prototype") :join))
+  (defconst canonical-json-array-join (get globalThis.Array.prototype :join))
 
   (defun make-canonical-json-sink ()
     (js-object :chunks (js-array) :parts (js-array) :length 0))
@@ -194,22 +201,26 @@
   (defun canonical-json-value (value path active depth &optional collect-output sink)
     (when (> depth ir-max-depth)
       (schema-fail (str path " exceeds IR nesting depth " ir-max-depth)))
-    (let* ((type (js* "typeof value")) (collect (not (eq collect-output false)))
+    (let* ((collect (not (eq collect-output false)))
            (output (when collect (or sink (make-canonical-json-sink)))))
       (cond
        ((nil? value) (when collect (canonical-json-token output "null")))
-       ((= type "boolean") (when collect (canonical-json-token output (if value "true" "false"))))
-       ((= type "number")
-        (unless (funcall finite-number-p value)
-          (schema-fail (str path " must contain only finite numbers")))
-        (when collect (canonical-json-token output (if (Object/is value (- 0)) "-0" (JSON/stringify value)))))
-       ((= type "string") (when collect (canonical-json-token output (JSON/stringify value))))
+       ((or (eq value t) (eq value false)) (when collect (canonical-json-token output (if value "true" "false"))))
+       ((not (Object/is (funcall globalThis.Object value) value))
+        (let ((type (funcall typeof-value value)))
+          (cond
+           ((= type "number")
+            (unless (funcall finite-number-p value)
+              (schema-fail (str path " must contain only finite numbers")))
+            (when collect (canonical-json-token output (if (Object/is value (- 0)) "-0" (JSON/stringify value)))))
+           ((= type "string") (when collect (canonical-json-token output (JSON/stringify value))))
+           (t (schema-fail (str path " contains unsupported JSON type " type))))))
        ((funcall array-p value)
         (canonical-json-array value path active depth collect output))
-       ((= type "object")
+       ((raw-object-p value)
         (canonical-json-record value path active depth collect output))
        (t
-        (schema-fail (str path " contains unsupported JSON type " type))))
+        (schema-fail (str path " contains unsupported JSON type function"))))
       (when (and collect (not sink)) (canonical-json-finish output))))
 
   (defun canonical-json (value)
@@ -220,7 +231,7 @@
       span
       (js-array "column" "end" "endColumn" "endLine" "filename" "line" "start")
       "IR span")
-    (unless (= (js* "typeof span.filename") "string")
+    (unless (= (funcall typeof-value (get span :filename)) "string")
       (schema-fail "IR span filename must be a string"))
     (js-call (js-array "start" "end") :forEach
       (lambda (key)
@@ -247,7 +258,7 @@
                  (js-array "children" "kind" "properties" "span" "value")
                (js-array "children" "kind" "span" "value"))))
         (require-closed-record node expected "IR node")))
-    (unless (and (= (js* "typeof node.kind") "string")
+    (unless (and (= (funcall typeof-value (get node :kind)) "string")
                  (node-kind-p (get node :kind)))
       (schema-fail (str "unknown Eliscript IR node kind: " (get node :kind))))
     (validate-span (get node :span))
@@ -265,7 +276,7 @@
   (defun validate-program (program)
     (require-closed-record
       program (js-array "body" "filename") "IR program")
-    (unless (= (js* "typeof program.filename") "string")
+    (unless (= (funcall typeof-value (get program :filename)) "string")
       (schema-fail "IR program filename must be a string"))
     (unless (funcall dense-json-array-p (get program :body))
       (schema-fail "IR program body must be a dense plain array"))
@@ -303,7 +314,7 @@
       program))
 
   (defun deserialize-program (source)
-    (unless (= (js* "typeof source") "string")
+    (unless (= (funcall typeof-value source) "string")
       (schema-fail "canonical IR source must be a string"))
     (let* ((document (funcall parse-json source schema-fail))
            (_validated (validate-document document))
@@ -327,12 +338,12 @@
 
   (defun node-p (value)
     (and value
-         (= (js* "typeof value") "object")
+         (= (funcall typeof-value value) "object")
          (node-kind-p (get value :kind))))
 
   (defun reference-node-p (value)
     (and value
-         (= (js* "typeof value") "object")
+         (= (funcall typeof-value value) "object")
          (reference-node-kind-p (get value :kind))))
 
   (defun make-node (kind span value children properties)

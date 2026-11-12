@@ -1,0 +1,7 @@
+(module tests.helpers.compiler-error-contract
+  (import "node:assert/strict" :default assert)
+  (defconst helpers (js-array (js-array "symbol" "fail") (js-array "source-map" "fail") (js-array "ir" "fail") (js-array "emitter" "fail") (js-array "lower" "fail") (js-array "expander" "raise-error")))
+  (defconst original (lambda (message) (throw (new globalThis.Error message))))
+  (defun capture (fn args)
+    (try (apply fn args) (js-call assert :fail "the helper must throw") (catch error error)))
+  (export helpers original capture))

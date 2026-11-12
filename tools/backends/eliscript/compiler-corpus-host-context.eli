@@ -41,7 +41,7 @@
                           (try (put error :expected expected) (catch ignored nil)))
                         (throw error)))))))))))))))
   (defconst interop-main-sha "a5e92051bca2afbae0ee700d94672e05a221367f8ab10b68e0767444bb34534c")
-  (defconst interop-host-sha "c82823f3489de0ea565ae9b44d27439ccaa66d75e55f5b273baa0324a5b7767a")
+  (defconst interop-host-sha "0066c03788b20180b55ab3156f4905d40cff16801977a0bc718060ae9daab248")
   (defun interop-digest (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
   (defun originalInteropFullRuntimeRecipe (record)
     (let* ((original (get record :original)) (execution (get record :execution)) (modules (get record :modules))
@@ -125,7 +125,7 @@
                  (js-call (js-array "wasm" "native") :includes (get input :target))
                  (= (value-type host) "string")
                  (js-call (new globalThis.RegExp
-                   "(?:^|/)tests/__eliscript_original_core_(?:set_map|stdlib_complete)\\.mjs$") :test host))
+                   "(?:^|/)tests/__eliscript_original_core_(?:set_map|stdlib_complete|project_(?:core|utility|persistent-values|value-text|public))\\.mjs$") :test host))
         (let* ((spawn (get runtime :spawn)) (preload (fileURLToPath own-url))
                (forward (lambda (command &rest arguments)
                  (let ((selected command))
@@ -225,6 +225,7 @@
             result)))))
 
   (defasync prepare-original-context (input key)
+    (setq input (await (resolveOriginalLiteralHostProvider input)))
     (unless (and input (js-call (js-array "wasm" "native") :includes (get input :target))
                  (= (value-type (get input :path)) "string") (= (value-type (get input :base)) "string")
                  (= (value-type (get input :entry)) "string")
@@ -269,13 +270,12 @@
           (try (funcall close-now) (catch ignored nil))
           (throw error)))))
   (defasync openOriginalProgramContext (input &rest tail)
-    (let* ((resolved-input (await (resolveOriginalLiteralHostProvider input)))
-           (options (if (or (= (js-length tail) 0) (undefined? (aref tail 0))) (js-object) (aref tail 0)))
+    (let* ((options (if (or (= (js-length tail) 0) (undefined? (aref tail 0))) (js-object) (aref tail 0)))
            (identity (get options :identity))
            (key (if (undefined? identity) undefined (resolve identity)))
            (pending (unless (undefined? key) (js-call program-contexts :get key))))
       (unless pending
-        (setq pending (prepare-original-context resolved-input key))
+        (setq pending (prepare-original-context input key))
         (unless (undefined? key) (js-call program-contexts :set key pending)))
       (try (bindOriginalManagedProgramContext input (await pending))
         (catch error

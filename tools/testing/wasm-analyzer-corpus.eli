@@ -1,2 +1,77 @@
-(module capsules.tools.testing.wasm-analyzer-corpus
-  (js* "// OPEN additional complete-source Analyzer acceptance. The original JS corpus\n// remains mandatory; this manual WASM corpus does not claim completed self-hosting.\n// A prior corpus run was externally stopped after three minutes while still\n// executing self-expander; that result is incomplete, not a semantic failure.\nimport assert from 'node:assert/strict';\nimport {readFile} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {fileURLToPath} from 'node:url';\nimport {instantiateManagedRuntime} from '../backends/managed-runtime.mjs';\nimport {setup,teardown,artifact,analyzeObserved,expectedAnalysis,finish} from '../../tests/wasm-compiler-analyzer-rig.mjs';\nconst sourceRoot=resolve(fileURLToPath(new URL('../..',import.meta.url)));\nprocess.chdir(sourceRoot);\nconst fixture=JSON.parse(await readFile('tests/fixtures/bootstrap-analyzer.json','utf8')),cases=fixture.valid.filter(item=>item.file);\nassert.equal(fixture.valid.length,30);assert.equal(cases.length,12);assert.equal(fixture.invalid.length,57);\nconst configuration={maxSlots:524288,initialBytes:16777216,maxBytes:134217728},memoryOptions={maximumPages:4096},autoBytes=65536;\nconsole.log(JSON.stringify({format:'eliscript-wasm-analyzer-corpus-config',...configuration,...memoryOptions,autoBytes,pageBytes:65536,cases:cases.map(item=>item.name)}));\nlet passed=0,failed=0;\ntry{\n await setup();const a=instantiateManagedRuntime(artifact(memoryOptions),configuration);a.auto(autoBytes);\n for(const item of cases){\n  const source=await readFile(item.file,'utf8'),result={case:item.name,target:'wasm',bytes:Buffer.byteLength(source)};console.log(JSON.stringify({...result,status:'running',stats:a.stats()}));\n  try{const expected=expectedAnalysis(source,item.filename);assert.equal(expected.status,'ok');assert.deepEqual(analyzeObserved(a,source,item.filename),expected);result.status='pass';}\n  catch(error){result.status='fail';result.name=error.name;result.message=error.message;result.diagnostic=error.eliscriptDiagnostic;result.statsAtFailure=error.testManagedState??a.stats();}\n  finally{try{a.collect();assert.equal(a.stats().frameDepth,0);}catch(error){result.status='fail';result.cleanupFailure=error.message;}}\n  if(result.status==='pass')passed++;else failed++;console.log(JSON.stringify(result));\n }\n finish(a);\n}finally{await teardown();}\nconsole.log(JSON.stringify({format:'eliscript-wasm-analyzer-corpus',passed,failed}));\nif(failed)process.exitCode=1;\n"))
+(module tools.testing.wasm-analyzer-corpus
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile)
+  (import "node:path" resolve)
+  (import "node:url" fileURLToPath)
+  (import "../backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../../tests/wasm-compiler-analyzer-rig.mjs" setup teardown artifact analyzeObserved expectedAnalysis finish)
+
+  (defun host-get (value key)
+    (if (nullish? value) undefined (get value key)))
+
+  (defasync run-corpus ()
+    (let* ((source-root (resolve (fileURLToPath (new globalThis.URL "../.." (js* "import.meta.url")))))
+           (fixture (progn (js-call globalThis.process :chdir source-root)
+                      (JSON/parse (await (readFile "tests/fixtures/bootstrap-analyzer.json" "utf8")))))
+           (cases (js-call (get fixture :valid) :filter (lambda (item) (get item :file))))
+           (configuration (js-object :maxSlots 524288 :initialBytes 16777216 :maxBytes 134217728))
+           (memory-options (js-object :maximumPages 4096))
+           (auto-bytes 65536)
+           (passed 0)
+           (failed 0))
+      (js-call assert :equal (js-length (get fixture :valid)) 30)
+      (js-call assert :equal (js-length cases) 12)
+      (js-call assert :equal (js-length (get fixture :invalid)) 57)
+      (console/log (JSON/stringify (js-call globalThis.Object :assign
+                                    (js-object :format "eliscript-wasm-analyzer-corpus-config")
+                                    configuration memory-options
+                                    (js-object :autoBytes auto-bytes :pageBytes 65536
+                                      :cases (js-call cases :map (lambda (item) (get item :name)))))))
+      (try
+        (await (setup))
+        (let ((runtime (instantiateManagedRuntime (artifact memory-options) configuration))
+              (index 0))
+          (js-call runtime :auto auto-bytes)
+          (while (< index (js-length cases))
+            (let* ((item (aref cases index))
+                   (source (await (readFile (get item :file) "utf8")))
+                   (result (js-object :case (get item :name) :target "wasm"
+                             :bytes (js-call globalThis.Buffer :byteLength source))))
+              (console/log (JSON/stringify (js-call globalThis.Object :assign (js-object) result
+                                            (js-object :status "running" :stats (js-call runtime :stats)))))
+              (try
+                (let ((expected (expectedAnalysis source (get item :filename))))
+                  (js-call assert :equal (get expected :status) "ok")
+                  (js-call assert :deepEqual (analyzeObserved runtime source (get item :filename)) expected)
+                  (put result :status "pass"))
+                (catch error
+                  (put result :status "fail")
+                  (put result :name (get error :name))
+                  (put result :message (get error :message))
+                  (put result :diagnostic (get error :eliscriptDiagnostic))
+                  (put result :statsAtFailure (get error :testManagedState (js-call runtime :stats))))
+                (finally
+                  (try
+                    (js-call runtime :collect)
+                    (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0)
+                    (catch error
+                      (put result :status "fail")
+                      (put result :cleanupFailure (get error :message))))))
+              (if (= (get result :status) "pass")
+                (setq passed (1+ passed))
+                (setq failed (1+ failed)))
+              (console/log (JSON/stringify result)))
+            (setq index (1+ index)))
+          (finish runtime))
+        (finally (await (teardown))))
+      (console/log (JSON/stringify (js-object :format "eliscript-wasm-analyzer-corpus" :passed passed :failed failed)))
+      (when (host-truthy-number failed)
+        (put globalThis.process :exitCode 1))))
+
+  (defun host-truthy-number (value)
+    (funcall (js* "(value) => !!value") value))
+
+  (js-call (run-corpus) :catch
+    (lambda (error)
+      (console/error error)
+      (put globalThis.process :exitCode 1))))

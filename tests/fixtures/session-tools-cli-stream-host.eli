@@ -1,0 +1,10 @@
+(module tests.fixtures.session-tools-cli-stream-host
+  (import "node:process" :default process)
+  (import "node:stream" Readable)
+  (defasync main ()
+    (let* ((args (get process :argv)) (cli (await (funcall (js* "(specifier) => import(specifier)") (aref args 2))))
+      (parts (JSON/parse (aref args 3))) (command (JSON/parse (aref args 4))))
+      (Object/defineProperty process "stdin" (js-object :value
+        (Readable/from (js-call parts :map (lambda (hex) (Buffer/from hex "hex"))))))
+      (await (js-call cli :main command))))
+  (main))

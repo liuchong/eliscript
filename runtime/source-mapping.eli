@@ -1,2 +1,267 @@
-(module capsules.runtime.source-mapping
-  (js* "const base64Vlq = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/\";\n\nexport class SourceMappingError extends Error {\n  constructor(code, message) {\n    super(message);\n    this.name = \"SourceMappingError\";\n    this.code = code;\n  }\n}\n\nfunction fail(code, message) {\n  throw new SourceMappingError(code, message);\n}\n\nfunction isPlainObject(value) {\n  return value !== null && typeof value === \"object\" && !Array.isArray(value);\n}\n\nfunction decodeVlq(segment) {\n  const values = [];\n  let index = 0;\n  while (index < segment.length) {\n    let value = 0;\n    let shift = 0;\n    let continuation;\n    do {\n      if (index >= segment.length) {\n        fail(\"invalid-vlq\", \"unterminated Base64 VLQ value\");\n      }\n      const digit = base64Vlq.indexOf(segment[index]);\n      if (digit === -1) fail(\"invalid-vlq\", \"invalid Base64 VLQ digit\");\n      index += 1;\n      value += (digit & 31) * (2 ** shift);\n      continuation = (digit & 32) !== 0;\n      shift += 5;\n      if (shift > 50) fail(\"invalid-vlq\", \"Base64 VLQ value exceeds safe bounds\");\n    } while (continuation);\n    const negative = (value & 1) === 1;\n    const magnitude = Math.floor(value / 2);\n    values.push(negative ? -magnitude : magnitude);\n  }\n  return values;\n}\n\nexport function decodeSourceMappings(mappings) {\n  if (typeof mappings !== \"string\") {\n    fail(\"invalid-mappings\", \"source mappings must be a string\");\n  }\n  let source = 0;\n  let originalLine = 0;\n  let originalColumn = 0;\n  return Object.freeze(mappings.split(\";\").map((encodedLine) => {\n    let generatedColumn = 0;\n    const line = [];\n    for (const encoded of encodedLine.split(\",\")) {\n      if (encoded.length === 0) continue;\n      const values = decodeVlq(encoded);\n      if (![1, 4, 5].includes(values.length)) {\n        fail(\"invalid-segment\", \"source map segments must contain 1, 4, or 5 fields\");\n      }\n      generatedColumn += values[0];\n      if (generatedColumn < 0) {\n        fail(\"invalid-segment\", \"generated source map columns must not be negative\");\n      }\n      const decoded = { generatedColumn };\n      if (values.length >= 4) {\n        source += values[1];\n        originalLine += values[2];\n        originalColumn += values[3];\n        if (source < 0 || originalLine < 0 || originalColumn < 0) {\n          fail(\"invalid-segment\", \"decoded source map positions must not be negative\");\n        }\n        decoded.source = source;\n        decoded.originalLine = originalLine;\n        decoded.originalColumn = originalColumn;\n      }\n      line.push(Object.freeze(decoded));\n    }\n    return Object.freeze(line);\n  }));\n}\n\nexport function sourceMapDescriptor(value) {\n  if (!isPlainObject(value) || typeof value.generatedFile !== \"string\" ||\n      value.generatedFile.length === 0 || !Array.isArray(value.sources) ||\n      value.sources.length === 0 || value.sources.some(\n        (source) => typeof source !== \"string\" || source.length === 0,\n      )) {\n    fail(\n      \"invalid-source-map\",\n      \"source map descriptor requires generatedFile sources and mappings\",\n    );\n  }\n  const lines = value.lines === undefined\n    ? decodeSourceMappings(value.mappings)\n    : value.lines;\n  if (!Array.isArray(lines) || lines.some((line) => !Array.isArray(line))) {\n    fail(\"invalid-source-map\", \"source map descriptor lines must be arrays\");\n  }\n  for (const line of lines) {\n    for (const segment of line) {\n      if (!isPlainObject(segment) ||\n          !Number.isInteger(segment.generatedColumn) ||\n          segment.generatedColumn < 0 ||\n          (segment.source !== undefined &&\n            (!Number.isInteger(segment.source) || segment.source < 0 ||\n              !Number.isInteger(segment.originalLine) ||\n              segment.originalLine < 0 ||\n              !Number.isInteger(segment.originalColumn) ||\n              segment.originalColumn < 0))) {\n        fail(\"invalid-source-map\", \"source map descriptor contains an invalid segment\");\n      }\n    }\n  }\n  return Object.freeze({\n    generatedFile: value.generatedFile,\n    sources: Object.freeze([...value.sources]),\n    lines: Object.freeze(lines.map((line) => Object.freeze(\n      line.map((segment) => Object.freeze({ ...segment })),\n    ))),\n  });\n}\n\nexport function parseJavaScriptStack(stack, options = {}) {\n  if (typeof stack !== \"string\") return Object.freeze([]);\n  const normalizeFile = typeof options.normalizeFile === \"function\"\n    ? options.normalizeFile\n    : (file) => file;\n  const frames = [];\n  for (const line of stack.split(\"\\n\")) {\n    const v8 = /^\\s*at (?:(.*?) \\()?(.+):(\\d+):(\\d+)\\)?$/u.exec(line);\n    const browser = v8 ? null : /^(.*?)@(.+):(\\d+):(\\d+)$/u.exec(line.trim());\n    const match = v8 ?? browser;\n    if (!match) continue;\n    frames.push(Object.freeze({\n      function: match[1] || undefined,\n      file: normalizeFile(match[2]),\n      line: Number(match[3]),\n      column: Number(match[4]),\n    }));\n  }\n  return Object.freeze(frames);\n}\n\nfunction cleanIdentity(value) {\n  try {\n    const url = new URL(value);\n    url.search = \"\";\n    url.hash = \"\";\n    return url.href;\n  } catch {\n    return value.replace(/[?#].*$/u, \"\");\n  }\n}\n\nfunction sourceIdentities(value) {\n  const clean = cleanIdentity(value);\n  const identities = [clean];\n  try {\n    const url = new URL(clean);\n    if (url.protocol === \"file:\") identities.push(decodeURIComponent(url.pathname));\n  } catch {\n    // Plain filesystem paths and runtime pseudo-URLs keep their clean identity.\n  }\n  return identities;\n}\n\nexport function mapSourceFrames(frames, sourceMaps) {\n  if (!Array.isArray(frames) || !Array.isArray(sourceMaps)) {\n    fail(\"invalid-frames\", \"frames and source maps must be arrays\");\n  }\n  const mapsByFile = new Map();\n  for (const sourceMap of sourceMaps) {\n    for (const identity of sourceIdentities(sourceMap.generatedFile)) {\n      mapsByFile.set(identity, sourceMap);\n    }\n  }\n  return Object.freeze(frames.map((frame) => {\n    const sourceMap = sourceIdentities(frame.file)\n      .map((identity) => mapsByFile.get(identity))\n      .find(Boolean);\n    const mapping = sourceMap?.lines[frame.line - 1];\n    if (!mapping) return frame;\n    const generatedColumn = Math.max(0, frame.column - 1);\n    let segment;\n    for (const candidate of mapping) {\n      if (candidate.generatedColumn > generatedColumn) break;\n      segment = candidate;\n    }\n    if (segment?.source === undefined ||\n        sourceMap.sources[segment.source] === undefined) return frame;\n    return Object.freeze({\n      ...frame,\n      generated: Object.freeze({\n        file: frame.file,\n        line: frame.line,\n        column: frame.column,\n      }),\n      file: sourceMap.sources[segment.source],\n      line: segment.originalLine + 1,\n      column: segment.originalColumn + 1,\n    });\n  }));\n}\n\nexport function sourceMappedFailure(error, sourceMaps, options = {}) {\n  const stack = typeof error?.stack === \"string\" ? error.stack : undefined;\n  const frames = stack\n    ? mapSourceFrames(parseJavaScriptStack(stack, options), sourceMaps)\n    : Object.freeze([]);\n  const location = frames.find((frame) => frame.file.endsWith(\".eli\")) ??\n    frames[0];\n  return Object.freeze({\n    name: typeof error?.name === \"string\" ? error.name : \"Error\",\n    message: typeof error?.message === \"string\" ? error.message : String(error),\n    ...(stack ? { stack } : {}),\n    frames,\n    ...(location ? { location } : {}),\n  });\n}\n"))
+(module eliscript.runtime.source-mapping
+  (defconst base64Vlq "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+
+  (defun SourceMappingError (code message)
+    (let ((err (new globalThis.Error message)))
+      (Object/setPrototypeOf err (get SourceMappingError :prototype))
+      (put err :name "SourceMappingError")
+      (put err :code code)
+      err))
+  (Object/setPrototypeOf SourceMappingError globalThis.Error)
+  (put SourceMappingError :prototype (Object/create (get globalThis.Error :prototype)))
+  (Object/defineProperty (get SourceMappingError :prototype) "constructor"
+    (js-object :value SourceMappingError :writable t :configurable t))
+  (Object/defineProperty SourceMappingError "name"
+    (js-object :value "SourceMappingError" :configurable t))
+
+  (defun fail (code message)
+    (throw (new SourceMappingError code message)))
+
+  (defun isPlainObject (value)
+    (and (not (nil? value))
+         (eq (value-type value) "object")
+         (not (Array/isArray value))))
+
+  (defun decodeVlq (segment)
+    (let ((values (js-array))
+          (index 0))
+      (while (< index (js-length segment))
+        (let ((value 0)
+              (shift 0)
+              (continuation t))
+          (while continuation
+            (when (>= index (js-length segment))
+              (fail "invalid-vlq" "unterminated Base64 VLQ value"))
+            (let ((digit (js-call base64Vlq :indexOf (aref segment index))))
+              (when (eq digit -1)
+                (fail "invalid-vlq" "invalid Base64 VLQ digit"))
+              (setq index (1+ index)
+                    value (+ value (* (bit-and digit 31) (Math/pow 2 shift)))
+                    continuation (not (eq (bit-and digit 32) 0))
+                    shift (+ shift 5))
+              (when (> shift 50)
+                (fail "invalid-vlq" "Base64 VLQ value exceeds safe bounds"))))
+          (let ((negative (eq (bit-and value 1) 1))
+                (magnitude (Math/floor (/ value 2))))
+            (js-call values :push (if negative (- magnitude) magnitude)))))
+      values))
+
+  (defun decodeSourceMappings (mappings)
+    (unless (eq (value-type mappings) "string")
+      (fail "invalid-mappings" "source mappings must be a string"))
+    (let ((source 0)
+          (originalLine 0)
+          (originalColumn 0))
+      (Object/freeze
+        (js-call (js-call mappings :split ";") :map
+          (lambda (encodedLine)
+            (let ((generatedColumn 0)
+                  (line (js-array))
+                  (parts (js-call encodedLine :split ","))
+                  (i 0))
+              (while (< i (js-length parts))
+                (let ((encoded (aref parts i)))
+                  (when (> (js-length encoded) 0)
+                    (let ((values (decodeVlq encoded)))
+                      (unless (js-call (js-array 1 4 5) :includes (js-length values))
+                        (fail "invalid-segment" "source map segments must contain 1, 4, or 5 fields"))
+                      (setq generatedColumn (+ generatedColumn (aref values 0)))
+                      (when (< generatedColumn 0)
+                        (fail "invalid-segment" "generated source map columns must not be negative"))
+                      (let ((decoded (js-object :generatedColumn generatedColumn)))
+                        (when (>= (js-length values) 4)
+                          (setq source (+ source (aref values 1))
+                                originalLine (+ originalLine (aref values 2))
+                                originalColumn (+ originalColumn (aref values 3)))
+                          (when (or (< source 0) (< originalLine 0) (< originalColumn 0))
+                            (fail "invalid-segment" "decoded source map positions must not be negative"))
+                          (put decoded :source source)
+                          (put decoded :originalLine originalLine)
+                          (put decoded :originalColumn originalColumn))
+                        (js-call line :push (Object/freeze decoded))))))
+                (setq i (1+ i)))
+              (Object/freeze line)))))))
+
+  (defun sourceMapDescriptor (value)
+    (when (or (not (isPlainObject value))
+              (not (eq (value-type (get value :generatedFile)) "string"))
+              (eq (js-length (get value :generatedFile)) 0)
+              (not (Array/isArray (get value :sources)))
+              (eq (js-length (get value :sources)) 0)
+              (js-call (get value :sources) :some
+                (lambda (source)
+                  (or (not (eq (value-type source) "string"))
+                      (eq (js-length source) 0)))))
+      (fail "invalid-source-map"
+            "source map descriptor requires generatedFile sources and mappings"))
+    (let ((lines (if (undefined? (get value :lines))
+                     (decodeSourceMappings (get value :mappings))
+                   (get value :lines))))
+      (when (or (not (Array/isArray lines))
+                (js-call lines :some (lambda (line) (not (Array/isArray line)))))
+        (fail "invalid-source-map" "source map descriptor lines must be arrays"))
+      (let ((i 0))
+        (while (< i (js-length lines))
+          (let ((line (aref lines i))
+                (j 0))
+            (while (< j (js-length line))
+              (let ((segment (aref line j)))
+                (when (or (not (isPlainObject segment))
+                          (not (Number/isInteger (get segment :generatedColumn)))
+                          (< (get segment :generatedColumn) 0)
+                          (and (not (undefined? (get segment :source)))
+                               (or (not (Number/isInteger (get segment :source)))
+                                   (< (get segment :source) 0)
+                                   (not (Number/isInteger (get segment :originalLine)))
+                                   (< (get segment :originalLine) 0)
+                                   (not (Number/isInteger (get segment :originalColumn)))
+                                   (< (get segment :originalColumn) 0))))
+                  (fail "invalid-source-map" "source map descriptor contains an invalid segment")))
+              (setq j (1+ j))))
+          (setq i (1+ i))))
+      (Object/freeze
+        (js-object
+          :generatedFile (get value :generatedFile)
+          :sources (Object/freeze (Array/from (get value :sources)))
+          :lines (Object/freeze
+                   (js-call lines :map
+                     (lambda (line)
+                       (Object/freeze
+                         (js-call line :map
+                           (lambda (segment)
+                             (Object/freeze (Object/assign (js-object) segment))))))))))))
+
+  (defconst v8-stack-pattern (new globalThis.RegExp "^\\s*at (?:(.*?) \\()?(.+):(\\d+):(\\d+)\\)?$" "u"))
+  (defconst browser-stack-pattern (new globalThis.RegExp "^(.*?)@(.+):(\\d+):(\\d+)$" "u"))
+  (defconst query-hash-pattern (new globalThis.RegExp "[?#].*$" "u"))
+
+  (defun parseJavaScriptStack (stack &rest __opt)
+    (let* ((options (aref __opt 0))
+           (opts (if (undefined? options) (js-object) options)))
+      (if (not (eq (value-type stack) "string"))
+          (Object/freeze (js-array))
+        (let ((normalizeFile (if (eq (value-type (get opts :normalizeFile)) "function")
+                                 (get opts :normalizeFile)
+                               (lambda (file) file)))
+              (frames (js-array))
+              (lines (js-call stack :split "\n"))
+              (i 0))
+          (while (< i (js-length lines))
+            (let* ((line (aref lines i))
+                   (v8 (js-call v8-stack-pattern :exec line))
+                   (browser (if v8 nil (js-call browser-stack-pattern :exec (js-call line :trim))))
+                   (match (or v8 browser)))
+              (when match
+                (js-call frames :push
+                  (Object/freeze
+                    (js-object
+                      :function (or (aref match 1) undefined)
+                      :file (funcall normalizeFile (aref match 2))
+                      :line (funcall globalThis.Number (aref match 3))
+                      :column (funcall globalThis.Number (aref match 4)))))))
+            (setq i (1+ i)))
+          (Object/freeze frames)))))
+  (Object/defineProperty parseJavaScriptStack "length" (js-object :value 1 :configurable t))
+
+  (defun cleanIdentity (value)
+    (try
+      (let ((url (new globalThis.URL value)))
+        (put url :search "")
+        (put url :hash "")
+        (get url :href))
+      (catch _error
+        (js-call value :replace query-hash-pattern ""))))
+
+  (defun sourceIdentities (value)
+    (let* ((clean (cleanIdentity value))
+           (identities (js-array clean)))
+      (try
+        (let ((url (new globalThis.URL clean)))
+          (when (eq (get url :protocol) "file:")
+            (js-call identities :push (globalThis.decodeURIComponent (get url :pathname)))))
+        (catch _error nil))
+      identities))
+
+  (defun mapSourceFrames (frames sourceMaps)
+    (unless (and (Array/isArray frames) (Array/isArray sourceMaps))
+      (fail "invalid-frames" "frames and source maps must be arrays"))
+    (let ((mapsByFile (new globalThis.Map))
+          (i 0))
+      (while (< i (js-length sourceMaps))
+        (let* ((sourceMap (aref sourceMaps i))
+               (identities (sourceIdentities (get sourceMap :generatedFile)))
+               (j 0))
+          (while (< j (js-length identities))
+            (js-call mapsByFile :set (aref identities j) sourceMap)
+            (setq j (1+ j))))
+        (setq i (1+ i)))
+      (Object/freeze
+        (js-call frames :map
+          (lambda (frame)
+            (let* ((identities (sourceIdentities (get frame :file)))
+                   (candidates (js-call identities :map (lambda (id) (js-call mapsByFile :get id))))
+                   (sourceMap (js-call candidates :find (lambda (item) (funcall globalThis.Boolean item))))
+                   (mapping (if sourceMap
+                                (aref (get sourceMap :lines) (1- (get frame :line)))
+                              undefined)))
+              (if (not mapping)
+                  frame
+                (let ((generatedColumn (Math/max 0 (1- (get frame :column))))
+                      (segment undefined)
+                      (k 0)
+                      (done false))
+                  (while (and (< k (js-length mapping)) (not done))
+                    (let ((candidate (aref mapping k)))
+                      (if (> (get candidate :generatedColumn) generatedColumn)
+                          (setq done t)
+                        (setq segment candidate)))
+                    (setq k (1+ k)))
+                  (if (or (not segment)
+                          (undefined? (get segment :source))
+                          (undefined? (aref (get sourceMap :sources) (get segment :source))))
+                      frame
+                    (Object/freeze
+                      (Object/assign
+                        (js-object)
+                        frame
+                        (js-object
+                          :generated (Object/freeze
+                                       (js-object :file (get frame :file)
+                                                  :line (get frame :line)
+                                                  :column (get frame :column)))
+                          :file (aref (get sourceMap :sources) (get segment :source))
+                          :line (1+ (get segment :originalLine))
+                          :column (1+ (get segment :originalColumn))))))))))))))
+
+  (defun sourceMappedFailure (error sourceMaps &rest __opt)
+    (let* ((options (aref __opt 0))
+           (opts (if (undefined? options) (js-object) options))
+           (stack (if (and (not (nullish? error)) (eq (value-type (get error :stack)) "string"))
+                      (get error :stack)
+                    undefined))
+           (frames (if stack
+                       (mapSourceFrames (parseJavaScriptStack stack opts) sourceMaps)
+                     (Object/freeze (js-array))))
+           (eli-frame (js-call frames :find (lambda (frame) (js-call (get frame :file) :endsWith ".eli"))))
+           (location (or eli-frame (aref frames 0)))
+           (result (js-object
+                     :name (if (and (not (nullish? error)) (eq (value-type (get error :name)) "string"))
+                               (get error :name)
+                             "Error")
+                     :message (if (and (not (nullish? error)) (eq (value-type (get error :message)) "string"))
+                                  (get error :message)
+                                (funcall globalThis.String error)))))
+      (when stack
+        (put result :stack stack))
+      (put result :frames frames)
+      (when location
+        (put result :location location))
+      (Object/freeze result)))
+  (Object/defineProperty sourceMappedFailure "length" (js-object :value 2 :configurable t))
+
+  (export SourceMappingError
+          decodeSourceMappings
+          sourceMapDescriptor
+          parseJavaScriptStack
+          mapSourceFrames
+          sourceMappedFailure))

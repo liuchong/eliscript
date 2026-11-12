@@ -21,8 +21,17 @@
   (import "./compiler-corpus-process.mjs" originalCorpusExecutionPolicy runOriginalCorpusProcess)
   (import "./compiler-corpus-source-archive.mjs" archiveCompilerCorpusSources)
   (import "../../dist/bootstrap/reader.mjs" read-string)
-  (import "../../dist/bootstrap/compiler.mjs" compile-string)
+  (import "../../dist/bootstrap/compiler.mjs" compile-string compile-ir-string)
+  (import "../../dist/bootstrap/emitter.mjs" emit-top-level)
   (import "../../bootstrap/host/bun.mjs" loadCompiler)
+  (defun original-tools-side-effect-import (url)
+    (let* ((program (compile-ir-string (str "(import " (JSON/stringify url) ")") "original-tools-data-import.eli"))
+           (body (get program :body)) (node (when (Array/isArray body) (aref body 0))))
+      (unless (and (Array/isArray body) (= (js-length body) 1)
+                   (= (get node :kind) "import-declaration") (= (get node :value) url)
+                   (Array/isArray (get node :children)) (= (js-length (get node :children)) 0))
+        (throw (new globalThis.TypeError "original tools reference requires one actual side-effect import")))
+      (str (get (emit-top-level node) :text) "\n")))
   (defconst resolveOriginalCorpusRequest (get ground :resolveOriginalCorpusRequest))
   (defconst originalProgramArguments (get ground :originalProgramArguments))
   (defconst compareCompilerCorpusObservation (get ground :compareCompilerCorpusObservation))
@@ -1301,13 +1310,15 @@
                  (sources (if archived-providers
                    (js-call (fallback (get context :sourceAssets) (js-array)) :filter
                      (lambda (asset) (and (= (value-type (get asset :file)) "string")
-                       (js-call (get asset :file) :startsWith "runtime/")
-                       (js-call (get asset :file) :endsWith ".mjs"))))
+                       (or (and (js-call (get asset :file) :startsWith "runtime/")
+                                (js-call (get asset :file) :endsWith ".mjs"))
+                           (= (get asset :file) "stdlib/bit.mjs")))))
                    (field (get record :request) "hostSources")))
                  (source-root (get context :sourceRoot))
                  (runtime-root (await (realpath (resolve source-root "runtime"))))
+                 (stdlib-root (await (realpath (resolve source-root "stdlib"))))
                  (files (await (local-runtime-files runtime-root "runtime")))
-                 (required (new globalThis.Set files)) (seen (new globalThis.Set))
+                 (required (new globalThis.Set files)) (seen (new globalThis.Set)) (seen-bit false)
                  (proofs (js-array)) (retained (js-array)) (index 0))
             (unless (and (Array/isArray modules) (Array/isArray sources)
                          (not (js-call modules :some (lambda (item)
@@ -1315,29 +1326,42 @@
                              (and (= (value-type id) "string")
                                (or (= id "runtime") (js-call id :startsWith "runtime/"))))))))
               (native-provider-fail))
-            ;; Validate the complete declaration before changing any execution
-            ;; routing. The raw record, archive, selected modules and oracle
-            ;; retain all original source bytes and hashes.
-            (while (< index (js-length sources))
-              (let* ((item (aref sources index)) (id (if archived-providers (get item :file) (field item "id")))
-                     (declared (if archived-providers
-                       (request-native-provider-source item) (field item "source"))))
-                (if (and (= (value-type id) "string") (js-call id :startsWith "runtime/"))
-                  (progn
-                    (unless (and (js-call required :has id) (not (js-call seen :has id))
-                                 (= (value-type declared) "string"))
-                      (native-provider-fail))
-                    (let* ((path (resolve source-root id)) (canonical (await (realpath path)))
-                           (expected (resolve runtime-root (js-call id :slice (js-length "runtime/"))))
-                           (bytes (await (readFile path))))
-                      (unless (and (= canonical expected)
-                                   (js-call bytes :equals (js-call Buffer :from declared "utf8")))
+            (let ((emitted-bit (js-call modules :some (lambda (item) (= (field item "id") "stdlib/bit.mjs")))))
+              ;; Validate the complete declaration before changing any execution
+              ;; routing. The raw record, archive, selected modules and oracle
+              ;; retain all original source bytes and hashes.
+              (while (< index (js-length sources))
+                (let* ((item (aref sources index)) (id (if archived-providers (get item :file) (field item "id")))
+                       (declared (if archived-providers
+                         (request-native-provider-source item) (field item "source"))))
+                  (cond
+                    ((and (= (value-type id) "string") (js-call id :startsWith "runtime/"))
+                      (unless (and (js-call required :has id) (not (js-call seen :has id))
+                                   (= (value-type declared) "string"))
                         (native-provider-fail))
-                      (js-call proofs :push (js-object :id id :sha256 (execution-digest bytes) :bytes (js-length bytes))))
-                    (js-call seen :add id))
-                  (js-call retained :push item)))
-              (setq index (1+ index)))
-            (unless (= (get seen :size) (js-length files)) (native-provider-fail))
+                      (let* ((path (resolve source-root id)) (canonical (await (realpath path)))
+                             (expected (resolve runtime-root (js-call id :slice (js-length "runtime/"))))
+                             (bytes (await (readFile path))))
+                        (unless (and (= canonical expected)
+                                     (js-call bytes :equals (js-call Buffer :from declared "utf8")))
+                          (native-provider-fail))
+                        (js-call proofs :push (js-object :id id :sha256 (execution-digest bytes) :bytes (js-length bytes))))
+                      (js-call seen :add id))
+                    ((= id "stdlib/bit.mjs")
+                      (when (or seen-bit (and (not archived-providers) emitted-bit))
+                        (native-provider-fail))
+                      (unless (= (value-type declared) "string") (native-provider-fail))
+                      (let* ((path (resolve source-root "stdlib/bit.mjs")) (canonical (await (realpath path)))
+                             (expected (resolve stdlib-root "bit.mjs"))
+                             (bytes (await (readFile path))))
+                        (unless (and (= canonical expected)
+                                     (js-call bytes :equals (js-call Buffer :from declared "utf8")))
+                          (native-provider-fail)))
+                      (setq seen-bit t))
+                    (t (js-call retained :push item))))
+                (setq index (1+ index)))
+              (unless (and (= (get seen :size) (js-length files)) (or seen-bit emitted-bit))
+                (native-provider-fail)))
             (let* ((directory (fallback (get artifact :directory) (resolve (get artifact :path) "..")))
                    (runtime (resolve directory "runtime"))
                    (package-source (await (readFile (resolve source-root "package.json"))))
@@ -1397,51 +1421,64 @@
         (js-call sources :forEach (lambda (source)
           (when (and (= (value-type (get source :id)) "string") (= (value-type (get source :source)) "string"))
             (js-call declared :set (get source :id) (get source :source)))))
-        (when (and (js-call declared :has "runtime/literals.mjs")
-                   (js-call declared :has "runtime/core/queue.mjs")
-                   (js-call declared :has "runtime/core/data-text.mjs"))
+        (when (or (js-call declared :has "runtime/literals.mjs")
+                  (js-call declared :has "runtime/core/value-internals.mjs")
+                  (js-call declared :has "runtime/core/map-internals.mjs"))
           (let* ((files (await (local-runtime-files (resolve (get context :sourceRoot) "runtime") "runtime")))
-                 (complete (js-call files :every (lambda (id) (js-call declared :has id)))))
-            (when complete
-              (let* ((artifact (get context :artifact))
-                     (directory (fallback (get artifact :directory) (resolve (get artifact :path) "..")))
-                     (root-package (JSON/parse (await (readFile (resolve (get context :sourceRoot) "package.json") "utf8"))))
-                     (root-exports (get root-package :exports))
-                     (exports (Object/fromEntries (js-array (js-array "./runtime/*" "./runtime/*"))))
-                     (keys (Object/keys root-exports)) (index 0))
-                ;; Preserve the package's explicit runtime aliases, including
-                ;; extensionless entry points. Platform capabilities require
-                ;; their exact declared file and original explicit export;
-                ;; no platform/compiler/browser wildcard is introduced.
-                (while (< index (js-length keys))
-                  (let* ((key (aref keys index)) (target (get root-exports key)))
-                    (when (js-call key :startsWith "./runtime/")
-                      (Object/defineProperty exports key (js-object :value target
-                        :writable t :enumerable t :configurable t)))
-                    (when (and (js-call key :startsWith "./platform/")
-                               (not (js-call key :includes "*")) (= (value-type target) "string")
-                               (js-call target :startsWith "./platform/")
-                               (js-call target :endsWith ".mjs") (not (js-call target :includes "*"))
-                               (js-call declared :has (js-call target :slice 2)))
-                      (let ((id (js-call target :slice 2)))
-                        (unless (js-call files :includes id) (js-call files :push id)))
-                      (Object/defineProperty exports key (js-object :value target
-                        :writable t :enumerable t :configurable t))))
-                  (setq index (1+ index)))
-                (let ((position 0))
-                  (while (< position (js-length files))
-                    (let ((id (aref files position)))
-                      (await (ensure-local-runtime-file directory id (js-call declared :get id))))
-                    (setq position (1+ position))))
-                (let* ((path (resolve directory "package.json"))
-                       (source (+ (JSON/stringify (js-object :name (get root-package :name) :type "module" :exports exports)) "\n")))
-                  (try (await (writeFile path source (js-object :flag "wx")))
-                    (catch error
-                      (unless (= (get error :code) "EEXIST") (throw error))
-                      (let ((details (await (lstat path))))
-                        (unless (and (js-call details :isFile) (not (js-call details :isSymbolicLink))
-                                     (= (await (readFile path "utf8")) source))
-                          (throw (new globalThis.Error "original local runtime package conflicts with emitted source"))))))))))))))
+                 (modules (field record "modules"))
+                 (emitted-bit (and (Array/isArray modules)
+                   (js-call modules :some (lambda (module)
+                     (and (= (field module "id") "stdlib/bit.mjs")
+                          (= (field module "filename") "stdlib/bit.eli"))))))
+                 (has-bit (js-call declared :has "stdlib/bit.mjs"))
+                 (complete (and (js-call files :every (lambda (id) (js-call declared :has id)))
+                                (or has-bit emitted-bit))))
+            (unless complete
+              (throw (new globalThis.Error "original local runtime graph is incomplete")))
+            (when has-bit (js-call files :push "stdlib/bit.mjs"))
+            (let* ((artifact (get context :artifact))
+                   (directory (fallback (get artifact :directory) (resolve (get artifact :path) "..")))
+                   (root-package (JSON/parse (await (readFile (resolve (get context :sourceRoot) "package.json") "utf8"))))
+                   (root-exports (get root-package :exports))
+                   (exports (Object/fromEntries (js-array (js-array "./runtime/*" "./runtime/*"))))
+                   (keys (Object/keys root-exports)) (index 0))
+              (when (and emitted-bit (not has-bit))
+                (let ((details (await (lstat (resolve directory "stdlib/bit.mjs")))))
+                  (unless (and (js-call details :isFile) (not (js-call details :isSymbolicLink)))
+                    (throw (new globalThis.Error "original local runtime graph conflicts with emitted source")))))
+              ;; Preserve the package's explicit runtime aliases, including
+              ;; extensionless entry points. Platform capabilities require
+              ;; their exact declared file and original explicit export;
+              ;; no platform/compiler/browser wildcard is introduced.
+              (while (< index (js-length keys))
+                (let* ((key (aref keys index)) (target (get root-exports key)))
+                  (when (js-call key :startsWith "./runtime/")
+                    (Object/defineProperty exports key (js-object :value target
+                      :writable t :enumerable t :configurable t)))
+                  (when (and (js-call key :startsWith "./platform/")
+                             (not (js-call key :includes "*")) (= (value-type target) "string")
+                             (js-call target :startsWith "./platform/")
+                             (js-call target :endsWith ".mjs") (not (js-call target :includes "*"))
+                             (js-call declared :has (js-call target :slice 2)))
+                    (let ((id (js-call target :slice 2)))
+                      (unless (js-call files :includes id) (js-call files :push id)))
+                    (Object/defineProperty exports key (js-object :value target
+                      :writable t :enumerable t :configurable t))))
+                (setq index (1+ index)))
+              (let ((position 0))
+                (while (< position (js-length files))
+                  (let ((id (aref files position)))
+                    (await (ensure-local-runtime-file directory id (js-call declared :get id))))
+                  (setq position (1+ position))))
+              (let* ((path (resolve directory "package.json"))
+                     (source (+ (JSON/stringify (js-object :name (get root-package :name) :type "module" :exports exports)) "\n")))
+                (try (await (writeFile path source (js-object :flag "wx")))
+                  (catch error
+                    (unless (= (get error :code) "EEXIST") (throw error))
+                    (let ((details (await (lstat path))))
+                      (unless (and (js-call details :isFile) (not (js-call details :isSymbolicLink))
+                                   (= (await (readFile path "utf8")) source))
+                        (throw (new globalThis.Error "original local runtime package conflicts with emitted source")))))))))))))
   (defun sequence-result-needed (steps start id)
     ;; Original recipes are data. Inspect descriptors rather than evaluating a
     ;; later accessor ahead of its request. Opaque/large inputs conservatively
@@ -1613,7 +1650,12 @@
                  (js-call host :replace (get cli :after) (get cli :before)) host))
                (files (js-array "tools/backends/eliscript/compiler-corpus-tools-reference.eli"
                         "tools/backends/compiler-corpus-tools-reference.mjs"
+                        "runtime/array-text.eli" "runtime/array-text.mjs"
+                        "runtime/errors.eli" "runtime/errors.mjs"
+                        "runtime/math.eli" "runtime/math.mjs"
+                        "runtime/number-radix.eli" "runtime/number-radix.mjs"
                         "runtime/prelude.eli" "runtime/prelude.mjs"
+                        "runtime/primitives.eli" "runtime/primitives.mjs"
                         "runtime/unicode-case.eli" "runtime/unicode-case.mjs"
                         "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs"))
                (seen (new globalThis.Set)) (index 0))
@@ -1655,7 +1697,7 @@
             ;; compiler, but its real generated data modules still need the
             ;; authenticated Unicode resolver installed before evaluation.
             (let* ((projected (if semantic-tools
-                     (str (compile-string (str "(import " after ")") "original-tools-data-import.eli") host)
+                     (str (original-tools-side-effect-import url) host)
                      (js-call host :replace before after))) (artifact (get context :artifact))
                    (directory (fallback (get artifact :directory) (resolve (get artifact :path) "..")))
                    (proof (js-object :kind "original-tools-data-reference" :version 1 :recordId id

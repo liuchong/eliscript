@@ -1,2 +1,954 @@
-(module capsules.runtime.core.vector
-  (js* "import {\n  BRANCH_BITS,\n  BRANCH_MASK,\n  BRANCH_WIDTH,\n  EMPTY_ROOT,\n  EMPTY_TAIL,\n  TRANSIENT_VECTOR_CONSTRUCTOR_TOKEN,\n  TRANSIENT_VECTOR_STATE,\n  VECTOR_CONSTRUCTOR_TOKEN,\n  VECTOR_STATE,\n  VectorNode,\n  allocateTail,\n  editableVectorNode,\n  recordInvalidTransientVectorCall,\n  recordRootGrowth,\n  recordTransientVectorNodeMutation,\n  recordTransientVectorPersistent,\n  recordTransientVectorTailCopy,\n  recordTransientVectorTailMutation,\n  visitNode,\n} from \"./vector-internals.mjs\";\nimport {\n  VALUE_EQUAL,\n  VALUE_HASH,\n  orderedCollectionHash,\n} from \"./value-internals.mjs\";\nimport {\n  COLLECTION_COUNT,\n  COLLECTION_EMPTY,\n  COLLECTION_CONJ,\n  COLLECTION_GET,\n  COLLECTION_ASSOC,\n  COLLECTION_CONTAINS,\n  COLLECTION_NTH,\n  COLLECTION_REDUCE,\n  COLLECTION_REDUCE_KV,\n  COLLECTION_PEEK,\n  COLLECTION_POP,\n  COLLECTION_RSEQ,\n  COLLECTION_SEQ,\n  isReducedValue,\n  reduceIterable,\n  sequenceView,\n  unreducedValue,\n} from \"./collection-internals.mjs\";\nimport {\n  EDITABLE_TRANSIENT,\n  TRANSIENT_ASSOC,\n  TRANSIENT_CONJ,\n  TRANSIENT_PERSISTENT,\n} from \"./transient-internals.mjs\";\nimport {\n  METADATA_READ,\n  METADATA_WITH,\n} from \"./metadata-internals.mjs\";\n\nconst MAX_COUNT = 0x7fffffff;\nconst MISSING = Symbol(\"eliscript.vector.missing\");\nconst VECTOR_HASH_TAG = 0x4f1b_2c3d;\nconst SUBVECTOR_STATE = new WeakMap();\n\nfunction assertIndex(index, upperBound, operation) {\n  if (!Number.isInteger(index) || index < 0 || index >= upperBound) {\n    throw new RangeError(\n      `${operation} index ${String(index)} is outside [0, ${upperBound})`,\n    );\n  }\n}\n\nfunction tailOffset(count) {\n  return count < BRANCH_WIDTH\n    ? 0\n    : ((count - 1) >>> BRANCH_BITS) << BRANCH_BITS;\n}\n\nfunction reverseVectorIterator(state) {\n  let index = state.count - 1;\n  let chunk = EMPTY_TAIL;\n  let chunkStart = state.count;\n  return {\n    next() {\n      if (index < 0) return { value: undefined, done: true };\n      if (index < chunkStart) {\n        chunk = arrayFor(state, index);\n        chunkStart = index - (index & BRANCH_MASK);\n      }\n      const value = chunk[index - chunkStart];\n      index -= 1;\n      return { value, done: false };\n    },\n  };\n}\n\nfunction vectorRangeIterator(vector, start, end, reverse = false) {\n  let index = reverse ? end - 1 : start;\n  return {\n    next() {\n      if (reverse ? index < start : index >= end) {\n        return { value: undefined, done: true };\n      }\n      const value = vector.nth(index);\n      index += reverse ? -1 : 1;\n      return { value, done: false };\n    },\n  };\n}\n\nfunction newPath(level, node) {\n  if (level === 0) {\n    return node;\n  }\n  return new VectorNode([newPath(level - BRANCH_BITS, node)]);\n}\n\nfunction pushTail(level, parent, tailNode, count) {\n  visitNode(parent);\n  const subindex = ((count - 1) >>> level) & BRANCH_MASK;\n  const slots = parent.slots.slice();\n\n  if (level === BRANCH_BITS) {\n    slots[subindex] = tailNode;\n  } else {\n    const child = parent.slots[subindex];\n    slots[subindex] = child === undefined\n      ? newPath(level - BRANCH_BITS, tailNode)\n      : pushTail(level - BRANCH_BITS, child, tailNode, count);\n  }\n  return new VectorNode(slots);\n}\n\nfunction assocNode(level, node, index, value) {\n  visitNode(node);\n  const slots = node.slots.slice();\n  if (level === 0) {\n    slots[index & BRANCH_MASK] = value;\n  } else {\n    const subindex = (index >>> level) & BRANCH_MASK;\n    slots[subindex] = assocNode(\n      level - BRANCH_BITS,\n      node.slots[subindex],\n      index,\n      value,\n    );\n  }\n  return new VectorNode(slots);\n}\n\nfunction transientNewPath(level, node, owner) {\n  if (level === 0) {\n    return node;\n  }\n  return new VectorNode(\n    [transientNewPath(level - BRANCH_BITS, node, owner)],\n    owner,\n  );\n}\n\nfunction transientPushTail(level, parent, tailNode, count, owner) {\n  visitNode(parent);\n  const editable = editableVectorNode(parent, owner);\n  const subindex = ((count - 1) >>> level) & BRANCH_MASK;\n  if (level === BRANCH_BITS) {\n    editable.slots[subindex] = tailNode;\n  } else {\n    const child = editable.slots[subindex];\n    editable.slots[subindex] = child === undefined\n      ? transientNewPath(level - BRANCH_BITS, tailNode, owner)\n      : transientPushTail(level - BRANCH_BITS, child, tailNode, count, owner);\n  }\n  recordTransientVectorNodeMutation();\n  return editable;\n}\n\nfunction transientAssocNode(level, node, index, value, owner) {\n  visitNode(node);\n  const editable = editableVectorNode(node, owner);\n  if (level === 0) {\n    editable.slots[index & BRANCH_MASK] = value;\n  } else {\n    const subindex = (index >>> level) & BRANCH_MASK;\n    editable.slots[subindex] = transientAssocNode(\n      level - BRANCH_BITS,\n      editable.slots[subindex],\n      index,\n      value,\n      owner,\n    );\n  }\n  recordTransientVectorNodeMutation();\n  return editable;\n}\n\nfunction popTail(level, node, count) {\n  visitNode(node);\n  const subindex = ((count - 2) >>> level) & BRANCH_MASK;\n  if (level > BRANCH_BITS) {\n    const child = popTail(\n      level - BRANCH_BITS,\n      node.slots[subindex],\n      count,\n    );\n    if (child === undefined && subindex === 0) {\n      return undefined;\n    }\n    const slots = node.slots.slice();\n    slots[subindex] = child;\n    return new VectorNode(slots);\n  }\n  if (subindex === 0) {\n    return undefined;\n  }\n  const slots = node.slots.slice();\n  slots[subindex] = undefined;\n  return new VectorNode(slots);\n}\n\nfunction arrayFor(state, index) {\n  if (index >= tailOffset(state.count)) {\n    return state.tail;\n  }\n\n  let node = state.root;\n  for (let level = state.shift; level > 0; level -= BRANCH_BITS) {\n    visitNode(node);\n    node = node.slots[(index >>> level) & BRANCH_MASK];\n  }\n  visitNode(node);\n  return node.slots;\n}\n\nfunction makeVector(count, shift, root, tail, metadata = null) {\n  return new PersistentVector(\n    VECTOR_CONSTRUCTOR_TOKEN,\n    count,\n    shift,\n    root,\n    tail,\n    metadata,\n  );\n}\n\nfunction emptyVectorWithMetadata(metadata) {\n  return metadata === null\n    ? EMPTY_VECTOR\n    : makeVector(0, BRANCH_BITS, EMPTY_ROOT, EMPTY_TAIL, metadata);\n}\n\nfunction makeTransientVector(vector) {\n  return new TransientVector(TRANSIENT_VECTOR_CONSTRUCTOR_TOKEN, vector);\n}\n\nfunction activeTransientVectorState(vector) {\n  const state = vector[TRANSIENT_VECTOR_STATE];\n  if (!state.active) {\n    recordInvalidTransientVectorCall();\n    throw new TypeError(\"transient vector is no longer editable\");\n  }\n  return state;\n}\n\nfunction editableTransientTail(state) {\n  if (!state.tailOwned) {\n    state.tail = state.tail.slice();\n    state.tailOwned = true;\n    recordTransientVectorTailCopy();\n  }\n  return state.tail;\n}\n\nclass TransientVector {\n  constructor(token, vector) {\n    if (token !== TRANSIENT_VECTOR_CONSTRUCTOR_TOKEN ||\n        !(vector instanceof PersistentVector)) {\n      throw new TypeError(\"transient vectors must be created from a persistent vector\");\n    }\n    const source = vector[VECTOR_STATE];\n    this[TRANSIENT_VECTOR_STATE] = {\n      active: true,\n      changed: false,\n      owner: Object.freeze({}),\n      source: vector,\n      count: source.count,\n      shift: source.shift,\n      root: source.root,\n      tail: source.tail,\n      tailOwned: false,\n      metadata: source.metadata,\n    };\n    Object.defineProperty(this, \"__eliscript_transient__\", {\n      enumerable: true,\n      get() {\n        throw new TypeError(\"transient vectors cannot be serialized\");\n      },\n    });\n    Object.freeze(this);\n  }\n\n  [TRANSIENT_CONJ](value) {\n    const state = activeTransientVectorState(this);\n    if (state.count === MAX_COUNT) {\n      throw new RangeError(`persistent vector cannot exceed ${MAX_COUNT} values`);\n    }\n    if (state.tail.length < BRANCH_WIDTH) {\n      editableTransientTail(state).push(value);\n      recordTransientVectorTailMutation();\n    } else {\n      if (!state.tailOwned) {\n        state.tail = state.tail.slice();\n        recordTransientVectorTailCopy();\n      }\n      const tailNode = new VectorNode(state.tail, state.owner);\n      if ((state.count >>> BRANCH_BITS) > (1 << state.shift)) {\n        state.root = new VectorNode([\n          state.root,\n          transientNewPath(state.shift, tailNode, state.owner),\n        ], state.owner);\n        state.shift += BRANCH_BITS;\n        recordRootGrowth();\n      } else {\n        state.root = transientPushTail(\n          state.shift,\n          state.root,\n          tailNode,\n          state.count,\n          state.owner,\n        );\n      }\n      state.tail = [value];\n      state.tailOwned = true;\n      recordTransientVectorTailMutation();\n    }\n    state.count += 1;\n    state.changed = true;\n    return this;\n  }\n\n  [TRANSIENT_ASSOC](index, value) {\n    const state = activeTransientVectorState(this);\n    if (index === state.count) {\n      return this[TRANSIENT_CONJ](value);\n    }\n    assertIndex(index, state.count, \"assocBang\");\n    if (index >= tailOffset(state.count)) {\n      editableTransientTail(state)[index & BRANCH_MASK] = value;\n      recordTransientVectorTailMutation();\n    } else {\n      state.root = transientAssocNode(\n        state.shift,\n        state.root,\n        index,\n        value,\n        state.owner,\n      );\n    }\n    state.changed = true;\n    return this;\n  }\n\n  [TRANSIENT_PERSISTENT]() {\n    const state = activeTransientVectorState(this);\n    const result = state.changed\n      ? makeVector(\n        state.count,\n        state.shift,\n        state.root,\n        state.tail,\n        state.metadata,\n      )\n      : state.source;\n    state.active = false;\n    state.owner = null;\n    recordTransientVectorPersistent();\n    return result;\n  }\n\n  toJSON() {\n    throw new TypeError(\"transient vectors cannot be serialized\");\n  }\n\n  get [Symbol.toStringTag]() {\n    return \"EliscriptTransientVector\";\n  }\n}\n\nexport class PersistentVector {\n  constructor(token, count, shift, root, tail, metadata = null) {\n    if (token !== VECTOR_CONSTRUCTOR_TOKEN) {\n      throw new TypeError(\n        \"PersistentVector values must be created with persistentVector or PersistentVector.from\",\n      );\n    }\n    this[VECTOR_STATE] = {\n      count,\n      shift,\n      root,\n      tail,\n      metadata,\n    };\n    Object.freeze(this);\n  }\n\n  static empty() {\n    return EMPTY_VECTOR;\n  }\n\n  static single(value) {\n    return makeVector(\n      1,\n      BRANCH_BITS,\n      EMPTY_ROOT,\n      allocateTail([value]),\n      null,\n    );\n  }\n\n  static pairWithMeta(first, second, metadata = null) {\n    return makeVector(\n      2,\n      BRANCH_BITS,\n      EMPTY_ROOT,\n      allocateTail([first, second]),\n      metadata,\n    );\n  }\n\n  static rawSlot(vector, index) {\n    return vector[VECTOR_STATE].tail[index];\n  }\n\n  static from(iterable) {\n    if (iterable instanceof PersistentVector) {\n      return iterable;\n    }\n    if (\n      Array.isArray(iterable) &&\n      Object.getPrototypeOf(iterable) === Array.prototype &&\n      !Object.hasOwn(iterable, Symbol.iterator) &&\n      iterable[Symbol.iterator] === Array.prototype[Symbol.iterator]\n    ) {\n      const length = iterable.length;\n      if (length === 0) return EMPTY_VECTOR;\n      if (length <= BRANCH_WIDTH) {\n        return makeVector(\n          length,\n          BRANCH_BITS,\n          EMPTY_ROOT,\n          allocateTail(iterable.slice()),\n        );\n      }\n      let root = EMPTY_ROOT;\n      let shift = BRANCH_BITS;\n      let count = BRANCH_WIDTH;\n      let tail = allocateTail(iterable.slice(0, BRANCH_WIDTH));\n      while (count < length) {\n        const nextEnd = Math.min(count + BRANCH_WIDTH, length);\n        const tailNode = new VectorNode(tail);\n        if ((count >>> BRANCH_BITS) > (1 << shift)) {\n          root = new VectorNode([\n            root,\n            newPath(shift, tailNode),\n          ]);\n          shift += BRANCH_BITS;\n          recordRootGrowth();\n        } else {\n          root = pushTail(shift, root, tailNode, count);\n        }\n        tail = allocateTail(iterable.slice(count, nextEnd));\n        count = nextEnd;\n      }\n      return makeVector(length, shift, root, tail);\n    }\n    let result = EMPTY_VECTOR;\n    for (const value of iterable) {\n      result = result.conj(value);\n    }\n    return result;\n  }\n\n  get count() {\n    return this[VECTOR_STATE].count;\n  }\n\n  get size() {\n    return this[VECTOR_STATE].count;\n  }\n\n  nth(index, notFound = MISSING) {\n    const state = this[VECTOR_STATE];\n    if (((index | 0) === index || Number.isInteger(index)) && index >= 0 && index < state.count) {\n      if (state.count <= BRANCH_WIDTH) {\n        const value = state.tail[index];\n        if (\n          index === 1 &&\n          state.count === 2 &&\n          state.metadata !== null &&\n          Array.isArray(value) &&\n          value.length === 6 &&\n          value[5] === true &&\n          !Object.isFrozen(value)\n        ) {\n          Object.freeze(value);\n        }\n        return value;\n      }\n      return arrayFor(state, index)[index & BRANCH_MASK];\n    }\n    if (notFound !== MISSING) {\n      return notFound;\n    }\n    assertIndex(index, state.count, \"nth\");\n  }\n\n  assoc(index, value) {\n    const state = this[VECTOR_STATE];\n    if (index === state.count) {\n      return this.conj(value);\n    }\n    assertIndex(index, state.count, \"assoc\");\n\n    if (index >= tailOffset(state.count)) {\n      const tail = state.tail.slice();\n      tail[index & BRANCH_MASK] = value;\n      return makeVector(\n        state.count,\n        state.shift,\n        state.root,\n        allocateTail(tail),\n        state.metadata,\n      );\n    }\n    return makeVector(\n      state.count,\n      state.shift,\n      assocNode(state.shift, state.root, index, value),\n      state.tail,\n      state.metadata,\n    );\n  }\n\n  conj(value) {\n    const state = this[VECTOR_STATE];\n    if (state.count === MAX_COUNT) {\n      throw new RangeError(`persistent vector cannot exceed ${MAX_COUNT} values`);\n    }\n    if (state.tail.length < BRANCH_WIDTH) {\n      return makeVector(\n        state.count + 1,\n        state.shift,\n        state.root,\n        allocateTail([...state.tail, value]),\n        state.metadata,\n      );\n    }\n\n    const tailNode = new VectorNode(state.tail);\n    let shift = state.shift;\n    let root;\n    if ((state.count >>> BRANCH_BITS) > (1 << state.shift)) {\n      root = new VectorNode([\n        state.root,\n        newPath(state.shift, tailNode),\n      ]);\n      shift += BRANCH_BITS;\n      recordRootGrowth();\n    } else {\n      root = pushTail(state.shift, state.root, tailNode, state.count);\n    }\n    return makeVector(\n      state.count + 1,\n      shift,\n      root,\n      allocateTail([value]),\n      state.metadata,\n    );\n  }\n\n  peek(notFound = null) {\n    const state = this[VECTOR_STATE];\n    return state.count === 0 ? notFound : state.tail[state.tail.length - 1];\n  }\n\n  pop() {\n    const state = this[VECTOR_STATE];\n    if (state.count === 0) {\n      throw new RangeError(\"cannot pop an empty persistent vector\");\n    }\n    if (state.count === 1) {\n      return emptyVectorWithMetadata(state.metadata);\n    }\n    if (state.tail.length > 1) {\n      return makeVector(\n        state.count - 1,\n        state.shift,\n        state.root,\n        allocateTail(state.tail.slice(0, -1)),\n        state.metadata,\n      );\n    }\n\n    const tail = allocateTail([...arrayFor(state, state.count - 2)]);\n    let root = popTail(state.shift, state.root, state.count) ?? EMPTY_ROOT;\n    let shift = state.shift;\n    if (shift > BRANCH_BITS && root.slots[1] === undefined) {\n      root = root.slots[0];\n      shift -= BRANCH_BITS;\n    }\n    return makeVector(\n      state.count - 1,\n      shift,\n      root,\n      tail,\n      state.metadata,\n    );\n  }\n\n  reduce(reducer, ...initial) {\n    if (typeof reducer !== \"function\") {\n      throw new TypeError(\"persistent vector reducer must be a function\");\n    }\n    const state = this[VECTOR_STATE];\n    let accumulator;\n    let index = 0;\n    if (initial.length === 0) {\n      if (state.count === 0) {\n        throw new TypeError(\"cannot reduce an empty persistent vector without an initial value\");\n      }\n      accumulator = this.nth(0);\n      index = 1;\n    } else {\n      accumulator = initial[0];\n    }\n\n    while (index < state.count) {\n      const chunk = arrayFor(state, index);\n      const chunkStart = index & BRANCH_MASK;\n      const chunkLength = Math.min(chunk.length, state.count - (index - chunkStart));\n      for (let offset = chunkStart; offset < chunkLength; offset += 1) {\n        accumulator = reducer(accumulator, chunk[offset], index);\n        index += 1;\n      }\n    }\n    return accumulator;\n  }\n\n  [COLLECTION_COUNT]() {\n    return this.count;\n  }\n\n  [COLLECTION_EMPTY]() {\n    return emptyVectorWithMetadata(this[VECTOR_STATE].metadata);\n  }\n\n  [COLLECTION_CONJ](value) {\n    return this.conj(value);\n  }\n\n  [COLLECTION_PEEK]() {\n    return this.peek();\n  }\n\n  [COLLECTION_POP]() {\n    return this.pop();\n  }\n\n  [COLLECTION_RSEQ]() {\n    const state = this[VECTOR_STATE];\n    return state.count === 0\n      ? null\n      : sequenceView(() => reverseVectorIterator(state), state.count);\n  }\n\n  [COLLECTION_GET](index, notFound = null) {\n    return this.nth(index, notFound);\n  }\n\n  [COLLECTION_ASSOC](index, value) {\n    return this.assoc(index, value);\n  }\n\n  [COLLECTION_CONTAINS](index) {\n    return Number.isInteger(index) && index >= 0 && index < this.count;\n  }\n\n  [COLLECTION_NTH](index, ...notFound) {\n    return notFound.length === 0\n      ? this.nth(index)\n      : this.nth(index, notFound[0]);\n  }\n\n  [COLLECTION_SEQ]() {\n    return this.count === 0\n      ? null\n      : sequenceView(() => this[Symbol.iterator](), this.count);\n  }\n\n  [COLLECTION_REDUCE](reducer, ...initial) {\n    return reduceIterable(this, reducer, ...initial);\n  }\n\n  [COLLECTION_REDUCE_KV](reducer, initial) {\n    const state = this[VECTOR_STATE];\n    let result = initial;\n    let index = 0;\n    while (index < state.count) {\n      const chunk = arrayFor(state, index);\n      const chunkStart = index & BRANCH_MASK;\n      const chunkLength = Math.min(chunk.length, state.count - (index - chunkStart));\n      for (let offset = chunkStart; offset < chunkLength; offset += 1) {\n        result = reducer(result, index, chunk[offset]);\n        index += 1;\n        if (isReducedValue(result)) return unreducedValue(result);\n      }\n    }\n    return result;\n  }\n\n  [EDITABLE_TRANSIENT]() {\n    return makeTransientVector(this);\n  }\n\n  toArray() {\n    return this.reduce((values, value) => {\n      values.push(value);\n      return values;\n    }, []);\n  }\n\n  sliceVector(start, end) {\n    const state = this[VECTOR_STATE];\n    const length = end - start;\n    if (length <= 0) return EMPTY_VECTOR;\n    if (start === 0 && end >= state.count && state.metadata === null) {\n      return this;\n    }\n    const values = new Array(length);\n    let outIndex = 0;\n    let index = start;\n    while (index < end) {\n      const chunk = arrayFor(state, index);\n      const chunkOffset = index & BRANCH_MASK;\n      const chunkBase = index - chunkOffset;\n      const chunkEnd = Math.min(end - chunkBase, chunk.length);\n      for (let i = chunkOffset; i < chunkEnd; i += 1) {\n        values[outIndex] = chunk[i];\n        outIndex += 1;\n      }\n      index = chunkBase + chunkEnd;\n    }\n    return PersistentVector.from(values);\n  }\n\n  [VALUE_EQUAL](other, equal) {\n    if (this === other) {\n      return true;\n    }\n    if (!(other instanceof PersistentVector) || other.count !== this.count) {\n      return false;\n    }\n    const right = other[Symbol.iterator]();\n    for (const value of this) {\n      if (!equal(value, right.next().value)) {\n        return false;\n      }\n    }\n    return true;\n  }\n\n  [VALUE_HASH](hash) {\n    return orderedCollectionHash(this, hash, VECTOR_HASH_TAG);\n  }\n\n  [METADATA_READ]() {\n    return this[VECTOR_STATE].metadata;\n  }\n\n  [METADATA_WITH](metadata) {\n    const state = this[VECTOR_STATE];\n    return metadata === state.metadata\n      ? this\n      : makeVector(\n        state.count,\n        state.shift,\n        state.root,\n        state.tail,\n        metadata,\n      );\n  }\n\n  *[Symbol.iterator]() {\n    const state = this[VECTOR_STATE];\n    let index = 0;\n    while (index < state.count) {\n      const chunk = arrayFor(state, index);\n      const chunkStart = index & BRANCH_MASK;\n      const chunkLength = Math.min(chunk.length, state.count - (index - chunkStart));\n      for (let offset = chunkStart; offset < chunkLength; offset += 1) {\n        yield chunk[offset];\n        index += 1;\n      }\n    }\n  }\n\n  get [Symbol.toStringTag]() {\n    return \"EliscriptPersistentVector\";\n  }\n}\n\nclass PersistentSubVector extends PersistentVector {\n  constructor(vector, start, end, metadata = null) {\n    const source = vector[VECTOR_STATE];\n    super(\n      VECTOR_CONSTRUCTOR_TOKEN,\n      source.count,\n      source.shift,\n      source.root,\n      source.tail,\n      metadata,\n    );\n    SUBVECTOR_STATE.set(this, Object.freeze({ vector, start, end, metadata }));\n  }\n\n  get count() {\n    const state = SUBVECTOR_STATE.get(this);\n    return state.end - state.start;\n  }\n\n  get size() {\n    return this.count;\n  }\n\n  sliceVector(start, end) {\n    const state = SUBVECTOR_STATE.get(this);\n    return state.vector.sliceVector(state.start + start, state.start + end);\n  }\n\n  nth(index, notFound = MISSING) {\n    const state = SUBVECTOR_STATE.get(this);\n    const count = state.end - state.start;\n    if (!Number.isInteger(index) || index < 0 || index >= count) {\n      if (notFound !== MISSING) return notFound;\n      assertIndex(index, count, \"subvec nth\");\n    }\n    return state.vector.nth(state.start + index);\n  }\n\n  assoc(index, value) {\n    const state = SUBVECTOR_STATE.get(this);\n    const count = state.end - state.start;\n    if (!Number.isInteger(index) || index < 0 || index > count) {\n      throw new RangeError(\n        `subvec assoc index ${String(index)} is outside [0, ${count}]`,\n      );\n    }\n    const absoluteIndex = state.start + index;\n    const vector = absoluteIndex === state.vector.count\n      ? state.vector.conj(value)\n      : state.vector.assoc(absoluteIndex, value);\n    return new PersistentSubVector(\n      vector,\n      state.start,\n      Math.max(state.end, absoluteIndex + 1),\n      state.metadata,\n    );\n  }\n\n  conj(value) {\n    return this.assoc(this.count, value);\n  }\n\n  peek(notFound = null) {\n    const state = SUBVECTOR_STATE.get(this);\n    return state.start === state.end\n      ? notFound\n      : state.vector.nth(state.end - 1);\n  }\n\n  pop() {\n    const state = SUBVECTOR_STATE.get(this);\n    if (state.start === state.end) {\n      throw new RangeError(\"cannot pop an empty persistent subvector\");\n    }\n    return state.end - state.start === 1\n      ? emptyVectorWithMetadata(state.metadata)\n      : new PersistentSubVector(\n        state.vector,\n        state.start,\n        state.end - 1,\n        state.metadata,\n      );\n  }\n\n  reduce(reducer, ...initial) {\n    if (typeof reducer !== \"function\") {\n      throw new TypeError(\"persistent subvector reducer must be a function\");\n    }\n    const state = SUBVECTOR_STATE.get(this);\n    let index = 0;\n    let result;\n    if (initial.length === 0) {\n      if (state.start === state.end) {\n        throw new TypeError(\n          \"cannot reduce an empty persistent subvector without an initial value\",\n        );\n      }\n      result = state.vector.nth(state.start);\n      index = 1;\n    } else {\n      result = initial[0];\n    }\n    while (index < state.end - state.start) {\n      result = reducer(result, state.vector.nth(state.start + index), index);\n      index += 1;\n    }\n    return result;\n  }\n\n  [COLLECTION_COUNT]() {\n    return this.count;\n  }\n\n  [COLLECTION_EMPTY]() {\n    return emptyVectorWithMetadata(SUBVECTOR_STATE.get(this).metadata);\n  }\n\n  [COLLECTION_CONJ](value) {\n    return this.conj(value);\n  }\n\n  [COLLECTION_PEEK]() {\n    return this.peek();\n  }\n\n  [COLLECTION_POP]() {\n    return this.pop();\n  }\n\n  [COLLECTION_RSEQ]() {\n    const state = SUBVECTOR_STATE.get(this);\n    return state.start === state.end\n      ? null\n      : sequenceView(\n        () => vectorRangeIterator(\n          state.vector,\n          state.start,\n          state.end,\n          true,\n        ),\n        state.end - state.start,\n      );\n  }\n\n  [COLLECTION_GET](index, notFound = null) {\n    return this.nth(index, notFound);\n  }\n\n  [COLLECTION_ASSOC](index, value) {\n    return this.assoc(index, value);\n  }\n\n  [COLLECTION_CONTAINS](index) {\n    return Number.isInteger(index) && index >= 0 && index < this.count;\n  }\n\n  [COLLECTION_NTH](index, ...notFound) {\n    return notFound.length === 0\n      ? this.nth(index)\n      : this.nth(index, notFound[0]);\n  }\n\n  [COLLECTION_SEQ]() {\n    return this.count === 0\n      ? null\n      : sequenceView(() => this[Symbol.iterator](), this.count);\n  }\n\n  [COLLECTION_REDUCE](reducer, ...initial) {\n    return reduceIterable(this, reducer, ...initial);\n  }\n\n  [COLLECTION_REDUCE_KV](reducer, initial) {\n    const state = SUBVECTOR_STATE.get(this);\n    let result = initial;\n    let index = 0;\n    while (state.start + index < state.end) {\n      result = reducer(result, index, state.vector.nth(state.start + index));\n      index += 1;\n      if (isReducedValue(result)) return unreducedValue(result);\n    }\n    return result;\n  }\n\n  [EDITABLE_TRANSIENT]() {\n    const state = SUBVECTOR_STATE.get(this);\n    const builder = makeTransientVector(\n      emptyVectorWithMetadata(state.metadata),\n    );\n    for (const value of this) {\n      builder[TRANSIENT_CONJ](value);\n    }\n    return builder;\n  }\n\n  [METADATA_READ]() {\n    return SUBVECTOR_STATE.get(this).metadata;\n  }\n\n  [METADATA_WITH](metadata) {\n    const state = SUBVECTOR_STATE.get(this);\n    return metadata === state.metadata\n      ? this\n      : new PersistentSubVector(\n        state.vector,\n        state.start,\n        state.end,\n        metadata,\n      );\n  }\n\n  [Symbol.iterator]() {\n    const state = SUBVECTOR_STATE.get(this);\n    return vectorRangeIterator(state.vector, state.start, state.end);\n  }\n\n  get [Symbol.toStringTag]() {\n    return \"EliscriptPersistentSubVector\";\n  }\n}\n\nexport const EMPTY_VECTOR = makeVector(0, BRANCH_BITS, EMPTY_ROOT, EMPTY_TAIL);\n\nexport function persistentVector(...values) {\n  return PersistentVector.from(values);\n}\n\nexport function subvec(vector, start, end = undefined) {\n  if (!(vector instanceof PersistentVector)) {\n    throw new TypeError(\"subvec expects a persistent vector\");\n  }\n  const count = vector.count;\n  const limit = end == null ? count : end;\n  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(limit) ||\n      start < 0 || limit < start || limit > count) {\n    throw new RangeError(\n      `subvec range [${String(start)}, ${String(limit)}) is outside [0, ${count}]`,\n    );\n  }\n  if (vector instanceof PersistentSubVector) {\n    const state = SUBVECTOR_STATE.get(vector);\n    return new PersistentSubVector(\n      state.vector,\n      state.start + start,\n      state.start + limit,\n    );\n  }\n  return new PersistentSubVector(vector, start, limit);\n}\n\nexport function isPersistentVector(value) {\n  return value instanceof PersistentVector;\n}\n\n// Bulk transports preserve a view's original base and bounds. Only the\n// constructor-owned WeakMap establishes this brand; user properties do not.\nexport function readPersistentVectorView(value) {\n  return SUBVECTOR_STATE.get(value);\n}\n"))
+(module eliscript.runtime.core.vector
+  (import "./vector-internals.mjs"
+    BRANCH_BITS
+    BRANCH_MASK
+    BRANCH_WIDTH
+    EMPTY_ROOT
+    EMPTY_TAIL
+    TRANSIENT_VECTOR_CONSTRUCTOR_TOKEN
+    TRANSIENT_VECTOR_STATE
+    VECTOR_CONSTRUCTOR_TOKEN
+    VECTOR_STATE
+    VectorNode
+    allocateTail
+    editableVectorNode
+    recordInvalidTransientVectorCall
+    recordRootGrowth
+    recordTransientVectorNodeMutation
+    recordTransientVectorPersistent
+    recordTransientVectorTailCopy
+    recordTransientVectorTailMutation
+    visitNode)
+  (import "./value-internals.mjs"
+    VALUE_EQUAL
+    VALUE_HASH
+    orderedCollectionHash)
+  (import "./collection-internals.mjs"
+    COLLECTION_COUNT
+    COLLECTION_EMPTY
+    COLLECTION_CONJ
+    COLLECTION_GET
+    COLLECTION_ASSOC
+    COLLECTION_CONTAINS
+    COLLECTION_NTH
+    COLLECTION_REDUCE
+    COLLECTION_REDUCE_KV
+    COLLECTION_PEEK
+    COLLECTION_POP
+    COLLECTION_RSEQ
+    COLLECTION_SEQ
+    isReducedValue
+    reduceIterable
+    sequenceView
+    unreducedValue)
+  (import "./transient-internals.mjs"
+    EDITABLE_TRANSIENT
+    TRANSIENT_ASSOC
+    TRANSIENT_CONJ
+    TRANSIENT_PERSISTENT)
+  (import "./metadata-internals.mjs"
+    METADATA_READ
+    METADATA_WITH)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+  (defconst host-generator (js* "(create) => function* (...args) { yield* create(this, ...args); }"))
+  (defconst bit-ushr (js* "(a, b) => a >>> b"))
+  (defconst bit-shl (js* "(a, b) => a << b"))
+  (defconst bit-and (js* "(a, b) => a & b"))
+  (defconst bit-or-zero (js* "(a) => a | 0"))
+  (defconst MAX_COUNT 2147483647)
+  (defconst MISSING (funcall globalThis/Symbol "eliscript.vector.missing"))
+  (defconst VECTOR_HASH_TAG 1327180861)
+  (defconst SUBVECTOR_STATE (new globalThis/WeakMap))
+
+  (defun callable? (value)
+    (= (funcall typeof-value value) "function"))
+
+  (defun method (implementation name arity)
+    (let ((function (funcall
+                      (js* "(fn, name) => ({ [name](...args) { return fn(this, ...args); } })[name]")
+                      implementation
+                      name)))
+      (Object/defineProperty function "length" (js-object :value arity :configurable t))
+      function))
+
+  (defun define-method (target key name arity implementation)
+    (Object/defineProperty
+      target
+      key
+      (js-object
+        :value (method implementation name arity)
+        :writable t
+        :configurable t)))
+
+  (defun define-getter (target key name implementation)
+    (Object/defineProperty
+      target
+      key
+      (js-object
+        :get (method implementation (str "get " name) 0)
+        :configurable t)))
+
+  (defun assert-index (index upper-bound operation)
+    (when (or (not (Number/isInteger index))
+              (< index 0)
+              (>= index upper-bound))
+      (throw (new globalThis/RangeError
+               (str operation " index " (funcall globalThis/String index) " is outside [0, " upper-bound ")")))))
+
+  (defun tail-offset (count)
+    (if (< count BRANCH_WIDTH)
+        0
+        (funcall bit-shl (funcall bit-ushr (- count 1) BRANCH_BITS) BRANCH_BITS)))
+
+  (defun array-for (state index)
+    (if (>= index (tail-offset (get state :count)))
+        (get state :tail)
+        (let ((node (get state :root))
+              (level (get state :shift)))
+          (while (> level 0)
+            (visitNode node)
+            (setq node (get (get node :slots)
+                            (funcall bit-and (funcall bit-ushr index level) BRANCH_MASK))
+                  level (- level BRANCH_BITS)))
+          (visitNode node)
+          (get node :slots))))
+
+  (defun reverse-vector-iterator (state)
+    (let ((index (- (get state :count) 1))
+          (chunk EMPTY_TAIL)
+          (chunk-start (get state :count)))
+      (js-object
+        :next (method
+                (lambda (_self)
+                  (if (< index 0)
+                      (js-object :value undefined :done t)
+                      (progn
+                        (when (< index chunk-start)
+                          (setq chunk (array-for state index)
+                                chunk-start (- index (funcall bit-and index BRANCH_MASK))))
+                        (let ((value (get chunk (- index chunk-start))))
+                          (setq index (- index 1))
+                          (js-object :value value :done false)))))
+                "next"
+                0))))
+
+  (defun vector-range-iterator (vector start end &optional reverse)
+    (let* ((rev (funcall globalThis/Boolean reverse))
+           (index (if rev (- end 1) start)))
+      (js-object
+        :next (method
+                (lambda (_self)
+                  (if (if rev (< index start) (>= index end))
+                      (js-object :value undefined :done t)
+                      (let ((value (js-call vector :nth index)))
+                        (setq index (+ index (if rev -1 1)))
+                        (js-object :value value :done false))))
+                "next"
+                0))))
+
+  (defun new-path (level node)
+    (if (= level 0)
+        node
+        (new VectorNode (js-array (new-path (- level BRANCH_BITS) node)))))
+
+  (defun push-tail (level parent tail-node count)
+    (visitNode parent)
+    (let* ((subindex (funcall bit-and (funcall bit-ushr (- count 1) level) BRANCH_MASK))
+           (slots (js-call (get parent :slots) :slice)))
+      (if (= level BRANCH_BITS)
+          (put slots subindex tail-node)
+          (let ((child (get (get parent :slots) subindex)))
+            (put slots subindex
+                  (if (undefined? child)
+                      (new-path (- level BRANCH_BITS) tail-node)
+                      (push-tail (- level BRANCH_BITS) child tail-node count)))))
+      (new VectorNode slots)))
+
+  (defun assoc-node (level node index value)
+    (visitNode node)
+    (let ((slots (js-call (get node :slots) :slice)))
+      (if (= level 0)
+          (put slots (funcall bit-and index BRANCH_MASK) value)
+          (let ((subindex (funcall bit-and (funcall bit-ushr index level) BRANCH_MASK)))
+            (put slots subindex
+                  (assoc-node
+                    (- level BRANCH_BITS)
+                    (get (get node :slots) subindex)
+                    index
+                    value))))
+      (new VectorNode slots)))
+
+  (defun transient-new-path (level node owner)
+    (if (= level 0)
+        node
+        (new VectorNode
+          (js-array (transient-new-path (- level BRANCH_BITS) node owner))
+          owner)))
+
+  (defun transient-push-tail (level parent tail-node count owner)
+    (visitNode parent)
+    (let* ((editable (editableVectorNode parent owner))
+           (subindex (funcall bit-and (funcall bit-ushr (- count 1) level) BRANCH_MASK)))
+      (if (= level BRANCH_BITS)
+          (put (get editable :slots) subindex tail-node)
+          (let ((child (get (get editable :slots) subindex)))
+            (put (get editable :slots) subindex
+                  (if (undefined? child)
+                      (transient-new-path (- level BRANCH_BITS) tail-node owner)
+                      (transient-push-tail (- level BRANCH_BITS) child tail-node count owner)))))
+      (recordTransientVectorNodeMutation)
+      editable))
+
+  (defun transient-assoc-node (level node index value owner)
+    (visitNode node)
+    (let ((editable (editableVectorNode node owner)))
+      (if (= level 0)
+          (put (get editable :slots) (funcall bit-and index BRANCH_MASK) value)
+          (let ((subindex (funcall bit-and (funcall bit-ushr index level) BRANCH_MASK)))
+            (put (get editable :slots) subindex
+                  (transient-assoc-node
+                    (- level BRANCH_BITS)
+                    (get (get editable :slots) subindex)
+                    index
+                    value
+                    owner))))
+      (recordTransientVectorNodeMutation)
+      editable))
+
+  (defun pop-tail (level node count)
+    (visitNode node)
+    (let ((subindex (funcall bit-and (funcall bit-ushr (- count 2) level) BRANCH_MASK)))
+      (if (> level BRANCH_BITS)
+          (let ((child (pop-tail (- level BRANCH_BITS) (get (get node :slots) subindex) count)))
+            (if (and (undefined? child) (= subindex 0))
+                undefined
+                (let ((slots (js-call (get node :slots) :slice)))
+                  (put slots subindex child)
+                  (new VectorNode slots))))
+          (if (= subindex 0)
+              undefined
+              (let ((slots (js-call (get node :slots) :slice)))
+                (put slots subindex undefined)
+                (new VectorNode slots))))))
+
+  (defun initialize-persistent-vector (self token count shift root tail metadata)
+    (unless (eq token VECTOR_CONSTRUCTOR_TOKEN)
+      (throw (new globalThis.TypeError "PersistentVector values must be created with persistentVector or PersistentVector.from")))
+    (put self VECTOR_STATE (js-object :count count :shift shift :root root :tail tail :metadata metadata))
+    (Object/freeze self))
+
+  (defconst PersistentVector
+    (funcall (js* "(initialize) => class PersistentVector { constructor(token, count, shift, root, tail, metadata = null) { initialize(this, token, count, shift, root, tail, metadata); } }") initialize-persistent-vector))
+
+  (defun make-vector (count shift root tail &optional metadata)
+    (new PersistentVector
+      VECTOR_CONSTRUCTOR_TOKEN
+      count
+      shift
+      root
+      tail
+      (if (undefined? metadata) nil metadata)))
+
+  (defconst EMPTY_VECTOR
+    (make-vector 0 BRANCH_BITS EMPTY_ROOT EMPTY_TAIL))
+
+  (defun empty-vector-with-metadata (metadata)
+    (if (eq metadata nil)
+        EMPTY_VECTOR
+        (make-vector 0 BRANCH_BITS EMPTY_ROOT EMPTY_TAIL metadata)))
+
+  (defun initialize-transient-vector (self token vector)
+    (unless (and (eq token TRANSIENT_VECTOR_CONSTRUCTOR_TOKEN) (funcall instance-of? vector PersistentVector))
+      (throw (new globalThis.TypeError "transient vectors must be created from a persistent vector")))
+    (let ((source (get vector VECTOR_STATE)))
+      (put self TRANSIENT_VECTOR_STATE
+        (js-object :active t :changed false :owner (Object/freeze (js-object)) :source vector
+          :count (get source :count) :shift (get source :shift) :root (get source :root)
+          :tail (get source :tail) :tailOwned false :metadata (get source :metadata))))
+    (Object/defineProperty self "__eliscript_transient__"
+      (js-object :enumerable t :get (funcall (js* "(reject) => ({ get() { return reject(); } }).get") (lambda ()
+        (throw (new globalThis.TypeError "transient vectors cannot be serialized"))))))
+    (Object/freeze self))
+
+  (defconst TransientVector
+    (funcall (js* "(initialize) => class TransientVector { constructor(token, vector) { initialize(this, token, vector); } }") initialize-transient-vector))
+
+  (defun make-transient-vector (vector)
+    (new TransientVector TRANSIENT_VECTOR_CONSTRUCTOR_TOKEN vector))
+
+  (defun active-transient-vector-state (vector)
+    (let ((state (aref vector TRANSIENT_VECTOR_STATE)))
+      (unless (get state :active)
+        (recordInvalidTransientVectorCall)
+        (throw (new globalThis/TypeError "transient vector is no longer editable")))
+      state))
+
+  (defun editable-transient-tail (state)
+    (unless (get state :tailOwned)
+      (put state "tail" (js-call (get state :tail) :slice))
+      (put state "tailOwned" t)
+      (recordTransientVectorTailCopy))
+    (get state :tail))
+
+  (let ((tproto (get TransientVector :prototype)))
+    (define-method tproto TRANSIENT_CONJ "[eliscript.transient.conj]" 1
+      (lambda (self value)
+        (let ((state (active-transient-vector-state self)))
+          (when (= (get state :count) MAX_COUNT)
+            (throw (new globalThis/RangeError
+                     (str "persistent vector cannot exceed " MAX_COUNT " values"))))
+          (if (< (js-length (get state :tail)) BRANCH_WIDTH)
+              (progn
+                (js-call (editable-transient-tail state) :push value)
+                (recordTransientVectorTailMutation))
+              (progn
+                (unless (get state :tailOwned)
+                  (put state "tail" (js-call (get state :tail) :slice))
+                  (recordTransientVectorTailCopy))
+                (let ((tail-node (new VectorNode (get state :tail) (get state :owner))))
+                  (if (> (funcall bit-ushr (get state :count) BRANCH_BITS)
+                         (funcall bit-shl 1 (get state :shift)))
+                      (progn
+                        (put state "root"
+                              (new VectorNode
+                                (js-array
+                                  (get state :root)
+                                  (transient-new-path (get state :shift) tail-node (get state :owner)))
+                                (get state :owner)))
+                        (put state "shift" (+ (get state :shift) BRANCH_BITS))
+                        (recordRootGrowth))
+                      (put state "root"
+                            (transient-push-tail
+                              (get state :shift)
+                              (get state :root)
+                              tail-node
+                              (get state :count)
+                              (get state :owner))))
+                  (put state "tail" (js-array value))
+                  (put state "tailOwned" t)
+                  (recordTransientVectorTailMutation))))
+          (put state "count" (+ (get state :count) 1))
+          (put state "changed" t)
+          self)))
+    (define-method tproto TRANSIENT_ASSOC "[eliscript.transient.assoc]" 2
+      (lambda (self index value)
+        (let ((state (active-transient-vector-state self)))
+          (if (= index (get state :count))
+              (js-call (aref self TRANSIENT_CONJ) :call self value)
+              (progn
+                (assert-index index (get state :count) "assocBang")
+                (if (>= index (tail-offset (get state :count)))
+                    (progn
+                      (put (editable-transient-tail state) (funcall bit-and index BRANCH_MASK) value)
+                      (recordTransientVectorTailMutation))
+                    (put state "root"
+                          (transient-assoc-node
+                            (get state :shift)
+                            (get state :root)
+                            index
+                            value
+                            (get state :owner))))
+                (put state "changed" t)
+                self)))))
+    (define-method tproto TRANSIENT_PERSISTENT "[eliscript.transient.persistent]" 0
+      (lambda (self)
+        (let* ((state (active-transient-vector-state self))
+               (result (if (get state :changed)
+                           (make-vector
+                             (get state :count)
+                             (get state :shift)
+                             (get state :root)
+                             (get state :tail)
+                             (get state :metadata))
+                           (get state :source))))
+          (put state "active" false)
+          (put state "owner" nil)
+          (recordTransientVectorPersistent)
+          result)))
+    (define-method tproto "toJSON" "toJSON" 0
+      (lambda (_self)
+        (throw (new globalThis/TypeError "transient vectors cannot be serialized"))))
+    (define-getter tproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptTransientVector")))
+
+  (defun for-each-iterable (iterable callback)
+    (let ((iterator-method (if (nil? iterable)
+                               undefined
+                               (aref iterable (get globalThis/Symbol :iterator)))))
+      (unless (callable? iterator-method)
+        (throw (new globalThis/TypeError "value is not iterable")))
+      (let ((iterator (js-call iterator-method :call iterable))
+            (done false))
+        (try
+          (while (not done)
+            (let ((step (js-call iterator :next)))
+              (if (funcall globalThis/Boolean (get step :done))
+                  (setq done t)
+                  (funcall callback (get step :value)))))
+          (finally
+            (when (and (not done) (callable? (get iterator :return)))
+              (js-call iterator :return)))))))
+
+  (defun vector-step-iterator (vector)
+    (let ((state (aref vector VECTOR_STATE))
+          (index 0)
+          (chunk nil)
+          (offset 0)
+          (chunk-length 0))
+      (let ((iterator
+              (js-object
+                :next (method
+                        (lambda (_self)
+                          (if (>= index (get state :count))
+                              (js-object :value undefined :done t)
+                              (progn
+                                (when (or (nil? chunk) (>= offset chunk-length))
+                                  (setq chunk (array-for state index)
+                                        offset (funcall bit-and index BRANCH_MASK)
+                                        chunk-length (Math/min (js-length chunk)
+                                                               (- (get state :count) (- index offset)))))
+                                (let ((value (get chunk offset)))
+                                  (setq offset (+ offset 1)
+                                        index (+ index 1))
+                                  (js-object :value value :done false)))))
+                        "next"
+                        0))))
+        (put iterator (get globalThis/Symbol :iterator)
+              (method (lambda (self) self) "[Symbol.iterator]" 0))
+        iterator)))
+
+  (let ((proto (get PersistentVector :prototype)))
+    (define-method PersistentVector "empty" "empty" 0
+      (lambda (_self) EMPTY_VECTOR))
+    (define-method PersistentVector "single" "single" 1
+      (lambda (_self value)
+        (make-vector 1 BRANCH_BITS EMPTY_ROOT (allocateTail (js-array value)) nil)))
+    (define-method PersistentVector "pairWithMeta" "pairWithMeta" 2
+      (lambda (_self first second &rest args)
+        (let ((metadata (if (= (js-length args) 0) nil (get args 0))))
+          (make-vector 2 BRANCH_BITS EMPTY_ROOT (allocateTail (js-array first second)) metadata))))
+    (define-method PersistentVector "rawSlot" "rawSlot" 2
+      (lambda (_self vector index)
+        (get (get (aref vector VECTOR_STATE) :tail) index)))
+    (define-method PersistentVector "from" "from" 1
+      (lambda (_self iterable)
+        (cond
+          ((funcall instance-of? iterable PersistentVector)
+           iterable)
+          ((and (Array/isArray iterable)
+                (eq (Object/getPrototypeOf iterable) (get globalThis/Array :prototype))
+                (not (Object/hasOwn iterable (get globalThis/Symbol :iterator)))
+                (eq (aref iterable (get globalThis/Symbol :iterator))
+                    (aref (get globalThis/Array :prototype) (get globalThis/Symbol :iterator))))
+           (let ((length (js-length iterable)))
+             (cond
+               ((= length 0) EMPTY_VECTOR)
+               ((<= length BRANCH_WIDTH)
+                (make-vector length BRANCH_BITS EMPTY_ROOT (allocateTail (js-call iterable :slice))))
+               (t
+                (let ((root EMPTY_ROOT)
+                      (shift BRANCH_BITS)
+                      (count BRANCH_WIDTH)
+                      (tail (allocateTail (js-call iterable :slice 0 BRANCH_WIDTH))))
+                  (while (< count length)
+                    (let ((next-end (Math/min (+ count BRANCH_WIDTH) length))
+                          (tail-node (new VectorNode tail)))
+                      (if (> (funcall bit-ushr count BRANCH_BITS) (funcall bit-shl 1 shift))
+                          (progn
+                            (setq root (new VectorNode (js-array root (new-path shift tail-node)))
+                                  shift (+ shift BRANCH_BITS))
+                            (recordRootGrowth))
+                          (setq root (push-tail shift root tail-node count)))
+                      (setq tail (allocateTail (js-call iterable :slice count next-end))
+                            count next-end)))
+                  (make-vector length shift root tail))))))
+          (t
+           (let ((result EMPTY_VECTOR))
+             (for-each-iterable iterable (lambda (value) (setq result (js-call result :conj value))))
+             result)))))
+    (define-getter proto "count" "count"
+      (lambda (self) (get (aref self VECTOR_STATE) :count)))
+    (define-getter proto "size" "size"
+      (lambda (self) (get (aref self VECTOR_STATE) :count)))
+    (define-method proto "nth" "nth" 1
+      (lambda (self index &rest args)
+        (let ((not-found (if (= (js-length args) 0) MISSING (get args 0)))
+              (state (aref self VECTOR_STATE)))
+          (if (and (or (eq (funcall bit-or-zero index) index)
+                       (Number/isInteger index))
+                   (>= index 0)
+                   (< index (get state :count)))
+              (if (<= (get state :count) BRANCH_WIDTH)
+                  (let ((value (get (get state :tail) index)))
+                    (when (and (= index 1)
+                               (= (get state :count) 2)
+                               (not (eq (get state :metadata) nil))
+                               (Array/isArray value)
+                               (= (js-length value) 6)
+                               (eq (get value 5) t)
+                               (not (Object/isFrozen value)))
+                      (Object/freeze value))
+                    value)
+                  (get (array-for state index) (funcall bit-and index BRANCH_MASK)))
+              (if (not (eq not-found MISSING))
+                  not-found
+                  (assert-index index (get state :count) "nth"))))))
+    (define-method proto "assoc" "assoc" 2
+      (lambda (self index value)
+        (let ((state (aref self VECTOR_STATE)))
+          (if (= index (get state :count))
+              (js-call self :conj value)
+              (progn
+                (assert-index index (get state :count) "assoc")
+                (if (>= index (tail-offset (get state :count)))
+                    (let ((tail (js-call (get state :tail) :slice)))
+                      (put tail (funcall bit-and index BRANCH_MASK) value)
+                      (make-vector
+                        (get state :count)
+                        (get state :shift)
+                        (get state :root)
+                        (allocateTail tail)
+                        (get state :metadata)))
+                    (make-vector
+                      (get state :count)
+                      (get state :shift)
+                      (assoc-node (get state :shift) (get state :root) index value)
+                      (get state :tail)
+                      (get state :metadata))))))))
+    (define-method proto "conj" "conj" 1
+      (lambda (self value)
+        (let ((state (aref self VECTOR_STATE)))
+          (when (= (get state :count) MAX_COUNT)
+            (throw (new globalThis/RangeError
+                     (str "persistent vector cannot exceed " MAX_COUNT " values"))))
+          (if (< (js-length (get state :tail)) BRANCH_WIDTH)
+              (let ((next-tail (js-call (get state :tail) :slice)))
+                (js-call next-tail :push value)
+                (make-vector
+                  (+ (get state :count) 1)
+                  (get state :shift)
+                  (get state :root)
+                  (allocateTail next-tail)
+                  (get state :metadata)))
+              (let ((tail-node (new VectorNode (get state :tail)))
+                    (shift (get state :shift))
+                    (root nil))
+                (if (> (funcall bit-ushr (get state :count) BRANCH_BITS)
+                       (funcall bit-shl 1 (get state :shift)))
+                    (progn
+                      (setq root (new VectorNode (js-array (get state :root) (new-path (get state :shift) tail-node)))
+                            shift (+ shift BRANCH_BITS))
+                      (recordRootGrowth))
+                    (setq root (push-tail (get state :shift) (get state :root) tail-node (get state :count))))
+                (make-vector
+                  (+ (get state :count) 1)
+                  shift
+                  root
+                  (allocateTail (js-array value))
+                  (get state :metadata)))))))
+    (define-method proto "peek" "peek" 0
+      (lambda (self &rest args)
+        (let ((not-found (if (= (js-length args) 0) nil (get args 0)))
+              (state (aref self VECTOR_STATE)))
+          (if (= (get state :count) 0)
+              not-found
+              (let ((tail (get state :tail)))
+                (get tail (- (js-length tail) 1)))))))
+    (define-method proto "pop" "pop" 0
+      (lambda (self)
+        (let ((state (aref self VECTOR_STATE)))
+          (when (= (get state :count) 0)
+            (throw (new globalThis/RangeError "cannot pop an empty persistent vector")))
+          (cond
+            ((= (get state :count) 1)
+             (empty-vector-with-metadata (get state :metadata)))
+            ((> (js-length (get state :tail)) 1)
+             (make-vector
+               (- (get state :count) 1)
+               (get state :shift)
+               (get state :root)
+               (allocateTail (js-call (get state :tail) :slice 0 -1))
+               (get state :metadata)))
+            (t
+             (let* ((tail (allocateTail (js-call (array-for state (- (get state :count) 2)) :slice)))
+                    (popped (pop-tail (get state :shift) (get state :root) (get state :count)))
+                    (root (if (undefined? popped) EMPTY_ROOT popped))
+                    (shift (get state :shift)))
+               (when (and (> shift BRANCH_BITS)
+                          (undefined? (get (get root :slots) 1)))
+                 (setq root (get (get root :slots) 0)
+                       shift (- shift BRANCH_BITS)))
+               (make-vector
+                 (- (get state :count) 1)
+                 shift
+                 root
+                 tail
+                 (get state :metadata))))))))
+    (define-method proto "reduce" "reduce" 1
+      (lambda (self reducer &rest initial)
+        (unless (callable? reducer)
+          (throw (new globalThis/TypeError "persistent vector reducer must be a function")))
+        (let ((state (aref self VECTOR_STATE))
+              (accumulator undefined)
+              (index 0))
+          (if (= (js-length initial) 0)
+              (progn
+                (when (= (get state :count) 0)
+                  (throw (new globalThis/TypeError "cannot reduce an empty persistent vector without an initial value")))
+                (setq accumulator (js-call self :nth 0)
+                      index 1))
+              (setq accumulator (get initial 0)))
+          (while (< index (get state :count))
+            (let* ((chunk (array-for state index))
+                   (chunk-start (funcall bit-and index BRANCH_MASK))
+                   (chunk-length (Math/min (js-length chunk) (- (get state :count) (- index chunk-start))))
+                   (offset chunk-start))
+              (while (< offset chunk-length)
+                (setq accumulator (funcall reducer accumulator (get chunk offset) index)
+                      index (+ index 1)
+                      offset (+ offset 1)))))
+          accumulator)))
+    (define-method proto COLLECTION_COUNT "[eliscript.collection.count]" 0
+      (lambda (self) (get self :count)))
+    (define-method proto COLLECTION_EMPTY "[eliscript.collection.empty]" 0
+      (lambda (self) (empty-vector-with-metadata (get (aref self VECTOR_STATE) :metadata))))
+    (define-method proto COLLECTION_CONJ "[eliscript.collection.conj]" 1
+      (lambda (self value) (js-call self :conj value)))
+    (define-method proto COLLECTION_PEEK "[eliscript.collection.peek]" 0
+      (lambda (self) (js-call self :peek)))
+    (define-method proto COLLECTION_POP "[eliscript.collection.pop]" 0
+      (lambda (self) (js-call self :pop)))
+    (define-method proto COLLECTION_RSEQ "[eliscript.collection.rseq]" 0
+      (lambda (self)
+        (let ((state (aref self VECTOR_STATE)))
+          (if (= (get state :count) 0)
+              nil
+              (sequenceView (lambda () (reverse-vector-iterator state)) (get state :count))))))
+    (define-method proto COLLECTION_GET "[eliscript.collection.get]" 1
+      (lambda (self index &rest args)
+        (let ((not-found (if (= (js-length args) 0) nil (get args 0))))
+          (js-call self :nth index not-found))))
+    (define-method proto COLLECTION_ASSOC "[eliscript.collection.assoc]" 2
+      (lambda (self index value) (js-call self :assoc index value)))
+    (define-method proto COLLECTION_CONTAINS "[eliscript.collection.contains]" 1
+      (lambda (self index)
+        (and (Number/isInteger index) (>= index 0) (< index (get self :count)))))
+    (define-method proto COLLECTION_NTH "[eliscript.collection.nth]" 1
+      (lambda (self index &rest not-found)
+        (if (= (js-length not-found) 0)
+            (js-call self :nth index)
+            (js-call self :nth index (get not-found 0)))))
+    (define-method proto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+      (lambda (self)
+        (if (= (get self :count) 0)
+            nil
+            (sequenceView
+              (lambda () (js-call (aref self (get globalThis/Symbol :iterator)) :call self))
+              (get self :count)))))
+    (define-method proto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
+      (lambda (self reducer &rest initial)
+        (apply reduceIterable self reducer initial)))
+    (define-method proto COLLECTION_REDUCE_KV "[eliscript.collection.reduceKv]" 2
+      (lambda (self reducer initial)
+        (let ((state (aref self VECTOR_STATE))
+              (result initial)
+              (index 0)
+              (halted false))
+          (while (and (< index (get state :count)) (not halted))
+            (let* ((chunk (array-for state index))
+                   (chunk-start (funcall bit-and index BRANCH_MASK))
+                   (chunk-length (Math/min (js-length chunk) (- (get state :count) (- index chunk-start))))
+                   (offset chunk-start))
+              (while (and (< offset chunk-length) (not halted))
+                (setq result (funcall reducer result index (get chunk offset))
+                      index (+ index 1)
+                      offset (+ offset 1))
+                (when (isReducedValue result)
+                  (setq result (unreducedValue result)
+                        halted t)))))
+          result)))
+    (define-method proto EDITABLE_TRANSIENT "[eliscript.transient.editable]" 0
+      (lambda (self) (make-transient-vector self)))
+    (define-method proto "toArray" "toArray" 0
+      (lambda (self)
+        (js-call self :reduce
+          (lambda (values value)
+            (js-call values :push value)
+            values)
+          (js-array))))
+    (define-method proto "sliceVector" "sliceVector" 2
+      (lambda (self start end)
+        (let* ((state (aref self VECTOR_STATE))
+               (length (- end start)))
+          (cond
+            ((<= length 0) EMPTY_VECTOR)
+            ((and (= start 0) (>= end (get state :count)) (eq (get state :metadata) nil))
+             self)
+            (t
+             (let ((values (new globalThis/Array length))
+                   (out-index 0)
+                   (index start))
+               (while (< index end)
+                 (let* ((chunk (array-for state index))
+                        (chunk-offset (funcall bit-and index BRANCH_MASK))
+                        (chunk-base (- index chunk-offset))
+                        (chunk-end (Math/min (- end chunk-base) (js-length chunk)))
+                        (i chunk-offset))
+                   (while (< i chunk-end)
+                     (put values out-index (get chunk i))
+                     (setq out-index (+ out-index 1)
+                           i (+ i 1)))
+                   (setq index (+ chunk-base chunk-end))))
+               (js-call PersistentVector :from values)))))))
+    (define-method proto VALUE_EQUAL "[eliscript.value.equal]" 2
+      (lambda (self other equal)
+        (cond
+          ((eq self other) t)
+          ((or (not (funcall instance-of? other PersistentVector))
+               (not (= (get other :count) (get self :count))))
+           false)
+          (t
+           (let ((left (js-call (aref self (get globalThis/Symbol :iterator)) :call self))
+                 (right (js-call (aref other (get globalThis/Symbol :iterator)) :call other))
+                 (matched t)
+                 (done false))
+             (while (and matched (not done))
+               (let ((left-step (js-call left :next)))
+                 (if (funcall globalThis/Boolean (get left-step :done))
+                     (setq done t)
+                     (let ((right-step (js-call right :next)))
+                       (unless (funcall globalThis/Boolean (funcall equal (get left-step :value) (get right-step :value)))
+                         (setq matched false))))))
+             matched)))))
+    (define-method proto VALUE_HASH "[eliscript.value.hash]" 1
+      (lambda (self hash)
+        (orderedCollectionHash self hash VECTOR_HASH_TAG)))
+    (define-method proto METADATA_READ "[eliscript.metadata.read]" 0
+      (lambda (self) (get (aref self VECTOR_STATE) :metadata)))
+    (define-method proto METADATA_WITH "[eliscript.metadata.with]" 1
+      (lambda (self metadata)
+        (let ((state (aref self VECTOR_STATE)))
+          (if (eq metadata (get state :metadata))
+              self
+              (make-vector
+                (get state :count)
+                (get state :shift)
+                (get state :root)
+                (get state :tail)
+                metadata)))))
+    (let ((gen-fn (funcall host-generator (lambda (self) (vector-step-iterator self)))))
+      (Object/defineProperty gen-fn "name" (js-object :value "[Symbol.iterator]" :configurable t))
+      (Object/defineProperty gen-fn "length" (js-object :value 0 :configurable t))
+      (Object/defineProperty proto (get globalThis/Symbol :iterator)
+        (js-object :value gen-fn :writable t :configurable t)))
+    (define-getter proto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptPersistentVector")))
+
+  (defun subvector-source (vector) (get vector VECTOR_STATE))
+  (defun initialize-subvector (self vector start end metadata)
+    (js-call SUBVECTOR_STATE :set self (Object/freeze (js-object :vector vector :start start :end end :metadata metadata))))
+  (defconst PersistentSubVector
+    (funcall
+      (js* "(Base, token, sourceOf, initialize) => class PersistentSubVector extends Base { constructor(vector, start, end, metadata = null) { const source = sourceOf(vector); super(token, source.count, source.shift, source.root, source.tail, metadata); initialize(this, vector, start, end, metadata); } }")
+      PersistentVector VECTOR_CONSTRUCTOR_TOKEN subvector-source initialize-subvector))
+
+  (let ((subproto (get PersistentSubVector :prototype)))
+    (define-getter subproto "count" "count"
+      (lambda (self)
+        (let ((state (js-call SUBVECTOR_STATE :get self)))
+          (- (get state :end) (get state :start)))))
+    (define-getter subproto "size" "size"
+      (lambda (self) (get self :count)))
+    (define-method subproto "sliceVector" "sliceVector" 2
+      (lambda (self start end)
+        (let ((state (js-call SUBVECTOR_STATE :get self)))
+          (js-call (get state :vector) :sliceVector (+ (get state :start) start) (+ (get state :start) end)))))
+    (define-method subproto "nth" "nth" 1
+      (lambda (self index &rest args)
+        (let* ((not-found (if (= (js-length args) 0) MISSING (get args 0)))
+               (state (js-call SUBVECTOR_STATE :get self))
+               (count (- (get state :end) (get state :start))))
+          (if (or (not (Number/isInteger index)) (< index 0) (>= index count))
+              (if (not (eq not-found MISSING))
+                  not-found
+                  (assert-index index count "subvec nth"))
+              (js-call (get state :vector) :nth (+ (get state :start) index))))))
+    (define-method subproto "assoc" "assoc" 2
+      (lambda (self index value)
+        (let* ((state (js-call SUBVECTOR_STATE :get self))
+               (count (- (get state :end) (get state :start))))
+          (when (or (not (Number/isInteger index)) (< index 0) (> index count))
+            (throw (new globalThis/RangeError
+                     (str "subvec assoc index " (funcall globalThis/String index) " is outside [0, " count "]"))))
+          (let* ((absolute-index (+ (get state :start) index))
+                 (vector (if (= absolute-index (get (get state :vector) :count))
+                             (js-call (get state :vector) :conj value)
+                             (js-call (get state :vector) :assoc absolute-index value))))
+            (new PersistentSubVector
+              vector
+              (get state :start)
+              (Math/max (get state :end) (+ absolute-index 1))
+              (get state :metadata))))))
+    (define-method subproto "conj" "conj" 1
+      (lambda (self value)
+        (js-call self :assoc (get self :count) value)))
+    (define-method subproto "peek" "peek" 0
+      (lambda (self &rest args)
+        (let ((not-found (if (= (js-length args) 0) nil (get args 0)))
+              (state (js-call SUBVECTOR_STATE :get self)))
+          (if (= (get state :start) (get state :end))
+              not-found
+              (js-call (get state :vector) :nth (- (get state :end) 1))))))
+    (define-method subproto "pop" "pop" 0
+      (lambda (self)
+        (let ((state (js-call SUBVECTOR_STATE :get self)))
+          (when (= (get state :start) (get state :end))
+            (throw (new globalThis/RangeError "cannot pop an empty persistent subvector")))
+          (if (= (- (get state :end) (get state :start)) 1)
+              (empty-vector-with-metadata (get state :metadata))
+              (new PersistentSubVector
+                (get state :vector)
+                (get state :start)
+                (- (get state :end) 1)
+                (get state :metadata))))))
+    (define-method subproto "reduce" "reduce" 1
+      (lambda (self reducer &rest initial)
+        (unless (callable? reducer)
+          (throw (new globalThis/TypeError "persistent subvector reducer must be a function")))
+        (let ((state (js-call SUBVECTOR_STATE :get self))
+              (index 0)
+              (result undefined))
+          (if (= (js-length initial) 0)
+              (progn
+                (when (= (get state :start) (get state :end))
+                  (throw (new globalThis/TypeError
+                           "cannot reduce an empty persistent subvector without an initial value")))
+                (setq result (js-call (get state :vector) :nth (get state :start))
+                      index 1))
+              (setq result (get initial 0)))
+          (while (< index (- (get state :end) (get state :start)))
+            (setq result (funcall reducer result (js-call (get state :vector) :nth (+ (get state :start) index)) index)
+                  index (+ index 1)))
+          result)))
+    (define-method subproto COLLECTION_COUNT "[eliscript.collection.count]" 0
+      (lambda (self) (get self :count)))
+    (define-method subproto COLLECTION_EMPTY "[eliscript.collection.empty]" 0
+      (lambda (self) (empty-vector-with-metadata (get (js-call SUBVECTOR_STATE :get self) :metadata))))
+    (define-method subproto COLLECTION_CONJ "[eliscript.collection.conj]" 1
+      (lambda (self value) (js-call self :conj value)))
+    (define-method subproto COLLECTION_PEEK "[eliscript.collection.peek]" 0
+      (lambda (self) (js-call self :peek)))
+    (define-method subproto COLLECTION_POP "[eliscript.collection.pop]" 0
+      (lambda (self) (js-call self :pop)))
+    (define-method subproto COLLECTION_RSEQ "[eliscript.collection.rseq]" 0
+      (lambda (self)
+        (let ((state (js-call SUBVECTOR_STATE :get self)))
+          (if (= (get state :start) (get state :end))
+              nil
+              (sequenceView
+                (lambda ()
+                  (vector-range-iterator (get state :vector) (get state :start) (get state :end) t))
+                (- (get state :end) (get state :start)))))))
+    (define-method subproto COLLECTION_GET "[eliscript.collection.get]" 1
+      (lambda (self index &rest args)
+        (let ((not-found (if (= (js-length args) 0) nil (get args 0))))
+          (js-call self :nth index not-found))))
+    (define-method subproto COLLECTION_ASSOC "[eliscript.collection.assoc]" 2
+      (lambda (self index value) (js-call self :assoc index value)))
+    (define-method subproto COLLECTION_CONTAINS "[eliscript.collection.contains]" 1
+      (lambda (self index)
+        (and (Number/isInteger index) (>= index 0) (< index (get self :count)))))
+    (define-method subproto COLLECTION_NTH "[eliscript.collection.nth]" 1
+      (lambda (self index &rest not-found)
+        (if (= (js-length not-found) 0)
+            (js-call self :nth index)
+            (js-call self :nth index (get not-found 0)))))
+    (define-method subproto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+      (lambda (self)
+        (if (= (get self :count) 0)
+            nil
+            (sequenceView
+              (lambda () (js-call (aref self (get globalThis/Symbol :iterator)) :call self))
+              (get self :count)))))
+    (define-method subproto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
+      (lambda (self reducer &rest initial)
+        (apply reduceIterable self reducer initial)))
+    (define-method subproto COLLECTION_REDUCE_KV "[eliscript.collection.reduceKv]" 2
+      (lambda (self reducer initial)
+        (let ((state (js-call SUBVECTOR_STATE :get self))
+              (result initial)
+              (index 0)
+              (halted false))
+          (while (and (< (+ (get state :start) index) (get state :end)) (not halted))
+            (setq result (funcall reducer result index (js-call (get state :vector) :nth (+ (get state :start) index)))
+                  index (+ index 1))
+            (when (isReducedValue result)
+              (setq result (unreducedValue result)
+                    halted t)))
+          result)))
+    (define-method subproto EDITABLE_TRANSIENT "[eliscript.transient.editable]" 0
+      (lambda (self)
+        (let* ((state (js-call SUBVECTOR_STATE :get self))
+               (builder (make-transient-vector (empty-vector-with-metadata (get state :metadata)))))
+          (for-each-iterable self (lambda (value) (js-call (aref builder TRANSIENT_CONJ) :call builder value)))
+          builder)))
+    (define-method subproto METADATA_READ "[eliscript.metadata.read]" 0
+      (lambda (self) (get (js-call SUBVECTOR_STATE :get self) :metadata)))
+    (define-method subproto METADATA_WITH "[eliscript.metadata.with]" 1
+      (lambda (self metadata)
+        (let ((state (js-call SUBVECTOR_STATE :get self)))
+          (if (eq metadata (get state :metadata))
+              self
+              (new PersistentSubVector
+                (get state :vector)
+                (get state :start)
+                (get state :end)
+                metadata)))))
+    (define-method subproto (get globalThis/Symbol :iterator) "[Symbol.iterator]" 0
+      (lambda (self)
+        (let ((state (js-call SUBVECTOR_STATE :get self)))
+          (vector-range-iterator (get state :vector) (get state :start) (get state :end)))))
+    (define-getter subproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptPersistentSubVector")))
+
+  (defun persistentVector (&rest values)
+    (js-call PersistentVector :from values))
+
+  (defun subvec (vector start &rest __opt)
+    (unless (funcall instance-of? vector PersistentVector)
+      (throw (new globalThis/TypeError "subvec expects a persistent vector")))
+    (let* ((end (aref __opt 0))
+           (count (get vector :count))
+           (limit (if (undefined? end) count end)))
+      (when (or (not (Number/isSafeInteger start))
+                (not (Number/isSafeInteger limit))
+                (< start 0)
+                (< limit start)
+                (> limit count))
+        (throw (new globalThis/RangeError
+                 (str "subvec range [" (funcall globalThis/String start) ", " (funcall globalThis/String limit) ") is outside [0, " count "]"))))
+      (if (funcall instance-of? vector PersistentSubVector)
+          (let ((state (js-call SUBVECTOR_STATE :get vector)))
+            (new PersistentSubVector
+              (get state :vector)
+              (+ (get state :start) start)
+              (+ (get state :start) limit)))
+          (new PersistentSubVector vector start limit))))
+
+  (defun isPersistentVector (value)
+    (funcall instance-of? value PersistentVector))
+
+  (defun readPersistentVectorView (value)
+    (js-call SUBVECTOR_STATE :get value))
+
+  (Object/defineProperty subvec "length" (js-object :value 2 :configurable t))
+
+  (export
+    PersistentVector
+    EMPTY_VECTOR
+    persistentVector
+    subvec
+    isPersistentVector
+    readPersistentVectorView))

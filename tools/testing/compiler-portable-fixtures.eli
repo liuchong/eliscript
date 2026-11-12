@@ -93,7 +93,7 @@
             (js-call a :closeModule) (js-call a :collect)
             (js-call assert :strictEqual (js-call a :live) 0)
             (js-call assert :strictEqual (get (js-call a :stats) :frameDepth) 0))))))
-  (defconst nativeNodeMemoryOriginalSource "\n    (import \"eliscript:memory32\" load-u32 store-u32 memory-grow)\n    (defun read32 (p) (load-u32 p))\n    (defun write32 (p v) (store-u32 p v))\n    (defun grow (n) (memory-grow n))\n    (defun notify (heap argv) 0)\n    (defun spin (heap argv) (while true (store-u32 64 1)))\n    (export read32 write32 grow notify spin)")
+  (defconst nativeNodeMemoryOriginalSource "\n    (import \"eliscript:memory32\" load-u32 store-u32 memory-grow)\n    (defun read32 (p) (load-u32 p))\n    (defun write32 (p v) (store-u32 p v))\n    (defun grow (n) (memory-grow n))\n    (defun notify (heap argv) 0)\n    (defun spin (heap argv) (while t (store-u32 64 1)))\n    (export read32 write32 grow notify spin)")
   (defun adaptNativeNodeMemoryCompiler (backend)
     (let* ((compiler (get backend :compiler)) (descriptors (Object/getOwnPropertyDescriptors compiler))
            (entry (get descriptors :compile_ir_string)) (original (get entry :value))
@@ -102,7 +102,7 @@
         (let ((forwarded (js-call arguments :slice)))
           (when (= (aref arguments 1) "native-node-memory.eli")
             (js-call assert :strictEqual (aref arguments 0) nativeNodeMemoryOriginalSource)
-            (let ((pieces (js-call (aref arguments 0) :split "(while true (store-u32 64 1))")))
+            (let ((pieces (js-call (aref arguments 0) :split "(while t (store-u32 64 1))")))
               (js-call assert :strictEqual (js-length pieces) 2)
               ;; The memory kernel requires a u32 function result. The loop
               ;; remains infinite; the unreachable zero gives its sequence

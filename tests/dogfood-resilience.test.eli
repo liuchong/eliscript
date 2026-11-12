@@ -1,2 +1,149 @@
-(module capsules.tests.dogfood-resilience.test
-  (js* "import { afterAll, beforeAll, expect, test } from \"bun:test\";\nimport { cp, mkdtemp, readFile, readdir, rm, stat, writeFile } from \"node:fs/promises\";\nimport { createHash } from \"node:crypto\";\nimport { join, resolve } from \"node:path\";\n\nconst ROOT = resolve(import.meta.dir, \"..\");\nconst COMPILER = resolve(ROOT, \"bin/eliscript-build\");\nconst DEMO = resolve(ROOT, \"examples/dogfood/_demo\");\n\nlet staging;\nlet program;\nlet bundle;\nlet project;\nlet configText;\n\nasync function run(command) {\n  const child = Bun.spawn(command, { cwd: ROOT, stdout: \"pipe\", stderr: \"pipe\" });\n  const [exitCode, stdout, stderr] = await Promise.all([\n    child.exited,\n    new Response(child.stdout).text(),\n    new Response(child.stderr).text(),\n  ]);\n  return { exitCode, stdout, stderr };\n}\n\nasync function build(output = \"site\") {\n  return run([\n    process.execPath, program, \"--root\", project, \"--output\", output,\n    \"--browser-bundle\", bundle,\n  ]);\n}\n\n/** A digest of the published tree, so \"unchanged\" is a fact rather than a hope. */\nasync function digestOf(directory) {\n  const digest = createHash(\"sha256\");\n  const walk = async (path, relative) => {\n    let entries;\n    try {\n      entries = await readdir(path, { withFileTypes: true });\n    } catch {\n      return;\n    }\n    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {\n      const child = join(path, entry.name);\n      const name = relative ? `${relative}/${entry.name}` : entry.name;\n      if (entry.isDirectory()) await walk(child, name);\n      else {\n        digest.update(name);\n        digest.update(await readFile(child));\n      }\n    }\n  };\n  await walk(directory, \"\");\n  return digest.digest(\"hex\");\n}\n\n/** Replaces the configured sources with the given declaration text. */\nfunction withSources(text, declaration) {\n  const replaced = text.replace(/:sources\\n\\s*\\[[\\s\\S]*?\\]\\n/u, `:sources\\n     ${declaration}\\n`);\n  if (replaced === text) throw new Error(\"the configuration sources were not replaced\");\n  return replaced;\n}\n\nasync function exists(path) {\n  try {\n    await stat(path);\n    return true;\n  } catch {\n    return false;\n  }\n}\n\nbeforeAll(async () => {\n  staging = await mkdtemp(resolve(ROOT, \".eliscript-dogfood-resilience-\"));\n  const built = await run([\n    COMPILER, \"--no-cache\", \"--root\", \"examples/dogfood\", \"--out-dir\",\n    join(staging, \"build\"), \"examples/dogfood/src/builder/main.eli\",\n  ]);\n  if (built.exitCode !== 0) throw new Error(built.stderr.trim() || built.stdout.trim());\n  program = join(staging, \"build/src/builder/main.mjs\");\n\n  const browser = await run([\n    COMPILER, \"--no-cache\", \"--root\", \"examples/dogfood\", \"--out-dir\",\n    join(staging, \"browser-source\"), \"examples/dogfood/src/renderer/browser.eli\",\n  ]);\n  if (browser.exitCode !== 0) throw new Error(browser.stderr.trim() || browser.stdout.trim());\n  bundle = join(staging, \"browser.js\");\n  const bundled = await run([\n    \"bun\", \"build\", join(staging, \"browser-source/src/renderer/browser.mjs\"),\n    \"--target=browser\", \"--format=iife\", \"--outfile\", bundle,\n  ]);\n  if (bundled.exitCode !== 0) throw new Error(bundled.stderr.trim() || bundled.stdout.trim());\n\n  project = join(staging, \"project\");\n  await cp(DEMO, project, { recursive: true });\n  configText = await readFile(join(project, \"dogfood.config.eli\"), \"utf8\");\n});\n\nafterAll(async () => {\n  if (staging) await rm(staging, { recursive: true, force: true });\n});\n\ntest(\"a source that returns nothing produces a site without it\", async () => {\n  // The demo project has one Markdown source; an empty directory is still a\n  // source, and a build must not invent articles for it.\n  await writeFile(\n    join(project, \"dogfood.config.eli\"),\n    withSources(\n      configText,\n      '[{:id :local :kind :markdown :enabled t :directory \"empty/posts\"}\\n'\n      + '      {:id :more-posts :kind :markdown :enabled t :directory \"content/posts\"}]',\n    ),\n    \"utf8\",\n  );\n  await run([\"mkdir\", \"-p\", join(project, \"empty/posts\")]);\n  const result = await build();\n  expect(result.exitCode).toBe(0);\n  const archive = await readFile(join(project, \"site/archive/index.html\"), \"utf8\");\n  expect(archive).toContain(\"posts/\");\n});\n\n// These two cases cross the real network boundary on purpose: the point is\n// that a failing provider is reported rather than crashing, and a substituted\n// transport would not prove that. A slow or unavailable network is therefore\n// part of the fixture, so they get more room than the default timeout.\nconst NETWORK_TIMEOUT = 30_000;\n\ntest(\"a provider failure ends the build without touching the published tree\", { timeout: NETWORK_TIMEOUT }, async () => {\n  await writeFile(join(project, \"dogfood.config.eli\"), configText, \"utf8\");\n  const first = await build();\n  expect(first.exitCode).toBe(0);\n  const published = await digestOf(join(project, \"site\"));\n  expect(published).toMatch(/^[0-9a-f]{64}$/u);\n\n  // The remote source cannot answer: there is no token and no such repository.\n  await writeFile(\n    join(project, \"dogfood.config.eli\"),\n    withSources(\n      configText,\n      '[{:id :local :kind :markdown :enabled t :directory \"content/posts\"}\\n'\n      + '      {:id :notes :kind :issues :enabled t'\n      + ' :repository \"owner/a-repository-that-does-not-exist\" :label \"published\"}]',\n    ),\n    \"utf8\",\n  );\n  const failed = await build();\n  expect(failed.exitCode).toBe(1);\n  expect(failed.stdout).toMatch(/DOGFOOD-GITHUB-\\d+/u);\n\n  // The previous publication is intact and no half-written tree is left.\n  expect(await digestOf(join(project, \"site\"))).toBe(published);\n  expect(await exists(join(project, \"site.staging\"))).toBe(false);\n  expect(await exists(join(project, \"site.backup\"))).toBe(false);\n});\n\ntest(\"a Discussion provider failure is reported with its own code\", { timeout: NETWORK_TIMEOUT }, async () => {\n  await writeFile(\n    join(project, \"dogfood.config.eli\"),\n    withSources(\n      configText,\n      '[{:id :local :kind :markdown :enabled t :directory \"content/posts\"}\\n'\n      + '      {:id :talks :kind :discussions :enabled t'\n      + ' :repository \"owner/a-repository-that-does-not-exist\" :category \"Blog\"}]',\n    ),\n    \"utf8\",\n  );\n  const failed = await build();\n  expect(failed.exitCode).toBe(1);\n  expect(failed.stdout).toMatch(/DOGFOOD-GITHUB-\\d+|DOGFOOD-DISCUSSIONS-\\d+/u);\n  expect(await exists(join(project, \"site.staging\"))).toBe(false);\n});\n\ntest(\"a failed configuration leaves the published tree alone as well\", async () => {\n  const before = await digestOf(join(project, \"site\"));\n  await writeFile(\n    join(project, \"dogfood.config.eli\"),\n    configText.replace(\":schema-version 1\", \":schema-version 1 :mystery t\"),\n    \"utf8\",\n  );\n  const failed = await build();\n  expect(failed.exitCode).toBe(1);\n  expect(failed.stdout).toContain(\"DOGFOOD-CONFIG-006\");\n  expect(await digestOf(join(project, \"site\"))).toBe(before);\n});\n"))
+(module
+  tests.dogfood-resilience.test
+  (import "bun:test" afterAll beforeAll expect test)
+  (import "node:fs/promises" cp mkdtemp readFile readdir rm stat writeFile)
+  (import "node:crypto" createHash)
+  (import "node:path" join resolve)
+  (defconst
+    ROOT
+    (resolve (get (js* "import.meta") :dir) ".."))
+  (defconst
+    COMPILER
+    (resolve ROOT "bin/eliscript-build"))
+  (defconst
+    DEMO
+    (resolve ROOT "examples/dogfood/_demo"))
+  (defconst
+    NETWORK_TIMEOUT
+    30000)
+  (defconst
+    state
+    (js-object :staging nil :program nil :bundle nil :project nil :configText nil))
+  (defasync
+    run
+    (command)
+    (let*
+      ((child (js-call globalThis.Bun :spawn command (js-object :cwd ROOT :stdout "pipe" :stderr "pipe"))) (results (await (js-call globalThis.Promise :all (js-array (get child :exited) (js-call (new globalThis.Response (get child :stdout)) :text) (js-call (new globalThis.Response (get child :stderr)) :text))))))
+      (js-object :exitCode (aref results 0) :stdout (aref results 1) :stderr (aref results 2))))
+  (defasync
+    build
+    (&rest __host_forwarded_arguments_1)
+    (let* ((output (aref __host_forwarded_arguments_1 0)))
+    (run (js-array (get globalThis.process :execPath) (get state :program) "--root" (get state :project) "--output" (or output "site") "--browser-bundle" (get state :bundle)))))
+  (defasync
+    walk-digest
+    (digest path relative)
+    (let*
+      ((entries (try
+            (await (readdir path (js-object :withFileTypes t)))
+            (catch
+              _
+              nil))))
+      (when
+        entries
+        (let*
+          ((sorted (js-call entries :sort (lambda (left right) (js-call (get left :name) :localeCompare (get right :name))))) (idx (js-object :i 0)))
+          (while
+            (< (get idx :i) (get sorted :length))
+            (let*
+              ((entry (aref sorted (get idx :i))) (child (join path (get entry :name))) (name (if
+                    (= relative "")
+                    (get entry :name)
+                    (str relative "/" (get entry :name)))))
+              (if
+                (js-call entry :isDirectory)
+                (await (walk-digest digest child name))
+                (progn
+                  (js-call digest :update name)
+                  (js-call digest :update (await (readFile child))))))
+            (put idx :i (+ (get idx :i) 1)))))))
+  (defasync
+    digestOf
+    (directory)
+    (let*
+      ((digest (createHash "sha256")))
+      (await (walk-digest digest directory ""))
+      (js-call digest :digest "hex")))
+  (defun
+    withSources
+    (text declaration)
+    (let*
+      ((replaced (js-call text :replace (new globalThis.RegExp ":sources\\n\\s*\\[[\\s\\S]*?\\]\\n" "u") (str ":sources\n     " declaration "\n"))))
+      (when
+        (= replaced text)
+        (throw (new globalThis.Error "the configuration sources were not replaced")))
+      replaced))
+  (defasync
+    exists
+    (path)
+    (try
+      (progn
+        (await (stat path))
+        t)
+      (catch
+        _
+        false)))
+  (beforeAll (async () (let*
+        ((staging (await (mkdtemp (resolve ROOT ".eliscript-dogfood-resilience-")))) (__ign_6 (put state :staging staging)) (built (await (run (js-array COMPILER "--no-cache" "--root" "examples/dogfood" "--out-dir" (join staging "build") "examples/dogfood/src/builder/main.eli")))))
+        (when
+          (not= (get built :exitCode) 0)
+          (throw (new globalThis.Error (or (js-call (get built :stderr) :trim) (js-call (get built :stdout) :trim)))))
+        (put state :program (join staging "build/src/builder/main.mjs"))
+        (let*
+          ((browser (await (run (js-array COMPILER "--no-cache" "--root" "examples/dogfood" "--out-dir" (join staging "browser-source") "examples/dogfood/src/renderer/browser.eli")))))
+          (when
+            (not= (get browser :exitCode) 0)
+            (throw (new globalThis.Error (or (js-call (get browser :stderr) :trim) (js-call (get browser :stdout) :trim)))))
+          (let*
+            ((bundle (join staging "browser.js")) (__ign_7 (put state :bundle bundle)) (bundled (await (run (js-array "bun" "build" (join staging "browser-source/src/renderer/browser.mjs") "--target=browser" "--format=iife" "--outfile" bundle)))))
+            (when
+              (not= (get bundled :exitCode) 0)
+              (throw (new globalThis.Error (or (js-call (get bundled :stderr) :trim) (js-call (get bundled :stdout) :trim)))))
+            (let*
+              ((project (join staging "project")))
+              (put state :project project)
+              (await (cp DEMO project (js-object :recursive t)))
+              (put state :configText (await (readFile (join project "dogfood.config.eli") "utf8")))))))))
+  (afterAll (async () (when
+        (get state :staging)
+        (await (rm (get state :staging) (js-object :recursive t :force t))))))
+  (test "a source that returns nothing produces a site without it" (async () (let*
+        ((project (get state :project)) (configText (get state :configText)))
+        (await (writeFile (join project "dogfood.config.eli") (withSources configText "[{:id :local :kind :markdown :enabled t :directory \"empty/posts\"}\n      {:id :more-posts :kind :markdown :enabled t :directory \"content/posts\"}]") "utf8"))
+        (await (run (js-array "mkdir" "-p" (join project "empty/posts"))))
+        (let*
+          ((result (await (build))))
+          (js-call (expect (get result :exitCode)) :toBe 0)
+          (let*
+            ((archive (await (readFile (join project "site/archive/index.html") "utf8"))))
+            (js-call (expect archive) :toContain "posts/"))))))
+  (test "a provider failure ends the build without touching the published tree" (js-object :timeout NETWORK_TIMEOUT) (async () (let*
+        ((project (get state :project)) (configText (get state :configText)))
+        (await (writeFile (join project "dogfood.config.eli") configText "utf8"))
+        (let*
+          ((first (await (build))) (__ign_8 (js-call (expect (get first :exitCode)) :toBe 0)) (published (await (digestOf (join project "site")))))
+          (js-call (expect published) :toMatch (new globalThis.RegExp "^[0-9a-f]{64}$" "u"))
+          (await (writeFile (join project "dogfood.config.eli") (withSources configText "[{:id :local :kind :markdown :enabled t :directory \"content/posts\"}\n      {:id :notes :kind :issues :enabled t :repository \"owner/a-repository-that-does-not-exist\" :label \"published\"}]") "utf8"))
+          (let*
+            ((failed (await (build))))
+            (js-call (expect (get failed :exitCode)) :toBe 1)
+            (js-call (expect (get failed :stdout)) :toMatch (new globalThis.RegExp "DOGFOOD-GITHUB-\\d+" "u"))
+            (js-call (expect (await (digestOf (join project "site")))) :toBe published)
+            (js-call (expect (await (exists (join project "site.staging")))) :toBe false)
+            (js-call (expect (await (exists (join project "site.backup")))) :toBe false))))))
+  (test "a Discussion provider failure is reported with its own code" (js-object :timeout NETWORK_TIMEOUT) (async () (let*
+        ((project (get state :project)) (configText (get state :configText)))
+        (await (writeFile (join project "dogfood.config.eli") (withSources configText "[{:id :local :kind :markdown :enabled t :directory \"content/posts\"}\n      {:id :talks :kind :discussions :enabled t :repository \"owner/a-repository-that-does-not-exist\" :category \"Blog\"}]") "utf8"))
+        (let*
+          ((failed (await (build))))
+          (js-call (expect (get failed :exitCode)) :toBe 1)
+          (js-call (expect (get failed :stdout)) :toMatch (new globalThis.RegExp "DOGFOOD-GITHUB-\\d+|DOGFOOD-DISCUSSIONS-\\d+" "u"))
+          (js-call (expect (await (exists (join project "site.staging")))) :toBe false)))))
+  (test "a failed configuration leaves the published tree alone as well" (async () (let*
+        ((project (get state :project)) (configText (get state :configText)) (before (await (digestOf (join project "site")))))
+        (await (writeFile (join project "dogfood.config.eli") (js-call configText :replace ":schema-version 1" ":schema-version 1 :mystery t") "utf8"))
+        (let*
+          ((failed (await (build))))
+          (js-call (expect (get failed :exitCode)) :toBe 1)
+          (js-call (expect (get failed :stdout)) :toContain "DOGFOOD-CONFIG-006")
+          (js-call (expect (await (digestOf (join project "site")))) :toBe before))))))

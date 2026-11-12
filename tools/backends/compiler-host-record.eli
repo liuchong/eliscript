@@ -1,0 +1,13 @@
+(module tools.backends.compiler-host-record
+  (import "./compiler-host-iteration.mjs" openHostIterator advanceHostIterator closeHostIterator)
+  ;; CopyDataProperties for maintained host-boundary records. Define own data
+  ;; properties rather than invoking a destination's inherited setters.
+  (defun copyHostRecord (&rest sources)
+    (let ((result (js-object)))
+      (let ((__eli_iterator_3 (openHostIterator sources))) (try (while (advanceHostIterator __eli_iterator_3) (let ((source (get __eli_iterator_3 :value))) (unless (nullish? source)
+          (let ((object (funcall globalThis.Object source)))
+            (let ((__eli_iterator_1 (openHostIterator (Reflect/ownKeys object)))) (try (while (advanceHostIterator __eli_iterator_1) (let ((key (get __eli_iterator_1 :value))) (let ((descriptor (Reflect/getOwnPropertyDescriptor object key)))
+                (when (and (not (undefined? descriptor)) (get descriptor :enumerable))
+                  (Object/defineProperty result key
+                    (js-object :value (Reflect/get object key) :writable t :enumerable t :configurable t)))))) (catch __eli_iteration_error_2 (closeHostIterator __eli_iterator_1 t) (throw __eli_iteration_error_2)) (finally (closeHostIterator __eli_iterator_1 false)))))))) (catch __eli_iteration_error_4 (closeHostIterator __eli_iterator_3 t) (throw __eli_iteration_error_4)) (finally (closeHostIterator __eli_iterator_3 false)))) result))
+  (export copyHostRecord))

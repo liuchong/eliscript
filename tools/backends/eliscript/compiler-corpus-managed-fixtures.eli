@@ -7,7 +7,7 @@
   (import "../../dist/bootstrap/compiler.mjs" compile-string compile-ir-string)
   (import "../../dist/bootstrap/emitter.mjs" emit-top-level)
   (import "./compiler-corpus-managed-fixtures-ground.mjs" :as ground)
-  (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
+  (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators originalPredicateSourceCases originalIntegritySourceCases)
   (import "./compiler-corpus-managed-adapters.mjs" originalManagedProgramCompletionSource)
   (import "./compiler-corpus-process.mjs" readOriginalProcessHostDependency bindOriginalProcessHostDependency)
 
@@ -29,7 +29,7 @@
   (defconst browser-suite-plans (js-array
     (js-object :suite "tests/wasm-managed-array-search.test.mjs"
       :archive "tests/wasm-managed-array-search-test-ground.mjs"
-      :sha256 "77b0266420b697cc216cf13fc6d8d1d189318dca8fc48f0d9fd478e321c9ecc2" :count 11
+      :sha256 "5f54aeac3637d167547ebdcdd72f1d8f6c76532a7b7832621e9cf10b5467e29d" :count 11
       :pairs (js-array
         (js-array "tests/eliscript/managed-array-search.eli" "tests/wasm-managed-array-search.test.mjs")
         (js-array "tests/eliscript/managed-array-search-node.eli" "tests/helpers/managed-array-search-node.mjs")
@@ -43,7 +43,7 @@
         "tests/fixtures/managed-array-search-conversion.eli"))
     (js-object :suite "tests/wasm-managed-symbols.test.mjs"
       :archive "tests/wasm-managed-symbols-test-ground.mjs"
-      :sha256 "fe0fd09cd43e80b01617570dc7913d3a0bd006f8c0a7f0a945de3072a3efdbc6" :count 35
+      :sha256 "d2f4d987d964925456f7c3fe91ec2ed36fbc007b8cae8b064f993bb0bdbea8fd" :count 35
       :pairs (js-array
         (js-array "tests/eliscript/managed-symbols.eli" "tests/wasm-managed-symbols.test.mjs")
         (js-array "tests/eliscript/managed-symbols-node.eli" "tests/helpers/managed-symbols-node.mjs")
@@ -53,7 +53,7 @@
       :fixtures (js-array "tests/fixtures/wasm-managed-symbols.eli"))
     (js-object :suite "tests/wasm-managed-object-properties.test.mjs"
       :archive "tests/wasm-managed-object-properties-test-ground.mjs"
-      :sha256 "56ed33c421d2aa7912c94fa50d807f1a40b4798418d0154779bd991bee057653" :count 20
+      :sha256 "aeb2b0cb24db6780a60b89405987a94dd93da656786f1a969ea0bb81c7190a9e" :count 20
       :pairs (js-array
         (js-array "tests/eliscript/managed-object-properties.eli" "tests/wasm-managed-object-properties.test.mjs")
         (js-array "tests/eliscript/managed-object-properties-node.eli" "tests/helpers/managed-object-properties-node.mjs")
@@ -69,7 +69,7 @@
         "tests/fixtures/managed-object-properties-descriptor-probes.eli"))
     (js-object :suite "tests/wasm-managed-array-construction.test.mjs"
       :archive "tests/wasm-managed-array-construction-test-ground.mjs"
-      :sha256 "456846a3f8356e9fa7cedd60561e2080e07895127b30c39d6266cef1e361b646" :count 20
+      :sha256 "cb10ce262a1af6e403cd78b7d5e5afac6c178bb24ee9f61a21b250c4f469df20" :count 20
       :pairs (js-array
         (js-array "tests/eliscript/managed-array-construction.eli" "tests/wasm-managed-array-construction.test.mjs")
         (js-array "tests/eliscript/managed-array-construction-node.eli" "tests/helpers/managed-array-construction-node.mjs")
@@ -201,7 +201,7 @@
              (js-array "tests/eliscript/wasm-static-snapshot-install.eli" "tests/helpers/wasm-static-snapshot-install.mjs")
              (js-array "tests/eliscript/wasm-static-snapshot-fixture.eli" "tests/wasm-static-snapshot-fixture-selfhosted.test.mjs")))
            (index 0))
-      (unless (and (= (get proof :sourceSha256) "060bb7f392c7d1978815f66b34fe1de601fa5d64d4d410e1d363e3bc424e41bc")
+      (unless (and (= (get proof :sourceSha256) "ad8c6c48bf1a732d3b2a86b0cc4e31d27900939486516b8e176a489597a81332")
                    (= (js-length cases) 19))
         (throw (new globalThis.TypeError "original static-data fixture suite identity or case inventory changed")))
       (while (< index (js-length pairs))
@@ -240,13 +240,13 @@
         (Object/assign (js-object) original (js-object :sourceAssets assets :staticDataFixtureMigration migration))))))
   (defconst final-fixture-plans (js-array
     (js-object :suite "tests/wasm-managed-runtime.test.mjs" :archive "tests/wasm-managed-runtime-test-ground.mjs"
-      :sha256 "0b240d3dff9164f23edf534b5a79598948b80f001e9316fa0f37e55a40f0fed2" :count 64 :replay t
+      :sha256 "3eeb17219d0881366d53943b82e67213b88da15e00422d2a8c214e83007bf415" :count 64 :replay t
       :pairs (js-array
         (js-array "tests/eliscript/wasm-managed-runtime.eli" "tests/wasm-managed-runtime.test.mjs")
         (js-array "tests/eliscript/managed-runtime-cases.eli" "tests/helpers/managed-runtime-cases.mjs")
         (js-array "tests/eliscript/managed-runtime-install.eli" "tests/helpers/managed-runtime-install.mjs")))
     (js-object :suite "tests/wasm-managed-wire.test.mjs" :executedSuite "tests/wasm-managed-wire-selfhosted.test.mjs"
-      :archive "tests/wasm-managed-wire-test-ground.mjs" :sha256 "05835e2d5f6fd6e973a052df3389cafb3e131fbcfce305272070b13d20453df0" :count 5 :replay t
+      :archive "tests/wasm-managed-wire-test-ground.mjs" :sha256 "f799b8f9557288ade36df506fdd77dafb40d144159bc3168636c1f0c1674a0d2" :count 5 :replay t
       :inputs (js-array "stdlib/managed-wire-http-rpc.eli" "stdlib/managed-wire-schema.eli" "stdlib/managed-wire-markdown.eli")
       :pairs (js-array
         (js-array "tools/testing/wire-project-fixture.eli" "tools/testing/wire-project-fixture.mjs")
@@ -257,32 +257,32 @@
         (js-array "tests/eliscript/wire-default-node.eli" "tests/helpers/wire-default-node.mjs")
         (js-array "tests/eliscript/wire-project-fixture.eli" "tests/wire-project-fixture-selfhosted.test.mjs")))
     (js-object :suite "tests/wasm-managed-source-collections.test.mjs" :archive "tests/wasm-managed-source-collections-test-ground.mjs"
-      :sha256 "544c284cd764eaa7dfa82cb5834fd7463a9eebf11f15b8e43a133e8634193215" :count 17 :replay t
+      :sha256 "af5668131358665fc6e4f1406cd7c23f951f93ff2f7497d224b21abe4864327e" :count 17 :replay t
       :pairs (js-array
         (js-array "tests/eliscript/managed-source-collections-test.eli" "tests/wasm-managed-source-collections.test.mjs")
         (js-array "tests/eliscript/managed-collection-affected.eli" "tests/helpers/managed-collection-affected.mjs")
         (js-array "tests/eliscript/managed-collection-install.eli" "tests/helpers/managed-collection-install.mjs")))
     (js-object :suite "tests/wasm-managed-collection-for-each.test.mjs" :archive "tests/wasm-managed-collection-for-each-test-ground.mjs"
-      :sha256 "793522a737ca6493ec25fa763a8b1251c17460ff98d9c5ac04eba2e4ebab3cfd" :count 11 :replay false
+      :sha256 "cd713977f7871090a4fc459a5527b13e87a9cfe3aae713bcd2feb562008fb3df" :count 11 :replay false
       :pairs (js-array
         (js-array "tests/eliscript/managed-collection-for-each-test.eli" "tests/wasm-managed-collection-for-each.test.mjs")
         (js-array "tests/eliscript/managed-collection-affected.eli" "tests/helpers/managed-collection-affected.mjs")
         (js-array "tests/eliscript/managed-collection-install.eli" "tests/helpers/managed-collection-install.mjs")))
     (js-object :suite "tests/compiler-response-events.test.mjs" :archive "tests/compiler-response-events-test-ground.mjs"
-      :sha256 "7fd4730b201a32a56dcd50ae3deaed752f64fe104b2c7e9ee28e563384be26e7" :count 25 :replay false
+      :sha256 "ff3379f2a92d29df6b33789687f4aba37cd3d3a34868fb9ff1a470760dbc8be9" :count 25 :replay false
       :inputs (js-array "bootstrap/host/compiler-session.eli" "bootstrap/host/compiler-tools.eli")
       :pairs (js-array
         (js-array "tests/eliscript/compiler-response-events.eli" "tests/compiler-response-events.test.mjs")
         (js-array "tests/eliscript/response-identities-install.eli" "tests/helpers/response-identities-install.mjs")
         (js-array "tests/eliscript/response-identities.eli" "tests/helpers/response-identities.mjs")))
     (js-object :suite "tests/wasm-managed-transient-state.test.mjs" :archive "tests/wasm-managed-transient-state.test.mjs"
-      :sha256 "cef9524c8f9e95420ba13b0ce4189ac7e171ea662a92275b89c01c828f4f1f19" :count 4 :replay t
+      :sha256 "2ebd14fe50e3ef3e3fe8becb0fe190781738fe7852cd3a95496dc0926dfab0e7" :count 4 :replay t
       :pairs (js-array
         (js-array "tests/eliscript/standard-library-fixture.eli" "tests/helpers/standard-library-fixture.mjs")
         (js-array "tests/eliscript/standard-library-fixture-install.eli" "tests/helpers/standard-library-fixture-install.mjs")
         (js-array "tests/eliscript/standard-library-fixture-tests.eli" "tests/standard-library-fixture-selfhosted.test.mjs")))
     (js-object :suite "tests/wasm-managed-core-modules.test.mjs" :archive "tests/wasm-managed-core-modules.test.mjs"
-      :sha256 "0925889b35d1a8c2f2d0142a0bfe9ff9f2e249d87221ca09afd50f4730673140" :count 4 :replay t
+      :sha256 "2c41d89f6766e7a0aa5f53cec324488c7419744a422736f8c7d721bf15babfb9" :count 4 :replay t
       :pairs (js-array
         (js-array "tests/eliscript/standard-library-fixture.eli" "tests/helpers/standard-library-fixture.mjs")
         (js-array "tests/eliscript/standard-library-fixture-install.eli" "tests/helpers/standard-library-fixture-install.mjs")
@@ -296,62 +296,62 @@
         (js-array "tests/eliscript/standard-library-fixture-install.eli" "tests/helpers/standard-library-fixture-install.mjs")
         (js-array "tests/eliscript/standard-library-fixture-tests.eli" "tests/standard-library-fixture-selfhosted.test.mjs")))
     (js-object :suite "tests/wasm-managed-primitive-properties.test.mjs" :archive "tests/wasm-managed-primitive-properties-test-ground.mjs"
-      :sha256 "4bc4538a02623f53c7ef8e54ad62fa047afddb9c6a1e78923a0e4bcea8a60a98" :count 11 :replay false
+      :sha256 "002b75456ce00299e9e609a038b84db22e60c52391665be8a16aa1da2300f7e4" :count 11 :replay false
       :pairs (js-array
         (js-array "tests/eliscript/wasm-managed-primitive-properties.eli" "tests/wasm-managed-primitive-properties.test.mjs")
         (js-array "tests/eliscript/managed-primitive-properties-install.eli" "tests/helpers/managed-primitive-properties-install.mjs")
         (js-array "tests/eliscript/managed-primitive-properties-cases.eli" "tests/helpers/managed-primitive-properties-cases.mjs")))
     (js-object :suite "tests/wasm-managed-objects.test.mjs" :archive "tests/wasm-managed-objects-test-ground.mjs"
-      :sha256 "d7901f1e2223b8b094df57f7dcdd56ad9c1938da84c89d57f5ab7752fc64241f" :count 23 :replay false
+      :sha256 "d82df73a1dde99292fd85b5b6d9ccac7cbbaf386ef4b1c7878c50ea83846f843" :count 23 :replay false
       :pairs (js-array
         (js-array "tests/eliscript/wasm-managed-objects.eli" "tests/wasm-managed-objects.test.mjs")
         (js-array "tests/eliscript/managed-container-cases.eli" "tests/helpers/managed-container-cases.mjs")
         (js-array "tests/eliscript/managed-container-install.eli" "tests/helpers/managed-container-install.mjs")))
     (js-object :suite "tests/wasm-managed-arrays.test.mjs" :archive "tests/wasm-managed-arrays-test-ground.mjs"
-      :sha256 "d7748ae39c13fe9b5e7ba31e866ef2868c279e161673406ab2fe244b192d89d4" :count 24 :replay false
+      :sha256 "dc57d5a9ccf05c1928a05cd5ba6729829477746a684a054a1e7e27e52c70e781" :count 24 :replay false
       :pairs (js-array
         (js-array "tests/eliscript/wasm-managed-arrays.eli" "tests/wasm-managed-arrays.test.mjs")
         (js-array "tests/eliscript/managed-container-cases.eli" "tests/helpers/managed-container-cases.mjs")
         (js-array "tests/eliscript/managed-container-install.eli" "tests/helpers/managed-container-install.mjs")))
     (js-object :suite "tests/backend-cli-isolation.test.mjs" :archive "tests/backend-cli-isolation-test-ground.mjs"
-      :sha256 "fa389b5fa4c92bcb80611132397a29c58d6403952eef6bae69ee302619895a72" :count 5 :replay false
+      :sha256 "406a2a984c7ff046422eca3ff5064a26d351ac59712f52008c1fabb23e29ddf4" :count 5 :replay false
       :pairs (js-array (js-array "tests/eliscript/backend-cli-isolation.eli" "tests/backend-cli-isolation.test.mjs")))
     (js-object :suite "tests/wasm-managed-project-sharing.test.mjs" :archive "tests/wasm-managed-project-sharing.test.mjs"
-      :sha256 "ff2fb797683678c45f4b9d28f0ac81a73a3e1fba27fd9a5319d7a4cbcbb90e87" :count 16 :replay false
+      :sha256 "6d1aa4324a50eb91d602b0db246de3676fcee1b3c0a7b2ad3fe5f7e0cea71306" :count 16 :replay false
       :pairs (js-array
         (js-array "tools/testing/managed-sharing-fixture.eli" "tools/testing/managed-sharing-fixture.mjs")
         (js-array "tests/eliscript/managed-sharing-fixture-install.eli" "tests/helpers/managed-sharing-fixture-install.mjs")
         (js-array "tests/eliscript/managed-sharing-fixture.eli" "tests/managed-sharing-fixture-selfhosted.test.mjs")))
     (js-object :suite "tests/wasm-managed-builtins.test.mjs" :archive "tests/wasm-managed-builtins-test-ground.mjs"
-      :sha256 "4b716f8dce8fd610d06802f906f973ad9491bff980a0dcee92f68552240a9689" :count 12 :replay false
+      :sha256 "ec3cdff8ad68f5fb8da09cae10aa044c59e9b55b8409c721ee58c64e18740acc" :count 12 :replay false
       :pairs (js-array
         (js-array "tests/eliscript/wasm-managed-builtins.eli" "tests/wasm-managed-builtins.test.mjs")
         (js-array "tests/eliscript/managed-container-cases.eli" "tests/helpers/managed-container-cases.mjs")
         (js-array "tests/eliscript/managed-container-install.eli" "tests/helpers/managed-container-install.mjs")))
     (js-object :suite "tests/wasm-managed-identity.test.mjs" :archive "tests/wasm-managed-identity-test-ground.mjs"
-      :sha256 "a58a31176ecf598f6670dd38888a83b33a090e885cc154575e5676e819969eb5" :count 10 :replay false
+      :sha256 "1b080efd7a90c9bd493adc37ae320c11279f61c0465462970b624d3c66605630" :count 10 :replay false
       :pairs (js-array
         (js-array "tests/eliscript/wasm-managed-identity.eli" "tests/wasm-managed-identity.test.mjs")
         (js-array "tests/eliscript/managed-container-cases.eli" "tests/helpers/managed-container-cases.mjs")
         (js-array "tests/eliscript/managed-container-install.eli" "tests/helpers/managed-container-install.mjs")))
     (js-object :suite "tests/wasm-managed-object-integrity.test.mjs" :archive "tests/wasm-managed-object-integrity-test-ground.mjs"
-      :sha256 "a6a752d58e7399aa5228061736c52cdd7ca81129b6ab810205f109317abed349" :count 21 :replay false
+      :sha256 "cf784f7d22123f9f3554bea4e888b891ec0f82044d8d977d4b581a5ce375c9a9" :count 21 :replay false
       :pairs (js-array
         (js-array "tests/eliscript/wasm-managed-object-integrity.eli" "tests/wasm-managed-object-integrity.test.mjs")
         (js-array "tests/eliscript/managed-integrity-cases.eli" "tests/helpers/managed-integrity-cases.mjs")
         (js-array "tests/eliscript/managed-integrity-install.eli" "tests/helpers/managed-integrity-install.mjs")))
     (js-object :suite "tests/wasm-managed-function-properties.test.mjs" :archive "tests/wasm-managed-function-properties.test.mjs"
-      :sha256 "6d587e122fdc20fd7c7da85aa30cf0e07e31fca0964256058484d87bbff1ae15" :count 9 :replay false
+      :sha256 "acecc8e15b6ddf408361e0511862ae77157f1dd16c95f263af9b27ee33dcd955" :count 9 :replay false
       :pairs (js-array
         (js-array "tools/testing/generated-fixture-module.eli" "tools/testing/generated-fixture-module.mjs")
         (js-array "tools/testing/managed-function-properties-repairs.eli" "tools/testing/managed-function-properties-repairs.mjs")
         (js-array "tests/eliscript/managed-function-properties-install.eli" "tests/helpers/managed-function-properties-install.mjs")))
     (js-object :suite "tests/eliscript-protocol.test.mjs" :archive "tests/eliscript-protocol-test-ground.mjs"
-      :sha256 "053b99e13aa1bfb42342bd2293d065a99458757a3cf205093e44fff46ab197c7" :count 1 :replay false
+      :sha256 "fb3cacfc35e1b03d6c11b9a15e4964f84c8eba535d677c2075db62e89df559fb" :count 1 :replay false
       :executedSuite "tests/eliscript-protocol-selfhosted.test.mjs"
       :pairs (js-array (js-array "tests/eliscript/eliscript-protocol.eli" "tests/eliscript-protocol-selfhosted.test.mjs")))
     (js-object :suite "tests/compiler-portable-guards.test.mjs" :archive "tests/compiler-portable-guards-test-ground.mjs"
-      :sha256 "b0b9cd417a7427edd5be0aa5cbc190a19ed617d09a751f944a06a775e2438915" :count 3 :replay false
+      :sha256 "11588f03a29593318908caa21953bc56178774c3b5c052a8079308d8a0e3d7a6" :count 3 :replay false
       :pairs (js-array
         (js-array "tools/testing/generated-fixture-module.eli" "tools/testing/generated-fixture-module.mjs")
         (js-array "tools/testing/portable-node-fixtures.eli" "tools/testing/portable-node-fixtures.mjs")
@@ -363,30 +363,30 @@
         (js-array "tools/testing/number-text-node.eli" "tools/testing/number-text-node.mjs")
         (js-array "tests/eliscript/compiler-portable-guards.eli" "tests/compiler-portable-guards.test.mjs")))
     (js-object :suite "tests/compiler-portable-predicates.test.mjs" :archive "tests/compiler-portable-predicates.test.mjs"
-      :sha256 "4bbc319b83880938df01f3f952250b3a844f36975e4ad41edf7137122de6a894" :count 17 :replay false
+      :sha256 "6f257b924d8812074aea1a533bb02c03cdc7db4403df42c29f7f6bc971e9c0e3" :count 17 :replay false
       :pairs (js-array
         (js-array "tools/testing/compiler-portable-fixtures.eli" "tools/testing/compiler-portable-fixtures.mjs")
         (js-array "tests/eliscript/compiler-portable-fixtures-install.eli" "tests/helpers/compiler-portable-fixtures-install.mjs")))
     (js-object :suite "tests/compiler-portable-reader.test.mjs" :archive "tests/compiler-portable-reader.test.mjs"
-      :sha256 "127bcc36ec328f1c6435904bc396347b32f744b943da4255af42e8ae7423198a" :count 20 :replay false
+      :sha256 "cdb9e69ab1fb9fac6791b7061fcaed2f5723f1a8a87375797bb40a32c73b4918" :count 20 :replay false
       :inputs (js-array "tools/testing/fixtures/portable-reader-failure.eli")
       :pairs (js-array
         (js-array "tools/testing/compiler-portable-fixtures.eli" "tools/testing/compiler-portable-fixtures.mjs")
         (js-array "tests/eliscript/compiler-portable-fixtures-install.eli" "tests/helpers/compiler-portable-fixtures-install.mjs")))
     (js-object :suite "tests/emacs-analysis-evidence.test.mjs" :archive "tests/emacs-analysis-evidence.test.mjs"
-      :sha256 "7adb647fd4de888fca31ea2d3726167a2dcd3d07a73baadeeee6de198e95dfa4" :count 2 :replay false
+      :sha256 "e815b667fe16fe5158b36ddb709d1d29f4816f726a3d5d1026f0cb110a05f052" :count 2 :replay false
       :pairs (js-array
         (js-array "tests/eliscript/managed-capacity-registration.eli" "tests/helpers/managed-capacity-registration.mjs")
         (js-array "tests/eliscript/managed-capacity-registration-tests.eli" "tests/managed-capacity-registration-selfhosted.test.mjs")))
     (js-object :suite "tests/native-node-memory.test.mjs" :archive "tests/native-node-memory.test.mjs"
-      :sha256 "4949de1619237a588945486e5f40958a9e248582db8f438e8a08d9da590e041c" :count 9 :replay false
+      :sha256 "2222e7bdfc7c7ded467e2652b662a8bc337dad4e5cb3ecd1abb0d42fa04391c6" :count 9 :replay false
       :pairs (js-array
         (js-array "tools/testing/native-node-fixtures.eli" "tools/testing/native-node-fixtures.mjs")
         (js-array "tests/eliscript/native-node-boundaries.eli" "tests/helpers/native-node-boundaries.mjs")
         (js-array "tools/testing/compiler-portable-fixtures.eli" "tools/testing/compiler-portable-fixtures.mjs")
         (js-array "tests/eliscript/compiler-portable-fixtures-install.eli" "tests/helpers/compiler-portable-fixtures-install.mjs")))
     (js-object :suite "tests/wasm-managed-number-text.test.mjs" :archive "tests/wasm-managed-number-text.test.mjs"
-      :sha256 "efb82a6a9f2457924f661ceaf8780412e4d2c80a983a535b7c066817a9f9e913" :count 9 :replay false
+      :sha256 "c8438c1e8018e36fdfca81a4800ac1332ddf11a0f094aa2788fe147e5740b5fc" :count 9 :replay false
       :pairs (js-array
         (js-array "tools/testing/number-text-regressions.eli" "tools/testing/number-text-regressions.mjs")
         (js-array "tests/eliscript/number-text-cross-host.eli" "tests/helpers/number-text-cross-host.mjs")
@@ -395,101 +395,32 @@
         (js-array "tests/eliscript/number-text-node-install.eli" "tests/helpers/number-text-node-install.mjs")
         (js-array "tests/eliscript/number-text-node-bridge.eli" "tests/number-text-node-bridge-selfhosted.test.mjs")))
     (js-object :suite "tests/wasm-managed-primitive-operators.test.mjs" :archive "tests/wasm-managed-primitive-operators.test.mjs"
-      :sha256 "35a423057162377838fdcd3a8a5ceec4634293fa5fe33450b39d4fafcfc48f22" :count 17 :replay false
+      :sha256 "e6ce0d9d0d3cd060ad6389dc1f7c3d362ca4ba63997ea0338cb790efbc8e492d" :count 17 :replay false
       :pairs (js-array
         (js-array "tools/testing/generated-fixture-module.eli" "tools/testing/generated-fixture-module.mjs")
         (js-array "tests/eliscript/numeric-seed-node.eli" "tests/helpers/numeric-seed-node.mjs")
         (js-array "tools/testing/managed-numeric-fixtures.eli" "tools/testing/managed-numeric-fixtures.mjs")
         (js-array "tests/eliscript/managed-numeric-fixtures-install.eli" "tests/helpers/managed-numeric-fixtures-install.mjs")))
     (js-object :suite "tests/managed-stdlib-value-json.test.mjs" :archive "tests/managed-stdlib-value-json.test.mjs"
-      :sha256 "3e91ede35722125fd5b4b10d5f6c86bd530f7a4a2adfdf576e9b3dda72b7ae8d" :count 5 :replay t
+      :sha256 "968d62d64859f695cdd0de74459b4af7a2351778dc9f9c9f64b104362ad5310e" :count 5 :replay t
       :pairs (js-array
         (js-array "tests/eliscript/standard-library-fixture.eli" "tests/helpers/standard-library-fixture.mjs")
         (js-array "tests/eliscript/standard-library-fixture-install.eli" "tests/helpers/standard-library-fixture-install.mjs")
         (js-array "tests/eliscript/standard-library-fixture-tests.eli" "tests/standard-library-fixture-selfhosted.test.mjs")))))
   (defun portable-predicate-cases (suite source)
-    (unless (= (hash source) "4bbc319b83880938df01f3f952250b3a844f36975e4ad41edf7137122de6a894")
-      (throw (new globalThis.TypeError "the exact original portable predicate source changed")))
-    (let* ((start (js-call source :indexOf "test('Given original '"))
-           (next (js-call source :indexOf "\ntest(" start)) (offset (1+ next)) (end next)
-           (expression-end (js-call source :indexOf ", () => {" start))
-           (rows (Array/from (js-call source :matchAll (new globalThis.RegExp "^  \\['([^']+)', '([^']+)'," "gm"))))
-           (registration (js-call source :slice start end))
-           (fixed (originalSourceCaseLocators suite (js-call source :slice offset))) (result (js-array)))
-      (unless (and (> start 0) (> next start) (> expression-end start)
-                   (= (js-call source :slice (- end 3) end) "});") (= (js-length rows) 11) (= (js-length fixed) 6))
-        (throw (new globalThis.TypeError "the complete original portable predicate case inventory changed")))
-      (js-call rows :forEach (lambda (row variant)
-        (let* ((input-start (get row :index)) (input-end (js-call source :indexOf "\n" input-start))
-               (title (str "Given original " (aref row 1) " helper " (aref row 2)
-                 ", when compiled as an independent predicate unit, then managed WASM needs no raw JavaScript function")))
-          (unless (< input-end start) (throw (new globalThis.TypeError "predicate inputs escaped their original binding")))
-          (js-call result :push (js-object :id (str "stable-compatibility:source-case:" suite ":0:" variant)
-            :file suite :kind "test" :contains title :originalCase (js-object
-              :title title :templateTitle "Given original " :titleExpression (js-call source :slice (+ start 5) expression-end)
-              :parameters (js-object :file (aref row 1) :name (aref row 2)) :titleKind "expression"
-              :sourceSha256 (hash source) :timeoutMs 5000 :registration "test" :span (js-object :start start :end end)
-              :byteStart (js-call Buffer :byteLength (js-call source :slice 0 start))
-              :byteEnd (js-call Buffer :byteLength (js-call source :slice 0 end)) :sha256 (hash registration)
-              :input (js-object :span (js-object :start input-start :end input-end)
-                :sha256 (hash (js-call source :slice input-start input-end)))))))))
-      (js-call fixed :forEach (lambda (item index)
-        (let* ((original (get item :originalCase)) (span (get original :span))
-               (begin (+ offset (get span :start))) (finish (+ offset (get span :end))))
-          (put item :id (str "stable-compatibility:source-case:" suite ":" (1+ index) ":0"))
-          (put original :sourceSha256 (hash source)) (put original :span (js-object :start begin :end finish))
-          (put original :byteStart (js-call Buffer :byteLength (js-call source :slice 0 begin)))
-          (put original :byteEnd (js-call Buffer :byteLength (js-call source :slice 0 finish)))
-          (js-call result :push item)))) result))
+    (originalPredicateSourceCases suite source))
   (defun final-fixture-cases (suite source)
-    (if (= suite "tests/native-node-memory.test.mjs")
-      (progn
-        (unless (= (hash source) "4949de1619237a588945486e5f40958a9e248582db8f438e8a08d9da590e041c")
-          (throw (new globalThis.TypeError "the exact native Node fixture source changed")))
-        ;; These two static identifiers have equal UTF16/UTF8 lengths. This
-        ;; parser view changes no original byte or source coordinate.
-        (js-call (originalSourceCaseLocators suite (js-call (js-call source :split "nativeTest") :join "actualTest"))
-          :map (lambda (item)
-            (let* ((original (get item :originalCase)) (span (get original :span)))
-              (put original :registration "nativeTest") (put original :sourceSha256 (hash source))
-              (put original :sha256 (hash (js-call source :slice (get span :start) (get span :end)))) item))))
-    (if (= suite "tests/compiler-portable-predicates.test.mjs") (portable-predicate-cases suite source)
-    (if (/= suite "tests/wasm-managed-object-integrity.test.mjs")
-      (originalSourceCaseLocators suite source)
-      (let* ((identity (hash source))
-             (boundary (js-call source :indexOf "const integrityScenarios=["))
-             (start (js-call source :lastIndexOf "test('Scenario: '"))
-             (tail (js-call source :lastIndexOf "}});});"))
-             (end (+ tail 4)))
-        (unless (and (= identity "a6a752d58e7399aa5228061736c52cdd7ca81129b6ab810205f109317abed349")
-                     (> boundary 0) (> start boundary) (> tail start))
-          (throw (new globalThis.TypeError "the exact original integrity scenario source changed")))
-        (let* ((cases (originalSourceCaseLocators suite (js-call source :slice 0 boundary)))
-               (registration (js-call source :slice start end))
-               (expression-end (js-call source :indexOf ",async()=>" start))
-               (expression (js-call source :slice (+ start 5) expression-end))
-               (pattern (new globalThis.RegExp "\\{id:'([^']+)',given:'([^']+)',when:'([^']+)',then:'([^']+)',source:" "g"))
-               (rows (Array/from (js-call source :matchAll pattern))))
-          (unless (and (= (js-length cases) 17) (= (js-length rows) 4) (> expression-end start))
-            (throw (new globalThis.TypeError "the complete integrity literal and scenario inventories changed")))
-          (js-call cases :forEach (lambda (item) (put (get item :originalCase) :sourceSha256 identity)))
-          (js-call rows :forEach (lambda (row variant)
-            (let* ((input-start (get row :index)) (input-end (js-call source :indexOf "\n" input-start))
-                   (input (js-call source :slice input-start input-end))
-                   (scenario (js-object :id (aref row 1) :given (aref row 2) :when (aref row 3) :then (aref row 4)))
-                   (title (str "Scenario: " (aref row 1) "\nGiven " (aref row 2) "\nWhen " (aref row 3) "\nThen " (aref row 4))))
-              (unless (and (> input-start boundary) (< input-end start))
-                (throw (new globalThis.TypeError "the original integrity scenario input escaped its real source region")))
-              (js-call cases :push (js-object
-                :id (str "stable-compatibility:source-case:" suite ":17:" variant) :file suite :kind "test" :contains title
-                :originalCase (js-object :title title :templateTitle "Scenario: " :titleExpression expression
-                  :parameters (js-object :scenario scenario) :titleKind "expression" :sourceSha256 identity :timeoutMs 5000 :registration "test"
-                  :span (js-object :start start :end end)
-                  :byteStart (js-call Buffer :byteLength (js-call source :slice 0 start))
-                  :byteEnd (js-call Buffer :byteLength (js-call source :slice 0 end)) :sha256 (hash registration)
-                  :input (js-object :span (js-object :start input-start :end input-end)
-                    :byteStart (js-call Buffer :byteLength (js-call source :slice 0 input-start))
-                    :byteEnd (js-call Buffer :byteLength (js-call source :slice 0 input-end)) :sha256 (hash input)))))))) cases))))))
+    (cond
+      ((= suite "tests/native-node-memory.test.mjs")
+       ;; Equal-width parser view, followed by proof of the unmodified bytes.
+       (js-call (originalSourceCaseLocators suite (js-call (js-call source :split "nativeTest") :join "actualTest"))
+         :map (lambda (item)
+           (let* ((original (get item :originalCase)) (span (get original :span)))
+             (put original :registration "nativeTest") (put original :sourceSha256 (hash source))
+             (put original :sha256 (hash (js-call source :slice (get span :start) (get span :end)))) item))))
+      ((= suite "tests/compiler-portable-predicates.test.mjs") (portable-predicate-cases suite source))
+      ((= suite "tests/wasm-managed-object-integrity.test.mjs") (originalIntegritySourceCases suite source))
+      (t (originalSourceCaseLocators suite source))))
   (defasync readOriginalFinalFixtureMigrations (options)
     (let ((result (js-array)) (plan-index 0))
       (while (< plan-index (js-length final-fixture-plans))
@@ -627,32 +558,32 @@
   (defasync readOriginalManagedFixtureRepairs (options)
     (let ((assets (js-array)) (suites (js-array))
           (plans (js-array
-            (js-array "tests/wasm-managed-empty-bindings.test.mjs" "ecb157620b2a55b24962c2528dd81c3b3bfc71ba71b052a33a80cba2e59f639f")
-            (js-array "tests/wasm-managed-callables.test.mjs" "b0b3137803b84d454a5b389b2616676f15f43d70d666bf617babd4d730e934ef")
-            (js-array "tests/wasm-managed-realm-lifetime.test.mjs" "3e8722afe234131cf927c7999a52c4911a79aaeb233ce4177be5cb1d9e2feb6b")
-            (js-array "tests/wasm-managed-native-prototype-callables.test.mjs" "768fcb829e7ef01dad76520eeed9b0c10a20d89440da7bbd48cfcf21c23bea4e")
-            (js-array "tests/wasm-managed-str.test.mjs" "94bfa646c922c1c87ea9bf5e7c1e686cbc09ba06e67c8c02ea4df89902607ce2")
-            (js-array "tests/wasm-managed-array-inheritance.test.mjs" "c0590bcde56a736363797834e27fdfd91bcd27d4de0ed3df38a507dc28177011")
-            (js-array "tests/wasm-managed-array-index-storage.test.mjs" "335f342bc2873f2c1580ce51789e407c00a0fb1e9b53c9c63ec49d179a5e8fac")
-            (js-array "tests/wasm-managed-variadic-calls.test.mjs" "2b18ecbbc8193e36d8bb2cd070cd27e137eafecafb3df446b3a4830793a550d6")
-            (js-array "tests/wasm-managed-typeof.test.mjs" "f55d60a967d030c61e0c2ab80bb4670abf252cfff46f3610184ddd8cd0882f7b")
-            (js-array "tests/wasm-managed-typeof-paths.test.mjs" "47251c18ed5f48e1ff9d42f09539a343bf208153f35875dc8f0648ee714da0f3")
-            (js-array "tests/wasm-managed-array-callbacks.test.mjs" "0f5c51587744164bb77fe7dd59d82a3af09c56a09ce8d87d9b75401589b2985a")
-            (js-array "tests/wasm-managed-array-splice.test.mjs" "166cfd99b0de0e64a2abb15bf1578372203ea73348be8ab317e5acf78550c8af")
-            (js-array "tests/wasm-managed-project-linking.test.mjs" "fd9c909b7e5fa57ee9237385c142349fdad1b9d66d5e9d603c2323cdf3ec0c07")
-            (js-array "tests/wasm-managed-strings.test.mjs" "33da413ad48d3b359663aa6109ca390eee68a5124d9a8634ac02a91988b06507")
-            (js-array "tests/wasm-managed-text-constructors.test.mjs" "30a083b2072d64bea0be1dcbfbacd833dc63afad32ff34a873875458e20468f6")
-            (js-array "tests/wasm-managed-regexp.test.mjs" "65d8dc751109174f90eb41ee0d0332e23e3b354d123c733448a84a32ad7ae2ad")
-            (js-array "tests/wasm-managed-regexp-exact.test.mjs" "faf75947bef51313bdd45eb5f1a35df3f59cde46480ea2f982c1c903bfb9c125")
-            (js-array "tests/wasm-managed-regexp-indices.test.mjs" "306a40b71bee4d072e1df807a992208a42659e73f3dc8f5ac737aa14cfc71ea3")
-            (js-array "tests/regexp-property-outlining.test.mjs" "b45811f343ae5942e33c7bb2bb47fade0de2d0e5cfdb7cfc889f7d287660bcb9")
-            (js-array "tests/compiler-fragment-combine.test.mjs" "5105cb3d9c727be942744a8f725dea0efd3a4fb2863f1d6a341249ca53fc561c")
-            (js-array "tests/wasm-managed-persistent-literals.test.mjs" "bb8fe651361e49b5dee4f12252209a054401e03beed7d150efd8fd9781e81287")
-            (js-array "tests/js-array-text-fast-path.test.mjs" "be07405cef94d217503e40a1606ccb7d0a824cb5a4ca63ebbe8bc3d415ce7def")
-            (js-array "tests/wasm-managed-initializer-outlining.test.mjs" "e3d2cd7d8e3d5f28a08f20401cf8cfa48ed10743136a2e39ef9b895bbd5e074e")
-            (js-array "tests/wasm-managed-primitive-own-runtime.test.mjs" "62d634ad2bf4e02f83a5fd2f7c7fc7cdf1ff570a81aada0d6e2e761d00c24069")
-            (js-array "tests/wasm-managed-operand-conversion.test.mjs" "d9385ea1cf4c2b17bd046590950e524f1cbf2e33adf87afeceba8c554ea5a95d")
-            (js-array "tests/wasm-managed-math.test.mjs" "364144cc482b0ea756505ee1723f3831f2d1439f147e9380906d6ef0c19b5b9d")))
+            (js-array "tests/wasm-managed-empty-bindings.test.mjs" "294b9b417b200868ac47e1592400b12fe21efda264135cdf0da990394eb9aeb0")
+            (js-array "tests/wasm-managed-callables.test.mjs" "cee9be3c91c710ae48d39f3e88bb718cec0719f407806d717805afdae7ed1fd6")
+            (js-array "tests/wasm-managed-realm-lifetime.test.mjs" "d9d80dd95a24071d9e976141cc9553c9b1797aec1ed2e9fd23130e906a812c58")
+            (js-array "tests/wasm-managed-native-prototype-callables.test.mjs" "cf843508f3e620428fce5fdccd35f02c3add2270c124d23d57f567a1d62b7e5f")
+            (js-array "tests/wasm-managed-str.test.mjs" "022576e2232b9b021e88e03abfdfdee8e3520d01dce237bd66222bd26e382356")
+            (js-array "tests/wasm-managed-array-inheritance.test.mjs" "211463fb402584e65337b1faf2ce25fc6216e4015165f2a6bd0246ef3864b560")
+            (js-array "tests/wasm-managed-array-index-storage.test.mjs" "18e766fe9888fcf23ed549e48048c92d932aa5ffa8820e0880b407a9196affaf")
+            (js-array "tests/wasm-managed-variadic-calls.test.mjs" "7c53c987fd8b7763a87635646593d7383aa35e2bb244235976b2d9d978b21c55")
+            (js-array "tests/wasm-managed-typeof.test.mjs" "2d7f2eed94d3e9fcd24ce7eb1363d186ea54c775dc788c291144336bf0021a36")
+            (js-array "tests/wasm-managed-typeof-paths.test.mjs" "6229e2a20b3aa45b6d658b24c054b61964112535b83a811058c53406973e6087")
+            (js-array "tests/wasm-managed-array-callbacks.test.mjs" "1f151891db7e3fdc19f057deaeafc62f569cdbd1c9c6edaa0da0b5369ef10732")
+            (js-array "tests/wasm-managed-array-splice.test.mjs" "947ceebb36b4822653b18f9e4d1cf3dd0131091a0405f212389fb8c416063fe0")
+            (js-array "tests/wasm-managed-project-linking.test.mjs" "3e3d62a38a8b908da9096b3d030a40e12fb1153ee8c5356c8352b61a9b171e99")
+            (js-array "tests/wasm-managed-strings.test.mjs" "2b1becfabbbe4ec6b1f298ab41d4546cd275492d229dfe854f64526207d62f0a")
+            (js-array "tests/wasm-managed-text-constructors.test.mjs" "2ab2f0098ad2bca26ea59a0cf74e86fabf72ed9c8b81d77e6fe5c3c326f8db96")
+            (js-array "tests/wasm-managed-regexp.test.mjs" "0b73637961c9771b18c6011df6a7cbfcd9331608999fa9e3709dbbf2bcc1c355")
+            (js-array "tests/wasm-managed-regexp-exact.test.mjs" "48b631444152567f8c4f4800c76b51ec74d6302886c28975973434456c34c7ed")
+            (js-array "tests/wasm-managed-regexp-indices.test.mjs" "143f20554e35abb0ba93b8639b6e5ad110f066196e272955cc2a73d9c65a331c")
+            (js-array "tests/regexp-property-outlining.test.mjs" "0b042be538725eefec12e80ef0a7eeb75033ad9a821aea23bc1170354ebefda7")
+            (js-array "tests/compiler-fragment-combine.test.mjs" "56008689c55c4d937bdb74ab62a4abb204b3808e193130b53526c61d7b438583")
+            (js-array "tests/wasm-managed-persistent-literals.test.mjs" "152779357c15d3f15774b06cfdde54cffc8284bc13cd598212e3204a97cb8fa0")
+            (js-array "tests/js-array-text-fast-path.test.mjs" "f155d3fd35c94a1407f610bb1632b23f12c2ea7aa55e2dd5dd3b67af4de45230")
+            (js-array "tests/wasm-managed-initializer-outlining.test.mjs" "a391042184e2b3483738ffc4d7450222daa20f061238c03ae5ae5ad3c9642633")
+            (js-array "tests/wasm-managed-primitive-own-runtime.test.mjs" "8ccfce1fadd98bae4cc14cde7c96b9356dbb06975a289f03b88bf5e5476495c6")
+            (js-array "tests/wasm-managed-operand-conversion.test.mjs" "e40b989be5921f9de32bd89c97a676eee0938f631d74fde7eb8be40d44462751")
+            (js-array "tests/wasm-managed-math.test.mjs" "85aaba1cc11ef07741d8a511b3466038f41fc860285b77d7b66b495ca5b0ff6f")))
           (pairs (js-array
             (js-array "tools/testing/managed-fixture-repairs.eli" "tools/testing/managed-fixture-repairs.mjs")
             (js-array "tools/testing/array-text-fixture.eli" "tools/testing/array-text-fixture.mjs")
@@ -677,6 +608,9 @@
           (inputs (js-array "tests/fixtures/managed-splice-rejected.eli" "tests/fixtures/managed-splice-species.eli"
             "tests/fixtures/managed-splice-accessor.eli" "tests/fixtures/managed-splice-observe.eli"
             "tests/wasm-managed-array-callbacks-test-ground.mjs" "tests/wasm-managed-array-splice-test-ground.mjs"
+            "runtime/array-text.eli" "runtime/array-text.mjs"
+            "runtime/errors.eli" "runtime/errors.mjs" "runtime/primitives.eli" "runtime/primitives.mjs"
+            "runtime/number-radix.eli" "runtime/number-radix.mjs" "runtime/binding.eli" "runtime/binding.mjs"
             "runtime/prelude.eli" "runtime/prelude.mjs"
             "runtime/unicode-case.eli" "runtime/unicode-case.mjs" "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs" "runtime/math.eli" "runtime/math.mjs"))
           (index 0))
@@ -689,10 +623,17 @@
       (setq index 0)
       (while (< index (js-length inputs))
         (let ((input (await (browser-source-asset options (aref inputs index)))))
-          (when (and (js-call (aref inputs index) :endsWith "-test-ground.mjs")
-            (/= (get (get input :proof) :sourceSha256)
-              (get (aref suites (if (= index 4) 10 11)) :sourceSha256)))
-            (throw (new globalThis.TypeError "the original array repair archive differs from its unchanged suite")))
+          (when (js-call (aref inputs index) :endsWith "-test-ground.mjs")
+            (let* ((ground-file (aref inputs index))
+                   (suite-file (js-call ground-file :replace "-test-ground.mjs" ".test.mjs"))
+                   (wrapper (await (browser-source-asset options suite-file)))
+                   (specifier (str "./" (js-call posix :basename ground-file)))
+                   (nodes (Array/from (js-call (get wrapper :source) :matchAll
+                     (new globalThis.RegExp "^import [\"']([^\"']+)[\"'];$" "gm")))))
+              (unless (and (= (js-length (js-call nodes :filter (lambda (node) (= (aref node 1) specifier)))) 1)
+                           (js-call nodes :every (lambda (node)
+                             (or (= (aref node 1) specifier) (= (aref node 1) "eliscript/runtime/unicode-case.mjs")))))
+                (throw (new globalThis.TypeError "array repair wrapper must import its authenticated ground suite")))))
           (js-call assets :push (get input :proof)))
         (setq index (1+ index)))
       (setq index 0)
@@ -724,7 +665,7 @@
              (js-array "tests/eliscript/direct-wasm-error-profile-tests.eli" "tests/direct-wasm-error-profile-selfhosted.test.mjs")
              (js-array "tests/eliscript/direct-wasm-registration-tests.eli" "tests/direct-wasm-registration-selfhosted.test.mjs")))
            (index 0))
-      (unless (= (get proof :sourceSha256) "d8590e98b2d6a748ecf71c01d4194ac43d9051edde886e34c900355354664f4f")
+      (unless (= (get proof :sourceSha256) "bdcd362f1963d75327647dfee33241f62738bc81ce7e9eec2825811dfe6fdcba")
         (throw (new globalThis.TypeError "original direct WASM assertion archive identity changed")))
       (while (< index (js-length pairs))
         (let* ((pair (aref pairs index)) (source (await (browser-source-asset options (aref pair 0))))
@@ -869,28 +810,17 @@
     (str "tests/fixtures/wasm-managed-" (if (js-call family :startsWith "persistent-vector-auto-") "persistent-vector" family) ".eli"))
   (defun raw-fixture-javascript-host (old family helper-url)
     (if (not (js-call (js-array "catch-destructuring" "typeof" "js-cons" "object-properties" "array-construction" "primitive-operators" "objects") :includes family)) old
-      (let* ((declaration "function compare(label,observe){")
-             (receipt "console.log(JSON.stringify({observations}));")
-             (start (js-call old :indexOf declaration)) (finish (js-call old :indexOf receipt))
+      (let* ((boundary "const {root,product,entry,reference,m,oracle,runtime,compare,outcome,named,finish}=fixture;\n")
+             (start (js-call old :indexOf boundary))
              (configuration (js-object :family family :originalHostSha256 (hash old))))
-        (unless (and (>= start 0) (>= finish 0)
-                     (= (js-call old :indexOf declaration (1+ start)) -1)
-                     (= (js-call old :indexOf receipt (1+ finish)) -1))
-          (throw (new globalThis.TypeError "original fixture compare/finish boundary changed")))
-        (let* ((prefix (compile-string (str "(import " (JSON/stringify helper-url) " finishOriginalFixtureObservation)\n"
-                   "(defconst originalFixtureGroups (Object/create nil))\n"
-                   "(defun compare (label observe) (funcall (js* \"originalFixtureCompare\") label observe)"
-                   " (put originalFixtureGroups label (1+ (or (get originalFixtureGroups label) 0))))\n"
-                   "(defun originalFixtureReceipt () (finishOriginalFixtureObservation (JSON/parse "
-                   (JSON/stringify (JSON/stringify configuration)) ") (js* \"observations\") originalFixtureGroups))")
-                   "original-fixture-observation-counter.eli"))
-               ;; The imported helper and counter belong to the same analyzed
-               ;; Eli unit. The retained host calls that emitted closure only.
-               ;; This replaces a statement inside finish(), not a module.
-               ;; Keep imports and the shared prelude in the prefix above.
-               (report-program (compile-ir-string "(funcall (js* \"originalFixtureReceipt\"))" "original-fixture-receipt.eli"))
-               (report (get (emit-top-level (aref (get report-program :body) 0)) :text)))
-          (str prefix "\n" (js-call (js-call old :replace declaration "function originalFixtureCompare(label,observe){") :replace receipt report))))))
+        (unless (and (>= start 0) (= (js-call old :indexOf boundary (1+ start)) -1))
+          (throw (new globalThis.TypeError "original fixture context boundary changed")))
+        (let* ((program (compile-string (str "(import " (JSON/stringify helper-url) " finishOriginalFixtureObservation)\n"
+                   "(put (js* \"fixture\") :report (lambda (observations groups)"
+                   " (finishOriginalFixtureObservation (JSON/parse " (JSON/stringify (JSON/stringify configuration))
+                   ") observations groups)))") "original-fixture-observation-counter.eli"))
+               (end (+ start (js-length boundary))))
+          (str (js-call old :slice 0 end) program (js-call old :slice end))))))
   (defasync fixture-observation-options (options)
     (if (or (nullish? options) (nullish? (get options :stableFiles))
             (/= (value-type (get options :add)) "function")) options
@@ -914,17 +844,34 @@
                      ;; templates reject before any provenance file is loaded.
                      (fixture-source (await (js-call options :text (raw-fixture-file "function-properties"))))
                      (source (await (js-call options :text suite)))
-                     (symbols (js-call (new globalThis.RegExp "const wellKnownSymbolNames=\\[([^\\]]*)\\];") :exec source))
+                     (model-file "tests/helpers/wasm-managed-function-properties-node.eli")
+                     (admission (unless (and (js-call source :includes "const reflection_source =")
+                         (js-call source :includes "./helpers/wasm-managed-function-properties-node.mjs"))
+                       (throw (new globalThis.TypeError "original managed reflection source declaration changed"))))
+                     (model (await (browser-source-asset options model-file)))
+                     (nodes (get (aref (read-string (get model :source) model-file) 0) :items))
+                     (symbols (js-call nodes :filter (lambda (node)
+                       (let ((items (get node :items)))
+                         (and (Array/isArray items) (= (get (aref items 0) :name) "defconst")
+                              (= (get (aref items 1) :name) "well-known-symbol-names"))))))
                      (names (js-array "isFinite" "missing" "name" "length" "prototype" "caller" "arguments"
                        "call" "apply" "bind" "constructor" "toString" "__proto__" "parseInt" "parseFloat"
                        "fromCharCode" "fromCodePoint" "raw")))
-                (unless (and symbols
-                  (js-call source :includes "const standardErrorOwnNames=['length','name','prototype'];")
-                  (js-call source :includes "const standardErrorShape=JSON.stringify([[],standardErrorOwnNames,[],true,['function','',0,false,true]]);")
-                  (js-call source :includes "mode===3?standardErrorShape:oracle.builtins[mode].shape")
-                  (js-call source :includes "spawnSync('node'"))
+                (unless (and (= (js-length symbols) 1)
+                  (js-call source :includes "standard_error_own_names")
+                  (js-call source :includes "standard_error_shape")
+                  (js-call source :includes "currentHostBuiltinShape")
+                  (js-call source :includes "spawnSync(\"node\""))
                   (throw (new globalThis.TypeError "function properties requires its complete original Node oracle and standard Error contract")))
-                (setq keys (js-call names :concat (JSON/parse (str "[" (js-call (aref symbols 1) :replaceAll "'" "\"") "]"))))
+                (let* ((value (aref (get (aref symbols 0) :items) 2)) (items (get value :items)))
+                  (unless (and (Array/isArray items) (= (get (aref items 0) :name) "js-array")
+                               (= (js-length items) 16)
+                               (js-call (js-call items :slice 1) :every (lambda (node)
+                                 (and (= (get node :kind) "literal") (= (value-type (get node :value)) "string")))))
+                    (throw (new globalThis.TypeError "function reflection symbols must remain fifteen literal names")))
+                  (setq keys (js-call names :concat (js-call (js-call items :slice 1) :map (lambda (node) (get node :value))))))
+                (js-call assets :push (get model :proof))
+                (js-call files :push "tests/helpers/wasm-managed-function-properties-node.mjs")
                 (let ((asset (await (browser-source-asset options suite))))
                   (unless (= (get asset :source) source)
                     (throw (new globalThis.TypeError "original function properties source changed during authentication")))
@@ -934,7 +881,8 @@
                 "tools/backends/compiler-corpus-raw-fixture-observer.mjs"
                 "tools/backends/eliscript/compiler-corpus-raw-language-fixtures.eli" "tools/backends/compiler-corpus-raw-language-fixtures.mjs"
                 "tools/backends/eliscript/compiler-corpus-raw-special-fixtures.eli" "tools/backends/compiler-corpus-raw-special-fixtures.mjs"
-                "tools/backends/eliscript/compiler-corpus-raw-math-fixture.eli" "tools/backends/compiler-corpus-raw-math-fixture.mjs"))
+                "tools/backends/eliscript/compiler-corpus-raw-math-fixture.eli" "tools/backends/compiler-corpus-raw-math-fixture.mjs"
+                "tests/helpers/wasm-managed-math-node.eli" "tests/helpers/wasm-managed-math-node.mjs"))
             (let ((suite-index 0))
               (while (< suite-index (js-length selected))
                 (let* ((family (aref selected suite-index))
@@ -1000,10 +948,11 @@
                     "tests/fixtures/managed-splice-accessor.eli" "tests/fixtures/managed-splice-observe.eli") :some
                 (lambda (filename) (js-call (get options :stableFiles) :has filename)))
           (let* ((suite "tests/wasm-managed-array-splice.test.mjs")
-                 (source (await (browser-source-asset options suite))) (proof (get source :proof))
+                 (source (await (browser-source-asset options "tests/wasm-managed-array-splice-test-ground.mjs")))
+                 (wrapper (await (browser-source-asset options suite))) (proof (get wrapper :proof))
                  (cases (originalSourceCaseLocators suite (get source :source)))
                  (selection (js-call (get options :locators) :slice)))
-            (unless (and (= (get proof :sourceSha256) "166cfd99b0de0e64a2abb15bf1578372203ea73348be8ab317e5acf78550c8af")
+            (unless (and (= (get proof :sourceSha256) "947ceebb36b4822653b18f9e4d1cf3dd0131091a0405f212389fb8c416063fe0")
                          (= (js-length cases) 11))
               (throw (new globalThis.TypeError "maintained splice inputs require the complete unchanged original suite")))
             ;; This selects a real whole-suite execution; it is not a source

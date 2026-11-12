@@ -1,0 +1,597 @@
+(module tests.helpers.wasm-managed-number-text-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:buffer" Buffer)
+  (import "node:util" :as node-util)
+
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+  (defconst receiver-fn (js* "(impl) => function (...args) { return impl(this, args); }"))
+  (defconst js-instanceof (js* "(a, b) => a instanceof b"))
+  (defconst empty-class (js* "class Constructor {}"))
+  (defconst construct-zero (js* "(Ctor) => new Ctor()"))
+
+  (defun verifyNumberMethodBoundary (m)
+    (let* ((num-proto (get globalThis.Number :prototype))
+           (builtin (get num-proto :toString))
+           (boxed (new globalThis.Number 255.5))
+           (trace (js-array))
+           (key (let ((k (js-object)))
+                  (put k (get globalThis.Symbol :toPrimitive)
+                    (lambda (hint) (js-call trace :push "key" hint) "toString"))
+                  k))
+           (radix (js-object :valueOf (lambda () (js-call trace :push "convert") 16))))
+      (js-call assert :strictEqual (get boxed :toString) builtin "the emitted helper never replaces the real function identity")
+      (put boxed :valueOf (lambda () (throw (globalThis.Error "receiver coercion must not replace NumberData"))))
+      (js-call assert :equal (js-call m :f boxed 16) "ff.8")
+      (js-call assert :equal (js-call m :f -0.0 2) "0")
+      (Object/defineProperty boxed "toString"
+        (js-object :configurable t :get (lambda () (js-call trace :push "get") builtin)))
+      (let ((output (js-call m :effects boxed key
+                      (lambda ()
+                        (js-call trace :push "argument")
+                        (Object/defineProperty boxed "toString"
+                          (js-object :configurable t :value (lambda () (throw (globalThis.Error "late method")))))
+                        radix))))
+        (js-call assert :equal output "ff.8")
+        (js-call assert :deepEqual trace (js-array "key" "string" "get" "argument" "convert")))
+      (let* ((marker (js-object))
+             (receiver nil)
+             (proto (js-object
+                      :toString (funcall receiver-fn
+                                  (lambda (self args)
+                                    (js-call trace :push "custom" (Object/is self receiver) (js-length args))
+                                    marker)))))
+        (setq receiver (Object/create proto))
+        (put trace :length 0)
+        (js-call assert :strictEqual
+          (js-call m :extras receiver "toString"
+            (lambda () (js-call trace :push "first") 1)
+            (lambda () (js-call trace :push "second") 2))
+          marker)
+        (js-call assert :deepEqual trace (js-array "first" "second" "custom" t 2))
+        (js-call (js-array nil undefined) :forEach
+          (lambda (value)
+            (put trace :length 0)
+            (js-call assert :throws
+              (lambda () (js-call m :effects value key (lambda () (js-call trace :push "argument") radix)))
+              globalThis.TypeError)
+            (js-call assert :deepEqual trace (js-array))))
+        (put trace :length 0)
+        (let ((bad-getter (js-object)))
+          (Object/defineProperty bad-getter "toString"
+            (js-object :enumerable t :configurable t
+                       :get (lambda () (js-call trace :push "get") (throw false))))
+          (js-call assert :throws
+            (lambda () (js-call m :effects bad-getter "toString" (lambda () (js-call trace :push "argument") radix)))
+            (lambda (error) (eq error false))))
+        (js-call assert :deepEqual trace (js-array "get"))
+        (let ((wrong (Object/create num-proto))
+              (original undefined))
+          (try (Reflect/apply builtin wrong (js-array 16))
+            (catch error (setq original error)))
+          (funcall assert (funcall js-instanceof original globalThis.TypeError))
+          (put trace :length 0)
+          (js-call assert :throws
+            (lambda () (js-call m :effects wrong "toString" (lambda () (js-call trace :push "argument") radix)))
+            (lambda (error)
+              (funcall assert (funcall js-instanceof error globalThis.TypeError))
+              (js-call assert :equal (get error :message) (get original :message))
+              t))
+          (js-call assert :deepEqual trace (js-array "argument") "bad receivers fail before the radix conversion hook"))
+        (let ((descriptor (Object/getOwnPropertyDescriptor num-proto "toString")))
+          (try
+            (progn
+              (Object/defineProperty num-proto "toString"
+                (js-object :configurable t
+                           :get (lambda ()
+                                  (js-call trace :push "prototype")
+                                  (funcall receiver-fn
+                                    (lambda (self args)
+                                      (js-call trace :push "override" (value-type self) (aref args 0))
+                                      marker)))))
+              (put trace :length 0)
+              (js-call assert :strictEqual
+                (js-call m :effects 7 "toString" (lambda () (js-call trace :push "argument") 16))
+                marker)
+              (js-call assert :deepEqual trace (js-array "prototype" "argument" "override" "number" 16)))
+            (finally (Object/defineProperty num-proto "toString" descriptor))))
+        (let ((number-class globalThis.Number))
+          (try
+            (let ((mutate (js-object :valueOf (lambda ()
+                                                (put (js* "globalThis") :Number (lambda () (throw marker)))
+                                                2))))
+              (js-call assert :equal (js-call m :f 0.5 mutate) "0.1"))
+            (finally (put (js* "globalThis") :Number number-class))))
+        (js-call assert :equal (js-call m :f (globalThis.BigInt 255) 16) "ff")
+        (js-call assert :equal (js-call m :f "text" 16) "text")
+        (let ((null-prototype (new globalThis.Number 1)))
+          (Object/setPrototypeOf null-prototype nil)
+          (js-call assert :throws (lambda () (js-call m :f null-prototype 16)) globalThis.TypeError))
+        (js-call assert :strictEqual (get num-proto :toString) builtin))))
+
+  (defun verifyBorrowedNumberBoundary (m samples)
+    (let* ((num-proto (get globalThis.Number :prototype))
+           (fn-proto (get globalThis.Function :prototype))
+           (builtin (get num-proto :toString))
+           (call-fn (get fn-proto :call))
+           (apply-fn (get fn-proto :apply))
+           (view (new globalThis.DataView (new globalThis.ArrayBuffer 8)))
+           (s-idx 0))
+      (while (< s-idx (js-length samples))
+        (let* ((sample (aref samples s-idx))
+               (words (get sample :words))
+               (texts (get sample :texts))
+               (value (progn
+                        (js-call view :setUint32 0 (aref words 0))
+                        (js-call view :setUint32 4 (aref words 1))
+                        (js-call view :getFloat64 0)))
+               (radix 2))
+          (while (<= radix 36)
+            (let ((expected (aref texts (- radix 2)))
+                  (arguments-list (js-array radix "ignored")))
+              (js-call assert :equal (js-call m :via_call builtin value radix) expected)
+              (js-call assert :equal (js-call m :via_apply builtin value arguments-list) expected)
+              (js-call assert :equal (js-call m :dynamic builtin "call" (new globalThis.Number value) radix) expected)
+              (js-call assert :equal (js-call m :dynamic builtin "apply" (new globalThis.Number value) arguments-list) expected)
+              (js-call assert :equal (js-call m :call_saved value radix) expected)
+              (js-call assert :equal (js-call m :apply_saved value radix) expected)
+              (js-call assert :deepEqual arguments-list (js-array radix "ignored")))
+            (setq radix (1+ radix))))
+        (setq s-idx (1+ s-idx)))
+      (js-call assert :equal (js-call m :literal_call) (aref (get (aref samples 1) :texts) 1)
+        "literal actuals use the same exact direct-call dispatch")
+      (js-call (js-array nil undefined) :forEach
+        (lambda (empty) (js-call assert :equal (js-call m :via_apply builtin 0.1 empty) "0.1")))
+      (let* ((trace (js-array))
+             (receiver (new globalThis.Number 255.5))
+             (marker (js-object))
+             (radix (js-object :valueOf (lambda () (js-call trace :push "radix") 16)))
+             (argument-prototype (let ((ap (js-object)))
+                                   (Object/defineProperty ap "0"
+                                     (js-object :enumerable t :configurable t :get (lambda () (js-call trace :push "0") radix)))
+                                   ap))
+             (arguments-list (let ((props (js-object
+                                            :length (js-object :get (lambda ()
+                                                                      (js-call trace :push "length")
+                                                                      (js-object :valueOf (lambda () (js-call trace :push "length.valueOf") 3))))
+                                            "1" (js-object :get (lambda ()
+                                                                  (js-call trace :push "1")
+                                                                  (js-object :valueOf (lambda () (throw marker)))))
+                                            "2" (js-object :get (lambda () (js-call trace :push "2") undefined)))))
+                               (put props (get globalThis.Symbol :iterator)
+                                 (js-object :get (lambda () (throw (globalThis.Error "apply must not use an iterator")))))
+                               (Object/create argument-prototype props))))
+        (js-call assert :equal (js-call m :via_apply builtin receiver arguments-list) "ff.8")
+        (js-call assert :deepEqual trace (js-array "length" "length.valueOf" "0" "1" "2" "radix"))
+        (put trace :length 0)
+        (let ((fractional (new globalThis.Proxy (js-object :length 1.9 "0" 16)
+                            (js-object :get (lambda (target key self)
+                                              (js-call trace :push key)
+                                              (when (and (/= key "length") (/= key "0"))
+                                                (throw marker))
+                                              (Reflect/get target key self))))))
+          (js-call assert :equal (js-call m :via_apply builtin receiver fractional) "ff.8")
+          (js-call assert :deepEqual trace (js-array "length" "0")))
+        (put trace :length 0)
+        (js-call assert :equal
+          (js-call m :extra_call builtin
+            (lambda () (js-call trace :push "receiver") receiver)
+            (lambda () (js-call trace :push "argument") radix)
+            (lambda () (js-call trace :push "extra") marker))
+          "ff.8")
+        (js-call assert :deepEqual trace (js-array "receiver" "argument" "extra" "radix"))
+        (let* ((wrong (Object/create num-proto))
+               (broken (let ((b (js-object)))
+                         (Object/defineProperty b "length"
+                           (js-object :enumerable t :configurable t :get (lambda () (js-call trace :push "length") 2)))
+                         (Object/defineProperty b "0"
+                           (js-object :enumerable t :configurable t :get (lambda () (js-call trace :push "0") radix)))
+                         (Object/defineProperty b "1"
+                           (js-object :enumerable t :configurable t :get (lambda () (js-call trace :push "1") (throw false))))
+                         b)))
+          (put trace :length 0)
+          (js-call assert :throws
+            (lambda () (js-call m :via_apply builtin wrong broken))
+            (lambda (error) (eq error false)))
+          (js-call assert :deepEqual trace (js-array "length" "0" "1")
+            "all apply element reads precede receiver and radix validation")
+          (js-call (js-array false 1 "16" (globalThis.BigInt 1) (globalThis.Symbol "arguments")) :forEach
+            (lambda (invalid)
+              (let ((original undefined))
+                (try (Reflect/apply apply-fn builtin (js-array wrong invalid))
+                  (catch error (setq original error)))
+                (funcall assert (funcall js-instanceof original globalThis.TypeError))
+                (js-call assert :throws
+                  (lambda () (js-call m :via_apply builtin wrong invalid))
+                  (lambda (error)
+                    (funcall assert (funcall js-instanceof error globalThis.TypeError))
+                    (js-call assert :equal (get error :message) (get original :message))
+                    t)))))
+          (put trace :length 0)
+          (js-call assert :throws
+            (lambda () (js-call m :via_apply builtin wrong (js-array radix)))
+            (lambda (error) (funcall js-instanceof error globalThis.TypeError)))
+          (js-call assert :deepEqual trace (js-array)
+            "receiver brand validation precedes conversion once the list is complete")
+          (js-call (js-array "call" "apply") :forEach
+            (lambda (operation)
+              (let ((saved (Object/getOwnPropertyDescriptor builtin operation)))
+                (try
+                  (let ((key (let ((k (js-object)))
+                               (put k (get globalThis.Symbol :toPrimitive)
+                                 (lambda (hint) (js-call trace :push "key" hint) operation))
+                               k)))
+                    (Object/defineProperty builtin operation
+                      (js-object :configurable t
+                                 :get (lambda ()
+                                        (js-call trace :push "get")
+                                        (if (= operation "call") call-fn apply-fn))))
+                    (put trace :length 0)
+                    (js-call assert :equal
+                      (js-call m :effects builtin key
+                        (lambda () (js-call trace :push "receiver") receiver)
+                        (lambda ()
+                          (js-call trace :push "argument")
+                          (Object/defineProperty builtin operation
+                            (js-object :configurable t :value (lambda () (throw marker))))
+                          (if (= operation "call") radix arguments-list)))
+                      "ff.8")
+                    (js-call assert :deepEqual trace
+                      (if (= operation "call")
+                        (js-array "key" "string" "get" "receiver" "argument" "radix")
+                        (js-array "key" "string" "get" "receiver" "argument" "length" "length.valueOf" "0" "1" "2" "radix"))))
+                  (finally
+                    (if saved
+                      (Object/defineProperty builtin operation saved)
+                      (Reflect/deleteProperty builtin operation)))))))
+          (js-call (js-array "call" "apply") :forEach
+            (lambda (key)
+              (let ((saved (Object/getOwnPropertyDescriptor builtin key)))
+                (try
+                  (progn
+                    (Object/defineProperty builtin key
+                      (js-object :configurable t
+                                 :value (funcall receiver-fn
+                                          (lambda (self args)
+                                            (js-call assert :strictEqual self builtin)
+                                            (js-call assert :strictEqual (aref args 0) wrong)
+                                            (js-call assert :strictEqual (aref args 1) broken)
+                                            marker))))
+                    (put trace :length 0)
+                    (js-call assert :strictEqual (js-call m :dynamic builtin key wrong broken) marker)
+                    (js-call assert :deepEqual trace (js-array)))
+                  (finally
+                    (if saved
+                      (Object/defineProperty builtin key saved)
+                      (Reflect/deleteProperty builtin key)))))))
+          (let ((other (funcall receiver-fn
+                         (lambda (self args)
+                           (js-call assert :strictEqual self receiver)
+                           (js-call assert :deepEqual args (js-array 16 "extra"))
+                           marker))))
+            (js-call assert :strictEqual (js-call m :via_apply other receiver (js-array 16 "extra")) marker))
+          (js-call assert :strictEqual (get num-proto :toString) builtin)
+          (js-call assert :strictEqual (get fn-proto :call) call-fn)
+          (js-call assert :strictEqual (get fn-proto :apply) apply-fn)))))
+
+  (defun verifyNumberCallFamily (m samples)
+    (let* ((num-proto (get globalThis.Number :prototype))
+           (fn-proto (get globalThis.Function :prototype))
+           (builtin (get num-proto :toString))
+           (bind-fn (get fn-proto :bind))
+           (call-fn (get fn-proto :call))
+           (apply-fn (get fn-proto :apply))
+           (reflect-fn Reflect/apply)
+           (view (new globalThis.DataView (new globalThis.ArrayBuffer 8)))
+           (s-idx 0))
+      (while (< s-idx (js-length samples))
+        (let* ((sample (aref samples s-idx))
+               (words (get sample :words))
+               (texts (get sample :texts))
+               (value (progn
+                        (js-call view :setUint32 0 (aref words 0))
+                        (js-call view :setUint32 4 (aref words 1))
+                        (js-call view :getFloat64 0)))
+               (radices (js-array 2 3 5 10 16 36))
+               (r-idx 0))
+          (while (< r-idx (js-length radices))
+            (let* ((radix (aref radices r-idx))
+                   (expected (aref texts (- radix 2)))
+                   (fixed (js-call m :bind_radix builtin value radix))
+                   (unfixed (js-call m :make_bound builtin value))
+                   (rebound (js-call m :bind_radix unfixed "ignored receiver" radix)))
+              (js-call assert :equal (js-call m :nested_call builtin value radix) expected)
+              (js-call assert :equal (js-call m :nested_apply builtin value (js-array radix)) expected)
+              (js-call assert :equal (js-call m :call_via_apply builtin value radix) expected)
+              (js-call assert :equal (js-call m :reflect_apply builtin value (js-array radix)) expected)
+              (js-call assert :equal (js-call m :reflect_nested builtin value (js-array radix)) expected)
+              (js-call assert :equal (js-call m :reflect_dynamic (js-object :apply reflect-fn) "apply" builtin value (js-array radix)) expected)
+              (js-call assert :equal (funcall fixed 2) expected)
+              (js-call assert :equal (funcall unfixed radix) expected)
+              (js-call assert :equal (js-call m :invoke unfixed radix) expected "actual funcall invokes the real bound result")
+              (js-call assert :equal (funcall rebound 36) expected)
+              (js-call assert :equal (funcall (js-call m :bind_radix fixed "ignored receiver" 36) 2) expected)
+              (js-call assert :equal (funcall (js-call m :dynamic call-fn "bind" builtin value) radix) expected)
+              (js-call assert :equal (funcall (js-call m :dynamic apply-fn "bind" builtin value) (js-array radix)) expected)
+              (js-call assert :equal (funcall (js-call m :bind_radix reflect-fn nil builtin) value (js-array radix)) expected)
+              (js-call assert :equal (funcall (funcall (js-call m :bind_radix bind-fn builtin value) radix)) expected)
+              (js-call assert :deepEqual (js-call (js-array 1 2) :map fixed) (js-array expected expected)
+                "a genuine external Array.map reaches the bound call")
+              (js-call assert :equal (funcall reflect-fn fixed nil (js-array 36)) expected
+                "external callbacks can invoke the returned bound object"))
+            (setq r-idx (1+ r-idx))))
+        (setq s-idx (1+ s-idx)))
+      (let ((decimal (js-call m :bind_radix builtin 0.1 undefined)))
+        (js-call assert :equal (funcall decimal 3) "0.1" "an explicit bound undefined radix suppresses the later radix argument"))
+      (let ((by-argument (js-call m :make_bound builtin 0.1))
+            (t1 (get (aref samples 1) :texts)))
+        (js-call assert :deepEqual
+          (js-call (js-array 3 5 16) :map by-argument)
+          (js-array (aref t1 1) (aref t1 3) (aref t1 14))))
+      (let ((real (funcall reflect-fn bind-fn builtin (js-array 0.1 3)))
+            (actual (js-call m :bind_radix builtin 0.1 3))
+            (fn-to-string (get fn-proto :toString)))
+        (js-call assert :equal (value-type actual) (value-type real))
+        (js-call assert :strictEqual (Object/getPrototypeOf actual) (Object/getPrototypeOf real))
+        (js-call assert :deepEqual (Reflect/ownKeys actual) (Reflect/ownKeys real))
+        (js-call assert :deepEqual (Object/getOwnPropertyDescriptors actual) (Object/getOwnPropertyDescriptors real))
+        (js-call assert :equal (js-call (get node-util :types) :isProxy actual) false)
+        (js-call assert :equal (js-call (get node-util :types) :isProxy real) false)
+        (js-call assert :equal (funcall reflect-fn fn-to-string actual (js-array)) (funcall reflect-fn fn-to-string real (js-array)))
+        (js-call assert :throws (lambda () (funcall construct-zero actual)) globalThis.TypeError)
+        (js-call assert :throws (lambda () (funcall construct-zero real)) globalThis.TypeError)
+        (js-call assert :throws (lambda () (funcall js-instanceof (js-object) actual)) globalThis.TypeError)
+        (js-call assert :throws (lambda () (funcall js-instanceof (js-object) real)) globalThis.TypeError)
+        (let* ((sym-has-instance (get globalThis.Symbol :hasInstance))
+               (native-has-instance (get fn-proto sym-has-instance))
+               (old-prototype (Object/getOwnPropertyDescriptor builtin "prototype"))
+               (old-has-instance (Object/getOwnPropertyDescriptor builtin sym-has-instance)))
+          (try
+            (let* ((first-prototype (js-object))
+                   (second-prototype (js-object))
+                   (unrelated (js-object))
+                   (first-instance (Object/create first-prototype))
+                   (second-instance (Object/create second-prototype)))
+              (Object/defineProperty builtin "prototype"
+                (js-object :configurable t :writable t :value first-prototype))
+              (js-call (js-array first-instance second-instance unrelated) :forEach
+                (lambda (instance)
+                  (js-call assert :equal (funcall js-instanceof instance actual) (funcall js-instanceof instance real))
+                  (js-call assert :equal
+                    (funcall reflect-fn native-has-instance actual (js-array instance))
+                    (funcall reflect-fn native-has-instance real (js-array instance)))))
+              (put builtin :prototype second-prototype)
+              (js-call (js-array first-instance second-instance) :forEach
+                (lambda (instance)
+                  (js-call assert :equal (funcall js-instanceof instance actual) (funcall js-instanceof instance real)
+                    "bound targets observe later prototype changes")
+                  (js-call assert :equal
+                    (funcall reflect-fn native-has-instance actual (js-array instance))
+                    (funcall reflect-fn native-has-instance real (js-array instance)))))
+              (let* ((observed (js-array))
+                     (has (funcall receiver-fn
+                            (lambda (self args)
+                              (js-call observed :push "call")
+                              (js-call assert :strictEqual self builtin)
+                              (Object/is (aref args 0) unrelated)))))
+                (Object/defineProperty builtin sym-has-instance
+                  (js-object :configurable t :get (lambda () (js-call observed :push "get") has)))
+                (js-call (js-array first-instance unrelated) :forEach
+                  (lambda (instance)
+                    (let ((expected (funcall js-instanceof instance real))
+                          (native-trace (js-call observed :splice 0)))
+                      (js-call assert :equal (funcall js-instanceof instance actual) expected)
+                      (js-call assert :deepEqual (js-call observed :splice 0) native-trace))
+                    (let ((expected-by-intrinsic (funcall reflect-fn native-has-instance real (js-array instance)))
+                          (intrinsic-trace (js-call observed :splice 0)))
+                      (js-call assert :equal
+                        (funcall reflect-fn native-has-instance actual (js-array instance))
+                        expected-by-intrinsic)
+                      (js-call assert :deepEqual (js-call observed :splice 0) intrinsic-trace))))
+                (Object/defineProperty builtin sym-has-instance
+                  (js-object :configurable t :get (lambda () (throw false))))
+                (js-call assert :throws (lambda () (funcall js-instanceof unrelated real)) (lambda (error) (eq error false)))
+                (js-call assert :throws (lambda () (funcall js-instanceof unrelated actual)) (lambda (error) (eq error false)))))
+            (finally
+              (if old-prototype
+                (Object/defineProperty builtin "prototype" old-prototype)
+                (Reflect/deleteProperty builtin "prototype"))
+              (if old-has-instance
+                (Object/defineProperty builtin sym-has-instance old-has-instance)
+                (Reflect/deleteProperty builtin sym-has-instance))))))
+      (let* ((trace (js-array))
+             (marker (js-object))
+             (descriptors (js-call (js-array "name" "length") :map (lambda (key) (Object/getOwnPropertyDescriptor builtin key)))))
+        (try
+          (progn
+            (Object/defineProperty builtin "length"
+              (js-object :configurable t :get (lambda () (js-call trace :push "length") 5)))
+            (Object/defineProperty builtin "name"
+              (js-object :configurable t :get (lambda () (js-call trace :push "name") "observed")))
+            (let ((bound (js-call m :bind_radix builtin 0.1 3)))
+              (js-call assert :deepEqual trace (js-array "length" "name"))
+              (put trace :length 0)
+              (let ((native (funcall reflect-fn bind-fn builtin (js-array 0.1 3))))
+                (js-call assert :deepEqual trace (js-array "length" "name"))
+                (js-call assert :deepEqual (Object/getOwnPropertyDescriptors bound) (Object/getOwnPropertyDescriptors native))))
+            (Object/defineProperty builtin "length"
+              (js-object :configurable t :get (lambda () (throw false))))
+            (put trace :length 0)
+            (js-call assert :throws (lambda () (js-call m :make_bound builtin 0.1)) (lambda (error) (eq error false)))
+            (js-call assert :deepEqual trace (js-array)))
+          (finally
+            (Object/defineProperty builtin "name" (aref descriptors 0))
+            (Object/defineProperty builtin "length" (aref descriptors 1))))
+        (let ((poison (let ((p (js-object)))
+                        (Object/defineProperty p "length"
+                          (js-object :enumerable t :configurable t :get (lambda () (js-call trace :push "length") (throw marker))))
+                        p)))
+          (js-call (js-array
+                     (lambda () (js-call m :via_apply 1 nil poison))
+                     (lambda () (js-call m :reflect_apply 1 nil poison)))
+                   :forEach
+                   (lambda (invoke)
+                     (put trace :length 0)
+                     (js-call assert :throws invoke globalThis.TypeError)
+                     (js-call assert :deepEqual trace (js-array) "callability precedes any source list read")))
+          (put trace :length 0)
+          (js-call assert :throws
+            (lambda () (js-call m :reflect_apply empty-class nil poison))
+            (lambda (error) (Object/is error marker)))
+          (js-call assert :deepEqual trace (js-array "length")
+            "class invocation is refused only after its argument list has been evaluated")
+          (let ((revoked (js-call globalThis.Proxy :revocable (lambda () 1) (js-object))))
+            (js-call revoked :revoke)
+            (put trace :length 0)
+            (js-call assert :throws
+              (lambda () (js-call m :reflect_apply (get revoked :proxy) nil poison))
+              (lambda (error) (Object/is error marker)))
+            (js-call assert :deepEqual trace (js-array "length"))
+            (js-call assert :throws
+              (lambda () (js-call m :reflect_apply (get revoked :proxy) nil (js-array)))
+              globalThis.TypeError))
+          (js-call (js-array nil undefined) :forEach
+            (lambda (empty)
+              (js-call assert :equal (js-call m :via_apply builtin 0.1 empty) "0.1")
+              (js-call assert :throws (lambda () (js-call m :reflect_apply builtin 0.1 empty)) globalThis.TypeError)))
+          (let ((list-obj (let ((l (js-object)))
+                            (Object/defineProperty l "length"
+                              (js-object :enumerable t :configurable t :get (lambda () (js-call trace :push "length") 2)))
+                            (Object/defineProperty l "0"
+                              (js-object :enumerable t :configurable t
+                                         :get (lambda ()
+                                                (js-call trace :push "0")
+                                                (js-object :valueOf (lambda () (js-call trace :push "radix") 3)))))
+                            (Object/defineProperty l "1"
+                              (js-object :enumerable t :configurable t :get (lambda () (js-call trace :push "1") marker)))
+                            l))
+                (expected-t1 (aref (get (aref samples 1) :texts) 1)))
+            (put trace :length 0)
+            (js-call assert :equal (js-call m :reflect_apply builtin 0.1 list-obj) expected-t1)
+            (js-call assert :deepEqual trace (js-array "length" "0" "1" "radix"))
+            (put trace :length 0)
+            (let ((delayed-apply (js-call m :dynamic apply-fn "bind" builtin 0.1))
+                  (delayed-reflect (js-call m :bind_radix reflect-fn nil builtin)))
+              (js-call assert :deepEqual trace (js-array) "binding apply does not inspect its later argument list")
+              (js-call assert :equal (funcall delayed-apply list-obj) expected-t1)
+              (js-call assert :deepEqual trace (js-array "length" "0" "1" "radix"))
+              (put trace :length 0)
+              (js-call assert :equal (funcall delayed-reflect 0.1 list-obj) expected-t1)
+              (js-call assert :deepEqual trace (js-array "length" "0" "1" "radix")))
+            (let ((owner nil))
+              (setq owner
+                (js-object :apply (funcall receiver-fn
+                                    (lambda (self args)
+                                      (js-call assert :strictEqual self owner)
+                                      (js-call assert :deepEqual args (js-array 1 nil poison))
+                                      marker))))
+              (put trace :length 0)
+              (js-call assert :strictEqual (js-call m :reflect_dynamic owner "apply" 1 nil poison) marker)
+              (js-call assert :deepEqual trace (js-array)))
+            (let ((old-bind (Object/getOwnPropertyDescriptor builtin "bind")))
+              (try
+                (let ((radix (js-object :valueOf (lambda () (js-call trace :push "radix") 3))))
+                  (Object/defineProperty builtin "bind"
+                    (js-object :configurable t :get (lambda () (js-call trace :push "bind.get") bind-fn)))
+                  (put trace :length 0)
+                  (let ((bound (js-call m :effects builtin "bind"
+                                 (lambda () (js-call trace :push "receiver") 0.1)
+                                 (lambda ()
+                                   (js-call trace :push "argument")
+                                   (Object/defineProperty builtin "bind"
+                                     (js-object :configurable t :value (lambda () (throw marker))))
+                                   radix))))
+                    (js-call assert :deepEqual trace (js-array "bind.get" "receiver" "argument")
+                      "binding captures arguments without coercing the receiver or radix")
+                    (js-call assert :equal (funcall bound) expected-t1)
+                    (js-call assert :deepEqual trace (js-array "bind.get" "receiver" "argument" "radix"))))
+                (finally
+                  (if old-bind
+                    (Object/defineProperty builtin "bind" old-bind)
+                    (Reflect/deleteProperty builtin "bind")))))
+            (let* ((arr-proto (get globalThis.Array :prototype))
+                   (sym-species (get globalThis.Symbol :species))
+                   (species (Object/getOwnPropertyDescriptor globalThis.Array sym-species))
+                   (slice (Object/getOwnPropertyDescriptor arr-proto "slice"))
+                   (first (Object/getOwnPropertyDescriptor arr-proto "0"))
+                   (species-reads 0)
+                   (setters 0)
+                   (nested undefined)
+                   (bound-result undefined))
+              (try
+                (progn
+                  (Object/defineProperty globalThis.Array sym-species
+                    (js-object :configurable t :get (lambda () (setq species-reads (1+ species-reads)) (throw marker))))
+                  (Object/defineProperty arr-proto "slice"
+                    (js-object :configurable t :value (lambda () (throw marker))))
+                  (Object/defineProperty arr-proto "0"
+                    (js-object :configurable t
+                               :get (lambda () (throw marker))
+                               :set (lambda () (setq setters (1+ setters)))))
+                  (setq nested (js-call m :nested_call builtin 0.1 3))
+                  (setq bound-result (funcall (js-call m :bind_radix builtin 0.1 3))))
+                (finally
+                  (Object/defineProperty globalThis.Array sym-species species)
+                  (Object/defineProperty arr-proto "slice" slice)
+                  (if first
+                    (Object/defineProperty arr-proto "0" first)
+                    (Reflect/deleteProperty arr-proto "0"))))
+              (js-call assert :equal nested expected-t1)
+              (js-call assert :equal bound-result expected-t1)
+              (js-call assert :equal species-reads 0)
+              (js-call assert :equal setters 0))))
+      (js-call assert :strictEqual (get num-proto :toString) builtin)
+      (js-call assert :strictEqual (get fn-proto :bind) bind-fn)
+      (js-call assert :strictEqual (get fn-proto :call) call-fn)
+      (js-call assert :strictEqual (get fn-proto :apply) apply-fn)
+      (js-call assert :strictEqual Reflect/apply reflect-fn))))
+
+  (defasync run-cli (mode)
+    (await (funcall dynamic-import
+             (get (new globalThis.URL "./managed-reference-node.mjs" (get (js* "import.meta") :url)) :href)))
+    (cond
+      ((= mode "--verify-samples")
+       (let* ((payload (JSON/parse (readFileSync 0 "utf8")))
+              (javascript (get payload :javascript))
+              (samples (get payload :samples))
+              (m (await (funcall dynamic-import
+                          (str "data:text/javascript;base64," (js-call (Buffer/from javascript) :toString "base64")))))
+              (view (new globalThis.DataView (new globalThis.ArrayBuffer 8)))
+              (idx 0))
+         (while (< idx (js-length samples))
+           (let* ((sample (aref samples idx))
+                  (words (get sample :words))
+                  (texts (get sample :texts))
+                  (number (progn
+                            (js-call view :setUint32 0 (aref words 0))
+                            (js-call view :setUint32 4 (aref words 1))
+                            (js-call view :getFloat64 0)))
+                  (radix 2))
+             (while (<= radix 36)
+               (js-call assert :equal (js-call m :f number radix) (aref texts (- radix 2)))
+               (js-call assert :equal (js-call m :dynamic number "toString" radix) (aref texts (- radix 2)))
+               (setq radix (1+ radix))))
+           (setq idx (1+ idx)))
+         (js-call globalThis.console :log (JSON/stringify (js-object :samples (js-length samples) :radices 35)))))
+      ((= mode "--verify-method-boundary")
+       (let* ((javascript (readFileSync 0 "utf8"))
+              (m (await (funcall dynamic-import
+                          (str "data:text/javascript;base64," (js-call (Buffer/from javascript) :toString "base64"))))))
+         (verifyNumberMethodBoundary m)))
+      ((= mode "--verify-borrowed-family")
+       (let* ((payload (JSON/parse (readFileSync 0 "utf8")))
+              (javascript (get payload :javascript))
+              (samples (get payload :samples))
+              (m (await (funcall dynamic-import
+                          (str "data:text/javascript;base64," (js-call (Buffer/from javascript) :toString "base64"))))))
+         (verifyBorrowedNumberBoundary m samples)
+         (verifyNumberCallFamily m samples)))))
+
+  (let ((argv (get globalThis.process :argv)))
+    (js-call (js-array "--verify-samples" "--verify-method-boundary" "--verify-borrowed-family") :forEach
+      (lambda (flag)
+        (when (>= (js-call argv :indexOf flag) 0)
+          (js-call (run-cli flag) :catch
+            (lambda (err) (js-call globalThis.console :error err) (js-call globalThis.process :exit 1)))))))
+
+  (export verifyNumberMethodBoundary verifyBorrowedNumberBoundary verifyNumberCallFamily))

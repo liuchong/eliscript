@@ -4,9 +4,10 @@
   (import "node:url" pathToFileURL)
   (import "../../dist/bootstrap/compiler.mjs" compile-string compile-ir-string)
   (import "../../dist/bootstrap/emitter.mjs" emit-top-level emit-expression)
+  (import "./maintained-suite-source.mjs" maintainedSuiteSource sourceCall rewriteSourceForms compileMaintainedSuite)
   (defconst wireCallSuite "tests/wasm-managed-wire-selfhosted.test.mjs")
   (defconst wireCallGround "tests/wasm-managed-wire-test-ground.mjs")
-  (defconst wireCallSha "05835e2d5f6fd6e973a052df3389cafb3e131fbcfce305272070b13d20453df0")
+  (defconst wireCallSha "f799b8f9557288ade36df506fdd77dafb40d144159bc3168636c1f0c1674a0d2")
   (defvar active undefined)
   (defun wireCallProfile (environment)
     (and (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
@@ -133,30 +134,64 @@
       (let* ((original (js-call source :slice start end))
              (guard (replace-once (get template :guard) (get template :placeholder) original)))
         (str (js-call source :slice 0 start) guard (js-call source :slice end)))))
-  (defun projectWireCallSuite (root source)
+    (defun projectWireCallSource (root source)
     (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex") wireCallSha)
       (throw (new globalThis.TypeError "wire partitions require the complete original suite")))
-    (let ((template (wire-template root "corpus" "index")))
-      (setq source (guard-original source root "    const record=cases[index];" "  }\n  const negative=" "corpus" "index"))
-      (setq source (guard-original source root "  const negative=runtime.invoke('parse-negative-zero');"
-        "  assert.deepEqual(await httpContracts" "tail" (JSON/stringify "negative-zero")))
-      (setq source (guard-original source root "  assert.deepEqual(await httpContracts" "\n}\nfunction platformOptions"
-        "tail" (JSON/stringify "http-contracts")))
-      (setq source (guard-original source root "  const originalPayload=" "\n}\n\nfor(const auto of"
-        "tail" (JSON/stringify "network")))
-      ;; This is a positive network test budget, not a change to transport
-      ;; timers or explicit timeout/cancellation contracts. Strict mode keeps
-      ;; the original three seconds. All replacement code is compiler output.
-      (setq source (replace-once source "{timeoutMs:3000}" (get template :networkOptions)))
-      (setq source (replace-once source "new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))"
-        (get template :networkListen)))
-      (setq source (replace-once source "for(const auto of [65536,1])test("
-        (replace-once "for(const auto of [65536,1])test(" "test" (get template :registration))))
-      (setq source (replace-once source "test.skipIf(!nativeTarget)("
-        (replace-once "test.skipIf(!nativeTarget)(" "test" (get template :registration))))
-      (str (get template :prefix) source)))
+    (let* ((maintained (maintainedSuiteSource root wireCallGround source))
+           (seen (new globalThis.Map))
+           (projected (rewriteSourceForms maintained
+             (lambda (node node-text)
+               (let ((items (get node :items)) (text (funcall node-text node))
+                     (kind undefined) (replacement undefined))
+                 (cond
+                   ((and (sourceCall node "let") (js-call text :startsWith "(let ((record (aref cases index)))"))
+                    (setq kind "corpus" replacement (str "(when (wirePartEnabled \"corpus\" index) " text ")")))
+                   ((and (sourceCall node "let") (js-call text :startsWith "(let ((negative (js-call runtime :invoke \"parse-negative-zero\")))"))
+                    (setq kind "negative-zero" replacement (str "(when (wirePartEnabled \"tail\" \"negative-zero\") " text ")")))
+                   ((and (sourceCall node "js-call") (js-call text :startsWith "(js-call assert :deepEqual")
+                         (js-call text :includes "(await (httpContracts (target-http runtime)))"))
+                    (setq kind "http-contracts" replacement (str "(when (wirePartEnabled \"tail\" \"http-contracts\") " text ")")))
+                   ((and (sourceCall node "defasync") (= (get (aref items 1) :name) "check-network"))
+                    (setq kind "network" replacement
+                      (str "(defasync check-network (runtime) (when (wirePartEnabled \"tail\" \"network\") "
+                        (js-call (js-call (js-call items :slice 3) :map node-text) :join "\n") "))")))
+                   ((and (sourceCall node "js-object") (= (js-length items) 3)
+                         (= (funcall node-text (aref items 1)) ":timeoutMs") (= (get (aref items 2) :value) 3000))
+                    (setq kind "options" replacement "(wireNetworkOptions)"))
+                   ((and (sourceCall node "await") (js-call text :includes "(js-call server :listen 0 \"127.0.0.1\" res)"))
+                    (setq kind "listen" replacement "(await (wireNetworkListen server))"))
+                   ((sourceCall node "test")
+                    (setq kind "registration" replacement (str "(wire-partition-test "
+                      (js-call (js-call (js-call items :slice 1) :map node-text) :join "\n") ")")))
+                   ((and (sourceCall node "js-call") (= (get (aref items 1) :name) "test")
+                         (= (funcall node-text (aref items 2)) ":skipIf"))
+                    (setq kind "native-registration" replacement (str "(js-call wire-partition-test "
+                      (js-call (js-call (js-call items :slice 2) :map node-text) :join " ") ")"))))
+                 (unless (undefined? kind) (js-call seen :set kind (1+ (or (js-call seen :get kind) 0))))
+                 replacement)))))
+      ;; A selected whole network function intentionally owns its internal
+      ;; options/listen forms. Rewrite those two forms in a second source pass.
+      (let* ((first (get projected :source))
+             (network (rewriteSourceForms first (lambda (node node-text)
+               (let ((items (get node :items)) (text (funcall node-text node)))
+                 (cond
+                   ((and (sourceCall node "js-object") (= (js-length items) 3)
+                         (= (funcall node-text (aref items 1)) ":timeoutMs") (= (get (aref items 2) :value) 3000))
+                    (js-call seen :set "options" (1+ (or (js-call seen :get "options") 0))) "(wireNetworkOptions)")
+                   ((and (sourceCall node "await") (js-call text :includes "(js-call server :listen 0 \"127.0.0.1\" res)"))
+                    (js-call seen :set "listen" (1+ (or (js-call seen :get "listen") 0))) "(await (wireNetworkListen server))")
+                   (t undefined)))))))
+        (js-call (js-array "corpus" "negative-zero" "http-contracts" "network" "options" "listen" "native-registration") :forEach
+          (lambda (kind) (unless (= (js-call seen :get kind) 1) (throw (new globalThis.TypeError (str "wire original block is incomplete or ambiguous: " kind))))))
+        (unless (> (js-call seen :get "registration") 0) (throw (new globalThis.TypeError "wire original registrations are missing")))
+        (put network :original maintained) network)))
+  (defun projectWireCallSuite (root source)
+    (compileMaintainedSuite (get (projectWireCallSource root source) :source) wireCallGround
+      (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/testing/wire-call-cases.mjs")) :href))
+        " wirePartEnabled wireCallTestRegistration wireNetworkOptions wireNetworkListen)\n"
+        "(defconst wire-partition-test (wireCallTestRegistration test cases))")))
   (defun wireCallWrapperSource (root)
     (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "tests/helpers/wire-project-fixture-install.mjs")) :href)) ")\n"
          "(import \"./wasm-managed-wire-test-ground.mjs\")\n"))
-  (export wireCallSuite wireCallGround wireCallSha wireCallProfile wireNetworkOptions wireNetworkListen runtimeCallShard wirePartEnabled wireCallParts
+  (export projectWireCallSource wireCallSuite wireCallGround wireCallSha wireCallProfile wireNetworkOptions wireNetworkListen runtimeCallShard wirePartEnabled wireCallParts
     wireCallTestRegistration projectWireCallSuite wireCallWrapperSource))

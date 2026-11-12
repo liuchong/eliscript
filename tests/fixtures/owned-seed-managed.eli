@@ -1,0 +1,6 @@
+(module tests.fixtures.owned-seed-managed
+  (defconst state (js-object))
+  (defconst productJSON "__OWNED_PRODUCT_DATA__")
+  (defun lower_managed_project (modules entry runtime options)
+    (put state :modules modules) (put state :runtime runtime) (put state :literals (get options :literalModules)) (JSON/parse productJSON))
+  (export state lower_managed_project))

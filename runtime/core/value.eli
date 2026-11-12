@@ -1,2 +1,84 @@
-(module capsules.runtime.core.value
-  (js* "import {\n  I_EQUIV,\n  I_HASH,\n  cachedProtocolHash,\n  dispatchValueEqual,\n  dispatchValueHash,\n  hashBigInt,\n  hashBoolean,\n  hashGlobalSymbol,\n  hashNull,\n  hashNumber,\n  hashString,\n  hashUndefined,\n  hostIdentityHash,\n  recordHashValueCall,\n} from \"./value-internals.mjs\";\nimport {\n  extendProtocolType,\n  implementsProtocolOperation,\n} from \"./protocol.mjs\";\n\nexport const IEquiv = I_EQUIV;\nexport const IHash = I_HASH;\n\nexport function extendValueType(constructor, implementations) {\n  if (implementations === null || typeof implementations !== \"object\" ||\n      typeof implementations.equal !== \"function\" ||\n      typeof implementations.hash !== \"function\") {\n    throw new TypeError(\n      \"value type extension requires equal and hash functions\",\n    );\n  }\n  extendProtocolType(IEquiv, constructor, { equal: implementations.equal });\n  extendProtocolType(IHash, constructor, { hash: implementations.hash });\n  return constructor;\n}\n\nexport function equalValues(left, right) {\n  if (left === right) {\n    return true;\n  }\n  if (typeof left === \"number\" && typeof right === \"number\") {\n    return Number.isNaN(left) && Number.isNaN(right);\n  }\n  if (left === null || right === null ||\n      (typeof left !== \"object\" && typeof left !== \"function\") ||\n      (typeof right !== \"object\" && typeof right !== \"function\")) {\n    return false;\n  }\n\n  if (!implementsProtocolOperation(IEquiv, \"equal\", left) ||\n      !implementsProtocolOperation(IEquiv, \"equal\", right)) {\n    return false;\n  }\n  return dispatchValueEqual(left, right, equalValues) === true;\n}\n\nexport function hashValue(value) {\n  recordHashValueCall();\n  if (value === null) {\n    return hashNull();\n  }\n  switch (typeof value) {\n    case \"undefined\":\n      return hashUndefined();\n    case \"boolean\":\n      return hashBoolean(value);\n    case \"number\":\n      return hashNumber(value);\n    case \"bigint\":\n      return hashBigInt(value);\n    case \"string\":\n      return hashString(value);\n    case \"symbol\": {\n      const globalKey = Symbol.keyFor(value);\n      return globalKey === undefined\n        ? hostIdentityHash(value)\n        : hashGlobalSymbol(globalKey);\n    }\n    case \"function\":\n    case \"object\": {\n      if (implementsProtocolOperation(IHash, \"hash\", value)) {\n        return cachedProtocolHash(\n          value,\n          () => dispatchValueHash(value, hashValue),\n        );\n      }\n      return hostIdentityHash(value);\n    }\n    default:\n      throw new TypeError(`cannot hash JavaScript value of type ${typeof value}`);\n  }\n}\n"))
+(module eliscript.runtime.core.value
+  (import "./value-internals.mjs"
+    I_EQUIV
+    I_HASH
+    cachedProtocolHash
+    dispatchValueEqual
+    dispatchValueHash
+    hashBigInt
+    hashBoolean
+    hashGlobalSymbol
+    hashNull
+    hashNumber
+    hashString
+    hashUndefined
+    hostIdentityHash
+    recordHashValueCall)
+  (import "./protocol.mjs" extendProtocolType implementsProtocolOperation)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst IEquiv I_EQUIV)
+  (defconst IHash I_HASH)
+
+  (defun extendValueType (ctor implementations)
+    (when (or (nil? implementations)
+              (not (= (funcall typeof-value implementations) "object"))
+              (not (= (funcall typeof-value (get implementations :equal)) "function"))
+              (not (= (funcall typeof-value (get implementations :hash)) "function")))
+      (throw (new globalThis/TypeError
+               "value type extension requires equal and hash functions")))
+    (extendProtocolType IEquiv ctor (js-object :equal (get implementations :equal)))
+    (extendProtocolType IHash ctor (js-object :hash (get implementations :hash)))
+    ctor)
+
+  (defun equalValues (left right)
+    (cond
+      ((eq left right) t)
+      ((and (= (funcall typeof-value left) "number")
+            (= (funcall typeof-value right) "number"))
+       (and (Number/isNaN left) (Number/isNaN right)))
+      ((or (nil? left)
+           (nil? right)
+           (and (not (= (funcall typeof-value left) "object"))
+                (not (= (funcall typeof-value left) "function")))
+           (and (not (= (funcall typeof-value right) "object"))
+                (not (= (funcall typeof-value right) "function"))))
+       false)
+      ((or (not (implementsProtocolOperation IEquiv "equal" left))
+           (not (implementsProtocolOperation IEquiv "equal" right)))
+       false)
+      (t
+       (eq (dispatchValueEqual left right equalValues) t))))
+
+  (defun hashValue (value)
+    (recordHashValueCall)
+    (if (nil? value)
+        (hashNull)
+        (let ((type (funcall typeof-value value)))
+          (cond
+            ((= type "undefined") (hashUndefined))
+            ((= type "boolean") (hashBoolean value))
+            ((= type "number") (hashNumber value))
+            ((= type "bigint") (hashBigInt value))
+            ((= type "string") (hashString value))
+            ((= type "symbol")
+             (let ((global-key (js-call globalThis/Symbol :keyFor value)))
+               (if (undefined? global-key)
+                   (hostIdentityHash value)
+                   (hashGlobalSymbol global-key))))
+            ((or (= type "function") (= type "object"))
+             (if (implementsProtocolOperation IHash "hash" value)
+                 (cachedProtocolHash
+                   value
+                   (lambda () (dispatchValueHash value hashValue)))
+                 (hostIdentityHash value)))
+            (t
+             (throw (new globalThis/TypeError
+                      (str "cannot hash JavaScript value of type " type))))))))
+
+  (export
+    IEquiv
+    IHash
+    extendValueType
+    equalValues
+    hashValue))

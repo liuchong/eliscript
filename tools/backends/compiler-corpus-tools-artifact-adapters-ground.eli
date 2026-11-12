@@ -1,2 +1,1019 @@
-(module capsules.tools.backends.compiler-corpus-tools-artifact-adapters_ground
-  (js* "import {createHash} from 'node:crypto';\nimport {resolve} from 'node:path';\nimport {pathToFileURL} from 'node:url';\nimport {loadCompilerSources} from './compiler-build.mjs';\nimport {compilerSourceIdentity} from './compiler-bootstrap.mjs';\nimport {addOriginalWorkerProgram} from './compiler-corpus-cli-adapters.mjs';\n\nconst suite = 'tests/compiler-session-tools.test.mjs';\nconst digest = source => createHash('sha256').update(source).digest('hex');\nconst caseTitles = [\n  'a complete real managed compiler driver transports AggregateError graphs with shared errors and cause identity',\n  'the real compiler CLI emits structured source failures and preserves successful output with the same built artifact',\n  'real CLI streaming UTF8 preserves split astral scalars BOM diagnostics and strict malformed-tail failures',\n];\nconst semanticFixtures = [\n  'tests/fixtures/core-expression-forms.eli', 'tests/fixtures/core-language-api-usage.eli',\n  'tests/fixtures/core-stdlib-usage.eli', 'tests/fixtures/wasm-managed-source-collections.eli',\n  'tests/fixtures/managed-stdlib-value-json.eli',\n];\n\nfunction semanticDependencies(source) {\n  // These are the existing suite's complete header dependencies. The replay\n  // supplies its test collector and selected-session setup explicitly; a new\n  // import must be wired deliberately instead of failing deep in a VM run.\n  const expected = [\n    \"import {beforeAll, afterAll, test, spyOn} from 'bun:test';\",\n    \"import assert from 'node:assert/strict';\",\n    \"import {mkdtemp, readFile, writeFile, rm} from 'node:fs/promises';\",\n    \"import {resolve} from 'node:path';\",\n    \"import {tmpdir} from 'node:os';\",\n    \"import {pathToFileURL} from 'node:url';\",\n    \"import {spawnSync} from 'node:child_process';\",\n    \"import {createHash} from 'node:crypto';\",\n    \"import {buildIndependentCompiler,loadCompilerSources,independentCompilerResources} from '../tools/backends/compiler-build.mjs';\",\n    \"import {createCompilerSession} from '../tools/backends/compiler-session.mjs';\",\n  ];\n  const headerEnd = source.indexOf('\\nlet directory, owned, driver;');\n  const imports = headerEnd < 0 ? [] : source.slice(0, headerEnd).split('\\n').map(line => line.trim()).filter(Boolean);\n  if (imports.length !== expected.length || imports.some((line, index) => line !== expected[index])) {\n    throw new TypeError('original compiler semantic dependencies changed');\n  }\n  const session = region(source, 'async function withSession(run) {', '\\nconst analyze =');\n  if (session.source !== \"async function withSession(run) {\\n  const session = await createCompilerSession({host: 'javascript', compiler: driver});\\n  try {await run(session);} finally {session.close();}\\n}\") {\n    throw new TypeError('original compiler semantic session lifecycle changed');\n  }\n  const {source: retained, ...sessionRange} = session;\n  return {imports, header: {start: 0, end: headerEnd, byteStart: 0, byteEnd: Buffer.byteLength(source.slice(0, headerEnd)),\n    sha256: digest(source.slice(0, headerEnd))}, session: sessionRange};\n}\n\nfunction semanticRegions(source) {\n  const first = region(source, 'const analyze =', '\\nasync function withBackendPhaseTrace');\n  const start = source.indexOf(\"test('optional parameter defaults resolve\");\n  if (start < 0) throw new TypeError('original compiler semantic case boundary changed');\n  const tail = source.slice(start);\n  return [first, {source: tail, start, end: source.length, byteStart: Buffer.byteLength(source.slice(0, start)),\n    byteEnd: Buffer.byteLength(source), sha256: digest(tail)}];\n}\n\nfunction semanticTitles(regions) {\n  const names = [];\n  for (const selected of regions) {\n    for (const match of selected.source.matchAll(/^[ \\t]*test\\('([^']+)'([^\\n]*)/gm)) {\n      if (match[1] === 'production tools analyze complete existing fixture ') {\n        if (!match[2].startsWith(' + filename,')) throw new TypeError('original compiler semantic fixture registration changed');\n        names.push(...semanticFixtures.map(filename => match[1] + filename));\n      } else {\n        if (!match[2].startsWith(',')) throw new TypeError('original compiler semantic test registration changed');\n        names.push(match[1]);\n      }\n    }\n  }\n  if (names.length === 0 || new Set(names).size !== names.length) throw new TypeError('invalid original compiler semantic case names');\n  return names;\n}\n\nfunction semanticHostSource(sourceRoot, sourceIdentity, fixtureIdentities, body, titles) {\n  return `import assert from 'node:assert/strict';\nimport {readFile} from 'node:fs/promises';\nimport {createHash} from 'node:crypto';\nimport {pathToFileURL} from 'node:url';\nimport {createCompilerSession} from ${JSON.stringify(pathToFileURL(resolve(sourceRoot, 'tools/backends/compiler-session.mjs')).href)};\nimport {loadCompilerSources} from ${JSON.stringify(pathToFileURL(resolve(sourceRoot, 'tools/backends/compiler-build.mjs')).href)};\nimport {compilerSourceIdentity} from ${JSON.stringify(pathToFileURL(resolve(sourceRoot, 'tools/backends/compiler-bootstrap.mjs')).href)};\nimport {readCompilerMetadata} from ${JSON.stringify(pathToFileURL(resolve(sourceRoot, 'tools/backends/compiler-metadata.mjs')).href)};\nconst configuration=await readCompilerMetadata(process.env.ELISCRIPT_ORIGINAL_COMPILER_SESSION);\nprocess.chdir(configuration.sourceRoot);\nassert.deepEqual(compilerSourceIdentity(await loadCompilerSources({sourceRoot:configuration.sourceRoot})),${JSON.stringify(sourceIdentity)});\nfor(const identity of ${JSON.stringify(fixtureIdentities)}){\n const bytes=await readFile(identity.filename);\n assert.equal(createHash('sha256').update(bytes).digest('hex'),identity.sha256,identity.filename);\n}\nconst selectedDriver=configuration.target==='javascript'?await import(pathToFileURL(configuration.path).href):undefined;\nconst selectedBytes=configuration.target==='wasm'?new Uint8Array(await readFile(configuration.path)):undefined;\nasync function openSelected(){\n const session=await createCompilerSession({host:configuration.target,compiler:selectedDriver,\n  ...(configuration.target==='wasm'?{bytes:selectedBytes}:{}),\n  ...(configuration.target==='native'?{path:configuration.path,descriptor:{typed:configuration.typed,descriptor:configuration.descriptor}}:{}),\n  memory:configuration.memory,options:configuration.runtimeOptions});\n assert.equal(session.host,configuration.target);return session;\n}\nasync function withSession(run){const session=await openSelected();try{await run(session);}finally{session.close();}}\nconst cases=[];\nfunction test(name,run,timeout=5000){cases.push({name,run,timeout});}\nasync function timed(name,run,timeout){\n let timer;const start=performance.now();\n try{\n  await Promise.race([Promise.resolve().then(run),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(name+' exceeded its original '+timeout+' ms timeout')),timeout);})]);\n  assert(performance.now()-start<=timeout,name+' exceeded its original '+timeout+' ms timeout');\n }finally{clearTimeout(timer);}\n}\n` + body + `\nassert.deepEqual(cases.map(record=>record.name),${JSON.stringify(titles)});\nfor(const record of cases)await timed(record.name,record.run,record.timeout);\nconsole.log(JSON.stringify(cases.map(record=>record.name)));\n`;\n}\n\nfunction region(source, begin, end, from = 0) {\n  const start = source.indexOf(begin, from);\n  const finish = start < 0 ? -1 : source.indexOf(end, start + begin.length);\n  if (start < 0 || finish < 0) throw new TypeError('original compiler artifact case boundary changed: ' + begin);\n  const selected = source.slice(start, finish);\n  return {source: selected, start, end: finish, byteStart: Buffer.byteLength(source.slice(0, start)),\n    byteEnd: Buffer.byteLength(source.slice(0, finish)), sha256: digest(selected)};\n}\n\nfunction replaceSetup(source, before, after, changes) {\n  const at = source.indexOf(before);\n  if (at < 0 || source.indexOf(before, at + before.length) >= 0) {\n    throw new TypeError('original compiler artifact setup changed: ' + before);\n  }\n  changes.push({role: 'selected-complete-compiler-transport', beforeSha256: digest(before), afterSha256: digest(after)});\n  return source.slice(0, at) + after + source.slice(at + before.length);\n}\n\n// These are the original artifact and CLI assertion bodies, rather than a\n// replacement compiler or a reduced request corpus. Only artifact construction,\n// target transport, and the independent JavaScript reference setup change.\nexport async function addOriginalToolsArtifactPrograms({add, locators, text, file, sourceRoot}) {\n  if (typeof add !== 'function' || !Array.isArray(locators) || typeof text !== 'function' ||\n      typeof file !== 'function' || typeof sourceRoot !== 'string') {\n    throw new TypeError('original compiler artifact adapter requires its source manifest and services');\n  }\n  const workerPrograms = await addOriginalWorkerProgram({add, locators, text, file, sourceRoot});\n  const candidates = locators.filter(locator => locator.file === suite);\n  if (candidates.length === 0) return workerPrograms;\n  const source = await text(suite), identity = await file(suite);\n  const selected = region(source, 'const aggregateSource=', \"\\ntest('optional parameter defaults resolve\");\n  const coverage = candidates.filter(locator => typeof locator.contains === 'string' &&\n    selected.source.includes(locator.contains)).map(locator => locator.id);\n  const semantics = semanticRegions(source);\n  const semanticNames = semanticTitles(semantics);\n  const semanticCoverage = candidates.filter(locator => typeof locator.contains === 'string' &&\n    (semanticNames.includes(locator.contains) || semantics.some(selected => selected.source.includes(locator.contains)))).map(locator => locator.id);\n  if (coverage.length === 0 && semanticCoverage.length === 0) return workerPrograms;\n  const dependencies = semanticCoverage.length ? semanticDependencies(source) : null;\n\n  const sources = await loadCompilerSources({sourceRoot});\n  for (const record of [...sources.modules, sources.runtime, ...(sources.literalSources ?? [])]) await file(record.filename);\n  const completeSourceIdentity = compilerSourceIdentity(sources);\n  const changes = [];\n  let body = selected.source;\n  body = replaceSetup(body,\n    \"const producer=await createCompilerSession({host:'javascript',compiler:driver});\",\n    'const producer=await openSelected();', changes);\n  body = replaceSetup(body, 'const sources=await loadCompilerSources();',\n    'const sources=structuredClone(completeSources);', changes);\n  body = replaceSetup(body,\n    \"const oracleSource=aggregateSource(pathToFileURL(resolve(directory,'host/compiler-session.mjs')).href);\",\n    `const oracleArtifact=await buildSelectedArtifact(producer,'aggregate-reference','javascript',structuredClone(completeSources));\n    const oracleSource=aggregateSource(pathToFileURL(oracleArtifact.path).href);`, changes);\n  body = replaceSetup(body,\n    \"const artifact=await withBackendPhaseTrace(()=>buildIndependentCompiler({host:'wasm',outputRoot:temporary,session:producer,sources}));\",\n    \"const artifact=await buildSelectedArtifact(producer,'aggregate-selected',configuration.target,sources);\", changes);\n  body = replaceSetup(body,\n    'assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(artifact.bytes)),[]);',\n    \"assert.equal(artifact.host,configuration.target);\\n    if(configuration.target==='wasm')assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(artifact.bytes)),[]);\", changes);\n  body = replaceSetup(body,\n    \"managed=await createCompilerSession({host:'wasm',bytes:artifact.bytes,memory:resources.memory,options:{...resources.budget,auto:resources.auto}});\",\n    'managed=await openArtifact(artifact,resources);assert.equal(managed.host,configuration.target);', changes);\n\n  const sessionURL = pathToFileURL(resolve(sourceRoot, 'tools/backends/compiler-session.mjs')).href;\n  const buildURL = pathToFileURL(resolve(sourceRoot, 'tools/backends/compiler-build.mjs')).href;\n  const bootstrapURL = pathToFileURL(resolve(sourceRoot, 'tools/backends/compiler-bootstrap.mjs')).href;\n  const hostSource = `import assert from 'node:assert/strict';\nimport {mkdtemp,readFile,writeFile,rm,mkdir} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {pathToFileURL} from 'node:url';\nimport {spawnSync} from 'node:child_process';\nimport {createCompilerSession} from ${JSON.stringify(sessionURL)};\nimport {buildIndependentCompiler,loadCompilerSources,independentCompilerResources} from ${JSON.stringify(buildURL)};\nimport {compilerSourceIdentity} from ${JSON.stringify(bootstrapURL)};\nimport {readCompilerMetadata} from ${JSON.stringify(pathToFileURL(resolve(sourceRoot,'tools/backends/compiler-metadata.mjs')).href)};\nconst configuration=await readCompilerMetadata(process.env.ELISCRIPT_ORIGINAL_COMPILER_SESSION);\nprocess.chdir(configuration.sourceRoot);\nif(!configuration.supportingDirectory||!configuration.supportingManifest)throw new TypeError('original compiler artifact cases require their actual product archive');\nconst completeSources=await loadCompilerSources({sourceRoot:configuration.sourceRoot});\nassert.deepEqual(compilerSourceIdentity(completeSources),${JSON.stringify(completeSourceIdentity)});\nconst cliPath=${JSON.stringify(resolve(sourceRoot, 'tools/backends/compiler-cli.mjs'))};\nconst resources=independentCompilerResources({profile:'small'});\nassert.deepEqual(configuration.memory,resources.memory);\nfor(const[key,value]of Object.entries({...resources.budget,auto:resources.auto}))assert.equal(configuration.runtimeOptions[key],value,key);\nconst selectedDriver=configuration.target==='javascript'?await import(pathToFileURL(configuration.path).href):undefined;\nasync function openSelected(){\n const session=await createCompilerSession({host:configuration.target,compiler:selectedDriver,\n  ...(configuration.target==='wasm'?{bytes:new Uint8Array(await readFile(configuration.path))}:{}),\n  ...(configuration.target==='native'?{path:configuration.path,descriptor:{typed:configuration.typed,descriptor:configuration.descriptor}}:{}),\n  memory:configuration.memory,options:configuration.runtimeOptions});\n assert.equal(session.host,configuration.target);return session;\n}\nasync function openArtifact(artifact,limits=resources){\n const session=await createCompilerSession({host:artifact.host,\n  ...(artifact.host==='javascript'?{compiler:await import(pathToFileURL(artifact.path).href)}:{}),\n  ...(artifact.host==='wasm'?{bytes:artifact.bytes}:{}),\n  ...(artifact.host==='native'?{path:artifact.path,descriptor:artifact.lowered??{typed:artifact.typed,descriptor:artifact.descriptor}}:{}),\n  memory:limits.memory,options:{...limits.budget,auto:limits.auto,nativeTarget:artifact.nativeTarget??configuration.runtimeOptions.nativeTarget}});\n assert.equal(session.host,artifact.host);return session;\n}\nconst supportingProducts=[];\nasync function saveSupportingProducts(){\n await mkdir(configuration.supportingDirectory,{recursive:true});\n await writeFile(configuration.supportingManifest,JSON.stringify({format:'eliscript-original-compiler-supporting-products',version:1,products:supportingProducts}));\n}\nasync function buildSelectedArtifact(producer,role,target,sources){\n const artifact=await buildIndependentCompiler({host:target,outputRoot:resolve(configuration.supportingDirectory,role),\n  sourceRoot:configuration.sourceRoot,session:producer,sources,profile:'small',budget:resources.budget,\n  memory:resources.memory,auto:resources.auto,nativeTarget:configuration.runtimeOptions.nativeTarget});\n assert.equal(artifact.host,target);assert.equal(artifact.provenance.mode,'session');\n assert.equal(artifact.provenance.producerHost,producer.host);\n assert.deepEqual(artifact.provenance.compiledModuleIds,sources.modules.map(module=>module.id));\n assert.equal(artifact.provenance.runtimeCompiled,true);\n supportingProducts.push({role,artifact});await saveSupportingProducts();return artifact;\n}\nlet directory,standard;\nasync function withSession(run){const session=await openArtifact(standard);try{return await run(session);}finally{session.close();}}\nconst cases=[];\nfunction test(name,run,timeout=5000){cases.push({name,run,timeout});}\nasync function timed(name,run,timeout){\n let timer;\n const start=performance.now();\n try{\n  await Promise.race([Promise.resolve().then(run),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(name+' exceeded its original '+timeout+' ms timeout')),timeout);})]);\n  assert(performance.now()-start<=timeout,name+' exceeded its original '+timeout+' ms timeout');\n }finally{clearTimeout(timer);}\n}\n` + body + `\nassert.deepEqual(cases.map(record=>record.name),${JSON.stringify(caseTitles)});\nlet failed=false;\ntry{\n await timed('original compiler artifact beforeAll',async()=>{\n  const producer=await openSelected();\n  try{standard=await buildSelectedArtifact(producer,'standard-selected',configuration.target,structuredClone(completeSources));directory=standard.directory;}\n  finally{producer.close();}\n },120000);\n for(const record of cases)await timed(record.name,record.run,record.timeout);\n console.log(JSON.stringify(cases.map(record=>record.name)));\n}catch(error){failed=true;throw error;}\nfinally{\n try{await saveSupportingProducts();}catch(error){if(!failed)throw error;}\n}\n`;\n\n  const regions = [{start: selected.start, end: selected.end, byteStart: selected.byteStart,\n    byteEnd: selected.byteEnd, sha256: selected.sha256}];\n  const recordIds = [];\n  for (const hostRuntime of coverage.length ? ['node', 'bun'] : []) {\n    const id = 'original-tools-artifact:compiler-session-tools:' + hostRuntime;\n    recordIds.push(id);\n    add({id, kind: 'project', coverage: [...coverage], entry: sources.entry,\n      modules: structuredClone(sources.modules), memory: {initialPages: 128, maximumPages: 4096},\n      request: {operation: 'project', resolveImports: true, phased: false, sourceMap: true},\n      execution: {kind: 'compiler-session-program', host: 'tests/__eliscript_original_tools_artifact_' + hostRuntime + '.mjs',\n        hostRuntime, hostSource, runtimeProfile: 'compiler', compilerProfile: 'small',\n        runtimeOptions: {maxSlots: 131072, initialBytes: 8388608, maxBytes: 67108864, auto: 65536},\n        supportingCompilerProducts: true, timeoutMs: 300000,\n        setupReplacement: {kind: 'selected-complete-compiler-artifacts', producer: 'selected-session',\n          reference: 'independent-javascript-product-assertions-only', sourceIdentity: completeSourceIdentity, changes,\n          beforeAllTimeoutMs: 120000, originalCaseTimeouts: [120000, 30000, 30000]}},\n      expected: {kind: 'seed-program', oracleRequired: true},\n      original: {suite, host: suite, sourceSha256: identity.sha256, regions,\n        originalAssertions: [...caseTitles], completeSourceIdentity,\n        setupReplacement: {kind: 'selected-complete-compiler-artifacts', changes},\n        coverageScope: 'aggregate-entry-and-three-artifact-cli-cases-only'},\n    });\n  }\n  const summaries = [...workerPrograms, ...(coverage.length ? [{suite, coverage: [...coverage], regions, recordIds}] : [])];\n  if (semanticCoverage.length) {\n    const fixtureIdentities = [];\n    for (const filename of semanticFixtures) fixtureIdentities.push({filename, sha256: (await file(filename)).sha256});\n    const semanticChanges = [];\n    const semanticBody = replaceSetup(semantics.map(selected => selected.source).join('\\n'),\n      \"const session = await createCompilerSession({host: 'javascript', compiler: driver});\",\n      'const session = await openSelected();', semanticChanges);\n    const titles = semanticNames;\n    const semanticRanges = semantics.map(({source, ...range}) => range);\n    const semanticIds = [];\n    const semanticHost = semanticHostSource(sourceRoot, completeSourceIdentity, fixtureIdentities, semanticBody, titles);\n    for (const hostRuntime of ['node', 'bun']) {\n      const id = 'original-managed:compiler-session-tools:' + hostRuntime;\n      semanticIds.push(id);\n      add({id, kind: 'project', coverage: [...semanticCoverage], entry: sources.entry,\n        modules: structuredClone(sources.modules), memory: {initialPages: 128, maximumPages: 4096},\n        request: {operation: 'project', resolveImports: true, phased: false, sourceMap: true},\n        execution: {kind: 'compiler-session-program', host: 'tests/__eliscript_compiler_session_tools_' + hostRuntime + '.mjs',\n          hostRuntime, hostSource: semanticHost, runtimeProfile: 'compiler', compilerProfile: 'small',\n          runtimeOptions: {maxSlots: 131072, initialBytes: 8388608, maxBytes: 67108864, auto: 65536}, timeoutMs: 120000,\n          setupReplacement: {kind: 'selected-complete-compiler-semantic-tools', producer: 'selected-session',\n            reference: 'retained-original-semantic-assertions-and-generated-javascript', sourceIdentity: completeSourceIdentity,\n            dependencies, changes: semanticChanges, defaultCaseTimeoutMs: 5000, deadlines: 'retained-test-registration-arguments'}},\n        expected: {kind: 'seed-program', oracleRequired: true},\n        original: {suite, host: suite, sourceSha256: identity.sha256, regions: semanticRanges,\n          cases: candidates.filter(locator => semanticCoverage.includes(locator.id) && locator.originalCase)\n            .map(locator => ({id: locator.id, ...structuredClone(locator.originalCase)})),\n          originalAssertions: titles, completeSourceIdentity, fixtureIdentities,\n          originalAssertion: 'all original public semantic tools cases including the original trailing parameter-default query corpus; aggregate/CLI artifact cases are separate',\n          setupReplacement: {kind: 'selected-complete-compiler-semantic-tools', dependencies, changes: semanticChanges},\n          coverageScope: 'retained-semantic-tools-regions-only'},\n      });\n    }\n    summaries.push({suite, coverage: [...semanticCoverage], regions: semanticRanges, recordIds: semanticIds});\n  }\n  return summaries;\n}\n"))
+(module tools.backends.compiler-corpus-tools-artifact-adapters-ground
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "./compiler-build.mjs" loadCompilerSources)
+  (import "./compiler-bootstrap.mjs" compilerSourceIdentity)
+  (import "./compiler-corpus-cli-adapters.mjs" addOriginalWorkerProgram)
+  (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
+  (import "../../dist/bootstrap/reader.mjs" read-string)
+  (import "../../dist/bootstrap/compiler.mjs" compile-ir-string emit-ir-string)
+
+  (defun eli-data (value)
+    (str "(JSON/parse " (JSON/stringify (JSON/stringify value)) ")"))
+
+  (defconst suite "tests/compiler-session-tools.test.mjs")
+  (defconst eli-suite "tests/compiler-session-tools.test.eli")
+
+  (defun digest (source)
+    (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
+
+  (defconst case-titles
+    (js-array
+      "a complete real managed compiler driver transports AggregateError graphs with shared errors and cause identity"
+      "the real compiler CLI emits structured source failures and preserves successful output with the same built artifact"
+      "real CLI streaming UTF8 preserves split astral scalars BOM diagnostics and strict malformed-tail failures"))
+
+  (defconst case-timeouts (js-array 120000 30000 30000))
+
+  (defconst semantic-fixtures
+    (js-array
+      "tests/fixtures/core-expression-forms.eli"
+      "tests/fixtures/core-language-api-usage.eli"
+      "tests/fixtures/core-stdlib-usage.eli"
+      "tests/fixtures/wasm-managed-source-collections.eli"
+      "tests/fixtures/managed-stdlib-value-json.eli"))
+
+  (defconst expected-eli-imports
+    (js-array
+      "(import \"bun:test\" beforeAll afterAll test)"
+      "(import \"node:assert/strict\" :default assert)"
+      "(import \"node:fs/promises\" mkdtemp readFile writeFile rm)"
+      "(import \"node:path\" resolve)"
+      "(import \"node:os\" tmpdir)"
+      "(import \"node:url\" pathToFileURL fileURLToPath)"
+      "(import \"node:process\" :default process)"
+      "(import \"node:child_process\" spawnSync)"
+      "(import \"node:crypto\" createHash)"
+      "(import \"../tools/backends/compiler-build.mjs\" buildIndependentCompiler loadCompilerSources independentCompilerResources)"
+      "(import \"../tools/backends/compiler-session.mjs\" createCompilerSession)"
+      "(import \"./helpers/session-tools-contract.mjs\" withBackendPhaseTrace caught checkAggregate)"))
+
+  (defconst expected-helper-signatures
+    (js-array
+      "defvar:directory"
+      "defvar:owned"
+      "defvar:driver"
+      "defconst:cliPath"
+      "defconst:dynamicImport"
+      "defconst:hostTypeof"
+      "defun:ae"
+      "defun:same"
+      "defun:copy"
+      "defun:sendRequest"
+      "defun:result"
+      "defun:analyze"
+      "defun:query"
+      "defun:editPreview"
+      "defun:slice"
+      "defun:records"
+      "defun:named"
+      "defun:declaration"
+      "defun:parameter"
+      "defun:roles"
+      "defun:bindings"
+      "defun:roleBindings"
+      "defun:semanticSpans"
+      "defun:utf16Digest"
+      "defasync:loadJavascript"
+      "defasync:withSession"
+      "defun:childClean"
+      "defun:cli"
+      "defun:stream"
+      "beforeAll"
+      "afterAll"
+      "defconst:lexical"
+      "defun:aggregateSource"))
+
+  (defun ast-head-p (node name)
+    (and node (= (get node :kind) "list") (Array/isArray (get node :items))
+         (> (js-length (get node :items)) 0)
+         (= (get (aref (get node :items) 0) :kind) "symbol")
+         (= (get (aref (get node :items) 0) :name) name)))
+
+  (defun ast-symbol-p (node name)
+    (and node (= (get node :kind) "symbol") (= (get node :name) name)))
+
+  (defun ast-keyword-p (node name)
+    (and node (= (get node :kind) "keyword") (= (get node :name) name)))
+
+  (defun ast-unit-offset (source point)
+    (let ((unit 0) (offset 0))
+      (while (< offset point)
+        (when (>= unit (js-length source))
+          (throw (new globalThis.TypeError "original compiler tools AST span exceeds its actual source")))
+        (setq unit (+ unit (if (> (js-call source :codePointAt unit) 65535) 2 1)))
+        (setq offset (1+ offset)))
+      unit))
+
+  (defun span-region (source start end)
+    (let ((selected (js-call source :slice start end)))
+      (js-object
+        :source selected
+        :start start
+        :end end
+        :byteStart (js-call Buffer :byteLength (js-call source :slice 0 start))
+        :byteEnd (js-call Buffer :byteLength (js-call source :slice 0 end))
+        :sha256 (digest selected))))
+
+  (defun ast-region (source node)
+    (let* ((span (get node :span))
+           (start (ast-unit-offset source (get span :start)))
+           (end (ast-unit-offset source (get span :end))))
+      (span-region source start end)))
+
+  (defun region-meta (reg)
+    (js-object
+      :start (get reg :start)
+      :end (get reg :end)
+      :byteStart (get reg :byteStart)
+      :byteEnd (get reg :byteEnd)
+      :sha256 (get reg :sha256)))
+
+  (defun ast-walk (node predicate)
+    (let ((result (js-array))
+          (pending (if (Array/isArray node)
+                     (js-call (js-call node :slice) :reverse)
+                     (js-array node))))
+      (while (> (js-length pending) 0)
+        (let ((current (js-call pending :pop)))
+          (if (Array/isArray current)
+            (let ((index (1- (js-length current))))
+              (while (>= index 0)
+                (js-call pending :push (aref current index))
+                (setq index (1- index))))
+            (when current
+              (when (funcall predicate current) (js-call result :push current))
+              (when (Array/isArray (get current :items))
+                (let* ((items (get current :items)) (index (1- (js-length items))))
+                  (while (>= index 0)
+                    (js-call pending :push (aref items index))
+                    (setq index (1- index)))))))))
+      result))
+
+  (defun replace-setup (source before after changes)
+    (let ((at (js-call source :indexOf before)))
+      (when (or (< at 0) (>= (js-call source :indexOf before (+ at (js-length before))) 0))
+        (throw (new globalThis.TypeError (str "original compiler artifact setup changed: " before))))
+      (js-call changes :push
+        (js-object
+          :role "selected-complete-compiler-transport"
+          :beforeSha256 (digest before)
+          :afterSha256 (digest after)))
+      (str (js-call source :slice 0 at)
+           after
+           (js-call source :slice (+ at (js-length before))))))
+
+  (defun rewrite-runtime-imports (javascript source-root)
+    (let ((names (js-array "array-text" "binding" "errors" "math" "number-radix" "prelude" "primitives" "unicode-case" "unicode-case-data"))
+          (result javascript)
+          (index 0))
+      (while (< index (js-length names))
+        (let* ((name (aref names index))
+               (specifier (JSON/stringify (str "eliscript/runtime/" name ".mjs")))
+               (url (JSON/stringify (get (pathToFileURL (resolve source-root (str "runtime/" name ".mjs"))) :href))))
+          (setq result (js-call result :replaceAll specifier url)))
+        (setq index (1+ index)))
+      result))
+
+  (defun helper-signature (node)
+    (if (not (and node (= (get node :kind) "list") (Array/isArray (get node :items)) (> (js-length (get node :items)) 0)))
+      "invalid"
+      (let* ((items (get node :items))
+             (head (if (= (get (aref items 0) :kind) "symbol") (get (aref items 0) :name) "invalid")))
+        (if (js-call (js-array "defvar" "defconst" "defun" "defasync") :includes head)
+          (if (and (>= (js-length items) 2) (= (get (aref items 1) :kind) "symbol"))
+            (str head ":" (get (aref items 1) :name))
+            "invalid")
+          head))))
+
+  (defun default-driver-session-call-p (node)
+    (and (ast-head-p node "createCompilerSession")
+         (= (js-length (get node :items)) 2)
+         (let ((arg (aref (get node :items) 1)))
+           (and (ast-head-p arg "js-object")
+                (= (js-length (get arg :items)) 5)
+                (ast-keyword-p (aref (get arg :items) 1) "host")
+                (= (get (aref (get arg :items) 2) :kind) "literal")
+                (= (get (aref (get arg :items) 2) :value) "javascript")
+                (ast-keyword-p (aref (get arg :items) 3) "compiler")
+                (ast-symbol-p (aref (get arg :items) 4) "driver")))))
+
+  (defun valid-with-session-p (node)
+    (and (ast-head-p node "defasync")
+         (= (js-length (get node :items)) 4)
+         (ast-symbol-p (aref (get node :items) 1) "withSession")
+         (let ((params (aref (get node :items) 2))
+               (body (aref (get node :items) 3)))
+           (and (= (get params :kind) "list")
+                (= (js-length (get params :items)) 1)
+                (ast-symbol-p (aref (get params :items) 0) "run")
+                (ast-head-p body "let")
+                (= (js-length (get body :items)) 3)
+                (let ((bindings (aref (get body :items) 1))
+                      (try-form (aref (get body :items) 2)))
+                  (and (= (get bindings :kind) "list")
+                       (= (js-length (get bindings :items)) 1)
+                       (let ((binding (aref (get bindings :items) 0)))
+                         (and (= (get binding :kind) "list")
+                              (= (js-length (get binding :items)) 2)
+                              (ast-symbol-p (aref (get binding :items) 0) "session")
+                              (ast-head-p (aref (get binding :items) 1) "await")
+                              (= (js-length (get (aref (get binding :items) 1) :items)) 2)
+                              (default-driver-session-call-p (aref (get (aref (get binding :items) 1) :items) 1))))
+                       (ast-head-p try-form "try")
+                       (= (js-length (get try-form :items)) 3)
+                       (let ((run-await (aref (get try-form :items) 1))
+                             (finally-clause (aref (get try-form :items) 2)))
+                         (and (ast-head-p run-await "await")
+                              (= (js-length (get run-await :items)) 2)
+                              (let ((call (aref (get run-await :items) 1)))
+                                (or (and (ast-head-p call "funcall")
+                                         (= (js-length (get call :items)) 3)
+                                         (ast-symbol-p (aref (get call :items) 1) "run")
+                                         (ast-symbol-p (aref (get call :items) 2) "session"))
+                                    (and (ast-head-p call "run")
+                                         (= (js-length (get call :items)) 2)
+                                         (ast-symbol-p (aref (get call :items) 1) "session"))))
+                              (ast-head-p finally-clause "finally")
+                              (= (js-length (get finally-clause :items)) 2)
+                              (let ((close-call (aref (get finally-clause :items) 1)))
+                                (and (ast-head-p close-call "js-call")
+                                     (= (js-length (get close-call :items)) 3)
+                                     (ast-symbol-p (aref (get close-call :items) 1) "session")
+                                     (ast-keyword-p (aref (get close-call :items) 2) "close")))))))))))
+
+  (defun parse-tools-eli (eli-source)
+    (let* ((forms (read-string eli-source eli-suite))
+           (modules (js-call forms :filter (lambda (node) (ast-head-p node "module")))))
+      (unless (and (= (js-length forms) 1) (= (js-length modules) 1))
+        (throw (new globalThis.TypeError "original compiler semantic case boundary changed")))
+      (let* ((module-node (aref modules 0))
+             (members (get module-node :items))
+             (setup-idx
+               (js-call members :findIndex
+                 (lambda (node idx) (and (> idx 0) (= (helper-signature node) "defvar:directory")))))
+             (first-reg-idx
+               (js-call members :findIndex
+                 (lambda (node idx)
+                   (and (> idx setup-idx)
+                        (> (js-length (ast-walk node (lambda (sub) (ast-head-p sub "test")))) 0))))))
+        (when (or (< setup-idx 3) (< first-reg-idx (1+ setup-idx)))
+          (throw (new globalThis.TypeError "original compiler semantic case boundary changed")))
+        (let* ((import-nodes (js-call members :slice 2 setup-idx))
+               (import-texts (js-call import-nodes :map (lambda (node) (get (ast-region eli-source node) :source)))))
+          (when (or (/= (js-length import-texts) (js-length expected-eli-imports))
+                    (js-call import-texts :some (lambda (line idx) (/= line (aref expected-eli-imports idx)))))
+            (throw (new globalThis.TypeError "original compiler semantic dependencies changed")))
+          (let* ((helper-nodes (js-call members :slice setup-idx first-reg-idx))
+                 (helper-sigs (js-call helper-nodes :map helper-signature)))
+            (when (or (/= (js-length helper-sigs) (js-length expected-helper-signatures))
+                      (js-call helper-sigs :some (lambda (sig idx) (/= sig (aref expected-helper-signatures idx)))))
+              (throw (new globalThis.TypeError "original compiler semantic session lifecycle changed")))
+            (let* ((helper-map
+                     (new globalThis.Map
+                       (js-call helper-nodes :map (lambda (node idx) (js-array (aref helper-sigs idx) node)))))
+                   (with-session-node (js-call helper-map :get "defasync:withSession")))
+              (unless (valid-with-session-p with-session-node)
+                (throw (new globalThis.TypeError "original compiler semantic session lifecycle changed")))
+              (let* ((agg-idx
+                       (js-call members :findIndex
+                         (lambda (node idx)
+                           (and (>= idx first-reg-idx)
+                                (ast-head-p node "test")
+                                (>= (js-length (get node :items)) 2)
+                                (= (get (aref (get node :items) 1) :kind) "literal")
+                                (= (get (aref (get node :items) 1) :value) (aref case-titles 0)))))))
+                (when (or (< agg-idx first-reg-idx) (>= (+ agg-idx 2) (js-length members)))
+                  (throw (new globalThis.TypeError "original compiler artifact case boundary changed: aggregateSource")))
+                (let ((c-idx 0))
+                  (while (< c-idx 3)
+                    (let ((node (aref members (+ agg-idx c-idx))))
+                      (unless (and (ast-head-p node "test")
+                                   (= (js-length (get node :items)) 4)
+                                   (= (get (aref (get node :items) 1) :kind) "literal")
+                                   (= (get (aref (get node :items) 1) :value) (aref case-titles c-idx))
+                                   (= (get (aref (get node :items) 3) :kind) "literal")
+                                   (= (get (aref (get node :items) 3) :value) (aref case-timeouts c-idx)))
+                        (throw (new globalThis.TypeError
+                                 (str "original compiler artifact case boundary changed: " (aref case-titles c-idx))))))
+                    (setq c-idx (1+ c-idx))))
+                (when (>= (+ agg-idx 3) (js-length members))
+                  (throw (new globalThis.TypeError "original compiler semantic case boundary changed")))
+                (let* ((header-reg
+                         (span-region eli-source
+                           (get (ast-region eli-source (aref import-nodes 0)) :start)
+                           (get (ast-region eli-source (aref import-nodes (1- (js-length import-nodes)))) :end)))
+                       (session-reg (ast-region eli-source with-session-node))
+                       (dependencies
+                         (js-object
+                           :sourceFile eli-suite
+                           :imports import-texts
+                           :header (region-meta header-reg)
+                           :session (region-meta session-reg)))
+                       (artifact-reg
+                         (span-region eli-source
+                           (get (ast-region eli-source (aref members agg-idx)) :start)
+                           (get (ast-region eli-source (aref members (+ agg-idx 2))) :end)))
+                       (early-sem-nodes (js-call members :slice first-reg-idx agg-idx))
+                       (tail-sem-nodes (js-call members :slice (+ agg-idx 3)))
+                       (early-sem-reg
+                         (span-region eli-source
+                           (get (ast-region eli-source (aref early-sem-nodes 0)) :start)
+                           (get (ast-region eli-source (aref early-sem-nodes (1- (js-length early-sem-nodes)))) :end)))
+                       (tail-sem-reg
+                         (span-region eli-source
+                           (get (ast-region eli-source (aref tail-sem-nodes 0)) :start)
+                           (get (ast-region eli-source (aref tail-sem-nodes (1- (js-length tail-sem-nodes)))) :end)))
+                       (semantic-names (js-array))
+                       (collect-sem-names
+                         (lambda (nodes)
+                           (let ((n-idx 0))
+                             (while (< n-idx (js-length nodes))
+                               (let ((node (aref nodes n-idx)))
+                                 (if (ast-head-p node "test")
+                                   (progn
+                                     (unless (and (or (= (js-length (get node :items)) 3)
+                                                      (and (= (js-length (get node :items)) 4)
+                                                           (= (get (aref (get node :items) 3) :kind) "literal")
+                                                           (Number/isSafeInteger (get (aref (get node :items) 3) :value))))
+                                                  (= (get (aref (get node :items) 1) :kind) "literal")
+                                                  (= (value-type (get (aref (get node :items) 1) :value)) "string"))
+                                       (throw (new globalThis.TypeError "original compiler semantic test registration changed")))
+                                     (js-call semantic-names :push (get (aref (get node :items) 1) :value)))
+                                   (let ((inner-tests (ast-walk node (lambda (sub) (ast-head-p sub "test"))))
+                                         (arrays (ast-walk node (lambda (sub) (ast-head-p sub "js-array")))))
+                                     (unless (= (js-length inner-tests) 1)
+                                       (throw (new globalThis.TypeError "original compiler semantic test registration changed")))
+                                     (let* ((inner (aref inner-tests 0))
+                                            (title-expr (if (>= (js-length (get inner :items)) 2) (aref (get inner :items) 1) nil))
+                                            (fixture-arr
+                                              (js-call arrays :find
+                                                (lambda (arr)
+                                                  (and (= (js-length (get arr :items)) (1+ (js-length semantic-fixtures)))
+                                                       (not (js-call semantic-fixtures :some
+                                                              (lambda (expected f-idx)
+                                                                (/= (get (aref (get arr :items) (1+ f-idx)) :value) expected)))))))))
+                                       (unless (and title-expr
+                                                    (or (ast-head-p title-expr "str") (ast-head-p title-expr "+"))
+                                                    (= (js-length (get title-expr :items)) 3)
+                                                    (= (get (aref (get title-expr :items) 1) :value)
+                                                       "production tools analyze complete existing fixture ")
+                                                    fixture-arr)
+                                         (throw (new globalThis.TypeError "original compiler semantic fixture registration changed")))
+                                       (let ((f-idx 0))
+                                         (while (< f-idx (js-length semantic-fixtures))
+                                           (js-call semantic-names :push
+                                             (str "production tools analyze complete existing fixture " (aref semantic-fixtures f-idx)))
+                                           (setq f-idx (1+ f-idx))))))))
+                               (setq n-idx (1+ n-idx)))))))
+                  (funcall collect-sem-names early-sem-nodes)
+                  (funcall collect-sem-names tail-sem-nodes)
+                  (when (or (= (js-length semantic-names) 0)
+                            (/= (get (new globalThis.Set semantic-names) :size) (js-length semantic-names)))
+                    (throw (new globalThis.TypeError "invalid original compiler semantic case names")))
+                  (js-object
+                    :helperMap helper-map
+                    :dependencies dependencies
+                    :artifactRegion artifact-reg
+                    :artifactNodes (js-call members :slice agg-idx (+ agg-idx 3))
+                    :semanticRegions (js-array early-sem-reg tail-sem-reg)
+                    :semanticNodes (js-call early-sem-nodes :concat tail-sem-nodes)
+                    :semanticNames semantic-names)))))))))
+
+  (defun mjs-suite-regions (mjs-source kind)
+    (let ((cases (originalSourceCaseLocators suite mjs-source)))
+      (if (= kind "artifact")
+        (let ((matched
+                (js-call case-titles :map
+                  (lambda (title)
+                    (let ((found (js-call cases :find (lambda (item) (= (get item :contains) title)))))
+                      (unless found
+                        (throw (new globalThis.TypeError (str "original compiler artifact MJS case missing: " title))))
+                      (get found :originalCase))))))
+          (js-array
+            (region-meta
+              (span-region mjs-source
+                (get (get (aref matched 0) :span) :start)
+                (get (get (aref matched 2) :span) :end)))))
+        (let* ((first-art
+                 (js-call cases :find (lambda (item) (= (get item :contains) (aref case-titles 0)))))
+               (last-art
+                 (js-call cases :find (lambda (item) (= (get item :contains) (aref case-titles 2)))))
+               (before-cases
+                 (if first-art
+                   (js-call cases :filter
+                     (lambda (item)
+                       (< (get (get (get item :originalCase) :span) :start)
+                          (get (get (get first-art :originalCase) :span) :start))))
+                   cases))
+               (after-cases
+                 (if last-art
+                   (js-call cases :filter
+                     (lambda (item)
+                       (> (get (get (get item :originalCase) :span) :start)
+                          (get (get (get last-art :originalCase) :span) :end))))
+                   (js-array)))
+               (regs (js-array)))
+          (when (> (js-length before-cases) 0)
+            (js-call regs :push
+              (region-meta
+                (span-region mjs-source
+                  (get (get (get (aref before-cases 0) :originalCase) :span) :start)
+                  (get (get (get (aref before-cases (1- (js-length before-cases))) :originalCase) :span) :end)))))
+          (when (> (js-length after-cases) 0)
+            (js-call regs :push
+              (region-meta
+                (span-region mjs-source
+                  (get (get (get (aref after-cases 0) :originalCase) :span) :start)
+                  (js-length mjs-source)))))
+          (when (= (js-length regs) 0)
+            (js-call regs :push (region-meta (span-region mjs-source 0 (js-length mjs-source)))))
+          regs))))
+
+  (defun build-artifact-host-source (eli-source parsed source-root complete-source-identity changes)
+    (let* ((helper-map (get parsed :helperMap))
+           (agg-helper-text (get (ast-region eli-source (js-call helper-map :get "defun:aggregateSource")) :source))
+           (shared-helper-keys
+             (js-array
+               "defconst:dynamicImport" "defconst:hostTypeof" "defun:ae" "defun:same" "defun:copy"
+               "defun:sendRequest" "defasync:loadJavascript" "defun:childClean" "defun:cli" "defun:stream"))
+           (shared-helpers-raw
+             (js-call (js-call shared-helper-keys :map
+                        (lambda (key) (get (ast-region eli-source (js-call helper-map :get key)) :source)))
+               :join "\n"))
+           (stream-host-expr "(fileURLToPath (new globalThis.URL \"./fixtures/session-tools-cli-stream-host.mjs\" (js* \"import.meta.url\")))")
+           (stream-host-path (JSON/stringify (resolve source-root "tests/fixtures/session-tools-cli-stream-host.mjs")))
+           (shared-helpers
+             (if (>= (js-call shared-helpers-raw :indexOf stream-host-expr) 0)
+               (js-call shared-helpers-raw :replace stream-host-expr stream-host-path)
+               (throw (new globalThis.TypeError "original compiler CLI stream fixture boundary changed"))))
+           (agg-node (aref (get parsed :artifactNodes) 0))
+           (producer-calls (ast-walk agg-node default-driver-session-call-p))
+           (load-sources-calls
+             (ast-walk agg-node
+               (lambda (node) (and (ast-head-p node "loadCompilerSources") (= (js-length (get node :items)) 1)))))
+           (oracle-bindings
+             (ast-walk agg-node
+               (lambda (node)
+                 (and (= (get node :kind) "list")
+                      (= (js-length (get node :items)) 2)
+                      (ast-symbol-p (aref (get node :items) 0) "oracleSource")
+                      (ast-head-p (aref (get node :items) 1) "aggregateSource")))))
+           (trace-calls
+             (ast-walk agg-node (lambda (node) (ast-head-p node "withBackendPhaseTrace"))))
+           (wasm-imports-checks
+             (ast-walk agg-node
+               (lambda (node)
+                 (and (ast-head-p node "same")
+                      (= (js-length (get node :items)) 3)
+                      (ast-head-p (aref (get node :items) 1) "js-call")
+                      (ast-symbol-p (aref (get (aref (get node :items) 1) :items) 1) "globalThis.WebAssembly.Module")
+                      (ast-keyword-p (aref (get (aref (get node :items) 1) :items) 2) "imports")))))
+           (managed-sets
+             (ast-walk agg-node
+               (lambda (node)
+                 (and (ast-head-p node "setq")
+                      (= (js-length (get node :items)) 3)
+                      (ast-symbol-p (aref (get node :items) 1) "managed")
+                      (ast-head-p (aref (get node :items) 2) "await"))))))
+      (unless (= (js-length oracle-bindings) 1)
+        (throw (new globalThis.TypeError "original compiler artifact setup changed: const oracleSource=")))
+      (let ((oracle-text (get (ast-region eli-source (aref oracle-bindings 0)) :source)))
+        (unless (= oracle-text "(oracleSource (aggregateSource (get (pathToFileURL (resolve directory \"host/compiler-session.mjs\")) :href)))")
+          (throw (new globalThis.TypeError "original compiler artifact setup changed: const oracleSource="))))
+      (unless (and (= (js-length producer-calls) 1)
+                   (= (js-length load-sources-calls) 1)
+                   (= (js-length trace-calls) 1)
+                   (= (js-length wasm-imports-checks) 1)
+                   (= (js-length managed-sets) 1))
+        (throw (new globalThis.TypeError "original compiler artifact setup changed: aggregate setup boundary")))
+      (let* ((raw-body (get (get parsed :artifactRegion) :source))
+             (step1 (replace-setup raw-body
+                      (get (ast-region eli-source (aref producer-calls 0)) :source)
+                      "(openSelected)"
+                      changes))
+             (step2 (replace-setup step1
+                      (get (ast-region eli-source (aref load-sources-calls 0)) :source)
+                      "(globalThis.structuredClone completeSources)"
+                      changes))
+             (step3 (replace-setup step2
+                      (get (ast-region eli-source (aref oracle-bindings 0)) :source)
+                      "(oracleArtifact (await (buildSelectedArtifact producer \"aggregate-reference\" \"javascript\" (globalThis.structuredClone completeSources))))\n        (oracleSource (aggregateSource (get (pathToFileURL (get oracleArtifact :path)) :href)))"
+                      changes))
+             (step4 (replace-setup step3
+                      (get (ast-region eli-source (aref trace-calls 0)) :source)
+                      "(buildSelectedArtifact producer \"aggregate-selected\" (get configuration :target) sources)"
+                      changes))
+             (wasm-check-src (get (ast-region eli-source (aref wasm-imports-checks 0)) :source))
+             (step5 (replace-setup step4
+                      wasm-check-src
+                      (str "(progn (ae (get artifact :host) (get configuration :target))\n"
+                           "            (when (= (get configuration :target) \"wasm\") " wasm-check-src "))")
+                      changes))
+             (body (replace-setup step5
+                     (get (ast-region eli-source (aref managed-sets 0)) :source)
+                     "(progn (setq managed (await (openArtifact artifact resources))) (ae (get managed :host) (get configuration :target)))"
+                     changes))
+             (module-url (lambda (name) (JSON/stringify (get (pathToFileURL (resolve source-root name)) :href))))
+             (eli-host
+               (str "(module original.tools-artifact-host\n"
+                    "(import \"node:assert/strict\" :default assert)\n"
+                    "(import \"node:buffer\" Buffer)\n"
+                    "(import \"node:fs/promises\" mkdtemp readFile writeFile rm mkdir)\n"
+                    "(import \"node:path\" resolve)\n"
+                    "(import \"node:os\" tmpdir)\n"
+                    "(import \"node:url\" pathToFileURL fileURLToPath)\n"
+                    "(import \"node:process\" :default process)\n"
+                    "(import \"node:child_process\" spawnSync)\n"
+                    "(import " (funcall module-url "tools/backends/compiler-session.mjs") " createCompilerSession)\n"
+                    "(import " (funcall module-url "tools/backends/compiler-build.mjs") " buildIndependentCompiler loadCompilerSources independentCompilerResources)\n"
+                    "(import " (funcall module-url "tools/backends/compiler-bootstrap.mjs") " compilerSourceIdentity)\n"
+                    "(import " (funcall module-url "tools/backends/compiler-metadata.mjs") " readCompilerMetadata)\n"
+                    "(import " (funcall module-url "tests/helpers/session-tools-contract.mjs") " caught checkAggregate)\n"
+                    "(defconst cliPath " (JSON/stringify (resolve source-root "tools/backends/compiler-cli.mjs")) ")\n"
+                    "(defvar configuration undefined)\n"
+                    "(defvar completeSources undefined)\n"
+                    "(defvar resources undefined)\n"
+                    "(defvar selectedDriver undefined)\n"
+                    "(defvar directory undefined)\n"
+                    "(defvar standard undefined)\n"
+                    shared-helpers "\n"
+                    agg-helper-text "\n"
+                    "(defasync openSelected ()\n"
+                    "  (let* ((base (js-object :host (get configuration :target) :compiler selectedDriver\n"
+                    "                 :memory (get configuration :memory) :options (get configuration :runtimeOptions)))\n"
+                    "         (opts (Object/assign base\n"
+                    "                 (if (= (get configuration :target) \"wasm\")\n"
+                    "                   (js-object :bytes (new globalThis.Uint8Array (await (readFile (get configuration :path)))))\n"
+                    "                   (js-object))\n"
+                    "                 (if (= (get configuration :target) \"native\")\n"
+                    "                   (js-object :path (get configuration :path)\n"
+                    "                     :descriptor (js-object :typed (get configuration :typed) :descriptor (get configuration :descriptor)))\n"
+                    "                   (js-object))))\n"
+                    "         (session (await (createCompilerSession opts))))\n"
+                    "    (ae (get session :host) (get configuration :target))\n"
+                    "    session))\n"
+                    "(defasync openArtifact (artifact &rest __opt)\n"
+                    "  (let* ((limits (aref __opt 0))\n"
+                    "         (lim (if (undefined? limits) resources limits))\n"
+                    "         (native-target (let ((nt (get artifact :nativeTarget))) (if (nullish? nt) (get (get configuration :runtimeOptions) :nativeTarget) nt)))\n"
+                    "         (run-opts (Object/assign (js-object) (get lim :budget) (js-object :auto (get lim :auto) :nativeTarget native-target)))\n"
+                    "         (base (js-object :host (get artifact :host) :memory (get lim :memory) :options run-opts))\n"
+                    "         (opts (Object/assign base\n"
+                    "                 (if (= (get artifact :host) \"javascript\")\n"
+                    "                   (js-object :compiler (await (funcall dynamicImport (get (pathToFileURL (get artifact :path)) :href))))\n"
+                    "                   (js-object))\n"
+                    "                 (if (= (get artifact :host) \"wasm\")\n"
+                    "                   (js-object :bytes (get artifact :bytes))\n"
+                    "                   (js-object))\n"
+                    "                 (if (= (get artifact :host) \"native\")\n"
+                    "                   (js-object :path (get artifact :path)\n"
+                    "                     :descriptor (let ((low (get artifact :lowered))) (if (nullish? low) (js-object :typed (get artifact :typed) :descriptor (get artifact :descriptor)) low)))\n"
+                    "                   (js-object))))\n"
+                    "         (session (await (createCompilerSession opts))))\n"
+                    "    (ae (get session :host) (get artifact :host))\n"
+                    "    session))\n"
+                    "(defconst supportingProducts (js-array))\n"
+                    "(defasync saveSupportingProducts ()\n"
+                    "  (await (mkdir (get configuration :supportingDirectory) (js-object :recursive t)))\n"
+                    "  (await (writeFile (get configuration :supportingManifest)\n"
+                    "           (JSON/stringify (js-object :format \"eliscript-original-compiler-supporting-products\" :version 1 :products supportingProducts)))))\n"
+                    "(defasync buildSelectedArtifact (producer role target sources)\n"
+                    "  (let ((artifact (await (buildIndependentCompiler\n"
+                    "                           (js-object :host target :outputRoot (resolve (get configuration :supportingDirectory) role)\n"
+                    "                             :sourceRoot (get configuration :sourceRoot) :session producer :sources sources\n"
+                    "                             :profile \"small\" :budget (get resources :budget) :memory (get resources :memory)\n"
+                    "                             :auto (get resources :auto) :nativeTarget (get (get configuration :runtimeOptions) :nativeTarget))))))\n"
+                    "    (ae (get artifact :host) target)\n"
+                    "    (ae (get (get artifact :provenance) :mode) \"session\")\n"
+                    "    (ae (get (get artifact :provenance) :producerHost) (get producer :host))\n"
+                    "    (same (get (get artifact :provenance) :compiledModuleIds) (js-call (get sources :modules) :map (lambda (m) (get m :id))))\n"
+                    "    (ae (get (get artifact :provenance) :runtimeCompiled) t)\n"
+                    "    (js-call supportingProducts :push (js-object :role role :artifact artifact))\n"
+                    "    (await (saveSupportingProducts))\n"
+                    "    artifact))\n"
+                    "(defasync withSession (run)\n"
+                    "  (let ((session (await (openArtifact standard))))\n"
+                    "    (try (await (funcall run session)) (finally (js-call session :close)))))\n"
+                    "(defconst cases (js-array))\n"
+                    "(defun test (name run &rest __opt)\n"
+                    "  (let ((timeout (aref __opt 0)))\n"
+                    "    (js-call cases :push (js-object :name name :run run :timeout (if (undefined? timeout) 5000 timeout)))))\n"
+                    "(defasync timed (name run timeout)\n"
+                    "  (let ((timer undefined) (start (js-call globalThis.performance :now)))\n"
+                    "    (try\n"
+                    "      (await (Promise/race\n"
+                    "               (js-array\n"
+                    "                 (js-call (Promise/resolve) :then run)\n"
+                    "                 (new globalThis.Promise\n"
+                    "                   (lambda (_ reject)\n"
+                    "                     (setq timer (globalThis.setTimeout\n"
+                    "                                   (lambda () (funcall reject (new globalThis.Error (str name \" exceeded its original \" timeout \" ms timeout\"))))\n"
+                    "                                   timeout)))))))\n"
+                    "      (funcall assert (<= (- (js-call globalThis.performance :now) start) timeout)\n"
+                    "        (str name \" exceeded its original \" timeout \" ms timeout\"))\n"
+                    "      (finally (globalThis.clearTimeout timer)))))\n"
+                    body "\n"
+                    "(defasync run-original-tools-artifact-host ()\n"
+                    "  (setq configuration (await (readCompilerMetadata (get (get process :env) :ELISCRIPT_ORIGINAL_COMPILER_SESSION))))\n"
+                    "  (js-call process :chdir (get configuration :sourceRoot))\n"
+                    "  (when (or (not (get configuration :supportingDirectory)) (not (get configuration :supportingManifest)))\n"
+                    "    (throw (new globalThis.TypeError \"original compiler artifact cases require their actual product archive\")))\n"
+                    "  (setq completeSources (await (loadCompilerSources (js-object :sourceRoot (get configuration :sourceRoot)))))\n"
+                    "  (same (compilerSourceIdentity completeSources) " (eli-data complete-source-identity) ")\n"
+                    "  (setq resources (independentCompilerResources (js-object :profile \"small\")))\n"
+                    "  (same (get configuration :memory) (get resources :memory))\n"
+                    "  (let ((entries (Object/entries (Object/assign (js-object) (get resources :budget) (js-object :auto (get resources :auto))))) (e-idx 0))\n"
+                    "    (while (< e-idx (js-length entries))\n"
+                    "      (let ((pair (aref entries e-idx)))\n"
+                    "        (ae (get (get configuration :runtimeOptions) (aref pair 0)) (aref pair 1) (aref pair 0)))\n"
+                    "      (setq e-idx (1+ e-idx))))\n"
+                    "  (setq selectedDriver\n"
+                    "    (if (= (get configuration :target) \"javascript\")\n"
+                    "      (await (funcall dynamicImport (get (pathToFileURL (get configuration :path)) :href)))\n"
+                    "      undefined))\n"
+                    "  (same (js-call cases :map (lambda (record) (get record :name))) " (eli-data case-titles) ")\n"
+                    "  (let ((failed false))\n"
+                    "    (try\n"
+                    "      (await (timed \"original compiler artifact beforeAll\"\n"
+                    "               (async ()\n"
+                    "                 (let ((producer (await (openSelected))))\n"
+                    "                   (try\n"
+                    "                     (setq standard (await (buildSelectedArtifact producer \"standard-selected\" (get configuration :target) (globalThis.structuredClone completeSources))))\n"
+                    "                     (setq directory (get standard :directory))\n"
+                    "                     (finally (js-call producer :close)))))\n"
+                    "               120000))\n"
+                    "      (let ((c-idx 0))\n"
+                    "        (while (< c-idx (js-length cases))\n"
+                    "          (let ((record (aref cases c-idx)))\n"
+                    "            (await (timed (get record :name) (get record :run) (get record :timeout))))\n"
+                    "          (setq c-idx (1+ c-idx))))\n"
+                    "      (js-call globalThis.console :log (JSON/stringify (js-call cases :map (lambda (record) (get record :name)))))\n"
+                    "      (catch error (setq failed t) (throw error))\n"
+                    "      (finally\n"
+                    "        (try (await (saveSupportingProducts))\n"
+                    "          (catch error (unless failed (throw error))))))))\n"
+                    "(js-call (run-original-tools-artifact-host) :catch\n"
+                    "  (lambda (error)\n"
+                    "    (js-call globalThis.console :error error)\n"
+                    "    (js-call process :exit 1)))\n"
+                    ")\n")))
+        (let ((host (rewrite-runtime-imports
+                      (emit-ir-string (compile-ir-string eli-host "original-tools-artifact-host.eli")) source-root)))
+          (js-object :hostSource host
+            :compilation (js-object :filename "original-tools-artifact-host.eli" :source eli-host
+              :sourceSha256 (digest eli-host) :hostSha256 (digest host)))))))
+
+  (defun build-semantic-host-source (eli-source parsed source-root complete-source-identity fixture-identities titles changes)
+    (let* ((helper-map (get parsed :helperMap))
+           (sem-helper-keys
+             (js-array
+               "defconst:dynamicImport" "defconst:hostTypeof" "defun:ae" "defun:same" "defun:copy"
+               "defun:sendRequest" "defun:result" "defun:analyze" "defun:query" "defun:editPreview"
+               "defun:slice" "defun:records" "defun:named" "defun:declaration" "defun:parameter"
+               "defun:roles" "defun:bindings" "defun:roleBindings" "defun:semanticSpans"
+               "defun:utf16Digest" "defasync:loadJavascript" "defconst:lexical"))
+           (sem-helpers
+             (js-call (js-call sem-helper-keys :map
+                        (lambda (key) (get (ast-region eli-source (js-call helper-map :get key)) :source)))
+               :join "\n"))
+           (early-reg (aref (get parsed :semanticRegions) 0))
+           (tail-reg (aref (get parsed :semanticRegions) 1))
+           (abort-calls
+             (ast-walk (get parsed :semanticNodes) default-driver-session-call-p))
+           (any-session-calls
+             (ast-walk (get parsed :semanticNodes) (lambda (node) (ast-head-p node "createCompilerSession")))))
+      (unless (and (= (js-length abort-calls) 1) (= (js-length any-session-calls) 1))
+        (throw (new globalThis.TypeError
+                 "original compiler artifact setup changed: const session = await createCompilerSession")))
+      (let* ((early-body
+               (replace-setup (get early-reg :source)
+                 (get (ast-region eli-source (aref abort-calls 0)) :source)
+                 "(openSelected)"
+                 changes))
+             (tail-body (get tail-reg :source))
+             (module-url (lambda (name) (JSON/stringify (get (pathToFileURL (resolve source-root name)) :href))))
+             (eli-host
+               (str "(module original.semantic-tools-host\n"
+                    "(import \"node:assert/strict\" :default assert)\n"
+                    "(import \"node:buffer\" Buffer)\n"
+                    "(import \"node:fs/promises\" readFile)\n"
+                    "(import \"node:crypto\" createHash)\n"
+                    "(import \"node:url\" pathToFileURL)\n"
+                    "(import \"node:process\" :default process)\n"
+                    "(import " (funcall module-url "tools/backends/compiler-session.mjs") " createCompilerSession)\n"
+                    "(import " (funcall module-url "tools/backends/compiler-build.mjs") " loadCompilerSources)\n"
+                    "(import " (funcall module-url "tools/backends/compiler-bootstrap.mjs") " compilerSourceIdentity)\n"
+                    "(import " (funcall module-url "tools/backends/compiler-metadata.mjs") " readCompilerMetadata)\n"
+                    "(defvar configuration undefined)\n"
+                    "(defvar selectedDriver undefined)\n"
+                    "(defvar selectedBytes undefined)\n"
+                    sem-helpers "\n"
+                    "(defasync openSelected ()\n"
+                    "  (let* ((base (js-object :host (get configuration :target) :compiler selectedDriver\n"
+                    "                 :memory (get configuration :memory) :options (get configuration :runtimeOptions)))\n"
+                    "         (opts (Object/assign base\n"
+                    "                 (if (= (get configuration :target) \"wasm\") (js-object :bytes selectedBytes) (js-object))\n"
+                    "                 (if (= (get configuration :target) \"native\")\n"
+                    "                   (js-object :path (get configuration :path)\n"
+                    "                     :descriptor (js-object :typed (get configuration :typed) :descriptor (get configuration :descriptor)))\n"
+                    "                   (js-object))))\n"
+                    "         (session (await (createCompilerSession opts))))\n"
+                    "    (ae (get session :host) (get configuration :target))\n"
+                    "    session))\n"
+                    "(defasync withSession (run)\n"
+                    "  (let ((session (await (openSelected))))\n"
+                    "    (try (await (funcall run session)) (finally (js-call session :close)))))\n"
+                    "(defconst cases (js-array))\n"
+                    "(defun test (name run &rest __opt)\n"
+                    "  (let ((timeout (aref __opt 0)))\n"
+                    "    (js-call cases :push (js-object :name name :run run :timeout (if (undefined? timeout) 5000 timeout)))))\n"
+                    "(defasync timed (name run timeout)\n"
+                    "  (let ((timer undefined) (start (js-call globalThis.performance :now)))\n"
+                    "    (try\n"
+                    "      (await (Promise/race\n"
+                    "               (js-array\n"
+                    "                 (js-call (Promise/resolve) :then run)\n"
+                    "                 (new globalThis.Promise\n"
+                    "                   (lambda (_ reject)\n"
+                    "                     (setq timer (globalThis.setTimeout\n"
+                    "                                   (lambda () (funcall reject (new globalThis.Error (str name \" exceeded its original \" timeout \" ms timeout\"))))\n"
+                    "                                   timeout)))))))\n"
+                    "      (funcall assert (<= (- (js-call globalThis.performance :now) start) timeout)\n"
+                    "        (str name \" exceeded its original \" timeout \" ms timeout\"))\n"
+                    "      (finally (globalThis.clearTimeout timer)))))\n"
+                    early-body "\n"
+                    tail-body "\n"
+                    "(defasync run-original-semantic-tools-host ()\n"
+                    "  (setq configuration (await (readCompilerMetadata (get (get process :env) :ELISCRIPT_ORIGINAL_COMPILER_SESSION))))\n"
+                    "  (js-call process :chdir (get configuration :sourceRoot))\n"
+                    "  (same (compilerSourceIdentity (await (loadCompilerSources (js-object :sourceRoot (get configuration :sourceRoot)))))\n"
+                    "    " (eli-data complete-source-identity) ")\n"
+                    "  (let ((identities " (eli-data fixture-identities) ") (f-idx 0))\n"
+                    "    (while (< f-idx (js-length identities))\n"
+                    "      (let* ((identity (aref identities f-idx))\n"
+                    "             (bytes (await (readFile (get identity :filename)))))\n"
+                    "        (ae (js-call (js-call (createHash \"sha256\") :update bytes) :digest \"hex\")\n"
+                    "          (get identity :sha256) (get identity :filename)))\n"
+                    "      (setq f-idx (1+ f-idx))))\n"
+                    "  (setq selectedDriver\n"
+                    "    (if (= (get configuration :target) \"javascript\")\n"
+                    "      (await (funcall dynamicImport (get (pathToFileURL (get configuration :path)) :href)))\n"
+                    "      undefined))\n"
+                    "  (setq selectedBytes\n"
+                    "    (if (= (get configuration :target) \"wasm\")\n"
+                    "      (new globalThis.Uint8Array (await (readFile (get configuration :path))))\n"
+                    "      undefined))\n"
+                    "  (same (js-call cases :map (lambda (record) (get record :name))) " (eli-data titles) ")\n"
+                    "  (let ((c-idx 0))\n"
+                    "    (while (< c-idx (js-length cases))\n"
+                    "      (let ((record (aref cases c-idx)))\n"
+                    "        (await (timed (get record :name) (get record :run) (get record :timeout))))\n"
+                    "      (setq c-idx (1+ c-idx))))\n"
+                    "  (js-call globalThis.console :log (JSON/stringify (js-call cases :map (lambda (record) (get record :name))))))\n"
+                    "(js-call (run-original-semantic-tools-host) :catch\n"
+                    "  (lambda (error)\n"
+                    "    (js-call globalThis.console :error error)\n"
+                    "    (js-call process :exit 1)))\n"
+                    ")\n")))
+        (let ((host (rewrite-runtime-imports
+                      (emit-ir-string (compile-ir-string eli-host "original-semantic-tools-host.eli")) source-root)))
+          (js-object :hostSource host
+            :compilation (js-object :filename "original-semantic-tools-host.eli" :source eli-host
+              :sourceSha256 (digest eli-host) :hostSha256 (digest host)))))))
+
+  ;; These are the original artifact and CLI assertion bodies, rather than a
+  ;; replacement compiler or a reduced request corpus. Only artifact construction,
+  ;; target transport, and the independent JavaScript reference setup change.
+  (defasync addOriginalToolsArtifactPrograms (options)
+    (let ((add (get options :add))
+          (locators (get options :locators))
+          (text (get options :text))
+          (file (get options :file))
+          (source-root (get options :sourceRoot)))
+      (when (or (/= (value-type add) "function")
+                (not (Array/isArray locators))
+                (/= (value-type text) "function")
+                (/= (value-type file) "function")
+                (/= (value-type source-root) "string"))
+        (throw (new globalThis.TypeError "original compiler artifact adapter requires its source manifest and services")))
+      (let* ((worker-programs (await (addOriginalWorkerProgram options)))
+             (candidates (js-call locators :filter (lambda (locator) (= (get locator :file) suite)))))
+        (if (= (js-length candidates) 0)
+          worker-programs
+          (let* ((mjs-source (await (funcall text suite)))
+                 (mjs-identity (await (funcall file suite)))
+                 (eli-source (await (funcall text eli-suite)))
+                 (eli-identity (await (funcall file eli-suite)))
+                 (parsed (parse-tools-eli eli-source))
+                 (artifact-eli-reg (get parsed :artifactRegion))
+                 (coverage
+                   (js-call
+                     (js-call candidates :filter
+                       (lambda (locator)
+                         (and (= (value-type (get locator :contains)) "string")
+                              (js-call (get artifact-eli-reg :source) :includes (get locator :contains)))))
+                     :map (lambda (locator) (get locator :id))))
+                 (semantics (get parsed :semanticRegions))
+                 (semantic-names (get parsed :semanticNames))
+                 (semantic-coverage
+                   (js-call
+                     (js-call candidates :filter
+                       (lambda (locator)
+                         (and (= (value-type (get locator :contains)) "string")
+                              (or (js-call semantic-names :includes (get locator :contains))
+                                  (js-call semantics :some
+                                    (lambda (sel) (js-call (get sel :source) :includes (get locator :contains))))))))
+                     :map (lambda (locator) (get locator :id)))))
+            (if (and (= (js-length coverage) 0) (= (js-length semantic-coverage) 0))
+              worker-programs
+              (let* ((dependencies (get parsed :dependencies))
+                     (sources (await (loadCompilerSources (js-object :sourceRoot source-root))))
+                     (all-records
+                       (js-call (get sources :modules) :concat
+                         (js-array (get sources :runtime))
+                         (let ((lit (get sources :literalSources))) (if (nullish? lit) (js-array) lit))))
+                     (r-idx 0))
+                (while (< r-idx (js-length all-records))
+                  (await (funcall file (get (aref all-records r-idx) :filename)))
+                  (setq r-idx (1+ r-idx)))
+                (let* ((_0 (await (funcall file "tests/helpers/session-tools-contract.eli")))
+                       (_1 (await (funcall file "tests/helpers/session-tools-contract.mjs")))
+                       (_2 (await (funcall file "tests/fixtures/session-tools-cli-stream-host.eli")))
+                       (_3 (await (funcall file "tests/fixtures/session-tools-cli-stream-host.mjs")))
+                       (_4 (await (funcall file "runtime/array-text.mjs")))
+                       (_5 (await (funcall file "runtime/errors.mjs")))
+                       (_6 (await (funcall file "runtime/math.mjs")))
+                       (_7 (await (funcall file "runtime/number-radix.mjs")))
+                       (_8 (await (funcall file "runtime/prelude.mjs")))
+                       (_9 (await (funcall file "runtime/primitives.mjs")))
+                       (_10 (await (funcall file "runtime/unicode-case.mjs")))
+                       (_11 (await (funcall file "runtime/unicode-case-data.mjs")))
+                       (complete-source-identity (compilerSourceIdentity sources))
+                       (record-ids (js-array))
+                       (artifact-mjs-regions
+                         (if (> (js-length coverage) 0) (mjs-suite-regions mjs-source "artifact") (js-array)))
+                       (artifact-eli-regions (js-array (region-meta artifact-eli-reg))))
+                  (when (> (js-length coverage) 0)
+                    (let* ((changes (js-array))
+                           (replay
+                             (build-artifact-host-source eli-source parsed source-root complete-source-identity changes))
+                           (host-source (get replay :hostSource))
+                           (hosts (js-array "node" "bun"))
+                           (h-idx 0))
+                      (while (< h-idx (js-length hosts))
+                        (let* ((host-runtime (aref hosts h-idx))
+                               (id (str "original-tools-artifact:compiler-session-tools:" host-runtime)))
+                          (js-call record-ids :push id)
+                          (funcall add
+                            (js-object
+                              :id id
+                              :kind "project"
+                              :coverage (js-call coverage :slice)
+                              :entry (get sources :entry)
+                              :modules (globalThis.structuredClone (get sources :modules))
+                              :memory (js-object :initialPages 128 :maximumPages 4096)
+                              :request (js-object :operation "project" :resolveImports t :phased false :sourceMap t)
+                              :execution
+                                (js-object
+                                  :kind "compiler-session-program"
+                                  :host (str "tests/__eliscript_original_tools_artifact_" host-runtime ".mjs")
+                                  :hostRuntime host-runtime
+                                  :hostSource host-source
+                                  :runtimeProfile "compiler"
+                                  :compilerProfile "small"
+                                  :runtimeOptions (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864 :auto 65536)
+                                  :supportingCompilerProducts t
+                                  :timeoutMs 300000
+                                  :setupReplacement
+                                    (js-object
+                                      :kind "selected-complete-compiler-artifacts"
+                                      :producer "selected-session"
+                                      :reference "independent-javascript-product-assertions-only"
+                                      :sourceIdentity complete-source-identity
+                                      :changes changes
+                                      :beforeAllTimeoutMs 120000
+                                      :originalCaseTimeouts (js-array 120000 30000 30000)))
+                              :expected (js-object :kind "seed-program" :oracleRequired t)
+                              :original
+                                (js-object
+                                  :suite suite
+                                  :host suite
+                                  :sourceSha256 (get mjs-identity :sha256)
+                                  :regions artifact-mjs-regions
+                                  :maintainedSource
+                                    (js-object
+                                      :sourceFile eli-suite
+                                      :sourceSha256 (get eli-identity :sha256)
+                                      :compilation (get replay :compilation)
+                                      :regions artifact-eli-regions
+                                      :dependencies dependencies)
+                                  :originalAssertions (js-call case-titles :slice)
+                                  :completeSourceIdentity complete-source-identity
+                                  :setupReplacement (js-object :kind "selected-complete-compiler-artifacts" :changes changes)
+                                  :coverageScope "aggregate-entry-and-three-artifact-cli-cases-only"))))
+                        (setq h-idx (1+ h-idx)))))
+                  (let ((summaries
+                          (js-call worker-programs :concat
+                            (if (> (js-length coverage) 0)
+                              (js-array (js-object :suite suite :coverage (js-call coverage :slice) :regions artifact-mjs-regions :recordIds record-ids))
+                              (js-array)))))
+                    (when (> (js-length semantic-coverage) 0)
+                      (let ((fixture-identities (js-array))
+                            (f-idx 0))
+                        (while (< f-idx (js-length semantic-fixtures))
+                          (let ((filename (aref semantic-fixtures f-idx)))
+                            (js-call fixture-identities :push
+                              (js-object :filename filename :sha256 (get (await (funcall file filename)) :sha256))))
+                          (setq f-idx (1+ f-idx)))
+                        (let* ((semantic-changes (js-array))
+                               (titles semantic-names)
+                               (semantic-eli-ranges (js-call semantics :map region-meta))
+                               (semantic-mjs-ranges (mjs-suite-regions mjs-source "semantic"))
+                               (semantic-ids (js-array))
+                               (semantic-replay
+                                 (build-semantic-host-source
+                                   eli-source parsed source-root complete-source-identity
+                                   fixture-identities titles semantic-changes))
+                               (semantic-host (get semantic-replay :hostSource))
+                               (sem-hosts (js-array "node" "bun"))
+                               (sh-idx 0))
+                          (while (< sh-idx (js-length sem-hosts))
+                            (let* ((host-runtime (aref sem-hosts sh-idx))
+                                   (id (str "original-managed:compiler-session-tools:" host-runtime)))
+                              (js-call semantic-ids :push id)
+                              (funcall add
+                                (js-object
+                                  :id id
+                                  :kind "project"
+                                  :coverage (js-call semantic-coverage :slice)
+                                  :entry (get sources :entry)
+                                  :modules (globalThis.structuredClone (get sources :modules))
+                                  :memory (js-object :initialPages 128 :maximumPages 4096)
+                                  :request (js-object :operation "project" :resolveImports t :phased false :sourceMap t)
+                                  :execution
+                                    (js-object
+                                      :kind "compiler-session-program"
+                                      :host (str "tests/__eliscript_compiler_session_tools_" host-runtime ".mjs")
+                                      :hostRuntime host-runtime
+                                      :hostSource semantic-host
+                                      :runtimeProfile "compiler"
+                                      :compilerProfile "small"
+                                      :runtimeOptions (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864 :auto 65536)
+                                      :timeoutMs 120000
+                                      :setupReplacement
+                                        (js-object
+                                          :kind "selected-complete-compiler-semantic-tools"
+                                          :producer "selected-session"
+                                          :reference "retained-original-semantic-assertions-and-generated-javascript"
+                                          :sourceIdentity complete-source-identity
+                                          :dependencies dependencies
+                                          :changes semantic-changes
+                                          :defaultCaseTimeoutMs 5000
+                                          :deadlines "retained-test-registration-arguments"))
+                                  :expected (js-object :kind "seed-program" :oracleRequired t)
+                                  :original
+                                    (js-object
+                                      :suite suite
+                                      :host suite
+                                      :sourceSha256 (get mjs-identity :sha256)
+                                      :regions semantic-mjs-ranges
+                                      :maintainedSource
+                                        (js-object
+                                          :sourceFile eli-suite
+                                          :sourceSha256 (get eli-identity :sha256)
+                                          :compilation (get semantic-replay :compilation)
+                                          :regions semantic-eli-ranges
+                                          :dependencies dependencies)
+                                      :cases
+                                        (js-call
+                                          (js-call candidates :filter
+                                            (lambda (locator)
+                                              (and (js-call semantic-coverage :includes (get locator :id))
+                                                   (get locator :originalCase))))
+                                          :map (lambda (locator)
+                                                 (Object/assign (js-object :id (get locator :id))
+                                                   (globalThis.structuredClone (get locator :originalCase)))))
+                                      :originalAssertions titles
+                                      :completeSourceIdentity complete-source-identity
+                                      :fixtureIdentities fixture-identities
+                                      :originalAssertion "all original public semantic tools cases including the original trailing parameter-default query corpus; aggregate/CLI artifact cases are separate"
+                                      :setupReplacement
+                                        (js-object
+                                          :kind "selected-complete-compiler-semantic-tools"
+                                          :dependencies dependencies
+                                          :changes semantic-changes)
+                                      :coverageScope "retained-semantic-tools-regions-only"))))
+                            (setq sh-idx (1+ sh-idx)))
+                          (js-call summaries :push
+                            (js-object
+                              :suite suite
+                              :coverage (js-call semantic-coverage :slice)
+                              :regions semantic-mjs-ranges
+                              :maintainedRegions semantic-eli-ranges
+                              :recordIds semantic-ids)))))
+                    summaries)))))))))
+
+  (export addOriginalToolsArtifactPrograms))

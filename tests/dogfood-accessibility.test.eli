@@ -1,2 +1,144 @@
-(module capsules.tests.dogfood-accessibility.test
-  (js* "import { afterAll, beforeAll, expect, test } from \"bun:test\";\nimport { cp, mkdtemp, readFile, readdir, rm, writeFile } from \"node:fs/promises\";\nimport { join, resolve } from \"node:path\";\n\nconst ROOT = resolve(import.meta.dir, \"..\");\nconst COMPILER = resolve(ROOT, \"bin/eliscript-build\");\nconst DEMO = resolve(ROOT, \"examples/dogfood/_demo\");\n\nlet staging;\nlet program;\nlet bundle;\nlet output;\nlet css;\nlet page;\nlet article;\n\nasync function run(command) {\n  const child = Bun.spawn(command, { cwd: ROOT, stdout: \"pipe\", stderr: \"pipe\" });\n  const [exitCode, stdout, stderr] = await Promise.all([\n    child.exited,\n    new Response(child.stdout).text(),\n    new Response(child.stderr).text(),\n  ]);\n  return { exitCode, stdout, stderr };\n}\n\nbeforeAll(async () => {\n  staging = await mkdtemp(resolve(ROOT, \".eliscript-dogfood-a11y-\"));\n\n  const built = await run([\n    COMPILER, \"--no-cache\", \"--root\", \"examples/dogfood\", \"--out-dir\",\n    join(staging, \"build\"), \"examples/dogfood/src/builder/main.eli\",\n  ]);\n  if (built.exitCode !== 0) throw new Error(built.stderr.trim() || built.stdout.trim());\n  program = join(staging, \"build/src/builder/main.mjs\");\n\n  const browser = await run([\n    COMPILER, \"--no-cache\", \"--root\", \"examples/dogfood\", \"--out-dir\",\n    join(staging, \"browser-source\"), \"examples/dogfood/src/renderer/browser.eli\",\n  ]);\n  if (browser.exitCode !== 0) throw new Error(browser.stderr.trim() || browser.stdout.trim());\n  bundle = join(staging, \"browser.js\");\n  const bundled = await run([\n    \"bun\", \"build\", join(staging, \"browser-source/src/renderer/browser.mjs\"),\n    \"--target=browser\", \"--format=iife\", \"--outfile\", bundle,\n  ]);\n  if (bundled.exitCode !== 0) throw new Error(bundled.stderr.trim() || bundled.stdout.trim());\n\n  // An external channel mounts in one region and needs a fallback, so the\n  // fixture enables one that has no builder-side record.\n  const project = join(staging, \"project\");\n  await cp(DEMO, project, { recursive: true });\n  const configPath = join(project, \"dogfood.config.eli\");\n  const config = await readFile(configPath, \"utf8\");\n  await writeFile(\n    configPath,\n    config.replace(\n      \":channels []\",\n      \":channels [{:id :giscus :kind :giscus :enabled t :mode :embed}]\",\n    ),\n    \"utf8\",\n  );\n  output = join(project, \"site\");\n  const site = await run([\n    process.execPath, program, \"--root\", project, \"--output\", \"site\",\n    \"--browser-bundle\", bundle,\n  ]);\n  if (site.exitCode !== 0) throw new Error(site.stderr.trim() || site.stdout.trim());\n\n  css = await readFile(join(output, \"assets/site.css\"), \"utf8\");\n  page = await readFile(join(output, \"index.html\"), \"utf8\");\n  // Comment channels belong to an article, not to the home page.\n  article = await readFile(join(output, \"posts/welcome/index.html\"), \"utf8\");\n});\n\nafterAll(async () => {\n  if (staging) await rm(staging, { recursive: true, force: true });\n});\n\ntest(\"every page carries the document contract\", async () => {\n  const pages = [];\n  async function walk(directory) {\n    for (const entry of await readdir(directory, { withFileTypes: true })) {\n      const path = join(directory, entry.name);\n      if (entry.isDirectory()) await walk(path);\n      else if (entry.name.endsWith(\".html\")) pages.push(path);\n    }\n  }\n  await walk(output);\n  expect(pages.length).toBeGreaterThan(5);\n\n  for (const path of pages) {\n    const source = await readFile(path, \"utf8\");\n    expect(source).toContain('<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">');\n    expect(source).toContain('<a class=\"skip\" href=\"#main\">');\n    expect(source).toContain(\"<header\");\n    expect(source).toContain('<main id=\"main\">');\n    expect(source).toContain(\"<footer>\");\n    expect(source).toContain('<nav aria-label=\"site\">');\n    // One page, one first-level heading.\n    expect(source.match(/<h1[ >]/gu)).toHaveLength(1);\n  }\n});\n\ntest(\"narrow screens get the navigation as a disclosure, wide ones inline\", () => {\n  // The disclosure ships open so that a browser which hides closed disclosure\n  // content cannot hide the navigation from a wide layout.\n  expect(page).toContain(\n    '<details class=\"menu\" open><summary>Menu</summary><nav aria-label=\"site\">',\n  );\n  // The wordmark is a sibling of the disclosure, so the publication identity is\n  // never hidden behind it.\n  const header = page.slice(page.indexOf(\"<header\"), page.indexOf(\"</header>\"));\n  expect(header.indexOf(\"wordmark\")).toBeLessThan(header.indexOf(\"<details\"));\n  // Above the breakpoint the disclosure is not rendered at all.\n  expect(css).toContain(\"@media (min-width:601px){.menu{display:contents}.menu>summary{display:none}\");\n  expect(css).toContain(\"@media (max-width:600px)\");\n  expect(css).toContain(\".menu>summary{display:block\");\n  // Below it the document element carries the decision, recorded before the\n  // header is parsed, so the links are never shown and then hidden.\n  expect(css).toContain(\"html[data-menu=collapsed] .menu>nav{display:none}\");\n});\n\ntest(\"the bundle decides the menu state before the header is parsed\", async () => {\n  const bundle = await readFile(join(staging, \"browser.js\"), \"utf8\");\n  expect(bundle).toContain(\"data-menu\");\n  expect(bundle).toContain(\"collapsed\");\n  // The element exists only after parsing, so the pre-paint decision is\n  // recorded on the document element and the element follows it afterwards.\n  expect(bundle).toContain(\"mark_menu_state\");\n  expect(bundle).toContain(\"bind_menu\");\n});\n\ntest(\"keyboard focus is visible and motion can be reduced\", () => {\n  expect(css).toContain(\":focus-visible{outline:2px solid var(--accent);outline-offset:2px\");\n  expect(css).toContain(\"@media (prefers-reduced-motion:reduce)\");\n  expect(css).toContain(\"transition-duration:0.01ms !important\");\n});\n\ntest(\"long labels and source names cannot overflow their containers\", () => {\n  expect(css).toContain(\"overflow-wrap:anywhere\");\n  expect(css).toContain(\".masthead>*{min-width:0}\");\n});\n\ntest(\"article measure is constrained independently of the viewport\", () => {\n  // A fixed rem measure rather than a percentage, so a wide window does not\n  // stretch the text.\n  expect(css).toContain(\".article{max-width:44rem}\");\n  expect(css).not.toContain(\".article{max-width:100%\");\n});\n\ntest(\"the theme control carries a name and a tooltip\", () => {\n  expect(page).toContain('title=\"Switch the colour theme\"');\n  expect(page).toContain('type=\"button\"');\n});\n\ntest(\"an external channel mounts in one isolated region with a fallback\", () => {\n  expect(article).toContain('class=\"embed-region\"');\n  // The mount names the provider by the configured kind.\n  expect(article).toContain('data-comment-mount=\"giscus\"');\n  // The region reserves its space and contains its own layout, so a provider\n  // that never loads cannot move the article.\n  expect(css).toContain(\".embed-region{min-height:180px\");\n  expect(css).toContain(\"contain:layout style\");\n  expect(article).toContain(\"The browser loads that provider\");\n\n  // The channel is declared in the configuration rather than fetched, so the\n  // build carries no provider content and no provider request.\n  expect(article).toContain(\"this build does not\");\n});\n\ntest(\"a declared channel reaches every published article once\", async () => {\n  const posts = [];\n  async function walk(directory) {\n    for (const entry of await readdir(directory, { withFileTypes: true })) {\n      const path = join(directory, entry.name);\n      if (entry.isDirectory()) await walk(path);\n      else if (entry.name === \"index.html\" && path.includes(\"/posts/\")) posts.push(path);\n    }\n  }\n  await walk(output);\n  expect(posts.length).toBeGreaterThan(1);\n  for (const path of posts) {\n    const source = await readFile(path, \"utf8\");\n    expect(source.split('data-comment-mount=\"giscus\"').length - 1).toBe(1);\n  }\n});\n"))
+(module
+  tests.dogfood-accessibility.test
+  (import "bun:test" afterAll beforeAll expect test)
+  (import "node:fs/promises" cp mkdtemp readFile readdir rm writeFile)
+  (import "node:path" join resolve)
+  (defconst
+    ROOT
+    (resolve (get (js* "import.meta") :dir) ".."))
+  (defconst
+    COMPILER
+    (resolve ROOT "bin/eliscript-build"))
+  (defconst
+    DEMO
+    (resolve ROOT "examples/dogfood/_demo"))
+  (defconst
+    state
+    (js-object :staging nil :program nil :bundle nil :output nil :css nil :page nil :article nil))
+  (defasync
+    run
+    (command)
+    (let*
+      ((child (js-call globalThis.Bun :spawn command (js-object :cwd ROOT :stdout "pipe" :stderr "pipe"))) (results (await (js-call globalThis.Promise :all (js-array (get child :exited) (js-call (new globalThis.Response (get child :stdout)) :text) (js-call (new globalThis.Response (get child :stderr)) :text))))))
+      (js-object :exitCode (aref results 0) :stdout (aref results 1) :stderr (aref results 2))))
+  (defasync
+    walk-html
+    (directory pages)
+    (let*
+      ((entries (await (readdir directory (js-object :withFileTypes t)))) (idx (js-object :i 0)))
+      (while
+        (< (get idx :i) (get entries :length))
+        (let*
+          ((entry (aref entries (get idx :i))) (path (join directory (get entry :name))))
+          (if
+            (js-call entry :isDirectory)
+            (await (walk-html path pages))
+            (when
+              (js-call (get entry :name) :endsWith ".html")
+              (js-call pages :push path))))
+        (put idx :i (+ (get idx :i) 1)))))
+  (defasync
+    walk-posts
+    (directory posts)
+    (let*
+      ((entries (await (readdir directory (js-object :withFileTypes t)))) (idx (js-object :i 0)))
+      (while
+        (< (get idx :i) (get entries :length))
+        (let*
+          ((entry (aref entries (get idx :i))) (path (join directory (get entry :name))))
+          (if
+            (js-call entry :isDirectory)
+            (await (walk-posts path posts))
+            (when
+              (and (= (get entry :name) "index.html") (js-call path :includes "/posts/"))
+              (js-call posts :push path))))
+        (put idx :i (+ (get idx :i) 1)))))
+  (beforeAll (async () (let*
+        ((staging (await (mkdtemp (resolve ROOT ".eliscript-dogfood-a11y-")))) (__ign_1 (put state :staging staging)) (built (await (run (js-array COMPILER "--no-cache" "--root" "examples/dogfood" "--out-dir" (join staging "build") "examples/dogfood/src/builder/main.eli")))))
+        (when
+          (not= (get built :exitCode) 0)
+          (throw (new globalThis.Error (or (js-call (get built :stderr) :trim) (js-call (get built :stdout) :trim)))))
+        (let*
+          ((program (join staging "build/src/builder/main.mjs")) (__ign_2 (put state :program program)) (browser (await (run (js-array COMPILER "--no-cache" "--root" "examples/dogfood" "--out-dir" (join staging "browser-source") "examples/dogfood/src/renderer/browser.eli")))))
+          (when
+            (not= (get browser :exitCode) 0)
+            (throw (new globalThis.Error (or (js-call (get browser :stderr) :trim) (js-call (get browser :stdout) :trim)))))
+          (let*
+            ((bundle (join staging "browser.js")) (__ign_3 (put state :bundle bundle)) (bundled (await (run (js-array "bun" "build" (join staging "browser-source/src/renderer/browser.mjs") "--target=browser" "--format=iife" "--outfile" bundle)))))
+            (when
+              (not= (get bundled :exitCode) 0)
+              (throw (new globalThis.Error (or (js-call (get bundled :stderr) :trim) (js-call (get bundled :stdout) :trim)))))
+            (let*
+              ((project (join staging "project")) (__ign_4 (await (cp DEMO project (js-object :recursive t)))) (configPath (join project "dogfood.config.eli")) (config (await (readFile configPath "utf8"))) (__ign_5 (await (writeFile configPath (js-call config :replace ":channels []" ":channels [{:id :giscus :kind :giscus :enabled t :mode :embed}]") "utf8"))) (output (join project "site")) (__ign_6 (put state :output output)) (site (await (run (js-array (get globalThis.process :execPath) program "--root" project "--output" "site" "--browser-bundle" bundle)))))
+              (when
+                (not= (get site :exitCode) 0)
+                (throw (new globalThis.Error (or (js-call (get site :stderr) :trim) (js-call (get site :stdout) :trim)))))
+              (put state :css (await (readFile (join output "assets/site.css") "utf8")))
+              (put state :page (await (readFile (join output "index.html") "utf8")))
+              (put state :article (await (readFile (join output "posts/welcome/index.html") "utf8")))))))))
+  (afterAll (async () (when
+        (get state :staging)
+        (await (rm (get state :staging) (js-object :recursive t :force t))))))
+  (test "every page carries the document contract" (async () (let*
+        ((pages (js-array)) (__ign_7 (await (walk-html (get state :output) pages))) (idx (js-object :i 0)))
+        (js-call (expect (get pages :length)) :toBeGreaterThan 5)
+        (while
+          (< (get idx :i) (get pages :length))
+          (let*
+            ((path (aref pages (get idx :i))) (source (await (readFile path "utf8"))))
+            (js-call (expect source) :toContain "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")
+            (js-call (expect source) :toContain "<a class=\"skip\" href=\"#main\">")
+            (js-call (expect source) :toContain "<header")
+            (js-call (expect source) :toContain "<main id=\"main\">")
+            (js-call (expect source) :toContain "<footer>")
+            (js-call (expect source) :toContain "<nav aria-label=\"site\">")
+            (js-call (expect (js-call source :match (new globalThis.RegExp "<h1[ >]" "gu"))) :toHaveLength 1))
+          (put idx :i (+ (get idx :i) 1))))))
+  (test "narrow screens get the navigation as a disclosure, wide ones inline" (lambda () (let*
+        ((page (get state :page)) (css (get state :css)) (header (js-call page :slice (js-call page :indexOf "<header") (js-call page :indexOf "</header>"))))
+        (js-call (expect page) :toContain "<details class=\"menu\" open><summary>Menu</summary><nav aria-label=\"site\">")
+        (js-call (expect (js-call header :indexOf "wordmark")) :toBeLessThan (js-call header :indexOf "<details"))
+        (js-call (expect css) :toContain "@media (min-width:601px){.menu{display:contents}.menu>summary{display:none}")
+        (js-call (expect css) :toContain "@media (max-width:600px)")
+        (js-call (expect css) :toContain ".menu>summary{display:block")
+        (js-call (expect css) :toContain "html[data-menu=collapsed] .menu>nav{display:none}"))))
+  (test "the bundle decides the menu state before the header is parsed" (async () (let*
+        ((bundle (await (readFile (join (get state :staging) "browser.js") "utf8"))))
+        (js-call (expect bundle) :toContain "data-menu")
+        (js-call (expect bundle) :toContain "collapsed")
+        (js-call (expect bundle) :toContain "mark_menu_state")
+        (js-call (expect bundle) :toContain "bind_menu"))))
+  (test "keyboard focus is visible and motion can be reduced" (lambda () (let*
+        ((css (get state :css)))
+        (js-call (expect css) :toContain ":focus-visible{outline:2px solid var(--accent);outline-offset:2px")
+        (js-call (expect css) :toContain "@media (prefers-reduced-motion:reduce)")
+        (js-call (expect css) :toContain "transition-duration:0.01ms !important"))))
+  (test "long labels and source names cannot overflow their containers" (lambda () (let*
+        ((css (get state :css)))
+        (js-call (expect css) :toContain "overflow-wrap:anywhere")
+        (js-call (expect css) :toContain ".masthead>*{min-width:0}"))))
+  (test "article measure is constrained independently of the viewport" (lambda () (let*
+        ((css (get state :css)))
+        (js-call (expect css) :toContain ".article{max-width:44rem}")
+        (js-call (get (expect css) :not) :toContain ".article{max-width:100%"))))
+  (test "the theme control carries a name and a tooltip" (lambda () (let*
+        ((page (get state :page)))
+        (js-call (expect page) :toContain "title=\"Switch the colour theme\"")
+        (js-call (expect page) :toContain "type=\"button\""))))
+  (test "an external channel mounts in one isolated region with a fallback" (lambda () (let*
+        ((article (get state :article)) (css (get state :css)))
+        (js-call (expect article) :toContain "class=\"embed-region\"")
+        (js-call (expect article) :toContain "data-comment-mount=\"giscus\"")
+        (js-call (expect css) :toContain ".embed-region{min-height:180px")
+        (js-call (expect css) :toContain "contain:layout style")
+        (js-call (expect article) :toContain "The browser loads that provider")
+        (js-call (expect article) :toContain "this build does not"))))
+  (test "a declared channel reaches every published article once" (async () (let*
+        ((posts (js-array)) (__ign_8 (await (walk-posts (get state :output) posts))) (idx (js-object :i 0)))
+        (js-call (expect (get posts :length)) :toBeGreaterThan 1)
+        (while
+          (< (get idx :i) (get posts :length))
+          (let*
+            ((path (aref posts (get idx :i))) (source (await (readFile path "utf8"))))
+            (js-call (expect (- (get (js-call source :split "data-comment-mount=\"giscus\"") :length) 1)) :toBe 1))
+          (put idx :i (+ (get idx :i) 1)))))))

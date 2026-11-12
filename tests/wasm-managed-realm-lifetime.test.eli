@@ -1,2 +1,367 @@
-(module capsules.tests.wasm-managed-realm-lifetime.test
-  (js* "import {beforeAll, afterAll, test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {readFile, writeFile, mkdtemp, rm} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {spawnSync} from 'node:child_process';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nimport {invokeWithHeapDiagnostic} from './helpers/managed-heap-diagnostic.mjs';\nimport {instantiateNativeManagedRuntime} from '../tools/backends/native-managed-runtime.mjs';\n\nconst source = `\n(defun identity (value) value)\n(defun function-value () identity)\n(defun missing (function) (get function \"unrelated-missing-field\"))\n(defun make-map () (new globalThis/Map))\n(defun discarded-map (marker) (new globalThis/Map nil (put marker 0 7)) 9)\n(defun same-map-prototype (map) (Object/is (Object/getPrototypeOf map) (get globalThis/Map \"prototype\")))\n(defun install-map (value) (put (get globalThis/Map \"prototype\") \"__eliscript_realm_lifetime\" value))\n(defun read-map () (get (new globalThis/Map) \"__eliscript_realm_lifetime\"))\n(defun delete-map () (Reflect/deleteProperty (get globalThis/Map \"prototype\") \"__eliscript_realm_lifetime\"))\n(defun install-function (value) (put (get globalThis/Function \"prototype\") \"__eliscript_realm_lifetime\" value))\n(defun read-function () (get identity \"__eliscript_realm_lifetime\"))\n(defun install-named (value) (put identity \"__eliscript_named_lifetime\" value))\n(defun read-named () (get identity \"__eliscript_named_lifetime\"))\n(defun lock-map () (Object/preventExtensions (get globalThis/Map \"prototype\")) nil)\n(defun map-extensible () (Object/isExtensible (get globalThis/Map \"prototype\")))\n(defun array-prototype-query (mode)\n (let* ((array (js-array))\n        (prototype (cond ((= mode 1) nil) ((= mode 2) (js-object))\n                         (t (get globalThis/Array \"prototype\")))))\n  (when (/= mode 0) (Object/setPrototypeOf array prototype))\n  (Object/is (Object/getPrototypeOf array) prototype)))\n(defun object-reference () globalThis/Object)\n(defun object-static (key) (get globalThis/Object key))\n(defun object-prototype-member (key) (get (get globalThis/Object \"prototype\") key))\n(defun object-static-order (mode)\n (let ((constructor globalThis/Object) (reads 0))\n  (cond\n   ((= mode 1) (get constructor \"seal\") (get constructor \"assign\") (get constructor \"keys\"))\n   ((= mode 2)\n    (Object/defineProperty constructor \"keys\"\n     (js-object :get (lambda () (setq reads (1+ reads)) 9) :configurable t)))\n   ((= mode 3)\n    (let ((original (get constructor \"keys\")))\n     (Reflect/deleteProperty constructor \"keys\") (put constructor \"keys\" original))))\n  (JSON/stringify (js-array (Object/getOwnPropertyNames constructor) reads))))\n(defun object-prototype-order (mode)\n (let ((prototype (get globalThis/Object \"prototype\")) (reads 0))\n  (cond\n   ((= mode 1) (get prototype \"isPrototypeOf\") (get prototype \"hasOwnProperty\") (get prototype \"toString\"))\n   ((= mode 2)\n    (Object/defineProperty prototype \"hasOwnProperty\"\n     (js-object :get (lambda () (setq reads (1+ reads)) 9) :configurable t)))\n   ((= mode 3)\n    (let ((original (get prototype \"hasOwnProperty\")))\n     (Reflect/deleteProperty prototype \"hasOwnProperty\") (put prototype \"hasOwnProperty\" original))))\n  (JSON/stringify (js-array (Object/getOwnPropertyNames prototype) reads))))\n(defun object-static-mutation (mode)\n (let* ((constructor globalThis/Object) (original (get constructor \"keys\"))\n        (reads 0) (first undefined) (second undefined))\n  (cond\n   ((= mode 0) (Reflect/deleteProperty constructor \"keys\"))\n   ((= mode 1) (put constructor \"keys\" false))\n   ((= mode 2)\n    (Object/defineProperty constructor \"keys\"\n     (js-object :get (lambda () (setq reads (1+ reads)) -0) :configurable t))))\n  (setq first (get constructor \"keys\") second (get constructor \"keys\"))\n  (JSON/stringify (js-array (Object/hasOwn constructor \"keys\")\n   (Object/is first second) (eq first undefined) (eq first false)\n   (Object/is first -0) reads (get original \"name\") (get original \"length\")))))\n(defun object-static-integrity ()\n (let ((constructor globalThis/Object))\n  (Object/freeze constructor)\n  (let ((description (Object/getOwnPropertyDescriptor constructor \"keys\")))\n   (JSON/stringify (js-array (Object/isFrozen constructor) (Object/isExtensible constructor)\n    (get description :writable) (get description :enumerable) (get description :configurable)\n    (get (get constructor \"keys\") \"name\") (get (get constructor \"keys\") \"length\"))))))\n(export identity function-value missing make-map discarded-map same-map-prototype\n install-map read-map delete-map install-function read-function install-named read-named lock-map map-extensible\n object-reference object-static object-prototype-member object-static-order object-prototype-order object-static-mutation object-static-integrity array-prototype-query)\n`;\nlet directory, backend, runtime, program, bytes, lowered, nativePath, objectOracle;\nbeforeAll(async () => {\n  directory = await mkdtemp(resolve(tmpdir(), 'eliscript-realm-lifetime-'));\n  backend = await buildBackends({outputRoot: directory});\n  runtime = backend.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli', 'utf8'), 'runtime.eli');\n  program = backend.compiler.compile_ir_string(source, 'realm-lifetime.eli');\n  lowered = backend.managed.lower_managed_program(program, runtime);\n  bytes = Uint8Array.from(backend.wasm.append_metadata_section(backend.wasm.emit_typed_memory_wasm(lowered.typed), 'eliscript-managed-control', JSON.stringify(lowered.descriptor)));\n  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);\n  const javascript = backend.compiler.emit_ir_string(program);\n  const oracle = spawnSync(process.env.NODE ?? 'node', ['--input-type=module', '--eval',\n    'const m=await import(' + JSON.stringify('data:text/javascript;base64,' + Buffer.from(javascript).toString('base64')) + ');' +\n    'const map=m.make_map(); const out=[m.same_map_prototype(map)]; m.install_map(-0);out.push(Object.is(m.read_map(),-0),m.delete_map());m.install_function(9);out.push(m.read_function());m.install_named(9);out.push(m.read_named());m.lock_map();out.push(m.map_extensible());console.log(JSON.stringify(out));'], {encoding: 'utf8', timeout: 30000});\n  assert.equal(oracle.status, 0, oracle.stderr);assert.deepEqual(JSON.parse(oracle.stdout), [true, true, true, 9, 9, false]);\n  const objectChild = spawnSync(process.env.NODE ?? 'node', ['--input-type=module', '--eval',\n    'const m=await import(' + JSON.stringify('data:text/javascript;base64,' + Buffer.from(javascript).toString('base64')) + ');' +\n    'const keys=Object.getOwnPropertyDescriptor(Object,\"keys\"),mutations=[];' +\n    'for(let mode=0;mode<3;mode++){try{mutations.push(JSON.parse(m.object_static_mutation(mode)));}finally{Object.defineProperty(Object,\"keys\",keys);}}' +\n    'const prototypes=[0,1,2].map(mode=>m.array_prototype_query(mode));' +\n    'const integrity=JSON.parse(m.object_static_integrity());console.log(JSON.stringify({mutations,integrity,prototypes}));'],\n    {encoding: 'utf8', timeout: 30000});\n  assert.equal(objectChild.status, 0, objectChild.stderr);objectOracle = JSON.parse(objectChild.stdout);\n  assert.deepEqual(objectOracle.mutations, [\n    [false,true,true,false,false,0,'keys',1],\n    [true,true,false,true,false,0,'keys',1],\n    [true,true,false,false,true,2,'keys',1],\n  ]);\n  assert.deepEqual(objectOracle.integrity, [true,false,false,false,false,'keys',1]);\n  assert.deepEqual(objectOracle.prototypes,[true,true,true]);\n  if (process.platform === 'darwin' && process.arch === 'arm64') {\n    nativePath = resolve(directory, 'realm.dylib');\n    await writeFile(nativePath, Uint8Array.from(backend.native.emit_typed_native_memory_library(lowered.typed, 'arm64-macos')));\n  }\n}, 120000);\nafterAll(async () => {if (directory) await rm(directory, {recursive: true, force: true});});\nfunction finish(a) {a.closeModule();a.collect();assert.equal(a.live(), 0);assert.equal(a.stats().frameDepth, 0);a.close?.();}\n\ntest('plain function values and missing reads fit the original 64-slot heap without materializing unrelated builtins', () => {\n  const a = instantiateManagedRuntime(bytes, {maxSlots: 64, initialBytes: 8192, maxBytes: 65536});a.auto(1);\n  try {\n    const f = a.invoke('function-value');\n    try {assert.equal(a.invoke('missing', [f]), undefined);} finally {a.release(f);}\n    a.collect();assert.equal(a.live(), 0);assert.equal(a.stats().frameDepth, 0);\n  } finally {finish(a);}\n});\n\nfor(const lookup of ['object-static','object-prototype-member']){\nfor(const maxSlots of [64,256])test(lookup+' recovers after exhaustion within its original '+maxSlots+' slots and keeps its identity across GC',()=>{\n  const a=instantiateManagedRuntime(bytes,{maxSlots,initialBytes:16384,maxBytes:65536});a.auto(1);\n  const constructor=a.invoke('object-reference'),key=a.string(lookup==='object-static'?'keys':'hasOwnProperty'),caller=a.frame(2),padding=[];let first,second;\n  a.frameSet(caller,0,constructor);a.frameSet(caller,1,key);\n  try{\n    assert.throws(()=>{for(let index=0;index<maxSlots*2;index++)padding.push(a.number(index));},\n      error=>error.eliscriptDiagnostic?.code==='ELI-RT0002');\n    assert.throws(()=>a.invoke(lookup,[key]),error=>error.eliscriptDiagnostic?.code==='ELI-RT0002');\n    assert.equal(a.stats().frameDepth,1);\n    for(const value of padding)a.release(value);padding.length=0;a.collect();\n    first=a.invoke(lookup,[key]);assert.equal(first.kind,18);a.collect();\n    second=a.invoke(lookup,[key]);assert(a.keyEqual(first,second));assert.equal(a.stats().frameDepth,1);\n  }finally{for(const value of padding)a.release(value);a.leaveFrame(caller);for(const value of [constructor,key,first,second])a.release(value);finish(a);}\n});\n}\n\ntest('reading default null and custom Array prototype identity does not observe its methods in the original 64 slots',()=>{\n  const a=instantiateManagedRuntime(bytes,{maxSlots:64,initialBytes:16384,maxBytes:65536});a.auto(1);\n  try{\n    for(let mode=0;mode<3;mode++){\n      const input=a.number(mode);\n      try{assert.equal(invokeWithHeapDiagnostic(a,'array-prototype-query',[input]),objectOracle.prototypes[mode]);a.collect();assert.equal(a.stats().frameDepth,0);}\n      finally{a.release(input);}\n    }\n  }finally{finish(a);}\n});\n\ntest('observed Object statics retain represented key order descriptors overrides deletion and complete integrity',()=>{\n  for(const [lookup,changed]of [['object-static-order','keys'],['object-prototype-order','hasOwnProperty']]){\n    const orders=[];\n    for(let mode=0;mode<4;mode++){\n      const a=instantiateManagedRuntime(bytes);a.auto(1);const input=a.number(mode);let out;\n      try{out=a.invoke(lookup,[input]);orders.push(JSON.parse(a.readString(out)));}\n      finally{a.release(input);a.release(out);finish(a);}\n    }\n    assert.deepEqual(orders[1],orders[0]);assert.deepEqual(orders[2],orders[0]);\n    assert.deepEqual(orders[3][0].slice(0,-1),orders[0][0].filter(name=>name!==changed));assert.equal(orders[3][0].at(-1),changed);\n    assert(orders.every(record=>record[1]===0),'own-name enumeration never invokes a replacement getter');\n  }\n  for(let mode=0;mode<3;mode++){\n    const a=instantiateManagedRuntime(bytes);a.auto(1);const input=a.number(mode);let out;\n    try{out=a.invoke('object-static-mutation',[input]);assert.deepEqual(JSON.parse(a.readString(out)),objectOracle.mutations[mode]);}\n    finally{a.release(input);a.release(out);finish(a);}\n  }\n  const a=instantiateManagedRuntime(bytes);a.auto(1);let out;\n  try{out=a.invoke('object-static-integrity');assert.deepEqual(JSON.parse(a.readString(out)),objectOracle.integrity);}\n  finally{a.release(out);finish(a);}\n});\n\ntest('unused constructors release their default realm while held instances retain canonical prototype identity', () => {\n  const a = instantiateManagedRuntime(bytes);a.auto(1);\n  try {\n    const marker = a.sourceArray([false]);\n    let out;\n    try {out = a.invoke('discarded-map', [marker]);assert.equal(a.readNumber(out), 9);const changed = a.get(marker, 0);try {assert.equal(a.readNumber(changed), 7);} finally {a.release(changed);}}\n    finally {a.release(out);a.release(marker);}\n    a.collect();assert.equal(a.live(), 0);\n    const map = a.invoke('make-map');\n    try {for (let index = 0; index < 3; index++) {a.collect();assert.equal(a.invoke('same-map-prototype', [map]), true);}}\n    finally {a.release(map);}\n    a.collect();assert.equal(a.live(), 0);\n  } finally {finish(a);}\n});\n\nfunction mutations(a) {\n  a.auto(1);const negative = a.number(-0), nine = a.number(9);\n  try {\n    for (const [name, value] of [['install-map', negative], ['install-function', nine], ['install-named', nine]]) {const out = a.invoke(name, [value]);a.release(out);}\n  } finally {a.release(negative);a.release(nine);}\n  a.collect();assert(a.live() > 0, 'observable changes to the realm must survive collection without external handles');\n  const mapValue = a.invoke('read-map'), functionValue = a.invoke('read-function'), namedValue = a.invoke('read-named');\n  try {assert(Object.is(a.readNumber(mapValue), -0));assert.equal(a.readNumber(functionValue), 9);assert.equal(a.readNumber(namedValue), 9);} finally {a.release(mapValue);a.release(functionValue);a.release(namedValue);}\n  assert.equal(a.invoke('delete-map'), true);a.collect();assert.equal(a.invoke('read-map'), undefined);\n  a.release(a.invoke('lock-map'));a.collect();assert.equal(a.invoke('map-extensible'), false);\n}\ntest('user prototype assignments, deletion and preventExtensions remain observable across GC and release on close', () => {\n  const a = instantiateManagedRuntime(bytes);try {mutations(a);} finally {finish(a);}\n});\n\ntest.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')('native machine code preserves the same realm mutation lifetime', async () => {\n  const a = await instantiateNativeManagedRuntime(nativePath, lowered);\n  try {mutations(a);} finally {finish(a);}\n});\n\ntest.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')('native Object statics preserve observed override deletion accessor and frozen descriptors',async()=>{\n  for(const mode of [0,1,2,'integrity']){\n    const a=await instantiateNativeManagedRuntime(nativePath,lowered);a.auto(1);let input,out;\n    try{\n      if(mode==='integrity')out=a.invoke('object-static-integrity');\n      else{input=a.number(mode);out=a.invoke('object-static-mutation',[input]);}\n      assert.deepEqual(JSON.parse(a.readString(out)),mode==='integrity'?objectOracle.integrity:objectOracle.mutations[mode]);\n      assert.equal(a.stats().frameDepth,0);\n    }finally{a.release(input);a.release(out);finish(a);}\n  }\n});\n"))
+(module tests.wasm-managed-realm-lifetime.test
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:buffer" Buffer)
+  (import "node:fs/promises" readFile writeFile mkdtemp rm)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "node:os" tmpdir)
+  (import "node:process" :default process)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "./helpers/managed-heap-diagnostic.mjs" invokeWithHeapDiagnostic)
+  (import "./helpers/managed-browser-transport.mjs" writeManagedReference)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+
+  (defconst node-helper (resolve "tests/helpers/wasm-managed-realm-lifetime-node.mjs"))
+
+  (defconst source
+    "\n(defun identity (value) value)\n(defun function-value () identity)\n(defun missing (function) (get function \"unrelated-missing-field\"))\n(defun make-map () (new globalThis/Map))\n(defun discarded-map (marker) (new globalThis/Map nil (put marker 0 7)) 9)\n(defun same-map-prototype (map) (Object/is (Object/getPrototypeOf map) (get globalThis/Map \"prototype\")))\n(defun install-map (value) (put (get globalThis/Map \"prototype\") \"__eliscript_realm_lifetime\" value))\n(defun read-map () (get (new globalThis/Map) \"__eliscript_realm_lifetime\"))\n(defun delete-map () (Reflect/deleteProperty (get globalThis/Map \"prototype\") \"__eliscript_realm_lifetime\"))\n(defun install-function (value) (put (get globalThis/Function \"prototype\") \"__eliscript_realm_lifetime\" value))\n(defun read-function () (get identity \"__eliscript_realm_lifetime\"))\n(defun install-named (value) (put identity \"__eliscript_named_lifetime\" value))\n(defun read-named () (get identity \"__eliscript_named_lifetime\"))\n(defun lock-map () (Object/preventExtensions (get globalThis/Map \"prototype\")) nil)\n(defun map-extensible () (Object/isExtensible (get globalThis/Map \"prototype\")))\n(defun array-prototype-query (mode)\n (let* ((array (js-array))\n        (prototype (cond ((= mode 1) nil) ((= mode 2) (js-object))\n                         (t (get globalThis/Array \"prototype\")))))\n  (when (/= mode 0) (Object/setPrototypeOf array prototype))\n  (Object/is (Object/getPrototypeOf array) prototype)))\n(defun object-reference () globalThis/Object)\n(defun object-static (key) (get globalThis/Object key))\n(defun object-prototype-member (key) (get (get globalThis/Object \"prototype\") key))\n(defun object-static-order (mode)\n (let ((constructor globalThis/Object) (reads 0))\n  (cond\n   ((= mode 1) (get constructor \"seal\") (get constructor \"assign\") (get constructor \"keys\"))\n   ((= mode 2)\n    (Object/defineProperty constructor \"keys\"\n     (js-object :get (lambda () (setq reads (1+ reads)) 9) :configurable t)))\n   ((= mode 3)\n    (let ((original (get constructor \"keys\")))\n     (Reflect/deleteProperty constructor \"keys\") (put constructor \"keys\" original))))\n  (JSON/stringify (js-array (Object/getOwnPropertyNames constructor) reads))))\n(defun object-prototype-order (mode)\n (let ((prototype (get globalThis/Object \"prototype\")) (reads 0))\n  (cond\n   ((= mode 1) (get prototype \"isPrototypeOf\") (get prototype \"hasOwnProperty\") (get prototype \"toString\"))\n   ((= mode 2)\n    (Object/defineProperty prototype \"hasOwnProperty\"\n     (js-object :get (lambda () (setq reads (1+ reads)) 9) :configurable t)))\n   ((= mode 3)\n    (let ((original (get prototype \"hasOwnProperty\")))\n     (Reflect/deleteProperty prototype \"hasOwnProperty\") (put prototype \"hasOwnProperty\" original))))\n  (JSON/stringify (js-array (Object/getOwnPropertyNames prototype) reads))))\n(defun object-static-mutation (mode)\n (let* ((constructor globalThis/Object) (original (get constructor \"keys\"))\n        (reads 0) (first undefined) (second undefined))\n  (cond\n   ((= mode 0) (Reflect/deleteProperty constructor \"keys\"))\n   ((= mode 1) (put constructor \"keys\" false))\n   ((= mode 2)\n    (Object/defineProperty constructor \"keys\"\n     (js-object :get (lambda () (setq reads (1+ reads)) -0) :configurable t))))\n  (setq first (get constructor \"keys\") second (get constructor \"keys\"))\n  (JSON/stringify (js-array (Object/hasOwn constructor \"keys\")\n   (Object/is first second) (eq first undefined) (eq first false)\n   (Object/is first -0) reads (get original \"name\") (get original \"length\")))))\n(defun object-static-integrity ()\n (let ((constructor globalThis/Object))\n  (Object/freeze constructor)\n  (let ((description (Object/getOwnPropertyDescriptor constructor \"keys\")))\n   (JSON/stringify (js-array (Object/isFrozen constructor) (Object/isExtensible constructor)\n    (get description :writable) (get description :enumerable) (get description :configurable)\n    (get (get constructor \"keys\") \"name\") (get (get constructor \"keys\") \"length\"))))))\n(export identity function-value missing make-map discarded-map same-map-prototype\n install-map read-map delete-map install-function read-function install-named read-named lock-map map-extensible\n object-reference object-static object-prototype-member object-static-order object-prototype-order object-static-mutation object-static-integrity array-prototype-query)\n")
+
+  (defvar directory nil)
+  (defvar backend nil)
+  (defvar runtime nil)
+  (defvar program nil)
+  (defvar bytes nil)
+  (defvar lowered nil)
+  (defvar nativePath nil)
+  (defvar objectOracle nil)
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-realm-lifetime-"))))
+      (setq backend (await (buildBackends (js-object :outputRoot directory))))
+      (setq runtime (js-call (get backend :compiler) :compile_ir_string
+                      (await (readFile "bootstrap/runtime/memory.eli" "utf8"))
+                      "runtime.eli"))
+      (setq program (js-call (get backend :compiler) :compile_ir_string source "realm-lifetime.eli"))
+      (setq lowered (js-call (get backend :managed) :lower_managed_program program runtime))
+      (setq bytes
+        (Uint8Array/from
+          (js-call (get backend :wasm) :append_metadata_section
+            (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed))
+            "eliscript-managed-control"
+            (JSON/stringify (get lowered :descriptor)))))
+      (js-call assert :deepEqual
+        (WebAssembly.Module/imports (new WebAssembly.Module bytes))
+        (js-array))
+      (let* ((javascript (js-call (get backend :compiler) :emit_ir_string program))
+             (data-url (get (pathToFileURL
+                         (await (writeManagedReference directory javascript "realm-reference"))) :href))
+             (env-node (get (get process :env) :NODE))
+             (node-bin (if (nullish? env-node) "node" env-node))
+             (oracle (spawnSync node-bin
+                       (js-array node-helper "oracle" data-url)
+                       (js-object :encoding "utf8" :timeout 30000)))
+             (object-child (spawnSync node-bin
+                             (js-array node-helper "object-oracle" data-url)
+                             (js-object :encoding "utf8" :timeout 30000))))
+        (js-call assert :equal (get oracle :status) 0 (get oracle :stderr))
+        (js-call assert :deepEqual
+          (JSON/parse (get oracle :stdout))
+          (js-array t t t 9 9 false))
+        (js-call assert :equal (get object-child :status) 0 (get object-child :stderr))
+        (setq objectOracle (JSON/parse (get object-child :stdout)))
+        (js-call assert :deepEqual (get objectOracle :mutations)
+          (js-array
+            (js-array false t t false false 0 "keys" 1)
+            (js-array t t false t false 0 "keys" 1)
+            (js-array t t false false t 2 "keys" 1)))
+        (js-call assert :deepEqual (get objectOracle :integrity)
+          (js-array t false false false false "keys" 1))
+        (js-call assert :deepEqual (get objectOracle :prototypes)
+          (js-array t t t))
+        (when (and (= (get process :platform) "darwin")
+                   (= (get process :arch) "arm64"))
+          (setq nativePath (resolve directory "realm.dylib"))
+          (await (writeFile nativePath
+                   (Uint8Array/from
+                     (js-call (get backend :native) :emit_typed_native_memory_library
+                       (get lowered :typed) "arm64-macos")))))))
+    120000)
+
+  (afterAll
+    (async ()
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun finish (a)
+    (js-call a :closeModule)
+    (js-call a :collect)
+    (js-call assert :equal (js-call a :live) 0)
+    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+    (let ((close-fn (get a :close)))
+      (when close-fn
+        (js-call a :close))))
+
+  (test "plain function values and missing reads fit the original 64-slot heap without materializing unrelated builtins"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes
+                 (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 65536))))
+        (js-call a :auto 1)
+        (try
+          (let ((f (js-call a :invoke "function-value")))
+            (try
+              (js-call assert :equal (js-call a :invoke "missing" (js-array f)) undefined)
+              (finally
+                (js-call a :release f)))
+            (js-call a :collect)
+            (js-call assert :equal (js-call a :live) 0)
+            (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))
+          (finally
+            (finish a))))))
+
+  (js-call (js-array "object-static" "object-prototype-member") :forEach
+    (lambda (lookup)
+      (js-call (js-array 64 256) :forEach
+        (lambda (max-slots)
+          (test (str lookup " recovers after exhaustion within its original " max-slots " slots and keeps its identity across GC")
+            (lambda ()
+              (let* ((a (instantiateManagedRuntime bytes
+                          (js-object :maxSlots max-slots :initialBytes 16384 :maxBytes 65536)))
+                     (constructor (progn (js-call a :auto 1) (js-call a :invoke "object-reference")))
+                     (key (js-call a :string (if (= lookup "object-static") "keys" "hasOwnProperty")))
+                     (caller (js-call a :frame 2))
+                     (padding (js-array))
+                     (first undefined)
+                     (second undefined))
+                (js-call a :frameSet caller 0 constructor)
+                (js-call a :frameSet caller 1 key)
+                (try
+                  (js-call assert :throws
+                    (lambda ()
+                      (let ((idx 0)
+                            (limit (* max-slots 2)))
+                        (while (< idx limit)
+                          (js-call padding :push (js-call a :number idx))
+                          (setq idx (+ idx 1)))))
+                    (lambda (error)
+                      (let ((diag (get error :eliscriptDiagnostic)))
+                        (= (if diag (get diag :code) undefined) "ELI-RT0002"))))
+                  (js-call assert :throws
+                    (lambda () (js-call a :invoke lookup (js-array key)))
+                    (lambda (error)
+                      (let ((diag (get error :eliscriptDiagnostic)))
+                        (= (if diag (get diag :code) undefined) "ELI-RT0002"))))
+                  (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+                  (js-call padding :forEach (lambda (v) (js-call a :release v)))
+                  (put padding :length 0)
+                  (js-call a :collect)
+                  (setq first (js-call a :invoke lookup (js-array key)))
+                  (js-call assert :equal (get first :kind) 18)
+                  (js-call a :collect)
+                  (setq second (js-call a :invoke lookup (js-array key)))
+                  (funcall assert (js-call a :keyEqual first second))
+                  (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+                  (finally
+                    (js-call padding :forEach (lambda (v) (js-call a :release v)))
+                    (js-call a :leaveFrame caller)
+                    (js-call (js-array constructor key first second) :forEach
+                      (lambda (v) (js-call a :release v)))
+                    (finish a))))))))))
+
+  (test "reading default null and custom Array prototype identity does not observe its methods in the original 64 slots"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes
+                 (js-object :maxSlots 64 :initialBytes 16384 :maxBytes 65536))))
+        (js-call a :auto 1)
+        (try
+          (let ((mode 0))
+            (while (< mode 3)
+              (let ((input (js-call a :number mode)))
+                (try
+                  (js-call assert :equal
+                    (invokeWithHeapDiagnostic a "array-prototype-query" (js-array input))
+                    (aref (get objectOracle :prototypes) mode))
+                  (js-call a :collect)
+                  (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+                  (finally
+                    (js-call a :release input))))
+              (setq mode (+ mode 1))))
+          (finally
+            (finish a))))))
+
+  (test "observed Object statics retain represented key order descriptors overrides deletion and complete integrity"
+    (lambda ()
+      (js-call (js-array
+                 (js-array "object-static-order" "keys")
+                 (js-array "object-prototype-order" "hasOwnProperty"))
+        :forEach
+        (lambda (pair)
+          (let ((lookup (aref pair 0))
+                (changed (aref pair 1))
+                (orders (js-array))
+                (mode 0))
+            (while (< mode 4)
+              (let ((a (instantiateManagedRuntime bytes))
+                    (input undefined)
+                    (out undefined))
+                (js-call a :auto 1)
+                (setq input (js-call a :number mode))
+                (try
+                  (setq out (js-call a :invoke lookup (js-array input)))
+                  (js-call orders :push (JSON/parse (js-call a :readString out)))
+                  (finally
+                    (js-call a :release input)
+                    (js-call a :release out)
+                    (finish a))))
+              (setq mode (+ mode 1)))
+            (js-call assert :deepEqual (aref orders 1) (aref orders 0))
+            (js-call assert :deepEqual (aref orders 2) (aref orders 0))
+            (js-call assert :deepEqual
+              (js-call (aref (aref orders 3) 0) :slice 0 -1)
+              (js-call (aref (aref orders 0) 0) :filter (lambda (name) (/= name changed))))
+            (js-call assert :equal (js-call (aref (aref orders 3) 0) :at -1) changed)
+            (funcall assert
+              (js-call orders :every (lambda (record) (= (aref record 1) 0)))
+              "own-name enumeration never invokes a replacement getter"))))
+      (let ((mode 0))
+        (while (< mode 3)
+          (let ((a (instantiateManagedRuntime bytes))
+                (input undefined)
+                (out undefined))
+            (js-call a :auto 1)
+            (setq input (js-call a :number mode))
+            (try
+              (setq out (js-call a :invoke "object-static-mutation" (js-array input)))
+              (js-call assert :deepEqual
+                (JSON/parse (js-call a :readString out))
+                (aref (get objectOracle :mutations) mode))
+              (finally
+                (js-call a :release input)
+                (js-call a :release out)
+                (finish a))))
+          (setq mode (+ mode 1))))
+      (let ((a (instantiateManagedRuntime bytes))
+            (out undefined))
+        (js-call a :auto 1)
+        (try
+          (setq out (js-call a :invoke "object-static-integrity"))
+          (js-call assert :deepEqual
+            (JSON/parse (js-call a :readString out))
+            (get objectOracle :integrity))
+          (finally
+            (js-call a :release out)
+            (finish a))))))
+
+  (test "unused constructors release their default realm while held instances retain canonical prototype identity"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes)))
+        (js-call a :auto 1)
+        (try
+          (let ((marker (js-call a :sourceArray (js-array false)))
+                (out undefined))
+            (try
+              (setq out (js-call a :invoke "discarded-map" (js-array marker)))
+              (js-call assert :equal (js-call a :readNumber out) 9)
+              (let ((changed (js-call a :get marker 0)))
+                (try
+                  (js-call assert :equal (js-call a :readNumber changed) 7)
+                  (finally
+                    (js-call a :release changed))))
+              (finally
+                (js-call a :release out)
+                (js-call a :release marker)))
+            (js-call a :collect)
+            (js-call assert :equal (js-call a :live) 0)
+            (let ((map (js-call a :invoke "make-map")))
+              (try
+                (let ((idx 0))
+                  (while (< idx 3)
+                    (js-call a :collect)
+                    (js-call assert :equal (js-call a :invoke "same-map-prototype" (js-array map)) t)
+                    (setq idx (+ idx 1))))
+                (finally
+                  (js-call a :release map))))
+            (js-call a :collect)
+            (js-call assert :equal (js-call a :live) 0))
+          (finally
+            (finish a))))))
+
+  (defun mutations (a)
+    (js-call a :auto 1)
+    (let ((negative (js-call a :number -0))
+          (nine (js-call a :number 9)))
+      (try
+        (js-call (js-array
+                   (js-array "install-map" negative)
+                   (js-array "install-function" nine)
+                   (js-array "install-named" nine))
+          :forEach
+          (lambda (pair)
+            (let ((out (js-call a :invoke (aref pair 0) (js-array (aref pair 1)))))
+              (js-call a :release out))))
+        (finally
+          (js-call a :release negative)
+          (js-call a :release nine))))
+    (js-call a :collect)
+    (funcall assert (> (js-call a :live) 0)
+      "observable changes to the realm must survive collection without external handles")
+    (let ((map-value (js-call a :invoke "read-map"))
+          (function-value (js-call a :invoke "read-function"))
+          (named-value (js-call a :invoke "read-named")))
+      (try
+        (funcall assert (Object/is (js-call a :readNumber map-value) -0))
+        (js-call assert :equal (js-call a :readNumber function-value) 9)
+        (js-call assert :equal (js-call a :readNumber named-value) 9)
+        (finally
+          (js-call a :release map-value)
+          (js-call a :release function-value)
+          (js-call a :release named-value))))
+    (js-call assert :equal (js-call a :invoke "delete-map") t)
+    (js-call a :collect)
+    (js-call assert :equal (js-call a :invoke "read-map") undefined)
+    (js-call a :release (js-call a :invoke "lock-map"))
+    (js-call a :collect)
+    (js-call assert :equal (js-call a :invoke "map-extensible") false))
+
+  (test "user prototype assignments, deletion and preventExtensions remain observable across GC and release on close"
+    (lambda ()
+      (let ((a (instantiateManagedRuntime bytes)))
+        (try
+          (mutations a)
+          (finally
+            (finish a))))))
+
+  (funcall (js-call test :skipIf
+             (or (/= (get process :platform) "darwin")
+                 (/= (get process :arch) "arm64")))
+    "native machine code preserves the same realm mutation lifetime"
+    (async ()
+      (let ((a (await (instantiateNativeManagedRuntime nativePath lowered))))
+        (try
+          (mutations a)
+          (finally
+            (finish a))))))
+
+  (funcall (js-call test :skipIf
+             (or (/= (get process :platform) "darwin")
+                 (/= (get process :arch) "arm64")))
+    "native Object statics preserve observed override deletion accessor and frozen descriptors"
+    (async ()
+      (let ((modes (js-array 0 1 2 "integrity"))
+            (idx 0))
+        (while (< idx (get modes :length))
+          (let* ((mode (aref modes idx))
+                 (a (await (instantiateNativeManagedRuntime nativePath lowered)))
+                 (input undefined)
+                 (out undefined))
+            (js-call a :auto 1)
+            (try
+              (if (= mode "integrity")
+                  (setq out (js-call a :invoke "object-static-integrity"))
+                  (progn
+                    (setq input (js-call a :number mode))
+                    (setq out (js-call a :invoke "object-static-mutation" (js-array input)))))
+              (js-call assert :deepEqual
+                (JSON/parse (js-call a :readString out))
+                (if (= mode "integrity")
+                    (get objectOracle :integrity)
+                    (aref (get objectOracle :mutations) mode)))
+              (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+              (finally
+                (js-call a :release input)
+                (js-call a :release out)
+                (finish a))))
+          (setq idx (+ idx 1)))))))

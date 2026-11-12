@@ -1,2 +1,398 @@
-(module capsules.runtime.core.set
-  (js* "import {\n  EMPTY_MAP,\n  PersistentHashMap,\n} from \"./map.mjs\";\nimport {\n  SET_CONSTRUCTOR_TOKEN,\n  SET_PRESENT,\n  SET_STATE,\n  TRANSIENT_SET_CONSTRUCTOR_TOKEN,\n  TRANSIENT_SET_STATE,\n  recordInvalidTransientSetCall,\n  recordTransientSetPersistent,\n} from \"./set-internals.mjs\";\nimport {\n  VALUE_EQUAL,\n  VALUE_HASH,\n  unorderedCollectionHash,\n} from \"./value-internals.mjs\";\nimport {\n  COLLECTION_COUNT,\n  COLLECTION_EMPTY,\n  COLLECTION_CONJ,\n  COLLECTION_GET,\n  COLLECTION_CONTAINS,\n  COLLECTION_REDUCE,\n  COLLECTION_DISJ,\n  COLLECTION_SEQ,\n  reduceIterable,\n  sequenceView,\n} from \"./collection-internals.mjs\";\nimport {\n  EDITABLE_TRANSIENT,\n  TRANSIENT_ASSOC,\n  TRANSIENT_CONJ,\n  TRANSIENT_DISSOC,\n  TRANSIENT_PERSISTENT,\n} from \"./transient-internals.mjs\";\nimport {\n  METADATA_READ,\n  METADATA_WITH,\n} from \"./metadata-internals.mjs\";\nimport {\n  PERSISTENT_SET_HAS_VALUE,\n  PERSISTENT_SET_KIND,\n  persistentSetValueEqual,\n} from \"./persistent-kind.mjs\";\n\nconst SET_HASH_TAG = 0x51e7_b32d;\n\nfunction makeSet(map, metadata = null) {\n  return new PersistentHashSet(SET_CONSTRUCTOR_TOKEN, map, metadata);\n}\n\nfunction emptySetWithMetadata(metadata) {\n  return metadata === null ? EMPTY_SET : makeSet(EMPTY_MAP, metadata);\n}\n\nfunction makeTransientSet(set) {\n  return new TransientHashSet(TRANSIENT_SET_CONSTRUCTOR_TOKEN, set);\n}\n\nfunction activeTransientSetState(set) {\n  const state = set[TRANSIENT_SET_STATE];\n  if (!state.active) {\n    recordInvalidTransientSetCall();\n    throw new TypeError(\"transient hash set is no longer editable\");\n  }\n  return state;\n}\n\nfunction asPersistentSet(values) {\n  return values instanceof PersistentHashSet\n    ? values\n    : PersistentHashSet.from(values);\n}\n\nclass TransientHashSet {\n  constructor(token, set) {\n    if (token !== TRANSIENT_SET_CONSTRUCTOR_TOKEN ||\n        !(set instanceof PersistentHashSet)) {\n      throw new TypeError(\n        \"transient hash sets must be created from a persistent hash set\",\n      );\n    }\n    const sourceMap = set[SET_STATE].map;\n    const metadata = set[SET_STATE].metadata;\n    this[TRANSIENT_SET_STATE] = {\n      active: true,\n      source: set,\n      sourceMap,\n      map: sourceMap[EDITABLE_TRANSIENT](),\n      metadata,\n    };\n    Object.defineProperty(this, \"__eliscript_transient__\", {\n      enumerable: true,\n      get() {\n        throw new TypeError(\"transient hash sets cannot be serialized\");\n      },\n    });\n    Object.freeze(this);\n  }\n\n  [TRANSIENT_CONJ](value) {\n    const state = activeTransientSetState(this);\n    state.map[TRANSIENT_ASSOC](value, SET_PRESENT);\n    return this;\n  }\n\n  [TRANSIENT_DISSOC](value) {\n    const state = activeTransientSetState(this);\n    state.map[TRANSIENT_DISSOC](value);\n    return this;\n  }\n\n  [TRANSIENT_PERSISTENT]() {\n    const state = activeTransientSetState(this);\n    const map = state.map[TRANSIENT_PERSISTENT]();\n    const result = map === state.sourceMap\n      ? state.source\n      : (map === EMPTY_MAP\n        ? emptySetWithMetadata(state.metadata)\n        : makeSet(map, state.metadata));\n    state.active = false;\n    recordTransientSetPersistent();\n    return result;\n  }\n\n  toJSON() {\n    throw new TypeError(\"transient hash sets cannot be serialized\");\n  }\n\n  get [Symbol.toStringTag]() {\n    return \"EliscriptTransientHashSet\";\n  }\n}\n\nexport class PersistentHashSet {\n  constructor(token, map, metadata = null) {\n    if (token !== SET_CONSTRUCTOR_TOKEN || !(map instanceof PersistentHashMap)) {\n      throw new TypeError(\n        \"PersistentHashSet values must be created with persistentHashSet or PersistentHashSet.from\",\n      );\n    }\n    this[SET_STATE] = Object.freeze({ map, metadata });\n    Object.freeze(this);\n  }\n\n  static empty() {\n    return EMPTY_SET;\n  }\n\n  static from(values) {\n    if (values instanceof PersistentHashSet) {\n      return values;\n    }\n    let result = EMPTY_SET;\n    for (const value of values) {\n      result = result.conj(value);\n    }\n    return result;\n  }\n\n  get count() {\n    return this[SET_STATE].map.count;\n  }\n\n  get size() {\n    return this[SET_STATE].map.count;\n  }\n\n  has(value) {\n    return this[SET_STATE].map.has(value);\n  }\n\n  conj(value) {\n    const state = this[SET_STATE];\n    const map = state.map.assoc(value, SET_PRESENT);\n    return map === state.map ? this : makeSet(map, state.metadata);\n  }\n\n  disj(value) {\n    const state = this[SET_STATE];\n    const map = state.map.dissoc(value);\n    if (map === state.map) {\n      return this;\n    }\n    return map === EMPTY_MAP\n      ? emptySetWithMetadata(state.metadata)\n      : makeSet(map, state.metadata);\n  }\n\n  union(...collections) {\n    let result = this;\n    for (const collection of collections) {\n      for (const value of collection) {\n        result = result.conj(value);\n      }\n    }\n    return result;\n  }\n\n  intersection(...collections) {\n    let result = this;\n    for (const collection of collections) {\n      const other = asPersistentSet(collection);\n      if (result.count === 0) {\n        return result;\n      }\n      const candidates = result.count <= other.count ? result : other;\n      const membership = candidates === result ? other : result;\n      let retained = emptySetWithMetadata(this[SET_STATE].metadata);\n      for (const value of candidates) {\n        if (membership.has(value)) {\n          retained = retained.conj(value);\n        }\n      }\n      result = retained.count === result.count ? result : retained;\n    }\n    return result;\n  }\n\n  difference(...collections) {\n    let result = this;\n    for (const collection of collections) {\n      for (const value of collection) {\n        result = result.disj(value);\n      }\n      if (result.count === 0) {\n        return result;\n      }\n    }\n    return result;\n  }\n\n  isSubsetOf(collection) {\n    const other = asPersistentSet(collection);\n    if (this.count > other.count) {\n      return false;\n    }\n    for (const value of this) {\n      if (!other.has(value)) {\n        return false;\n      }\n    }\n    return true;\n  }\n\n  isSupersetOf(collection) {\n    return asPersistentSet(collection).isSubsetOf(this);\n  }\n\n  isDisjointFrom(collection) {\n    const other = asPersistentSet(collection);\n    const candidates = this.count <= other.count ? this : other;\n    const membership = candidates === this ? other : this;\n    for (const value of candidates) {\n      if (membership.has(value)) {\n        return false;\n      }\n    }\n    return true;\n  }\n\n  values() {\n    return this[SET_STATE].map.keys();\n  }\n\n  keys() {\n    return this.values();\n  }\n\n  *entries() {\n    for (const value of this) {\n      yield Object.freeze([value, value]);\n    }\n  }\n\n  reduce(reducer, initial) {\n    if (typeof reducer !== \"function\") {\n      throw new TypeError(\"persistent hash set reducer must be a function\");\n    }\n    if (arguments.length < 2) {\n      throw new TypeError(\"persistent hash set reduce requires an initial value\");\n    }\n    let result = initial;\n    for (const value of this) {\n      result = reducer(result, value, this);\n    }\n    return result;\n  }\n\n  [COLLECTION_COUNT]() {\n    return this.count;\n  }\n\n  [COLLECTION_EMPTY]() {\n    return emptySetWithMetadata(this[SET_STATE].metadata);\n  }\n\n  [COLLECTION_CONJ](value) {\n    return this.conj(value);\n  }\n\n  [COLLECTION_DISJ](value) {\n    return this.disj(value);\n  }\n\n  [COLLECTION_GET](value, notFound = null) {\n    return this.has(value) ? value : notFound;\n  }\n\n  [COLLECTION_CONTAINS](value) {\n    return this.has(value);\n  }\n\n  [COLLECTION_SEQ]() {\n    return this.count === 0\n      ? null\n      : sequenceView(() => this.values(), this.count);\n  }\n\n  [COLLECTION_REDUCE](reducer, ...initial) {\n    return reduceIterable(this, reducer, ...initial);\n  }\n\n  [EDITABLE_TRANSIENT]() {\n    return makeTransientSet(this);\n  }\n\n  toSet() {\n    return new Set(this);\n  }\n\n  [PERSISTENT_SET_HAS_VALUE](value) {\n    return this.has(value);\n  }\n\n  get [PERSISTENT_SET_KIND]() {\n    return true;\n  }\n\n  [VALUE_EQUAL](other, equal) {\n    return persistentSetValueEqual(this, other, equal);\n  }\n\n  [VALUE_HASH](hash) {\n    return unorderedCollectionHash(this, hash, SET_HASH_TAG);\n  }\n\n  [METADATA_READ]() {\n    return this[SET_STATE].metadata;\n  }\n\n  [METADATA_WITH](metadata) {\n    const state = this[SET_STATE];\n    return metadata === state.metadata\n      ? this\n      : makeSet(state.map, metadata);\n  }\n\n  [Symbol.iterator]() {\n    return this.values();\n  }\n\n  get [Symbol.toStringTag]() {\n    return \"EliscriptPersistentHashSet\";\n  }\n}\n\nexport const EMPTY_SET = makeSet(EMPTY_MAP);\n\nexport function persistentHashSet(...values) {\n  return PersistentHashSet.from(values);\n}\n\nexport function isPersistentHashSet(value) {\n  return value instanceof PersistentHashSet;\n}\n"))
+(module eliscript.runtime.core.set
+  (import "./map.mjs"
+    EMPTY_MAP
+    PersistentHashMap)
+  (import "./set-internals.mjs"
+    SET_CONSTRUCTOR_TOKEN
+    SET_PRESENT
+    SET_STATE
+    TRANSIENT_SET_CONSTRUCTOR_TOKEN
+    TRANSIENT_SET_STATE
+    recordInvalidTransientSetCall
+    recordTransientSetPersistent)
+  (import "./value-internals.mjs"
+    VALUE_EQUAL
+    VALUE_HASH
+    unorderedCollectionHash)
+  (import "./collection-internals.mjs"
+    COLLECTION_COUNT
+    COLLECTION_EMPTY
+    COLLECTION_CONJ
+    COLLECTION_GET
+    COLLECTION_CONTAINS
+    COLLECTION_REDUCE
+    COLLECTION_DISJ
+    COLLECTION_SEQ
+    reduceIterable
+    sequenceView)
+  (import "./transient-internals.mjs"
+    EDITABLE_TRANSIENT
+    TRANSIENT_ASSOC
+    TRANSIENT_CONJ
+    TRANSIENT_DISSOC
+    TRANSIENT_PERSISTENT)
+  (import "./metadata-internals.mjs"
+    METADATA_READ
+    METADATA_WITH)
+  (import "./persistent-kind.mjs"
+    PERSISTENT_SET_HAS_VALUE
+    PERSISTENT_SET_KIND
+    persistentSetValueEqual)
+
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+  (defconst host-generator (js* "(create) => function* (...args) { yield* create(this, ...args); }"))
+  (defconst SET_HASH_TAG 1374139181)
+
+  (defun callable? (value)
+    (= (funcall typeof-value value) "function"))
+
+  (defun method (implementation name arity)
+    (let ((function (funcall
+                      (js* "(fn, name) => ({ [name](...args) { return fn(this, ...args); } })[name]")
+                      implementation
+                      name)))
+      (Object/defineProperty function "length" (js-object :value arity :configurable t))
+      function))
+
+  (defun define-method (target key name arity implementation)
+    (Object/defineProperty
+      target
+      key
+      (js-object
+        :value (method implementation name arity)
+        :writable t
+        :configurable t)))
+
+  (defun define-getter (target key name implementation)
+    (Object/defineProperty
+      target
+      key
+      (js-object
+        :get (method implementation (str "get " name) 0)
+        :configurable t)))
+
+  (defun define-generator-method (target key name arity implementation)
+    (let ((gen-fn (funcall host-generator implementation)))
+      (Object/defineProperty gen-fn "name" (js-object :value name :configurable t))
+      (Object/defineProperty gen-fn "length" (js-object :value arity :configurable t))
+      (Object/defineProperty target key
+        (js-object :value gen-fn :writable t :configurable t))))
+
+  (defun initialize-persistent-set (self token map metadata)
+    (unless (and (eq token SET_CONSTRUCTOR_TOKEN) (funcall instance-of? map PersistentHashMap))
+      (throw (new globalThis.TypeError "PersistentHashSet values must be created with persistentHashSet or PersistentHashSet.from")))
+    (put self SET_STATE (Object/freeze (js-object :map map :metadata metadata)))
+    (Object/freeze self))
+
+  (defconst PersistentHashSet
+    (funcall (js* "(initialize) => class PersistentHashSet { constructor(token, map, metadata = null) { initialize(this, token, map, metadata); } }") initialize-persistent-set))
+
+  (defun make-set (map &optional metadata)
+    (new PersistentHashSet
+      SET_CONSTRUCTOR_TOKEN
+      map
+      (if (undefined? metadata) nil metadata)))
+
+  (defconst EMPTY_SET
+    (make-set EMPTY_MAP))
+
+  (defun empty-set-with-metadata (metadata)
+    (if (eq metadata nil)
+        EMPTY_SET
+        (make-set EMPTY_MAP metadata)))
+
+  (defun initialize-transient-set (self token set)
+    (unless (and (eq token TRANSIENT_SET_CONSTRUCTOR_TOKEN) (funcall instance-of? set PersistentHashSet))
+      (throw (new globalThis.TypeError "transient hash sets must be created from a persistent hash set")))
+    (let* ((source-map (get (get set SET_STATE) :map)) (metadata (get (get set SET_STATE) :metadata)))
+      (put self TRANSIENT_SET_STATE
+        (js-object :active t :source set :sourceMap source-map :map (js-call source-map EDITABLE_TRANSIENT) :metadata metadata)))
+    (Object/defineProperty self "__eliscript_transient__"
+      (js-object :enumerable t :get (funcall (js* "(reject) => ({ get() { return reject(); } }).get") (lambda ()
+        (throw (new globalThis.TypeError "transient hash sets cannot be serialized"))))))
+    (Object/freeze self))
+
+  (defconst TransientHashSet
+    (funcall (js* "(initialize) => class TransientHashSet { constructor(token, set) { initialize(this, token, set); } }") initialize-transient-set))
+
+  (defun make-transient-set (set)
+    (new TransientHashSet TRANSIENT_SET_CONSTRUCTOR_TOKEN set))
+
+  (defun active-transient-set-state (set)
+    (let ((state (aref set TRANSIENT_SET_STATE)))
+      (unless (get state :active)
+        (recordInvalidTransientSetCall)
+        (throw (new globalThis/TypeError "transient hash set is no longer editable")))
+      state))
+
+  (defun as-persistent-set (values)
+    (if (funcall instance-of? values PersistentHashSet)
+        values
+        (js-call PersistentHashSet :from values)))
+
+  (let ((tproto (get TransientHashSet :prototype)))
+    (define-method tproto TRANSIENT_CONJ "[eliscript.transient.conj]" 1
+      (lambda (self value)
+        (let* ((state (active-transient-set-state self))
+               (map (get state :map)))
+          (js-call (aref map TRANSIENT_ASSOC) :call map value SET_PRESENT)
+          self)))
+    (define-method tproto TRANSIENT_DISSOC "[eliscript.transient.dissoc]" 1
+      (lambda (self value)
+        (let* ((state (active-transient-set-state self))
+               (map (get state :map)))
+          (js-call (aref map TRANSIENT_DISSOC) :call map value)
+          self)))
+    (define-method tproto TRANSIENT_PERSISTENT "[eliscript.transient.persistent]" 0
+      (lambda (self)
+        (let* ((state (active-transient-set-state self))
+               (tmap (get state :map))
+               (map (js-call (aref tmap TRANSIENT_PERSISTENT) :call tmap))
+               (result (cond
+                         ((eq map (get state :sourceMap)) (get state :source))
+                         ((eq map EMPTY_MAP) (empty-set-with-metadata (get state :metadata)))
+                         (t (make-set map (get state :metadata))))))
+          (put state "active" false)
+          (recordTransientSetPersistent)
+          result)))
+    (define-method tproto "toJSON" "toJSON" 0
+      (lambda (_self)
+        (throw (new globalThis/TypeError "transient hash sets cannot be serialized"))))
+    (define-getter tproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptTransientHashSet")))
+
+  (defun for-each-iterable (iterable callback)
+    (let ((iterator-method (if (nil? iterable)
+                               undefined
+                               (aref iterable (get globalThis/Symbol :iterator)))))
+      (unless (callable? iterator-method)
+        (throw (new globalThis/TypeError "value is not iterable")))
+      (let ((iterator (js-call iterator-method :call iterable))
+            (done false))
+        (try
+          (while (not done)
+            (let ((step (js-call iterator :next)))
+              (if (funcall globalThis/Boolean (get step :done))
+                  (setq done t)
+                  (funcall callback (get step :value)))))
+          (finally
+            (when (and (not done) (callable? (get iterator :return)))
+              (js-call iterator :return)))))))
+
+  (defun set-entries-iterator (set)
+    (let ((iter (js-call (aref set (get globalThis/Symbol :iterator)) :call set)))
+      (let ((iterator
+              (js-object
+                :next (method
+                        (lambda (_self)
+                          (let ((step (js-call iter :next)))
+                            (if (funcall globalThis/Boolean (get step :done))
+                                (js-object :value undefined :done t)
+                                (let ((val (get step :value)))
+                                  (js-object :value (Object/freeze (js-array val val)) :done false)))))
+                        "next"
+                        0))))
+        (put iterator (get globalThis/Symbol :iterator)
+              (method (lambda (self) self) "[Symbol.iterator]" 0))
+        iterator)))
+
+  (let ((proto (get PersistentHashSet :prototype)))
+    (define-method PersistentHashSet "empty" "empty" 0
+      (lambda (_self) EMPTY_SET))
+    (define-method PersistentHashSet "from" "from" 1
+      (lambda (_self values)
+        (if (funcall instance-of? values PersistentHashSet)
+            values
+            (let ((result EMPTY_SET))
+              (for-each-iterable values
+                (lambda (value)
+                  (setq result (js-call result :conj value))))
+              result))))
+    (define-getter proto "count" "count"
+      (lambda (self) (get (get (aref self SET_STATE) :map) :count)))
+    (define-getter proto "size" "size"
+      (lambda (self) (get (get (aref self SET_STATE) :map) :count)))
+    (define-method proto "has" "has" 1
+      (lambda (self value)
+        (js-call (get (aref self SET_STATE) :map) :has value)))
+    (define-method proto "conj" "conj" 1
+      (lambda (self value)
+        (let* ((state (aref self SET_STATE))
+               (map (js-call (get state :map) :assoc value SET_PRESENT)))
+          (if (eq map (get state :map))
+              self
+              (make-set map (get state :metadata))))))
+    (define-method proto "disj" "disj" 1
+      (lambda (self value)
+        (let* ((state (aref self SET_STATE))
+               (map (js-call (get state :map) :dissoc value)))
+          (cond
+            ((eq map (get state :map)) self)
+            ((eq map EMPTY_MAP) (empty-set-with-metadata (get state :metadata)))
+            (t (make-set map (get state :metadata)))))))
+    (define-method proto "union" "union" 0
+      (lambda (self &rest collections)
+        (let ((result self)
+              (index 0)
+              (limit (js-length collections)))
+          (while (< index limit)
+            (for-each-iterable (get collections index)
+              (lambda (value) (setq result (js-call result :conj value))))
+            (setq index (+ index 1)))
+          result)))
+    (define-method proto "intersection" "intersection" 0
+      (lambda (self &rest collections)
+        (let ((result self)
+              (index 0)
+              (limit (js-length collections))
+              (halted false))
+          (while (and (< index limit) (not halted))
+            (let ((other (as-persistent-set (get collections index))))
+              (if (= (get result :count) 0)
+                  (setq halted t)
+                  (let* ((candidates (if (<= (get result :count) (get other :count)) result other))
+                         (membership (if (eq candidates result) other result))
+                         (retained (empty-set-with-metadata (get (aref self SET_STATE) :metadata))))
+                    (for-each-iterable candidates
+                      (lambda (value)
+                        (when (js-call membership :has value)
+                          (setq retained (js-call retained :conj value)))))
+                    (setq result (if (= (get retained :count) (get result :count)) result retained)))))
+            (setq index (+ index 1)))
+          result)))
+    (define-method proto "difference" "difference" 0
+      (lambda (self &rest collections)
+        (let ((result self)
+              (index 0)
+              (limit (js-length collections))
+              (halted false))
+          (while (and (< index limit) (not halted))
+            (for-each-iterable (get collections index)
+              (lambda (value) (setq result (js-call result :disj value))))
+            (when (= (get result :count) 0)
+              (setq halted t))
+            (setq index (+ index 1)))
+          result)))
+    (define-method proto "isSubsetOf" "isSubsetOf" 1
+      (lambda (self collection)
+        (let ((other (as-persistent-set collection)))
+          (if (> (get self :count) (get other :count))
+              false
+              (let ((iter (js-call (aref self (get globalThis/Symbol :iterator)) :call self))
+                    (subset t)
+                    (done false))
+                (try
+                  (while (and subset (not done))
+                    (let ((step (js-call iter :next)))
+                      (if (funcall globalThis/Boolean (get step :done))
+                          (setq done t)
+                          (unless (js-call other :has (get step :value))
+                            (setq subset false)))))
+                  (finally
+                    (when (and (not done) (callable? (get iter :return)))
+                      (js-call iter :return))))
+                subset)))))
+    (define-method proto "isSupersetOf" "isSupersetOf" 1
+      (lambda (self collection)
+        (js-call (as-persistent-set collection) :isSubsetOf self)))
+    (define-method proto "isDisjointFrom" "isDisjointFrom" 1
+      (lambda (self collection)
+        (let* ((other (as-persistent-set collection))
+               (candidates (if (<= (get self :count) (get other :count)) self other))
+               (membership (if (eq candidates self) other self))
+               (iter (js-call (aref candidates (get globalThis/Symbol :iterator)) :call candidates))
+               (disjoint t)
+               (done false))
+          (try
+            (while (and disjoint (not done))
+              (let ((step (js-call iter :next)))
+                (if (funcall globalThis/Boolean (get step :done))
+                    (setq done t)
+                    (when (js-call membership :has (get step :value))
+                      (setq disjoint false)))))
+            (finally
+              (when (and (not done) (callable? (get iter :return)))
+                (js-call iter :return))))
+          disjoint)))
+    (define-method proto "values" "values" 0
+      (lambda (self)
+        (js-call (get (aref self SET_STATE) :map) :keys)))
+    (define-method proto "keys" "keys" 0
+      (lambda (self)
+        (js-call self :values)))
+    (define-generator-method proto "entries" "entries" 0
+      (lambda (self)
+        (set-entries-iterator self)))
+    (define-method proto "reduce" "reduce" 2
+      (lambda (self &rest args)
+        (let ((reducer (get args 0)))
+          (unless (callable? reducer)
+            (throw (new globalThis/TypeError "persistent hash set reducer must be a function")))
+          (when (< (js-length args) 2)
+            (throw (new globalThis/TypeError "persistent hash set reduce requires an initial value")))
+          (let ((result (get args 1)))
+            (for-each-iterable self
+              (lambda (value)
+                (setq result (funcall reducer result value self))))
+            result))))
+    (define-method proto COLLECTION_COUNT "[eliscript.collection.count]" 0
+      (lambda (self) (get self :count)))
+    (define-method proto COLLECTION_EMPTY "[eliscript.collection.empty]" 0
+      (lambda (self) (empty-set-with-metadata (get (aref self SET_STATE) :metadata))))
+    (define-method proto COLLECTION_CONJ "[eliscript.collection.conj]" 1
+      (lambda (self value) (js-call self :conj value)))
+    (define-method proto COLLECTION_DISJ "[eliscript.collection.disj]" 1
+      (lambda (self value) (js-call self :disj value)))
+    (define-method proto COLLECTION_GET "[eliscript.collection.get]" 1
+      (lambda (self value &rest args)
+        (let ((not-found (if (= (js-length args) 0) nil (get args 0))))
+          (if (js-call self :has value) value not-found))))
+    (define-method proto COLLECTION_CONTAINS "[eliscript.collection.contains]" 1
+      (lambda (self value) (js-call self :has value)))
+    (define-method proto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+      (lambda (self)
+        (if (= (get self :count) 0)
+            nil
+            (sequenceView (lambda () (js-call self :values)) (get self :count)))))
+    (define-method proto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
+      (lambda (self reducer &rest initial)
+        (apply reduceIterable self reducer initial)))
+    (define-method proto EDITABLE_TRANSIENT "[eliscript.transient.editable]" 0
+      (lambda (self) (make-transient-set self)))
+    (define-method proto "toSet" "toSet" 0
+      (lambda (self) (new globalThis/Set self)))
+    (define-method proto PERSISTENT_SET_HAS_VALUE "[eliscript.persistent-set.has-value]" 1
+      (lambda (self value) (js-call self :has value)))
+    (define-getter proto PERSISTENT_SET_KIND "[eliscript.persistent-set.kind]"
+      (lambda (_self) t))
+    (define-method proto VALUE_EQUAL "[eliscript.value.equal]" 2
+      (lambda (self other equal)
+        (persistentSetValueEqual self other equal)))
+    (define-method proto VALUE_HASH "[eliscript.value.hash]" 1
+      (lambda (self hash)
+        (unorderedCollectionHash self hash SET_HASH_TAG)))
+    (define-method proto METADATA_READ "[eliscript.metadata.read]" 0
+      (lambda (self) (get (aref self SET_STATE) :metadata)))
+    (define-method proto METADATA_WITH "[eliscript.metadata.with]" 1
+      (lambda (self metadata)
+        (let ((state (aref self SET_STATE)))
+          (if (eq metadata (get state :metadata))
+              self
+              (make-set (get state :map) metadata)))))
+    (define-method proto (get globalThis/Symbol :iterator) "[Symbol.iterator]" 0
+      (lambda (self) (js-call self :values)))
+    (define-getter proto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptPersistentHashSet")))
+
+  (defun persistentHashSet (&rest values)
+    (js-call PersistentHashSet :from values))
+
+  (defun isPersistentHashSet (value)
+    (funcall instance-of? value PersistentHashSet))
+
+  (export
+    PersistentHashSet
+    EMPTY_SET
+    persistentHashSet
+    isPersistentHashSet))

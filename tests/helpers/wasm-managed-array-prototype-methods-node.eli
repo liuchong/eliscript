@@ -1,0 +1,66 @@
+(module tests.helpers.wasm-managed-array-prototype-methods-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+  (defconst methods
+    (js-array "push" "pop" "slice" "map" "filter" "forEach" "some" "every"
+              "find" "findIndex" "findLast" "findLastIndex" "reduce" "reduceRight"
+              "sort" "toSorted" "join" "toString" "concat" "includes" "indexOf"
+              "lastIndexOf" "keys" "values" "entries"))
+
+  (defun withPrototypes (fn)
+    (let ((arrays (Object/getOwnPropertyDescriptors globalThis.Array.prototype))
+          (objects (Object/getOwnPropertyDescriptors globalThis.Object.prototype)))
+      (try (funcall fn)
+        (finally
+          ;; The callback deliberately replaces Array.prototype methods,
+          ;; including forEach. Cleanup must not dispatch through that realm.
+          (let ((pairs (js-array (js-array globalThis.Object.prototype objects)
+                                  (js-array globalThis.Array.prototype arrays)))
+                (pair-index 0))
+            (while (< pair-index 2)
+              (let* ((pair (aref pairs pair-index)) (prototype (aref pair 0))
+                     (saved (aref pair 1)) (current-keys (Reflect/ownKeys prototype))
+                     (saved-keys (Reflect/ownKeys saved)) (index 0))
+                (while (< index (js-length current-keys))
+                  (let ((key (aref current-keys index)))
+                    (unless (Object/hasOwn saved key) (Reflect/deleteProperty prototype key)))
+                  (setq index (1+ index)))
+                (setq index 0)
+                (while (< index (js-length saved-keys))
+                  (let ((key (aref saved-keys index)))
+                    (unless (= key "length")
+                      (Object/defineProperty prototype key (get saved key))))
+                  (setq index (1+ index)))
+                (when (Object/hasOwn saved "length")
+                  (Object/defineProperty prototype "length" (get saved :length))))
+              (setq pair-index (1+ pair-index))))))))
+
+  (defun finish (a values)
+    (js-call values :forEach (lambda (value) (js-call a :release value)))
+    (js-call a :closeModule)
+    (js-call a :collect)
+    (js-call assert :equal (js-call a :live) 0)
+    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))
+
+  (defasync main ()
+    (let* ((argv (get globalThis.process :argv))
+           (rt-mod (await (funcall dynamic-import (aref argv 2))))
+           (instantiateManagedRuntime (get rt-mod :instantiateManagedRuntime))
+           (reference (await (funcall dynamic-import (aref argv 3))))
+           (bytes (readFileSync (aref argv 4))))
+      (js-call methods :forEach
+        (lambda (name)
+          (let ((mode 0))
+            (while (<= mode 11)
+              (let* ((expected (withPrototypes (lambda () (js-call reference (str "test_" name) mode))))
+                     (a (funcall instantiateManagedRuntime bytes))
+                     (_ (js-call a :auto 1))
+                     (input (js-call a :number mode))
+                     (out (js-call a :invoke (str "test-" name) (js-array input))))
+                (js-call assert :equal (js-call a :readString out) expected (str name " mode " mode))
+                (finish a (js-array input out)))
+              (setq mode (1+ mode))))))))
+
+  (js-call (main) :catch (lambda (err) (console/error err) (js-call globalThis.process :exit 1))))

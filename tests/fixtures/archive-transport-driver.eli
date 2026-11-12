@@ -1,0 +1,9 @@
+(module tests.fixtures.archive-transport-driver
+  ; A request recorder for loader transport, never a compiler implementation.
+  (defun compiler_session_new () (js-object :runtime nil))
+  (defun compiler_session_close (state) (put state :runtime nil))
+  (defun compiler_session_request (state text)
+    (let ((request (JSON/parse text)))
+      (if (= (get request :operation) "capabilities") (JSON/stringify (js-object :runtime (get state :runtime)))
+        (progn (put state :runtime request) (JSON/stringify request)))))
+  (export compiler_session_new compiler_session_close compiler_session_request))

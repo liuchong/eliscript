@@ -44,9 +44,8 @@
           (= (get (get execution :setupReplacement) :sourceSha256) sha)
           (isDeepStrictEqual (get original :regions) (js-array region)))
           (generation-fail "original CLI generation assertion archive binding changed"))
-        ;; Logical gate names remain canonical for final-gate classification.
-        ;; Every actual byte coordinate explicitly names the retained archive;
-        ;; the new canonical suite and its maintained Eli are separate assets.
+        ;; Logical gate names remain canonical. The assertion archive, current
+        ;; gate and maintained replay implementation have separate identities.
         (Object/assign (js-object) record (js-object :original
           (Object/assign (js-object) original (js-object
             :regions (js-array (Object/assign (js-object) region (js-object :sourceFile generation-archive)))
@@ -54,7 +53,7 @@
               :bytes (js-call Buffer :byteLength source) :regions (js-array region))
             :cases (js-call (get record :coverage) :map (lambda (id)
               (Object/assign (js-object) (get binding :case) (js-object :id id :sourceFile generation-archive))))
-            :sourceAssets (get binding :assets)
+            :sourceAssets (js-call (get binding :assets) :concat (get original :sourceAssets))
             :maintainedGate (js-object :kind "maintained-eli-original-js-bootstrap-gate"
               :logicalSuite generation-suite :sourceFile generation-maintained
               :sourceSha256 (hash (get binding :maintainedSource)) :generatedFile generation-suite
@@ -81,9 +80,9 @@
           (Object/assign (js-object) (get record :expected) (js-object :stdout stdout)))))))
 
   (defasync addOriginalCLIPrograms (options)
-    ;; Historical construction stays byte-identical. Its retired generation
-    ;; replay is provenance only in the stage3 scope; the canonical maintained
-    ;; suite executes the complete JS gate once in make test.
+    ;; The retired generation replay retains its actual assertion archive and
+    ;; compiles the maintained Eli transport. The canonical maintained suite
+    ;; executes the complete JS gate once in make test.
     (if (nullish? options) (await (js-call ground :addOriginalCLIPrograms options))
       (let ((source undefined) (add (get options :add)) (text (get options :text)))
         (if (or (/= (value-type add) "function") (/= (value-type text) "function"))

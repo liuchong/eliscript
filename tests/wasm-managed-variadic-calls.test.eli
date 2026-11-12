@@ -1,2 +1,612 @@
-(module capsules.tests.wasm-managed-variadic-calls.test
-  (js* "import {afterAll,beforeAll,test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';\nimport {tmpdir} from 'node:os';\nimport {resolve} from 'node:path';\nimport {spawnSync} from 'node:child_process';\nimport {pathToFileURL} from 'node:url';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\nlet directory,backends,runtime,program,reference,bytes;\nbeforeAll(async()=>{\n directory=await mkdtemp(resolve(tmpdir(),'eliscript-variadic-'));\n backends=await buildBackends({outputRoot:directory});\n runtime=backends.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli');\n program=backends.compiler.compile_ir_string(await readFile('tests/fixtures/wasm-managed-variadic-calls.eli','utf8'),'variadic.eli');\n reference=await import('data:text/javascript;base64,'+Buffer.from(backends.compiler.emit_ir_string(program)).toString('base64'));\n},120000);\nafterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});\nfunction instance(options={}){bytes??=Uint8Array.from(backends.managed.emit_managed_wasm(program,runtime));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);const a=instantiateManagedRuntime(bytes,options);a.auto(1);return a;}\nfunction value(a,x){if(x===null||typeof x==='boolean'||x===undefined)return x;if(x.kind===4)return a.readNumber(x);if(x.kind===5)return a.readString(x);assert.equal(x.kind,14);const result=[];for(let i=0;i<a.length(x);i++){const c=a.get(x,i);try{result.push(value(a,c));}finally{a.release(c);}}return result;}\nfunction result(a,name,args=[]){const out=a.invoke(name,args);try{return value(a,out);}finally{a.release(out);}}\nfunction finish(a,values=[]){for(const x of values)a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}\n\ntest('optional and rest exports preserve omitted, undefined, nil and exact IEEE values',()=>{\n const a=instance();\n for(const xs of [[],[undefined],[null],[false],[1],[1,undefined],[1,null,2,false,undefined],[-0,NaN,Infinity,-Infinity,Number.MIN_VALUE]]){\n  const args=xs.map(x=>typeof x==='number'?a.number(x):x);\n  assert.deepEqual(result(a,'mixed',args),reference.mixed(...xs));for(const x of args)a.release(x);\n }\n assert.equal(a.invoke('optional-one'),null);assert.equal(a.invoke('optional-one',[undefined]),null);\n assert.equal(a.invoke('optional-one',[false]),false);\n assert.deepEqual(result(a,'pack'),[]);assert.equal(a.invoke('fresh-rest'),false);finish(a);\n});\n\ntest('named and lifted variadic functions retain source call and dynamic function semantics',()=>{\n const a=instance(),f=a.invoke('mixed-value'),one=a.number(1),two=a.number(2);\n assert.deepEqual(result(a,'source-calls'),reference.source_calls());\n assert.deepEqual(result(a,'call-none',[f]),reference.call_none(reference.mixed_value()));\n assert.deepEqual(result(a,'call-three',[f,one,undefined,two]),reference.call_three(reference.mixed_value(),1,undefined,2));\n const capture=a.invoke('make-capture',[one,two]),fn=reference.make_capture(1,2);\n for(const x of [undefined,null,two,false]){\n  assert.deepEqual(result(a,'call-capture',[capture,x,one]),reference.call_capture(fn,x===two?2:x,1));a.collect();\n }\n finish(a,[f,one,two,capture]);\n});\n\ntest('rest arrays are fresh and argument snapshots survive captured writes',()=>{\n const a=instance(),one=a.number(1),items=a.sourceArray([one]);\n assert.deepEqual(result(a,'rest-snapshots',[items]),reference.rest_snapshots([1]));\n const last=a.get(items,0);assert.equal(a.readNumber(last),99);finish(a,[one,items,last]);\n});\n\ntest('apply-call is executable on its own and snapshots the callee before its iterable',()=>{\n const ir=backends.compiler.compile_ir_string('(defun id (x) x) (defun run (values) (apply id values)) (export run)','apply-only.eli');\n const a=instantiateManagedRuntime(Uint8Array.from(backends.managed.emit_managed_wasm(ir,runtime)));a.auto(1);\n const n=a.number(-0),args=a.sourceArray([n]);assert(Object.is(result(a,'run',[args]),-0));finish(a,[n,args]);\n const b=instance(),items=b.sourceArray([]);assert.equal(result(b,'apply-callee-order',[items]),reference.apply_callee_order([]));finish(b,[items]);\n});\n\ntest('apply exhausts arrays, holes and Unicode strings with ordinary spread semantics',()=>{\n const a=instance(),f=a.invoke('pack-value'),text=a.string('A\\ud83d\\ude00\\ud800Z'),sparse=[];sparse.length=4;\n const holes=a.sourceArray(sparse);assert.deepEqual(result(a,'apply-values',[f,holes]),reference.apply_values(reference.pack_value(),sparse));\n assert.deepEqual(result(a,'apply-values',[f,text]),reference.apply_values(reference.pack_value(),'A\\ud83d\\ude00\\ud800Z'));\n for(const x of [null,undefined,false,true,a.number(1),a.sourceObject({})]){\n  assert.throws(()=>a.invoke('apply-values',[f,x]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');if(typeof x==='object'&&x)a.release(x);\n }\n finish(a,[f,text,holes]);\n});\n\ntest('apply supports owned Set, Map and partially consumed iterators and consumes before noncallable failure',()=>{\n const a=instance(),f=a.invoke('pack-value'),one=a.number(1),two=a.number(2),items=a.sourceArray([one,two]);\n const set=a.invoke('as-set',[items]);assert.deepEqual(result(a,'apply-values',[f,set]),[1,2]);\n const pair=a.sourceArray([one,two]),pairs=a.sourceArray([pair]),map=a.invoke('as-map',[pairs]);assert.deepEqual(result(a,'apply-values',[f,map]),[[1,2]]);\n const iter=a.invoke('values-iterator',[items]);assert.equal(a.invoke('iterator-done',[iter]),false);assert.deepEqual(result(a,'apply-values',[f,iter]),[2]);assert.equal(a.invoke('iterator-done',[iter]),true);\n const consumed=a.invoke('values-iterator',[items]);assert.throws(()=>a.invoke('apply-values',[false,consumed]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.equal(a.invoke('iterator-done',[consumed]),true);\n finish(a,[f,one,two,items,set,pair,pairs,map,iter,consumed]);\n});\n\ntest('variadic host entry protects arguments before later getters and keeps caller frames on failure',()=>{\n const a=instance(),n=a.number(7),keep=a.number(9),frame=a.frame(1);a.frameSet(frame,0,keep);\n const args=[n,undefined];Object.defineProperty(args,1,{get(){a.release(n);a.collect();return true;}});\n assert.deepEqual(result(a,'pack',args),[7,true]);assert.equal(a.stats().frameDepth,1);\n const marker=a.sourceArray([false]);assert.throws(()=>a.invoke('first-error',[false,marker]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.equal(a.get(marker,0),false);\n const broken=[true];Object.defineProperty(broken,1,{get(){throw Error('variadic getter');}});assert.throws(()=>a.invoke('pack',broken),/variadic getter/);assert.equal(a.stats().frameDepth,1);\n a.leaveFrame(frame);finish(a,[keep,marker]);\n});\n\ntest('rest and spread capacity failures release temporary argument lists and preserve existing roots',()=>{\n const a=instance({maxSlots:64,initialBytes:4096,maxBytes:8192}),n=a.number(7),frame=a.frame(1);a.frameSet(frame,0,n);let failed=false,passed=false;\n for(const count of [0,8,64,256,512,1024,2048]){\n  try{const out=a.invoke('pack',Array(count).fill(true));assert.equal(a.length(out),count);a.release(out);passed=true;}\n  catch(e){assert.equal(e.eliscriptDiagnostic?.code,'ELI-RT0002');failed=true;}\n  assert.equal(a.stats().frameDepth,1);a.collect();const saved=a.frameGet(frame,0);assert.equal(a.readNumber(saved),7);a.release(saved);\n }\n assert(passed&&failed);a.leaveFrame(frame);finish(a,[n]);\n});\n\ntest('variadic lowering refuses invalid parameter modes, hidden children and malformed apply shapes immutably',()=>{\n for(const mutate of [p=>p.body[0].children[0].properties.parameterKind='unknown',p=>p.body[0].children[1].properties.parameterKind='required',p=>p.body[0].children[0].properties.parameterKind='rest',p=>p.body[0].children[0].children.push({kind:'raw-javascript',children:[],value:'hidden'})]){\n  const ir=backends.compiler.compile_ir_string('(defun f (&optional a b) (js-array a b)) (export f)','bad-variadic.eli');mutate(ir);const saved=JSON.stringify(ir);assert.throws(()=>backends.managed.emit_managed_wasm(ir,runtime),e=>e.eliscriptDiagnostic?.code==='ELI-B0001');assert.equal(JSON.stringify(ir),saved);\n }\n const ir=backends.compiler.compile_ir_string('(defun f (g values) (apply g values)) (export f)','bad-apply.eli');ir.body[0].children.at(-1).children.push({kind:'literal',value:7,children:[]});const saved=JSON.stringify(ir);assert.throws(()=>backends.managed.emit_managed_wasm(ir,runtime),e=>e.eliscriptDiagnostic?.code==='ELI-B0001');assert.equal(JSON.stringify(ir),saved);\n});\n\ntest('argument-list descriptors validate parameter modes and the actual exported ABI',()=>{\n const lowered=backends.managed.lower_managed_program(program,runtime),raw=backends.wasm.emit_typed_memory_wasm(lowered.typed),saved=[...raw];\n const positive=Uint8Array.from(backends.wasm.append_metadata_section([...raw],'eliscript-managed-control',JSON.stringify(lowered.descriptor)));assert.equal(WebAssembly.Module.customSections(new WebAssembly.Module(positive),'eliscript-managed-control').length,1);finish(instantiateManagedRuntime(positive));\n const mixed=lowered.descriptor.functions.find(f=>f.name==='mixed');assert.deepEqual(mixed,{name:'mixed',arity:null,callingConvention:'argument-list',parameterKinds:['required','optional','rest']});\n for(const mutate of [d=>{delete d.functions.find(f=>f.name==='mixed').parameterKinds;},d=>{d.functions.find(f=>f.name==='mixed').arity++;},d=>{d.functions.find(f=>f.name==='mixed').callingConvention='other';},d=>{delete d.functions.find(f=>f.name==='mixed').callingConvention;},d=>{d.functions.find(f=>f.name==='mixed').parameterKinds=['required','rest','optional'];},d=>{d.functions.find(f=>f.name==='mixed').parameterKinds=['required','optional','unknown'];},d=>{d.functions.find(f=>f.name==='mixed').parameterKinds=[];},d=>{d.functions.find(f=>f.name==='call-none').arity=3;}]){\n  const d=structuredClone(lowered.descriptor);mutate(d);const invalid=Uint8Array.from(backends.wasm.append_metadata_section([...raw],'eliscript-managed-control',JSON.stringify(d)));\n  assert.equal(WebAssembly.Module.customSections(new WebAssembly.Module(invalid),'eliscript-managed-control').length,1,'each argument-list mutant needs its own metadata section');\n  assert.throws(()=>instantiateManagedRuntime(invalid),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');\n }\n assert.deepEqual(raw,saved);\n const a=instance();assert.throws(()=>a.invoke('call-none'),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');finish(a);\n});\ntest('required parameter patterns declare and execute the real argument-list ABI without optional or rest parameters',()=>{\n const ir=backends.compiler.compile_ir_string('(defun required-pattern ([value]) value) (export required-pattern)','required-pattern.eli');\n const lowered=backends.managed.lower_managed_program(ir,runtime);\n assert.deepEqual(lowered.descriptor.functions,[{name:'required-pattern',arity:null,callingConvention:'argument-list',parameterKinds:['required']}]);\n const raw=backends.wasm.emit_typed_memory_wasm(lowered.typed);\n const artifact=Uint8Array.from(backends.wasm.append_metadata_section([...raw],'eliscript-managed-control',JSON.stringify(lowered.descriptor)));\n const a=instantiateManagedRuntime(artifact);a.auto(1);const zero=a.number(-0),input=a.sourceArray([zero]);\n try{const output=a.invoke('required-pattern',[input]);try{assert(Object.is(a.readNumber(output),-0));}finally{a.release(output);}}\n finally{a.release(input);a.release(zero);a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}\n});\n\nfunction rawHeap(){\n const ir=structuredClone(runtime);ir.body.push({kind:'export-declaration',value:null,children:['value-call-arguments-check','value-call-rest','value-call-expand'].map(value=>({kind:'reference',value,children:[]}))});\n const raw=Uint8Array.from(backends.wasm.emit_memory_wasm(ir));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(raw)),[]);const e=new WebAssembly.Instance(new WebAssembly.Module(raw)).exports,heap=e['heap-new'](128,4096,32768);\n const call=(name,...args)=>{const result=e[name](heap,...args)>>>0;assert.equal(e['last-error'](),0,name);return result;};call('heap-auto',1);return {e,heap,call};\n}\n\ntest('raw argument helpers borrow unrooted inputs and preserve exact tail bits through GC',()=>{\n const {e,heap,call}=rawHeap(),args=call('value-refs',7,5);call('heap-pin',args);\n const patterns=[[0,0x80000000],[1,0],[0xabcdef01,0x7ff80000],[0,0x7ff00000],[0xffffffff,0x7fefffff]];\n for(let i=0;i<patterns.length;i++){const n=call('value-number',...patterns[i]);call('value-set',args,i,n);}\n call('heap-release',args);const tail=call('value-call-rest',args,1,5);call('heap-pin',tail);\n for(let i=0;i<60;i++)call('value-number',i,0);call('heap-collect');assert.equal(call('value-length',tail),4);\n for(let i=0;i<4;i++){const child=call('value-get',tail,i),offset=call('value-data',child,4),view=new DataView(e.memory.buffer);assert.deepEqual([view.getUint32(offset,true),view.getUint32(offset+4,true)],patterns[i+1]);}\n call('heap-release',tail);call('heap-collect');assert.equal(call('heap-live'),0);assert.equal(call('frame-depth'),0);\n});\n\ntest('raw spread growth fills holes and rejects malformed argument words or counts',()=>{\n const {e,heap,call}=rawHeap(),items=call('value-array-new',513);call('heap-pin',items);\n for(let i=0;i<513;i+=3)call('value-set',items,i,2);\n const expanded=call('value-call-expand',items);call('heap-pin',expanded);assert.equal(call('value-length',expanded),513);\n for(let i=0;i<513;i++)assert.equal(call('value-get',expanded,i),i%3===0?2:3);\n assert.equal(call('value-call-arguments-check',expanded,513),1);e['value-call-arguments-check'](heap,expanded,512);assert.equal(e['last-error'](),3);\n const data=call('value-data',expanded,7);new DataView(e.memory.buffer).setUint32(data+4,4,true);\n e['value-call-arguments-check'](heap,expanded,513);assert.equal(e['last-error'](),1);\n call('heap-release',expanded);call('heap-release',items);call('heap-collect');assert.equal(call('heap-live'),0);assert.equal(call('frame-depth'),0);\n});\n\ntest('a real trap in rest allocation or spread expansion unwinds host and source callers',async()=>{\n const source=await readFile('bootstrap/runtime/memory.eli','utf8');\n for(const [helper,signature,entry,args]of [['value-call-rest','heap arguments start count','pack',[true]],['value-call-expand','heap input','apply-values',[false,undefined]]]){\n  const start=source.indexOf('  (defun '+helper+' ('),end=source.indexOf('  (defun ',start+10);assert(start>=0&&end>start);\n  const faulty=source.slice(0,start)+`  (defun ${helper} (${signature}) (load-u32 4294967295))\\n`+source.slice(end);\n  const ir=backends.compiler.compile_ir_string(faulty,'trap-arguments.eli'),a=instantiateManagedRuntime(Uint8Array.from(backends.managed.emit_managed_wasm(program,ir)));a.auto(1);\n  const n=a.number(7),frame=a.frame(1);a.frameSet(frame,0,n);assert.throws(()=>a.invoke(entry,args),WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);const saved=a.frameGet(frame,0);assert.equal(a.readNumber(saved),7);a.release(saved);a.leaveFrame(frame);finish(a,[n]);\n }\n});\n\ntest('generated argument shapes match an independent optional and rest model with exact Number bits',()=>{\n const a=instance(),f=a.invoke('mixed-value');let seed=0x1f34ac81;\n const random=()=>seed=(Math.imul(seed,1664525)+1013904223)>>>0;\n for(let i=0;i<96;i++){\n  const count=random()%13,values=[],args=[];\n  for(let j=0;j<count;j++){const tag=random()%7;let x;if(tag===0)x=undefined;else if(tag===1)x=null;else if(tag===2)x=false;else{const bits=new DataView(new ArrayBuffer(8));bits.setUint32(0,random(),true);bits.setUint32(4,random(),true);x=bits.getFloat64(0,true);}values.push(x);args.push(typeof x==='number'?a.number(x):x);}\n  const expected=[values[0],values[1]===undefined?null:values[1],values.slice(2)];assert.deepEqual(result(a,'mixed',args),expected);\n  const list=a.sourceArray(args);assert.deepEqual(result(a,'apply-values',[f,list]),expected);a.release(list);for(const x of args)a.release(x);a.collect();\n }\n finish(a,[f]);\n});\n\ntest('large argument lists preserve every operand while required-only public ABI stays exact',()=>{\n const a=instance();\n for(const count of [127,128,255,256,1025]){\n  const out=a.invoke('pack',Array(count).fill(true));assert.equal(a.length(out),count);\n  for(let i=0;i<count;i++)assert.equal(a.get(out,i),true);a.release(out);a.collect();\n }\n assert.equal(a.invoke('optional-one',Array(1025).fill(false)),false);\n assert.throws(()=>a.invoke('call-none',[]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');finish(a);\n});\n\ntest('Node executes the same variadic and iterable artifact against standalone generated JavaScript',async()=>{\n const artifact=resolve(directory,'variadic.wasm'),js=resolve(directory,'reference.mjs'),runner=resolve(directory,'node.mjs');\n await writeFile(artifact,Uint8Array.from(backends.managed.emit_managed_wasm(program,runtime)));await writeFile(js,backends.compiler.emit_ir_string(program));\n const adapter=pathToFileURL(resolve('tools/backends/managed-runtime.mjs')).href;\n await writeFile(runner,`import assert from 'node:assert/strict';import{readFile}from'node:fs/promises';import{instantiateManagedRuntime}from${JSON.stringify(adapter)};import*as ref from'./reference.mjs';\n const a=instantiateManagedRuntime(await readFile(new URL('./variadic.wasm',import.meta.url)));a.auto(1);\n const value=x=>{if(x===null||typeof x==='boolean'||x===undefined)return x;if(x.kind===4)return a.readNumber(x);if(x.kind===5)return a.readString(x);const result=[];for(let i=0;i<a.length(x);i++){const c=a.get(x,i);try{result.push(value(c));}finally{a.release(c)}}return result};\n const get=(name,args=[])=>{const x=a.invoke(name,args);try{return value(x)}finally{a.release(x)}};\n assert.deepEqual(get('mixed'),ref.mixed());\n const n=a.number(-0),seed=a.number(Number.MIN_VALUE),f=a.invoke('mixed-value'),list=a.sourceArray([n,undefined,seed]);assert.deepEqual(get('apply-values',[f,list]),ref.apply_values(ref.mixed_value(),[-0,undefined,Number.MIN_VALUE]));\n const text=a.string('A😀Z'),pack=a.invoke('pack-value');assert.deepEqual(get('apply-values',[pack,text]),ref.pack(...'A😀Z'));\n const captured=a.invoke('make-capture',[n,seed]),reference=ref.make_capture(-0,Number.MIN_VALUE);assert.deepEqual(get('call-capture',[captured,true]),ref.call_capture(reference,true));\n const iter=a.invoke('values-iterator',[list]);assert.throws(()=>a.invoke('apply-values',[false,iter]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.equal(a.invoke('iterator-done',[iter]),true);\n for(const x of[n,seed,f,list,text,pack,captured,iter])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);console.log('independent Node variadic source semantics passed');`);\n const result=spawnSync('node',[runner],{encoding:'utf8',timeout:30000});assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/independent Node variadic source semantics passed/);\n});\n"))
+(module tests.wasm-managed-variadic-calls.test
+  (import "bun:test" afterAll beforeAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:buffer" Buffer)
+  (import "node:fs/promises" mkdtemp readFile rm writeFile)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "node:child_process" spawnSync)
+  (import "node:url" pathToFileURL)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+
+  (defvar directory nil)
+  (defvar backends nil)
+  (defvar runtime nil)
+  (defvar program nil)
+  (defvar reference nil)
+  (defvar bytes nil)
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-variadic-"))))
+      (setq backends (await (buildBackends (js-object :outputRoot directory))))
+      (setq runtime
+        (js-call (get backends :compiler) :compile_ir_string
+                 (await (readFile "bootstrap/runtime/memory.eli" "utf8"))
+                 "runtime.eli"))
+      (setq program
+        (js-call (get backends :compiler) :compile_ir_string
+                 (await (readFile "tests/fixtures/wasm-managed-variadic-calls.eli" "utf8"))
+                 "variadic.eli"))
+      (setq reference
+        (await (funcall dyn-import
+                        (str "data:text/javascript;base64,"
+                             (js-call (Buffer/from
+                                        (js-call (get backends :compiler) :emit_ir_string program))
+                                      :toString "base64"))))))
+    120000)
+
+  (afterAll
+    (async ()
+      (when directory
+        (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun make-instance (&rest __host_default_arguments_1)
+    (let* ((options (aref __host_default_arguments_1 0)))
+    (when (nullish? bytes)
+      (setq bytes (Uint8Array/from (js-call (get backends :managed) :emit_managed_wasm program runtime))))
+    (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+    (let ((a (instantiateManagedRuntime bytes (if (undefined? options) (js-object) options))))
+      (js-call a :auto 1)
+      a)))
+
+  (defun decode-value (a x)
+    (cond
+      ((or (= x nil) (= (funcall js-typeof x) "boolean") (undefined? x)) x)
+      ((= (get x :kind) 4) (js-call a :readNumber x))
+      ((= (get x :kind) 5) (js-call a :readString x))
+      (t
+       (js-call assert :equal (get x :kind) 14)
+       (let ((res (js-array))
+             (len (js-call a :length x))
+             (i 0))
+         (while (< i len)
+           (let ((c (js-call a :get x i)))
+             (try
+               (js-call res :push (decode-value a c))
+               (finally
+                 (js-call a :release c))))
+           (setq i (+ i 1)))
+         res))))
+
+  (defun invoke-result (a name &rest __host_default_arguments_2)
+    (let* ((args (aref __host_default_arguments_2 0)))
+    (let ((out (js-call a :invoke name (if (undefined? args) (js-array) args))))
+      (try
+        (decode-value a out)
+        (finally
+          (js-call a :release out))))))
+
+  (defun finish-heap (a &rest __host_default_arguments_3)
+    (let* ((values (aref __host_default_arguments_3 0)))
+    (when (not (undefined? values))
+      (js-call values :forEach (lambda (x)
+        (js-call a :release x))))
+    (js-call a :collect)
+    (js-call assert :equal (js-call a :live) 0)
+    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))
+
+  (test "optional and rest exports preserve omitted, undefined, nil and exact IEEE values"
+    (lambda ()
+      (let ((a (make-instance))
+            (cases (js-array (js-array)
+                             (js-array undefined)
+                             (js-array nil)
+                             (js-array false)
+                             (js-array 1)
+                             (js-array 1 undefined)
+                             (js-array 1 nil 2 false undefined)
+                             (js-array -0.0 globalThis.NaN globalThis.Infinity (- globalThis.Infinity) globalThis.Number.MIN_VALUE))))
+        (js-call cases :forEach (lambda (xs)
+          (let ((args (js-call xs :map (lambda (x) (if (= (funcall js-typeof x) "number") (js-call a :number x) x)))))
+            (js-call assert :deepEqual (invoke-result a "mixed" args) (apply (get reference :mixed) xs))
+            (js-call args :forEach (lambda (x)
+              (js-call a :release x))))))
+        (js-call assert :equal (js-call a :invoke "optional-one") nil)
+        (js-call assert :equal (js-call a :invoke "optional-one" (js-array undefined)) nil)
+        (js-call assert :equal (js-call a :invoke "optional-one" (js-array false)) false)
+        (js-call assert :deepEqual (invoke-result a "pack") (js-array))
+        (js-call assert :equal (js-call a :invoke "fresh-rest") false)
+        (finish-heap a))))
+
+  (test "named and lifted variadic functions retain source call and dynamic function semantics"
+    (lambda ()
+      (let* ((a (make-instance))
+             (f (js-call a :invoke "mixed-value"))
+             (one (js-call a :number 1))
+             (two (js-call a :number 2)))
+        (js-call assert :deepEqual (invoke-result a "source-calls") (js-call reference :source_calls))
+        (js-call assert :deepEqual (invoke-result a "call-none" (js-array f))
+                 (js-call reference :call_none (js-call reference :mixed_value)))
+        (js-call assert :deepEqual (invoke-result a "call-three" (js-array f one undefined two))
+                 (js-call reference :call_three (js-call reference :mixed_value) 1 undefined 2))
+        (let ((capture (js-call a :invoke "make-capture" (js-array one two)))
+              (ref-fn (js-call reference :make_capture 1 2)))
+          (js-call (js-array undefined nil two false) :forEach (lambda (x)
+            (js-call assert :deepEqual
+              (invoke-result a "call-capture" (js-array capture x one))
+              (js-call reference :call_capture ref-fn (if (eq x two) 2 x) 1))
+            (js-call a :collect)))
+          (finish-heap a (js-array f one two capture))))))
+
+  (test "rest arrays are fresh and argument snapshots survive captured writes"
+    (lambda ()
+      (let* ((a (make-instance))
+             (one (js-call a :number 1))
+             (items (js-call a :sourceArray (js-array one))))
+        (js-call assert :deepEqual (invoke-result a "rest-snapshots" (js-array items))
+                 (js-call reference :rest_snapshots (js-array 1)))
+        (let ((last (js-call a :get items 0)))
+          (js-call assert :equal (js-call a :readNumber last) 99)
+          (finish-heap a (js-array one items last))))))
+
+  (test "apply-call is executable on its own and snapshots the callee before its iterable"
+    (lambda ()
+      (let* ((ir (js-call (get backends :compiler) :compile_ir_string
+                          "(defun id (x) x) (defun run (values) (apply id values)) (export run)"
+                          "apply-only.eli"))
+             (a (instantiateManagedRuntime
+                  (Uint8Array/from (js-call (get backends :managed) :emit_managed_wasm ir runtime)))))
+        (js-call a :auto 1)
+        (let* ((n (js-call a :number -0.0))
+               (args (js-call a :sourceArray (js-array n))))
+          (funcall assert (Object/is (invoke-result a "run" (js-array args)) -0.0))
+          (finish-heap a (js-array n args))))
+      (let* ((b (make-instance))
+             (items (js-call b :sourceArray (js-array))))
+        (js-call assert :equal (invoke-result b "apply-callee-order" (js-array items))
+                 (js-call reference :apply_callee_order (js-array)))
+        (finish-heap b (js-array items)))))
+
+  (test "apply exhausts arrays, holes and Unicode strings with ordinary spread semantics"
+    (lambda ()
+      (let* ((a (make-instance))
+             (f (js-call a :invoke "pack-value"))
+             (raw-str (str "A" (String/fromCharCode 55357 56832 55296) "Z"))
+             (text (js-call a :string raw-str))
+             (sparse (js-array)))
+        (put sparse "length" 4)
+        (let ((holes (js-call a :sourceArray sparse)))
+          (js-call assert :deepEqual (invoke-result a "apply-values" (js-array f holes))
+                   (js-call reference :apply_values (js-call reference :pack_value) sparse))
+          (js-call assert :deepEqual (invoke-result a "apply-values" (js-array f text))
+                   (js-call reference :apply_values (js-call reference :pack_value) raw-str))
+          (js-call (js-array nil undefined) :forEach (lambda (x)
+            (js-call assert :deepEqual (invoke-result a "apply-values" (js-array f x))
+              (js-call reference :apply_values (js-call reference :pack_value) x))))
+          (js-call (js-array false t (js-call a :number 1) (js-call a :sourceObject (js-object))) :forEach (lambda (x)
+            (js-call assert :throws
+              (lambda () (js-call a :invoke "apply-values" (js-array f x)))
+              (lambda (e)
+                (let ((diag (get e :eliscriptDiagnostic)))
+                  (and (not (nullish? diag))
+                       (= (get diag :code) "ELI-RT0003")))))
+            (when (and (not (nullish? x)) (= (funcall js-typeof x) "object"))
+              (js-call a :release x))))
+          (finish-heap a (js-array f text holes))))))
+
+  (test "apply supports owned Set, Map and partially consumed iterators and consumes before noncallable failure"
+    (lambda ()
+      (let* ((a (make-instance))
+             (f (js-call a :invoke "pack-value"))
+             (one (js-call a :number 1))
+             (two (js-call a :number 2))
+             (items (js-call a :sourceArray (js-array one two)))
+             (s (js-call a :invoke "as-set" (js-array items)))
+             (pair (js-call a :sourceArray (js-array one two)))
+             (pairs (js-call a :sourceArray (js-array pair)))
+             (m (js-call a :invoke "as-map" (js-array pairs)))
+             (iter (js-call a :invoke "values-iterator" (js-array items)))
+             (consumed (js-call a :invoke "values-iterator" (js-array items))))
+        (js-call assert :deepEqual (invoke-result a "apply-values" (js-array f s)) (js-array 1 2))
+        (js-call assert :deepEqual (invoke-result a "apply-values" (js-array f m)) (js-array (js-array 1 2)))
+        (js-call assert :equal (js-call a :invoke "iterator-done" (js-array iter)) false)
+        (js-call assert :deepEqual (invoke-result a "apply-values" (js-array f iter)) (js-array 2))
+        (js-call assert :equal (js-call a :invoke "iterator-done" (js-array iter)) t)
+        (js-call assert :throws
+          (lambda () (js-call a :invoke "apply-values" (js-array false consumed)))
+          (lambda (e)
+            (let ((diag (get e :eliscriptDiagnostic)))
+              (and (not (nullish? diag))
+                   (= (get diag :code) "ELI-RT0003")))))
+        (js-call assert :equal (js-call a :invoke "iterator-done" (js-array consumed)) t)
+        (finish-heap a (js-array f one two items s pair pairs m iter consumed)))))
+
+  (test "variadic host entry protects arguments before later getters and keeps caller frames on failure"
+    (lambda ()
+      (let* ((a (make-instance))
+             (n (js-call a :number 7))
+             (keep (js-call a :number 9))
+             (frame (js-call a :frame 1))
+             (args (js-array n undefined)))
+        (js-call a :frameSet frame 0 keep)
+        (Object/defineProperty args 1
+          (js-object :get (lambda ()
+                            (js-call a :release n)
+                            (js-call a :collect)
+                            t)))
+        (js-call assert :deepEqual (invoke-result a "pack" args) (js-array 7 t))
+        (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+        (let ((marker (js-call a :sourceArray (js-array false)))
+              (broken (js-array t)))
+          (js-call assert :throws
+            (lambda () (js-call a :invoke "first-error" (js-array false marker)))
+            (lambda (e)
+              (let ((diag (get e :eliscriptDiagnostic)))
+                (and (not (nullish? diag))
+                     (= (get diag :code) "ELI-RT0003")))))
+          (js-call assert :equal (js-call a :get marker 0) false)
+          (Object/defineProperty broken 1
+            (js-object :get (lambda () (throw (globalThis.Error "variadic getter")))))
+          (js-call assert :throws
+            (lambda () (js-call a :invoke "pack" broken))
+            (new globalThis.RegExp "variadic getter"))
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+          (js-call a :leaveFrame frame)
+          (finish-heap a (js-array keep marker))))))
+
+  (test "rest and spread capacity failures release temporary argument lists and preserve existing roots"
+    (lambda ()
+      (let* ((a (make-instance (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 8192)))
+             (n (js-call a :number 7))
+             (frame (js-call a :frame 1))
+             (failed false)
+             (passed false))
+        (js-call a :frameSet frame 0 n)
+        (js-call (js-array 0 8 64 256 512 1024 2048) :forEach (lambda (cnt)
+          (try
+            (let ((out (js-call a :invoke "pack" (js-call (globalThis.Array cnt) :fill t))))
+              (js-call assert :equal (js-call a :length out) cnt)
+              (js-call a :release out)
+              (setq passed t))
+            (catch e
+              (js-call assert :equal (get (get e :eliscriptDiagnostic) :code) "ELI-RT0002")
+              (setq failed t)))
+          (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+          (js-call a :collect)
+          (let ((saved (js-call a :frameGet frame 0)))
+            (js-call assert :equal (js-call a :readNumber saved) 7)
+            (js-call a :release saved))))
+        (funcall assert (and passed failed))
+        (js-call a :leaveFrame frame)
+        (finish-heap a (js-array n)))))
+
+  (test "variadic lowering refuses invalid parameter modes, hidden children and malformed apply shapes immutably"
+    (lambda ()
+      (js-call (js-array
+                        (lambda (p) (put (get (aref (get (aref (get p :body) 0) :children) 0) :properties) "parameterKind" "unknown"))
+                        (lambda (p) (put (get (aref (get (aref (get p :body) 0) :children) 1) :properties) "parameterKind" "required"))
+                        (lambda (p) (put (get (aref (get (aref (get p :body) 0) :children) 0) :properties) "parameterKind" "rest"))
+                        (lambda (p) (js-call (get (aref (get (aref (get p :body) 0) :children) 0) :children) :push
+                                             (js-object :kind "raw-javascript" :children (js-array) :value "hidden")))) :forEach (lambda (mutate)
+        (let ((ir (js-call (get backends :compiler) :compile_ir_string
+                           "(defun f (&optional a b) (js-array a b)) (export f)"
+                           "bad-variadic.eli")))
+          (funcall mutate ir)
+          (let ((saved (JSON/stringify ir)))
+            (js-call assert :throws
+              (lambda () (js-call (get backends :managed) :emit_managed_wasm ir runtime))
+              (lambda (e)
+                (let ((diag (get e :eliscriptDiagnostic)))
+                  (and (not (nullish? diag))
+                       (= (get diag :code) "ELI-B0001")))))
+            (js-call assert :equal (JSON/stringify ir) saved)))))
+      (let* ((ir (js-call (get backends :compiler) :compile_ir_string
+                          "(defun f (g values) (apply g values)) (export f)"
+                          "bad-apply.eli"))
+             (fn-children (get (aref (get ir :body) 0) :children))
+             (last-node (js-call fn-children :at -1)))
+        (js-call (get last-node :children) :push (js-object :kind "literal" :value 7 :children (js-array)))
+        (let ((saved (JSON/stringify ir)))
+          (js-call assert :throws
+            (lambda () (js-call (get backends :managed) :emit_managed_wasm ir runtime))
+            (lambda (e)
+              (let ((diag (get e :eliscriptDiagnostic)))
+                (and (not (nullish? diag))
+                     (= (get diag :code) "ELI-B0001")))))
+          (js-call assert :equal (JSON/stringify ir) saved)))))
+
+  (test "argument-list descriptors validate parameter modes and the actual exported ABI"
+    (lambda ()
+      (let* ((lowered (js-call (get backends :managed) :lower_managed_program program runtime))
+             (raw (js-call (get backends :wasm) :emit_typed_memory_wasm (get lowered :typed)))
+             (saved (Array/from raw))
+             (positive (Uint8Array/from
+                         (js-call (get backends :wasm) :append_metadata_section
+                                  (Array/from raw)
+                                  "eliscript-managed-control"
+                                  (JSON/stringify (get lowered :descriptor))))))
+        (js-call assert :equal (get (WebAssembly.Module/customSections
+                                      (new globalThis.WebAssembly.Module positive)
+                                      "eliscript-managed-control") :length)
+                 1)
+        (finish-heap (instantiateManagedRuntime positive))
+        (let ((mixed (js-call (get (get lowered :descriptor) :functions) :find (lambda (f) (= (get f :name) "mixed")))))
+          (js-call assert :deepEqual mixed
+                   (js-object :name "mixed"
+                              :arity nil
+                              :callingConvention "argument-list"
+                              :parameterKinds (js-array "required" "optional" "rest"))))
+        (let ((find-fn (lambda (d name)
+                         (js-call (get d :functions) :find (lambda (f) (= (get f :name) name))))))
+          (js-call (js-array
+                            (lambda (d) (Reflect/deleteProperty (funcall find-fn d "mixed") "parameterKinds"))
+                            (lambda (d) (let ((m (funcall find-fn d "mixed")))
+                                          (put m "arity" (+ (globalThis.Number (get m :arity)) 1))))
+                            (lambda (d) (put (funcall find-fn d "mixed") "callingConvention" "other"))
+                            (lambda (d) (Reflect/deleteProperty (funcall find-fn d "mixed") "callingConvention"))
+                            (lambda (d) (put (funcall find-fn d "mixed") "parameterKinds" (js-array "required" "rest" "optional")))
+                            (lambda (d) (put (funcall find-fn d "mixed") "parameterKinds" (js-array "required" "optional" "unknown")))
+                            (lambda (d) (put (funcall find-fn d "mixed") "parameterKinds" (js-array)))
+                            (lambda (d) (put (funcall find-fn d "call-none") "arity" 3))) :forEach (lambda (mutate)
+            (let ((d (globalThis.structuredClone (get lowered :descriptor))))
+              (funcall mutate d)
+              (let ((invalid (Uint8Array/from
+                               (js-call (get backends :wasm) :append_metadata_section
+                                        (Array/from raw)
+                                        "eliscript-managed-control"
+                                        (JSON/stringify d)))))
+                (js-call assert :equal (get (WebAssembly.Module/customSections
+                                              (new globalThis.WebAssembly.Module invalid)
+                                              "eliscript-managed-control") :length)
+                         1
+                         "each argument-list mutant needs its own metadata section")
+                (js-call assert :throws
+                  (lambda () (instantiateManagedRuntime invalid))
+                  (lambda (e)
+                    (let ((diag (get e :eliscriptDiagnostic)))
+                      (and (not (nullish? diag))
+                           (= (get diag :code) "ELI-RT0003"))))))))))
+        (js-call assert :deepEqual raw saved)
+        (let ((a (make-instance)))
+          (js-call assert :throws
+            (lambda () (js-call a :invoke "call-none"))
+            (lambda (e)
+              (let ((diag (get e :eliscriptDiagnostic)))
+                (and (not (nullish? diag))
+                     (= (get diag :code) "ELI-RT0003")))))
+          (finish-heap a)))))
+
+  (test "required parameter patterns declare and execute the real argument-list ABI without optional or rest parameters"
+    (lambda ()
+      (let* ((ir (js-call (get backends :compiler) :compile_ir_string
+                          "(defun required-pattern ([value]) value) (export required-pattern)"
+                          "required-pattern.eli"))
+             (lowered (js-call (get backends :managed) :lower_managed_program ir runtime)))
+        (js-call assert :deepEqual (get (get lowered :descriptor) :functions)
+                 (js-array (js-object :name "required-pattern"
+                                      :arity nil
+                                      :callingConvention "argument-list"
+                                      :parameterKinds (js-array "required"))))
+        (let* ((raw (js-call (get backends :wasm) :emit_typed_memory_wasm (get lowered :typed)))
+               (artifact (Uint8Array/from
+                           (js-call (get backends :wasm) :append_metadata_section
+                                    (Array/from raw)
+                                    "eliscript-managed-control"
+                                    (JSON/stringify (get lowered :descriptor)))))
+               (a (instantiateManagedRuntime artifact)))
+          (js-call a :auto 1)
+          (let* ((zero (js-call a :number -0.0))
+                 (input (js-call a :sourceArray (js-array zero))))
+            (try
+              (let ((output (js-call a :invoke "required-pattern" (js-array input))))
+                (try
+                  (funcall assert (Object/is (js-call a :readNumber output) -0.0))
+                  (finally
+                    (js-call a :release output))))
+              (finally
+                (js-call a :release input)
+                (js-call a :release zero)
+                (js-call a :closeModule)
+                (js-call a :collect)
+                (js-call assert :equal (js-call a :live) 0)
+                (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))))))
+
+  (defun raw-heap ()
+    (let ((ir (globalThis.structuredClone runtime)))
+      (js-call (get ir :body) :push
+               (js-object
+                 :kind "export-declaration"
+                 :value nil
+                 :children (js-call (js-array "value-call-arguments-check" "value-call-rest" "value-call-expand")
+                                    :map (lambda (v) (js-object :kind "reference" :value v :children (js-array))))))
+      (let ((raw (Uint8Array/from (js-call (get backends :wasm) :emit_memory_wasm ir))))
+        (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module raw)) (js-array))
+        (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module raw)) :exports))
+               (heap (funcall (aref e "heap-new") 128 4096 32768))
+               (call-fn (lambda (name &rest args)
+                          (let ((res (unsigned-bit-shift-right (apply (aref e name) (js-call (js-array heap) :concat args)) 0)))
+                            (js-call assert :equal (funcall (aref e "last-error")) 0 name)
+                            res))))
+          (funcall call-fn "heap-auto" 1)
+          (js-object :e e :heap heap :call call-fn)))))
+
+  (test "raw argument helpers borrow unrooted inputs and preserve exact tail bits through GC"
+    (lambda ()
+      (let* ((ctx (raw-heap))
+             (e (get ctx :e))
+             (call-fn (get ctx :call))
+             (args (funcall call-fn "value-refs" 7 5))
+             (patterns (js-array (js-array 0 2147483648)
+                                 (js-array 1 0)
+                                 (js-array 2882400001 2146959360)
+                                 (js-array 0 2146435072)
+                                 (js-array 4294967295 2146435071)))
+             (i 0))
+        (funcall call-fn "heap-pin" args)
+        (while (< i (get patterns :length))
+          (let* ((pat (aref patterns i))
+                 (n (funcall call-fn "value-number" (aref pat 0) (aref pat 1))))
+            (funcall call-fn "value-set" args i n))
+          (setq i (+ i 1)))
+        (funcall call-fn "heap-release" args)
+        (let ((tail (funcall call-fn "value-call-rest" args 1 5)))
+          (funcall call-fn "heap-pin" tail)
+          (setq i 0)
+          (while (< i 60)
+            (funcall call-fn "value-number" i 0)
+            (setq i (+ i 1)))
+          (funcall call-fn "heap-collect")
+          (js-call assert :equal (funcall call-fn "value-length" tail) 4)
+          (setq i 0)
+          (while (< i 4)
+            (let* ((child (funcall call-fn "value-get" tail i))
+                   (offset (funcall call-fn "value-data" child 4))
+                   (view (new globalThis.DataView (get (get e :memory) :buffer))))
+              (js-call assert :deepEqual
+                (js-array (js-call view :getUint32 offset t)
+                          (js-call view :getUint32 (+ offset 4) t))
+                (aref patterns (+ i 1))))
+            (setq i (+ i 1)))
+          (funcall call-fn "heap-release" tail)
+          (funcall call-fn "heap-collect")
+          (js-call assert :equal (funcall call-fn "heap-live") 0)
+          (js-call assert :equal (funcall call-fn "frame-depth") 0)))))
+
+  (test "raw spread growth fills holes and rejects malformed argument words or counts"
+    (lambda ()
+      (let* ((ctx (raw-heap))
+             (e (get ctx :e))
+             (heap (get ctx :heap))
+             (call-fn (get ctx :call))
+             (items (funcall call-fn "value-array-new" 513))
+             (i 0))
+        (funcall call-fn "heap-pin" items)
+        (while (< i 513)
+          (funcall call-fn "value-set" items i 2)
+          (setq i (+ i 3)))
+        (let ((expanded (funcall call-fn "value-call-expand" items)))
+          (funcall call-fn "heap-pin" expanded)
+          (js-call assert :equal (funcall call-fn "value-length" expanded) 513)
+          (setq i 0)
+          (while (< i 513)
+            (js-call assert :equal (funcall call-fn "value-get" expanded i)
+                     (if (= (% i 3) 0) 2 3))
+            (setq i (+ i 1)))
+          (js-call assert :equal (funcall call-fn "value-call-arguments-check" expanded 513) 1)
+          (funcall (aref e "value-call-arguments-check") heap expanded 512)
+          (js-call assert :equal (funcall (aref e "last-error")) 3)
+          (let ((data (funcall call-fn "value-data" expanded 7)))
+            (js-call (new globalThis.DataView (get (get e :memory) :buffer)) :setUint32 (+ data 4) 4 t))
+          (funcall (aref e "value-call-arguments-check") heap expanded 513)
+          (js-call assert :equal (funcall (aref e "last-error")) 1)
+          (funcall call-fn "heap-release" expanded)
+          (funcall call-fn "heap-release" items)
+          (funcall call-fn "heap-collect")
+          (js-call assert :equal (funcall call-fn "heap-live") 0)
+          (js-call assert :equal (funcall call-fn "frame-depth") 0)))))
+
+  (test "a real trap in rest allocation or spread expansion unwinds host and source callers"
+    (async ()
+      (let ((source (await (readFile "bootstrap/runtime/memory.eli" "utf8"))))
+        (js-call (js-array (js-array "value-call-rest" "heap arguments start count" "pack" (js-array t))
+                                (js-array "value-call-expand" "heap input" "apply-values" (js-array false undefined))) :forEach (lambda (spec)
+          (let* ((helper (aref spec 0))
+                 (signature (aref spec 1))
+                 (entry (aref spec 2))
+                 (args (aref spec 3))
+                 (start (js-call source :indexOf (str "  (defun " helper " (")))
+                 (end (js-call source :indexOf "  (defun " (+ start 10))))
+            (funcall assert (and (>= start 0) (> end start)))
+            (let* ((faulty (str (js-call source :slice 0 start)
+                                "  (defun " helper " (" signature ") (load-u32 4294967295))\n"
+                                (js-call source :slice end)))
+                   (ir (js-call (get backends :compiler) :compile_ir_string faulty "trap-arguments.eli"))
+                   (a (instantiateManagedRuntime
+                        (Uint8Array/from (js-call (get backends :managed) :emit_managed_wasm program ir)))))
+              (js-call a :auto 1)
+              (let* ((n (js-call a :number 7))
+                     (frame (js-call a :frame 1))
+                     (spread (if (= helper "value-call-expand") (js-call a :sourceArray (js-array)) undefined))
+                     (actual-args (if (undefined? spread) args (js-array false spread))))
+                (js-call a :frameSet frame 0 n)
+                (js-call assert :throws
+                  (lambda () (js-call a :invoke entry actual-args))
+                  globalThis.WebAssembly.RuntimeError)
+                (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
+                (let ((saved (js-call a :frameGet frame 0)))
+                  (js-call assert :equal (js-call a :readNumber saved) 7)
+                  (js-call a :release saved))
+                (js-call a :leaveFrame frame)
+                (unless (undefined? spread) (js-call a :release spread))
+                (finish-heap a (js-array n))))))))))
+
+  (test "generated argument shapes match an independent optional and rest model with exact Number bits"
+    (lambda ()
+      (let* ((a (make-instance))
+             (f (js-call a :invoke "mixed-value"))
+             (seed 523545729)
+             (random (lambda ()
+                       (setq seed (unsigned-bit-shift-right (+ (Math/imul seed 1664525) 1013904223) 0))
+                       seed))
+             (i 0))
+        (while (< i 96)
+          (let ((cnt (% (funcall random) 13))
+                (values (js-array))
+                (args (js-array))
+                (j 0))
+            (while (< j cnt)
+              (let ((tag (% (funcall random) 7))
+                    (x undefined))
+                (cond
+                  ((= tag 0) (setq x undefined))
+                  ((= tag 1) (setq x nil))
+                  ((= tag 2) (setq x false))
+                  (t
+                   (let ((bits (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
+                     (js-call bits :setUint32 0 (funcall random) t)
+                     (js-call bits :setUint32 4 (funcall random) t)
+                     (setq x (js-call bits :getFloat64 0 t)))))
+                (js-call values :push x)
+                (js-call args :push (if (= (funcall js-typeof x) "number") (js-call a :number x) x)))
+              (setq j (+ j 1)))
+            (let* ((exp (js-array (aref values 0)
+                                  (if (undefined? (aref values 1)) nil (aref values 1))
+                                  (js-call values :slice 2)))
+                   (lst (js-call a :sourceArray args)))
+              (js-call assert :deepEqual (invoke-result a "mixed" args) exp)
+              (js-call assert :deepEqual (invoke-result a "apply-values" (js-array f lst)) exp)
+              (js-call a :release lst)
+              (js-call args :forEach (lambda (x)
+                (js-call a :release x)))
+              (js-call a :collect)))
+          (setq i (+ i 1)))
+        (finish-heap a (js-array f)))))
+
+  (test "large argument lists preserve every operand while required-only public ABI stays exact"
+    (lambda ()
+      (let ((a (make-instance)))
+        (js-call (js-array 127 128 255 256 1025) :forEach (lambda (cnt)
+          (let ((out (js-call a :invoke "pack" (js-call (globalThis.Array cnt) :fill t)))
+                (i 0))
+            (js-call assert :equal (js-call a :length out) cnt)
+            (while (< i cnt)
+              (js-call assert :equal (js-call a :get out i) t)
+              (setq i (+ i 1)))
+            (js-call a :release out)
+            (js-call a :collect))))
+        (js-call assert :equal (js-call a :invoke "optional-one" (js-call (globalThis.Array 1025) :fill false)) false)
+        (js-call assert :throws
+          (lambda () (js-call a :invoke "call-none" (js-array)))
+          (lambda (e)
+            (let ((diag (get e :eliscriptDiagnostic)))
+              (and (not (nullish? diag))
+                   (= (get diag :code) "ELI-RT0003")))))
+        (finish-heap a))))
+
+  (test "Node executes the same variadic and iterable artifact against standalone generated JavaScript"
+    (async ()
+      (let ((artifact (resolve directory "variadic.wasm"))
+            (js-path (resolve directory "reference.mjs"))
+            (runner (resolve "tests/helpers/wasm-managed-variadic-calls-node.mjs")))
+        (await (writeFile artifact (Uint8Array/from (js-call (get backends :managed) :emit_managed_wasm program runtime))))
+        (await (writeFile js-path (js-call (get backends :compiler) :emit_ir_string program)))
+        (let ((res (spawnSync "node"
+                              (js-array runner artifact (get (pathToFileURL js-path) :href))
+                              (js-object :encoding "utf8" :timeout 30000))))
+          (js-call assert :equal (get res :status) 0 (get res :stderr))
+          (js-call assert :match (get res :stdout) (new globalThis.RegExp "independent Node variadic source semantics passed")))))))

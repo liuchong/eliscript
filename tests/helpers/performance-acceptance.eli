@@ -1,2 +1,9 @@
-(module capsules.tests.helpers.performance-acceptance
-  (js* "// A deferred check is explicitly skipped, never reported as passed. Historical\n// report validation and live semantic tests keep using the original runner.\nexport function currentPerformanceTest(test, environment = process.env) {\n  if (environment.ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE !== '1') return test;\n  return (name, ...arguments_) => test.skip(\n    `DEFERRED / NOT ACCEPTED: ${name}`, ...arguments_,\n  );\n}\n"))
+(module tests.helpers.performance-acceptance
+  ;; Deferral is an explicit skip, never a successful performance measurement.
+  ;; Historical validation and semantic checks retain their original runner.
+  (defun currentPerformanceTest (test environment)
+    (setq environment (if (= environment undefined) (get globalThis.process :env) environment))
+    (if (not (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")) test
+      (lambda (name &rest arguments_)
+        (Reflect/apply (get test :skip) test (js-call (js-array (str "DEFERRED / NOT ACCEPTED: " name)) :concat arguments_)))))
+  (export currentPerformanceTest))

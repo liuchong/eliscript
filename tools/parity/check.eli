@@ -1,2 +1,355 @@
-(module capsules.tools.parity.check
-  (js* "#!/usr/bin/env bun\n\nimport { createHash } from \"node:crypto\";\nimport { readdir, readFile, writeFile } from \"node:fs/promises\";\nimport path from \"node:path\";\nimport process from \"node:process\";\nimport { fileURLToPath } from \"node:url\";\n\nconst moduleDirectory = path.dirname(fileURLToPath(import.meta.url));\nexport const DEFAULT_ROOT = path.resolve(moduleDirectory, \"../..\");\nexport const CONTRACT_FILE = \"contracts/compiler-parity-corpus.json\";\n\nconst FEATURE_DOMAINS = Object.freeze([\n  \"bootstrap\",\n  \"compiler\",\n  \"language\",\n  \"macro\",\n  \"portable\",\n  \"project\",\n]);\nconst DIMENSION_IDS = Object.freeze([\n  \"acceptance\",\n  \"diagnostics\",\n  \"canonical-ir\",\n  \"emitted-esm\",\n  \"source-maps\",\n  \"portable-closures\",\n  \"project-graphs\",\n]);\nconst FIXTURES = Object.freeze([\n  { id: \"reader\", file: \"tests/fixtures/bootstrap-reader.json\" },\n  { id: \"expander\", file: \"tests/fixtures/bootstrap-expander.json\" },\n  { id: \"analyzer\", file: \"tests/fixtures/bootstrap-analyzer.json\" },\n  { id: \"ir\", file: \"tests/fixtures/bootstrap-ir.json\" },\n]);\nconst IDENTITY_SOURCES = Object.freeze([\n  \"Makefile\",\n  \"contracts/core-acceptance-corpus.json\",\n  \"contracts/maturity-progress.json\",\n  \"contracts/public-surface.json\",\n  \"specs/0146-complete-compiler-parity-corpus.md\",\n  \"specs/index.json\",\n  \"tests/conformance/manifest.json\",\n  \"tests/compiler-parity-corpus.test.mjs\",\n  \"tools/parity/check.mjs\",\n]);\n\nexport class CompilerParityCorpusError extends Error {\n  constructor(errors) {\n    super(`compiler parity corpus validation failed:\\n- ${errors.join(\"\\n- \")}`);\n    this.name = \"CompilerParityCorpusError\";\n    this.errors = errors;\n  }\n}\n\nfunction equal(left, right) {\n  return JSON.stringify(left) === JSON.stringify(right);\n}\n\nfunction isPlainObject(value) {\n  return value !== null && typeof value === \"object\" && !Array.isArray(value);\n}\n\nasync function readJson(root, relative) {\n  return JSON.parse(await readFile(path.join(root, relative), \"utf8\"));\n}\n\nfunction stableFeatureIds(manifest) {\n  return manifest.features\n    .filter((feature) => feature.status === \"stable\" &&\n      FEATURE_DOMAINS.includes(feature.id.split(\".\", 1)[0]))\n    .map((feature) => feature.id);\n}\n\nasync function bootstrapSources(root) {\n  const entries = await readdir(path.join(root, \"bootstrap/compiler\"), {\n    withFileTypes: true,\n  });\n  return entries\n    .filter((entry) => entry.isFile() && entry.name.endsWith(\".eli\"))\n    .map((entry) => `bootstrap/compiler/${entry.name}`)\n    .sort();\n}\n\nfunction safeSourcePath(root, relative) {\n  const absolute = path.resolve(root, relative);\n  const prefix = `${path.resolve(root)}${path.sep}`;\n  if (!absolute.startsWith(prefix)) {\n    throw new Error(`source escapes repository root: ${relative}`);\n  }\n  return absolute;\n}\n\nfunction identitySourceFiles(contract, manifest, specificationIndex, featureIds) {\n  const files = new Set(IDENTITY_SOURCES);\n  for (const fixture of Array.isArray(contract.fixtures) ? contract.fixtures : []) {\n    if (typeof fixture?.file === \"string\") files.add(fixture.file);\n  }\n  for (const source of Array.isArray(contract.bootstrapSources) ?\n    contract.bootstrapSources : []) {\n    if (typeof source === \"string\") files.add(source);\n  }\n  for (const dimension of Array.isArray(contract.dimensions) ?\n    contract.dimensions : []) {\n    for (const evidence of Array.isArray(dimension?.evidence) ?\n      dimension.evidence : []) {\n      if (typeof evidence?.file === \"string\") files.add(evidence.file);\n    }\n  }\n  const specifications = new Map(\n    (specificationIndex.specifications ?? []).map((specification) => [\n      specification.id,\n      specification.file,\n    ]),\n  );\n  for (const feature of manifest.features ?? []) {\n    if (!featureIds.includes(feature.id)) continue;\n    const specificationFile = specifications.get(feature.spec);\n    if (typeof specificationFile === \"string\") files.add(specificationFile);\n    for (const evidence of feature.evidence ?? []) {\n      if (typeof evidence?.file === \"string\") files.add(evidence.file);\n    }\n  }\n  return [...files].sort();\n}\n\nasync function sourceDigests(root, files, errors) {\n  const result = [];\n  for (const relative of files) {\n    try {\n      const bytes = await readFile(safeSourcePath(root, relative));\n      result.push({\n        file: relative,\n        sha256: createHash(\"sha256\").update(bytes).digest(\"hex\"),\n      });\n    } catch (error) {\n      errors.push(`identity source ${relative} could not be read: ${error.message}`);\n    }\n  }\n  return result;\n}\n\nfunction corpusIdentity(payload) {\n  return createHash(\"sha256\")\n    .update(JSON.stringify(payload))\n    .digest(\"hex\");\n}\n\nasync function inspectCompilerParityCorpus(contract, root) {\n  const errors = [];\n  if (!isPlainObject(contract) || contract.schemaVersion !== 1 ||\n      contract.format !== \"eliscript-compiler-parity-corpus\" ||\n      contract.version !== 1) {\n    throw new CompilerParityCorpusError([\n      \"contract must use eliscript-compiler-parity-corpus version 1\",\n    ]);\n  }\n\n  const manifest = await readJson(root, \"tests/conformance/manifest.json\");\n  const surface = await readJson(root, \"contracts/public-surface.json\");\n  const specificationIndex = await readJson(root, \"specs/index.json\");\n  const makefile = await readFile(path.join(root, \"Makefile\"), \"utf8\");\n  const actualFeatures = stableFeatureIds(manifest);\n  const actualBootstrapSources = await bootstrapSources(root);\n\n  if (!equal(contract.featureDomains, FEATURE_DOMAINS)) {\n    errors.push(\"featureDomains must contain the exact compiler-relevant domain order\");\n  }\n  if (!equal(contract.featureIds, actualFeatures)) {\n    errors.push(\"featureIds must match every stable compiler-relevant conformance feature\");\n  }\n  if (!equal(contract.bootstrapSources, actualBootstrapSources)) {\n    errors.push(\"bootstrapSources must match every maintained Eliscript compiler module\");\n  }\n\n  const fixtureState = [];\n  if (!Array.isArray(contract.fixtures) || contract.fixtures.length !== FIXTURES.length) {\n    errors.push(\"fixtures must contain the exact reader expander analyzer and IR inventory\");\n  }\n  for (const [index, expected] of FIXTURES.entries()) {\n    const declared = contract.fixtures?.[index];\n    if (!isPlainObject(declared) || declared.id !== expected.id ||\n        declared.file !== expected.file) {\n      errors.push(`fixture ${expected.id} metadata must match the maintained inventory`);\n      continue;\n    }\n    try {\n      const fixture = await readJson(root, expected.file);\n      const valid = Array.isArray(fixture.valid) ? fixture.valid.length : -1;\n      const invalid = Array.isArray(fixture.invalid) ? fixture.invalid.length : 0;\n      fixtureState.push({ id: expected.id, file: expected.file, valid, invalid });\n      if (declared.valid !== valid || declared.invalid !== invalid) {\n        errors.push(`fixture ${expected.id} counts must match its source file`);\n      }\n    } catch (error) {\n      errors.push(`fixture ${expected.id} could not be read: ${error.message}`);\n    }\n  }\n\n  const irKinds = surface.ir?.nodeKinds;\n  if (!Array.isArray(irKinds) || contract.irKindCount !== irKinds.length) {\n    errors.push(\"irKindCount must match the complete public IR inventory\");\n  }\n  const diagnosticCaseCount = fixtureState\n    .filter(({ id }) => id !== \"ir\")\n    .reduce((total, fixture) => total + fixture.invalid, 0);\n  if (contract.diagnosticCaseCount !== diagnosticCaseCount) {\n    errors.push(\"diagnosticCaseCount must match all shared negative fixtures\");\n  }\n\n  const dimensions = Array.isArray(contract.dimensions) ? contract.dimensions : [];\n  if (!equal(dimensions.map((dimension) => dimension?.id), DIMENSION_IDS)) {\n    errors.push(\"dimensions must contain the exact seven compiler parity boundaries\");\n  }\n  const evidenceLocators = new Set();\n  for (const dimensionId of DIMENSION_IDS) {\n    const dimension = dimensions.find((candidate) => candidate?.id === dimensionId);\n    if (!dimension || !Array.isArray(dimension.evidence) ||\n        dimension.evidence.length === 0) {\n      errors.push(`dimension ${dimensionId} must contain executable evidence`);\n      continue;\n    }\n    for (const [index, evidence] of dimension.evidence.entries()) {\n      const label = `dimension ${dimensionId} evidence ${index}`;\n      if (!isPlainObject(evidence) || typeof evidence.file !== \"string\" ||\n          typeof evidence.contains !== \"string\" || evidence.contains.length === 0) {\n        errors.push(`${label} must contain file and contains strings`);\n        continue;\n      }\n      if (!evidence.file.startsWith(\"tests/\") ||\n          !evidence.file.endsWith(\".test.mjs\")) {\n        errors.push(`${label} must point to a Bun core test file`);\n      }\n      try {\n        const source = await readFile(safeSourcePath(root, evidence.file), \"utf8\");\n        if (!source.includes(evidence.contains)) {\n          errors.push(`${label} locator is absent from ${evidence.file}`);\n        }\n      } catch (error) {\n        errors.push(`${label} could not be read: ${error.message}`);\n      }\n      if (!makefile.includes(evidence.file)) {\n        errors.push(`${label} file is not executed by test-core`);\n      }\n      evidenceLocators.add(`${evidence.file}\\0${evidence.contains}`);\n    }\n  }\n\n  const files = identitySourceFiles(\n    contract,\n    manifest,\n    specificationIndex,\n    actualFeatures,\n  );\n  const digests = await sourceDigests(root, files, errors);\n  const identityPayload = {\n    featureDomains: FEATURE_DOMAINS,\n    featureIds: actualFeatures,\n    fixtures: fixtureState,\n    bootstrapSources: actualBootstrapSources,\n    irKinds: Array.isArray(irKinds) ? irKinds : [],\n    diagnosticCaseCount,\n    dimensions,\n    sources: digests,\n  };\n  const expectedIdentity = corpusIdentity(identityPayload);\n  if (!/^[0-9a-f]{64}$/u.test(contract.identity ?? \"\") ||\n      contract.identity !== expectedIdentity) {\n    errors.push(\"identity must bind the complete parity inventory and source files\");\n  }\n\n  return {\n    errors,\n    expectedIdentity,\n    report: {\n      schemaVersion: 1,\n      stableFeatures: actualFeatures.length,\n      fixtures: fixtureState.length,\n      validCases: fixtureState.reduce((total, fixture) => total + fixture.valid, 0),\n      diagnosticCases: diagnosticCaseCount,\n      bootstrapSources: actualBootstrapSources.length,\n      irKinds: Array.isArray(irKinds) ? irKinds.length : 0,\n      dimensions: dimensions.length,\n      evidence: evidenceLocators.size,\n      sourceFiles: files.length,\n      identity: expectedIdentity,\n    },\n  };\n}\n\nexport async function validateCompilerParityCorpus(contract, options = {}) {\n  const root = path.resolve(options.root ?? DEFAULT_ROOT);\n  const inspected = await inspectCompilerParityCorpus(contract, root);\n  if (inspected.errors.length > 0) {\n    throw new CompilerParityCorpusError(inspected.errors);\n  }\n  return inspected.report;\n}\n\nexport async function checkCompilerParityCorpus(options = {}) {\n  const root = path.resolve(options.root ?? DEFAULT_ROOT);\n  const contract = options.contract ?? await readJson(root, CONTRACT_FILE);\n  return validateCompilerParityCorpus(contract, { root });\n}\n\nexport async function generateCompilerParityIdentity(options = {}) {\n  const root = path.resolve(options.root ?? DEFAULT_ROOT);\n  const filename = path.join(root, CONTRACT_FILE);\n  const contract = await readJson(root, CONTRACT_FILE);\n  const inspected = await inspectCompilerParityCorpus(\n    { ...contract, identity: \"0\".repeat(64) },\n    root,\n  );\n  const structuralErrors = inspected.errors.filter((error) =>\n    !error.startsWith(\"identity must bind\"));\n  if (structuralErrors.length > 0) {\n    throw new CompilerParityCorpusError(structuralErrors);\n  }\n  contract.identity = inspected.expectedIdentity;\n  await writeFile(filename, `${JSON.stringify(contract, null, 2)}\\n`);\n  return validateCompilerParityCorpus(contract, { root });\n}\n\nfunction printReport(report) {\n  process.stdout.write(\n    `Compiler parity corpus: ${report.dimensions}/7 dimensions, ` +\n    `${report.stableFeatures} stable features\\n` +\n    `Shared inputs: ${report.validCases} valid cases, ` +\n    `${report.diagnosticCases} diagnostics, ${report.bootstrapSources} modules, ` +\n    `${report.irKinds} IR kinds\\n` +\n    `Evidence: ${report.evidence} locators, ${report.sourceFiles} bound files; ` +\n    `identity ${report.identity}\\n`,\n  );\n}\n\nif (import.meta.main) {\n  const generate = process.argv.slice(2).includes(\"--generate\");\n  try {\n    printReport(generate ?\n      await generateCompilerParityIdentity() :\n      await checkCompilerParityCorpus());\n  } catch (error) {\n    process.stderr.write(`${error.message}\\n`);\n    process.exitCode = 1;\n  }\n}\n"))
+(module tools.parity.check
+  (import "node:crypto" createHash)
+  (import "node:fs/promises" readdir readFile writeFile)
+  (import "node:path" :as path)
+  (import "node:url" fileURLToPath)
+
+  (defconst module-file (fileURLToPath (js* "import.meta.url")))
+  (defconst DEFAULT_ROOT (js-call path :resolve (js-call path :dirname module-file) "../.."))
+  (defconst CONTRACT_FILE "contracts/compiler-parity-corpus.json")
+  (defconst feature-domains
+    (js-array "bootstrap" "compiler" "language" "macro" "portable" "project"))
+  (defconst dimension-ids
+    (js-array "acceptance" "diagnostics" "canonical-ir" "emitted-esm" "source-maps"
+      "portable-closures" "project-graphs"))
+  (defconst fixtures
+    (js-array
+      (js-object :id "reader" :file "tests/fixtures/bootstrap-reader.json")
+      (js-object :id "expander" :file "tests/fixtures/bootstrap-expander.json")
+      (js-object :id "analyzer" :file "tests/fixtures/bootstrap-analyzer.json")
+      (js-object :id "ir" :file "tests/fixtures/bootstrap-ir.json")))
+  (defconst identity-sources
+    (js-array "Makefile" "contracts/core-acceptance-corpus.json" "contracts/maturity-progress.json"
+      "contracts/public-surface.json" "specs/0146-complete-compiler-parity-corpus.md" "specs/index.json"
+      "tests/conformance/manifest.json" "tests/compiler-parity-corpus.test.mjs" "tools/parity/check.mjs"))
+  (defconst identity-pattern "^[0-9a-f]{64}$")
+
+  (defun parity-error-message (errors)
+    (str "compiler parity corpus validation failed:\n- " (js-call errors :join "\n- ")))
+
+  (defun parity-error-fields (self errors)
+    (put self :name "CompilerParityCorpusError")
+    (put self :errors errors)
+    self)
+
+  (defconst CompilerParityCorpusError
+    (funcall
+      (js* "(message, fields) => class CompilerParityCorpusError extends Error { constructor(errors) { const self = super(message(errors)); return fields(self, errors); } }")
+      parity-error-message
+      parity-error-fields))
+
+  (defun host-type (value)
+    (funcall (js* "(value) => typeof value") value))
+
+  (defun plain-object? (value)
+    (and (not (nil? value))
+         (= (host-type value) "object")
+         (not (Array/isArray value))))
+
+  (defun host-get (value key)
+    (if (nullish? value) undefined (get value key)))
+
+  (defun call-options (supplied)
+    (if (or (= (js-length supplied) 0) (undefined? (aref supplied 0)))
+      (js-object)
+      (aref supplied 0)))
+
+  (defun json-equal (left right)
+    (= (JSON/stringify left) (JSON/stringify right)))
+
+  (defun regexp-test (source text flags)
+    (js-call (new globalThis.RegExp source flags) :test text))
+
+  (defun sha256 (bytes)
+    (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+
+  (defasync read-json (root relative)
+    (JSON/parse (await (readFile (js-call path :join root relative) "utf8"))))
+
+  (defun stable-feature-ids (manifest)
+    (let ((ids (js-array)) (features (get manifest :features)) (index 0))
+      (while (< index (js-length features))
+        (let* ((feature (aref features index))
+               (domain (aref (js-call (get feature :id) :split "." 1) 0)))
+          (when (and (= (get feature :status) "stable") (js-call feature-domains :includes domain))
+            (js-call ids :push (get feature :id))))
+        (setq index (1+ index)))
+      ids))
+
+  (defasync bootstrap-sources (root)
+    (let ((entries (await (readdir (js-call path :join root "bootstrap/compiler")
+                            (js-object :withFileTypes t))))
+          (files (js-array))
+          (index 0))
+      (while (< index (js-length entries))
+        (let ((entry (aref entries index)))
+          (when (and (js-call entry :isFile) (js-call (get entry :name) :endsWith ".eli"))
+            (js-call files :push (str "bootstrap/compiler/" (get entry :name)))))
+        (setq index (1+ index)))
+      (js-call files :sort)))
+
+  (defun safe-source-path (root relative)
+    (let* ((absolute (js-call path :resolve root relative))
+           (prefix (str (js-call path :resolve root) (get path :sep))))
+      (unless (js-call absolute :startsWith prefix)
+        (throw (new globalThis.Error (str "source escapes repository root: " relative))))
+      absolute))
+
+  (defun add-string (files value)
+    (when (= (host-type value) "string")
+      (js-call files :add value)))
+
+  (defun identity-source-files (contract manifest specification-index feature-ids)
+    (let ((files (new globalThis.Set identity-sources))
+          (declared-fixtures (if (Array/isArray (get contract :fixtures)) (get contract :fixtures) (js-array)))
+          (declared-sources (if (Array/isArray (get contract :bootstrapSources))
+                              (get contract :bootstrapSources) (js-array)))
+          (declared-dimensions (if (Array/isArray (get contract :dimensions))
+                                 (get contract :dimensions) (js-array)))
+          (index 0))
+      (while (< index (js-length declared-fixtures))
+        (add-string files (host-get (aref declared-fixtures index) "file"))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (js-length declared-sources))
+        (add-string files (aref declared-sources index))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (js-length declared-dimensions))
+        (let* ((dimension (aref declared-dimensions index))
+               (evidence (host-get dimension "evidence"))
+               (items (if (Array/isArray evidence) evidence (js-array)))
+               (evidence-index 0))
+          (while (< evidence-index (js-length items))
+            (add-string files (host-get (aref items evidence-index) "file"))
+            (setq evidence-index (1+ evidence-index))))
+        (setq index (1+ index)))
+      (let* ((listed (if (nullish? (get specification-index :specifications))
+                       (js-array) (get specification-index :specifications)))
+             (specifications (new globalThis.Map
+                               (js-call listed :map (lambda (specification)
+                                                      (js-array (get specification :id) (get specification :file))))))
+             (manifest-features (if (nullish? (get manifest :features)) (js-array) (get manifest :features))))
+        (setq index 0)
+        (while (< index (js-length manifest-features))
+          (let ((feature (aref manifest-features index)))
+            (when (js-call feature-ids :includes (get feature :id))
+              (let ((specification-file (js-call specifications :get (get feature :spec)))
+                    (evidence (if (nullish? (get feature :evidence)) (js-array) (get feature :evidence)))
+                    (evidence-index 0))
+                (add-string files specification-file)
+                (while (< evidence-index (js-length evidence))
+                  (add-string files (host-get (aref evidence evidence-index) "file"))
+                  (setq evidence-index (1+ evidence-index))))))
+          (setq index (1+ index))))
+      (js-call (Array/from files) :sort)))
+
+  (defasync source-digests (root files errors)
+    (let ((result (js-array)) (index 0))
+      (while (< index (js-length files))
+        (let ((relative (aref files index)))
+          (try
+            (let ((bytes (await (readFile (safe-source-path root relative)))))
+              (js-call result :push (js-object :file relative :sha256 (sha256 bytes))))
+            (catch error
+              (js-call errors :push (str "identity source " relative " could not be read: " (get error :message))))))
+        (setq index (1+ index)))
+      result))
+
+  (defun corpus-identity (payload)
+    (sha256 (JSON/stringify payload)))
+
+  (defun optional-index (value index)
+    (if (nullish? value) undefined (aref value index)))
+
+  (defun sum-field (items key)
+    (let ((total 0) (index 0))
+      (while (< index (js-length items))
+        (setq total (+ total (get (aref items index) key)))
+        (setq index (1+ index)))
+      total))
+
+  (defasync inspect-compiler-parity-corpus (contract root)
+    (let ((errors (js-array)))
+      (unless (and (plain-object? contract)
+                   (= (get contract :schemaVersion) 1)
+                   (= (get contract :format) "eliscript-compiler-parity-corpus")
+                   (= (get contract :version) 1))
+        (throw (new CompilerParityCorpusError
+                 (js-array "contract must use eliscript-compiler-parity-corpus version 1"))))
+      (let* ((manifest (await (read-json root "tests/conformance/manifest.json")))
+             (surface (await (read-json root "contracts/public-surface.json")))
+             (specification-index (await (read-json root "specs/index.json")))
+             (makefile (await (readFile (js-call path :join root "Makefile") "utf8")))
+             (actual-features (stable-feature-ids manifest))
+             (actual-bootstrap (await (bootstrap-sources root)))
+             (fixture-state (js-array))
+             (index 0))
+        (unless (json-equal (get contract :featureDomains) feature-domains)
+          (js-call errors :push "featureDomains must contain the exact compiler-relevant domain order"))
+        (unless (json-equal (get contract :featureIds) actual-features)
+          (js-call errors :push "featureIds must match every stable compiler-relevant conformance feature"))
+        (unless (json-equal (get contract :bootstrapSources) actual-bootstrap)
+          (js-call errors :push "bootstrapSources must match every maintained Eliscript compiler module"))
+        (unless (and (Array/isArray (get contract :fixtures))
+                     (= (js-length (get contract :fixtures)) (js-length fixtures)))
+          (js-call errors :push "fixtures must contain the exact reader expander analyzer and IR inventory"))
+        (while (< index (js-length fixtures))
+          (let* ((expected (aref fixtures index))
+                 (declared (optional-index (get contract :fixtures) index)))
+            (if (or (not (plain-object? declared))
+                    (not (= (get declared :id) (get expected :id)))
+                    (not (= (get declared :file) (get expected :file))))
+              (js-call errors :push (str "fixture " (get expected :id) " metadata must match the maintained inventory"))
+              (try
+                (let* ((fixture (await (read-json root (get expected :file))))
+                       (valid (if (Array/isArray (get fixture :valid)) (js-length (get fixture :valid)) -1))
+                       (invalid (if (Array/isArray (get fixture :invalid)) (js-length (get fixture :invalid)) 0)))
+                  (js-call fixture-state :push (js-object :id (get expected :id) :file (get expected :file)
+                                                  :valid valid :invalid invalid))
+                  (unless (and (= (get declared :valid) valid) (= (get declared :invalid) invalid))
+                    (js-call errors :push (str "fixture " (get expected :id) " counts must match its source file"))))
+                (catch error
+                  (js-call errors :push (str "fixture " (get expected :id) " could not be read: " (get error :message)))))))
+          (setq index (1+ index)))
+        (let* ((ir-kinds (host-get (host-get surface "ir") "nodeKinds"))
+               (diagnostic-case-count (let ((total 0) (fixture-index 0))
+                                        (while (< fixture-index (js-length fixture-state))
+                                          (let ((fixture (aref fixture-state fixture-index)))
+                                            (unless (= (get fixture :id) "ir")
+                                              (setq total (+ total (get fixture :invalid)))))
+                                          (setq fixture-index (1+ fixture-index)))
+                                        total))
+               (dimensions (if (Array/isArray (get contract :dimensions)) (get contract :dimensions) (js-array)))
+               (dimension-names (js-array))
+               (evidence-locators (new globalThis.Set)))
+          (when (or (not (Array/isArray ir-kinds)) (not (= (get contract :irKindCount) (js-length ir-kinds))))
+            (js-call errors :push "irKindCount must match the complete public IR inventory"))
+          (unless (= (get contract :diagnosticCaseCount) diagnostic-case-count)
+            (js-call errors :push "diagnosticCaseCount must match all shared negative fixtures"))
+          (setq index 0)
+          (while (< index (js-length dimensions))
+            (js-call dimension-names :push (host-get (aref dimensions index) "id"))
+            (setq index (1+ index)))
+          (unless (json-equal dimension-names dimension-ids)
+            (js-call errors :push "dimensions must contain the exact seven compiler parity boundaries"))
+          (setq index 0)
+          (while (< index (js-length dimension-ids))
+            (let* ((dimension-id (aref dimension-ids index))
+                   (dimension (js-call dimensions :find
+                                (lambda (candidate) (= (host-get candidate "id") dimension-id)))))
+              (if (or (not dimension)
+                      (not (Array/isArray (get dimension :evidence)))
+                      (= (js-length (get dimension :evidence)) 0))
+                (js-call errors :push (str "dimension " dimension-id " must contain executable evidence"))
+                (let ((evidence-index 0) (evidence (get dimension :evidence)))
+                  (while (< evidence-index (js-length evidence))
+                    (let ((item (aref evidence evidence-index))
+                          (label (str "dimension " dimension-id " evidence " evidence-index)))
+                      (if (or (not (plain-object? item))
+                              (not (= (host-type (get item :file)) "string"))
+                              (not (= (host-type (get item :contains)) "string"))
+                              (= (js-length (get item :contains)) 0))
+                        (js-call errors :push (str label " must contain file and contains strings"))
+                        (progn
+                          (when (or (not (js-call (get item :file) :startsWith "tests/"))
+                                    (not (js-call (get item :file) :endsWith ".test.mjs")))
+                            (js-call errors :push (str label " must point to a Bun core test file")))
+                          (try
+                            (let ((source (await (readFile (safe-source-path root (get item :file)) "utf8"))))
+                              (unless (js-call source :includes (get item :contains))
+                                (js-call errors :push (str label " locator is absent from " (get item :file)))))
+                            (catch error
+                              (js-call errors :push (str label " could not be read: " (get error :message)))))
+                          (unless (js-call makefile :includes (get item :file))
+                            (js-call errors :push (str label " file is not executed by test-core")))
+                          (js-call evidence-locators :add (str (get item :file) "\u0000" (get item :contains))))))
+                    (setq evidence-index (1+ evidence-index))))))
+            (setq index (1+ index)))
+          (let* ((files (identity-source-files contract manifest specification-index actual-features))
+                 (digests (await (source-digests root files errors)))
+                 (payload (js-object :featureDomains feature-domains :featureIds actual-features
+                            :fixtures fixture-state :bootstrapSources actual-bootstrap
+                            :irKinds (if (Array/isArray ir-kinds) ir-kinds (js-array))
+                            :diagnosticCaseCount diagnostic-case-count :dimensions dimensions
+                            :sources digests))
+                 (expected-identity (corpus-identity payload)))
+            (when (or (not (regexp-test identity-pattern (get contract :identity "") "u"))
+                      (not (= (get contract :identity) expected-identity)))
+              (js-call errors :push "identity must bind the complete parity inventory and source files"))
+            (js-object :errors errors :expectedIdentity expected-identity
+              :report (js-object :schemaVersion 1
+                        :stableFeatures (js-length actual-features)
+                        :fixtures (js-length fixture-state)
+                        :validCases (sum-field fixture-state "valid")
+                        :diagnosticCases diagnostic-case-count
+                        :bootstrapSources (js-length actual-bootstrap)
+                        :irKinds (if (Array/isArray ir-kinds) (js-length ir-kinds) 0)
+                        :dimensions (js-length dimensions)
+                        :evidence (get evidence-locators :size)
+                        :sourceFiles (js-length files)
+                        :identity expected-identity)))))))
+
+  (defasync validateCompilerParityCorpus (contract &rest supplied)
+    (let* ((options (call-options supplied))
+           (root (js-call path :resolve (get options :root DEFAULT_ROOT)))
+           (inspected (await (inspect-compiler-parity-corpus contract root))))
+      (when (> (js-length (get inspected :errors)) 0)
+        (throw (new CompilerParityCorpusError (get inspected :errors))))
+      (get inspected :report)))
+
+  (defasync checkCompilerParityCorpus (&rest supplied)
+    (let* ((options (call-options supplied))
+           (root (js-call path :resolve (get options :root DEFAULT_ROOT)))
+           (contract (if (nullish? (get options :contract))
+                       (await (read-json root CONTRACT_FILE))
+                       (get options :contract))))
+      (await (validateCompilerParityCorpus contract (js-object :root root)))))
+
+  (defasync generateCompilerParityIdentity (&rest supplied)
+    (let* ((options (call-options supplied))
+           (root (js-call path :resolve (get options :root DEFAULT_ROOT)))
+           (filename (js-call path :join root CONTRACT_FILE))
+           (contract (await (read-json root CONTRACT_FILE)))
+           (inspected (await (inspect-compiler-parity-corpus
+                               (Object/assign (js-object) contract
+                                 (js-object :identity (js-call "0" :repeat 64)))
+                               root)))
+           (structural (js-array))
+           (index 0)
+           (found (get inspected :errors)))
+      (while (< index (js-length found))
+        (let ((error (aref found index)))
+          (unless (js-call error :startsWith "identity must bind")
+            (js-call structural :push error)))
+        (setq index (1+ index)))
+      (when (> (js-length structural) 0)
+        (throw (new CompilerParityCorpusError structural)))
+      (put contract :identity (get inspected :expectedIdentity))
+      (await (writeFile filename (str (JSON/stringify contract nil 2) "\n")))
+      (await (validateCompilerParityCorpus contract (js-object :root root)))))
+
+  (defun print-report (report)
+    (js-call (get globalThis.process :stdout) :write
+      (str "Compiler parity corpus: " (get report :dimensions) "/7 dimensions, "
+           (get report :stableFeatures) " stable features\n"
+           "Shared inputs: " (get report :validCases) " valid cases, "
+           (get report :diagnosticCases) " diagnostics, " (get report :bootstrapSources) " modules, "
+           (get report :irKinds) " IR kinds\n"
+           "Evidence: " (get report :evidence) " locators, " (get report :sourceFiles) " bound files; "
+           "identity " (get report :identity) "\n")))
+
+  (defasync main ()
+    (let ((generate (js-call (js-call (get globalThis.process :argv) :slice 2) :includes "--generate")))
+      (print-report (if generate
+                      (await (generateCompilerParityIdentity))
+                      (await (checkCompilerParityCorpus))))))
+
+  (when (js* "import.meta.main")
+    (js-call (main) :catch
+      (lambda (error)
+        (js-call (get globalThis.process :stderr) :write (str (get error :message) "\n"))
+        (put globalThis.process :exitCode 1))))
+
+  (export DEFAULT_ROOT CONTRACT_FILE CompilerParityCorpusError validateCompilerParityCorpus
+    checkCompilerParityCorpus generateCompilerParityIdentity))

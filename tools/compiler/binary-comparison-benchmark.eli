@@ -1,2 +1,336 @@
-(module capsules.tools.compiler.binary-comparison-benchmark
-  (js* "import { createHash } from \"node:crypto\";\nimport { readFile, writeFile } from \"node:fs/promises\";\nimport os from \"node:os\";\nimport path from \"node:path\";\nimport process from \"node:process\";\nimport { fileURLToPath, pathToFileURL } from \"node:url\";\n\nexport const COMPILER_BINARY_COMPARISON_FORMAT =\n  \"eliscript-compiler-binary-comparison-benchmark\";\nexport const COMPILER_BINARY_COMPARISON_VERSION = 1;\nexport const COMPILER_BINARY_COMPARISON_BASELINE =\n  \"a123937b275d89e833434e84064e4e120cf5495b\";\n\nconst directory = path.dirname(fileURLToPath(import.meta.url));\nconst projectDirectory = path.resolve(directory, \"../..\");\nconst compilerSources = Object.freeze([\n  \"bootstrap/compiler/symbol.eli\",\n  \"bootstrap/compiler/syntax.eli\",\n  \"bootstrap/compiler/reader.eli\",\n  \"bootstrap/compiler/formatter.eli\",\n  \"bootstrap/compiler/expander.eli\",\n  \"bootstrap/compiler/transient-analysis.eli\",\n  \"bootstrap/compiler/analyzer.eli\",\n  \"bootstrap/compiler/ir.eli\",\n  \"bootstrap/compiler/lower.eli\",\n  \"bootstrap/compiler/source-map.eli\",\n  \"bootstrap/compiler/emitter.eli\",\n  \"bootstrap/compiler/project.eli\",\n  \"bootstrap/compiler/compiler.eli\",\n]);\nconst digestFiles = Object.freeze([\n  ...compilerSources,\n  \"compiler/eliscript-emitter.el\",\n  \"compiler/eliscript-ir-emitter.el\",\n  \"tools/compiler/binary-comparison-benchmark.mjs\",\n]);\n\nfunction positiveInteger(value, name) {\n  const parsed = Number(value);\n  if (!Number.isSafeInteger(parsed) || parsed <= 0) {\n    throw new TypeError(`${name} must be a positive safe integer`);\n  }\n  return parsed;\n}\n\nfunction parseArguments(arguments_) {\n  let baselineRoot;\n  let output;\n  for (let index = 0; index < arguments_.length; index += 1) {\n    const argument = arguments_[index];\n    if (argument === \"--baseline-root\") {\n      baselineRoot = arguments_[++index];\n    } else if (argument === \"--output\") {\n      output = arguments_[++index];\n    } else if (argument === \"--help\") {\n      process.stdout.write(\n        \"Usage: bun tools/compiler/binary-comparison-benchmark.mjs \" +\n          \"--baseline-root DIR [--output REPORT.json]\\n\",\n      );\n      process.exit(0);\n    } else {\n      throw new TypeError(`unknown argument ${argument}`);\n    }\n  }\n  if (!baselineRoot) throw new TypeError(\"--baseline-root is required\");\n  return { baselineRoot: path.resolve(baselineRoot), output };\n}\n\nexport async function compilerBinaryComparisonSourceDigest() {\n  const hash = createHash(\"sha256\");\n  for (const relative of digestFiles) {\n    hash.update(relative);\n    hash.update(\"\\0\");\n    hash.update(await readFile(path.join(projectDirectory, relative)));\n    hash.update(\"\\0\");\n  }\n  return {\n    algorithm: \"sha256\",\n    files: digestFiles,\n    value: hash.digest(\"hex\"),\n  };\n}\n\nfunction gitRevision(root) {\n  const result = Bun.spawnSync([\"git\", \"-C\", root, \"rev-parse\", \"HEAD\"]);\n  if (result.exitCode !== 0) {\n    throw new Error(new TextDecoder().decode(result.stderr).trim());\n  }\n  return new TextDecoder().decode(result.stdout).trim();\n}\n\nasync function loadCompiler(root, identity) {\n  const location = path.join(root, \"dist/bootstrap/compiler.mjs\");\n  return import(`${pathToFileURL(location).href}?benchmark=${identity}`);\n}\n\nfunction median(samples) {\n  const values = [...samples].sort((left, right) => left - right);\n  return values[Math.floor(values.length / 2)];\n}\n\nfunction compileCorpus(compiler, corpus, rounds) {\n  let checksum = 0;\n  const start = performance.now();\n  for (let round = 0; round < rounds; round += 1) {\n    for (const item of corpus) {\n      const result = compiler.compile_string_with_source_map(\n        item.source,\n        item.relative,\n        `${path.basename(item.relative, \".eli\")}.mjs`,\n        item.relative,\n      );\n      checksum += result.javascript.length + result.sourceMap.length;\n    }\n  }\n  return { milliseconds: performance.now() - start, checksum };\n}\n\nexport function validateCompilerBinaryComparisonReport(report) {\n  const reject = message => {const error = new TypeError(message);error.report = report;throw error;};\n  if (report?.format !== COMPILER_BINARY_COMPARISON_FORMAT ||\n      report?.version !== COMPILER_BINARY_COMPARISON_VERSION ||\n      report?.baseline?.revision !== COMPILER_BINARY_COMPARISON_BASELINE) {\n    reject(\"invalid compiler binary comparison report identity\");\n  }\n  const samples = report.parameters?.timingSamples;\n  if (!Array.isArray(report.measurements?.baseline?.samplesMs) ||\n      !Array.isArray(report.measurements?.optimized?.samplesMs) ||\n      report.measurements.baseline.samplesMs.length !== samples ||\n      report.measurements.optimized.samplesMs.length !== samples) {\n    reject(\"compiler binary comparison samples are incomplete\");\n  }\n  if (report.validation?.compiledModules !== report.corpus?.files?.length ||\n      report.validation?.validSourceMaps !== report.corpus?.files?.length ||\n      report.validation?.baselineChecksum <= 0 ||\n      report.validation?.optimizedChecksum <= 0 ||\n      report.validation?.optimizedBytes >= report.validation?.baselineBytes) {\n    reject(\"compiler binary comparison validation failed\");\n  }\n  if (report.decision?.passed !== true ||\n      report.measurements.speedup < report.decision.minimumSpeedup) {\n    reject(\"compiler binary comparison speedup decision failed\");\n  }\n  return report;\n}\n\nexport async function runCompilerBinaryComparisonBenchmark(options) {\n  const warmupRounds = positiveInteger(\n    options.warmupRounds ??\n      process.env.ELISCRIPT_COMPILER_COMPARISON_WARMUP_ROUNDS ?? 2,\n    \"warmup rounds\",\n  );\n  const timingRounds = positiveInteger(\n    options.timingRounds ??\n      process.env.ELISCRIPT_COMPILER_COMPARISON_TIMING_ROUNDS ?? 6,\n    \"timing rounds\",\n  );\n  const timingSamples = positiveInteger(\n    options.timingSamples ??\n      process.env.ELISCRIPT_COMPILER_COMPARISON_TIMING_SAMPLES ?? 11,\n    \"timing samples\",\n  );\n  if (timingSamples % 2 === 0) {\n    throw new TypeError(\"timing samples must be odd\");\n  }\n  const minimumSpeedup = Number(\n    options.minimumSpeedup ??\n      process.env.ELISCRIPT_COMPILER_COMPARISON_MINIMUM_SPEEDUP ?? 1.15,\n  );\n  if (!Number.isFinite(minimumSpeedup) || minimumSpeedup <= 1) {\n    throw new TypeError(\"minimum speedup must be greater than 1\");\n  }\n  const baselineRoot = path.resolve(options.baselineRoot);\n  const revision = gitRevision(baselineRoot);\n  if (revision !== COMPILER_BINARY_COMPARISON_BASELINE) {\n    throw new TypeError(\n      `baseline must be ${COMPILER_BINARY_COMPARISON_BASELINE}, got ${revision}`,\n    );\n  }\n\n  const corpus = await Promise.all(compilerSources.map(async (relative) => {\n    const source = await readFile(path.join(projectDirectory, relative), \"utf8\");\n    return { relative, source };\n  }));\n  const sourceBytes = corpus.reduce(\n    (total, item) => total + Buffer.byteLength(item.source),\n    0,\n  );\n  const [baseline, optimized] = await Promise.all([\n    loadCompiler(baselineRoot, \"baseline\"),\n    loadCompiler(projectDirectory, \"optimized\"),\n  ]);\n\n  let baselineBytes = 0;\n  let optimizedBytes = 0;\n  let validSourceMaps = 0;\n  for (const item of corpus) {\n    const baselineResult = baseline.compile_string_with_source_map(\n      item.source, item.relative, \"module.mjs\", item.relative,\n    );\n    const optimizedResult = optimized.compile_string_with_source_map(\n      item.source, item.relative, \"module.mjs\", item.relative,\n    );\n    JSON.parse(baselineResult.sourceMap);\n    JSON.parse(optimizedResult.sourceMap);\n    validSourceMaps += 1;\n    baselineBytes += Buffer.byteLength(baselineResult.javascript);\n    optimizedBytes += Buffer.byteLength(optimizedResult.javascript);\n  }\n\n  for (let round = 0; round < warmupRounds; round += 1) {\n    compileCorpus(baseline, corpus, 1);\n    compileCorpus(optimized, corpus, 1);\n  }\n  const baselineSamples = [];\n  const optimizedSamples = [];\n  let baselineChecksum = 0;\n  let optimizedChecksum = 0;\n  for (let sample = 0; sample < timingSamples; sample += 1) {\n    const order = sample % 2 === 0\n      ? [[baseline, baselineSamples, \"baseline\"],\n        [optimized, optimizedSamples, \"optimized\"]]\n      : [[optimized, optimizedSamples, \"optimized\"],\n        [baseline, baselineSamples, \"baseline\"]];\n    for (const [compiler, samples, identity] of order) {\n      const result = compileCorpus(compiler, corpus, timingRounds);\n      samples.push(result.milliseconds);\n      if (identity === \"baseline\") baselineChecksum = result.checksum;\n      else optimizedChecksum = result.checksum;\n    }\n  }\n  const baselineMedian = median(baselineSamples);\n  const optimizedMedian = median(optimizedSamples);\n  const speedup = baselineMedian / optimizedMedian;\n  return validateCompilerBinaryComparisonReport({\n    format: COMPILER_BINARY_COMPARISON_FORMAT,\n    version: COMPILER_BINARY_COMPARISON_VERSION,\n    generatedAt: new Date().toISOString(),\n    sourceDigest: await compilerBinaryComparisonSourceDigest(),\n    host: {\n      runtime: \"bun\",\n      runtimeVersion: Bun.version,\n      engine: \"JavaScriptCore\",\n      platform: process.platform,\n      architecture: process.arch,\n      operatingSystem: `${os.type()} ${os.release()}`,\n    },\n    baseline: { revision, root: path.basename(baselineRoot) },\n    corpus: { files: compilerSources, sourceBytes },\n    parameters: { warmupRounds, timingRounds, timingSamples },\n    validation: {\n      compiledModules: corpus.length,\n      validSourceMaps,\n      baselineBytes,\n      optimizedBytes,\n      baselineChecksum,\n      optimizedChecksum,\n    },\n    measurements: {\n      baseline: { samplesMs: baselineSamples, medianMs: baselineMedian },\n      optimized: { samplesMs: optimizedSamples, medianMs: optimizedMedian },\n      speedup,\n    },\n    decision: { minimumSpeedup, passed: speedup >= minimumSpeedup },\n  });\n}\n\nif (import.meta.main) {\n  const options = parseArguments(process.argv.slice(2));\n  let report;\n  try { report = await runCompilerBinaryComparisonBenchmark(options); }\n  catch (error) {\n    if (error.report) {\n      const failed = `${JSON.stringify(error.report, null, 2)}\\n`;\n      if (options.output === undefined) process.stdout.write(failed);\n      else await writeFile(path.resolve(options.output), failed);\n    }\n    throw error;\n  }\n  const json = `${JSON.stringify(report, null, 2)}\\n`;\n  if (options.output) await writeFile(path.resolve(options.output), json);\n  else process.stdout.write(json);\n}\n"))
+(module tools.compiler.binary-comparison-benchmark
+  (import "node:crypto" createHash)
+  (import "node:fs/promises" readFile writeFile)
+  (import "node:os" :default os)
+  (import "node:path" :default path)
+  (import "node:process" :default process)
+  (import "node:url" fileURLToPath pathToFileURL)
+
+  (defconst COMPILER_BINARY_COMPARISON_FORMAT "eliscript-compiler-binary-comparison-benchmark")
+  (defconst COMPILER_BINARY_COMPARISON_VERSION 1)
+  (defconst COMPILER_BINARY_COMPARISON_BASELINE "a123937b275d89e833434e84064e4e120cf5495b")
+
+  (defconst directory (js-call path :dirname (fileURLToPath (js* "import.meta.url"))))
+  (defconst project-directory (js-call path :resolve directory "../.."))
+  (defconst compiler-sources
+    (Object/freeze
+      (js-array
+        "bootstrap/compiler/symbol.eli"
+        "bootstrap/compiler/syntax.eli"
+        "bootstrap/compiler/reader.eli"
+        "bootstrap/compiler/formatter.eli"
+        "bootstrap/compiler/expander.eli"
+        "bootstrap/compiler/transient-analysis.eli"
+        "bootstrap/compiler/analyzer.eli"
+        "bootstrap/compiler/ir.eli"
+        "bootstrap/compiler/lower.eli"
+        "bootstrap/compiler/source-map.eli"
+        "bootstrap/compiler/emitter.eli"
+        "bootstrap/compiler/project.eli"
+        "bootstrap/compiler/compiler.eli")))
+  (defconst digest-files
+    (Object/freeze
+      (js-call compiler-sources :concat
+        (js-array
+          "compiler/eliscript-emitter.el"
+          "compiler/eliscript-ir-emitter.el"
+          "tools/compiler/binary-comparison-benchmark.mjs"))))
+
+  (defun positive-integer (value name)
+    (let ((parsed (globalThis.Number value)))
+      (when (or (not (Number/isSafeInteger parsed)) (<= parsed 0))
+        (throw (new globalThis.TypeError (str name " must be a positive safe integer"))))
+      parsed))
+
+  (defun parse-arguments (arguments*)
+    (let ((baseline-root undefined)
+          (output undefined)
+          (index 0))
+      (while (< index (js-length arguments*))
+        (let ((argument (aref arguments* index)))
+          (cond
+            ((= argument "--baseline-root")
+             (setq index (+ index 1))
+             (setq baseline-root (aref arguments* index)))
+            ((= argument "--output")
+             (setq index (+ index 1))
+             (setq output (aref arguments* index)))
+            ((= argument "--help")
+             (js-call (get process :stdout) :write
+               (str "Usage: bun tools/compiler/binary-comparison-benchmark.mjs "
+                    "--baseline-root DIR [--output REPORT.json]\n"))
+             (js-call process :exit 0))
+            (t
+             (throw (new globalThis.TypeError (str "unknown argument " argument))))))
+        (setq index (+ index 1)))
+      (when (not baseline-root)
+        (throw (new globalThis.TypeError "--baseline-root is required")))
+      (js-object
+        :baselineRoot (js-call path :resolve baseline-root)
+        :output output)))
+
+  (defasync compilerBinaryComparisonSourceDigest ()
+    (let ((hash (createHash "sha256"))
+          (index 0))
+      (while (< index (js-length digest-files))
+        (let ((relative (aref digest-files index)))
+          (js-call hash :update relative)
+          (js-call hash :update "\u0000")
+          (js-call hash :update (await (readFile (js-call path :join project-directory relative))))
+          (js-call hash :update "\u0000"))
+        (setq index (+ index 1)))
+      (js-object
+        :algorithm "sha256"
+        :files digest-files
+        :value (js-call hash :digest "hex"))))
+
+  (defun git-revision (root)
+    (let ((result (js-call globalThis.Bun :spawnSync (js-array "git" "-C" root "rev-parse" "HEAD"))))
+      (when (not (= (get result :exitCode) 0))
+        (throw (new globalThis.Error (js-call (js-call (new globalThis.TextDecoder) :decode (get result :stderr)) :trim))))
+      (js-call (js-call (new globalThis.TextDecoder) :decode (get result :stdout)) :trim)))
+
+  (defasync load-compiler (root identity)
+    (let ((location (js-call path :join root "dist/bootstrap/compiler.mjs")))
+      (funcall (js* "(u) => import(u)") (str (get (pathToFileURL location) :href) "?benchmark=" identity))))
+
+  (defun median (samples)
+    (let ((values (js-call (js-call samples :slice) :sort (lambda (left right) (- left right)))))
+      (aref values (Math/floor (/ (js-length values) 2)))))
+
+  (defun compile-corpus (compiler corpus rounds)
+    (let ((checksum 0)
+          (start (js-call globalThis.performance :now))
+          (round 0))
+      (while (< round rounds)
+        (let ((index 0))
+          (while (< index (js-length corpus))
+            (let* ((item (aref corpus index))
+                   (relative (get item :relative))
+                   (result (js-call compiler :compile_string_with_source_map
+                             (get item :source)
+                             relative
+                             (str (js-call path :basename relative ".eli") ".mjs")
+                             relative)))
+              (setq checksum (+ checksum
+                                (js-length (get result :javascript))
+                                (js-length (get result :sourceMap)))))
+            (setq index (+ index 1))))
+        (setq round (+ round 1)))
+      (js-object
+        :milliseconds (- (js-call globalThis.performance :now) start)
+        :checksum checksum)))
+
+  (defun validateCompilerBinaryComparisonReport (report)
+    (let ((reject (lambda (message)
+                    (let ((err (new globalThis.TypeError message)))
+                      (put err :report report)
+                      (throw err)))))
+      (when (or (not report)
+                (not (= (get report :format) COMPILER_BINARY_COMPARISON_FORMAT))
+                (not (= (get report :version) COMPILER_BINARY_COMPARISON_VERSION))
+                (not (get report :baseline))
+                (not (= (get (get report :baseline) :revision) COMPILER_BINARY_COMPARISON_BASELINE)))
+        (funcall reject "invalid compiler binary comparison report identity"))
+      (let* ((parameters (get report :parameters))
+             (samples (if parameters (get parameters :timingSamples) undefined))
+             (measurements (get report :measurements))
+             (baseline-meas (if measurements (get measurements :baseline) undefined))
+             (optimized-meas (if measurements (get measurements :optimized) undefined))
+             (baseline-samples (if baseline-meas (get baseline-meas :samplesMs) undefined))
+             (optimized-samples (if optimized-meas (get optimized-meas :samplesMs) undefined)))
+        (when (or (not (Array/isArray baseline-samples))
+                  (not (Array/isArray optimized-samples))
+                  (not (= (js-length baseline-samples) samples))
+                  (not (= (js-length optimized-samples) samples)))
+          (funcall reject "compiler binary comparison samples are incomplete")))
+      (let* ((validation (get report :validation))
+             (corpus (get report :corpus))
+             (files (if corpus (get corpus :files) undefined))
+             (file-count (if files (js-length files) undefined)))
+        (when (or (not validation)
+                  (not (= (get validation :compiledModules) file-count))
+                  (not (= (get validation :validSourceMaps) file-count))
+                  (<= (get validation :baselineChecksum) 0)
+                  (<= (get validation :optimizedChecksum) 0)
+                  (>= (get validation :optimizedBytes) (get validation :baselineBytes)))
+          (funcall reject "compiler binary comparison validation failed")))
+      (let ((decision (get report :decision))
+            (measurements (get report :measurements)))
+        (when (or (not decision)
+                  (not (= (get decision :passed) t))
+                  (< (get measurements :speedup) (get decision :minimumSpeedup)))
+          (funcall reject "compiler binary comparison speedup decision failed")))
+      report))
+
+  (defun coalesce (a b c)
+    (if (not (= a undefined))
+        (if (not (= a nil)) a (if (not (= b undefined)) (if (not (= b nil)) b c) c))
+      (if (not (= b undefined)) (if (not (= b nil)) b c) c)))
+
+  (defasync runCompilerBinaryComparisonBenchmark (options)
+    (let* ((env (get process :env))
+           (warmup-rounds
+             (positive-integer
+               (coalesce (get options :warmupRounds)
+                         (get env :ELISCRIPT_COMPILER_COMPARISON_WARMUP_ROUNDS)
+                         2)
+               "warmup rounds"))
+           (timing-rounds
+             (positive-integer
+               (coalesce (get options :timingRounds)
+                         (get env :ELISCRIPT_COMPILER_COMPARISON_TIMING_ROUNDS)
+                         6)
+               "timing rounds"))
+           (timing-samples
+             (positive-integer
+               (coalesce (get options :timingSamples)
+                         (get env :ELISCRIPT_COMPILER_COMPARISON_TIMING_SAMPLES)
+                         11)
+               "timing samples")))
+      (when (= (% timing-samples 2) 0)
+        (throw (new globalThis.TypeError "timing samples must be odd")))
+      (let ((minimum-speedup
+              (globalThis.Number
+                (coalesce (get options :minimumSpeedup)
+                          (get env :ELISCRIPT_COMPILER_COMPARISON_MINIMUM_SPEEDUP)
+                          1.15))))
+        (when (or (not (Number/isFinite minimum-speedup)) (<= minimum-speedup 1))
+          (throw (new globalThis.TypeError "minimum speedup must be greater than 1")))
+        (let* ((baseline-root (js-call path :resolve (get options :baselineRoot)))
+               (revision (git-revision baseline-root)))
+          (when (not (= revision COMPILER_BINARY_COMPARISON_BASELINE))
+            (throw (new globalThis.TypeError
+                     (str "baseline must be " COMPILER_BINARY_COMPARISON_BASELINE ", got " revision))))
+          (let* ((corpus
+                   (await (Promise/all
+                            (js-call compiler-sources :map
+                              (async (relative)
+                                (let ((source (await (readFile (js-call path :join project-directory relative) "utf8"))))
+                                  (js-object :relative relative :source source)))))))
+                 (source-bytes
+                   (js-call corpus :reduce
+                     (lambda (total item) (+ total (Buffer/byteLength (get item :source))))
+                     0))
+                 (compilers
+                   (await (Promise/all
+                            (js-array
+                              (load-compiler baseline-root "baseline")
+                              (load-compiler project-directory "optimized")))))
+                 (baseline (aref compilers 0))
+                 (optimized (aref compilers 1))
+                 (baseline-bytes 0)
+                 (optimized-bytes 0)
+                 (valid-source-maps 0))
+            (let ((index 0))
+              (while (< index (js-length corpus))
+                (let* ((item (aref corpus index))
+                       (relative (get item :relative))
+                       (source (get item :source))
+                       (baseline-result (js-call baseline :compile_string_with_source_map source relative "module.mjs" relative))
+                       (optimized-result (js-call optimized :compile_string_with_source_map source relative "module.mjs" relative)))
+                  (JSON/parse (get baseline-result :sourceMap))
+                  (JSON/parse (get optimized-result :sourceMap))
+                  (setq valid-source-maps (+ valid-source-maps 1))
+                  (setq baseline-bytes (+ baseline-bytes (Buffer/byteLength (get baseline-result :javascript))))
+                  (setq optimized-bytes (+ optimized-bytes (Buffer/byteLength (get optimized-result :javascript)))))
+                (setq index (+ index 1))))
+            (let ((round 0))
+              (while (< round warmup-rounds)
+                (compile-corpus baseline corpus 1)
+                (compile-corpus optimized corpus 1)
+                (setq round (+ round 1))))
+            (let ((baseline-samples (js-array))
+                  (optimized-samples (js-array))
+                  (baseline-checksum 0)
+                  (optimized-checksum 0)
+                  (sample 0))
+              (while (< sample timing-samples)
+                (let ((order (if (= (% sample 2) 0)
+                                 (js-array
+                                   (js-array baseline baseline-samples "baseline")
+                                   (js-array optimized optimized-samples "optimized"))
+                               (js-array
+                                 (js-array optimized optimized-samples "optimized")
+                                 (js-array baseline baseline-samples "baseline"))))
+                      (order-index 0))
+                  (while (< order-index (js-length order))
+                    (let* ((entry (aref order order-index))
+                           (compiler (aref entry 0))
+                           (samples (aref entry 1))
+                           (identity (aref entry 2))
+                           (result (compile-corpus compiler corpus timing-rounds)))
+                      (js-call samples :push (get result :milliseconds))
+                      (if (= identity "baseline")
+                          (setq baseline-checksum (get result :checksum))
+                        (setq optimized-checksum (get result :checksum))))
+                    (setq order-index (+ order-index 1))))
+                (setq sample (+ sample 1)))
+              (let* ((baseline-median (median baseline-samples))
+                     (optimized-median (median optimized-samples))
+                     (speedup (/ baseline-median optimized-median)))
+                (validateCompilerBinaryComparisonReport
+                  (js-object
+                    :format COMPILER_BINARY_COMPARISON_FORMAT
+                    :version COMPILER_BINARY_COMPARISON_VERSION
+                    :generatedAt (js-call (new globalThis.Date) :toISOString)
+                    :sourceDigest (await (compilerBinaryComparisonSourceDigest))
+                    :host (js-object
+                            :runtime "bun"
+                            :runtimeVersion (get globalThis.Bun :version)
+                            :engine "JavaScriptCore"
+                            :platform (get process :platform)
+                            :architecture (get process :arch)
+                            :operatingSystem (str (js-call os :type) " " (js-call os :release)))
+                    :baseline (js-object
+                                :revision revision
+                                :root (js-call path :basename baseline-root))
+                    :corpus (js-object
+                              :files compiler-sources
+                              :sourceBytes source-bytes)
+                    :parameters (js-object
+                                  :warmupRounds warmup-rounds
+                                  :timingRounds timing-rounds
+                                  :timingSamples timing-samples)
+                    :validation (js-object
+                                  :compiledModules (js-length corpus)
+                                  :validSourceMaps valid-source-maps
+                                  :baselineBytes baseline-bytes
+                                  :optimizedBytes optimized-bytes
+                                  :baselineChecksum baseline-checksum
+                                  :optimizedChecksum optimized-checksum)
+                    :measurements (js-object
+                                    :baseline (js-object :samplesMs baseline-samples :medianMs baseline-median)
+                                    :optimized (js-object :samplesMs optimized-samples :medianMs optimized-median)
+                                    :speedup speedup)
+                    :decision (js-object
+                                :minimumSpeedup minimum-speedup
+                                :passed (>= speedup minimum-speedup)))))))))))
+
+  (defasync run-main ()
+    (let ((options (parse-arguments (js-call (get process :argv) :slice 2)))
+          (report undefined))
+      (try
+        (setq report (await (runCompilerBinaryComparisonBenchmark options)))
+        (catch error
+          (when (get error :report)
+            (let ((failed (str (JSON/stringify (get error :report) nil 2) "\n")))
+              (if (= (get options :output) undefined)
+                  (js-call (get process :stdout) :write failed)
+                (await (writeFile (js-call path :resolve (get options :output)) failed)))))
+          (throw error)))
+      (let ((json (str (JSON/stringify report nil 2) "\n")))
+        (if (get options :output)
+            (await (writeFile (js-call path :resolve (get options :output)) json))
+          (js-call (get process :stdout) :write json)))))
+
+  (when (js* "import.meta.main")
+    (run-main))
+
+  (export
+    COMPILER_BINARY_COMPARISON_FORMAT
+    COMPILER_BINARY_COMPARISON_VERSION
+    COMPILER_BINARY_COMPARISON_BASELINE
+    compilerBinaryComparisonSourceDigest
+    validateCompilerBinaryComparisonReport
+    runCompilerBinaryComparisonBenchmark))

@@ -1,2 +1,36 @@
-(module capsules.examples.org-site.vite.config
-  (js* "import react from \"@vitejs/plugin-react\";\nimport { defineConfig } from \"vite\";\nimport { dirname, resolve } from \"node:path\";\nimport { fileURLToPath } from \"node:url\";\nimport { eliscriptOrg } from \"../../tools/org/vite-plugin.mjs\";\nimport { eliscript } from \"../../tools/vite/index.mjs\";\n\nconst exampleDirectory = dirname(fileURLToPath(import.meta.url));\nconst repositoryDirectory = resolve(exampleDirectory, \"../..\");\nconst contentDirectory = resolve(exampleDirectory, \"content\");\nconst outputDirectory = process.env.ELISCRIPT_BUILD_OUT_DIR\n  ? resolve(process.env.ELISCRIPT_BUILD_OUT_DIR)\n  : resolve(repositoryDirectory, \"dist/org-site\");\n\nexport default defineConfig({\n  root: exampleDirectory,\n  plugins: [\n    eliscript(),\n    eliscriptOrg({ contentDirectory }),\n    react({ include: /\\.(?:[jt]sx?|eli)$/ }),\n  ],\n  server: {\n    port: 5173,\n    strictPort: true,\n    fs: {\n      allow: [repositoryDirectory],\n    },\n  },\n  preview: {\n    port: 4173,\n    strictPort: true,\n  },\n  build: {\n    outDir: outputDirectory,\n    emptyOutDir: true,\n    sourcemap: true,\n  },\n});\n"))
+(module examples.org-site.vite.config
+  (import "@vitejs/plugin-react" :default react)
+  (import "vite" defineConfig)
+  (import "node:path" dirname resolve)
+  (import "node:url" fileURLToPath)
+  (import "../../tools/org/vite-plugin.mjs" eliscriptOrg)
+  (import "../../tools/vite/index.mjs" eliscript)
+
+  (defconst exampleDirectory (dirname (fileURLToPath (js* "import.meta.url"))))
+  (defconst repositoryDirectory (resolve exampleDirectory "../.."))
+  (defconst contentDirectory (resolve exampleDirectory "content"))
+  (defconst outputDirectory
+    (let ((configured (get (get globalThis.process :env) :ELISCRIPT_BUILD_OUT_DIR)))
+      (if configured
+          (resolve configured)
+        (resolve repositoryDirectory "dist/org-site"))))
+
+  (export-default
+    (defineConfig
+      (js-object
+        :root exampleDirectory
+        :plugins (js-array
+                   (eliscript)
+                   (eliscriptOrg (js-object :contentDirectory contentDirectory))
+                   (react (js-object :include (new globalThis.RegExp "\\.(?:[jt]sx?|eli)$"))))
+        :server (js-object
+                  :port 5173
+                  :strictPort t
+                  :fs (js-object :allow (js-array repositoryDirectory)))
+        :preview (js-object
+                   :port 4173
+                   :strictPort t)
+        :build (js-object
+                 :outDir outputDirectory
+                 :emptyOutDir t
+                 :sourcemap t)))))

@@ -5,7 +5,7 @@
   (import "./initializer-array-fixture.mjs" prepareInitializerFixtureArguments)
 
   (defconst fixture-origin "http://eliscript-fixture.invalid")
-  (defconst runtime-files (js-array "prelude.mjs" "unicode-case.mjs" "unicode-case-data.mjs" "math.mjs"))
+  (defconst runtime-files (js-array "array-text.mjs" "binding.mjs" "errors.mjs" "math.mjs" "number-radix.mjs" "prelude.mjs" "primitives.mjs" "unicode-case.mjs" "unicode-case-data.mjs"))
   (defun fixture-root (source-root)
     (let* ((root (realpathSync (resolve source-root)))
            (package (JSON/parse (readFileSync (resolve root "package.json") "utf8")))
@@ -190,7 +190,12 @@
   (defun installFixtureBrowserEnvironment (types source-root)
     (let ((restorations (js-array)) (browsers (new globalThis.WeakSet))
           (configuration (js-object :imports (js-object
+            "eliscript/runtime/array-text.mjs" (+ fixture-origin "/runtime/array-text.mjs")
+            "eliscript/runtime/binding.mjs" (+ fixture-origin "/runtime/binding.mjs")
+            "eliscript/runtime/errors.mjs" (+ fixture-origin "/runtime/errors.mjs")
+            "eliscript/runtime/number-radix.mjs" (+ fixture-origin "/runtime/number-radix.mjs")
             "eliscript/runtime/prelude.mjs" (+ fixture-origin "/runtime/prelude.mjs")
+            "eliscript/runtime/primitives.mjs" (+ fixture-origin "/runtime/primitives.mjs")
             "eliscript/runtime/unicode-case" (+ fixture-origin "/runtime/unicode-case.mjs")
             "eliscript/runtime/unicode-case.mjs" (+ fixture-origin "/runtime/unicode-case.mjs")
             "eliscript/runtime/math.mjs" (+ fixture-origin "/runtime/math.mjs")

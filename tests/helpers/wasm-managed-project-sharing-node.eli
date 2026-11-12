@@ -1,0 +1,18 @@
+(module tests.helpers.wasm-managed-project-sharing-node
+  (import "node:fs" readFileSync)
+  (import "node:buffer" Buffer)
+
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defasync run-main ()
+    (await (funcall dynamic-import
+             (get (new globalThis.URL "./managed-reference-node.mjs" (get (js* "import.meta") :url)) :href)))
+    (let* ((source (readFileSync 0 "utf8"))
+           (m (await (funcall dynamic-import
+                       (str "data:text/javascript;base64,"
+                            (js-call (Buffer/from source) :toString "base64")))))
+           (sample (get m :sample)))
+      (js-call (get globalThis.process :stdout) :write
+        (JSON/stringify (js-call sample :toString)))))
+
+  (run-main))

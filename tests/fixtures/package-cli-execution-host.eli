@@ -1,0 +1,8 @@
+(module tests.fixtures.package-cli-execution-host
+  (import "node:assert/strict" :default assert)
+  (import "node:process" :default process)
+  (defasync main ()
+    (let* ((args (get process :argv)) (load (js* "(specifier) => import(specifier)"))
+      (single (await (funcall load (aref args 2)))) (project (await (funcall load (aref args 3)))))
+      (js-call assert :equal (js-call single :add 19 23) 42) (js-call assert :equal (js-call project :run) 42)))
+  (main))

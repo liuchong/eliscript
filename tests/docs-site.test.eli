@@ -67,15 +67,20 @@
         (try
           (let ((page (await (js-call browser :newPage)))
                 (failed (js-array))
-                (requests (js-array)))
+                (requests (js-array))
+                (responses (js-array)))
             (js-call page :on "pageerror"
               (lambda (error)
                 (js-call failed :push (js-call (str error) :slice 0 160))))
             (js-call page :on "request"
               (lambda (request)
                 (js-call requests :push (js-call request :url))))
+            (js-call page :on "response"
+              (lambda (response)
+                (when (js-call (js-call response :url) :includes "dist/browser/worker.mjs")
+                  (js-call responses :push response))))
             (await (js-call page :goto (+ (get server :origin) path) (js-object :waitUntil "networkidle")))
-            (await (funcall verify page requests))
+            (await (funcall verify page requests responses))
             (js-call (expect failed) :toEqual (js-array)))
           (finally
             (await (js-call browser :close)))))))
@@ -83,10 +88,14 @@
   (test "the page compiles the source in the browser"
     (async ()
       (await (withPage "index.html"
-        (async (page requests)
+        (async (page requests responses)
           (js-call (expect (js-call requests :some (lambda (url) (js-call url :endsWith "/site.eli")))) :toBe t)
           (js-call (expect (js-call requests :some (lambda (url) (js-call url :includes "browser/worker.mjs")))) :toBe t)
-          (js-call (expect (js-call requests :some (lambda (url) (js-call url :includes "dist/browser/compiler.js")))) :toBe t))))))
+          (js-call (expect (js-length responses)) :toBe 1)
+          (let ((response (aref responses 0)))
+            (js-call (expect (js-call response :status)) :toBe 200)
+            (js-call (expect (await (js-call response :text))) :toBe
+              (await (readFile (resolve ROOT "dist/browser/worker.mjs") "utf8")))))))))
 
   (test "every page opens with the same band as the home page"
     (async ()

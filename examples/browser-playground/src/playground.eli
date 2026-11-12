@@ -15,34 +15,118 @@
   (import "./highlight.eli" highlight-eliscript highlight-javascript)
 
   (defconst dynamic-import (js* "(url) => import(url)"))
-  (defconst blob-url-of
-    (js* "(code) => URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))"))
-  (defconst release-blob-url (js* "(url) => URL.revokeObjectURL(url)"))
-  (defconst install-console-capture
-    (js* "(node, format) => { if (console.eliscriptPlayground) return; const original = console.log; console.eliscriptPlayground = original; console.log = (...args) => { const pane = document.getElementById(node); if (pane) pane.textContent += args.map((value) => (value !== null && typeof value === 'object' ? format(value) : String(value))).join(' ') + '\\n'; original(...args); }; }"))
+
+  (defun blob-url-of (code)
+    (js-call globalThis.URL :createObjectURL
+             (new globalThis.Blob (js-array code)
+                  (js-object :type "text/javascript"))))
+
+  (defun release-blob-url (url)
+    (js-call globalThis.URL :revokeObjectURL url))
+
+  (defun install-console-capture (node-id format)
+    (let ((con globalThis.console))
+      (unless (get con :eliscriptPlayground)
+        (let ((original (get con :log)))
+          (put con :eliscriptPlayground original)
+          (put con :log
+            (lambda (&rest args)
+              (let ((pane (js-call globalThis.document :getElementById node-id)))
+                (when pane
+                  (let ((parts (js-call args :map
+                                 (lambda (value)
+                                   (if (and (not (= value nil))
+                                            (= (value-type value) "object"))
+                                       (funcall format value)
+                                     (funcall globalThis.String value))))))
+                    (put pane "textContent"
+                         (str (get pane "textContent" "")
+                              (js-call parts :join " ")
+                              "\n")))))
+              (apply original args)))))))
 
   ;; The page and the worker both live two levels below the repository root,
   ;; which is the base the runtime is served from.
-  (defconst package-base (js* "new URL('../../', import.meta.url).href"))
-  (defconst worker-url (js* "new URL('../../browser/worker.mjs', import.meta.url).href"))
+  (defconst package-base
+    (get (new globalThis.URL "../../" (js* "import.meta.url")) :href))
+  (defconst worker-url
+    (get (new globalThis.URL "../../dist/browser/worker.mjs" (js* "import.meta.url")) :href))
   (defconst compiler-browser-url
     (get (new globalThis.URL "../../tools/backends/browser/compiler-browser.mjs" (js* "import.meta.url")) :href))
-  (defconst compiler-configuration
-    (js* "() => { const configured = globalThis.eliscriptCompiler ?? {}; if (configured === null || typeof configured !== 'object' || Array.isArray(configured)) throw new TypeError('eliscriptCompiler must be a compiler configuration object'); const parameters = new URLSearchParams(location.search); const host = parameters.get('compilerHost') ?? configured.host ?? 'javascript'; const manifest = parameters.get('compilerManifest') ?? configured.manifestURL; if (host !== 'javascript' && host !== 'wasm') throw new TypeError('playground compiler host must be javascript or wasm'); if (host === 'wasm' && !manifest && !configured.workerClient) throw new TypeError('WASM playground compiler requires compilerManifest'); return { ...configured, host, manifestURL: manifest ? new URL(manifest, document.baseURI).href : undefined }; }"))
-  (defconst load-configured-compiler
-    (js* "async (url, configuration) => { const { createBrowserCompiler } = await import(url); return await createBrowserCompiler(configuration); }"))
-  (defconst dispose-compilers
-    (js* "(worker, pending) => { worker?.terminate(); if (pending) Promise.resolve(pending).then((compiler) => compiler.dispose()).catch((error) => console.error(error)); }"))
-  (defconst start-worker (js* "(url) => new Worker(url, { type: 'module' })"))
-  (defconst compile-once
-    (js* "(worker, message) => new Promise((resolve, reject) => { const onMessage = (event) => { const data = event.data; if (!data || data.id !== message.id) return; worker.removeEventListener('message', onMessage); if (data.ok) { resolve(data); return; } const error = new Error(data.message); error.diagnostics = data.diagnostics ?? []; reject(error); }; worker.addEventListener('message', onMessage); worker.postMessage(message); })"))
+
+  (defun compiler-configuration ()
+    (let ((configured (let ((raw globalThis.eliscriptCompiler))
+                        (if (nullish? raw) (js-object) raw))))
+      (when (or (= configured nil)
+                (not (= (value-type configured) "object"))
+                (Array/isArray configured))
+        (throw (new globalThis.TypeError "eliscriptCompiler must be a compiler configuration object")))
+      (let* ((parameters (new globalThis.URLSearchParams
+                              (get globalThis.location :search)))
+             (host-param (js-call parameters :get "compilerHost"))
+             (host (if (not (nullish? host-param))
+                       host-param
+                     (let ((cfg-host (get configured :host)))
+                       (if (not (nullish? cfg-host)) cfg-host "javascript"))))
+             (manifest-param (js-call parameters :get "compilerManifest"))
+             (manifest (if (not (nullish? manifest-param))
+                           manifest-param
+                         (get configured :manifestURL))))
+        (when (and (not (= host "javascript")) (not (= host "wasm")))
+          (throw (new globalThis.TypeError "playground compiler host must be javascript or wasm")))
+        (when (and (= host "wasm")
+                   (not manifest)
+                   (not (get configured :workerClient)))
+          (throw (new globalThis.TypeError "WASM playground compiler requires compilerManifest")))
+        (let ((result (Object/assign (js-object) configured)))
+          (put result :host host)
+          (put result :manifestURL
+               (if manifest
+                   (get (new globalThis.URL manifest (get globalThis.document :baseURI)) :href)
+                 undefined))
+          result))))
+
+  (defasync load-configured-compiler (url configuration)
+    (let* ((mod (await (funcall dynamic-import url)))
+           (create (get mod :createBrowserCompiler)))
+      (await (funcall create configuration))))
+
+  (defun dispose-compilers (worker pending)
+    (when worker
+      (js-call worker :terminate))
+    (when pending
+      (js-call (js-call (Promise/resolve pending)
+                        :then (lambda (compiler) (js-call compiler :dispose)))
+               :catch (lambda (error) (js-call globalThis.console :error error)))))
+
+  (defun start-worker (url)
+    (new globalThis.Worker url (js-object :type "module")))
+
+  (defun compile-once (worker message)
+    (new globalThis.Promise
+      (lambda (resolve reject)
+        (let ((on-message nil))
+          (setq on-message
+            (lambda (event)
+              (let ((data (get event :data)))
+                (when (and data (= (get data :id) (get message :id)))
+                  (js-call worker :removeEventListener "message" on-message)
+                  (if (get data :ok)
+                      (funcall resolve data)
+                    (let ((error (new globalThis.Error (get data :message)))
+                          (diagnostics (get data :diagnostics)))
+                      (put error :diagnostics
+                           (if (nullish? diagnostics) (js-array) diagnostics))
+                      (funcall reject error)))))))
+          (js-call worker :addEventListener "message" on-message)
+          (js-call worker :postMessage message)))))
 
   (defvar compile-worker nil)
   (defvar configured-compiler-promise nil)
   (defvar compile-sequence 0)
 
   (defconst capabilities
-    (browserCapabilities (js* "globalThis") (js-array "document")))
+    (browserCapabilities globalThis.globalThis (js-array "document")))
   (defconst page (browserDocument capabilities))
 
   (defun node (id) (js-call page :getElementById id))
@@ -100,13 +184,13 @@
 
   (defun worker-for-compile ()
     (when (nil? compile-worker)
-      (setq compile-worker (funcall start-worker worker-url)))
+      (setq compile-worker (start-worker worker-url)))
     compile-worker)
 
   (defasync configured-compiler (configuration)
     (when (nil? configured-compiler-promise)
       (setq configured-compiler-promise
-            (funcall load-configured-compiler compiler-browser-url configuration)))
+            (load-configured-compiler compiler-browser-url configuration)))
     (await configured-compiler-promise))
 
   (defun close-compilers ()
@@ -114,22 +198,22 @@
           (pending configured-compiler-promise))
       (setq compile-worker nil)
       (setq configured-compiler-promise nil)
-      (funcall dispose-compilers worker pending)))
+      (dispose-compilers worker pending)))
 
   (defasync compile-in-worker (source)
-    (let ((configuration (funcall compiler-configuration)))
+    (let ((configuration (compiler-configuration)))
       (if (and (= (get configuration "host") "javascript")
                (undefined? (get configuration "manifestURL"))
                (undefined? (get configuration "workerClient")))
           (progn
             (setq compile-sequence (1+ compile-sequence))
-            (await (funcall compile-once
-                            (worker-for-compile)
-                            (js-object :id (str "compile-" compile-sequence)
-                                       :request (js-object :mode "single"
-                                                           :source source
-                                                           :filename "playground.eli"
-                                                           :runtimeBase package-base)))))
+            (await (compile-once
+                     (worker-for-compile)
+                     (js-object :id (str "compile-" compile-sequence)
+                                :request (js-object :mode "single"
+                                                    :source source
+                                                    :filename "playground.eli"
+                                                    :runtimeBase package-base)))))
         (let* ((compiler (await (configured-compiler configuration)))
                (javascript (await (js-call compiler :compile_string source "playground.eli")))
                (modules (js-object)))
@@ -165,7 +249,7 @@
                                  (display-text "diagnostics" (error-text error)))))
 
   (defun wire ()
-    (js-call (js* "globalThis") :addEventListener "pagehide" (lambda (event) (close-compilers)))
+    (js-call globalThis.globalThis :addEventListener "pagehide" (lambda (event) (close-compilers)))
     (js-call (node "run") :addEventListener "click" (lambda (event) (start)))
     (js-call (node "source") :addEventListener "input" (lambda (event) (paint-source)))
     (js-call (node "source") :addEventListener "scroll" (lambda (event) (sync-editor-scroll)))

@@ -1204,12 +1204,13 @@
                "backends/elf.mjs" "backends/managed.mjs" "backends/memory.mjs"
                "backends/native.mjs" "backends/numeric.mjs" "backends/optimize.mjs"
                "backends/regexp.mjs" "backends/sha256.mjs" "backends/wasm.mjs"
-               "host/compiler-session.mjs" "host/compiler-tools.mjs" "runtime/math.mjs"
-               "runtime/prelude.mjs" "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs"))
+               "host/compiler-session.mjs" "host/compiler-tools.mjs" "runtime/array-text.mjs"
+               "runtime/errors.mjs" "runtime/math.mjs" "runtime/number-radix.mjs"
+               "runtime/prelude.mjs" "runtime/primitives.mjs" "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs"))
              (sorted-module-ids (js-call (js-call module-ids :slice) :sort)))
         (try
           (progn
-            (js-call assert :strictEqual (js-length module-ids) 31)
+            (js-call assert :strictEqual (js-length module-ids) 35)
             (js-call assert :deepStrictEqual
               (js-call (js-call (get sources :modules) :map (lambda (record) (get record :id))) :sort) sorted-module-ids)
             (js-call assert :strictEqual (js-length (get sources :literalSources)) 53)
@@ -1238,8 +1239,12 @@
                   (js-call assert :deepStrictEqual observed-scopes
                     (js-array (js-object
                       :product (js-object :name "eliscript" :type "module" :private t
-                        :exports (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+                        :exports (js-object "./runtime/array-text.mjs" "./runtime/array-text.mjs"
+                          "./runtime/errors.mjs" "./runtime/errors.mjs"
+                          "./runtime/math.mjs" "./runtime/math.mjs"
+                          "./runtime/number-radix.mjs" "./runtime/number-radix.mjs"
                           "./runtime/prelude.mjs" "./runtime/prelude.mjs"
+                          "./runtime/primitives.mjs" "./runtime/primitives.mjs"
                           "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
                           "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs"))
                       :seed (js-object :type "module" :private t))))
@@ -1265,8 +1270,12 @@
                            (lambda (item) (= (get item :id) "runtime/math.mjs")))))
                     (js-call assert :deepStrictEqual scope
                       (js-object :name "eliscript" :type "module" :private t
-                        :exports (js-object "./runtime/math.mjs" "./runtime/math.mjs"
+                        :exports (js-object "./runtime/array-text.mjs" "./runtime/array-text.mjs"
+                          "./runtime/errors.mjs" "./runtime/errors.mjs"
+                          "./runtime/math.mjs" "./runtime/math.mjs"
+                          "./runtime/number-radix.mjs" "./runtime/number-radix.mjs"
                           "./runtime/prelude.mjs" "./runtime/prelude.mjs"
+                          "./runtime/primitives.mjs" "./runtime/primitives.mjs"
                           "./runtime/unicode-case.mjs" "./runtime/unicode-case.mjs"
                           "./runtime/unicode-case-data.mjs" "./runtime/unicode-case-data.mjs")))
                     (js-call assert :strictEqual

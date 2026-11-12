@@ -1,0 +1,65 @@
+(module tests.helpers.wasm-managed-strings-node
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:buffer" Buffer)
+  (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst dynamic-import (js* "(specifier) => import(specifier)"))
+
+  (defasync run-cli (mode arg)
+    (cond
+      ((= mode "--eval-cases")
+       (await (funcall dynamic-import
+                (get (new globalThis.URL "./managed-reference-node.mjs" (get (js* "import.meta") :url)) :href)))
+       (let* ((payload (JSON/parse (readFileSync 0 "utf8")))
+              (javascript (get payload :javascript))
+              (cases (get payload :cases))
+              (m (await (funcall dynamic-import
+                          (str "data:text/javascript;base64," (js-call (Buffer/from javascript) :toString "base64")))))
+              (out (js-call cases :map
+                     (lambda (pair)
+                       (let ((name (aref pair 0))
+                             (args (aref pair 1)))
+                         (Reflect/apply (get m (js-call name :replaceAll "-" "_")) m args))))))
+         (js-call (get globalThis.process :stdout) :write (JSON/stringify out))))
+      ((= mode "--check-wasm")
+       (let* ((a (instantiateManagedRuntime (readFileSync arg)))
+              (_ (js-call a :auto 1))
+              (s (js-call a :string (str "中😀" (String/fromCharCode 55296))))
+              (p (js-call a :number 1))
+              (point (js-call a :invoke "code-point" (js-array s p))))
+         (js-call assert :equal (js-call a :readNumber point) 128512)
+         (js-call a :release point)
+         (let ((fixed (js-call a :invoke "repair" (js-array s))))
+           (js-call assert :equal (js-call a :readString fixed) (str "中😀" (String/fromCharCode 65533)))
+           (js-call a :release fixed))
+         (let* ((needle (js-call a :string "😀"))
+                (nan (js-call a :number (get globalThis.Number :NaN)))
+                (last (js-call a :invoke "last" (js-array s needle nan))))
+           (js-call assert :equal (js-call a :readNumber last) 1)
+           (js-call a :release last)
+           (let* ((spaced (js-call a :string (str (String/fromCharCode 65279) " x " (String/fromCharCode 8192))))
+                  (trimmed (js-call a :invoke "trim" (js-array spaced))))
+             (js-call assert :equal (js-call a :readString trimmed) "x")
+             (js-call (js-array s p needle nan spaced trimmed) :forEach (lambda (v) (js-call a :release v)))
+             (js-call a :closeModule)
+             (js-call a :collect)
+             (js-call assert :equal (js-call a :live) 0)
+             (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))
+      ((= mode "--literal-source")
+       (await (funcall dynamic-import
+                (get (new globalThis.URL "./managed-reference-node.mjs" (get (js* "import.meta") :url)) :href)))
+       (let* ((source (readFileSync 0 "utf8"))
+              (m (await (funcall dynamic-import
+                          (str "data:text/javascript;base64," (js-call (Buffer/from source) :toString "base64")))))
+              (fn-literal (get m :literal)))
+         (js-call (get globalThis.process :stdout) :write
+           (JSON/stringify (js-object :text (funcall fn-literal) :sourceText (js-call fn-literal :toString))))))))
+
+  (let ((argv (get globalThis.process :argv)))
+    (js-call (js-array "--eval-cases" "--check-wasm" "--literal-source") :forEach
+      (lambda (flag)
+        (let ((idx (js-call argv :indexOf flag)))
+          (when (>= idx 0)
+            (js-call (run-cli flag (aref argv (1+ idx))) :catch
+              (lambda (err) (js-call globalThis.console :error err) (js-call globalThis.process :exit 1)))))))))

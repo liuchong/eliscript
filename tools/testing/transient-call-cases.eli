@@ -5,8 +5,9 @@
   (import "node:url" pathToFileURL)
   (import "../../dist/bootstrap/compiler.mjs" compile-string compile-ir-string)
   (import "../../dist/bootstrap/emitter.mjs" emit-expression)
+  (import "./maintained-suite-source.mjs" maintainedSuiteSource sourceCall sourceFormText rewriteSourceForms compileMaintainedSuite)
   (defconst transientCallSuite "tests/wasm-managed-transient-state.test.mjs")
-  (defconst transientCallSha "cef9524c8f9e95420ba13b0ce4189ac7e171ea662a92275b89c01c828f4f1f19")
+  (defconst transientCallSha "2ebd14fe50e3ef3e3fe8becb0fe190781738fe7852cd3a95496dc0926dfab0e7")
   (defconst transientCallTitles (js-array
     "Given the complete transient state dependency graph when vector trie boundaries and HAMT branches execute then zero-import WASM matches the original JS runtime"
     "Given collection at every allocation when owners mutate collision and branch nodes then old values metadata callbacks and sealed states match the original JS runtime"
@@ -34,31 +35,36 @@
       (unless (and (>= at 0) (= (js-call source :indexOf before (1+ at)) -1))
         (throw (new globalThis.TypeError "transient original loop boundary changed")))
       (str (js-call source :slice 0 at) after (js-call source :slice (+ at (js-length before))))))
-  (defun projectTransientCallSuite (root source)
+    (defun projectTransientCallSuite (root source)
     (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex") transientCallSha)
       (throw (new globalThis.TypeError "transient partition requires the complete original suite")))
-    (let* ((url (JSON/stringify (get (pathToFileURL (resolve root "tools/testing/transient-call-cases.mjs")) :href)))
-           (imports (str "(import " url " transientCallSelection)\n"))
-           (program (compile-ir-string (str imports
-             "(defun partition (items) (js-array (transientCallSelection \"vector\" items)"
-             " (transientCallSelection \"entry\" items) (transientCallSelection \"callback\" items)))")
-             "transient-call-partition.eli"))
-           (body (aref (get (aref (get program :body) 1) :children) 1)) (index 0)
-           (prefixes (js-array "for (const [index, count] of " "for (const [name,key] of " "for (const mode of ")))
-      (while (< index 3)
-        (let* ((prefix (aref prefixes index)) (start (js-call source :indexOf prefix))
-               (end (js-call source :indexOf ") {" (+ start (js-length prefix))))
-               (before (js-call source :slice start (+ end 3)))
-               (iterable (js-call source :slice (+ start (js-length prefix)) end))
-               (expression (get (emit-expression (aref (get body :children) index)) :text)))
-          (unless (and (>= start 0) (> end start))
-            (throw (new globalThis.TypeError "transient original loop is incomplete")))
-          ;; Preserve every callback, independent oracle, input, assertion,
-          ;; collection and cleanup. Only its iterable is selected per case.
-          (setq source (replace-once source before
-            (str prefix (replace-once expression "items" iterable) ") {"))))
-        (setq index (1+ index)))
-      (str (compile-string imports "transient-call-imports.eli") source)))
+    (let* ((maintained (maintainedSuiteSource root transientCallSuite source))
+           (seen (new globalThis.Set))
+           (projected (rewriteSourceForms maintained
+             (lambda (node node-text)
+               (let ((items (get node :items)) (kind undefined) (candidate undefined))
+                 (when (and (sourceCall node "js-call") (= (js-length items) 4)
+                            (= (funcall node-text (aref items 2)) ":forEach")
+                            (sourceCall (aref items 3) "lambda"))
+                   (let ((input (funcall node-text (aref items 1))))
+                     (cond ((= input "counts") (setq kind "vector" candidate "(js-array index count)"))
+                           ((js-call input :includes "\"vector-ownership\"") (setq kind "entry" candidate "pair"))
+                           ((= input "(js-array 0 1 2 3)") (setq kind "callback" candidate "mode")))))
+                 (if (undefined? kind) undefined
+                   (progn
+                     (when (js-call seen :has kind) (throw (new globalThis.TypeError "transient original loop is ambiguous")))
+                     (js-call seen :add kind)
+                     (let* ((callback (get (aref items 3) :items))
+                            (body (js-call (js-call (js-call callback :slice 2) :map (lambda (form) (funcall node-text form))) :join "\n")))
+                       (str "(js-call " (funcall node-text (aref items 1)) " :forEach (lambda "
+                         (funcall node-text (aref callback 1))
+                         " (when (> (js-length (transientCallSelection " (JSON/stringify kind) " (js-array " candidate "))) 0) "
+                         body ")))")))))))))
+      (unless (= (get seen :size) 3) (throw (new globalThis.TypeError "transient original loop is incomplete")))
+      (compileMaintainedSuite (get projected :source) transientCallSuite
+        (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/testing/transient-call-cases.mjs")) :href))
+          " transientCallSelection)"))))
+
   (defun isTransientCallFixture (root argument environment)
     (let ((directory (get environment :ELISCRIPT_TEST_FIXTURE_DIRECTORY)))
       (and (transientCallProfile environment) (= (value-type directory) "string")

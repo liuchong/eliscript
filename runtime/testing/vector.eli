@@ -1,2 +1,103 @@
-(module capsules.runtime.testing.vector
-  (js* "import {\n  VECTOR_STATE,\n  TRANSIENT_VECTOR_STATE,\n  VectorNode,\n  readTransientVectorMetrics,\n  readVectorMetrics,\n  resetTransientVectorMetrics as resetTransientVectorMetricsInternal,\n  resetVectorMetrics,\n} from \"../core/vector-internals.mjs\";\n\nfunction stateOf(vector) {\n  const state = vector?.[VECTOR_STATE];\n  if (state === undefined) {\n    throw new TypeError(\"expected an Eliscript persistent vector\");\n  }\n  return state;\n}\n\nfunction transientStateOf(vector) {\n  const state = vector?.[TRANSIENT_VECTOR_STATE];\n  if (state === undefined) {\n    throw new TypeError(\"expected an Eliscript transient vector\");\n  }\n  return state;\n}\n\nfunction collectNodes(node, nodes) {\n  if (nodes.has(node)) {\n    return;\n  }\n  nodes.add(node);\n  for (const child of node.slots) {\n    if (child instanceof VectorNode) {\n      collectNodes(child, nodes);\n    }\n  }\n}\n\nexport function resetPersistentVectorMetrics() {\n  resetVectorMetrics();\n}\n\nexport function persistentVectorMetrics() {\n  return readVectorMetrics();\n}\n\nexport function resetTransientVectorMetrics() {\n  resetTransientVectorMetricsInternal();\n}\n\nexport function transientVectorMetrics() {\n  return readTransientVectorMetrics();\n}\n\nexport function inspectTransientVector(vector) {\n  const state = transientStateOf(vector);\n  const nodes = new Set();\n  collectNodes(state.root, nodes);\n  let ownedNodeCount = 0;\n  for (const node of nodes) {\n    if (node.owner === state.owner) {\n      ownedNodeCount += 1;\n    }\n  }\n  return Object.freeze({\n    active: state.active,\n    count: state.count,\n    shift: state.shift,\n    tailOwned: state.tailOwned,\n    nodeCount: nodes.size,\n    ownedNodeCount,\n    sharesSourceRoot: state.root === state.source?.[VECTOR_STATE].root,\n    sharesSourceTail: state.tail === state.source?.[VECTOR_STATE].tail,\n  });\n}\n\nexport function inspectPersistentVector(vector) {\n  const state = stateOf(vector);\n  const nodes = new Set();\n  collectNodes(state.root, nodes);\n  return Object.freeze({\n    count: state.count,\n    shift: state.shift,\n    depth: state.shift / 5 + 1,\n    tailLength: state.tail.length,\n    nodeCount: nodes.size,\n  });\n}\n\nexport function sharedPersistentVectorNodes(left, right) {\n  const leftNodes = new Set();\n  const rightNodes = new Set();\n  collectNodes(stateOf(left).root, leftNodes);\n  collectNodes(stateOf(right).root, rightNodes);\n  let shared = 0;\n  for (const node of leftNodes) {\n    if (rightNodes.has(node)) {\n      shared += 1;\n    }\n  }\n  return shared;\n}\n"))
+(module eliscript.runtime.testing.vector
+  (import "../core/vector-internals.mjs" :as vector-internals)
+  (import "../core/vector-internals.mjs"
+    VECTOR_STATE
+    TRANSIENT_VECTOR_STATE
+    VectorNode
+    readTransientVectorMetrics
+    readVectorMetrics
+    resetVectorMetrics)
+
+  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+
+  (defun state-of (vector)
+    (let ((state (if (nil? vector) undefined (aref vector VECTOR_STATE))))
+      (when (undefined? state)
+        (throw (new globalThis/TypeError "expected an Eliscript persistent vector")))
+      state))
+
+  (defun transient-state-of (vector)
+    (let ((state (if (nil? vector) undefined (aref vector TRANSIENT_VECTOR_STATE))))
+      (when (undefined? state)
+        (throw (new globalThis/TypeError "expected an Eliscript transient vector")))
+      state))
+
+  (defun collect-nodes (node nodes)
+    (unless (js-call nodes :has node)
+      (js-call nodes :add node)
+      (let ((slots (get node :slots))
+            (index 0))
+        (while (< index (js-length slots))
+          (let ((child (get slots index)))
+            (when (funcall instance-of? child VectorNode)
+              (collect-nodes child nodes)))
+          (setq index (+ index 1))))))
+
+  (defun resetPersistentVectorMetrics ()
+    (resetVectorMetrics))
+
+  (defun persistentVectorMetrics ()
+    (readVectorMetrics))
+
+  (defun resetTransientVectorMetrics ()
+    (vector-internals/resetTransientVectorMetrics))
+
+  (defun transientVectorMetrics ()
+    (readTransientVectorMetrics))
+
+  (defun inspectTransientVector (vector)
+    (let ((state (transient-state-of vector))
+          (nodes (new globalThis/Set))
+          (owned-node-count 0))
+      (collect-nodes (get state :root) nodes)
+      (js-call nodes :forEach
+        (lambda (node)
+          (when (eq (get node :owner) (get state :owner))
+            (setq owned-node-count (+ owned-node-count 1)))))
+      (let* ((source (get state :source))
+             (source-state (if (nil? source) undefined (aref source VECTOR_STATE))))
+        (Object/freeze
+          (js-object
+            :active (get state :active)
+            :count (get state :count)
+            :shift (get state :shift)
+            :tailOwned (get state :tailOwned)
+            :nodeCount (get nodes :size)
+            :ownedNodeCount owned-node-count
+            :sharesSourceRoot (and (not (undefined? source-state))
+                                   (eq (get state :root) (get source-state :root)))
+            :sharesSourceTail (and (not (undefined? source-state))
+                                   (eq (get state :tail) (get source-state :tail))))))))
+
+  (defun inspectPersistentVector (vector)
+    (let ((state (state-of vector))
+          (nodes (new globalThis/Set)))
+      (collect-nodes (get state :root) nodes)
+      (Object/freeze
+        (js-object
+          :count (get state :count)
+          :shift (get state :shift)
+          :depth (+ (/ (get state :shift) 5) 1)
+          :tailLength (js-length (get state :tail))
+          :nodeCount (get nodes :size)))))
+
+  (defun sharedPersistentVectorNodes (left right)
+    (let ((left-nodes (new globalThis/Set))
+          (right-nodes (new globalThis/Set))
+          (shared 0))
+      (collect-nodes (get (state-of left) :root) left-nodes)
+      (collect-nodes (get (state-of right) :root) right-nodes)
+      (js-call left-nodes :forEach
+        (lambda (node)
+          (when (js-call right-nodes :has node)
+            (setq shared (+ shared 1)))))
+      shared))
+
+  (export
+    resetPersistentVectorMetrics
+    persistentVectorMetrics
+    resetTransientVectorMetrics
+    transientVectorMetrics
+    inspectTransientVector
+    inspectPersistentVector
+    sharedPersistentVectorNodes))

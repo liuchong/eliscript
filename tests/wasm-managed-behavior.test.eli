@@ -1,2 +1,152 @@
-(module capsules.tests.wasm-managed-behavior.test
-  (js* "import {afterAll, beforeAll, describe, test} from 'bun:test';\nimport assert from 'node:assert/strict';\nimport {readFile, mkdtemp, rm} from 'node:fs/promises';\nimport {resolve} from 'node:path';\nimport {tmpdir} from 'node:os';\nimport {buildBackends} from '../tools/backends/build.mjs';\nimport {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';\n\nconst catalog = JSON.parse(await readFile(new URL('./fixtures/wasm-managed-behavior.json', import.meta.url), 'utf8'));\nassert.equal(catalog.format, 'eliscript-managed-bdd');assert.equal(catalog.version, 1);\nassert.deepEqual(catalog.features.map(feature => feature.name), ['Array text conversion', 'Represented type and null queries', 'Text formatting and decomposition', 'Stable array sorting', 'Integer rounding', 'Live collection callbacks', 'Sequence concatenation', 'Value identity', 'Shallow source object integrity', 'Array searching', 'Array construction', 'Object own properties', 'Ordinary operand conversion', 'Ordinary text method dispatch', 'Source exceptions', 'Source Error construction', 'Symbol identity and iteration protocols', 'Catch destructuring']);\nassert.deepEqual(catalog.features.flatMap(feature => feature.scenarios.map(scenario => scenario.id)), [\n  'empty-and-holes', 'exact-primitive-text', 'shared-arrays', 'length-before-separator', 'live-element-reads', 'conversion-fallback',\n  'capture-before-arguments', 'toString-late-join-lookup', 'custom-result-identity', 'self-cycle-and-recovery', 'mutual-cycle-and-recovery',\n  'primitive-labels', 'capture-and-live-member', 'missing-member', 'null-predicate-family', 'nil-is-distinct', 'null-member-fails', 'unrepresented-global-refusal',\n  'indexed-member-path', 'indexed-capture-live-write', 'indexed-intermediate-fails', 'computed-index-refusal', 'intrinsic-type-evaluates-once', 'intrinsic-own-brands',\n  'unicode-case-expansion', 'padding-code-units', 'number-radix-text', 'replace-all-original-text', 'literal-split-zero-effects', 'regexp-split-captures', 'invalid-number-radix-recovery',\n  'sort-sparse-identity', 'sort-stable-equal-keys', 'sort-nan-ties', 'sort-captured-method', 'to-sorted-dense-copy', 'to-sorted-source-mutation', 'sort-invalid-comparator-recovery', 'to-sorted-invalid-comparator-recovery',\n  'math-round-half-and-zero', 'math-floor-ceil-trunc', 'math-number-hint-after-arguments', 'math-conversion-error-recovery',\n  'map-for-each-live-clear', 'set-for-each-reinsert', 'collection-for-each-empty-error',\n  'concat-sparse-shallow-copy', 'concat-ordered-string-conversions', 'concat-own-method-capture',\n  'same-value-ieee', 'same-value-object-identity', 'same-value-missing-effects', 'same-value-lexical-method',\n  'freeze-shallow-identity', 'freeze-strict-write-and-recovery', 'freeze-collection-internal-slots', 'freeze-invalid-comparator-before-short-sort',\n  'search-equality-and-zero', 'search-holes-and-undefined', 'search-last-omitted-versus-undefined', 'search-length-before-conversion', 'search-empty-skips-conversion', 'search-method-capture',\n  'array-of-dense-identity', 'array-from-unicode-points', 'array-from-arraylike-snapshot', 'array-from-live-collection', 'array-from-captured-next', 'array-from-abrupt-close',\n  'object-keys-integer-order', 'object-string-own-units', 'object-key-string-hint', 'object-assign-sparse-identity', 'object-assign-proto-data', 'object-assign-partial-error',\n  'operand-default-string-addition', 'operand-fallback-before-right', 'operand-relational-string-primitives', 'operand-left-failure-suppresses-right',\n  'ordinary-split-method-capture', 'ordinary-text-noncallable-effects',\n  'throw-exact-primitives', 'throw-cross-call-identity', 'finally-completion-priority', 'catch-lexical-closure', 'runtime-exception-families',\n  'error-family-own-properties', 'error-inherited-cause-identity', 'error-message-string-hint',\n  \"symbol-primitive-identities\", \"symbol-own-keys-and-json\", \"symbol-primitive-key-hint\", \"symbol-iterator-live-next\", \"symbol-nullish-iterator-fallback\", \"symbol-invalid-hook-recovery\",\n  'catch-vector-unicode-rest', 'catch-map-missing-and-as', 'catch-captured-later-binding', 'catch-default-tdz', 'catch-close-before-body', 'catch-missing-lookup-protocol',\n]);\nlet directory, b, runtime;\nbeforeAll(async () => {\n  directory = await mkdtemp(resolve(tmpdir(), 'eliscript-managed-bdd-'));b = await buildBackends({outputRoot: directory});\n  runtime = b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli', 'utf8'), 'runtime.eli');\n}, 120000);\nafterAll(async () => {if (directory) await rm(directory, {recursive: true, force: true});});\n\nfunction observe(a, value) {\n  if (value === null || typeof value !== 'object') return value;\n  if (value.kind === 4) return a.readNumber(value);\n  if (value.kind === 5) return a.readString(value);\n  assert.equal(value.kind, 14, 'BDD results use ordinary source arrays');\n  return Array.from({length: a.length(value)}, (_, index) => {const item = a.get(value, index);try {return observe(a, item);} finally {a.release(item);}});\n}\nconst ids = new Set();\nfor (const feature of catalog.features) describe('Feature: ' + feature.name + ' — ' + feature.description, () => {\n  for (const scenario of feature.scenarios) {\n    assert(!ids.has(scenario.id), 'unique BDD scenario identity');ids.add(scenario.id);\n    for (const field of ['given', 'when', 'then', 'source']) assert.equal(typeof scenario[field], 'string');\n    test('Scenario: ' + scenario.id + '\\nGiven ' + scenario.given + '\\nWhen ' + scenario.when + '\\nThen ' + scenario.then, async () => {\n      const filename = 'bdd-' + scenario.id + '.eli', source = ';中😀\\n(defconst marker 1)\\n' + scenario.source + '\\n(export run' + (Object.hasOwn(scenario, 'recover') ? ' recover' : '') + ')';\n      const program = b.compiler.compile_ir_string(source, filename), before = JSON.stringify(program);\n      const javascript = b.compiler.emit_ir_string(program).replace(/from \"eliscript\\/([^\"]+)\"/g, (_, path) => 'from ' + JSON.stringify(new URL('../' + path, import.meta.url).href));\n      const js = await import('data:text/javascript;base64,' + Buffer.from(javascript).toString('base64'));\n      if (scenario.compileError) {\n        assert.deepEqual(js.run(), scenario.expected);\n        assert.throws(() => b.managed.emit_managed_wasm(program, runtime), error => error.eliscriptDiagnostic?.code === scenario.compileError && error.eliscriptDiagnostic.location.file === filename && error.eliscriptDiagnostic.location.start.line >= 2);\n        assert.equal(JSON.stringify(program), before);return;\n      }\n      const bytes = Uint8Array.from(b.managed.emit_managed_wasm(program, runtime));assert.equal(JSON.stringify(program), before);\n      assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);\n      const a = instantiateManagedRuntime(bytes);a.auto(1);\n      try {\n        if (scenario.runtimeError) {\n          assert.throws(() => js.run(), error => error.name === scenario.jsError && (scenario.runtimeError !== 'ELI-RT0009' || error.eliscriptDiagnostic?.code === scenario.runtimeError));\n          assert.throws(() => a.invoke('run'), error => error.eliscriptDiagnostic?.code === scenario.runtimeError && (!scenario.wasmError || error.name === scenario.wasmError));\n          assert.equal(a.stats().frameDepth, 0);\n          if (Object.hasOwn(scenario, 'recover')) {const out = a.invoke('recover');try {assert.deepEqual(observe(a, out), scenario.recover);assert.deepEqual(js.recover(), scenario.recover);} finally {a.release(out);}}\n        } else {\n          const out = a.invoke('run');try {assert.deepEqual(js.run(), scenario.expected);assert.deepEqual(observe(a, out), scenario.expected);} finally {a.release(out);}\n        }\n      } finally {a.closeModule();a.collect();assert.equal(a.live(), 0);assert.equal(a.stats().frameDepth, 0);}\n    });\n  }\n});\n"))
+(module tests.wasm-managed-behavior.test
+  (import "bun:test" afterAll beforeAll describe test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs" readFileSync)
+  (import "node:fs/promises" readFile mkdtemp rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defun dynamic-import (specifier)
+    (funcall (js* "(specifier) => import(specifier)") specifier))
+
+  (defconst meta-url (js* "import.meta.url"))
+
+  (defconst catalog
+    (JSON/parse (readFileSync (new globalThis.URL "./fixtures/wasm-managed-behavior.json" meta-url) "utf8")))
+
+  (js-call assert :equal (get catalog :format) "eliscript-managed-bdd")
+  (js-call assert :equal (get catalog :version) 1)
+  (js-call assert :deepEqual
+    (js-call (get catalog :features) :map (lambda (feature) (get feature :name)))
+    (js-array "Array text conversion" "Represented type and null queries" "Text formatting and decomposition"
+              "Stable array sorting" "Integer rounding" "Live collection callbacks" "Sequence concatenation"
+              "Value identity" "Shallow source object integrity" "Array searching" "Array construction"
+              "Object own properties" "Ordinary operand conversion" "Ordinary text method dispatch"
+              "Source exceptions" "Source Error construction" "Symbol identity and iteration protocols"
+              "Catch destructuring"))
+  (js-call assert :deepEqual
+    (js-call (get catalog :features) :flatMap
+      (lambda (feature) (js-call (get feature :scenarios) :map (lambda (scenario) (get scenario :id)))))
+    (js-array
+      "empty-and-holes" "exact-primitive-text" "shared-arrays" "length-before-separator" "live-element-reads" "conversion-fallback"
+      "capture-before-arguments" "toString-late-join-lookup" "custom-result-identity" "self-cycle-and-recovery" "mutual-cycle-and-recovery"
+      "primitive-labels" "capture-and-live-member" "missing-member" "null-predicate-family" "nil-is-distinct" "null-member-fails" "unrepresented-global-refusal"
+      "indexed-member-path" "indexed-capture-live-write" "indexed-intermediate-fails" "computed-index-refusal" "intrinsic-type-evaluates-once" "intrinsic-own-brands"
+      "unicode-case-expansion" "padding-code-units" "number-radix-text" "replace-all-original-text" "literal-split-zero-effects" "regexp-split-captures" "invalid-number-radix-recovery"
+      "sort-sparse-identity" "sort-stable-equal-keys" "sort-nan-ties" "sort-captured-method" "to-sorted-dense-copy" "to-sorted-source-mutation" "sort-invalid-comparator-recovery" "to-sorted-invalid-comparator-recovery"
+      "math-round-half-and-zero" "math-floor-ceil-trunc" "math-number-hint-after-arguments" "math-conversion-error-recovery"
+      "map-for-each-live-clear" "set-for-each-reinsert" "collection-for-each-empty-error"
+      "concat-sparse-shallow-copy" "concat-ordered-string-conversions" "concat-own-method-capture"
+      "same-value-ieee" "same-value-object-identity" "same-value-missing-effects" "same-value-lexical-method"
+      "freeze-shallow-identity" "freeze-strict-write-and-recovery" "freeze-collection-internal-slots" "freeze-invalid-comparator-before-short-sort"
+      "search-equality-and-zero" "search-holes-and-undefined" "search-last-omitted-versus-undefined" "search-length-before-conversion" "search-empty-skips-conversion" "search-method-capture"
+      "array-of-dense-identity" "array-from-unicode-points" "array-from-arraylike-snapshot" "array-from-live-collection" "array-from-captured-next" "array-from-abrupt-close"
+      "object-keys-integer-order" "object-string-own-units" "object-key-string-hint" "object-assign-sparse-identity" "object-assign-proto-data" "object-assign-partial-error"
+      "operand-default-string-addition" "operand-fallback-before-right" "operand-relational-string-primitives" "operand-left-failure-suppresses-right"
+      "ordinary-split-method-capture" "ordinary-text-noncallable-effects"
+      "throw-exact-primitives" "throw-cross-call-identity" "finally-completion-priority" "catch-lexical-closure" "runtime-exception-families"
+      "error-family-own-properties" "error-inherited-cause-identity" "error-message-string-hint"
+      "symbol-primitive-identities" "symbol-own-keys-and-json" "symbol-primitive-key-hint" "symbol-iterator-live-next" "symbol-nullish-iterator-fallback" "symbol-invalid-hook-recovery"
+      "catch-vector-unicode-rest" "catch-map-missing-and-as" "catch-captured-later-binding" "catch-default-tdz" "catch-close-before-body" "catch-missing-lookup-protocol"))
+
+  (defvar directory undefined)
+  (defvar b undefined)
+  (defvar runtime undefined)
+
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-managed-bdd-"))))
+    (setq b (await (buildBackends (js-object :outputRoot directory))))
+    (setq runtime (js-call (get b :compiler) :compile_ir_string (await (readFile "bootstrap/runtime/memory.eli" "utf8")) "runtime.eli")))
+    120000)
+
+  (afterAll (async ()
+    (when directory
+      (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun observe (a value)
+    (cond
+      ((or (= value nil) (/= (value-type value) "object")) value)
+      ((= (get value :kind) 4) (js-call a :readNumber value))
+      ((= (get value :kind) 5) (js-call a :readString value))
+      (t
+       (js-call assert :equal (get value :kind) 14 "BDD results use ordinary source arrays")
+       (Array/from (js-object :length (js-call a :length value))
+         (lambda (_ index)
+           (let ((item (js-call a :get value index)))
+             (try (observe a item) (finally (js-call a :release item)))))))))
+
+  (defconst ids (new globalThis.Set))
+
+  (js-call (get catalog :features) :forEach
+    (lambda (feature)
+      (describe (str "Feature: " (get feature :name) " — " (get feature :description))
+        (lambda ()
+          (js-call (get feature :scenarios) :forEach
+            (lambda (scenario)
+              (assert (not (js-call ids :has (get scenario :id))) "unique BDD scenario identity")
+              (js-call ids :add (get scenario :id))
+              (js-call (js-array "given" "when" "then" "source") :forEach
+                (lambda (field) (js-call assert :equal (value-type (get scenario field)) "string")))
+              (test (str "Scenario: " (get scenario :id) "\nGiven " (get scenario :given) "\nWhen " (get scenario :when) "\nThen " (get scenario :then))
+                (async ()
+                  (let* ((filename (str "bdd-" (get scenario :id) ".eli"))
+                         (source (str ";中😀\n(defconst marker 1)\n" (get scenario :source)
+                                      "\n(export run" (if (Object/hasOwn scenario "recover") " recover" "") ")"))
+                         (program (js-call (get b :compiler) :compile_ir_string source filename))
+                         (before (JSON/stringify program))
+                         (javascript (js-call (js-call (get b :compiler) :emit_ir_string program)
+                                       :replace (new globalThis.RegExp "from \"eliscript/([^\"]+)\"" "g")
+                                       (lambda (_ path) (str "from " (JSON/stringify (get (new globalThis.URL (str "../" path) meta-url) :href))))))
+                         (js (await (dynamic-import (str "data:text/javascript;base64," (js-call (Buffer/from javascript) :toString "base64"))))))
+                    (if (get scenario :compileError)
+                      (progn
+                        (js-call assert :deepEqual (js-call js :run) (get scenario :expected))
+                        (js-call assert :throws
+                          (lambda () (js-call (get b :managed) :emit_managed_wasm program runtime))
+                          (lambda (error)
+                            (and (get error :eliscriptDiagnostic)
+                                 (= (get (get error :eliscriptDiagnostic) :code) (get scenario :compileError))
+                                 (= (get (get (get error :eliscriptDiagnostic) :location) :file) filename)
+                                 (>= (get (get (get (get error :eliscriptDiagnostic) :location) :start) :line) 2))))
+                        (js-call assert :equal (JSON/stringify program) before))
+                      (let ((bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program runtime))))
+                        (js-call assert :equal (JSON/stringify program) before)
+                        (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+                        (let ((a (instantiateManagedRuntime bytes)))
+                          (js-call a :auto 1)
+                          (try
+                            (if (get scenario :runtimeError)
+                              (progn
+                                (js-call assert :throws
+                                  (lambda () (js-call js :run))
+                                  (lambda (error)
+                                    (and (= (get error :name) (get scenario :jsError))
+                                         (or (/= (get scenario :runtimeError) "ELI-RT0009")
+                                             (and (get error :eliscriptDiagnostic)
+                                                  (= (get (get error :eliscriptDiagnostic) :code) (get scenario :runtimeError)))))))
+                                (js-call assert :throws
+                                  (lambda () (js-call a :invoke "run"))
+                                  (lambda (error)
+                                    (and (get error :eliscriptDiagnostic)
+                                         (= (get (get error :eliscriptDiagnostic) :code) (get scenario :runtimeError))
+                                         (or (not (get scenario :wasmError))
+                                             (= (get error :name) (get scenario :wasmError))))))
+                                (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+                                (when (Object/hasOwn scenario "recover")
+                                  (let ((out (js-call a :invoke "recover")))
+                                    (try
+                                      (js-call assert :deepEqual (observe a out) (get scenario :recover))
+                                      (js-call assert :deepEqual (js-call js :recover) (get scenario :recover))
+                                      (finally (js-call a :release out))))))
+                              (let ((out (js-call a :invoke "run")))
+                                (try
+                                  (js-call assert :deepEqual (js-call js :run) (get scenario :expected))
+                                  (js-call assert :deepEqual (observe a out) (get scenario :expected))
+                                  (finally (js-call a :release out)))))
+                            (finally
+                              (js-call a :closeModule)
+                              (js-call a :collect)
+                              (js-call assert :equal (js-call a :live) 0)
+                              (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))))))))))))))

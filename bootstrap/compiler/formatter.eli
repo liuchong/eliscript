@@ -2,15 +2,17 @@
   (import "./reader.mjs" read-string)
 
   (defconst formatter-format "eliscript-formatter")
+  (defconst typeof-value (lambda (value) (js* "typeof value")))
   (defconst formatter-version 1)
   (defconst formatter-width 88)
   (defconst formatter-indent 2)
+  (defconst trailing-horizontal-whitespace-pattern (new globalThis.RegExp "[ \\t]+$" "u"))
   (defconst formatter-fail
     (lambda (message filename)
-      (let* ((error (new (js* "Error") message))
+      (let* ((error (new globalThis.Error message))
              (diagnostic (js-object :format "eliscript-diagnostic" :version 1
                :code "ELI-F0001" :severity "error" :phase "formatter" :message message)))
-        (when (js* "!!filename")
+        (when (funcall globalThis.Boolean filename)
           (put diagnostic :location (js-object :file filename)))
         (put error :eliscriptDiagnostic diagnostic)
         (throw error))))
@@ -101,7 +103,7 @@
             start
             (get state :index))
           :replace
-          (js* "/[ \\t]+$/u")
+          trailing-horizontal-whitespace-pattern
           ""))))
 
   (defun read-atom-token (state)
@@ -351,7 +353,7 @@
       (if (= (get output :length) 0) "" (str output "\n"))))
 
   (defun format-source (source filename)
-    (unless (= (js* "typeof source") "string")
+    (unless (= (funcall typeof-value source) "string")
       (formatter-error "formatter source must be a string" filename))
     (read-string source filename)
     (let ((formatted (render-root (concrete-tree source filename))))

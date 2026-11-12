@@ -1,0 +1,16 @@
+(module tests.helpers.owned-build-product
+  (defun product ()
+    (let* ((filename "virtual/中文😀\ud800.eli") (span (Object/freeze (js-object :filename filename :start 0 :end 1 :line 1 :column 1)))
+           (source (Object/freeze (js-object :kind "function-declaration" :value "run" :span span
+             :children (Object/freeze (js-array (js-object :kind "literal" :value (js* "-0") :span span :children (js-array))))))))
+      (js-object :target "native" :nativeTarget "arm64-linux" :nativeFormat "library" :revision 1
+        :bytes (js-object :encoding "u16le-chunks" :byteLength 5 :chunks (js-array (String/fromCharCode 17791 17996 255)))
+        :typed (js-object :abi "memory-u32" :filename filename :exports (js-array "run") :aliases (js-array) :table (js-array)
+          :functions (js-array (js-object :name "run" :index 0 :arity 0 :locals (js-array) :source source :body (js-object :kind "literal" :type "f64" :value (js* "-0") :span span :children (js-array)))))
+        :descriptor (js-object :format "eliscript-managed-control" :version 1 :abi "managed-control-v1" :functions (js-array (js-object :name "run" :arity 0)))
+        :debug (js-object :format "eliscript-native-source-map" :version 1 :target "arm64-linux" :offsetUnit "byte" :offsetBase "code-section"
+          :codeSection (js-object :fileOffset 0 :virtualAddress 0 :size 4)
+          :functions (js-array (js-object :name "run" :index 0 :start 0 :end 4 :span span))
+          :ranges (js-array (js-object :kind "literal" :function "run" :functionIndex 0 :depth 0 :start 0 :end 4 :span span))
+          :sources (js-array (js-object :id filename :filename filename :macroOrigins (js-array)))))))
+  (export product))

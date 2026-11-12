@@ -1,2 +1,210 @@
-(module capsules.tools.backends.compiler-corpus-evaluation-adapters
-  (js* "import {createHash} from 'node:crypto';\n\nfunction region(source,begin,end){\n  const start=source.indexOf(begin),finish=end===undefined?source.length:source.indexOf(end,start+begin.length);\n  if(start<0||finish<0)throw new TypeError('original evaluation host boundary changed');\n  const text=source.slice(start,finish);\n  return {text,start,end:finish,byteStart:Buffer.byteLength(source.slice(0,start)),byteEnd:Buffer.byteLength(source.slice(0,finish)),\n    sha256:createHash('sha256').update(text).digest('hex')};\n}\n\n// Keep the original persistent-session, stdio and terminal bodies intact. Only\n// their compiler construction setup is supplied by the selected target graph.\nexport async function addOriginalEvaluationPrograms({add,locators,text,file,bootstrapSources}) {\n  const suite='tests/bootstrap-evaluation.test.mjs',coverage=locators.filter(item=>item.file===suite).map(item=>item.id);\n  if(!coverage.length)return [];\n  const original=await text(suite),helpers=region(original,'async function run(', '\\nbeforeAll(');\n  const bodies=region(original,'test(\"self-hosted evaluation descriptors are closed and framework neutral\"');\n  const modules=[];\n  for(const filename of bootstrapSources){\n    if(!/^bootstrap\\/compiler\\/[a-z][a-z-]*[.]eli$/.test(filename))continue;\n    modules.push({id:filename.slice(0,-4)+'.mjs',filename,source:await text(filename)});\n  }\n  if(modules.length!==13||!modules.some(item=>item.id==='bootstrap/compiler/compiler.mjs'))\n    throw new TypeError('original evaluation requires the complete original compiler module graph');\n  for(const filename of ['bootstrap/host/evaluation.mjs','bootstrap/host/evaluation-cli.mjs','bootstrap/host/project.mjs',\n    'bootstrap/host/bun.mjs','bin/eliscript-eval','tests/bootstrap-evaluation-oracle.el','tests/fixtures/evaluation-session/main.eli'])await file(filename);\n  const host=[\n    'import {expect} from \"bun:test\";',\n    'import {existsSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from \"node:fs\";',\n    'import {tmpdir} from \"node:os\";',\n    'import {join,resolve} from \"node:path\";',\n    'import {pathToFileURL} from \"node:url\";',\n    'const projectDirectory=process.env.ELISCRIPT_ORIGINAL_SOURCE_ROOT;',\n    'if(!projectDirectory)throw new Error(\"original evaluation host requires its source root\");',\n    'const {EvaluationSession}=await import(pathToFileURL(resolve(projectDirectory,\"bootstrap/host/evaluation.mjs\")).href);',\n    'const evaluationPath=resolve(projectDirectory,\"bin/eliscript-eval\");',\n    'const evaluationOracle=resolve(projectDirectory,\"tests/bootstrap-evaluation-oracle.el\");',\n    'const fixture=resolve(projectDirectory,\"tests/fixtures/evaluation-session/main.eli\");',\n    'const node=process.env.NODE??\"node\";',\n    'const bun=process.env.ELISCRIPT_ORIGINAL_BUN??process.execPath;',\n    'const emacs=process.env.EMACS??\"emacs\";',\n    'const directory=mkdtempSync(join(tmpdir(),\"eliscript-evaluation-original-\"));',\n    'const compilerDirectory=resolve(process.argv[2],\"bootstrap/compiler\");',\n    'const compiler=await import(pathToFileURL(resolve(compilerDirectory,\"compiler.mjs\")).href);',\n    'const originalBodies=[];',\n    'function test(name,body,timeout=5000){originalBodies.push({name,body,timeout});}',\n    helpers.text,\n    bodies.text,\n    'try{for(const entry of originalBodies){',\n    ' let timer;try{await Promise.race([Promise.resolve().then(()=>entry.body()),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(entry.name+\": original timeout \"+entry.timeout+\"ms\")),entry.timeout);})]);}',\n    ' finally{clearTimeout(timer);}',\n    '}}finally{rmSync(directory,{recursive:true,force:true});}',\n  ].join('\\n')+'\\n';\n  add({id:'original-program:compiler-persistent-evaluation',kind:'project',coverage,\n    modules,entry:'bootstrap/compiler/compiler.mjs',\n    request:{operation:'project',resolveImports:true,phased:true,sourceMap:true,entries:modules.map(item=>item.id)},\n    execution:{kind:'original-program',host:'tests/__eliscript_original_evaluation.mjs',hostSource:host,\n      arguments:[{directory:true}],aliases:true,requiresBun:true,childProcesses:'inherit-selected-artifact',runtimeLaunchers:true,runtimeProfile:'compiler',\n      setupReplacement:{kind:'selected-compiler-module-directory',sourceIds:modules.map(item=>item.id),\n        replaces:'beforeAll compiler construction',preservedAssertions:'complete original test bodies and timeout parameters'}},\n    expected:{kind:'seed-program',oracleRequired:true,stdout:''},\n    original:{manifest:'stable-compatibility',suite,fixture:suite,host:suite,sourceSha256:(await file(suite)).sha256,\n      regions:[helpers,bodies].map(({start,end,byteStart,byteEnd,sha256})=>({start,end,byteStart,byteEnd,sha256}))}});\n  return [suite];\n}\n"))
+(module tools.backends.compiler-corpus-evaluation-adapters
+  (import "node:crypto" createHash)
+  (import "node:buffer" Buffer)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "../../dist/bootstrap/reader.mjs" read-string)
+  (import "../../dist/bootstrap/compiler.mjs" compile-ir-string emit-ir-string)
+  (import "../testing/maintained-suite-source.mjs" sourceCall sourceFormText rewriteSourceForms)
+
+  (defun region (source begin &rest __opt)
+    (let* ((end (aref __opt 0))
+           (start (js-call source :indexOf begin))
+           (finish (if (undefined? end) (js-length source)
+                     (js-call source :indexOf end (+ start (js-length begin))))))
+      (when (or (< start 0) (< finish 0))
+        (throw (new globalThis.TypeError "original evaluation host boundary changed")))
+      (let ((text (js-call source :slice start finish)))
+        (js-object
+          :text text
+          :start start
+          :end finish
+          :byteStart (js-call Buffer :byteLength (js-call source :slice 0 start))
+          :byteEnd (js-call Buffer :byteLength (js-call source :slice 0 finish))
+          :sha256 (js-call (js-call (createHash "sha256") :update text) :digest "hex")))))
+
+  (defun digest (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
+  (defasync evaluation-replay (options)
+    (let* ((source-root (get options :sourceRoot)) (text (get options :text)) (file (get options :file))
+           (source-file "tests/bootstrap-evaluation.test.eli")
+           (source (await (funcall text source-file))) (identity (await (funcall file source-file)))
+           (assets (js-array (js-object :file source-file :sourceSha256 (get identity :sha256))))
+           (paths (js-array "tools/testing/maintained-suite-source.eli" "tools/testing/maintained-suite-source.mjs"
+             "tools/backends/compiler-host-record.eli" "tools/backends/compiler-host-record.mjs"
+             "tools/backends/compiler-host-iteration.eli" "tools/backends/compiler-host-iteration.mjs"
+             "tools/backends/eliscript/compiler-corpus-project-transport.eli" "tools/backends/compiler-corpus-project-transport.mjs"
+             "tools/backends/eliscript/compiler-corpus-cli-transport.eli" "tools/backends/compiler-corpus-cli-transport.mjs"))
+           (expected-imports (js-array
+             "(import \"bun:test\" afterAll beforeAll expect test)"
+             "(import \"node:fs\" existsSync mkdtempSync readFileSync rmSync writeFileSync)"
+             "(import \"node:os\" tmpdir)" "(import \"node:path\" join resolve)"
+             "(import \"node:url\" fileURLToPath pathToFileURL)"
+             "(import \"../bootstrap/host/evaluation.mjs\" EvaluationSession)"
+             "(import \"../tools/backends/compiler-host-record.mjs\" copyHostRecord)"))
+           (forms (read-string source source-file))
+           (module (aref forms 0)) (members (js-call (get module :items) :slice 2))
+           (imports (js-call members :filter (lambda (node) (sourceCall node "import"))))
+           (changes (js-array)) (setup-count 0) (index 0))
+      (unless (and (= (value-type source-root) "string") (= (get identity :file) source-file)
+                   (= (get identity :sha256) (digest source)) (= (get identity :bytes) (js-call Buffer :byteLength source))
+                   (= (js-length forms) 1) (sourceCall module "module")
+                   (= (js-length imports) (js-length expected-imports)))
+        (throw (new globalThis.TypeError "original evaluation maintained dependencies changed")))
+      (while (< index (js-length imports))
+        (unless (= (sourceFormText source (aref imports index)) (aref expected-imports index))
+          (throw (new globalThis.TypeError "original evaluation maintained dependencies changed")))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (js-length paths))
+        (let* ((filename (aref paths index)) (body (await (funcall text filename))) (proof (await (funcall file filename))))
+          (unless (and (= (get proof :file) filename) (= (get proof :sha256) (digest body))
+                       (= (get proof :bytes) (js-call Buffer :byteLength body)))
+            (throw (new globalThis.TypeError "original evaluation transport source identity differs")))
+          (js-call assets :push (js-object :file filename :sourceSha256 (get proof :sha256))))
+        (setq index (1+ index)))
+      (let* ((projection (rewriteSourceForms source
+               (lambda (node node-text)
+                 (let ((replacement undefined) (items (get node :items)))
+                   (cond
+                     ((sourceCall node "import")
+                       (let ((path (get (aref items 1) :value)))
+                         (cond ((= path "bun:test") (setq replacement "(import \"bun:test\" expect)"))
+                           ((js-call path :startsWith "../")
+                             (setq replacement (js-call (funcall node-text node) :replace
+                               (JSON/stringify path) (JSON/stringify (get (pathToFileURL (resolve source-root (js-call path :slice 3))) :href))))))))
+                     ((and (sourceCall node "defconst") (= (get (aref items 1) :name) "projectDirectory"))
+                       (setq replacement "(defconst projectDirectory (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_SOURCE_ROOT))"))
+                     ((and (sourceCall node "defconst") (= (get (aref items 1) :name) "bun"))
+                       (setq replacement "(defconst bun (let ((value (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_BUN))) (if (nullish? value) (get globalThis.process :execPath) value)))"))
+                     ((sourceCall node "beforeAll")
+                       (unless (= (get (aref items (1- (js-length items))) :value) 30000)
+                         (throw (new globalThis.TypeError "original evaluation setup deadline changed")))
+                       (setq setup-count (1+ setup-count))
+                       (setq replacement
+                         "(beforeAll (async ()\n  (setq directory (mkdtempSync (join (tmpdir) \"eliscript-evaluation-original-\")))\n  (setq compilerDirectory (resolve (aref (get globalThis.process :argv) 2) \"bootstrap/compiler\"))\n  (setq compiler (await (funcall load-module (get (pathToFileURL (resolve compilerDirectory \"compiler.mjs\")) :href))))) 30000)")))
+                   (unless (undefined? replacement)
+                     (js-call changes :push (js-object :role "selected-artifact-transport"
+                       :beforeSha256 (digest (funcall node-text node)) :afterSha256 (digest replacement))))
+                   replacement))))
+             (modified (get projection :source)) (points (Array/from modified))
+             (modified-module (aref (read-string modified source-file) 0))
+             (insert-at (get (get (aref (get modified-module :items) 1) :span) :end))
+             (close-at (1- (get (get modified-module :span) :end)))
+             (preamble
+               (str "\n(import " (JSON/stringify (get (pathToFileURL (resolve source-root "tools/backends/compiler-corpus-project-transport.mjs")) :href)) " runOriginalProjectCases)\n"
+                 "(defconst __evaluation_cases (js-array))\n(defconst __evaluation_before (js-array))\n(defconst __evaluation_after (js-array))\n"
+                 "(defun test (name body &rest arguments) (let ((timeout (if (undefined? (aref arguments 0)) 5000 (aref arguments 0)))) (js-call __evaluation_cases :push (js-object :name name :body body :timeout timeout))))\n"
+                 "(defun beforeAll (body &rest arguments) (let ((timeout (if (undefined? (aref arguments 0)) 5000 (aref arguments 0)))) (js-call __evaluation_before :push (js-object :name \"original evaluation setup\" :body body :timeout timeout))))\n"
+                 "(defun afterAll (body) (js-call __evaluation_after :push body))\n"))
+             (runner
+               "\n(defasync run-original-evaluation ()\n  (let ((failed false) (cleanup-failed false) (cleanup undefined))\n    (try\n      (await (runOriginalProjectCases __evaluation_before))\n      (await (runOriginalProjectCases __evaluation_cases))\n      (catch error (setq failed t) (throw error))\n      (finally\n        (let ((index 0))\n          (while (< index (js-length __evaluation_after))\n            (try (await (funcall (aref __evaluation_after index)))\n              (catch error (unless cleanup-failed (setq cleanup-failed t cleanup error))))\n            (setq index (1+ index))))\n        (when (and cleanup-failed (not failed)) (throw cleanup))))))\n(js-call (run-original-evaluation) :catch (lambda (error) (js-call globalThis.console :error error) (js-call globalThis.process :exit 1)))\n")
+             (eli-host (str (js-call (js-call points :slice 0 insert-at) :join "") preamble
+                        (js-call (js-call points :slice insert-at close-at) :join "") runner
+                        (js-call (js-call points :slice close-at) :join "")))
+             (filename "original-evaluation-replay.eli")
+             (host (emit-ir-string (compile-ir-string eli-host filename))))
+        (unless (= setup-count 1) (throw (new globalThis.TypeError "original evaluation setup registration changed")))
+        (let ((names (js-array "array-text" "binding" "errors" "math" "number-radix" "prelude" "primitives" "unicode-case" "unicode-case-data")) (i 0))
+          (while (< i (js-length names))
+            (let ((name (aref names i)))
+              (setq host (js-call host :replaceAll (JSON/stringify (str "eliscript/runtime/" name ".mjs"))
+                (JSON/stringify (get (pathToFileURL (resolve source-root (str "runtime/" name ".mjs"))) :href)))))
+            (setq i (1+ i))))
+        (js-object :host host :sourceAssets assets :changes changes
+          :maintainedSource (js-object :sourceFile source-file :sourceSha256 (get identity :sha256)
+            :compilation (js-object :filename filename :source eli-host :sourceSha256 (digest eli-host) :hostSha256 (digest host)))))))
+
+  ;; Keep the original persistent-session, stdio and terminal bodies intact. Only
+  ;; their compiler construction setup is supplied by the selected target graph.
+  (defasync addOriginalEvaluationPrograms (options)
+    (let* ((add (get options :add))
+           (locators (get options :locators))
+           (text (get options :text))
+           (file (get options :file))
+           (bootstrap-sources (get options :bootstrapSources))
+           (suite "tests/bootstrap-evaluation.test.mjs")
+           (coverage (js-call (js-call locators :filter (lambda (item) (= (get item :file) suite)))
+                       :map (lambda (item) (get item :id)))))
+      (if (= (js-length coverage) 0)
+        (js-array)
+        (let* ((original (await (funcall text suite)))
+               (helpers (region original "async function run(" "\nbeforeAll("))
+               (bodies (region original "test(\"self-hosted evaluation descriptors are closed and framework neutral\""))
+               (modules (js-array))
+               (i 0))
+          (while (< i (js-length bootstrap-sources))
+            (let ((filename (aref bootstrap-sources i)))
+              (when (js-call (new globalThis.RegExp "^bootstrap/compiler/[a-z][a-z-]*[.]eli$") :test filename)
+                (js-call modules :push
+                  (js-object
+                    :id (str (js-call filename :slice 0 -4) ".mjs")
+                    :filename filename
+                    :source (await (funcall text filename))))))
+            (setq i (1+ i)))
+          (unless (and (= (js-length modules) 13)
+                       (js-call modules :some (lambda (item) (= (get item :id) "bootstrap/compiler/compiler.mjs"))))
+            (throw (new globalThis.TypeError "original evaluation requires the complete original compiler module graph")))
+          (let ((deps (js-array
+                        "bootstrap/host/evaluation.mjs"
+                        "bootstrap/host/evaluation-cli.mjs"
+                        "bootstrap/host/project.mjs"
+                        "bootstrap/host/bun.mjs"
+                        "bin/eliscript-eval"
+                        "tests/bootstrap-evaluation-oracle.el"
+                        "tests/fixtures/evaluation-session/main.eli"))
+                (j 0))
+            (while (< j (js-length deps))
+              (await (funcall file (aref deps j)))
+              (setq j (1+ j))))
+          (let* ((replay (await (evaluation-replay options)))
+                 (host (get replay :host))
+                (source-ids (js-call modules :map (lambda (item) (get item :id)))))
+            (funcall add
+              (js-object
+                :id "original-program:compiler-persistent-evaluation"
+                :kind "project"
+                :coverage coverage
+                :modules modules
+                :entry "bootstrap/compiler/compiler.mjs"
+                :request (js-object
+                           :operation "project"
+                           :resolveImports t
+                           :phased t
+                           :sourceMap t
+                           :entries source-ids)
+                :execution (js-object
+                             :kind "original-program"
+                             :host "tests/__eliscript_original_evaluation.mjs"
+                             :hostSource host
+                             :arguments (js-array (js-object :directory t))
+                             :aliases t
+                             :requiresBun t
+                             :childProcesses "inherit-selected-artifact"
+                             :runtimeLaunchers t
+                             :runtimeProfile "compiler"
+                             :setupReplacement (js-object
+                                                 :kind "selected-compiler-module-directory"
+                                                 :sourceIds (js-call source-ids :slice)
+                                                 :replaces "beforeAll compiler construction"
+                                                 :preservedAssertions "complete original test bodies and timeout parameters"))
+                :expected (js-object :kind "seed-program" :oracleRequired t :stdout "")
+                :original (js-object
+                            :manifest "stable-compatibility"
+                            :suite suite
+                            :fixture suite
+                            :host suite
+                            :sourceSha256 (get (await (funcall file suite)) :sha256)
+                            :sourceAssets (get replay :sourceAssets)
+                            :maintainedSource (get replay :maintainedSource)
+                            :changes (get replay :changes)
+                            :regions (js-call (js-array helpers bodies) :map
+                                       (lambda (item)
+                                         (js-object
+                                           :start (get item :start)
+                                           :end (get item :end)
+                                           :byteStart (get item :byteStart)
+                                           :byteEnd (get item :byteEnd)
+                                           :sha256 (get item :sha256)))))))
+            (js-array suite))))))
+
+  (export addOriginalEvaluationPrograms))

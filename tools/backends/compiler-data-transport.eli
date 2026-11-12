@@ -1,0 +1,87 @@
+(module tools.backends.compiler-data-transport
+  (import "./compiler-host-iteration.mjs" openHostIterator advanceHostIterator closeHostIterator)
+  (import "./compiler-host-record.mjs" copyHostRecord)
+  (defun host-type (value) (js* "typeof value"))
+  (defun instance-of (value constructor) (funcall (js* "(value, constructor) => value instanceof constructor") value constructor))
+  ;; Preserve the normal Function brand of the original host facade. The
+  ;; callback contains the actual transport algorithm in maintained Eli.
+  (defconst host-forwarding-function (js* "(invoke) => function (...args) { return invoke(args); }"))
+
+  (defun each-host (values visit)
+    (let ((iterator (openHostIterator values)))
+      (try
+        (while (advanceHostIterator iterator) (funcall visit (get iterator :value)))
+        (catch error (closeHostIterator iterator t) (throw error))
+        (finally (closeHostIterator iterator false)))))
+
+  (defun pair-values (value)
+    (let ((iterator (openHostIterator value)) (key undefined) (item undefined))
+      (try
+        (when (advanceHostIterator iterator) (setq key (get iterator :value)))
+        (when (advanceHostIterator iterator) (setq item (get iterator :value)))
+        (js-array key item)
+        (catch error (closeHostIterator iterator t) (throw error))
+        (finally (closeHostIterator iterator false)))))
+
+  ;; Copy the compiler's data graph while preserving cycles, shared buffers,
+  ;; descriptor flags, null prototypes and non-extensibility. Functions and
+  ;; primitive values retain identity; accessors never execute during copying.
+  (defun transportCompilerData (value &rest supplied)
+    (if (or (eq value nil) (/= (host-type value) "object")) value
+      (let ((seen (if (undefined? (aref supplied 0)) (new globalThis.Map) (aref supplied 0))))
+        (if (js-call seen :has value) (js-call seen :get value)
+          (let ((output undefined))
+            (cond
+              ((js-call globalThis.ArrayBuffer :isView value)
+                (let ((buffer (transportCompilerData (get value :buffer) seen)))
+                  (setq output
+                    (if (instance-of value globalThis.DataView)
+                      (new globalThis.DataView buffer (get value :byteOffset) (get value :byteLength))
+                      (new (get value :constructor) buffer (get value :byteOffset) (get value :length)))))
+                (js-call seen :set value output))
+              ((instance-of value globalThis.ArrayBuffer)
+                (setq output (js-call value :slice 0)) (js-call seen :set value output))
+              ((instance-of value globalThis.Map)
+                (setq output (new globalThis.Map)) (js-call seen :set value output)
+                (each-host value (lambda (entry)
+                  (let ((pair (pair-values entry)))
+                    (js-call output :set (transportCompilerData (aref pair 0) seen)
+                                         (transportCompilerData (aref pair 1) seen))))))
+              ((instance-of value globalThis.Set)
+                (setq output (new globalThis.Set)) (js-call seen :set value output)
+                (each-host value (lambda (item) (js-call output :add (transportCompilerData item seen)))))
+              (t
+                (setq output (if (Array/isArray value) (js-array)
+                  (Object/create (if (eq (Object/getPrototypeOf value) nil) nil (get globalThis.Object :prototype)))))
+                (js-call seen :set value output)
+                (each-host (Reflect/ownKeys value) (lambda (key)
+                  (let ((descriptor (Object/getOwnPropertyDescriptor value key)))
+                    (when (undefined? descriptor)
+                      (throw (new globalThis.TypeError "compiler result changed during data transport")))
+                    (unless (Object/hasOwn descriptor "value")
+                      (throw (new globalThis.TypeError "compiler data results cannot contain accessors")))
+                    (Object/defineProperty output key
+                      (copyHostRecord descriptor (js-object :value (transportCompilerData (get descriptor :value) seen)))))))
+                (unless (Object/isExtensible value) (Object/preventExtensions output))))
+            output)))))
+  (defun transportCompilerExport (namespace key)
+    (if (= (host-type (get namespace key)) "function")
+      (funcall host-forwarding-function (lambda (arguments)
+        (transportCompilerData (Reflect/apply (get namespace key) undefined arguments))))
+      (transportCompilerData (get namespace key))))
+
+  (defun transportCompilerNamespace (namespace functions)
+    (let ((result (Object/create nil)))
+      (each-host (Object/keys namespace) (lambda (key)
+        (Object/defineProperty result key (js-object :enumerable t :get (lambda ()
+          (let ((value (get namespace key)))
+            (if (/= (host-type value) "function") (transportCompilerData value)
+              (progn
+                (unless (js-call functions :has value)
+                  (js-call functions :set value
+                    (funcall host-forwarding-function (lambda (arguments)
+                      (transportCompilerData (Reflect/apply value undefined arguments))))))
+                (js-call functions :get value)))))))))
+      (Object/freeze result)))
+
+  (export transportCompilerData transportCompilerExport transportCompilerNamespace))

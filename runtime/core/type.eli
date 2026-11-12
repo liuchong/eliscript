@@ -1,2 +1,379 @@
-(module capsules.runtime.core.type
-  (js* "const MAX_FIELDS = 1024;\nconst MAX_PROTOCOLS = 1024;\nconst TYPE_CONSTRUCTOR_TOKEN = Symbol(\"eliscript.type.constructor-token\");\nconst TYPE_VALUE_STATE = new WeakMap();\nconst typeStates = new WeakMap();\nconst reifiedStates = new WeakMap();\n\nfunction fail(message) {\n  throw new TypeError(message);\n}\n\nfunction denseArray(value, label, maximum) {\n  if (!Array.isArray(value) || value.length > maximum) {\n    fail(`${label} must be a dense array of at most ${maximum} values`);\n  }\n  const descriptors = Object.getOwnPropertyDescriptors(value);\n  if (Reflect.ownKeys(descriptors).length !== value.length + 1) {\n    fail(`${label} must be a dense array with no extra properties`);\n  }\n  for (let index = 0; index < value.length; index += 1) {\n    const descriptor = descriptors[String(index)];\n    if (!descriptor?.enumerable || !(\"value\" in descriptor)) {\n      fail(`${label} must contain enumerable data values`);\n    }\n  }\n  return value;\n}\n\nfunction normalizeTypeName(name) {\n  if (typeof name !== \"string\" || name.length === 0) {\n    fail(\"type name must be a non-empty string\");\n  }\n  return name;\n}\n\nfunction normalizeFieldNames(fields) {\n  denseArray(fields, \"type fields\", MAX_FIELDS);\n  const seen = new Set();\n  const normalized = fields.map((field) => {\n    if (typeof field !== \"string\" || field.length === 0 || field.includes(\"/\")) {\n      fail(\"type field names must be non-empty unqualified strings\");\n    }\n    if (seen.has(field)) fail(`type declares duplicate field ${field}`);\n    seen.add(field);\n    return field;\n  });\n  return Object.freeze(normalized);\n}\n\nfunction protocolShape(protocol) {\n  if (protocol === null || typeof protocol !== \"object\") {\n    fail(\"expected an Eliscript protocol\");\n  }\n  const descriptors = Object.getOwnPropertyDescriptors(protocol);\n  const keys = Reflect.ownKeys(descriptors);\n  const nameDescriptor = descriptors.name;\n  const operationsDescriptor = descriptors.operations;\n  if (keys.length !== 2 || !nameDescriptor?.enumerable ||\n      !(\"value\" in nameDescriptor) ||\n      typeof nameDescriptor.value !== \"string\" ||\n      nameDescriptor.value.length === 0 ||\n      !operationsDescriptor?.enumerable || !(\"value\" in operationsDescriptor) ||\n      !Object.isFrozen(protocol)) {\n    fail(\"expected an Eliscript protocol\");\n  }\n  const operations = operationsDescriptor.value;\n  if (operations === null || typeof operations !== \"object\" ||\n      Array.isArray(operations) || !Object.isFrozen(operations)) {\n    fail(\"expected an Eliscript protocol\");\n  }\n  const operationDescriptors = Object.getOwnPropertyDescriptors(operations);\n  const operationNames = Reflect.ownKeys(operationDescriptors);\n  if (operationNames.length === 0 || operationNames.length > MAX_FIELDS ||\n      operationNames.some((operation) => typeof operation !== \"string\")) {\n    fail(\"expected an Eliscript protocol\");\n  }\n  const methods = operationNames.map((operation) => {\n    const descriptor = operationDescriptors[operation];\n    const method = descriptor?.value;\n    const methodDescriptors = typeof method === \"function\"\n      ? Object.getOwnPropertyDescriptors(method)\n      : {};\n    if (!descriptor?.enumerable || !(\"value\" in descriptor) ||\n        methodDescriptors.protocol?.value !== protocol ||\n        methodDescriptors.operation?.value !== operation ||\n        typeof methodDescriptors.slot?.value !== \"symbol\" ||\n        !Object.isFrozen(method)) {\n      fail(\"expected an Eliscript protocol\");\n    }\n    return Object.freeze({ operation, slot: methodDescriptors.slot.value });\n  });\n  return Object.freeze({\n    name: nameDescriptor.value,\n    operations: Object.freeze(methods),\n  });\n}\n\nfunction normalizeMethods(protocol, implementations) {\n  const definition = protocolShape(protocol);\n  if (implementations === null || typeof implementations !== \"object\" ||\n      Array.isArray(implementations)) {\n    fail(`protocol ${definition.name} implementations must be a plain object`);\n  }\n  const prototype = Object.getPrototypeOf(implementations);\n  if (prototype !== Object.prototype && prototype !== null) {\n    fail(`protocol ${definition.name} implementations must be a plain object`);\n  }\n  const descriptors = Object.getOwnPropertyDescriptors(implementations);\n  const keys = Reflect.ownKeys(descriptors);\n  if (keys.length !== definition.operations.length) {\n    fail(`protocol ${definition.name} implementation must define every operation`);\n  }\n  const operationNames = definition.operations.map(({ operation }) => operation);\n  if (keys.some((key) => typeof key !== \"string\" ||\n      !operationNames.includes(key))) {\n    fail(`protocol ${definition.name} implementation contains an unknown operation`);\n  }\n  const normalized = [];\n  for (const { operation, slot } of definition.operations) {\n    const descriptor = descriptors[operation];\n    if (!descriptor?.enumerable || !(\"value\" in descriptor) ||\n        typeof descriptor.value !== \"function\") {\n      fail(`protocol ${definition.name}/${operation} implementation must be a function`);\n    }\n    normalized.push(Object.freeze({\n      operation,\n      slot,\n      implementation: descriptor.value,\n    }));\n  }\n  return Object.freeze({ protocol, name: definition.name, methods: normalized });\n}\n\nfunction normalizeProtocolPlans(plans, allowEmpty) {\n  denseArray(plans, \"protocol implementations\", MAX_PROTOCOLS);\n  if (!allowEmpty && plans.length === 0) {\n    fail(\"reify requires at least one protocol implementation\");\n  }\n  const seen = new Set();\n  return Object.freeze(plans.map((plan, index) => {\n    denseArray(plan, `protocol implementation ${index}`, 2);\n    if (plan.length !== 2) {\n      fail(`protocol implementation ${index} must contain a protocol and methods`);\n    }\n    const [protocol, methods] = plan;\n    if (seen.has(protocol)) fail(\"protocol may be implemented only once\");\n    seen.add(protocol);\n    return normalizeMethods(protocol, methods);\n  }));\n}\n\nfunction installProtocolMethods(target, plans) {\n  for (const plan of plans) {\n    for (const { slot, implementation } of plan.methods) {\n      if (Reflect.has(target, slot)) {\n        fail(`protocol slot conflict while implementing ${plan.name}`);\n      }\n      Object.defineProperty(target, slot, {\n        configurable: false,\n        enumerable: false,\n        writable: false,\n        value: function (...argumentsList) {\n          return implementation(this, ...argumentsList);\n        },\n      });\n    }\n  }\n  return target;\n}\n\nfunction protocolPlanSnapshot(plans) {\n  const snapshot = [];\n  for (let index = 0; index < plans.length; index += 1) {\n    const plan = plans[index];\n    const implementations = Object.create(null);\n    for (let methodIndex = 0; methodIndex < plan.methods.length; methodIndex += 1) {\n      const method = plan.methods[methodIndex];\n      Object.defineProperty(implementations, method.operation, {\n        value: method.implementation,\n        enumerable: true,\n      });\n    }\n    Object.defineProperty(snapshot, String(index), {\n      value: Object.freeze([plan.protocol, Object.freeze(implementations)]),\n      writable: true,\n      configurable: true,\n      enumerable: true,\n    });\n  }\n  return Object.freeze(snapshot);\n}\n\nfunction defineFieldAccessors(TypeValue, fieldNames) {\n  for (let index = 0; index < fieldNames.length; index += 1) {\n    const fieldName = fieldNames[index];\n    if (fieldName in TypeValue.prototype) {\n      fail(`type field ${fieldName} conflicts with a type member`);\n    }\n    Object.defineProperty(TypeValue.prototype, fieldName, {\n      configurable: false,\n      enumerable: true,\n      get() {\n        return TYPE_VALUE_STATE.get(this).values[index];\n      },\n    });\n  }\n}\n\nexport function defineType(name, fields, protocolPlans = []) {\n  return makeTypeDefinition(name, fields, protocolPlans, false);\n}\n\n// Used only by the trusted bulk boundary after transporting the declaration.\n// Keep that frozen array so an independently transported typeFields reference\n// remains the very same object; public defineType still makes its usual copy.\nexport function materializeTypeDefinition(name, fields, protocolPlans = []) {\n  return makeTypeDefinition(name, fields, protocolPlans, true);\n}\n\nfunction makeTypeDefinition(name, fields, protocolPlans, retainFields) {\n  const typeName = normalizeTypeName(name);\n  const normalized = normalizeFieldNames(fields);\n  if (retainFields && !Object.isFrozen(fields)) {\n    fail(\"transported type fields must be frozen\");\n  }\n  const fieldNames = retainFields ? fields : normalized;\n  const plans = normalizeProtocolPlans(protocolPlans, true);\n\n  class TypeValue {\n    constructor(token, values) {\n      if (token !== TYPE_CONSTRUCTOR_TOKEN) {\n        fail(`${typeName} values must be created with its positional constructor`);\n      }\n      TYPE_VALUE_STATE.set(this, Object.freeze({\n        type: TypeValue,\n        values: Object.freeze(values),\n      }));\n      Object.freeze(this);\n    }\n\n    static create(...values) {\n      if (values.length !== fieldNames.length) {\n        fail(\n          `->${typeName} expects ${fieldNames.length} values, received ${values.length}`,\n        );\n      }\n      return new TypeValue(TYPE_CONSTRUCTOR_TOKEN, values);\n    }\n\n    static isInstance(value) {\n      return TYPE_VALUE_STATE.get(value)?.type === TypeValue;\n    }\n\n    get [Symbol.toStringTag]() {\n      return `EliscriptType:${typeName}`;\n    }\n  }\n\n  Object.defineProperty(TypeValue, \"name\", { value: typeName });\n  Object.defineProperties(TypeValue, {\n    typeName: { enumerable: true, value: typeName },\n    typeFields: { enumerable: true, value: fieldNames },\n  });\n  defineFieldAccessors(TypeValue, fieldNames);\n  installProtocolMethods(TypeValue.prototype, plans);\n  Object.freeze(TypeValue.prototype);\n  Object.freeze(TypeValue);\n  typeStates.set(TypeValue, Object.freeze({\n    name: typeName,\n    fields: fieldNames,\n    protocolPlans: protocolPlanSnapshot(plans),\n  }));\n  return TypeValue;\n}\n\nexport function reifyProtocols(protocolPlans) {\n  const plans = normalizeProtocolPlans(protocolPlans, false);\n  const value = Object.freeze(installProtocolMethods(Object.create(null), plans));\n  reifiedStates.set(value, Object.freeze({ protocolPlans: protocolPlanSnapshot(plans) }));\n  return value;\n}\n\n// Read only the states owned by these constructors. The transport preserves\n// actual protocol and function references instead of inferring a type from its\n// printable name, field names, or Symbol descriptions.\nexport function readTypeState(type) {\n  return typeof type === \"function\" ? typeStates.get(type) : undefined;\n}\n\nexport function readTypeValueState(value) {\n  return value !== null && typeof value === \"object\"\n    ? TYPE_VALUE_STATE.get(value) : undefined;\n}\n\nexport function materializeTypeValue(type, values) {\n  const state = readTypeState(type);\n  if (state === undefined) fail(\"expected an Eliscript type\");\n  denseArray(values, \"type values\", MAX_FIELDS);\n  if (values.length !== state.fields.length) {\n    fail(`->${state.name} expects ${state.fields.length} values, received ${values.length}`);\n  }\n  if (!Object.isFrozen(values)) fail(\"transported type values must be frozen\");\n  return new type(TYPE_CONSTRUCTOR_TOKEN, values);\n}\n\nexport function readReifiedState(value) {\n  return value !== null && typeof value === \"object\"\n    ? reifiedStates.get(value) : undefined;\n}\n\nexport function isType(value) {\n  return typeof value === \"function\" && typeStates.has(value);\n}\n\nexport function isTypeValue(value) {\n  return value !== null && typeof value === \"object\" &&\n    TYPE_VALUE_STATE.has(value);\n}\n\nexport function typeOf(value) {\n  const state = TYPE_VALUE_STATE.get(value);\n  if (state === undefined) fail(\"expected an Eliscript type value\");\n  return state.type;\n}\n\nexport function typeName(value) {\n  const type = isType(value) ? value : typeOf(value);\n  return typeStates.get(type).name;\n}\n\nexport function typeFieldNames(value) {\n  const type = isType(value) ? value : typeOf(value);\n  return typeStates.get(type).fields;\n}\n"))
+(module eliscript.runtime.core.type
+  (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst type-constructor-token (funcall globalThis/Symbol "eliscript.type.constructor-token"))
+  (defconst type-value-states (new globalThis/WeakMap))
+  (defconst type-states (new globalThis/WeakMap))
+  (defconst reified-states (new globalThis/WeakMap))
+
+  (defun fail (message)
+    (throw (new globalThis/TypeError message)))
+
+  (defun truth (value)
+    (funcall globalThis/Boolean value))
+
+  (defun callable? (value)
+    (= (funcall typeof-value value) "function"))
+
+  (defun array-each (items callback)
+    (let ((index 0)
+          (limit (js-length items)))
+      (while (< index limit)
+        (funcall callback (get items index) index)
+        (setq index (1+ index)))))
+
+  (defun method (implementation name arity)
+    (let ((result (funcall
+                    (js* "(fn, name) => ({ [name](...args) { return fn(this, ...args); } })[name]")
+                    implementation
+                    name)))
+      (Object/defineProperty result "length" (js-object :value arity :configurable t))
+      result))
+
+  (defun dense-array (value label maximum)
+    (unless (and (Array/isArray value) (<= (js-length value) maximum))
+      (fail (str label " must be a dense array of at most " maximum " values")))
+    (let ((descriptors (Object/getOwnPropertyDescriptors value))
+          (index 0))
+      (unless (= (js-length (Reflect/ownKeys descriptors)) (1+ (js-length value)))
+        (fail (str label " must be a dense array with no extra properties")))
+      (while (< index (js-length value))
+        (let ((descriptor (get descriptors (funcall globalThis/String index))))
+          (unless (and (not (nullish? descriptor))
+                       (truth (get descriptor :enumerable))
+                       (Reflect/has descriptor "value"))
+            (fail (str label " must contain enumerable data values"))))
+        (setq index (1+ index))))
+    value)
+
+  (defun normalize-name (name)
+    (unless (and (= (funcall typeof-value name) "string") (> (js-length name) 0))
+      (fail "type name must be a non-empty string"))
+    name)
+
+  (defun normalize-fields (fields)
+    (dense-array fields "type fields" 1024)
+    (let ((seen (new globalThis/Set)))
+      (Object/freeze
+        (js-call fields :map
+          (lambda (field)
+            (unless (and (= (funcall typeof-value field) "string")
+                         (> (js-length field) 0)
+                         (not (js-call field :includes "/")))
+              (fail "type field names must be non-empty unqualified strings"))
+            (when (js-call seen :has field)
+              (fail (str "type declares duplicate field " field)))
+            (js-call seen :add field)
+            field)))))
+
+  (defun protocol-shape (protocol)
+    (unless (and (not (nil? protocol)) (= (funcall typeof-value protocol) "object"))
+      (fail "expected an Eliscript protocol"))
+    (let* ((descriptors (Object/getOwnPropertyDescriptors protocol))
+           (keys (Reflect/ownKeys descriptors))
+           (name-descriptor (get descriptors :name))
+           (operations-descriptor (get descriptors :operations)))
+      (unless (and (= (js-length keys) 2)
+                   (not (nullish? name-descriptor))
+                   (truth (get name-descriptor :enumerable))
+                   (Reflect/has name-descriptor "value")
+                   (= (funcall typeof-value (get name-descriptor :value)) "string")
+                   (> (js-length (get name-descriptor :value)) 0)
+                   (not (nullish? operations-descriptor))
+                   (truth (get operations-descriptor :enumerable))
+                   (Reflect/has operations-descriptor "value")
+                   (Object/isFrozen protocol))
+        (fail "expected an Eliscript protocol"))
+      (let ((operations (get operations-descriptor :value)))
+        (unless (and (not (nil? operations))
+                     (= (funcall typeof-value operations) "object")
+                     (not (Array/isArray operations))
+                     (Object/isFrozen operations))
+          (fail "expected an Eliscript protocol"))
+        (let* ((operation-descriptors (Object/getOwnPropertyDescriptors operations))
+               (operation-names (Reflect/ownKeys operation-descriptors)))
+          (when (or (= (js-length operation-names) 0)
+                    (> (js-length operation-names) 1024)
+                    (js-call operation-names :some
+                      (lambda (operation) (not (= (funcall typeof-value operation) "string")))))
+            (fail "expected an Eliscript protocol"))
+          (let ((methods (js-call operation-names :map
+                           (lambda (operation)
+                             (let* ((descriptor (get operation-descriptors operation))
+                                    (operation-method (if (nullish? descriptor) undefined (get descriptor :value)))
+                                    (method-descriptors (if (callable? operation-method)
+                                                            (Object/getOwnPropertyDescriptors operation-method)
+                                                            (js-object)))
+                                    (protocol-descriptor (get method-descriptors :protocol))
+                                    (operation-descriptor (get method-descriptors :operation))
+                                    (slot-descriptor (get method-descriptors :slot))
+                                    (slot (if (nullish? slot-descriptor) undefined (get slot-descriptor :value))))
+                               (unless (and (not (nullish? descriptor))
+                                            (truth (get descriptor :enumerable))
+                                            (Reflect/has descriptor "value")
+                                            (not (nullish? protocol-descriptor))
+                                            (eq (get protocol-descriptor :value) protocol)
+                                            (not (nullish? operation-descriptor))
+                                            (eq (get operation-descriptor :value) operation)
+                                            (not (nullish? slot-descriptor))
+                                            (= (funcall typeof-value slot) "symbol")
+                                            (Object/isFrozen operation-method))
+                                 (fail "expected an Eliscript protocol"))
+                               (Object/freeze (js-object :operation operation :slot slot)))))))
+            (Object/freeze (js-object :name (get name-descriptor :value) :operations (Object/freeze methods))))))))
+
+  (defun normalize-methods (protocol implementations)
+    (let ((definition (protocol-shape protocol)))
+      (unless (and (not (nil? implementations))
+                   (= (funcall typeof-value implementations) "object")
+                   (not (Array/isArray implementations)))
+        (fail (str "protocol " (get definition :name) " implementations must be a plain object")))
+      (let ((prototype (Object/getPrototypeOf implementations)))
+        (unless (or (eq prototype (get globalThis/Object :prototype)) (nil? prototype))
+          (fail (str "protocol " (get definition :name) " implementations must be a plain object"))))
+      (let* ((descriptors (Object/getOwnPropertyDescriptors implementations))
+             (keys (Reflect/ownKeys descriptors))
+             (operations (get definition :operations)))
+        (unless (= (js-length keys) (js-length operations))
+          (fail (str "protocol " (get definition :name) " implementation must define every operation")))
+        (let ((names (js-call operations :map (lambda (operation) (get operation :operation)))))
+          (when (js-call keys :some
+                  (lambda (key)
+                    (or (not (= (funcall typeof-value key) "string"))
+                        (not (js-call names :includes key)))))
+            (fail (str "protocol " (get definition :name) " implementation contains an unknown operation"))))
+        (let ((normalized (js-array)))
+          (array-each operations
+            (lambda (entry _index)
+              (let* ((operation (get entry :operation))
+                     (slot (get entry :slot))
+                     (descriptor (get descriptors operation)))
+                (unless (and (not (nullish? descriptor))
+                             (truth (get descriptor :enumerable))
+                             (Reflect/has descriptor "value")
+                             (callable? (get descriptor :value)))
+                  (fail (str "protocol " (get definition :name) "/" operation " implementation must be a function")))
+                (js-call normalized :push
+                  (Object/freeze
+                    (js-object :operation operation :slot slot :implementation (get descriptor :value)))))))
+          (Object/freeze (js-object :protocol protocol :name (get definition :name) :methods normalized))))))
+
+  (defun normalize-plans (plans allow-empty)
+    (dense-array plans "protocol implementations" 1024)
+    (when (and (not allow-empty) (= (js-length plans) 0))
+      (fail "reify requires at least one protocol implementation"))
+    (let ((seen (new globalThis/Set)))
+      (Object/freeze
+        (js-call plans :map
+          (lambda (plan index)
+            (dense-array plan (str "protocol implementation " index) 2)
+            (unless (= (js-length plan) 2)
+              (fail (str "protocol implementation " index " must contain a protocol and methods")))
+            (let ((protocol (get plan 0))
+                  (methods (get plan 1)))
+              (when (js-call seen :has protocol)
+                (fail "protocol may be implemented only once"))
+              (js-call seen :add protocol)
+              (normalize-methods protocol methods)))))))
+
+  (defun plans-snapshot (plans)
+    (let ((result (js-array))
+          (plan-index 0))
+      (while (< plan-index (js-length plans))
+        (let* ((plan (get plans plan-index))
+               (implementations (Object/create nil))
+               (methods (get plan :methods))
+               (index 0))
+          (while (< index (js-length methods))
+            (let ((entry (get methods index)))
+              (Object/defineProperty implementations (get entry :operation)
+                (js-object :enumerable t :value (get entry :implementation))))
+            (setq index (1+ index)))
+          (Object/defineProperty result (funcall globalThis/String plan-index)
+            (js-object
+              :enumerable t
+              :writable t
+              :configurable t
+              :value (Object/freeze (js-array (get plan :protocol) (Object/freeze implementations))))))
+        (setq plan-index (1+ plan-index)))
+      (Object/freeze result)))
+
+  (defun install-protocol-methods (target plans)
+    (array-each plans
+      (lambda (plan _plan-index)
+        (array-each (get plan :methods)
+          (lambda (entry _method-index)
+            (let* ((slot (get entry :slot))
+                   (implementation (get entry :implementation)))
+              (when (Reflect/has target slot)
+                (fail (str "protocol slot conflict while implementing " (get plan :name))))
+              (let ((wrapper (funcall
+                               (js* "(fn) => function (...argumentsList) { return fn(this, ...argumentsList); }")
+                               implementation)))
+                (Object/defineProperty wrapper "name" (js-object :value "value" :configurable t))
+                (Object/defineProperty target slot
+                  (js-object
+                    :value wrapper
+                    :configurable false
+                    :enumerable false
+                    :writable false))))))))
+    target)
+
+  (defun define-fields (type field-names)
+    (let ((index 0))
+      (while (< index (js-length field-names))
+        (let ((field (get field-names index))
+              (position index)
+              (prototype (get type :prototype)))
+          (when (Reflect/has prototype field)
+            (fail (str "type field " field " conflicts with a type member")))
+          (Object/defineProperty prototype field
+            (js-object
+              :configurable false
+              :enumerable t
+              :get (method
+                     (lambda (self)
+                       (get (get (js-call type-value-states :get self) :values) position))
+                     "get"
+                     0))))
+        (setq index (1+ index)))))
+
+  (defun make-type-definition (name fields protocol-plans retain-fields)
+    (let* ((type-name (normalize-name name))
+           (normalized (normalize-fields fields))
+           (field-names (progn
+                          (when (and retain-fields (not (Object/isFrozen fields)))
+                            (fail "transported type fields must be frozen"))
+                          (if retain-fields fields normalized)))
+           (plans (normalize-plans protocol-plans t))
+           (type nil))
+      (setq type
+        (funcall
+          (js* "(initInstance) => class TypeValue { constructor(token, values) { initInstance(this, token, values); } }")
+          (lambda (self token values)
+            (unless (eq token type-constructor-token)
+              (fail (str type-name " values must be created with its positional constructor")))
+            (js-call type-value-states :set self
+              (Object/freeze (js-object :type type :values (Object/freeze values))))
+            (Object/freeze self))))
+      (Object/defineProperty type "create"
+        (js-object
+          :writable t
+          :configurable t
+          :value (method
+                   (lambda (_self &rest values)
+                     (unless (= (js-length values) (js-length field-names))
+                       (fail (str "->" type-name " expects " (js-length field-names)
+                                  " values, received " (js-length values))))
+                     (new type type-constructor-token values))
+                   "create"
+                   0)))
+      (Object/defineProperty type "isInstance"
+        (js-object
+          :writable t
+          :configurable t
+          :value (method
+                   (lambda (_self value)
+                     (let ((state (js-call type-value-states :get value)))
+                       (and (not (undefined? state)) (eq (get state :type) type))))
+                   "isInstance"
+                   1)))
+      (Object/defineProperty (get type :prototype) (get globalThis/Symbol :toStringTag)
+        (js-object
+          :configurable t
+          :get (method (lambda (_self) (str "EliscriptType:" type-name)) "get [Symbol.toStringTag]" 0)))
+      (Object/defineProperty type "name" (js-object :value type-name))
+      (Object/defineProperties type
+        (js-object
+          :typeName (js-object :enumerable t :value type-name)
+          :typeFields (js-object :enumerable t :value field-names)))
+      (define-fields type field-names)
+      (install-protocol-methods (get type :prototype) plans)
+      (Object/freeze (get type :prototype))
+      (Object/freeze type)
+      (js-call type-states :set type
+        (Object/freeze (js-object :name type-name :fields field-names :protocolPlans (plans-snapshot plans))))
+      type))
+
+  (defun defineType (name fields &rest optional-plans)
+    (make-type-definition name fields
+      (if (or (= (js-length optional-plans) 0) (undefined? (get optional-plans 0)))
+          (js-array)
+          (get optional-plans 0))
+      false))
+
+  (defun materializeTypeDefinition (name fields &rest optional-plans)
+    (make-type-definition name fields
+      (if (or (= (js-length optional-plans) 0) (undefined? (get optional-plans 0)))
+          (js-array)
+          (get optional-plans 0))
+      t))
+
+  (defun reifyProtocols (protocolPlans)
+    (let* ((plans (normalize-plans protocolPlans false))
+           (value (Object/freeze (install-protocol-methods (Object/create nil) plans))))
+      (js-call reified-states :set value
+        (Object/freeze (js-object :protocolPlans (plans-snapshot plans))))
+      value))
+
+  (defun readTypeState (type)
+    (if (= (funcall typeof-value type) "function")
+        (js-call type-states :get type)
+        undefined))
+
+  (defun readTypeValueState (value)
+    (if (and (not (nil? value)) (= (funcall typeof-value value) "object"))
+        (js-call type-value-states :get value)
+        undefined))
+
+  (defun materializeTypeValue (type values)
+    (let ((state (readTypeState type)))
+      (when (undefined? state)
+        (fail "expected an Eliscript type"))
+      (dense-array values "type values" 1024)
+      (unless (= (js-length values) (js-length (get state :fields)))
+        (fail (str "->" (get state :name) " expects " (js-length (get state :fields))
+                   " values, received " (js-length values))))
+      (unless (Object/isFrozen values)
+        (fail "transported type values must be frozen"))
+      (new type type-constructor-token values)))
+
+  (defun readReifiedState (value)
+    (if (and (not (nil? value)) (= (funcall typeof-value value) "object"))
+        (js-call reified-states :get value)
+        undefined))
+
+  (defun isType (value)
+    (and (= (funcall typeof-value value) "function") (js-call type-states :has value)))
+
+  (defun isTypeValue (value)
+    (and (not (nil? value))
+         (= (funcall typeof-value value) "object")
+         (js-call type-value-states :has value)))
+
+  (defun typeOf (value)
+    (let ((state (js-call type-value-states :get value)))
+      (when (undefined? state)
+        (fail "expected an Eliscript type value"))
+      (get state :type)))
+
+  (defun typeName (value)
+    (let ((type (if (isType value) value (typeOf value))))
+      (get (js-call type-states :get type) :name)))
+
+  (defun typeFieldNames (value)
+    (let ((type (if (isType value) value (typeOf value))))
+      (get (js-call type-states :get type) :fields)))
+
+  (export
+    defineType
+    reifyProtocols
+    isType
+    isTypeValue
+    typeOf
+    typeName
+    typeFieldNames
+    readTypeState
+    readTypeValueState
+    readReifiedState
+    materializeTypeDefinition
+    materializeTypeValue))

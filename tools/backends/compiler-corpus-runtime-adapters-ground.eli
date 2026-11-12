@@ -1,2 +1,833 @@
-(module capsules.tools.backends.compiler-corpus-runtime-adapters-ground
-  (js* "import {createHash} from 'node:crypto';\nimport {originalSourceCaseLocators} from './compiler-corpus-managed-cases.mjs';\n\n// Additional selected-product regions are not necessarily named by the older\n// stable-feature manifest. Bind each actual transported region, rather than\n// borrowing a sibling test's identity or declaring its whole suite covered.\nconst runtimeRegionPlans=Object.freeze([\n  {file:'tests/persistent-zipper.test.mjs',id:'zipper-indexed-ascent',record:'original-program:persistent-zipper-indexed-ascent',\n    title:'deep zipper ascent reads indexed ancestor slots without reducing wide parent vectors',\n    begin:'    const script = `',end:'\\n    `;'},\n  {file:'tests/literal-runtime.test.mjs',id:'host-only-shape',record:'original-program:literal-runtime-host-only',\n    title:'explicit host-only modules do not link the persistent runtime',\n    begin:'    expect(seed).not.toContain(',end:'\\n  } finally {'},\n  {file:'tests/literal-runtime.test.mjs',id:'portable-codec',record:'original-program:literal-runtime-portable-codec',\n    title:'portable closures produce persistent values for the versioned worker codec',\n    begin:'    const seedModule = await import(seedOutput);',end:'\\n    await Bun.write('},\n  {file:'tests/literal-runtime.test.mjs',id:'incomplete-map-input',record:'original-sequence:literal-runtime-invalid-inputs',\n    title:'hash-map rejects incomplete pairs in both compilers',\n    begin:'  await Bun.write(source, ',end:');\\n'},\n  {file:'tests/literal-runtime.test.mjs',id:'unbound-portable-input',record:'original-sequence:literal-runtime-invalid-inputs',\n    title:'portable closures produce persistent values for the versioned worker codec',\n    begin:'await Bun.write(\\n      invalid,',end:'\\n    );'},\n  {file:'tests/language-equality.test.mjs',id:'identity-source-shape',record:'original-program:language-equality-identity-only',\n    title:'language equal uses value semantics across compilers and local hosts',\n    begin:'    expect(identity).not.toContain(',end:'\\n  } finally {'},\n  {file:'tests/core-set.test.mjs',id:'source-map',record:'original-program:core-set-source-map',\n    title:'Eliscript-authored set algebra compiles and agrees across local hosts',\n    begin:'    const sourceMap = JSON.parse(await readFile(`${setModule}.map`, \"utf8\"));',end:'\\n  } finally {'},\n  {file:'tests/core-stdlib.test.mjs',id:'complete-protocols',record:'original-program:core-stdlib-complete-protocols',\n    title:'Eliscript core modules compile and execute against runtime protocols',\n    begin:'    const usage = await import(pathToFileURL(usageModule).href);',end:'\\n  } finally {'},\n  ...[\n    ['core','stable protocol and core algorithms build as one project across Bun and Node'],\n    ['utility','stable portable utility modules build as one project across Bun and Node'],\n    ['persistent-values','persistent value library builds as one project and executes under Bun and Node'],\n    ['value-text','identifier metadata and data text build as one project across Bun and Node'],\n    ['public','public state interop result JSON and numeric modules build across hosts'],\n  ].map(([id,title])=>({file:'tests/core-stdlib.test.mjs',id:'core-project-'+id,\n    record:'original-program:core-project-'+id,title,\n    begin:'    expect(report).toMatchObject({',end:'\\n  } finally {'})),\n]);\nexport const originalRuntimeSourceSuites=Object.freeze([...new Set(runtimeRegionPlans.map(plan=>plan.file))]);\n\nexport function originalRuntimeCaseLocators(file,source){\n  if(!originalRuntimeSourceSuites.includes(file))throw new TypeError('unregistered original runtime source suite');\n  const cases=originalSourceCaseLocators(file,source),locators=[];\n  for(const plan of runtimeRegionPlans.filter(item=>item.file===file)){\n    const matches=cases.filter(item=>item.originalCase.title===plan.title);\n    if(!matches.length)throw new TypeError('original runtime region lost its source case: '+plan.id);\n    for(const[index,locator]of matches.entries()){\n      const bound=locator.originalCase;\n      const start=source.indexOf(plan.begin,bound.span.start);\n      const end=start<0?-1:source.indexOf(plan.end,start+plan.begin.length);\n      if(start<bound.span.start||end<start||end+plan.end.length>bound.span.end)\n        throw new TypeError('original runtime region left its registered case: '+plan.id);\n      const contains=source.slice(start,end);\n      locators.push({id:'stable-compatibility:source-region:'+file+':'+plan.id+':'+index,\n        file,kind:'test',contains,originalCase:structuredClone(bound),\n        originalExecution:{record:plan.record,span:{start,end},\n          byteStart:Buffer.byteLength(source.slice(0,start)),byteEnd:Buffer.byteLength(source.slice(0,end)),\n          sha256:createHash('sha256').update(contains).digest('hex')}});\n    }\n  }\n  return locators;\n}\n\n// Original host-only runtime checks remain mandatory original gate evidence.\n// They do not represent execution of a compiled WASM or native algorithm.\nconst hostRuntimeFiles = new Set([\n  'tests/core-order.test.mjs', 'tests/collection-protocol.test.mjs', 'tests/data-text.test.mjs',\n  'tests/fixtures/value-hashes.json',\n  'tests/identifier.test.mjs', 'tests/metadata.test.mjs',\n  'tests/persistent-list.test.mjs', 'tests/persistent-map.test.mjs',\n  'tests/persistent-queue.test.mjs', 'tests/persistent-set.test.mjs',\n  'tests/persistent-vector.test.mjs', 'tests/protocol.test.mjs',\n  'tests/record.test.mjs', 'tests/transducer.test.mjs',\n  'tests/transient.test.mjs', 'tests/type.test.mjs',\n  'tests/value-semantics.test.mjs',\n  ...['collection-protocol', 'core-stdlib', 'data-text', 'metadata',\n    'persistent-list', 'persistent-map', 'persistent-queue', 'persistent-set',\n    'persistent-vector', 'protocol', 'transducer', 'transient', 'value-hash']\n    .map(name => 'tests/fixtures/' + name + '-host.mjs'),\n]);\n\nexport function isOriginalRuntimeHostOnly(filename, source) {\n  if (!hostRuntimeFiles.has(filename) || typeof source !== 'string') return false;\n  if (filename === 'tests/fixtures/value-hashes.json') return true;\n  if (!/from\\s+[\"'](?:\\.\\.\\/)+runtime\\/[^\"']+[\"']/.test(source)) return false;\n  // Refuse this classification if an original host grows a compiler or actual\n  // language-product injection path. It must then receive a selected adapter.\n  return !/(?:bin\\/eliscript|buildBackends|buildProject|checkProject|seedCompilerFixture|compile_ir_string|compile_string|\\.eli[\"'`]|process\\.argv|ELISCRIPT_.*(?:MODULE|COMPILER))/.test(source);\n}\n\nconst mixedRuntimeBoundaries=new Map([\n  ['tests/persistent-queue.test.mjs','Eliscript persistent queue API compiles and runs on both hosts'],\n  ['tests/lazy-sequence.test.mjs','Eliscript lazy sequences agree across compilers and local hosts'],\n  ['tests/persistent-sorted.test.mjs','Eliscript sorted API agrees across compilers and local hosts'],\n  ['tests/regex.test.mjs','Eliscript regex APIs agree across compilers and local hosts'],\n  ['tests/core-text-object.test.mjs','core text/object production artifacts are fixed-point and cross-host'],\n  ['tests/core-set.test.mjs','Eliscript-authored set algebra compiles and agrees across local hosts'],\n  ['tests/core-stdlib.test.mjs','Eliscript core modules compile and execute against runtime protocols'],\n]);\n\nconst mixedRuntimeCaseTitles=new Map([\n  ['tests/persistent-queue.test.mjs',new Set([\n    'persistent queue preserves FIFO order and immutable front operations',\n    'persistent queue implements collection value and metadata protocols',\n    'persistent queue promotes its rear without traversal or node allocation',\n    'persistent queue agrees with a mutable FIFO reference model',\n    'persistent queue stays iterative at one million values',\n    'persistent queue runtime agrees under Bun and Node',\n  ])],\n  ['tests/lazy-sequence.test.mjs',new Set([\n    'lazy sequences start on demand and share one realized prefix',\n    'lazy sequence failures are cached at one stable realization position',\n    'lazy cons defers tails and remains stack safe for recursive streams',\n    'transducer sequence pulls only enough input and memoizes output',\n    'transducer sequence honors zero input and completion output',\n    'transducer sequence closes its input when transformation fails',\n    'lazy combinators compose infinite inputs without eager realization',\n    'lazy combinator family preserves transducer semantics',\n    'lazy combinators validate before consuming their inputs',\n    'lazy sequence APIs reject malformed producers and calls',\n  ])],\n  ['tests/persistent-sorted.test.mjs',new Set([\n    'persistent sorted maps preserve order immutability and comparator identity',\n    'persistent sorted sets retain canonical comparator-equivalent values',\n    'sorted collections implement collection value metadata and text protocols',\n    'hash and sorted collections share exact logical value semantics',\n    'sorted range queries honor inclusive bounds and direction',\n    'persistent sorted trees agree with a randomized mutable model',\n    'persistent sorted trees keep height work and copying logarithmic',\n  ])],\n  ['tests/regex.test.mjs',new Set([\n    'regex patterns are immutable deterministic values',\n    'regex matching preserves captures absence and start offsets',\n    'regex sequences are memoized and advance zero-width Unicode matches',\n    'regex replacement is global literal and callback driven',\n    'regex APIs reject mutable host patterns and malformed calls',\n  ])],\n  ['tests/core-set.test.mjs',new Set([\n    'set conversion and union accept protocol sources with value semantics',\n    'intersection and difference preserve left metadata and immutable inputs',\n    'set relations are value-semantic and enforce complete arity',\n    'relational projection and selection preserve value semantics and metadata',\n    'relational rename and inversion handle swaps and traversal collisions',\n    'relational indexing drives natural and mapped joins',\n    'relational set operations enforce arity and predicate contracts',\n  ])],\n  ['tests/core-stdlib.test.mjs',new Set([\n    'sequence algorithms use protocols and Eliscript truthiness',\n    'sequence composition partitioning and tree traversal use protocol sources',\n    'finite sequence selection is single-pass, bounded, and nullish-safe',\n    'replayable sequence heads and tails preserve bounded source semantics',\n    'replayable sequence sources compose lazily with bounded reduction',\n    'removing and dropping compose with fresh reduction state',\n    'data algorithms return persistent value-semantic maps and vectors',\n    'associative data algorithms preserve nested and value-semantic behavior',\n    'indexBy uses a transient HAMT builder at scale',\n    'protocol standard-library algorithms agree under Bun and Node',\n  ])],\n  ['tests/core-text-object.test.mjs',new Set([\n    'protocol-driven text and object algorithms preserve value boundaries',\n    'external protocol values reuse text and keyed algorithms',\n    'core object transforms use transient persistent-map construction',\n  ])],\n]);\n\nexport function originalRuntimeOnlyCase(filename,source,contains){\n  const boundary=mixedRuntimeBoundaries.get(filename);\n  if(!boundary||typeof contains!=='string'||contains.length===0||\n    !/from\\s+[\"'](?:\\.\\.\\/)+runtime\\//.test(source))return null;\n  const end=source.indexOf('test('+JSON.stringify(boundary)+',');\n  if(end<0)return null;\n  const starts=[...source.matchAll(/^test\\(/gm)].map(match=>match.index);\n  const candidates=[];\n  for(let index=0;index<starts.length;index++){\n    const start=starts[index],finish=starts[index+1]??source.length;\n    if(start===end)continue;\n    const code=source.slice(start,finish);\n    if(!code.includes(contains))continue;\n    const header=/^test\\((\"(?:[^\"\\\\]|\\\\.)*\")\\s*,/.exec(code);\n    if(!header||!mixedRuntimeCaseTitles.get(filename)?.has(JSON.parse(header[1])))continue;\n    let occurrence=source.indexOf(contains);\n    while(occurrence>=0){\n      if(occurrence<start||occurrence+contains.length>finish)return null;\n      occurrence=source.indexOf(contains,occurrence+1);\n    }\n    // This classification applies only to a complete pre-existing runtime case,\n    // never the mixed file or a compiler setup helper shared by both regions.\n    if(/(?:bin\\/eliscript|\\.eli[\"'`]|compileFamily|compile_ir_string|compile_string|seedCompilerFixture|buildBackends|buildProject|checkProject|importGeneratedModule|generatedModules)/.test(code))return null;\n    candidates.push({start,end:finish});\n  }\n  return candidates.length===1?candidates[0]:null;\n}\n\nconst captureModuleOutput = `async function originalModuleOutput(filename) {\n  const chunks = [];\n  const stream = new Writable({write(chunk, encoding, complete) {chunks.push(Buffer.from(chunk));complete();}});\n  const previous = globalThis.console;\n  globalThis.console = new Console({stdout:stream,stderr:process.stderr,colorMode:false});\n  try {await import(pathToFileURL(filename).href);}\n  finally {globalThis.console = previous;stream.end();}\n  return Buffer.concat(chunks).toString('utf8');\n}`;\n\nfunction writtenOriginalSource(original,variable,from,region){\n  const escaped=variable.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&');\n  const opening=new RegExp('await Bun[.]write\\\\(\\\\s*'+escaped+',\\\\s*').exec(original.slice(from));\n  if(!opening)throw new TypeError('original inline source write changed: '+variable);\n  const start=from+opening.index,tail=original.slice(start+opening[0].length);\n  const closing=/\\n\\s*\\);/.exec(tail);\n  if(!closing)throw new TypeError('original inline source write has no closing boundary');\n  const bound=region(original,opening[0],closing[0],start);\n  const expression=bound.text.slice(opening[0].length).trim().replace(/,$/,'');\n  const tokens=expression.match(/\"(?:[^\"\\\\]|\\\\.)*\"/g)??[];\n  if(!tokens.length||expression.replace(/\"(?:[^\"\\\\]|\\\\.)*\"/g,'').replace(/\\s+/g,'')!=='+'.repeat(tokens.length-1))\n    throw new TypeError('original inline source is not a frozen string concatenation');\n  return{source:tokens.map(value=>JSON.parse(value)).join(''),region:bound};\n}\n\n// Compilation setup is performed by the selected compiler session. This host\n// retains every original output, own-property, callback and physical-map check.\nexport async function addOriginalStdlibRuntimeAdapters({add, records, locators, text, file, region, data,bootstrapSources}) {\n  const publish=add,byLocator=new Map(locators.map(locator=>[locator.id,locator]));\n  add=record=>{\n    record.coverage=record.coverage.filter(id=>{\n      const execution=byLocator.get(id)?.originalExecution;\n      return !execution||execution.record===record.id;\n    });\n    for(const locator of locators)if(locator.originalExecution?.record===record.id&&!record.coverage.includes(locator.id))\n      throw new TypeError('original runtime record omitted its exact executed region: '+record.id);\n    if(!record.coverage.length)throw new TypeError('original runtime record has no executed source coverage: '+record.id);\n    publish(record);\n  };\n  const plans = [\n    {name:'sequence',library:'sequence',assertion:'portable sequence library compiles and executes as an ESM module'},\n    {name:'object',library:'object',assertion:'portable object and data libraries preserve immutable own-property semantics'},\n    {name:'text',library:'text',assertion:'portable text library compiles and executes as an ESM module'},\n  ];\n  const mapped = [];\n  for (const plan of plans) {\n    const suite = 'tests/stdlib-' + plan.name + '.test.mjs';\n    if (!locators.some(item => item.file === suite)) continue;\n    const original = await text(suite);\n    const body = region(original, '    expect(JSON.parse(executed)).toEqual(', '\\n  } finally {');\n    const coverage = locators.filter(item => item.file === suite && typeof item.contains === 'string' &&\n      (plan.assertion + '\\n' + body.text).includes(item.contains)).map(item => item.id);\n    if (!coverage.length) throw new TypeError('original stdlib host has no bound assertion locator: ' + suite);\n    const source = 'tests/fixtures/' + plan.name + '-usage.eli';\n    const originalPlan = records.find(record => record.id === 'stable-compatibility:program:' + source);\n    if (!originalPlan) throw new Error('original stdlib program graph is unavailable: ' + source);\n    const hostSource = [\n      'import {expect} from \"bun:test\";',\n      'import {resolve} from \"node:path\";',\n      'import {pathToFileURL} from \"node:url\";',\n      'import {Console} from \"node:console\";',\n      'import {Writable} from \"node:stream\";',\n      'const directory=resolve(process.argv[2],\"tests/fixtures\");',\n      'const usageModule=resolve(directory,' + JSON.stringify(plan.name + '-usage.mjs') + ');',\n      'const ' + plan.library + 'Module=resolve(directory,' + JSON.stringify(plan.library + '.mjs') + ');',\n      ...(plan.name === 'object' ? ['const dataModule=resolve(directory,\"data.mjs\");'] : []),\n      captureModuleOutput,\n      'const executed=await originalModuleOutput(usageModule);',\n      body.text,\n      '',\n    ].join('\\n');\n    add({id:'original-program:stdlib-' + plan.name + '-complete-host',kind:'project',coverage,\n      modules:structuredClone(originalPlan.modules),entry:originalPlan.entry,\n      request:{...structuredClone(originalPlan.request),phased:true},\n      execution:{kind:'original-program',host:'tests/__eliscript_original_stdlib_' + plan.name + '.mjs',\n        hostSource,arguments:[{directory:true}],aliases:true,requiresBun:true,compilerSourceMaps:true},\n      expected:{kind:'seed-program',oracleRequired:true,stdout:''},\n      original:{manifest:'stable-compatibility',suite,fixture:source,host:suite,\n        sourceSha256:(await file(suite)).sha256,\n        regions:[body].map(({start,end,byteStart,byteEnd,sha256}) => ({start,end,byteStart,byteEnd,sha256})),\n        originalAssertion:plan.assertion,\n        setupAssertions:'original compiler CLI silence and project transport remain required by the original gate'},\n    });\n    mapped.push(suite);\n  }\n  for (const plan of [\n    {name:'function',assertions:[\n      'portable function combinators compile and agree across local hosts',\n      'predicate combinators preserve Lisp truth and short-circuit order',\n    ],directBodies:2},\n    {name:'deferred',assertions:[\n      'deferred computations compile and agree across local hosts',\n      'delay and memoize retry failures without caching partial state',\n    ],directBodies:1},\n  ]) {\n    const suite='tests/stdlib-'+plan.name+'.test.mjs';\n    if(!locators.some(item=>item.file===suite))continue;\n    const original=await text(suite),source='tests/fixtures/'+plan.name+'-usage.eli';\n    const originalPlan=records.find(record=>record.id==='stable-compatibility:program:'+source);\n    if(!originalPlan)throw new Error('original stdlib program graph is unavailable: '+source);\n    const expectedRegion=region(original,'    const expected = {',';\\n    for (const host');\n    const expected=data(expectedRegion.text.slice('    const expected = '.length));\n    const bodies=[];let offset=0;\n    for(let index=0;index<plan.directBodies;index++){\n      const body=region(original,'    const module = await import(', '\\n  } finally {',offset);\n      bodies.push(body);offset=body.end;\n    }\n    const allCode=plan.assertions.join('\\n')+'\\n'+expectedRegion.text+'\\n'+bodies.map(body=>body.text).join('\\n');\n    const coverage=locators.filter(item=>item.file===suite&&typeof item.contains==='string'&&allCode.includes(item.contains)).map(item=>item.id);\n    if(!coverage.length)throw new TypeError('original stdlib host has no bound assertion locator: '+suite);\n    const origin={manifest:'stable-compatibility',suite,fixture:source,host:suite,sourceSha256:(await file(suite)).sha256,\n      regions:[expectedRegion,...bodies].map(({start,end,byteStart,byteEnd,sha256})=>({start,end,byteStart,byteEnd,sha256})),\n      setupAssertions:'original project build-report and compiler CLI setup remain required by the original gate'};\n    for(const hostRuntime of ['bun','node'])add({\n      id:'original-program:stdlib-'+plan.name+'-output-'+hostRuntime,kind:'project',coverage,\n      modules:structuredClone(originalPlan.modules),entry:originalPlan.entry,request:{...structuredClone(originalPlan.request),phased:true},\n      execution:{kind:'original-program',host:null,hostRuntime,aliases:true,requiresBun:hostRuntime==='bun'},\n      expected:{kind:'seed-program',oracleRequired:true,stdoutJSON:structuredClone(expected)},original:structuredClone(origin),\n    });\n    add({id:'original-program:stdlib-'+plan.name+'-complete-callables',kind:'project',coverage,\n      modules:structuredClone(originalPlan.modules),entry:originalPlan.entry,\n      request:{...structuredClone(originalPlan.request),phased:true},\n      execution:{kind:'original-program',host:'tests/__eliscript_original_stdlib_'+plan.name+'_callables.mjs',\n        hostSource:[\n          'import {expect} from \"bun:test\";',\n          'import {resolve} from \"node:path\";',\n          'import {pathToFileURL} from \"node:url\";',\n          'const outputRoot=resolve(process.argv[2],\"tests/fixtures/stdlib\");',\n          ...bodies.map(body=>'{\\n'+body.text+'\\n}'),'',\n        ].join('\\n'),arguments:[{directory:true}],aliases:true,requiresBun:true,hostRuntime:'bun'},\n      expected:{kind:'seed-program',oracleRequired:true,stdout:''},original:structuredClone(origin),\n    });\n    mapped.push(suite);\n  }\n  for(const plan of [\n    {name:'value',suite:'portable-value-semantics',helperStart:'function nextRandom(state)',multiModules:true,tests:[\n      'portable persistent collections preserve nested undefined values',\n      'optimized and portable persistent Lists share frozen hash semantics',\n      'Eliscript-authored value semantics preserve generated cross-family invariants',\n      'Eliscript-authored value hashing traverses one million persistent values',\n    ]},\n    {name:'persistent-list',helperStart:'function nextRandom(state)',tests:[\n      'Eliscript-authored persistent list preserves generated history',\n      'Eliscript-authored persistent list shares a million-node suffix',\n    ]},\n    {name:'persistent-vector',helperStart:'function nodeCount(node, level)',vector:true,tests:[\n      'Eliscript-authored persistent vector preserves generated history',\n      'Eliscript-authored persistent vector keeps million-value trie bounds',\n    ]},\n    {name:'persistent-map',helperStart:'function integerHash(value)',tests:[\n      'Eliscript-authored HAMT Map preserves generated value-key histories',\n      'Eliscript-authored HAMT Map promotes and demotes measured layouts',\n      'Eliscript-authored HAMT Map shares the million-key update path',\n    ]},\n    {name:'persistent-set',helperStart:'function integerHash(value)',tests:[\n      'Eliscript-authored persistent Set preserves generated value-key histories',\n      'Eliscript-authored persistent Set preserves algebra and HAMT layouts',\n      'Eliscript-authored persistent Set shares the million-member update path',\n    ]},\n  ]){\n    const suite='tests/'+(plan.suite??'portable-'+plan.name)+'.test.mjs';\n    if(!locators.some(item=>item.file===suite))continue;\n    const original=await text(suite),helpers=region(original,plan.helperStart,'\\ntest(');\n    const originalPlan=records.find(record=>record.id==='stable-compatibility:program:stdlib/'+plan.name+'.eli');\n    if(!originalPlan)throw new Error('original portable collection graph is unavailable: '+plan.name);\n    for(const assertion of plan.tests){\n      const prefix='test('+JSON.stringify(assertion)+', async () => {\\n';\n      const body=region(original,prefix,'\\n}, '),suffix=original.slice(body.end);\n      const deadline=/^\\n}, ([0-9_]+)\\);/.exec(suffix);\n      if(!deadline)throw new TypeError('original portable collection deadline changed: '+assertion);\n      const timeoutMs=Number(deadline[1].replaceAll('_',''));\n      let code=body.text.slice(prefix.length);const regions=[helpers,body];\n      if(plan.vector){\n        const modulePath=region(code,'  const modulePath = resolve(','\\n  const vectorModule = await import(');\n        code=code.slice(0,modulePath.start)+'  const modulePath=selectedModulePath;'+code.slice(modulePath.end);\n        // The complete original body remains bound even though its module\n        // location is transported from the actual selected product.\n      }\n      const coverage=locators.filter(item=>item.file===suite&&typeof item.contains==='string'&&\n        (assertion+'\\n'+helpers.text+'\\n'+body.text).includes(item.contains)).map(item=>item.id);\n      if(!coverage.length)throw new TypeError('original collection case has no bound assertion locator: '+assertion);\n      add({id:'original-program:portable-'+plan.name+'-'+plan.tests.indexOf(assertion),kind:'project',coverage,\n        modules:structuredClone(originalPlan.modules),entry:originalPlan.entry,\n        request:{...structuredClone(originalPlan.request),phased:true},\n        execution:{kind:'original-program',host:'tests/__eliscript_original_'+plan.name+'_'+plan.tests.indexOf(assertion)+'.mjs',\n          hostSource:[\n            'import {expect} from \"bun:test\";',\n            'import {resolve} from \"node:path\";',\n            'import {pathToFileURL} from \"node:url\";',\n            'const selectedModulePath=resolve(process.argv[2],'+JSON.stringify(originalPlan.entry)+');',\n            'async function importGeneratedModule(label){return import(pathToFileURL(selectedModulePath).href+\"?original=\"+encodeURIComponent(label));}',\n            ...(plan.multiModules?[\n              'const runtimeRoot=process.env.ELISCRIPT_ORIGINAL_SOURCE_ROOT;',\n              'const {persistentList:runtimePersistentList}=await import(pathToFileURL(resolve(runtimeRoot,\"runtime/core/list.mjs\")).href);',\n              'const {hashValue:runtimeHashValue}=await import(pathToFileURL(resolve(runtimeRoot,\"runtime/core/value.mjs\")).href);',\n              'async function generatedModules(label){const result={};for(const name of [\"bit\",\"persistent-list\",\"persistent-vector\",\"persistent-map\",\"persistent-set\",\"value\"]){result[name]=await import(pathToFileURL(resolve(process.argv[2],name+\".mjs\")).href+\"?original=\"+encodeURIComponent(label));}return result;}',\n            ]:[]),\n            helpers.text,code,'',\n          ].join('\\n'),arguments:[{directory:true}],aliases:true,requiresBun:true,hostRuntime:'bun',timeoutMs},\n        expected:{kind:'seed-program',oracleRequired:true,stdout:''},\n        original:{manifest:'stable-compatibility',suite,fixture:'stdlib/'+plan.name+'.eli',host:suite,\n          sourceSha256:(await file(suite)).sha256,originalAssertion:assertion,\n          regions:regions.map(({start,end,byteStart,byteEnd,sha256})=>({start,end,byteStart,byteEnd,sha256}))},\n      });\n    }\n  }\n  for(const plan of [\n    {name:'persistent-list',suite:'portable-persistent-list',assertion:'Eliscript-authored persistent list compiles and agrees across hosts',begin:'    for (const report of reports) {'},\n    {name:'persistent-vector',suite:'portable-persistent-vector',assertion:'Eliscript-authored persistent vector compiles and agrees across hosts',begin:'    for (const report of hostReports) {'},\n    {name:'persistent-map',suite:'portable-persistent-map',assertion:'Eliscript-authored HAMT Map compiles and agrees across hosts'},\n    {name:'persistent-set',suite:'portable-persistent-set',assertion:'Eliscript-authored persistent Set compiles and agrees across hosts'},\n    {name:'numeric',suite:'portable-numeric',assertion:'portable numeric functions preserve exact Number and safe-integer contracts'},\n    {name:'json',suite:'portable-json',assertion:'portable JSON values are strict, canonical, bounded, and self-hosted'},\n    {name:'result',suite:'portable-result',assertion:'portable Result values are byte-identical and short-circuit at scale'},\n    {name:'metadata',suite:'portable-metadata',assertion:'Eliscript-authored metadata is byte-identical and portable'},\n    {name:'data-text',suite:'portable-data-text',assertion:'portable canonical data text is byte-identical and host-independent'},\n    {name:'value',suite:'portable-value-semantics',assertion:'Eliscript-authored value semantics compile and agree across hosts'},\n    {name:'persistent-queue',suite:'persistent-queue',assertion:'Eliscript persistent queue API compiles and runs on both hosts',begin:'    expect(reports[1]).toEqual(reports[0]);',maps:false},\n    {name:'lazy-sequence',suite:'lazy-sequence',source:'tests/fixtures/lazy-sequence.eli',assertion:'Eliscript lazy sequences agree across compilers and local hosts',maps:false},\n    {name:'persistent-sorted',suite:'persistent-sorted',source:'tests/fixtures/persistent-sorted.eli',assertion:'Eliscript sorted API agrees across compilers and local hosts',maps:false},\n    {name:'regex',suite:'regex',source:'tests/fixtures/regex.eli',assertion:'Eliscript regex APIs agree across compilers and local hosts',maps:false},\n    {name:'persistent-tree-walk',suite:'persistent-tree-walk',source:'tests/fixtures/persistent-tree-walk.eli',assertion:'persistent tree walk is stack safe and agrees across compilers and hosts',maps:false},\n    {name:'persistent-zipper',suite:'persistent-zipper',source:'tests/fixtures/persistent-zipper.eli',assertion:'persistent zippers navigate edit and rebuild stack-safe trees',maps:false},\n    {name:'core-text-object',suite:'core-text-object',source:'stdlib/core/text.eli',assertion:'core text/object production artifacts are fixed-point and cross-host',maps:false},\n    {name:'interop-js',suite:'interop-js',source:'stdlib/interop/js.eli',mapRoot:'stdlib',assertion:'Eliscript JS interop preserves explicit host and persistent boundaries'},\n    {name:'declarative-protocol',suite:'declarative-protocol',source:'tests/fixtures/declarative-protocol.eli',assertion:'declarative protocols preserve protocol identity and host dispatch'},\n    {name:'declarative-record',suite:'declarative-record',source:'tests/fixtures/declarative-record.eli',assertion:'defrecord is identical across seed and self-hosted compilers',maps:false},\n    {name:'declarative-type',suite:'declarative-type',source:'tests/fixtures/declarative-type.eli',assertion:'deftype and reify agree across compilers and hosts',maps:false},\n    {name:'multimethod',suite:'multimethod',assertion:'Eliscript multimethods dispatch on values with persistent method snapshots'},\n    {name:'core-expression-forms',suite:'core-expression-forms',source:'tests/fixtures/core-expression-forms.eli',assertion:'core expression forms preserve threading and single-evaluation semantics',maps:false},\n    {name:'local-recursive-functions',suite:'local-recursive-functions',source:'tests/fixtures/local-recursive-functions.eli',assertion:'local recursive functions agree across compilers and local hosts',maps:false},\n    {name:'multi-arity',suite:'multi-arity',source:'tests/fixtures/multi-arity.eli',assertion:'multi-arity functions agree across compilers and local hosts',maps:false},\n    {name:'value-dispatch',suite:'value-dispatch',source:'tests/fixtures/value-dispatch.eli',assertion:'case and condp agree across compilers and local hosts',maps:false},\n    {name:'literal-runtime',suite:'literal-runtime',source:'tests/fixtures/literal-runtime.eli',assertion:'persistent literals and quoted data preserve language value categories',begin:'    expect(nodeReport).toEqual(bunReport);'},\n    {name:'atom',suite:'atom',source:'stdlib/state/atom.eli',assertion:'Eliscript Atom preserves ordered single-transition state semantics'},\n    {name:'eliscript-protocol',suite:'eliscript-protocol',source:'stdlib/core/protocol.eli',assertion:'Eliscript-authored protocol policy preserves open dispatch semantics'},\n    ...['vector','map','set'].map(collection=>({name:'persistent-core-exit-'+collection,suite:'persistent-core-exit',source:'stdlib/value.eli',baseId:'persistent-core-exit-'+collection,idSuffix:collection,locals:'const collection='+JSON.stringify(collection)+';',assertion:'persistent collection core closes its all-host million-value exit gate',begin:'      expect(reports[1]).toEqual(reports[0]);',end:'\\n    }\\n  } finally {',maps:false})),\n    {name:'language-equality',suite:'language-equality',source:'tests/fixtures/language-equality.eli',assertion:'language equal uses value semantics across compilers and local hosts',begin:'    const expected = {',end:'    const identitySource ='},\n  ]){\n    const suite='tests/'+plan.suite+'.test.mjs';\n    if(!locators.some(item=>item.file===suite))continue;\n    const original=await text(suite),testStart=original.indexOf('test('+JSON.stringify(plan.assertion)+',');\n    if(testStart<0)throw new TypeError('original portable host assertion changed: '+suite);\n    const body=region(original,plan.begin??'    for (const report of reports) expect(report).toEqual(reports[0]);',plan.end??'\\n  } finally {',testStart);\n    const firstEnd=original.slice(body.end),deadline=/^[\\s\\S]*?\\n}, ([0-9_]+)\\);/.exec(firstEnd);\n    if(!deadline)throw new TypeError('original portable host deadline changed: '+suite);\n    const source=plan.source??'stdlib/'+plan.name+'.eli';\n    const originalPlan=records.find(record=>record.id==='stable-compatibility:program:'+(plan.baseId??source));\n    if(!originalPlan?.execution.host||typeof originalPlan.execution.hostSource!=='string')throw new Error('original portable host graph is unavailable: '+plan.name);\n    const fixture=originalPlan.execution.host;\n    let assertionCode=body.text;\n    let assertionPrefix='';\n    const transportRegions=[];\n    if(plan.name==='literal-runtime'){\n      const shape=region(original,'    const javascript =','    const bunReport =',testStart);\n      assertionPrefix=shape.text.replace('readFile(seedOutput, \"utf8\")',\n        'readFile(resolve(javascriptProductRoot,'+JSON.stringify(originalPlan.entry)+'), \"utf8\")');\n      transportRegions.push(shape);\n    }\n    if(plan.name==='language-equality'){\n      const shape=region(original,'    expect(seed.match(', '\\n    const expected =',testStart);\n      assertionPrefix='{const seed=await readFile(resolve(javascriptProductRoot,'+JSON.stringify(originalPlan.entry)+'),\"utf8\");\\n'+shape.text+'\\n}';\n      transportRegions.push(shape);\n    }\n    if(plan.name==='eliscript-protocol')assertionCode=assertionCode.replace('`${seed}.map`','`${seedModule}.map`');\n    if(plan.name==='multimethod')assertionCode=assertionCode\n      .replace('\"multimethod.eli.map\"','\"multimethod.mjs.map\"')\n      .replace('\"hierarchy.eli.map\"','\"hierarchy.mjs.map\"');\n    if(['numeric','json','result'].includes(plan.name)){\n      const compileStart=assertionCode.indexOf('    await runSuccessful([\\n      projectBuilder,');\n      const prunedStart=assertionCode.indexOf('    const pruned =',compileStart);\n      const mapStart=assertionCode.indexOf('    const sourceMap =',prunedStart);\n      if(compileStart<0||prunedStart<0||mapStart<0)throw new TypeError('original portable pruning boundaries changed: '+suite);\n      const pruning=region(original,'    const pruned =','    const sourceMap =',body.start+compileStart);\n      const portableEntry={numeric:'gcd',json:'parse-json',result:'unwrap-or'}[plan.name];\n      const pruningCoverage=locators.filter(item=>item.file===suite&&typeof item.contains==='string'&&\n        (plan.assertion+'\\n'+pruning.text).includes(item.contains)).map(item=>item.id);\n      add({id:'original-program:'+plan.suite+'-pruned',kind:'project',coverage:pruningCoverage,\n        modules:structuredClone(originalPlan.modules),entry:originalPlan.entry,\n        request:{...structuredClone(originalPlan.request),phased:true,portableEntries:[portableEntry]},\n        execution:{kind:'original-program',host:'tests/__eliscript_original_'+plan.suite+'_pruned.mjs',\n          hostSource:[\n            'import {expect} from \"bun:test\";',\n            'import {resolve} from \"node:path\";',\n            'const prunedDirectory=process.env.ELISCRIPT_ORIGINAL_JAVASCRIPT_PRODUCT_ROOT;',\n            'if(!prunedDirectory)throw new Error(\"original pruning assertions require the actual selected compiler JavaScript artifact\");',\n            pruning.text,'',\n          ].join('\\n'),arguments:[{directory:true}],aliases:true,requiresBun:true,hostRuntime:'bun',\n          compilerSourceMaps:true,timeoutMs:Number(deadline[1].replaceAll('_',''))},\n        expected:{kind:'seed-program',oracleRequired:true,stdout:''},\n        original:{manifest:'stable-compatibility',suite,fixture:source,host:suite,\n          sourceSha256:(await file(suite)).sha256,originalAssertion:plan.assertion,\n          regions:[pruning].map(({start,end,byteStart,byteEnd,sha256})=>({start,end,byteStart,byteEnd,sha256}))},\n      });\n      assertionCode=assertionCode.slice(0,compileStart)+assertionCode.slice(mapStart);\n      if(plan.name==='json')assertionCode=assertionCode.replace(\n        'resolve(seedDirectory, \"json.mjs\")','resolve(javascriptProductRoot, \"json.mjs\")');\n    }\n    const runtimeImports=[...original.matchAll(/^import\\s+[^;]+;/gm)]\n      .map(match=>match[0]).filter(code=>/from\\s+[\"']\\.\\.\\/runtime\\//.test(code));\n    const coverage=locators.filter(item=>item.file===suite&&typeof item.contains==='string'&&\n      (plan.assertion+'\\n'+body.text).includes(item.contains)).map(item=>item.id);\n    if(!coverage.length)throw new TypeError('original portable host has no bound assertion locator: '+suite);\n    const originalArguments=originalPlan.execution.arguments??(originalPlan.execution.argumentModules??[originalPlan.entry]).map(module=>({module}));\n    const hostSource=[\n      'import {expect} from \"bun:test\";',\n      'import {resolve,dirname} from \"node:path\";',\n      'import {readFile} from \"node:fs/promises\";',\n      'const root=process.env.ELISCRIPT_ORIGINAL_SOURCE_ROOT;',\n      ...runtimeImports,\n      'if(!root)throw new Error(\"original portable host requires its source root\");',\n      'const product=process.argv[2];',\n      'const fixture=resolve(product,'+JSON.stringify(fixture)+');',\n      'const moduleArguments='+JSON.stringify(originalArguments)+'.map(item=>item.directory===true?product:Object.hasOwn(item,\"literal\")?item.literal:resolve(product,item.module));',\n      ...(plan.locals?[plan.locals]:[]),\n      'const seedModule=resolve(product,'+JSON.stringify(originalPlan.entry)+');',\n      'const seed=seedModule,seedSet=seedModule,seedDirectory=resolve(product,'+JSON.stringify(plan.mapRoot??'.')+');',\n      'const javascriptProductRoot=process.env.ELISCRIPT_ORIGINAL_JAVASCRIPT_PRODUCT_ROOT;',\n      'const originalChildren=new Set();',\n      'for(const signal of [\"SIGINT\",\"SIGTERM\"])process.once(signal,()=>{for(const child of originalChildren)child.kill(signal);process.exitCode=signal===\"SIGINT\"?130:143;});',\n      'async function originalReport(host){',\n      '  const bun=host===\"bun\",args=bun?[\"--preload\",resolve(root,\"tests/fixtures/compiled-eli-bun-preload.mjs\")]:[\"--experimental-loader\",resolve(root,\"tests/fixtures/compiled-eli-node-loader.mjs\")];',\n      '  if(bun&&process.env.ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT)args.push(\"--preload\",resolve(root,\"tools/backends/compiler-corpus-host-context.mjs\"));',\n      '  args.push(fixture,...moduleArguments);',\n      '  const child=Bun.spawn([bun?\"bun\":process.env.NODE??\"node\",...args],{cwd:root,env:process.env,stdout:\"pipe\",stderr:\"pipe\"});',\n      '  originalChildren.add(child);',\n      '  const [status,stdout,stderr]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]).finally(()=>originalChildren.delete(child));',\n      '  if(status!==0)throw new Error(stderr.trim()||stdout.trim()||\"original portable host exited with \"+status);',\n      '  return JSON.parse(stdout);',\n      '}',\n      'const reports=[await originalReport(\"bun\"),await originalReport(\"node\")],hostReports=reports;',\n      'const bunReport=reports[0],nodeReport=reports[1];',\n      'const BUN=\"bun\",NODE=\"node\",seedOutput=seedModule,selfOutput=seedModule;',\n      'async function execute(host){return reports[host===\"bun\"?0:1];}',\n      assertionPrefix,assertionCode,\n      'console.log(JSON.stringify(reports));','',\n    ].join('\\n');\n    add({id:'original-program:'+plan.suite+'-complete-hosts'+(plan.idSuffix?'-'+plan.idSuffix:''),kind:'project',coverage,\n      modules:structuredClone(originalPlan.modules),entry:originalPlan.entry,\n      request:{...structuredClone(originalPlan.request),phased:true,\n        hostSources:[...(originalPlan.request.hostSources??[]),{id:fixture,filename:fixture,source:originalPlan.execution.hostSource}]},\n      execution:{kind:'original-program',host:'tests/__eliscript_original_'+plan.suite+'.mjs',hostSource,\n        arguments:[{directory:true}],aliases:true,requiresBun:true,hostRuntime:'bun',\n        compilerSourceMaps:plan.maps!==false,childProcesses:'inherit-selected-artifact',timeoutMs:Number(deadline[1].replaceAll('_',''))},\n      expected:{kind:'seed-program',oracleRequired:true},\n      original:{manifest:'stable-compatibility',suite,fixture:source,host:fixture,\n        sourceSha256:(await file(suite)).sha256,originalAssertion:plan.assertion,\n        regions:[body,...transportRegions].map(({start,end,byteStart,byteEnd,sha256})=>({start,end,byteStart,byteEnd,sha256})),\n        setupAssertions:'original compiler and portable CLI byte/map equality remain required by the original gate'},\n    });\n    mapped.push(suite);\n  }\n  {\n    const suite='tests/persistent-zipper.test.mjs';\n    const assertion='deep zipper ascent reads indexed ancestor slots without reducing wide parent vectors';\n    if(locators.some(item=>item.file===suite)){\n      const original=await text(suite),start=original.indexOf('test('+JSON.stringify(assertion)+',');\n      if(start<0)throw new TypeError('original indexed zipper assertion changed');\n      const script=region(original,'    const script = `','\\n    `;',start);\n      let code=script.text.slice('    const script = `'.length);\n      // Only original filesystem specifiers are transported. Every original\n      // indexed-ascent operation, monkeypatch, depth and assertion stays intact.\n      code=code.replace(/import (\\{[^}]+\\}) from \\$\\{JSON\\.stringify\\(resolve\\(root,\"(runtime\\/[^\"\\n]+)\"\\)\\)\\};/g,\n        (_,bindings,path)=>'const '+bindings+'=await import(pathToFileURL(resolve(product,'+JSON.stringify(path)+')).href);');\n      code=code.replace('${JSON.stringify(resolve(seedDirectory,\"stdlib/core/zipper.eli\"))}',\n        'pathToFileURL(resolve(product,\"stdlib/core/zipper.mjs\")).href');\n      const source='tests/fixtures/persistent-zipper.eli';\n      const originalPlan=records.find(record=>record.id==='stable-compatibility:program:'+source);\n      if(!originalPlan)throw new Error('original indexed zipper graph is unavailable');\n      const tail=original.slice(script.end),deadline=/^\\n    `;[\\s\\S]*?\\n}, ([0-9_]+)\\);/.exec(tail);\n      if(!deadline)throw new TypeError('original indexed zipper deadline changed');\n      const coverage=locators.filter(item=>item.file===suite&&typeof item.contains==='string'&&\n        (assertion+'\\n'+script.text).includes(item.contains)).map(item=>item.id);\n      add({id:'original-program:persistent-zipper-indexed-ascent',kind:'project',coverage,\n        modules:structuredClone(originalPlan.modules),entry:originalPlan.entry,\n        request:{...structuredClone(originalPlan.request),phased:true},\n        execution:{kind:'original-program',host:'tests/__eliscript_original_zipper_indexed_ascent.mjs',\n          hostSource:'import {resolve} from \"node:path\";\\nimport {pathToFileURL} from \"node:url\";\\nconst product=process.argv[2];\\n'+code+'\\n',\n          arguments:[{directory:true}],aliases:true,requiresBun:true,hostRuntime:'bun',\n          timeoutMs:Number(deadline[1].replaceAll('_',''))},\n        expected:{kind:'seed-program',oracleRequired:true,stdout:''},\n        original:{manifest:'stable-compatibility',suite,fixture:source,host:suite,\n          originalAssertion:assertion,sourceSha256:(await file(suite)).sha256,\n          regions:[script].map(({start,end,byteStart,byteEnd,sha256})=>({start,end,byteStart,byteEnd,sha256}))},\n      });\n    }\n  }\n  {\n    const suite='tests/literal-runtime.test.mjs';\n    if(locators.some(item=>item.file===suite)){\n      const original=await text(suite),base=records.find(record=>record.id==='stable-compatibility:program:tests/fixtures/literal-runtime.eli');\n      if(!base)throw new Error('original literal runtime graph is unavailable');\n      const sourceOnlyAssertion='explicit host-only modules do not link the persistent runtime';\n      const sourceOnlyStart=original.indexOf('test('+JSON.stringify(sourceOnlyAssertion)+',');\n      const sourceOnly=writtenOriginalSource(original,'source',sourceOnlyStart,region);\n      const sourceOnlyBody=region(original,'    expect(seed).not.toContain(', '\\n  } finally {',sourceOnly.region.end);\n      const entry='tests/fixtures/host-only.mjs';\n      const coverage=locators.filter(item=>item.file===suite&&typeof item.contains==='string'&&\n        (sourceOnlyAssertion+'\\n'+sourceOnlyBody.text).includes(item.contains)).map(item=>item.id);\n      add({id:'original-program:literal-runtime-host-only',kind:'project',coverage,\n        modules:[{id:entry,filename:'host-only.eli',source:sourceOnly.source}],entry,\n        request:{...structuredClone(base.request),entries:[entry]},\n        execution:{kind:'original-program',host:'tests/__eliscript_original_host_only_shape.mjs',\n          hostSource:[\n            'import {expect} from \"bun:test\";',\n            'import {resolve} from \"node:path\";',\n            'import {readFile} from \"node:fs/promises\";',\n            'const companion=process.env.ELISCRIPT_ORIGINAL_JAVASCRIPT_PRODUCT_ROOT;',\n            'if(!companion)throw new Error(\"original source assertions require the actual selected compiler JavaScript artifact\");',\n            'const seed=await readFile(resolve(companion,'+JSON.stringify(entry)+'),\"utf8\");',\n            sourceOnlyBody.text,'',\n          ].join('\\n'),arguments:[{directory:true}],aliases:true,requiresBun:true,hostRuntime:'bun',\n          compilerSourceMaps:true,timeoutMs:60000},expected:{kind:'seed-program',oracleRequired:true,stdout:''},\n        original:{manifest:'stable-compatibility',suite,host:suite,originalAssertion:sourceOnlyAssertion,\n          sourceSha256:(await file(suite)).sha256,\n          regions:[sourceOnly.region,sourceOnlyBody].map(({start,end,byteStart,byteEnd,sha256})=>({start,end,byteStart,byteEnd,sha256}))},\n      });\n      const assertion='portable closures produce persistent values for the versioned worker codec';\n      const start=original.indexOf('test('+JSON.stringify(assertion)+',');\n      const portable=writtenOriginalSource(original,'source',start,region);\n      const invalid=writtenOriginalSource(original,'invalid',portable.region.end,region);\n      const incompleteAssertion='hash-map rejects incomplete pairs in both compilers';\n      const incompleteStart=original.indexOf('test('+JSON.stringify(incompleteAssertion)+',');\n      if(incompleteStart<0)throw new TypeError('original incomplete map assertion changed');\n      const incompletePrefix='  await Bun.write(source, ';\n      const incomplete=region(original,incompletePrefix,');\\n',incompleteStart);\n      const incompleteSource=data(incomplete.text.slice(incompletePrefix.length));\n      if(typeof incompleteSource!=='string')throw new TypeError('original incomplete map input is not source text');\n      const body=region(original,'    const seedModule = await import(seedOutput);','\\n    await Bun.write(',portable.region.end);\n      const shape=region(original,'    expect(await readFile(seedOutput, \"utf8\"))\\n      .toContain(', '    const seedModule =',portable.region.end);\n      const moduleId='tests/fixtures/portable.mjs';\n      const runtimeImports=[...original.matchAll(/^import\\s+[^;]+;/gm)]\n        .map(match=>match[0]).filter(code=>/from\\s+[\"']\\.\\.\\/runtime\\//.test(code));\n      add({id:'original-program:literal-runtime-portable-codec',kind:'project',\n        coverage:locators.filter(item=>item.file===suite&&typeof item.contains==='string'&&\n          (assertion+'\\n'+body.text).includes(item.contains)).map(item=>item.id),\n        modules:[{id:moduleId,filename:'portable.eli',source:portable.source}],entry:moduleId,\n        request:{...structuredClone(base.request),entries:[moduleId],portableEntries:['build']},\n        execution:{kind:'original-program',host:'tests/__eliscript_original_portable_codec.mjs',\n          hostSource:[\n            'import {expect} from \"bun:test\";',\n            'import {resolve} from \"node:path\";',\n            'import {pathToFileURL} from \"node:url\";',\n            'import {readFile} from \"node:fs/promises\";',\n            ...runtimeImports,\n            'const referenceRoot=process.env.ELISCRIPT_ORIGINAL_REFERENCE_PRODUCT_ROOT;',\n            'if(!referenceRoot)throw new Error(\"original dual-compiler assertions require an independently emitted reference artifact\");',\n            'const seedOutput=pathToFileURL(resolve(referenceRoot,'+JSON.stringify(moduleId)+')).href;',\n            'const selfOutput=pathToFileURL(resolve(process.argv[2],'+JSON.stringify(moduleId)+')).href;',\n            '{const seedOutput=resolve(process.env.ELISCRIPT_ORIGINAL_JAVASCRIPT_PRODUCT_ROOT,'+JSON.stringify(moduleId)+');\\n'+shape.text+'\\n}',body.text,'',\n          ].join('\\n'),arguments:[{directory:true}],aliases:true,requiresBun:true,hostRuntime:'bun',referenceArtifact:true,compilerSourceMaps:true,timeoutMs:60000},\n        expected:{kind:'seed-program',oracleRequired:true,stdout:''},\n        original:{manifest:'stable-compatibility',suite,host:suite,originalAssertion:assertion,\n          sourceSha256:(await file(suite)).sha256,\n          regions:[portable.region,shape,body].map(({start,end,byteStart,byteEnd,sha256})=>({start,end,byteStart,byteEnd,sha256}))},\n      });\n      add({id:'original-sequence:literal-runtime-invalid-inputs',kind:'sequence',\n        coverage:locators.filter(item=>item.file===suite&&typeof item.contains==='string'&&\n          (incompleteAssertion+'\\n'+assertion+'\\n'+incomplete.text+'\\n'+invalid.region.text).includes(item.contains)).map(item=>item.id),\n        original:{manifest:'stable-compatibility',suite,sourceSha256:(await file(suite)).sha256,\n          regions:[incomplete,invalid.region].map(({start,end,byteStart,byteEnd,sha256})=>({start,end,byteStart,byteEnd,sha256}))},\n        steps:[\n          {id:'incomplete-map',request:{operation:'compile',source:incompleteSource,filename:'invalid.eli'},\n            error:{contains:'hash-map expects complete key/value pairs'}},\n          {id:'unbound-portable',request:{operation:'compile',source:invalid.source,filename:'invalid.eli',portableEntries:['build']},\n            error:{contains:'unbound symbol missing'}},\n        ],expected:{kind:'sequence'},\n      });\n    }\n  }\n  {\n    const suite='tests/language-equality.test.mjs';\n    if(locators.some(item=>item.file===suite)){\n      const original=await text(suite),start=original.indexOf('    const identitySource =');\n      const source=writtenOriginalSource(original,'identitySource',start,region);\n      const body=region(original,'    expect(identity).not.toContain(', '\\n  } finally {',source.region.end);\n      const entry='tests/fixtures/identity.mjs';\n      const base=records.find(record=>record.id==='stable-compatibility:program:tests/fixtures/language-equality.eli');\n      if(!base)throw new Error('original identity graph is unavailable');\n      add({id:'original-program:language-equality-identity-only',kind:'project',\n        coverage:locators.filter(item=>item.file===suite&&typeof item.contains==='string'&&body.text.includes(item.contains)).map(item=>item.id),\n        modules:[{id:entry,filename:'identity-only.eli',source:source.source}],entry,\n        request:{...structuredClone(base.request),entries:[entry]},\n        execution:{kind:'original-program',host:'tests/__eliscript_original_identity_shape.mjs',\n          hostSource:[\n            'import {expect} from \"bun:test\";',\n            'import {resolve} from \"node:path\";',\n            'import {readFile} from \"node:fs/promises\";',\n            'const companion=process.env.ELISCRIPT_ORIGINAL_JAVASCRIPT_PRODUCT_ROOT;',\n            'if(!companion)throw new Error(\"original identity source assertions require the actual selected compiler JavaScript artifact\");',\n            'const identity=await readFile(resolve(companion,'+JSON.stringify(entry)+'),\"utf8\");',\n            body.text,'',\n          ].join('\\n'),arguments:[{directory:true}],aliases:true,requiresBun:true,hostRuntime:'bun',compilerSourceMaps:true,timeoutMs:60000},\n        expected:{kind:'seed-program',oracleRequired:true,stdout:''},\n        original:{manifest:'stable-compatibility',suite,host:suite,sourceSha256:(await file(suite)).sha256,\n          regions:[source.region,body].map(({start,end,byteStart,byteEnd,sha256})=>({start,end,byteStart,byteEnd,sha256}))},\n      });\n    }\n  }\n  {\n    const suite='tests/core-set.test.mjs';\n    if(locators.some(item=>item.file===suite)){\n      const original=await text(suite),start=original.indexOf('test(\"Eliscript-authored set algebra compiles and agrees across local hosts\",');\n      const title='Eliscript-authored set algebra compiles and agrees across local hosts';\n      const body=region(original,'    const expected = {','\\n  } finally {',start);\n      const runner=region(original,'async function runSuccessful(command) {','\\nasync function compile(');\n      const host=region(original,'async function runUsageHost(command, module) {','\\ntest(');\n      const environment=region(original,'const EMACS =','const COMPILER =');\n      const sourceCase=originalRuntimeCaseLocators(suite,original).find(item=>item.originalExecution.record==='original-program:core-set-source-map').originalCase;\n      const base=records.find(record=>record.id==='stable-compatibility:program:tests/fixtures/core-set-usage.eli');\n      if(!base)throw new Error('original set algebra graph is unavailable');\n      add({id:'original-program:core-set-source-map',kind:'project',\n        coverage:locators.filter(item=>item.file===suite&&typeof item.contains==='string'&&\n          (title+'\\n'+body.text+'\\n'+host.text).includes(item.contains)).map(item=>item.id),\n        modules:structuredClone(base.modules),entry:base.entry,request:structuredClone(base.request),\n        execution:{kind:'original-program',host:'tests/__eliscript_original_core_set_map.mjs',\n          hostSource:[\n            'import {expect} from \"bun:test\";',\n            'import {resolve} from \"node:path\";',\n            'import {readFile} from \"node:fs/promises\";',\n            'import {pathToFileURL} from \"node:url\";',\n            'const ROOT=process.argv[2],setModule=resolve(ROOT,\"stdlib/core/set.mjs\"),usageModule=resolve(ROOT,\"core-set-usage.mjs\");',\n            environment.text,runner.text,host.text,body.text,'',\n          ].join('\\n'),arguments:[{directory:true}],aliases:true,requiresBun:true,hostRuntime:'bun',compilerSourceMaps:true,\n          childProcesses:'inherit-selected-artifact',timeoutMs:sourceCase.timeoutMs},expected:{kind:'seed-program',oracleRequired:true,stdout:''},\n        original:{manifest:'stable-compatibility',suite,sourceSha256:(await file(suite)).sha256,\n          originalAssertion:title,\n          regions:[environment,runner,host,body].map(({start,end,byteStart,byteEnd,sha256})=>({start,end,byteStart,byteEnd,sha256}))},\n      });\n    }\n  }\n  await addOriginalCoreRuntimeProgram({add,locators,text,file,region,records});\n  for(const suite of await addOriginalCoreProjectPrograms({add,locators,text,file,region,bootstrapSources,records}))mapped.push(suite);\n  return mapped;\n}\n\nasync function addOriginalCoreRuntimeProgram({add,locators,text,file,region,records}){\n  const suite='tests/core-stdlib.test.mjs';\n  if(!locators.some(item=>item.file===suite))return;\n  const original=await text(suite),title='Eliscript core modules compile and execute against runtime protocols';\n  const start=original.indexOf('test('+JSON.stringify(title)+',');\n  if(start<0)throw new TypeError('original complete core runtime case changed');\n  const body=region(original,'    const usage = await import(pathToFileURL(usageModule).href);','\\n  } finally {',start);\n  const imports=region(original,'import { expect, test } from \"bun:test\";','const ROOT =');\n  const runner=region(original,'async function runSuccessful(command) {','\\nasync function compile(');\n  const environment=region(original,'const EMACS =','const COMPILER =');\n  const bound=originalRuntimeCaseLocators(suite,original).find(item=>item.originalExecution.record==='original-program:core-stdlib-complete-protocols');\n  const base=records.find(record=>record.id==='stable-compatibility:program:tests/fixtures/core-stdlib-usage.eli');\n  if(!base)throw new Error('original complete core runtime graph is unavailable');\n  const bindings={usageModule:'core-stdlib-usage.mjs',apiUsageModule:'core-language-api-usage.mjs',\n    protocolModule:'stdlib/core/protocol.mjs',identifierModule:'stdlib/core/identifier.mjs',\n    dataTextModule:'stdlib/core/data-text.mjs',metadataModule:'stdlib/core/metadata.mjs',\n    collectionModule:'stdlib/core/collection.mjs',transientModule:'stdlib/core/transient.mjs',\n    transducerModule:'stdlib/core/transducer.mjs',seqModule:'stdlib/core/seq.mjs',dataModule:'stdlib/core/data.mjs'};\n  for(const id of Object.values(bindings))if(!base.modules.some(module=>module.id===id))\n    throw new TypeError('original complete core runtime module is missing: '+id);\n  // Preserve the entire original body, including the independent Node program,\n  // external protocol object, 50,000-value transient metrics and every map\n  // assertion. The only replacement is its compilation/setup directory.\n  add({id:'original-program:core-stdlib-complete-protocols',kind:'project',\n    coverage:locators.filter(item=>item.file===suite&&typeof item.contains==='string'&&\n      (title+'\\n'+body.text).includes(item.contains)).map(item=>item.id),\n    modules:structuredClone(base.modules),entry:base.entry,request:structuredClone(base.request),\n    execution:{kind:'original-program',host:'tests/__eliscript_original_core_stdlib_complete.mjs',\n      hostSource:[imports.text,'const ROOT=process.argv[2];',\n        ...Object.entries(bindings).map(([name,id])=>'const '+name+'=resolve(ROOT,'+JSON.stringify(id)+');'),\n        environment.text,runner.text,body.text,''].join('\\n'),\n      arguments:[{directory:true}],aliases:true,requiresBun:true,hostRuntime:'bun',\n      compilerSourceMaps:true,childProcesses:'inherit-selected-artifact',timeoutMs:bound.originalCase.timeoutMs},\n    expected:{kind:'seed-program',oracleRequired:true,stdout:''},\n    original:{manifest:'stable-compatibility',suite,sourceSha256:(await file(suite)).sha256,originalAssertion:title,\n      regions:[imports,environment,runner,body].map(({start,end,byteStart,byteEnd,sha256})=>({start,end,byteStart,byteEnd,sha256})),\n      setupReplacement:{kind:'selected-compiler-and-selected-library-artifacts',\n        libraryAlgorithms:'complete original selected core and usage modules',\n        sourceMaps:'actual selected compiler companion JavaScript source maps; selected binary algorithms remain selected'}},\n  });\n}\n\nasync function addOriginalCoreProjectPrograms({add,locators,text,file,region,bootstrapSources,records}){\n  const suite='tests/core-stdlib.test.mjs';\n  if(!locators.some(item=>item.file===suite))return[];\n  if(!Array.isArray(bootstrapSources)||bootstrapSources.length!==13)throw new TypeError('original core project adapters require the complete compiler source manifest');\n  const original=await text(suite),identity=await file(suite);\n  const hosts=region(original,'async function runBuiltCoreProjectHost(', '\\ntest(');\n  const runner=region(original,'async function runSuccessful(command) {','\\nasync function compile(');\n  const compilerModules=[];\n  for(const filename of bootstrapSources)compilerModules.push({id:filename.slice(0,-4)+'.mjs',filename,source:await text(filename)});\n  const runtimePlan=records.find(record=>record.id==='stable-compatibility:program:stdlib/core/text.eli');\n  if(!runtimePlan)throw new Error('original core project runtime graph is unavailable');\n  for(const plan of [\n    {id:'core',assertion:'stable protocol and core algorithms build as one project across Bun and Node',\n      declaration:'  const sources = [',names:['protocol','collection','transient','transducer','seq','data','set','order','text','object'].map(name=>'core/'+name)},\n    {id:'utility',assertion:'stable portable utility modules build as one project across Bun and Node',\n      declaration:'  const modules = [',names:['sequence','text','object','data']},\n    {id:'persistent-values',assertion:'persistent value library builds as one project and executes under Bun and Node',\n      declaration:'  const sourceNames = [',names:['bit','persistent-list','persistent-vector','persistent-map','persistent-set','value']},\n    {id:'value-text',assertion:'identifier metadata and data text build as one project across Bun and Node',\n      declaration:'  const entries = [',names:['bit','data-text','identifier','metadata','persistent-list','persistent-map','persistent-set','persistent-vector','value'],entries:['identifier','metadata','data-text']},\n    {id:'public',assertion:'public state interop result JSON and numeric modules build across hosts',\n      declaration:'  const entries = [',names:['bit','interop/js','json','numeric','persistent-list','persistent-map','persistent-set','persistent-vector','result','state/atom','value'],entries:['state/atom','interop/js','result','json','numeric']},\n  ]){\n    const start=original.indexOf('test('+JSON.stringify(plan.assertion)+',');\n    if(start<0)throw new TypeError('original complete core project assertion changed: '+plan.assertion);\n    const declarations=region(original,plan.declaration,'\\n  try {',start);\n    const body=region(original,'    expect(report).toMatchObject({','\\n  } finally {',declarations.end);\n    const deadline=/^[\\s\\S]*?\\n}, ([0-9_]+)\\);/.exec(original.slice(body.end));\n    if(!deadline)throw new TypeError('original complete core project deadline changed');\n    const modules=structuredClone(compilerModules);\n    for(const name of plan.names){const filename='stdlib/'+name+'.eli';modules.push({id:name+'.mjs',filename,source:await text(filename)});}\n    const entries=(plan.entries??plan.names).map(name=>'stdlib/'+name+'.eli');\n    const hostSource=[\n      'import {expect} from \"bun:test\";',\n      'import {resolve,dirname} from \"node:path\";',\n      'import {pathToFileURL} from \"node:url\";',\n      'import {mkdtemp,rm,readFile} from \"node:fs/promises\";',\n      'import {tmpdir} from \"node:os\";',\n      'const ROOT=process.env.ELISCRIPT_ORIGINAL_SOURCE_ROOT;',\n      'if(!ROOT)throw new Error(\"original core project requires its source root\");',\n      'const EMACS=process.env.EMACS??\"emacs\";',\n      'const product=process.argv[2],outputRoot=product;',\n      'const {buildProject}=await import(pathToFileURL(resolve(ROOT,\"bootstrap/host/project.mjs\")).href);',\n      'const selectedCompiler=await import(pathToFileURL(resolve(product,\"bootstrap/compiler/compiler.mjs\")).href);',\n      'const directory=await mkdtemp(resolve(tmpdir(),\"eliscript-original-core-project-\"));',\n      declarations.text,runner.text,hosts.text,\n      'try{',\n      'const build=await buildProject({root:resolve(ROOT,\"stdlib\"),outDir:resolve(directory,\"report\"),useCache:false,entries:'+JSON.stringify(entries)+'.map(name=>resolve(ROOT,name)),moduleDirectory:resolve(product,\"bootstrap/compiler\"),compiler:selectedCompiler});',\n      'const report=build.report;',\n      body.text,\n      '}finally{await rm(directory,{recursive:true,force:true});}','',\n    ].join('\\n');\n    add({id:'original-program:core-project-'+plan.id,kind:'project',\n      coverage:locators.filter(item=>item.file===suite&&typeof item.contains==='string'&&\n        (plan.assertion+'\\n'+declarations.text+'\\n'+body.text+'\\n'+hosts.text).includes(item.contains)).map(item=>item.id),\n      modules,entry:plan.names[0]+'.mjs',\n      request:{...structuredClone(runtimePlan.request),entries:modules.map(module=>module.id),resolveImports:true,phased:true,sourceMap:true},\n      execution:{kind:'original-program',host:'tests/__eliscript_original_core_project_'+plan.id+'.mjs',hostSource,\n        arguments:[{directory:true}],aliases:true,requiresBun:true,hostRuntime:'bun',\n        childProcesses:'inherit-selected-artifact',runtimeLaunchers:true,compilerSourceMaps:true,runtimeProfile:'compiler',\n        timeoutMs:Number(deadline[1].replaceAll('_',''))},\n      expected:{kind:'seed-program',oracleRequired:true,stdout:''},\n      original:{manifest:'stable-compatibility',suite,host:suite,originalAssertion:plan.assertion,sourceSha256:identity.sha256,\n        regions:[declarations,runner,hosts,body].map(({start,end,byteStart,byteEnd,sha256})=>({start,end,byteStart,byteEnd,sha256})),\n        setupReplacement:{kind:'selected-compiler-and-selected-library-artifacts',reportCompiler:'actual selected target compiler',libraryAlgorithms:'actual selected target modules'}},\n    });\n  }\n  return[];\n}\n"))
+(module
+  tools.backends.compiler-corpus-runtime-adapters-ground
+  (import "node:crypto" createHash)
+  (import "node:path" resolve posix)
+  (import "node:url" pathToFileURL)
+  (import "../../dist/bootstrap/reader.mjs" read-string)
+  (import "../../dist/bootstrap/compiler.mjs" compile-string)
+  (import "../testing/maintained-suite-source.mjs" rewriteSourceForms sourceCall)
+  (import "./compiler-corpus-identity-value-adapters-ground.mjs" maintained-helper helper-transport source-head source-node-text source-node-proof)
+  (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
+  (defun
+    typeof-str
+    (v)
+    (js* "typeof v"))
+  (defun
+    nullish?
+    (v)
+    (or (= v nil) (= v undefined)))
+  (defun
+    truthy?
+    (v)
+    (js* "!!v"))
+  (defun
+    box-val
+    (v)
+    (let*
+      ((arr (js-array)))
+      (js-call arr :push v)
+      arr))
+  (defun
+    unbox
+    (b)
+    (aref b 0))
+  (defun
+    set-box!
+    (b v)
+    (put b 0 v))
+  (defun
+    merge-objs
+    (&rest objs)
+    (let*
+      ((out (js-object)))
+      (let*
+        ((__coll_1 (Array/from objs)) (__idx_2 0))
+        (while
+          (< __idx_2 (js-length __coll_1))
+          (let
+            ((obj (aref __coll_1 __idx_2)))
+            (when
+              (not (nullish? obj))
+              (let*
+                ((__coll_3 (Array/from (globalThis.Object.entries obj))) (__idx_4 0))
+                (while
+                  (< __idx_4 (js-length __coll_3))
+                  (let
+                    ((entry (aref __coll_3 __idx_4)))
+                    (put out (aref entry 0) (aref entry 1)))
+                  (setq __idx_4 (1+ __idx_4))))))
+          (setq __idx_2 (1+ __idx_2))))
+      out))
+  (defun
+    region-summary
+    (r)
+    (js-object :start (get r :start) :end (get r :end) :byteStart (get r :byteStart) :byteEnd (get r :byteEnd) :sha256 (get r :sha256)))
+  (defconst
+    runtimeRegionPlans
+    (globalThis.Object.freeze (js-call (js-array (js-object :file "tests/persistent-zipper.test.mjs" :id "zipper-indexed-ascent" :record "original-program:persistent-zipper-indexed-ascent" :title "deep zipper ascent reads indexed ancestor slots without reducing wide parent vectors" :begin "          return await (runSuccessful([" :end "\n        } finally {") (js-object :file "tests/literal-runtime.test.mjs" :id "host-only-shape" :record "original-program:literal-runtime-host-only" :title "explicit host-only modules do not link the persistent runtime" :begin "    expect(seed).not.toContain(" :end "\n  } finally {") (js-object :file "tests/literal-runtime.test.mjs" :id "portable-codec" :record "original-program:literal-runtime-portable-codec" :title "portable closures produce persistent values for the versioned worker codec" :begin "    const seedModule = await import(seedOutput);" :end "\n    await Bun.write(") (js-object :file "tests/literal-runtime.test.mjs" :id "incomplete-map-input" :record "original-sequence:literal-runtime-invalid-inputs" :title "hash-map rejects incomplete pairs in both compilers" :begin "  await Bun.write(source, " :end ");\n") (js-object :file "tests/literal-runtime.test.mjs" :id "unbound-portable-input" :record "original-sequence:literal-runtime-invalid-inputs" :title "portable closures produce persistent values for the versioned worker codec" :begin "await Bun.write(\n      invalid," :end "\n    );") (js-object :file "tests/language-equality.test.mjs" :id "identity-source-shape" :record "original-program:language-equality-identity-only" :title "language equal uses value semantics across compilers and local hosts" :begin "                        excludes(identity, \"runtime/core/value.mjs\");" :end "\n                      })(await (readFile(identitySeed,") (js-object :file "tests/core-set.test.mjs" :id "source-map" :record "original-program:core-set-source-map" :title "Eliscript-authored set algebra compiles and agrees across local hosts" :begin "    const sourceMap = JSON.parse(await readFile(`${setModule}.map`, \"utf8\"));" :end "\n  } finally {") (js-object :file "tests/core-stdlib.test.mjs" :id "complete-protocols" :record "original-program:core-stdlib-complete-protocols" :title "Eliscript core modules compile and execute against runtime protocols" :begin "    const usage = await import(pathToFileURL(usageModule).href);" :end "\n  } finally {")) :concat (js-call (js-array (js-array "core" "stable protocol and core algorithms build as one project across Bun and Node") (js-array "utility" "stable portable utility modules build as one project across Bun and Node") (js-array "persistent-values" "persistent value library builds as one project and executes under Bun and Node") (js-array "value-text" "identifier metadata and data text build as one project across Bun and Node") (js-array "public" "public state interop result JSON and numeric modules build across hosts")) :map (lambda (pair) (let*
+              ((id (aref pair 0)) (title (aref pair 1)))
+              (js-object :file "tests/core-stdlib.test.mjs" :id (str "core-project-" id) :record (str "original-program:core-project-" id) :title title :begin "    expect(report).toMatchObject({" :end "\n  } finally {")))))))
+  (defconst
+    originalRuntimeSourceSuites
+    (globalThis.Object.freeze (globalThis.Array.from (new globalThis.Set (js-call runtimeRegionPlans :map (lambda (plan) (get plan :file)))))))
+  (defun
+    originalRuntimeCaseLocators
+    (file source)
+    (when
+      (not (js-call originalRuntimeSourceSuites :includes file))
+      (throw (new globalThis.TypeError "unregistered original runtime source suite")))
+    (let*
+      ((cases (originalSourceCaseLocators file source)) (locators (js-array)))
+      (let*
+        ((__coll_5 (Array/from (js-call runtimeRegionPlans :filter (lambda (item) (= (get item :file) file))))) (__idx_6 0))
+        (while
+          (< __idx_6 (js-length __coll_5))
+          (let
+            ((plan (aref __coll_5 __idx_6)))
+            (let*
+              ((matches (js-call cases :filter (lambda (item) (= (get (get item :originalCase) :title) (get plan :title))))))
+              (when
+                (= (get matches :length) 0)
+                (throw (new globalThis.TypeError (str "original runtime region lost its source case: " (get plan :id)))))
+              (let*
+                ((index 0) (__loop_7 t))
+                (while
+                  __loop_7
+                  (setq __loop_7 false)
+                  (when
+                    (< index (get matches :length))
+                    (let*
+                      ((locator (aref matches index)) (bound (get locator :originalCase)) (span-start (get (get bound :span) :start)) (span-end (get (get bound :span) :end)) (start (js-call source :indexOf (get plan :begin) span-start)) (end (if
+                            (< start 0)
+                            -1
+                            (js-call source :indexOf (get plan :end) (+ start (get (get plan :begin) :length))))))
+                      (when
+                        (or (< start span-start) (< end start) (> (+ end (get (get plan :end) :length)) span-end))
+                        (throw (new globalThis.TypeError (str "original runtime region left its registered case: " (get plan :id)))))
+                      (let*
+                        ((contains (js-call source :slice start end)))
+                        (js-call locators :push (js-object :id (str "stable-compatibility:source-region:" file ":" (get plan :id) ":" index) :file file :kind "test" :contains contains :originalCase (globalThis.structuredClone bound) :originalExecution (js-object :record (get plan :record) :span (js-object :start start :end end) :byteStart (globalThis.Buffer.byteLength (js-call source :slice 0 start)) :byteEnd (globalThis.Buffer.byteLength (js-call source :slice 0 end)) :sha256 (js-call (js-call (createHash "sha256") :update contains) :digest "hex"))))))
+                    (progn
+                      (setq index (+ index 1))
+                      (setq __loop_7 t)))))))
+          (setq __idx_6 (1+ __idx_6))))
+      locators))
+  (defconst
+    hostRuntimeFiles
+    (new globalThis.Set (js-call (js-array "tests/core-order.test.mjs" "tests/collection-protocol.test.mjs" "tests/data-text.test.mjs" "tests/fixtures/value-hashes.json" "tests/identifier.test.mjs" "tests/metadata.test.mjs" "tests/persistent-list.test.mjs" "tests/persistent-map.test.mjs" "tests/persistent-queue.test.mjs" "tests/persistent-set.test.mjs" "tests/persistent-vector.test.mjs" "tests/protocol.test.mjs" "tests/record.test.mjs" "tests/transducer.test.mjs" "tests/transient.test.mjs" "tests/type.test.mjs" "tests/value-semantics.test.mjs") :concat (js-call (js-array "collection-protocol" "core-stdlib" "data-text" "metadata" "persistent-list" "persistent-map" "persistent-queue" "persistent-set" "persistent-vector" "protocol" "transducer" "transient" "value-hash") :map (lambda (name) (str "tests/fixtures/" name "-host.mjs"))))))
+  (defun originalRuntimeHostArtifact (filename)
+    (let ((artifact (if (js-call filename :endsWith ".eli")
+                       (str (js-call filename :slice 0 -4) ".mjs") filename)))
+      (when (js-call hostRuntimeFiles :has artifact) artifact)))
+  (defun
+    isOriginalRuntimeHostOnly
+    (filename source)
+    (cond
+      ((or (not (js-call hostRuntimeFiles :has filename)) (not (= (typeof-str source) "string"))) false)
+      ((= filename "tests/fixtures/value-hashes.json") t)
+      ((not (js-call (new globalThis.RegExp "from\\s+[\"'](?:\\.\\.\\/)+runtime\\/[^\"']+[\"']") :test source)) false)
+      (t (not (js-call (new globalThis.RegExp "(?:bin\\/eliscript|buildBackends|buildProject|checkProject|seedCompilerFixture|compile_ir_string|compile_string|\\.eli[\"'`]|process\\.argv|ELISCRIPT_.*(?:MODULE|COMPILER))") :test source)))))
+  (defconst
+    mixedRuntimeBoundaries
+    (new globalThis.Map (js-array (js-array "tests/persistent-queue.test.mjs" "Eliscript persistent queue API compiles and runs on both hosts") (js-array "tests/lazy-sequence.test.mjs" "Eliscript lazy sequences agree across compilers and local hosts") (js-array "tests/persistent-sorted.test.mjs" "Eliscript sorted API agrees across compilers and local hosts") (js-array "tests/regex.test.mjs" "Eliscript regex APIs agree across compilers and local hosts") (js-array "tests/core-text-object.test.mjs" "core text/object production artifacts are fixed-point and cross-host") (js-array "tests/core-set.test.mjs" "Eliscript-authored set algebra compiles and agrees across local hosts") (js-array "tests/core-stdlib.test.mjs" "Eliscript core modules compile and execute against runtime protocols"))))
+  (defconst
+    mixedRuntimeCaseTitles
+    (new globalThis.Map (js-array (js-array "tests/persistent-queue.test.mjs" (new globalThis.Set (js-array "persistent queue preserves FIFO order and immutable front operations" "persistent queue implements collection value and metadata protocols" "persistent queue promotes its rear without traversal or node allocation" "persistent queue agrees with a mutable FIFO reference model" "persistent queue stays iterative at one million values" "persistent queue runtime agrees under Bun and Node"))) (js-array "tests/lazy-sequence.test.mjs" (new globalThis.Set (js-array "lazy sequences start on demand and share one realized prefix" "lazy sequence failures are cached at one stable realization position" "lazy cons defers tails and remains stack safe for recursive streams" "transducer sequence pulls only enough input and memoizes output" "transducer sequence honors zero input and completion output" "transducer sequence closes its input when transformation fails" "lazy combinators compose infinite inputs without eager realization" "lazy combinator family preserves transducer semantics" "lazy combinators validate before consuming their inputs" "lazy sequence APIs reject malformed producers and calls"))) (js-array "tests/persistent-sorted.test.mjs" (new globalThis.Set (js-array "persistent sorted maps preserve order immutability and comparator identity" "persistent sorted sets retain canonical comparator-equivalent values" "sorted collections implement collection value metadata and text protocols" "hash and sorted collections share exact logical value semantics" "sorted range queries honor inclusive bounds and direction" "persistent sorted trees agree with a randomized mutable model" "persistent sorted trees keep height work and copying logarithmic"))) (js-array "tests/regex.test.mjs" (new globalThis.Set (js-array "regex patterns are immutable deterministic values" "regex matching preserves captures absence and start offsets" "regex sequences are memoized and advance zero-width Unicode matches" "regex replacement is global literal and callback driven" "regex APIs reject mutable host patterns and malformed calls"))) (js-array "tests/core-set.test.mjs" (new globalThis.Set (js-array "set conversion and union accept protocol sources with value semantics" "intersection and difference preserve left metadata and immutable inputs" "set relations are value-semantic and enforce complete arity" "relational projection and selection preserve value semantics and metadata" "relational rename and inversion handle swaps and traversal collisions" "relational indexing drives natural and mapped joins" "relational set operations enforce arity and predicate contracts"))) (js-array "tests/core-stdlib.test.mjs" (new globalThis.Set (js-array "sequence algorithms use protocols and Eliscript truthiness" "sequence composition partitioning and tree traversal use protocol sources" "finite sequence selection is single-pass, bounded, and nullish-safe" "replayable sequence heads and tails preserve bounded source semantics" "replayable sequence sources compose lazily with bounded reduction" "removing and dropping compose with fresh reduction state" "data algorithms return persistent value-semantic maps and vectors" "associative data algorithms preserve nested and value-semantic behavior" "indexBy uses a transient HAMT builder at scale" "protocol standard-library algorithms agree under Bun and Node"))) (js-array "tests/core-text-object.test.mjs" (new globalThis.Set (js-array "protocol-driven text and object algorithms preserve value boundaries" "external protocol values reuse text and keyed algorithms" "core object transforms use transient persistent-map construction"))))))
+  (defun
+    originalRuntimeOnlyCase
+    (filename source contains)
+    (let*
+      ((boundary (js-call mixedRuntimeBoundaries :get filename)))
+      (if
+        (or (not (truthy? boundary)) (not (= (typeof-str contains) "string")) (= (get contains :length) 0) (not (js-call (new globalThis.RegExp "from\\s+[\"'](?:\\.\\.\\/)+runtime\\/") :test source)))
+        nil
+        (let*
+          ((end (js-call source :indexOf (str "test(" (globalThis.JSON.stringify boundary) ","))))
+          (if
+            (< end 0)
+            nil
+            (let*
+              ((starts (js-call (globalThis.Array.from (js-call source :matchAll (new globalThis.RegExp "^test\\(" "gm"))) :map (lambda (m) (get m :index)))) (candidates (js-array)) (aborted-box (box-val false)))
+              (let*
+                ((index 0) (__loop_8 t))
+                (while
+                  __loop_8
+                  (setq __loop_8 false)
+                  (when
+                    (and (< index (get starts :length)) (not (unbox aborted-box)))
+                    (let*
+                      ((start (aref starts index)) (finish (if
+                            (< (+ index 1) (get starts :length))
+                            (aref starts (+ index 1))
+                            (get source :length))))
+                      (when
+                        (not (= start end))
+                        (let*
+                          ((code (js-call source :slice start finish)))
+                          (when
+                            (js-call code :includes contains)
+                            (let*
+                              ((header (js-call (new globalThis.RegExp "^test\\((\"(?:[^\"\\\\]|\\\\.)*\")\\s*,") :exec code)) (title-set (js-call mixedRuntimeCaseTitles :get filename)))
+                              (when
+                                (and (truthy? header) (truthy? title-set) (js-call title-set :has (globalThis.JSON.parse (aref header 1))))
+                                (let*
+                                  ((occ-box (box-val (js-call source :indexOf contains))))
+                                  (while
+                                    (and (>= (unbox occ-box) 0) (not (unbox aborted-box)))
+                                    (let*
+                                      ((occ (unbox occ-box)))
+                                      (if
+                                        (or (< occ start) (> (+ occ (get contains :length)) finish))
+                                        (set-box! aborted-box t)
+                                        (set-box! occ-box (js-call source :indexOf contains (+ occ 1))))))
+                                  (when
+                                    (not (unbox aborted-box))
+                                    (if
+                                      (js-call (new globalThis.RegExp "(?:bin\\/eliscript|\\.eli[\"'`]|compileFamily|compile_ir_string|compile_string|seedCompilerFixture|buildBackends|buildProject|checkProject|importGeneratedModule|generatedModules)") :test code)
+                                      (set-box! aborted-box t)
+                                      (js-call candidates :push (js-object :start start :end finish)))))))))))
+                    (progn
+                      (setq index (+ index 1))
+                      (setq __loop_8 t)))))
+              (if
+                (or (unbox aborted-box) (not (= (get candidates :length) 1)))
+                nil
+                (aref candidates 0))))))))
+  (defun runtime-owner-region (source owner)
+    (let* ((span (get owner :span)) (start (get span :start)) (end (get span :end))
+           (text (js-call source :slice start end)))
+      (js-object :start start :end end
+        :byteStart (globalThis.Buffer.byteLength (js-call source :slice 0 start))
+        :byteEnd (globalThis.Buffer.byteLength (js-call source :slice 0 end))
+        :sha256 (js-call (js-call (createHash "sha256") :update text) :digest "hex"))))
+
+  (defun runtime-case-coverage (locators suite title record)
+    (js-call (js-call locators :filter (lambda (locator)
+      (and (= (get locator :file) suite)
+        (if (get locator :originalExecution)
+          (= (get (get locator :originalExecution) :record) record)
+          (if (get locator :originalCase) (= (get (get locator :originalCase) :title) title)
+            (and (= (value-type (get locator :contains)) "string") (js-call title :includes (get locator :contains))))))))
+      :map (lambda (locator) (get locator :id))))
+
+  (defasync runtime-maintained-case (ctx suite title)
+    (let* ((filename (str (js-call suite :slice 0 -4) ".eli"))
+           (source (await (funcall (get ctx :text) filename)))
+           (module (aref (read-string source filename) 0))
+           (items (get module :items))
+           (cases (js-call items :filter (lambda (node)
+             (and (source-head node "test") (= (get (aref (get node :items) 1) :value) title)))))
+           (artifact (await (funcall (get ctx :text) suite)))
+           (registered (js-call (originalSourceCaseLocators suite artifact) :filter
+             (lambda (locator) (= (get (get locator :originalCase) :title) title)))))
+      (unless (and (= (js-length cases) 1) (= (js-length registered) 1))
+        (throw (new globalThis.TypeError (str "original runtime case is not uniquely registered: " title))))
+      (js-object :source source :file filename :items items :test (aref cases 0)
+        :callback (aref (get (aref cases 0) :items) 2) :locator (aref registered 0)
+        :artifact artifact)))
+
+  (defun runtime-source-node (input node) (source-node-text (get input :source) node))
+
+  (defun runtime-has-reports-binding (node)
+    (let ((pending (js-array node)) (found false))
+      (while (and (> (js-length pending) 0) (not found))
+        (let* ((current (js-call pending :pop)) (items (get current :items)))
+          (when (Array/isArray items)
+            (when (or (source-head current "let") (source-head current "let*"))
+              (let ((bindings (get (aref items 1) :items)))
+                (when (Array/isArray bindings)
+                  (setq found (js-call bindings :some (lambda (binding)
+                    (let ((pair (get binding :items)))
+                      (and (Array/isArray pair) (> (js-length pair) 0)
+                           (js-call (js-array "reports" "hostReports") :includes (get (aref pair 0) :name))))))))))
+            (Reflect/apply (get pending :push) pending items)))) found))
+
+  (defun runtime-semantic-tail (input)
+    ;; Only the direct report binding owns its assertion tail. Enclosing
+    ;; compiler setup lets may contain that binding deeper in their children.
+    (let ((pending (js-array (get input :callback))) (matches (js-array)))
+      (while (> (js-length pending) 0)
+        (let* ((parent (js-call pending :shift)) (items (get parent :items)))
+          (when (Array/isArray items)
+            (let ((index 0))
+              (while (< index (js-length items))
+                (let* ((child (aref items index)) (body (get child :items)))
+                  (when (and (or (source-head child "let") (source-head child "let*"))
+                             (or (runtime-let-binding-p child "reports") (runtime-let-binding-p child "hostReports")))
+                    (let ((start -1) (cursor 2) (parts (js-array)))
+                      (while (< cursor (js-length body))
+                        (let ((form (aref body cursor)))
+                          (when (and (< start 0) (or (source-head form "be") (source-head form "same") (source-head form "same-values")
+                            (source-head form "contains") (source-head form "excludes")
+                            (and (source-head form "js-call")
+                              (or (= (get (aref (get form :items) 1) :name) "reports")
+                                  (= (get (aref (get form :items) 1) :name) "hostReports")
+                                  (source-head (aref (get form :items) 1) "expect")))))
+                            (setq start cursor))
+                          (when (>= start 0) (js-call parts :push (runtime-source-node input form))))
+                        (setq cursor (1+ cursor)))
+                      (unless (>= start 0) (throw (new globalThis.TypeError "original report scope has no semantic assertions")))
+                      (setq cursor (1+ index))
+                      (while (and (< cursor (js-length items))
+                                  (not (source-head (aref items cursor) "finally"))
+                                  (not (source-head (aref items cursor) "catch")))
+                        (let ((sibling (aref items cursor)))
+                          ;; The three independently selected core-exit records
+                          ;; own the original collection values, not the outer
+                          ;; harness loop counter.
+                          (unless (and (source-head sibling "setq")
+                                       (= (get (aref (get sibling :items) 1) :name) "collectionIndex"))
+                            (js-call parts :push (runtime-source-node input sibling))))
+                        (setq cursor (1+ cursor)))
+                      (js-call matches :push (js-call parts :join "\n")))))
+                (setq index (1+ index))))
+            (Reflect/apply (get pending :push) pending items))))
+      (unless (= (js-length matches) 1)
+        (throw (new globalThis.TypeError "original runtime report/assertion lexical region changed")))
+      (aref matches 0)))
+
+  (defun runtime-identity-body (input)
+    (let ((pending (js-array (get input :callback))) (found (js-array)))
+      (while (> (js-length pending) 0)
+        (let* ((node (js-call pending :shift)) (items (get node :items)))
+          (when (Array/isArray items)
+            (when (and (or (source-head node "let") (source-head node "let*"))
+                       (= (get (aref (get (aref (get (aref items 1) :items) 0) :items) 0) :name) "identity"))
+              (js-call found :push (runtime-source-node input node)))
+            (Reflect/apply (get pending :push) pending items))))
+      (unless (= (js-length found) 1)
+        (throw (new globalThis.TypeError "original identity source-shape scope changed"))) (aref found 0)))
+
+  (defun runtime-nodes (node)
+    (let ((pending (js-array node)) (out (js-array)))
+      (while (> (js-length pending) 0)
+        (let ((item (js-call pending :shift)))
+          (js-call out :push item)
+          (when (Array/isArray (get item :items)) (Reflect/apply (get pending :push) pending (get item :items))))) out))
+
+  (defun runtime-let-binding-p (node name)
+    (and (or (source-head node "let") (source-head node "let*"))
+      (let* ((items (get node :items)) (bindings (get (aref items 1) :items)))
+        (and (Array/isArray bindings) (js-call bindings :some (lambda (binding)
+          (let ((pair (get binding :items)))
+            (and (Array/isArray pair) (> (js-length pair) 0) (= (get (aref pair 0) :name) name)))))))))
+
+  (defun runtime-pruning-node (input)
+    (let ((matches (js-call (runtime-nodes (get input :callback)) :filter (lambda (node) (source-head node "pruneLibrary")))))
+      (when (> (js-length matches) 1)
+        (throw (new globalThis.TypeError "original runtime pruning case is ambiguous")))
+      (if (= (js-length matches) 0) nil (aref matches 0))))
+
+  (defun runtime-assertion-body (input mode)
+    (cond
+      ((= mode "reports") (runtime-semantic-tail input))
+      ((= mode "identity-shape") (runtime-identity-body input))
+      ((= mode "equality")
+       (let ((scopes (js-call (runtime-nodes (get input :callback)) :filter
+                (lambda (node) (runtime-let-binding-p node "expected")))))
+         (unless (= (js-length scopes) 1)
+           (throw (new globalThis.TypeError "original equality observation scope changed")))
+         (get (rewriteSourceForms (runtime-source-node input (aref scopes 0))
+           (lambda (node node-text)
+             (if (and (sourceCall node "await") (sourceCall (aref (get node :items) 1) "execute"))
+               (let ((engine (get (aref (get (aref (get node :items) 1) :items) 1) :name)))
+                 (cond ((= engine "BUN") "(aref (get context :reports) 0)")
+                       ((= engine "NODE") "(aref (get context :reports) 1)")
+                       (t (throw (new globalThis.TypeError "original equality host changed"))))) undefined))) :source)))
+      ((= mode "pruning")
+       (let ((node (runtime-pruning-node input)))
+         (unless node (throw (new globalThis.TypeError "original runtime pruning call is missing")))
+         (str "(await " (runtime-source-node input node) ")")))
+      ((= mode "callables")
+       (let ((scopes (js-call (runtime-nodes (get input :callback)) :filter
+         (lambda (node) (runtime-let-binding-p node "library")))))
+         (if (= (js-length scopes) 1) (runtime-source-node input (aref scopes 0))
+           (let ((hosts (js-call (runtime-nodes (get input :callback)) :filter
+                    (lambda (node) (runtime-let-binding-p node "hosts")))))
+             (unless (= (js-length hosts) 1) (throw (new globalThis.TypeError "original callable assertion lexical scope changed")))
+             (get (rewriteSourceForms (runtime-source-node input (aref hosts 0))
+               (lambda (node node-text)
+                 (if (and (sourceCall node "await") (sourceCall (aref (get node :items) 1) "runSuccessful"))
+                   "(aref (get context :rawOutputs) index)" undefined))) :source)))))
+      ((= mode "usage")
+       (let ((tails (js-array)))
+         (js-call (runtime-nodes (get input :callback)) :forEach (lambda (node)
+           (when (source-head node "try")
+             (let ((items (get node :items)) (start -1) (stop (js-length (get node :items))) (index 1))
+               (while (< index (js-length items))
+                 (let ((child (aref items index)))
+                   (when (or (and (source-head child "same")
+                              (js-call (runtime-source-node input child) :includes "runSuccessful"))
+                             (and (runtime-let-binding-p child "output")
+                               (js-call (runtime-source-node input child) :includes "runSuccessful")))
+                     (when (>= start 0) (throw (new globalThis.TypeError "ambiguous original usage assertion")))
+                     (setq start index))
+                   (when (or (source-head child "catch") (source-head child "finally")) (setq stop index)))
+                 (setq index (1+ index)))
+               (when (and (>= start 0) (> stop start))
+                 (js-call tails :push (js-call (js-call (js-call items :slice start stop) :map
+                   (lambda (child)
+                     (if (and (runtime-let-binding-p child "output")
+                              (js-call (runtime-source-node input child) :includes "runSuccessful"))
+                       (let ((body (js-call (get child :items) :slice 2)))
+                         (unless (js-call body :every (lambda (form)
+                           (or (source-head form "same")
+                             (and (source-head form "be") (= (get (aref (get form :items) 1) :name) "output")
+                                  (= (get (aref (get form :items) 2) :value) "")))))
+                           (throw (new globalThis.TypeError "original CLI setup acquired an unprojected assertion")))
+                         (js-call (js-call (js-call body :filter (lambda (form) (source-head form "same"))) :map
+                           (lambda (form) (runtime-source-node input form))) :join "\n"))
+                       (runtime-source-node input child)))) :join "\n")))))))
+         (unless (= (js-length tails) 1) (throw (new globalThis.TypeError "original stdlib assertion scope changed")))
+         (get (rewriteSourceForms (aref tails 0) (lambda (child node-text)
+           (if (and (sourceCall child "await") (sourceCall (aref (get child :items) 1) "runSuccessful"))
+             "(get context :output)" undefined))) :source)))
+      (t (str "(funcall " (runtime-source-node input (get input :callback)) ")"))))
+
+  (defun runtime-static-data (node)
+    (cond
+      ((= (get node :kind) "literal") (get node :value))
+      ((= (get node :kind) "keyword") (get node :name))
+      ((= (get node :kind) "symbol")
+       (cond ((= (get node :name) "t") t) ((= (get node :name) "false") false)
+             ((= (get node :name) "nil") nil)
+             (t (throw (new globalThis.TypeError "original runtime expectation contains an unsupported symbol")))))
+      ((and (source-head node "-") (= (js-length (get node :items)) 2))
+       (- (runtime-static-data (aref (get node :items) 1))))
+      ((source-head node "js-array") (js-call (js-call (get node :items) :slice 1) :map runtime-static-data))
+      ((source-head node "js-object")
+       (let ((items (get node :items)) (out (js-object)) (index 1))
+         (unless (= (% (1- (js-length items)) 2) 0)
+           (throw (new globalThis.TypeError "original runtime expectation has incomplete key/value pairs")))
+         (while (< index (js-length items))
+           (Object/defineProperty out (funcall globalThis.String (runtime-static-data (aref items index)))
+             (js-object :value (runtime-static-data (aref items (1+ index))) :writable t :enumerable t :configurable t))
+           (setq index (+ index 2))) out))
+      (t (throw (new globalThis.TypeError "original runtime expectation is not static Eliscript data")))))
+
+  (defun runtime-output-expectation (input)
+    (let ((matches (js-call (runtime-nodes (get input :callback)) :filter (lambda (node)
+      (and (source-head node "same") (= (js-length (get node :items)) 3)
+           (js-call (runtime-source-node input (aref (get node :items) 1)) :includes "runSuccessful")
+           (source-head (aref (get node :items) 2) "js-object"))))))
+      (unless (= (js-length matches) 1)
+        (throw (new globalThis.TypeError "original runtime output expectation changed")))
+      (runtime-static-data (aref (get (aref matches 0) :items) 2))))
+
+  (defasync runtime-assertion-helper (ctx suite title mode)
+    (let* ((input (await (runtime-maintained-case ctx suite title)))
+           (root (get ctx :sourceRoot))
+           (original-url (get (pathToFileURL (resolve root suite)) :href))
+           (declarations (js-array)) (imports (js-array)) (own-names (new globalThis.Set))
+           (body (runtime-assertion-body input mode)))
+      (when (= suite "tests/core-stdlib.test.mjs")
+        (setq body (get (rewriteSourceForms body (lambda (node node-text)
+          (when (and (source-head node "js-call")
+                     (js-call (funcall node-text node) :startsWith "(js-call (expect (transientMapMetrics)) :toMatchObject"))
+            (str "(when (= (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_TARGET) \"javascript\") "
+              (funcall node-text node) ")")))) :source)))
+      (when (= suite "tests/persistent-core-exit.test.mjs")
+        (setq body (js-call body :replace "(js-array \"vector\" \"map\" \"set\")" "(js-array (get context :collection))")))
+      (when (= suite "tests/multimethod.test.mjs")
+        (setq body (js-call (js-call body :replaceAll "multimethod.eli.map" "multimethod.mjs.map") :replaceAll "hierarchy.eli.map" "hierarchy.mjs.map")))
+      (js-call (get input :items) :forEach (lambda (node)
+        (let ((items (get node :items)))
+          (cond
+            ((source-head node "import")
+             (let* ((specifier (get (aref items 1) :value))
+                    (names (js-call (js-call items :slice 2) :filter (lambda (item)
+                      (not (js-call (js-array "be" "same" "contains" "excludes") :includes (get item :name)))))))
+               (if (= specifier "bun:test")
+                 (js-call imports :push (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/backends/compiler-corpus-matchers.mjs")) :href)) " expect)"))
+                 (when (and (> (js-length names) 0) (/= specifier "node:assert/strict")) (js-call imports :push (str "(import "
+                   (JSON/stringify (if (js-call specifier :startsWith ".")
+                     (get (pathToFileURL (resolve root (posix/dirname suite) specifier)) :href) specifier)) " "
+                   (js-call (js-call names :map (lambda (item) (runtime-source-node input item))) :join " ") ")"))))))
+            ((or (source-head node "defconst") (source-head node "defvar")
+                 (source-head node "defun") (source-head node "defasync"))
+             (js-call own-names :add (get (aref items 1) :name))
+             (js-call declarations :push (js-object :name (get (aref items 1) :name)
+               :replacement (js-call (runtime-source-node input node) :replaceAll "(js* \"import.meta.url\")" (JSON/stringify original-url)))))))))
+      (js-call (js-array
+        (js-array "be" "(defun be (actual expected) (js-call (expect actual) :toBe expected))")
+        (js-array "same" "(defun same (actual expected) (js-call (expect actual) :toEqual expected))")
+        (js-array "contains" "(defun contains (actual expected) (js-call (expect actual) :toContain expected))")
+        (js-array "excludes" "(defun excludes (actual expected) (js-call (get (expect actual) :not) :toContain expected))"))
+        :forEach (lambda (entry) (unless (js-call own-names :has (aref entry 0)) (js-call imports :push (aref entry 1)))))
+      (let* ((extra (str (js-call imports :join "\n") "\n"
+        "(import \"node:fs/promises\" :as original-fs) (import \"node:url\" :as original-url) (import \"node:path\" :as original-path)\n"
+        "(import " (JSON/stringify (get (pathToFileURL (resolve root "tests/helpers/portable-stdlib.mjs")) :href)) " :as original-assertions)\n"
+
+        "(defconst original-import (js* \"(specifier) => import(specifier)\"))\n"
+        (if (= mode "identity-shape")
+          (str
+            "(defasync original-cli-view (context)\n"
+            " (let* ((input (get context :modulePath)) (id \"tests/fixtures/identity.mjs\")\n"
+            "   (output (js-call original-path :resolve (get context :product) \"original-cli-view\" id))\n"
+            "   (javascript (await (js-call original-fs :readFile input \"utf8\")))\n"
+            "   (map (JSON/parse (await (js-call original-fs :readFile (str input \".map\") \"utf8\"))))\n"
+            "   (original-file (get map :file)))\n"
+            "  (unless (and (= (js-call original-path :relative (get context :javascriptRoot) input) id)\n"
+            "    (= (js-length (get map :sources)) 1) (= (js-length (get map :sourcesContent)) 1)\n"
+            "    (or (= (aref (get map :sources) 0) \"identity-only.eli\")\n"
+            "        (= (aref (get map :sources) 0) \"../../../sources/identity-only.eli\")\n"
+            "        (= (aref (get map :sources) 0) \"../sources/identity-only.eli\")))\n"
+            "   (throw (new globalThis.TypeError \"original identity CLI source map changed\")))\n"
+            "  (put map :file (js-call original-path :basename id))\n"
+            "  (put map :sources (js-array (js-call original-path :relative\n"
+            "    (js-call original-path :dirname (js-call original-path :resolve \"/seed-output\" id))\n"
+            "    (js-call original-path :resolve \"/sources\" \"identity-only.eli\"))))\n"
+            "  (await (js-call original-fs :mkdir (js-call original-path :dirname output) (js-object :recursive t)))\n"
+            "  (unless (js-call (js-array \"tests/fixtures/identity.mjs\" \"identity.mjs\" \"identity-only.mjs\") :includes original-file)\n"
+            "   (throw (new globalThis.TypeError \"original identity CLI output identity changed\")))\n"
+            "  (let* ((comment (str \"//# sourceMappingURL=\" (js-call original-path :basename (str id \".map\")) \"\\n\"))\n"
+            "         (original-comment (str \"//# sourceMappingURL=\" (js-call original-path :basename original-file) \".map\\n\"))\n"
+            "         (body (if (js-call javascript :endsWith original-comment)\n"
+            "           (js-call javascript :slice 0 (- (js-length original-comment))) javascript)))\n"
+            "   (when (js-call body :includes \"\\n//# sourceMappingURL=\")\n"
+            "    (throw (new globalThis.TypeError \"original identity CLI source map footer changed\")))\n"
+            "   (await (js-call original-fs :writeFile output (str body comment))))\n"
+            "  (await (js-call original-fs :writeFile (str output \".map\") (str (JSON/stringify map) \"\\n\"))) output))\n")
+          "")
+        "(defasync run-original-assertions (context)\n"
+        " (let* ((product (get context :product)) (directory product) (seed "
+        (if (= suite "tests/eliscript-protocol.test.mjs") "(get context :modulePath)" "(get context :javascriptRoot product)") ")\n"
+        "  (self seed) (seedDirectory seed) (selfHostedDirectory seed) (outputRoot (get context :outputRoot product)) (library (get context :modulePath))\n"
+        "  (modulePath (get context :selectedModulePath)) (seedModule modulePath) (seedSet modulePath)\n"
+        "  (objectModule library) (dataModule (js-call original-path :resolve library \"..\" \"data.mjs\"))\n"
+        "  (identitySeed (get context :referenceModulePath)) (identitySelf "
+        (if (= mode "identity-shape") "(await (original-cli-view context))" "(get context :modulePath)") ")\n"
+        "  (usage (get context :usage)) (collection (get context :collection)) (output (get context :output)) (executed output)\n"
+        "  (reports (get context :reports (js-array))) (hostReports reports) (report (if (> (js-length reports) 0) (aref reports 0) nil)) (bunReport report) (nodeReport (if (> (js-length reports) 1) (aref reports 1) report))\n"
+        "  (importGeneratedModule (async (ignored) (await (funcall original-import (get (js-call original-url :pathToFileURL (get context :selectedModulePath)) :href)))))\n"
+        "  (generatedModules (async (label) (let ((modules (js-object)))\n"
+        "   (js-call (js-array \"bit\" \"persistent-list\" \"persistent-vector\" \"persistent-map\" \"persistent-set\" \"value\") :forEach\n"
+        "     (lambda (name) (put modules name (funcall original-import (get (js-call original-url :pathToFileURL\n"
+        "       (js-call original-path :resolve product (str name \".mjs\"))) :href)))))\n"
+        "   (let ((names (Object/keys modules)) (index 0)) (while (< index (js-length names))\n"
+        "     (let ((name (aref names index))) (put modules name (await (get modules name)))) (setq index (1+ index)))) modules)))\n"
+        "  (withPortableLibraries (async (settings check) (await (funcall check (Object/assign (js-object) context\n"
+        "    (js-object :report report :reports reports :seedDirectory seed :selfHostedDirectory seed :directory product))))))\n"
+        "  (pruneLibrary (async (settings exported include exclude)\n"
+        "   (when (get context :pruningOnly)\n"
+        "    (let ((source (await (js-call original-fs :readFile (get context :prunedModulePath) \"utf8\"))))\n"
+        "      (js-call include :forEach (lambda (value) (js-call original-assertions :contains source value)))\n"
+        "      (js-call exclude :forEach (lambda (value) (js-call original-assertions :excludes source value))))))))\n"
+        body "))\n"))
+             (helper (await (maintained-helper ctx suite declarations extra (js-array "run-original-assertions")))))
+        (put helper :case (get input :locator))
+        (put helper :regions (js-array (get (get input :locator) :originalCase)))
+        (js-call (get (get helper :maintainedSource) :sourceRegions) :push
+          (source-node-proof (get input :source) (get input :callback))) helper)))
+
+(defconst runtime-stdlib-plans
+    (js-array (js-object :name "sequence" :library "sequence" :assertion "portable sequence library compiles and executes as an ESM module") (js-object :name "object" :library "object" :assertion "portable object and data libraries preserve immutable own-property semantics") (js-object :name "text" :library "text" :assertion "portable text library compiles and executes as an ESM module")))
+(defconst runtime-callable-plans
+    (js-array (js-object :name "function" :assertions (js-array "portable function combinators compile and agree across local hosts" "predicate combinators preserve Lisp truth and short-circuit order") :directBodies 2) (js-object :name "deferred" :assertions (js-array "deferred computations compile and agree across local hosts" "delay and memoize retry failures without caching partial state") :directBodies 1)))
+(defconst runtime-history-plans
+    (js-array (js-object :name "value" :suite "portable-value-semantics" :helperStart "function nextRandom(state)" :multiModules t :tests (js-array "portable persistent collections preserve nested undefined values" "optimized and portable persistent Lists share frozen hash semantics" "Eliscript-authored value semantics preserve generated cross-family invariants" "Eliscript-authored value hashing traverses one million persistent values")) (js-object :name "persistent-list" :helperStart "function nextRandom(state)" :tests (js-array "Eliscript-authored persistent list preserves generated history" "Eliscript-authored persistent list shares a million-node suffix")) (js-object :name "persistent-vector" :helperStart "function nodeCount(node, level)" :vector t :tests (js-array "Eliscript-authored persistent vector preserves generated history" "Eliscript-authored persistent vector keeps million-value trie bounds")) (js-object :name "persistent-map" :helperStart "function integerHash(value)" :tests (js-array "Eliscript-authored HAMT Map preserves generated value-key histories" "Eliscript-authored HAMT Map promotes and demotes measured layouts" "Eliscript-authored HAMT Map shares the million-key update path")) (js-object :name "persistent-set" :helperStart "function integerHash(value)" :tests (js-array "Eliscript-authored persistent Set preserves generated value-key histories" "Eliscript-authored persistent Set preserves algebra and HAMT layouts" "Eliscript-authored persistent Set shares the million-member update path"))))
+(defconst runtime-portable-plans
+    (js-call (js-array (js-object :name "persistent-list" :suite "portable-persistent-list" :assertion "Eliscript-authored persistent list compiles and agrees across hosts" :begin "    for (const report of reports) {") (js-object :name "persistent-vector" :suite "portable-persistent-vector" :assertion "Eliscript-authored persistent vector compiles and agrees across hosts" :begin "    for (const report of hostReports) {") (js-object :name "persistent-map" :suite "portable-persistent-map" :assertion "Eliscript-authored HAMT Map compiles and agrees across hosts") (js-object :name "persistent-set" :suite "portable-persistent-set" :assertion "Eliscript-authored persistent Set compiles and agrees across hosts") (js-object :name "numeric" :suite "portable-numeric" :assertion "portable numeric functions preserve exact Number and safe-integer contracts") (js-object :name "json" :suite "portable-json" :assertion "portable JSON values are strict, canonical, bounded, and self-hosted") (js-object :name "result" :suite "portable-result" :assertion "portable Result values are byte-identical and short-circuit at scale") (js-object :name "metadata" :suite "portable-metadata" :assertion "Eliscript-authored metadata is byte-identical and portable") (js-object :name "data-text" :suite "portable-data-text" :assertion "portable canonical data text is byte-identical and host-independent") (js-object :name "value" :suite "portable-value-semantics" :assertion "Eliscript-authored value semantics compile and agree across hosts") (js-object :name "persistent-queue" :suite "persistent-queue" :assertion "Eliscript persistent queue API compiles and runs on both hosts" :begin "    expect(reports[1]).toEqual(reports[0]);" :maps false) (js-object :name "lazy-sequence" :suite "lazy-sequence" :source "tests/fixtures/lazy-sequence.eli" :assertion "Eliscript lazy sequences agree across compilers and local hosts" :maps false) (js-object :name "persistent-sorted" :suite "persistent-sorted" :source "tests/fixtures/persistent-sorted.eli" :assertion "Eliscript sorted API agrees across compilers and local hosts" :maps false) (js-object :name "regex" :suite "regex" :source "tests/fixtures/regex.eli" :assertion "Eliscript regex APIs agree across compilers and local hosts" :maps false) (js-object :name "persistent-tree-walk" :suite "persistent-tree-walk" :source "tests/fixtures/persistent-tree-walk.eli" :assertion "persistent tree walk is stack safe and agrees across compilers and hosts" :maps false) (js-object :name "persistent-zipper" :suite "persistent-zipper" :source "tests/fixtures/persistent-zipper.eli" :assertion "persistent zippers navigate edit and rebuild stack-safe trees" :maps false) (js-object :name "core-text-object" :suite "core-text-object" :source "stdlib/core/text.eli" :assertion "core text/object production artifacts are fixed-point and cross-host" :maps false) (js-object :name "interop-js" :suite "interop-js" :source "stdlib/interop/js.eli" :mapRoot "stdlib" :assertion "Eliscript JS interop preserves explicit host and persistent boundaries") (js-object :name "declarative-protocol" :suite "declarative-protocol" :source "tests/fixtures/declarative-protocol.eli" :assertion "declarative protocols preserve protocol identity and host dispatch") (js-object :name "declarative-record" :suite "declarative-record" :source "tests/fixtures/declarative-record.eli" :assertion "defrecord is identical across seed and self-hosted compilers" :maps false) (js-object :name "declarative-type" :suite "declarative-type" :source "tests/fixtures/declarative-type.eli" :assertion "deftype and reify agree across compilers and hosts" :maps false) (js-object :name "multimethod" :suite "multimethod" :assertion "Eliscript multimethods dispatch on values with persistent method snapshots") (js-object :name "core-expression-forms" :suite "core-expression-forms" :source "tests/fixtures/core-expression-forms.eli" :assertion "core expression forms preserve threading and single-evaluation semantics" :maps false) (js-object :name "local-recursive-functions" :suite "local-recursive-functions" :source "tests/fixtures/local-recursive-functions.eli" :assertion "local recursive functions agree across compilers and local hosts" :maps false) (js-object :name "multi-arity" :suite "multi-arity" :source "tests/fixtures/multi-arity.eli" :assertion "multi-arity functions agree across compilers and local hosts" :maps false) (js-object :name "value-dispatch" :suite "value-dispatch" :source "tests/fixtures/value-dispatch.eli" :assertion "case and condp agree across compilers and local hosts" :maps false) (js-object :name "literal-runtime" :suite "literal-runtime" :source "tests/fixtures/literal-runtime.eli" :assertion "persistent literals and quoted data preserve language value categories" :begin "    expect(nodeReport).toEqual(bunReport);") (js-object :name "atom" :suite "atom" :source "stdlib/state/atom.eli" :assertion "Eliscript Atom preserves ordered single-transition state semantics") (js-object :name "eliscript-protocol" :suite "eliscript-protocol" :source "stdlib/core/protocol.eli" :assertion "Eliscript-authored protocol policy preserves open dispatch semantics")) :concat (js-call (js-array "vector" "map" "set") :map (lambda (collection) (js-object :name (str "persistent-core-exit-" collection) :suite "persistent-core-exit" :source "stdlib/value.eli" :baseId (str "persistent-core-exit-" collection) :idSuffix collection :locals (str "const collection=" (globalThis.JSON.stringify collection) ";") :assertion "persistent collection core closes its all-host million-value exit gate" :begin "      expect(reports[1]).toEqual(reports[0]);" :end "\n    }\n  } finally {" :maps false))) (js-array (js-object :name "language-equality" :suite "language-equality" :source "tests/fixtures/language-equality.eli" :assertion "language equal uses value semantics across compilers and local hosts" :begin "    const expected = {" :end "    const identitySource ="))))
+
+  (defun runtime-json-source (value) (str "(JSON/parse " (JSON/stringify (JSON/stringify value)) ")"))
+
+  (defun runtime-host-program (ctx base plan helpers timeout)
+    (let* ((root (get ctx :sourceRoot))
+           (original-execution (get base :execution))
+           (fixture (get original-execution :host))
+           (arguments (get original-execution :arguments
+             (js-call (get original-execution :argumentModules (js-array (get base :entry)))
+               :map (lambda (id) (js-object :module id)))))
+           (process-url (get (pathToFileURL (resolve root "tools/backends/compiler-corpus-process.mjs")) :href))
+           (helper-inputs (js-call helpers :map (lambda (helper)
+             (js-object :javascript (get helper :javascript)))))
+           (settings (js-object :entry (get base :entry) :fixture fixture :arguments arguments
+             :mapRoot (get plan :mapRoot ".") :module (get plan :name)
+             :modulePath (get plan :modulePath (get base :entry))
+             :libraryRoot (get plan :libraryRoot ".")
+             :usage (get base :entry) :timeout timeout
+             :pruningOnly (get plan :pruningOnly false) :collection (get plan :idSuffix)
+             :runFixture (get plan :runFixture t)))
+           (source (str
+      "(module original.runtime.assertions\n"
+      " (import \"node:path\" resolve) (import \"node:url\" pathToFileURL) (import \"node:process\" :default process)\n"
+      " (import " (JSON/stringify process-url) " readOriginalCorpusExecutionContext originalCorpusExecutionPolicy runOriginalCorpusProcess)\n"
+      " (defconst host-import (js* \"(specifier) => import(specifier)\"))\n"
+      " (defconst settings " (runtime-json-source settings) ")\n"
+      " (import \"node:buffer\" Buffer)\n"
+      " (defconst helpers " (runtime-json-source helper-inputs) ")\n"
+      " (defasync original-report (engine product fixture arguments)\n"
+      "  (let* ((env (Object/assign (js-object) (get process :env)))\n"
+      "    (root (get env :ELISCRIPT_ORIGINAL_SOURCE_ROOT))\n"
+      "    (context (readOriginalCorpusExecutionContext (get env :ELISCRIPT_ORIGINAL_EXECUTION_CONTEXT)))\n"
+      "    (bun (= engine \"bun\")) (command (if bun (get env :BUN (get process :execPath)) (get env :NODE \"node\")))\n"
+      "    (flags (if bun (js-array \"--preload\" (resolve root \"tests/fixtures/compiled-eli-bun-preload.mjs\"))\n"
+      "      (js-array \"--experimental-loader\" (resolve root \"tests/fixtures/compiled-eli-node-loader.mjs\")))))\n"
+      "    (when (and bun (get env :ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT))\n"
+      "      (js-call flags :push \"--preload\" (resolve root \"tools/backends/compiler-corpus-host-context.mjs\")))\n"
+      "    (js-call flags :push (resolve product fixture))\n"
+      "    (js-call arguments :forEach (lambda (argument)\n"
+      "      (js-call flags :push (cond ((get argument :directory) product)\n"
+      "        ((Object/hasOwn argument \"literal\") (get argument :literal))\n"
+      "        ((= (value-type (get argument :module)) \"string\") (resolve product (get argument :module)))\n"
+      "        (t (throw (new globalThis.TypeError \"original host argument lost its exact source form\")))))))\n"
+      "    (let ((receipt (await (runOriginalCorpusProcess command flags\n"
+      "      (Object/assign (js-object) context (js-object :cwd root :env env\n"
+      "        :directory (resolve (get context :directory) (str \"runtime-observation-\" engine))\n"
+      "        :policy (originalCorpusExecutionPolicy (Object/assign (js-object) context\n"
+      "          (js-object :record (js-object :id (get context :caseId) :execution (js-object :timeoutMs (get settings :timeout))))))))))))\n"
+      "      (get receipt :stdout))))\n"
+      " (defasync main ()\n"
+      "  (let* ((product (aref (get process :argv) 2)) (env (get process :env))\n"
+      "    (javascript (get env :ELISCRIPT_ORIGINAL_JAVASCRIPT_PRODUCT_ROOT product))\n"
+      "    (fixture (if (nullish? (get settings :fixture)) (get settings :entry) (get settings :fixture)))\n"
+      "    (arguments (if (nullish? (get settings :fixture)) (js-array) (get settings :arguments)))\n"
+      "    (reports (js-array)) (rawOutputs (js-array)) (output undefined))\n"
+      "    (when (get settings :runFixture)\n"
+      "      (let ((bun (await (original-report \"bun\" product fixture arguments)))\n"
+      "            (node (await (original-report \"node\" product fixture arguments))))\n"
+      "        (setq output bun) (js-call rawOutputs :push bun node) (js-call reports :push (JSON/parse bun) (JSON/parse node))))\n"
+      "    (let ((input (js-object :product product :javascriptRoot (resolve javascript (get settings :mapRoot))\n"
+      "      :module (get settings :module) :directory product :output output :rawOutputs rawOutputs :reports reports :report (aref reports 0)\n"
+      "      :modulePath (resolve javascript (get settings :modulePath))\n"
+      "      :selectedModulePath (resolve product (get settings :entry))\n"
+      "      :outputRoot (resolve product (get settings :libraryRoot))\n"
+      "      :usage (resolve product (get settings :usage))\n"
+      "      :pruningOnly (get settings :pruningOnly) :collection (get settings :collection)\n"
+      "      :prunedModulePath (resolve javascript (str (get settings :module) \".mjs\")))))\n"
+      "      (let ((index 0)) (while (< index (js-length helpers))\n"
+      "        (let ((module (await (funcall host-import (str \"data:text/javascript;base64,\"\n"
+      "          (js-call (Buffer/from (get (aref helpers index) :javascript) \"utf8\") :toString \"base64\"))))))\n"
+      "          (await (js-call module :run_original_assertions input)))\n"
+      "        (setq index (1+ index)))))))\n"
+      " (defconst completion (main))\n"
+      " (js-call completion :catch (lambda (error) (console/error error) (put process :exitCode 1)))\n"
+      " (defun then (fulfill reject) (js-call completion :then (lambda (ignored) (funcall fulfill undefined)) reject)) (export then))\n")))
+      (compile-string source "original-runtime-assertions-host.eli")))
+
+  (defasync publish-runtime-assertions (ctx plan base titles mode id)
+    (let* ((suite (get plan :suite)) (locators (get ctx :locators)) (text (get ctx :text)) (file (get ctx :file))
+           (source (await (funcall text suite))) (identity (await (funcall file suite)))
+           (helpers (js-array)) (owners (js-array)) (regions (js-array)) (coverage (new globalThis.Set))
+           (source-assets (js-array)) (timeout 0) (index 0))
+      (unless base (throw (new globalThis.TypeError (str "original runtime program graph is unavailable: " id))))
+      (while (< index (js-length titles))
+        (let* ((title (aref titles index)) (input (await (runtime-maintained-case ctx suite title)))
+               (owner (get (get input :locator) :originalCase))
+               (actual-mode (if (= mode "auto")
+                 (if (js-call (runtime-nodes (get input :callback)) :some (lambda (node) (source-head node "withPortableLibraries"))) "context" "reports") mode))
+               (helper (await (runtime-assertion-helper ctx suite title actual-mode))))
+          (when (or (not (Number/isFinite (get owner :timeoutMs))) (<= (get owner :timeoutMs) 0))
+            (throw (new globalThis.TypeError "original runtime case requires its positive original deadline")))
+          (setq timeout (if (> (get owner :timeoutMs) timeout) (get owner :timeoutMs) timeout))
+          (js-call helpers :push helper) (js-call owners :push (Object/assign (js-object :id (get (get input :locator) :id)) (globalThis.structuredClone owner)))
+          (js-call regions :push (runtime-owner-region source owner))
+          (js-call (get helper :sourceAssets) :forEach (lambda (asset) (js-call source-assets :push asset)))
+          (js-call locators :forEach (lambda (locator)
+            (when (and (= (get locator :file) suite)
+              (if (get locator :originalExecution) (= (get (get locator :originalExecution) :record) id)
+                (if (get locator :originalCase) (= (get (get locator :originalCase) :title) title)
+                  (and (= (value-type (get locator :contains)) "string")
+                    (js-call (str title "\n" (js-call source :slice (get (get owner :span) :start) (get (get owner :span) :end))) :includes (get locator :contains))))))
+              (js-call coverage :add (get locator :id))))))
+        (setq index (1+ index)))
+      (when (= (get coverage :size) 0) (throw (new globalThis.TypeError (str "original runtime assertions lost their exact coverage: " id))))
+      (let* ((fixture (get (get base :execution) :host))
+             (host-source (get (get base :execution) :hostSource))
+             (request (merge-objs (globalThis.structuredClone (get base :request)) (js-object :phased t)))
+             (maintained (globalThis.structuredClone (get (aref helpers 0) :maintainedSource)))
+             (pruning (get plan :pruningOnly false)))
+        (when (and fixture (= (value-type host-source) "string"))
+          (put request :hostSources (js-call (get request :hostSources (js-array)) :concat
+            (js-array (js-object :id fixture :filename fixture :source host-source)))))
+        (when pruning
+          (put request :portableEntries (js-array (get plan :portableEntry))))
+        (let ((h 1))
+          (while (< h (js-length helpers))
+            (Reflect/apply (get (get maintained :sourceRegions) :push) (get maintained :sourceRegions)
+              (get (get (aref helpers h) :maintainedSource) :sourceRegions))
+            (setq h (1+ h))))
+        (js-call (get (get base :original) :sourceAssets (js-array)) :forEach (lambda (asset) (js-call source-assets :push asset)))
+        (funcall (get ctx :add) (merge-objs (globalThis.structuredClone base) (js-object :id id :kind "project" :coverage (Array/from coverage)
+          :modules (globalThis.structuredClone (get base :modules)) :entry (get base :entry) :request request
+          :execution (js-object :kind "original-program" :host (str "tests/__eliscript_original_" (js-call id :replaceAll ":" "_") ".mjs")
+            :hostSource (runtime-host-program ctx base plan helpers timeout) :arguments (js-array (js-object :directory t))
+            :aliases t :requiresBun t :hostRuntime "bun" :compilerSourceMaps t :childProcesses "inherit-selected-artifact" :timeoutMs timeout)
+          :expected (js-object :kind "seed-program" :oracleRequired t :stdout "")
+          :original (js-object :manifest "stable-compatibility" :suite suite :host suite
+            :sourceSha256 (get identity :sha256) :originalAssertion titles :originalCases owners
+            :completeOriginalCaseCoverage false :regions regions :maintainedSource maintained
+            :nativeInstrumentationScope (when (= suite "tests/core-stdlib.test.mjs")
+              (js-object :kind "javascript-host-implementation-counters" :version 1
+                :executedTargets (js-array "javascript") :notEvaluatedTargets (js-array "wasm" "native")
+                :functionalInputCount 50000 :functionalResultsUnchanged t))
+            :sourceAssets source-assets :helperPrograms (js-call helpers :map (lambda (helper) (js-object :sha256 (get helper :helpersSha256)))) :setupReplacement (js-object :kind "actual-selected-library-artifacts"
+              :originalAssertions "compiled unchanged from authenticated maintained source"
+              :compilerSetup "executed by the actual selected compiler matrix request"
+              :cliSetupAssertions "original CLI stdout and per-build counts remain mandatory in the unchanged original suites; not asserted by this matrix runtime projection"
+              :splitPruning pruning))))))))
+
+  (defasync add-indexed-runtime-records (ctx)
+    (let ((records (get ctx :records)) (locators (get ctx :locators)) (text (get ctx :text)) (file (get ctx :file)) (add (get ctx :add)))
+      (let* ((suite "tests/persistent-zipper.test.mjs")
+             (title "deep zipper ascent reads indexed ancestor slots without reducing wide parent vectors"))
+        (when (js-call locators :some (lambda (item) (= (get item :file) suite)))
+          (let* ((original (await (text suite)))
+                 (input (await (runtime-maintained-case ctx suite title)))
+                 (owner (get (get input :locator) :originalCase))
+                 (fixture "tests/fixtures/persistent-zipper-indexed-host.mjs")
+                 (fixture-source (await (text fixture))) (fixture-identity (await (file fixture)))
+                 (maintained-file "tests/fixtures/persistent-zipper-indexed-host.eli")
+                 (maintained-identity (await (file maintained-file)))
+                 (base (js-call records :find (lambda (record)
+                   (= (get record :id) "stable-compatibility:program:tests/fixtures/persistent-zipper.eli")))))
+            (unless base (throw (new globalThis.TypeError "original indexed zipper graph is unavailable")))
+            (add (js-object :id "original-program:persistent-zipper-indexed-ascent" :kind "project"
+              :coverage (runtime-case-coverage locators suite title "original-program:persistent-zipper-indexed-ascent")
+              :modules (globalThis.structuredClone (get base :modules)) :entry (get base :entry)
+              :request (merge-objs (globalThis.structuredClone (get base :request))
+                (js-object :phased t :hostSources (js-call (get (get base :request) :hostSources (js-array)) :concat
+                  (js-array (js-object :id fixture :filename fixture :source fixture-source)))))
+              :execution (js-object :kind "original-program" :host "tests/__eliscript_original_zipper_indexed_ascent.mjs"
+                :hostSource (str "import {resolve} from \"node:path\";\nimport {pathToFileURL} from \"node:url\";\n"
+                  "const product=process.argv[2];process.argv=[process.execPath,'indexed-zipper.mjs',resolve(product,'stdlib/core/zipper.eli')];\n"
+                  "await import(pathToFileURL(resolve(product," (JSON/stringify fixture) ")).href);\n")
+                :arguments (js-array (js-object :directory t)) :aliases t :requiresBun t :hostRuntime "bun"
+                :childProcesses "inherit-selected-artifact" :timeoutMs (get owner :timeoutMs))
+              :expected (js-object :kind "seed-program" :oracleRequired t :stdout "")
+              :original (js-object :manifest "stable-compatibility" :suite suite :host suite
+                :sourceSha256 (get (await (file suite)) :sha256) :originalAssertion title
+                :regions (js-array (runtime-owner-region original owner))
+                :maintainedSource (js-object :sourceFile (get input :file)
+                  :sourceSha256 (get (await (file (get input :file))) :sha256)
+                  :sourceRegions (js-array (source-node-proof (get input :source) (get input :callback))))
+                :sourceAssets (js-array
+                  (js-object :file fixture :sourceSha256 (get fixture-identity :sha256))
+                  (js-object :file maintained-file :sourceSha256 (get maintained-identity :sha256)))))))))
+      (let* ((suite "tests/language-equality.test.mjs")
+             (title "language equal uses value semantics across compilers and local hosts")
+             (id "original-program:language-equality-identity-only"))
+        (when (js-call locators :some (lambda (item) (= (get item :file) suite)))
+          (let* ((input (await (runtime-maintained-case ctx suite title)))
+                 (pending (js-array (get input :callback))) (sources (js-array))
+                 (entry "tests/fixtures/identity.mjs")
+                 (base (js-call records :find (lambda (record)
+                   (= (get record :id) "stable-compatibility:program:tests/fixtures/language-equality.eli")))))
+            (while (> (js-length pending) 0)
+              (let* ((node (js-call pending :shift)) (items (get node :items)))
+                (when (Array/isArray items)
+                  (when (and (source-head node "Bun/write") (= (get (aref items 1) :name) "identitySource")
+                             (and (= (get (aref items 2) :kind) "literal") (= (value-type (get (aref items 2) :value)) "string")))
+                    (js-call sources :push (get (aref items 2) :value)))
+                  (Reflect/apply (get pending :push) pending items))))
+            (unless (and base (= (js-length sources) 1))
+              (throw (new globalThis.TypeError "original identity input or graph changed")))
+            (let* ((helper (await (runtime-assertion-helper ctx suite title "identity-shape")))
+                   (link (helper-transport helper "run_original_assertions")))
+              (add (js-object :id id :kind "project" :coverage (runtime-case-coverage locators suite title id)
+                :modules (js-array (js-object :id entry :filename "identity-only.eli" :source (aref sources 0))) :entry entry
+                :request (merge-objs (globalThis.structuredClone (get base :request)) (js-object :entries (js-array entry)))
+                :execution (js-object :kind "original-program" :host "tests/__eliscript_original_identity_shape.mjs"
+                  :hostSource (str "import {resolve} from \"node:path\";\n" link
+                    "const product=process.argv[2],reference=process.env.ELISCRIPT_ORIGINAL_REFERENCE_PRODUCT_ROOT,javascript=process.env.ELISCRIPT_ORIGINAL_JAVASCRIPT_PRODUCT_ROOT??product;\n"
+                    "if(!reference)throw new Error('original identity comparison requires its actual independent reference');\n"
+                    "await run_original_assertions({product,javascriptRoot:javascript,modulePath:resolve(javascript,"
+                    (JSON/stringify entry) "),referenceModulePath:resolve(reference," (JSON/stringify entry) "),reports:[]});\n")
+                  :arguments (js-array (js-object :directory t)) :aliases t :requiresBun t :hostRuntime "bun"
+                  :referenceArtifact t :compilerSourceMaps t :timeoutMs (get (get (get input :locator) :originalCase) :timeoutMs))
+                :expected (js-object :kind "seed-program" :oracleRequired t :stdout "")
+                :original (js-object :manifest "stable-compatibility" :suite suite :host suite
+                  :sourceSha256 (get (await (file suite)) :sha256) :originalAssertion title
+                  :regions (js-array (runtime-owner-region (get input :artifact) (get (get input :locator) :originalCase)))
+                  :maintainedSource (get helper :maintainedSource) :sourceAssets (get helper :sourceAssets)
+                  :setupReplacement (js-object :kind "actual-selected-and-independent-seed-artifacts"))))))))
+      nil))
+
+  (defasync addOriginalStdlibRuntimeAdapters (ctx)
+    (let* ((records (get ctx :records)) (locators (get ctx :locators))
+           (file (get ctx :file)) (text (get ctx :text)) (add (get ctx :add))
+           (mapped (js-array)) (index 0))
+      (while (< index (js-length runtime-stdlib-plans))
+        (let* ((input (aref runtime-stdlib-plans index))
+               (suite (str "tests/stdlib-" (get input :name) ".test.mjs")))
+          (when (js-call locators :some (lambda (item) (= (get item :file) suite)))
+            (let* ((base (js-call records :find (lambda (record)
+                      (= (get record :id) (str "stable-compatibility:program:tests/fixtures/" (get input :name) "-usage.eli")))))
+                   (plan (merge-objs input (js-object :suite suite
+                     :modulePath (str "tests/fixtures/" (get input :library) ".mjs")))))
+              (await (publish-runtime-assertions ctx plan base (js-array (get input :assertion)) "usage"
+                (str "original-program:stdlib-" (get input :name) "-complete-host")))
+              (js-call mapped :push suite))))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (js-length runtime-callable-plans))
+        (let* ((input (aref runtime-callable-plans index)) (name (get input :name))
+               (suite (str "tests/stdlib-" name ".test.mjs")))
+          (when (js-call locators :some (lambda (item) (= (get item :file) suite)))
+            (let* ((base (js-call records :find (lambda (record)
+                     (= (get record :id) (str "stable-compatibility:program:tests/fixtures/" name "-usage.eli")))))
+                   (plan (merge-objs input (js-object :suite suite :runFixture (= name "deferred") :libraryRoot "tests/fixtures/stdlib")))
+                   (source (await (runtime-maintained-case ctx suite (aref (get input :assertions) 0))))
+                   (suite-identity (await (file suite)))
+                   (maintained-identity (await (file (get source :file))))
+                   (expected (runtime-output-expectation source)))
+              (unless base (throw (new globalThis.TypeError "original callable library graph is unavailable")))
+              (js-call (js-array "bun" "node") :forEach (lambda (host)
+                (funcall add (merge-objs (globalThis.structuredClone base)
+                  (js-object :id (str "original-program:stdlib-" name "-output-" host)
+                    :coverage (runtime-case-coverage locators suite (aref (get input :assertions) 0) "")
+                    :request (merge-objs (globalThis.structuredClone (get base :request)) (js-object :phased t))
+                    :execution (js-object :kind "original-program" :host nil :hostRuntime host :aliases t :requiresBun (= host "bun"))
+                    :expected (js-object :kind "seed-program" :oracleRequired t :stdoutJSON expected)
+                    :original (js-object :manifest "stable-compatibility" :suite suite :host suite
+                      :sourceSha256 (get suite-identity :sha256)
+                      :fixture (str "tests/fixtures/" name "-usage.eli")
+                      :originalAssertion (get input :assertions)
+                      :regions (js-array (runtime-owner-region (get source :artifact) (get (get source :locator) :originalCase)))
+                      :maintainedSource (js-object :sourceFile (get source :file) :sourceSha256 (get maintained-identity :sha256)
+                        :sourceRegions (js-array (source-node-proof (get source :source) (get source :callback))))))))))
+              (await (publish-runtime-assertions ctx plan base (get input :assertions) "callables"
+                (str "original-program:stdlib-" name "-complete-callables")))
+              (js-call mapped :push suite))))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (js-length runtime-history-plans))
+        (let* ((input (aref runtime-history-plans index))
+               (suite (str "tests/" (get input :suite (str "portable-" (get input :name))) ".test.mjs")))
+          (when (js-call locators :some (lambda (item) (= (get item :file) suite)))
+            (let ((base (js-call records :find (lambda (record)
+                    (= (get record :id) (str "stable-compatibility:program:stdlib/" (get input :name) ".eli")))))
+                  (test-index 0))
+              (while (< test-index (js-length (get input :tests)))
+                (await (publish-runtime-assertions ctx (merge-objs input (js-object :suite suite :runFixture false)) base
+                  (js-array (aref (get input :tests) test-index)) "history"
+                  (str "original-program:portable-" (get input :name) "-" test-index)))
+                (setq test-index (1+ test-index))))))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (js-length runtime-portable-plans))
+        (let* ((input (aref runtime-portable-plans index)) (suite (str "tests/" (get input :suite) ".test.mjs")))
+          (when (js-call locators :some (lambda (item) (= (get item :file) suite)))
+            (let* ((source (get input :source (str "stdlib/" (get input :name) ".eli")))
+                   (base (js-call records :find (lambda (record)
+                      (= (get record :id) (str "stable-compatibility:program:" (get input :baseId source))))))
+                   (plan (merge-objs input (js-object :suite suite)))
+                   (case (await (runtime-maintained-case ctx suite (get input :assertion))))
+                   (pruning (runtime-pruning-node case))
+                   (id (str "original-program:" (get input :suite) "-complete-hosts"
+                         (if (get input :idSuffix) (str "-" (get input :idSuffix)) ""))))
+              (await (publish-runtime-assertions ctx plan base (js-array (get input :assertion))
+                (if (= (get input :name) "language-equality") "equality" "auto") id))
+              (when pruning
+                (let* ((entry (aref (get pruning :items) 2)) (exported (get entry :value)))
+                  (unless (and (= (get entry :kind) "literal") (= (value-type exported) "string"))
+                    (throw (new globalThis.TypeError "original pruning export must remain a literal entry name")))
+                  (await (publish-runtime-assertions ctx
+                    (merge-objs plan (js-object :pruningOnly t :runFixture false :portableEntry exported))
+                    base (js-array (get input :assertion)) "pruning" (str "original-program:" (get input :suite) "-pruned")))))
+              (js-call mapped :push suite))))
+        (setq index (1+ index)))
+      (await (add-indexed-runtime-records ctx))
+      mapped))
+
+  (export originalRuntimeSourceSuites originalRuntimeCaseLocators originalRuntimeHostArtifact isOriginalRuntimeHostOnly originalRuntimeOnlyCase addOriginalStdlibRuntimeAdapters))

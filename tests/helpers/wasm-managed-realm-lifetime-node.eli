@@ -1,0 +1,46 @@
+(module tests.helpers.wasm-managed-realm-lifetime-node
+  (import "node:process" :default process)
+
+  (defconst dyn-import (js* "(specifier) => import(specifier)"))
+
+  (defasync main ()
+    (let* ((argv (get process :argv))
+           (mode (aref argv 2))
+           (m (await (funcall dyn-import (aref argv 3)))))
+      (cond
+        ((= mode "oracle")
+         (let* ((map (js-call m :make_map))
+                (out (js-array (js-call m :same_map_prototype map))))
+           (js-call m :install_map -0)
+           (js-call out :push (Object/is (js-call m :read_map) -0) (js-call m :delete_map))
+           (js-call m :install_function 9)
+           (js-call out :push (js-call m :read_function))
+           (js-call m :install_named 9)
+           (js-call out :push (js-call m :read_named))
+           (js-call m :lock_map)
+           (js-call out :push (js-call m :map_extensible))
+           (console/log (JSON/stringify out))))
+        ((= mode "object-oracle")
+         (let ((keys (Object/getOwnPropertyDescriptor globalThis.Object "keys"))
+               (mutations (js-array))
+               (i 0))
+           (while (< i 3)
+             (try
+               (js-call mutations :push (JSON/parse (js-call m :object_static_mutation i)))
+               (finally
+                 (Object/defineProperty globalThis.Object "keys" keys)))
+             (setq i (+ i 1)))
+           (let ((prototypes (js-call (js-array 0 1 2) :map
+                               (lambda (idx) (js-call m :array_prototype_query idx))))
+                 (integrity (JSON/parse (js-call m :object_static_integrity))))
+             (console/log (JSON/stringify
+                            (js-object :mutations mutations
+                                       :integrity integrity
+                                       :prototypes prototypes))))))
+        (t
+         (throw (new globalThis.Error (str "unknown mode: " mode)))))))
+
+  (js-call (main) :catch
+    (lambda (err)
+      (console/error err)
+      (js-call process :exit 1))))

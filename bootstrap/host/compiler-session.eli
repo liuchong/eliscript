@@ -27,10 +27,10 @@
   ;; Private JSON buffers contain only already encoded string tokens. Invoke
   ;; the primitive join directly rather than source-array text conversion,
   ;; which must also implement the language's cyclic-array contract.
-  (defconst session-json-parts-join (get (js* "Array.prototype") :join))
+  (defconst session-json-parts-join (get globalThis.Array.prototype :join))
 
   (defun session-fail (message &optional filename)
-    (let* ((error (new (js* "Error") message))
+    (let* ((error (new globalThis.Error message))
            (diagnostic (js-object :format "eliscript-diagnostic" :version 1
              :code "ELI-H0001" :severity "error" :phase "compiler-session" :message message)))
       (when filename (put diagnostic :location (js-object :file filename)))
@@ -933,7 +933,7 @@
       initial))
 
   (defun session-portable-import-fail (message filename)
-    (let ((error (new (js* "Error") message)))
+    (let ((error (new globalThis.Error message)))
       (put error :eliscriptDiagnostic (js-object :format "eliscript-diagnostic" :version 1
         :code "ELI-B0001" :severity "error" :phase "project-build" :message message
         :location (js-object :file filename)))

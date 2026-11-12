@@ -136,17 +136,17 @@
                 (js-call runtime :leaveFrame caller) (js-call runtime :release value) (js-call runtime :release tail)
                 (close-runtime runtime))))
           (setq index (1+ index))))) 30000)
-  (test "three-operand prefix apply remains a source-bound refusal and never mutates the original program"
+  (test "apply without a final list remains a source-bound refusal and never mutates the original program"
     (lambda ()
       (let* ((ir (js-call (get backend :compiler) :compile_ir_string
-                   "(defun f (callee values) (apply callee 7 values)) (export f)" "invalid-prefix-apply.eli"))
+                   "(defun f (callee) (apply callee)) (export f)" "invalid-arity-apply.eli"))
              (before (JSON/stringify ir)))
         (js-call assert :throws (lambda () (js-call (get backend :managed) :lower_managed_program ir runtime-ir))
           (lambda (error)
             (let ((diagnostic (get error :eliscriptDiagnostic)))
               (js-call assert :ok diagnostic error)
               (js-call assert :strictEqual (get diagnostic :code) "ELI-B0001")
-              (js-call assert :strictEqual (get (get diagnostic :location) :file) "invalid-prefix-apply.eli") t)))
+              (js-call assert :strictEqual (get (get diagnostic :location) :file) "invalid-arity-apply.eli") t)))
         (js-call assert :strictEqual (JSON/stringify ir) before))))
   (test "independent Node executes the actual emitted JS oracle and identical WASM wrapper artifact"
     (lambda ()
