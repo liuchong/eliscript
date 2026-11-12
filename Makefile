@@ -5,6 +5,7 @@ NODE ?= node
 # This is per Node process; a separate supervisor must bound the complete tree.
 ELISCRIPT_NODE_HEAP_MIB ?= 12288
 export NODE_OPTIONS ?= --max-old-space-size=$(ELISCRIPT_NODE_HEAP_MIB)
+# The Node self-hosted suite exposes GC for completed compiler snapshots.
 BUN_TEST_RUNNER ?= tools/testing/final-functional-scope.mjs
 BUN_ARTIFACT_TEST_RUNNER ?= $(BUN_TEST_RUNNER)
 SUITE_RUNNER ?= tools/testing/file-workers.mjs
@@ -449,7 +450,7 @@ test-core: check-contracts
 		./tests/math-runtime-selfhosted.test.mjs \
 		./tests/unicode-case-selfhosted.test.mjs \
 		./tests/unicode-default-selfhosted.test.mjs; \
-	$(SUITE_STEP) test test-core/node-selfhosted "" -- $(NODE) --test --test-concurrency=1 "$$@"
+	$(SUITE_STEP) test test-core/node-selfhosted "" -- $(NODE) --expose-gc --test --test-concurrency=1 "$$@"
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" $(SUITE_STEP) test test-core/cli-test "" -- ./tests/cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" $(SUITE_STEP) test test-core/project-cli-test "" -- ./tests/project-cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" $(SUITE_STEP) test test-core/check-cli-test "" -- ./tests/check-cli-test.sh

@@ -725,6 +725,10 @@
               (otherwise (get (get outcome :failure) :eliscriptDiagnostic)
                 (js-object :name (get (get outcome :failure) :name) :message (get (get outcome :failure) :message))))))
             (await (saveCompilerMetadata (join directory "diagnostic.json") (get outcome :failure)))))
+        ;; Execution has settled and its product is already archived. Do not
+        ;; pin decoded and detached typed/debug graphs during the independent
+        ;; Seed comparison; its inputs are the record and observation.
+        (setq response undefined product undefined)
         (when (Object/hasOwn (get context :transportEvidence) "nativeProviderIdentity")
           (put outcome :nativeProviderIdentity (get (get context :transportEvidence) :nativeProviderIdentity)))
         (when (or (= (get record :kind) "original-suite") (= (get record :kind) "sequence"))
@@ -755,6 +759,11 @@
         (put outcome :nativeTarget (matrix-native-target options))
         (put outcome :inputSha256 (compilerDigest (encodeCompilerIR (js-object :value record))))
         (put outcome :comparison comparison-result)
+        ;; The exact input and enclosing corpus bind this completed run.
+        ;; Listings of already-disposable source files are neither needed nor
+        ;; reauthenticated; keeping them makes every later manifest rewrite
+        ;; repeat all earlier source metadata.
+        (Reflect/deleteProperty outcome "sourceIdentity")
         (put outcome :artifactsRetained false)
         (await (saveCompilerMetadata manifest metadata))
         (await (rm directory (js-object :recursive t :force t))))))

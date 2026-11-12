@@ -220,6 +220,7 @@
             manifest corpus options options cell nil nil))
           (let ((row (aref (get cell :records) 0)))
             (js-call assert :strictEqual (get row :artifactsRetained) false)
+            (js-call assert :strictEqual (get row :sourceIdentity) undefined)
             (js-call assert :strictEqual (get row :nativeTarget) "arm64-macos")
             (await (js-call assert :rejects (readdir (get row :directory)) (js-object :code "ENOENT")))
             (js-call assert :strictEqual (js-length (get (await (loadCompilerMatrixResume manifest expected)) :records)) 1)
@@ -276,6 +277,7 @@
             manifest corpus options options cell nil nil))
           (let ((row (aref (get cell :records) 0)))
             (js-call assert :strictEqual (get row :artifactsRetained) undefined)
+            (js-call assert :ok (get row :sourceIdentity))
             (js-call assert :strictEqual (js-length (await (readFile (join (get row :directory) "temporary-product.bin")))) 131072)
             (await (rm (get row :directory) (js-object :recursive t))))
           (put options :retainArtifacts false)
@@ -286,6 +288,7 @@
           (let ((row (aref (get cell :records) 0)))
             (js-call assert :strictEqual (get row :verification) "different")
             (js-call assert :strictEqual (get row :artifactsRetained) undefined)
+            (js-call assert :ok (get row :sourceIdentity))
             (js-call assert :strictEqual (js-length (await (readFile (join (get row :directory) "temporary-product.bin")))) 131072))))))))
   (defun fixture-records (originals)
     ;; This is only the loader's adversarial data fixture. It never certifies

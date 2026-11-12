@@ -247,6 +247,7 @@
            (classifyStage3Corpus (get matrix :classifyStage3Corpus))
            (findCompilerMatrixResumeManifests (get resume :findCompilerMatrixResumeManifests))
            (corpus (await (loadCompilerMatrixCorpus (js-object :sourceRoot source-root :recordsPath (get options :corpusRecordsPath)))))
+           (corpus-sha (get corpus :recordsSha256))
            (sources (await (loadCompilerSources (js-object :sourceRoot source-root))))
            (source-identity (compilerSourceIdentity sources))
            (resume-from (get options :resumeFrom))
@@ -254,7 +255,7 @@
              (type-fail "continuation requires a new output directory to preserve the previous evidence")))
            (resumes (await (findCompilerMatrixResumeManifests resume-from
              (js-object :sourceIdentity source-identity :producerIdentity (get authentication :productIdentity)
-               :corpusRecordsSha256 (get corpus :recordsSha256) :nativeTarget native-target
+               :corpusRecordsSha256 corpus-sha :nativeTarget native-target
                :functionalRuntimeProfile (get options :functionalRuntimeProfile)))))
            (frozen-path (resolve output "corpus" "records.json"))
            (summary-path (resolve output "stage3-targets.json")))
@@ -267,14 +268,14 @@
         (progn
           (await (copyFile (resolve (get options :corpusRecordsPath)) frozen-path
             (get constants :COPYFILE_FICLONE)))
-          (unless (= (compilerDigest (await (readFile frozen-path))) (get corpus :recordsSha256))
+          (unless (= (compilerDigest (await (readFile frozen-path))) corpus-sha)
             (fail "frozen stage3 corpus changed while archiving")))
         (await (writeFile frozen-path (get corpus :recordsBytes))))
       (let* ((summary (js-object :format "eliscript-stage3-targets" :version 1 :scope "javascript-stage3-output-targets"
                :status "running" :verification "unverified" :bootstrapManifestPath (get authentication :bootstrapManifestPath)
                :stage3MetadataPath (get authentication :stage3MetadataPath) :sourceIdentity source-identity
                :producerIdentity (get authentication :productIdentity) :corpusIdentity (get corpus :identity)
-               :corpusRecordsSha256 (get corpus :recordsSha256) :corpusRecordsPath (relative output frozen-path)
+               :corpusRecordsSha256 corpus-sha :corpusRecordsPath (relative output frozen-path)
                :nativeTarget native-target
                :completeIds (js-call (get corpus :records) :map (lambda (record) (get record :id)))
                :targetSelections (js-call targets :map (lambda (target) (classifyStage3Corpus (get corpus :records) target
@@ -297,10 +298,13 @@
                :resumeManifests resumes
                :sessionOptions (get options :sessionOptions) :onStage (get options :onStage))))
         (await (saveCompilerMetadata summary-path summary))
+        ;; Each target loads the authenticated frozen input itself. The
+        ;; schedule needs its digest, not a second live corpus or source set.
+        (setq sources undefined corpus undefined)
         ;; The frozen corpus is checked before every target. Successful cells
         ;; release their workspaces unless artifact retention was requested.
         (let ((result (await (run-stage3-target-schedule schedule-options (async (call)
-                (unless (= (compilerDigest (await (readFile frozen-path))) (get corpus :recordsSha256))
+                (unless (= (compilerDigest (await (readFile frozen-path))) corpus-sha)
                   (fail "frozen stage3 corpus changed before target execution"))
                 (await (runStage3CompilerTargetCell call)))))))
           (put summary :targets (get result :targets))
@@ -317,7 +321,7 @@
           (try
             (identical (await (authenticateStage3Targets options)) authentication "final stage3 identity")
             (identical (compilerSourceIdentity (await (loadCompilerSources (js-object :sourceRoot source-root)))) source-identity "final source identity")
-            (unless (= (compilerDigest (await (readFile frozen-path))) (get corpus :recordsSha256))
+            (unless (= (compilerDigest (await (readFile frozen-path))) corpus-sha)
               (fail "frozen stage3 corpus changed during target execution"))
             (when (= (get result :status) "completed") (put summary :verification "equivalent"))
             (catch error

@@ -20,8 +20,10 @@ Rebuilding produces new measurements; it does not recreate historical timings.
 `targets` deletes each successful record's working directory after its real
 execution and independent comparison. The run manifest keeps a same-input
 checkpoint, bound to the exact compiler, corpus and input, for an interrupted
-run; it does not claim to reauthenticate deleted artifacts. `--retain-artifacts`
-keeps products for active debugging. Failed records remain available while
+run; it does not claim to reauthenticate deleted artifacts. The checkpoint
+omits listings of deleted source files; exact input digests and the enclosing
+corpus binding remain required. `--retain-artifacts` keeps products for active
+debugging. Failed records remain available while
 investigating that run. Delete these workspaces and the checkpoint when their
 purpose ends, using `make clean-all` for checkout-generated products and
 removing any explicitly selected external output directory too.
