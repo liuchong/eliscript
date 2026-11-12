@@ -13,6 +13,31 @@
   (import "../tools/backends/build.mjs" root)
   (import "../tools/backends/compiler-bootstrap.mjs" compilerSourceIdentity openCompilerArtifact archiveCompilerArtifact)
 
+  (defun collect-host-garbage ()
+    (let ((bun-host globalThis.Bun))
+      (cond
+        ((and (not (nullish? bun-host)) (= (value-type (get bun-host :gc)) "function"))
+         (js-call bun-host :gc t))
+        ((= (value-type globalThis.gc) "function")
+         (funcall globalThis.gc)))))
+
+  (defun build-gc-phase (phase)
+    (when (or (= phase "runtime-retained-ir-complete")
+              (= phase "project-complete")
+              (= phase "retained-ir-complete")
+              (= phase "javascript-files-complete")
+              (= phase "debug-file-complete"))
+      (collect-host-garbage)))
+
+  (defasync load-source-declaration ()
+    (let ((sources (await (loadCompilerSources))))
+      (let ((identity (compilerSourceIdentity sources))
+            (entry (get sources :entry))
+            (compiled-module-ids (js-call (get sources :modules) :map (lambda (item) (get item :id)))))
+        (setq sources undefined)
+        (collect-host-garbage)
+        (js-object :identity identity :entry entry :compiledModuleIds compiled-module-ids))))
+
   (test "existing cell artifact execution accepts only a metadata path and preserves ordinary cell validation"
     (async ()
       (await (js-call assert :rejects (executeCompilerMatrixCellFromArtifact nil "javascript" "javascript" "existing.json")
@@ -24,87 +49,122 @@
 
   (test "a real complete session build is reused only after source producer files IR debug and original build evidence agree"
     (async ()
-      (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-reuse-cell-"))))
-             (sources (await (loadCompilerSources))) (producer nil) (instance nil))
+      (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-reuse-cell-"))))
+            (producer nil) (instance nil))
         (try
-          (let* ((seed (await (buildIndependentCompiler (js-object :host "javascript" :sources sources
-                               :outputRoot (resolve directory "producer") :profile "full-compiler" :retainIR t :debug t))))
-                 (cell-directory (resolve directory "original-cell"))
-                 (input (recorded-grid-input)) (stages (js-array)) (artifact undefined))
+          (let ((cell-directory (resolve directory "original-cell"))
+                (input (recorded-grid-input)) (stages (js-array))
+                (sources nil) (source-identity nil)
+                (seed-metadata-path nil) (seed-product-identity nil)
+                (artifact nil) (artifact-path nil) (path nil)
+                (receipt-path nil) (receipt nil) (original nil))
+            (setq sources (await (loadCompilerSources)))
+            (setq source-identity (compilerSourceIdentity sources))
             (put input :generations 3) (put input :outputRoot (resolve directory "attempts"))
             (put input :corpusRecordsPath (resolve directory "missing-original-corpus.json"))
-            (put input :onStage (async (event) (js-call stages :push (get event :phase))))
-            (put (aref (get input :producers) 0) :metadataPath (get seed :metadataPath))
-            (setq producer (await (openCompilerArtifact seed)))
+            (put input :onStage (async (event)
+              (js-call stages :push (get event :phase))
+              (collect-host-garbage)))
+            (let ((seed (await (buildIndependentCompiler (js-object :host "javascript" :sources sources
+                                 :outputRoot (resolve directory "producer") :profile "full-compiler" :retainIR t :debug t
+                                 :onPhase build-gc-phase)))))
+              (setq seed-metadata-path (get seed :metadataPath))
+              (setq seed-product-identity (get seed :productIdentity))
+              (put (aref (get input :producers) 0) :metadataPath seed-metadata-path)
+              (setq producer (await (openCompilerArtifact seed)))
+              (setq seed undefined))
+            (collect-host-garbage)
             (try (setq artifact (await (buildIndependentCompiler
                    (js-object :host "javascript" :sources sources :session producer
-                     :outputRoot (resolve cell-directory "artifact") :profile "full-compiler" :retainIR t :debug t))))
-              (finally (await (js-call producer :close)) (setq producer nil)))
+                     :outputRoot (resolve cell-directory "artifact") :profile "full-compiler" :retainIR t :debug t
+                     :onPhase build-gc-phase))))
+              (finally
+                (setq sources undefined)
+                (await (js-call producer :close)) (setq producer nil)
+                (collect-host-garbage)))
             (setq instance (await (openCompilerArtifact artifact)))
             (try
               (js-call assert :strictEqual (get (await (js-call instance :request (js-object :operation "capabilities"))) :format)
                 "eliscript-compiler-capabilities")
-              (finally (await (js-call instance :close)) (setq instance nil)))
-            (let* ((archived (await (archiveCompilerArtifact artifact (resolve cell-directory "metadata"))))
-                   (receipt-path (resolve cell-directory "execution.json"))
-                   (receipt (js-object :format "eliscript-compiler-matrix-cell-execution" :version 1
-                     :host "javascript" :target "javascript" :profile "full-compiler" :status "corpus-running"
-                     :verification "unverified" :sourceIdentity (compilerSourceIdentity sources)
-                     :producerMetadataPath (get seed :metadataPath)
-                     :build (js-object :host "javascript" :target "javascript" :status "constructed" :execution "initialized"
-                       :metadataPath (get artifact :metadataPath) :producerIdentity (get seed :productIdentity) :artifact archived)))
-                   (path (get artifact :metadataPath))
-                   (original (await (readCompilerMetadata path)))
-                   (mutations (js-array
-                     (lambda (value) (put value :host "wasm"))
-                     (lambda (value) (put (get value :provenance) :producerHost "wasm"))
-                     (lambda (value) (put (get value :provenance) :mode "seed"))
-                     (lambda (value) (js-call (get (get value :provenance) :compiledModuleIds) :pop))
-                     (lambda (value) (put (aref (get (get value :sourceIdentity) :modules) 0)
-                                       :sha256 (js-call "0" :repeat 64)))
-                     (lambda (value) (js-call (get value :frontendIR) :pop))
-                     (lambda (value) (put value :debugEnabled false))
-                     (lambda (value) (put (get value :productIdentity) :sha256 (js-call "0" :repeat 64)))))
-                   (index 0))
-              (await (writeCompilerMetadata receipt-path receipt))
+              (finally
+                (await (js-call instance :close)) (setq instance nil)
+                (collect-host-garbage)))
+            (setq artifact-path (get artifact :path))
+            (setq path (get artifact :metadataPath))
+            (setq receipt-path (resolve cell-directory "execution.json"))
+            (let ((archived (await (archiveCompilerArtifact artifact (resolve cell-directory "metadata")))))
+              (setq artifact undefined)
+              (setq receipt (js-object :format "eliscript-compiler-matrix-cell-execution" :version 1
+                :host "javascript" :target "javascript" :profile "full-compiler" :status "corpus-running"
+                :verification "unverified" :sourceIdentity source-identity
+                :producerMetadataPath seed-metadata-path
+                :build (js-object :host "javascript" :target "javascript" :status "constructed" :execution "initialized"
+                  :metadataPath path :producerIdentity seed-product-identity :artifact archived)))
+              (setq archived undefined))
+            (setq source-identity undefined)
+            (setq seed-product-identity undefined)
+            (collect-host-garbage)
+            (setq original (await (readCompilerMetadata path)))
+            (await (writeCompilerMetadata receipt-path receipt))
+            (let ((mutations (js-array
+                    (lambda (value) (put value :host "wasm"))
+                    (lambda (value) (put (get value :provenance) :producerHost "wasm"))
+                    (lambda (value) (put (get value :provenance) :mode "seed"))
+                    (lambda (value) (js-call (get (get value :provenance) :compiledModuleIds) :pop))
+                    (lambda (value) (put (aref (get (get value :sourceIdentity) :modules) 0)
+                                      :sha256 (js-call "0" :repeat 64)))
+                    (lambda (value) (js-call (get value :frontendIR) :pop))
+                    (lambda (value) (put value :debugEnabled false))
+                    (lambda (value) (put (get value :productIdentity) :sha256 (js-call "0" :repeat 64)))))
+                  (index 0))
               (while (< index (js-length mutations))
                 (let ((changed (funcall globalThis.structuredClone original)))
                   (funcall (aref mutations index) changed)
                   (await (writeCompilerMetadata path changed))
-                  (await (js-call assert :rejects (executeCompilerMatrixCellFromArtifact input "javascript" "javascript" path))))
-                (setq index (1+ index)))
-              (await (writeCompilerMetadata path original))
-              (let ((changed (funcall globalThis.structuredClone receipt)))
-                (put (get (get changed :build) :producerIdentity) :sha256 (js-call "0" :repeat 64))
-                (await (writeCompilerMetadata receipt-path changed))
-                (await (js-call assert :rejects (executeCompilerMatrixCellFromArtifact input "javascript" "javascript" path)
-                  (lambda (error) (= (get error :message) "existing cell build has a different original producer"))))
-                (await (writeCompilerMetadata receipt-path receipt)))
-              (let* ((file (get artifact :path)) (bytes (await (readFile file))))
-                (await (rm file))
-                (try (await (js-call assert :rejects (executeCompilerMatrixCellFromArtifact input "javascript" "javascript" path)
-                       (lambda (error) (= (get error :code) "ENOENT"))))
-                  (finally (await (writeFile file bytes)))))
-              (await (rm receipt-path))
+                  (setq changed undefined)
+                  (await (js-call assert :rejects (executeCompilerMatrixCellFromArtifact input "javascript" "javascript" path)))
+                  (collect-host-garbage))
+                (setq index (1+ index))))
+            (await (writeCompilerMetadata path original))
+            (let ((changed (funcall globalThis.structuredClone receipt)))
+              (put (get (get changed :build) :producerIdentity) :sha256 (js-call "0" :repeat 64))
+              (await (writeCompilerMetadata receipt-path changed))
+              (setq changed undefined)
               (await (js-call assert :rejects (executeCompilerMatrixCellFromArtifact input "javascript" "javascript" path)
-                (lambda (error) (= (get error :code) "ENOENT"))))
-              (await (writeCompilerMetadata receipt-path receipt))
-              (put stages :length 0)
-              ;; The actual reused compiler initializes and closes. Only then
-              ;; does the unchanged corpus loader reject the missing input;
-              ;; this is reuse evidence, never a counterfeit corpus success.
-              (await (js-call assert :rejects (executeCompilerMatrixCellFromArtifact input "javascript" "javascript" path)
-                (lambda (error) (and (= (get error :code) "ENOENT")
-                                    (js-call (get error :message) :includes "missing-original-corpus.json")))))
-              (js-call assert :ok (js-call stages :includes "compiler-reuse"))
-              (js-call assert :ok (js-call stages :includes "compiler-initialize"))
-              (js-call assert :strictEqual (js-call stages :includes "compiler-build") false)
-              (js-call assert :deepStrictEqual (await (readCompilerMetadata path)) original)
-              (js-call assert :deepStrictEqual (await (readCompilerMetadata receipt-path)) receipt)))
+                (lambda (error) (= (get error :message) "existing cell build has a different original producer"))))
+              (collect-host-garbage)
+              (await (writeCompilerMetadata receipt-path receipt)))
+            (let ((bytes (await (readFile artifact-path))))
+              (await (rm artifact-path))
+              (try (await (js-call assert :rejects (executeCompilerMatrixCellFromArtifact input "javascript" "javascript" path)
+                     (lambda (error) (= (get error :code) "ENOENT"))))
+                (finally
+                  (await (writeFile artifact-path bytes)) (setq bytes undefined)
+                  (collect-host-garbage))))
+            (await (rm receipt-path))
+            (await (js-call assert :rejects (executeCompilerMatrixCellFromArtifact input "javascript" "javascript" path)
+              (lambda (error) (= (get error :code) "ENOENT"))))
+            (collect-host-garbage)
+            (await (writeCompilerMetadata receipt-path receipt))
+            (put stages :length 0)
+            ;; The actual reused compiler initializes and closes. Only then
+            ;; does the unchanged corpus loader reject the missing input;
+            ;; this is reuse evidence, never a counterfeit corpus success.
+            (await (js-call assert :rejects (executeCompilerMatrixCellFromArtifact input "javascript" "javascript" path)
+              (lambda (error) (and (= (get error :code) "ENOENT")
+                                  (js-call (get error :message) :includes "missing-original-corpus.json")))))
+            (collect-host-garbage)
+            (js-call assert :ok (js-call stages :includes "compiler-reuse"))
+            (js-call assert :ok (js-call stages :includes "compiler-initialize"))
+            (js-call assert :strictEqual (js-call stages :includes "compiler-build") false)
+            (js-call assert :deepStrictEqual (await (readCompilerMetadata path)) original)
+            (js-call assert :deepStrictEqual (await (readCompilerMetadata receipt-path)) receipt)
+            (setq original nil receipt nil input nil))
           (finally
             (when producer (await (js-call producer :close)))
             (when instance (await (js-call instance :close)))
-            (await (rm directory (js-object :recursive t :force t))))))))
+            (await (rm directory (js-object :recursive t :force t)))
+            (collect-host-garbage))))))
 
   (defun recorded-grid-input ()
     (let ((hosts (js-array "javascript" "wasm" "native")) (producers (js-array)) (cells (js-array)) (index 0))
@@ -194,7 +254,8 @@
       (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-selected-cell-"))))
              (input (recorded-grid-input)) (selected (resolve directory "selected-wasm.json"))
              (output (resolve directory "output"))
-             (identity (compilerSourceIdentity (await (loadCompilerSources)))))
+             (declaration (await (load-source-declaration)))
+             (identity (get declaration :identity)))
         (try
           (progn
             (put input :generations 3) (put input :outputRoot output)
@@ -261,7 +322,8 @@
   (test "retained chain files cannot bypass source host generation fixed-point original-manifest or producer validation"
     (async ()
       (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-retained-chain-"))))
-             (sources (await (loadCompilerSources))) (identity (compilerSourceIdentity sources))
+             (declaration (await (load-source-declaration)))
+             (identity (get declaration :identity))
              (input (recorded-grid-input)) (producer-path (resolve directory "javascript.json"))
              (chain-root (resolve directory "output" "generations" "chain-javascript"))
              (actual-directory (resolve chain-root "original-chain"))
@@ -273,11 +335,11 @@
             (await (mkdir actual-directory (js-object :recursive t)))
             ;; This declaration reaches only rejection checks. Missing emitted
             ;; files prevent it from ever authenticating as a seed or product.
-            (await (writeCompilerMetadata producer-path (js-object :host "javascript" :entry (get sources :entry)
+            (await (writeCompilerMetadata producer-path (js-object :host "javascript" :entry (get declaration :entry)
               :path "never-executed.mjs" :sourceIdentity (rejected-producer-source-identity identity)
               :productIdentity (js-object :sha256 "initial-product")
               :provenance (js-object :mode "seed" :runtimeCompiled t
-                :compiledModuleIds (js-call (get sources :modules) :map (lambda (item) (get item :id)))))))
+                :compiledModuleIds (get declaration :compiledModuleIds)))))
             (let ((mutations (js-array
                     (lambda (metadata) (put metadata :sourceIdentity (js-object :sha256 "stale")))
                     (lambda (metadata) (put metadata :hosts (js-array "wasm" "wasm" "wasm")))
@@ -315,7 +377,8 @@
   (test "complete execution validates the current host chain before decoding another host typed manifest"
     (async ()
       (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-grid-host-lifetime-"))))
-             (sources (await (loadCompilerSources))) (identity (compilerSourceIdentity sources))
+             (declaration (await (load-source-declaration)))
+             (identity (get declaration :identity))
              (input (recorded-grid-input)) (producer-path (resolve directory "javascript.json"))
              (chain-root (resolve directory "output/generations/chain-javascript")))
         (try
@@ -324,11 +387,11 @@
             (put (aref (get input :producers) 0) :metadataPath producer-path)
             (put (aref (get input :producers) 1) :metadataPath (resolve directory "wasm.json"))
             (put (aref (get input :producers) 2) :metadataPath (resolve directory "native.json"))
-            (await (writeCompilerMetadata producer-path (js-object :host "javascript" :entry (get sources :entry)
+            (await (writeCompilerMetadata producer-path (js-object :host "javascript" :entry (get declaration :entry)
               :path "never-executed.mjs" :sourceIdentity (rejected-producer-source-identity identity)
               :productIdentity (js-object :sha256 "initial-product")
               :provenance (js-object :mode "seed" :runtimeCompiled t
-                :compiledModuleIds (js-call (get sources :modules) :map (lambda (item) (get item :id)))))))
+                :compiledModuleIds (get declaration :compiledModuleIds)))))
             ;; These later-host documents must not be decoded while the
             ;; JavaScript chain is being verified. Their syntax errors would
             ;; otherwise replace its original fixed-point rejection.
@@ -409,8 +472,7 @@
   (test "nine artifact declarations cannot stand in for complete source-bound fixed-point generations"
     (async ()
       (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-record-grid-generations-"))))
-             (sources (await (loadCompilerSources)))
-             (identity (compilerSourceIdentity sources))
+             (identity (get (await (load-source-declaration)) :identity))
              (input (recorded-grid-input))
              (generation-directory (resolve directory "generations"))
              (metadata (js-object :format "eliscript-independent-compiler-bootstrap" :version 1

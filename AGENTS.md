@@ -10,7 +10,12 @@
 - Never store persistent source, uncommitted changes, plans, recovery data,
   long-lived logs or acceptance evidence in system temporary directories.
   Temporary locations are only for disposable, reproducible intermediates.
-  Store retained evidence under the project's durable ignored directories.
+  Keep only the minimum material needed by an active task. Delete all spent
+  build products, caches, logs and acceptance workspaces inside and outside
+  the checkout; retaining generated evidence is not a reason to keep them.
+  Commit necessary sources, fixtures, generators, dependency locks and concise
+  documentation. A fresh clone must rebuild the complete project without an
+  old dist directory, local cache or privately retained acceptance archive.
 - Preserve unrelated changes. Commit with a verified signature and deliver
   completed work to the primary branch using fast-forward merges and pushes.
 
@@ -23,7 +28,8 @@
 - Only final stage3 must pass the shared-source JavaScript, WASM and native
   output acceptance. Do not add binary-output acceptance for stage1 or stage2.
 - WASM/native compiler hosts and the previous 3-by-3 bootstrap goal are
-  cancelled for this delivery. Preserve their historical evidence; do not
+  cancelled for this delivery. Preserve their historical conclusions in Git;
+  disposable run directories are not required. Do not
   restart that work or require it for 0.0.4. The WASM/native output backends
   and actual generated-program execution remain required.
 - `docs/native-wasm-feasibility.md` is historical context, not the active

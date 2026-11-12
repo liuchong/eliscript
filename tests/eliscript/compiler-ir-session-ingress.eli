@@ -22,44 +22,99 @@
     (js-call (js-array "darwin" "linux") :includes (get globalThis.process :platform))))
   (defconst native-target (if (= (get globalThis.process :platform) "linux") "arm64-linux" "arm64-macos"))
   (defconst targets (if native-supported (js-array "wasm" "native") (js-array "wasm")))
+
+  (defun collect-host-garbage ()
+    (let ((bun-host globalThis.Bun))
+      (cond
+        ((and (not (nullish? bun-host)) (= (value-type (get bun-host :gc)) "function"))
+         (js-call bun-host :gc t))
+        ((= (value-type globalThis.gc) "function")
+         (funcall globalThis.gc)))
+      undefined))
+
+  (defun clear-product-fields (product)
+    (when (and (not (nullish? product)) (= (value-type product) "object"))
+      (put product :modules undefined)
+      (put product :bytes undefined)
+      (put product :descriptor undefined)
+      (put product :typed undefined)
+      (put product :debug undefined)))
+
   (beforeAll (async ()
     (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-session-ir-"))))
-    (setq sources (await (loadCompilerSources)))
-    (setq seed (await (buildIndependentCompiler (js-object :host "javascript" :sources sources
-      :profile "full-runtime" :outputRoot (resolve directory "javascript") :retainIR false :debug false))))) 120000)
-  (afterAll (async () (when directory (await (rm directory (js-object :recursive t :force t))))))
+    (let ((loaded (await (loadCompilerSources))))
+      (setq sources (js-object :runtime (get loaded :runtime) :literalSources (get loaded :literalSources)))
+      (setq seed (await (buildIndependentCompiler (js-object :host "javascript" :sources loaded
+        :profile "full-runtime" :outputRoot (resolve directory "javascript") :retainIR false :debug false))))
+      (setq loaded undefined))
+    (collect-host-garbage)) 120000)
+
+  (afterAll (async ()
+    (setq sources undefined)
+    (setq seed undefined)
+    (when directory
+      (let ((target directory))
+        (setq directory undefined)
+        (await (rm target (js-object :recursive t :force t)))))
+    (collect-host-garbage)))
+
   (defasync each (values callback)
     (let ((index 0))
       (while (< index (js-length values)) (await (funcall callback (aref values index) index)) (setq index (1+ index)))))
+
+  (defasync initialize-session-runtime (session)
+    (await (js-call session :request (js-object :operation "runtime" :source (get (get sources :runtime) :source)
+      :filename (get (get sources :runtime) :filename) :literalSources (get sources :literalSources)))))
+
   (defasync session-for (run)
     (let ((session (await (openCompilerArtifact seed))))
       (try
-        (await (js-call session :request (js-object :operation "runtime" :source (get (get sources :runtime) :source)
-          :filename (get (get sources :runtime) :filename) :literalSources (globalThis.structuredClone (get sources :literalSources)))))
-        (await (funcall run session))
-        (finally (await (js-call session :close))))))
-  (defasync execute (response name)
-    (let ((runtime undefined))
-      (if (= (get response :target) "wasm")
-        (let ((bytes (globalThis.Uint8Array.from (get response :bytes))))
-          (js-call assert :deepEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes)) (js-array))
-          (setq runtime (instantiateManagedRuntime bytes)))
         (progn
-          (js-call assert :equal (get response :target) "native")
-          (let ((path (resolve directory (str name (if (= (get globalThis.process :platform) "linux") ".so" ".dylib")))))
-            (await (writeFile path (globalThis.Uint8Array.from (get response :bytes))))
-            (setq runtime (await (instantiateNativeManagedRuntime path
-              (js-object :typed (get response :typed) :descriptor (get response :descriptor))))))))
+          (await (initialize-session-runtime session))
+          (collect-host-garbage)
+          (await (funcall run session)))
+        (finally
+          (let ((closing session))
+            (setq session undefined)
+            (try
+              (await (js-call closing :close))
+              (finally
+                (setq closing undefined)
+                (collect-host-garbage))))))))
+
+  (defasync execute (response name)
+    (let ((runtime undefined)
+          (library-path undefined))
       (try
-        (js-call runtime :auto 1)
-        (let ((result (js-call runtime :invoke "run" (js-array))))
-          (try (js-call runtime :readNumber result) (finally (js-call runtime :release result))))
+        (progn
+          (if (= (get response :target) "wasm")
+            (let ((bytes (globalThis.Uint8Array.from (get response :bytes))))
+              (js-call assert :deepEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes)) (js-array))
+              (setq runtime (instantiateManagedRuntime bytes)))
+            (progn
+              (js-call assert :equal (get response :target) "native")
+              (let ((path (resolve directory (str name (if (= (get globalThis.process :platform) "linux") ".so" ".dylib")))))
+                (setq library-path path)
+                (await (writeFile path (globalThis.Uint8Array.from (get response :bytes))))
+                (setq runtime (await (instantiateNativeManagedRuntime path
+                  (js-object :typed (get response :typed) :descriptor (get response :descriptor))))))))
+          (js-call runtime :auto 1)
+          (let ((result (js-call runtime :invoke "run" (js-array))))
+            (try (js-call runtime :readNumber result) (finally (js-call runtime :release result)))))
         (finally
           (try
-            (js-call runtime :closeModule) (js-call runtime :collect)
-            (js-call assert :equal (js-call runtime :live) 0)
-            (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0)
-            (finally (when (= (value-type (get runtime :close)) "function") (js-call runtime :close))))))))
+            (when (not (undefined? runtime))
+              (try
+                (js-call runtime :closeModule) (js-call runtime :collect)
+                (js-call assert :equal (js-call runtime :live) 0)
+                (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0)
+                (finally
+                  (when (= (value-type (get runtime :close)) "function") (js-call runtime :close))
+                  (setq runtime undefined))))
+            (finally
+              (when (not (undefined? library-path))
+                (await (rm library-path (js-object :force t)))
+                (setq library-path undefined))))))))
 
   ;; These complete products include the runtime's typed/debug DAG. The
   ;; existing graph protocol preserves every public field without flattening
@@ -67,25 +122,36 @@
   (defasync graph-product (session request)
     (await (js-call session :request request
       (js-object :responseMode "graph-events-v1" :responseStringChunks t))))
+
   (defasync compare-graph-product (session request direct target reversed)
-    ;; Only this candidate and the baseline remain live. Return no product to
-    ;; the caller before it starts the next complete compilation.
+    ;; Only this candidate and the baseline remain live. Release compared subgraphs
+    ;; before execution and clear the candidate record before the next compilation.
     (let ((actual (await (graph-product session request))))
-      (js-call assert :equal (get actual :target) target)
-      (js-call assert :equal (get actual :entry) (get direct :entry))
-      (if (= target "javascript")
+      (try
         (progn
-          (js-call assert :deepEqual (get actual :modules) (get direct :modules))
-          (when reversed
-            (js-call assert :deepEqual (js-call (get actual :modules) :map (lambda (member) (get member :id)))
-              (js-array "entry.mjs" "library.mjs"))))
-        (progn
-          (js-call assert :deepEqual (get actual :bytes) (get direct :bytes))
-          (js-call assert :deepEqual (get actual :descriptor) (get direct :descriptor))
-          (when (= target "native") (js-call assert :deepEqual (get actual :typed) (get direct :typed)))
-          (js-call assert :deepEqual (get actual :debug) (get direct :debug))
-          (unless reversed
-            (funcall assert (Object/is (await (execute actual (str "javascript-graph-" target))) -0.0)))))
+          (js-call assert :equal (get actual :target) target)
+          (js-call assert :equal (get actual :entry) (get direct :entry))
+          (if (= target "javascript")
+            (progn
+              (js-call assert :deepEqual (get actual :modules) (get direct :modules))
+              (when reversed
+                (js-call assert :deepEqual (js-call (get actual :modules) :map (lambda (member) (get member :id)))
+                  (js-array "entry.mjs" "library.mjs"))))
+            (progn
+              (js-call assert :deepEqual (get actual :bytes) (get direct :bytes))
+              (when reversed (put actual :bytes undefined))
+              (js-call assert :deepEqual (get actual :descriptor) (get direct :descriptor))
+              (when (= target "native")
+                (js-call assert :deepEqual (get actual :typed) (get direct :typed))
+                (when reversed (put actual :typed undefined)))
+              (js-call assert :deepEqual (get actual :debug) (get direct :debug))
+              (put actual :debug undefined)
+              (unless reversed
+                (collect-host-garbage)
+                (funcall assert (Object/is (await (execute actual (str "javascript-graph-" target))) -0.0))))))
+        (finally
+          (clear-product-fields actual)
+          (setq actual undefined)))
       undefined))
 
   (test "Given complete javascript compiler When validated single IR is emitted Then actual WASM and native output preserve IEEE values"
@@ -94,13 +160,22 @@
              (ir (get (await (js-call session :request (js-object :operation "compile-ir" :source source :filename "ieee-ir.eli"))) :ir))
              (javascript (await (js-call session :request (js-object :operation "emit-ir" :ir ir))))
              (reference (await (loadGeneratedFixture directory (get javascript :javascript) "single-ir"))))
+        (setq javascript undefined)
         (funcall assert (Object/is (js-call reference :run) -0.0))
         (await (each targets (async (target)
           (let ((product (await (js-call session :request (js-object :operation "emit-ir" :target target :ir ir
                            :nativeTarget native-target :nativeFormat "library")))))
-            (js-call assert :equal (get product :target) target)
-            (js-call assert :equal (get (get product :descriptor) :module) undefined)
-            (funcall assert (Object/is (await (execute product (str "javascript-single-" target))) (js-call reference :run)))))))
+            (try
+              (progn
+                (js-call assert :equal (get product :target) target)
+                (js-call assert :equal (get (get product :descriptor) :module) undefined)
+                (collect-host-garbage)
+                (funcall assert (Object/is (await (execute product (str "javascript-single-" target))) (js-call reference :run))))
+              (finally
+                (clear-product-fields product)
+                (setq product undefined)
+                (collect-host-garbage)))))))
+        (setq reference undefined)
         (let ((caps (await (js-call session :request (js-object :operation "capabilities")))))
           (funcall assert (js-call (get caps :operations) :includes "project-ir")))))))) 120000)
 
@@ -108,9 +183,7 @@
     (async () (await (session-for (async (session)
       (let* ((source "(defun token (x) (host-identity-token x)) (export token)")
              (original (get (await (js-call session :request (js-object :operation "compile-ir" :source source :filename "arity.eli"))) :ir))
-             (runtime-request (js-object :operation "runtime" :source (get (get sources :runtime) :source)
-               :filename (get (get sources :runtime) :filename) :literalSources (globalThis.structuredClone (get sources :literalSources))))
-             (before-runtime (await (js-call session :request runtime-request))))
+             (before-runtime (await (initialize-session-runtime session))))
         (await (each (js-array 0 2) (async (count)
           (let* ((program (JSON/parse original)) (node (js-call (get (aref (get program :body) 0) :children) :at -1))
                  (operand (aref (get node :children) 0)))
@@ -154,13 +227,19 @@
               (js-call (get error :message) :includes "literalSources must be an array")))))
           (js-call assert :equal (get (await (js-call session :request
             (js-object :operation "compile-ir" :source source :filename "arity.eli"))) :ir) original)
-          (js-call assert :deepEqual (await (js-call session :request runtime-request)) before-runtime
+          (js-call assert :deepEqual (await (initialize-session-runtime session)) before-runtime
             "failed raw IR must roll back the exact prior private-library revision")
+          (setq before-runtime undefined)
           (let ((product (await (js-call session :request (js-object :operation "emit-ir" :target "wasm" :ir original)))))
-            (js-call assert :equal (get product :target) "wasm")
-            (js-call assert :equal (value-type (get product :descriptor)) "object")
-            (js-call assert :deepEqual (globalThis.WebAssembly.Module.imports
-              (new globalThis.WebAssembly.Module (globalThis.Uint8Array.from (get product :bytes)))) (js-array))))))))) 120000)
+            (try
+              (progn
+                (js-call assert :equal (get product :target) "wasm")
+                (js-call assert :equal (value-type (get product :descriptor)) "object")
+                (js-call assert :deepEqual (globalThis.WebAssembly.Module.imports
+                  (new globalThis.WebAssembly.Module (globalThis.Uint8Array.from (get product :bytes)))) (js-array)))
+              (finally
+                (clear-product-fields product)
+                (setq product undefined)))))))))) 120000)
 
   (test "Given complete javascript compiler When a source graph and its exact IR graph are emitted Then all target bytes and JS maps agree"
     (async () (await (session-for (async (session)
@@ -176,15 +255,25 @@
           (let* ((request (js-object :entry "entry.mjs" :target target :resolveImports t :sourceMap t :debug t
                    :nativeTarget native-target :nativeFormat "library"))
                  (direct (await (graph-product session
-                   (Object/assign (js-object) request (js-object :operation "project" :modules modules))))))
-            (await (compare-graph-product session
-              (Object/assign (js-object) request (js-object :operation "project-ir" :modules inputs)) direct target false))
-            (await (compare-graph-product session
-              (Object/assign (js-object) request
-                (js-object :operation "project" :modules (js-call (js-call modules :slice) :reverse))) direct target t))
-            (await (compare-graph-product session
-              (Object/assign (js-object) request
-                (js-object :operation "project-ir" :modules (js-call (js-call inputs :slice) :reverse))) direct target t))))))
+                   (Object/assign (js-object) request (js-object :operation "project" :modules modules)))))
+                 (binary (/= target "javascript")))
+            (try
+              (progn
+                (when binary (collect-host-garbage))
+                (await (compare-graph-product session
+                  (Object/assign (js-object) request (js-object :operation "project-ir" :modules inputs)) direct target false))
+                (when binary (collect-host-garbage))
+                (await (compare-graph-product session
+                  (Object/assign (js-object) request
+                    (js-object :operation "project" :modules (js-call (js-call modules :slice) :reverse))) direct target t))
+                (when binary (collect-host-garbage))
+                (await (compare-graph-product session
+                  (Object/assign (js-object) request
+                    (js-object :operation "project-ir" :modules (js-call (js-call inputs :slice) :reverse))) direct target t)))
+              (finally
+                (clear-product-fields direct)
+                (setq direct undefined)
+                (when binary (collect-host-garbage))))))))
         (let ((good (js-object :operation "project-ir" :entry "entry.mjs" :target "javascript" :modules inputs :resolveImports t)))
           (await (each (js-array
             (js-object :modules (js-array)) (js-object :modules (js-array (aref inputs 0) (aref inputs 0)))
@@ -198,7 +287,9 @@
               (js-object :ir "{\"body\":[],\"filename\":\"x\",\"unknown\":true}")))))
             (async (patch) (await (js-call assert :rejects
               (async () (await (js-call session :request (Object/assign (js-object) good patch)))))))))
-          (js-call assert :equal (get (await (js-call session :request good)) :target) "javascript"))
+          (let ((recovered (await (js-call session :request good))))
+            (js-call assert :equal (get recovered :target) "javascript")
+            (setq recovered undefined)))
         (let* ((unicode-modules (js-array
                  (js-object :id "\ue000.mjs" :filename "\ue000.eli" :source ";; 私有区\n(defun private-value () 1) (export private-value)")
                  (js-object :id "𐀀.mjs" :filename "𐀀.eli" :source ";; 😀 preserve source-map bytes\n(defun astral-value () -0) (export astral-value)")
@@ -213,9 +304,16 @@
                   (js-object :operation "project" :modules unicode-modules)))))
                 (raw (await (js-call session :request (Object/assign (js-object) request
                   (js-object :operation "project-ir" :modules (js-call (js-call unicode-ir :slice) :reverse)))))))
-            (js-call assert :deepEqual (get raw :modules) (get from-source :modules))
-            (js-call assert :deepEqual (js-call (get raw :modules) :map (lambda (member) (get member :id)))
-              (js-array "entry.mjs" "𐀀.mjs" "\ue000.mjs"))))))))) 120000)
+            (try
+              (progn
+                (js-call assert :deepEqual (get raw :modules) (get from-source :modules))
+                (js-call assert :deepEqual (js-call (get raw :modules) :map (lambda (member) (get member :id)))
+                  (js-array "entry.mjs" "𐀀.mjs" "\ue000.mjs")))
+              (finally
+                (clear-product-fields from-source)
+                (clear-product-fields raw)
+                (setq from-source undefined)
+                (setq raw undefined)))))))))) 120000)
 
   (test "Given complete javascript compiler When original memory IR or typed memory IR is emitted Then the real raw ABI and refusal paths are preserved"
     (async () (await (session-for (async (session)
@@ -225,13 +323,23 @@
              (ir (get (await (js-call session :request (js-object :operation "compile-ir" :source source :filename "raw-memory.eli"))) :ir))
              (memory (js-object :initialPages 1 :maximumPages 2))
              (wasm (await (js-call session :request (js-object :operation "emit-memory-ir" :ir ir :target "wasm" :memory memory))))
-             (wire (encodeCompilerIR (get wasm :typed)))
-             (same (await (js-call session :request (js-object :operation "emit-typed-memory" :ir wire :target "wasm" :memory memory)))))
-        (js-call assert :equal (get wasm :abi) "memory-u32") (js-call assert :equal (get wasm :descriptor) undefined)
-        (js-call assert :deepEqual (get same :bytes) (get wasm :bytes))
-        (js-call assert :equal (encodeCompilerIR (get same :typed)) wire)
+             (wire (encodeCompilerIR (get wasm :typed))))
+        (js-call assert :equal (get wasm :abi) "memory-u32")
+        (js-call assert :equal (get wasm :descriptor) undefined)
+        (let ((same (await (js-call session :request (js-object :operation "emit-typed-memory" :ir wire :target "wasm" :memory memory)))))
+          (try
+            (progn
+              (js-call assert :deepEqual (get same :bytes) (get wasm :bytes))
+              (js-call assert :equal (encodeCompilerIR (get same :typed)) wire))
+            (finally
+              (clear-product-fields same)
+              (setq same undefined))))
         (let ((debug (await (js-call session :request (js-object :operation "emit-typed-memory" :ir wire :target "wasm" :memory memory :debug t)))))
-          (js-call assert :equal (encodeCompilerIR (get debug :typed)) wire "debug scratch locals must not mutate the public typed payload"))
+          (try
+            (js-call assert :equal (encodeCompilerIR (get debug :typed)) wire "debug scratch locals must not mutate the public typed payload")
+            (finally
+              (clear-product-fields debug)
+              (setq debug undefined))))
         (let* ((module (new globalThis.WebAssembly.Module (globalThis.Uint8Array.from (get wasm :bytes))))
                (exports (get (new globalThis.WebAssembly.Instance module) :exports)))
           (js-call assert :deepEqual (globalThis.WebAssembly.Module.imports module) (js-array))
@@ -241,31 +349,61 @@
           (js-call assert :equal (js-call exports :grow 1) 1) (js-call assert :equal (js-call exports :size) 2)
           (js-call assert :equal (uint32 (js-call exports :grow 1)) 4294967295)
           (js-call assert :equal (js-call exports :set32 65536 42) 42))
-        (let ((saved (await (archiveProduct wasm "wasm" (resolve directory "javascript-raw-archive")))))
-          (js-call assert :equal (get saved :abi) "memory-u32") (js-call assert :equal (get saved :descriptor) undefined)
-          (js-call assert :deepEqual (JSON/parse (await (readFile (resolve (get saved :directory) "typed.json") "utf8"))) (get wasm :typed)))
+        (let ((archive-dir (resolve directory "javascript-raw-archive")))
+          (try
+            (let ((saved (await (archiveProduct wasm "wasm" archive-dir))))
+              (js-call assert :equal (get saved :abi) "memory-u32") (js-call assert :equal (get saved :descriptor) undefined)
+              (js-call assert :deepEqual (JSON/parse (await (readFile (resolve (get saved :directory) "typed.json") "utf8"))) (get wasm :typed))
+              (setq saved undefined))
+            (finally
+              (await (rm archive-dir (js-object :recursive t :force t))))))
+        (put wasm :bytes undefined)
         (await (each (js-array (js-object :abi "invalid-memory-abi") (js-object :functions nil))
           (async (patch) (await (js-call assert :rejects (async () (await (js-call session :request
             (js-object :operation "emit-typed-memory" :ir (encodeCompilerIR (Object/assign (js-object) (get wasm :typed) patch))
               :target "wasm" :memory memory)))))))))
         (await (js-call assert :rejects (async () (await (js-call session :request
           (js-object :operation "emit-memory-ir" :ir ir :target "javascript" :memory memory))))))
-        (when native-supported
-          (let* ((native (await (js-call session :request (js-object :operation "emit-typed-memory" :ir (encodeCompilerIR (get wasm :typed))
-                   :target "native" :nativeTarget native-target :nativeFormat "library" :memory memory))))
-                 (artifact (await (archiveProduct native "native" (resolve directory "javascript-raw-native"))))
-                 (runtime (await (openNativeMemory (get artifact :path) (js-object :read32 1 :set32 2 :grow 1 :size 0)
-                   (Object/assign (js-object) memory (js-object :nativeTarget native-target))))))
-            (js-call assert :equal (encodeCompilerIR (get native :typed)) wire "target-specific emission must retain the public typed input")
-            (js-call assert :equal (encodeCompilerIR (get wasm :typed)) wire)
+        (setq ir undefined)
+        (if native-supported
+          (let ((native-dir (resolve directory "javascript-raw-native")))
             (try
-              (js-call assert :equal (uint32 (js-call runtime :invoke "set32" 8 4294967295)) 4294967295)
-              (js-call assert :equal (uint32 (js-call runtime :invoke "read32" 8)) 4294967295)
-              (js-call assert :throws (lambda () (js-call runtime :invoke "read32" 65533)))
-              (js-call assert :equal (js-call runtime :invoke "grow" 1) 1) (js-call assert :equal (js-call runtime :invoke "size") 2)
-              (js-call assert :equal (uint32 (js-call runtime :invoke "grow" 1)) 4294967295)
-              (js-call assert :equal (js-call runtime :invoke "set32" 65536 42) 42)
-              (finally (js-call runtime :close)))))
+              (let ((artifact-path undefined))
+                (let ((native (await (js-call session :request (js-object :operation "emit-typed-memory"
+                        :ir (encodeCompilerIR (get wasm :typed))
+                        :target "native" :nativeTarget native-target :nativeFormat "library" :memory memory)))))
+                  (try
+                    (progn
+                      (js-call assert :equal (encodeCompilerIR (get native :typed)) wire
+                        "target-specific emission must retain the public typed input")
+                      (js-call assert :equal (encodeCompilerIR (get wasm :typed)) wire)
+                      (put wasm :typed undefined)
+                      (setq wasm undefined)
+                      (let ((artifact (await (archiveProduct native "native" native-dir))))
+                        (setq artifact-path (get artifact :path))
+                        (setq artifact undefined)))
+                    (finally
+                      (clear-product-fields native)
+                      (setq native undefined))))
+                (let ((runtime (await (openNativeMemory artifact-path (js-object :read32 1 :set32 2 :grow 1 :size 0)
+                        (Object/assign (js-object) memory (js-object :nativeTarget native-target))))))
+                  (try
+                    (progn
+                      (js-call assert :equal (uint32 (js-call runtime :invoke "set32" 8 4294967295)) 4294967295)
+                      (js-call assert :equal (uint32 (js-call runtime :invoke "read32" 8)) 4294967295)
+                      (js-call assert :throws (lambda () (js-call runtime :invoke "read32" 65533)))
+                      (js-call assert :equal (js-call runtime :invoke "grow" 1) 1) (js-call assert :equal (js-call runtime :invoke "size") 2)
+                      (js-call assert :equal (uint32 (js-call runtime :invoke "grow" 1)) 4294967295)
+                      (js-call assert :equal (js-call runtime :invoke "set32" 65536 42) 42))
+                    (finally
+                      (js-call runtime :close)
+                      (setq runtime undefined)))))
+              (finally
+                (await (rm native-dir (js-object :recursive t :force t))))))
+          (progn
+            (put wasm :typed undefined)
+            (setq wasm undefined)))
+        (setq wire undefined)
         (js-call assert :deepEqual (get (await (js-call session :request (js-object :operation "capabilities"))) :memoryIRTargets)
           (js-array "wasm" "native"))))))) 120000)
 

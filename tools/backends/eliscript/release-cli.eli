@@ -14,10 +14,16 @@
   (defconst import-release-tool (js* "(specifier) => import(specifier)"))
 
   (defconst release-help
-    "Eliscript JavaScript compiler bootstrap and final outputs\n\n  bootstrap --stage0-manifest FILE --output DIRECTORY\n  verify-bootstrap [--bootstrap-manifest FILE]\n  targets [--bootstrap-manifest FILE] [--corpus-records FILE] [--output DIRECTORY] [--functional-runtime-profile small] [--resume-from PREVIOUS_DIRECTORY]\n  compile [--bootstrap-manifest FILE] --input SOURCE --target javascript|wasm|native --output PATH\n  compile [--bootstrap-manifest FILE] --project ENTRY --root DIRECTORY --target TARGET --output PATH\n  request [--bootstrap-manifest FILE] --request FILE [--output PATH]\n  package [--bootstrap-manifest FILE] --output DIRECTORY\n  prepare-release-package [--bootstrap-manifest FILE]\n\nEmacs generates JavaScript stage0. stage0 -> stage1 -> stage2 -> stage3 all run as JavaScript.\nOnly stage3 supplies the final javascript, wasm and native program outputs.\nThe stage2/stage3 fixed point is verified before a final compiler is used.\nFunctional small resources explicitly defer the original sequence capacity acceptance.\n")
+    "Eliscript JavaScript compiler bootstrap and final outputs\n\n  bootstrap --stage0-manifest FILE --output DIRECTORY\n  verify-bootstrap [--bootstrap-manifest FILE]\n  targets [--bootstrap-manifest FILE] [--corpus-records FILE] [--output DIRECTORY] [--native-target arm64-macos|arm64-linux] [--functional-runtime-profile small] [--resume-from PREVIOUS_DIRECTORY] [--retain-artifacts]\n  compile [--bootstrap-manifest FILE] --input SOURCE --target javascript|wasm|native --output PATH\n  compile [--bootstrap-manifest FILE] --project ENTRY --root DIRECTORY --target TARGET --output PATH\n  request [--bootstrap-manifest FILE] --request FILE [--output PATH]\n  package [--bootstrap-manifest FILE] --output DIRECTORY\n  prepare-release-package [--bootstrap-manifest FILE]\n\nEmacs generates JavaScript stage0. stage0 -> stage1 -> stage2 -> stage3 all run as JavaScript.\nOnly stage3 supplies the final javascript, wasm and native program outputs.\nThe stage2/stage3 fixed point is verified before a final compiler is used.\nFunctional small resources explicitly defer the original sequence capacity acceptance.\n")
 
   (defun release-default (value fallback) (if (undefined? value) fallback value))
   (defun release-type-error (message) (throw (new globalThis.TypeError message)))
+  (defun release-native-target (value)
+    (let ((resolved (release-default value
+            (if (= (get globalThis.process :platform) "linux") "arm64-linux" "arm64-macos"))))
+      (unless (js-call (js-array "arm64-macos" "arm64-linux") :includes resolved)
+        (release-type-error "nativeTarget must be arm64-macos or arm64-linux"))
+      resolved))
   (defun default-release-manifest ()
     (let ((bootstrap-path (resolve root "dist/bootstrap-release/bootstrap.json"))
           (release-path (resolve root "dist/stage3-release.json")))
@@ -210,6 +216,7 @@
                 :compiler-artifact (js-object :type "string")
                 :corpus-records (js-object :type "string")
                 :resume-from (js-object :type "string")
+                :retain-artifacts (js-object :type "boolean")
                 :functional-runtime-profile (js-object :type "string")
                 :output (js-object :type "string" :short "o")
                 :input (js-object :type "string" :short "i")
@@ -228,8 +235,10 @@
                 (and (not (undefined? (get values :host))) (/= (get values :host) "javascript")))
         (release-type-error "this release supports only a JavaScript compiler host"))
       (unless (= (js-length positionals) 1) (release-type-error "provide exactly one compiler command"))
-      (when (and (get values :resume-from) (not (= command "targets")))
+      (when (and (not (undefined? (get values :resume-from))) (not (= command "targets")))
         (release-type-error "resume-from is supported only for targets"))
+      (when (and (get values :retain-artifacts) (not (= command "targets")))
+        (release-type-error "retain-artifacts is supported only for targets"))
       (unless (undefined? (get values :functional-runtime-profile))
         (unless (and (= command "targets") (= (get values :functional-runtime-profile) "small"))
           (release-type-error "functionalRuntimeProfile is supported only as targets --functional-runtime-profile small")))
@@ -249,24 +258,25 @@
                    :outputRoot (resolve (get values :output)) :onStage release-progress)))))
            (release-write io (+ (get result :manifestPath) "\n")) result))
         ((= command "targets")
-         (await (require-prepared-runtime (await (resolveReleaseCompiler
-           (js-object :bootstrapManifestPath (release-manifest values)
-             :stage3MetadataPath (get values :compiler-artifact))))))
-         (unless (existsSync (resolve root "tools/backends/compiler-matrix.mjs"))
-           (release-type-error "Full target acceptance requires an Eliscript source checkout"))
-         (let* ((output (resolve (release-default (get values :output) (resolve root "dist/bootstrap-release/targets"))))
-                (corpus-path (await (release-corpus-path values output))))
-           (release-progress (js-object :phase "targets-start"))
-           (let ((result (await (runStage3Targets
-                   (js-object :bootstrapManifestPath (release-manifest values)
-                     :stage3MetadataPath (get values :compiler-artifact) :corpusRecordsPath corpus-path
-                     :resumeFrom (get values :resume-from)
-                     :functionalRuntimeProfile (get values :functional-runtime-profile)
-                     :outputRoot output :nativeTarget (release-default (get values :native-target)
-                       (if (= (get globalThis.process :platform) "linux") "arm64-linux" "arm64-macos"))
-                     :onStage release-progress)))))
-             (release-write io (+ (if (= (value-type result) "string") result
-               (release-default (get result :reportPath) (release-default (get result :manifestPath) "targets-complete"))) "\n")) result)))
+         (let ((native-target (release-native-target (get values :native-target))))
+           (await (require-prepared-runtime (await (resolveReleaseCompiler
+             (js-object :bootstrapManifestPath (release-manifest values)
+               :stage3MetadataPath (get values :compiler-artifact))))))
+           (unless (existsSync (resolve root "tools/backends/compiler-matrix.mjs"))
+             (release-type-error "Full target acceptance requires an Eliscript source checkout"))
+           (let* ((output (resolve (release-default (get values :output) (resolve root "dist/bootstrap-release/targets"))))
+                  (corpus-path (await (release-corpus-path values output))))
+             (release-progress (js-object :phase "targets-start"))
+             (let ((result (await (runStage3Targets
+                     (js-object :bootstrapManifestPath (release-manifest values)
+                       :stage3MetadataPath (get values :compiler-artifact) :corpusRecordsPath corpus-path
+                       :resumeFrom (get values :resume-from)
+                       :retainArtifacts (= (get values :retain-artifacts) t)
+                       :functionalRuntimeProfile (get values :functional-runtime-profile)
+                       :outputRoot output :nativeTarget native-target
+                       :onStage release-progress)))))
+               (release-write io (+ (if (= (value-type result) "string") result
+                 (release-default (get result :reportPath) (release-default (get result :manifestPath) "targets-complete"))) "\n")) result))))
         ((= command "prepare-release-package")
          (let ((result (await (prepareReleasePackage (js-object :bootstrapManifestPath (release-manifest values))))))
            (release-write io (+ (get result :stage3MetadataPath) "\n")) result))

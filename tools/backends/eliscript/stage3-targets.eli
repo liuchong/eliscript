@@ -23,6 +23,14 @@
   (defun required-path (value label)
     (unless (and (= (value-type value) "string") (> (js-length value) 0))
       (type-fail (+ label " is required"))) (resolve value))
+  (defun stage3-native-target (options)
+    (let ((value (if (nullish? options) undefined (get options :nativeTarget))))
+      (if (undefined? value)
+        (if (= (get globalThis.process :platform) "linux") "arm64-linux" "arm64-macos")
+        (progn
+          (unless (js-call (js-array "arm64-macos" "arm64-linux") :includes value)
+            (type-fail "nativeTarget must be arm64-macos or arm64-linux"))
+          value))))
   (defun snapshot (value)
     (let ((result (js-object)))
       (js-call (Reflect/ownKeys value) :forEach (lambda (key)
@@ -150,8 +158,9 @@
               (let* ((call (js-object :host "javascript" :target target :metadataPath (get options :stage3MetadataPath)
                              :corpusRecordsPath (get options :corpusRecordsPath)
                              :outputRoot (resolve (get options :outputRoot) target)
-                             :sourceRoot (get options :sourceRoot) :nativeTarget (get options :nativeTarget)
+                             :sourceRoot (get options :sourceRoot) :nativeTarget (stage3-native-target options)
                              :programCache (get options :programCache)
+                             :retainArtifacts (get options :retainArtifacts)
                              :bootstrapManifestPath (get options :bootstrapManifestPath)
                              :signal signal :sessionOptions (get options :sessionOptions) :onStage observer))
                      (_resources (unless (undefined? (get options :functionalRuntimeProfile))
@@ -202,6 +211,7 @@
            (result (js-object :scope "target-schedule" :verification "unverified" :status "completed"
                      :hasFailure false :targets entries)))
       (compilerFunctionalRuntimeProfile options)
+      (stage3-native-target options)
       (unless (or (undefined? parallel) (= parallel false) (= parallel t))
         (type-fail "parallelTargets must be a boolean"))
       (if (= parallel t)
@@ -217,11 +227,16 @@
   (defasync runStage3Targets (input)
     (object-options input)
     (compilerFunctionalRuntimeProfile input)
+    (stage3-native-target input)
+    (when (and (not (undefined? (get input :retainArtifacts)))
+               (not (js-call (js-array t false) :includes (get input :retainArtifacts))))
+      (type-fail "retainArtifacts must be a boolean"))
     (js-call (js-array "host" "target" "producer" "producers" "compilerArtifact" "runCell" "execute" "compare" "corpusRecords"
               "originalOracle" "programCache" "seedOracleCache" "parallelTargets" "resumeManifests" "resumeManifestPath")
       :forEach (lambda (key) (when (Object/hasOwn input key)
         (type-fail (+ "final stage3 acceptance does not accept " key)))))
     (let* ((options (snapshot input))
+           (native-target (stage3-native-target options))
            (output (required-path (get options :outputRoot) "outputRoot"))
            (source-root (if (undefined? (get options :sourceRoot)) root (resolve (get options :sourceRoot))))
            (authentication (await (authenticateStage3Targets options)))
@@ -239,7 +254,8 @@
              (type-fail "continuation requires a new output directory to preserve the previous evidence")))
            (resumes (await (findCompilerMatrixResumeManifests resume-from
              (js-object :sourceIdentity source-identity :producerIdentity (get authentication :productIdentity)
-               :corpusRecordsSha256 (get corpus :recordsSha256) :functionalRuntimeProfile (get options :functionalRuntimeProfile)))))
+               :corpusRecordsSha256 (get corpus :recordsSha256) :nativeTarget native-target
+               :functionalRuntimeProfile (get options :functionalRuntimeProfile)))))
            (frozen-path (resolve output "corpus" "records.json"))
            (summary-path (resolve output "stage3-targets.json")))
       (identical source-identity (get authentication :sourceIdentity) "current formal source identity")
@@ -259,12 +275,14 @@
                :stage3MetadataPath (get authentication :stage3MetadataPath) :sourceIdentity source-identity
                :producerIdentity (get authentication :productIdentity) :corpusIdentity (get corpus :identity)
                :corpusRecordsSha256 (get corpus :recordsSha256) :corpusRecordsPath (relative output frozen-path)
+               :nativeTarget native-target
                :completeIds (js-call (get corpus :records) :map (lambda (record) (get record :id)))
                :targetSelections (js-call targets :map (lambda (target) (classifyStage3Corpus (get corpus :records) target
-                 (Object/assign (js-object) options (js-object :sourceAssets (get (get corpus :document) :evidence))))))
+                 (Object/assign (js-object) options (js-object :nativeTarget native-target
+                   :sourceAssets (get (get corpus :document) :evidence))))))
                :semanticComparison "each effective record uses the original independent Seed oracle and exact comparison"
                :functionalRuntimeProfile (get options :functionalRuntimeProfile) :resourceAcceptance "not-evaluated"
-               :resumeFrom resume-from
+               :resumeFrom resume-from :retainArtifacts (= (get options :retainArtifacts) t)
                :targets (js-array)))
              ;; Each complete binary-output cell can retain a large compiler
              ;; and managed heap. Keep final acceptance sequential; the
@@ -273,13 +291,14 @@
                :bootstrapManifestPath (get authentication :bootstrapManifestPath)
                :corpusRecordsPath frozen-path :outputRoot output :sourceRoot source-root
                :programCache (new globalThis.Map)
-               :nativeTarget (get options :nativeTarget) :signal (get options :signal)
+               :retainArtifacts (= (get options :retainArtifacts) t)
+               :nativeTarget native-target :signal (get options :signal)
                :functionalRuntimeProfile (get options :functionalRuntimeProfile)
                :resumeManifests resumes
                :sessionOptions (get options :sessionOptions) :onStage (get options :onStage))))
         (await (saveCompilerMetadata summary-path summary))
-        ;; The frozen corpus is checked before every target. Each cell keeps
-        ;; its complete original source/IR/map/diagnostic/Seed-oracle records.
+        ;; The frozen corpus is checked before every target. Successful cells
+        ;; release their workspaces unless artifact retention was requested.
         (let ((result (await (run-stage3-target-schedule schedule-options (async (call)
                 (unless (= (compilerDigest (await (readFile frozen-path))) (get corpus :recordsSha256))
                   (fail "frozen stage3 corpus changed before target execution"))

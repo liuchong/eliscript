@@ -1,10 +1,10 @@
 (module tools.backends.compiler-matrix
-  (import "node:fs/promises" mkdir readFile writeFile mkdtemp statfs)
+  (import "node:fs/promises" mkdir readFile writeFile mkdtemp statfs rm)
   (import "node:path" resolve join relative)
   (import "node:child_process" spawn)
   (import "node:buffer" Buffer)
   (import "./build.mjs" root)
-  (import "./compiler-build.mjs" loadCompilerSources compilerMetadataDigest decodeCompilerBinary)
+  (import "./compiler-build.mjs" loadCompilerSources compilerMetadataDigest decodeCompilerBinary compilerFunctionalRuntimeProfile)
   (import "./compiler-corpus.mjs" loadOriginalCompilerCorpus compilerCorpusRequest cloneCompilerCorpusData compilerCorpusResourceDeferred)
   (import "./compiler-corpus-sorted-observation.mjs" sortedFunctionalPartition)
   (import "./compiler-corpus-wire-host.mjs" wireFunctionalPartition)
@@ -15,7 +15,7 @@
     executeCompilerCorpusRecord compareCompilerCorpusObservation createOriginalSeedOracle compilerCorpusRuntimeAcceptance prepareCompilerCorpusExecutionScope)
   (import "./managed-module-graph.mjs" createManagedProjectFacades)
   (import "./compiler-corpus-source-archive.mjs" archiveCompilerCorpusSources)
-  (import "./compiler-session.mjs" encodeCompilerMetadata)
+  (import "./compiler-session.mjs" encodeCompilerMetadata encodeCompilerIR)
   (import "./compiler-metadata.mjs" readCompilerMetadata)
   (import "./compiler-matrix-resume.mjs" loadCompilerMatrixResume)
   (import "./compiler-bootstrap.mjs"
@@ -48,6 +48,14 @@
   (defun matrix-call-options (arguments)
     (let ((value (if (> (js-length arguments) 0) (aref arguments 0) undefined)))
       (if (undefined? value) (js-object) value)))
+  (defun matrix-native-target (options)
+    (let ((value (if (nullish? options) undefined (get options :nativeTarget))))
+      (if (undefined? value)
+        (if (= (get globalThis.process :platform) "linux") "arm64-linux" "arm64-macos")
+        (progn
+          (unless (js-call (js-array "arm64-macos" "arm64-linux") :includes value)
+            (matrix-type-error "nativeTarget must be arm64-macos or arm64-linux"))
+          value))))
   (defun clone (value) (funcall globalThis.structuredClone value))
   (defun matrix-spread (&rest sources)
     ;; CopyDataProperties semantics: own enumerable keys, getter order, symbols
@@ -634,7 +642,8 @@
            (request (compilerCorpusRequest record target
                       (matrix-spread options (js-object :sourceAssets (get (get corpus :document) :evidence)
                         :literalSources literal-sources :literalSourceIdentity literal-identity))))
-           (observation undefined) (response undefined) (product undefined) (execution-started false) (trace (js-array)))
+           (observation undefined) (response undefined) (product undefined) (execution-started false)
+           (comparison-result undefined) (trace (js-array)))
       (js-call (get cell :records) :push outcome)
       (unless (undefined? runtime-acceptance)
         (Object/assign outcome runtime-acceptance)
@@ -724,6 +733,7 @@
           (try
             (let ((comparison (await (funcall (otherwise (get options :compare) compareCompilerCorpusObservation)
                                   (matrix-spread context (js-object :observation observation))))))
+              (setq comparison-result comparison)
               (await (saveCompilerMetadata (join directory "comparison.json") comparison))
               (cond ((= (field comparison "status") "equivalent") (put outcome :verification "equivalent"))
                     ((= (field comparison "status") "different") (put outcome :verification "different")))
@@ -735,7 +745,19 @@
       (await (saveCompilerMetadata (join directory "outcome.json") outcome))
       (await (saveCompilerMetadata manifest metadata))
       (await (matrix-progress options directory
-        (js-object :host host :target target :id (get record :id) :index index :phase "record-complete")))))
+        (js-object :host host :target target :id (get record :id) :index index :phase "record-complete")))
+      ;; Release successful working products after the independent comparison.
+      ;; The manifest is an optional same-input execution checkpoint, not
+      ;; reauthentication of artifacts that no longer exist.
+      (when (and (= (get options :retainArtifacts) false)
+                 (= (get outcome :verification) "equivalent")
+                 (= (field comparison-result "status") "equivalent"))
+        (put outcome :nativeTarget (matrix-native-target options))
+        (put outcome :inputSha256 (compilerDigest (encodeCompilerIR (js-object :value record))))
+        (put outcome :comparison comparison-result)
+        (put outcome :artifactsRetained false)
+        (await (saveCompilerMetadata manifest metadata))
+        (await (rm directory (js-object :recursive t :force t))))))
 
   (defun stage3-original-js-generations-p (record)
     (let* ((execution (get record :execution)) (original (get record :original))
@@ -862,7 +884,9 @@
             (matrix-error "loaded independent compiler differs from its retained product identity"))
           (when (and stage3-scope (get options :resumeManifestPath))
             (setq retained (await (loadCompilerMatrixResume (get options :resumeManifestPath)
-              (js-object :target target :sourceIdentity source-identity :corpusIdentity (get metadata :corpusIdentity)
+              (js-object :target target :nativeTarget (matrix-native-target options)
+                :functionalRuntimeProfile (compilerFunctionalRuntimeProfile options)
+                :sourceIdentity source-identity :corpusIdentity (get metadata :corpusIdentity)
                 :selection (get metadata :corpusSelection) :producerIdentity (get metadata :producerIdentity)
                 :records (get corpus :records)))))
             (setq retained-count (js-length (get retained :records)))
@@ -965,6 +989,8 @@
       (matrix-type-error "matrix cell host and target are required"))
     (let* ((host (normalizeCompilerHost (get options :host)))
            (target (normalizeCompilerHost (get options :target)))
+           (native-target (matrix-native-target options))
+           (functional-profile (when stage3-scope (compilerFunctionalRuntimeProfile options)))
            (output (get options :outputRoot))
            (path (get options :metadataPath)) (initial (get options :compilerArtifact))
            (source-root (otherwise (get options :sourceRoot) root))
@@ -992,7 +1018,8 @@
                (_scope (await (prepareCompilerCorpusExecutionScope directory source-root)))
                (manifest (join directory "matrix.json"))
                (metadata (js-object :format "eliscript-independent-compiler-matrix-cell" :version 1
-                 :scope "single-cell" :host host :target target :status "constructing" :verification "unverified"
+                 :scope "single-cell" :host host :target target :nativeTarget native-target
+                 :status "constructing" :verification "unverified"
                  :finalGridVerification "unverified" :crossCellVerification "unverified"
                  :generationsVerification "unverified" :originalGateVerification "not-evaluated"
                  :pendingVerifications (js-array "cross-cell-identities" "three-generation-fixed-point" "original-gates")
@@ -1001,8 +1028,8 @@
                  :cells (js-array) :comparisons (js-array)))
                (artifacts (new globalThis.Map))
                (producer-record (js-object :host host))
-               (cell-options (matrix-spread options))
-               (execution-options (matrix-spread options (js-object :profile profile
+               (cell-options (matrix-spread options (js-object :nativeTarget native-target)))
+               (execution-options (matrix-spread options (js-object :profile profile :nativeTarget native-target
                  :originalOracle (if (nullish? (get options :originalOracle))
                    (createOriginalSeedOracle (js-object :sourceRoot source-root :emacs (get options :emacs) :signal (get options :signal)
                      :bootstrapManifestPath (get options :bootstrapManifestPath)
@@ -1011,7 +1038,7 @@
                      :sourceAssets (get (get corpus :document) :evidence) :literalSources (get sources :literalSources)
                      :literalSourceIdentity (get source-identity :literalSources) :programCache (get options :programCache)
                      :programHost (get options :programHost) :profile profile :budget (get options :budget) :memory (get options :memory)
-                     :auto (get options :auto) :nativeTarget (get options :nativeTarget) :sessionOptions (get options :sessionOptions)))
+                     :auto (get options :auto) :nativeTarget native-target :sessionOptions (get options :sessionOptions)))
                    (get options :originalOracle))))))
           ;; Only this actual producer is loaded. Keep no second typed graph in
           ;; the identity map; the per-cell scope owns the decoded manifest.
@@ -1031,6 +1058,10 @@
                 (put producer-record :productIdentity (js-object :sha256 identity))
                 (put metadata :producerIdentity identity))
               artifact)))
+          (when stage3-scope
+            (put metadata :acceptanceScope "javascript-stage3-output-targets")
+            (unless (undefined? functional-profile)
+              (put metadata :functionalRuntimeProfile functional-profile)))
           (await (saveCompilerMetadata manifest metadata))
           (try
             (progn
@@ -1039,9 +1070,9 @@
               (put metadata :originalCorpusBeforeExecution
                 (await (verifyOriginalCompilerCorpusFiles (js-object :sourceRoot source-root :corpus corpus))))
               (when stage3-scope
-                (put metadata :acceptanceScope "javascript-stage3-output-targets")
                 (put metadata :corpusSelection (classifyStage3Corpus (get corpus :records) target
-                  (matrix-spread options (js-object :sourceAssets (get (get corpus :document) :evidence))))))
+                  (matrix-spread options (js-object :nativeTarget native-target
+                    :sourceAssets (get (get corpus :document) :evidence))))))
               (await (matrix-cell host target artifacts sources source-identity directory corpus metadata manifest
                 execution-options cell-options
                 (async (phase)

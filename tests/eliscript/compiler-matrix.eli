@@ -12,6 +12,7 @@
   (import "../tools/backends/compiler-build.mjs" loadCompilerSources)
   (import "../tools/backends/compiler-bootstrap.mjs" compilerDigest compilerSourceIdentity)
   (import "../tools/backends/compiler-metadata.mjs" readCompilerMetadata)
+  (import "../tools/backends/compiler-matrix-resume.mjs" loadCompilerMatrixResume findCompilerMatrixResumeManifests)
   (import "../dist/bootstrap/compiler.mjs" compile-ir-string emit-ir-string)
   (import "../tools/backends/compiler-session.mjs" createCompilerSession encodeCompilerIR)
   (import "../tools/backends/compiler-corpus-execution.mjs" prepareCompilerCorpusExecutionScope)
@@ -187,6 +188,105 @@
     (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-selfhosted-matrix-")))))
       (try (await (funcall run directory))
         (finally (await (rm directory (js-object :recursive t :force t)))))))
+
+  (test "completed matrix workspaces are disposable while exact-input checkpoints retain only completed independent comparisons"
+    (async ()
+      (await (workspace (async (directory)
+        (let* ((record (js-object :id "disposable-sequence" :kind "sequence"
+                        :steps (js-array) :expected (js-object :kind "sequence")))
+               (source (js-object :runtime (js-object :sha256 "runtime") :literalSources (js-array)))
+               (producer (js-object :sha256 "producer"))
+               (selection (js-object :cancelled (js-array) :resourceDeferred (js-array)))
+               (cell (js-object :compilerIdentity producer :runtimeSourceSha256 "runtime"
+                       :literalSourceIdentity (js-array) :records (js-array)))
+               (metadata (js-object :format "eliscript-independent-compiler-matrix-cell" :version 1
+                 :acceptanceScope "javascript-stage3-output-targets" :host "javascript" :target "native"
+                 :nativeTarget "arm64-macos"
+                 :sourceIdentity source :producerIdentity producer :corpusIdentity (js-object :sha256 "corpus")
+                 :corpusSelection selection :cells (js-array cell)))
+               (manifest (join directory "matrix.json"))
+               (session (js-object :host "javascript"))
+               (corpus (js-object :document (js-object :evidence (js-array))))
+               (comparison (js-object :status "equivalent"))
+               (options (js-object :retainArtifacts false :nativeTarget "arm64-macos"
+                 :execute (async (context)
+                   (await (writeFile (join (get context :directory) "temporary-product.bin") (new globalThis.Uint8Array 131072)))
+                   (js-object :kind "sequence" :status "executed"))
+                 :compare (async () comparison)))
+               (expected (js-object :target "native" :nativeTarget "arm64-macos"
+                 :sourceIdentity source :producerIdentity producer
+                 :corpusIdentity (get metadata :corpusIdentity) :selection selection :records (js-array record))))
+          (await (matrix-case-execution record 0 "javascript" "native" session nil directory metadata
+            manifest corpus options options cell nil nil))
+          (let ((row (aref (get cell :records) 0)))
+            (js-call assert :strictEqual (get row :artifactsRetained) false)
+            (js-call assert :strictEqual (get row :nativeTarget) "arm64-macos")
+            (await (js-call assert :rejects (readdir (get row :directory)) (js-object :code "ENOENT")))
+            (js-call assert :strictEqual (js-length (get (await (loadCompilerMatrixResume manifest expected)) :records)) 1)
+            (await (js-call assert :rejects
+              (loadCompilerMatrixResume manifest (Object/assign (js-object) expected (js-object :nativeTarget "arm64-linux")))
+              (new globalThis.RegExp "native output target")))
+            (await (js-call assert :rejects
+              (loadCompilerMatrixResume manifest (Object/assign (js-object) expected (js-object :functionalRuntimeProfile "small")))
+              (new globalThis.RegExp "functional profile")))
+            (put row :nativeTarget "arm64-linux")
+            (await (writeFile manifest (JSON/stringify metadata)))
+            (await (js-call assert :rejects (loadCompilerMatrixResume manifest expected)
+              (new globalThis.RegExp "completed checkpoint native target")))
+            (put row :nativeTarget "arm64-macos")
+            (await (writeFile manifest (JSON/stringify metadata)))
+            (let* ((resume-root (join directory "targets-run"))
+                   (corpus-bytes (js-call Buffer :from "{\"records\":[]}\n"))
+                   (corpus-sha (compilerDigest corpus-bytes))
+                   (cell-folder (join resume-root "native" "compiler-matrix-cell-javascript-native-0"))
+                   (cell-manifest (join cell-folder "matrix.json"))
+                   (summary-path (join resume-root "stage3-targets.json"))
+                   (summary (js-object :format "eliscript-stage3-targets" :version 1
+                     :sourceIdentity source :producerIdentity producer
+                     :corpusRecordsSha256 corpus-sha :corpusRecordsPath "corpus/records.json"
+                     :nativeTarget "arm64-macos"))
+                   (resume-expected (js-object :sourceIdentity source :producerIdentity producer
+                     :corpusRecordsSha256 corpus-sha :nativeTarget "arm64-macos")))
+              (await (mkdir (join resume-root "corpus") (js-object :recursive t)))
+              (await (mkdir cell-folder (js-object :recursive t)))
+              (await (writeFile (join resume-root "corpus" "records.json") corpus-bytes))
+              (await (writeFile summary-path (JSON/stringify summary)))
+              (await (writeFile cell-manifest (JSON/stringify metadata)))
+              (js-call assert :deepStrictEqual
+                (await (findCompilerMatrixResumeManifests resume-root resume-expected))
+                (js-object :native cell-manifest))
+              (await (js-call assert :rejects
+                (findCompilerMatrixResumeManifests resume-root
+                  (Object/assign (js-object) resume-expected (js-object :nativeTarget "arm64-linux")))
+                (new globalThis.RegExp "target summary native target")))
+              (await (writeFile cell-manifest
+                (JSON/stringify (Object/assign (js-object) metadata (js-object :nativeTarget "arm64-linux")))))
+              (await (js-call assert :rejects
+                (findCompilerMatrixResumeManifests resume-root resume-expected)
+                (new globalThis.RegExp "cell native output target"))))
+            (put row :inputSha256 "tampered")
+            (await (writeFile manifest (JSON/stringify metadata)))
+            (await (js-call assert :rejects (loadCompilerMatrixResume manifest expected)
+              (new globalThis.RegExp "completed checkpoint input"))))
+          ;; Explicit debugging retains products; an actual comparison failure
+          ;; also remains available, and is never converted to a cleaned pass.
+          (put options :retainArtifacts t)
+          (put cell :records (js-array))
+          (await (matrix-case-execution record 0 "javascript" "native" session nil directory metadata
+            manifest corpus options options cell nil nil))
+          (let ((row (aref (get cell :records) 0)))
+            (js-call assert :strictEqual (get row :artifactsRetained) undefined)
+            (js-call assert :strictEqual (js-length (await (readFile (join (get row :directory) "temporary-product.bin")))) 131072)
+            (await (rm (get row :directory) (js-object :recursive t))))
+          (put options :retainArtifacts false)
+          (setq comparison (js-object :status "different"))
+          (put cell :records (js-array))
+          (await (matrix-case-execution record 0 "javascript" "native" session nil directory metadata
+            manifest corpus options options cell nil nil))
+          (let ((row (aref (get cell :records) 0)))
+            (js-call assert :strictEqual (get row :verification) "different")
+            (js-call assert :strictEqual (get row :artifactsRetained) undefined)
+            (js-call assert :strictEqual (js-length (await (readFile (join (get row :directory) "temporary-product.bin")))) 131072))))))))
   (defun fixture-records (originals)
     ;; This is only the loader's adversarial data fixture. It never certifies
     ;; the original corpus or supplies a replacement execution oracle.
@@ -553,6 +653,10 @@
           (await (js-call assert :rejects (runCompilerMatrixCell options)
             (lambda (error) (= (get error :message) "compiler host must be javascript, wasm or native"))))
           (put options :target "native")
+          (put options :nativeTarget "x64-linux")
+          (await (js-call assert :rejects (runCompilerMatrixCell options)
+            (lambda (error) (= (get error :name) "TypeError"))))
+          (Reflect/deleteProperty options "nativeTarget")
           (put options :compilerArtifact (js-object :host "javascript"))
           (await (js-call assert :rejects (runCompilerMatrixCell options)
             (lambda (error) (= (get error :name) "TypeError"))))

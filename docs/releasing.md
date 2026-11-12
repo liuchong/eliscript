@@ -7,6 +7,25 @@ This page records the maintained release procedure for the `eliscript`
 package. It is a procedure, not a decision: the package is prepared and
 verifiable, and nothing is published until a release is explicitly authorized.
 
+## Rebuild and workspace lifetime
+
+Git contains the maintained sources, formal inputs and generation rules.
+Build and acceptance outputs are disposable: a fresh clone must work without
+old `dist/`, test result directories or a local request cache. Run the official
+`make bootstrap-release`, `make prepare-release-package` and
+`make verify-bootstrap` sequence to reconstruct the final compiler and verify
+the stage2/stage3 fixed point before using its output acceptance commands.
+Rebuilding produces new measurements; it does not recreate historical timings.
+
+`targets` deletes each successful record's working directory after its real
+execution and independent comparison. The run manifest keeps a same-input
+checkpoint, bound to the exact compiler, corpus and input, for an interrupted
+run; it does not claim to reauthenticate deleted artifacts. `--retain-artifacts`
+keeps products for active debugging. Failed records remain available while
+investigating that run. Delete these workspaces and the checkpoint when their
+purpose ends, using `make clean-all` for checkout-generated products and
+removing any explicitly selected external output directory too.
+
 ## Release Latch
 
 `package.json` sets `"private": true`. npm refuses to publish a private
