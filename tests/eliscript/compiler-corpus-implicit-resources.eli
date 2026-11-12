@@ -173,9 +173,11 @@
   (test "all six complete original regression records select packed binary transport without changing any source request or resource contract"
     (async ()
       (let* ((corpus (await (loadCompilerMatrixCorpus (js-object :sourceRoot root))))
-             (literal-sources (await (loadLiteralSources)))
+             (sources (await (loadCompilerSources (js-object :sourceRoot root))))
+             (identity (compilerSourceIdentity sources))
              (options (js-object :functionalRuntimeProfile "small" :profile "small"
-               :sourceAssets (get (get corpus :document) :evidence) :literalSources literal-sources))
+               :sourceAssets (get (get corpus :document) :evidence)
+               :literalSources (get sources :literalSources) :literalSourceIdentity (get identity :literalSources)))
              (ids (js-array "stable-compatibility:program:tests/fixtures/persistent-zipper.eli"
                "original-program:stdlib-object-complete-host" "original-program:persistent-zipper-complete-hosts"
                "original-program:persistent-zipper-indexed-ascent" "original-program:portable-persistent-list-1"
@@ -572,12 +574,19 @@
           (let* ((record (js-call (get corpus :records) :find (lambda (item) (= (get item :id) id))))
                  (before (JSON/stringify record))
                  (prepared (prepareOriginalSeedCorpusRecord record configuration))
-                 (providers (get (get prepared :request) :hostSources)))
+                 (providers (get (get prepared :request) :hostSources (js-array))))
             (js-call assert :notStrictEqual prepared record)
             (js-call assert :strictEqual (JSON/stringify record) before)
-            (js-call assert :ok (and (Array/isArray providers) (> (js-length providers) 0)))
-            (js-call assert :ok (js-call providers :some (lambda (item)
-              (= (get item :id) "runtime/core/protocol-error.mjs"))))
+            (js-call assert :strictEqual (Array/isArray providers) t)
+            (if (= id "stable-compatibility:program:stdlib/multimethod.eli")
+              (progn
+                (js-call assert :ok (> (js-length providers) 0))
+                (js-call assert :ok (js-call providers :some (lambda (item)
+                  (= (get item :id) "runtime/core/protocol-error.mjs")))))
+              ;; Self-contained compiler and JSON graphs do not declare a local
+              ;; JS runtime package. Seed preparation must not invent one.
+              (js-call assert :deepStrictEqual providers
+                (get (get record :request) :hostSources (js-array))))
             (js-call assert :deepStrictEqual (get (get prepared :original) :functionalResourceInputs)
               (get (get record :original) :functionalResourceInputs))))))))
 

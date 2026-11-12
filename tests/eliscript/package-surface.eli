@@ -59,9 +59,13 @@
       (js-call (expect (get exports "./compiler")) :toBe "./dist/bootstrap/compiler.mjs")
       (js-call (expect (get exports "./browser")) :toBe "./browser/host.mjs")
       (js-call (expect (get exports "./browser/loader")) :toBe "./dist/browser/loader.js")
-      (js-call (expect (get exports "./browser/worker.mjs")) :toBe "./browser/worker.mjs")
+      ;; Worker realms have no document import map, so the package export points to
+      ;; the self-contained browser ESM bundle produced during prepack.
+      (js-call (expect (get exports "./browser/worker.mjs")) :toBe "./dist/browser/worker.mjs")
       (js-call (expect (get exports "./browser/compiler")) :toBe "./dist/browser/compiler.js")
       (js-call (expect (get exports "./compiler-session")) :toBe "./tools/backends/compiler-session.mjs")
+      (js-call (expect (get exports "./compiler-worker")) :toBe "./tools/backends/compiler-worker.mjs")
+      (js-call (expect (get exports "./compiler-debug")) :toBe "./tools/backends/compiler-debug.mjs")
       (js-call (expect (get exports "./browser/compiler-session")) :toBe "./tools/backends/compiler-browser.mjs"))))
 
   (test "the published file list carries the browser host" (async ()
@@ -98,18 +102,55 @@
     (await (access (resolve root "dist/stage3-release.json")))
     (await (access (resolve root "dist/compiler-artifact.json")))))
 
-  (test "the published transport includes native Node execution and the complete corpus adapter graph" (async ()
-    (let ((names (js-array "native-node-memory.mjs" "native-node-worker.mjs"
-                   "native-node-runner.mjs" "native-node-watchdog.mjs"
-                   "compiler-corpus-cli-adapters.mjs" "compiler-corpus-evaluation-adapters.mjs"
-                   "compiler-corpus-project-adapters.mjs" "compiler-corpus-runtime-adapters.mjs"
-                   "compiler-corpus-generations.mjs" "compiler-corpus-reference.mjs"
-                   "compiler-corpus-host-context.mjs")) (index 0))
-      (while (< index (js-length names))
-        (let ((entry (str "tools/backends/" (aref names index))))
+  (test "the published transport includes formal compiler and native Node execution while excluding development corpus harnesses" (async ()
+    (each (js-array "tools/backends/*.mjs" "tools/backends/dist/")
+      (lambda (entry) (js-call (expect (get manifest :files)) :toContain entry)))
+    (let ((explicit (js-array "build.mjs"
+                      "compiler-session.mjs" "compiler-worker.mjs" "compiler-debug.mjs"
+                      "compiler-browser.mjs" "compiler-metadata.mjs" "compiler-sha256.mjs"
+                      "compiler-build.mjs" "compiler-bootstrap.mjs" "compiler-cli.mjs"
+                      "compiler-cli-ground.mjs" "compiler-package.mjs" "compiler-project.mjs"
+                      "stage3-targets.mjs" "managed-runtime.mjs" "managed-host.mjs"
+                      "managed-source-view.mjs" "managed-module-graph.mjs" "memory-runtime.mjs"
+                      "native-managed-runtime.mjs" "native-memory.mjs" "native-node-memory.mjs"
+                      "native-node-worker.mjs" "native-node-runner.mjs" "native-node-watchdog.mjs"))
+          (closure (js-array "compiler-package-ground.mjs" "compiler-package-loader.mjs"
+                     "compiler-host-record.mjs" "compiler-host-iteration.mjs"
+                     "managed-runtime-host-ground.mjs" "managed-host-ground.mjs"
+                     "managed-host-runtime.mjs" "managed-host-lifecycle.mjs"
+                     "managed-host-object-realm.mjs" "managed-host-object-provider.mjs"
+                     "managed-host-proxy.mjs" "managed-foreign-binding.mjs"
+                     "managed-source-view-ground.mjs" "managed-module-graph-ground.mjs"
+                     "dist/bootstrap-js-stages.mjs" "dist/release-cli.mjs"))
+          (index 0))
+      (while (< index (js-length explicit))
+        (let* ((entry (str "tools/backends/" (aref explicit index)))
+               (source (await (readFile (resolve root entry) "utf8"))))
           (js-call (expect (get manifest :files)) :toContain entry)
-          (js-call (expect (js-call (await (stat (resolve root entry))) :isFile)) :toBe t))
-        (setq index (1+ index))))))
+          (js-call (expect (js-call (await (stat (resolve root entry))) :isFile)) :toBe t)
+          (js-call (does-not source) :toContain "compiler-corpus")
+          (js-call (does-not source) :toMatch (pattern "(?:import|export)\\s+[^;\\n]*compiler-matrix" "u")))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (js-length closure))
+        (let* ((entry (str "tools/backends/" (aref closure index)))
+               (source (await (readFile (resolve root entry) "utf8"))))
+          (js-call (does-not (get manifest :files)) :toContain (str "!" entry))
+          (js-call (expect (js-call (await (stat (resolve root entry))) :isFile)) :toBe t)
+          (js-call (does-not source) :toContain "compiler-corpus")
+          (js-call (does-not source) :toMatch (pattern "(?:import|export)\\s+[^;\\n]*compiler-matrix" "u")))
+        (setq index (1+ index))))
+    ;; Checkout-only corpus and matrix harnesses stay outside the < 5 MB published package.
+    (each (js-array "!tools/backends/compiler-corpus*.mjs"
+                    "!tools/backends/compiler-corpus*.mjs.map"
+                    "!tools/backends/compiler-matrix*.mjs"
+                    "!tools/backends/compiler-matrix*.mjs.map"
+                    "!tools/backends/dist/record-grid.mjs"
+                    "!tools/backends/dist/record-grid.mjs.map")
+      (lambda (excluded) (js-call (expect (get manifest :files)) :toContain excluded)))
+    (each (get manifest :files) (lambda (entry)
+      (js-call (expect (js-call entry :startsWith "tools/backends/compiler-corpus")) :toBe false)
+      (js-call (expect (js-call entry :startsWith "tools/backends/compiler-matrix")) :toBe false)))))
 
   (test "the package keeps development trees out of the tarball" (lambda ()
     (each (js-array "acceptance/" "docs/" "examples/" "node_modules/" "specs/" "tests/" "tools/"

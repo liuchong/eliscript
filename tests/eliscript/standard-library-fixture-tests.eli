@@ -11,7 +11,10 @@
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
   (import "../tools/backends/compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
   (import "../tools/testing/transient-call-cases.mjs" transientCallSuite transientCallTitles transientCallParts
-    transientCallProfile transientCallSelection transientCallTestRegistration projectTransientCallSuite)
+    transientCallProfile transientCallSelection transientCallTestRegistration projectTransientCallSource projectTransientCallSuite)
+  (import "../tools/testing/maintained-suite-source.mjs" compileMaintainedSuite sourceFormText sourceCall)
+  (import "../dist/bootstrap/reader.mjs" read-string)
+  (import "node:url" pathToFileURL)
   (import "./helpers/standard-library-fixture.mjs" standardLibraryFixturePlans standardLibraryFixtureOptions
     readStandardLibraryDescriptor standardLibraryRuntimeFacade standardLibraryFixtureTestRegistration)
   (defconst environment (js-object :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE "small"
@@ -166,14 +169,47 @@
   (test "transient projection changes only three loop iterables in the complete authenticated original suite"
     (async ()
       (let* ((source (await (readFile (resolve root transientCallSuite) "utf8")))
-             (projected (projectTransientCallSuite root source))
-             (prefixes (js-array "for (const [index, count] of " "for (const [name,key] of " "for (const mode of ")))
-        (js-call prefixes :forEach (lambda (prefix)
-          (let* ((old-start (js-call source :indexOf prefix)) (old-end (+ 3 (js-call source :indexOf ") {" old-start)))
-                 (new-start (js-call projected :indexOf prefix)) (new-end (+ 3 (js-call projected :indexOf ") {" new-start))))
-            (setq projected (str (js-call projected :slice 0 new-start) (js-call source :slice old-start old-end)
-                                 (js-call projected :slice new-end))))))
-        (js-call assert :strictEqual (js-call projected :slice (js-call projected :indexOf (js-call source :slice 0 60))) source)
+             (projection (projectTransientCallSource root source))
+             (original (get projection :originalSource))
+             (changes (get projection :changes))
+             (points (Array/from original))
+             (restored (get projection :source))
+             (ordered (js-call (js-call changes :slice) :sort (lambda (a b) (- (get a :start) (get b :start))))))
+        (js-call assert :strictEqual (js-length changes) 3)
+        (js-call ordered :forEach (lambda (change)
+          (let* ((before (js-call (js-call points :slice (get change :start) (get change :end)) :join ""))
+                 (replacement (get change :replacement))
+                 (at (js-call restored :indexOf replacement))
+                 (old-node (aref (read-string before "transient-before.eli") 0))
+                 (new-node (aref (read-string replacement "transient-after.eli") 0))
+                 (old-callback (aref (get old-node :items) 3))
+                 (new-callback (aref (get new-node :items) 3))
+                 (guard (aref (get new-callback :items) 2)))
+            (js-call assert :ok (>= at 0))
+            (js-call assert :strictEqual (js-call restored :indexOf replacement (1+ at)) -1)
+            ;; Every original callback statement remains byte-for-byte in the
+            ;; maintained projection; only its selection guard is added.
+            (js-call assert :strictEqual (sourceCall old-node "js-call") t)
+            (js-call assert :strictEqual (sourceCall new-node "js-call") t)
+            (js-call assert :strictEqual
+              (sourceFormText before (aref (get old-node :items) 1))
+              (sourceFormText replacement (aref (get new-node :items) 1)))
+            (js-call assert :strictEqual
+              (sourceFormText before (aref (get old-callback :items) 1))
+              (sourceFormText replacement (aref (get new-callback :items) 1)))
+            (js-call assert :strictEqual (js-length (get new-callback :items)) 3)
+            (js-call assert :strictEqual (sourceCall guard "when") t)
+            (js-call assert :deepStrictEqual
+              (js-call (js-call (get old-callback :items) :slice 2) :map (lambda (node) (sourceFormText before node)))
+              (js-call (js-call (get guard :items) :slice 2) :map (lambda (node) (sourceFormText replacement node))))
+            (js-call assert :ok (js-call replacement :includes "transientCallSelection"))
+            (setq restored (str (js-call restored :slice 0 at) before
+              (js-call restored :slice (+ at (js-length replacement))))))))
+        (js-call assert :strictEqual restored original)
+        (js-call assert :strictEqual (projectTransientCallSuite root source)
+          (compileMaintainedSuite (get projection :source) transientCallSuite
+            (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/testing/transient-call-cases.mjs")) :href))
+              " transientCallSelection)")))
         (js-call assert :throws (lambda () (projectTransientCallSuite root (str source " "))) globalThis.TypeError))))
   (test "cold primitive string iteration survives GC and preserves undefined overrides and single getter reads"
     (async ()

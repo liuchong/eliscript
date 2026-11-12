@@ -6,6 +6,7 @@
   (import "node:url" pathToFileURL)
   (import "../bootstrap/host/bun.mjs" loadCompiler)
   (import "node:child_process" spawnSync)
+  (import "node:crypto" createHash)
   (import "../dist/bootstrap/reader.mjs" read-string)
   (import "../dist/bootstrap/compiler.mjs" compile-string)
   (import "../tools/backends/build.mjs" root buildBackends)
@@ -533,8 +534,9 @@
         (js-call assert :strictEqual (get observed :live) (get runtime :live))
         (js-call assert :strictEqual (Object/isFrozen observed) t))))
   (test "wire functional resources require the exact original source options and both explicit deferrals without accepting original capacity"
-    (lambda ()
-      (let* ((sha "451df9a0106e99235aa24bc4cdea2d16c1e6a6e0b1f513e4d33a1ca4ec050ef8")
+    (async ()
+      (let* ((sha (js-call (js-call (createHash "sha256") :update
+                    (await (readFile (resolve root "tests/wasm-managed-wire-test-ground.mjs")))) :digest "hex"))
              (environment (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1" :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE "small"))
              (importer (lambda () "original")) (modules (new globalThis.Map))
              (original (Object/freeze (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216

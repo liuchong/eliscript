@@ -723,6 +723,19 @@
         (js-call assert :strictEqual (bindOriginalManagedProgramContext input context) context)
         (js-call assert :strictEqual (get context :runtime) runtime))))
 
+  (defun retained-original-metadata (current prior)
+    (let ((metadata (Object/assign (js-object) current))
+          (assets (get current :sourceAssets (js-array))))
+      (js-call (get prior :sourceAssets (js-array)) :forEach (lambda (asset)
+        (let ((matches (js-call assets :filter (lambda (item) (= (get item :file) (get asset :file))))))
+          (js-call assert :strictEqual (js-length matches) 1)
+          (js-call assert :deepStrictEqual (aref matches 0) asset))))
+      (if (Object/hasOwn prior "sourceAssets")
+        (put metadata :sourceAssets (get prior :sourceAssets))
+        (Reflect/deleteProperty metadata "sourceAssets"))
+      (Reflect/deleteProperty metadata "observationTransport")
+      metadata))
+
   (test "all four transient replays preserve original assertion bytes and bind the private context transport by actual SHA"
     (async ()
       (let* ((reader (createOriginalCorpusSourceReader (js-object :sourceRoot root)))
@@ -738,14 +751,12 @@
         (let ((index 0))
           (while (< index (js-length actual))
             (let* ((record (aref actual index)) (before (aref baseline index))
-                   (metadata (Object/assign (js-object) (get record :original)))
-                   (assets (get metadata :sourceAssets))
+                   (metadata (retained-original-metadata (get record :original) (get before :original)))
+                   (assets (get (get record :original) :sourceAssets))
                    (files (js-array "tools/backends/eliscript/compiler-corpus-host-context.eli"
                      "tools/backends/compiler-corpus-host-context.mjs" "tools/backends/compiler-corpus-host-context-ground.mjs"
                      "tools/backends/original-program-bun-launcher.el"))
                    (position 0))
-              (Reflect/deleteProperty metadata "sourceAssets")
-              (Reflect/deleteProperty metadata "observationTransport")
               (js-call assert :deepStrictEqual metadata (get before :original))
               (js-call (js-array "id" "kind" "entry" "modules" "request" "memory" "auto" "expected" "coverage") :forEach
                 (lambda (key) (js-call assert :deepStrictEqual (get record key) (get before key))))
@@ -895,7 +906,8 @@
                  (expected (globalThis.structuredClone baseline))
                  (expected-record (js-call expected :find (lambda (record) (= (get record :id) (get original :id)))))
                  (step (js-call (get expected-record :steps) :find (lambda (step) (= (get step :id) "unrelated-path-refusal")))))
-            (js-call assert :ok (js-call source :includes "backend.managed.lower_managed_project(unrelated,entry,runtimeIR,{literalModules})"))
+            (js-call assert :ok (js-call source :includes
+              "((backend)[\"managed\"])[\"lower_managed_project\"](unrelated, entry, runtimeIR, ({\"literalModules\": literalModules}))"))
             (js-call assert :strictEqual (get (get step :request) :resolveImports) t)
             (put (get step :request) :resolveImports false)
             (js-call assert :deepStrictEqual (get step :error) (js-object :code "ELI-B0001" :phase "managed-link"))
@@ -907,11 +919,14 @@
                 (js-call (Object/keys prior) :forEach (lambda (key)
                   (unless (or (= key "execution") (= key "original"))
                     (js-call assert :deepStrictEqual (get record key) (get prior key)))))
-                (let ((metadata (Object/assign (js-object) (get record :original))))
-                  (Reflect/deleteProperty metadata "sourceAssets")
-                  (Reflect/deleteProperty metadata "observationTransport")
+                (let ((metadata (retained-original-metadata (get record :original) (get prior :original))))
                   (js-call assert :deepStrictEqual metadata (get prior :original))))))
-            (js-call assert :deepStrictEqual changed expected-record)
+            (let ((normalized (Object/assign (js-object) changed (js-object
+                    :original (retained-original-metadata (get changed :original) (get expected-record :original))))))
+              (if (Object/hasOwn expected-record "execution")
+                (put normalized :execution (retained-observation-execution changed expected-record))
+                (Reflect/deleteProperty normalized "execution"))
+              (js-call assert :deepStrictEqual normalized expected-record))
             (js-call assert :deepStrictEqual baseline before))))))
 
   (defasync authenticated-process-request (record old)
@@ -1275,6 +1290,9 @@
     (async ()
       (let* ((source (await (readFile (resolve root "tests/core-stdlib.test.mjs") "utf8")))
              (tail (js-call source :slice (js-call source :indexOf "\n")))
+             (before-import "import {expect, test} from \"bun:test\";")
+             (after-import (str "import {expect, test} from "
+               (JSON/stringify (get (pathToFileURL (resolve root "tools/backends/compiler-corpus-matchers.mjs")) :href)) ";"))
              (files (js-array "tools/backends/eliscript/compiler-corpus-matchers.eli"
                "tools/backends/compiler-corpus-matchers.mjs"
                "tools/backends/eliscript/managed-source-view.eli" "tools/backends/managed-source-view.mjs"
@@ -1294,7 +1312,9 @@
                    (output (get (get changed :execution) :hostSource))
                    (transport (get (get changed :original) :matcherTransport)))
               (js-call assert :strictEqual (JSON/stringify record) before)
-              (js-call assert :strictEqual (js-call output :slice (js-call output :indexOf "\n")) tail)
+              (js-call assert :strictEqual (js-length (js-call source :split before-import)) 2)
+              (js-call assert :strictEqual (js-length (js-call output :split after-import)) 2)
+              (js-call assert :strictEqual (js-call output :replace after-import before-import) source)
               (js-call assert :ok (js-call (js-call output :split "\n") :at 0))
               (js-call assert :strictEqual (get transport :originalHostSha256) (hash source))
               (js-call assert :strictEqual (get transport :transportedHostSha256) (hash output))
@@ -1306,7 +1326,7 @@
               (js-call assert :throws (lambda () (transportOriginalMatcherRecord record root
                 (js-call assets :concat (js-array (aref assets 0))))))
               (let ((invalid (Object/assign (js-object) record (js-object :execution
-                    (js-object :kind "original-program" :hostSource tail)))))
+                    (js-object :kind "original-program" :hostSource (js-call source :replace before-import ""))))))
                 (js-call assert :throws (lambda () (transportOriginalMatcherRecord invalid root assets)))))))
         (let ((unrelated (js-object :id "unrelated")) (reads 0))
           (Object/defineProperty unrelated "execution" (js-object :get
@@ -1318,11 +1338,16 @@
   (test "core host counters remain strict for JS while every target keeps the unchanged fifty-thousand result assertion"
     (async ()
       (let* ((original (await (readFile (resolve root "tests/core-stdlib.test.mjs") "utf8")))
-             (start (js-call original :indexOf "    expect(indexed.count).toBe(50_000);"))
-             (metrics (js-call original :indexOf "    expect(transientMapMetrics()).toMatchObject({" start))
-             (end (+ (js-call original :indexOf "\n    });" metrics) (js-length "\n    });")))
-             (source (js-call original :slice start end))
-             (assertion (js-call original :slice metrics end))
+             (functional-statement "be((indexed)[\"count\"], 50000);")
+             (start (js-call original :indexOf functional-statement))
+             (metric-statement "(expect(transientMapMetrics()))[\"toMatchObject\"](({\"persistentCalls\": 1, \"invalidCalls\": 0}))")
+             (metrics (js-call original :indexOf metric-statement start))
+             (end (+ metrics (js-length metric-statement) 1))
+             ;; Keep the two actual emitted assertions, without the surrounding
+             ;; compiler-generated function returns between their scopes.
+             (source (str (js-call original :slice start (+ start (js-length functional-statement)))
+                          "\n" (js-call original :slice metrics end)))
+             (assertion (js-call original :slice metrics (+ metrics (js-length metric-statement))))
              (record (js-object :id "stable-compatibility:program:tests/fixtures/core-stdlib-usage.eli"
                        :execution (js-object :kind "original-program" :hostSource source) :original (js-object)))
              (before (JSON/stringify record))
@@ -1342,6 +1367,7 @@
           (try
             (await (writeFile preload (compile-string (str
               "(import \"bun:test\" expect) (put (js* \"globalThis\") :expect expect) "
+              "(put (js* \"globalThis\") :be (lambda (actual expected) (js-call (expect actual) :toBe expected))) "
               "(put (js* \"globalThis\") :indexed (js-object :count (globalThis.Number (get (get globalThis.process :env) :SCOPE_COUNT)))) "
               "(put (js* \"globalThis\") :transientMapMetrics (lambda () (js-object "
               ":persistentCalls (globalThis.Number (get (get globalThis.process :env) :SCOPE_CALLS)) :invalidCalls 0)))") "core-counter-globals.eli")))

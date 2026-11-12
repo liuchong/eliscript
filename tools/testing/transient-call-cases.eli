@@ -35,7 +35,7 @@
       (unless (and (>= at 0) (= (js-call source :indexOf before (1+ at)) -1))
         (throw (new globalThis.TypeError "transient original loop boundary changed")))
       (str (js-call source :slice 0 at) after (js-call source :slice (+ at (js-length before))))))
-    (defun projectTransientCallSuite (root source)
+  (defun projectTransientCallSource (root source)
     (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex") transientCallSha)
       (throw (new globalThis.TypeError "transient partition requires the complete original suite")))
     (let* ((maintained (maintainedSuiteSource root transientCallSuite source))
@@ -61,6 +61,10 @@
                          " (when (> (js-length (transientCallSelection " (JSON/stringify kind) " (js-array " candidate "))) 0) "
                          body ")))")))))))))
       (unless (= (get seen :size) 3) (throw (new globalThis.TypeError "transient original loop is incomplete")))
+      (Object/assign projected (js-object :originalSource maintained))))
+
+  (defun projectTransientCallSuite (root source)
+    (let ((projected (projectTransientCallSource root source)))
       (compileMaintainedSuite (get projected :source) transientCallSuite
         (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "tools/testing/transient-call-cases.mjs")) :href))
           " transientCallSelection)"))))
@@ -98,4 +102,4 @@
                   (t value))))))))
       (wrap original)))
   (export transientCallSuite transientCallSha transientCallTitles transientCallParts transientCallProfile
-    transientCallSelection projectTransientCallSuite isTransientCallFixture transientCallTestRegistration))
+    transientCallSelection projectTransientCallSource projectTransientCallSuite isTransientCallFixture transientCallTestRegistration))
