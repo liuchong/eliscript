@@ -51,8 +51,8 @@
     PERSISTENT_MAP_KIND
     persistentMapValueEqual)
 
-  (defconst typeof-value (js* "(value) => typeof value"))
-  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+  (defun typeof-value (value) (js* "typeof value"))
+  (defun instance-of? (value Constructor) (js* "value instanceof Constructor"))
   (defconst host-generator (js* "(create) => function* (...args) { yield* create(this, ...args); }"))
   (defconst MAP_HASH_TAG 1821285621)
   (defconst MAP_ENTRY_HASH_TAG 982610667)

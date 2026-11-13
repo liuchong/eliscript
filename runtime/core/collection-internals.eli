@@ -303,7 +303,7 @@
         (Object/defineProperty result REDUCED_STATE (js-object :value value)) (Object/freeze result))))
   (defun isReducedValue (value)
     (and (not (nil? value)) (or (= (host-type value) "object") (callable? value))
-      (js-call (get (get globalThis.Object :prototype) :hasOwnProperty) :call value REDUCED_STATE)))
+      (Object/hasOwn value REDUCED_STATE)))
   (defun unreducedValue (value) (if (isReducedValue value) (get value REDUCED_STATE) value))
   (defun close-iterator (iterator)
     (let ((method (get iterator :return)))

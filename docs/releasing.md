@@ -56,13 +56,33 @@ full gate with its six-hour ceiling. Use it only when current measurements
 fit the selected runner; cancelled and deferred records never count as
 passes. The default platform job does not run or claim that exhaustive gate.
 
-## Release Latch
+## Publication guard
 
-`package.json` sets `"private": true`. npm refuses to publish a private
-package, so the repository cannot publish by accident. Removing that field is
-the release step, and it is the only edit a release requires in the manifest.
+Publication is a separate, explicit action. The manual release workflow calls
+`tools/ci/check-release-ready.eli` before any registry publication. It requires
+Compatibility, Browser compatibility, Compiler bootstrap and final outputs,
+and Pages to have succeeded on the exact signed release commit. An older
+successful commit cannot satisfy this guard. The package is publishable in
+manifest terms; there is no `private: true` latch to remove.
 
-The version is `0.1.2` and is not bumped by ordinary work.
+The working candidate version is `0.1.3`. Preparing its quality does not authorize npm
+publication, a GitHub Release or a signed release tag.
+
+### 0.1.3 candidate quality checklist
+
+- [x] Benchmark each version using that version's own source build; reject a
+  missing compiler instead of falling back to another checkout.
+- [x] Implement real workload checks before timing, use the same Vector and
+  reference-identity inputs in GNU Emacs and Eliscript, and enforce PERF-02 on
+  unrounded measurements before producing release assets.
+- [ ] Complete the current candidate's four-dimension benchmark and resolve
+  substantive performance failures. The 14 deferred strict capacity/performance
+  items remain unaccepted until independently measured; they are not passed by
+  producing a benchmark report.
+- [ ] Prepare the final 0.1.3 candidate and validate its clean source build,
+  installed JS/WASM/native package and necessary functional regression.
+- [ ] Complete all four required checks on the final candidate commit, obtain
+  the final independent acceptance, and clean used generated outputs.
 
 ## What Ships
 
@@ -108,6 +128,17 @@ bun run benchmark:version-comparison -- --release-dir dist/release-report
 npm pack --dry-run --json       # prepack rebuilds the compiler first
 ```
 
+The comparison uses each target's own compiler and runtime. Its shared workload
+source is compiled with that compiler; it never borrows a compiler from another
+version. Each workload verifies its actual result before timing. Vector tail
+access and same-reference equality have the same inputs on GNU Emacs and
+Eliscript. Both drivers warm each workload for at least 20ms and report the
+median of three samples lasting at least 100ms each; original iteration counts
+remain the minimum batch sizes. Every dimension is attempted even if an earlier measurement fails;
+failed dimensions do not acquire successful timings. The release command rejects
+non-improvements against Emacs or regressions against an active prior version
+using unrounded values, before writing release assets.
+
 `bun run benchmark:version-comparison -- --release-dir dist/release-report`
 executes the four-dimension performance and verification comparison (`Emacs
 Lisp` current latest, `previousMajor`, `previousMinor`, and `latest`) and
@@ -117,16 +148,15 @@ writes:
   `dist/release-report/release-notes-merged.md` — concise summary and
   idempotently merged release body for the main GitHub Release page
   (`gh release create --notes-file` / `gh release edit --notes-file`).
-- `dist/release-report/eliscript-0.1.1-benchmark-report.md` and
-  `dist/release-report/eliscript-0.1.1-benchmark-report.json` — detailed
+- `dist/release-report/eliscript-<version>-benchmark-report.md` and
+  `dist/release-report/eliscript-<version>-benchmark-report.json` — detailed
   benchmark, artifact-size, and verification report files uploaded as GitHub
-  Release assets alongside `eliscript-0.1.1.tgz`.
+  Release assets alongside `eliscript-<version>.tgz`.
 
 When `.github/workflows/release.yml` is dispatched (`gh workflow run release.yml
--f version=0.1.1 -f publish=true`), GitHub Actions automatically verifies the
+-f version="$VERSION" -f publish=true`), GitHub Actions automatically verifies the
 signed tag and release tarball, runs the four-dimension benchmark against the
-full tag history, uploads `eliscript-0.1.1-benchmark-report.md` and
-`eliscript-0.1.1-benchmark-report.json` to the GitHub Release page, updates the
+full tag history, uploads the versioned benchmark reports to the GitHub Release page, updates the
 Release main page summary, and publishes (or stages with OIDC provenance) the
 package to npm.
 

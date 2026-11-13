@@ -1,6 +1,7 @@
 (module tools.performance.version-comparison
   (import "node:fs/promises" mkdir mkdtemp readFile rm stat symlink writeFile)
   (import "node:module" createRequire)
+  (import "node:child_process" spawnSync)
   (import "node:os" :default os)
   (import "node:path" :default path)
   (import "node:process" :default process)
@@ -19,7 +20,7 @@
         (Object/freeze (js-object :id "sequence.first10k" :label "first(Vector, N=10,000)" :category "sequence" :unit "ms"))
         (Object/freeze (js-object :id "sequence.last10k" :label "last(Vector, N=10,000)" :category "sequence" :unit "ms"))
         (Object/freeze (js-object :id "sequence.takeLast10k" :label "take-last(64, N=10,000)" :category "sequence" :unit "ms"))
-        (Object/freeze (js-object :id "value.equalSameRef10k" :label "[VALUE_EQUAL] / compare(sameVec, N=10,000)" :category "equality" :unit "ms"))
+        (Object/freeze (js-object :id "value.equalSameRef10k" :label "equality(same Vector reference, N=10,000)" :category "equality" :unit "ms"))
         (Object/freeze (js-object :id "order.sort10k" :label "sort(Vector, N=10,000)" :category "ordering" :unit "ms"))
         (Object/freeze (js-object :id "data.groupBy10k" :label "group-by(x % 100, N=10,000)" :category "aggregation" :unit "ms"))
         (Object/freeze (js-object :id "data.frequencies100k" :label "frequencies(1,000 keys, N=100,000)" :category "aggregation" :unit "ms"))
@@ -152,26 +153,26 @@
 
   (defasync capture (command &optional rawOptions)
     (let* ((options (nullish rawOptions (js-object)))
-           (spawnOpts (Object/assign (js-object :cwd projectDirectory :stdout "pipe" :stderr "pipe") options))
-           (child (Bun/spawn command spawnOpts))
-           (results (await (Promise/all
-                             (js-array
-                               (get child :exited)
-                               (js-call (new globalThis.Response (get child :stdout)) :text)
-                               (js-call (new globalThis.Response (get child :stderr)) :text)))))
-           (exitCode (aref results 0))
-           (stdout (aref results 1))
-           (stderr (aref results 2)))
-      (when (/= exitCode 0)
-        (let ((trimmedErr (js-call stderr :trim))
-              (trimmedOut (js-call stdout :trim)))
-          (throw (new globalThis.Error
-                   (if (> (js-length trimmedErr) 0)
-                     trimmedErr
-                     (if (> (js-length trimmedOut) 0)
-                       trimmedOut
-                       (str (aref command 0) " exited with " exitCode)))))))
-      (js-object :stdout stdout :stderr stderr)))
+           (result (spawnSync (aref command 0) (js-call command :slice 1)
+             (Object/assign (js-object :cwd projectDirectory :encoding "utf8"
+               :timeout 120000 :maxBuffer 4194304 :detached t :killSignal "SIGKILL") options)))
+           (error (get result :error)))
+      (unless (nullish? error)
+        ;; Every command owns a POSIX process group. A timed-out build must not
+        ;; leave make's compiler children writing into a removed worktree.
+        (when (and (Number/isInteger (get result :pid)) (> (get result :pid) 0))
+          (try (js-call process :kill (- (get result :pid)) "SIGKILL")
+            (catch ignored nil)))
+        (throw error))
+      (let ((stdout (nullish (get result :stdout) ""))
+            (stderr (nullish (get result :stderr) "")))
+        (unless (= (get result :status) 0)
+          (let ((trimmedErr (js-call stderr :trim)) (trimmedOut (js-call stdout :trim)))
+            (throw (new globalThis.Error
+              (if (> (js-length trimmedErr) 0) trimmedErr
+                (if (> (js-length trimmedOut) 0) trimmedOut
+                  (str (aref command 0) " exited with " (get result :status))))))))
+        (js-object :stdout stdout :stderr stderr))))
 
   (defasync discoverReleasedTags (&optional rawRoot)
     (let* ((targetRoot (nullish rawRoot projectDirectory))
@@ -187,75 +188,9 @@
       (js-call (get result :stdout) :trim)))
 
   (defasync defaultMeasureEmacsLisp ()
-    (let* ((elispScript
-             (js-call
-               (js-array
-                 "(progn"
-                 "  (require (quote json))"
-                 "  (require (quote cl-lib))"
-                 "  (defun ms-since (t0) (* 1000.0 (- (float-time) t0)))"
-                 "  (defun bench-el (iters fn)"
-                 "    (funcall fn)"
-                 "    (garbage-collect)"
-                 "    (let ((t0 (float-time)))"
-                 "      (dotimes (_ iters) (funcall fn))"
-                 "      (/ (ms-since t0) (float iters))))"
-                 "  (let* ((n 10000)"
-                 "         (lst (number-sequence 0 (1- n)))"
-                 "         (vec (vconcat lst))"
-                 "         (shuffled-lst (mapcar (lambda (i) (% (* i 7919) n)) lst))"
-                 "         (mod-100k (let (r) (dotimes (i 100000) (push (% i 1000) r)) (nreverse r)))"
-                 "         (t-first (bench-el 20000 (lambda () (aref vec 0))))"
-                 "         (t-last (bench-el 200 (lambda () (car (last lst)))))"
-                 "         (t-take-last (bench-el 200 (lambda () (last lst 64))))"
-                 "         (vec-copy (copy-sequence vec))"
-                 "         (t-equal (bench-el 1000 (lambda () (equal vec vec-copy))))"
-                 "         (t-sort (bench-el 30 (lambda () (vconcat (sort (copy-sequence shuffled-lst) (function <))))))"
-                 "         (t-group-by (bench-el 30 (lambda ()"
-                 "                                    (let ((ht (make-hash-table :test (quote eql))))"
-                 "                                      (dolist (x lst)"
-                 "                                        (let ((k (% x 100)))"
-                 "                                          (puthash k (cons x (gethash k ht)) ht)))"
-                 "                                      ht))))"
-                 "         (t-freq-100k (bench-el 7 (lambda ()"
-                 "                                    (let ((ht (make-hash-table :test (quote eql))))"
-                 "                                      (dolist (x mod-100k)"
-                 "                                        (puthash x (1+ (gethash x ht 0)) ht))"
-                 "                                      ht))))"
-                 "         (score-vec (let ((v (make-vector 10000 0))) (dotimes (i 10000) (aset v i (% i 997))) v))"
-                 "         (t-score (bench-el 7 (lambda ()"
-                 "                                (let ((total 0))"
-                 "                                  (dotimes (round 10)"
-                 "                                    (dotimes (idx 10000)"
-                 "                                      (setq total (% (+ (* total 33) (aref score-vec idx) round) 1000000007))))"
-                 "                                  total))))"
-                 "         (t-zipper (let ((nested (vector 0)))"
-                 "                     (dotimes (_ 12000) (setq nested (vector nested)))"
-                 "                     (bench-el 3 (lambda ()"
-                 "                                   (let ((cur nested)"
-                 "                                         (p nil))"
-                 "                                     (dotimes (_ 12000)"
-                 "                                       (push cur p)"
-                 "                                       (setq cur (aref cur 0)))"
-                 "                                     (let ((rebuilt 42))"
-                 "                                       (dolist (parent p)"
-                 "                                         (let ((cp (copy-sequence parent)))"
-                 "                                           (aset cp 0 rebuilt)"
-                 "                                           (setq rebuilt cp)))"
-                 "                                       rebuilt)))))))"
-                 "    (princ (json-encode"
-                 "            (list (cons (quote sequence.first10k) t-first)"
-                 "                  (cons (quote sequence.last10k) t-last)"
-                 "                  (cons (quote sequence.takeLast10k) t-take-last)"
-                 "                  (cons (quote value.equalSameRef10k) t-equal)"
-                 "                  (cons (quote order.sort10k) t-sort)"
-                 "                  (cons (quote data.groupBy10k) t-group-by)"
-                 "                  (cons (quote data.frequencies100k) t-freq-100k)"
-                 "                  (cons (quote tree.zipper12k) t-zipper)"
-                 "                  (cons (quote worker.scoreValues) t-score))))))")
-               :join "\n"))
-           (emacsBin (nullish (get (get process :env) :EMACS) "emacs"))
-           (result (await (capture (js-array emacsBin "--batch" "-Q" "--eval" elispScript)))))
+    (let* ((emacsBin (nullish (get (get process :env) :EMACS) "emacs"))
+           (driver (js-call path :join projectDirectory "tools/performance/version-comparison-emacs.el"))
+           (result (await (capture (js-array emacsBin "--batch" "-Q" "--load" driver)))))
       (JSON/parse (js-call (get result :stdout) :trim))))
 
   (defasync pathExists (targetPath)
@@ -265,47 +200,15 @@
 
   (defasync measureEliscriptDirectory (targetRoot &optional rawCompilerRoot)
     (let* ((compilerRoot (nullish rawCompilerRoot projectDirectory))
-           (literalsMjs (js-call path :join targetRoot "runtime/literals.mjs")))
-      (unless (await (pathExists literalsMjs))
-        (await (capture (js-array "make" "bootstrap-backends") (js-object :cwd targetRoot))))
+           (literalsMjs (js-call path :join targetRoot "runtime/literals.mjs"))
+           (targetCompilerPath (js-call path :join targetRoot "dist/bootstrap/compiler.mjs")))
+      ;; A version is measured with its own build, never a convenient compiler
+      ;; from another checkout. compilerRoot supplies only the common workload.
+      (unless (and (await (pathExists literalsMjs)) (await (pathExists targetCompilerPath)))
+        (await (capture (js-array "make" "bootstrap-backends") (js-object :cwd targetRoot :timeout 360000))))
       (let* ((targetCompilerPath (js-call path :join targetRoot "dist/bootstrap/compiler.mjs"))
-             (fallbackCompilerPath (js-call path :join compilerRoot "dist/bootstrap/compiler.mjs"))
-             (activeCompilerPath
-               (if (await (pathExists targetCompilerPath))
-                 targetCompilerPath
-                 (progn
-                   (unless (await (pathExists fallbackCompilerPath))
-                     (await (capture (js-array "make" "bootstrap-backends") (js-object :cwd compilerRoot))))
-                   fallbackCompilerPath)))
-             (compiler (funcall (createRequire activeCompilerPath) activeCompilerPath))
-             (generatedPairs
-               (js-array
-                 (js-array "runtime/number-radix.eli" "runtime/number-radix.mjs")
-                 (js-array "runtime/array-text.eli" "runtime/array-text.mjs")
-                 (js-array "runtime/primitives.eli" "runtime/primitives.mjs")
-                 (js-array "runtime/errors.eli" "runtime/errors.mjs")
-                 (js-array "runtime/prelude.eli" "runtime/prelude.mjs")
-                 (js-array "stdlib/core/protocol.eli" "runtime/core/protocol-impl.mjs")
-                 (js-array "stdlib/core/text.eli" "runtime/core/text-impl.mjs")
-                 (js-array "stdlib/core/object.eli" "runtime/core/object-impl.mjs")
-                 (js-array "runtime/binding.eli" "runtime/binding.mjs")
-                 (js-array "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs")
-                 (js-array "runtime/unicode-case.eli" "runtime/unicode-case.mjs")
-                 (js-array "runtime/math.eli" "runtime/math.mjs")))
-             (pairIdx 0))
-        (while (< pairIdx (js-length generatedPairs))
-          (let* ((pair (aref generatedPairs pairIdx))
-                 (srcRel (aref pair 0))
-                 (outRel (aref pair 1))
-                 (outPath (js-call path :join targetRoot outRel)))
-            (unless (await (pathExists outPath))
-              (let ((srcPath (js-call path :join targetRoot srcRel)))
-                (if (await (pathExists srcPath))
-                  (let ((srcText (await (readFile srcPath "utf8"))))
-                    (await (writeFile outPath (js-call compiler :compile_string srcText srcRel))))
-                  (throw (new globalThis.Error
-                    (str "benchmark target runtime artifact is unavailable from its own source: " srcRel)))))))
-          (setq pairIdx (1+ pairIdx)))
+             (activeCompilerPath targetCompilerPath)
+             (compiler (funcall (createRequire activeCompilerPath) activeCompilerPath)))
         (let* ((zipperSource (await (readFile (js-call path :join targetRoot "stdlib/core/zipper.eli") "utf8")))
                (compiledZipper
                  (js-call
@@ -418,6 +321,8 @@
           (when (or (not dim) (not res) (/= (get dim :id) dimensionId))
             (throw (new globalThis.TypeError (str "missing dimension " dimensionId " in version comparison report"))))
           (let ((status (get dim :status)))
+            (unless (and (= (get res :id) dimensionId) (= (get res :status) status))
+              (throw (new globalThis.TypeError (str "dimension result identity differs: " dimensionId))))
             (cond
               ((= status "active")
                (let ((wIdx 0))
@@ -439,6 +344,39 @@
                (throw (new globalThis.TypeError (str "unsupported dimension status " (globalThis.String status))))))))
         (setq dimIdx (1+ dimIdx))))
     report)
+
+  (defasync measure-comparison-dimension (dimension measure failures)
+    (try
+      (Object/assign (js-object) dimension
+        (js-object :deduplicatedFrom nil :metricsMs (await (funcall measure dimension))))
+      (catch error
+        (js-call failures :push (js-object :dimension (get dimension :id) :error error))
+        (Object/assign (js-object) dimension (js-object :status "failed" :metricsMs nil)))))
+
+  (defun validateVersionComparisonAcceptance (report)
+    (validateVersionComparisonReport report)
+    (let ((failures (js-array)) (index 0)
+          (results (get report :results)))
+      (while (< index (js-length VERSION_COMPARISON_WORKLOADS))
+        (let* ((workload (aref VERSION_COMPARISON_WORKLOADS index))
+               (id (get workload :id))
+               (latest (get (get (get results :latest) :metricsMs) id))
+               (emacs (get (get (get results :emacsLisp) :metricsMs) id)))
+          (unless (< latest emacs)
+            (js-call failures :push (str id ": latest " latest "ms does not outperform native Emacs Lisp " emacs "ms")))
+          (js-call (js-array "previousMajor" "previousMinor") :forEach
+            (lambda (dimension)
+              (let ((baseline (get results dimension)))
+                (when (and (= (get baseline :status) "active")
+                           (> latest (get (get baseline :metricsMs) id)))
+                  (js-call failures :push (str id ": latest " latest "ms regresses against " dimension " " (get (get baseline :metricsMs) id) "ms")))))))
+        (setq index (1+ index)))
+      (when (> (js-length failures) 0)
+        (let ((error (new globalThis.Error (str "release performance acceptance failed\n"
+                       (js-call failures :join "\n")))))
+          (put error :results results)
+          (throw error)))
+      report))
 
   (defasync runVersionComparisonBenchmark (&optional rawOptions)
     (let* ((options (nullish rawOptions (js-object)))
@@ -462,34 +400,38 @@
            (measureTarget
              (nullish (get options :measureEliscriptTarget)
                (lambda (target) (defaultMeasureEliscriptTarget target targetRoot))))
-           (results (js-object)))
+           (results (js-object)) (failures (js-array)))
       (put results :emacsLisp
-        (Object/assign (js-object) (get matrix :emacsLisp)
-          (js-object :deduplicatedFrom nil :metricsMs (await (funcall measureEmacs (get matrix :emacsLisp))))))
+        (await (measure-comparison-dimension (get matrix :emacsLisp) measureEmacs failures)))
       (if (= (get (get matrix :previousMinor) :status) "active")
         (put results :previousMinor
-          (Object/assign (js-object) (get matrix :previousMinor)
-            (js-object :deduplicatedFrom nil :metricsMs (await (funcall measureTarget (get matrix :previousMinor))))))
+          (await (measure-comparison-dimension (get matrix :previousMinor) measureTarget failures)))
         (put results :previousMinor
           (Object/assign (js-object) (get matrix :previousMinor)
             (js-object :deduplicatedFrom nil :metricsMs nil))))
       (if (= (get (get matrix :previousMajor) :status) "active")
-        (if (and (get (get matrix :previousMajor) :sameAsPreviousMinor)
-                 (get (get results :previousMinor) :metricsMs))
+        (if (get (get matrix :previousMajor) :sameAsPreviousMinor)
           (put results :previousMajor
             (Object/assign (js-object) (get matrix :previousMajor)
               (js-object
                 :deduplicatedFrom "previousMinor"
-                :metricsMs (Object/assign (js-object) (get (get results :previousMinor) :metricsMs)))))
+                :status (get (get results :previousMinor) :status)
+                :metricsMs (if (eq (get (get results :previousMinor) :metricsMs) nil) nil
+                  (Object/assign (js-object) (get (get results :previousMinor) :metricsMs))))))
           (put results :previousMajor
-            (Object/assign (js-object) (get matrix :previousMajor)
-              (js-object :deduplicatedFrom nil :metricsMs (await (funcall measureTarget (get matrix :previousMajor)))))))
+            (await (measure-comparison-dimension (get matrix :previousMajor) measureTarget failures))))
         (put results :previousMajor
           (Object/assign (js-object) (get matrix :previousMajor)
             (js-object :deduplicatedFrom nil :metricsMs nil))))
       (put results :latest
-        (Object/assign (js-object) (get matrix :latest)
-          (js-object :deduplicatedFrom nil :metricsMs (await (funcall measureTarget (get matrix :latest))))))
+        (await (measure-comparison-dimension (get matrix :latest) measureTarget failures)))
+      (when (> (js-length failures) 0)
+        (let ((error (new globalThis.AggregateError
+                (js-call failures :map (lambda (failure) (get failure :error)))
+                (str "version comparison measurements failed: "
+                  (js-call (js-call failures :map (lambda (failure) (get failure :dimension))) :join ", ")))))
+          (put error :results results) (put error :matrix matrix)
+          (throw error)))
       (let ((report
               (js-object
                 :format VERSION_COMPARISON_FORMAT
@@ -739,6 +681,9 @@
            (releaseDir (get parsed :releaseDir))
            (mergeNotesPath (get parsed :mergeNotesPath))
            (report (await (runVersionComparisonBenchmark))))
+      ;; Producing positive timings is not the release performance gate.
+      ;; Validate actual unrounded measurements before writing release assets.
+      (validateVersionComparisonAcceptance report)
       (when releaseDir
         (await (writeReleaseComparisonBundle report releaseDir (js-object :mergeNotesPath mergeNotesPath))))
       (let ((rendered
@@ -754,7 +699,11 @@
   (when (and (> (js-length (get process :argv)) 1)
              (= (js-call path :resolve (aref (get process :argv) 1))
                 (js-call path :join projectDirectory "tools/performance/version-comparison.mjs")))
-    (main))
+    (js-call (main) :catch (lambda (error)
+      (console/error error)
+      (when (and (not (nullish? error)) (Object/hasOwn error "results"))
+        (console/error (JSON/stringify (get error :results))))
+      (put process :exitCode 1))))
 
   (export
     VERSION_COMPARISON_FORMAT
@@ -770,6 +719,7 @@
     measureEliscriptDirectory
     defaultMeasureEliscriptTarget
     validateVersionComparisonReport
+    validateVersionComparisonAcceptance
     runVersionComparisonBenchmark
     renderVersionComparisonMarkdown
     renderReleaseNotesSummary

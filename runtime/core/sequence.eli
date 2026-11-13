@@ -39,7 +39,7 @@
   (import "./truth.mjs" isTruthy)
   (import "./vector.mjs" EMPTY_VECTOR isPersistentVector persistentVector)
 
-  (defconst typeof-value (js* "(value) => typeof value"))
+  (defun typeof-value (value) (js* "typeof value"))
   (defconst NOT_FOUND (funcall globalThis/Symbol "eliscript.sequence.not-found"))
   (defconst NO_PARTITION_PAD (funcall globalThis/Symbol "eliscript.sequence.no-partition-pad"))
 

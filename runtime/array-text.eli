@@ -26,6 +26,9 @@
   (defconst weakDelete (get (get globalThis.WeakSet :prototype) :delete))
   (defconst active (new globalThis.WeakSet))
   (defconst active-state (js-object :root nil))
+  (defconst normalized-methods
+    (new globalThis.Set (js-array numberStringBuiltin intrinsicJoin
+      intrinsicArrayString functionCall functionApply functionBind)))
 
   (defun typeof-value (value)
     (js* "typeof value"))
@@ -169,6 +172,9 @@
         (funcall apply-fn functionApply collectArguments (js-array undefined value))
       (funcall apply-fn collectArguments undefined value)))
 
+  (defun normalized-method-p (method)
+    (js-call normalized-methods :has method))
+
   (defun dispatch (initial-method initial-receiver initial-args)
     (let ((method initial-method)
           (receiver initial-receiver)
@@ -185,6 +191,13 @@
                  done t))
           ((and (eq method intrinsicArrayString) (funcall array receiver))
            (setq output (arrayString receiver)
+                 done t))
+          ;; A call/apply of an ordinary function needs no argument copying or
+          ;; normalization loop. Keep native argument-list conversion and error
+          ;; order; nested calls of normalized intrinsics retain the slow path.
+          ((and (or (eq method functionCall) (eq method functionApply))
+                (not (normalized-method-p receiver)))
+           (setq output (funcall apply-fn method receiver args)
                  done t))
           ((eq method functionCall)
            (if (not (callable-p receiver))

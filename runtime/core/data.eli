@@ -15,7 +15,7 @@
   (import "./transducer.mjs" into)
   (import "./vector.mjs" EMPTY_VECTOR PersistentVector)
 
-  (defconst typeof-value (js* "(value) => typeof value"))
+  (defun typeof-value (value) (js* "typeof value"))
   (defconst MISSING (funcall globalThis/Symbol "eliscript.data.missing"))
 
   (defun require-function (value label)
@@ -44,16 +44,27 @@
   (defun collect-buckets (key-function collection create-bucket update-bucket)
     (require-function key-function "data key function")
     (let ((bucket-index (transient EMPTY_MAP))
+          (primitive-index (new globalThis/Map))
           (keys (js-array))
           (buckets (js-array)))
       (reduce collection
         (lambda (result value)
           (let* ((key (funcall key-function value))
-                 (index (js-call bucket-index :get key MISSING)))
+                 ;; SameValueZero agrees with equalValues for primitives.
+                 ;; Objects still use the value protocol and persistent HAMT.
+                 (type (funcall typeof-value key))
+                 (primitive (or (eq key nil)
+                   (and (/= type "object") (/= type "function")
+                     (or (/= type "undefined") (eq key undefined)))))
+                 (index (if primitive
+                   (let ((found (js-call primitive-index :get key)))
+                     (if (undefined? found) MISSING found))
+                   (js-call bucket-index :get key MISSING))))
             (if (eq index MISSING)
                 (progn
                   (setq index (js-length keys))
-                  (assocBang bucket-index key index)
+                  (if primitive (js-call primitive-index :set key index)
+                    (assocBang bucket-index key index))
                   (js-call keys :push key)
                   (js-call buckets :push (funcall create-bucket value)))
                 (funcall update-bucket buckets index value)))
@@ -65,7 +76,7 @@
     (let ((result (transient EMPTY_MAP))
           (index 0))
       (while (< index (js-length keys))
-        (assocBang result (funcall get keys index) (funcall finish-bucket (funcall get buckets index)))
+        (assocBang result (aref keys index) (funcall finish-bucket (aref buckets index)))
         (setq index (1+ index)))
       (persistentBang result)))
 
@@ -85,7 +96,7 @@
                        collection
                        (lambda (value) (js-array value))
                        (lambda (values index value)
-                         (js-call (funcall get values index) :push value)))))
+                         (js-call (aref values index) :push value)))))
       (persistent-map-from-buckets
         (get collected :keys)
         (get collected :buckets)
@@ -97,7 +108,7 @@
                        collection
                        (lambda () 1)
                        (lambda (counts index _value)
-                         (put counts index (1+ (funcall get counts index)))))))
+                         (put counts index (1+ (aref counts index)))))))
       (persistent-map-from-buckets
         (get collected :keys)
         (get collected :buckets)

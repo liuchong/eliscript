@@ -50,13 +50,13 @@
     METADATA_READ
     METADATA_WITH)
 
-  (defconst typeof-value (js* "(value) => typeof value"))
-  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+  (defun typeof-value (value) (js* "typeof value"))
+  (defun instance-of? (value Constructor) (js* "value instanceof Constructor"))
   (defconst host-generator (js* "(create) => function* (...args) { yield* create(this, ...args); }"))
-  (defconst bit-ushr (js* "(a, b) => a >>> b"))
-  (defconst bit-shl (js* "(a, b) => a << b"))
-  (defconst bit-and (js* "(a, b) => a & b"))
-  (defconst bit-or-zero (js* "(a) => a | 0"))
+  (defun bit-ushr (a b) (js* "a >>> b"))
+  (defun bit-shl (a b) (js* "a << b"))
+  (defun bit-and (a b) (js* "a & b"))
+  (defun bit-or-zero (a) (js* "a | 0"))
   (defconst MAX_COUNT 2147483647)
   (defconst MISSING (funcall globalThis/Symbol "eliscript.vector.missing"))
   (defconst VECTOR_HASH_TAG 1327180861)
@@ -87,7 +87,9 @@
       target
       key
       (js-object
-        :get (method implementation (str "get " name) 0)
+        :get (funcall
+          (js* "(fn, name) => Object.getOwnPropertyDescriptor({ get [name]() { return fn(this); } }, name).get")
+          implementation name)
         :configurable t)))
 
   (defun assert-index (index upper-bound operation)

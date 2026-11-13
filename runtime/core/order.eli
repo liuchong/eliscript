@@ -6,8 +6,9 @@
   (import "./truth.mjs" isTruthy)
   (import "./vector.mjs" EMPTY_VECTOR PersistentVector)
 
-  (defconst typeof-value (js* "(value) => typeof value"))
-  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+  (defun typeof-value (value) (js* "typeof value"))
+  (defun instance-of? (value Constructor) (js* "value instanceof Constructor"))
+  (defun host-less (left right) (js* "left < right"))
   (defconst IComparable (defineProtocol "IComparable" (js-array "compare")))
   (defconst dispatch-compare (protocolMethod IComparable "compare"))
 
@@ -103,11 +104,12 @@
 
   (defun compareValues (left right)
     (cond
-      ((or (eq left right) (and (Number/isNaN left) (Number/isNaN right))) 0)
+      ((eq left right) 0)
       ((and (= (funcall typeof-value left) "number") (= (funcall typeof-value right) "number"))
-       (if (Number/isNaN left) 1 (if (Number/isNaN right) -1 (if (< left right) -1 1))))
+       (if (Number/isNaN left) (if (Number/isNaN right) 0 1)
+         (if (Number/isNaN right) -1 (if (host-less left right) -1 1))))
       ((and (= (funcall typeof-value left) "string") (= (funcall typeof-value right) "string"))
-       (if (< left right) -1 1))
+       (if (host-less left right) -1 1))
       ((nil? left) -1)
       ((nil? right) 1)
       ((undefined? left) -1)
@@ -158,25 +160,39 @@
       values))
 
   (defun collect-values (collection)
-    (let ((values (js-array)))
+    (let ((values (js-array)) (numbers t))
       (reduce collection
         (lambda (result value)
+          (when (/= (typeof-value value) "number") (setq numbers false))
           (js-call result :push value)
           result)
         values)
-      values))
+      (js-object :values values :numbers numbers)))
+
+  (defun compare-numbers (left right)
+    ;; The collector proved both operands primitive numbers. Preserve the
+    ;; default total order (including NaN and signed zero), without repeating
+    ;; dynamic type dispatch for every native sort comparison.
+    (cond ((eq left right) 0)
+          ((Number/isNaN left) (if (Number/isNaN right) 0 1))
+          ((Number/isNaN right) -1)
+          ((host-less left right) -1)
+          (t 1)))
 
   (defun sort (&rest arguments)
     (unless (or (= (js-length arguments) 1) (= (js-length arguments) 2))
       (throw (new globalThis/TypeError "sort expects a collection or comparator and collection")))
     (let* ((comparison (if (= (js-length arguments) 1) compareValues (get arguments 0)))
            (collection (get arguments (1- (js-length arguments))))
-           (values (collect-values collection))
+           (collected (collect-values collection))
+           (values (get collected :values))
            (normalized (comparator comparison)))
       (if (= (js-length values) 0)
           EMPTY_VECTOR
           (progn
-            (js-call values :sort normalized)
+            (js-call values :sort
+              (if (and (eq normalized compareValues) (get collected :numbers))
+                compare-numbers normalized))
             (js-call PersistentVector :from values)))))
 
   (defun sortBy (keyFunction &rest arguments)
