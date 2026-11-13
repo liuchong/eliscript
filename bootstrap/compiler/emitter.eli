@@ -658,6 +658,8 @@
            (and (= (js-length nodes) 1) (= (ir-kind (js-nth 0 nodes)) "literal")
                 (= (value-type (ir-value (js-nth 0 nodes))) "string")
                 (boolean-reference-text-p (js-call (ir-value (js-nth 0 nodes)) :trim)))))
+        ((or (= kind "invoke") (= kind "conditional"))
+         (primitive-boolean-expression-p node))
         ((= kind "intrinsic")
          (not (= (js-call
                    (js-array "not" "=" "/=" "not=" "<" "<=" ">" ">="
@@ -699,7 +701,10 @@
                            (root (js-nth 0 (js-call name :split "."))))
                       (when (and (js-call names :has root) (or parallel (>= (js-call names :get root) index)))
                         (setq safe false))))
-                  (js-call (children node) :forEach (lambda (child) (js-call pending :push child))))))))
+                  (let ((members (children node)))
+                    (when (and (= kind "invoke") (primitive-invocation-operator members t))
+                      (setq members (js-call members :slice 1)))
+                    (js-call members :forEach (lambda (child) (js-call pending :push child)))))))))
         (setq index (1+ index))) safe)))
 
   (defun emit-context-let (bindings body sequential returning)
@@ -1779,6 +1784,68 @@
         (and (= (ir-kind node) "literal")
              (not (= (literal-kind node) "keyword"))))))
 
+  (defconst primitive-arrow-pattern
+    (new globalThis.RegExp "^[ \\t]*\\([ \\t]*a[ \\t]*,[ \\t]*b[ \\t]*\\)[ \\t]*=>[ \\t]*a[ \\t]*([+*/%<>=!&|^-]+)[ \\t]*b[ \\t]*$"))
+  (defconst primitive-instanceof-pattern
+    (new globalThis.RegExp "^[ \\t]*\\([ \\t]*a[ \\t]*,[ \\t]*b[ \\t]*\\)[ \\t]*=>[ \\t]*a[ \\t]+instanceof[ \\t]+b[ \\t]*$"))
+  (defconst primitive-binary-operators
+    (js-array "+" "-" "*" "/" "%" "<" ">" "<=" ">="
+              "==" "!=" "===" "!==" "&" "|" "^" "<<" ">>" ">>>"))
+  (defun raw-binary-operator (source)
+    (when (and (= (value-type source) "string")
+               (not (js-call source :includes "\n")) (not (js-call source :includes "\r")))
+      (let ((matched (js-call primitive-arrow-pattern :exec source)))
+        (if matched
+          (when (js-call primitive-binary-operators :includes (aref matched 1)) (aref matched 1))
+          (when (js-call primitive-instanceof-pattern :test source) "instanceof")))))
+  (defun primitive-operand-p (node)
+    (let ((pending (js-array node)) (safe t))
+      (while (and safe (> (js-length pending) 0))
+        (let* ((item (js-call pending :pop)) (kind (ir-kind item)))
+          (cond
+            ((or (= kind "literal") (= kind "reference")) nil)
+            ((or (= kind "property-read")
+                 (and (= kind "intrinsic")
+                      (js-call (js-array "aref" "js-length") :includes (ir-value item))))
+             (js-call (children item) :forEach (lambda (child) (js-call pending :push child))))
+            (t (setq safe false))))) safe))
+  (defun primitive-invocation-operator (nodes &optional unguarded)
+    (let* ((callee (aref nodes 0)) (members (when callee (children callee)))
+           (operator (when (and (= (js-length nodes) 3) (= (ir-kind callee) "raw-javascript")
+                                (= (js-length members) 1) (= (ir-kind (aref members 0)) "literal"))
+                       (raw-binary-operator (ir-value (aref members 0))))))
+      (when (and operator (js-call (js-call nodes :slice 1) :every primitive-operand-p))
+        (let ((safe t) (pending (if (and unguarded tdz-state) (js-call nodes :slice 1) (js-array))))
+          ;; A guarded operand stays opaque to scope merging. Emission still
+          ;; reduces the primitive while retaining its original read guard.
+          (while (and safe (> (js-length pending) 0))
+            (let ((node (js-call pending :pop)))
+              (if (js-call (get tdz-state :reads) :has node) (setq safe false)
+                (js-call (children node) :forEach (lambda (child) (js-call pending :push child))))))
+          (when safe operator)))))
+  (defconst primitive-comparisons (js-array "<" ">" "<=" ">=" "==" "!=" "===" "!==" "instanceof"))
+  (defun primitive-boolean-expression-p (node)
+    (let ((pending (js-array node)) (safe t) (seen false))
+      (while (and safe (> (js-length pending) 0))
+        (let* ((item (js-call pending :pop)) (kind (ir-kind item)) (nodes (children item)))
+          (cond
+            ((= kind "invoke")
+             (if (js-call primitive-comparisons :includes (primitive-invocation-operator nodes))
+               (setq seen t) (setq safe false)))
+            ((= kind "conditional")
+             (if (= (js-length nodes) 3)
+               (js-call pending :push (aref nodes 1) (aref nodes 2)) (setq safe false)))
+            ((= kind "short-circuit")
+             (if (> (js-length nodes) 0)
+               (js-call nodes :forEach (lambda (child) (js-call pending :push child))) (setq safe false)))
+            ((not (boolean-p item)) (setq safe false)))))
+      (and safe seen)))
+  (defun emit-primitive-invocation (nodes)
+    (let ((operator (primitive-invocation-operator nodes)))
+      (when operator
+        (combine (js-array "((" (emit-expression (aref nodes 1)) ") " operator " ("
+                           (emit-expression (aref nodes 2)) "))")))))
+
   (defun emit-expression (node)
     (unless (node-p node)
       (fail "expected an IR expression node"))
@@ -1866,9 +1933,10 @@
                      (combine (js-array "String(" (emit-expression child) ")")))))
                (combine (js-array "(" (join-fragments parts " + ") ")")))))
           ((= kind "invoke")
-           (combine
-             (js-array (emit-callee (js-nth 0 nodes)) "("
-              (emit-arguments (js-call nodes :slice 1)) ")")))
+           (or (emit-primitive-invocation nodes)
+             (combine
+               (js-array (emit-callee (js-nth 0 nodes)) "("
+                (emit-arguments (js-call nodes :slice 1)) ")"))))
           ((= kind "apply-call")
            (require-arity "apply" nodes 2 nil)
            (let ((fixed (js-call nodes :slice 1 -1))

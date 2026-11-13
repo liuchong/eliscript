@@ -46,7 +46,20 @@
       (be (get descriptor :enumerable) false) (be (get descriptor :configurable) t)
       (be (get descriptor :set) undefined) (be (Object/hasOwn getter "prototype") false)
       (raises (lambda () (Reflect/construct getter (js-array))) globalThis.TypeError)
-      (be (Reflect/apply getter (persistentVector 1 2 3) (js-array)) 3))))
+      (be (Reflect/apply getter (persistentVector 1 2 3) (js-array)) 3))
+    (let* ((key (get globalThis.Symbol :hasInstance))
+           (original (Object/getOwnPropertyDescriptor PersistentVector key))
+           (candidate (js-object)) (calls 0))
+      (try
+        (Object/defineProperty PersistentVector key (js-object :configurable t
+          :value (lambda (value) (be value candidate) (setq calls (1+ calls)) 0)))
+        (be (isPersistentVector candidate) false) (be calls 1)
+        (Object/defineProperty PersistentVector key (js-object :configurable t
+          :value (lambda (value) (be value candidate) (setq calls (1+ calls)) (js-object))))
+        (be (isPersistentVector candidate) t) (be calls 2)
+        (finally
+          (if (undefined? original) (Reflect/deleteProperty PersistentVector key)
+            (Object/defineProperty PersistentVector key original)))))))
 
   (test "vector nth protocol forwards absent and explicit undefined defaults distinctly" (lambda ()
     (let ((value (Object/create (get PersistentVector :prototype))))

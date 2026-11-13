@@ -80,12 +80,14 @@ publication, a GitHub Release or a signed release tag.
   items remain unaccepted until independently measured; they are not passed by
   producing a benchmark report.
   The latest normalized local sample has all nine medians below native
-  Emacs, with the 64-element tail slice only narrowly ahead (0.730 vs 0.735
-  microseconds/op). Comparisons against 0.1.2 still reject first, last, that
-  tail slice, reference-identity equality, the deep zipper and numeric scoring.
-  Sorting measures 0.370196 vs 0.563929 ms/op; grouping and frequencies also
-  pass in this sample. Raw sample variation needs diagnosis and does not
-  automatically waive a slower median.
+  Emacs. The 64-element tail slice measures 0.401 vs 0.738 microseconds/op;
+  first and last measure 14.05 and 1.59 nanoseconds/op. Comparisons against
+  0.1.2 still reject first, last, the tail slice and reference-identity equality
+  (14.05 vs 8.53 ns, 1.59 vs 0.858 ns, 0.401 vs 0.161 microseconds, and
+  0.374 vs 0.365 ns respectively). Sorting measures 0.387663 vs 0.531131
+  ms/op; grouping, frequencies, deep zipper and numeric scoring pass in this
+  sample. Raw sample variation needs diagnosis and does not automatically
+  waive a slower median.
 - [ ] Prepare the final 0.1.3 candidate and validate its clean source build,
   installed JS/WASM/native package and necessary functional regression.
 - [ ] Complete all four required checks on the final candidate commit, obtain
@@ -94,8 +96,14 @@ publication, a GitHub Release or a signed release tag.
 The vector `count`, `from` and `sliceVector` bridges have distinct host call
 sites while their Eli algorithms, method signatures, descriptors and public
 factory overrides remain unchanged. Counter-helper and native chunk-copy
-experiments were rejected after slower measurements; the retained bridge
-change does not close the remaining previous-version performance failures.
+experiments were rejected after slower measurements. The three emitters now
+reduce immediately invoked, closed `(a, b) => a OP b` host primitives only
+with two proven operands and a fixed eager-operator whitelist. Private vector
+index and instance checks use that path; arbitrary `js*`, spread, extra
+arguments and scoped operands keep ordinary calls. Boolean inference retains
+Lisp truth for numeric zero, and module initialization guards remain intact.
+This improves the retained vector path without closing the four remaining
+previous-version performance failures.
 
 Dense safe-integer collections now use a stable counting sort in both the
 JavaScript runtime and the managed WASM/native provider. The path requires at
@@ -111,6 +119,16 @@ still reports capacity exhaustion on both targets. These failures remain
 unaccepted; neither the new test's budget nor the explicit functional profile
 certifies that original capacity gate.
 
+The primitive-emission batch passes the 338-file stage2/stage3 byte fixed
+point, 36 Emacs emitter/bootstrap protections and 29 vector/core/emitter
+integration tests. The first platform sweep collected a fixture-registration
+failure and the old compressed-size failure without stopping the independent
+checks. Isolating the new protection from the original corpus restores all 21
+stage3 checks; the unchanged 11 release-integration and 8 package-surface
+checks retain their passes. The corrected exact package passes all 7 install
+checks under the documented allowance. These local results do not substitute
+for the final commit's four required remote workflows.
+
 ## What Ships
 
 The compressed size baseline is 5 MB. A small increase for necessary payload
@@ -118,10 +136,18 @@ can be accepted after checking duplication, growth proportion and installation
 cost, with actual bytes and the reason documented before adjusting the automated
 budget. Required source and debug assets take priority over shaving a few bytes.
 
-The last installed candidate (`6992faaf`) produced a 4,851,866-byte tarball (729 entries,
-33,110,394 bytes unpacked). Clean installation and installed JS/WASM/native
-execution pass. The size budget is unchanged. This package measurement does
-not waive the version-comparison failures above; those remain release blockers.
+The current clean-build package measures 5,053,538 bytes (833 entries,
+35,029,810 bytes unpacked), after excluding the temporary runtime project's
+nested dependency copy and project manifest. Clean installation and installed
+JS/WASM/native execution pass. No identical payloads of at least 1 MB occur.
+The full Lisp frontend, maintained compiler sources and source maps remain:
+removing those formal capabilities to meet the old count would be incorrect.
+Compared with the last installed candidate (`6992faaf`: 4,851,866 bytes), the
+compressed increase is 4.16%; it is 1.07% above the original 5 MB baseline.
+For this candidate, the automatic compressed limit is 5.1 MB, a bounded 2%
+allowance above that baseline. Further growth requires a new payload audit;
+this allowance does not waive any version-comparison or deferred strict
+performance/capacity gate.
 
 The browser loader's unbundled `dist/browser/loader.mjs` is a disposable build
 intermediate. `build:browser` removes it after producing `loader.js`, and the

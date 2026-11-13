@@ -387,6 +387,8 @@
        (and (stringp source)
             (string-match-p "\\`!![A-Za-z_$][A-Za-z0-9_$]*\\'"
                             (string-trim source)))))
+    ((or 'invoke 'conditional)
+     (eliscript-ir-emitter--primitive-boolean-expression-p node))
     ('intrinsic
      (memq (eliscript-ir-node-value node)
            '(not = /= not= < <= > >= eq equal nil? undefined? null nullish?)))
@@ -423,7 +425,11 @@ With PARALLEL, reject references to any of the new bindings."
                        (root (car (split-string name "\\.")))
                        (position (gethash root names)))
                   (when (and position (or parallel (> position index))) (setq safe nil))))
-              (dolist (child (eliscript-ir-emitter--children node)) (push child pending))))))
+              (let ((children (eliscript-ir-emitter--children node)))
+                (when (and (eq kind 'invoke)
+                           (eliscript-ir-emitter--primitive-invocation-operator children t))
+                  (setq children (cdr children)))
+                (dolist (child children) (push child pending)))))))
       (setq index (1+ index)))
     safe)))
 
@@ -1583,6 +1589,64 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
    ((eq value 'undefined) "undefined")
    (t (eliscript-emitter--fail "unsupported IR literal: %S" value))))
 
+(defun eliscript-ir-emitter--primitive-operand-p (node)
+  "Match the source-form operand proof with an explicit traversal stack."
+  (let ((pending (list node)) (safe t))
+    (while (and pending safe)
+      (let* ((item (pop pending)) (kind (eliscript-ir-node-kind item)))
+        (cond ((memq kind '(literal reference)) nil)
+              ((or (eq kind 'property-read)
+                   (and (eq kind 'intrinsic)
+                        (memq (eliscript-ir-node-value item) '(aref js-length))))
+               (dolist (child (eliscript-ir-emitter--children item)) (push child pending)))
+              (t (setq safe nil)))))
+    safe))
+
+(defun eliscript-ir-emitter--primitive-invocation-operator (nodes &optional unguarded)
+  "Prove a closed primitive invocation with the same source-form whitelist."
+  (let* ((callee (car nodes))
+         (children (and callee (eliscript-ir-emitter--children callee)))
+         (operator
+          (and (= (length nodes) 3)
+               (eq (eliscript-ir-node-kind callee) 'raw-javascript)
+               (= (length children) 1)
+               (eq (eliscript-ir-node-kind (car children)) 'literal)
+               (eliscript-emitter--raw-binary-operator
+                (eliscript-ir-node-value (car children))))))
+    (and operator (cl-every #'eliscript-ir-emitter--primitive-operand-p (cdr nodes))
+         (or (not unguarded) (not eliscript-ir-emitter--tdz-state)
+             (not (eliscript-ir-emitter--some-node (cdr nodes)
+                    (lambda (node) (gethash node (plist-get eliscript-ir-emitter--tdz-state :reads))) nil)))
+         operator)))
+
+(defun eliscript-ir-emitter--primitive-boolean-expression-p (node)
+  "Prove only primitive-containing boolean values, with no host recursion."
+  (let ((pending (list node)) (safe t) seen)
+    (while (and pending safe)
+      (let* ((item (pop pending)) (kind (eliscript-ir-node-kind item))
+             (nodes (eliscript-ir-emitter--children item)))
+        (cond
+         ((eq kind 'invoke)
+          (if (member (eliscript-ir-emitter--primitive-invocation-operator nodes)
+                      eliscript-emitter--primitive-comparisons)
+              (setq seen t) (setq safe nil)))
+         ((eq kind 'conditional)
+          (if (= (length nodes) 3)
+              (setq pending (cons (nth 1 nodes) (cons (nth 2 nodes) pending)))
+            (setq safe nil)))
+         ((eq kind 'short-circuit)
+          (if nodes (dolist (child nodes) (push child pending)) (setq safe nil)))
+         ((not (eliscript-ir-emitter--boolean-p item)) (setq safe nil)))))
+    (and safe seen)))
+
+(defun eliscript-ir-emitter--emit-primitive-invocation (nodes)
+  "Emit a proven primitive without allocating an intermediate function."
+  (let ((operator (eliscript-ir-emitter--primitive-invocation-operator nodes)))
+    (when operator
+      (format "((%s) %s (%s))"
+              (eliscript-ir-emitter-emit-expression (nth 1 nodes)) operator
+              (eliscript-ir-emitter-emit-expression (nth 2 nodes))))))
+
 (defun eliscript-ir-emitter-emit-expression (node)
   "Emit expression NODE with explicit continuations for conditional branches."
   (if (and (eliscript-ir-node-p node) (eq (eliscript-ir-node-kind node) 'conditional))
@@ -1694,9 +1758,10 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
                             (eliscript-ir-emitter-emit-expression child)))
                   children " + "))))
       ('invoke
-       (format "%s(%s)"
-               (eliscript-ir-emitter--emit-callee (car children))
-               (eliscript-ir-emitter--emit-arguments (cdr children))))
+       (or (eliscript-ir-emitter--emit-primitive-invocation children)
+           (format "%s(%s)"
+                   (eliscript-ir-emitter--emit-callee (car children))
+                   (eliscript-ir-emitter--emit-arguments (cdr children)))))
       ('apply-call
        (eliscript-ir-emitter--require-arity node 2)
        (let ((fixed (butlast (cdr children)))

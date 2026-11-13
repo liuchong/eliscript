@@ -51,7 +51,8 @@
     METADATA_WITH)
 
   (defun typeof-value (value) (js* "typeof value"))
-  (defun instance-of? (value Constructor) (js* "value instanceof Constructor"))
+  (defmacro instance-of? (value Constructor)
+    `(funcall (js* "(a, b) => a instanceof b") ,value ,Constructor))
   (defconst host-generator (js* "(create) => function* () { yield* create(this); }"))
   (defun bit-ushr (a b) (js* "a >>> b"))
   (defun bit-shl (a b) (js* "a << b"))
@@ -59,10 +60,14 @@
   (defun bit-or-zero (a) (js* "a | 0"))
   ;; Internal trie indices and levels have already passed integer validation.
   ;; Keep their host-number arithmetic separate from polymorphic Lisp numbers.
-  (defun index-less? (a b) (js* "a < b"))
-  (defun index-greater? (a b) (js* "a > b"))
-  (defun index-at-least? (a b) (js* "a >= b"))
-  (defun index-subtract (a b) (js* "a - b"))
+  (defmacro index-less? (a b)
+    `(funcall (js* "(a, b) => a < b") ,a ,b))
+  (defmacro index-greater? (a b)
+    `(funcall (js* "(a, b) => a > b") ,a ,b))
+  (defmacro index-at-least? (a b)
+    `(funcall (js* "(a, b) => a >= b") ,a ,b))
+  (defmacro index-subtract (a b)
+    `(funcall (js* "(a, b) => a - b") ,a ,b))
   (defconst MAX_COUNT 2147483647)
   (defconst MISSING (funcall globalThis/Symbol "eliscript.vector.missing"))
   (defconst VECTOR_HASH_TAG 1327180861)
@@ -326,7 +331,7 @@
         (make-vector 0 BRANCH_BITS EMPTY_ROOT EMPTY_TAIL metadata)))
 
   (defun initialize-transient-vector (self token vector)
-    (unless (and (eq token TRANSIENT_VECTOR_CONSTRUCTOR_TOKEN) (funcall instance-of? vector PersistentVector))
+    (unless (and (eq token TRANSIENT_VECTOR_CONSTRUCTOR_TOKEN) (instance-of? vector PersistentVector))
       (throw (new globalThis.TypeError "transient vectors must be created from a persistent vector")))
     (let ((source (get vector VECTOR_STATE)))
       (put self TRANSIENT_VECTOR_STATE
@@ -531,7 +536,7 @@
       (funcall (js* "(fn) => ({ from(value) { return fn(value); } }).from")
         (lambda (iterable)
           (cond
-            ((funcall instance-of? iterable PersistentVector)
+            ((instance-of? iterable PersistentVector)
              iterable)
             ((and (Array/isArray iterable)
                   (eq (Object/getPrototypeOf iterable) (get globalThis/Array :prototype))
@@ -767,7 +772,7 @@
       (lambda (self other equal)
         (cond
           ((eq self other) t)
-          ((or (not (funcall instance-of? other PersistentVector))
+          ((or (not (instance-of? other PersistentVector))
                (not (= (get other :count) (get self :count))))
            false)
           (t
@@ -978,7 +983,7 @@
     (js-call PersistentVector :from values))
 
   (defun subvec (vector start &rest __opt)
-    (unless (funcall instance-of? vector PersistentVector)
+    (unless (instance-of? vector PersistentVector)
       (throw (new globalThis/TypeError "subvec expects a persistent vector")))
     (let* ((end (aref __opt 0))
            (count (get vector :count))
@@ -990,7 +995,7 @@
                 (> limit count))
         (throw (new globalThis/RangeError
                  (str "subvec range [" (funcall globalThis/String start) ", " (funcall globalThis/String limit) ") is outside [0, " count "]"))))
-      (if (funcall instance-of? vector PersistentSubVector)
+      (if (instance-of? vector PersistentSubVector)
           (let ((state (js-call SUBVECTOR_STATE :get vector)))
             (new PersistentSubVector
               (get state :vector)
@@ -999,7 +1004,7 @@
           (new PersistentSubVector vector start limit))))
 
   (defun isPersistentVector (value)
-    (funcall instance-of? value PersistentVector))
+    (instance-of? value PersistentVector))
 
   (defun readPersistentVectorView (value)
     (js-call SUBVECTOR_STATE :get value))

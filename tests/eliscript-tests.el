@@ -2899,6 +2899,110 @@ already nested suffix, or use either production emitter to build the oracle."
       (should (string-match-p dependency (eliscript-compile-string
         "(module ordinary.program (defun run () 1) (export run))" (car entry)))))))
 
+(ert-deftest eliscript-immediate-binary-primitives-match-both-emission-paths ()
+  (dolist (operator '("+" "-" "*" "/" "%" "<" ">" "<=" ">=" "==" "!=" "===" "!=="
+                       "&" "|" "^" "<<" ">>" ">>>" "instanceof"))
+    (let* ((arrow (format "(a, b) => a %s b" operator))
+           (source (format "(defun run (left right) (funcall (js* %S) left right))" arrow))
+           (output (eliscript-compile-string source "primitive.eli")))
+      (should (equal output (eliscript-tests--ground-compile-string source "primitive.eli")))
+      (should (string-match-p (regexp-quote (format "((left) %s (right))" operator)) output))
+      (should-not (string-match-p (regexp-quote arrow) output))))
+  (let* ((source "(defun run (left right) (funcall (js* \"(a, b) => a + b\") (get left :item) (aref right 0)))")
+         (output (eliscript-compile-string source "read-operands.eli")))
+    (should (equal output (eliscript-tests--ground-compile-string source "read-operands.eli")))
+    (should-not (string-match-p (regexp-quote "(a, b) => a + b") output))))
+
+(ert-deftest eliscript-immediate-binary-primitives-retain-unproven-templates ()
+  (dolist (arrow '("(a, b) => a && b" "(a, b) => a || b" "(a, b) => a ?? b"
+                    "(a, b) => a += b" "(a, b) => a + a" "(a, b = 1) => a + b"
+                    "(a, b) => (a + b)" "(a, b) => { return a + b; }"
+                    "(a, b) => a + b\n"))
+    (should-not (eliscript-emitter--raw-binary-operator arrow))
+    (let* ((source (format "(defun run (left right) (funcall (js* %S) left right))" arrow))
+           (output (eliscript-compile-string source "unproven-primitive.eli")))
+      (should (equal output (eliscript-tests--ground-compile-string source "unproven-primitive.eli")))
+      (should (string-match-p (regexp-quote arrow) output)))))
+
+(ert-deftest eliscript-immediate-binary-primitives-retain-raw-scoped-and-extra-operands ()
+  (dolist (arguments '("(progn left) right" "(lambda () left) right" "'left right"
+                       "[left] right" "(js* \"...[1, 2]\") right" "left right (print right)"))
+    (let* ((source (format "(defun run (left right) (funcall (js* \"(a, b) => a + b\") %s))" arguments))
+           (output (eliscript-compile-string source "primitive-arguments.eli")))
+      (should (equal output (eliscript-tests--ground-compile-string source "primitive-arguments.eli")))
+      (should (string-match-p (regexp-quote "(a, b) => a + b") output)))))
+
+(ert-deftest eliscript-immediate-binary-primitives-do-not-hide-lexical-reads ()
+  (dolist (entry '(((funcall (js* "(a, b) => a + b") 1 2) t)
+                   ((funcall (js* "(a, b) => a + b") b 2) nil)
+                   ((funcall (js* "(a, b) => a + b") b/value 2) nil)
+                   ((funcall (js* "(a, b) => a && b") 1 2) nil)
+                   ((funcall (js* "(a, b) => a + outer") 1 2) nil)
+                   ((funcall (js* "(a, b) => a + b") 1 2 3) nil)))
+    (let* ((initializer (car entry))
+           (parsed (list (list 'a initializer) '(b 4)))
+           (source (format "(defun run (b) (let %S a))" parsed))
+           (program (eliscript-compile-ir-string source "primitive-scope.eli"))
+           (function (car (eliscript-ir-program-body program)))
+           (lexical (nth 1 (eliscript-ir-node-children function)))
+           (bindings (cl-subseq (eliscript-ir-node-children lexical) 0 2)))
+      (should (eq (not (null (eliscript-emitter--context-sequential-safe-p parsed t))) (cadr entry)))
+      (should (eq (not (null (eliscript-ir-emitter--context-sequential-safe-p bindings t))) (cadr entry)))
+      (should (equal (eliscript-compile-string source "primitive-scope.eli")
+                     (eliscript-tests--ground-compile-string source "primitive-scope.eli"))))))
+
+(ert-deftest eliscript-immediate-binary-operand-proof-is-stack-safe ()
+  (let ((form 'root) (node (eliscript-ir-make-node 'reference nil 'root)))
+    (dotimes (_ 10000)
+      (setq form (list 'get form 0)
+            node (eliscript-ir-make-node 'property-read nil 'get
+                   (list node (eliscript-ir-make-node 'literal nil 0)))))
+    (should (eliscript-emitter--primitive-operand-p form))
+    (should (eliscript-ir-emitter--primitive-operand-p node))))
+
+(ert-deftest eliscript-primitive-boolean-proof-retains-numeric-truth-and-token-boundaries ()
+  (should-not (eliscript-emitter--boolean-p '(if ready t false)))
+  (dolist (source '("(a,b)=>ainstanceofb" "(a,b)=>a instanceofb" "(a,b)=>ainstanceof b"))
+    (should-not (eliscript-emitter--raw-binary-operator source)))
+  (dolist (entry '(((funcall (js* "(a, b) => a < b") left right) t)
+                   ((funcall (js* "(a, b) => a instanceof b") left right) t)
+                   ((funcall (js* "(a, b) => a - b") left right) nil)
+                   ((if ready (funcall (js* "(a, b) => a < b") left right) false) t)
+                   ((if ready (funcall (js* "(a, b) => a - b") left right) false) nil)))
+    (let* ((form (car entry))
+           (source (format "(defun run (left right ready) (if %S 1 2))" form))
+           (program (eliscript-compile-ir-string source "primitive-boolean.eli"))
+           (function (car (eliscript-ir-program-body program)))
+           (conditional (nth 3 (eliscript-ir-node-children function)))
+           (condition (car (eliscript-ir-node-children conditional))))
+      (should (eq (not (null (eliscript-emitter--boolean-p form))) (cadr entry)))
+      (should (eq (not (null (eliscript-ir-emitter--boolean-p condition))) (cadr entry)))
+      (should (equal (eliscript-compile-string source "primitive-boolean.eli")
+                     (eliscript-tests--ground-compile-string source "primitive-boolean.eli"))))))
+
+(ert-deftest eliscript-primitive-boolean-proof-is-stack-safe ()
+  (let* ((form '(funcall (js* "(a, b) => a < b") left right))
+         (node (eliscript-ir-make-node 'invoke nil nil
+                 (list (eliscript-ir-make-node 'raw-javascript nil 'js*
+                         (list (eliscript-ir-make-node 'literal nil "(a, b) => a < b")))
+                       (eliscript-ir-make-node 'reference nil 'left)
+                       (eliscript-ir-make-node 'reference nil 'right)))))
+    (dotimes (_ 10000)
+      (setq form (list 'if 'ready form 'false)
+            node (eliscript-ir-make-node 'conditional nil nil
+                   (list (eliscript-ir-make-node 'reference nil 'ready) node
+                         (eliscript-ir-make-node 'literal nil 'false)))))
+    (should (eliscript-emitter--primitive-boolean-expression-p form))
+    (should (eliscript-ir-emitter--primitive-boolean-expression-p node))))
+
+(ert-deftest eliscript-immediate-binary-primitives-preserve-guarded-module-reads ()
+  (dolist (source '("(defconst before (run)) (defun run () (funcall (js* \"(a, b) => a + b\") later 2)) (defconst later 40)"
+                    "(defconst before (run)) (defun run () (let ((value (funcall (js* \"(a, b) => a + b\") later 2))) value)) (defconst later 40)"))
+    (let ((output (eliscript-compile-string source "primitive-tdz.eli")))
+      (should (equal output (eliscript-tests--ground-compile-string source "primitive-tdz.eli")))
+      (eliscript-tests--guarded-module-read output "later")
+      (should-not (string-match-p (regexp-quote "(a, b) => a + b") output)))))
+
 (provide 'eliscript-tests)
 
 ;;; eliscript-tests.el ends here

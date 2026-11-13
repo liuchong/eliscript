@@ -73,6 +73,9 @@
     "  (js-call (get globalThis.process :stdout) :write (str (JSON/stringify (js-object :targets results :rootsReleased t :node (get globalThis.process :version) :sourceIdentity (get certificate :sourceIdentity) :producerIdentity (get certificate :productIdentity))) \"\\n\")))"
     " (main))") :join "\n"))
 
+  ;; The measured 0.1.3 payload allowance is justified in docs/releasing.md.
+  (defconst MAX_PACKED_BYTES 5100000)
+
   (defun clean-environment ()
     (let ((env (Object/assign (js-object) (get globalThis.process :env))))
       (js-call (Object/keys env) :forEach (lambda (key)
@@ -111,6 +114,11 @@
   (defasync check-package-payloads (files)
     (let ((paths (js-call files :map (lambda (file) (get file :path))))
           (large (new globalThis.Map)) (index 0))
+      (js-call assert :strictEqual
+        (js-call paths :some (lambda (path) (js-call path :startsWith "dist/runtime/node_modules/"))) false
+        "temporary project dependencies must not be packaged")
+      (js-call assert :strictEqual (js-call paths :includes "dist/runtime/eliscript-project.json") false
+        "the temporary runtime project manifest must not be packaged")
       (js-call assert :ok (js-call paths :includes "dist/runtime.eli")
         "the authenticated final runtime source must be packaged")
       (js-call assert :strictEqual (js-call paths :includes "bootstrap/runtime/memory.eli") false
@@ -200,15 +208,15 @@
                        (tarball (resolve directory (get pack-result :filename))))
                   (put receipt :tarball (get pack-result :filename))
                   (put receipt :tarballBytes (get pack-result :size))
-                  (put receipt :capacityAccepted (< (get pack-result :size) 5000000))
+                  (put receipt :capacityAccepted (< (get pack-result :size) MAX_PACKED_BYTES))
                   (put receipt :npmIntegrity (get pack-result :integrity))
                   (put receipt :tarballSha256 (await (file-sha tarball)))
                   ;; A size failure remains a failed acceptance gate, but must not prevent
                   ;; independent installed JS/WASM/Native semantics from being collected.
-                  (await (js-call context :test "release tarball remains compact (< 5 MB)"
+                  (await (js-call context :test "release tarball remains compact (< 5.1 MB)"
                     (async ()
-                      (js-call assert :ok (< (get pack-result :size) 5000000)
-                        (str "release tarball must remain compact (< 5 MB); actual " (get pack-result :size))))))
+                      (js-call assert :ok (< (get pack-result :size) MAX_PACKED_BYTES)
+                        (str "release tarball must remain compact (< 5.1 MB); actual " (get pack-result :size))))))
                   (await (check-package-payloads (get pack-result :files)))
                   (child "install" "npm" (js-array "install" "--ignore-scripts" "--no-audit" "--no-fund" "--package-lock=false" tarball) consumer env receipt))
                 (let* ((installed (resolve consumer "node_modules/eliscript"))

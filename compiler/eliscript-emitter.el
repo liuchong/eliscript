@@ -552,7 +552,9 @@ must retain their ordinary property identity and receiver."
   "Whether FORM is proven to return a JavaScript boolean."
   (or (memq form '(t false))
       (and (consp form)
-           (or (and (eq (car form) 'js*) (= (length form) 2)
+           (or (and (memq (car form) '(funcall if))
+                    (eliscript-emitter--primitive-boolean-expression-p form))
+               (and (eq (car form) 'js*) (= (length form) 2)
                     (stringp (cadr form))
                     (string-match-p "\\`!![A-Za-z_$][A-Za-z0-9_$]*\\'" (string-trim (cadr form))))
                (memq (car form)
@@ -613,6 +615,11 @@ With PARALLEL, every initializer must be independent of every new binding."
                 ((consp form)
                  (let ((operator (car form)) (arguments (cdr form)))
                    (cond
+                    ((and (eq operator 'funcall)
+                          (eliscript-emitter--primitive-invocation-operator arguments t))
+                     ;; The closed a/b arrow has no free binding roots. Its
+                     ;; operands still participate in the complete scope proof.
+                     (mapc #'walk (cdr arguments)))
                     ((eq operator 'js*) (setq safe nil))
                     ((eq operator 'quote) nil)
                     ((memq operator '(lambda fn async))
@@ -1759,6 +1766,80 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
         (vectorp value) (consp value)) t)
    (t nil)))
 
+(defun eliscript-emitter--raw-binary-operator (source)
+  "Recognize a closed, eager two-argument JavaScript primitive template.
+Only canonical a/b arrows are reduced. Other js* expressions stay ordinary
+calls, including short circuits, assignments, defaults and repeated operands."
+  (when (and (stringp source) (not (string-match-p "[\r\n]" source))
+             (or (string-match
+              "\\`[ \t]*([ \t]*a[ \t]*,[ \t]*b[ \t]*)[ \t]*=>[ \t]*a[ \t]*\\([+*/%<>=!&|^-]+\\)[ \t]*b[ \t]*\\'"
+              source)
+                 (string-match
+                  "\\`[ \t]*([ \t]*a[ \t]*,[ \t]*b[ \t]*)[ \t]*=>[ \t]*a[ \t]+\\(instanceof\\)[ \t]+b[ \t]*\\'"
+                  source)))
+    (let ((operator (match-string 1 source)))
+      (and (member operator '("+" "-" "*" "/" "%" "<" ">" "<=" ">="
+                              "==" "!=" "===" "!==" "&" "|" "^" "<<" ">>" ">>>" "instanceof"))
+           operator))))
+
+(defun eliscript-emitter--primitive-operand-p (form)
+  "Accept literals, references and reads without recursive proof traversal."
+  (let ((pending (list form)) (safe t))
+    (while (and pending safe)
+      (let ((item (pop pending)))
+        (cond ((or (symbolp item) (stringp item) (numberp item)) nil)
+              ((and (consp item) (eq (car item) eliscript-emitter--tdz-read-tag)
+                    (= (length item) 3) (symbolp (nth 2 item))) nil)
+              ((and (consp item) (memq (car item) '(get aref js-length)))
+               (dolist (child (cdr item)) (push child pending)))
+              (t (setq safe nil)))))
+    safe))
+
+(defun eliscript-emitter--primitive-invocation-operator (arguments &optional unguarded)
+  "Prove a closed primitive invocation without emitting or changing state."
+  (let* ((callee (car arguments))
+         (operator (and (= (length arguments) 3) (consp callee)
+                        (eq (car callee) 'js*) (= (length callee) 2)
+                        (eliscript-emitter--raw-binary-operator (cadr callee)))))
+    (and operator (cl-every #'eliscript-emitter--primitive-operand-p (cdr arguments))
+         (or (not unguarded)
+             (not (eliscript-emitter--some-form (cdr arguments)
+                    (lambda (form) (and (consp form) (eq (car form) eliscript-emitter--tdz-read-tag))))))
+         operator)))
+
+(defconst eliscript-emitter--primitive-comparisons
+  '("<" ">" "<=" ">=" "==" "!=" "===" "!==" "instanceof"))
+
+(defun eliscript-emitter--primitive-boolean-expression-p (form)
+  "Prove boolean leaves, widening only expressions containing a primitive.
+Conditions retain their ordinary Lisp truth conversion; numeric primitive
+results are never boolean. Use an explicit stack for deep conditional trees."
+  (let ((pending (list form)) (safe t) seen)
+    (while (and pending safe)
+      (let* ((item (pop pending)) (operator (car-safe item)))
+        (cond
+         ((eq operator 'funcall)
+          (if (member (eliscript-emitter--primitive-invocation-operator (cdr item))
+                      eliscript-emitter--primitive-comparisons)
+              (setq seen t) (setq safe nil)))
+         ((eq operator 'if)
+          (if (= (length item) 4)
+              (setq pending (cons (nth 2 item) (cons (nth 3 item) pending)))
+            (setq safe nil)))
+         ((memq operator '(and or))
+          (if (cdr item) (dolist (child (cdr item)) (push child pending))
+            (setq safe nil)))
+         ((not (eliscript-emitter--boolean-p item)) (setq safe nil)))))
+    (and safe seen)))
+
+(defun eliscript-emitter--emit-primitive-invocation (arguments)
+  "Reduce a proven primitive without changing operand evaluation."
+  (let ((operator (eliscript-emitter--primitive-invocation-operator arguments)))
+    (when operator
+      (format "((%s) %s (%s))"
+              (eliscript-emitter-emit-expression (nth 1 arguments)) operator
+              (eliscript-emitter-emit-expression (nth 2 arguments))))))
+
 (defun eliscript-emitter--emit-call (form)
   "Emit list FORM as an expression."
   (let ((operator (car form))
@@ -2056,9 +2137,10 @@ placement and exponent spelling. No rounded decimal arithmetic is involved."
                   arguments " + "))))
       ('funcall
        (eliscript-emitter--require-arity "funcall" arguments 1)
-       (format "%s(%s)"
-               (eliscript-emitter--emit-callee (car arguments))
-               (eliscript-emitter--emit-arguments (cdr arguments))))
+       (or (eliscript-emitter--emit-primitive-invocation arguments)
+           (format "%s(%s)"
+                   (eliscript-emitter--emit-callee (car arguments))
+                   (eliscript-emitter--emit-arguments (cdr arguments)))))
       ('apply
        (eliscript-emitter--require-arity "apply" arguments 2)
        (let ((fixed (butlast (cdr arguments)))
