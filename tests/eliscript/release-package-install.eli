@@ -84,7 +84,11 @@
       (put env :PATH (str (dirname (get globalThis.process :execPath)) ":" (get env :PATH ""))) env))
 
   (defun child (name executable arguments directory env receipt)
-    (let* ((actual (spawnSync executable arguments (js-object :cwd directory :env env :encoding "utf8" :maxBuffer 8388608)))
+    (let* ((actual-arguments
+             (if (= executable "npm")
+               (js-call (js-array "--global=false" "--location=project" "--prefix" directory) :concat arguments)
+               arguments))
+           (actual (spawnSync executable actual-arguments (js-object :cwd directory :env env :encoding "utf8" :maxBuffer 8388608)))
            (record (js-object :phase name :executable executable :status (get actual :status)
                      :signal (get actual :signal) :stdout (get actual :stdout) :stderr (get actual :stderr))))
       (js-call (get receipt :commands) :push record)
@@ -193,9 +197,25 @@
                 (js-call context :skip (get prepared :pending)))
               (let* ((native-target (cond ((and (= (get globalThis.process :arch) "arm64") (= (get globalThis.process :platform) "darwin")) "arm64-macos")
                                           ((and (= (get globalThis.process :arch) "arm64") (= (get globalThis.process :platform) "linux")) "arm64-linux")))
-                     (env (clean-environment)) (consumer (resolve directory "consumer"))
+                     (npm-cache (resolve directory "npm-cache"))
+                     ;; Keep package blobs and npm logs in this attempt's
+                     ;; disposable workspace, including inherited config aliases.
+                     (env (Object/assign (clean-environment)
+                       (js-object "npm_config_cache" npm-cache "NPM_CONFIG_CACHE" npm-cache
+                         "npm_config_logs_dir" (resolve npm-cache "_logs")
+                         "NPM_CONFIG_LOGS_DIR" (resolve npm-cache "_logs"))))
+                     (consumer (resolve directory "consumer"))
                      (node (get globalThis.process :execPath)))
                 (unless native-target (throw (new globalThis.Error "actual package native acceptance requires a declared ARM64 platform")))
+                (js-call assert :strictEqual
+                  (js-call (get (child "npm-cache-scope" "npm" (js-array "config" "get" "cache") directory env receipt) :stdout) :trim)
+                  npm-cache "npm must resolve this attempt's disposable cache")
+                (js-call assert :strictEqual
+                  (js-call (get (child "npm-logs-scope" "npm" (js-array "config" "get" "logs-dir") directory env receipt) :stdout) :trim)
+                  (resolve npm-cache "_logs") "npm logs must remain inside the same disposable cache")
+                (js-call assert :strictEqual
+                  (js-call (get (child "npm-install-scope" "npm" (js-array "config" "get" "global") directory env receipt) :stdout) :trim)
+                  "false" "npm must not inherit global installation mode")
                 (put receipt :status "running")
                 (put receipt :packageVersion (get (get prepared :manifest) :version))
                 (put receipt :sourceIdentity (get (get prepared :certified) :sourceIdentity))

@@ -52,7 +52,10 @@
 
   (defun typeof-value (value) (js* "typeof value"))
   ;; Keep copy-array allocation at a distinct host allocation site.
-  (defun allocate-copy-array (length) (new globalThis.Array length))
+  ;; Read the live Array binding even when the globalThis property is rebound.
+  ;; Reflect.construct also preserves Proxy construction after host JIT warmup.
+  (defun allocate-copy-array (length)
+    (Reflect/construct (js* "Array") (js-array length)))
   (defmacro instance-of? (value Constructor)
     `(funcall (js* "(a, b) => a instanceof b") ,value ,Constructor))
   (defconst host-generator (js* "(create) => function* () { yield* create(this); }"))
@@ -578,10 +581,10 @@
             ((instance-of? iterable PersistentVector)
              iterable)
             ((and (Array/isArray iterable)
-                  (eq (Object/getPrototypeOf iterable) (get globalThis/Array :prototype))
+                  (eq (Object/getPrototypeOf iterable) Array/prototype)
                   (not (Object/hasOwn iterable (get globalThis/Symbol :iterator)))
                   (eq (aref iterable (get globalThis/Symbol :iterator))
-                      (aref (get globalThis/Array :prototype) (get globalThis/Symbol :iterator))))
+                      (aref Array/prototype (get globalThis/Symbol :iterator))))
              (vector-from-array iterable))
             (t
              (vector-from-iterable iterable))))))

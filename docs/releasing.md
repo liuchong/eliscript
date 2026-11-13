@@ -16,6 +16,11 @@ old `dist/`, test result directories or a local request cache. Run the official
 `make verify-bootstrap` sequence to reconstruct the final compiler and verify
 the stage2/stage3 fixed point before using its output acceptance commands.
 Rebuilding produces new measurements; it does not recreate historical timings.
+The installed-package check keeps npm cache data and logs inside its own
+attempt directory, overriding inherited cache paths for its child processes.
+It pins npm's installation mode and prefix to each child workspace.
+It checks npm's resolved paths before packing and installing, so checkout
+cleanup also removes those package blobs and logs without touching user caches.
 
 `targets` deletes each successful record's working directory after its real
 execution and independent comparison. The run manifest keeps a same-input
@@ -80,11 +85,12 @@ publication, a GitHub Release or a signed release tag.
   items remain unaccepted until independently measured; they are not passed by
   producing a benchmark report.
   The latest local diagnostic sample has all nine medians below native
-  Emacs. With calibrated batches, six of nine also pass against 0.1.2:
-  first, last, sorting, grouping, frequencies and numeric scoring.
-  The sample still rejects take-last (0.153734 vs 0.142717 microseconds/op),
-  reference-identity equality (0.375 vs 0.298 nanoseconds/op) and deep zipper
-  (1.100120 vs 1.059313 ms/op). These are diagnostic samples, not final
+  Emacs. With calibrated batches, five of nine also pass against 0.1.2:
+  first, last, sorting, grouping and frequencies.
+  The sample still rejects take-last (0.176300 vs 0.147946 microseconds/op),
+  reference-identity equality (0.390 vs 0.323 nanoseconds/op), deep zipper
+  (1.154253 vs 1.059290 ms/op) and numeric scoring
+  (1.530808 vs 1.530372 ms/op). These are diagnostic samples, not final
   candidate acceptance. Sample variation and clock calibration do not waive
   a slower unrounded median or close the performance gate.
 - [ ] Prepare the final 0.1.3 candidate and validate its clean source build,
@@ -284,9 +290,10 @@ Then install that artifact and use it the way a consumer would:
 ```sh
 consumer_dir=$(mktemp -d)
 trap 'rm -rf "$consumer_dir"' EXIT
-npm pack --pack-destination "$consumer_dir"
-mkdir "$consumer_dir/app" && cd "$consumer_dir/app" && npm init -y
-npm install "$consumer_dir"/eliscript-*.tgz
+npm --cache "$consumer_dir/npm-cache" --logs-dir "$consumer_dir/npm-cache/_logs" pack --pack-destination "$consumer_dir"
+mkdir "$consumer_dir/app" && cd "$consumer_dir/app"
+npm --cache "$consumer_dir/npm-cache" --logs-dir "$consumer_dir/npm-cache/_logs" init -y
+npm --cache "$consumer_dir/npm-cache" --logs-dir "$consumer_dir/npm-cache/_logs" install "$consumer_dir"/eliscript-*.tgz
 ./node_modules/.bin/eliscript --help
 ```
 

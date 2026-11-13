@@ -1,6 +1,6 @@
 (module tests.helpers.portable-stdlib
   (import "bun:test" expect)
-  (import "node:fs/promises" mkdir mkdtemp readFile rm)
+  (import "node:fs/promises" mkdir mkdtemp readFile rm symlink)
   (import "node:os" tmpdir)
   (import "node:path" resolve)
   (import "node:url" fileURLToPath pathToFileURL)
@@ -51,6 +51,11 @@
            (extension (lambda (name) (if (or (= name module) (Object/hasOwn extraSources name)) "mjs" "eli"))))
       (try
         (progn
+          ;; Compiled core modules keep the package specifier
+          ;; `eliscript/runtime/*.mjs`; an out-of-package scratch directory
+          ;; needs the real package scope to resolve it under Bun and Node.
+          (await (mkdir (resolve directory "node_modules") (js-object :recursive t)))
+          (await (symlink projectDirectory (resolve directory "node_modules/eliscript") "dir"))
           (await (Promise/all (js-array (mkdir seedDirectory (js-object :recursive t)) (mkdir selfHostedDirectory (js-object :recursive t)))))
           (let ((index 0))
             (while (< index (js-length sources))
