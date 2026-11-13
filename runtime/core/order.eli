@@ -179,6 +179,48 @@
           ((not (eq right right)) -1)
           (t (host-number-difference left right))))
 
+  (defun dense-integer-sort (values)
+    ;; Bound both extra memory and the value-domain scan. Sparse, fractional
+    ;; and non-finite inputs keep the general numeric comparison path.
+    (let ((length (js-length values)) (index 0)
+          (minimum globalThis.Infinity) (maximum (- globalThis.Infinity))
+          (eligible t))
+      (when (>= length 256)
+        (while (and eligible (< index length))
+          (let ((value (aref values index)))
+            (if (Number/isSafeInteger value)
+              (progn
+                (when (host-less value minimum) (setq minimum value))
+                (when (host-less maximum value) (setq maximum value)))
+              (setq eligible false)))
+          (setq index (1+ index)))
+        (let ((width (1+ (host-number-difference maximum minimum))))
+          (when (and eligible (<= width 65536) (<= width (* length 4)))
+            (let ((offsets (js-call (new globalThis.Array width) :fill 0))
+                  (result (new globalThis.Array length)) (total 0))
+              (setq index 0)
+              (while (< index length)
+                (let ((bucket (host-number-difference (aref values index) minimum)))
+                  (put offsets bucket (1+ (aref offsets bucket))))
+                (setq index (1+ index)))
+              (setq index 0)
+              (while (< index width)
+                (let ((frequency (aref offsets index)))
+                  (put offsets index total)
+                  (setq total (+ total frequency)))
+                (setq index (1+ index)))
+              ;; Scatter original values, rather than reconstructing numbers:
+              ;; equal keys retain their order and the sign of each zero.
+              (setq index 0)
+              (while (< index length)
+                (let* ((value (aref values index))
+                       (bucket (host-number-difference value minimum))
+                       (position (aref offsets bucket)))
+                  (put result position value)
+                  (put offsets bucket (1+ position)))
+                (setq index (1+ index)))
+              result))))))
+
   (defun sort (&rest arguments)
     (unless (or (= (js-length arguments) 1) (= (js-length arguments) 2))
       (throw (new globalThis/TypeError "sort expects a collection or comparator and collection")))
@@ -189,11 +231,13 @@
            (normalized (comparator comparison)))
       (if (= (js-length values) 0)
           EMPTY_VECTOR
-          (progn
-            (js-call values :sort
-              (if (and (eq normalized compareValues) (get collected :numbers))
-                compare-numbers normalized))
-            (js-call PersistentVector :from values)))))
+          (let* ((numeric (and (eq normalized compareValues) (get collected :numbers)))
+                 (dense (when numeric (dense-integer-sort values))))
+            (if (nullish? dense)
+              (progn
+                (js-call values :sort (if numeric compare-numbers normalized))
+                (js-call PersistentVector :from values))
+              (js-call PersistentVector :from dense))))))
 
   (defun sortBy (keyFunction &rest arguments)
     (require-function keyFunction "sortBy key function")

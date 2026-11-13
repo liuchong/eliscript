@@ -411,6 +411,7 @@ test-core: check-contracts
 		./tests/language-equality.test.mjs \
 		./tests/transducer.test.mjs ./tests/transient.test.mjs \
 		./tests/core-order.test.mjs \
+		./tests/core-order-targets.test.mjs \
 		./tests/core-set.test.mjs \
 		./tests/core-stdlib.test.mjs \
 		./tests/persistent-list.test.mjs ./tests/persistent-queue.test.mjs ./tests/persistent-vector.test.mjs ./tests/value-semantics.test.mjs \

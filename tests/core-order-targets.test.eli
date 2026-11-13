@@ -1,0 +1,101 @@
+(module tests.core-order-targets
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp mkdir readFile writeFile symlink rm)
+  (import "node:path" resolve)
+  (import "node:os" tmpdir)
+  (import "node:url" pathToFileURL)
+  (import "node:child_process" spawnSync)
+  (import "../tools/backends/build.mjs" root buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (defconst load (js* "(specifier) => import(specifier)"))
+  (defconst native-target
+    (if (= globalThis.process.arch "arm64")
+      (cond ((= globalThis.process.platform "darwin") "arm64-macos")
+            ((= globalThis.process.platform "linux") "arm64-linux")
+            (t nil)) nil))
+  ;; This new regression has its own explicit functional budget. It neither
+  ;; changes nor certifies the original sorted-core suite's capacity gate.
+  (defconst budget (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864))
+  (defconst memory (js-object :initialPages 4 :maximumPages 1024))
+  (defconst expected (js-array
+    (Array/from (js-object :length 512) (lambda (ignored index) (- index 256)))
+    (Array/from (js-object :length 256) (lambda () t))
+    (Array/from (js-object :length 256) (lambda (ignored index) (/ index 2)))))
+  (defvar directory nil)
+  (defvar wasm nil)
+  (defvar lowered nil)
+  (defvar native-path nil)
+  (beforeAll (async ()
+    (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-dense-order-"))))
+    (await (mkdir (resolve directory "javascript")))
+    (let* ((backend (await (buildBackends (js-object :outputRoot (resolve directory "compiler")))))
+           (compiler (get backend :compiler))
+           (source (await (readFile "tests/fixtures/dense-order.eli" "utf8")))
+           (runtime (js-call compiler :compile_ir_string
+                      (await (readFile "bootstrap/runtime/memory.eli" "utf8")) "runtime.eli"))
+           (program (js-call compiler :compile_ir_string source "tests/fixtures/dense-order.eli"))
+           (literal-modules (get (await (js-call backend :loadLiteralModules)) :literalModules)))
+      (setq lowered (js-call (get backend :managed) :lower_managed_project
+        (js-array (js-object :id "entry.mjs" :program program)) "entry.mjs" runtime
+        (Object/assign (js-object) memory (js-object :literalModules literal-modules))))
+      (setq wasm (globalThis.Uint8Array.from
+        (js-call (get backend :wasm) :append_metadata_section
+          (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) memory)
+          "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))))
+      (js-call assert :deepStrictEqual
+        (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module wasm)) (js-array))
+      (when native-target
+        (setq native-path (resolve directory (if (= native-target "arm64-macos") "order.dylib" "order.so")))
+        (await (writeFile native-path (globalThis.Uint8Array.from
+          (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) native-target)))))
+      (await (mkdir (resolve directory "javascript/node_modules") (js-object :recursive t)))
+      (await (symlink root (resolve directory "javascript/node_modules/eliscript") "dir"))
+      (await (writeFile (resolve directory "javascript/program.mjs")
+        (js-call compiler :compile_string source "tests/fixtures/dense-order.eli")))
+      (await (writeFile (resolve directory "javascript/host.mjs")
+        (js-call compiler :compile_string
+          "(import \"./program.mjs\" report) (console/log (JSON/stringify (report)))"
+          "dense-order-host.eli"))))) 120000)
+  (afterAll (async ()
+    (setq wasm nil lowered nil native-path nil)
+    (when directory (await (rm directory (js-object :recursive t :force t))) (setq directory nil))))
+  (defun decode (runtime value)
+    (cond ((or (nullish? value) (= (value-type value) "boolean")) value)
+          ((= (get value :kind) 4) (js-call runtime :readNumber value))
+          ((= (get value :kind) 14)
+           (Array/from (js-object :length (js-call runtime :length value))
+             (lambda (ignored index)
+               (let ((child (js-call runtime :get value index)))
+                 (try (decode runtime child) (finally (js-call runtime :release child)))))))
+          (t (throw (new globalThis.TypeError "unexpected dense ordering result")))))
+  (defun verify (runtime)
+    (try
+      (js-call runtime :auto 1)
+      (let ((value (js-call runtime :invoke "report")))
+        (try (js-call assert :deepStrictEqual (decode runtime value) expected)
+          (finally (js-call runtime :release value))))
+      (finally
+        (js-call runtime :closeModule)
+        (js-call runtime :collect)
+        (js-call assert :strictEqual (js-call runtime :live) 0)
+        (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0))))
+  (test "dense integer sorting and fractional fallback execute in real Bun JavaScript"
+    (async ()
+      (let ((program (await (load (get (pathToFileURL (resolve directory "javascript/program.mjs")) :href)))))
+        (js-call assert :deepStrictEqual (js-call program :report) expected))))
+  (test "dense integer sorting and fractional fallback execute in a real Node JavaScript process"
+    (lambda ()
+      (let ((result (spawnSync "node" (js-array (resolve directory "javascript/host.mjs"))
+                      (js-object :encoding "utf8" :timeout 30000))))
+        (js-call assert :strictEqual (get result :status) 0 (get result :stderr))
+        (js-call assert :deepStrictEqual (JSON/parse (get result :stdout)) expected))))
+  (test "the same dense ordering source executes in zero-import WASM with collection at every allocation"
+    (lambda () (verify (instantiateManagedRuntime wasm budget))) 30000)
+  (funcall (js-call test :skipIf (nil? native-target))
+    "the same dense ordering source executes as native machine code with complete root cleanup"
+    (async ()
+      (let ((runtime (await (instantiateNativeManagedRuntime native-path lowered
+                             (Object/assign (js-object) budget memory)))))
+        (try (verify runtime) (finally (js-call runtime :close))))) 30000))

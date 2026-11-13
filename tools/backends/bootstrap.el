@@ -1066,6 +1066,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
                             ("tests/core-acceptance-corpus.test.eli" . "tests/core-acceptance-corpus.test.mjs")
                             ("tests/core-expression-forms.test.eli" . "tests/core-expression-forms.test.mjs")
                             ("tests/core-order.test.eli" . "tests/core-order.test.mjs")
+                  ("tests/core-order-targets.test.eli" . "tests/core-order-targets.test.mjs")
                             ("tests/core-performance-benchmark.test.eli" . "tests/core-performance-benchmark.test.mjs")
                             ("tests/data-text.test.eli" . "tests/data-text.test.mjs")
                             ("tests/declarative-protocol.test.eli" . "tests/declarative-protocol.test.mjs")

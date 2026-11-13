@@ -1,0 +1,15 @@
+(module tests.fixture.dense-order
+  (import "eliscript/runtime/core/order.mjs" sort)
+  (defun report ()
+    (let* ((values (Array/from (js-object :length 512)
+                     (lambda (ignored index) (- (% (* index 137) 512) 256))))
+           (zeros (Array/from (js-object :length 256)
+                    (lambda (ignored index) (if (= (% index 2) 0) -0.0 0))))
+           (fractions (Array/from (js-object :length 256)
+                        (lambda (ignored index) (/ (% (* index 137) 256) 2))))
+           (ordered-zeros (Array/from (sort zeros))))
+      (js-array (Array/from (sort values))
+        (js-call ordered-zeros :map
+          (lambda (value index) (Object/is value (aref zeros index))))
+        (Array/from (sort fractions)))))
+  (export report))
