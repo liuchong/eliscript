@@ -3,7 +3,8 @@
   (import "node:url" fileURLToPath)
   (import "../runtime/core/vector.mjs" EMPTY_VECTOR PersistentVector isPersistentVector persistentVector subvec)
   (import "../runtime/core/collection.mjs" :as collection)
-  (import "../runtime/core/collection-internals.mjs" COLLECTION_GET COLLECTION_NTH)
+  (import "../runtime/core/collection-internals.mjs" COLLECTION_GET COLLECTION_NTH COLLECTION_REDUCE_KV)
+  (import "../runtime/core/vector-internals.mjs" VECTOR_STATE)
   (import "../runtime/core/map.mjs" persistentHashMap)
   (import "../runtime/core/metadata.mjs" meta withMeta)
   (import "../runtime/core/value.mjs" hashValue equalValues)
@@ -136,7 +137,25 @@
           (put PersistentVector :from (lambda (array) (setq received array) marker))
           (be (js-call values :sliceVector 31 96) marker)
           (same-values received (Array/from (js-object :length 65) (lambda (_ index) (+ 31 index))))
-          (finally (put PersistentVector :from original)))))))
+          (finally (put PersistentVector :from original))))
+      ;; A corrupt chunk must fail at its length read instead of stalling a loop.
+      ;; The second read throws independently so the old defect stays bounded.
+      (js-call (js-array
+                 (lambda (value) (Reflect/apply (get values :sliceVector) value (js-array 0 2)))
+                 (lambda (value) (Reflect/apply (get values :reduce) value
+                                   (js-array (lambda (sum item) (+ sum item)) 0)))
+                 (lambda (value) (Reflect/apply (aref values COLLECTION_REDUCE_KV) value
+                                   (js-array (lambda (sum _ item) (+ sum item)) 0)))
+                 (lambda (value) (js-call (Reflect/apply (aref values (get globalThis.Symbol :iterator))
+                                                       value (js-array)) :next)))
+        :forEach (lambda (operation)
+          (let ((reads 0) (state (js-object :count 3 :metadata nil)) (receiver (js-object)))
+            (Object/defineProperty state "tail" (js-object :get (lambda ()
+              (setq reads (1+ reads))
+              (when (> reads 1) (throw (new globalThis.Error "chunk read repeated"))) nil)))
+            (put receiver VECTOR_STATE state)
+            (raises (lambda () (funcall operation receiver)) globalThis.TypeError)
+            (be reads 1)))))))
 
   (test "persistent subvector is an O(1) structurally shared vector view" (lambda ()
     (let* ((source (vectorRange 4096)) (shape (inspectPersistentVector source)))

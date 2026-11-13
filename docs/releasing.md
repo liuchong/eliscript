@@ -79,14 +79,15 @@ publication, a GitHub Release or a signed release tag.
   substantive performance failures. The 14 deferred strict capacity/performance
   items remain unaccepted until independently measured; they are not passed by
   producing a benchmark report.
-  The latest normalized local sample has all nine medians below native
-  Emacs. First and last measure 7.46 and 0.639 nanoseconds/op, against 8.54
-  and 0.837 in 0.1.2. Comparisons still reject the 64-element tail slice
-  (0.396 vs 0.163 microseconds/op), deep zipper (1.1584 vs 1.1314 ms/op),
-  and reference-identity equality (0.3613 vs 0.3566 nanoseconds/op). Sorting
-  measures 0.382110 vs 0.564476 ms/op; grouping, frequencies and numeric
-  scoring also pass in this sample. Raw sample variation needs diagnosis
-  and does not automatically waive a slower median.
+  A local diagnostic sample has all nine medians below native
+  Emacs. First and last measure 7.23 and 0.615 nanoseconds/op, against 8.47
+  and 0.848 in 0.1.2. Comparisons still reject the 64-element tail slice
+  (0.390 vs 0.173 microseconds/op) and sorting (0.632442 vs 0.547899 ms/op).
+  Deep zipper measures 1.1142 vs 1.1302 ms/op and reference-identity equality
+  0.3489 vs 0.4235 nanoseconds/op; grouping, frequencies and numeric scoring
+  also pass in this sample. Their previously slower medians and the changed
+  sorting result show sample variation that still needs diagnosis; a slower
+  median is never automatically waived.
 - [ ] Prepare the final 0.1.3 candidate and validate its clean source build,
   installed JS/WASM/native package and necessary functional regression.
 - [ ] Complete all four required checks on the final candidate commit, obtain
@@ -111,7 +112,9 @@ forms retain their original errors. Conditional `and`/`or`/`not` emit direct
 logical tests with Lisp truth conversion at every leaf, including through the
 seed emitters' deep-tree continuation path. Value-context short circuits keep
 their original returned values. These changes improve hot sequence dispatch
-without closing the three measured previous-version failures.
+without closing the previous-version performance gate. Vector leaf iteration,
+reduction and copying read chunk lengths directly: a missing internal chunk
+raises `TypeError` rather than becoming zero-length work that cannot advance.
 
 Dense safe-integer collections now use a stable counting sort in both the
 JavaScript runtime and the managed WASM/native provider. The path requires at
